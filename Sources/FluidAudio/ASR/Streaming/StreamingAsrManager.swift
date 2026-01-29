@@ -96,14 +96,7 @@ public actor StreamingAsrManager {
         let vocabSize = vocabulary.terms.count
         let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocabSize)
         self.vocabSizeConfig = vocabConfig
-        let effectiveConfig =
-            config
-            ?? VocabularyRescorer.Config(
-                minScoreAdvantage: vocabConfig.minScoreAdvantage,
-                minVocabScore: vocabConfig.minVocabScore,
-                maxOriginalScoreForReplacement: vocabConfig.maxOriginalScoreForReplacement,
-                vocabBoostWeight: vocabConfig.vocabBoostWeight
-            )
+        let effectiveConfig = config ?? .default
 
         // Create rescorer
         let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)

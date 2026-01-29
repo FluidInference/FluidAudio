@@ -139,14 +139,7 @@ public final class AsrManager {
         let vocabSize = vocabulary.terms.count
         let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocabSize)
         self.vocabSizeConfig = vocabConfig
-        let effectiveConfig =
-            config
-            ?? VocabularyRescorer.Config(
-                minScoreAdvantage: vocabConfig.minScoreAdvantage,
-                minVocabScore: vocabConfig.minVocabScore,
-                maxOriginalScoreForReplacement: vocabConfig.maxOriginalScoreForReplacement,
-                vocabBoostWeight: vocabConfig.vocabBoostWeight
-            )
+        let effectiveConfig = config ?? .default
 
         let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
         self.vocabularyRescorer = try await VocabularyRescorer.create(

@@ -45,99 +45,6 @@ final class CtcDPAlgorithmTests: XCTestCase {
         XCTAssertEqual(CtcDPAlgorithm.nonWildcardCount([]), 0)
     }
 
-    // MARK: - ctcWordSpot
-
-    func testPerfectAlignmentSingleToken() {
-        // 3 frames, vocab size 5
-        // Token 2 is hot at all 3 frames -> keyword [2] aligns perfectly
-        let logProbs = makeLogProbs(
-            frames: 3, vocabSize: 5,
-            hotTokens: [(0, 2), (1, 2), (2, 2)]
-        )
-        let result = CtcDPAlgorithm.ctcWordSpot(logProbs: logProbs, keywordTokens: [2])
-        // Score should be close to highScore (-0.1) since token 2 is strongly present
-        XCTAssertGreaterThan(result.score, -1.0)
-    }
-
-    func testPerfectAlignmentMultipleTokens() {
-        // 6 frames, vocab size 5
-        // Frames 0-1: token 0 hot, Frames 2-3: token 1 hot, Frames 4-5: token 2 hot
-        let logProbs = makeLogProbs(
-            frames: 6, vocabSize: 5,
-            hotTokens: [(0, 0), (1, 0), (2, 1), (3, 1), (4, 2), (5, 2)]
-        )
-        let result = CtcDPAlgorithm.ctcWordSpot(logProbs: logProbs, keywordTokens: [0, 1, 2])
-        // All tokens have strong alignment
-        XCTAssertGreaterThan(result.score, -1.0)
-    }
-
-    func testNoMatchReturnsLowScore() {
-        // 3 frames, token 0 is always hot, but keyword asks for token 3
-        let logProbs = makeLogProbs(
-            frames: 3, vocabSize: 5,
-            hotTokens: [(0, 0), (1, 0), (2, 0)]
-        )
-        let result = CtcDPAlgorithm.ctcWordSpot(logProbs: logProbs, keywordTokens: [3])
-        // Token 3 always cold -> score should be very negative
-        XCTAssertLessThan(result.score, -5.0)
-    }
-
-    func testEmptyKeyword() {
-        let logProbs = makeLogProbs(frames: 3, vocabSize: 5, hotTokens: [])
-        let result = CtcDPAlgorithm.ctcWordSpot(logProbs: logProbs, keywordTokens: [])
-        XCTAssertEqual(result.score, -Float.infinity)
-    }
-
-    func testEmptyLogProbs() {
-        let result = CtcDPAlgorithm.ctcWordSpot(logProbs: [], keywordTokens: [0, 1])
-        XCTAssertEqual(result.score, -Float.infinity)
-    }
-
-    func testSingleFrameSingleToken() {
-        let logProbs = makeLogProbs(
-            frames: 1, vocabSize: 3,
-            hotTokens: [(0, 1)],
-            highScore: -0.1
-        )
-        let result = CtcDPAlgorithm.ctcWordSpot(logProbs: logProbs, keywordTokens: [1])
-        XCTAssertEqual(result.score, -0.1, accuracy: 0.01)
-    }
-
-    func testKeywordLongerThanFrames() {
-        // 2 frames but keyword needs 3 tokens -> T < N
-        let logProbs = makeLogProbs(frames: 2, vocabSize: 5, hotTokens: [(0, 0), (1, 1)])
-        let result = CtcDPAlgorithm.ctcWordSpot(logProbs: logProbs, keywordTokens: [0, 1, 2])
-        // Cannot fit keyword in frames -> should get very bad score
-        XCTAssertLessThan(result.score, -5.0)
-    }
-
-    func testStartAndEndFrame() {
-        // 10 frames, keyword [0, 1, 2] hot at frames 3-5
-        let logProbs = makeLogProbs(
-            frames: 10, vocabSize: 5,
-            hotTokens: [(3, 0), (4, 1), (5, 2)]
-        )
-        let result = CtcDPAlgorithm.ctcWordSpot(logProbs: logProbs, keywordTokens: [0, 1, 2])
-        // Frames use 1-based indexing in DP (frame 3 in 0-based = t=4 in DP)
-        // End frame should be near 4-6 (1-based offset of 0-based frames 3-5)
-        XCTAssertGreaterThanOrEqual(result.endFrame, 3)
-        XCTAssertLessThanOrEqual(result.endFrame, 7)
-    }
-
-    func testWildcardTokenMatchesAnything() {
-        let wildcard = CtcDPAlgorithm.wildcardTokenId
-        // keyword: [wildcard, 1, wildcard] — only token 1 needs to match
-        let logProbs = makeLogProbs(
-            frames: 5, vocabSize: 5,
-            hotTokens: [(2, 1)],
-            highScore: -0.1
-        )
-        let result = CtcDPAlgorithm.ctcWordSpot(logProbs: logProbs, keywordTokens: [wildcard, 1, wildcard])
-        // nonWildcardCount = 1, so score normalized by 1
-        // Token 1 is hot at frame 2 -> score should be close to -0.1
-        XCTAssertGreaterThan(result.score, -1.0)
-    }
-
     // MARK: - ctcWordSpotConstrained
 
     func testConstrainedWindowBasic() {
@@ -255,7 +162,7 @@ final class CtcDPAlgorithmTests: XCTestCase {
         }
     }
 
-    // MARK: - fillDPTable (indirectly tested through ctcWordSpot)
+    // MARK: - fillDPTable (indirectly tested through ctcWordSpotConstrained)
 
     func testDPTableScoreMonotonicity() {
         // With a perfect match, the score at the end should be non-negative
@@ -265,7 +172,12 @@ final class CtcDPAlgorithmTests: XCTestCase {
             hotTokens: [(0, 0), (1, 1), (2, 2)],
             highScore: -0.05
         )
-        let result = CtcDPAlgorithm.ctcWordSpot(logProbs: logProbs, keywordTokens: [0, 1, 2])
+        let result = CtcDPAlgorithm.ctcWordSpotConstrained(
+            logProbs: logProbs,
+            keywordTokens: [0, 1, 2],
+            searchStartFrame: 0,
+            searchEndFrame: logProbs.count
+        )
         // Normalized score = sum(-0.05 * 3) / 3 = -0.05
         XCTAssertEqual(result.score, -0.05, accuracy: 0.01)
     }

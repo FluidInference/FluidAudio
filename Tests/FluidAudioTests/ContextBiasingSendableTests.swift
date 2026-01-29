@@ -16,16 +16,6 @@ final class ContextBiasingSendableTests: XCTestCase {
         requiresSendable(CustomVocabularyContext.self)
     }
 
-    // MARK: - BK-Tree
-
-    func testBKTreeIsSendable() {
-        requiresSendable(BKTree.self)
-    }
-
-    func testBKTreeSearchResultIsSendable() {
-        requiresSendable(BKTree.SearchResult.self)
-    }
-
     // MARK: - Constants
 
     func testVocabSizeConfigIsSendable() {

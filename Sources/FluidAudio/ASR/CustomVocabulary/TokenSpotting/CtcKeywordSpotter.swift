@@ -47,7 +47,6 @@ public struct CtcKeywordSpotter: Sendable {
         let frameDuration: Double
         let totalFrames: Int
         let audioSamplesUsed: Int
-        let frameTimes: [Double]?
     }
 
     /// Public result type containing detections and cached CTC log-probabilities.
@@ -95,7 +94,6 @@ public struct CtcKeywordSpotter: Sendable {
     public init(models: CtcModels, blankId: Int = ContextBiasingConstants.defaultBlankId) {
         self.models = models
         self.blankId = blankId
-        // predictionOptions is now a computed property - no assignment needed
     }
 
     // MARK: - Public API
@@ -156,12 +154,8 @@ public struct CtcKeywordSpotter: Sendable {
             )
 
             for (score, start, end) in multipleDetections {
-                let startTime =
-                    ctcResult.frameTimes.flatMap { start < $0.count ? $0[start] : nil }
-                    ?? TimeInterval(start) * frameDuration
-                let endTime =
-                    ctcResult.frameTimes.flatMap { end < $0.count ? $0[end] : nil }
-                    ?? TimeInterval(end) * frameDuration
+                let startTime = TimeInterval(start) * frameDuration
+                let endTime = TimeInterval(end) * frameDuration
 
                 let detection = KeywordDetection(
                     term: term,

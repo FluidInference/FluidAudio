@@ -74,8 +74,7 @@ extension VocabularyRescorer {
 
     /// Finalize replacements: sort by span length, apply greedily, reconstruct transcript.
     ///
-    /// This shared helper handles Pass 2 & 3 of the two-pass algorithm, used by both
-    /// word-centric and term-centric approaches.
+    /// This helper handles Pass 2 & 3 of the two-pass algorithm.
     private func finalizeReplacements(
         pendingReplacements: [PendingReplacement],
         modifiedWords: inout [(word: String, startTime: Double, endTime: Double)],
@@ -128,8 +127,8 @@ extension VocabularyRescorer {
 
     /// Rescore using constrained CTC token scoring around TDT word locations.
     ///
-    /// Dispatches to either word-centric (USE_BK_TREE=1) or term-centric (default) algorithm.
-    /// Term-centric is the default as it produces better results in benchmarks.
+    /// Uses term-centric algorithm: for each vocabulary term, find similar TDT words
+    /// and run constrained CTC DP to decide replacements.
     ///
     /// - Parameters:
     ///   - transcript: Original transcript from TDT decoder
@@ -149,241 +148,18 @@ extension VocabularyRescorer {
         marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
         minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> RescoreOutput {
-        if useBKTree {
-            return rescoreWithConstrainedCTCWordCentric(
-                transcript: transcript,
-                tokenTimings: tokenTimings,
-                logProbs: logProbs,
-                frameDuration: frameDuration,
-                cbw: cbw,
-                marginSeconds: marginSeconds,
-                minSimilarity: minSimilarity
-            )
-        } else {
-            return rescoreWithConstrainedCTCTermCentric(
-                transcript: transcript,
-                tokenTimings: tokenTimings,
-                logProbs: logProbs,
-                frameDuration: frameDuration,
-                cbw: cbw,
-                marginSeconds: marginSeconds,
-                minSimilarity: minSimilarity
-            )
-        }
-    }
-
-    /// Word-centric constrained CTC rescoring (USE_BK_TREE=1).
-    ///
-    /// Algorithm:
-    /// 1. For each TDT word, query BK-tree to find candidate vocabulary terms (O(log V) per word)
-    /// 2. For each candidate, run constrained CTC DP within the TDT word's timestamp window
-    /// 3. Compare constrained CTC score with original word's CTC score to decide replacement
-    ///
-    /// Best used with BK-tree enabled for O(W x log V) performance.
-    private func rescoreWithConstrainedCTCWordCentric(
-        transcript: String,
-        tokenTimings: [TokenTiming],
-        logProbs: [[Float]],
-        frameDuration: Double,
-        cbw: Float = ContextBiasingConstants.defaultCbw,
-        marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
-        minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
-    ) -> RescoreOutput {
-        // Build word-level timings from token timings
-        let wordTimings = buildWordTimings(from: tokenTimings)
-
-        guard !wordTimings.isEmpty, !logProbs.isEmpty else {
-            return RescoreOutput(text: transcript, replacements: [], wasModified: false)
-        }
-
-        debugLog("=== VocabularyRescorer (Constrained CTC - Word-Centric) ===")
-        debugLog("Words: \(wordTimings.count), Frames: \(logProbs.count), Vocab: \(vocabulary.terms.count)")
-        debugLog("Frame duration: \(String(format: "%.4f", frameDuration))s")
-        debugLog("CBW: \(cbw), Margin: \(marginSeconds)s, MinSimilarity: \(minSimilarity)")
-        debugLog("Mode: \(useBKTree ? "BK-tree O(W × log V)" : "Linear scan O(W × V)")")
-
-        var replacements: [RescoringResult] = []
-        var modifiedWords: [(word: String, startTime: Double, endTime: Double)] = wordTimings.map {
-            (word: $0.word, startTime: $0.startTime, endTime: $0.endTime)
-        }
-        var replacedIndices = Set<Int>()
-        var pendingReplacements: [PendingReplacement] = []  // Two-pass: collect first, apply later
-
-        // Build normalized vocabulary set for guard checks
-        let vocabularyNormalizedSet = buildVocabularyNormalizedSet()
-
-        // Pre-compute normalized words for all timings
-        let normalizedWords = wordTimings.map { Self.normalizeForSimilarity($0.word) }
-
-        // WORD-CENTRIC LOOP: For each TDT word, find candidate vocabulary terms
-        for (wordIdx, timing) in wordTimings.enumerated() {
-            guard !replacedIndices.contains(wordIdx) else { continue }
-
-            let tdtWord = timing.word
-            let normalizedWord = normalizedWords[wordIdx]
-            guard !normalizedWord.isEmpty else { continue }
-
-            // Skip stopwords for single-word matching (checked again for compounds later)
-            if Self.stopwords.contains(normalizedWord) {
-                debugLog("  [STOPWORD] Skipping '\(normalizedWord)' (single word)")
-                // Don't skip entirely - still check compound matches starting from this word
-            }
-
-            // Build adjacent normalized words for compound detection
-            var adjacentNormalized: [String] = []
-            for offset in 1...3 {
-                let idx = wordIdx + offset
-                if idx < wordTimings.count && !replacedIndices.contains(idx) {
-                    let norm = normalizedWords[idx]
-                    if !norm.isEmpty {
-                        adjacentNormalized.append(norm)
-                    } else {
-                        break  // Stop at first empty/invalid word
-                    }
-                } else {
-                    break
-                }
-            }
-
-            // Find candidate vocabulary terms using BK-tree or linear scan
-            let candidates = findCandidateTermsForWord(
-                normalizedWord: normalizedWord,
-                adjacentNormalized: adjacentNormalized,
-                minSimilarity: minSimilarity
-            )
-
-            if !candidates.isEmpty {
-                let candidateInfo = candidates.prefix(5).map {
-                    "\($0.term.text)(sim=\(String(format: "%.2f", $0.similarity)), span=\($0.spanLength))"
-                }.joined(separator: ", ")
-                debugLog("  '\(tdtWord)' -> \(candidates.count) candidates: \(candidateInfo)")
-            }
-
-            // Process each candidate
-            for candidate in candidates {
-                let term = candidate.term
-                let vocabTerm = term.text
-                let similarity = candidate.similarity
-                let spanLength = candidate.spanLength
-
-                // Skip short vocabulary terms (per NeMo CTC-WS paper)
-                guard vocabTerm.count >= vocabulary.minTermLength else { continue }
-
-                // Get vocabulary tokens
-                guard let vocabTokens = term.ctcTokenIds ?? term.tokenIds, !vocabTokens.isEmpty else {
-                    continue
-                }
-
-                // Build span indices
-                let spanIndices = Array(wordIdx..<(wordIdx + spanLength))
-
-                // Check if any word in the span is already replaced
-                guard spanIndices.allSatisfy({ !replacedIndices.contains($0) }) else { continue }
-
-                // Build the original phrase
-                let originalPhrase =
-                    spanLength == 1
-                    ? tdtWord
-                    : spanIndices.map { wordTimings[$0].word }.joined(separator: " ")
-                let normalizedPhrase =
-                    spanLength == 1
-                    ? normalizedWord
-                    : spanIndices.map { normalizedWords[$0] }.joined(separator: " ")
-
-                // Skip if already exact match to canonical (no replacement needed)
-                let normalizedCanonical = Self.normalizeForSimilarity(vocabTerm)
-                if normalizedPhrase == normalizedCanonical {
-                    continue
-                }
-
-                // Guard: Skip if original phrase matches a DIFFERENT vocabulary term
-                let normalizedCurrentSet = Set(buildNormalizedForms(for: term).map { $0.normalized })
-                if vocabularyNormalizedSet.contains(normalizedPhrase)
-                    && !normalizedCurrentSet.contains(normalizedPhrase)
-                {
-                    debugLog("  Skipping '\(vocabTerm)': phrase '\(originalPhrase)' matches another vocab term")
-                    continue
-                }
-
-                // Apply similarity threshold adjustments
-                var minSimilarityForSpan = requiredSimilarity(
-                    minSimilarity: minSimilarity,
-                    spanLength: spanLength,
-                    normalizedText: normalizedPhrase
-                )
-
-                // LENGTH RATIO CHECK for single words
-                if spanLength == 1 {
-                    minSimilarityForSpan = checkLengthRatioRules(
-                        normalizedWord: normalizedWord,
-                        vocabTerm: vocabTerm,
-                        currentSimilarity: similarity,
-                        minSimilarity: minSimilarityForSpan
-                    )
-                }
-
-                // STOPWORD CHECKS
-                let spanWords = spanLength >= 2 ? spanIndices.map { normalizedWords[$0] } : []
-                let (shouldSkipStopword, adjustedSimilarity) = checkStopwordRules(
-                    normalizedWord: normalizedWord,
-                    spanLength: spanLength,
-                    spanWords: spanWords,
-                    vocabTerm: vocabTerm,
-                    currentSimilarity: minSimilarityForSpan
-                )
-                if shouldSkipStopword { continue }
-                minSimilarityForSpan = adjustedSimilarity
-
-                // Check if similarity meets threshold after all adjustments
-                guard similarity >= minSimilarityForSpan else { continue }
-
-                // Get temporal window for the span
-                let spanStartTime = wordTimings[wordIdx].startTime
-                let spanEndTime = wordTimings[wordIdx + spanLength - 1].endTime
-
-                // Evaluate CTC match using shared helper
-                let matchCandidate = CTCMatchCandidate(
-                    originalPhrase: originalPhrase,
-                    vocabTerm: vocabTerm,
-                    vocabTokens: vocabTokens,
-                    similarity: similarity,
-                    spanLength: spanLength,
-                    spanIndices: spanIndices,
-                    spanStartTime: spanStartTime,
-                    spanEndTime: spanEndTime
-                )
-
-                let result = evaluateCTCMatch(
-                    candidate: matchCandidate,
-                    logProbs: logProbs,
-                    frameDuration: frameDuration,
-                    cbw: cbw,
-                    marginSeconds: marginSeconds
-                )
-
-                if result.shouldReplace {
-                    // Collect candidate instead of applying immediately
-                    pendingReplacements.append(
-                        PendingReplacement(
-                            candidate: matchCandidate,
-                            result: result,
-                            similarity: similarity
-                        )
-                    )
-                }
-            }
-        }
-
-        // PASS 2 & 3: Sort, apply, and reconstruct (shared logic)
-        return finalizeReplacements(
-            pendingReplacements: pendingReplacements,
-            modifiedWords: &modifiedWords,
-            replacedIndices: &replacedIndices,
-            replacements: &replacements
+        return rescoreWithConstrainedCTCTermCentric(
+            transcript: transcript,
+            tokenTimings: tokenTimings,
+            logProbs: logProbs,
+            frameDuration: frameDuration,
+            cbw: cbw,
+            marginSeconds: marginSeconds,
+            minSimilarity: minSimilarity
         )
     }
 
-    /// Term-centric constrained CTC rescoring (default, USE_BK_TREE=0).
+    /// Term-centric constrained CTC rescoring.
     ///
     /// Algorithm:
     /// 1. For each vocabulary term, find TDT words phonetically similar (string similarity)
@@ -495,8 +271,7 @@ extension VocabularyRescorer {
                         // Use adaptive similarity threshold
                         let minSimilarityForSpan = requiredSimilarity(
                             minSimilarity: minSimilarity,
-                            spanLength: spanLength,
-                            normalizedText: normalizedPhrase
+                            spanLength: spanLength
                         )
                         guard bestSimilarity >= minSimilarityForSpan else { continue }
 
@@ -564,7 +339,6 @@ extension VocabularyRescorer {
                     // Check similarity against ALL forms (single word)
                     var bestSimilarity: Float = 0
                     var matchedSpanLength = 1
-                    var matchedConcatenation = normalizedWord
                     for form in singleWordForms {
                         let similarity = Self.stringSimilarity(normalizedWord, form.normalized)
                         bestSimilarity = max(bestSimilarity, similarity)
@@ -600,7 +374,7 @@ extension VocabularyRescorer {
                                 if concatSimilarity > bestSimilarity {
                                     bestSimilarity = concatSimilarity
                                     matchedSpanLength = 2
-                                    matchedConcatenation = concatenated
+
                                 }
                             }
                         }
@@ -622,17 +396,16 @@ extension VocabularyRescorer {
                                 if concatSimilarity > bestSimilarity {
                                     bestSimilarity = concatSimilarity
                                     matchedSpanLength = 3
-                                    matchedConcatenation = concatenated
+
                                 }
                             }
                         }
                     }
 
-                    // Use adaptive similarity threshold (use concatenated text for multi-word spans)
+                    // Use adaptive similarity threshold
                     var minSimilarityForSpan = requiredSimilarity(
                         minSimilarity: minSimilarity,
-                        spanLength: matchedSpanLength,
-                        normalizedText: matchedConcatenation
+                        spanLength: matchedSpanLength
                     )
 
                     // LENGTH RATIO CHECK for single words

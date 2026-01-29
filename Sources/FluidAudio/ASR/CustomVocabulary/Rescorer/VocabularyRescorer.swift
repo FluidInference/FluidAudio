@@ -18,29 +18,8 @@ public struct VocabularyRescorer: Sendable {
     let ctcTokenizer: CtcTokenizer?
     let debugMode: Bool
 
-    // BK-tree for efficient approximate string matching (USE_BK_TREE=1 to enable)
-    // When enabled, uses BK-tree to find candidate vocabulary terms within edit distance
-    // instead of iterating all terms. Provides O(log n) vs O(n) for large vocabularies.
-    let useBKTree: Bool
-    let bkTree: BKTree?
-    let bkTreeMaxDistance: Int
-
     /// Configuration for rescoring behavior
     public struct Config: Sendable {
-        /// Minimum CTC score advantage needed to replace original word
-        /// Higher = more conservative (fewer replacements)
-        public let minScoreAdvantage: Float
-
-        /// Minimum absolute CTC score for vocabulary term to be considered
-        public let minVocabScore: Float
-
-        /// Maximum CTC score for original word to allow replacement
-        /// If original word scores very high, don't replace it
-        public let maxOriginalScoreForReplacement: Float
-
-        /// Weight for vocabulary term boost (added to CTC score)
-        public let vocabBoostWeight: Float
-
         /// Enable adaptive thresholds based on token count
         /// When true, thresholds are adjusted for longer vocabulary terms
         public let useAdaptiveThresholds: Bool
@@ -49,48 +28,19 @@ public struct VocabularyRescorer: Sendable {
         public let referenceTokenCount: Int
 
         public static let `default` = Config(
-            minScoreAdvantage: ContextBiasingConstants.defaultMinScoreAdvantage,
-            minVocabScore: ContextBiasingConstants.defaultMinVocabScore,
-            maxOriginalScoreForReplacement: ContextBiasingConstants.defaultMaxOriginalScoreForReplacement,
-            vocabBoostWeight: ContextBiasingConstants.defaultVocabBoostWeight,
             useAdaptiveThresholds: ContextBiasingConstants.defaultUseAdaptiveThresholds,
             referenceTokenCount: ContextBiasingConstants.defaultReferenceTokenCount
         )
 
         public init(
-            minScoreAdvantage: Float = ContextBiasingConstants.defaultMinScoreAdvantage,
-            minVocabScore: Float = ContextBiasingConstants.defaultMinVocabScore,
-            maxOriginalScoreForReplacement: Float = ContextBiasingConstants.defaultMaxOriginalScoreForReplacement,
-            vocabBoostWeight: Float = ContextBiasingConstants.defaultVocabBoostWeight,
             useAdaptiveThresholds: Bool = ContextBiasingConstants.defaultUseAdaptiveThresholds,
             referenceTokenCount: Int = ContextBiasingConstants.defaultReferenceTokenCount
         ) {
-            self.minScoreAdvantage = minScoreAdvantage
-            self.minVocabScore = minVocabScore
-            self.maxOriginalScoreForReplacement = maxOriginalScoreForReplacement
-            self.vocabBoostWeight = vocabBoostWeight
             self.useAdaptiveThresholds = useAdaptiveThresholds
             self.referenceTokenCount = referenceTokenCount
         }
 
         // MARK: - Adaptive Threshold Functions
-
-        /// Compute adaptive minimum vocabulary score based on token count.
-        /// Longer keywords naturally have lower CTC scores, so we relax the threshold.
-        ///
-        /// Formula: `minVocabScore - (extraTokens * 1.0)`
-        /// - 3 tokens: no adjustment (reference)
-        /// - 5 tokens: threshold lowered by 2.0
-        /// - 8 tokens: threshold lowered by 5.0
-        ///
-        /// - Parameters:
-        ///   - tokenCount: Number of tokens in the vocabulary term
-        /// - Returns: Adjusted minimum vocabulary score threshold
-        public func adaptiveMinVocabScore(tokenCount: Int) -> Float {
-            guard useAdaptiveThresholds else { return minVocabScore }
-            let extraTokens = max(0, tokenCount - referenceTokenCount)
-            return minVocabScore - Float(extraTokens) * 1.0
-        }
 
         /// Compute adaptive context-biasing weight based on token count.
         /// Longer keywords need more boost to compensate for accumulated scoring error.
@@ -109,23 +59,6 @@ public struct VocabularyRescorer: Sendable {
             let ratio = Float(tokenCount) / Float(referenceTokenCount)
             let scaleFactor = 1.0 + log2(ratio) * 0.3
             return baseCbw * scaleFactor
-        }
-
-        /// Compute adaptive minimum score advantage based on token count.
-        /// Longer keywords may need less advantage since they're more distinctive.
-        ///
-        /// Formula: `minScoreAdvantage / sqrt(tokenCount / referenceTokenCount)`
-        /// - 3 tokens: no adjustment (reference)
-        /// - 6 tokens: advantage reduced to ~70%
-        /// - 12 tokens: advantage reduced to ~50%
-        ///
-        /// - Parameters:
-        ///   - tokenCount: Number of tokens in the vocabulary term
-        /// - Returns: Adjusted minimum score advantage threshold
-        public func adaptiveMinScoreAdvantage(tokenCount: Int) -> Float {
-            guard useAdaptiveThresholds, tokenCount > referenceTokenCount else { return minScoreAdvantage }
-            let ratio = Float(tokenCount) / Float(referenceTokenCount)
-            return minScoreAdvantage / sqrt(ratio)
         }
     }
 
@@ -180,16 +113,6 @@ public struct VocabularyRescorer: Sendable {
         #else
         self.debugMode = false
         #endif
-
-        // BK-tree for efficient approximate string matching (disabled by default)
-        // Enable for large vocabularies (>100 terms) where O(log V) lookup helps
-        self.useBKTree = ContextBiasingConstants.useBkTree
-        self.bkTreeMaxDistance = ContextBiasingConstants.bkTreeMaxDistance
-        if useBKTree {
-            self.bkTree = BKTree(terms: vocabulary.terms)
-        } else {
-            self.bkTree = nil
-        }
     }
 
     // MARK: - Result Types
@@ -218,8 +141,6 @@ public struct VocabularyRescorer: Sendable {
         public let word: String
         public let startTime: Double
         public let endTime: Double
-        public let confidence: Float
-        public let wordIndex: Int
     }
 
     /// Build word-level timings from token timings.
@@ -229,8 +150,6 @@ public struct VocabularyRescorer: Sendable {
         var currentWord = ""
         var wordStart: Double = 0
         var wordEnd: Double = 0
-        var minConfidence: Float = 1.0
-        var wordIndex = 0
 
         for timing in tokenTimings {
             let token = timing.token
@@ -251,13 +170,9 @@ public struct VocabularyRescorer: Sendable {
                         WordTiming(
                             word: trimmedWord,
                             startTime: wordStart,
-                            endTime: wordEnd,
-                            confidence: minConfidence,
-                            wordIndex: wordIndex
+                            endTime: wordEnd
                         ))
-                    wordIndex += 1
                 }
-                minConfidence = 1.0
                 currentWord = ""
             }
 
@@ -268,7 +183,6 @@ public struct VocabularyRescorer: Sendable {
                 currentWord += token
             }
             wordEnd = timing.endTime
-            minConfidence = min(minConfidence, timing.confidence)
         }
 
         // Save final word
@@ -278,9 +192,7 @@ public struct VocabularyRescorer: Sendable {
                 WordTiming(
                     word: trimmedWord,
                     startTime: wordStart,
-                    endTime: wordEnd,
-                    confidence: minConfidence,
-                    wordIndex: wordIndex
+                    endTime: wordEnd
                 ))
         }
 

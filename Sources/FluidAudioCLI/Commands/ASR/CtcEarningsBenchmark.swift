@@ -525,12 +525,7 @@ public enum CtcEarningsBenchmark {
             let vocabSize = vocabularyWords.count
             let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocabSize)
 
-            let rescorerConfig = VocabularyRescorer.Config(
-                minScoreAdvantage: vocabConfig.minScoreAdvantage,
-                minVocabScore: vocabConfig.minVocabScore,
-                maxOriginalScoreForReplacement: vocabConfig.maxOriginalScoreForReplacement,
-                vocabBoostWeight: vocabConfig.vocabBoostWeight
-            )
+            let rescorerConfig = VocabularyRescorer.Config.default
 
             let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
             let rescorer = try await VocabularyRescorer.create(

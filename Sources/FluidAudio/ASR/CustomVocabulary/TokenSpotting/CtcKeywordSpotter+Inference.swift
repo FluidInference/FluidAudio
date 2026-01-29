@@ -12,7 +12,7 @@ extension CtcKeywordSpotter {
     func computeLogProbs(for audioSamples: [Float]) async throws -> CtcLogProbResult {
         guard !audioSamples.isEmpty else {
             return CtcLogProbResult(
-                logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0, frameTimes: nil)
+                logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0)
         }
 
         // For audio longer than model limit, use chunked processing
@@ -80,14 +80,14 @@ extension CtcKeywordSpotter {
 
         guard !chunkResults.isEmpty else {
             return CtcLogProbResult(
-                logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0, frameTimes: nil)
+                logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0)
         }
 
         // Use frame duration from first chunk (should be consistent)
         let frameDuration = chunkResults[0].frameDuration
         guard frameDuration > 0 else {
             return CtcLogProbResult(
-                logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0, frameTimes: nil)
+                logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0)
         }
 
         // Calculate overlap in frames
@@ -141,8 +141,7 @@ extension CtcKeywordSpotter {
             logProbs: concatenatedLogProbs,
             frameDuration: frameDuration,
             totalFrames: concatenatedLogProbs.count,
-            audioSamplesUsed: totalSamples,
-            frameTimes: nil
+            audioSamplesUsed: totalSamples
         )
     }
 
@@ -234,8 +233,7 @@ extension CtcKeywordSpotter {
             logProbs: trimmed,
             frameDuration: frameDuration,
             totalFrames: frameCount,
-            audioSamplesUsed: clampedCount,
-            frameTimes: nil
+            audioSamplesUsed: clampedCount
         )
     }
 
@@ -326,7 +324,6 @@ extension CtcKeywordSpotter {
 
     private func makeLogProbs(
         from ctcOutput: MLMultiArray,
-        applyLogSoftmax: Bool = true,
         temperature: Float = 1.0,
         blankBias: Float = 0.0
     ) throws -> [[Float]] {
@@ -369,7 +366,7 @@ extension CtcKeywordSpotter {
                 logits[v] = ctcOutput[indexBuilder(t, v)].floatValue
             }
 
-            var row = applyLogSoftmax ? logSoftmax(logits, temperature: temperature) : logits
+            var row = logSoftmax(logits, temperature: temperature)
 
             // Apply blank bias: subtract from blank token log prob to penalize it
             if blankBias != 0.0 && blankId < row.count {

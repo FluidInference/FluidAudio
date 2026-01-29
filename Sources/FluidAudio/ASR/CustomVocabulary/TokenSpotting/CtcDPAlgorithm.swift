@@ -1,5 +1,3 @@
-import Foundation
-
 /// Pure dynamic programming algorithms for CTC keyword spotting.
 ///
 /// Extracted from `CtcKeywordSpotter` so that the DP logic can be tested
@@ -107,46 +105,6 @@ enum CtcDPAlgorithm {
     }
 
     // MARK: - Word Spotting
-
-    /// Find the best alignment of a keyword in CTC log-probabilities.
-    ///
-    /// - Parameters:
-    ///   - logProbs: CTC log-probabilities `[T, vocab_size]`
-    ///   - keywordTokens: Token IDs for the keyword
-    /// - Returns: `(score, startFrame, endFrame)` where score is average log-prob per non-wildcard token
-    static func ctcWordSpot(
-        logProbs: [[Float]],
-        keywordTokens: [Int]
-    ) -> (score: Float, startFrame: Int, endFrame: Int) {
-        let T = logProbs.count
-        let N = keywordTokens.count
-
-        if N == 0 || T == 0 {
-            return (-Float.infinity, 0, 0)
-        }
-
-        let (dp, backtrack, lastMatch) = fillDPTable(logProbs: logProbs, keywordTokens: keywordTokens)
-
-        var bestEnd = 0
-        var bestScore = -Float.greatestFiniteMagnitude
-
-        if T >= N {
-            for t in N...T {
-                if dp[t][N] > bestScore {
-                    bestScore = dp[t][N]
-                    bestEnd = t
-                }
-            }
-        }
-
-        let bestStart = backtrack[bestEnd][N]
-        let actualEndFrame = lastMatch[bestEnd][N]
-
-        let normFactor = nonWildcardCount(keywordTokens)
-        let normalizedScore = normFactor > 0 ? bestScore / Float(normFactor) : bestScore
-
-        return (normalizedScore, bestStart, actualEndFrame)
-    }
 
     /// Constrained CTC word spotting within a temporal window.
     ///

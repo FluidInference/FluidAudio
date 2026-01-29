@@ -96,29 +96,6 @@ final class VocabularyRescorerUtilsTests: XCTestCase {
 
     // MARK: - Config Adaptive Thresholds
 
-    func testAdaptiveMinVocabScoreAtReference() {
-        let config = VocabularyRescorer.Config.default
-        // referenceTokenCount = 3, no adjustment
-        XCTAssertEqual(config.adaptiveMinVocabScore(tokenCount: 3), config.minVocabScore, accuracy: 0.01)
-    }
-
-    func testAdaptiveMinVocabScoreLongerPhrase() {
-        let config = VocabularyRescorer.Config.default
-        // 5 tokens: extraTokens = 5 - 3 = 2, threshold = -12.0 - 2*1.0 = -14.0
-        XCTAssertEqual(config.adaptiveMinVocabScore(tokenCount: 5), -14.0, accuracy: 0.01)
-    }
-
-    func testAdaptiveMinVocabScoreShortPhrase() {
-        let config = VocabularyRescorer.Config.default
-        // 1 token: extraTokens = max(0, 1-3) = 0, no adjustment
-        XCTAssertEqual(config.adaptiveMinVocabScore(tokenCount: 1), config.minVocabScore, accuracy: 0.01)
-    }
-
-    func testAdaptiveMinVocabScoreDisabled() {
-        let config = VocabularyRescorer.Config(useAdaptiveThresholds: false)
-        XCTAssertEqual(config.adaptiveMinVocabScore(tokenCount: 10), config.minVocabScore, accuracy: 0.01)
-    }
-
     func testAdaptiveCbwAtReference() {
         let config = VocabularyRescorer.Config.default
         XCTAssertEqual(config.adaptiveCbw(baseCbw: 3.0, tokenCount: 3), 3.0, accuracy: 0.01)
@@ -141,39 +118,11 @@ final class VocabularyRescorerUtilsTests: XCTestCase {
         XCTAssertEqual(config.adaptiveCbw(baseCbw: 3.0, tokenCount: 10), 3.0, accuracy: 0.01)
     }
 
-    func testAdaptiveMinScoreAdvantageAtReference() {
-        let config = VocabularyRescorer.Config.default
-        XCTAssertEqual(config.adaptiveMinScoreAdvantage(tokenCount: 3), config.minScoreAdvantage, accuracy: 0.01)
-    }
-
-    func testAdaptiveMinScoreAdvantageLongerPhrase() {
-        let config = VocabularyRescorer.Config.default
-        // 6 tokens: ratio = 6/3 = 2.0, result = 2.0 / sqrt(2.0) ≈ 1.414
-        let expected = config.minScoreAdvantage / sqrt(2.0)
-        XCTAssertEqual(config.adaptiveMinScoreAdvantage(tokenCount: 6), expected, accuracy: 0.01)
-    }
-
-    func testAdaptiveMinScoreAdvantageBelowReference() {
-        let config = VocabularyRescorer.Config.default
-        XCTAssertEqual(config.adaptiveMinScoreAdvantage(tokenCount: 1), config.minScoreAdvantage, accuracy: 0.01)
-    }
-
-    func testAdaptiveMinScoreAdvantageDisabled() {
-        let config = VocabularyRescorer.Config(useAdaptiveThresholds: false)
-        XCTAssertEqual(config.adaptiveMinScoreAdvantage(tokenCount: 10), config.minScoreAdvantage, accuracy: 0.01)
-    }
-
     // MARK: - Config Defaults
 
     func testConfigDefaultValues() {
         let config = VocabularyRescorer.Config.default
-        XCTAssertEqual(config.minScoreAdvantage, ContextBiasingConstants.defaultMinScoreAdvantage, accuracy: 0.01)
-        XCTAssertEqual(config.minVocabScore, ContextBiasingConstants.defaultMinVocabScore, accuracy: 0.01)
-        XCTAssertEqual(
-            config.maxOriginalScoreForReplacement,
-            ContextBiasingConstants.defaultMaxOriginalScoreForReplacement,
-            accuracy: 0.01
-        )
-        XCTAssertEqual(config.vocabBoostWeight, ContextBiasingConstants.defaultVocabBoostWeight, accuracy: 0.01)
+        XCTAssertEqual(config.useAdaptiveThresholds, ContextBiasingConstants.defaultUseAdaptiveThresholds)
+        XCTAssertEqual(config.referenceTokenCount, ContextBiasingConstants.defaultReferenceTokenCount)
     }
 }

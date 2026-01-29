@@ -34,7 +34,6 @@ extension VocabularyRescorer {
 
     /// Represents a normalized form of a vocabulary term (canonical or alias)
     struct NormalizedForm: Hashable {
-        let raw: String
         let normalized: String
         let wordCount: Int
     }
@@ -65,7 +64,7 @@ extension VocabularyRescorer {
             seen.insert(normalized)
 
             let wordCount = normalized.split(separator: " ").count
-            forms.append(NormalizedForm(raw: raw, normalized: normalized, wordCount: wordCount))
+            forms.append(NormalizedForm(normalized: normalized, wordCount: wordCount))
         }
 
         return forms
@@ -75,7 +74,7 @@ extension VocabularyRescorer {
 
     /// Determine required similarity threshold based on span length and word length
     /// Note: Using permissive thresholds to avoid rejecting valid matches
-    func requiredSimilarity(minSimilarity: Float, spanLength: Int, normalizedText: String) -> Float {
+    func requiredSimilarity(minSimilarity: Float, spanLength: Int) -> Float {
         // Multi-word spans: slightly higher threshold to avoid false positives
         if spanLength >= 2 {
             return max(minSimilarity, 0.55)
