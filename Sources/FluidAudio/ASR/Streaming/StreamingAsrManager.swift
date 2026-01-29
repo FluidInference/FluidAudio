@@ -559,7 +559,7 @@ public actor StreamingAsrManager {
             let cbw = vocabConfig.cbw
 
             // Apply constrained CTC rescoring
-            let rescoreOutput = rescorer.rescoreWithConstrainedCTC(
+            let rescoreOutput = rescorer.ctcTokenRescore(
                 transcript: text,
                 tokenTimings: tokenTimings,
                 logProbs: logProbs,

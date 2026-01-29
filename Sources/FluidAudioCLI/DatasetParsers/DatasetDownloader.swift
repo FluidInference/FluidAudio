@@ -217,30 +217,6 @@ struct DatasetDownloader {
         }
     }
 
-    /// Download a binary file (parquet, etc.)
-    static func downloadBinaryFile(from urlString: String, to outputPath: URL) async -> Bool {
-        guard let url = URL(string: urlString) else {
-            return false
-        }
-
-        do {
-            let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
-
-            if let httpResponse = response as? HTTPURLResponse {
-                if httpResponse.statusCode == 200 {
-                    try data.write(to: outputPath)
-                    return data.count > 0
-                } else {
-                    return false
-                }
-            }
-        } catch {
-            return false
-        }
-
-        return false
-    }
-
     /// Download a single annotation file from AMI corpus
     static func downloadAnnotationFile(from urlString: String, to outputPath: URL) async -> Bool {
         guard let url = URL(string: urlString) else {
@@ -682,7 +658,43 @@ struct DatasetDownloader {
         return appSupport.appendingPathComponent("FluidAudio/earnings22-kws", isDirectory: true)
     }
 
+    // MARK: - HuggingFace Datasets Server API types
+
+    private struct HFRowsResponse: Decodable {
+        let rows: [HFRow]
+        let numRowsTotal: Int
+
+        enum CodingKeys: String, CodingKey {
+            case rows
+            case numRowsTotal = "num_rows_total"
+        }
+    }
+
+    private struct HFRow: Decodable {
+        let row: HFRowData
+    }
+
+    private struct HFRowData: Decodable {
+        let fileId: String
+        let text: String
+        let dictionary: [String]?
+        let audio: [HFAudioSource]
+
+        enum CodingKeys: String, CodingKey {
+            case fileId = "file_id"
+            case text
+            case dictionary
+            case audio
+        }
+    }
+
+    private struct HFAudioSource: Decodable {
+        let src: String
+        let type: String
+    }
+
     /// Download Earnings22 KWS dataset from argmaxinc/earnings22-kws-golden
+    /// using the HuggingFace Datasets Server REST API (pure Swift, no Python dependency).
     static func downloadEarnings22KWS(force: Bool) async {
         let cacheDir = getEarnings22Directory()
         let testDatasetDir = cacheDir.appendingPathComponent("test-dataset")
@@ -711,106 +723,96 @@ struct DatasetDownloader {
             return
         }
 
-        // Download parquet file
-        let parquetURL =
-            "https://huggingface.co/datasets/argmaxinc/earnings22-kws-golden/resolve/main/data/test-00000-of-00001.parquet"
-        let parquetFile = cacheDir.appendingPathComponent("test-00000-of-00001.parquet")
+        // Fetch rows via HuggingFace Datasets Server API (paginated, max 100 per request)
+        let baseURL = "https://datasets-server.huggingface.co/rows"
+        let dataset = "argmaxinc/earnings22-kws-golden"
+        let pageSize = 100
+        var offset = 0
+        var totalExtracted = 0
+        var totalRows = Int.max
 
-        let parquetSuccess = await downloadBinaryFile(from: parquetURL, to: parquetFile)
+        logger.info("📦 Fetching Earnings22 dataset via HuggingFace API...")
 
-        if !parquetSuccess {
-            logger.error("Failed to download parquet. Manual: wget \(parquetURL)")
-            return
-        }
+        while offset < totalRows {
+            let apiURLString =
+                "\(baseURL)?dataset=\(dataset)&config=default&split=test&offset=\(offset)&length=\(pageSize)"
 
-        // Extract using Python script
-        logger.info("📦 Extracting Earnings22 dataset...")
-
-        // Create extraction script
-        let scriptContent = """
-            #!/usr/bin/env python3
-            import pandas as pd
-            from pathlib import Path
-            import sys
-            import numpy as np
-
-            parquet_path = Path(sys.argv[1])
-            output_dir = Path(sys.argv[2])
-
-            df = pd.read_parquet(parquet_path)
-            print(f"Found {len(df)} rows")
-
-            for row in df.to_dict(orient="records"):
-                file_id = row["file_id"]
-
-                wav_path = output_dir / f"{file_id}.wav"
-                audio_field = row["audio"]
-                if isinstance(audio_field, dict) and "bytes" in audio_field:
-                    wav_path.write_bytes(audio_field["bytes"])
-                else:
-                    wav_path.write_bytes(bytes(audio_field))
-
-                (output_dir / f"{file_id}.text.txt").write_text(str(row.get("text", "")))
-
-                # Handle dictionary field (may be numpy array, list, or None)
-                dictionary = row.get("dictionary")
-                if dictionary is None:
-                    dict_text = ""
-                elif isinstance(dictionary, np.ndarray):
-                    dict_text = "\\n".join(str(x) for x in dictionary.tolist())
-                elif isinstance(dictionary, (list, tuple)):
-                    dict_text = "\\n".join(str(x) for x in dictionary)
-                else:
-                    dict_text = str(dictionary)
-                (output_dir / f"{file_id}.dictionary.txt").write_text(dict_text)
-
-                print(f"Extracted: {file_id}")
-
-            print(f"Done! Extracted {len(df)} files")
-            """
-
-        let scriptFile = cacheDir.appendingPathComponent("extract.py")
-        do {
-            try scriptContent.write(to: scriptFile, atomically: true, encoding: .utf8)
-        } catch {
-            logger.error("Failed to create extraction script: \(error)")
-            return
-        }
-
-        // Run Python extraction
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        process.arguments = [scriptFile.path, parquetFile.path, testDatasetDir.path]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            logger.info(output)
-
-            if process.terminationStatus == 0 {
-                // Count extracted files
-                let files =
-                    (try? FileManager.default.contentsOfDirectory(
-                        at: testDatasetDir, includingPropertiesForKeys: nil
-                    )) ?? []
-                let wavFiles = files.filter { $0.pathExtension == "wav" }
-
-                logger.info("Earnings22 KWS ready: \(wavFiles.count) files")
-
-                // Clean up
-                try? FileManager.default.removeItem(at: scriptFile)
-            } else {
-                logger.error("Extraction failed. Run: pip3 install pandas pyarrow")
+            guard let apiURL = URL(string: apiURLString) else {
+                logger.error("Invalid API URL: \(apiURLString)")
+                return
             }
-        } catch {
-            logger.error("Extraction failed: \(error). Run: pip3 install pandas pyarrow")
+
+            do {
+                let (data, response) = try await DownloadUtils.sharedSession.data(from: apiURL)
+
+                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                    let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    logger.error("API request failed (status \(statusCode)) at offset \(offset)")
+                    return
+                }
+
+                let decoded = try JSONDecoder().decode(HFRowsResponse.self, from: data)
+                totalRows = decoded.numRowsTotal
+
+                guard !decoded.rows.isEmpty else { break }
+
+                for hfRow in decoded.rows {
+                    let row = hfRow.row
+                    let fileId = row.fileId
+                    let wavPath = testDatasetDir.appendingPathComponent("\(fileId).wav")
+
+                    // Skip if already extracted (resume support)
+                    if FileManager.default.fileExists(atPath: wavPath.path) {
+                        totalExtracted += 1
+                        continue
+                    }
+
+                    // Download audio from the src URL
+                    guard let audioSource = row.audio.first,
+                        let audioURL = URL(string: audioSource.src)
+                    else {
+                        logger.warning("No audio source for \(fileId)")
+                        continue
+                    }
+
+                    let (audioData, audioResponse) = try await DownloadUtils.sharedSession.data(from: audioURL)
+                    guard let audioHTTP = audioResponse as? HTTPURLResponse, audioHTTP.statusCode == 200 else {
+                        logger.warning("Failed to download audio for \(fileId)")
+                        continue
+                    }
+
+                    try audioData.write(to: wavPath)
+
+                    // Write text file
+                    let textPath = testDatasetDir.appendingPathComponent("\(fileId).text.txt")
+                    try row.text.write(to: textPath, atomically: true, encoding: .utf8)
+
+                    // Write dictionary file
+                    let dictPath = testDatasetDir.appendingPathComponent("\(fileId).dictionary.txt")
+                    let dictText = row.dictionary?.joined(separator: "\n") ?? ""
+                    try dictText.write(to: dictPath, atomically: true, encoding: .utf8)
+
+                    totalExtracted += 1
+                    logger.info("Extracted: \(fileId)")
+                }
+
+                logger.info("Progress: \(min(offset + pageSize, totalRows))/\(totalRows)")
+
+            } catch {
+                logger.error("Failed at offset \(offset): \(error)")
+                return
+            }
+
+            offset += pageSize
         }
+
+        // Count final files
+        let files =
+            (try? FileManager.default.contentsOfDirectory(
+                at: testDatasetDir, includingPropertiesForKeys: nil
+            )) ?? []
+        let wavFiles = files.filter { $0.pathExtension == "wav" }
+        logger.info("Earnings22 KWS ready: \(wavFiles.count) files (\(totalExtracted) extracted)")
     }
 
     /// Download VOiCES subset dataset from GitHub

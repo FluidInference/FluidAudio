@@ -353,7 +353,7 @@ enum TranscribeCommand {
                     let minSimilarity = vocabConfig.minSimilarity
                     let cbw = vocabConfig.cbw
 
-                    let rescoreOutput = rescorer.rescoreWithConstrainedCTC(
+                    let rescoreOutput = rescorer.ctcTokenRescore(
                         transcript: result.text,
                         tokenTimings: tokenTimings,
                         logProbs: logProbs,

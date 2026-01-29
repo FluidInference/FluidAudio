@@ -181,7 +181,7 @@ public enum ContextBiasingConstants {
     ///
     /// - Value: `3.0` (log-probability boost)
     /// - Effect: Multiplies vocabulary term probability by ~20x (e^3.0)
-    /// - Used in: `VocabularyRescorer.rescoreWithTimings()`, constrained CTC methods
+    /// - Used in: `VocabularyRescorer.ctcTokenRescore()` and constrained CTC methods
     public static let defaultCbw: Float = 3.0
 
     /// Default alpha value for weighted score combination.
@@ -200,7 +200,7 @@ public enum ContextBiasingConstants {
     /// allows for timing imprecision in word boundaries.
     ///
     /// - Value: `0.5` seconds (500ms tolerance)
-    /// - Used in: `VocabularyRescorer+ConstrainedCTC.rescoreWithConstrainedCTC()`
+    /// - Used in: `VocabularyRescorer+TokenRescoring.ctcTokenRescore()`
     public static let defaultMarginSeconds: Double = 0.5
 
     /// Default vocabulary boost weight for rescorer config.
