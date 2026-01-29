@@ -738,308 +738,41 @@ public struct CtcKeywordSpotter: Sendable {
         return Array(logProbs.prefix(clampedFrames))
     }
 
-    // MARK: - NeMo-compatible DP
-
-    /// Dynamic programming keyword alignment, ported from
-    /// `NeMo/scripts/asr_context_biasing/ctc_word_spotter.py:ctc_word_spot`.
-    // Wildcard token ID: represents "*" that matches anything at zero cost
-    private static let WILDCARD_TOKEN_ID = ContextBiasingConstants.wildcardTokenId
-
-    /// Core DP table construction shared by all CTC word spotting variants.
-    /// Returns filled DP, backtrack, and lastMatch arrays for downstream interpretation.
-    ///
-    /// - Parameters:
-    ///   - logProbs: CTC log-probabilities [T, vocab_size]
-    ///   - keywordTokens: Token IDs for the keyword (may include WILDCARD_TOKEN_ID)
-    /// - Returns: Tuple of (dp, backtrack, lastMatch) where:
-    ///   - dp[t][n] = best score to match first n tokens by time t
-    ///   - backtrack[t][n] = start frame for the best alignment ending at t with n tokens matched
-    ///   - lastMatch[t][n] = frame where token n was last matched (actual end frame)
-    private func fillDPTable(
-        logProbs: [[Float]],
-        keywordTokens: [Int]
-    ) -> (dp: [[Float]], backtrack: [[Int]], lastMatch: [[Int]]) {
-        let T = logProbs.count
-        let N = keywordTokens.count
-
-        // dp[t][n] = best score to match first n tokens by time t
-        var dp = Array(
-            repeating: Array(repeating: -Float.greatestFiniteMagnitude, count: N + 1),
-            count: T + 1
-        )
-        var backtrack = Array(
-            repeating: Array(repeating: 0, count: N + 1),
-            count: T + 1
-        )
-        // lastMatch[t][n] = the frame where the nth token was last matched
-        // This tracks the ACTUAL end frame, not the DP evaluation frame
-        var lastMatch = Array(
-            repeating: Array(repeating: 0, count: N + 1),
-            count: T + 1
-        )
-
-        // Initialize: keyword of length 0 has score 0 at any time
-        for t in 0...T {
-            dp[t][0] = 0.0
-        }
-
-        for t in 1...T {
-            let frame = logProbs[t - 1]
-
-            for n in 1...N {
-                let tokenId = keywordTokens[n - 1]
-
-                // Wildcard token: matches any symbol (including blank) at zero cost
-                if tokenId == Self.WILDCARD_TOKEN_ID {
-                    let wildcardSkip = dp[t - 1][n - 1]  // Move to next token
-                    let wildcardStay = dp[t - 1][n]  // Stay on wildcard
-                    let wildcardScore = max(wildcardSkip, wildcardStay)
-                    dp[t][n] = wildcardScore
-                    if wildcardScore == wildcardSkip {
-                        backtrack[t][n] = t - 1
-                        lastMatch[t][n] = t  // Wildcard consumed at this frame
-                    } else {
-                        backtrack[t][n] = backtrack[t - 1][n]
-                        lastMatch[t][n] = lastMatch[t - 1][n]  // Propagate from previous
-                    }
-                    continue
-                }
-
-                if tokenId < 0 || tokenId >= frame.count {
-                    continue
-                }
-
-                let tokenScore = frame[tokenId]
-
-                // Option 1: match this token at this timestep (new token or repeat)
-                let matchScore = max(
-                    dp[t - 1][n - 1] + tokenScore,
-                    dp[t - 1][n] + tokenScore
-                )
-
-                // Option 2: skip this timestep (blank or other token)
-                let skipScore = dp[t - 1][n]
-
-                if matchScore > skipScore {
-                    dp[t][n] = matchScore
-                    backtrack[t][n] = t - 1
-                    lastMatch[t][n] = t  // Token matched at this frame
-                } else {
-                    dp[t][n] = skipScore
-                    backtrack[t][n] = backtrack[t - 1][n]
-                    lastMatch[t][n] = lastMatch[t - 1][n]  // Propagate last match frame
-                }
-            }
-        }
-
-        return (dp, backtrack, lastMatch)
-    }
-
-    /// Count non-wildcard tokens for score normalization.
-    private func nonWildcardCount(_ keywordTokens: [Int]) -> Int {
-        keywordTokens.filter { $0 != Self.WILDCARD_TOKEN_ID }.count
-    }
+    // MARK: - NeMo-compatible DP (delegated to CtcDPAlgorithm)
 
     func ctcWordSpot(
         logProbs: [[Float]],
         keywordTokens: [Int]
     ) -> (score: Float, startFrame: Int, endFrame: Int) {
-        let T = logProbs.count
-        let N = keywordTokens.count
-
-        if N == 0 || T == 0 {
-            return (-Float.infinity, 0, 0)
-        }
-
-        let (dp, backtrack, lastMatch) = fillDPTable(logProbs: logProbs, keywordTokens: keywordTokens)
-
-        // Find best end position for the full keyword
-        var bestEnd = 0
-        var bestScore = -Float.greatestFiniteMagnitude
-
-        if T >= N {
-            for t in N...T {
-                if dp[t][N] > bestScore {
-                    bestScore = dp[t][N]
-                    bestEnd = t
-                }
-            }
-        }
-
-        let bestStart = backtrack[bestEnd][N]
-        // Use lastMatch to get the actual end frame where the last token matched
-        let actualEndFrame = lastMatch[bestEnd][N]
-
-        // Normalize score by non-wildcard tokens
-        let normFactor = nonWildcardCount(keywordTokens)
-        let normalizedScore = normFactor > 0 ? bestScore / Float(normFactor) : bestScore
-
-        return (normalizedScore, bestStart, actualEndFrame)
+        CtcDPAlgorithm.ctcWordSpot(logProbs: logProbs, keywordTokens: keywordTokens)
     }
 
-    /// Constrained CTC word spotting within a temporal window.
-    ///
-    /// Unlike `ctcWordSpot` which searches the entire audio for the best alignment,
-    /// this method restricts the search to a specific frame range. This is useful when
-    /// you already know approximately where a word should be (e.g., from TDT timestamps)
-    /// and want to verify/refine the detection within that window.
-    ///
-    /// - Parameters:
-    ///   - logProbs: CTC log-probabilities [T, vocab_size]
-    ///   - keywordTokens: Token IDs for the keyword
-    ///   - searchStartFrame: Start of search window (inclusive)
-    ///   - searchEndFrame: End of search window (exclusive)
-    /// - Returns: Tuple `(score, startFrame, endFrame)` in global frame coordinates
     func ctcWordSpotConstrained(
         logProbs: [[Float]],
         keywordTokens: [Int],
         searchStartFrame: Int,
         searchEndFrame: Int
     ) -> (score: Float, startFrame: Int, endFrame: Int) {
-        let T = logProbs.count
-        let N = keywordTokens.count
-
-        // Clamp search window to valid range
-        let clampedStart = max(0, searchStartFrame)
-        let clampedEnd = min(T, searchEndFrame)
-
-        if N == 0 || clampedEnd <= clampedStart {
-            return (-Float.infinity, clampedStart, clampedStart)
-        }
-
-        // Slice logProbs to the search window
-        let windowLogProbs = Array(logProbs[clampedStart..<clampedEnd])
-        let windowT = windowLogProbs.count
-
-        if windowT < N {
-            // Window too small for keyword
-            return (-Float.infinity, clampedStart, clampedStart)
-        }
-
-        let (dp, backtrack, lastMatch) = fillDPTable(logProbs: windowLogProbs, keywordTokens: keywordTokens)
-
-        // Find best end position within the window
-        var bestEnd = 0
-        var bestScore = -Float.greatestFiniteMagnitude
-
-        for t in N...windowT {
-            if dp[t][N] > bestScore {
-                bestScore = dp[t][N]
-                bestEnd = t
-            }
-        }
-
-        let bestStart = backtrack[bestEnd][N]
-        // Use lastMatch to get the actual end frame where the last token matched
-        let actualEndFrame = lastMatch[bestEnd][N]
-
-        // Normalize score by non-wildcard tokens
-        let normFactor = nonWildcardCount(keywordTokens)
-        let normalizedScore = normFactor > 0 ? bestScore / Float(normFactor) : bestScore
-
-        // Convert window-relative indices back to global frame coordinates
-        let globalStart = clampedStart + bestStart
-        let globalEnd = clampedStart + actualEndFrame
-
-        return (normalizedScore, globalStart, globalEnd)
+        CtcDPAlgorithm.ctcWordSpotConstrained(
+            logProbs: logProbs,
+            keywordTokens: keywordTokens,
+            searchStartFrame: searchStartFrame,
+            searchEndFrame: searchEndFrame
+        )
     }
 
-    /// Find ALL occurrences of a keyword in the audio, not just the best one.
-    /// Returns multiple (score, startFrame, endFrame) tuples for each detection.
-    /// Per NeMo CTC-WS paper: finds all candidates, merges overlapping intervals.
-    ///
-    /// - Parameters:
-    ///   - logProbs: CTC log-probabilities [T, vocab_size]
-    ///   - keywordTokens: Token IDs for the keyword
-    ///   - minScore: Minimum normalized score threshold (default: -15.0)
-    ///   - mergeOverlap: Whether to merge overlapping detections (default: true)
-    /// - Returns: Array of (score, startFrame, endFrame) tuples
     func ctcWordSpotMultiple(
         logProbs: [[Float]],
         keywordTokens: [Int],
         minScore: Float = ContextBiasingConstants.defaultMinSpotterScore,
         mergeOverlap: Bool = true
     ) -> [(score: Float, startFrame: Int, endFrame: Int)] {
-        let T = logProbs.count
-        let N = keywordTokens.count
-
-        if N == 0 || T == 0 {
-            return []
-        }
-
-        let (dp, backtrack, lastMatch) = fillDPTable(logProbs: logProbs, keywordTokens: keywordTokens)
-
-        // Normalize score factor
-        let wildcardFreeCount = nonWildcardCount(keywordTokens)
-        let normFactor = wildcardFreeCount > 0 ? Float(wildcardFreeCount) : 1.0
-
-        // Find all positions where the complete keyword has good score
-        // Look for local maxima in the score
-        var candidates: [(score: Float, startFrame: Int, endFrame: Int)] = []
-
-        guard T >= N else { return [] }
-
-        for t in N...T {
-            let rawScore = dp[t][N]
-            let normalizedScore = rawScore / normFactor
-
-            // Check if this is a local maximum (better than neighbors)
-            let prevScore = t > N ? dp[t - 1][N] / normFactor : -Float.greatestFiniteMagnitude
-            let nextScore = t < T ? dp[t + 1][N] / normFactor : -Float.greatestFiniteMagnitude
-
-            let isLocalMax = normalizedScore >= prevScore && normalizedScore > nextScore
-            let meetsThreshold = normalizedScore >= minScore
-
-            if isLocalMax && meetsThreshold {
-                let startFrame = backtrack[t][N]
-                // Use lastMatch to get the actual end frame where the last token matched
-                let actualEndFrame = lastMatch[t][N]
-                candidates.append((score: normalizedScore, startFrame: startFrame, endFrame: actualEndFrame))
-            }
-        }
-
-        // If no local maxima found but there are valid scores, take the global best
-        if candidates.isEmpty {
-            var bestEnd = 0
-            var bestScore = -Float.greatestFiniteMagnitude
-            for t in N...T {
-                let normalizedScore = dp[t][N] / normFactor
-                if normalizedScore > bestScore {
-                    bestScore = normalizedScore
-                    bestEnd = t
-                }
-            }
-            if bestScore >= minScore {
-                let startFrame = backtrack[bestEnd][N]
-                // Use lastMatch to get the actual end frame where the last token matched
-                let actualEndFrame = lastMatch[bestEnd][N]
-                candidates.append((score: bestScore, startFrame: startFrame, endFrame: actualEndFrame))
-            }
-        }
-
-        guard mergeOverlap else { return candidates }
-
-        // Merge overlapping intervals, keeping the best score
-        let sorted = candidates.sorted { $0.startFrame < $1.startFrame }
-        var merged: [(score: Float, startFrame: Int, endFrame: Int)] = []
-
-        for candidate in sorted {
-            if let last = merged.last {
-                // Check for overlap
-                if candidate.startFrame <= last.endFrame {
-                    // Overlapping - keep the best score and extend to cover both
-                    var best = candidate.score > last.score ? candidate : last
-                    best.endFrame = max(last.endFrame, candidate.endFrame)
-                    merged[merged.count - 1] = best
-                } else {
-                    merged.append(candidate)
-                }
-            } else {
-                merged.append(candidate)
-            }
-        }
-
-        return merged
+        CtcDPAlgorithm.ctcWordSpotMultiple(
+            logProbs: logProbs,
+            keywordTokens: keywordTokens,
+            minScore: minScore,
+            mergeOverlap: mergeOverlap
+        )
     }
 
 }
