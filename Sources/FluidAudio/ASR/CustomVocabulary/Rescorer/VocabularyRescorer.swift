@@ -18,6 +18,13 @@ public struct VocabularyRescorer: Sendable {
     let ctcTokenizer: CtcTokenizer?
     let debugMode: Bool
 
+    // BK-tree for efficient approximate string matching (experimental)
+    // When enabled, uses BK-tree to find candidate vocabulary terms within edit distance
+    // instead of iterating all terms. Provides O(log n) vs O(n) for large vocabularies.
+    let useBKTree: Bool
+    let bkTree: BKTree?
+    let bkTreeMaxDistance: Int
+
     /// Configuration for rescoring behavior
     public struct Config: Sendable {
         /// Enable adaptive thresholds based on token count
@@ -89,11 +96,17 @@ public struct VocabularyRescorer: Sendable {
             tokenizer = try await CtcTokenizer.load()
         }
 
+        let useBKTree = ContextBiasingConstants.useBkTree
+        let bkTree: BKTree? = useBKTree ? BKTree(terms: vocabulary.terms) : nil
+
         return VocabularyRescorer(
             spotter: spotter,
             vocabulary: vocabulary,
             config: config,
-            ctcTokenizer: tokenizer
+            ctcTokenizer: tokenizer,
+            useBKTree: useBKTree,
+            bkTree: bkTree,
+            bkTreeMaxDistance: ContextBiasingConstants.bkTreeMaxDistance
         )
     }
 
@@ -102,12 +115,18 @@ public struct VocabularyRescorer: Sendable {
         spotter: CtcKeywordSpotter,
         vocabulary: CustomVocabularyContext,
         config: Config,
-        ctcTokenizer: CtcTokenizer
+        ctcTokenizer: CtcTokenizer,
+        useBKTree: Bool,
+        bkTree: BKTree?,
+        bkTreeMaxDistance: Int
     ) {
         self.spotter = spotter
         self.vocabulary = vocabulary
         self.config = config
         self.ctcTokenizer = ctcTokenizer
+        self.useBKTree = useBKTree
+        self.bkTree = bkTree
+        self.bkTreeMaxDistance = bkTreeMaxDistance
         #if DEBUG
         self.debugMode = true  // Verbose logging in DEBUG builds
         #else

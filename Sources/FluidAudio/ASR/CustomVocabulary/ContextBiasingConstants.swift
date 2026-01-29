@@ -258,4 +258,25 @@ public enum ContextBiasingConstants {
     /// - Examples: "you" (3) is short, "nvidia" (6) is not
     /// - Used in: `VocabularyRescorer+ConstrainedCTC.swift` length checks
     public static let shortWordMaxLength: Int = 4
+
+    // MARK: - BK-Tree (Experimental)
+
+    /// Enable BK-tree for approximate string matching (experimental).
+    ///
+    /// When enabled, the word-centric rescoring path uses a BK-tree to find
+    /// candidate vocabulary terms within edit distance, providing O(log V)
+    /// lookup instead of O(V) linear scan per word.
+    ///
+    /// - Value: `false` (disabled by default, linear scan used instead)
+    /// - Used in: `VocabularyRescorer.create()` to build BK-tree
+    public static let useBkTree: Bool = false
+
+    /// Maximum edit distance for BK-tree fuzzy matching.
+    ///
+    /// Controls how many character edits are tolerated when searching
+    /// the BK-tree for candidate vocabulary terms.
+    ///
+    /// - Value: `3` (up to 3 character insertions/deletions/substitutions)
+    /// - Used in: `VocabularyRescorer+CandidateMatching.swift` BK-tree queries
+    public static let bkTreeMaxDistance: Int = 3
 }

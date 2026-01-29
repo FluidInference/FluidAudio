@@ -36,6 +36,12 @@ final class ContextBiasingSendableTests: XCTestCase {
         requiresSendable(CtcKeywordSpotter.SpotKeywordsResult.self)
     }
 
+    // MARK: - BK-Tree
+
+    func testBKTreeIsSendable() {
+        requiresSendable(BKTree.self)
+    }
+
     // MARK: - Rescorer
 
     func testVocabularyRescorerIsSendable() {
