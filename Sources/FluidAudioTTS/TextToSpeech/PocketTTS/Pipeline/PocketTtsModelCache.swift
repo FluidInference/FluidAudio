@@ -34,7 +34,7 @@ public actor PocketTtsModelCache {
         logger.info("Loading PocketTTS CoreML models...")
 
         let config = MLModelConfiguration()
-        config.computeUnits = .cpuAndGPU
+        config.computeUnits = .all
         config.allowLowPrecisionAccumulationOnGPU = true
 
         let modelFiles = [
