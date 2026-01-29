@@ -221,9 +221,17 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        // Convert final accumulated tokens to text (proper way to avoid duplicates)
+        // Convert final accumulated tokens to text
         let finalText: String
-        if let asrManager = asrManager, !accumulatedTokens.isEmpty {
+        if vocabBoostingEnabled {
+            // When vocab boosting is active, use text-based reconstruction which preserves
+            // the rescored corrections applied during processWindow(). Token-based reconstruction
+            // would undo the rescoring since it decodes raw tokens without CTC corrections.
+            var parts: [String] = []
+            if !confirmedTranscript.isEmpty { parts.append(confirmedTranscript) }
+            if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
+            finalText = parts.joined(separator: " ")
+        } else if let asrManager = asrManager, !accumulatedTokens.isEmpty {
             let finalResult = asrManager.processTranscriptionResult(
                 tokenIds: accumulatedTokens,
                 timestamps: [],
@@ -235,7 +243,10 @@ public actor StreamingAsrManager {
             finalText = finalResult.text
         } else {
             // Fallback to text concatenation if no tokens available
-            finalText = confirmedTranscript + volatileTranscript
+            var parts: [String] = []
+            if !confirmedTranscript.isEmpty { parts.append(confirmedTranscript) }
+            if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
+            finalText = parts.joined(separator: " ")
         }
 
         logger.info("Final transcription: \(finalText.count) characters")
@@ -410,19 +421,16 @@ public actor StreamingAsrManager {
                 "Chunk \(self.processedChunks): '\(interim.text)', time: \(String(format: "%.3f", processingTime))s)"
             )
 
-            // Apply confidence-based confirmation logic (uses configured threshold)
-            await updateTranscriptionState(with: interim)
-
-            // Emit update based on progressive confidence model
+            // Compute shouldConfirm BEFORE updateTranscriptionState so we can rescore first
             let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
             let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
             let isHighConfidence = Double(interim.confidence) >= config.confirmationThreshold
             let shouldConfirm = isHighConfidence && hasMinimumContext
 
-            // Apply vocabulary rescoring when confirming (Option 3: Hybrid Rescoring)
-            // Note: We need to use chunk-local timings for rescoring since CTC logProbs are chunk-local
-            var finalText = interim.text
-            let finalTokenTimings = interim.tokenTimings ?? []
+            // Apply vocabulary rescoring BEFORE updating transcript state so that
+            // confirmedTranscript/volatileTranscript hold the rescored text.
+            // This ensures finish() returns rescored content.
+            var displayResult = interim
             if shouldConfirm && vocabBoostingEnabled {
                 // Create chunk-local token timings for rescoring (CTC logProbs are chunk-local)
                 let chunkLocalTimings =
@@ -440,18 +448,28 @@ public actor StreamingAsrManager {
                     tokenTimings: chunkLocalTimings,
                     windowSamples: windowSamples
                 ) {
-                    finalText = rescored.text
-                    // Keep original timings since rescoring only changes text
+                    let detected = rescored.replacements.compactMap { $0.replacementWord }
+                    let applied = rescored.replacements.filter { $0.shouldReplace }.compactMap {
+                        $0.replacementWord
+                    }
+                    displayResult = interim.withRescoring(
+                        text: rescored.text,
+                        detected: detected.isEmpty ? nil : detected,
+                        applied: applied.isEmpty ? nil : applied
+                    )
                 }
             }
 
+            // Update transcript state with potentially-rescored result
+            await updateTranscriptionState(with: displayResult, shouldConfirm: shouldConfirm)
+
             let update = StreamingTranscriptionUpdate(
-                text: finalText,
+                text: displayResult.text,
                 isConfirmed: shouldConfirm,
                 confidence: interim.confidence,
                 timestamp: Date(),
                 tokenIds: tokens,
-                tokenTimings: finalTokenTimings
+                tokenTimings: displayResult.tokenTimings ?? []
             )
 
             updateContinuation?.yield(update)
@@ -465,16 +483,13 @@ public actor StreamingAsrManager {
         }
     }
 
-    /// Update transcription state based on confidence and context duration
-    private func updateTranscriptionState(with result: ASRResult) async {
+    /// Update transcription state based on pre-computed confirmation decision.
+    ///
+    /// The `shouldConfirm` flag is computed by the caller (processWindow) so that vocabulary
+    /// rescoring can be applied _before_ updating the transcript state. This ensures
+    /// `confirmedTranscript` and `volatileTranscript` hold rescored text when vocab boosting is active.
+    private func updateTranscriptionState(with result: ASRResult, shouldConfirm: Bool) async {
         let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
-        let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
-        let isHighConfidence = Double(result.confidence) >= config.confirmationThreshold
-
-        // Progressive confidence model:
-        // 1. Always show text immediately as volatile for responsiveness
-        // 2. Only confirm text when we have both high confidence AND sufficient context
-        let shouldConfirm = isHighConfidence && hasMinimumContext
 
         if shouldConfirm {
             // Move volatile text to confirmed and set new text as volatile
@@ -493,6 +508,7 @@ public actor StreamingAsrManager {
         } else {
             // Only update volatile text (hypothesis)
             volatileTranscript = result.text
+            let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
             let reason =
                 !hasMinimumContext
                 ? "insufficient context (\(String(format: "%.1f", totalAudioProcessed))s)" : "low confidence"
