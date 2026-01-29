@@ -2,20 +2,20 @@ import FluidAudio
 import Foundation
 import OSLog
 
-/// Manages text-to-speech synthesis using the Kokoro CoreML model.
+/// Manages text-to-speech synthesis using Kokoro CoreML models.
 ///
 /// - Note: **Beta:** The TTS system is currently in beta and only supports American English.
 ///   Additional language support is planned for future releases.
 ///
 /// Example usage:
 /// ```swift
-/// let manager = TtSManager()
+/// let manager = KokoroTtsManager()
 /// try await manager.initialize()
 /// let audioData = try await manager.synthesize(text: "Hello, world!")
 /// ```
-public final class TtSManager {
+public final class KokoroTtsManager {
 
-    private let logger = AppLogger(category: "TtSManager")
+    private let logger = AppLogger(category: "KokoroTtsManager")
     private let modelCache: KokoroModelCache
     private let lexiconAssets: LexiconAssetManager
 
@@ -80,7 +80,7 @@ public final class TtSManager {
         try await KokoroSynthesizer.loadSimplePhonemeDictionary()
         try await modelCache.loadModelsIfNeeded(variants: models.availableVariants)
         isInitialized = true
-        logger.notice("TtSManager initialized with provided models")
+        logger.notice("KokoroTtsManager initialized with provided models")
     }
 
     public func initialize(preloadVoices: Set<String>? = nil) async throws {
