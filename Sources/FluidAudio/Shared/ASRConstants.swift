@@ -2,6 +2,15 @@ import Foundation
 
 /// Constants for ASR audio processing and frame calculations
 public enum ASRConstants {
+    /// Audio sample rate expected by ASR models
+    public static let sampleRate: Int = 16_000
+
+    /// Maximum audio duration supported by CoreML encoder (seconds)
+    public static let maxDurationSeconds: Double = 15.0
+
+    /// Maximum audio samples supported by CoreML encoder (sampleRate × maxDurationSeconds)
+    public static let maxModelSamples: Int = 240_000
+
     /// Mel-spectrogram hop size in samples (10ms at 16kHz)
     public static let melHopSize: Int = 160
 

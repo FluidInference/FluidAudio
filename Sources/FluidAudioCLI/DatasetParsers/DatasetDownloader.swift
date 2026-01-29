@@ -45,8 +45,7 @@ struct DatasetDownloader {
             return
         }
 
-        logger.info("📥 Downloading AMI \(variant.displayName) dataset...")
-        logger.info("   Target directory: \(variantDir.path)")
+        logger.info("📥 Downloading AMI \(variant.displayName) to \(variantDir.path)")
 
         // Download AMI annotations first (required for proper benchmarking)
         await downloadAMIAnnotations(force: force)
@@ -55,7 +54,6 @@ struct DatasetDownloader {
         let commonMeetings: [String]
         if let singleFile = singleFile {
             commonMeetings = [singleFile]
-            logger.info("📋 Downloading single file: \(singleFile)")
         } else {
             commonMeetings = [
                 // Full 16-meeting AMI SDM test set
@@ -76,7 +74,6 @@ struct DatasetDownloader {
 
             // Skip if file exists and not forcing download
             if !force && FileManager.default.fileExists(atPath: filePath.path) {
-                logger.info("   ⏭️ Skipping \(fileName) (already exists)")
                 skippedFiles += 1
                 continue
             }
@@ -90,20 +87,15 @@ struct DatasetDownloader {
 
             if success {
                 downloadedFiles += 1
-                logger.info("   Downloaded \(fileName)")
             } else {
-                logger.warning("   Failed to download \(fileName)")
+                logger.warning("Failed to download \(fileName)")
             }
         }
 
-        logger.info("🎉 AMI \(variant.displayName) download completed")
-        logger.info("   Downloaded: \(downloadedFiles) files")
-        logger.info("   Skipped: \(skippedFiles) files")
-        logger.info("   Total files: \(downloadedFiles + skippedFiles)/\(commonMeetings.count)")
+        logger.info("AMI \(variant.displayName): \(downloadedFiles) downloaded, \(skippedFiles) skipped")
 
         if downloadedFiles == 0 && skippedFiles == 0 {
-            logger.warning("⚠️ No files were downloaded. You may need to download manually from:")
-            logger.warning("   https://groups.inf.ed.ac.uk/ami/download/")
+            logger.warning("⚠️ No files downloaded. Manual download: https://groups.inf.ed.ac.uk/ami/download/")
         }
     }
 
@@ -123,12 +115,10 @@ struct DatasetDownloader {
             let urlString = "\(baseURL)/\(meetingId)/audio/\(meetingId).\(variant.filePattern)"
 
             guard let url = URL(string: urlString) else {
-                logger.error("     ⚠️ Invalid URL: \(urlString)")
                 continue
             }
 
             do {
-                logger.info("     📥 Downloading from: \(urlString)")
                 let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
 
                 if let httpResponse = response as? HTTPURLResponse {
@@ -137,30 +127,24 @@ struct DatasetDownloader {
 
                         // Verify it's a valid audio file
                         if await isValidAudioFile(outputPath) {
-                            let fileSizeMB = Double(data.count) / (1024 * 1024)
-                            logger.info("     Downloaded \(String(format: "%.1f", fileSizeMB)) MB")
                             return true
                         } else {
-                            logger.warning("     ⚠️ Downloaded file is not valid audio")
                             try? FileManager.default.removeItem(at: outputPath)
                             // Try next URL
                             continue
                         }
                     } else if httpResponse.statusCode == 404 {
-                        logger.warning("     ⚠️ File not found (HTTP 404) - trying next URL...")
                         continue
                     } else {
-                        logger.warning("     ⚠️ HTTP error: \(httpResponse.statusCode) - trying next URL...")
                         continue
                     }
                 }
             } catch {
-                logger.warning("     ⚠️ Download error: \(error.localizedDescription) - trying next URL...")
                 continue
             }
         }
 
-        logger.error("     Failed to download from all available URLs")
+        logger.error("Failed to download \(meetingId) from all URLs")
         return false
     }
 
@@ -185,12 +169,11 @@ struct DatasetDownloader {
         if !force && FileManager.default.fileExists(atPath: segmentsDir.path)
             && FileManager.default.fileExists(atPath: meetingsFile.path)
         {
-            logger.info("📂 AMI annotations already exist in \(annotationsDir.path)")
+            logger.info("📂 AMI annotations exist at \(annotationsDir.path)")
             return
         }
 
-        logger.info("📥 Downloading AMI annotations from Edinburgh University...")
-        logger.info("   Target directory: \(annotationsDir.path)")
+        logger.info("📥 Downloading AMI annotations to \(annotationsDir.path)")
 
         // Create required directories
         do {
@@ -205,16 +188,14 @@ struct DatasetDownloader {
         let zipURL =
             "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip"
         let zipFile = annotationsDir.appendingPathComponent("ami_public_manual_1.6.2.zip")
-
-        logger.info("📥 Downloading AMI manual annotations archive (22MB)...")
         let zipSuccess = await downloadAnnotationFile(from: zipURL, to: zipFile)
 
         if !zipSuccess {
-            logger.error("Failed to download AMI annotations archive")
+            logger.error("Failed to download AMI annotations")
             return
         }
 
-        logger.info("📦 Extracting AMI annotations archive...")
+        logger.info("📦 Extracting AMI annotations...")
 
         // Extract the ZIP file using the system unzip command
         let extractSuccess = await extractZipFile(zipFile, to: annotationsDir)
@@ -227,22 +208,42 @@ struct DatasetDownloader {
             if FileManager.default.fileExists(atPath: segmentsDir.path)
                 && FileManager.default.fileExists(atPath: meetingsFile.path)
             {
-                logger.info("AMI annotations download and extraction completed")
-                logger.info("💡 Benchmarks will now use real AMI ground truth data")
+                logger.info("AMI annotations ready")
             } else {
                 logger.warning("⚠️ Extraction completed but expected files not found")
-                logger.warning("   Looking for: \(segmentsDir.path)")
-                logger.warning("   Looking for: \(meetingsFile.path)")
             }
         } else {
-            logger.error("Failed to extract AMI annotations archive")
+            logger.error("Failed to extract AMI annotations")
         }
+    }
+
+    /// Download a binary file (parquet, etc.)
+    static func downloadBinaryFile(from urlString: String, to outputPath: URL) async -> Bool {
+        guard let url = URL(string: urlString) else {
+            return false
+        }
+
+        do {
+            let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
+
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 200 {
+                    try data.write(to: outputPath)
+                    return data.count > 0
+                } else {
+                    return false
+                }
+            }
+        } catch {
+            return false
+        }
+
+        return false
     }
 
     /// Download a single annotation file from AMI corpus
     static func downloadAnnotationFile(from urlString: String, to outputPath: URL) async -> Bool {
         guard let url = URL(string: urlString) else {
-            logger.error("     ⚠️ Invalid URL: \(urlString)")
             return false
         }
 
@@ -255,7 +256,6 @@ struct DatasetDownloader {
 
                     // Check if it's a ZIP file or XML file
                     if outputPath.pathExtension.lowercased() == "zip" {
-                        // For ZIP files, just verify it's not empty
                         return data.count > 0
                     } else {
                         // Verify it's valid XML
@@ -264,18 +264,15 @@ struct DatasetDownloader {
                         {
                             return true
                         } else {
-                            logger.warning("     ⚠️ Downloaded file is not valid XML")
                             try? FileManager.default.removeItem(at: outputPath)
                             return false
                         }
                     }
                 } else {
-                    logger.warning("     ⚠️ HTTP error: \(httpResponse.statusCode)")
                     return false
                 }
             }
         } catch {
-            logger.warning("     ⚠️ Download error: \(error.localizedDescription)")
             return false
         }
 
@@ -293,7 +290,6 @@ struct DatasetDownloader {
             process.waitUntilExit()
             return process.terminationStatus == 0
         } catch {
-            logger.error("     ⚠️ Failed to extract ZIP file: \(error)")
             return false
         }
     }
@@ -302,8 +298,7 @@ struct DatasetDownloader {
     static func downloadVadDataset(force: Bool, dataset: String = "mini50") async {
         let cacheDir = getVadDatasetCacheDirectory()
 
-        logger.info("📥 Downloading VAD dataset from Hugging Face...")
-        logger.info("   Target directory: \(cacheDir.path)")
+        logger.info("📥 Downloading VAD dataset to \(cacheDir.path)")
 
         // Create cache directories
         let speechDir = cacheDir.appendingPathComponent("speech")
@@ -329,9 +324,8 @@ struct DatasetDownloader {
                     at: noiseDir, includingPropertiesForKeys: nil)) ?? []
 
             if !existingSpeechFiles.isEmpty && !existingNoiseFiles.isEmpty {
-                logger.info("📂 VAD dataset already exists (use --force to re-download)")
-                logger.info("   Speech files: \(existingSpeechFiles.count)")
-                logger.info("   Noise files: \(existingNoiseFiles.count)")
+                logger.info(
+                    "📂 VAD dataset exists (\(existingSpeechFiles.count) speech, \(existingNoiseFiles.count) noise)")
                 return
             }
         } else {
@@ -352,7 +346,6 @@ struct DatasetDownloader {
         var failedFiles = 0
 
         // Download speech files
-        logger.info("📢 Downloading speech samples...")
         let speechCount = dataset == "mini100" ? 50 : 25
         do {
             let speechFiles = try await downloadVadFilesFromHF(
@@ -364,14 +357,12 @@ struct DatasetDownloader {
                 repoName: repoName
             )
             downloadedFiles += speechFiles.count
-            logger.info("   Downloaded \(speechFiles.count) speech files")
         } catch {
-            logger.error("   Failed to download speech files: \(error)")
+            logger.error("Failed to download speech files: \(error)")
             failedFiles += 1
         }
 
         // Download noise files
-        logger.info("🔇 Downloading noise samples...")
         let noiseCount = dataset == "mini100" ? 50 : 25
         do {
             let noiseFiles = try await downloadVadFilesFromHF(
@@ -383,22 +374,15 @@ struct DatasetDownloader {
                 repoName: repoName
             )
             downloadedFiles += noiseFiles.count
-            logger.info("   Downloaded \(noiseFiles.count) noise files")
         } catch {
-            logger.error("   Failed to download noise files: \(error)")
+            logger.error("Failed to download noise files: \(error)")
             failedFiles += 1
         }
 
-        logger.info("📊 VAD Dataset Download Summary:")
-        logger.info("   Downloaded: \(downloadedFiles) files")
-        logger.info("   Failed: \(failedFiles) categories")
-
         if downloadedFiles > 0 {
-            logger.info("VAD dataset download completed")
-            logger.info("💡 You can now run VAD benchmarks with the downloaded dataset")
+            logger.info("VAD dataset ready: \(downloadedFiles) files")
         } else {
-            logger.warning("No files were downloaded successfully")
-            logger.warning("⚠️ VAD benchmarks will fall back to legacy URLs")
+            logger.warning("⚠️ VAD download failed, will use legacy URLs")
         }
     }
 
@@ -426,11 +410,8 @@ struct DatasetDownloader {
             }
             allFiles.append(contentsOf: audioFiles)
         } catch {
-            logger.warning("      ⚠️ Could not access \(filePrefix): \(error)")
+            // Will try pattern-based download as fallback
         }
-
-        logger.info("      Found \(allFiles.count) audio files in \(filePrefix)/ directory")
-        logger.debug("      Debug: requesting \(count) files from \(allFiles.count) available")
 
         if !allFiles.isEmpty {
             let filesToDownload = Array(allFiles.prefix(count))
@@ -450,21 +431,14 @@ struct DatasetDownloader {
                             url: downloadedFile
                         ))
                     downloadedCount += 1
-                    logger.info("      Downloaded: \(fileName)")
-
                 } catch {
-                    logger.warning("      ⚠️ Failed to download \(fileName): \(error)")
                     continue
                 }
             }
-        } else {
-            logger.warning("      No audio files found in subdirectories")
         }
 
         // If no files downloaded via API, try pattern-based download
         if testFiles.isEmpty {
-            logger.warning(
-                "      ⚠️ API method failed or no files found, trying pattern-based download...")
 
             // Fallback to pattern-based download
             let extensions = ["wav", "mp3", "flac"]
@@ -504,10 +478,7 @@ struct DatasetDownloader {
                                     url: downloadedFile
                                 ))
                             downloadedCount += 1
-                            logger.info("      Downloaded: \(fileName)")
-
                         } catch {
-                            // File doesn't exist, continue trying
                             continue
                         }
                     }
@@ -603,9 +574,7 @@ struct DatasetDownloader {
         ).first!
         .appendingPathComponent("FluidAudio/musanFull", isDirectory: true)
 
-        logger.info("📥 Downloading full MUSAN dataset from OpenSLR...")
-        logger.info("   Target directory: \(cacheDir.path)")
-        logger.info("   Expected size: ~600MB compressed, ~4.5GB uncompressed")
+        logger.info("📥 Downloading full MUSAN (~600MB) to \(cacheDir.path)")
 
         // Create cache directory
         do {
@@ -631,8 +600,7 @@ struct DatasetDownloader {
             }
 
             if allExist {
-                logger.info("📂 Full MUSAN dataset already exists (use --force to re-download)")
-                logger.info("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
+                logger.info("📂 Full MUSAN exists at \(musanDir.path)")
                 return
             }
         }
@@ -640,8 +608,6 @@ struct DatasetDownloader {
         // Download from OpenSLR
         let musanURL = "https://www.openslr.org/resources/17/musan.tar.gz"
         let downloadPath = cacheDir.appendingPathComponent("musan.tar.gz")
-
-        logger.info("🌐 Downloading from: \(musanURL)")
 
         do {
             // Download the tar.gz file
@@ -656,10 +622,9 @@ struct DatasetDownloader {
 
             // Move downloaded file
             try FileManager.default.moveItem(at: downloadURL, to: downloadPath)
-            logger.info("Download complete")
 
             // Extract tar.gz
-            logger.info("📦 Extracting archive...")
+            logger.info("📦 Extracting MUSAN archive...")
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
             task.arguments = ["-xzf", downloadPath.path, "-C", cacheDir.path]
@@ -668,8 +633,6 @@ struct DatasetDownloader {
             task.waitUntilExit()
 
             if task.terminationStatus == 0 {
-                logger.info("Extraction complete")
-
                 // Clean up tar file
                 try? FileManager.default.removeItem(at: downloadPath)
 
@@ -678,15 +641,11 @@ struct DatasetDownloader {
                 let musicFiles = countFiles(in: musanDir.appendingPathComponent("music"))
                 let noiseFiles = countFiles(in: musanDir.appendingPathComponent("noise"))
 
-                logger.info("📊 Full MUSAN Dataset Summary:")
-                logger.info("   Speech files: \(speechFiles)")
-                logger.info("   Music files: \(musicFiles)")
-                logger.info("   Noise files: \(noiseFiles)")
-                logger.info("   Total files: \(speechFiles + musicFiles + noiseFiles)")
-                logger.info("Full MUSAN dataset ready for benchmarking")
-                logger.info("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
+                logger.info(
+                    "Full MUSAN ready: \(speechFiles + musicFiles + noiseFiles) files (speech: \(speechFiles), music: \(musicFiles), noise: \(noiseFiles))"
+                )
             } else {
-                logger.error("Extraction failed")
+                logger.error("MUSAN extraction failed")
                 try? FileManager.default.removeItem(at: downloadPath)
             }
 
@@ -713,6 +672,147 @@ struct DatasetDownloader {
         return count
     }
 
+    // MARK: - Earnings22 KWS Dataset
+
+    /// Get Earnings22 KWS dataset cache directory
+    static func getEarnings22Directory() -> URL {
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        return appSupport.appendingPathComponent("FluidAudio/earnings22-kws", isDirectory: true)
+    }
+
+    /// Download Earnings22 KWS dataset from argmaxinc/earnings22-kws-golden
+    static func downloadEarnings22KWS(force: Bool) async {
+        let cacheDir = getEarnings22Directory()
+        let testDatasetDir = cacheDir.appendingPathComponent("test-dataset")
+
+        logger.info("📥 Downloading Earnings22 KWS to \(cacheDir.path)")
+
+        // Check if already downloaded
+        if !force && FileManager.default.fileExists(atPath: testDatasetDir.path) {
+            let files =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: testDatasetDir, includingPropertiesForKeys: nil
+                )) ?? []
+            let wavFiles = files.filter { $0.pathExtension == "wav" }
+            if wavFiles.count > 100 {
+                logger.info("📂 Earnings22 KWS exists (\(wavFiles.count) files)")
+                return
+            }
+        }
+
+        // Create directories
+        do {
+            try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: testDatasetDir, withIntermediateDirectories: true)
+        } catch {
+            logger.error("Failed to create directories: \(error)")
+            return
+        }
+
+        // Download parquet file
+        let parquetURL =
+            "https://huggingface.co/datasets/argmaxinc/earnings22-kws-golden/resolve/main/data/test-00000-of-00001.parquet"
+        let parquetFile = cacheDir.appendingPathComponent("test-00000-of-00001.parquet")
+
+        let parquetSuccess = await downloadBinaryFile(from: parquetURL, to: parquetFile)
+
+        if !parquetSuccess {
+            logger.error("Failed to download parquet. Manual: wget \(parquetURL)")
+            return
+        }
+
+        // Extract using Python script
+        logger.info("📦 Extracting Earnings22 dataset...")
+
+        // Create extraction script
+        let scriptContent = """
+            #!/usr/bin/env python3
+            import pandas as pd
+            from pathlib import Path
+            import sys
+            import numpy as np
+
+            parquet_path = Path(sys.argv[1])
+            output_dir = Path(sys.argv[2])
+
+            df = pd.read_parquet(parquet_path)
+            print(f"Found {len(df)} rows")
+
+            for row in df.to_dict(orient="records"):
+                file_id = row["file_id"]
+
+                wav_path = output_dir / f"{file_id}.wav"
+                audio_field = row["audio"]
+                if isinstance(audio_field, dict) and "bytes" in audio_field:
+                    wav_path.write_bytes(audio_field["bytes"])
+                else:
+                    wav_path.write_bytes(bytes(audio_field))
+
+                (output_dir / f"{file_id}.text.txt").write_text(str(row.get("text", "")))
+
+                # Handle dictionary field (may be numpy array, list, or None)
+                dictionary = row.get("dictionary")
+                if dictionary is None:
+                    dict_text = ""
+                elif isinstance(dictionary, np.ndarray):
+                    dict_text = "\\n".join(str(x) for x in dictionary.tolist())
+                elif isinstance(dictionary, (list, tuple)):
+                    dict_text = "\\n".join(str(x) for x in dictionary)
+                else:
+                    dict_text = str(dictionary)
+                (output_dir / f"{file_id}.dictionary.txt").write_text(dict_text)
+
+                print(f"Extracted: {file_id}")
+
+            print(f"Done! Extracted {len(df)} files")
+            """
+
+        let scriptFile = cacheDir.appendingPathComponent("extract.py")
+        do {
+            try scriptContent.write(to: scriptFile, atomically: true, encoding: .utf8)
+        } catch {
+            logger.error("Failed to create extraction script: \(error)")
+            return
+        }
+
+        // Run Python extraction
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = [scriptFile.path, parquetFile.path, testDatasetDir.path]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            logger.info(output)
+
+            if process.terminationStatus == 0 {
+                // Count extracted files
+                let files =
+                    (try? FileManager.default.contentsOfDirectory(
+                        at: testDatasetDir, includingPropertiesForKeys: nil
+                    )) ?? []
+                let wavFiles = files.filter { $0.pathExtension == "wav" }
+
+                logger.info("Earnings22 KWS ready: \(wavFiles.count) files")
+
+                // Clean up
+                try? FileManager.default.removeItem(at: scriptFile)
+            } else {
+                logger.error("Extraction failed. Run: pip3 install pandas pyarrow")
+            }
+        } catch {
+            logger.error("Extraction failed: \(error). Run: pip3 install pandas pyarrow")
+        }
+    }
+
     /// Download VOiCES subset dataset from GitHub
     static func downloadVoicesSubset(force: Bool) async {
         let cacheDir = FileManager.default.urls(
@@ -720,8 +820,7 @@ struct DatasetDownloader {
         ).first!
         .appendingPathComponent("FluidAudio/voicesSubset", isDirectory: true)
 
-        logger.info("📥 Downloading VOiCES subset from GitHub...")
-        logger.info("   Target directory: \(cacheDir.path)")
+        logger.info("📥 Downloading VOiCES subset to \(cacheDir.path)")
 
         // Create cache directory
         do {
@@ -747,16 +846,12 @@ struct DatasetDownloader {
                     at: noisyDir, includingPropertiesForKeys: nil)) ?? []
 
             if !cleanFiles.isEmpty || !noisyFiles.isEmpty {
-                logger.info("📂 VOiCES subset already exists (use --force to re-download)")
-                logger.info("   Clean files: \(cleanFiles.count)")
-                logger.info("   Noisy files: \(noisyFiles.count)")
-                logger.info("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
+                logger.info("📂 VOiCES subset exists (\(cleanFiles.count) clean, \(noisyFiles.count) noisy)")
                 return
             }
         }
 
         // Clone the repository
-        logger.info("🌐 Cloning VOiCES-subset repository...")
         let cloneDir = cacheDir.appendingPathComponent("temp_clone")
 
         do {
@@ -775,8 +870,6 @@ struct DatasetDownloader {
             task.waitUntilExit()
 
             if task.terminationStatus == 0 {
-                logger.info("Repository cloned successfully")
-
                 // Move the audio files to our cache structure
                 let sourceCleanDir = cloneDir.appendingPathComponent("clean")
                 let sourceNoisyDir = cloneDir.appendingPathComponent("noisy")
@@ -788,6 +881,8 @@ struct DatasetDownloader {
                     at: noisyDir, withIntermediateDirectories: true)
 
                 // Move clean files
+                var cleanCount = 0
+                var noisyCount = 0
                 if FileManager.default.fileExists(atPath: sourceCleanDir.path) {
                     let cleanFiles = try FileManager.default.contentsOfDirectory(
                         at: sourceCleanDir, includingPropertiesForKeys: nil)
@@ -795,10 +890,8 @@ struct DatasetDownloader {
                         let destination = cleanDir.appendingPathComponent(
                             file.lastPathComponent)
                         try FileManager.default.moveItem(at: file, to: destination)
+                        cleanCount += 1
                     }
-                    logger.info(
-                        "   Moved \(cleanFiles.filter { $0.pathExtension == "wav" }.count) clean files"
-                    )
                 }
 
                 // Move noisy files
@@ -809,17 +902,14 @@ struct DatasetDownloader {
                         let destination = noisyDir.appendingPathComponent(
                             file.lastPathComponent)
                         try FileManager.default.moveItem(at: file, to: destination)
+                        noisyCount += 1
                     }
-                    logger.info(
-                        "   Moved \(noisyFiles.filter { $0.pathExtension == "wav" }.count) noisy files"
-                    )
                 }
 
                 // Clean up clone directory
                 try? FileManager.default.removeItem(at: cloneDir)
 
-                logger.info("VOiCES subset ready for benchmarking")
-                logger.info("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
+                logger.info("VOiCES subset ready: \(cleanCount) clean, \(noisyCount) noisy")
 
             } else {
                 logger.error("Git clone failed")

@@ -13,21 +13,21 @@ extension AsrManager {
         let startTime = Date()
 
         // Route to appropriate processing method based on audio length
-        if audioSamples.count <= 240_000 {
+        if audioSamples.count <= ASRConstants.maxModelSamples {
             let originalLength = audioSamples.count
             let frameAlignedCandidate =
                 ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
                     / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
             let frameAlignedLength: Int
             let alignedSamples: [Float]
-            if frameAlignedCandidate > originalLength && frameAlignedCandidate <= 240_000 {
+            if frameAlignedCandidate > originalLength && frameAlignedCandidate <= ASRConstants.maxModelSamples {
                 frameAlignedLength = frameAlignedCandidate
                 alignedSamples = audioSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
             } else {
                 frameAlignedLength = originalLength
                 alignedSamples = audioSamples
             }
-            let paddedAudio: [Float] = padAudioIfNeeded(alignedSamples, targetLength: 240_000)
+            let paddedAudio: [Float] = padAudioIfNeeded(alignedSamples, targetLength: ASRConstants.maxModelSamples)
             let (hypothesis, encoderSequenceLength) = try await executeMLInferenceWithTimings(
                 paddedAudio,
                 originalLength: frameAlignedLength,
@@ -176,7 +176,7 @@ extension AsrManager {
         let alignedSamples: [Float]
         if previousTokens.isEmpty
             && frameAlignedCandidate > originalLength
-            && frameAlignedCandidate <= 240_000
+            && frameAlignedCandidate <= ASRConstants.maxModelSamples
         {
             frameAlignedLength = frameAlignedCandidate
             alignedSamples = chunkSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
@@ -184,7 +184,7 @@ extension AsrManager {
             frameAlignedLength = originalLength
             alignedSamples = chunkSamples
         }
-        let padded = padAudioIfNeeded(alignedSamples, targetLength: 240_000)
+        let padded = padAudioIfNeeded(alignedSamples, targetLength: ASRConstants.maxModelSamples)
         let (hypothesis, encLen) = try await executeMLInferenceWithTimings(
             padded,
             originalLength: frameAlignedLength,
