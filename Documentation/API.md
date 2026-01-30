@@ -27,9 +27,6 @@ Main class for speaker diarization and "who spoke when" analysis.
   - Process complete audio file and return speaker segments
   - Parameters: `RandomAccessCollection<Float>` audio samples, sample rate (default: 16000)
   - Returns: `DiarizerResult` with speaker segments and timing
-- `compareSpeakers(audio1:audio2:) throws -> Float`
-  - Compare speaker similarity between two audio samples
-  - Returns: Similarity score (0.0-1.0, higher = more similar)
 - `validateAudio(_:) throws -> AudioValidationResult`
   - Validate audio quality, length, and format requirements
 

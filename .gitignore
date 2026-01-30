@@ -90,6 +90,8 @@ baseline*.json
 .vscode/
 
 *results.json
+*benchmark*.json
+.sortformer_progress*.json
 
 
 FluidAudioDatasets/
