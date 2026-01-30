@@ -214,12 +214,10 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        // Convert final accumulated tokens to text
         let finalText: String
         if vocabBoostingEnabled {
-            // When vocab boosting is active, use text-based reconstruction which preserves
-            // the rescored corrections applied during processWindow(). Token-based reconstruction
-            // would undo the rescoring since it decodes raw tokens without CTC corrections.
+            // Text-based reconstruction preserves rescored corrections from processWindow().
+            // Token-based reconstruction would undo rescoring since it decodes raw tokens.
             var parts: [String] = []
             if !confirmedTranscript.isEmpty { parts.append(confirmedTranscript) }
             if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
@@ -235,7 +233,6 @@ public actor StreamingAsrManager {
             )
             finalText = finalResult.text
         } else {
-            // Fallback to text concatenation if no tokens available
             var parts: [String] = []
             if !confirmedTranscript.isEmpty { parts.append(confirmedTranscript) }
             if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
@@ -414,18 +411,14 @@ public actor StreamingAsrManager {
                 "Chunk \(self.processedChunks): '\(interim.text)', time: \(String(format: "%.3f", processingTime))s)"
             )
 
-            // Compute shouldConfirm BEFORE updateTranscriptionState so we can rescore first
             let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
             let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
             let isHighConfidence = Double(interim.confidence) >= config.confirmationThreshold
             let shouldConfirm = isHighConfidence && hasMinimumContext
 
-            // Apply vocabulary rescoring BEFORE updating transcript state so that
-            // confirmedTranscript/volatileTranscript hold the rescored text.
-            // This ensures finish() returns rescored content.
+            // Rescore before updating transcript state so finish() returns rescored content
             var displayResult = interim
             if shouldConfirm && vocabBoostingEnabled {
-                // Create chunk-local token timings for rescoring (CTC logProbs are chunk-local)
                 let chunkLocalTimings =
                     asrManager.processTranscriptionResult(
                         tokenIds: tokens,
@@ -453,7 +446,6 @@ public actor StreamingAsrManager {
                 }
             }
 
-            // Update transcript state with potentially-rescored result
             await updateTranscriptionState(with: displayResult, shouldConfirm: shouldConfirm)
 
             let update = StreamingTranscriptionUpdate(
@@ -476,16 +468,10 @@ public actor StreamingAsrManager {
         }
     }
 
-    /// Update transcription state based on pre-computed confirmation decision.
-    ///
-    /// The `shouldConfirm` flag is computed by the caller (processWindow) so that vocabulary
-    /// rescoring can be applied _before_ updating the transcript state. This ensures
-    /// `confirmedTranscript` and `volatileTranscript` hold rescored text when vocab boosting is active.
     private func updateTranscriptionState(with result: ASRResult, shouldConfirm: Bool) async {
         let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
 
         if shouldConfirm {
-            // Move volatile text to confirmed and set new text as volatile
             if !volatileTranscript.isEmpty {
                 var components: [String] = []
                 if !confirmedTranscript.isEmpty {
@@ -499,7 +485,6 @@ public actor StreamingAsrManager {
                 "CONFIRMED (\(result.confidence), \(String(format: "%.1f", totalAudioProcessed))s context): promoted to confirmed; new volatile '\(result.text)'"
             )
         } else {
-            // Only update volatile text (hypothesis)
             volatileTranscript = result.text
             let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
             let reason =
