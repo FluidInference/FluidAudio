@@ -106,7 +106,7 @@ The additional ~64 MB overhead comes from the CTC encoder (Parakeet 110M) being 
 
 ## Pipeline Components
 
-### 1. CtcTokenizer (`TokenSpotting/CtcTokenizer.swift`)
+### 1. CtcTokenizer (`WordSpotting/CtcTokenizer.swift`)
 
 Converts vocabulary terms to CTC token ID sequences using the HuggingFace tokenizer (loaded from `tokenizer.json`).
 
@@ -119,7 +119,7 @@ let tokenIds = tokenizer.encode("NVIDIA")
 
 **Why this matters**: The CTC model outputs probabilities over its learned vocabulary. To match custom terms, we must convert them to the same token space.
 
-### 2. CtcKeywordSpotter (`TokenSpotting/CtcKeywordSpotter.swift`, `+Inference.swift`)
+### 2. CtcKeywordSpotter (`WordSpotting/CtcKeywordSpotter.swift`, `+Inference.swift`)
 
 Runs CTC model inference and implements the NeMo CTC word spotting algorithm.
 
@@ -134,7 +134,7 @@ Runs CTC model inference and implements the NeMo CTC word spotting algorithm.
 - Delegates DP work to `CtcDPAlgorithm`
 - Returns `SpotKeywordsResult` with detections (scores, frame ranges, timestamps) and reusable log-probs
 
-### 3. CtcDPAlgorithm (`TokenSpotting/CtcDPAlgorithm.swift`)
+### 3. CtcDPAlgorithm (`WordSpotting/CtcDPAlgorithm.swift`)
 
 Pure dynamic programming algorithms for CTC keyword spotting. No CoreML dependency — operates on raw `[[Float]]` log-prob matrices.
 
@@ -369,7 +369,7 @@ CustomVocabulary/
 │   ├── VocabularyRescorer+TokenRescoring.swift — Rescoring orchestration (term-centric + word-centric)
 │   ├── VocabularyRescorer+TokenEvaluation.swift— Per-candidate scoring and guard logic
 │   └── VocabularyRescorer+Utilities.swift     — String similarity, normalization, token boundary helpers
-└── TokenSpotting/
+└── WordSpotting/
     ├── CtcDPAlgorithm.swift                   — Pure DP algorithms (no CoreML dependency)
     ├── CtcKeywordSpotter.swift                — Public spotting API and result types
     ├── CtcKeywordSpotter+Inference.swift       — CoreML inference pipeline (audio → log-probs)
