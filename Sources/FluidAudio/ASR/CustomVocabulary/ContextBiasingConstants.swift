@@ -44,7 +44,7 @@ public enum ContextBiasingConstants {
     ///
     /// - Value: `-15.0` (log-probability, ~3e-7 probability)
     /// - Range: Typically -20.0 (very lenient) to -5.0 (strict)
-    /// - Used in: `CtcKeywordSpotter.spotKeywords()` for initial filtering
+    /// - Used in: `CtcKeywordSpotter.spotKeywordsWithLogProbs()` for initial filtering
     public static let defaultMinSpotterScore: Float = -15.0
 
     /// Default minimum CTC score for vocabulary context matching.
@@ -106,27 +106,6 @@ public enum ContextBiasingConstants {
     /// - Used in: `CustomVocabularyContext.init()` as default parameter
     public static let defaultMinCombinedConfidence: Float = 0.54
 
-    /// Similarity threshold for single-word span replacements.
-    ///
-    /// When replacing a single transcript word (span=1) with a vocabulary term,
-    /// this moderate threshold allows corrections like "NECI" → "Nequi" while
-    /// still being stricter than the floor.
-    ///
-    /// - Value: `0.55` (55% similarity for single words)
-    /// - Example: "neci" vs "nequi" = 0.60 ✓
-    /// - Used in: `VocabularyRescorer.swift` span-based decision logic
-    public static let singleWordSpanSimilarity: Float = 0.55
-
-    /// Similarity threshold for user-defined alias matches.
-    ///
-    /// When a vocabulary term has explicit aliases defined by the user,
-    /// we trust those mappings with moderate similarity. This allows
-    /// intentional phonetic aliases like "newres" → "Newrez".
-    ///
-    /// - Value: `0.65` (65% similarity for trusted aliases)
-    /// - Used in: `VocabularyRescorer.swift` high-confidence alias path
-    public static let highConfidenceAliasSimilarity: Float = 0.65
-
     /// Length ratio threshold below which stricter similarity is required.
     ///
     /// When original word is significantly shorter than vocabulary term
@@ -138,17 +117,6 @@ public enum ContextBiasingConstants {
     /// - Example: "and"/"Andre" = 0.60 < 0.75 → requires stricter threshold
     /// - Used in: `VocabularyRescorer+ConstrainedCTC.swift` length ratio check
     public static let lengthRatioThreshold: Float = 0.75
-
-    /// Similarity threshold for multi-word span replacements.
-    ///
-    /// When replacing multiple transcript words with a single vocabulary term
-    /// (e.g., "new res" → "Newrez"), high similarity is required since we're
-    /// modifying more text. Prevents "want to" → "Santoro", "and I" → "Audi".
-    ///
-    /// - Value: `0.80` (80% similarity for multi-word spans)
-    /// - Raised from 0.75 after "and I" → "Audi" false positive (sim=0.75)
-    /// - Used in: `VocabularyRescorer.swift` compound word matching
-    public static let multiWordSpanSimilarity: Float = 0.80
 
     /// Similarity threshold for short words with low length ratio.
     ///
@@ -181,7 +149,7 @@ public enum ContextBiasingConstants {
     ///
     /// - Value: `3.0` (log-probability boost)
     /// - Effect: Multiplies vocabulary term probability by ~20x (e^3.0)
-    /// - Used in: `VocabularyRescorer.rescoreWithTimings()`, constrained CTC methods
+    /// - Used in: `VocabularyRescorer.ctcTokenRescore()` and constrained CTC methods
     public static let defaultCbw: Float = 3.0
 
     /// Default alpha value for weighted score combination.
@@ -200,26 +168,8 @@ public enum ContextBiasingConstants {
     /// allows for timing imprecision in word boundaries.
     ///
     /// - Value: `0.5` seconds (500ms tolerance)
-    /// - Used in: `VocabularyRescorer+ConstrainedCTC.rescoreWithConstrainedCTC()`
+    /// - Used in: `VocabularyRescorer+TokenRescoring.ctcTokenRescore()`
     public static let defaultMarginSeconds: Double = 0.5
-
-    /// Default vocabulary boost weight for rescorer config.
-    ///
-    /// Multiplier applied to vocabulary term scores in the rescorer.
-    /// Lower than CBW since this is applied after initial detection.
-    ///
-    /// - Value: `1.5` (50% score boost)
-    /// - Used in: `VocabularyRescorer.Config.default`
-    public static let defaultVocabBoostWeight: Float = 1.5
-
-    /// Score advantage threshold for multi-word span replacement.
-    ///
-    /// When replacing multi-word spans based on high similarity alone
-    /// (without strong CTC evidence), require at least this score advantage.
-    ///
-    /// - Value: `0.5` (vocabulary score must be 0.5 higher than original)
-    /// - Used in: `VocabularyRescorer.swift` compound word decision
-    public static let scoreAdvantageThreshold: Float = 0.5
 
     // MARK: - Vocabulary Size
 
@@ -238,10 +188,6 @@ public enum ContextBiasingConstants {
     /// Large vocabularies (>10 terms) use tighter thresholds to reduce false
     /// positives from the larger candidate set.
     public struct VocabSizeConfig: Sendable {
-        public let minScoreAdvantage: Float
-        public let minVocabScore: Float
-        public let maxOriginalScoreForReplacement: Float
-        public let vocabBoostWeight: Float
         public let minSimilarity: Float
         public let cbw: Float
     }
@@ -253,35 +199,10 @@ public enum ContextBiasingConstants {
     public static func rescorerConfig(forVocabSize size: Int) -> VocabSizeConfig {
         let isLarge = size > largeVocabThreshold
         return VocabSizeConfig(
-            minScoreAdvantage: isLarge ? 1.5 : 1.0,
-            minVocabScore: isLarge ? -14.0 : -15.0,
-            maxOriginalScoreForReplacement: isLarge ? -2.5 : -2.0,
-            vocabBoostWeight: isLarge ? 2.5 : 3.0,
             minSimilarity: isLarge ? 0.60 : 0.50,
             cbw: isLarge ? 2.5 : 3.0
         )
     }
-
-    // MARK: - Rescorer Config Defaults
-
-    /// Default minimum score advantage for vocabulary replacement.
-    ///
-    /// Vocabulary term must score at least this much better than the original
-    /// transcript word to trigger replacement. Higher values are more conservative.
-    ///
-    /// - Value: `2.0` (vocab term needs 2.0 score advantage)
-    /// - Used in: `VocabularyRescorer.Config.default` and init
-    public static let defaultMinScoreAdvantage: Float = 2.0
-
-    /// Default minimum vocabulary term CTC score for replacement.
-    ///
-    /// Vocabulary terms with CTC scores below this are rejected as low-confidence.
-    /// Lowered from -8.0 to -12.0 to support alias matching which may have weaker
-    /// acoustic evidence.
-    ///
-    /// - Value: `-12.0` (log-probability threshold)
-    /// - Used in: `VocabularyRescorer.Config.default` and init
-    public static let defaultMinVocabScore: Float = -12.0
 
     /// Baseline token count for multi-token phrase threshold adjustment.
     ///
@@ -291,7 +212,7 @@ public enum ContextBiasingConstants {
     ///
     /// - Value: `3` tokens
     /// - Formula: `extraTokens = max(0, tokenCount - baselineTokenCountForThreshold)`
-    /// - Used in: `CtcKeywordSpotter.spotKeywords()` threshold adjustment
+    /// - Used in: `CtcKeywordSpotter.spotKeywordsWithLogProbs()` threshold adjustment
     public static let baselineTokenCountForThreshold: Int = 3
 
     /// Threshold relaxation amount per extra token beyond baseline.
@@ -303,18 +224,8 @@ public enum ContextBiasingConstants {
     /// - Value: `1.0` (log-probability units)
     /// - Formula: `adjustedThreshold = baseThreshold - extraTokens * thresholdRelaxationPerToken`
     /// - Example: 5-token phrase with -12.0 base → -12.0 - (5-3)*1.0 = -14.0
-    /// - Used in: `CtcKeywordSpotter.spotKeywords()` threshold adjustment
+    /// - Used in: `CtcKeywordSpotter.spotKeywordsWithLogProbs()` threshold adjustment
     public static let thresholdRelaxationPerToken: Float = 1.0
-
-    /// Default maximum original word score for replacement.
-    ///
-    /// If the original transcript word has a CTC score better (less negative) than
-    /// this threshold, it's considered high-confidence and won't be replaced.
-    /// Prevents replacing words the model is very confident about.
-    ///
-    /// - Value: `-4.0` (don't replace confident words)
-    /// - Used in: `VocabularyRescorer.Config.default` and init
-    public static let defaultMaxOriginalScoreForReplacement: Float = -4.0
 
     /// Default reference token count for adaptive threshold scaling.
     ///
@@ -348,34 +259,24 @@ public enum ContextBiasingConstants {
     /// - Used in: `VocabularyRescorer+ConstrainedCTC.swift` length checks
     public static let shortWordMaxLength: Int = 4
 
-    /// Minimum vocabulary term length to attempt 3-word span matching.
-    ///
-    /// Terms shorter than this only match 1-2 word spans to prevent
-    /// short vocabulary terms from over-consuming transcript words.
-    ///
-    /// - Value: `8` characters
-    /// - Example: "Ramirez-Santos" (14 chars) can match 3 words, "NVIDIA" (6) cannot
-    /// - Used in: `VocabularyRescorer.swift` compound word matching
-    public static let minLengthForThreeWordSpan: Int = 8
+    // MARK: - BK-Tree (Experimental)
 
-    // MARK: - BK-Tree Configuration
-
-    /// Whether to use BK-tree for fuzzy string matching.
+    /// Enable BK-tree for approximate string matching (experimental).
     ///
-    /// BK-trees organize vocabulary by edit distance for efficient O(log V)
-    /// approximate matching. Beneficial for large vocabularies (>100 terms).
-    /// When false, uses O(V) linear scan which is faster for small vocabularies.
+    /// When enabled, the word-centric rescoring path uses a BK-tree to find
+    /// candidate vocabulary terms within edit distance, providing O(log V)
+    /// lookup instead of O(V) linear scan per word.
     ///
-    /// - Value: `false` (linear scan)
-    /// - Used in: `VocabularyRescorer.swift` initialization
+    /// - Value: `false` (disabled by default, linear scan used instead)
+    /// - Used in: `VocabularyRescorer.create()` to build BK-tree
     public static let useBkTree: Bool = false
 
-    /// Maximum edit distance for BK-tree fuzzy search.
+    /// Maximum edit distance for BK-tree fuzzy matching.
     ///
-    /// Limits how "fuzzy" the BK-tree search can be. Higher values
-    /// find more distant matches but increase search time.
+    /// Controls how many character edits are tolerated when searching
+    /// the BK-tree for candidate vocabulary terms.
     ///
-    /// - Value: `3` (max 3 character edits)
-    /// - Used in: `VocabularyRescorer.swift` when BK-tree is enabled
+    /// - Value: `3` (up to 3 character insertions/deletions/substitutions)
+    /// - Used in: `VocabularyRescorer+CandidateMatching.swift` BK-tree queries
     public static let bkTreeMaxDistance: Int = 3
 }

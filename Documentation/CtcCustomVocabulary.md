@@ -106,7 +106,7 @@ The additional ~64 MB overhead comes from the CTC encoder (Parakeet 110M) being 
 
 ## Pipeline Components
 
-### 1. CtcTokenizer (`CtcTokenizer.swift`)
+### 1. CtcTokenizer (`WordSpotting/CtcTokenizer.swift`)
 
 Converts vocabulary terms to CTC token ID sequences using the HuggingFace tokenizer (loaded from `tokenizer.json`).
 
@@ -119,9 +119,24 @@ let tokenIds = tokenizer.encode("NVIDIA")
 
 **Why this matters**: The CTC model outputs probabilities over its learned vocabulary. To match custom terms, we must convert them to the same token space.
 
-### 2. CtcKeywordSpotter (`CtcKeywordSpotter.swift`)
+### 2. CtcKeywordSpotter (`WordSpotting/CtcKeywordSpotter.swift`, `+Inference.swift`)
 
-Implements the NeMo CTC word spotting algorithm using dynamic programming.
+Runs CTC model inference and implements the NeMo CTC word spotting algorithm.
+
+**Inference pipeline** (`+Inference.swift`):
+1. Audio → MelSpectrogram model → mel features
+2. Mel features → AudioEncoder model → CTC logits
+3. Logits → log-softmax → log-probabilities `[T, V]`
+4. For long audio (>15s), processes in overlapping chunks and averages log-probs at boundaries
+
+**Keyword spotting** (`CtcKeywordSpotter.swift`):
+- `spotKeywordsWithLogProbs()` — public API that returns detections + cached log-probs
+- Delegates DP work to `CtcDPAlgorithm`
+- Returns `SpotKeywordsResult` with detections (scores, frame ranges, timestamps) and reusable log-probs
+
+### 3. CtcDPAlgorithm (`WordSpotting/CtcDPAlgorithm.swift`)
+
+Pure dynamic programming algorithms for CTC keyword spotting. No CoreML dependency — operates on raw `[[Float]]` log-prob matrices.
 
 **Algorithm Overview** (per arXiv:2406.07096):
 
@@ -137,44 +152,40 @@ For each vocabulary term with token sequence [t₁, t₂, ..., tₙ]:
 3. Score = dp[T][n] (final frame, all tokens consumed)
 ```
 
-**Implementation Details**:
-
-The DP table construction is consolidated into `fillDPTable(logProbs:keywordTokens:)`, which is shared by three entry points:
-- `ctcWordSpot` - Basic word spotting with normalized scores
-- `ctcWordSpotConstrained` - Constrained spotting within frame ranges
-- `ctcWordSpotMultiple` - Batch detection of multiple occurrences
+**Entry points**:
+- `fillDPTable()` — core DP table construction shared by all variants
+- `ctcWordSpotConstrained()` — find best alignment within a time window (used by rescorer to score original words)
+- `ctcWordSpotMultiple()` — find ALL occurrences above a threshold with local-max detection and overlap merging
 
 Score normalization uses `nonWildcardCount(_:)` to handle wildcard tokens correctly.
 
-**Key Features**:
-- Handles CTC blank tokens correctly
-- Supports repeated characters (e.g., "committee" → c-o-m-m-i-t-t-e-e)
-- Returns detection timestamps and confidence scores
+### 4. VocabularyRescorer (`Rescorer/VocabularyRescorer.swift` + extensions)
 
-### 3. VocabularyRescorer (`VocabularyRescorer.swift`)
+Performs principled comparison between original transcript words and vocabulary terms using a three-pass algorithm.
 
-Performs principled comparison between original transcript words and vocabulary terms.
+**Pass 1 — Keyword Spotting**: Calls `spotKeywordsWithLogProbs()` to run CTC inference and find all vocabulary term detections with scores and frame ranges.
 
-**Rescoring Logic**:
+**Pass 2 — Alignment**: Maps each transcript word to overlapping keyword detections by timestamp. Groups consecutive words into multi-word spans to match multi-word vocabulary terms (e.g., "in video" → "NVIDIA").
 
-```swift
-// For each word in transcript that might match a vocabulary term:
+**Pass 3 — Evaluation**: For each candidate replacement:
 
-1. Tokenize original word: "in video" → [token IDs]
-2. Compute CTC score for original word using cached log-probs
-3. Get CTC score for vocabulary term from keyword spotter
-4. Apply context-biasing weight (CBW = 3.0 per NeMo paper)
+1. Compute string similarity (Levenshtein-based) between original word and vocabulary term
+2. Check similarity meets minimum threshold
+3. Apply guards:
+   - **Length ratio guard** — if original is much shorter than vocab term (e.g., "and" vs "Andre"), require higher similarity
+   - **Short word guard** — words ≤4 chars with low length ratio need ≥80% similarity
+   - **Stopword guard** — spans containing "the", "and", "or" etc. need ≥85% similarity
+4. Score original word against CTC log-probs using constrained DP alignment
+5. Compare: replacement score (detection score + CBW boost) vs original score
+6. Replace only when vocabulary term has stronger acoustic evidence
 
-if (vocabScore + CBW) > (originalScore + minAdvantage):
-    replace("in video" → "NVIDIA")
-```
+**Rescorer files**:
+- `VocabularyRescorer.swift` — struct definition, Config, result types, word timing builder
+- `VocabularyRescorer+TokenRescoring.swift` — three-pass orchestration (`ctcTokenRescore()`)
+- `VocabularyRescorer+TokenEvaluation.swift` — per-candidate scoring and guard logic
+- `VocabularyRescorer+Utilities.swift` — string similarity, normalization, token boundary helpers
 
-**Why CTC-vs-CTC Comparison**:
-- Both scores are on the same scale (CTC log-probabilities)
-- Prevents false replacements when original word has strong acoustic evidence
-- The context-biasing weight (CBW) gives vocabulary terms a controlled boost
-
-### 4. CustomVocabularyContext (`CustomVocabularyContext.swift`)
+### 5. CustomVocabularyContext (`CustomVocabularyContext.swift`)
 
 Defines vocabulary terms to boost:
 
@@ -238,14 +249,17 @@ Frame 3:  log_prob[3][t₃] = -2.1
 
 ### Detection Thresholds
 
-Per the NeMo paper, the system uses several thresholds:
-
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `minScoreAdvantage` | 2.0 | Vocab term must score 2.0 better than original |
-| `minVocabScore` | -12.0 | Minimum absolute CTC score for detection |
-| `maxOriginalScoreForReplacement` | -4.0 | Don't replace high-confidence words |
-| `contextBiasingWeight` (CBW) | 3.0 | Boost applied to vocabulary terms |
+| `defaultMinSpotterScore` | -15.0 | Minimum CTC score for keyword spotting detections |
+| `defaultMinVocabCtcScore` | -12.0 | Minimum CTC score for vocabulary context matching |
+| `defaultCbw` (CBW) | 3.0 | Context-biasing weight boost applied to vocabulary terms |
+| `minSimilarityFloor` | 0.50 | Absolute minimum string similarity for any match |
+| `defaultMinSimilarity` | 0.52 | Default minimum similarity for vocabulary matching |
+| `shortWordSimilarity` | 0.80 | Similarity required for short words (≤4 chars) with low length ratio |
+| `stopwordSpanSimilarity` | 0.85 | Similarity required when stopwords are present in span |
+
+All constants are defined in `ContextBiasingConstants.swift`.
 
 ## Usage Example
 
@@ -295,16 +309,45 @@ When using `--custom-vocab` with `--streaming`, be aware of the following constr
 - If streaming is required, prefer single-word vocabulary terms over multi-word phrases
 - Consider post-processing the streaming transcript with vocabulary boosting on the complete audio
 
-## Vocabulary Size Guidelines
+## BK-Tree Approximate String Matching (Experimental)
 
-The vocabulary boosting system has been tested with vocabularies of varying sizes:
+The rescorer supports an optional **BK-tree** (Burkhard-Keller tree) for efficient approximate string matching. When enabled, the rescorer switches from the default term-centric algorithm to a **word-centric** algorithm.
+
+### How It Works
+
+| Algorithm | Approach | Complexity | Default |
+|-----------|----------|------------|---------|
+| **Term-centric** | For each vocab term, scan all TDT words | O(V × W) | Yes |
+| **Word-centric** | For each TDT word, query BK-tree for candidates | O(W × log V) | No |
+
+The BK-tree organizes vocabulary terms by edit distance, enabling O(log V) fuzzy lookups per word instead of O(V) linear scans. This is beneficial for large vocabularies (100+ terms).
+
+### Enabling BK-Tree
+
+The BK-tree is controlled by `ContextBiasingConstants.useBkTree` (default: `false`). The maximum edit distance for queries is `ContextBiasingConstants.bkTreeMaxDistance` (default: `3`).
+
+### Candidate Matching
+
+When BK-tree is enabled, the word-centric rescorer finds candidates via `findCandidateTermsForWord()`:
+
+1. **Single word match** — query BK-tree with the normalized TDT word
+2. **Two-word compound** — concatenate adjacent words (e.g., "Liv" + "Mali" → "livmali" matches "Livmarli")
+3. **Three-word compound** — for longer terms (≥6 chars)
+4. **Multi-word phrase** — space-separated phrases for multi-word vocabulary terms
+
+All candidates are sorted by similarity (descending) then span length (descending).
+
+### Status
+
+The BK-tree path is experimental. In benchmarks, the default term-centric algorithm produces slightly better results. The BK-tree is primarily useful for very large vocabularies where O(W × log V) lookup provides meaningful speedup over O(V × W) linear scan.
+
+## Vocabulary Size Guidelines
 
 | Vocabulary Size | Performance | Notes |
 |-----------------|-------------|-------|
 | 1-50 terms | Excellent | Typical use case (company names, products) |
 | 50-100 terms | Good | No noticeable latency impact |
 | 100-230 terms | Tested | Validated with domain-specific term lists |
-| 230+ terms | Untested | Consider BK-tree for large vocabularies |
 
 **Recommendations**:
 - Keep vocabularies focused on domain-specific terms that ASR commonly misrecognizes
@@ -312,69 +355,27 @@ The vocabulary boosting system has been tested with vocabularies of varying size
 - Terms should be at least 4 characters (configurable via `minTermLength`)
 - The system automatically skips stopwords (a, the, and, etc.) to prevent false matches
 
-## BK-Tree for Large Vocabularies
-
-> **Note**: BK-tree support is currently **experimental** and disabled by default.
-
-For large vocabularies (100+ terms), the system supports BK-tree indexing for efficient approximate string matching.
-
-### Algorithm Selection
-
-| Algorithm | Complexity | When Used |
-|-----------|------------|-----------|
-| **Linear scan** (default) | O(W × V) | `useBkTree = false` |
-| **BK-tree** | O(W × log V) | `useBkTree = true` |
-
-Where W = words in transcript, V = vocabulary size.
-
-### Complexity Analysis
-
-**Linear Scan**:
-- Per-word: O(V) comparisons against all vocabulary terms
-- Total: O(W × V) for entire transcript
-
-**BK-tree**:
-- Construction: O(V × avg_word_length) one-time cost
-- Per-word: O(log V) amortized for approximate matching
-- Total: O(V) build + O(W × log V) queries
-
-### Crossover Point
-
-BK-tree becomes beneficial when query savings outweigh construction cost:
-
-| Vocabulary Size | Recommendation |
-|-----------------|----------------|
-| < 50 terms | Linear scan (BK-tree overhead not worth it) |
-| 50-100 terms | Either works (marginal difference) |
-| 100-500 terms | Consider BK-tree |
-| 500+ terms | Strongly recommend BK-tree |
-
-### Enabling BK-Tree
-
-```swift
-// In ContextBiasingConstants.swift
-public static let useBkTree: Bool = true  // Default: false
-public static let bkTreeMaxDistance: Int = 3  // Max edit distance for fuzzy matching
-```
-
-### Current Status
-
-BK-tree support is **experimental** because:
-1. Limited production testing with very large vocabularies
-2. The linear scan performs well for typical use cases (< 100 terms)
-3. BK-tree adds memory overhead for the tree structure
-
-Enable it only when working with large domain-specific vocabularies where the O(log V) improvement matters.
-
 ## File Reference
 
-| File | Purpose |
-|------|---------|
-| `CtcModels.swift` | CTC model loading (MelSpectrogram + AudioEncoder) |
-| `CtcKeywordSpotter.swift` | NeMo CTC word spotting algorithm with DP helpers |
-| `CtcTokenizer.swift` | Vocabulary term tokenization (HuggingFace tokenizer) |
-| `VocabularyRescorer.swift` | CTC-vs-CTC score comparison (async factory API) |
-| `CustomVocabularyContext.swift` | Vocabulary definition structures |
+```
+CustomVocabulary/
+├── ContextBiasingConstants.swift              — All numeric constants and thresholds
+├── CustomVocabularyContext.swift               — Vocabulary term data model and tokenization
+├── BKTree/
+│   ├── BKTree.swift                           — Burkhard-Keller tree for approximate string matching (experimental)
+│   └── VocabularyRescorer+CandidateMatching.swift — Word-centric candidate finding via BK-tree or linear scan
+├── Rescorer/
+│   ├── VocabularyRescorer.swift               — Core struct, Config, result types, word timing builder
+│   ├── VocabularyRescorer+TokenRescoring.swift — Rescoring orchestration (term-centric + word-centric)
+│   ├── VocabularyRescorer+TokenEvaluation.swift— Per-candidate scoring and guard logic
+│   └── VocabularyRescorer+Utilities.swift     — String similarity, normalization, token boundary helpers
+└── WordSpotting/
+    ├── CtcDPAlgorithm.swift                   — Pure DP algorithms (no CoreML dependency)
+    ├── CtcKeywordSpotter.swift                — Public spotting API and result types
+    ├── CtcKeywordSpotter+Inference.swift       — CoreML inference pipeline (audio → log-probs)
+    ├── CtcModels.swift                        — CTC model downloading and loading
+    └── CtcTokenizer.swift                     — Text → token ID encoding
+```
 
 ## References
 
@@ -382,5 +383,3 @@ Enable it only when working with large domain-specific vocabularies where the O(
 2. **Parakeet TDT**: NVIDIA NeMo Parakeet TDT 0.6B - Token Duration Transducer
 3. **Parakeet CTC**: NVIDIA NeMo Parakeet CTC 110M - CTC-based encoder
 4. **HuggingFace Tokenizers**: swift-transformers for BPE tokenization
-5. **BK-Tree**: https://en.wikipedia.org/wiki/BK-tree
-6. **BK-Tree Implementation**: https://www.geeksforgeeks.org/dsa/bk-tree-introduction-implementation/

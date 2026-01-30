@@ -64,6 +64,26 @@ public struct ASRResult: Codable, Sendable {
     public var rtfx: Float {
         Float(duration) / Float(processingTime)
     }
+
+    /// Create a copy of this result with rescored text and CTC metadata from vocabulary boosting.
+    ///
+    /// - Parameters:
+    ///   - text: The rescored transcript text
+    ///   - detected: Vocabulary terms detected by CTC (candidates considered for replacement)
+    ///   - applied: Vocabulary terms actually applied as replacements
+    /// - Returns: A new ASRResult with updated text and CTC metadata
+    public func withRescoring(text: String, detected: [String]?, applied: [String]?) -> ASRResult {
+        ASRResult(
+            text: text,
+            confidence: confidence,
+            duration: duration,
+            processingTime: processingTime,
+            tokenTimings: tokenTimings,
+            performanceMetrics: performanceMetrics,
+            ctcDetectedTerms: detected,
+            ctcAppliedTerms: applied
+        )
+    }
 }
 
 public struct TokenTiming: Codable, Sendable {

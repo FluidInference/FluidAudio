@@ -519,19 +519,13 @@ public enum CtcEarningsBenchmark {
         // Set USE_TIMESTAMP_RESCORING=1 to use timestamp-based matching (default)
         // Set USE_TIMESTAMP_RESCORING=0 to use legacy string-similarity based matching
         let useRescorer = ProcessInfo.processInfo.environment["NO_CTC_RESCORING"] != "1"
-        let useTimestampRescoring = ProcessInfo.processInfo.environment["USE_TIMESTAMP_RESCORING"] != "0"
         let hypothesis: String
         if useRescorer {
             // Vocabulary-size-aware thresholds
             let vocabSize = vocabularyWords.count
             let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocabSize)
 
-            let rescorerConfig = VocabularyRescorer.Config(
-                minScoreAdvantage: vocabConfig.minScoreAdvantage,
-                minVocabScore: vocabConfig.minVocabScore,
-                maxOriginalScoreForReplacement: vocabConfig.maxOriginalScoreForReplacement,
-                vocabBoostWeight: vocabConfig.vocabBoostWeight
-            )
+            let rescorerConfig = VocabularyRescorer.Config.default
 
             let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
             let rescorer = try await VocabularyRescorer.create(
@@ -561,7 +555,7 @@ public enum CtcEarningsBenchmark {
 
             if useConstrainedCTC, let tokenTimings = tdtResult.tokenTimings, !tokenTimings.isEmpty {
                 // Use constrained CTC rescoring (string similarity first, then constrained DP)
-                let rescoreResult = rescorer.rescoreWithConstrainedCTC(
+                let rescoreResult = rescorer.ctcTokenRescore(
                     transcript: tdtResult.text,
                     tokenTimings: tokenTimings,
                     logProbs: spotResult.logProbs,
@@ -571,19 +565,8 @@ public enum CtcEarningsBenchmark {
                     minSimilarity: minSimilarity
                 )
                 hypothesis = rescoreResult.text
-            } else if useTimestampRescoring, let tokenTimings = tdtResult.tokenTimings, !tokenTimings.isEmpty {
-                // Use timestamp-based rescoring (NeMo CTC-WS algorithm)
-                let rescoreResult = rescorer.rescoreWithTimings(
-                    transcript: tdtResult.text,
-                    tokenTimings: tokenTimings,
-                    spotResult: spotResult,
-                    cbw: cbw  // Vocabulary-size-aware CBW
-                )
-                hypothesis = rescoreResult.text
             } else {
-                // Fall back to string-similarity based rescoring
-                let rescoreResult = rescorer.rescore(transcript: tdtResult.text, spotResult: spotResult)
-                hypothesis = rescoreResult.text
+                hypothesis = tdtResult.text  // No rescoring (missing token timings or --no-constrained-ctc)
             }
         } else {
             hypothesis = tdtResult.text  // Baseline: no CTC corrections

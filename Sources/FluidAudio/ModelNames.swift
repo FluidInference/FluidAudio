@@ -58,8 +58,6 @@ public enum Repo: String, CaseIterable {
     /// Subdirectory within repo (for repos with multiple model variants)
     public var subPath: String? {
         switch self {
-        case .parakeetCtc110m:
-            return "parakeet-ctc-110m-coreml"
         case .parakeetEou160:
             return "160ms"
         case .parakeetEou320:

@@ -35,7 +35,7 @@ extension AsrManager {
                 decoderState: &decoderState
             )
 
-            let result = processTranscriptionResult(
+            var result = processTranscriptionResult(
                 tokenIds: hypothesis.ySequence,
                 timestamps: hypothesis.timestamps,
                 confidences: hypothesis.tokenConfidences,
@@ -44,6 +44,12 @@ extension AsrManager {
                 audioSamples: audioSamples,
                 processingTime: Date().timeIntervalSince(startTime)
             )
+
+            // Auto-apply vocabulary rescoring when configured
+            if vocabBoostingEnabled {
+                result = await applyVocabularyRescoring(result: result, audioSamples: audioSamples)
+            }
+
             return result
         }
 
@@ -463,6 +469,78 @@ extension AsrManager {
         // This method is deprecated as frame tracking is now handled by the decoder's timeJump mechanism
         // Kept for test compatibility
         return 0
+    }
+
+    // MARK: - Vocabulary Rescoring
+
+    /// Apply vocabulary rescoring to an ASRResult using CTC-based constrained decoding.
+    ///
+    /// Runs CTC inference on the audio samples and applies vocabulary rescoring to correct
+    /// misrecognized words. Returns an updated ASRResult with rescored text and populated
+    /// `ctcDetectedTerms`/`ctcAppliedTerms` fields.
+    ///
+    /// - Parameters:
+    ///   - result: The original ASRResult from transcription
+    ///   - audioSamples: Audio samples used for CTC inference
+    /// - Returns: An ASRResult with rescored text and CTC metadata, or the original result if rescoring was skipped
+    internal func applyVocabularyRescoring(
+        result: ASRResult, audioSamples: [Float]
+    ) async -> ASRResult {
+        guard let spotter = ctcSpotter,
+            let rescorer = vocabularyRescorer,
+            let vocab = customVocabulary,
+            let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty
+        else {
+            return result
+        }
+
+        do {
+            let spotResult = try await spotter.spotKeywordsWithLogProbs(
+                audioSamples: audioSamples,
+                customVocabulary: vocab,
+                minScore: nil
+            )
+
+            let logProbs = spotResult.logProbs
+            guard !logProbs.isEmpty else {
+                logger.debug("Vocabulary rescoring skipped: no log probs from CTC")
+                return result
+            }
+
+            let vocabConfig = vocabSizeConfig ?? ContextBiasingConstants.rescorerConfig(forVocabSize: 0)
+
+            let rescoreOutput = rescorer.ctcTokenRescore(
+                transcript: result.text,
+                tokenTimings: tokenTimings,
+                logProbs: logProbs,
+                frameDuration: spotResult.frameDuration,
+                cbw: vocabConfig.cbw,
+                marginSeconds: 0.5,
+                minSimilarity: vocabConfig.minSimilarity
+            )
+
+            guard rescoreOutput.wasModified else {
+                return result
+            }
+
+            let detected = rescoreOutput.replacements.compactMap { $0.replacementWord }
+            let applied = rescoreOutput.replacements.filter { $0.shouldReplace }.compactMap {
+                $0.replacementWord
+            }
+
+            logger.info(
+                "Vocabulary rescoring applied \(applied.count) replacement(s)"
+            )
+
+            return result.withRescoring(
+                text: rescoreOutput.text,
+                detected: detected.isEmpty ? nil : detected,
+                applied: applied.isEmpty ? nil : applied
+            )
+        } catch {
+            logger.warning("Vocabulary rescoring failed: \(error.localizedDescription)")
+            return result
+        }
     }
 
 }
