@@ -69,6 +69,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[WhisKey](https://whiskey.asktobuild.app/)** | Privacy-first voice dictation keyboard for iOS and macOS. On-device transcription with 12+ languages, AI meeting summaries, and mindmap generation. Great for daily use and vibe-coding. Uses speaker diarization. |
 | **[hongbomiao.com](https://github.com/hongbo-miao/hongbomiao.com)** | A personal R&D lab that facilitates knowledge sharing. Uses Parakeet ASR. |
 | **[Hex](https://github.com/kitlangton/Hex)** | macOS app that lets you press-and-hold a hotkey to record your voice, transcribe it, and paste into any application. Uses Parakeet ASR. |
+| **[Super Voice Assistant](https://github.com/ykdojo/super-voice-assistant)** | Open-source macOS voice assistant with local transcription. Uses Parakeet ASR. |
 
 ## Installation
 
