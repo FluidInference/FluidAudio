@@ -785,8 +785,8 @@ class RealtimeDiarizer {
 
 ## See Also
 
-- [SpeakerDiarization.md](SpeakerDiarization.md) - Full diarization pipeline documentation
-- [API.md](API.md) - Complete API reference
+- [Getting Started](GettingStarted.md) - Full diarization pipeline documentation
+- [API Reference](../API.md) - Complete API reference
 - `DiarizerManager` - Main diarization orchestrator
 - `Speaker` class - Speaker data model
 - `SpeakerUtilities` - Utility functions for speaker operations
