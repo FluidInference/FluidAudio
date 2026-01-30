@@ -170,23 +170,8 @@ public struct PocketTtsSynthesizer {
         logger.info(
             "Generated \(audioChunks.count) frames in \(String(format: "%.2f", genElapsed))s")
 
-        // 8. Concatenate and normalize audio
+        // 8. Concatenate audio (no peak normalization — preserve natural levels)
         var allSamples = audioChunks.flatMap { $0 }
-
-        // Peak normalization to 0.9
-        var maxMagnitude: Float = 0
-        for sample in allSamples {
-            let magnitude = abs(sample)
-            if magnitude > maxMagnitude {
-                maxMagnitude = magnitude
-            }
-        }
-        if maxMagnitude > 0 {
-            let scale = 0.9 / maxMagnitude
-            for i in 0..<allSamples.count {
-                allSamples[i] *= scale
-            }
-        }
 
         // De-essing
         if deEss {
