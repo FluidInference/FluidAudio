@@ -40,11 +40,15 @@ public struct ASRResult: Codable, Sendable {
     public let processingTime: TimeInterval
     public let tokenTimings: [TokenTiming]?
     public let performanceMetrics: ASRPerformanceMetrics?
+    public let ctcDetectedTerms: [String]?
+    public let ctcAppliedTerms: [String]?
 
     public init(
         text: String, confidence: Float, duration: TimeInterval, processingTime: TimeInterval,
         tokenTimings: [TokenTiming]? = nil,
-        performanceMetrics: ASRPerformanceMetrics? = nil
+        performanceMetrics: ASRPerformanceMetrics? = nil,
+        ctcDetectedTerms: [String]? = nil,
+        ctcAppliedTerms: [String]? = nil
     ) {
         self.text = text
         self.confidence = confidence
@@ -52,11 +56,33 @@ public struct ASRResult: Codable, Sendable {
         self.processingTime = processingTime
         self.tokenTimings = tokenTimings
         self.performanceMetrics = performanceMetrics
+        self.ctcDetectedTerms = ctcDetectedTerms
+        self.ctcAppliedTerms = ctcAppliedTerms
     }
 
     /// Real-time factor (RTFx) - how many times faster than real-time
     public var rtfx: Float {
         Float(duration) / Float(processingTime)
+    }
+
+    /// Create a copy of this result with rescored text and CTC metadata from vocabulary boosting.
+    ///
+    /// - Parameters:
+    ///   - text: The rescored transcript text
+    ///   - detected: Vocabulary terms detected by CTC (candidates considered for replacement)
+    ///   - applied: Vocabulary terms actually applied as replacements
+    /// - Returns: A new ASRResult with updated text and CTC metadata
+    public func withRescoring(text: String, detected: [String]?, applied: [String]?) -> ASRResult {
+        ASRResult(
+            text: text,
+            confidence: confidence,
+            duration: duration,
+            processingTime: processingTime,
+            tokenTimings: tokenTimings,
+            performanceMetrics: performanceMetrics,
+            ctcDetectedTerms: detected,
+            ctcAppliedTerms: applied
+        )
     }
 }
 

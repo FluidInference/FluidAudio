@@ -198,6 +198,15 @@ struct TextNormalizer {
             withTemplate: ""
         )
 
+        // Remove stuttering patterns like "th-", "o-", "y-" (single letter followed by dash)
+        let stutterPattern = try! NSRegularExpression(pattern: "\\b[a-z]+-\\s*", options: [])
+        normalized = stutterPattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: ""
+        )
+
         // Standardize spaces before apostrophes
         normalized = normalized.replacingOccurrences(of: " '", with: "'")
 

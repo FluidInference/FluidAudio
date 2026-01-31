@@ -1,4 +1,3 @@
-#if os(macOS)
 //
 //  AsrBenchmarkTypes.swift
 //  FluidAudio
@@ -6,6 +5,8 @@
 //  Copyright © 2025 Brandon Weng. All rights reserved.
 //
 
+#if os(macOS)
+import FluidAudio
 import Foundation
 
 /// ASR evaluation metrics
@@ -71,10 +72,21 @@ public struct ASRBenchmarkResult: Sendable {
     public let audioLength: TimeInterval
     public let rtfx: Double  // Real-Time Factor (inverse)
     public let streamingMetrics: StreamingMetrics?  // Optional streaming metrics
+    public let ctcDetectedTerms: [String]?
+    public let ctcAppliedTerms: [String]?
+
+    // CTC comparison data (optional)
+    public let baselineHypothesis: String?
+    public let baselineMetrics: ASRMetrics?
+    public let ctcHypothesis: String?
+    public let ctcMetrics: ASRMetrics?
 
     public init(
         fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval,
-        audioLength: TimeInterval, streamingMetrics: StreamingMetrics? = nil
+        audioLength: TimeInterval, streamingMetrics: StreamingMetrics? = nil,
+        baselineHypothesis: String? = nil, baselineMetrics: ASRMetrics? = nil,
+        ctcHypothesis: String? = nil, ctcMetrics: ASRMetrics? = nil,
+        ctcDetectedTerms: [String]? = nil, ctcAppliedTerms: [String]? = nil
     ) {
         self.fileName = fileName
         self.hypothesis = hypothesis
@@ -84,6 +96,21 @@ public struct ASRBenchmarkResult: Sendable {
         self.audioLength = audioLength
         self.rtfx = audioLength / processingTime
         self.streamingMetrics = streamingMetrics
+        self.baselineHypothesis = baselineHypothesis
+        self.baselineMetrics = baselineMetrics
+        self.ctcHypothesis = ctcHypothesis
+        self.ctcMetrics = ctcMetrics
+        self.ctcDetectedTerms = ctcDetectedTerms
+        self.ctcAppliedTerms = ctcAppliedTerms
+    }
+
+    /// Calculate relative WER improvement when CTC comparison is available
+    public var werImprovement: Double? {
+        guard let baselineWER = baselineMetrics?.wer, let ctcWER = ctcMetrics?.wer else {
+            return nil
+        }
+        guard baselineWER > 0 else { return nil }
+        return (baselineWER - ctcWER) / baselineWER
     }
 }
 

@@ -39,6 +39,14 @@ public final class AsrManager {
     internal var microphoneDecoderState: TdtDecoderState
     internal var systemDecoderState: TdtDecoderState
 
+    // Vocabulary boosting state (configured via configureVocabularyBoosting)
+    // Internal access required for AsrTranscription extension (separate file)
+    internal var customVocabulary: CustomVocabularyContext?
+    internal var ctcSpotter: CtcKeywordSpotter?
+    internal var vocabularyRescorer: VocabularyRescorer?
+    internal var vocabSizeConfig: ContextBiasingConstants.VocabSizeConfig?
+    internal var vocabBoostingEnabled: Bool { customVocabulary != nil && vocabularyRescorer != nil }
+
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {
         AsrModels.optimizedPredictionOptions()
@@ -53,7 +61,7 @@ public final class AsrManager {
         // Pre-warm caches if possible
         Task {
             await sharedMLArrayCache.prewarm(shapes: [
-                ([NSNumber(value: 1), NSNumber(value: 240_000)], .float32),
+                ([NSNumber(value: 1), NSNumber(value: ASRConstants.maxModelSamples)], .float32),
                 ([NSNumber(value: 1)], .int32),
                 (
                     [
@@ -71,7 +79,7 @@ public final class AsrManager {
         }
     }
 
-    /// Returns the current transcription progress stream for offline long audio (>\(240_000) samples).
+    /// Returns the current transcription progress stream for offline long audio (>240,000 samples / ~15s).
     /// Only one session is supported at a time.
     public var transcriptionProgressStream: AsyncThrowingStream<Double, Error> {
         get async {
@@ -105,6 +113,55 @@ public final class AsrManager {
         logger.info("Token duration optimization model loaded successfully")
 
         logger.info("AsrManager initialized successfully with provided models")
+    }
+
+    /// Configure vocabulary boosting for batch transcription.
+    ///
+    /// When configured, vocabulary terms will be automatically rescored after each `transcribe()` call
+    /// using CTC-based constrained decoding. The resulting `ASRResult` will have `ctcDetectedTerms`
+    /// and `ctcAppliedTerms` populated.
+    ///
+    /// - Parameters:
+    ///   - vocabulary: Custom vocabulary context with terms to detect
+    ///   - ctcModels: Pre-loaded CTC models for keyword spotting
+    ///   - config: Optional rescorer configuration (default: vocabulary-size-aware config)
+    /// - Throws: Error if rescorer initialization fails
+    public func configureVocabularyBoosting(
+        vocabulary: CustomVocabularyContext,
+        ctcModels: CtcModels,
+        config: VocabularyRescorer.Config? = nil
+    ) async throws {
+        self.customVocabulary = vocabulary
+
+        let blankId = ctcModels.vocabulary.count
+        self.ctcSpotter = CtcKeywordSpotter(models: ctcModels, blankId: blankId)
+
+        let vocabSize = vocabulary.terms.count
+        let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocabSize)
+        self.vocabSizeConfig = vocabConfig
+        let effectiveConfig = config ?? .default
+
+        let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
+        self.vocabularyRescorer = try await VocabularyRescorer.create(
+            spotter: ctcSpotter!,
+            vocabulary: vocabulary,
+            config: effectiveConfig,
+            ctcModelDirectory: ctcModelDir
+        )
+
+        let isLargeVocab = vocabSize > ContextBiasingConstants.largeVocabThreshold
+        logger.info(
+            "Vocabulary boosting configured with \(vocabSize) terms (isLargeVocab: \(isLargeVocab))"
+        )
+    }
+
+    /// Disable vocabulary boosting and release CTC models.
+    public func disableVocabularyBoosting() {
+        customVocabulary = nil
+        ctcSpotter = nil
+        vocabularyRescorer = nil
+        vocabSizeConfig = nil
+        logger.info("Vocabulary boosting disabled")
     }
 
     private func createFeatureProvider(
@@ -232,6 +289,8 @@ public final class AsrManager {
         // Reset decoder states using fresh allocations for deterministic behavior
         microphoneDecoderState = TdtDecoderState.make()
         systemDecoderState = TdtDecoderState.make()
+        // Release vocabulary boosting resources
+        disableVocabularyBoosting()
         logger.info("AsrManager resources cleaned up")
     }
 
@@ -397,7 +456,7 @@ public final class AsrManager {
     /// - Parameters:
     ///   - audioSamples: Array of 16-bit audio samples at 16kHz
     ///   - source: The audio source type (microphone or system audio)
-    /// - Note: Progress stream is emitted only when `audioSamples.count > 240_000` (~15s).
+    /// - Note: Progress stream is emitted only when `audioSamples.count > ASRConstants.maxModelSamples` (~15s).
     ///         Use `transcriptionProgressStream` before calling this method to observe progress.
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails or models are not initialized
@@ -405,7 +464,7 @@ public final class AsrManager {
         _ audioSamples: [Float],
         source: AudioSource = .microphone
     ) async throws -> ASRResult {
-        let shouldEmitProgress = audioSamples.count > 240_000
+        let shouldEmitProgress = audioSamples.count > ASRConstants.maxModelSamples
         if shouldEmitProgress {
             _ = await progressEmitter.ensureSession()
         }

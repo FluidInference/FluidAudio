@@ -90,6 +90,8 @@ baseline*.json
 .vscode/
 
 *results.json
+*benchmark*.json
+.sortformer_progress*.json
 
 
 FluidAudioDatasets/
@@ -109,3 +111,6 @@ fluidaudio_cli/*
 .vscode/
 
 .mobius/
+
+# Continuous Claude cache (local only)
+.claude/cache/

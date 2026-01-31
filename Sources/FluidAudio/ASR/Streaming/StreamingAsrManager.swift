@@ -46,6 +46,16 @@ public actor StreamingAsrManager {
     private var startTime: Date?
     private var processedChunks: Int = 0
 
+    // Vocabulary boosting
+    // These are initialized via configureVocabularyBoosting() before start()
+    // CtcKeywordSpotter and VocabularyRescorer contain CoreML models which are not Sendable.
+    // We manage the safety ourselves by only accessing them from within the actor.
+    private var customVocabulary: CustomVocabularyContext?
+    nonisolated(unsafe) private var ctcSpotter: CtcKeywordSpotter?
+    nonisolated(unsafe) private var vocabularyRescorer: VocabularyRescorer?
+    private var vocabSizeConfig: ContextBiasingConstants.VocabSizeConfig?
+    private var vocabBoostingEnabled: Bool { customVocabulary != nil && vocabularyRescorer != nil }
+
     /// Initialize the streaming ASR manager
     /// - Parameter config: Configuration for streaming behavior
     public init(config: StreamingAsrConfig = .default) {
@@ -58,6 +68,48 @@ public actor StreamingAsrManager {
 
         logger.info(
             "Initialized StreamingAsrManager with config: chunk=\(config.chunkSeconds)s left=\(config.leftContextSeconds)s right=\(config.rightContextSeconds)s"
+        )
+    }
+
+    /// Configure vocabulary boosting for streaming transcription
+    ///
+    /// When configured, vocabulary terms will be rescored when text is confirmed during streaming.
+    /// This provides real-time vocabulary corrections visible in confirmed updates.
+    ///
+    /// - Parameters:
+    ///   - vocabulary: Custom vocabulary context with terms to detect
+    ///   - ctcModels: Pre-loaded CTC models for keyword spotting
+    ///   - config: Optional rescorer configuration (default: vocabulary-size-aware config)
+    /// - Throws: Error if rescorer initialization fails
+    public func configureVocabularyBoosting(
+        vocabulary: CustomVocabularyContext,
+        ctcModels: CtcModels,
+        config: VocabularyRescorer.Config? = nil
+    ) async throws {
+        self.customVocabulary = vocabulary
+
+        // Create CTC spotter
+        let blankId = ctcModels.vocabulary.count
+        self.ctcSpotter = CtcKeywordSpotter(models: ctcModels, blankId: blankId)
+
+        // Use vocabulary-size-aware config (matching batch mode behavior)
+        let vocabSize = vocabulary.terms.count
+        let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocabSize)
+        self.vocabSizeConfig = vocabConfig
+        let effectiveConfig = config ?? .default
+
+        // Create rescorer
+        let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
+        self.vocabularyRescorer = try await VocabularyRescorer.create(
+            spotter: ctcSpotter!,
+            vocabulary: vocabulary,
+            config: effectiveConfig,
+            ctcModelDirectory: ctcModelDir
+        )
+
+        let isLargeVocab = vocabSize > ContextBiasingConstants.largeVocabThreshold
+        logger.info(
+            "Vocabulary boosting configured with \(vocabSize) terms (isLargeVocab: \(isLargeVocab))"
         )
     }
 
@@ -162,9 +214,15 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        // Convert final accumulated tokens to text (proper way to avoid duplicates)
         let finalText: String
-        if let asrManager = asrManager, !accumulatedTokens.isEmpty {
+        if vocabBoostingEnabled {
+            // Text-based reconstruction preserves rescored corrections from processWindow().
+            // Token-based reconstruction would undo rescoring since it decodes raw tokens.
+            var parts: [String] = []
+            if !confirmedTranscript.isEmpty { parts.append(confirmedTranscript) }
+            if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
+            finalText = parts.joined(separator: " ")
+        } else if let asrManager = asrManager, !accumulatedTokens.isEmpty {
             let finalResult = asrManager.processTranscriptionResult(
                 tokenIds: accumulatedTokens,
                 timestamps: [],
@@ -175,8 +233,10 @@ public actor StreamingAsrManager {
             )
             finalText = finalResult.text
         } else {
-            // Fallback to text concatenation if no tokens available
-            finalText = confirmedTranscript + volatileTranscript
+            var parts: [String] = []
+            if !confirmedTranscript.isEmpty { parts.append(confirmedTranscript) }
+            if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
+            finalText = parts.joined(separator: " ")
         }
 
         logger.info("Final transcription: \(finalText.count) characters")
@@ -351,22 +411,50 @@ public actor StreamingAsrManager {
                 "Chunk \(self.processedChunks): '\(interim.text)', time: \(String(format: "%.3f", processingTime))s)"
             )
 
-            // Apply confidence-based confirmation logic (uses configured threshold)
-            await updateTranscriptionState(with: interim)
-
-            // Emit update based on progressive confidence model
             let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
             let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
             let isHighConfidence = Double(interim.confidence) >= config.confirmationThreshold
             let shouldConfirm = isHighConfidence && hasMinimumContext
 
+            // Rescore before updating transcript state so finish() returns rescored content
+            var displayResult = interim
+            if shouldConfirm && vocabBoostingEnabled {
+                let chunkLocalTimings =
+                    asrManager.processTranscriptionResult(
+                        tokenIds: tokens,
+                        timestamps: timestamps,  // Original chunk-local timestamps (not adjusted)
+                        confidences: confidences,
+                        encoderSequenceLength: 0,
+                        audioSamples: windowSamples,
+                        processingTime: processingTime
+                    ).tokenTimings ?? []
+
+                if let rescored = await applyVocabularyRescoring(
+                    text: interim.text,
+                    tokenTimings: chunkLocalTimings,
+                    windowSamples: windowSamples
+                ) {
+                    let detected = rescored.replacements.compactMap { $0.replacementWord }
+                    let applied = rescored.replacements.filter { $0.shouldReplace }.compactMap {
+                        $0.replacementWord
+                    }
+                    displayResult = interim.withRescoring(
+                        text: rescored.text,
+                        detected: detected.isEmpty ? nil : detected,
+                        applied: applied.isEmpty ? nil : applied
+                    )
+                }
+            }
+
+            await updateTranscriptionState(with: displayResult, shouldConfirm: shouldConfirm)
+
             let update = StreamingTranscriptionUpdate(
-                text: interim.text,
+                text: displayResult.text,
                 isConfirmed: shouldConfirm,
                 confidence: interim.confidence,
                 timestamp: Date(),
                 tokenIds: tokens,
-                tokenTimings: interim.tokenTimings ?? []
+                tokenTimings: displayResult.tokenTimings ?? []
             )
 
             updateContinuation?.yield(update)
@@ -380,19 +468,10 @@ public actor StreamingAsrManager {
         }
     }
 
-    /// Update transcription state based on confidence and context duration
-    private func updateTranscriptionState(with result: ASRResult) async {
+    private func updateTranscriptionState(with result: ASRResult, shouldConfirm: Bool) async {
         let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
-        let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
-        let isHighConfidence = Double(result.confidence) >= config.confirmationThreshold
-
-        // Progressive confidence model:
-        // 1. Always show text immediately as volatile for responsiveness
-        // 2. Only confirm text when we have both high confidence AND sufficient context
-        let shouldConfirm = isHighConfidence && hasMinimumContext
 
         if shouldConfirm {
-            // Move volatile text to confirmed and set new text as volatile
             if !volatileTranscript.isEmpty {
                 var components: [String] = []
                 if !confirmedTranscript.isEmpty {
@@ -406,12 +485,84 @@ public actor StreamingAsrManager {
                 "CONFIRMED (\(result.confidence), \(String(format: "%.1f", totalAudioProcessed))s context): promoted to confirmed; new volatile '\(result.text)'"
             )
         } else {
-            // Only update volatile text (hypothesis)
             volatileTranscript = result.text
+            let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
             let reason =
                 !hasMinimumContext
                 ? "insufficient context (\(String(format: "%.1f", totalAudioProcessed))s)" : "low confidence"
             logger.debug("VOLATILE (\(result.confidence)): \(reason) - updated volatile '\(result.text)'")
+        }
+    }
+
+    /// Apply vocabulary rescoring to confirmed text using CTC-based constrained decoding.
+    ///
+    /// This runs CTC inference on the chunk audio and applies vocabulary rescoring
+    /// to replace misrecognized words with vocabulary terms when acoustic evidence supports it.
+    ///
+    /// - Parameters:
+    ///   - text: Original transcript text from ASR
+    ///   - tokenTimings: Token-level timing information
+    ///   - windowSamples: Audio samples for the current window
+    /// - Returns: Rescored output if modifications were made, nil otherwise
+    private func applyVocabularyRescoring(
+        text: String,
+        tokenTimings: [TokenTiming],
+        windowSamples: [Float]
+    ) async -> VocabularyRescorer.RescoreOutput? {
+        guard let spotter = ctcSpotter,
+            let rescorer = vocabularyRescorer,
+            let vocab = customVocabulary,
+            !tokenTimings.isEmpty
+        else {
+            return nil
+        }
+
+        do {
+            // Run CTC inference on the chunk audio to get log probabilities
+            let spotResult = try await spotter.spotKeywordsWithLogProbs(
+                audioSamples: windowSamples,
+                customVocabulary: vocab,
+                minScore: nil
+            )
+
+            let logProbs = spotResult.logProbs
+            guard !logProbs.isEmpty else {
+                logger.debug("Vocabulary rescoring skipped: no log probs from CTC")
+                return nil
+            }
+
+            // Determine rescoring parameters based on vocabulary size
+            let vocabConfig = vocabSizeConfig ?? ContextBiasingConstants.rescorerConfig(forVocabSize: 0)
+            let minSimilarity = vocabConfig.minSimilarity
+            let cbw = vocabConfig.cbw
+
+            // Apply constrained CTC rescoring
+            let rescoreOutput = rescorer.ctcTokenRescore(
+                transcript: text,
+                tokenTimings: tokenTimings,
+                logProbs: logProbs,
+                frameDuration: spotResult.frameDuration,
+                cbw: cbw,
+                marginSeconds: 0.5,
+                minSimilarity: minSimilarity
+            )
+
+            if rescoreOutput.wasModified {
+                logger.info(
+                    "Vocabulary rescoring applied \(rescoreOutput.replacements.count) replacement(s) in streaming chunk"
+                )
+                for replacement in rescoreOutput.replacements where replacement.shouldReplace {
+                    logger.debug(
+                        "  '\(replacement.originalWord)' → '\(replacement.replacementWord ?? "")'"
+                    )
+                }
+                return rescoreOutput
+            }
+
+            return nil
+        } catch {
+            logger.warning("Vocabulary rescoring failed: \(error.localizedDescription)")
+            return nil
         }
     }
 

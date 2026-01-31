@@ -26,7 +26,8 @@ struct ChunkProcessor {
     /// Without this, the first frames of a chunk may produce features that cause all-blank predictions.
     private let melContextSamples: Int = ASRConstants.samplesPerEncoderFrame  // 1280 samples = 80ms
 
-    private var maxModelSamples: Int { 240_000 }  // CoreML encoder capacity (15 seconds)
+    private var maxModelSamples: Int { ASRConstants.maxModelSamples }
+
     private var chunkSamples: Int {
         // Reserve space for context samples that will be prepended to non-first chunks.
         // This ensures chunkSamples + melContextSamples <= maxModelSamples.
