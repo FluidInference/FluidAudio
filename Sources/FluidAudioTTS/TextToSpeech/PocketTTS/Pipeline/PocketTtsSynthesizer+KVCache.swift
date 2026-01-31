@@ -39,30 +39,6 @@ extension PocketTtsSynthesizer {
         return KVCacheState(caches: caches, positions: positions)
     }
 
-    /// Clone a KV cache state for independent use.
-    static func cloneKVCacheState(_ state: KVCacheState) throws -> KVCacheState {
-        var newCaches: [MLMultiArray] = []
-        var newPositions: [MLMultiArray] = []
-        newCaches.reserveCapacity(state.caches.count)
-        newPositions.reserveCapacity(state.positions.count)
-
-        for cache in state.caches {
-            let copy = try MLMultiArray(shape: cache.shape, dataType: .float32)
-            let srcPtr = cache.dataPointer
-            let dstPtr = copy.dataPointer
-            dstPtr.copyMemory(from: srcPtr, byteCount: cache.count * MemoryLayout<Float>.size)
-            newCaches.append(copy)
-        }
-
-        for pos in state.positions {
-            let copy = try MLMultiArray(shape: [1], dataType: .float32)
-            copy[0] = pos[0]
-            newPositions.append(copy)
-        }
-
-        return KVCacheState(caches: newCaches, positions: newPositions)
-    }
-
     /// Run the conditioning step model for a single token, updating the KV cache in place.
     static func runCondStep(
         conditioning: MLMultiArray,
