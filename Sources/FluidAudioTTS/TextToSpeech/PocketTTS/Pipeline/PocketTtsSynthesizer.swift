@@ -17,24 +17,24 @@ public struct PocketTtsSynthesizer {
     static let logger = AppLogger(category: "PocketTtsSynthesizer")
 
     private enum Context {
-        @TaskLocal static var modelCache: PocketTtsModelCache?
+        @TaskLocal static var modelStore: PocketTtsModelStore?
     }
 
-    static func withModelCache<T>(
-        _ cache: PocketTtsModelCache,
+    static func withModelStore<T>(
+        _ store: PocketTtsModelStore,
         operation: () async throws -> T
     ) async rethrows -> T {
-        try await Context.$modelCache.withValue(cache) {
+        try await Context.$modelStore.withValue(store) {
             try await operation()
         }
     }
 
-    static func currentModelCache() throws -> PocketTtsModelCache {
-        guard let cache = Context.modelCache else {
+    static func currentModelStore() throws -> PocketTtsModelStore {
+        guard let store = Context.modelStore else {
             throw TTSError.processingFailed(
-                "PocketTtsSynthesizer requires a model cache context.")
+                "PocketTtsSynthesizer requires a model store context.")
         }
-        return cache
+        return store
     }
 
     // MARK: - Public API
@@ -55,31 +55,29 @@ public struct PocketTtsSynthesizer {
         seed: UInt64? = nil,
         deEss: Bool = true
     ) async throws -> SynthesisResult {
-        let cache = try currentModelCache()
+        let store = try currentModelStore()
 
         logger.info("PocketTTS synthesizing: '\(text)'")
 
         // 1. Load constants and voice
-        let constants = try await cache.constants()
-        let voiceData = try await cache.voiceData(for: voice)
+        let constants = try await store.constants()
+        let voiceData = try await store.voiceData(for: voice)
 
         // 2. Split text into chunks that fit within KV cache capacity
         let chunks = chunkText(text, tokenizer: constants.tokenizer)
         logger.info("Split into \(chunks.count) chunk(s)")
 
-        // 3. Set random seed if specified
-        if let seed {
-            srand48(Int(seed))
-        }
+        // 3. Set up random number generator (seeded or system entropy)
+        var rng = SeededRNG(seed: seed ?? UInt64.random(in: 0...UInt64.max))
 
         // 4. Load models
-        let condModel = try await cache.condStep()
-        let stepModel = try await cache.flowlmStep()
-        let flowModel = try await cache.flowDecoder()
-        let mimiModel = try await cache.mimiDecoder()
+        let condModel = try await store.condStep()
+        let stepModel = try await store.flowlmStep()
+        let flowModel = try await store.flowDecoder()
+        let mimiModel = try await store.mimiDecoder()
 
         // 5. Load Mimi initial state (continuous across chunks)
-        let repoDir = try await resolveRepoDirectory(cache: cache)
+        let repoDir = try await store.repoDir()
         var mimiState = try loadMimiInitialState(from: repoDir)
 
         // 6. Create BOS embedding
@@ -88,7 +86,6 @@ public struct PocketTtsSynthesizer {
         // 7. Generate audio for each chunk
         var audioChunks: [[Float]] = []
         var lastEosStep: Int?
-        var totalSteps = 0
 
         let genStart = Date()
 
@@ -139,7 +136,8 @@ public struct PocketTtsSynthesizer {
                     transformerOut: transformerOut,
                     numSteps: PocketTtsConstants.numLsdSteps,
                     temperature: temperature,
-                    model: flowModel
+                    model: flowModel,
+                    rng: &rng
                 )
 
                 let denormalized = denormalize(
@@ -162,7 +160,6 @@ public struct PocketTtsSynthesizer {
                 }
             }
 
-            totalSteps += eosStep ?? maxGenLen
             lastEosStep = eosStep
         }
 
@@ -479,8 +476,15 @@ public struct PocketTtsSynthesizer {
     static func embedTokens(
         _ tokenIds: [Int], constants: PocketTtsConstantsBundle
     ) -> [[Float]] {
-        let dim = constants.embeddingDim
+        let dim = PocketTtsConstants.embeddingDim
+        let vocabSize = PocketTtsConstants.vocabSize
         return tokenIds.map { id in
+            guard id >= 0, id < vocabSize else {
+                logger.warning("Token ID \(id) out of range [0, \(vocabSize)), clamping")
+                let clampedId = min(max(id, 0), vocabSize - 1)
+                let offset = clampedId * dim
+                return Array(constants.textEmbedTable[offset..<(offset + dim)])
+            }
             let offset = id * dim
             return Array(constants.textEmbedTable[offset..<(offset + dim)])
         }
@@ -532,13 +536,4 @@ public struct PocketTtsSynthesizer {
         return array
     }
 
-    /// Resolve the repo directory from the cache.
-    private static func resolveRepoDirectory(
-        cache: PocketTtsModelCache
-    ) async throws -> URL {
-        // Trigger load if needed (this will set the repo directory internally)
-        try await cache.loadIfNeeded()
-        // We need to access the repo directory — use ensureModels() which returns it
-        return try await PocketTtsResourceDownloader.ensureModels()
-    }
 }

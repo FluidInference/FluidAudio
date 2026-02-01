@@ -14,10 +14,10 @@ import OSLog
 /// try await manager.initialize()
 /// let audioData = try await manager.synthesize(text: "Hello, world!")
 /// ```
-public final class PocketTtsManager {
+public actor PocketTtsManager {
 
     private let logger = AppLogger(category: "PocketTtsManager")
-    private let modelCache: PocketTtsModelCache
+    private let modelStore: PocketTtsModelStore
     private var defaultVoice: String
     private var isInitialized = false
 
@@ -26,7 +26,7 @@ public final class PocketTtsManager {
     /// - Parameters:
     ///   - defaultVoice: Default voice identifier (default: "alba").
     public init(defaultVoice: String = PocketTtsConstants.defaultVoice) {
-        self.modelCache = PocketTtsModelCache()
+        self.modelStore = PocketTtsModelStore()
         self.defaultVoice = defaultVoice
     }
 
@@ -36,7 +36,7 @@ public final class PocketTtsManager {
 
     /// Initialize by downloading and loading all PocketTTS models.
     public func initialize() async throws {
-        try await modelCache.loadIfNeeded()
+        try await modelStore.loadIfNeeded()
         isInitialized = true
         logger.notice("PocketTtsManager initialized")
     }
@@ -61,7 +61,7 @@ public final class PocketTtsManager {
 
         let selectedVoice = voice ?? defaultVoice
 
-        return try await PocketTtsSynthesizer.withModelCache(modelCache) {
+        return try await PocketTtsSynthesizer.withModelStore(modelStore) {
             let result = try await PocketTtsSynthesizer.synthesize(
                 text: text,
                 voice: selectedVoice,
@@ -85,7 +85,7 @@ public final class PocketTtsManager {
 
         let selectedVoice = voice ?? defaultVoice
 
-        return try await PocketTtsSynthesizer.withModelCache(modelCache) {
+        return try await PocketTtsSynthesizer.withModelStore(modelStore) {
             try await PocketTtsSynthesizer.synthesize(
                 text: text,
                 voice: selectedVoice,
