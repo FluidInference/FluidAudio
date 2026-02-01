@@ -312,9 +312,16 @@ PocketTTS is not "Kokoro but streaming." The generation strategy is fundamentall
 
 PocketTTS is based on the **Kyutai Moshi** architecture — a real-time bidirectional speech dialogue model. It adapts the Moshi generation pipeline and Mimi neural codec for TTS. This is distinct from the Kokoro/StyleTTS/Matcha-TTS lineage which uses mel spectrograms and vocoders.
 
+## License
+
+The original PocketTTS weights by [Kyutai](https://huggingface.co/kyutai/pocket-tts) are licensed under **CC-BY-4.0**. The CoreML conversion at [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml) inherits this license. Attribution to Kyutai is required.
+
+Voice cloning weights are gated separately by Kyutai and are **not included** in the CoreML package — only the 4 pre-encoded voices (alba, azelma, cosette, javert) are shipped.
+
 ## References
 
+- **PocketTTS:** [kyutai/pocket-tts](https://huggingface.co/kyutai/pocket-tts)
 - **Flow Matching:** Lipman et al., [Flow Matching for Generative Modeling](https://arxiv.org/abs/2210.02747) (ICLR 2023)
 - **Mimi Codec:** Defossez et al., [Moshi: a speech-text foundation model for real-time dialogue](https://arxiv.org/abs/2410.00037) (2024)
 - **Conversion Scripts:** [FluidInference/mobius](https://github.com/FluidInference/mobius) `models/tts/pocket_tts/`
-- **Models:** [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml)
+- **CoreML Models:** [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml)
