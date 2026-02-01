@@ -3,14 +3,14 @@ import FluidAudio
 import Foundation
 import OSLog
 
-/// Actor-based cache for PocketTTS CoreML models and constants.
+/// Actor-based store for PocketTTS CoreML models and constants.
 ///
-/// Manages loading and caching of the four CoreML models
+/// Manages loading and storing of the four CoreML models
 /// (cond_step, flowlm_step, flow_decoder, mimi_decoder),
 /// the binary constants bundle, and voice conditioning data.
-public actor PocketTtsModelCache {
+public actor PocketTtsModelStore {
 
-    private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "PocketTtsModelCache")
+    private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "PocketTtsModelStore")
 
     private var condStepModel: MLModel?
     private var flowlmStepModel: MLModel?
@@ -135,6 +135,14 @@ public actor PocketTtsModelCache {
             throw TTSError.modelNotFound("PocketTTS constants not loaded")
         }
         return bundle
+    }
+
+    /// The repository directory containing models and constants.
+    public func repoDir() throws -> URL {
+        guard let dir = repoDirectory else {
+            throw TTSError.modelNotFound("PocketTTS repository not loaded")
+        }
+        return dir
     }
 
     /// Load and cache voice conditioning data.

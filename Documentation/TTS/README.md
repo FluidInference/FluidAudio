@@ -2,7 +2,12 @@
 
 > **⚠️ Beta:** The TTS system is currently in beta and only supports American English. Additional language support is planned for future releases.
 
-Quick recipes for running the Kokoro synthesis stack.
+Quick recipes for running the TTS stack.
+
+## Available Backends
+
+- **Kokoro**: High-quality, English-only model (Default).
+- **[PocketTTS](PocketTTS.md)**: Lightweight, flow-matching model optimized for on-device usage.
 
 ## Enable TTS in Your Project
 
