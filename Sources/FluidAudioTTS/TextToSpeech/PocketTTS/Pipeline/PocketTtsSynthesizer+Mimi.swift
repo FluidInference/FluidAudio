@@ -6,7 +6,7 @@ extension PocketTtsSynthesizer {
 
     /// Mutable streaming state for the Mimi audio decoder.
     ///
-    /// Contains 23 tensors that track convolutional history,
+    /// Contains 26 tensors that track convolutional history,
     /// attention caches, and partial upsampling buffers.
     struct MimiState {
         var tensors: [String: MLMultiArray]
@@ -39,16 +39,10 @@ extension PocketTtsSynthesizer {
                 continue
             }
 
-            // Skip zero-length state tensors (removed from model to fix
-            // CoreML Espresso crash with zero-element blobs)
-            guard !shapeArray.contains(0) else {
-                continue
-            }
-
             let shape = shapeArray.map { NSNumber(value: $0) }
             let array = try MLMultiArray(shape: shape, dataType: .float32)
 
-            if byteCount > 0 {
+            if byteCount > 0 && !shapeArray.contains(0) {
                 let binURL = stateDir.appendingPathComponent("\(name).bin")
                 let data = try Data(contentsOf: binURL)
                 let floatCount = byteCount / MemoryLayout<Float>.size
@@ -94,24 +88,29 @@ extension PocketTtsSynthesizer {
         return MimiState(tensors: newTensors)
     }
 
-    /// Run the Mimi decoder for a single quantized latent frame.
+    /// Run the Mimi decoder for a single latent frame.
+    ///
+    /// The model internally denormalizes and quantizes the 32-dim latent
+    /// before decoding to audio.
     ///
     /// - Parameters:
-    ///   - quantized: The quantized latent vector, shape [512].
-    ///   - state: The streaming state (23 tensors), modified in place.
+    ///   - latent: The raw latent vector, shape [32].
+    ///   - state: The streaming state (26 tensors), modified in place.
     ///   - model: The Mimi CoreML model.
     /// - Returns: Audio samples for this frame (1920 samples = 80ms at 24kHz).
     static func runMimiDecoder(
-        quantized: [Float],
+        latent: [Float],
         state: inout MimiState,
         model: MLModel
     ) async throws -> [Float] {
-        // Create latent input: [1, 512, 1]
-        let latentArray = try MLMultiArray(shape: [1, 512, 1], dataType: .float32)
-        let latentPtr = latentArray.dataPointer.bindMemory(to: Float.self, capacity: 512)
-        quantized.withUnsafeBufferPointer { buffer in
+        // Create latent input: [1, 32]
+        let latentDim = PocketTtsConstants.latentDim
+        let latentArray = try MLMultiArray(
+            shape: [1, NSNumber(value: latentDim)], dataType: .float32)
+        let latentPtr = latentArray.dataPointer.bindMemory(to: Float.self, capacity: latentDim)
+        latent.withUnsafeBufferPointer { buffer in
             guard let base = buffer.baseAddress else { return }
-            latentPtr.update(from: base, count: 512)
+            latentPtr.update(from: base, count: latentDim)
         }
 
         // Build input dictionary

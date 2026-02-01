@@ -50,39 +50,6 @@ extension PocketTtsSynthesizer {
         return latent
     }
 
-    /// Denormalize a latent vector: result = latent * std + mean.
-    static func denormalize(
-        _ latent: [Float], mean: [Float], std: [Float]
-    ) -> [Float] {
-        var result = [Float](repeating: 0, count: latent.count)
-        for i in 0..<latent.count {
-            result[i] = latent[i] * std[i] + mean[i]
-        }
-        return result
-    }
-
-    /// Quantize a latent vector using the quantizer weight matrix.
-    ///
-    /// Computes `dot(latent, weight.T)` where weight is [512, 32] (stored as flat array).
-    /// Result shape: [512].
-    static func quantize(_ latent: [Float], weight: [Float]) -> [Float] {
-        let outDim = PocketTtsConstants.quantizerOutDim
-        let inDim = PocketTtsConstants.latentDim
-        var result = [Float](repeating: 0, count: outDim)
-
-        // weight is [512, 32] row-major: weight[i * 32 + j]
-        for i in 0..<outDim {
-            var sum: Float = 0
-            let rowOffset = i * inDim
-            for j in 0..<inDim {
-                sum += weight[rowOffset + j] * latent[j]
-            }
-            result[i] = sum
-        }
-
-        return result
-    }
-
     // MARK: - Private
 
     /// Run a single flow decoder step.

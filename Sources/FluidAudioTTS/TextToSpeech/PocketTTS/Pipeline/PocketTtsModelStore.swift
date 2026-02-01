@@ -23,8 +23,6 @@ public actor PocketTtsModelStore {
     public init() {}
 
     /// Load all four CoreML models and the constants bundle.
-    ///
-    /// `.mlpackage` files are compiled to `.mlmodelc` on first load and cached.
     public func loadIfNeeded() async throws {
         guard condStepModel == nil else { return }
 
@@ -52,9 +50,8 @@ public actor PocketTtsModelStore {
 
         var loadedModels: [MLModel] = []
         for file in modelFiles {
-            let compiledURL = try compileIfNeeded(
-                packageName: file, in: repoDir)
-            let model = try MLModel(contentsOf: compiledURL, configuration: config)
+            let modelURL = repoDir.appendingPathComponent(file)
+            let model = try MLModel(contentsOf: modelURL, configuration: config)
             loadedModels.append(model)
             logger.info("Loaded \(file)")
         }
@@ -71,30 +68,6 @@ public actor PocketTtsModelStore {
         constantsBundle = try PocketTtsResourceDownloader.ensureConstants(
             repoDirectory: repoDir)
         logger.info("PocketTTS constants loaded")
-    }
-
-    /// Compile an `.mlpackage` to `.mlmodelc` if the compiled version doesn't exist.
-    private func compileIfNeeded(packageName: String, in directory: URL) throws -> URL {
-        let packageURL = directory.appendingPathComponent(packageName)
-
-        // Check for cached compiled model alongside the package
-        let compiledName = packageName.replacingOccurrences(of: ".mlpackage", with: ".mlmodelc")
-        let compiledURL = directory.appendingPathComponent(compiledName)
-
-        if FileManager.default.fileExists(atPath: compiledURL.path) {
-            return compiledURL
-        }
-
-        logger.info("Compiling \(packageName) → \(compiledName)...")
-        let tempCompiled = try MLModel.compileModel(at: packageURL)
-
-        // Move from temp location to cache directory
-        if FileManager.default.fileExists(atPath: compiledURL.path) {
-            try? FileManager.default.removeItem(at: compiledURL)
-        }
-        try FileManager.default.moveItem(at: tempCompiled, to: compiledURL)
-
-        return compiledURL
     }
 
     /// The conditioning step model (KV cache prefill).

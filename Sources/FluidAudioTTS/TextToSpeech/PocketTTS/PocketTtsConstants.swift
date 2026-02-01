@@ -14,7 +14,6 @@ public enum PocketTtsConstants {
     public static let transformerDim: Int = 1024
     public static let vocabSize: Int = 4001
     public static let embeddingDim: Int = 1024
-    public static let quantizerOutDim: Int = 512
 
     // MARK: - Generation parameters
 

@@ -140,14 +140,10 @@ public struct PocketTtsSynthesizer {
                     rng: &rng
                 )
 
-                let denormalized = denormalize(
-                    latent, mean: constants.embMean, std: constants.embStd)
-                let quantized = quantize(
-                    denormalized, weight: constants.quantizerWeight)
-
                 // Mimi state is continuous across chunks
+                // (denormalize + quantize baked into mimi_decoder model)
                 let frameSamples = try await runMimiDecoder(
-                    quantized: quantized,
+                    latent: latent,
                     state: &mimiState,
                     model: mimiModel
                 )

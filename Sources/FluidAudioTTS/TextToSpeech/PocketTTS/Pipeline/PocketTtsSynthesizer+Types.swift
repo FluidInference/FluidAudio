@@ -50,36 +50,39 @@ extension PocketTtsSynthesizer {
 
     /// CoreML output key names for the Mimi decoder model.
     enum MimiKeys {
-        static let audioOutput = "var_1445"
+        static let audioOutput = "var_821"
     }
 
     /// Mimi decoder streaming state key mappings (input name → output name).
     ///
-    /// 23 state tensors (26 original minus 3 zero-length tensors that were removed
-    /// from the model to fix CoreML Espresso crash with zero-element blobs).
+    /// 26 state tensors including 3 zero-length tensors (res{0,1,2}_conv1_prev)
+    /// whose input and output names are identical pass-throughs.
     static let mimiStateMapping: [(input: String, output: String)] = [
-        ("upsample_partial", "y_end_1"),
-        ("attn0_cache", "new_cache_1_internal_tensor_assign_2"),
-        ("attn0_offset", "var_402"),
+        ("upsample_partial", "var_82"),
+        ("attn0_cache", "var_262"),
+        ("attn0_offset", "var_840"),
         ("attn0_end_offset", "new_end_offset_1"),
-        ("attn1_cache", "new_cache_internal_tensor_assign_2"),
-        ("attn1_offset", "var_825"),
+        ("attn1_cache", "var_479"),
+        ("attn1_offset", "var_843"),
         ("attn1_end_offset", "new_end_offset"),
-        ("conv0_prev", "var_998"),
-        ("conv0_first", "var_1006"),
-        ("convtr0_partial", "var_1048"),
-        ("res0_conv0_prev", "var_1105"),
-        ("res0_conv0_first", "var_1113"),
-        ("res0_conv1_first", "var_1134"),
-        ("convtr1_partial", "var_1178"),
-        ("res1_conv0_prev", "var_1235"),
-        ("res1_conv0_first", "var_1243"),
-        ("res1_conv1_first", "var_1264"),
-        ("convtr2_partial", "var_1308"),
-        ("res2_conv0_prev", "var_1365"),
-        ("res2_conv0_first", "var_1373"),
-        ("res2_conv1_first", "var_1394"),
-        ("conv_final_prev", "var_1450"),
-        ("conv_final_first", "var_1458"),
+        ("conv0_prev", "var_607"),
+        ("conv0_first", "conv0_first"),
+        ("convtr0_partial", "var_634"),
+        ("res0_conv0_prev", "var_660"),
+        ("res0_conv0_first", "res0_conv0_first"),
+        ("res0_conv1_prev", "res0_conv1_prev"),
+        ("res0_conv1_first", "res0_conv1_first"),
+        ("convtr1_partial", "var_700"),
+        ("res1_conv0_prev", "var_726"),
+        ("res1_conv0_first", "res1_conv0_first"),
+        ("res1_conv1_prev", "res1_conv1_prev"),
+        ("res1_conv1_first", "res1_conv1_first"),
+        ("convtr2_partial", "var_766"),
+        ("res2_conv0_prev", "var_792"),
+        ("res2_conv0_first", "res2_conv0_first"),
+        ("res2_conv1_prev", "res2_conv1_prev"),
+        ("res2_conv1_first", "res2_conv1_first"),
+        ("conv_final_prev", "var_824"),
+        ("conv_final_first", "conv_final_first"),
     ]
 }

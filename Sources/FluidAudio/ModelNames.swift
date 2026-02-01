@@ -12,7 +12,7 @@ public enum Repo: String, CaseIterable {
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
-    case pocketTts = "alexwengg/pocket-tts-coreml"
+    case pocketTts = "FluidInference/pocket-tts-coreml"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -53,8 +53,6 @@ public enum Repo: String, CaseIterable {
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .sortformer:
             return "FluidInference/diar-streaming-sortformer-coreml"
-        case .pocketTts:
-            return "alexwengg/pocket-tts-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -275,12 +273,12 @@ public enum ModelNames {
         public static let condStep = "cond_step"
         public static let flowlmStep = "flowlm_step"
         public static let flowDecoder = "flow_decoder"
-        public static let mimiDecoder = "mimi_decoder"
+        public static let mimiDecoder = "mimi_decoder_v2"
 
-        public static let condStepFile = condStep + ".mlpackage"
-        public static let flowlmStepFile = flowlmStep + ".mlpackage"
-        public static let flowDecoderFile = flowDecoder + ".mlpackage"
-        public static let mimiDecoderFile = mimiDecoder + ".mlpackage"
+        public static let condStepFile = condStep + ".mlmodelc"
+        public static let flowlmStepFile = flowlmStep + ".mlmodelc"
+        public static let flowDecoderFile = flowDecoder + ".mlmodelc"
+        public static let mimiDecoderFile = mimiDecoder + ".mlmodelc"
 
         /// Directory containing binary constants, tokenizer, and voice data.
         public static let constantsBinDir = "constants_bin"

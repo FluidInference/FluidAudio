@@ -5,9 +5,6 @@ import OSLog
 /// Pre-loaded binary constants for PocketTTS inference.
 public struct PocketTtsConstantsBundle: Sendable {
     public let bosEmbedding: [Float]
-    public let embMean: [Float]
-    public let embStd: [Float]
-    public let quantizerWeight: [Float]
     public let textEmbedTable: [Float]
     public let tokenizer: SentencePieceTokenizer
 }
@@ -40,21 +37,6 @@ public enum PocketTtsConstantsLoader {
             expectedCount: PocketTtsConstants.latentDim,
             name: "bos_emb"
         )
-        let embMean = try loadFloatArray(
-            from: constantsDir.appendingPathComponent("emb_mean.bin"),
-            expectedCount: PocketTtsConstants.latentDim,
-            name: "emb_mean"
-        )
-        let embStd = try loadFloatArray(
-            from: constantsDir.appendingPathComponent("emb_std.bin"),
-            expectedCount: PocketTtsConstants.latentDim,
-            name: "emb_std"
-        )
-        let qWeight = try loadFloatArray(
-            from: constantsDir.appendingPathComponent("quantizer_weight.bin"),
-            expectedCount: PocketTtsConstants.quantizerOutDim * PocketTtsConstants.latentDim,
-            name: "quantizer_weight"
-        )
         let embedTable = try loadFloatArray(
             from: constantsDir.appendingPathComponent("text_embed_table.bin"),
             expectedCount: PocketTtsConstants.vocabSize * PocketTtsConstants.embeddingDim,
@@ -77,9 +59,6 @@ public enum PocketTtsConstantsLoader {
 
         return PocketTtsConstantsBundle(
             bosEmbedding: bosEmb,
-            embMean: embMean,
-            embStd: embStd,
-            quantizerWeight: qWeight,
             textEmbedTable: embedTable,
             tokenizer: tokenizer
         )
