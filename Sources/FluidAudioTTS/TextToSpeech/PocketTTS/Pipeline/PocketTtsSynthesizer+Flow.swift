@@ -12,7 +12,8 @@ extension PocketTtsSynthesizer {
         transformerOut: MLMultiArray,
         numSteps: Int,
         temperature: Float,
-        model: MLModel
+        model: MLModel,
+        rng: inout some RandomNumberGenerator
     ) async throws -> [Float] {
         let latentDim = PocketTtsConstants.latentDim
         let dt: Float = 1.0 / Float(numSteps)
@@ -21,7 +22,7 @@ extension PocketTtsSynthesizer {
         var latent = [Float](repeating: 0, count: latentDim)
         let scale = sqrtf(temperature)
         for i in 0..<latentDim {
-            latent[i] = Float.gaussianRandom() * scale
+            latent[i] = Float.gaussianRandom(using: &rng) * scale
         }
 
         // Flatten transformer_out from [1, 1, 1024] to [1, 1024]
@@ -65,7 +66,7 @@ extension PocketTtsSynthesizer {
     /// Computes `dot(latent, weight.T)` where weight is [512, 32] (stored as flat array).
     /// Result shape: [512].
     static func quantize(_ latent: [Float], weight: [Float]) -> [Float] {
-        let outDim = 512
+        let outDim = PocketTtsConstants.quantizerOutDim
         let inDim = PocketTtsConstants.latentDim
         var result = [Float](repeating: 0, count: outDim)
 
@@ -140,13 +141,50 @@ extension PocketTtsSynthesizer {
     }
 }
 
-// MARK: - Gaussian Random
+// MARK: - Seeded Random
+
+/// Simple seeded random number generator (xoshiro256**).
+///
+/// Provides reproducible random sequences when a seed is set,
+/// and falls back to system entropy when unseeded.
+struct SeededRNG: RandomNumberGenerator {
+    private var state: (UInt64, UInt64, UInt64, UInt64)
+
+    init(seed: UInt64) {
+        // SplitMix64 to expand seed into 4-part state
+        var s = seed
+        func next() -> UInt64 {
+            s &+= 0x9E37_79B9_7F4A_7C15
+            var z = s
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+        state = (next(), next(), next(), next())
+    }
+
+    mutating func next() -> UInt64 {
+        let result = rotl(state.1 &* 5, 7) &* 9
+        let t = state.1 << 17
+        state.2 ^= state.0
+        state.3 ^= state.1
+        state.1 ^= state.2
+        state.0 ^= state.3
+        state.2 ^= t
+        state.3 = rotl(state.3, 45)
+        return result
+    }
+
+    private func rotl(_ x: UInt64, _ k: Int) -> UInt64 {
+        (x << k) | (x >> (64 - k))
+    }
+}
 
 extension Float {
     /// Generate a single sample from the standard normal distribution (Box-Muller transform).
-    static func gaussianRandom() -> Float {
-        let u1 = Float.random(in: Float.leastNonzeroMagnitude...1.0)
-        let u2 = Float.random(in: 0.0...1.0)
+    static func gaussianRandom(using rng: inout some RandomNumberGenerator) -> Float {
+        let u1 = Float.random(in: Float.leastNonzeroMagnitude...1.0, using: &rng)
+        let u2 = Float.random(in: 0.0...1.0, using: &rng)
         return sqrtf(-2.0 * logf(u1)) * cosf(2.0 * .pi * u2)
     }
 }

@@ -10,11 +10,6 @@ public struct PocketTtsConstantsBundle: Sendable {
     public let quantizerWeight: [Float]
     public let textEmbedTable: [Float]
     public let tokenizer: SentencePieceTokenizer
-
-    /// Number of rows in the text embedding table.
-    public var vocabSize: Int { PocketTtsConstants.vocabSize }
-    /// Embedding dimension per token.
-    public var embeddingDim: Int { PocketTtsConstants.embeddingDim }
 }
 
 /// Pre-loaded voice conditioning data.
@@ -57,7 +52,7 @@ public enum PocketTtsConstantsLoader {
         )
         let qWeight = try loadFloatArray(
             from: constantsDir.appendingPathComponent("quantizer_weight.bin"),
-            expectedCount: 512 * 32,
+            expectedCount: PocketTtsConstants.quantizerOutDim * PocketTtsConstants.latentDim,
             name: "quantizer_weight"
         )
         let embedTable = try loadFloatArray(
@@ -96,15 +91,21 @@ public enum PocketTtsConstantsLoader {
     public static func loadVoice(
         _ voice: String, from directory: URL
     ) throws -> PocketTtsVoiceData {
+        // Sanitize voice name to prevent path traversal
+        let sanitized = voice.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+        guard !sanitized.isEmpty else {
+            throw LoadError.fileNotFound("invalid voice name: \(voice)")
+        }
+
         let constantsDir = directory.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
 
         let audioPrompt = try loadFloatArray(
-            from: constantsDir.appendingPathComponent("\(voice)_audio_prompt.bin"),
+            from: constantsDir.appendingPathComponent("\(sanitized)_audio_prompt.bin"),
             expectedCount: PocketTtsConstants.voicePromptLength * PocketTtsConstants.embeddingDim,
-            name: "\(voice)_audio_prompt"
+            name: "\(sanitized)_audio_prompt"
         )
 
-        logger.info("Loaded PocketTTS voice '\(voice)' conditioning data")
+        logger.info("Loaded PocketTTS voice '\(sanitized)' conditioning data")
 
         return PocketTtsVoiceData(
             audioPrompt: audioPrompt,

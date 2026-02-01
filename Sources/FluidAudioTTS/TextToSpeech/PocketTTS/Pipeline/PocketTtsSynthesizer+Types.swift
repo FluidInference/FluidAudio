@@ -31,6 +31,8 @@ extension PocketTtsSynthesizer {
 
     /// CoreML output key names for the generation step model.
     enum FlowLMStepKeys {
+        /// CoreML assigned this output the name "input" during model tracing —
+        /// it is the transformer hidden state output, not an input tensor.
         static let transformerOut = "input"
         static let eosLogit = "var_2582"
         static let cacheKeys: [String] = [

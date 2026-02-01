@@ -7,7 +7,6 @@ public enum PocketTtsConstants {
 
     public static let audioSampleRate: Int = 24_000
     public static let samplesPerFrame: Int = 1_920
-    public static let frameDurationMs: Double = 80.0
 
     // MARK: - Model dimensions
 
@@ -15,6 +14,7 @@ public enum PocketTtsConstants {
     public static let transformerDim: Int = 1024
     public static let vocabSize: Int = 4001
     public static let embeddingDim: Int = 1024
+    public static let quantizerOutDim: Int = 512
 
     // MARK: - Generation parameters
 
@@ -31,8 +31,6 @@ public enum PocketTtsConstants {
 
     public static let kvCacheLayers: Int = 6
     public static let kvCacheMaxLen: Int = 512
-    public static let kvCacheHeads: Int = 16
-    public static let kvCacheHeadDim: Int = 64
 
     // MARK: - Voice
 
@@ -41,6 +39,5 @@ public enum PocketTtsConstants {
 
     // MARK: - Repository
 
-    public static let defaultRepository: String = "alexwengg/pocket-tts-coreml"
     public static let defaultModelsSubdirectory: String = "Models"
 }
