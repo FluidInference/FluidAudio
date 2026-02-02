@@ -11,14 +11,12 @@ private let logger = Logger(subsystem: "FluidAudio", category: "Qwen3AsrModels")
 /// Components:
 /// - `audioEncoder`: mel spectrogram -> 1024-dim audio features (single window)
 /// - `embedding`: token IDs -> 1024-dim embeddings
-/// - `decoderStack`: single-token decoder (seq=1, for autoregressive decode)
-/// - `decoderPrefill`: batched decoder (seq=512 fixed, for prompt prefill)
+/// - `decoderStateful`: stateful decoder with internal KV cache (macOS 15+)
 /// - `lmHead`: hidden states -> 151936-dim logits (includes final norm)
 public struct Qwen3AsrModels {
     public let audioEncoder: MLModel
     public let embedding: MLModel
-    public let decoderStack: MLModel
-    public let decoderPrefill: MLModel
+    public let decoderStateful: MLModel
     public let lmHead: MLModel
     public let vocabulary: [Int: String]
     public let config: Qwen3AsrConfig
@@ -31,7 +29,7 @@ public struct Qwen3AsrModels {
     ///   qwen3_asr_audio_encoder.mlpackage/  (or .mlmodelc)
     ///   qwen3_asr_embedding.mlpackage/
     ///   qwen3_asr_lm_head.mlpackage/
-    ///   qwen3_asr_decoder_stack.mlpackage/
+    ///   qwen3_asr_decoder_stateful.mlpackage/
     ///   vocab.json
     /// ```
     public static func load(
@@ -40,7 +38,7 @@ public struct Qwen3AsrModels {
     ) async throws -> Qwen3AsrModels {
         let config = Qwen3AsrConfig.default
 
-        // CPU+GPU only — ANE produces garbled output for some files
+        // CPU+GPU — ANE degrades both speed and accuracy for this model
         let decodeConfig = MLModelConfiguration()
         decodeConfig.computeUnits = .cpuAndGPU
 
@@ -50,7 +48,7 @@ public struct Qwen3AsrModels {
         logger.info("Loading Qwen3-ASR models from \(directory.path)")
         let start = CFAbsoluteTimeGetCurrent()
 
-        // Load audio encoder (use .all — encoder benefits from ANE)
+        // Load audio encoder
         let audioEncoder = try await loadModel(
             named: "qwen3_asr_audio_encoder",
             from: directory,
@@ -71,16 +69,9 @@ public struct Qwen3AsrModels {
             configuration: decodeConfig
         )
 
-        // Load consolidated decoder stack (single-token decode, seq=1)
-        let decoderStack = try await loadModel(
-            named: "qwen3_asr_decoder_stack",
-            from: directory,
-            configuration: decodeConfig
-        )
-
-        // Load decoder prefill (batched prompt processing, seq=512 fixed)
-        let decoderPrefill = try await loadModel(
-            named: "qwen3_asr_decoder_prefill",
+        // Load stateful decoder (unified prefill + decode with internal KV cache)
+        let decoderStateful = try await loadModel(
+            named: "qwen3_asr_decoder_stateful",
             from: directory,
             configuration: decodeConfig
         )
@@ -94,8 +85,7 @@ public struct Qwen3AsrModels {
         return Qwen3AsrModels(
             audioEncoder: audioEncoder,
             embedding: embedding,
-            decoderStack: decoderStack,
-            decoderPrefill: decoderPrefill,
+            decoderStateful: decoderStateful,
             lmHead: lmHead,
             vocabulary: vocabulary,
             config: config
@@ -149,8 +139,7 @@ public struct Qwen3AsrModels {
         let requiredModels = [
             ModelNames.Qwen3ASR.audioEncoderFile,
             ModelNames.Qwen3ASR.embeddingFile,
-            ModelNames.Qwen3ASR.decoderStackFile,
-            ModelNames.Qwen3ASR.decoderPrefillFile,
+            ModelNames.Qwen3ASR.decoderStatefulFile,
             ModelNames.Qwen3ASR.lmHeadFile,
         ]
         return requiredModels.allSatisfy { model in
