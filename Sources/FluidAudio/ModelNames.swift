@@ -12,6 +12,8 @@ public enum Repo: String, CaseIterable {
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
+    case qwen3Asr = "alexwengg/qwen3-asr-0.6b-coreml/f32"
+    case qwen3AsrInt8 = "alexwengg/qwen3-asr-0.6b-coreml/int8"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -36,6 +38,10 @@ public enum Repo: String, CaseIterable {
             return "kokoro-82m-coreml"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
+        case .qwen3Asr:
+            return "qwen3-asr-0.6b-coreml/f32"
+        case .qwen3AsrInt8:
+            return "qwen3-asr-0.6b-coreml/int8"
         }
     }
 
@@ -50,6 +56,8 @@ public enum Repo: String, CaseIterable {
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .sortformer:
             return "FluidInference/diar-streaming-sortformer-coreml"
+        case .qwen3Asr, .qwen3AsrInt8:
+            return "alexwengg/qwen3-asr-0.6b-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -62,6 +70,10 @@ public enum Repo: String, CaseIterable {
             return "160ms"
         case .parakeetEou320:
             return "320ms"
+        case .qwen3Asr:
+            return "qwen3-asr-0.6b-coreml-f32"
+        case .qwen3AsrInt8:
+            return "qwen3-asr-0.6b-coreml-int8"
         default:
             return nil
         }
@@ -263,6 +275,23 @@ public enum ModelNames {
         }
     }
 
+    /// Qwen3-ASR model names
+    public enum Qwen3ASR {
+        public static let audioEncoderFile = "qwen3_asr_audio_encoder.mlpackage"
+        public static let embeddingFile = "qwen3_asr_embedding.mlpackage"
+        public static let decoderStackFile = "qwen3_asr_decoder_stack.mlpackage"
+        public static let decoderPrefillFile = "qwen3_asr_decoder_prefill.mlpackage"
+        public static let lmHeadFile = "qwen3_asr_lm_head.mlpackage"
+
+        public static let requiredModels: Set<String> = [
+            audioEncoderFile,
+            embeddingFile,
+            decoderStackFile,
+            decoderPrefillFile,
+            lmHeadFile,
+        ]
+    }
+
     /// TTS model names
     public enum TTS {
 
@@ -330,6 +359,8 @@ public enum ModelNames {
             return ModelNames.TTS.requiredModels
         case .sortformer:
             return ModelNames.Sortformer.requiredModels
+        case .qwen3Asr, .qwen3AsrInt8:
+            return ModelNames.Qwen3ASR.requiredModels
         }
     }
 }
