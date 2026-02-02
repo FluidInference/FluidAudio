@@ -176,39 +176,31 @@ public struct Qwen3AsrModels {
         let compiledPath = directory.appendingPathComponent("\(name).mlmodelc")
         let packagePath = directory.appendingPathComponent("\(name).mlpackage")
 
-        // Attempt 1: load pre-compiled .mlmodelc
+        let modelURL: URL
         if FileManager.default.fileExists(atPath: compiledPath.path) {
-            do {
-                let start = CFAbsoluteTimeGetCurrent()
-                let model = try await MLModel.load(contentsOf: compiledPath, configuration: configuration)
-                let elapsed = CFAbsoluteTimeGetCurrent() - start
-                logger.debug("  \(name): loaded .mlmodelc in \(String(format: "%.2f", elapsed))s")
-                return model
-            } catch {
-                logger.warning(
-                    "  \(name): .mlmodelc failed to load (\(error.localizedDescription)), trying .mlpackage fallback"
-                )
-            }
-        }
+            modelURL = compiledPath
+        } else if FileManager.default.fileExists(atPath: packagePath.path) {
+            // .mlpackage must be compiled to .mlmodelc before loading
+            logger.info("Compiling \(name).mlpackage -> .mlmodelc ...")
+            let compileStart = CFAbsoluteTimeGetCurrent()
+            let compiledURL = try await MLModel.compileModel(at: packagePath)
+            let compileElapsed = CFAbsoluteTimeGetCurrent() - compileStart
+            logger.info("  \(name): compiled in \(String(format: "%.2f", compileElapsed))s")
 
-        // Attempt 2: compile .mlpackage on the fly
-        guard FileManager.default.fileExists(atPath: packagePath.path) else {
+            // Move compiled model next to the package for caching
+            let cachedCompiledPath = compiledPath
+            try? FileManager.default.removeItem(at: cachedCompiledPath)
+            try FileManager.default.copyItem(at: compiledURL, to: cachedCompiledPath)
+            // Clean up the temp compiled model
+            try? FileManager.default.removeItem(at: compiledURL)
+
+            modelURL = cachedCompiledPath
+        } else {
             throw Qwen3AsrError.modelNotFound(name)
         }
 
-        logger.info("Compiling \(name).mlpackage -> .mlmodelc ...")
-        let compileStart = CFAbsoluteTimeGetCurrent()
-        let compiledURL = try await MLModel.compileModel(at: packagePath)
-        let compileElapsed = CFAbsoluteTimeGetCurrent() - compileStart
-        logger.info("  \(name): compiled in \(String(format: "%.2f", compileElapsed))s")
-
-        // Cache the compiled model next to the package
-        try? FileManager.default.removeItem(at: compiledPath)
-        try FileManager.default.copyItem(at: compiledURL, to: compiledPath)
-        try? FileManager.default.removeItem(at: compiledURL)
-
         let start = CFAbsoluteTimeGetCurrent()
-        let model = try await MLModel.load(contentsOf: compiledPath, configuration: configuration)
+        let model = try await MLModel.load(contentsOf: modelURL, configuration: configuration)
         let elapsed = CFAbsoluteTimeGetCurrent() - start
         logger.debug("  \(name): loaded in \(String(format: "%.2f", elapsed))s")
         return model
