@@ -56,6 +56,10 @@ struct FluidAudioCLI {
             await SortformerCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "sortformer-benchmark":
             await SortformerBenchmark.run(arguments: Array(arguments.dropFirst(2)))
+        case "qwen3-benchmark":
+            await Qwen3AsrBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+        case "qwen3-transcribe":
+            await Qwen3TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
