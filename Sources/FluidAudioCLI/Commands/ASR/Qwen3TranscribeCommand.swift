@@ -16,6 +16,7 @@ enum Qwen3TranscribeCommand {
 
         let audioFile = arguments[0]
         var modelDir: String?
+        var language: String?
 
         // Parse options
         var i = 1
@@ -29,16 +30,21 @@ enum Qwen3TranscribeCommand {
                     modelDir = arguments[i + 1]
                     i += 1
                 }
+            case "--language", "-l":
+                if i + 1 < arguments.count {
+                    language = arguments[i + 1]
+                    i += 1
+                }
             default:
                 logger.warning("Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
-        await transcribe(audioFile: audioFile, modelDir: modelDir)
+        await transcribe(audioFile: audioFile, modelDir: modelDir, language: language)
     }
 
-    private static func transcribe(audioFile: String, modelDir: String?) async {
+    private static func transcribe(audioFile: String, modelDir: String?, language: String?) async {
         do {
             // Load models
             let manager = Qwen3AsrManager()
@@ -67,7 +73,7 @@ enum Qwen3TranscribeCommand {
             // Transcribe
             logger.info("Transcribing...")
             let startTime = CFAbsoluteTimeGetCurrent()
-            let text = try await manager.transcribe(audioSamples: samples)
+            let text = try await manager.transcribe(audioSamples: samples, language: language)
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
 
             let rtfx = duration / elapsed
@@ -100,10 +106,21 @@ enum Qwen3TranscribeCommand {
             Options:
                 --help, -h              Show this help message
                 --model-dir <path>      Path to local model directory (skips download)
+                --language, -l <code>   Language hint (e.g., zh, en, ja, ko, yue, ar, fr, de)
+
+            Supported languages:
+                en   English        zh   Chinese (Mandarin)   yue  Cantonese
+                ja   Japanese       ko   Korean               vi   Vietnamese
+                th   Thai           id   Indonesian           ms   Malay
+                hi   Hindi          ar   Arabic               tr   Turkish
+                ru   Russian        de   German               fr   French
+                es   Spanish        pt   Portuguese           it   Italian
+                nl   Dutch          pl   Polish               sv   Swedish
 
             Examples:
                 fluidaudio qwen3-transcribe audio.wav
-                fluidaudio qwen3-transcribe audio.wav --model-dir /path/to/qwen3-asr
+                fluidaudio qwen3-transcribe chinese.wav --language zh
+                fluidaudio qwen3-transcribe meeting.wav --model-dir /path/to/qwen3-asr
             """
         )
     }
