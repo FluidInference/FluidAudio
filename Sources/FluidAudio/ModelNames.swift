@@ -306,14 +306,14 @@ public enum ModelNames {
 
     /// Qwen3-ASR model names
     public enum Qwen3ASR {
-        public static let audioEncoderFile = "qwen3_asr_audio_encoder.mlpackage"
-        public static let embeddingFile = "qwen3_asr_embedding.mlpackage"
-        public static let decoderStatefulFile = "qwen3_asr_decoder_stateful.mlpackage"
-        public static let lmHeadFile = "qwen3_asr_lm_head.mlpackage"
+        public static let audioEncoderFile = "qwen3_asr_audio_encoder.mlmodelc"
+        public static let embeddingFile = "qwen3_asr_embedding.mlmodelc"
+        public static let decoderStatefulFile = "qwen3_asr_decoder_stateful.mlmodelc"
+        public static let lmHeadFile = "qwen3_asr_lm_head.mlmodelc"
 
         /// Legacy model names (non-stateful pipeline, pre macOS 15)
-        public static let decoderStackFile = "qwen3_asr_decoder_stack.mlpackage"
-        public static let decoderPrefillFile = "qwen3_asr_decoder_prefill.mlpackage"
+        public static let decoderStackFile = "qwen3_asr_decoder_stack.mlmodelc"
+        public static let decoderPrefillFile = "qwen3_asr_decoder_prefill.mlmodelc"
 
         public static let requiredModels: Set<String> = [
             audioEncoderFile,
