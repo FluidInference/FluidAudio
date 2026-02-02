@@ -4,6 +4,10 @@ Fluid Audio ships the Silero VAD converted for Core ML together with Silero-styl
 timestamp extraction and streaming hysteresis. If you need help tuning the
 parameters for your use case, reach out on Discord.
 
+For comparison of Silero-VAD compared to other models, see this. We are running v6
+
+https://github.com/snakers4/silero-vad/wiki/Quality-Metrics
+
 ## Quick Start
 
 Need chunk-level probabilities or state for custom pipelines? Call `process(_:)`
