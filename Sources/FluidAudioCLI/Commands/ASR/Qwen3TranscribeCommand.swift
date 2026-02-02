@@ -45,6 +45,11 @@ enum Qwen3TranscribeCommand {
     }
 
     private static func transcribe(audioFile: String, modelDir: String?, language: String?) async {
+        guard #available(macOS 15, iOS 18, *) else {
+            logger.error("Qwen3-ASR requires macOS 15 or later")
+            return
+        }
+
         do {
             // Load models
             let manager = Qwen3AsrManager()

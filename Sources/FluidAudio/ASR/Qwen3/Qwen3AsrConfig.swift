@@ -63,5 +63,9 @@ public struct Qwen3AsrConfig: Sendable {
     public let maxSequenceLength: Int = 4096
     public let maxAudioSeconds: Double = 30.0
 
+    /// Maximum KV cache sequence length for the stateful decoder model.
+    /// Must match the value used during CoreML conversion.
+    public let maxCacheSeqLen: Int = 512
+
     public static let `default` = Qwen3AsrConfig()
 }

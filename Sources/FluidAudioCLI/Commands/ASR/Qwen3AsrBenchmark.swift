@@ -100,6 +100,11 @@ enum Qwen3AsrBenchmark {
         logger.info("  Model dir: \(modelDir ?? "auto-download")")
         logger.info("  Output: \(outputFile)")
 
+        guard #available(macOS 15, iOS 18, *) else {
+            logger.error("Qwen3-ASR requires macOS 15 or later")
+            exit(1)
+        }
+
         do {
             // 1. Load Qwen3-ASR models
             let manager = Qwen3AsrManager()
@@ -139,6 +144,7 @@ enum Qwen3AsrBenchmark {
 
     // MARK: - LibriSpeech Benchmark
 
+    @available(macOS 15, iOS 18, *)
     private static func runLibriSpeechBenchmark(
         manager: Qwen3AsrManager,
         subset: String,
@@ -167,6 +173,7 @@ enum Qwen3AsrBenchmark {
 
     // MARK: - FLEURS Benchmark
 
+    @available(macOS 15, iOS 18, *)
     private static func runFleursBenchmark(
         manager: Qwen3AsrManager,
         languages: [String],
@@ -270,6 +277,7 @@ enum Qwen3AsrBenchmark {
 
     // MARK: - Shared Benchmark Loop
 
+    @available(macOS 15, iOS 18, *)
     private static func runBenchmarkLoop(
         manager: Qwen3AsrManager,
         files: [(fileName: String, audioPath: URL, transcript: String)],

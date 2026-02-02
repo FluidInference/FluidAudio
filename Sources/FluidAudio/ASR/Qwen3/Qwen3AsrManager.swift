@@ -19,6 +19,7 @@ private let logger = Logger(subsystem: "FluidAudio", category: "Qwen3AsrManager"
 ///
 /// This is an LLM-based ASR model, not an encoder-decoder-joiner like Parakeet TDT.
 /// The decoder is autoregressive and generates text token-by-token.
+@available(macOS 15, iOS 18, *)
 public final class Qwen3AsrManager {
     private var models: Qwen3AsrModels?
     private let config: Qwen3AsrConfig
@@ -282,7 +283,7 @@ public final class Qwen3AsrManager {
         return embeddings
     }
 
-    // MARK: - Autoregressive Generation
+    // MARK: - Autoregressive Generation (Stateful Decoder)
 
     private func generate(
         initialEmbeddings: [[Float]],
@@ -290,40 +291,70 @@ public final class Qwen3AsrManager {
         maxNewTokens: Int,
         models: Qwen3AsrModels
     ) async throws -> [Int] {
-        var kvCache = Qwen3KVCache(config: config)
+        // Create fresh KV cache state for this transcription
+        let state = models.decoderStateful.makeState()
         var generatedTokens: [Int] = []
+        var currentPosition = 0
 
-        // Prefill: process all prompt tokens in a single decoder call
         guard promptLength > 0 else {
             throw Qwen3AsrError.generationFailed("Empty prompt")
         }
 
+        // Clamp generation to cache capacity
+        let effectiveMaxNew = min(maxNewTokens, config.maxCacheSeqLen - promptLength)
+        guard effectiveMaxNew > 0 else {
+            throw Qwen3AsrError.generationFailed(
+                "Prompt length \(promptLength) exceeds cache capacity \(config.maxCacheSeqLen)"
+            )
+        }
+
+        // ---- Prefill: process all prompt tokens in a single decoder call ----
         let prefillStart = CFAbsoluteTimeGetCurrent()
-        var currentHidden = try await runDecoderPrefill(
-            embeddings: Array(initialEmbeddings[0..<promptLength]),
-            startPosition: 0,
-            kvCache: &kvCache,
+
+        let (prefillCos, prefillSin) = rope.computeRange(startPosition: 0, count: promptLength)
+        let hiddenArray = try createBatchedHiddenArray(
+            embeddings: Array(initialEmbeddings[0..<promptLength])
+        )
+        let cosArray = try createBatchedPositionArray(values: prefillCos, seqLen: promptLength)
+        let sinArray = try createBatchedPositionArray(values: prefillSin, seqLen: promptLength)
+        let prefillMask = try createPrefillMask(seqLen: promptLength)
+
+        let prefillOutput = try runStatefulDecoder(
+            hiddenStates: hiddenArray,
+            positionCos: cosArray,
+            positionSin: sinArray,
+            mask: prefillMask,
+            state: state,
             models: models
         )
+
+        currentPosition = promptLength
+
+        // Extract last position's hidden state
+        let totalElements = promptLength * config.hiddenSize
+        let prefillPtr = prefillOutput.dataPointer.bindMemory(to: Float.self, capacity: totalElements)
+        let lastOffset = (promptLength - 1) * config.hiddenSize
+        var currentHidden = Array(UnsafeBufferPointer(start: prefillPtr + lastOffset, count: config.hiddenSize))
+
         let prefillTime = CFAbsoluteTimeGetCurrent() - prefillStart
         print(
-            "[Qwen3]   Prefill: \(String(format: "%.3f", prefillTime))s for \(promptLength) tokens (padded to \(Self.prefillSeqLen))"
+            "[Qwen3]   Prefill: \(String(format: "%.3f", prefillTime))s for \(promptLength) tokens (stateful)"
         )
 
-        // Decode phase: generate tokens one at a time
+        // ---- Decode: generate tokens one at a time ----
         let decodeStart = CFAbsoluteTimeGetCurrent()
         var lmHeadTotal = 0.0
         var embedTotal = 0.0
         var decoderTotal = 0.0
-        for step in 0..<maxNewTokens {
-            // LM head: hidden -> logits (with repetition penalty)
+
+        for _ in 0..<effectiveMaxNew {
+            // LM head: hidden -> logits -> argmax
             let t1 = CFAbsoluteTimeGetCurrent()
             let tokenId = try await lmHeadArgmax(
                 hiddenStates: currentHidden, generatedTokens: generatedTokens, models: models
             )
             lmHeadTotal += CFAbsoluteTimeGetCurrent() - t1
 
-            // Check for EOS
             if config.eosTokenIds.contains(tokenId) {
                 break
             }
@@ -335,17 +366,28 @@ public final class Qwen3AsrManager {
             let nextEmbedding = try await embedSingleToken(tokenId: Int32(tokenId), models: models)
             embedTotal += CFAbsoluteTimeGetCurrent() - t2
 
-            // Run decoder for next step
+            // Run stateful decoder step
             let t3 = CFAbsoluteTimeGetCurrent()
-            let position = promptLength + step + 1
-            currentHidden = try await runDecoderStep(
-                hiddenStates: nextEmbedding,
-                position: position,
-                kvCache: &kvCache,
+            let (cos, sin) = rope.compute(position: currentPosition)
+            let hidArr = try createHiddenArray(values: nextEmbedding)
+            let cosArr = try createPositionArray(values: cos)
+            let sinArr = try createPositionArray(values: sin)
+            let endStep = currentPosition + 1
+            let mask = try createDecodeMask(endStep: endStep)
+
+            let output = try runStatefulDecoder(
+                hiddenStates: hidArr,
+                positionCos: cosArr,
+                positionSin: sinArr,
+                mask: mask,
+                state: state,
                 models: models
             )
+
+            let outPtr = output.dataPointer.bindMemory(to: Float.self, capacity: config.hiddenSize)
+            currentHidden = Array(UnsafeBufferPointer(start: outPtr, count: config.hiddenSize))
+            currentPosition += 1
             decoderTotal += CFAbsoluteTimeGetCurrent() - t3
-            // KV cache sequence length updated inside runDecoderStep
         }
 
         let decodeTime = CFAbsoluteTimeGetCurrent() - decodeStart
@@ -360,153 +402,34 @@ public final class Qwen3AsrManager {
         return generatedTokens
     }
 
-    // MARK: - Decoder Step (single token, for autoregressive decode)
+    // MARK: - Stateful Decoder
 
-    private func runDecoderStep(
-        hiddenStates: [Float],
-        position: Int,
-        kvCache: inout Qwen3KVCache,
+    /// Run the stateful decoder for one step (prefill or decode).
+    ///
+    /// The KV cache lives inside the model as persistent state buffers (fp16).
+    /// Each call updates the cache in-place via slice writes — no data is copied in or out.
+    private func runStatefulDecoder(
+        hiddenStates: MLMultiArray,
+        positionCos: MLMultiArray,
+        positionSin: MLMultiArray,
+        mask: MLMultiArray,
+        state: MLState,
         models: Qwen3AsrModels
-    ) async throws -> [Float] {
-        let (positionCos, positionSin) = rope.compute(position: position)
-        let cosArray = try createPositionArray(values: positionCos)
-        let sinArray = try createPositionArray(values: positionSin)
-
-        let hiddenArray = try createHiddenArray(values: hiddenStates)
-        let maskArray = try createCausalMask(
-            cacheDim: kvCache.cacheSequenceDimension, paddingIndices: kvCache.paddingIndices
-        )
-
+    ) throws -> MLMultiArray {
         let input = try MLDictionaryFeatureProvider(dictionary: [
-            "hidden_states": MLFeatureValue(multiArray: hiddenArray),
-            "k_caches": MLFeatureValue(multiArray: kvCache.kCaches),
-            "v_caches": MLFeatureValue(multiArray: kvCache.vCaches),
-            "position_cos": MLFeatureValue(multiArray: cosArray),
-            "position_sin": MLFeatureValue(multiArray: sinArray),
-            "attention_mask": MLFeatureValue(multiArray: maskArray),
+            "hidden_states": MLFeatureValue(multiArray: hiddenStates),
+            "position_cos": MLFeatureValue(multiArray: positionCos),
+            "position_sin": MLFeatureValue(multiArray: positionSin),
+            "attention_mask": MLFeatureValue(multiArray: mask),
         ])
 
-        let output = try await models.decoderStack.prediction(from: input)
+        let output = try models.decoderStateful.prediction(from: input, using: state)
 
-        guard let outputHidden = output.featureValue(for: "output_hidden")?.multiArrayValue,
-            let kCachesOut = output.featureValue(for: "k_caches_out")?.multiArrayValue,
-            let vCachesOut = output.featureValue(for: "v_caches_out")?.multiArrayValue
-        else {
-            throw Qwen3AsrError.decoderFailed("Missing outputs from decoder stack")
+        guard let outputHidden = output.featureValue(for: "output_hidden")?.multiArrayValue else {
+            throw Qwen3AsrError.decoderFailed("Missing output from stateful decoder")
         }
 
-        kvCache.update(kCachesOut: kCachesOut, vCachesOut: vCachesOut)
-
-        // Extract hidden states as [Float]
-        let ptr = outputHidden.dataPointer.bindMemory(to: Float.self, capacity: config.hiddenSize)
-        return Array(UnsafeBufferPointer(start: ptr, count: config.hiddenSize))
-    }
-
-    // MARK: - Batched Prefill
-
-    /// Fixed prefill sequence length — must match DecoderPrefillWrapper.PREFILL_SEQ_LEN.
-    private static let prefillSeqLen = 512
-
-    /// Process all prompt embeddings in a single decoder call using the fixed-shape prefill model.
-    ///
-    /// Pads embeddings to `prefillSeqLen`, runs one prediction call, extracts
-    /// the last real position's hidden state, and trims the KV cache to discard
-    /// padded entries.
-    ///
-    /// Falls back to sequential processing if the prompt exceeds prefillSeqLen.
-    private func runDecoderPrefill(
-        embeddings: [[Float]],
-        startPosition: Int,
-        kvCache: inout Qwen3KVCache,
-        models: Qwen3AsrModels
-    ) async throws -> [Float] {
-        let realLen = embeddings.count
-
-        // Fall back to sequential if prompt exceeds fixed prefill capacity
-        guard realLen <= Self.prefillSeqLen else {
-            logger.info("Prompt \(realLen) > prefill capacity \(Self.prefillSeqLen), falling back to sequential")
-            return try await runSequentialPrefill(
-                embeddings: embeddings, startPosition: startPosition,
-                kvCache: &kvCache, models: models
-            )
-        }
-
-        // Pad embeddings to prefillSeqLen with zeros
-        var paddedEmbeddings = embeddings
-        let zeroPad = [Float](repeating: 0.0, count: config.hiddenSize)
-        for _ in realLen..<Self.prefillSeqLen {
-            paddedEmbeddings.append(zeroPad)
-        }
-
-        // Compute RoPE for all prefillSeqLen positions
-        let (positionCos, positionSin) = rope.computeRange(
-            startPosition: startPosition, count: Self.prefillSeqLen
-        )
-        let cosArray = try createBatchedPositionArray(values: positionCos, seqLen: Self.prefillSeqLen)
-        let sinArray = try createBatchedPositionArray(values: positionSin, seqLen: Self.prefillSeqLen)
-        let hiddenArray = try createBatchedHiddenArray(embeddings: paddedEmbeddings)
-
-        // Use the fixed-shape prefill model (no attention_mask input — baked in)
-        let input = try MLDictionaryFeatureProvider(dictionary: [
-            "hidden_states": MLFeatureValue(multiArray: hiddenArray),
-            "k_caches": MLFeatureValue(multiArray: kvCache.kCaches),
-            "v_caches": MLFeatureValue(multiArray: kvCache.vCaches),
-            "position_cos": MLFeatureValue(multiArray: cosArray),
-            "position_sin": MLFeatureValue(multiArray: sinArray),
-        ])
-
-        let output = try await models.decoderPrefill.prediction(from: input)
-
-        guard let outputHidden = output.featureValue(for: "output_hidden")?.multiArrayValue,
-            let kCachesOut = output.featureValue(for: "k_caches_out")?.multiArrayValue,
-            let vCachesOut = output.featureValue(for: "v_caches_out")?.multiArrayValue
-        else {
-            throw Qwen3AsrError.decoderFailed("Missing outputs from decoder prefill")
-        }
-
-        // Update cache with full prefillSeqLen, then trim to discard padded entries
-        kvCache.update(kCachesOut: kCachesOut, vCachesOut: vCachesOut, tokenCount: Self.prefillSeqLen)
-        kvCache.trim(toSequenceLength: realLen)
-
-        // Strip the dummy entry from the KV cache.
-        // During prefill the dummy is masked with -1e9, but CoreML's masking becomes
-        // numerically unstable as cache grows. Removing it before decode prevents
-        // catastrophic divergence on some files.
-        kvCache.stripDummy()
-
-        // Pad the cache to HEAD_DIM (128) to skip a CoreML attention bad zone.
-        // CoreML's coremltools conversion produces catastrophic errors when the KV
-        // cache sequence dimension is in [112, 126]. Padding ensures the cache starts
-        // at 128 and only grows from there, never entering the bad zone during decode.
-        kvCache.padToMinimumLength(config.headDim)
-
-        // Extract the last REAL position's hidden state
-        let totalElements = Self.prefillSeqLen * config.hiddenSize
-        let ptr = outputHidden.dataPointer.bindMemory(to: Float.self, capacity: totalElements)
-        let lastOffset = (realLen - 1) * config.hiddenSize
-        return Array(UnsafeBufferPointer(start: ptr + lastOffset, count: config.hiddenSize))
-    }
-
-    /// Fallback: process prompt tokens one at a time when prompt exceeds prefill capacity.
-    private func runSequentialPrefill(
-        embeddings: [[Float]],
-        startPosition: Int,
-        kvCache: inout Qwen3KVCache,
-        models: Qwen3AsrModels
-    ) async throws -> [Float] {
-        var currentHidden = embeddings[0]
-        for i in 0..<embeddings.count {
-            currentHidden = try await runDecoderStep(
-                hiddenStates: embeddings[i],
-                position: startPosition + i,
-                kvCache: &kvCache,
-                models: models
-            )
-        }
-        // Strip dummy before decode (same as batched prefill path)
-        kvCache.stripDummy()
-        kvCache.padToMinimumLength(config.headDim)
-        return currentHidden
+        return outputHidden
     }
 
     // MARK: - LM Head
@@ -649,23 +572,28 @@ public final class Qwen3AsrManager {
 
     // MARK: - MLMultiArray Helpers
 
-    /// Create attention mask for single-token decode: [1, 1, 1, cacheDim+1].
-    ///
-    /// All positions are 0.0 (attend) except padding positions which are -1e9 (ignore).
-    /// Padding positions exist when the KV cache was padded to skip a CoreML bad zone.
-    private func createCausalMask(cacheDim: Int, paddingIndices: Range<Int>?) throws -> MLMultiArray {
-        let totalDim = cacheDim + 1  // cache entries + 1 new token
-        let shape: [NSNumber] = [1, 1, 1, NSNumber(value: totalDim)]
+    /// Create lower-triangular causal mask for prefill: [1, 1, seqLen, seqLen].
+    /// Positions where j > i get -1e9 (masked), positions where j <= i get 0.0 (attend).
+    private func createPrefillMask(seqLen: Int) throws -> MLMultiArray {
+        let shape: [NSNumber] = [1, 1, NSNumber(value: seqLen), NSNumber(value: seqLen)]
         let array = try MLMultiArray(shape: shape, dataType: .float32)
-        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: totalDim)
-        if let padding = paddingIndices {
-            for i in 0..<totalDim {
-                ptr[i] = padding.contains(i) ? -1e9 : 0.0
+        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: seqLen * seqLen)
+        for i in 0..<seqLen {
+            for j in 0..<seqLen {
+                ptr[i * seqLen + j] = j > i ? Float(-1e9) : 0.0
             }
-        } else {
-            for i in 0..<totalDim {
-                ptr[i] = 0.0
-            }
+        }
+        return array
+    }
+
+    /// Create decode mask for single-token step: [1, 1, 1, endStep].
+    /// All zeros — attend to all valid cached positions.
+    private func createDecodeMask(endStep: Int) throws -> MLMultiArray {
+        let shape: [NSNumber] = [1, 1, 1, NSNumber(value: endStep)]
+        let array = try MLMultiArray(shape: shape, dataType: .float32)
+        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: endStep)
+        for i in 0..<endStep {
+            ptr[i] = 0.0
         }
         return array
     }
