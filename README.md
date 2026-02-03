@@ -42,10 +42,10 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 | --- | --- |
 | **[Spokenly Real-time ASR](https://www.youtube.com/watch?v=9fXKKkyL8JE)** | Video demonstration of FluidAudio's transcription accuracy and speed |
 | **[Senko Integration](https://x.com/hamza_q_/status/1970228971657928995)** | Python Speaker diarization on Mac using FluidAudio's segmentation model |
-| **[Mobile TTS](https://x.com/sach1n/status/1977817056507793521)** | Voice on mobile video using FluidAudio's Kokoro and Silero models |
+| **[Kokoro TTS](https://x.com/sach1n/status/1977817056507793521)** | Text-to-speech demo using FluidAudio's Kokoro and Silero models on iOS |
 | **[Parakeet Realtime EOU](https://x.com/sach1n/status/2003210626659680762)** | Parakeet streaming ASR with end-of-utterance detection on iOS |
 | **[Sortformer Diarization](https://x.com/Alex_tra_memory/status/2010530705667661843)** | Sortformer for speaker diarization with overlapping speech on iOS |
-| **[PocketTTS](https://x.com/sach1n/status/2017627657006158296)** | Lightweight text-to-speech using PocketTTS backend on iOS |
+| **[PocketTTS](https://x.com/sach1n/status/2017627657006158296)** | Streaming text-to-speech using PocketTTS on iOS |
 
 ## Showcase
 
