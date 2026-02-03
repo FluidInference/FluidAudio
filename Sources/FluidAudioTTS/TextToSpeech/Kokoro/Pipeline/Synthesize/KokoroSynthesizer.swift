@@ -55,7 +55,7 @@ public struct KokoroSynthesizer {
     static func currentModelCache() throws -> KokoroModelCache {
         guard let cache = Context.modelCache else {
             throw TTSError.processingFailed(
-                "KokoroSynthesizer requires a model cache context. Use TtSManager or withModelCache(_:operation:)."
+                "KokoroSynthesizer requires a model cache context. Use KokoroTtsManager or withModelCache(_:operation:)."
             )
         }
         return cache
@@ -64,7 +64,7 @@ public struct KokoroSynthesizer {
     static func currentLexiconAssets() throws -> LexiconAssetManager {
         guard let assets = Context.lexiconAssets else {
             throw TTSError.processingFailed(
-                "KokoroSynthesizer requires lexicon assets context. Use TtSManager or withLexiconAssets(_:operation:)."
+                "KokoroSynthesizer requires lexicon assets context. Use KokoroTtsManager or withLexiconAssets(_:operation:)."
             )
         }
         return assets

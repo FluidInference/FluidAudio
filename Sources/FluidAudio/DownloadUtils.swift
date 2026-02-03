@@ -201,7 +201,7 @@ public class DownloadUtils {
         }
 
         // Get all files recursively using HuggingFace API
-        var filesToDownload: [String] = []
+        var filesToDownload: [(path: String, size: Int)] = []
 
         func listDirectory(path: String) async throws {
             let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
@@ -256,7 +256,8 @@ public class DownloadUtils {
                             || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
                     }
                     if shouldInclude {
-                        filesToDownload.append(itemPath)
+                        let fileSize = item["size"] as? Int ?? -1
+                        filesToDownload.append((path: itemPath, size: fileSize))
                     }
                 }
             }
@@ -267,11 +268,11 @@ public class DownloadUtils {
         logger.info("Found \(filesToDownload.count) files to download")
 
         // Download each file
-        for (index, filePath) in filesToDownload.enumerated() {
+        for (index, file) in filesToDownload.enumerated() {
             // Strip subPath prefix when saving locally
-            var localPath = filePath
-            if let sub = subPath, filePath.hasPrefix("\(sub)/") {
-                localPath = String(filePath.dropFirst(sub.count + 1))
+            var localPath = file.path
+            if let sub = subPath, file.path.hasPrefix("\(sub)/") {
+                localPath = String(file.path.dropFirst(sub.count + 1))
             }
             let destPath = repoPath.appendingPathComponent(localPath)
 
@@ -286,8 +287,15 @@ public class DownloadUtils {
                 withIntermediateDirectories: true
             )
 
+            // HuggingFace returns 500 for 0-byte files — create empty file locally
+            if file.size == 0 {
+                FileManager.default.createFile(atPath: destPath.path, contents: Data())
+                continue
+            }
+
             // Download file (use original path for HuggingFace URL)
-            let encodedFilePath = filePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? filePath
+            let encodedFilePath =
+                file.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file.path
             let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedFilePath)
             let request = authorizedRequest(url: fileURL)
 
@@ -300,12 +308,12 @@ public class DownloadUtils {
             if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
                 throw HuggingFaceDownloadError.rateLimited(
                     statusCode: httpResponse.statusCode,
-                    message: "Rate limited while downloading \(filePath)")
+                    message: "Rate limited while downloading \(file.path)")
             }
 
             guard (200..<300).contains(httpResponse.statusCode) else {
                 throw HuggingFaceDownloadError.downloadFailed(
-                    path: filePath,
+                    path: file.path,
                     underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
                 )
             }

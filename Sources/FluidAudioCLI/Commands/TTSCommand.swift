@@ -134,6 +134,7 @@ public struct TTS {
         var text: String? = nil
         var benchmarkMode = false
         var deEss = true
+        var backend: TtsBackend = .kokoro
 
         var i = 0
         while i < arguments.count {
@@ -180,6 +181,19 @@ public struct TTS {
                     lexiconPath = arguments[i + 1]
                     i += 1
                 }
+            case "--backend":
+                if i + 1 < arguments.count {
+                    let value = arguments[i + 1].lowercased()
+                    switch value {
+                    case "kokoro":
+                        backend = .kokoro
+                    case "pocket", "pockettts":
+                        backend = .pocketTts
+                    default:
+                        logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro")
+                    }
+                    i += 1
+                }
             case "--auto-download":
                 // No-op: downloads are always ensured by the CLI
                 ()
@@ -214,12 +228,19 @@ public struct TTS {
             return
         }
 
+        if backend == .pocketTts {
+            await runPocketTts(
+                text: text, output: output, voice: voice, deEss: deEss,
+                metricsPath: metricsPath)
+            return
+        }
+
         do {
             // Timing buckets
             let tStart = Date()
 
             let customLexicon = try loadCustomLexicon(from: lexiconPath)
-            let manager = TtSManager(customLexicon: customLexicon)
+            let manager = KokoroTtsManager(customLexicon: customLexicon)
             let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
             let voiceOverride = requestedVoice.isEmpty ? nil : requestedVoice
             let preloadVoices = voiceOverride.map { Set([$0]) }
@@ -449,6 +470,121 @@ public struct TTS {
         }
     }
 
+    private static func runPocketTts(
+        text: String, output: String, voice: String, deEss: Bool,
+        metricsPath: String?
+    ) async {
+        do {
+            let tStart = Date()
+            let pocketVoice =
+                voice == TtsConstants.recommendedVoice
+                ? PocketTtsConstants.defaultVoice : voice
+            let manager = PocketTtsManager(defaultVoice: pocketVoice)
+
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+
+            let tSynth0 = Date()
+            let wav = try await manager.synthesize(
+                text: text, voice: pocketVoice, deEss: deEss)
+            let tSynth1 = Date()
+
+            let outURL = {
+                let expanded = (output as NSString).expandingTildeInPath
+                if expanded.hasPrefix("/") {
+                    return URL(fileURLWithPath: expanded)
+                }
+                let cwd = URL(
+                    fileURLWithPath: FileManager.default.currentDirectoryPath,
+                    isDirectory: true)
+                return cwd.appendingPathComponent(expanded)
+            }()
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try wav.write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let totalS = tSynth1.timeIntervalSince(tStart)
+            let sampleRate = Double(PocketTtsConstants.audioSampleRate)
+            let payload = max(0, wav.count - 44)
+            let audioSecs = Double(payload) / (sampleRate * 2.0)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+
+            logger.info("PocketTTS synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Total: \(String(format: "%.3f", totalS))s")
+            logger.info("  Output: \(outURL.path)")
+
+            // ASR round-trip evaluation
+            if metricsPath != nil {
+                logger.info("--- Running ASR for TTS→STT evaluation ---")
+                var asrHypothesis: String? = nil
+                var werValue: Double? = nil
+
+                do {
+                    let asrModels = try await AsrModels.downloadAndLoad()
+                    let asr = AsrManager()
+                    try await asr.initialize(models: asrModels)
+
+                    let transcription = try await asr.transcribe(outURL)
+                    asrHypothesis = transcription.text
+
+                    let werMetrics = WERCalculator.calculateWERMetrics(
+                        hypothesis: transcription.text, reference: text)
+                    werValue = werMetrics.wer
+
+                    logger.info("Reference:  \(text)")
+                    logger.info("Hypothesis: \(transcription.text)")
+                    logger.info(String(format: "WER: %.1f%%", werValue! * 100))
+
+                    asr.cleanup()
+                } catch {
+                    logger.warning("ASR evaluation failed: \(error.localizedDescription)")
+                }
+
+                if let metricsPath {
+                    var metricsDict: [String: Any] = [
+                        "backend": "pockettts",
+                        "text": text,
+                        "voice": pocketVoice,
+                        "output": outURL.path,
+                        "model_load_time_s": loadS,
+                        "inference_time_s": synthS,
+                        "audio_duration_s": audioSecs,
+                        "realtime_speed": rtfx,
+                        "total_time_s": totalS,
+                    ]
+                    if let asrHypothesis {
+                        metricsDict["asr_hypothesis"] = asrHypothesis
+                    }
+                    if let werValue {
+                        metricsDict["wer"] = werValue
+                    }
+
+                    let artifactsRoot = try ensureArtifactsRoot()
+                    let mURL = resolveOutputURL(
+                        metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+                    try FileManager.default.createDirectory(
+                        at: mURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    let json = try JSONSerialization.data(
+                        withJSONObject: metricsDict, options: [.prettyPrinted])
+                    try json.write(to: mURL)
+                    logger.info("Metrics saved: \(mURL.path)")
+                }
+            }
+        } catch {
+            logger.error("PocketTTS Error: \(error)")
+            print("PocketTTS failed: \(error)")
+            exit(1)
+        }
+    }
+
     private static func printUsage() {
         print(
             """
@@ -456,8 +592,9 @@ public struct TTS {
 
             Options:
               --output, -o         Output WAV path (default: output.wav)
-              --voice, -v          Voice name (default: af_heart)
-              --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format)
+              --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS)
+              --backend            TTS backend: kokoro (default) or pocket
+              --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)
               --metrics            Write timing metrics to a JSON file (also runs ASR for evaluation)
@@ -496,7 +633,7 @@ extension TTS {
     ) async {
         do {
             let customLexicon = try loadCustomLexicon(from: lexiconPath)
-            let manager = TtSManager(customLexicon: customLexicon)
+            let manager = KokoroTtsManager(customLexicon: customLexicon)
             let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedVoice = requestedVoice.isEmpty ? nil : requestedVoice
             let preloadVoices = normalizedVoice.map { Set([$0]) }
