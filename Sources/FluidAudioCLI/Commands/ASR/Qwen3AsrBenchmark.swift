@@ -3,6 +3,18 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
+/// Protocol for Qwen3-ASR transcription (allows both 2-model and 3-model pipelines)
+@available(macOS 15, iOS 18, *)
+protocol Qwen3Transcriber {
+    func transcribe(audioSamples: [Float], language: String?, maxNewTokens: Int) async throws -> String
+}
+
+@available(macOS 15, iOS 18, *)
+extension Qwen3AsrManager: Qwen3Transcriber {}
+
+@available(macOS 15, iOS 18, *)
+extension Qwen3AsrManagerFull: Qwen3Transcriber {}
+
 /// Benchmark for Qwen3-ASR supporting LibriSpeech (English) and FLEURS (multilingual).
 ///
 /// Runs inference through `Qwen3AsrManager` with WER/CER evaluation.
@@ -37,6 +49,7 @@ enum Qwen3AsrBenchmark {
         var outputFile = "qwen3_asr_benchmark_results.json"
         var languages: [String] = ["cmn_hans_cn"]
         var fleursDir: String? = nil
+        var useFull = false  // Use 2-model pipeline with Swift-side embedding
 
         if arguments.contains("--help") || arguments.contains("-h") {
             printUsage()
@@ -83,6 +96,8 @@ enum Qwen3AsrBenchmark {
                     fleursDir = arguments[i + 1]
                     i += 1
                 }
+            case "--full":
+                useFull = true
             default:
                 break
             }
@@ -90,6 +105,7 @@ enum Qwen3AsrBenchmark {
         }
 
         logger.info("Qwen3-ASR Benchmark")
+        logger.info("  Pipeline: \(useFull ? "2-model (Swift embedding)" : "3-model")")
         logger.info("  Dataset: \(dataset)")
         if dataset == "librispeech" {
             logger.info("  Subset: \(subset)")
@@ -107,14 +123,29 @@ enum Qwen3AsrBenchmark {
 
         do {
             // 1. Load Qwen3-ASR models
-            let manager = Qwen3AsrManager()
-            if let dir = modelDir {
-                logger.info("Loading models from \(dir)")
-                try await manager.loadModels(from: URL(fileURLWithPath: dir))
+            let manager: any Qwen3Transcriber
+            if useFull {
+                let fullManager = Qwen3AsrManagerFull()
+                if let dir = modelDir {
+                    logger.info("Loading 2-model pipeline from \(dir)")
+                    try await fullManager.loadModels(from: URL(fileURLWithPath: dir))
+                } else {
+                    logger.info("Downloading Qwen3-ASR models (2-model pipeline)...")
+                    let cacheDir = try await Qwen3AsrModelsFull.download()
+                    try await fullManager.loadModels(from: cacheDir)
+                }
+                manager = fullManager
             } else {
-                logger.info("Downloading Qwen3-ASR models...")
-                let cacheDir = try await Qwen3AsrModels.download()
-                try await manager.loadModels(from: cacheDir)
+                let standardManager = Qwen3AsrManager()
+                if let dir = modelDir {
+                    logger.info("Loading 3-model pipeline from \(dir)")
+                    try await standardManager.loadModels(from: URL(fileURLWithPath: dir))
+                } else {
+                    logger.info("Downloading Qwen3-ASR models (3-model pipeline)...")
+                    let cacheDir = try await Qwen3AsrModels.download()
+                    try await standardManager.loadModels(from: cacheDir)
+                }
+                manager = standardManager
             }
 
             // 2. Collect files based on dataset
@@ -146,7 +177,7 @@ enum Qwen3AsrBenchmark {
 
     @available(macOS 15, iOS 18, *)
     private static func runLibriSpeechBenchmark(
-        manager: Qwen3AsrManager,
+        manager: any Qwen3Transcriber,
         subset: String,
         maxFiles: Int?,
         outputFile: String
@@ -175,7 +206,7 @@ enum Qwen3AsrBenchmark {
 
     @available(macOS 15, iOS 18, *)
     private static func runFleursBenchmark(
-        manager: Qwen3AsrManager,
+        manager: any Qwen3Transcriber,
         languages: [String],
         maxFiles: Int?,
         fleursDir: String?,
@@ -279,7 +310,7 @@ enum Qwen3AsrBenchmark {
 
     @available(macOS 15, iOS 18, *)
     private static func runBenchmarkLoop(
-        manager: Qwen3AsrManager,
+        manager: any Qwen3Transcriber,
         files: [(fileName: String, audioPath: URL, transcript: String)],
         language: String?
     ) async throws -> [Qwen3BenchmarkResult] {
@@ -296,7 +327,8 @@ enum Qwen3AsrBenchmark {
                 let inferenceStart = CFAbsoluteTimeGetCurrent()
                 let hypothesis = try await manager.transcribe(
                     audioSamples: samples,
-                    language: language
+                    language: language,
+                    maxNewTokens: 512
                 )
                 let inferenceTime = CFAbsoluteTimeGetCurrent() - inferenceStart
 
@@ -498,6 +530,7 @@ enum Qwen3AsrBenchmark {
                 --model-dir <path>      Local model directory (skips download)
                 --fleurs-dir <path>     FLEURS data directory (default: ~/Library/Application Support/FluidAudio/FLEURS)
                 --output <file>         Output JSON path (default: qwen3_asr_benchmark_results.json)
+                --full                  Use 2-model pipeline with Swift-side embedding (default: 3-model)
                 --help, -h              Show this help
 
             Examples:

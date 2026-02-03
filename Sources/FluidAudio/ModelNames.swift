@@ -286,16 +286,25 @@ public enum ModelNames {
         public static let embeddingFile = "qwen3_asr_embedding.mlmodelc"
         public static let decoderStatefulFile = "qwen3_asr_decoder_stateful.mlmodelc"
         public static let decoderFullFile = "qwen3_asr_decoder_full.mlmodelc"
+        public static let embeddingsFile = "qwen3_asr_embeddings.bin"
 
         /// Legacy model names (lmHead is now fused into decoder_stateful)
         public static let lmHeadFile = "qwen3_asr_lm_head.mlmodelc"
         public static let decoderStackFile = "qwen3_asr_decoder_stack.mlmodelc"
         public static let decoderPrefillFile = "qwen3_asr_decoder_prefill.mlmodelc"
 
+        /// Required models for 3-model pipeline (with embedding CoreML model)
         public static let requiredModels: Set<String> = [
             audioEncoderFile,
             embeddingFile,
             decoderStatefulFile,
+        ]
+
+        /// Required files for 2-model pipeline (with Swift-side embedding)
+        public static let requiredModelsFull: Set<String> = [
+            audioEncoderFile,
+            decoderStatefulFile,
+            embeddingsFile,
         ]
     }
 
