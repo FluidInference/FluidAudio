@@ -13,8 +13,9 @@ final class FrameworkLinkTests: XCTestCase {
         // Simply importing and using FluidAudio tests that ESpeakNG is properly linked
         // If the framework structure is broken (binary name wrong, symlinks broken, etc),
         // this would fail with dyld errors
-        let manager = TtSManager()
-        XCTAssertNotNil(manager, "TtSManager should be instantiable, meaning ESpeakNG framework is properly linked")
+        let manager = KokoroTtsManager()
+        XCTAssertNotNil(
+            manager, "KokoroTtsManager should be instantiable, meaning ESpeakNG framework is properly linked")
     }
 
     /// Test that the binary can actually be found by dyld at runtime.
@@ -23,7 +24,7 @@ final class FrameworkLinkTests: XCTestCase {
     /// - Symlink chain is broken
     /// - Framework not embedded correctly
     func testFrameworkBinaryResolution() async throws {
-        let manager = TtSManager()
+        let manager = KokoroTtsManager()
 
         XCTExpectFailure("Framework usage may fail in test environment without models", strict: false)
 
@@ -45,7 +46,7 @@ final class FrameworkLinkTests: XCTestCase {
     /// Test that TTS functionality is accessible (requires ESpeakNG framework).
     /// This ensures the framework is not just linked but properly functional.
     func testTTSFrameworkFunctionality() async throws {
-        let manager = TtSManager()
+        let manager = KokoroTtsManager()
 
         XCTExpectFailure("TTS may fail in CI without models", strict: false)
 
