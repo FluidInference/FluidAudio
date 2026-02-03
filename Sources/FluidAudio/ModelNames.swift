@@ -280,6 +280,25 @@ public enum ModelNames {
         }
     }
 
+    /// Qwen3-ASR model names
+    public enum Qwen3ASR {
+        public static let audioEncoderFile = "qwen3_asr_audio_encoder.mlmodelc"
+        public static let embeddingFile = "qwen3_asr_embedding.mlmodelc"
+        public static let decoderStatefulFile = "qwen3_asr_decoder_stateful.mlmodelc"
+        public static let decoderFullFile = "qwen3_asr_decoder_full.mlmodelc"
+
+        /// Legacy model names (lmHead is now fused into decoder_stateful)
+        public static let lmHeadFile = "qwen3_asr_lm_head.mlmodelc"
+        public static let decoderStackFile = "qwen3_asr_decoder_stack.mlmodelc"
+        public static let decoderPrefillFile = "qwen3_asr_decoder_prefill.mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            audioEncoderFile,
+            embeddingFile,
+            decoderStatefulFile,
+        ]
+    }
+
     /// PocketTTS model names (flow-matching language model TTS)
     public enum PocketTTS {
         public static let condStep = "cond_step"
@@ -301,25 +320,6 @@ public enum ModelNames {
             flowDecoderFile,
             mimiDecoderFile,
             constantsBinDir,
-        ]
-    }
-
-    /// Qwen3-ASR model names
-    public enum Qwen3ASR {
-        public static let audioEncoderFile = "qwen3_asr_audio_encoder.mlmodelc"
-        public static let embeddingFile = "qwen3_asr_embedding.mlmodelc"
-        public static let decoderStatefulFile = "qwen3_asr_decoder_stateful.mlmodelc"
-        public static let lmHeadFile = "qwen3_asr_lm_head.mlmodelc"
-
-        /// Legacy model names (non-stateful pipeline, pre macOS 15)
-        public static let decoderStackFile = "qwen3_asr_decoder_stack.mlmodelc"
-        public static let decoderPrefillFile = "qwen3_asr_decoder_prefill.mlmodelc"
-
-        public static let requiredModels: Set<String> = [
-            audioEncoderFile,
-            embeddingFile,
-            decoderStatefulFile,
-            lmHeadFile,
         ]
     }
 
