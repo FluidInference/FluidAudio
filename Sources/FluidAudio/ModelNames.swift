@@ -12,6 +12,7 @@ public enum Repo: String, CaseIterable {
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
+    case pocketTts = "FluidInference/pocket-tts-coreml"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -36,6 +37,8 @@ public enum Repo: String, CaseIterable {
             return "kokoro-82m-coreml"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
+        case .pocketTts:
+            return "pocket-tts-coreml"
         }
     }
 
@@ -78,6 +81,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-eou-streaming/320ms"
         case .sortformer:
             return "sortformer"
+        case .pocketTts:
+            return "pocket-tts"
         default:
             return name
         }
@@ -263,6 +268,30 @@ public enum ModelNames {
         }
     }
 
+    /// PocketTTS model names (flow-matching language model TTS)
+    public enum PocketTTS {
+        public static let condStep = "cond_step"
+        public static let flowlmStep = "flowlm_step"
+        public static let flowDecoder = "flow_decoder"
+        public static let mimiDecoder = "mimi_decoder_v2"
+
+        public static let condStepFile = condStep + ".mlmodelc"
+        public static let flowlmStepFile = flowlmStep + ".mlmodelc"
+        public static let flowDecoderFile = flowDecoder + ".mlmodelc"
+        public static let mimiDecoderFile = mimiDecoder + ".mlmodelc"
+
+        /// Directory containing binary constants, tokenizer, and voice data.
+        public static let constantsBinDir = "constants_bin"
+
+        public static let requiredModels: Set<String> = [
+            condStepFile,
+            flowlmStepFile,
+            flowDecoderFile,
+            mimiDecoderFile,
+            constantsBinDir,
+        ]
+    }
+
     /// TTS model names
     public enum TTS {
 
@@ -328,6 +357,8 @@ public enum ModelNames {
             return ModelNames.Diarizer.requiredModels
         case .kokoro:
             return ModelNames.TTS.requiredModels
+        case .pocketTts:
+            return ModelNames.PocketTTS.requiredModels
         case .sortformer:
             return ModelNames.Sortformer.requiredModels
         }

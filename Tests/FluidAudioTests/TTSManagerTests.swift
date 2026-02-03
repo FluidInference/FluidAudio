@@ -4,13 +4,13 @@ import XCTest
 import FluidAudioTTS
 @testable import FluidAudio
 
-final class TtSManagerTests: XCTestCase {
+final class KokoroTtsManagerTests: XCTestCase {
 
-    var manager: TtSManager!
+    var manager: KokoroTtsManager!
 
     override func setUp() {
         super.setUp()
-        manager = TtSManager()
+        manager = KokoroTtsManager()
     }
 
     override func tearDown() {
@@ -133,7 +133,7 @@ final class TtSManagerTests: XCTestCase {
             "Third text",
         ]
 
-        // Swift 6: TtSManager is not Sendable, so use sequential synthesis
+        // Swift 6: KokoroTtsManager is not Sendable, so use sequential synthesis
         var results: [Data] = []
         for text in texts {
             let result = try await manager.synthesize(text: text)
