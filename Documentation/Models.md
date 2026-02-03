@@ -44,7 +44,7 @@ TDT models process audio in chunks (~15s with overlap) as batch operations. Fast
 | Model | Description | Context |
 |-------|-------------|---------|
 | **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Requires espeak for phonemization. | First TTS backend added. |
-| **PocketTTS** | Second TTS backend (~155M params). Upgrade over Kokoro with much better dynamic audio chunking. No espeak dependency. | |
+| **PocketTTS** | Second TTS backend (~155M params). Upgrade over Kokoro with much better dynamic audio chunking. No espeak dependency. | Improvement over Kokoro TTS: simpler chunking, dynammic inputs & longer token counts |
 
 ## Evaluated Models (Not Shipped)
 
