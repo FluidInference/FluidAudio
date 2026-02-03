@@ -55,7 +55,7 @@ extension AsrManager {
 
         // ChunkProcessor handles stateless chunked transcription for long audio
         let processor = ChunkProcessor(audioSamples: audioSamples)
-        return try await processor.process(
+        var result = try await processor.process(
             using: self,
             startTime: startTime,
             progressHandler: { [weak self] progress in
@@ -63,6 +63,13 @@ extension AsrManager {
                 await self.progressEmitter.report(progress: progress)
             }
         )
+
+        // Auto-apply vocabulary rescoring when configured
+        if vocabBoostingEnabled {
+            result = await applyVocabularyRescoring(result: result, audioSamples: audioSamples)
+        }
+
+        return result
     }
 
     internal func executeMLInferenceWithTimings(
