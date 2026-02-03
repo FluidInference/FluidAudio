@@ -46,6 +46,14 @@ TDT models process audio in chunks (~15s with overlap) as batch operations. Fast
 | **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Requires espeak for phonemization. | First TTS backend added. |
 | **PocketTTS** | Second TTS backend (~155M params). Upgrade over Kokoro with much better dynamic audio chunking. No espeak dependency. | |
 
+## Evaluated Models (Not Shipped)
+
+Models we converted and tested but haven't shipped yet — either still in development or superseded by better approaches.
+
+| Model | Status |
+|-------|--------|
+| **Nemotron Speech Streaming 0.6B** ([#254](https://github.com/FluidInference/FluidAudio/pull/254)) | Streaming model with 1.12s chunks. Not significantly faster or more accurate than existing Parakeet models: streaming (EOU) and batch (TDT) modes. |
+
 ## Model Sources
 
 | Model | HuggingFace Repo |
