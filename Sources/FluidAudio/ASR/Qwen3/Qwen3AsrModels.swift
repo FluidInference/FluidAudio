@@ -11,13 +11,11 @@ private let logger = Logger(subsystem: "FluidAudio", category: "Qwen3AsrModels")
 /// Components:
 /// - `audioEncoder`: mel spectrogram -> 1024-dim audio features (single window)
 /// - `embedding`: token IDs -> 1024-dim embeddings
-/// - `decoderStateful`: stateful decoder with internal KV cache (macOS 15+)
-/// - `lmHead`: hidden states -> 151936-dim logits (includes final norm)
+/// - `decoderStateful`: stateful decoder with fused lmHead, outputs logits directly (macOS 15+)
 public struct Qwen3AsrModels {
     public let audioEncoder: MLModel
     public let embedding: MLModel
     public let decoderStateful: MLModel
-    public let lmHead: MLModel
     public let vocabulary: [Int: String]
     public let config: Qwen3AsrConfig
 
@@ -26,10 +24,9 @@ public struct Qwen3AsrModels {
     /// Expected directory structure:
     /// ```
     /// qwen3-asr/
-    ///   qwen3_asr_audio_encoder.mlpackage/  (or .mlmodelc)
-    ///   qwen3_asr_embedding.mlpackage/
-    ///   qwen3_asr_lm_head.mlpackage/
-    ///   qwen3_asr_decoder_stateful.mlpackage/
+    ///   qwen3_asr_audio_encoder.mlmodelc
+    ///   qwen3_asr_embedding.mlmodelc
+    ///   qwen3_asr_decoder_stateful.mlmodelc  (fused with lmHead)
     ///   vocab.json
     /// ```
     public static func load(
@@ -62,14 +59,7 @@ public struct Qwen3AsrModels {
             configuration: decodeConfig
         )
 
-        // Load LM head
-        let lmHead = try await loadModel(
-            named: "qwen3_asr_lm_head",
-            from: directory,
-            configuration: decodeConfig
-        )
-
-        // Load stateful decoder (unified prefill + decode with internal KV cache)
+        // Load stateful decoder (fused with lmHead, outputs logits directly)
         let decoderStateful = try await loadModel(
             named: "qwen3_asr_decoder_stateful",
             from: directory,
@@ -86,7 +76,6 @@ public struct Qwen3AsrModels {
             audioEncoder: audioEncoder,
             embedding: embedding,
             decoderStateful: decoderStateful,
-            lmHead: lmHead,
             vocabulary: vocabulary,
             config: config
         )
@@ -140,7 +129,6 @@ public struct Qwen3AsrModels {
             ModelNames.Qwen3ASR.audioEncoderFile,
             ModelNames.Qwen3ASR.embeddingFile,
             ModelNames.Qwen3ASR.decoderStatefulFile,
-            ModelNames.Qwen3ASR.lmHeadFile,
         ]
         return requiredModels.allSatisfy { model in
             let path = directory.appendingPathComponent(model)

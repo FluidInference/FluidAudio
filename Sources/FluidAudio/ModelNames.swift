@@ -285,9 +285,10 @@ public enum ModelNames {
         public static let audioEncoderFile = "qwen3_asr_audio_encoder.mlmodelc"
         public static let embeddingFile = "qwen3_asr_embedding.mlmodelc"
         public static let decoderStatefulFile = "qwen3_asr_decoder_stateful.mlmodelc"
-        public static let lmHeadFile = "qwen3_asr_lm_head.mlmodelc"
+        public static let decoderFullFile = "qwen3_asr_decoder_full.mlmodelc"
 
-        /// Legacy model names (non-stateful pipeline, pre macOS 15)
+        /// Legacy model names (lmHead is now fused into decoder_stateful)
+        public static let lmHeadFile = "qwen3_asr_lm_head.mlmodelc"
         public static let decoderStackFile = "qwen3_asr_decoder_stack.mlmodelc"
         public static let decoderPrefillFile = "qwen3_asr_decoder_prefill.mlmodelc"
 
@@ -295,7 +296,6 @@ public enum ModelNames {
             audioEncoderFile,
             embeddingFile,
             decoderStatefulFile,
-            lmHeadFile,
         ]
     }
 

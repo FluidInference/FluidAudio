@@ -322,7 +322,7 @@ public final class Qwen3AsrManager {
         let sinArray = try createBatchedPositionArray(values: prefillSin, seqLen: promptLength)
         let prefillMask = try createPrefillMask(seqLen: promptLength)
 
-        let prefillOutput = try runStatefulDecoder(
+        let prefillLogits = try runStatefulDecoder(
             hiddenStates: hiddenArray,
             positionCos: cosArray,
             positionSin: sinArray,
@@ -334,12 +334,6 @@ public final class Qwen3AsrManager {
         currentPosition = promptLength
 
         // Preallocate buffers for decode loop (avoids per-token MLMultiArray allocation)
-        let lmHiddenArray = try MLMultiArray(
-            shape: [1, 1, NSNumber(value: config.hiddenSize)], dataType: .float32
-        )
-        let lmHiddenPtr = lmHiddenArray.dataPointer.bindMemory(
-            to: Float.self, capacity: config.hiddenSize
-        )
         let decHiddenArray = try MLMultiArray(
             shape: [1, 1, NSNumber(value: config.hiddenSize)], dataType: .float32
         )
@@ -359,11 +353,11 @@ public final class Qwen3AsrManager {
             to: Float.self, capacity: config.headDim
         )
 
-        // Extract last position's hidden state -> lmHead input buffer
-        let totalElements = promptLength * config.hiddenSize
-        let prefillPtr = prefillOutput.dataPointer.bindMemory(to: Float.self, capacity: totalElements)
-        let lastOffset = (promptLength - 1) * config.hiddenSize
-        memcpy(lmHiddenPtr, prefillPtr + lastOffset, config.hiddenSize * MemoryLayout<Float>.size)
+        // Get first token from prefill logits (already [1, 1, vocabSize])
+        let firstTokenId = try argmaxFromLogits(prefillLogits, generatedTokens: generatedTokens)
+        if !config.eosTokenIds.contains(firstTokenId) {
+            generatedTokens.append(firstTokenId)
+        }
 
         let prefillTime = CFAbsoluteTimeGetCurrent() - prefillStart
         print(
@@ -371,32 +365,26 @@ public final class Qwen3AsrManager {
         )
 
         // ---- Decode: generate tokens one at a time ----
+        // Skip decode loop if first token was EOS
+        if config.eosTokenIds.contains(firstTokenId) {
+            return generatedTokens
+        }
+
         let decodeStart = CFAbsoluteTimeGetCurrent()
-        var lmHeadTotal = 0.0
         var embedTotal = 0.0
         var decoderTotal = 0.0
 
-        for _ in 0..<effectiveMaxNew {
-            // LM head: hidden -> logits -> argmax
+        for _ in 1..<effectiveMaxNew {
+            // Get last generated token
+            guard let lastTokenId = generatedTokens.last else { break }
+
+            // Embed the token
             let t1 = CFAbsoluteTimeGetCurrent()
-            let tokenId = try await lmHeadArgmax(
-                hiddenArray: lmHiddenArray, generatedTokens: generatedTokens, models: models
-            )
-            lmHeadTotal += CFAbsoluteTimeGetCurrent() - t1
+            let nextEmbedding = try await embedSingleToken(tokenId: Int32(lastTokenId), models: models)
+            embedTotal += CFAbsoluteTimeGetCurrent() - t1
 
-            if config.eosTokenIds.contains(tokenId) {
-                break
-            }
-
-            generatedTokens.append(tokenId)
-
-            // Embed the new token
+            // Run stateful decoder step (returns logits directly)
             let t2 = CFAbsoluteTimeGetCurrent()
-            let nextEmbedding = try await embedSingleToken(tokenId: Int32(tokenId), models: models)
-            embedTotal += CFAbsoluteTimeGetCurrent() - t2
-
-            // Run stateful decoder step with preallocated buffers
-            let t3 = CFAbsoluteTimeGetCurrent()
             nextEmbedding.withUnsafeBufferPointer { src in
                 _ = memcpy(decHiddenPtr, src.baseAddress!, config.hiddenSize * MemoryLayout<Float>.size)
             }
@@ -404,7 +392,7 @@ public final class Qwen3AsrManager {
             let endStep = currentPosition + 1
             let mask = try createDecodeMask(endStep: endStep)
 
-            let output = try runStatefulDecoder(
+            let logits = try runStatefulDecoder(
                 hiddenStates: decHiddenArray,
                 positionCos: decodeCosArray,
                 positionSin: decodeSinArray,
@@ -413,11 +401,17 @@ public final class Qwen3AsrManager {
                 models: models
             )
 
-            // Copy decoder output to lmHead input buffer for next iteration
-            let outPtr = output.dataPointer.bindMemory(to: Float.self, capacity: config.hiddenSize)
-            memcpy(lmHiddenPtr, outPtr, config.hiddenSize * MemoryLayout<Float>.size)
             currentPosition += 1
-            decoderTotal += CFAbsoluteTimeGetCurrent() - t3
+            decoderTotal += CFAbsoluteTimeGetCurrent() - t2
+
+            // Argmax on logits to get next token
+            let tokenId = try argmaxFromLogits(logits, generatedTokens: generatedTokens)
+
+            if config.eosTokenIds.contains(tokenId) {
+                break
+            }
+
+            generatedTokens.append(tokenId)
         }
 
         let decodeTime = CFAbsoluteTimeGetCurrent() - decodeStart
@@ -427,17 +421,18 @@ public final class Qwen3AsrManager {
             "[Qwen3]   Decode: \(String(format: "%.3f", decodeTime))s for \(generatedTokens.count) tokens (\(String(format: "%.1f", perToken * 1000))ms/tok)"
         )
         print(
-            "[Qwen3]   Breakdown: lmHead=\(String(format: "%.3f", lmHeadTotal))s(\(String(format: "%.1f", lmHeadTotal / Double(n) * 1000))ms) embed=\(String(format: "%.3f", embedTotal))s(\(String(format: "%.1f", embedTotal / Double(n) * 1000))ms) decoder=\(String(format: "%.3f", decoderTotal))s(\(String(format: "%.1f", decoderTotal / Double(n) * 1000))ms)"
+            "[Qwen3]   Breakdown: embed=\(String(format: "%.3f", embedTotal))s(\(String(format: "%.1f", embedTotal / Double(n) * 1000))ms) decoder=\(String(format: "%.3f", decoderTotal))s(\(String(format: "%.1f", decoderTotal / Double(n) * 1000))ms)"
         )
         return generatedTokens
     }
 
-    // MARK: - Stateful Decoder
+    // MARK: - Stateful Decoder (Fused with lmHead)
 
     /// Run the stateful decoder for one step (prefill or decode).
     ///
     /// The KV cache lives inside the model as persistent state buffers (fp16).
     /// Each call updates the cache in-place via slice writes — no data is copied in or out.
+    /// Returns logits [1, 1, vocabSize] for the last position (lmHead is fused into decoder).
     private func runStatefulDecoder(
         hiddenStates: MLMultiArray,
         positionCos: MLMultiArray,
@@ -455,33 +450,24 @@ public final class Qwen3AsrManager {
 
         let output = try models.decoderStateful.prediction(from: input, using: state)
 
-        guard let outputHidden = output.featureValue(for: "output_hidden")?.multiArrayValue else {
-            throw Qwen3AsrError.decoderFailed("Missing output from stateful decoder")
+        guard let logits = output.featureValue(for: "logits")?.multiArrayValue else {
+            throw Qwen3AsrError.decoderFailed("Missing logits from stateful decoder")
         }
 
-        return outputHidden
+        return logits
     }
 
-    // MARK: - LM Head
+    // MARK: - Argmax from Logits
 
     /// Repetition penalty factor applied to logits of previously generated tokens.
     /// Values > 1.0 discourage repetition. 1.2 is a common default.
     private static let repetitionPenalty: Float = 1.0
 
-    private func lmHeadArgmax(
-        hiddenArray: MLMultiArray,
-        generatedTokens: [Int],
-        models: Qwen3AsrModels
-    ) async throws -> Int {
-        let input = try MLDictionaryFeatureProvider(dictionary: [
-            "hidden_states": MLFeatureValue(multiArray: hiddenArray)
-        ])
-
-        let output = try await models.lmHead.prediction(from: input)
-        guard let logits = output.featureValue(for: "logits")?.multiArrayValue else {
-            throw Qwen3AsrError.generationFailed("No logits output")
-        }
-
+    /// Extract the most likely token ID from logits [1, 1, vocabSize].
+    private func argmaxFromLogits(
+        _ logits: MLMultiArray,
+        generatedTokens: [Int]
+    ) throws -> Int {
         let ptr = logits.dataPointer.bindMemory(to: Float.self, capacity: config.vocabSize)
 
         // Apply repetition penalty: divide positive logits / multiply negative logits
