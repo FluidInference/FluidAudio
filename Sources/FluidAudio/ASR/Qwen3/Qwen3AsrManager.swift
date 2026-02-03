@@ -1,3 +1,4 @@
+import Accelerate
 import CoreML
 import Foundation
 import OSLog
@@ -24,6 +25,7 @@ public final class Qwen3AsrManager {
     private var models: Qwen3AsrModels?
     private let config: Qwen3AsrConfig
     private let rope: Qwen3RoPE
+    private var embeddingCache: [Int32: [Float]] = [:]
 
     public init(config: Qwen3AsrConfig = .default) {
         self.config = config
@@ -33,6 +35,7 @@ public final class Qwen3AsrManager {
     /// Load all CoreML models from the specified directory.
     public func loadModels(from directory: URL, computeUnits: MLComputeUnits = .all) async throws {
         models = try await Qwen3AsrModels.load(from: directory, computeUnits: computeUnits)
+        embeddingCache = [:]
         logger.info("Qwen3-ASR models loaded successfully")
     }
 
@@ -330,11 +333,37 @@ public final class Qwen3AsrManager {
 
         currentPosition = promptLength
 
-        // Extract last position's hidden state
+        // Preallocate buffers for decode loop (avoids per-token MLMultiArray allocation)
+        let lmHiddenArray = try MLMultiArray(
+            shape: [1, 1, NSNumber(value: config.hiddenSize)], dataType: .float32
+        )
+        let lmHiddenPtr = lmHiddenArray.dataPointer.bindMemory(
+            to: Float.self, capacity: config.hiddenSize
+        )
+        let decHiddenArray = try MLMultiArray(
+            shape: [1, 1, NSNumber(value: config.hiddenSize)], dataType: .float32
+        )
+        let decHiddenPtr = decHiddenArray.dataPointer.bindMemory(
+            to: Float.self, capacity: config.hiddenSize
+        )
+        let decodeCosArray = try MLMultiArray(
+            shape: [1, 1, NSNumber(value: config.headDim)], dataType: .float32
+        )
+        let decodeCosPtr = decodeCosArray.dataPointer.bindMemory(
+            to: Float.self, capacity: config.headDim
+        )
+        let decodeSinArray = try MLMultiArray(
+            shape: [1, 1, NSNumber(value: config.headDim)], dataType: .float32
+        )
+        let decodeSinPtr = decodeSinArray.dataPointer.bindMemory(
+            to: Float.self, capacity: config.headDim
+        )
+
+        // Extract last position's hidden state -> lmHead input buffer
         let totalElements = promptLength * config.hiddenSize
         let prefillPtr = prefillOutput.dataPointer.bindMemory(to: Float.self, capacity: totalElements)
         let lastOffset = (promptLength - 1) * config.hiddenSize
-        var currentHidden = Array(UnsafeBufferPointer(start: prefillPtr + lastOffset, count: config.hiddenSize))
+        memcpy(lmHiddenPtr, prefillPtr + lastOffset, config.hiddenSize * MemoryLayout<Float>.size)
 
         let prefillTime = CFAbsoluteTimeGetCurrent() - prefillStart
         print(
@@ -351,7 +380,7 @@ public final class Qwen3AsrManager {
             // LM head: hidden -> logits -> argmax
             let t1 = CFAbsoluteTimeGetCurrent()
             let tokenId = try await lmHeadArgmax(
-                hiddenStates: currentHidden, generatedTokens: generatedTokens, models: models
+                hiddenArray: lmHiddenArray, generatedTokens: generatedTokens, models: models
             )
             lmHeadTotal += CFAbsoluteTimeGetCurrent() - t1
 
@@ -366,26 +395,27 @@ public final class Qwen3AsrManager {
             let nextEmbedding = try await embedSingleToken(tokenId: Int32(tokenId), models: models)
             embedTotal += CFAbsoluteTimeGetCurrent() - t2
 
-            // Run stateful decoder step
+            // Run stateful decoder step with preallocated buffers
             let t3 = CFAbsoluteTimeGetCurrent()
-            let (cos, sin) = rope.compute(position: currentPosition)
-            let hidArr = try createHiddenArray(values: nextEmbedding)
-            let cosArr = try createPositionArray(values: cos)
-            let sinArr = try createPositionArray(values: sin)
+            nextEmbedding.withUnsafeBufferPointer { src in
+                _ = memcpy(decHiddenPtr, src.baseAddress!, config.hiddenSize * MemoryLayout<Float>.size)
+            }
+            rope.fill(position: currentPosition, cosPtr: decodeCosPtr, sinPtr: decodeSinPtr)
             let endStep = currentPosition + 1
             let mask = try createDecodeMask(endStep: endStep)
 
             let output = try runStatefulDecoder(
-                hiddenStates: hidArr,
-                positionCos: cosArr,
-                positionSin: sinArr,
+                hiddenStates: decHiddenArray,
+                positionCos: decodeCosArray,
+                positionSin: decodeSinArray,
                 mask: mask,
                 state: state,
                 models: models
             )
 
+            // Copy decoder output to lmHead input buffer for next iteration
             let outPtr = output.dataPointer.bindMemory(to: Float.self, capacity: config.hiddenSize)
-            currentHidden = Array(UnsafeBufferPointer(start: outPtr, count: config.hiddenSize))
+            memcpy(lmHiddenPtr, outPtr, config.hiddenSize * MemoryLayout<Float>.size)
             currentPosition += 1
             decoderTotal += CFAbsoluteTimeGetCurrent() - t3
         }
@@ -439,11 +469,10 @@ public final class Qwen3AsrManager {
     private static let repetitionPenalty: Float = 1.0
 
     private func lmHeadArgmax(
-        hiddenStates: [Float],
+        hiddenArray: MLMultiArray,
         generatedTokens: [Int],
         models: Qwen3AsrModels
     ) async throws -> Int {
-        let hiddenArray = try createHiddenArray(values: hiddenStates)
         let input = try MLDictionaryFeatureProvider(dictionary: [
             "hidden_states": MLFeatureValue(multiArray: hiddenArray)
         ])
@@ -470,22 +499,20 @@ public final class Qwen3AsrManager {
             }
         }
 
-        // Argmax over vocab dimension
-        var maxVal: Float = -Float.infinity
-        var maxIdx = 0
-        for i in 0..<config.vocabSize {
-            let val = ptr[i]
-            if val > maxVal {
-                maxVal = val
-                maxIdx = i
-            }
-        }
-        return maxIdx
+        // vDSP vectorized argmax over 151K vocab
+        var maxVal: Float = 0
+        var maxIdx: vDSP_Length = 0
+        vDSP_maxvi(ptr, 1, &maxVal, &maxIdx, vDSP_Length(config.vocabSize))
+        return Int(maxIdx)
     }
 
     // MARK: - Token Embedding (single token)
 
     private func embedSingleToken(tokenId: Int32, models: Qwen3AsrModels) async throws -> [Float] {
+        if let cached = embeddingCache[tokenId] {
+            return cached
+        }
+
         let shape: [NSNumber] = [1, 1]
         let idsArray = try MLMultiArray(shape: shape, dataType: .int32)
         let ptr = idsArray.dataPointer.bindMemory(to: Int32.self, capacity: 1)
@@ -501,7 +528,9 @@ public final class Qwen3AsrManager {
         }
 
         let embPtr = emb.dataPointer.bindMemory(to: Float.self, capacity: config.hiddenSize)
-        return Array(UnsafeBufferPointer(start: embPtr, count: config.hiddenSize))
+        let result = Array(UnsafeBufferPointer(start: embPtr, count: config.hiddenSize))
+        embeddingCache[tokenId] = result
+        return result
     }
 
     // MARK: - Text Decoding
@@ -594,26 +623,6 @@ public final class Qwen3AsrManager {
         let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: endStep)
         for i in 0..<endStep {
             ptr[i] = 0.0
-        }
-        return array
-    }
-
-    private func createHiddenArray(values: [Float]) throws -> MLMultiArray {
-        let shape: [NSNumber] = [1, 1, NSNumber(value: config.hiddenSize)]
-        let array = try MLMultiArray(shape: shape, dataType: .float32)
-        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: values.count)
-        for i in 0..<values.count {
-            ptr[i] = values[i]
-        }
-        return array
-    }
-
-    private func createPositionArray(values: [Float]) throws -> MLMultiArray {
-        let shape: [NSNumber] = [1, 1, NSNumber(value: config.headDim)]
-        let array = try MLMultiArray(shape: shape, dataType: .float32)
-        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: values.count)
-        for i in 0..<values.count {
-            ptr[i] = values[i]
         }
         return array
     }
