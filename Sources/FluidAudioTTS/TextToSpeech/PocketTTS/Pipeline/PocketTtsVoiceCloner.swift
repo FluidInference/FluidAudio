@@ -121,6 +121,34 @@ public enum PocketTtsVoiceCloner {
         logger.info("Saved voice to \(url.lastPathComponent) (\(data.count / 1024) KB)")
     }
 
+    /// Load voice conditioning data from a binary file.
+    ///
+    /// - Parameters:
+    ///   - url: Path to the .bin file containing voice data.
+    /// - Returns: Voice conditioning data ready for TTS.
+    /// - Throws: `TTSError.processingFailed` if the file cannot be read or has invalid size.
+    public static func loadVoice(from url: URL) throws -> PocketTtsVoiceData {
+        let data = try Data(contentsOf: url)
+        let expectedSize = voicePromptLength * PocketTtsConstants.embeddingDim * MemoryLayout<Float>.size
+
+        guard data.count == expectedSize else {
+            throw TTSError.processingFailed(
+                "Invalid voice file size: \(data.count) bytes (expected \(expectedSize))"
+            )
+        }
+
+        var audioPrompt = [Float](repeating: 0, count: voicePromptLength * PocketTtsConstants.embeddingDim)
+        data.withUnsafeBytes { buffer in
+            let floatBuffer = buffer.bindMemory(to: Float.self)
+            for i in 0..<audioPrompt.count {
+                audioPrompt[i] = floatBuffer[i]
+            }
+        }
+
+        logger.info("Loaded voice from \(url.lastPathComponent) (\(data.count / 1024) KB)")
+        return PocketTtsVoiceData(audioPrompt: audioPrompt, promptLength: voicePromptLength)
+    }
+
     // MARK: - Private Helpers
 
     private static func padToFrameBoundary(_ samples: [Float]) -> [Float] {

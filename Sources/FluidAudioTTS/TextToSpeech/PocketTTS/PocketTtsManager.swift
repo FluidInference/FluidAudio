@@ -208,7 +208,7 @@ public actor PocketTtsManager {
     /// - Parameters:
     ///   - voiceData: The voice conditioning data from `cloneVoice`.
     ///   - url: Destination URL (should end with `_audio_prompt.bin`).
-    public func saveClonedVoice(_ voiceData: PocketTtsVoiceData, to url: URL) throws {
+    public nonisolated func saveClonedVoice(_ voiceData: PocketTtsVoiceData, to url: URL) throws {
         try PocketTtsVoiceCloner.saveVoice(voiceData, to: url)
     }
 
@@ -223,5 +223,14 @@ public actor PocketTtsManager {
         let voiceData = try await cloneVoice(from: audioURL)
         try saveClonedVoice(voiceData, to: outputURL)
         return voiceData
+    }
+
+    /// Load previously saved voice data from a binary file.
+    ///
+    /// - Parameters:
+    ///   - url: Path to the .bin file containing voice data.
+    /// - Returns: Voice conditioning data ready for TTS.
+    public nonisolated func loadClonedVoice(from url: URL) throws -> PocketTtsVoiceData {
+        try PocketTtsVoiceCloner.loadVoice(from: url)
     }
 }

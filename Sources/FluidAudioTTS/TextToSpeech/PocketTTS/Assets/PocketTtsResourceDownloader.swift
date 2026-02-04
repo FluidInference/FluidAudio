@@ -100,7 +100,8 @@ public enum PocketTtsResourceDownloader {
         // Download each file
         for (index, file) in filesToDownload.enumerated() {
             // Local path relative to modelName
-            let relativePath = file.path.hasPrefix("\(modelName)/")
+            let relativePath =
+                file.path.hasPrefix("\(modelName)/")
                 ? String(file.path.dropFirst(modelName.count + 1))
                 : file.path
             let destPath = modelDir.appendingPathComponent(relativePath)

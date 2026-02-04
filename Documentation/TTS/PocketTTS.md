@@ -117,6 +117,23 @@ let audio = try await manager.synthesize(text: "Hello!", voiceData: voiceData)
 
 // Save for later use
 try manager.saveClonedVoice(voiceData, to: outputURL)
+
+// Load previously saved voice
+let savedVoice = try manager.loadClonedVoice(from: savedVoiceURL)
+let audio = try await manager.synthesize(text: "Hello!", voiceData: savedVoice)
+```
+
+### CLI Usage
+
+```bash
+# Clone voice and synthesize in one step
+fluidaudio tts "Hello world" --backend pocket --clone-voice speaker.wav
+
+# Clone, save for later, and synthesize
+fluidaudio tts "Hello world" --backend pocket --clone-voice speaker.wav --save-voice my_voice.bin
+
+# Use previously saved voice
+fluidaudio tts "Hello world" --backend pocket --voice-file my_voice.bin
 ```
 
 ### Requirements
