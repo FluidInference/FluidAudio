@@ -193,6 +193,162 @@ public struct PocketTtsSynthesizer {
         )
     }
 
+    /// Synthesize audio from text using provided voice data.
+    ///
+    /// Use this overload for cloned voices without saving to disk first.
+    ///
+    /// - Parameters:
+    ///   - text: The text to synthesize.
+    ///   - voiceData: Voice conditioning data (e.g., from cloneVoice).
+    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - seed: Random seed for reproducibility (nil for random).
+    ///   - deEss: Whether to apply de-essing post-processing.
+    /// - Returns: A synthesis result containing WAV audio data.
+    public static func synthesize(
+        text: String,
+        voiceData: PocketTtsVoiceData,
+        temperature: Float = PocketTtsConstants.temperature,
+        seed: UInt64? = nil,
+        deEss: Bool = true
+    ) async throws -> SynthesisResult {
+        let store = try currentModelStore()
+
+        logger.info("PocketTTS synthesizing with custom voice: '\(text)'")
+
+        // 1. Load constants (voice provided directly)
+        let constants = try await store.constants()
+
+        // 2. Split text into chunks that fit within KV cache capacity
+        let chunks = chunkText(text, tokenizer: constants.tokenizer)
+        logger.info("Split into \(chunks.count) chunk(s)")
+
+        // 3. Set up random number generator (seeded or system entropy)
+        var rng = SeededRNG(seed: seed ?? UInt64.random(in: 0...UInt64.max))
+
+        // 4. Load models
+        let condModel = try await store.condStep()
+        let stepModel = try await store.flowlmStep()
+        let flowModel = try await store.flowDecoder()
+        let mimiModel = try await store.mimiDecoder()
+
+        // 5. Load Mimi initial state (continuous across chunks)
+        let repoDir = try await store.repoDir()
+        var mimiState = try loadMimiInitialState(from: repoDir)
+
+        // 6. Create BOS embedding
+        let bosEmb = try createBosEmbedding(constants.bosEmbedding)
+
+        // 7. Generate audio for each chunk
+        var audioChunks: [[Float]] = []
+        var lastEosStep: Int?
+
+        let genStart = Date()
+
+        for (chunkIdx, chunkText) in chunks.enumerated() {
+            let (normalizedChunk, framesAfterEos) = normalizeText(chunkText)
+            logger.info("Chunk \(chunkIdx + 1)/\(chunks.count): '\(normalizedChunk)'")
+
+            // Tokenize and embed this chunk
+            let tokenIds = constants.tokenizer.encode(normalizedChunk)
+            let textEmbeddings = embedTokens(tokenIds, constants: constants)
+
+            // Fresh KV cache per chunk
+            let prefillStart = Date()
+            var kvState = try await prefillKVCache(
+                voiceData: voiceData,
+                textEmbeddings: textEmbeddings,
+                model: condModel
+            )
+            let prefillElapsed = Date().timeIntervalSince(prefillStart)
+            logger.info(
+                "Chunk \(chunkIdx + 1) prefill: \(String(format: "%.2f", prefillElapsed))s (\(tokenIds.count) tokens)"
+            )
+
+            // Generation loop for this chunk
+            let maxGenLen = estimateMaxFrames(text: chunkText)
+            var eosStep: Int?
+            var sequence = try createNaNSequence()
+            let totalFramesAfterEos =
+                framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
+
+            for step in 0..<maxGenLen {
+                let (transformerOut, eosLogit) = try await runFlowLMStep(
+                    sequence: sequence,
+                    bosEmb: bosEmb,
+                    state: &kvState,
+                    model: stepModel
+                )
+
+                if eosLogit > PocketTtsConstants.eosThreshold && eosStep == nil {
+                    eosStep = step
+                    logger.info("Chunk \(chunkIdx + 1) EOS at step \(step)")
+                }
+
+                if let eos = eosStep, step >= eos + totalFramesAfterEos {
+                    break
+                }
+
+                let latent = try await flowDecode(
+                    transformerOut: transformerOut,
+                    numSteps: PocketTtsConstants.numLsdSteps,
+                    temperature: temperature,
+                    model: flowModel,
+                    rng: &rng
+                )
+
+                // Mimi state is continuous across chunks
+                // (denormalize + quantize baked into mimi_decoder model)
+                let frameSamples = try await runMimiDecoder(
+                    latent: latent,
+                    state: &mimiState,
+                    model: mimiModel
+                )
+                audioChunks.append(frameSamples)
+
+                sequence = try createSequenceFromLatent(latent)
+
+                if step % 20 == 0 {
+                    logger.info("Chunk \(chunkIdx + 1) step \(step)...")
+                }
+            }
+
+            lastEosStep = eosStep
+        }
+
+        let genElapsed = Date().timeIntervalSince(genStart)
+        logger.info(
+            "Generated \(audioChunks.count) frames in \(String(format: "%.2f", genElapsed))s")
+
+        // 8. Concatenate audio (no peak normalization — preserve natural levels)
+        var allSamples = audioChunks.flatMap { $0 }
+
+        // De-essing
+        if deEss {
+            AudioPostProcessor.applyTtsPostProcessing(
+                &allSamples,
+                sampleRate: Float(PocketTtsConstants.audioSampleRate),
+                deEssAmount: -3.0,
+                smoothing: false
+            )
+        }
+
+        // 9. Encode WAV
+        let audioData = try AudioWAV.data(
+            from: allSamples,
+            sampleRate: Double(PocketTtsConstants.audioSampleRate)
+        )
+
+        let duration = Double(allSamples.count) / Double(PocketTtsConstants.audioSampleRate)
+        logger.info("Audio duration: \(String(format: "%.2f", duration))s")
+
+        return SynthesisResult(
+            audio: audioData,
+            samples: allSamples,
+            frameCount: audioChunks.count,
+            eosStep: lastEosStep
+        )
+    }
+
     // MARK: - Text Processing
 
     /// Normalize a text chunk for PocketTTS (matching Python `prepare_text_prompt`).

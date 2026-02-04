@@ -6,8 +6,9 @@ How the Swift code generates speech from text.
 
 | File | Role |
 |------|------|
-| `PocketTtsManager.swift` | Public API — `initialize()`, `synthesize()`, `synthesizeToFile()` |
+| `PocketTtsManager.swift` | Public API — `initialize()`, `synthesize()`, `synthesizeToFile()`, `cloneVoice()` |
 | `PocketTtsModelStore.swift` | Loads and stores the 4 CoreML models + constants + voice data |
+| `PocketTtsVoiceCloner.swift` | Voice cloning — converts audio to voice conditioning embeddings |
 | `PocketTtsSynthesizer.swift` | Main synthesis loop — chunking, prefill, generation, output |
 | `PocketTtsSynthesizer+KVCache.swift` | KV cache state, `prefillKVCache()`, `runCondStep()`, `runFlowLMStep()` |
 | `PocketTtsSynthesizer+Flow.swift` | Flow decoder loop, `denormalize()`, `quantize()`, SeededRNG |
@@ -91,6 +92,39 @@ Splitting priority:
 - `PocketTtsModelStore` is an actor — thread-safe access to loaded models
 - Voice data cached per voice name to avoid reloading
 
+## Voice Cloning
+
+Clone any voice from a short audio sample (1-30 seconds) using the Mimi encoder model.
+
+### How It Works
+
+1. Audio is loaded and resampled to 24kHz mono using `AudioConverter`
+2. The Mimi encoder converts audio to conditioning embeddings `[1, num_frames, 1024]`
+3. Embeddings are padded/truncated to 125 frames (standard voice prompt length)
+4. The resulting `PocketTtsVoiceData` can be used directly for synthesis
+
+### Voice Cloning API
+
+```swift
+// Clone from audio file (WAV, MP3, M4A, etc.)
+let voiceData = try await manager.cloneVoice(from: audioURL)
+
+// Clone from raw samples (24kHz mono Float32)
+let voiceData = try await manager.cloneVoice(from: samples)
+
+// Use cloned voice immediately (no file I/O needed)
+let audio = try await manager.synthesize(text: "Hello!", voiceData: voiceData)
+
+// Save for later use
+try manager.saveClonedVoice(voiceData, to: outputURL)
+```
+
+### Requirements
+
+- Audio duration: 1-30 seconds
+- The `mimi_encoder.mlmodelc` model is downloaded automatically on first use
+- Supports any audio format that AVFoundation can read
+
 ## Usage
 
 ```swift
@@ -99,7 +133,12 @@ import FluidAudioTTS
 let manager = PocketTtsManager()
 try await manager.initialize()
 
+// Using built-in voices
 let audioData = try await manager.synthesize(text: "Hello, world!")
+
+// Using cloned voice
+let voiceData = try await manager.cloneVoice(from: speakerAudioURL)
+let audioData = try await manager.synthesize(text: "Hello, world!", voiceData: voiceData)
 
 try await manager.synthesizeToFile(
     text: "Hello, world!",

@@ -274,11 +274,13 @@ public enum ModelNames {
         public static let flowlmStep = "flowlm_step"
         public static let flowDecoder = "flow_decoder"
         public static let mimiDecoder = "mimi_decoder_v2"
+        public static let mimiEncoder = "mimi_encoder"
 
         public static let condStepFile = condStep + ".mlmodelc"
         public static let flowlmStepFile = flowlmStep + ".mlmodelc"
         public static let flowDecoderFile = flowDecoder + ".mlmodelc"
         public static let mimiDecoderFile = mimiDecoder + ".mlmodelc"
+        public static let mimiEncoderFile = mimiEncoder + ".mlmodelc"
 
         /// Directory containing binary constants, tokenizer, and voice data.
         public static let constantsBinDir = "constants_bin"
@@ -289,6 +291,11 @@ public enum ModelNames {
             flowDecoderFile,
             mimiDecoderFile,
             constantsBinDir,
+        ]
+
+        /// Models required for voice cloning (optional feature).
+        public static let voiceCloningModels: Set<String> = [
+            mimiEncoderFile
         ]
     }
 
