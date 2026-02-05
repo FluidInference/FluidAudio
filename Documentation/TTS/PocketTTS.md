@@ -100,8 +100,10 @@ Clone any voice from a short audio sample (1-30 seconds) using the Mimi encoder 
 
 1. Audio is loaded and resampled to 24kHz mono using `AudioConverter`
 2. The Mimi encoder converts audio to conditioning embeddings `[1, num_frames, 1024]`
-3. Embeddings are padded/truncated to 125 frames (standard voice prompt length)
+3. Embeddings are used at their natural length (no padding) — the KV cache prefill processes the actual number of frames
 4. The resulting `PocketTtsVoiceData` can be used directly for synthesis
+
+Variable-length support is important: zero-padding shorter audio would corrupt voice conditioning by feeding meaningless vectors into the transformer.
 
 ### Voice Cloning API
 
@@ -138,9 +140,47 @@ fluidaudio tts "Hello world" --backend pocket --voice-file my_voice.bin
 
 ### Requirements
 
-- Audio duration: 1-30 seconds
+- Audio duration: 1-30 seconds (capped at 250 frames / ~20s to leave KV cache room)
 - The `mimi_encoder.mlmodelc` model is downloaded automatically on first use
 - Supports any audio format that AVFoundation can read
+
+## Pipeline and Pronunciation Control
+
+```
+text → SentencePiece tokenizer → subword tokens → PocketTTS model → audio
+                                                    ↑
+                                          pronunciation decisions
+                                          happen inside model weights
+                                          (no external control)
+```
+
+Unlike Kokoro which uses espeak to convert text to IPA phonemes **before** the model, PocketTTS feeds raw text tokens directly into the neural network. The model learned text→pronunciation mappings during training — there is no phoneme stage to intercept.
+
+### Feature Support
+
+| Feature | Supported | Can We Add? | Why |
+|---------|-----------|-------------|-----|
+| SSML `<phoneme>` | No | No | No IPA layer — model has no phoneme vocabulary |
+| Custom lexicon (word → IPA) | No | No | No phoneme stage to apply mappings |
+| Markdown `[word](/ipa/)` | No | No | Same — no phoneme input |
+| SSML `<sub>` (text substitution) | No | **Yes** | Text-level, can run before tokenizer |
+| Text preprocessing (numbers, dates) | Minimal | **Yes** | Text-level, can run before tokenizer |
+
+### What Can Be Added
+
+Text-level preprocessing that runs **before** the SentencePiece tokenizer:
+
+- **Number/date/currency expansion** — "123" → "one hundred twenty three"
+- **`<sub>` substitution** — replace abbreviations with full text before tokenization
+- **Phonetic spelling workarounds** — spelling out pronunciation ("NVIDIA" → "en-vidia"), though unreliable since the model may not pronounce phonetic spellings consistently
+
+### What Cannot Be Added (Without Retraining)
+
+- **`<phoneme>` tags** — the model has no IPA vocabulary
+- **Custom lexicon** — no phoneme stage to apply word → IPA mappings
+- **Fine-grained pronunciation control** — the model decides pronunciation from text tokens alone
+
+See [Kokoro.md](Kokoro.md) if you need pronunciation control.
 
 ## Usage
 
