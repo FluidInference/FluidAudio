@@ -1,0 +1,44 @@
+---
+title: Manual Model Loading
+description: Deploy models offline without HuggingFace downloads.
+---
+
+## Overview
+
+FluidAudio auto-downloads models from HuggingFace on first use. For offline or air-gapped environments, stage the CoreML bundles manually.
+
+## Per-Module Guides
+
+Each module has specific assets and loading APIs:
+
+- **ASR**: [Manual Model Loading](/asr/manual-model-loading) — 4 CoreML bundles + vocabulary
+- **Diarization**: [Getting Started](/diarization/getting-started#manual-model-loading) — segmentation + embedding models
+- **VAD**: [Getting Started](/vad/getting-started#manual-model-loading) — single Silero VAD bundle
+
+## General Pattern
+
+1. **Download assets** via Git LFS, HuggingFace web UI, or copy from a machine that already ran the auto-downloader
+2. **Stage in a directory** matching the expected layout
+3. **Call the `load` API** with the staged directory URL
+
+```swift
+// Example: ASR
+let models = try await AsrModels.load(
+    from: URL(fileURLWithPath: "/opt/models/parakeet-tdt-0.6b-v3-coreml"),
+    version: .v3
+)
+
+// Example: Diarization
+let models = try await DiarizerModels.load(
+    localSegmentationModel: segmentationURL,
+    localEmbeddingModel: embeddingURL
+)
+
+// Example: VAD
+let vadModel = try MLModel(contentsOf: modelURL, configuration: config)
+let manager = VadManager(config: .default, vadModel: vadModel)
+```
+
+## Cache Locations
+
+Models are cached at `~/Library/Application Support/FluidAudio/Models/<repo>` on macOS after first download.

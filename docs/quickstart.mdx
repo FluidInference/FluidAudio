@@ -1,0 +1,101 @@
+---
+title: Quickstart
+description: Get up and running with FluidAudio in minutes.
+---
+
+## Install the Package
+
+Add FluidAudio to your project using Swift Package Manager:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
+],
+```
+
+## Transcribe Audio
+
+```swift
+import FluidAudio
+
+Task {
+    let models = try await AsrModels.downloadAndLoad(version: .v3)
+    let asrManager = AsrManager(config: .default)
+    try await asrManager.initialize(models: models)
+
+    let audioURL = URL(fileURLWithPath: "/path/to/audio.wav")
+    let result = try await asrManager.transcribe(audioURL, source: .system)
+    print("Transcription: \(result.text)")
+}
+```
+
+## Diarize Speakers
+
+```swift
+import FluidAudio
+
+Task {
+    let models = try await DiarizerModels.downloadIfNeeded()
+    let diarizer = DiarizerManager()
+    diarizer.initialize(models: models)
+
+    let samples = try AudioConverter().resampleAudioFile(
+        URL(fileURLWithPath: "meeting.wav")
+    )
+    let result = try diarizer.performCompleteDiarization(samples)
+
+    for segment in result.segments {
+        print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
+    }
+}
+```
+
+## Detect Voice Activity
+
+```swift
+import FluidAudio
+
+Task {
+    let manager = try await VadManager(
+        config: VadConfig(defaultThreshold: 0.75)
+    )
+
+    let samples = try AudioConverter().resampleAudioFile(
+        URL(fileURLWithPath: "audio.wav")
+    )
+
+    var segmentation = VadSegmentationConfig.default
+    segmentation.minSpeechDuration = 0.25
+
+    let segments = try await manager.segmentSpeech(samples, config: segmentation)
+    for segment in segments {
+        print(String(format: "Speech %.2f–%.2fs", segment.startTime, segment.endTime))
+    }
+}
+```
+
+## Synthesize Speech
+
+```swift
+import FluidAudioTTS
+
+Task {
+    let manager = TtSManager()
+    try await manager.initialize()
+    let audio = try await manager.synthesize(text: "Hello from FluidAudio!")
+    try audio.write(to: URL(fileURLWithPath: "/tmp/demo.wav"))
+}
+```
+
+## CLI
+
+```bash
+# Transcribe
+swift run fluidaudio transcribe audio.wav
+
+# Diarize
+swift run fluidaudio process meeting.wav --mode offline --threshold 0.6
+
+# TTS
+swift run fluidaudio tts "Hello from FluidAudio" --output out.wav
+```

@@ -1,0 +1,44 @@
+---
+title: Segmentation Config
+description: Tune VAD segmentation for your use case.
+---
+
+## VadSegmentationConfig
+
+```swift
+public struct VadSegmentationConfig {
+    var minSpeechDuration: TimeInterval    // Default: 0.15s
+    var minSilenceDuration: TimeInterval   // Default: 0.75s
+    var maxSpeechDuration: TimeInterval    // Default: 14s
+    var speechPadding: TimeInterval        // Default: 0.1s
+    var silenceThresholdForSplit: Float    // Default: 0.3
+    var negativeThreshold: Float?          // Default: nil (auto)
+    var negativeThresholdOffset: Float     // Default: 0.15
+    var minSilenceAtMaxSpeech: TimeInterval // Default: 0.098s
+    var useMaxPossibleSilenceAtMaxSpeech: Bool // Default: true
+}
+```
+
+## Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `minSpeechDuration` | 0.15s | Minimum speech to keep. Prevents clicks/coughs from being treated as speech. |
+| `minSilenceDuration` | 0.75s | Silence required to end a segment. Prevents early cut-offs during brief pauses. |
+| `maxSpeechDuration` | 14s | Force-split long segments to match ASR model limits. |
+| `speechPadding` | 0.1s | Context padding on both sides of each segment. |
+| `silenceThresholdForSplit` | 0.3 | Probability below which audio is treated as silence for splitting. |
+| `negativeThreshold` | nil | Override for exit hysteresis threshold. If nil, computed as `baseThreshold - negativeThresholdOffset`. |
+| `negativeThresholdOffset` | 0.15 | Gap between entry and exit thresholds. Creates a "sticky zone" to prevent rapid flipping. |
+| `minSilenceAtMaxSpeech` | 0.098s | Minimum silence at forced split points. Ensures splits don't land mid-phoneme. |
+| `useMaxPossibleSilenceAtMaxSpeech` | true | Split at the longest silence near max duration for cleaner boundaries. |
+
+## Hysteresis
+
+The entry/exit threshold system prevents rapid state toggling:
+
+- **Enter speech** when probability > `baseThreshold`
+- **Exit speech** when probability < `negativeThreshold`
+- **Stay in current state** when probability is between the two
+
+The entry threshold defaults to `VadConfig.defaultThreshold` set when constructing `VadManager`.

@@ -1,0 +1,97 @@
+---
+title: Getting Started
+description: möbius — convert AI models for edge deployment on Apple Silicon, NPUs, and other accelerators.
+---
+
+[möbius](https://github.com/FluidInference/mobius) is a model conversion framework for running AI on edge devices. It converts models from PyTorch/ONNX to CoreML, ONNX Runtime, and OpenVINO — targeting Apple Neural Engine, NPUs, and embedded accelerators.
+
+Every model that ships in FluidAudio was converted through möbius.
+
+## Why möbius
+
+Running AI on NVIDIA GPUs is straightforward. The edge is a different story — fragmented devices, different accelerators, format incompatibilities. möbius handles the conversion, validation, and quantization so you get production-ready models with a few commands.
+
+Each conversion includes:
+- **Parity validation** — numerical comparison between PyTorch and converted outputs
+- **Latency benchmarks** — Torch CPU vs CoreML (ANE/GPU) on real inputs
+- **Quantization sweeps** — size, speed, and quality trade-offs for int8, palettization, etc.
+
+## Repository Structure
+
+Models are organized by class, name, and target runtime. Each target directory is self-contained with its own `pyproject.toml` and dependencies managed by [uv](https://github.com/astral-sh/uv).
+
+```
+models/
+├── emb/
+│   └── cam++/coreml                  # Speaker embedding
+├── segment-text/
+│   └── coreml                        # Text segmentation
+├── speaker-diarization/
+│   ├── pyannote-community-1/coreml   # Pyannote diarization
+│   └── sortformer-streaming/         # Sortformer diarization
+├── stt/
+│   ├── canary-1b-v2/coreml           # Canary ASR
+│   ├── nemotron-speech-streaming-0.6b/coreml
+│   ├── parakeet-realtime-eou-120m/coreml
+│   ├── parakeet-tdt-ctc-110m/coreml
+│   ├── parakeet-tdt-v2-0.6b/coreml
+│   ├── parakeet-tdt-v3-0.6b/coreml   # Current FluidAudio default
+│   └── qwen3-asr-0.6b/coreml
+├── tts/
+│   ├── kokoro/coreml                 # Kokoro TTS
+│   └── pocket_tts/coreml             # PocketTTS
+└── vad/
+    └── silero-vad/coreml             # Silero VAD
+```
+
+## Converted Models
+
+These models have been converted and published to [Hugging Face](https://huggingface.co/FluidInference):
+
+| Class | Model | Source | CoreML |
+|-------|-------|--------|--------|
+| **STT** | Parakeet TDT v3 0.6B | [NVIDIA](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) | [FluidInference](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml) |
+| **STT** | Parakeet TDT v2 0.6B | [NVIDIA](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) | [FluidInference](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml) |
+| **STT** | Parakeet EOU 120M | [NVIDIA](https://huggingface.co/nvidia/parakeet-tdt_ctc-110m) | [FluidInference](https://huggingface.co/FluidInference/parakeet-eou-120m-coreml) |
+| **VAD** | Silero VAD v6 | [Silero](https://github.com/snakers4/silero-vad) | [FluidInference](https://huggingface.co/FluidInference/silero-vad-coreml) |
+| **Diarization** | Pyannote 3.1 | [Pyannote](https://huggingface.co/pyannote/speaker-diarization-3.1) | [FluidInference](https://huggingface.co/FluidInference/pyannote-community-1-coreml) |
+| **TTS** | Kokoro 82M | [Hexgrad](https://huggingface.co/hexgrad/Kokoro-82M) | [FluidInference](https://huggingface.co/FluidInference/kokoro-82m-coreml) |
+| **TTS** | PocketTTS 155M | [Kyutai](https://huggingface.co/kyutai/pocket-tts) | [FluidInference](https://huggingface.co/FluidInference/pocket-tts-coreml) |
+| **Embedding** | CAM++ | [3D-Speaker](https://github.com/alibaba-damo-academy/3D-Speaker) | [FluidInference](https://huggingface.co/FluidInference/cam-plusplus-coreml) |
+
+## Quick Start
+
+```bash
+# Clone
+git clone https://github.com/FluidInference/mobius.git
+cd mobius
+
+# Pick a model
+cd models/stt/parakeet-tdt-v3-0.6b/coreml
+
+# Set up environment
+uv sync
+
+# Convert
+uv run python convert-parakeet.py convert \
+  --nemo-path /path/to/parakeet-tdt-0.6b-v3.nemo \
+  --output-dir parakeet_coreml
+
+# Validate parity
+uv run python compare-components.py compare \
+  --output-dir parakeet_coreml \
+  --runs 10 --warmup 3
+```
+
+Each model directory has its own README with specific conversion steps.
+
+## Conversion Guidelines
+
+- **Trace with `.CpuOnly`** — ensures deterministic tracing without ANE/GPU side effects
+- **Target iOS 17+ / macOS 14+** — minimum deployment target for all CoreML exports
+- **Use `uv`** — each model has isolated dependencies via its own `pyproject.toml`
+- **Validate numerically** — always compare converted outputs against PyTorch reference
+
+## License
+
+Apache 2.0. See individual model directories for upstream model licenses.

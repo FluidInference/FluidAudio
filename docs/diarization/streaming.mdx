@@ -1,0 +1,105 @@
+---
+title: Streaming Diarization
+description: Real-time speaker diarization for live audio streams.
+---
+
+## Overview
+
+Process audio in chunks for real-time speaker labeling. Use this when you need speaker labels while transcription is happening. For most use cases, the [offline pipeline](/diarization/offline-pipeline) is more accurate.
+
+## Quick Start
+
+```swift
+let diarizer = DiarizerManager()
+diarizer.initialize(models: models)
+
+var stream = AudioStream(
+    chunkDuration: 5.0,
+    chunkSkip: 2.0,
+    streamStartTime: 0.0,
+    chunkingStrategy: .useMostRecent
+)
+
+stream.bind { chunk, time in
+    let results = try diarizer.performCompleteDiarization(chunk, atTime: time)
+    for segment in results.segments {
+        handleSpeakerSegment(segment)
+    }
+}
+
+for audioSamples in audioStream {
+    try stream.write(from: audioSamples)
+}
+```
+
+## Chunk Size Considerations
+
+| Chunk Size | Accuracy | Latency |
+|------------|----------|---------|
+| < 3 seconds | May fail or unreliable | Lowest |
+| 3-5 seconds | Minimum viable | Low |
+| 10 seconds | Optimal (recommended) | Medium |
+| > 10 seconds | Good | Higher |
+
+## Real-time Audio Capture
+
+```swift
+class RealTimeDiarizer {
+    private let audioEngine = AVAudioEngine()
+    private let diarizer: DiarizerManager
+    private var audioStream: AudioStream
+
+    init() async throws {
+        let models = try await DiarizerModels.downloadIfNeeded()
+        diarizer = DiarizerManager()
+        diarizer.initialize(models: models)
+        audioStream = AudioStream(
+            chunkDuration: 5.0,
+            chunkSkip: 3.0,
+            streamStartTime: 0.0,
+            chunkingStrategy: .useFixedSkip
+        )
+        audioStream.bind { [weak self] chunk, _ in
+            Task {
+                let result = try self?.diarizer.performCompleteDiarization(chunk)
+                // Handle results
+            }
+        }
+    }
+
+    func startCapture() throws {
+        let inputNode = audioEngine.inputNode
+        let format = inputNode.outputFormat(forBus: 0)
+
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) {
+            [weak self] buffer, _ in
+            try? self?.audioStream.write(from: buffer)
+        }
+
+        audioEngine.prepare()
+        try audioEngine.start()
+    }
+}
+```
+
+## Benchmarks
+
+[AMI SDM](https://groups.inf.ed.ac.uk/ami/corpus/) (meeting recordings, single distant microphone):
+
+| Audio Length | Overlap | Threshold | DER | RTFx | Best For |
+|-------------|---------|-----------|-----|------|----------|
+| 5s chunks | 0s | 0.8 | 26.2% | 223x | Best accuracy/speed balance |
+| 10s chunks | 0s | 0.7 | 33.3% | 392x | Higher throughput |
+| 3s chunks | 1s | 0.85 | 49.7% | 51x | Lowest latency |
+| 5s chunks | 2s | 0.8 | 43.0% | 69x | — |
+
+<Warning>
+Streaming diarization is 10-15% worse DER than offline. Only use streaming when you critically need real-time speaker labels. For most apps, offline is more than fast enough.
+</Warning>
+
+## Tips
+
+- Keep one `DiarizerManager` per stream for consistent speaker IDs
+- Always rebase per-chunk timestamps by `(chunkStartSample / sampleRate)`
+- Provide 16 kHz mono Float32 samples
+- Tune `speakerThreshold` and `embeddingThreshold` to trade off ID stability vs. sensitivity

@@ -1,0 +1,74 @@
+---
+title: Streaming ASR
+description: Real-time streaming transcription with Parakeet EOU and end-of-utterance detection.
+---
+
+## Overview
+
+`StreamingEouAsrManager` provides real-time streaming ASR with End-of-Utterance detection using the Parakeet EOU 120M model.
+
+## Quick Start
+
+```swift
+let manager = StreamingEouAsrManager(chunkSize: .ms160, eouDebounceMs: 1280)
+try await manager.loadModels(modelDir: modelsURL)
+
+// Process audio incrementally
+_ = try await manager.process(audioBuffer: buffer1)
+_ = try await manager.process(audioBuffer: buffer2)
+
+// Get final transcript
+let transcript = try await manager.finish()
+
+// Reset for next utterance
+await manager.reset()
+```
+
+## Configuration
+
+```swift
+let manager = StreamingEouAsrManager(
+    chunkSize: .ms320,        // .ms160, .ms320, or .ms1600
+    eouDebounceMs: 1280       // Minimum silence before EOU triggers
+)
+```
+
+## EOU Callback
+
+```swift
+manager.setEouCallback { transcript in
+    print("End of utterance: \(transcript)")
+}
+```
+
+## API
+
+| Method | Description |
+|--------|-------------|
+| `loadModels(modelDir:)` | Load CoreML models from directory |
+| `process(audioBuffer:)` | Process audio incrementally |
+| `finish()` | Finalize and return transcript |
+| `reset()` | Reset state for next utterance |
+| `appendAudio(_:)` | Append audio without processing (VAD integration) |
+
+## Benchmarks
+
+[LibriSpeech test-clean](https://huggingface.co/datasets/openslr/librispeech_asr) (2,620 files, 5.4h audio):
+
+| Chunk Size | Latency | WER | RTFx |
+|------------|---------|-----|------|
+| 160ms | Lowest | ~8% | ~5x |
+| 320ms | Balanced | ~5% | ~12x |
+| 1600ms | Highest throughput | — | — |
+
+320ms is the recommended default — best accuracy/latency tradeoff.
+
+## CLI
+
+```bash
+# Transcribe a file
+swift run fluidaudio parakeet-eou --input audio.wav --use-cache
+
+# Benchmark
+swift run fluidaudio parakeet-eou --benchmark --chunk-size 160 --max-files 100 --use-cache
+```

@@ -1,0 +1,125 @@
+---
+title: SpeakerManager API
+description: Track and manage speaker identities across audio chunks.
+---
+
+## Overview
+
+`SpeakerManager` maintains an in-memory database of speakers, tracks their voice embeddings, and assigns consistent IDs across audio chunks.
+
+<Note>
+`SpeakerManager` is compatible with `DiarizerManager` (streaming pipeline) only. `OfflineDiarizerManager` uses VBx clustering.
+</Note>
+
+## Configuration
+
+```swift
+let speakerManager = SpeakerManager(
+    speakerThreshold: 0.65,           // Max cosine distance for speaker match
+    embeddingThreshold: 0.45,         // Max distance for embedding updates
+    minSpeechDuration: 1.0,           // Min seconds to create new speaker
+    minEmbeddingUpdateDuration: 2.0   // Min seconds to update embeddings
+)
+```
+
+## Speaker Assignment
+
+```swift
+let speaker = speakerManager.assignSpeaker(
+    embedding,
+    speechDuration: 2.5,
+    confidence: 0.95
+)
+```
+
+**Behavior:**
+1. Finds closest speaker using cosine distance
+2. If distance < `speakerThreshold`: assigns to existing speaker
+3. If no match and duration >= `minSpeechDuration`: creates new speaker
+4. Returns `nil` if speech too short
+
+## Known Speakers
+
+```swift
+let alice = Speaker(id: "alice", name: "Alice", currentEmbedding: aliceEmbedding)
+let bob = Speaker(id: "bob", name: "Bob", currentEmbedding: bobEmbedding)
+speakerManager.initializeKnownSpeakers([alice, bob])
+```
+
+### Initialization Modes
+
+| Mode | Behavior |
+|------|----------|
+| `.reset` | Clear database, add new speakers |
+| `.merge` | Merge with existing speakers by ID |
+| `.overwrite` | Replace existing speakers with same IDs |
+| `.skip` | Skip if ID already exists |
+
+## Speaker Management
+
+```swift
+// Upsert
+speakerManager.upsertSpeaker(speaker)
+
+// Merge speakers
+speakerManager.mergeSpeaker("1", into: "alice", mergedName: "Alice")
+
+// Remove
+speakerManager.removeSpeaker("1")
+
+// Remove inactive
+speakerManager.removeSpeakersInactive(for: 10.0)
+
+// Permanent speakers
+speakerManager.makeSpeakerPermanent("alice")
+speakerManager.revokePermanence(from: "alice")
+```
+
+## Speaker Lookup
+
+```swift
+// Find closest match
+let (id, distance) = speakerManager.findSpeaker(with: embedding)
+
+// Find all matches
+let matches = speakerManager.findMatchingSpeakers(with: embedding)
+
+// Get speaker by ID
+if let speaker = speakerManager.getSpeaker(for: "speaker_1") {
+    print("\(speaker.name): \(speaker.duration)s")
+}
+
+// Count and IDs
+print("Active: \(speakerManager.speakerCount)")
+let ids = speakerManager.speakerIds
+```
+
+## Cosine Distance Guide
+
+| Distance | Interpretation |
+|----------|----------------|
+| < 0.3 | Same speaker (very high confidence) |
+| 0.3-0.5 | Same speaker (high confidence) |
+| 0.5-0.7 | Same speaker (medium confidence) |
+| 0.7-0.9 | Different speakers |
+| > 0.9 | Different speakers (high confidence) |
+
+## Speaker Data Model
+
+```swift
+public final class Speaker: Identifiable, Codable {
+    public let id: String
+    public var name: String
+    public var currentEmbedding: [Float]     // 256-dim L2-normalized
+    public var duration: Float               // Total speech (seconds)
+    public var createdAt: Date
+    public var updatedAt: Date
+    public var updateCount: Int
+    public var rawEmbeddings: [RawEmbedding] // Max 50 historical
+    public var isPermanent: Bool
+}
+```
+
+## Thread Safety
+
+`SpeakerManager` uses internal `DispatchQueue` with concurrent reads and barrier writes. All public methods are thread-safe.

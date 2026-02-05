@@ -1,0 +1,81 @@
+---
+title: SSML Support
+description: Control pronunciation with Speech Synthesis Markup Language tags.
+---
+
+## Supported Tags
+
+### `<phoneme>` — Custom Pronunciation
+
+```xml
+<phoneme alphabet="ipa" ph="kəˈkɔɹo">Kokoro</phoneme>
+```
+
+### `<sub>` — Text Substitution
+
+```xml
+<sub alias="World Wide Web">WWW</sub>
+```
+
+### `<say-as>` — Content Type Interpretation
+
+```xml
+<say-as interpret-as="cardinal">123</say-as>
+```
+
+## Say-As Types
+
+| Type | Input | Output |
+|------|-------|--------|
+| `characters` / `spell-out` | `ABC` | "A B C" |
+| `cardinal` / `number` | `123` | "one hundred twenty-three" |
+| `ordinal` | `1` | "first" |
+| `digits` | `123` | "one two three" |
+| `date` | `12/25/2024` | "December twenty-fifth twenty twenty-four" |
+| `time` | `2:30` | "two thirty" |
+| `telephone` | `555-1234` | "five five five one two three four" |
+| `fraction` | `3/4` | "three quarters" |
+
+### Date Formats
+
+| Format | Description | Example |
+|--------|-------------|---------|
+| `mdy` | Month-Day-Year (default) | `12/25/2024` |
+| `dmy` | Day-Month-Year | `25/12/2024` |
+| `ymd` | Year-Month-Day | `2024-01-15` |
+| `md` | Month-Day | `12/25` |
+| `dm` | Day-Month | `25/12` |
+| `y` | Year only | `2024` |
+| `m` | Month only | `12` |
+| `d` | Day only | `25` |
+
+## Usage
+
+```swift
+import FluidAudioTTS
+
+let ttsManager = TtSManager()
+try await ttsManager.initialize()
+
+let text = """
+    The price is <say-as interpret-as="cardinal">42</say-as> dollars.
+    Call us at <say-as interpret-as="telephone">555-1234</say-as>.
+    """
+let audio = try await ttsManager.synthesize(text: text, voice: .afHeart)
+```
+
+## Coexistence with Markdown
+
+Both syntaxes work together:
+
+```swift
+let text = """
+    <phoneme ph="kəˈkɔɹo">Kokoro</phoneme> and [Misaki](/mɪˈsɑːki/)
+    """
+```
+
+## Edge Cases
+
+- **No SSML tags:** Text passes through unchanged (fast path)
+- **Malformed tags:** Invalid SSML passes through as literal text
+- **Unknown interpret-as:** Content returned unchanged

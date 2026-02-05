@@ -1,0 +1,140 @@
+---
+title: Converting Models
+description: How to convert PyTorch models to CoreML using möbius — export, validate, quantize.
+---
+
+Each model conversion in möbius follows a three-step workflow: **export**, **validate**, **quantize**. The scripts and dependencies are self-contained per model directory.
+
+## Workflow
+
+```
+PyTorch model
+    │
+    ▼
+convert-*.py          Export to .mlpackage (CoreML)
+    │
+    ▼
+compare-*.py          Validate numerical parity + measure latency
+    │
+    ▼
+quantize_coreml.py    Sweep quantization variants (optional)
+    │
+    ▼
+.mlmodelc / .mlpackage   Ready for FluidAudio or direct CoreML usage
+```
+
+## Step 1: Export
+
+Each model directory contains a conversion script (e.g., `convert-parakeet.py`, `convert-coreml.py`). The script:
+
+1. Loads the original PyTorch / NeMo / ONNX model
+2. Traces or scripts the model with fixed input shapes
+3. Converts to CoreML using `coremltools`
+4. Saves `.mlpackage` files
+
+```bash
+cd models/stt/parakeet-tdt-v3-0.6b/coreml
+uv sync
+uv run python convert-parakeet.py convert \
+  --nemo-path /path/to/model.nemo \
+  --output-dir ./build
+```
+
+### Fixed Input Shapes
+
+CoreML requires static shapes at export time. Each model defines its input contract:
+
+| Model | Input Shape | Duration |
+|-------|------------|----------|
+| Parakeet TDT v3 | 240,000 samples | 15s at 16kHz |
+| Parakeet EOU | 5,120 samples | 320ms at 16kHz |
+| Silero VAD | 576 samples | 36ms at 16kHz |
+| Silero VAD (256ms) | 4,160 samples | 256ms at 16kHz |
+| Kokoro (5s variant) | Variable tokens | ~5s output |
+| Kokoro (15s variant) | Variable tokens | ~15s output |
+
+## Step 2: Validate
+
+Parity scripts run the PyTorch and CoreML models side-by-side on identical inputs, comparing outputs numerically and measuring latency.
+
+```bash
+uv run python compare-components.py compare \
+  --output-dir ./build \
+  --model-id nvidia/parakeet-tdt-0.6b-v3 \
+  --runs 10 --warmup 3
+```
+
+This produces:
+- **Numerical diff** — max absolute error, max relative error, match/no-match per component
+- **Latency comparison** — Torch CPU vs CoreML (CPU+ANE) with speedup ratios
+- **Plots** — visual comparisons saved to `plots/` directory
+- **metadata.json** — structured results for CI and reporting
+
+### Example Parity Results (Parakeet TDT v3)
+
+| Component | Max Abs Error | Match | Torch CPU | CoreML ANE | Speedup |
+|-----------|--------------|-------|-----------|------------|---------|
+| Encoder | 0.005 | Yes | 1030ms | 25ms | 40x |
+| Preprocessor | 0.484 | Yes | 2.0ms | 1.2ms | 1.7x |
+| Decoder | tolerance | Yes | 7.5ms | 4.3ms | 1.7x |
+| Joint | 0.099 | Yes | 28ms | 23ms | 1.3x |
+
+## Step 3: Quantize (Optional)
+
+Quantization reduces model size and can improve latency on ANE. The sweep evaluates multiple strategies and reports the trade-offs.
+
+```bash
+uv run python quantize_coreml.py \
+  --input-dir ./build \
+  --output-root ./build_quantized \
+  --compute-units ALL --runs 10
+```
+
+### Quantization Strategies
+
+| Strategy | Size Reduction | Quality Impact | Best For |
+|----------|---------------|----------------|----------|
+| INT8 per-channel | ~2x smaller | Minimal loss | General deployment |
+| INT8 per-tensor | ~2x smaller | Significant loss on large models | Small models only |
+| 6-bit palettization | ~2.5x smaller | Varies by model | Size-constrained devices |
+
+Results are saved to `quantization_summary.json` with per-component quality scores (1.0 = identical to baseline).
+
+## Common CoreML Modifications
+
+PyTorch models often need modifications for CoreML tracing. Common patterns:
+
+| PyTorch Feature | CoreML Fix |
+|----------------|------------|
+| `pack_padded_sequence` | Explicit LSTM states + masking |
+| Dynamic shapes / loops | Fixed shapes, broadcasting |
+| In-place operations | Pure functional transforms |
+| Random generation | Deterministic inputs passed externally |
+| Complex number ops | Real/imaginary split |
+
+## Adding a New Model
+
+1. Create the directory: `models/{class}/{name}/coreml/`
+2. Add `pyproject.toml` with dependencies
+3. Write `convert-*.py` — export script
+4. Write `compare-*.py` — validation script (optional but recommended)
+5. Add `README.md` documenting the conversion
+6. Push converted weights to [Hugging Face](https://huggingface.co/FluidInference)
+
+```bash
+mkdir -p models/stt/my-new-model/coreml
+cd models/stt/my-new-model/coreml
+
+# Initialize with uv
+uv init
+uv add coremltools torch
+
+# Write your conversion script
+# ... convert-my-model.py
+```
+
+## Deployment Targets
+
+- **Minimum**: iOS 17 / macOS 14
+- **Format**: MLProgram (`.mlpackage` for development, `.mlmodelc` for compiled)
+- **Compute units**: Models traced with `CPU_ONLY` for determinism; runtime compute units set when loading (`.cpuAndNeuralEngine`, `.cpuAndGPU`, `.all`)

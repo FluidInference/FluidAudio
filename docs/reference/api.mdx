@@ -1,0 +1,91 @@
+---
+title: API Reference
+description: Complete API reference for FluidAudio.
+---
+
+## Common Patterns
+
+### Audio Format
+
+All pipelines expect **16 kHz mono Float32** samples. Use `AudioConverter` to normalize input:
+
+```swift
+let converter = AudioConverter()
+let samples = try converter.resampleAudioFile(path: "audio.wav")
+```
+
+### Model Registry
+
+Override the default HuggingFace URL:
+
+```swift
+ModelRegistry.baseURL = "https://your-mirror.example.com"
+```
+
+Or via environment: `REGISTRY_URL=...`
+
+## Diarization
+
+### DiarizerManager
+
+| Method | Description |
+|--------|-------------|
+| `initialize(models:)` | Initialize with Core ML models |
+| `performCompleteDiarization(_:sampleRate:)` | Process audio and return segments |
+| `cleanup()` | Release resources |
+
+### OfflineDiarizerManager
+
+| Method | Description |
+|--------|-------------|
+| `prepareModels()` | Download + compile Core ML bundles |
+| `process(audio:)` | Process Float32 samples |
+| `process(_:)` | Process from file URL (memory-mapped) |
+
+## Voice Activity Detection
+
+### VadManager
+
+| Method | Description |
+|--------|-------------|
+| `process(_:)` | Chunk-level probabilities for full audio |
+| `segmentSpeech(_:config:)` | Speech segments with timestamps |
+| `segmentSpeechAudio(_:config:)` | Speech segments with audio buffers |
+| `processStreamingChunk(_:state:config:)` | Single-chunk streaming |
+| `makeStreamState()` | Fresh streaming state |
+
+## ASR
+
+### AsrManager
+
+| Method | Description |
+|--------|-------------|
+| `initialize(models:)` | Load ASR models |
+| `transcribe(_:source:)` | Transcribe Float32 samples |
+| `transcribe(_:source:)` | Transcribe from file URL |
+
+### AsrModels
+
+| Method | Description |
+|--------|-------------|
+| `downloadAndLoad(version:)` | Download and compile models |
+| `load(from:version:)` | Load from staged directory |
+| `modelsExist(at:)` | Check if bundles are present |
+
+## TTS
+
+### TtSManager (Kokoro)
+
+| Method | Description |
+|--------|-------------|
+| `initialize()` | Download and load Kokoro models |
+| `synthesize(text:voice:)` | Generate audio Data |
+| `synthesizeDetailed(text:)` | Generate with chunk metadata |
+
+### PocketTtsManager
+
+| Method | Description |
+|--------|-------------|
+| `initialize()` | Download and load PocketTTS models |
+| `synthesize(text:)` | Generate audio Data |
+| `synthesizeToFile(text:outputURL:)` | Generate directly to file |

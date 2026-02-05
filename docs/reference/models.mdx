@@ -1,0 +1,63 @@
+---
+title: Models
+description: CoreML model catalog and HuggingFace sources.
+---
+
+## ASR Models
+
+### Batch Transcription
+
+| Model | Description |
+|-------|-------------|
+| **Parakeet TDT v3** | 25 European languages, 0.6B params. Default ASR model. |
+| **Parakeet TDT v2** | English only, 0.6B params. Better English recall. |
+
+TDT models process audio in chunks (~15s with overlap). Fast enough for dictation-style workflows.
+
+### Streaming Transcription
+
+| Model | Description |
+|-------|-------------|
+| **Parakeet EOU** | 120M params. 160ms/320ms frames for real-time results with end-of-utterance detection. |
+
+### Custom Vocabulary
+
+| Model | Description |
+|-------|-------------|
+| **Parakeet CTC 110M** | CTC-based keyword spotting alongside TDT. |
+| **Parakeet CTC 0.6B** | Larger CTC variant. |
+
+## VAD Models
+
+| Model | Description |
+|-------|-------------|
+| **Silero VAD v6** | Voice activity detection on 256ms windows. |
+
+## Diarization Models
+
+| Model | Description |
+|-------|-------------|
+| **Pyannote CoreML Pipeline** | Segmentation + WeSpeaker embeddings. Online and offline modes. |
+| **Sortformer** | End-to-end streaming diarization. Single neural network, 4 speaker slots. |
+
+## TTS Models
+
+| Model | Description |
+|-------|-------------|
+| **Kokoro TTS** | 82M params, 48 voices. Flow matching + Vocos vocoder. Requires espeak. |
+| **PocketTTS** | 155M params. Autoregressive, no espeak dependency. |
+
+## HuggingFace Sources
+
+| Model | Repository |
+|-------|-----------|
+| Parakeet TDT v3 | [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml) |
+| Parakeet TDT v2 | [FluidInference/parakeet-tdt-0.6b-v2-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml) |
+| Parakeet CTC 110M | [FluidInference/parakeet-ctc-110m-coreml](https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml) |
+| Parakeet CTC 0.6B | [FluidInference/parakeet-ctc-0.6b-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-coreml) |
+| Parakeet EOU | [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml) |
+| Silero VAD | [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml) |
+| Diarization (Pyannote) | [FluidInference/speaker-diarization-coreml](https://huggingface.co/FluidInference/speaker-diarization-coreml) |
+| Sortformer | [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml) |
+| Kokoro TTS | [FluidInference/kokoro-82m-coreml](https://huggingface.co/FluidInference/kokoro-82m-coreml) |
+| PocketTTS | [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml) |

@@ -1,0 +1,106 @@
+---
+title: Custom Vocabulary
+description: CTC-based vocabulary boosting for domain-specific terms without retraining.
+---
+
+<Warning>
+Custom vocabulary boosting is **batch mode only** (Parakeet TDT). It is not supported with streaming ASR (Parakeet EOU).
+</Warning>
+
+## Overview
+
+FluidAudio's CTC-based custom vocabulary boosting enables accurate recognition of domain-specific terms (company names, technical jargon, proper nouns) without retraining the ASR model.
+
+Based on the NVIDIA NeMo paper: [CTC-based Word Spotter](https://arxiv.org/abs/2406.07096).
+
+## Architecture
+
+The system uses two encoders processing the same audio:
+
+1. **TDT Encoder** (Parakeet 0.6B) — Primary high-quality transcription
+2. **CTC Encoder** (Parakeet 110M) — Keyword spotting with per-frame log-probabilities
+
+Both encoders produce frames at the same rate (~40ms), enabling direct timestamp comparison.
+
+## Quick Start
+
+```swift
+let asrManager = try await AsrManager.shared
+let ctcModels = try await CtcModels.downloadAndLoad()
+let ctcSpotter = CtcKeywordSpotter(models: ctcModels)
+
+let vocabulary = CustomVocabularyContext(terms: [
+    CustomVocabularyTerm(text: "NVIDIA"),
+    CustomVocabularyTerm(text: "TensorRT"),
+])
+
+let result = try await asrManager.transcribe(
+    audioSamples,
+    customVocabulary: vocabulary
+)
+// result.text: "NVIDIA announced TensorRT optimizations"
+```
+
+## Aliases
+
+Handle common misspellings or phonetic variations:
+
+```swift
+let vocabulary = CustomVocabularyContext(terms: [
+    CustomVocabularyTerm(
+        text: "Hagen-Dazs",
+        aliases: ["Haagen-Dazs", "Hagen-Das", "Hagen Daz"]
+    ),
+    CustomVocabularyTerm(
+        text: "macOS",
+        aliases: ["Mac OS", "Mac O S", "Macos"]
+    ),
+])
+```
+
+When a match is found via canonical or alias, the **canonical form** is used in the output.
+
+## Detection Thresholds
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `defaultMinSpotterScore` | -15.0 | Minimum CTC score for keyword spotting |
+| `defaultMinVocabCtcScore` | -12.0 | Minimum CTC score for vocabulary matching |
+| `defaultCbw` | 3.0 | Context-biasing weight boost |
+| `defaultMinSimilarity` | 0.52 | Minimum string similarity |
+
+## Vocabulary Size Guidelines
+
+| Size | Performance | Notes |
+|------|-------------|-------|
+| 1-50 terms | Excellent | Typical use case |
+| 50-100 terms | Good | No noticeable latency |
+| 100-230 terms | Tested | Validated with domain-specific lists |
+
+## Memory
+
+| Configuration | Peak RAM |
+|---------------|----------|
+| TDT encoder only | ~66 MB |
+| TDT + CTC encoders | ~130 MB |
+
+## Why Batch Only
+
+Custom vocabulary requires the complete CTC log-probability matrix for accurate scoring. Streaming ASR processes audio in small chunks (160-320ms), which is too short for reliable keyword spotting and rescoring. Keywords spanning chunk boundaries would be missed, and the rescorer cannot look ahead to future frames for optimal alignment.
+
+## Benchmarks
+
+[Earnings22](https://huggingface.co/datasets/revdotcom/earnings22) (771 files, 3.2h audio — earnings call transcripts with domain-specific terms):
+
+| Metric | Value |
+|--------|-------|
+| Average WER | 15.0% |
+| Vocab Precision | 99.3% (TP=1068, FP=8) |
+| Vocab Recall | 85.2% (TP=1068, FN=185) |
+| Vocab F-score | 91.7% |
+| Dict Pass (Recall) | 99.3% (1299/1308) |
+| RTFx | 63.4x |
+
+Precision = "of words we output, how many were correct?" Recall = "of words that should appear, how many did we find?"
+
+The 63x RTFx is slower than TDT-only (156x) because two encoders run on the same audio. Still well above real-time.

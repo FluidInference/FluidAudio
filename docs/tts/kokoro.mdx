@@ -1,0 +1,128 @@
+---
+title: Kokoro TTS
+description: High-quality text-to-speech synthesis with 48 voices.
+---
+
+## When to Use
+
+- **Best quality, full generation** — Kokoro generates all frames at once. Use when you can wait for complete audio before playback.
+- **Need streaming/immediate playback** — Use [PocketTTS](/tts/pocket-tts) instead (~80ms to first audio).
+
+## Specs
+
+| Metric | Value |
+|--------|-------|
+| Parameters | 82M |
+| Voices | 48 |
+| Speed | 23x RTFx |
+| Peak RAM | 1.5 GB |
+| Architecture | Flow matching + Vocos vocoder |
+| Phonemization | eSpeak-NG (GPL-3.0) |
+
+Model: [FluidInference/kokoro-82m-coreml](https://huggingface.co/FluidInference/kokoro-82m-coreml)
+
+## Quick Start
+
+### CLI
+
+```bash
+swift run fluidaudio tts "Welcome to FluidAudio text to speech" \
+  --output ~/Desktop/demo.wav \
+  --voice af_heart
+```
+
+### Swift
+
+```swift
+import FluidAudioTTS
+
+let manager = TtSManager()
+try await manager.initialize()
+
+let audioData = try await manager.synthesize(text: "Hello from FluidAudio!")
+try audioData.write(to: URL(fileURLWithPath: "/tmp/demo.wav"))
+```
+
+## Chunk Metadata
+
+```swift
+let detailed = try await manager.synthesizeDetailed(
+    text: "FluidAudio can report chunk splits for you.",
+    variantPreference: .fifteenSecond
+)
+
+for chunk in detailed.chunks {
+    print("Chunk #\(chunk.index) -> variant: \(chunk.variant), tokens: \(chunk.tokenCount)")
+    print("  text: \(chunk.text)")
+}
+```
+
+## Pipeline
+
+```
+text → espeak G2P → IPA phonemes → Kokoro model → audio
+         ↑                ↑
+   custom lexicon    SSML <phoneme>
+   overrides here    overrides here
+```
+
+Because espeak runs **outside** the model as a preprocessing step, you can intercept and edit phonemes before they reach the neural network. This is what enables SSML, custom lexicon, and markdown pronunciation control.
+
+## Pronunciation Control
+
+Kokoro supports three ways to override pronunciation:
+
+- **SSML tags** — `<phoneme>`, `<sub>`, `<say-as>`. See [SSML documentation](/tts/ssml).
+- **Custom lexicon** — word → IPA mapping files loaded via `setCustomLexicon()`. See [Custom Pronunciation](/tts/custom-pronunciation).
+- **Markdown syntax** — inline `[word](/ipa/)` overrides in the input text.
+
+## Kokoro vs PocketTTS
+
+| | Kokoro | PocketTTS |
+|---|---|---|
+| Pipeline | text → espeak G2P → IPA → model | text → SentencePiece → model |
+| Voice conditioning | Style embedding vector | 125 audio prompt tokens |
+| Generation | All frames at once | Frame-by-frame autoregressive |
+| Latency to first audio | Must wait for full generation | ~80ms after prefill |
+| SSML support | Yes (`<phoneme>`, `<sub>`, `<say-as>`) | No |
+| Custom lexicon | Yes (word → IPA) | No |
+| Pronunciation control | Full (phoneme-level) | None (model decides internally) |
+| Text preprocessing | Full (numbers, dates, currencies) | Minimal (whitespace, punctuation) |
+
+## Benchmarks
+
+Same text samples generating 1s to ~300s of output audio, M4 Pro:
+
+| Framework | RTFx | Peak RAM | Notes |
+|-----------|------|----------|-------|
+| **Swift CoreML** | **23.2x** | **1.50 GB** | Lowest memory |
+| MLX | 23.8x | 3.37 GB | — |
+| PyTorch CPU | 17.0x | 4.85 GB | Known memory leak |
+| PyTorch MPS | 10.0x | 1.54 GB | Crashes on long strings |
+
+CoreML matches MLX speed with 55% less peak RAM. PocketTTS benchmarks coming soon.
+
+## Enable in Your Project
+
+### Package.swift
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.7"),
+],
+targets: [
+    .target(
+        name: "YourTarget",
+        dependencies: [
+            .product(name: "FluidAudioWithTTS", package: "FluidAudio")
+        ]
+    )
+]
+```
+
+### Import
+
+```swift
+import FluidAudio       // Core (ASR, diarization, VAD)
+import FluidAudioTTS    // TTS features
+```

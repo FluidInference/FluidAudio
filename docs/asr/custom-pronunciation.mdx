@@ -1,0 +1,79 @@
+---
+title: Custom Pronunciation
+description: Override TTS pronunciation with custom lexicon files.
+---
+
+## Overview
+
+FluidAudio TTS supports custom pronunciation dictionaries that override how specific words are pronounced. Essential for domain-specific terminology, brand names, acronyms, and proper nouns.
+
+### Priority Order
+
+1. Per-word phonetic overrides — Inline markup like `[word](/phonemes/)`
+2. Custom lexicon — Your `word=phonemes` file entries
+3. Case-sensitive built-in lexicon
+4. Standard built-in lexicon
+5. Grapheme-to-phoneme (G2P) — eSpeak-NG fallback
+
+## File Format
+
+```text
+# This is a comment
+kokoro=kəkˈɔɹO
+NASDAQ=nˈæzdæk
+UN=junˈaɪtᵻd nˈeɪʃənz
+```
+
+Phonemes are compact IPA strings. Use whitespace to separate words in multi-word expansions.
+
+## Word Matching
+
+Three-tier strategy:
+
+1. **Exact match** — `NASDAQ` matches only `NASDAQ`
+2. **Case-insensitive** — `nasdaq` matches `NASDAQ`, `Nasdaq`
+3. **Normalized** — Strips to letters/digits/apostrophes, lowercased
+
+## Usage
+
+### CLI
+
+```bash
+swift run fluidaudio tts "The NASDAQ index rose today" \
+  --lexicon custom.txt --output output.wav
+```
+
+### Swift API
+
+```swift
+let lexicon = try TtsCustomLexicon.load(from: fileURL)
+
+let manager = TtSManager(customLexicon: lexicon)
+try await manager.initialize()
+let audio = try await manager.synthesize(text: "Welcome to Kokoro TTS")
+
+// Update at runtime
+manager.setCustomLexicon(newLexicon)
+```
+
+### Merging Lexicons
+
+```swift
+let combined = baseLexicon.merged(with: domainLexicon)
+```
+
+## Example Lexicon
+
+```text
+# Finance
+NASDAQ=nˈæzdæk
+EBITDA=iːbˈɪtdɑː
+
+# Technology
+NVIDIA=ɛnvˈɪdiə
+Kubernetes=kuːbɚnˈɛtiːz
+
+# Product Names
+Kokoro=kəkˈɔɹO
+FluidAudio=flˈuːɪd ˈɔːdioʊ
+```

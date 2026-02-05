@@ -1,0 +1,93 @@
+---
+title: CLI Reference
+description: FluidAudio command-line interface for testing and benchmarking.
+---
+
+## Installation
+
+```bash
+cd FluidAudio
+swift build -c release
+# Binary at .build/release/fluidaudio
+```
+
+Or run directly:
+
+```bash
+swift run fluidaudio <command>
+```
+
+## Commands
+
+### Transcription
+
+```bash
+# Batch transcription
+fluidaudio transcribe audio.wav
+fluidaudio transcribe audio.wav --model-version v2  # English-only
+
+# Multi-stream parallel transcription
+fluidaudio multi-stream audio1.wav audio2.wav
+
+# Streaming transcription (Parakeet EOU)
+fluidaudio parakeet-eou --input audio.wav --use-cache
+```
+
+### Text-to-Speech
+
+```bash
+fluidaudio tts "Hello from FluidAudio" --output demo.wav --voice af_heart
+fluidaudio tts "Custom pronunciation" --lexicon custom.txt --output out.wav
+```
+
+### Diarization
+
+```bash
+# Process a file
+fluidaudio process meeting.wav --output results.json --threshold 0.6
+
+# Offline mode
+fluidaudio process meeting.wav --mode offline --threshold 0.6
+
+# With ground-truth
+fluidaudio process meeting.wav --rttm ground_truth.rttm
+```
+
+### Voice Activity Detection
+
+```bash
+# Offline segmentation
+fluidaudio vad-analyze audio.wav
+
+# Streaming
+fluidaudio vad-analyze audio.wav --streaming --min-silence-ms 300
+
+# Both modes
+fluidaudio vad-analyze audio.wav --mode both
+```
+
+### Benchmarks
+
+```bash
+# ASR benchmark
+fluidaudio asr-benchmark --subset test-clean --max-files 100
+
+# FLEURS multilingual
+fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
+
+# Diarization benchmark
+fluidaudio diarization-benchmark --auto-download
+fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.7
+
+# VAD benchmark
+fluidaudio vad-benchmark --num-files 40 --threshold 0.5
+```
+
+### Dataset Management
+
+```bash
+fluidaudio download --dataset ami-sdm
+fluidaudio download --dataset librispeech-test-clean
+fluidaudio download --dataset librispeech-test-other
+fluidaudio download --dataset vad
+```
