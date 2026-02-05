@@ -32,15 +32,16 @@ public actor Qwen3TtsManager {
         isInitialized
     }
 
+    /// Download models from HuggingFace and initialize.
+    public func initialize() async throws {
+        try await modelStore.loadIfNeeded()
+        isInitialized = true
+        logger.notice("Qwen3TtsManager initialized (auto-download)")
+    }
+
     /// Load models from a local directory.
     ///
-    /// The directory should contain:
-    /// - qwen3_tts_lm_prefill_v9.mlpackage
-    /// - qwen3_tts_code_predictor_v3.mlpackage
-    /// - qwen3_tts_decoder_10s.mlpackage
-    /// - speaker_embedding_official.npy (optional)
-    ///
-    /// - Parameter directory: Path to directory containing CoreML models.
+    /// - Parameter directory: Path to directory containing CoreML model bundles.
     public func loadFromDirectory(_ directory: URL) async throws {
         try await modelStore.loadFromDirectory(directory)
         isInitialized = true

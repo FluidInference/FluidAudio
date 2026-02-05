@@ -6,11 +6,11 @@ import OSLog
 /// Actor-based store for Qwen3-TTS CoreML models.
 ///
 /// Manages loading and storing of the CoreML models:
-/// - LM Prefill (qwen3_tts_lm_prefill_v9.mlpackage)
-/// - LM Decode V10 (qwen3_tts_lm_decode_v10.mlpackage)
-/// - CP Prefill (qwen3_tts_cp_prefill.mlpackage)
-/// - CP Decode (qwen3_tts_cp_decode.mlpackage)
-/// - Audio Decoder (qwen3_tts_decoder_10s.mlpackage)
+/// - LM Prefill (qwen3_tts_lm_prefill_v9.mlmodelc)
+/// - LM Decode V10 (qwen3_tts_lm_decode_v10.mlmodelc)
+/// - CP Prefill (qwen3_tts_cp_prefill.mlmodelc)
+/// - CP Decode (qwen3_tts_cp_decode.mlmodelc)
+/// - Audio Decoder (qwen3_tts_decoder_10s.mlmodelc)
 /// - CP Embeddings (cp_embeddings.npy) [15, 2048, 1024]
 public actor Qwen3TtsModelStore {
 
@@ -29,9 +29,17 @@ public actor Qwen3TtsModelStore {
 
     public init() {}
 
+    /// Download models from HuggingFace and load them.
+    public func loadIfNeeded() async throws {
+        guard prefillModel == nil else { return }
+
+        let repoDir = try await Qwen3TtsResourceDownloader.ensureModels()
+        try await loadFromDirectory(repoDir)
+    }
+
     /// Load all CoreML models from a local directory.
     ///
-    /// - Parameter directory: Directory containing the .mlpackage files.
+    /// - Parameter directory: Directory containing the .mlmodelc bundles and .npy files.
     public func loadFromDirectory(_ directory: URL) async throws {
         guard prefillModel == nil else { return }
 
@@ -45,44 +53,46 @@ public actor Qwen3TtsModelStore {
 
         let loadStart = Date()
 
-        // Load LM prefill model
-        let prefillURL = directory.appendingPathComponent("qwen3_tts_lm_prefill_v9.mlpackage")
-        prefillModel = try loadModel(at: prefillURL, config: config, name: "LM prefill")
+        let modelFiles = [
+            (ModelNames.Qwen3TTS.lmPrefillFile, "LM prefill"),
+            (ModelNames.Qwen3TTS.lmDecodeFile, "LM decode"),
+            (ModelNames.Qwen3TTS.cpPrefillFile, "CP prefill"),
+            (ModelNames.Qwen3TTS.cpDecodeFile, "CP decode"),
+            (ModelNames.Qwen3TTS.audioDecoderFile, "audio decoder"),
+        ]
 
-        // Load LM decode V10 model (takes CB0 + CB1-15 as inputs)
-        let decodeURL = directory.appendingPathComponent("qwen3_tts_lm_decode_v10.mlpackage")
-        decodeModel = try loadModel(at: decodeURL, config: config, name: "LM decode V10")
+        var loadedModels: [MLModel] = []
+        for (file, name) in modelFiles {
+            let modelURL = directory.appendingPathComponent(file)
+            let model = try loadModel(at: modelURL, config: config, name: name)
+            loadedModels.append(model)
+        }
 
-        // Load code predictor prefill model
-        let cpPrefillURL = directory.appendingPathComponent("qwen3_tts_cp_prefill.mlpackage")
-        cpPrefillModel = try loadModel(at: cpPrefillURL, config: config, name: "CP prefill")
-
-        // Load code predictor decode model
-        let cpDecodeURL = directory.appendingPathComponent("qwen3_tts_cp_decode.mlpackage")
-        cpDecodeModel = try loadModel(at: cpDecodeURL, config: config, name: "CP decode")
-
-        // Load audio decoder model
-        let decoderURL = directory.appendingPathComponent("qwen3_tts_decoder_10s.mlpackage")
-        audioDecoderModel = try loadModel(at: decoderURL, config: config, name: "audio decoder")
+        prefillModel = loadedModels[0]
+        decodeModel = loadedModels[1]
+        cpPrefillModel = loadedModels[2]
+        cpDecodeModel = loadedModels[3]
+        audioDecoderModel = loadedModels[4]
 
         // Load code predictor embedding tables
-        let cpEmbedURL = directory.appendingPathComponent("cp_embeddings.npy")
+        let cpEmbedURL = directory.appendingPathComponent(ModelNames.Qwen3TTS.cpEmbeddingsFile)
         if FileManager.default.fileExists(atPath: cpEmbedURL.path) {
             cpEmbeddings = try loadNumpyFloat3DArray(from: cpEmbedURL, shape: (15, 2048, 1024))
             logger.info("Loaded CP embeddings [15, 2048, 1024]")
         }
 
         // Load speaker embedding if available
-        let speakerURL = directory.appendingPathComponent("speaker_embedding_official.npy")
+        let speakerURL = directory.appendingPathComponent(
+            ModelNames.Qwen3TTS.speakerEmbeddingFile)
         if FileManager.default.fileExists(atPath: speakerURL.path) {
             speakerEmbedding = try loadNumpyFloatArray(from: speakerURL)
             logger.info("Loaded speaker embedding")
         }
 
         // Load TTS embeddings if available
-        let bosURL = directory.appendingPathComponent("tts_bos_embed.npy")
-        let padURL = directory.appendingPathComponent("tts_pad_embed.npy")
-        let eosURL = directory.appendingPathComponent("tts_eos_embed.npy")
+        let bosURL = directory.appendingPathComponent(ModelNames.Qwen3TTS.ttsBosEmbedFile)
+        let padURL = directory.appendingPathComponent(ModelNames.Qwen3TTS.ttsPadEmbedFile)
+        let eosURL = directory.appendingPathComponent(ModelNames.Qwen3TTS.ttsEosEmbedFile)
         if FileManager.default.fileExists(atPath: bosURL.path),
             FileManager.default.fileExists(atPath: padURL.path),
             FileManager.default.fileExists(atPath: eosURL.path)
@@ -172,7 +182,7 @@ public actor Qwen3TtsModelStore {
 
     // MARK: - Private Helpers
 
-    /// Load a CoreML model, compiling mlpackage if needed.
+    /// Load a CoreML model from mlmodelc bundle or mlpackage (compiling if needed).
     private func loadModel(
         at url: URL,
         config: MLModelConfiguration,
@@ -181,18 +191,16 @@ public actor Qwen3TtsModelStore {
         let ext = url.pathExtension
 
         if ext == "mlpackage" {
-            // Need to compile mlpackage first
             logger.info("Compiling \(name) model...")
             let compiledURL = try MLModel.compileModel(at: url)
             let model = try MLModel(contentsOf: compiledURL, configuration: config)
             logger.info("Loaded \(name) model (compiled)")
             return model
-        } else {
-            // Already compiled (.mlmodelc)
-            let model = try MLModel(contentsOf: url, configuration: config)
-            logger.info("Loaded \(name) model")
-            return model
         }
+
+        let model = try MLModel(contentsOf: url, configuration: config)
+        logger.info("Loaded \(name) model")
+        return model
     }
 
     /// Load a numpy .npy file containing float32 array.
