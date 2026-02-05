@@ -91,6 +91,44 @@ Splitting priority:
 - `PocketTtsModelStore` is an actor — thread-safe access to loaded models
 - Voice data cached per voice name to avoid reloading
 
+## Pipeline and Pronunciation Control
+
+```
+text → SentencePiece tokenizer → subword tokens → PocketTTS model → audio
+                                                    ↑
+                                          pronunciation decisions
+                                          happen inside model weights
+                                          (no external control)
+```
+
+Unlike Kokoro which uses espeak to convert text to IPA phonemes **before** the model, PocketTTS feeds raw text tokens directly into the neural network. The model learned text→pronunciation mappings during training — there is no phoneme stage to intercept.
+
+### Feature Support
+
+| Feature | Supported | Can We Add? | Why |
+|---------|-----------|-------------|-----|
+| SSML `<phoneme>` | No | No | No IPA layer — model has no phoneme vocabulary |
+| Custom lexicon (word → IPA) | No | No | No phoneme stage to apply mappings |
+| Markdown `[word](/ipa/)` | No | No | Same — no phoneme input |
+| SSML `<sub>` (text substitution) | No | **Yes** | Text-level, can run before tokenizer |
+| Text preprocessing (numbers, dates) | Minimal | **Yes** | Text-level, can run before tokenizer |
+
+### What Can Be Added
+
+Text-level preprocessing that runs **before** the SentencePiece tokenizer:
+
+- **Number/date/currency expansion** — "123" → "one hundred twenty three"
+- **`<sub>` substitution** — replace abbreviations with full text before tokenization
+- **Phonetic spelling workarounds** — spelling out pronunciation ("NVIDIA" → "en-vidia"), though unreliable since the model may not pronounce phonetic spellings consistently
+
+### What Cannot Be Added (Without Retraining)
+
+- **`<phoneme>` tags** — the model has no IPA vocabulary
+- **Custom lexicon** — no phoneme stage to apply word → IPA mappings
+- **Fine-grained pronunciation control** — the model decides pronunciation from text tokens alone
+
+See [Kokoro.md](Kokoro.md) if you need pronunciation control.
+
 ## Usage
 
 ```swift
