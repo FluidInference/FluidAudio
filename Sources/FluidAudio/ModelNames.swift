@@ -14,6 +14,7 @@ public enum Repo: String, CaseIterable {
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
     case pocketTts = "FluidInference/pocket-tts-coreml"
     case qwen3Asr = "FluidInference/qwen3-asr-0.6b-coreml/f32"
+    case qwen3Tts = "alexwengg/qwen3-tts-coreml"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -42,6 +43,8 @@ public enum Repo: String, CaseIterable {
             return "pocket-tts-coreml"
         case .qwen3Asr:
             return "qwen3-asr-0.6b-coreml/f32"
+        case .qwen3Tts:
+            return "qwen3-tts-coreml"
         }
     }
 
@@ -58,6 +61,8 @@ public enum Repo: String, CaseIterable {
             return "FluidInference/diar-streaming-sortformer-coreml"
         case .qwen3Asr:
             return "FluidInference/qwen3-asr-0.6b-coreml"
+        case .qwen3Tts:
+            return "alexwengg/qwen3-tts-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -90,6 +95,8 @@ public enum Repo: String, CaseIterable {
             return "sortformer"
         case .pocketTts:
             return "pocket-tts"
+        case .qwen3Tts:
+            return "qwen3-tts"
         default:
             return name
         }
@@ -334,6 +341,45 @@ public enum ModelNames {
         ]
     }
 
+    /// Qwen3-TTS model names (LLM-based multilingual TTS)
+    public enum Qwen3TTS {
+        public static let lmPrefill = "qwen3_tts_lm_prefill_v9"
+        public static let lmDecode = "qwen3_tts_lm_decode_v10"
+        public static let cpPrefill = "qwen3_tts_cp_prefill"
+        public static let cpDecode = "qwen3_tts_cp_decode"
+        public static let audioDecoder = "qwen3_tts_decoder_10s"
+
+        public static let lmPrefillFile = lmPrefill + ".mlmodelc"
+        public static let lmDecodeFile = lmDecode + ".mlmodelc"
+        public static let cpPrefillFile = cpPrefill + ".mlmodelc"
+        public static let cpDecodeFile = cpDecode + ".mlmodelc"
+        public static let audioDecoderFile = audioDecoder + ".mlmodelc"
+
+        /// Speaker embedding file.
+        public static let speakerEmbeddingFile = "speaker_embedding_official.npy"
+
+        /// Code predictor embedding tables [15, 2048, 1024].
+        public static let cpEmbeddingsFile = "cp_embeddings.npy"
+
+        /// TTS special token embedding files.
+        public static let ttsBosEmbedFile = "tts_bos_embed.npy"
+        public static let ttsPadEmbedFile = "tts_pad_embed.npy"
+        public static let ttsEosEmbedFile = "tts_eos_embed.npy"
+
+        public static let requiredModels: Set<String> = [
+            lmPrefillFile,
+            lmDecodeFile,
+            cpPrefillFile,
+            cpDecodeFile,
+            audioDecoderFile,
+            speakerEmbeddingFile,
+            cpEmbeddingsFile,
+            ttsBosEmbedFile,
+            ttsPadEmbedFile,
+            ttsEosEmbedFile,
+        ]
+    }
+
     /// TTS model names
     public enum TTS {
 
@@ -405,6 +451,8 @@ public enum ModelNames {
             return ModelNames.Sortformer.requiredModels
         case .qwen3Asr:
             return ModelNames.Qwen3ASR.requiredModels
+        case .qwen3Tts:
+            return ModelNames.Qwen3TTS.requiredModels
         }
     }
 }

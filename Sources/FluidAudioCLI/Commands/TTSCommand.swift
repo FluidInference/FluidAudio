@@ -678,22 +678,17 @@ public struct TTS {
                 exit(1)
             }
 
-            // Get model directory from environment or use default
-            let modelDir: URL
-            if let envPath = ProcessInfo.processInfo.environment["QWEN3_TTS_MODEL_DIR"] {
-                modelDir = URL(fileURLWithPath: envPath)
-            } else {
-                // Default to mobius/models/tts/qwen3/coreml relative to CWD
-                let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                modelDir = cwd.appendingPathComponent("mobius/models/tts/qwen3/coreml")
-            }
-
-            logger.info("Loading Qwen3-TTS models from: \(modelDir.path)")
-
             let manager = Qwen3TtsManager()
 
             let tLoad0 = Date()
-            try await manager.loadFromDirectory(modelDir)
+            if let envPath = ProcessInfo.processInfo.environment["QWEN3_TTS_MODEL_DIR"] {
+                let modelDir = URL(fileURLWithPath: envPath)
+                logger.info("Loading Qwen3-TTS models from: \(modelDir.path)")
+                try await manager.loadFromDirectory(modelDir)
+            } else {
+                logger.info("Downloading/loading Qwen3-TTS models from HuggingFace...")
+                try await manager.initialize()
+            }
             let tLoad1 = Date()
 
             let tSynth0 = Date()
@@ -823,8 +818,9 @@ public struct TTS {
               --save-voice FILE    Save cloned voice to .bin file for later use
 
             Qwen3-TTS Notes:
-              Set QWEN3_TTS_MODEL_DIR env var to model directory path
-              Currently only supports test sentence: "Hello world, this is a test..."
+              Models auto-download from HuggingFace on first use (~5.9GB)
+              Set QWEN3_TTS_MODEL_DIR env var to use a local model directory instead
+              Currently only supports pre-tokenized test sentences
 
             Lexicon file format:
               # Comments start with #
