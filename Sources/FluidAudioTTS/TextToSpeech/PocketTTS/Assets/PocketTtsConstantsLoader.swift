@@ -7,6 +7,12 @@ public struct PocketTtsConstantsBundle: Sendable {
     public let bosEmbedding: [Float]
     public let textEmbedTable: [Float]
     public let tokenizer: SentencePieceTokenizer
+    /// Latent normalization mean [32].
+    public let embMean: [Float]
+    /// Latent normalization std [32].
+    public let embStd: [Float]
+    /// Quantizer projection weight [512, 32] (flattened row-major).
+    public let quantizerWeight: [Float]
 }
 
 /// Pre-loaded voice conditioning data.
@@ -43,6 +49,22 @@ public enum PocketTtsConstantsLoader {
             name: "text_embed_table"
         )
 
+        let embMean = try loadFloatArray(
+            from: constantsDir.appendingPathComponent("emb_mean.bin"),
+            expectedCount: PocketTtsConstants.latentDim,
+            name: "emb_mean"
+        )
+        let embStd = try loadFloatArray(
+            from: constantsDir.appendingPathComponent("emb_std.bin"),
+            expectedCount: PocketTtsConstants.latentDim,
+            name: "emb_std"
+        )
+        let quantizerWeight = try loadFloatArray(
+            from: constantsDir.appendingPathComponent("quantizer_weight.bin"),
+            expectedCount: PocketTtsConstants.quantizerDim * PocketTtsConstants.latentDim,
+            name: "quantizer_weight"
+        )
+
         let tokenizerURL = constantsDir.appendingPathComponent("tokenizer.model")
         guard FileManager.default.fileExists(atPath: tokenizerURL.path) else {
             throw LoadError.fileNotFound("tokenizer.model")
@@ -60,7 +82,10 @@ public enum PocketTtsConstantsLoader {
         return PocketTtsConstantsBundle(
             bosEmbedding: bosEmb,
             textEmbedTable: embedTable,
-            tokenizer: tokenizer
+            tokenizer: tokenizer,
+            embMean: embMean,
+            embStd: embStd,
+            quantizerWeight: quantizerWeight
         )
     }
 

@@ -1,3 +1,4 @@
+import Accelerate
 @preconcurrency import CoreML
 import FluidAudio
 import Foundation
@@ -90,27 +91,63 @@ extension PocketTtsSynthesizer {
 
     /// Run the Mimi decoder for a single latent frame.
     ///
-    /// The model internally denormalizes and quantizes the 32-dim latent
-    /// before decoding to audio.
+    /// Denormalizes the raw 32-dim latent, quantizes it to 512-dim,
+    /// then decodes to audio via the CoreML model.
     ///
     /// - Parameters:
     ///   - latent: The raw latent vector, shape [32].
-    ///   - state: The streaming state (26 tensors), modified in place.
+    ///   - state: The streaming state (23 tensors), modified in place.
+    ///   - constants: Bundle containing emb_mean, emb_std, and quantizer_weight.
     ///   - model: The Mimi CoreML model.
     /// - Returns: Audio samples for this frame (1920 samples = 80ms at 24kHz).
     static func runMimiDecoder(
         latent: [Float],
         state: inout MimiState,
+        constants: PocketTtsConstantsBundle,
         model: MLModel
     ) async throws -> [Float] {
-        // Create latent input: [1, 32]
         let latentDim = PocketTtsConstants.latentDim
+        let quantizerDim = PocketTtsConstants.quantizerDim
+
+        // Allocate output MLMultiArray directly — write quantized result into it
+        // to avoid a separate heap allocation + copy.
         let latentArray = try MLMultiArray(
-            shape: [1, NSNumber(value: latentDim)], dataType: .float32)
-        let latentPtr = latentArray.dataPointer.bindMemory(to: Float.self, capacity: latentDim)
-        latent.withUnsafeBufferPointer { buffer in
-            guard let base = buffer.baseAddress else { return }
-            latentPtr.update(from: base, count: latentDim)
+            shape: [1, NSNumber(value: quantizerDim), 1], dataType: .float32)
+        let outPtr = latentArray.dataPointer.bindMemory(to: Float.self, capacity: quantizerDim)
+
+        // Denormalize: denorm = latent * emb_std + emb_mean (element-wise, 32 floats)
+        // Then quantize: outPtr = quantizer_weight @ denorm  (matrix-vector, [512,32] × [32])
+        // Use a stack buffer for the 32-float intermediate to avoid heap allocation.
+        latent.withUnsafeBufferPointer { latentBuf in
+            constants.embStd.withUnsafeBufferPointer { stdBuf in
+                constants.embMean.withUnsafeBufferPointer { meanBuf in
+                    constants.quantizerWeight.withUnsafeBufferPointer { weightBuf in
+                        // denorm[i] = latent[i] * std[i] + mean[i]
+                        var denorm = [Float](unsafeUninitializedCapacity: latentDim) { buf, count in
+                            vDSP_vma(
+                                latentBuf.baseAddress!, 1,
+                                stdBuf.baseAddress!, 1,
+                                meanBuf.baseAddress!, 1,
+                                buf.baseAddress!, 1,
+                                vDSP_Length(latentDim)
+                            )
+                            count = latentDim
+                        }
+
+                        // outPtr = quantizer_weight (512×32, row-major) × denorm (32×1)
+                        // vDSP matrix-vector multiply: C = A × B
+                        // A is [M×N] row-major, B is [N], C is [M]
+                        vDSP_mmul(
+                            weightBuf.baseAddress!, 1,
+                            &denorm, 1,
+                            outPtr, 1,
+                            vDSP_Length(quantizerDim),
+                            vDSP_Length(1),
+                            vDSP_Length(latentDim)
+                        )
+                    }
+                }
+            }
         }
 
         // Build input dictionary
