@@ -20,8 +20,8 @@ public enum PocketTtsVoiceCloner {
     /// Frame size for the encoder (1920 samples = 80ms).
     public static let frameSize: Int = PocketTtsConstants.samplesPerFrame
 
-    /// Standard voice prompt length (125 frames).
-    public static let voicePromptLength: Int = PocketTtsConstants.voicePromptLength
+    /// Maximum voice prompt frames (caps at ~20s to leave KV cache room for text tokens).
+    public static let maxVoiceFrames: Int = 250
 
     /// Minimum audio duration in seconds for voice cloning.
     public static let minDurationSeconds: Double = 1.0
@@ -78,12 +78,20 @@ public enum PocketTtsVoiceCloner {
         }
 
         let numFrames = conditioning.shape[1].intValue
-        logger.info("Encoded to \(numFrames) frames")
+        let embDim = conditioning.shape[2].intValue
+        let usableFrames = min(numFrames, maxVoiceFrames)
+        logger.info("Encoded to \(numFrames) frames, using \(usableFrames)")
 
-        // Convert to voice data format [voicePromptLength, 1024]
-        let voiceData = padOrTruncate(conditioning, targetFrames: voicePromptLength)
+        // Extract conditioning with bulk memory copy (no zero-padding)
+        let totalFloats = usableFrames * embDim
+        let voiceData = extractConditioning(conditioning, frames: usableFrames, embDim: embDim)
 
-        return PocketTtsVoiceData(audioPrompt: voiceData, promptLength: voicePromptLength)
+        guard voiceData.count == totalFloats else {
+            throw TTSError.processingFailed(
+                "Conditioning extraction mismatch: got \(voiceData.count), expected \(totalFloats)")
+        }
+
+        return PocketTtsVoiceData(audioPrompt: voiceData, promptLength: usableFrames)
     }
 
     /// Clone a voice from an audio file.
@@ -123,30 +131,40 @@ public enum PocketTtsVoiceCloner {
 
     /// Load voice conditioning data from a binary file.
     ///
+    /// Supports variable-length voice prompts — the prompt length is derived
+    /// from the file size (`floatCount / embeddingDim`).
+    ///
     /// - Parameters:
     ///   - url: Path to the .bin file containing voice data.
     /// - Returns: Voice conditioning data ready for TTS.
     /// - Throws: `TTSError.processingFailed` if the file cannot be read or has invalid size.
     public static func loadVoice(from url: URL) throws -> PocketTtsVoiceData {
         let data = try Data(contentsOf: url)
-        let expectedSize = voicePromptLength * PocketTtsConstants.embeddingDim * MemoryLayout<Float>.size
+        let embDim = PocketTtsConstants.embeddingDim
+        let floatCount = data.count / MemoryLayout<Float>.size
 
-        guard data.count == expectedSize else {
+        guard floatCount > 0, floatCount % embDim == 0 else {
             throw TTSError.processingFailed(
-                "Invalid voice file size: \(data.count) bytes (expected \(expectedSize))"
+                "Invalid voice file size: \(data.count) bytes (not divisible by embedding dim \(embDim))"
             )
         }
 
-        var audioPrompt = [Float](repeating: 0, count: voicePromptLength * PocketTtsConstants.embeddingDim)
-        data.withUnsafeBytes { buffer in
-            let floatBuffer = buffer.bindMemory(to: Float.self)
-            for i in 0..<audioPrompt.count {
-                audioPrompt[i] = floatBuffer[i]
-            }
+        let promptLength = floatCount / embDim
+
+        guard promptLength <= maxVoiceFrames else {
+            throw TTSError.processingFailed(
+                "Voice file too large: \(promptLength) frames (max \(maxVoiceFrames))"
+            )
         }
 
-        logger.info("Loaded voice from \(url.lastPathComponent) (\(data.count / 1024) KB)")
-        return PocketTtsVoiceData(audioPrompt: audioPrompt, promptLength: voicePromptLength)
+        let audioPrompt = data.withUnsafeBytes { rawBuffer in
+            let floatBuffer = rawBuffer.bindMemory(to: Float.self)
+            return Array(floatBuffer)
+        }
+
+        logger.info(
+            "Loaded voice from \(url.lastPathComponent): \(promptLength) frames (\(data.count / 1024) KB)")
+        return PocketTtsVoiceData(audioPrompt: audioPrompt, promptLength: promptLength)
     }
 
     // MARK: - Private Helpers
@@ -160,28 +178,21 @@ public enum PocketTtsVoiceCloner {
         return samples
     }
 
-    private static func padOrTruncate(_ conditioning: MLMultiArray, targetFrames: Int) -> [Float] {
-        let numFrames = conditioning.shape[1].intValue
-        let embDim = conditioning.shape[2].intValue
-
-        var result = [Float](repeating: 0, count: targetFrames * embDim)
-
-        let framesToCopy = min(numFrames, targetFrames)
-        for frame in 0..<framesToCopy {
-            for dim in 0..<embDim {
-                let idx = frame * embDim + dim
-                let value = conditioning[[0, NSNumber(value: frame), NSNumber(value: dim)]].floatValue
-                result[idx] = value
+    /// Extract conditioning floats from MLMultiArray [1, frames, embDim] via bulk memory copy.
+    private static func extractConditioning(
+        _ conditioning: MLMultiArray, frames: Int, embDim: Int
+    ) -> [Float] {
+        let count = frames * embDim
+        if conditioning.dataType == .float16 {
+            return (0..<count).map { i in
+                let frame = i / embDim
+                let dim = i % embDim
+                return conditioning[[0, NSNumber(value: frame), NSNumber(value: dim)]].floatValue
             }
         }
-
-        if numFrames > targetFrames {
-            logger.info("Truncated from \(numFrames) to \(targetFrames) frames")
-        } else if numFrames < targetFrames {
-            logger.info("Padded from \(numFrames) to \(targetFrames) frames")
-        }
-
-        return result
+        // Fast path: float32 bulk copy
+        let srcPtr = conditioning.dataPointer.bindMemory(to: Float.self, capacity: count)
+        return Array(UnsafeBufferPointer(start: srcPtr, count: count))
     }
 
     /// Load audio from a file and convert to 24kHz mono Float32.
