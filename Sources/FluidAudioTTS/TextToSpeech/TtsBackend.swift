@@ -6,4 +6,6 @@ public enum TtsBackend: Sendable {
     case kokoro
     /// PocketTTS — flow-matching language model, autoregressive streaming synthesis.
     case pocketTts
+    /// Qwen3-TTS — large language model-based multilingual TTS (English, Chinese).
+    case qwen3Tts
 }
