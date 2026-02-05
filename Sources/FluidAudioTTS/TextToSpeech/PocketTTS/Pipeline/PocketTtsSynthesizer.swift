@@ -141,10 +141,10 @@ public struct PocketTtsSynthesizer {
                 )
 
                 // Mimi state is continuous across chunks
-                // (denormalize + quantize baked into mimi_decoder model)
                 let frameSamples = try await runMimiDecoder(
                     latent: latent,
                     state: &mimiState,
+                    constants: constants,
                     model: mimiModel
                 )
                 audioChunks.append(frameSamples)

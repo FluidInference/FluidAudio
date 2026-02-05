@@ -11,6 +11,7 @@ public enum PocketTtsConstants {
     // MARK: - Model dimensions
 
     public static let latentDim: Int = 32
+    public static let quantizerDim: Int = 512
     public static let transformerDim: Int = 1024
     public static let vocabSize: Int = 4001
     public static let embeddingDim: Int = 1024
