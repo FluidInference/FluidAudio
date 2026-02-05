@@ -1,0 +1,69 @@
+---
+title: Manual Model Loading
+description: Deploy ASR models offline without HuggingFace downloads.
+---
+
+## Required Assets
+
+Each ASR release ships four CoreML bundles plus vocabulary:
+
+- `Preprocessor.mlmodelc`
+- `Encoder.mlmodelc`
+- `Decoder.mlmodelc`
+- `JointDecision.mlmodelc`
+- `parakeet_vocab.json`
+
+## Directory Layout
+
+```
+/opt/models
+└── parakeet-tdt-0.6b-v3-coreml
+    ├── Preprocessor.mlmodelc
+    ├── Encoder.mlmodelc
+    ├── Decoder.mlmodelc
+    ├── JointDecision.mlmodelc
+    └── parakeet_vocab.json
+```
+
+## Download Options
+
+1. **Git LFS clone:**
+   ```bash
+   git lfs install
+   git clone https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml
+   ```
+2. **HuggingFace web UI** — download `.tar` archives
+3. **Copy from cache** — from a machine that already ran `downloadAndLoad` (macOS: `~/Library/Application Support/FluidAudio/Models/<repo>`)
+
+## Loading Without Downloads
+
+```swift
+import FluidAudio
+
+let repoDirectory = URL(
+    fileURLWithPath: "/opt/models/parakeet-tdt-0.6b-v3-coreml",
+    isDirectory: true
+)
+
+let models = try await AsrModels.load(
+    from: repoDirectory,
+    configuration: AsrModels.defaultConfiguration(),
+    version: .v3
+)
+
+let asrManager = AsrManager()
+try await asrManager.initialize(models: models)
+```
+
+## Switching Versions
+
+```swift
+let englishRepo = URL(fileURLWithPath: "/opt/models/parakeet-tdt-0.6b-v2-coreml")
+let englishModels = try await AsrModels.load(from: englishRepo, version: .v2)
+```
+
+## Troubleshooting
+
+- Use `AsrModels.modelsExist(at:)` to verify all bundles are present
+- `parakeet_vocab.json` must sit beside the model bundles
+- If you see `AsrModelsError.modelNotFound`, check folder names and `coremldata.bin` files

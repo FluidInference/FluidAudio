@@ -1,0 +1,134 @@
+---
+title: PocketTTS
+description: Autoregressive TTS with dynamic audio chunking and streaming output.
+---
+
+## Overview
+
+PocketTTS (~155M params) is an autoregressive TTS backend that generates audio frame-by-frame. No espeak dependency — uses SentencePiece tokenization directly. Audio starts streaming ~80ms after prefill.
+
+Model: [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml)
+
+## Quick Start
+
+```swift
+import FluidAudioTTS
+
+let manager = PocketTtsManager()
+try await manager.initialize()
+
+let audioData = try await manager.synthesize(text: "Hello, world!")
+
+try await manager.synthesizeToFile(
+    text: "Hello, world!",
+    outputURL: URL(fileURLWithPath: "/tmp/output.wav")
+)
+```
+
+## Architecture
+
+```
+PocketTtsManager.synthesize(text:)
+  → chunkText() — split into max 50 token chunks
+  → loadMimiInitialState() — 23 streaming state tensors
+  → FOR EACH CHUNK:
+      → tokenizer.encode() — SentencePiece
+      → embedTokens() — table lookup
+      → prefillKVCache() — 125 voice + N text tokens
+      → GENERATE LOOP:
+          → runFlowLMStep() — transformer_out + eos_logit
+          → flowDecode() — 8 Euler steps → 32-dim latent
+          → denormalize() → quantize() → runMimiDecoder()
+          → 1920 audio samples per frame
+  → concatenate + postprocess
+  → WAV output (24kHz mono)
+```
+
+## Key State
+
+### KV Cache
+- 6 cache tensors `[2, 1, 512, 16, 64]` + 6 position counters
+- Reset per chunk
+
+### Mimi State
+- 23 tensors for convolution history, attention caches, overlap-add buffers
+- Continuous across chunks — keeps audio seamless
+
+## Text Chunking
+
+Long text splits at 50 tokens or fewer:
+1. Sentence boundaries (`.!?`)
+2. Clause boundaries (`,;:`)
+3. Word boundaries (fallback)
+
+## Pipeline
+
+```
+text → SentencePiece tokenizer → subword tokens → PocketTTS model → audio
+                                                    ↑
+                                          pronunciation decisions
+                                          happen inside model weights
+                                          (no external control)
+```
+
+Unlike [Kokoro](/tts/kokoro) which uses espeak to convert text to IPA phonemes **before** the model, PocketTTS feeds raw text tokens directly into the neural network. The model learned text→pronunciation mappings during training — there is no phoneme stage to intercept.
+
+## Pronunciation Control
+
+| Feature | Supported | Why |
+|---------|-----------|-----|
+| SSML `<phoneme>` | No | No IPA layer — model has no phoneme vocabulary |
+| Custom lexicon (word → IPA) | No | No phoneme stage to apply mappings |
+| Markdown `[word](/ipa/)` | No | Same — no phoneme input |
+| SSML `<sub>` (text substitution) | **Planned** | Text-level, can run before tokenizer |
+| Text preprocessing (numbers, dates) | **Planned** | Text-level, can run before tokenizer |
+
+**What can be added** — anything that operates on text before the SentencePiece tokenizer: number/date/currency expansion, text substitution, abbreviation expansion.
+
+**What cannot be added without retraining** — anything that requires phoneme-level control. The model decides pronunciation from text tokens alone. See [Kokoro](/tts/kokoro) if you need pronunciation control.
+
+## CoreML Details
+
+- All 4 models loaded with `.cpuAndGPU` (ANE float16 causes artifacts in Mimi state)
+- Compiled from `.mlpackage` → `.mlmodelc` on first load, cached on disk
+- Thread-safe via actor pattern
+
+## Benchmarks
+
+Benchmarks in progress. Methodology follows [Kyutai's evaluation](https://kyutai.org/pocket-tts-technical-report) and their [tts_longeval](https://github.com/kyutai-labs/tts_longeval) toolkit.
+
+### Upstream (Kyutai, CPU)
+
+[LibriSpeech test-clean](https://huggingface.co/datasets/openslr/librispeech_asr), WER via Whisper large-v3:
+
+| Metric | PocketTTS (100M) | F5-TTS | DSM (313M) |
+|--------|-------------------|--------|------------|
+| WER | 1.84% | 2.21% | 1.84% |
+| Audio Quality (ELO) | 2016 | — | — |
+| Speaker Similarity (ELO) | 1898 | — | — |
+| Runs on CPU | Yes (6x real-time) | No | No |
+
+ELO from human pairwise evaluation (50 raters, 50 samples). Tested on Apple M3 and Intel Core Ultra 7.
+
+### FluidAudio CoreML (planned)
+
+We will benchmark the CoreML port against the upstream PyTorch CPU baseline using the same methodology:
+
+| Metric | How | Dataset |
+|--------|-----|---------|
+| **WER** | Transcribe TTS output with Whisper large-v3, compare to input text | [LibriSpeech test-clean](https://huggingface.co/datasets/openslr/librispeech_asr) |
+| **Speaker Similarity** | WavLM cosine similarity between prompt audio and generated audio | LibriSpeech test-clean |
+| **RTFx** | Wall-clock generation time / audio duration | Variable length (1s to 300s) |
+| **Time to First Audio** | Time from `synthesize()` call to first audio frame | Single sentence |
+| **Peak RAM** | Instruments / `os_proc_memory` during generation | Variable length |
+
+Additional datasets from [tts_longeval](https://github.com/kyutai-labs/tts_longeval):
+- **NTREX** — monologue sentences from news translation corpus
+- **Synthetic Dialogs** — daily life, technical, and number-heavy scripts
+- **SEED English** — adapted from ByteDance's SEED TTS Eval
+
+Key comparisons: CoreML ANE vs PyTorch CPU (upstream), CoreML vs Kokoro CoreML (FluidAudio internal).
+
+## License
+
+CC-BY-4.0, inherited from [kyutai/pocket-tts](https://huggingface.co/kyutai/pocket-tts).

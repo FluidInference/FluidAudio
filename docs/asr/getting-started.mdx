@@ -1,0 +1,96 @@
+---
+title: ASR Getting Started
+description: Batch and streaming transcription with Parakeet models.
+---
+
+## When to Use
+
+- **Transcribing recordings or files** — Use batch ASR (this page). 210x real-time, 2.5% WER on English.
+- **Live captions while user speaks** — Use [Streaming ASR](/asr/streaming) with Parakeet EOU.
+- **Domain-specific terms keep getting wrong** — Add [Custom Vocabulary](/asr/custom-vocabulary) boosting (91.7% F-score on earnings calls).
+
+## Models
+
+| Model | Languages | Audio Length | Use Case |
+|-------|-----------|-------------|----------|
+| **Parakeet TDT v3** | 25 European | ~15s chunks | Default — multilingual |
+| **Parakeet TDT v2** | English only | ~15s chunks | Best English accuracy |
+| **Parakeet EOU** | English | 320ms chunks | Real-time streaming |
+
+## Batch Transcription
+
+Real-time factor: ~120x on M4 Pro (1 minute of audio in ~0.5 seconds).
+
+```swift
+import FluidAudio
+
+Task {
+    let models = try await AsrModels.downloadAndLoad(version: .v3) // .v2 for English-only
+    let asrManager = AsrManager(config: .default)
+    try await asrManager.initialize(models: models)
+
+    let samples = try AudioConverter().resampleAudioFile(
+        path: "path/to/audio.wav"
+    )
+    let result = try await asrManager.transcribe(samples, source: .system)
+    print("Transcription: \(result.text)")
+    print("Confidence: \(result.confidence)")
+}
+```
+
+### Transcribing from a File URL
+
+```swift
+let audioURL = URL(fileURLWithPath: "/path/to/audio.wav")
+let result = try await asrManager.transcribe(audioURL, source: .system)
+print(result.text)
+```
+
+<Warning>
+Do not parse WAV/PCM bytes by hand. Always convert with `AudioConverter` so differing bit depths, channel layouts, metadata chunks, or compressed formats get normalized to the 16 kHz mono Float32 tensors that Parakeet expects.
+</Warning>
+
+## Choosing a Model Version
+
+- **v2** — English only. Tighter vocabulary, better recall on long-form English audio.
+- **v3** — 25 European languages. English accuracy is still strong, but the broader vocab slightly trails v2 on rare words.
+
+Both share the same API surface—set `AsrModelVersion` in code or pass `--model-version` in the CLI.
+
+```swift
+let models = try await AsrModels.downloadAndLoad(version: .v2)
+```
+
+## Benchmarks
+
+[LibriSpeech test-clean](https://huggingface.co/datasets/openslr/librispeech_asr) (2,620 files, 5.4h audio):
+
+| Model | WER | RTFx |
+|-------|-----|------|
+| Parakeet TDT v3 | 2.5% | 156x |
+| Parakeet TDT v2 | 2.1% | 146x |
+| Parakeet EOU (320ms) | 4.9% | 12x |
+
+[FLEURS](https://huggingface.co/datasets/google/fleurs) (14,085 files, 44.9h audio, 25 languages):
+
+| Model | Avg WER | RTFx |
+|-------|---------|------|
+| Parakeet TDT v3 | 14.7% | 210x |
+
+See [full benchmarks](/reference/benchmarks) for per-language breakdown.
+
+## CLI
+
+```bash
+# Transcribe (multilingual)
+swift run fluidaudio transcribe audio.wav
+
+# English-only (better recall)
+swift run fluidaudio transcribe audio.wav --model-version v2
+
+# Multiple files in parallel
+swift run fluidaudio multi-stream audio1.wav audio2.wav
+
+# Benchmark on LibriSpeech
+swift run fluidaudio asr-benchmark --subset test-clean --max-files 50
+```

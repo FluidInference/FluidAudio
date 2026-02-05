@@ -1,0 +1,53 @@
+---
+title: Streaming VAD
+description: Real-time voice activity detection with event callbacks.
+---
+
+## Overview
+
+For streaming workloads, maintain a `VadStreamState` and process chunks individually. Each call emits at most one `VadStreamEvent` describing a speech start or end boundary.
+
+## Quick Start
+
+```swift
+import FluidAudio
+
+let manager = try await VadManager()
+var state = await manager.makeStreamState()
+
+for chunk in microphoneChunks {
+    let result = try await manager.processStreamingChunk(
+        chunk,
+        state: state,
+        config: .default,
+        returnSeconds: true,
+        timeResolution: 2
+    )
+
+    state = result.state
+    print(String(format: "Probability: %.3f", result.probability))
+
+    if let event = result.event {
+        switch event.kind {
+        case .speechStart:
+            print("Speech began at \(event.time ?? 0) s")
+        case .speechEnd:
+            print("Speech ended at \(event.time ?? 0) s")
+        }
+    }
+}
+```
+
+## VadStreamResult
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `state` | `VadStreamState` | Updated state for next chunk |
+| `event` | `VadStreamEvent?` | Speech start/end (only at boundaries) |
+| `probability` | `Float` | Raw VAD probability (0.0-1.0) |
+
+## Notes
+
+- Chunks don't need to be exactly 4096 samples
+- Call `makeStreamState()` to reset (equivalent to Silero's `reset_states`)
+- Use `probability` for custom thresholding alongside the built-in hysteresis

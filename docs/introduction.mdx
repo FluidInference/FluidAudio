@@ -1,0 +1,71 @@
+---
+title: Introduction
+description: Local audio AI for Apple devices — speech-to-text, speaker diarization, voice activity detection, and text-to-speech on the Neural Engine.
+---
+
+FluidAudio is a Swift SDK for fully local, low-latency audio AI on Apple devices. All inference runs on the Apple Neural Engine (ANE), keeping CPU and GPU free for your app.
+
+## At a Glance
+
+| Capability | Model | Speed | Accuracy | Languages |
+|-----------|-------|-------|----------|-----------|
+| **Transcription** | Parakeet TDT 0.6B | 210x RTFx | 2.5% WER (en), 14.7% avg (25 lang) | 25 European |
+| **Streaming ASR** | Parakeet EOU 120M | 12x RTFx | 4.9% WER (en) | English |
+| **Speaker Diarization** | Pyannote CoreML | 122x RTFx | 15% DER (offline) | Language-agnostic |
+| **Streaming Diarization** | Sortformer | 127x RTFx | 31.7% DER | Language-agnostic |
+| **Voice Activity** | Silero VAD v6 | 1230x RTFx | 96% accuracy | Language-agnostic |
+| **Text-to-Speech** | Kokoro 82M | 23x RTFx | 48 voices | English |
+| **Text-to-Speech** | PocketTTS 155M | Streaming | ~80ms first audio | English |
+
+All benchmarks on M4 Pro. ASR on [LibriSpeech](https://huggingface.co/datasets/openslr/librispeech_asr) / [FLEURS](https://huggingface.co/datasets/google/fleurs), diarization on [VoxConverse](https://www.robots.ox.ac.uk/~vgg/data/voxconverse/) / [AMI](https://groups.inf.ed.ac.uk/ami/corpus/), VAD on [VOiCES](https://iqtlabs.github.io/voices/) / [MUSAN](https://www.openslr.org/17/). See [full benchmarks](/reference/benchmarks) for per-language breakdowns and device comparisons.
+
+## When to Use Which
+
+### Transcription
+
+| Need | Use | Why |
+|------|-----|-----|
+| Transcribe recordings/files | **Parakeet TDT v3** | Fastest, 25 languages, 210x real-time |
+| English-only, best accuracy | **Parakeet TDT v2** | 2.1% WER vs 2.5% on LibriSpeech |
+| Live captions as user speaks | **Parakeet EOU** | 160ms chunks, end-of-utterance detection |
+| Domain-specific terms (names, jargon) | **TDT + CTC vocabulary boosting** | 99.3% precision, 85.2% recall on earnings calls |
+
+### Speaker Diarization
+
+| Need | Use | Why |
+|------|-----|-----|
+| Best accuracy (post-recording) | **Offline pipeline** (VBx) | 15% DER, full pyannote-compatible pipeline |
+| Real-time "who's speaking now" | **Streaming pipeline** | 26% DER at 5s chunks, speaker tracking across chunks |
+| Simple 2-4 speaker meetings | **Sortformer** | Single model, no clustering, 32% DER |
+
+### Voice Activity Detection
+
+| Need | Use | Why |
+|------|-----|-----|
+| Segment audio before ASR | **Offline segmentation** | Clean segments with min/max duration controls |
+| Real-time speech detection | **Streaming VAD** | Per-chunk events with hysteresis |
+
+### Text-to-Speech
+
+| Need | Use | Why |
+|------|-----|-----|
+| Highest quality, full generation | **Kokoro** | 48 voices, SSML support, flow matching |
+| Streaming audio (start playing fast) | **PocketTTS** | ~80ms to first audio, no espeak dependency |
+
+## Platform Support
+
+| Platform | Package |
+|----------|---------|
+| **Swift (iOS / macOS)** | [FluidAudio](https://github.com/FluidInference/FluidAudio) |
+| **React Native / Expo** | [@fluidinference/react-native-fluidaudio](https://github.com/FluidInference/react-native-fluidaudio) |
+| **Rust / Tauri** | [fluidaudio-rs](https://github.com/FluidInference/fluidaudio-rs) |
+
+## Requirements
+
+- macOS 14+ / iOS 17+
+- Swift 5.10+
+- Apple Silicon recommended
+
+## Model Conversion
+
+Want to convert your own models to CoreML? See [mobius](https://github.com/FluidInference/mobius).

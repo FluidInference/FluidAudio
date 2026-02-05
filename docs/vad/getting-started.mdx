@@ -1,0 +1,113 @@
+---
+title: VAD Getting Started
+description: Voice activity detection with Silero VAD v6 on CoreML.
+---
+
+## When to Use
+
+- **Pre-process audio before ASR** — Segment files into speech regions, skip silence. Reduces ASR processing by 30-50%.
+- **Real-time speech detection** — Trigger recording or UI when user starts/stops speaking.
+- **Improve diarization quality** — Filter noise before speaker embedding extraction. Reduces false speakers by 20-40%.
+
+## Specs
+
+| Metric | Value |
+|--------|-------|
+| Model | Silero VAD v6 |
+| Window size | 256ms |
+| Memory | Minimal (runs on CPU) |
+
+Model: [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml)
+
+## Offline Segmentation
+
+```swift
+import FluidAudio
+
+let manager = try await VadManager(
+    config: VadConfig(defaultThreshold: 0.75)
+)
+
+let samples = try AudioConverter().resampleAudioFile(
+    URL(fileURLWithPath: "audio.wav")
+)
+
+var segmentation = VadSegmentationConfig.default
+segmentation.minSpeechDuration = 0.25
+segmentation.minSilenceDuration = 0.4
+segmentation.speechPadding = 0.12
+
+let segments = try await manager.segmentSpeech(samples, config: segmentation)
+for (index, segment) in segments.enumerated() {
+    print(String(format: "Segment %02d: %.2f-%.2fs", index + 1, segment.startTime, segment.endTime))
+}
+```
+
+### Get Audio Clips
+
+```swift
+let clips = try await manager.segmentSpeechAudio(samples, config: segmentation)
+print("Extracted \(clips.count) buffered segments ready for ASR")
+```
+
+### Chunk-Level Probabilities
+
+```swift
+let results = try await manager.process(samples)
+for (index, chunk) in results.enumerated() {
+    print(String(format: "Chunk %02d: prob=%.3f", index, chunk.probability))
+}
+```
+
+## Manual Model Loading
+
+Stage the Core ML bundle for offline environments:
+
+```swift
+let modelURL = URL(
+    fileURLWithPath: "/opt/models/silero-vad-coreml/silero-vad-unified-256ms-v6.0.0.mlmodelc",
+    isDirectory: true
+)
+var configuration = MLModelConfiguration()
+configuration.computeUnits = .cpuOnly
+let vadModel = try MLModel(contentsOf: modelURL, configuration: configuration)
+let manager = VadManager(config: .default, vadModel: vadModel)
+```
+
+## Benchmarks
+
+[VOiCES](https://iqtlabs.github.io/voices/) (25 files, clean speech):
+
+| Metric | Value |
+|--------|-------|
+| Accuracy | 96.0% |
+| Precision | 100.0% |
+| Recall | 95.8% |
+| F1-Score | 97.9% |
+| RTFx | 1,230x |
+
+[MUSAN](https://www.openslr.org/17/) (2,016 files, mixed noise/music/speech):
+
+| Metric | Value |
+|--------|-------|
+| Accuracy | 94.2% |
+| Precision | 92.6% |
+| Recall | 78.9% |
+| F1-Score | 85.2% |
+| RTFx | 1,221x |
+
+## CLI
+
+```bash
+# Offline segmentation
+swift run fluidaudio vad-analyze audio.wav
+
+# Streaming mode
+swift run fluidaudio vad-analyze audio.wav --streaming --min-silence-ms 300
+
+# Both modes
+swift run fluidaudio vad-analyze audio.wav --mode both
+
+# Benchmark
+swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
+```

@@ -1,0 +1,212 @@
+---
+title: Benchmarks
+description: Performance benchmarks across all FluidAudio capabilities on Apple Silicon.
+---
+
+Hardware: 2024 MacBook Pro, M4 Pro, 48GB RAM, macOS Tahoe 26.0 (unless noted).
+
+## Transcription (Parakeet TDT v3)
+
+25 European languages on [FLEURS](https://huggingface.co/datasets/google/fleurs):
+
+| Language | WER% | CER% | RTFx | Files |
+|----------|------|------|------|-------|
+| Italian | 4.0 | 1.3 | 236.7 | 350 |
+| Spanish | 4.5 | 2.2 | 221.7 | 350 |
+| English (US) | 5.4 | 2.5 | 207.4 | 350 |
+| French | 5.9 | 2.2 | 199.9 | 350 |
+| German | 5.9 | 1.9 | 220.9 | 350 |
+| Russian | 7.2 | 2.2 | 209.7 | 350 |
+| Ukrainian | 7.2 | 2.5 | 201.9 | 350 |
+| Dutch | 7.8 | 2.6 | 191.7 | 350 |
+| Polish | 8.6 | 2.8 | 190.2 | 350 |
+| Czech | 12.0 | 3.8 | 214.2 | 350 |
+| Slovak | 12.6 | 4.4 | 227.6 | 350 |
+| Bulgarian | 12.8 | 4.1 | 195.2 | 350 |
+| Croatian | 14.0 | 4.3 | 204.9 | 350 |
+| Romanian | 14.4 | 4.7 | 200.4 | 883 |
+| Finnish | 14.8 | 3.1 | 222.0 | 918 |
+| Swedish | 16.8 | 5.0 | 219.5 | 759 |
+| Hungarian | 17.6 | 5.2 | 213.6 | 905 |
+| Danish | 20.2 | 7.4 | 214.4 | 930 |
+| Estonian | 20.1 | 4.2 | 225.3 | 893 |
+| Maltese | 25.2 | 9.3 | 217.4 | 926 |
+| Lithuanian | 25.0 | 6.8 | 202.8 | 986 |
+| Latvian | 27.1 | 7.5 | 217.8 | 851 |
+| Slovenian | 27.4 | 9.2 | 197.1 | 834 |
+| Greek | 36.9 | 13.7 | 183.0 | 650 |
+| **Average** | **14.7** | **4.7** | **209.8** | **14,085** |
+
+### LibriSpeech (English)
+
+| Model | Dataset | WER% | CER% | RTFx | Files |
+|-------|---------|------|------|------|-------|
+| TDT v3 | test-clean | 2.5% | 1.0% | 155.6x | 2,620 |
+| TDT v2 | test-clean | 2.1% | 0.7% | 145.8x | 2,620 |
+
+v2 has lower English WER — use it if you only need English.
+
+### Model Compilation Times
+
+First-load CoreML compile times (ANE compilation):
+
+| Model | iPhone 16 Pro Max (cold) | iPhone 16 Pro Max (warm) | iPhone 13 (cold) |
+|-------|------------------------:|-------------------------:|------------------:|
+| Preprocessor | 9ms | — | 633ms |
+| Encoder | 3,361ms | 162ms | 4,396ms |
+| Decoder | 88ms | 8ms | 146ms |
+| JointDecision | 48ms | 8ms | 72ms |
+
+Cold start = first load after install. Warm = subsequent loads from ANE cache.
+
+## Custom Vocabulary Boosting
+
+Earnings22 benchmark (771 files, earnings call transcripts with domain-specific terms):
+
+| Metric | Value |
+|--------|-------|
+| Average WER | 15.0% |
+| Vocab Precision | 99.3% (TP=1068, FP=8) |
+| Vocab Recall | 85.2% (TP=1068, FN=185) |
+| Vocab F-score | 91.7% |
+| Dict Pass (Recall) | 99.3% (1299/1308) |
+| RTFx | 63.4x |
+| Total audio | 11,565s |
+
+## Streaming ASR (Parakeet EOU)
+
+Hardware: Apple M2, 2022, macOS 26.
+
+LibriSpeech test-clean (2,620 files, 5.4h audio):
+
+| Chunk Size | WER (Avg) | RTFx | Total Time |
+|------------|-----------|------|------------|
+| 320ms | 4.87% | 12.48x | 26min |
+| 160ms | 8.29% | 4.78x | 68min |
+
+320ms is the recommended default — best accuracy/latency tradeoff.
+
+## Voice Activity Detection (Silero VAD v6)
+
+### VOiCES Dataset (25 files, clean speech)
+
+| Metric | Value |
+|--------|-------|
+| Accuracy | 96.0% |
+| Precision | 100.0% |
+| Recall | 95.8% |
+| F1-Score | 97.9% |
+| RTFx | 1,230.6x |
+
+### MUSAN Full (2,016 files, mixed noise/music/speech)
+
+| Metric | Value |
+|--------|-------|
+| Accuracy | 94.2% |
+| Precision | 92.6% |
+| Recall | 78.9% |
+| F1-Score | 85.2% |
+| RTFx | 1,220.7x |
+
+## Speaker Diarization
+
+### Offline Pipeline (VBx)
+
+VoxConverse dataset (232 clips):
+
+| Config | DER% | JER% | RTFx |
+|--------|------|------|------|
+| Step ratio 0.2, min duration 1.0s (default) | 15.1% | 39.4% | 122x |
+| Step ratio 0.1, min duration 0s (max accuracy) | 13.9% | 42.8% | 65x |
+
+The default is ~2x faster for only ~1.2% worse DER. Use step ratio 0.1 for critical accuracy.
+
+Reference: pyannote community-1 on CPU is 1.5-2x RTFx, on MPS is 20-25x RTFx. FluidAudio on ANE is 65-122x RTFx.
+
+### Streaming Pipeline (AMI SDM)
+
+| Chunk | Overlap | Threshold | DER% | RTFx | Best For |
+|-------|---------|-----------|------|------|----------|
+| 5s | 0s | 0.8 | 26.2% | 223x | Best accuracy/speed balance |
+| 10s | 0s | 0.7 | 33.3% | 392x | Higher throughput |
+| 3s | 1s | 0.85 | 49.7% | 51x | Lowest latency |
+| 5s | 2s | 0.8 | 43.0% | 69x | — |
+
+5s chunks with 0.8 threshold is the recommended starting point for streaming.
+
+<Warning>
+Streaming diarization is 10-15% worse DER than offline. Only use streaming when you critically need real-time speaker labels. For most apps, offline is more than fast enough.
+</Warning>
+
+### Sortformer (End-to-End Streaming)
+
+Hardware: Apple M2, 2022, macOS 26.1.
+
+AMI SDM dataset, NVIDIA high-latency config (30.4s chunks):
+
+| Meeting | DER% | Miss% | FA% | SE% | RTFx |
+|---------|------|-------|-----|-----|------|
+| IS1009b | 16.4 | 10.6 | 0.6 | 5.3 | 127.0 |
+| ES2004c | 23.8 | 17.8 | 0.3 | 5.7 | 126.5 |
+| ES2004b | 23.9 | 18.7 | 0.2 | 5.0 | 123.9 |
+| IS1009a | 26.5 | 16.0 | 1.4 | 9.1 | 134.4 |
+| ES2004d | 28.3 | 19.7 | 0.3 | 8.3 | 123.5 |
+| IS1009d | 29.1 | 16.5 | 1.0 | 11.6 | 127.9 |
+| TS3003b | 31.1 | 27.1 | 0.6 | 3.4 | 125.5 |
+| EN2002c | 31.8 | 20.1 | 0.2 | 11.5 | 126.0 |
+| ES2004a | 33.7 | 24.6 | 0.1 | 9.0 | 127.2 |
+| EN2002b | 34.0 | 20.2 | 0.6 | 13.3 | 127.7 |
+| TS3003c | 34.4 | 31.1 | 0.3 | 3.1 | 126.6 |
+| EN2002a | 35.6 | 20.0 | 0.4 | 15.2 | 125.4 |
+| EN2002d | 37.1 | 20.1 | 0.5 | 16.5 | 125.5 |
+| IS1009c | 38.1 | 12.8 | 0.9 | 24.4 | 129.2 |
+| TS3003d | 41.0 | 32.0 | 0.1 | 8.8 | 125.6 |
+| TS3003a | 41.8 | 36.8 | 0.7 | 4.3 | 125.7 |
+| **Average** | **31.7** | **21.5** | **0.5** | **9.7** | **126.7** |
+
+## Text-to-Speech
+
+Comparison across frameworks generating the same text samples (1s to ~300s of output audio):
+
+### Kokoro 82M
+
+| Framework | Total RTFx | Peak RAM | Notes |
+|-----------|-----------|----------|-------|
+| PyTorch CPU | 17.0x | 4.85 GB | Known memory leak |
+| PyTorch MPS | 10.0x | 1.54 GB | Crashes on long strings |
+| MLX | 23.8x | 3.37 GB | — |
+| **Swift CoreML** | **23.2x** | **1.50 GB** | Lowest memory |
+
+CoreML matches MLX speed with 55% less peak RAM. First run takes ~15s for ANE compilation, subsequent loads ~2s.
+
+## Running Benchmarks
+
+```bash
+# Transcription (all languages)
+swift run -c release fluidaudio fleurs-benchmark --languages all --samples all
+
+# Transcription (English, LibriSpeech)
+swift run -c release fluidaudio asr-benchmark --max-files all
+
+# Custom vocabulary
+swift run -c release fluidaudio ctc-earnings-benchmark --auto-download
+
+# Streaming ASR
+swift run -c release fluidaudio parakeet-eou --benchmark --chunk-size 320 --use-cache
+
+# VAD
+swift run -c release fluidaudio vad-benchmark --dataset voices-subset --all-files --threshold 0.85
+
+# Diarization (offline)
+swift run -c release fluidaudio diarization-benchmark --mode offline --auto-download
+
+# Diarization (streaming)
+swift run -c release fluidaudio diarization-benchmark --mode streaming \
+  --dataset ami-sdm --threshold 0.8 --chunk-seconds 5.0 --overlap-seconds 0.0
+
+# Sortformer
+swift run -c release fluidaudio sortformer-benchmark --nvidia-high-latency --hf --auto-download
+
+# TTS
+swift run -c release fluidaudio tts --benchmark
+```

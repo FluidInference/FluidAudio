@@ -1,0 +1,55 @@
+---
+title: Sortformer
+description: NVIDIA's end-to-end streaming speaker diarization model.
+---
+
+## Overview
+
+Sortformer is NVIDIA's end-to-end streaming speaker diarization model, converted to CoreML. Unlike the pyannote pipeline (segmentation + clustering), Sortformer is a single neural network with 4 fixed speaker slots.
+
+Model: [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml)
+
+## Key Properties
+
+- 4 fixed speaker slots with real-time inference
+- No separate segmentation + clustering stages
+- Streaming only (no offline mode)
+- Best for scenarios with 4 or fewer speakers
+
+## When to Use Sortformer vs Pyannote
+
+Sortformer can beat pyannote on benchmarks with certain configs, but benchmark DER does not always reflect production performance. In practice:
+
+| Scenario | Recommendation | Why |
+|----------|---------------|-----|
+| Noisy / background noise | **Sortformer** | More robust to non-speech audio |
+| 4 or fewer speakers | **Sortformer** | Designed for this — single model, no clustering |
+| 5+ speakers | **Pyannote offline** | Sortformer only has 4 speaker slots, will miss speakers |
+| Overlapping speech (5+ people) | **Pyannote offline** | Sortformer breaks down with heavy crosstalk beyond 4 |
+| Best overall accuracy | **Pyannote offline** | 15% DER vs 32% — more consistent in production |
+| Streaming required, simple meetings | **Sortformer** | Single model, no clustering overhead |
+
+<Warning>
+Benchmarks are not always consistent with production usage. Pyannote's offline pipeline with aggressive tuning can score lower DER on AMI, but those configs may not generalize. Sortformer's 32% DER is more representative of real-world performance on meetings with 4 or fewer speakers.
+</Warning>
+
+## Benchmarks
+
+[AMI SDM](https://groups.inf.ed.ac.uk/ami/corpus/) (16 meetings, single distant microphone). Audio length: 30.4s chunks (NVIDIA high-latency config):
+
+| Metric | Value |
+|--------|-------|
+| Average DER | 31.7% |
+| Average Miss | 21.5% |
+| Average FA | 0.5% |
+| Average SE | 9.7% |
+| Average RTFx | 126.7x |
+
+See [full benchmarks](/reference/benchmarks) for per-meeting breakdown.
+
+## CLI
+
+```bash
+swift run fluidaudio sortformer-benchmark \
+  --nvidia-high-latency --hf --auto-download
+```

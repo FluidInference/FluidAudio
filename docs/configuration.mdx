@@ -1,0 +1,59 @@
+---
+title: Configuration
+description: Model registry, proxy settings, and environment configuration.
+---
+
+## Model Registry URL
+
+Models auto-download from HuggingFace by default. You can override this to use a mirror, local server, or air-gapped environment.
+
+### Programmatic Override (recommended for apps)
+
+```swift
+import FluidAudio
+
+ModelRegistry.baseURL = "https://your-mirror.example.com"
+
+let diarizer = DiarizerManager()
+```
+
+### Environment Variables (recommended for CLI/testing)
+
+```bash
+export REGISTRY_URL=https://your-mirror.example.com
+swift run fluidaudio transcribe audio.wav
+
+# Or use the alias
+export MODEL_REGISTRY_URL=https://models.internal.corp
+```
+
+### Xcode Scheme
+
+1. Edit Scheme > Run > Arguments
+2. Go to **Environment Variables** tab
+3. Add: `REGISTRY_URL` = `https://your-mirror.example.com`
+
+**Priority order:** programmatic override > env vars > default (HuggingFace)
+
+## Proxy Configuration
+
+If you're behind a corporate firewall, set the `https_proxy` environment variable:
+
+```bash
+export https_proxy=http://proxy.company.com:8080
+
+# Or for authenticated proxies:
+export https_proxy=http://user:password@proxy.company.com:8080
+```
+
+### When to Use Which
+
+| Scenario | Solution |
+|----------|----------|
+| Local mirror or internal model server | Registry URL override |
+| Behind a corporate firewall with proxy | Proxy configuration |
+
+**Registry URL** — App requests from `your-mirror.com` instead of `huggingface.co`.
+**Proxy** — App still requests `huggingface.co`, but traffic routes through the proxy.
+
+In most cases, you only need one.

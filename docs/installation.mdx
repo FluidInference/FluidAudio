@@ -1,0 +1,55 @@
+---
+title: Installation
+description: Add FluidAudio to your Swift project.
+---
+
+## Swift Package Manager
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
+],
+```
+
+### Choosing a Product
+
+FluidAudio provides two library products:
+
+- **`FluidAudio`** (default) — Core functionality: ASR, diarization, VAD. Lightweight, no GPL dependencies.
+- **`FluidAudioTTS`** — Text-to-Speech (Kokoro). Includes ESpeakNG framework (GPL-3.0). Only bundled if you explicitly add it.
+
+**In Package.swift:**
+
+```swift
+// Core features only (no GPL dependencies):
+.product(name: "FluidAudio", package: "FluidAudio")
+
+// Add TTS support (includes GPL ESpeakNG):
+.product(name: "FluidAudioTTS", package: "FluidAudio")
+```
+
+**In Xcode:**
+
+1. File > Add Package Dependencies
+2. Enter the FluidAudio repository URL
+3. Select your desired product (`FluidAudio` or `FluidAudioTTS`)
+4. Add to your app target
+
+## CocoaPods
+
+We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but you can also use the podspec:
+
+```ruby
+pod 'FluidAudio', '~> 0.7.8'
+```
+
+## Other Frameworks
+
+| Platform | Package | Install |
+|----------|---------|---------|
+| **React Native / Expo** | [@fluidinference/react-native-fluidaudio](https://github.com/FluidInference/react-native-fluidaudio) | `npm install @fluidinference/react-native-fluidaudio` |
+| **Rust / Tauri** | [fluidaudio-rs](https://github.com/FluidInference/fluidaudio-rs) | `cargo add fluidaudio-rs` |
+
+<Note>
+The Kokoro TTS tooling currently ships arm64-only dependencies. See the [TTS docs](/tts/kokoro) if you hit linker errors targeting x86_64.
+</Note>

@@ -1,0 +1,33 @@
+---
+title: Audio Conversion
+description: Convert any audio format to 16 kHz mono Float32 for FluidAudio pipelines.
+---
+
+## Overview
+
+Most FluidAudio features expect 16 kHz mono Float32 samples. `AudioConverter` uses `AVAudioConverter` under the hood for sample-rate conversion, format conversion (e.g., Int16 → Float32), and channel mixing (stereo → mono).
+
+## File Conversion
+
+```swift
+import FluidAudio
+
+let converter = AudioConverter()
+let samples = try converter.resampleAudioFile(path: "path/to/audio.wav")
+// samples: [Float] at 16 kHz mono
+```
+
+Supported inputs: WAV, M4A, MP3, FLAC — anything readable by `AVAudioFile`.
+
+## Streaming Conversion
+
+```swift
+let converter = AudioConverter()
+
+func processChunk(_ pcmBuffer: AVAudioPCMBuffer) async throws {
+    let samples = try converter.resampleBuffer(pcmBuffer)
+    // Feed samples to ASR/VAD/diarization
+}
+```
+
+Each conversion is stateless — reuse the same converter instance across formats.
