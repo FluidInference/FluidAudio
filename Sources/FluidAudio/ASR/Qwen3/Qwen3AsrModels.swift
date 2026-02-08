@@ -39,9 +39,8 @@ public struct Qwen3AsrModels {
     ) async throws -> Qwen3AsrModels {
         let config = Qwen3AsrConfig.default
 
-        // CPU+GPU — ANE degrades both speed and accuracy for this model
         let modelConfig = MLModelConfiguration()
-        modelConfig.computeUnits = .cpuAndGPU
+        modelConfig.computeUnits = .all
 
         logger.info("Loading Qwen3-ASR models (2-model pipeline) from \(directory.path)")
         let start = CFAbsoluteTimeGetCurrent()

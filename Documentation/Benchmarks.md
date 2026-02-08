@@ -330,18 +330,10 @@ Hardware: Apple M2, 2022, macOS 26
 swift run -c release fluidaudiocli qwen3-benchmark --dataset aishell
 ```
 
-### Compute Units Comparison
-
-| Compute Units | WER (Avg) | RTFx | Per-token | Total Time |
-|---------------|-----------|------|-----------|------------|
-| `.cpuAndGPU` | 4.8% | 2.7x | ~85ms | 330.7s |
-| `.all` (ANE) | 5.0% | 3.2x | ~71ms | 282.6s |
-
-ANE provides ~18% speed improvement but ~4% worse accuracy. The autoregressive decoder is the fundamental bottleneck regardless of compute units.
-
 ```bash
-# Run Qwen3-ASR benchmark (full test-clean)
+# Run Qwen3-ASR benchmark
 swift run -c release fluidaudiocli qwen3-benchmark --subset test-clean
+swift run -c release fluidaudiocli qwen3-benchmark --dataset aishell
 ```
 
 ## Streaming ASR (Parakeet EOU)
