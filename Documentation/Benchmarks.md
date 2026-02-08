@@ -296,7 +296,7 @@ swift run fluidaudiocli vad-benchmark --dataset musan-full --num-files all --thr
 
 Encoder-decoder ASR using Qwen3-ASR-0.6B converted to CoreML. Autoregressive generation with KV-cache.
 
-Model: [alexwengg/qwen3-asr-0.6b-coreml](https://huggingface.co/alexwengg/qwen3-asr-0.6b-coreml) (f32 variant)
+Model: [FluidInference/qwen3-asr-0.6b-coreml](https://huggingface.co/FluidInference/qwen3-asr-0.6b-coreml) (f32 variant)
 
 Hardware: M4 Pro, 48GB RAM, macOS 26
 
@@ -310,6 +310,27 @@ Hardware: M4 Pro, 48GB RAM, macOS 26
 | Parakeet EOU 160ms | 8.3% | 0.0% | 4.8x | 160ms | Streaming chunks |
 
 Qwen3-ASR processes audio in 1-second windows (100 mel frames at 10ms hop), then generates text autoregressively through a 28-layer transformer decoder (~75ms/token). The official Qwen3-ASR-0.6B reports 2.11% WER on LibriSpeech test-clean; the CoreML conversion shows higher WER (4.4%), suggesting potential accuracy loss during conversion.
+
+### AISHELL-1 Chinese (6920 files, 9.7h audio)
+
+| Metric | Value |
+|--------|-------|
+| CER (Avg) | 6.6% |
+| WER (Avg) | 10.3% |
+| Median RTFx | 4.6x |
+| Overall RTFx | 3.8x |
+| Processing Time | 2.6h |
+
+**Methodology notes:**
+- CER (Character Error Rate) is the primary metric for Chinese ASR, as per the [Qwen3-ASR Technical Report](https://arxiv.org/html/2601.21337v1): *"We use CER for character-based languages (e.g., Mandarin Chinese, Cantonese, and Korean) and WER for word-delimited languages"*
+- WER calculation uses Apple's `NLTokenizer` for Chinese word segmentation, which may differ from official evaluation tokenization
+- Official Qwen3-ASR reports 3.15% CER on AISHELL-2 (different dataset); our 6.6% CER on AISHELL-1 suggests some accuracy loss in CoreML conversion
+- Dataset: [AudioLLMs/aishell_1_zh_test](https://huggingface.co/datasets/AudioLLMs/aishell_1_zh_test)
+
+```bash
+# Run AISHELL-1 benchmark
+swift run -c release fluidaudiocli qwen3-benchmark --dataset aishell
+```
 
 ### Compute Units Comparison
 
