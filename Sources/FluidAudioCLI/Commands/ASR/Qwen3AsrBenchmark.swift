@@ -1,4 +1,5 @@
 #if os(macOS)
+import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -214,12 +215,20 @@ enum Qwen3AsrBenchmark {
 
         for language in languages {
             let languageDir = baseFleursDir.appendingPathComponent(language)
-            guard FileManager.default.fileExists(atPath: languageDir.path) else {
-                logger.error(
-                    "FLEURS data not found for \(language) at \(languageDir.path). "
-                        + "Run prepare_fleurs_chinese.py first."
-                )
-                continue
+
+            // Auto-download if not present
+            if !FileManager.default.fileExists(atPath: languageDir.path) {
+                logger.info("FLEURS data not found for \(language), downloading...")
+                do {
+                    try await downloadFLEURSLanguage(
+                        language: language,
+                        targetDir: languageDir,
+                        maxFiles: maxFiles
+                    )
+                } catch {
+                    logger.error("Failed to download FLEURS \(language): \(error.localizedDescription)")
+                    continue
+                }
             }
 
             let allFiles = try collectFLEURSFiles(language: language, directory: languageDir)
@@ -252,6 +261,99 @@ enum Qwen3AsrBenchmark {
                 subset: nil,
                 language: language
             )
+        }
+    }
+
+    // MARK: - FLEURS Download
+
+    /// Download FLEURS data for a language from HuggingFace.
+    private static func downloadFLEURSLanguage(
+        language: String,
+        targetDir: URL,
+        maxFiles: Int?
+    ) async throws {
+        try FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
+
+        let datasetRepo = "FluidInference/fleurs"
+        logger.info("Downloading from HuggingFace: \(datasetRepo)/\(language)...")
+
+        // List files in the language directory
+        let apiURL = try ModelRegistry.apiDatasets(datasetRepo, "tree/main/\(language)")
+        let (listData, _) = try await DownloadUtils.fetchWithAuth(from: apiURL)
+
+        guard let items = try JSONSerialization.jsonObject(with: listData) as? [[String: Any]] else {
+            throw Qwen3AsrError.generationFailed("Could not parse file list from HuggingFace")
+        }
+
+        // Find transcript file and audio files
+        var audioFiles: [String] = []
+        let transFile = targetDir.appendingPathComponent("\(language).trans.txt")
+
+        for item in items {
+            guard let itemPath = item["path"] as? String,
+                let itemType = item["type"] as? String,
+                itemType == "file"
+            else { continue }
+
+            let fileName = URL(fileURLWithPath: itemPath).lastPathComponent
+
+            if fileName == "\(language).trans.txt" {
+                // Download transcript file
+                let downloadURL = try ModelRegistry.resolveDataset(datasetRepo, itemPath)
+                let transData = try await DownloadUtils.fetchHuggingFaceFile(
+                    from: downloadURL,
+                    description: "\(language) transcript"
+                )
+                try transData.write(to: transFile, options: .atomic)
+
+                let transcriptContent = String(data: transData, encoding: .utf8) ?? ""
+                let lines = transcriptContent.components(separatedBy: .newlines).filter { !$0.isEmpty }
+                logger.info("Downloaded \(lines.count) transcriptions")
+            } else if fileName.hasSuffix(".wav") {
+                audioFiles.append(itemPath)
+            }
+        }
+
+        // Download audio files
+        let maxDownload = maxFiles ?? audioFiles.count
+        var downloadedCount = 0
+
+        for audioPath in audioFiles.prefix(maxDownload) {
+            let fileName = URL(fileURLWithPath: audioPath).lastPathComponent
+            let audioFile = targetDir.appendingPathComponent(fileName)
+
+            // Skip if already exists and valid
+            if FileManager.default.fileExists(atPath: audioFile.path) {
+                if isValidAudioFile(audioFile) {
+                    downloadedCount += 1
+                    continue
+                }
+                try? FileManager.default.removeItem(at: audioFile)
+            }
+
+            // Download audio file
+            let downloadURL = try ModelRegistry.resolveDataset(datasetRepo, audioPath)
+            let audioData = try await DownloadUtils.fetchHuggingFaceFile(
+                from: downloadURL,
+                description: "\(language)/\(fileName)"
+            )
+            try audioData.write(to: audioFile, options: .atomic)
+            downloadedCount += 1
+
+            if downloadedCount % 20 == 0 {
+                logger.info("Downloaded \(downloadedCount)/\(maxDownload) audio files...")
+            }
+        }
+
+        logger.info("Downloaded \(downloadedCount) audio files for \(language)")
+    }
+
+    private static func isValidAudioFile(_ url: URL) -> Bool {
+        do {
+            _ = try AVAudioFile(forReading: url)
+            return true
+        } catch {
+            return false
         }
     }
 
