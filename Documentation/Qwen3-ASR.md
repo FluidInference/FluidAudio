@@ -90,6 +90,24 @@ See [Benchmarks.md](Benchmarks.md#qwen3-asr-experimental) for performance result
 | `qwen3_asr_embeddings.bin` | Token embedding weights (float16) |
 | `vocab.json` | Tokenizer vocabulary (151,936 tokens) |
 
+## CoreML Limitations
+
+This CoreML implementation differs from the original PyTorch in ways that may affect accuracy:
+
+| Feature | Original PyTorch | CoreML |
+|---------|-----------------|--------|
+| Attention | Dynamic flash attention (1-8s) | Fixed 1s windows, stateless |
+| Decoding | Greedy or beam search | Greedy only |
+| Streaming | Native with chunk unfixing | Not implemented |
+| Timestamps | Non-autoregressive aligner | Not implemented |
+| Max audio | 20 minutes | 30 seconds |
+| Batch size | Configurable (up to 32) | Single sample |
+
+**Impact on accuracy:**
+- Fixed 1s encoder windows lose cross-window context that dynamic attention provides
+- Greedy decoding may miss better paths that beam search would find
+- Chinese CER (6.6%) vs official 3.15% suggests ~2x degradation from CoreML conversion and architectural simplifications
+
 ## Why not int8?
 
 int8 quantization does not improve performance for Qwen3-ASR on Apple Silicon. In testing, int8 was actually **slower** (1.4x RTFx) than f32 (2.8x RTFx).
