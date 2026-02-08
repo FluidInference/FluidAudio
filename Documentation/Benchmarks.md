@@ -323,6 +323,7 @@ Hardware: Apple M2, 2022, macOS 26
 - CER (Character Error Rate) is the primary metric for Chinese ASR, as per the [Qwen3-ASR Technical Report](https://arxiv.org/html/2601.21337v1): *"We use CER for character-based languages (e.g., Mandarin Chinese, Cantonese, and Korean) and WER for word-delimited languages"*
 - WER calculation uses Apple's `NLTokenizer` for Chinese word segmentation; we were unable to verify how official Qwen3-ASR evaluation performs tokenization
 - Official Qwen3-ASR reports 3.15% on AISHELL-2 (different dataset) per [HuggingFace model card](https://huggingface.co/Qwen/Qwen3-ASR-0.6B); our 6.6% CER on AISHELL-1 suggests some accuracy loss in CoreML conversion
+- **Why AISHELL-1?** AISHELL-2 (1000h) requires an application with institutional affiliation and is restricted to non-commercial use. AISHELL-1 (178h) is openly available under Apache 2.0.
 - Dataset: [AudioLLMs/aishell_1_zh_test](https://huggingface.co/datasets/AudioLLMs/aishell_1_zh_test)
 
 ```bash
