@@ -1,29 +1,9 @@
 import Foundation
+import RegexBuilder
 
 /// HuggingFace-compatible text normalizer for ASR evaluation
 /// Matches the normalization used in the Open ASR Leaderboard
-enum TextNormalizer {
-
-    // MARK: - Static Regex Patterns (compiled once)
-
-    private static let bracketsPattern = try! NSRegularExpression(pattern: "[<\\[].*?[>\\]]")
-    private static let parenthesesPattern = try! NSRegularExpression(pattern: "\\([^)]+?\\)")
-    private static let whitespacePattern = try! NSRegularExpression(pattern: "\\s+")
-    private static let fillerPattern = try! NSRegularExpression(pattern: "\\b(hmm|mm|mhm|mmm|uh|um)\\b")
-    private static let stutterPattern = try! NSRegularExpression(pattern: "\\b[a-z]+-\\s*")
-    private static let numberLetterPattern1 = try! NSRegularExpression(pattern: "([a-z])([0-9])")
-    private static let numberLetterPattern2 = try! NSRegularExpression(pattern: "([0-9])([a-z])")
-    private static let suffixPattern = try! NSRegularExpression(pattern: "([0-9])\\s+(st|nd|rd|th|s)\\b")
-    private static let punctuationPattern = try! NSRegularExpression(pattern: "[^\\w\\s']")
-    private static let commaPattern = try! NSRegularExpression(pattern: "(\\d),(\\d)")
-    private static let periodPattern = try! NSRegularExpression(pattern: "\\.([^0-9]|$)")
-    private static let timePattern = try! NSRegularExpression(
-        pattern: "\\b(\\d{1,2})\\s+(\\d{2})\\s+(am|pm)\\b")
-    private static let symbolCleanup1 = try! NSRegularExpression(pattern: "[.$¢€£]([^0-9])")
-    private static let symbolCleanup2 = try! NSRegularExpression(pattern: "([^0-9])%")
-    private static let finalCleanPattern = try! NSRegularExpression(pattern: "[^\\w\\s]")
-
-    // MARK: - Character Mappings
+struct TextNormalizer {
 
     private static let additionalDiacritics: [Character: String] = [
         "œ": "oe", "Œ": "OE", "ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE",
@@ -46,23 +26,25 @@ enum TextNormalizer {
         var normalized = text.lowercased()
 
         // Remove words between brackets
+        let bracketsPattern = try! NSRegularExpression(pattern: "[<\\[].*?[>\\]]", options: [])
         normalized = bracketsPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: ""
         )
 
         // Remove words between parentheses
+        let parenthesesPattern = try! NSRegularExpression(pattern: "\\([^)]+?\\)", options: [])
         normalized = parenthesesPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: ""
         )
 
         // Apply NFKD normalization and handle diacritics/symbols
-        normalized = normalized.decomposedStringWithCompatibilityMapping
+        normalized = normalized.precomposedStringWithCompatibilityMapping
 
         if removeDiacritics {
             normalized = removeSymbolsAndDiacritics(normalized)
@@ -71,10 +53,11 @@ enum TextNormalizer {
         }
 
         // Replace successive whitespace with single space
+        let whitespacePattern = try! NSRegularExpression(pattern: "\\s+", options: [])
         normalized = whitespacePattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: " "
         )
 
@@ -87,9 +70,7 @@ enum TextNormalizer {
                 return replacement
             }
 
-            guard let category = char.unicodeScalars.first?.properties.generalCategory else {
-                return String(char)
-            }
+            let category = char.unicodeScalars.first?.properties.generalCategory
 
             // Remove combining marks (diacritics)
             if category == .nonspacingMark {
@@ -97,7 +78,9 @@ enum TextNormalizer {
             }
 
             // Replace symbols, punctuation, separators with space
-            if isSymbolPunctuationOrSeparator(category) {
+            if let cat = category,
+                ["symbol", "punctuation", "separator"].contains(String(describing: cat).prefix(1).lowercased())
+            {
                 return " "
             }
 
@@ -107,12 +90,12 @@ enum TextNormalizer {
 
     private static func removeSymbols(_ text: String) -> String {
         return text.compactMap { char in
-            guard let category = char.unicodeScalars.first?.properties.generalCategory else {
-                return String(char)
-            }
+            let category = char.unicodeScalars.first?.properties.generalCategory
 
             // Replace symbols, punctuation, separators with space, but keep diacritics
-            if isSymbolPunctuationOrSeparator(category) {
+            if let cat = category,
+                ["symbol", "punctuation", "separator"].contains(String(describing: cat).prefix(1).lowercased())
+            {
                 return " "
             }
 
@@ -120,36 +103,17 @@ enum TextNormalizer {
         }.joined()
     }
 
-    private static func isSymbolPunctuationOrSeparator(
-        _ category: Unicode.GeneralCategory
-    ) -> Bool {
-        switch category {
-        // Symbols
-        case .mathSymbol, .currencySymbol, .modifierSymbol, .otherSymbol:
-            return true
-        // Punctuation
-        case .connectorPunctuation, .dashPunctuation, .openPunctuation,
-            .closePunctuation, .initialPunctuation, .finalPunctuation, .otherPunctuation:
-            return true
-        // Separators
-        case .spaceSeparator, .lineSeparator, .paragraphSeparator:
-            return true
-        default:
-            return false
-        }
-    }
-
     /// Normalize text using HuggingFace ASR leaderboard standards
     /// This matches the normalization used in the official leaderboard evaluation
     static func normalize(_ text: String) -> String {
         var normalized = text
 
-        // Chinese number normalization (before lowercasing, since Chinese has no case)
-        normalized = normalizeChinese(normalized)
-
         normalized = normalized.lowercased()
 
         // British to American normalization
+        if britishToAmerican.isEmpty {
+            print("WARNING: english.json failed to load or is empty!")
+        }
         for (british, american) in britishToAmerican {
             let pattern = "\\b" + NSRegularExpression.escapedPattern(for: british) + "\\b"
             normalized = normalized.replacingOccurrences(
@@ -209,33 +173,37 @@ enum TextNormalizer {
             )
         }
 
+        let bracketsPattern = try! NSRegularExpression(pattern: "[<\\[].*?[>\\]]", options: [])
         normalized = bracketsPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: ""
         )
 
+        let parenthesesPattern = try! NSRegularExpression(pattern: "\\([^)]+?\\)", options: [])
         normalized = parenthesesPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: ""
         )
 
         // Remove filler words and interjections
+        let fillerPattern = try! NSRegularExpression(pattern: "\\b(hmm|mm|mhm|mmm|uh|um)\\b", options: [])
         normalized = fillerPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: ""
         )
 
         // Remove stuttering patterns like "th-", "o-", "y-" (single letter followed by dash)
+        let stutterPattern = try! NSRegularExpression(pattern: "\\b[a-z]+-\\s*", options: [])
         normalized = stutterPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: ""
         )
 
@@ -246,25 +214,28 @@ enum TextNormalizer {
         normalized = normalized.replacingOccurrences(of: " and a half", with: " point five")
 
         // Add spaces at number/letter boundaries
+        let numberLetterPattern1 = try! NSRegularExpression(pattern: "([a-z])([0-9])", options: [])
         normalized = numberLetterPattern1.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: "$1 $2"
         )
 
+        let numberLetterPattern2 = try! NSRegularExpression(pattern: "([0-9])([a-z])", options: [])
         normalized = numberLetterPattern2.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: "$1 $2"
         )
 
         // Remove spaces before suffixes
+        let suffixPattern = try! NSRegularExpression(pattern: "([0-9])\\s+(st|nd|rd|th|s)\\b", options: [])
         normalized = suffixPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: "$1$2"
         )
 
@@ -279,10 +250,11 @@ enum TextNormalizer {
         normalized = normalized.replacingOccurrences(of: "&", with: " and ")
         normalized = normalized.replacingOccurrences(of: "%", with: " percent ")
 
+        let punctuationPattern = try! NSRegularExpression(pattern: "[^\\w\\s']", options: [])
         normalized = punctuationPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: " "
         )
 
@@ -358,10 +330,12 @@ enum TextNormalizer {
             normalized = normalized.replacingOccurrences(of: contraction, with: expansion)
         }
 
+        // Abbreviations moved to top
+
         let numberWords = [
             // English numbers
             "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
-            "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+            "five": "5", "seven": "7", "eight": "8", "nine": "9",
             "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
             "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
             "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
@@ -397,7 +371,7 @@ enum TextNormalizer {
 
             // French numbers
             "zéro": "0", "un": "1", "deux": "2", "trois": "3", "quatre": "4",
-            "cinq": "5", "sept": "7", "huit": "8", "neuf": "9",
+            "cinq": "5", "six": "6", "sept": "7", "huit": "8", "neuf": "9",
             "dix": "10", "onze": "11", "douze": "12", "treize": "13", "quatorze": "14",
             "quinze": "15", "seize": "16", "dix-sept": "17", "dix-huit": "18",
             "dix-neuf": "19", "vingt": "20", "trente": "30", "quarante": "40",
@@ -426,18 +400,22 @@ enum TextNormalizer {
         }
 
         // Remove commas between digits
+        let commaPattern = try! NSRegularExpression(pattern: "(\\d),(\\d)", options: [])
         normalized = commaPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: "$1$2"
         )
 
+        // Merge consecutive digits logic removed due to regression
+
         // Remove periods not followed by numbers
+        let periodPattern = try! NSRegularExpression(pattern: "\\.([^0-9]|$)", options: [])
         normalized = periodPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: " $1"
         )
 
@@ -445,10 +423,11 @@ enum TextNormalizer {
         normalized = normalized.replacingOccurrences(of: "a d", with: "ad")
 
         // Handle time formats: "11 35 pm" -> "11 35 p m"
+        let timePattern = try! NSRegularExpression(pattern: "\\b(\\d{1,2})\\s+(\\d{2})\\s+(am|pm)\\b", options: [])
         normalized = timePattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: "$1 $2 $3"
         )
 
@@ -460,134 +439,41 @@ enum TextNormalizer {
         normalized = normalized.replacingOccurrences(of: "™", with: " trademark ")
 
         // Remove symbols not preceded/followed by numbers
+        let symbolCleanup1 = try! NSRegularExpression(pattern: "[.$¢€£]([^0-9])", options: [])
         normalized = symbolCleanup1.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: " $1"
         )
 
+        let symbolCleanup2 = try! NSRegularExpression(pattern: "([^0-9])%", options: [])
         normalized = symbolCleanup2.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: "$1 "
         )
 
+        let finalCleanPattern = try! NSRegularExpression(pattern: "[^\\w\\s]", options: [])
         normalized = finalCleanPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: " "
         )
 
+        let whitespacePattern = try! NSRegularExpression(pattern: "\\s+", options: [])
         normalized = whitespacePattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.utf16.count),
+            range: NSRange(location: 0, length: normalized.count),
             withTemplate: " "
         )
 
         normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return normalized
-    }
-
-    // MARK: - Chinese Text Normalization
-
-    /// Chinese digit characters to Arabic digit mapping.
-    private static let chineseDigits: [Character: Int] = [
-        "零": 0, "〇": 0,
-        "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
-        "六": 6, "七": 7, "八": 8, "九": 9,
-    ]
-
-    /// Chinese multiplier characters.
-    private static let chineseMultipliers: [Character: Int] = [
-        "十": 10, "百": 100, "千": 1000, "万": 10000, "亿": 100_000_000,
-    ]
-
-    /// All characters that form part of a Chinese number.
-    private static let chineseNumberChars: Set<Character> = {
-        Set(chineseDigits.keys).union(Set(chineseMultipliers.keys))
-    }()
-
-    /// Convert Chinese numbers to Arabic digits.
-    ///
-    /// Handles two styles:
-    /// 1. Sequential digit reading: 二零一一 → 2011
-    /// 2. Compound numbers: 十五 → 15, 二十三 → 23, 三百 → 300
-    static func normalizeChinese(_ text: String) -> String {
-        var result: [Character] = []
-        let chars = Array(text)
-        var i = 0
-
-        while i < chars.count {
-            guard chineseNumberChars.contains(chars[i]) else {
-                result.append(chars[i])
-                i += 1
-                continue
-            }
-
-            // Collect contiguous Chinese number characters
-            var numChars: [Character] = []
-            while i < chars.count && chineseNumberChars.contains(chars[i]) {
-                numChars.append(chars[i])
-                i += 1
-            }
-
-            // Check if any multiplier is present
-            let hasMultiplier = numChars.contains { chineseMultipliers[$0] != nil }
-
-            if hasMultiplier {
-                let converted = convertChineseCompound(numChars)
-                result.append(contentsOf: converted)
-            } else {
-                // Sequential digit reading: 二零一一 → 2011
-                for c in numChars {
-                    if let d = chineseDigits[c] {
-                        result.append(contentsOf: String(d))
-                    }
-                }
-            }
-        }
-
-        return String(result)
-    }
-
-    /// Convert a compound Chinese number like 十五, 二十三, 三百二十一 to Arabic.
-    private static func convertChineseCompound(_ chars: [Character]) -> String {
-        var total = 0
-        var current = 0
-        var sectionTotal = 0  // for 万/亿 sections
-
-        for c in chars {
-            if let digit = chineseDigits[c] {
-                current = digit
-            } else if let mult = chineseMultipliers[c] {
-                if mult >= 10000 {
-                    // 万 or 亿 — finalize current section
-                    if current > 0 {
-                        sectionTotal += current
-                        current = 0
-                    }
-                    if sectionTotal == 0 { sectionTotal = 1 }
-                    total += sectionTotal * mult
-                    sectionTotal = 0
-                } else {
-                    // 十, 百, 千
-                    if current == 0 { current = 1 }  // handles bare 十 = 10
-                    sectionTotal += current * mult
-                    current = 0
-                }
-            }
-        }
-
-        // Add remaining
-        sectionTotal += current
-        total += sectionTotal
-
-        return String(total)
     }
 
     // MARK: - Advanced Number Parsing
