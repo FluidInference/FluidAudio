@@ -1,9 +1,38 @@
 import Foundation
+import NaturalLanguage
 
 /// Shared Word Error Rate calculation utilities used by CLI commands.
 enum WERCalculator {
 
+    /// Tokenize text into words, using NaturalLanguage for Chinese/Japanese/Korean.
+    private static func tokenize(_ text: String) -> [String] {
+        let tokenizer = NLTokenizer(unit: .word)
+        tokenizer.string = text
+
+        var words: [String] = []
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            let word = String(text[range])
+            if !word.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                words.append(word)
+            }
+            return true
+        }
+        return words
+    }
+
+    /// Check if text contains CJK (Chinese/Japanese/Korean) characters.
+    private static func containsCJK(_ text: String) -> Bool {
+        text.unicodeScalars.contains { scalar in
+            // CJK Unified Ideographs and common ranges
+            (0x4E00...0x9FFF).contains(scalar.value)  // CJK Unified
+                || (0x3400...0x4DBF).contains(scalar.value)  // CJK Extension A
+                || (0x3040...0x309F).contains(scalar.value)  // Hiragana
+                || (0x30A0...0x30FF).contains(scalar.value)  // Katakana
+        }
+    }
+
     /// Compute word-level edit distance statistics and WER for hypothesis/reference pairs.
+    /// Uses NaturalLanguage tokenization for CJK languages (Chinese/Japanese/Korean).
     static func calculateWERMetrics(
         hypothesis rawHypothesis: String, reference rawReference: String
     )
@@ -12,8 +41,16 @@ enum WERCalculator {
         let hypothesis = TextNormalizer.normalize(rawHypothesis)
         let reference = TextNormalizer.normalize(rawReference)
 
-        let hypWords = hypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        let refWords = reference.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        // Use NL tokenizer for CJK text, whitespace splitting for others
+        let hypWords: [String]
+        let refWords: [String]
+        if containsCJK(reference) {
+            hypWords = tokenize(hypothesis)
+            refWords = tokenize(reference)
+        } else {
+            hypWords = hypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+            refWords = reference.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        }
 
         let distance = editDistance(hypWords, refWords)
         let wer = refWords.isEmpty ? 0.0 : Double(distance.total) / Double(refWords.count)
@@ -22,6 +59,7 @@ enum WERCalculator {
     }
 
     /// Compute character-level CER alongside WER if needed.
+    /// Uses NaturalLanguage tokenization for CJK languages (Chinese/Japanese/Korean).
     static func calculateWERAndCER(
         hypothesis rawHypothesis: String, reference rawReference: String
     )
@@ -33,8 +71,16 @@ enum WERCalculator {
         let hypothesis = TextNormalizer.normalize(rawHypothesis)
         let reference = TextNormalizer.normalize(rawReference)
 
-        let hypWords = hypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        let refWords = reference.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        // Use NL tokenizer for CJK text, whitespace splitting for others
+        let hypWords: [String]
+        let refWords: [String]
+        if containsCJK(reference) {
+            hypWords = tokenize(hypothesis)
+            refWords = tokenize(reference)
+        } else {
+            hypWords = hypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+            refWords = reference.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        }
 
         let wordDistance = editDistance(hypWords, refWords)
         let wer = refWords.isEmpty ? 0.0 : Double(wordDistance.total) / Double(refWords.count)

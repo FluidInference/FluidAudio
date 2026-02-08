@@ -127,6 +127,12 @@ enum Qwen3AsrBenchmark {
                     fleursDir: fleursDir,
                     outputFile: outputFile
                 )
+            case "aishell":
+                try await runAishellBenchmark(
+                    manager: manager,
+                    maxFiles: maxFiles,
+                    outputFile: outputFile
+                )
             default:
                 try await runLibriSpeechBenchmark(
                     manager: manager,
@@ -226,6 +232,75 @@ enum Qwen3AsrBenchmark {
                 dataset: "fleurs", subset: nil, language: language
             )
         }
+    }
+
+    // MARK: - AISHELL-1 Benchmark
+
+    @available(macOS 15, iOS 18, *)
+    private static func runAishellBenchmark(
+        manager: Qwen3AsrManager,
+        maxFiles: Int?,
+        outputFile: String
+    ) async throws {
+        let aishellDir =
+            FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/FluidAudio/AISHELL/cmn_hans_cn")
+
+        guard FileManager.default.fileExists(atPath: aishellDir.path) else {
+            logger.error(
+                "AISHELL-1 data not found at \(aishellDir.path). "
+                    + "Please extract AISHELL-1 test set first."
+            )
+            exit(1)
+        }
+
+        let allFiles = try collectAishellFiles(directory: aishellDir)
+        let files = Array(allFiles.prefix(maxFiles ?? allFiles.count))
+        logger.info("Collected \(files.count) files from AISHELL-1 test set")
+
+        let results = try await runBenchmarkLoop(
+            manager: manager,
+            files: files.map { ($0.fileName, $0.audioPath, $0.transcript) },
+            language: "zh"
+        )
+
+        printSummary(results: results, dataset: "AISHELL-1", subset: "test", language: "zh")
+        try writeJSON(
+            results: results, outputFile: outputFile,
+            dataset: "aishell", subset: "test", language: "zh"
+        )
+    }
+
+    private static func collectAishellFiles(directory: URL) throws -> [LibriSpeechFile] {
+        let transFile = directory.appendingPathComponent("cmn_hans_cn.trans.txt")
+        guard FileManager.default.fileExists(atPath: transFile.path) else {
+            throw Qwen3AsrError.generationFailed(
+                "Transcript file not found: \(transFile.path)"
+            )
+        }
+
+        let content = try String(contentsOf: transFile)
+        let lines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        var files: [LibriSpeechFile] = []
+
+        for line in lines {
+            guard let spaceIndex = line.firstIndex(of: " ") else { continue }
+            let fileId = String(line[line.startIndex..<spaceIndex])
+            let transcript = String(line[line.index(after: spaceIndex)...])
+
+            let wavPath = directory.appendingPathComponent("\(fileId).wav")
+            guard FileManager.default.fileExists(atPath: wavPath.path) else { continue }
+
+            files.append(
+                LibriSpeechFile(
+                    fileName: wavPath.lastPathComponent,
+                    audioPath: wavPath,
+                    transcript: transcript
+                )
+            )
+        }
+
+        return files
     }
 
     // MARK: - FLEURS File Collection
@@ -491,7 +566,7 @@ enum Qwen3AsrBenchmark {
             Usage: fluidaudio qwen3-benchmark [options]
 
             Options:
-                --dataset <name>        Dataset: librispeech (default) or fleurs
+                --dataset <name>        Dataset: librispeech (default), fleurs, or aishell
                 --subset <name>         LibriSpeech subset (default: test-clean)
                 --languages <list>      FLEURS language codes, comma-separated (default: cmn_hans_cn)
                 --max-files <number>    Max files to process (default: all)
@@ -505,11 +580,14 @@ enum Qwen3AsrBenchmark {
                 fluidaudio qwen3-benchmark --max-files 100
                 fluidaudio qwen3-benchmark --subset test-other --max-files 50
 
+                # Chinese (AISHELL-1)
+                fluidaudio qwen3-benchmark --dataset aishell
+                fluidaudio qwen3-benchmark --dataset aishell --max-files 100
+
                 # Chinese (FLEURS)
                 fluidaudio qwen3-benchmark --dataset fleurs --languages cmn_hans_cn
-                fluidaudio qwen3-benchmark --dataset fleurs --languages cmn_hans_cn --max-files 20
 
-                # Multiple languages
+                # Multiple languages (FLEURS)
                 fluidaudio qwen3-benchmark --dataset fleurs --languages cmn_hans_cn,ja_jp,ko_kr
 
             Supported FLEURS languages:
