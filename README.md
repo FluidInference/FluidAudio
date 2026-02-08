@@ -65,7 +65,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Whisper Mate](https://whisper.marksdo.com)** | Transcribes movies and audio locally; records and transcribes in real time from speakers or system apps. Uses speaker diarization. |
 | **[Altic/Fluid Voice](https://github.com/altic-dev/Fluid-oss)** | Lightweight Fully free and Open Source Voice to Text dictation for macOS built using FluidAudio. Never pay for dictation apps |
 | **[Paraspeech](https://paraspeech.com)** | AI powered voice to text. Fully offline. No subscriptions. |
-| **[mac-whisper-speedtest](https://github.com/anvanvan/mac-whisper-speedtest)** | Comparison of different local ASR, including one of the first verions of FluidAudio's ASR models |
+| **[mac-whisper-speedtest](https://github.com/anvanvan/mac-whisper-speedtest)** | Comparison of different local ASR, including one of the first versions of FluidAudio's ASR models |
 | **[Starling](https://github.com/Ryandonofrio3/Starling)** | Open Source, fully local voice-to-text transcription with auto-paste at your cursor. |
 | **[BoltAI](https://boltai.com/)** | Write content 10x faster using parakeet models |
 | **[Voxeoflow](https://www.voxeoflow.app)** | Mac dictation app with real-time translation. Lightning-fast transcription in over 100 languages, instantly translated to your target language. |
@@ -118,13 +118,6 @@ FluidAudio provides two library products:
 // Add TTS support (includes GPL ESpeakNG):
 .product(name: "FluidAudioTTS", package: "FluidAudio")
 ```
-
-**In Xcode:**
-1. Add the FluidAudio package to your project
-2. In the "Add Package" dialog, select your desired product:
-   - `FluidAudio` for core features only
-   - `FluidAudioWithTTS` if you need text-to-speech
-3. Add the selected product to your app target
 
 **CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.7.8'`
 
@@ -222,7 +215,7 @@ swift run fluidaudio transcribe audio.wav
 
 - Guides
   - [Audio Conversion for Inference](Documentation/Guides/AudioConversion.md)
-  - Manual model download & loading options: [ASR](Documentation/ASR/ManualModelLoading.md), [Diarizer](Documentation/SpeakerDiarization.md#manual-model-loading), [VAD](Documentation/VAD/GettingStarted.md#manual-model-loading)
+  - Manual model download & loading options: [ASR](Documentation/ASR/ManualModelLoading.md), [Diarizer](Documentation/Diarization/GettingStarted.md#manual-model-loading), [VAD](Documentation/VAD/GettingStarted.md#manual-model-loading)
   - Routing Hugging Face (or compatible) requests through a proxy? Set `https_proxy` before running the download helpers (see [Documentation/API.md](Documentation/API.md:9)).
   - [Kokoro TTS arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds)
 - Models
@@ -230,11 +223,11 @@ swift run fluidaudio transcribe audio.wav
     - [Getting Started](Documentation/ASR/GettingStarted.md)
     - [Last Chunk Handling](Documentation/ASR/LastChunkHandling.md)
   - Speaker Diarization
-    - [Speaker Diarization Guide](Documentation/SpeakerDiarization.md)
+    - [Speaker Diarization Guide](Documentation/Diarization/GettingStarted.md)
   - VAD: [Getting Started](Documentation/VAD/GettingStarted.md)
     - [Segmentation](Documentation/VAD/Segmentation.md)
     - [Model Conversion Code](https://github.com/FluidInference/mobius)
-- [Benchmarks]([Documentation/Benchmarks.md])
+- [Benchmarks](Documentation/Benchmarks.md)
 - [API Reference](Documentation/API.md)
 - [Command Line Guide](Documentation/CLI.md)
 
@@ -304,7 +297,7 @@ swift run fluidaudio transcribe audio.wav --model-version v2
 
 ### Offline Speaker Diarization Pipeline
 
-Pyannote Community-1 pipeline (powerset segmentation + WeSpeaker + VBx) for offline speaker diarization. Use this for most use cases, see Benchmarkds.md for benchmarks.
+Pyannote Community-1 pipeline (powerset segmentation + WeSpeaker + VBx) for offline speaker diarization. Use this for most use cases, see Benchmarks.md for benchmarks.
 
 ```swift
 import FluidAudio
@@ -368,7 +361,7 @@ Task {
 }
 ```
 
-For diarization streaming see [Documentation/SpeakerDiarization.md](Documentation/SpeakerDiarization.md)
+For diarization streaming see [Documentation/Diarization/GettingStarted.md](Documentation/Diarization/GettingStarted.md)
 
 ```bash
 swift run fluidaudio diarization-benchmark --single-file ES2004a \
@@ -572,7 +565,7 @@ This project builds upon the excellent work of the [sherpa-onnx](https://github.
 
 Pyannote: <https://github.com/pyannote/pyannote-audio>
 
-Wewpeaker: <https://github.com/wenet-e2e/wespeaker>
+WeSpeaker: <https://github.com/wenet-e2e/wespeaker>
 
 Parakeet-mlx: <https://github.com/senstella/parakeet-mlx>
 
