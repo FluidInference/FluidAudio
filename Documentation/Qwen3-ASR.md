@@ -51,12 +51,6 @@ let text = try await manager.transcribe(audioSamples: samples)
 
 See [Benchmarks.md](Benchmarks.md#qwen3-asr-experimental) for performance results on LibriSpeech and AISHELL-1.
 
-## Limitations
-
-- **Speed**: Autoregressive decoding (~60-80ms/token) is slower than parallel decoders like Parakeet TDT
-- **Accuracy**: CoreML conversion introduces some accuracy loss vs PyTorch original
-- **Memory**: Requires ~1.5GB RAM for inference
-
 ## Files
 
 | Component | Description |
