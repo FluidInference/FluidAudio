@@ -8,8 +8,6 @@ private let logger = Logger(subsystem: "FluidAudio", category: "Qwen3AsrModels")
 
 /// Holds CoreML model components for the optimized 2-model Qwen3-ASR pipeline.
 ///
-/// - Warning: **Beta** - This API is experimental and subject to change.
-///
 /// This uses Swift-side embedding lookup from a preloaded weight matrix,
 /// eliminating the embedding CoreML model. Reduces CoreML calls from 3 to 2 per token.
 ///
