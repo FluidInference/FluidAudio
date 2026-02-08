@@ -4,6 +4,7 @@
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
+[![Documentation](https://img.shields.io/badge/Documentation-docs.fluidinference.com-008574.svg)](https://docs.fluidinference.com/introduction)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/WNsvaCtmDe)
 [![Hugging Face Models](https://img.shields.io/badge/Hugging%20Face%20Models-100k%2B%20downloads-brightgreen?logo=huggingface)](https://huggingface.co/FluidInference)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/FluidInference/FluidAudio)
@@ -20,7 +21,11 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
   <a href="https://github.com/Beingpax/VoiceInk/"><img src="Documentation/assets/voiceink.png" height="40" alt="Voice Ink"></a>
   <a href="https://spokenly.app/"><img src="Documentation/assets/spokenly.png" height="40" alt="Spokenly"></a>
   <a href="https://slipbox.ai/"><img src="Documentation/assets/slipbox.png" height="40" alt="Slipbox"></a>
-  
+  <a href="https://hex.kitlangton.com/"><img src="Documentation/assets/hex.png" height="40" alt="Hex"></a>
+  <a href="https://boltai.com/"><img src="Documentation/assets/boltai.png" height="40" alt="BoltAI"></a>
+  <a href="https://paraspeech.com"><img src="Documentation/assets/paraspeech.png" height="40" alt="Paraspeech"></a>
+  <a href="https://altic.dev/fluid"><img src="Documentation/assets/fluidvoice.png" height="40" alt="Fluid Voice"></a>
+
   <!-- Add your app: submit logo via PR -->
 </p>
 
@@ -42,9 +47,10 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 | --- | --- |
 | **[Spokenly Real-time ASR](https://www.youtube.com/watch?v=9fXKKkyL8JE)** | Video demonstration of FluidAudio's transcription accuracy and speed |
 | **[Senko Integration](https://x.com/hamza_q_/status/1970228971657928995)** | Python Speaker diarization on Mac using FluidAudio's segmentation model |
-| **[Mobile TTS](https://x.com/sach1n/status/1977817056507793521)** | Voice on mobile video using FluidAudio's Kokoro and Silero models |
-| **[Parakeet Realtime EOU](https://x.com/sach1n/status/2003210626659680762)** | NVIDIA's Parakeet streaming ASR with end-of-utterance detection |
-| **[Sortformer Diarization](https://x.com/Alex_tra_memory/status/2010530705667661843)** | NVIDIA Sortformer for speaker diarization with overlapping speech |
+| **[Kokoro TTS](https://x.com/sach1n/status/1977817056507793521)** | Text-to-speech demo using FluidAudio's Kokoro and Silero models on iOS |
+| **[Parakeet Realtime EOU](https://x.com/sach1n/status/2003210626659680762)** | Parakeet streaming ASR with end-of-utterance detection on iOS |
+| **[Sortformer Diarization](https://x.com/Alex_tra_memory/status/2010530705667661843)** | Sortformer for speaker diarization with overlapping speech on iOS |
+| **[PocketTTS](https://x.com/sach1n/status/2017627657006158296)** | Streaming text-to-speech using PocketTTS on iOS |
 
 ## Showcase
 
@@ -52,7 +58,6 @@ Make a PR if you want to add your app, please keep it in chronological order.
 
 | App | Description |
 | --- | --- |
-| **[Dictate Anywhere](https://github.com/hoomanaskari/mac-dictate-anywhere)** | Native macOS dictation app with global Fn key activation. Dictate into any app with 25 language support. Uses Parakeet ASR. |
 | **[Voice Ink](https://tryvoiceink.com/)** | Local AI for instant, private transcription with near-perfect accuracy. Uses Parakeet ASR. |
 | **[Spokenly](https://spokenly.app/)** | Mac dictation app for fast, accurate voice-to-text; supports real-time dictation and file transcription. Uses Parakeet ASR and speaker diarization. |
 | **[Senko](https://github.com/narcotic-sh/senko)** | A very fast and accurate speaker diarization pipeline. A [good example](https://github.com/narcotic-sh/senko/commit/51dbd8bde764c3c6648dbbae57d6aff66c5ca15c) for how to integrate FluidAudio into a Python app |
@@ -67,10 +72,13 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Speakmac](https://speakmac.app)** | Mac app that lets you type anywhere on your Mac using your voice. Fully local, private dictation built on FluidAudio. |
 | **[SamScribe](https://github.com/Steven-Weng/SamScribe)** | An open-source macOS app that captures and transcribes audio from your microphone and meeting applications (Zoom, Teams, Chrome) in real-time, with cross-session speaker recognition. |
 | **[WhisKey](https://whiskey.asktobuild.app/)** | Privacy-first voice dictation keyboard for iOS and macOS. On-device transcription with 12+ languages, AI meeting summaries, and mindmap generation. Great for daily use and vibe-coding. Uses speaker diarization. |
+| **[Dictate Anywhere](https://github.com/hoomanaskari/mac-dictate-anywhere)** | Native macOS dictation app with global Fn key activation. Dictate into any app with 25 language support. Uses Parakeet ASR. |
 | **[hongbomiao.com](https://github.com/hongbo-miao/hongbomiao.com)** | A personal R&D lab that facilitates knowledge sharing. Uses Parakeet ASR. |
 | **[Hex](https://github.com/kitlangton/Hex)** | macOS app that lets you press-and-hold a hotkey to record your voice, transcribe it, and paste into any application. Uses Parakeet ASR. |
 | **[Super Voice Assistant](https://github.com/ykdojo/super-voice-assistant)** | Open-source macOS voice assistant with local transcription. Uses Parakeet ASR. |
 | **[VoiceTypr](https://github.com/moinulmoin/voicetypr)** | Open-source voice-to-text dictation for macOS and Windows. Uses Parakeet ASR. |
+| **[Summit AI Notes](https://summitnotes.app/)** | Local meeting transcription and summarization with speaker identification. Supports 100+ languages. |
+| **[Ora](https://futurelab.studio/ora)** | Local voice assistant for macOS with speech recognition and text-to-speech. |
 
 ## Installation
 

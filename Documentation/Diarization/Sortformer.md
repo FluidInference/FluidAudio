@@ -25,6 +25,16 @@ Sortformer is an end-to-end neural speaker diarization model that answers "who s
 | More than 4 speakers | No | Yes |
 | Remembering speakers across meetings | No | Yes |
 
+## Production Notes
+
+Benchmark DER does not always reflect real-world performance. Key things to know:
+
+- **Noisy environments**: Sortformer's main strength. It handles background noise significantly better than pyannote.
+- **4 speaker hard limit**: Sortformer has 4 fixed speaker slots. It will not work with 5+ speakers — it will miss or merge them.
+- **Heavy crosstalk (5+ people)**: Does not work well when many people talk over each other. The 4-slot design breaks down.
+- **Benchmark tuning**: Pyannote with aggressive tuning can score lower DER than Sortformer on specific datasets (e.g. AMI), but those configs often don't generalize to real audio. Sortformer's 32% DER is more representative of actual production performance on meetings with 4 or fewer speakers.
+- **Missed speech**: The most common error type. Sortformer is trained to ignore background conversations, so quiet or distant speech may be missed.
+
 ## Architecture
 
 ### Processing Pipeline

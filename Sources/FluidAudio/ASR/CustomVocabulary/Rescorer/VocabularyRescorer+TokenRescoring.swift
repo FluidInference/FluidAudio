@@ -455,6 +455,7 @@ extension VocabularyRescorer {
                 guard minSpan <= maxSpan else { continue }
 
                 for spanLength in minSpan...maxSpan {
+                    guard spanLength <= wordTimings.count else { break }
                     for startIdx in 0..<(wordTimings.count - spanLength + 1) {
                         // Check if any word in the span is already replaced
                         let spanIndices = Array(startIdx..<(startIdx + spanLength))

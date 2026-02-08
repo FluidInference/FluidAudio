@@ -51,22 +51,49 @@ for chunk in detailed.chunks {
 
 `KokoroSynthesizer.SynthesisResult` also exposes `diagnostics` for per-run variant and audio footprint totals.
 
-## SSML Support
+## Pipeline
 
-Kokoro supports a subset of SSML tags for controlling pronunciation. See [SSML.md](SSML.md) for details.
+```
+text → espeak G2P → IPA phonemes → Kokoro model → audio
+         ↑                ↑
+   custom lexicon    SSML <phoneme>
+   overrides here    overrides here
+```
+
+Because espeak runs **outside** the model as a preprocessing step, you can intercept and edit phonemes before they reach the neural network. This is what enables all pronunciation control features.
+
+## Pronunciation Control
+
+Kokoro supports three ways to override pronunciation:
+
+1. **SSML tags** — `<phoneme>`, `<sub>`, `<say-as>` (cardinal, ordinal, digits, date, time, telephone, fraction, characters). See [SSML.md](SSML.md).
+2. **Custom lexicon** — word → IPA mapping files loaded via `setCustomLexicon()`. Entries matched case-sensitive first, then case-insensitive, then normalized. See [CustomPronunciation.md](../ASR/CustomPronunciation.md).
+3. **Markdown syntax** — inline `[word](/ipa/)` overrides in the input text. Example: `[Kokoro](/kəˈkɔɹo/)`.
+
+Precedence: custom lexicon > built-in dictionaries > grapheme-to-phoneme conversion.
+
+## Text Preprocessing
+
+Kokoro includes comprehensive text normalization (numbers, currencies, times, decimal numbers, units, abbreviations, dates). SSML processing runs first, then markdown-style overrides, then normalization.
 
 ## How It Differs From PocketTTS
 
 | | Kokoro | PocketTTS |
 |---|---|---|
-| Text input | Phonemes (IPA via espeak) | Raw text (SentencePiece) |
+| Pipeline | text → espeak G2P → IPA → model | text → SentencePiece → model |
 | Voice conditioning | Style embedding vector | 125 audio prompt tokens |
 | Generation | All frames at once | Frame-by-frame autoregressive |
 | Flow matching target | Mel spectrogram | 32-dim latent per frame |
 | Audio synthesis | Vocos vocoder | Mimi streaming codec |
 | Latency to first audio | Must wait for full generation | ~80ms after prefill |
+| SSML support | Yes (`<phoneme>`, `<sub>`, `<say-as>`) | No |
+| Custom lexicon | Yes (word → IPA) | No |
+| Markdown pronunciation | Yes (`[word](/ipa/)`) | No |
+| Text preprocessing | Full (numbers, dates, currencies) | Minimal (whitespace, punctuation) |
 
 Kokoro parallelizes across time (fast total, but must wait for everything). PocketTTS is sequential across time (slower total, but audio starts immediately).
+
+PocketTTS cannot support phoneme-level features because it has no phoneme stage — the model was trained on text tokens, not IPA. See [PocketTTS.md](PocketTTS.md) for details on what can and cannot be added.
 
 ## Enable TTS in Your Project
 
