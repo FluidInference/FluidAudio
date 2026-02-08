@@ -106,7 +106,6 @@ This CoreML implementation differs from the original PyTorch in ways that may af
 **Impact on accuracy:**
 - Fixed 1s encoder windows lose cross-window context that dynamic attention provides
 - Greedy decoding may miss better paths that beam search would find
-- Chinese CER (6.6%) vs official 3.15% suggests ~2x degradation from CoreML conversion and architectural simplifications
 
 ## Why not int8?
 
