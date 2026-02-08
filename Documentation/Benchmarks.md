@@ -309,8 +309,6 @@ Hardware: Apple M2, 2022, macOS 26
 | RTFx | 2.8x |
 | Per-token | ~75ms |
 
-Qwen3-ASR processes audio in 1-second windows (100 mel frames at 10ms hop), then generates text autoregressively through a 28-layer transformer decoder. The official Qwen3-ASR-0.6B reports 2.11% WER on LibriSpeech test-clean; the CoreML conversion shows higher WER (4.4%), likely due to precision differences in conversion.
-
 ### AISHELL-1 Chinese (6920 files, 9.7h audio)
 
 | Metric | Value |
