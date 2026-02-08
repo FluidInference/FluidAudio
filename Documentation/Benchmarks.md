@@ -292,6 +292,39 @@ swift run fluidaudiocli vad-benchmark --dataset musan-full --num-files all --thr
 [23:02:35.744] [INFO] [VAD] Results saved to: vad_benchmark_results.json
 ```
 
+## Qwen3-ASR (Experimental)
+
+Encoder-decoder ASR using Qwen3-ASR-0.6B converted to CoreML. Autoregressive generation with KV-cache.
+
+Model: [alexwengg/qwen3-asr-0.6b-coreml](https://huggingface.co/alexwengg/qwen3-asr-0.6b-coreml) (f32 variant)
+
+Hardware: M4 Pro, 48GB RAM, macOS 26
+
+### LibriSpeech test-clean (2620 files)
+
+| Model | WER (Avg) | WER (Median) | RTFx | Audio Chunk | Notes |
+|-------|-----------|--------------|------|-------------|-------|
+| Qwen3-ASR 0.6B CoreML | 4.4% | 0.0% | 2.8x | 1s (100 mel frames) | Autoregressive, ~75ms/token |
+| Parakeet TDT 0.6B v3 | 2.5% | 0.0% | 155.6x | Full audio | Parallel decoding |
+| Parakeet EOU 320ms | 4.9% | 0.0% | 12.5x | 320ms | Streaming chunks |
+| Parakeet EOU 160ms | 8.3% | 0.0% | 4.8x | 160ms | Streaming chunks |
+
+Qwen3-ASR processes audio in 1-second windows (100 mel frames at 10ms hop), then generates text autoregressively through a 28-layer transformer decoder (~75ms/token). The official Qwen3-ASR-0.6B reports 2.11% WER on LibriSpeech test-clean; the CoreML conversion shows higher WER (4.4%), suggesting potential accuracy loss during conversion.
+
+### Compute Units Comparison
+
+| Compute Units | WER (Avg) | RTFx | Per-token | Total Time |
+|---------------|-----------|------|-----------|------------|
+| `.cpuAndGPU` | 4.8% | 2.7x | ~85ms | 330.7s |
+| `.all` (ANE) | 5.0% | 3.2x | ~71ms | 282.6s |
+
+ANE provides ~18% speed improvement but ~4% worse accuracy. The autoregressive decoder is the fundamental bottleneck regardless of compute units.
+
+```bash
+# Run Qwen3-ASR benchmark (full test-clean)
+swift run -c release fluidaudiocli qwen3-benchmark --subset test-clean
+```
+
 ## Streaming ASR (Parakeet EOU)
 
 Real-time streaming ASR with End-of-Utterance detection using the Parakeet EOU 120M CoreML model.
