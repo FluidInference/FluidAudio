@@ -42,6 +42,15 @@ public struct TTS {
         return artifactsRoot.appendingPathComponent(expanded, isDirectory: expectsDirectory)
     }
 
+    private static func resolveInputURL(_ suppliedPath: String) -> URL {
+        let expanded = (suppliedPath as NSString).expandingTildeInPath
+        if expanded.hasPrefix("/") {
+            return URL(fileURLWithPath: expanded)
+        }
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        return cwd.appendingPathComponent(expanded)
+    }
+
     private static func loadCustomLexicon(from path: String?) throws -> TtsCustomLexicon? {
         guard let path = path else { return nil }
         let expanded = (path as NSString).expandingTildeInPath
@@ -135,6 +144,9 @@ public struct TTS {
         var benchmarkMode = false
         var deEss = true
         var backend: TtsBackend = .kokoro
+        var cloneVoicePath: String? = nil
+        var voiceFilePath: String? = nil
+        var saveVoicePath: String? = nil
 
         var i = 0
         while i < arguments.count {
@@ -201,6 +213,21 @@ public struct TTS {
                 benchmarkMode = true
             case "--no-deess":
                 deEss = false
+            case "--clone-voice":
+                if i + 1 < arguments.count {
+                    cloneVoicePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--voice-file":
+                if i + 1 < arguments.count {
+                    voiceFilePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--save-voice":
+                if i + 1 < arguments.count {
+                    saveVoicePath = arguments[i + 1]
+                    i += 1
+                }
             default:
                 if text == nil {
                     text = argument
@@ -231,7 +258,8 @@ public struct TTS {
         if backend == .pocketTts {
             await runPocketTts(
                 text: text, output: output, voice: voice, deEss: deEss,
-                metricsPath: metricsPath)
+                metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
+                voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath)
             return
         }
 
@@ -472,7 +500,8 @@ public struct TTS {
 
     private static func runPocketTts(
         text: String, output: String, voice: String, deEss: Bool,
-        metricsPath: String?
+        metricsPath: String?, cloneVoicePath: String?,
+        voiceFilePath: String?, saveVoicePath: String?
     ) async {
         do {
             let tStart = Date()
@@ -485,9 +514,36 @@ public struct TTS {
             try await manager.initialize()
             let tLoad1 = Date()
 
+            // Handle voice cloning options
+            var voiceData: PocketTtsVoiceData? = nil
+
+            if let cloneVoicePath = cloneVoicePath {
+                let cloneURL = resolveInputURL(cloneVoicePath)
+                logger.info("Cloning voice from: \(cloneURL.path)")
+                voiceData = try await manager.cloneVoice(from: cloneURL)
+                logger.info("Voice cloned successfully")
+
+                if let saveVoicePath = saveVoicePath {
+                    let saveURL = resolveInputURL(saveVoicePath)
+                    try manager.saveClonedVoice(voiceData!, to: saveURL)
+                    logger.info("Saved cloned voice to: \(saveURL.path)")
+                }
+            } else if let voiceFilePath = voiceFilePath {
+                let voiceURL = resolveInputURL(voiceFilePath)
+                logger.info("Loading voice from: \(voiceURL.path)")
+                voiceData = try manager.loadClonedVoice(from: voiceURL)
+                logger.info("Voice loaded successfully")
+            }
+
             let tSynth0 = Date()
-            let wav = try await manager.synthesize(
-                text: text, voice: pocketVoice, deEss: deEss)
+            let wav: Data
+            if let voiceData = voiceData {
+                wav = try await manager.synthesize(
+                    text: text, voiceData: voiceData, deEss: deEss)
+            } else {
+                wav = try await manager.synthesize(
+                    text: text, voice: pocketVoice, deEss: deEss)
+            }
             let tSynth1 = Date()
 
             let outURL = {
@@ -603,11 +659,26 @@ public struct TTS {
               (models/dictionary auto-download is always on in CLI)
               --help, -h           Show this help
 
+            Voice Cloning (PocketTTS only):
+              --clone-voice FILE   Clone voice from audio file (WAV, MP3, M4A, etc.)
+              --voice-file FILE    Load previously saved voice .bin file
+              --save-voice FILE    Save cloned voice to .bin file for later use
+
             Lexicon file format:
               # Comments start with #
               kokoro=kəkˈɔɹO
               ketorolac=kˈɛtɔːɹˌɒlak
               xiaomi=zˌaɪəɹˈəʊmi
+
+            Voice Cloning examples:
+              # Clone and synthesize in one step
+              fluidaudio tts "Hello world" --backend pocket --clone-voice speaker.wav
+
+              # Clone, save, and synthesize
+              fluidaudio tts "Hello world" --backend pocket --clone-voice speaker.wav --save-voice my_voice.bin
+
+              # Use previously saved voice
+              fluidaudio tts "Hello world" --backend pocket --voice-file my_voice.bin
             """
         )
     }

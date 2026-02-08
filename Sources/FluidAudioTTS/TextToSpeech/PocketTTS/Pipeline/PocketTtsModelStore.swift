@@ -16,6 +16,7 @@ public actor PocketTtsModelStore {
     private var flowlmStepModel: MLModel?
     private var flowDecoderModel: MLModel?
     private var mimiDecoderModel: MLModel?
+    private var mimiEncoderModel: MLModel?
     private var constantsBundle: PocketTtsConstantsBundle?
     private var voiceCache: [String: PocketTtsVoiceData] = [:]
     private var repoDirectory: URL?
@@ -129,5 +130,60 @@ public actor PocketTtsModelStore {
         let data = try PocketTtsResourceDownloader.ensureVoice(voice, repoDirectory: repoDir)
         voiceCache[voice] = data
         return data
+    }
+
+    // MARK: - Voice Cloning
+
+    /// Load the Mimi encoder model for voice cloning (lazy, on-demand).
+    ///
+    /// Downloads the model from HuggingFace if not already cached.
+    public func loadMimiEncoderIfNeeded() async throws {
+        guard mimiEncoderModel == nil else { return }
+
+        // Ensure the mimi_encoder is downloaded (downloads if needed)
+        let modelURL = try await PocketTtsResourceDownloader.ensureMimiEncoder()
+
+        // Update repoDirectory if not set
+        if repoDirectory == nil {
+            repoDirectory = modelURL.deletingLastPathComponent()
+        }
+
+        let config = MLModelConfiguration()
+        config.computeUnits = .cpuAndGPU
+
+        logger.info("Loading Mimi encoder for voice cloning...")
+        let loadStart = Date()
+        mimiEncoderModel = try MLModel(contentsOf: modelURL, configuration: config)
+        let elapsed = Date().timeIntervalSince(loadStart)
+        logger.info("Mimi encoder loaded in \(String(format: "%.2f", elapsed))s")
+    }
+
+    /// The Mimi encoder model for voice cloning.
+    public func mimiEncoder() throws -> MLModel {
+        guard let model = mimiEncoderModel else {
+            throw TTSError.modelNotFound(
+                "Mimi encoder not loaded. Call loadMimiEncoderIfNeeded() first."
+            )
+        }
+        return model
+    }
+
+    /// Check if the Mimi encoder model is available.
+    public func isMimiEncoderAvailable() -> Bool {
+        guard let repoDir = repoDirectory else { return false }
+        let modelURL = repoDir.appendingPathComponent(ModelNames.PocketTTS.mimiEncoderFile)
+        return FileManager.default.fileExists(atPath: modelURL.path)
+    }
+
+    /// Clone a voice from an audio URL within the actor's isolation context.
+    public func cloneVoice(from audioURL: URL) throws -> PocketTtsVoiceData {
+        let encoder = try mimiEncoder()
+        return try PocketTtsVoiceCloner.cloneVoice(from: audioURL, using: encoder)
+    }
+
+    /// Clone a voice from audio samples within the actor's isolation context.
+    public func cloneVoice(from samples: [Float]) throws -> PocketTtsVoiceData {
+        let encoder = try mimiEncoder()
+        return try PocketTtsVoiceCloner.cloneVoice(from: samples, using: encoder)
     }
 }
