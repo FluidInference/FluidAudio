@@ -237,7 +237,7 @@ Peak memory usage (process-wide): 1.503 GB
 
 ## Voice Activity Detection
 
-Model is nearly identical to the base model in terms of quality, perforamnce wise we see an up to ~3.5x improvement compared to the silero Pytorch VAD model with the 256ms batch model (8 chunks of 32ms)
+Model is nearly identical to the base model in terms of quality, performance wise we see an up to ~3.5x improvement compared to the silero Pytorch VAD model with the 256ms batch model (8 chunks of 32ms)
 
 ![VAD/speed.png](VAD/speed.png)
 ![VAD/correlation.png](VAD/correlation.png)
@@ -320,7 +320,7 @@ swift run -c release fluidaudiocli parakeet-eou --benchmark --chunk-size 160 --u
 
 The offline version uses the community-1 model, the online version uses the legacy speaker-diarization-3.1 model.
 
-### Offline diarzing pipeline
+### Offline diarization pipeline
 
 For slightly ~1.2% worse DER we default to a higher step ratio segmentation duration than the baseline community-1 pipeline. This allows us to get nearly ~2x the speed (as expected because we're processing 1/2 of the embeddings). For highly critical use cases, one may should use step ratio = 0.1 and minSegmentDurationSeconds = 0.0
 
@@ -331,7 +331,7 @@ StepRatio = 0.2, minSegmentDurationSeconds= 1.0
 Average DER: 15.07% | Median DER: 10.70% | Average JER: 39.40% | Median JER: 40.95% (collar=0.25s, ignoreOverlap=True)
 Average RTFx: 122.06 (from 232 clips)
 Completed. New results: 232, Skipped existing: 0, Total attempted: 232
-Step Ratio 2, min turation 1.0
+Step Ratio 2, min duration 1.0
 
 
 StepRatio = 0.1, minSegmentDurationSeconds= 0
@@ -341,7 +341,7 @@ Completed. New results: 232, Skipped existing: 0, Total attempted: 232
 Step Ratio 1, min duration 0 (edited) 
 ```
 
-Note that the baseline pytorch version is ~11% DER, we lost some precision dropping down to fp16 precision in order to run most of the emebdding model on neural engine. But as a result, we significantly out perform the baseline `mps` backend as well. the pyannote-community-1 on cpu is ~1.5-2 RTFx, on mps, it's ~20-25 RTFx.
+Note that the baseline pytorch version is ~11% DER, we lost some precision dropping down to fp16 precision in order to run most of the embedding model on neural engine. But as a result, we significantly out perform the baseline `mps` backend as well. the pyannote-community-1 on cpu is ~1.5-2 RTFx, on mps, it's ~20-25 RTFx.
 
 ### Streaming/online Diarization
 
