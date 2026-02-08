@@ -6,10 +6,7 @@ Encoder-decoder automatic speech recognition using [Qwen3-ASR-0.6B](https://hugg
 
 **CoreML Model**: [FluidInference/qwen3-asr-0.6b-coreml](https://huggingface.co/FluidInference/qwen3-asr-0.6b-coreml)
 
-| Variant | Size | Use Case |
-|---------|------|----------|
-| f32 | ~1.2GB | Default, higher precision |
-| int8 | ~600MB | Smaller, slightly faster on CPU |
+Only the **f32** variant is recommended. See [Why not int8?](#why-not-int8) below.
 
 ## Architecture
 
@@ -59,3 +56,15 @@ See [Benchmarks.md](Benchmarks.md#qwen3-asr-experimental) for performance result
 | `qwen3_asr_decoder_stateful.mlmodelc` | Autoregressive decoder with KV-cache |
 | `qwen3_asr_embeddings.bin` | Token embedding weights (float16) |
 | `vocab.json` | Tokenizer vocabulary (151,936 tokens) |
+
+## Why not int8?
+
+int8 quantization does not improve performance for Qwen3-ASR on Apple Silicon. In testing, int8 was actually **slower** (1.4x RTFx) than f32 (2.8x RTFx).
+
+**Root cause:** Qwen3-ASR uses a 28-layer transformer decoder that runs **once per token** (autoregressive). Each forward pass requires dequantizing ~1GB of weights across all layers. This overhead multiplies with token count.
+
+This differs from parallel decoders like Parakeet TDT, where:
+- The decoder is small (~23MB) and runs once
+- int8 dequantization cost is amortized across batch output
+
+For autoregressive LLM-style decoders, fp16 compute precision (used by f32 models internally) provides the best speed/accuracy tradeoff on Apple Silicon.
