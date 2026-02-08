@@ -108,6 +108,9 @@ struct TextNormalizer {
     static func normalize(_ text: String) -> String {
         var normalized = text
 
+        // Chinese number normalization (before lowercasing, since Chinese has no case)
+        normalized = normalizeChinese(normalized)
+
         normalized = normalized.lowercased()
 
         // British to American normalization
@@ -474,6 +477,103 @@ struct TextNormalizer {
         normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return normalized
+    }
+
+    // MARK: - Chinese Text Normalization
+
+    /// Chinese digit characters to Arabic digit mapping.
+    private static let chineseDigits: [Character: Int] = [
+        "零": 0, "〇": 0,
+        "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+        "六": 6, "七": 7, "八": 8, "九": 9,
+    ]
+
+    /// Chinese multiplier characters.
+    private static let chineseMultipliers: [Character: Int] = [
+        "十": 10, "百": 100, "千": 1000, "万": 10000, "亿": 100_000_000,
+    ]
+
+    /// All characters that form part of a Chinese number.
+    private static let chineseNumberChars: Set<Character> = {
+        Set(chineseDigits.keys).union(Set(chineseMultipliers.keys))
+    }()
+
+    /// Convert Chinese numbers to Arabic digits.
+    ///
+    /// Handles two styles:
+    /// 1. Sequential digit reading: 二零一一 → 2011
+    /// 2. Compound numbers: 十五 → 15, 二十三 → 23, 三百 → 300
+    static func normalizeChinese(_ text: String) -> String {
+        var result: [Character] = []
+        let chars = Array(text)
+        var i = 0
+
+        while i < chars.count {
+            guard chineseNumberChars.contains(chars[i]) else {
+                result.append(chars[i])
+                i += 1
+                continue
+            }
+
+            // Collect contiguous Chinese number characters
+            var numChars: [Character] = []
+            while i < chars.count && chineseNumberChars.contains(chars[i]) {
+                numChars.append(chars[i])
+                i += 1
+            }
+
+            // Check if any multiplier is present
+            let hasMultiplier = numChars.contains { chineseMultipliers[$0] != nil }
+
+            if hasMultiplier {
+                let converted = convertChineseCompound(numChars)
+                result.append(contentsOf: converted)
+            } else {
+                // Sequential digit reading: 二零一一 → 2011
+                for c in numChars {
+                    if let d = chineseDigits[c] {
+                        result.append(contentsOf: String(d))
+                    }
+                }
+            }
+        }
+
+        return String(result)
+    }
+
+    /// Convert a compound Chinese number like 十五, 二十三, 三百二十一 to Arabic.
+    private static func convertChineseCompound(_ chars: [Character]) -> String {
+        var total = 0
+        var current = 0
+        var sectionTotal = 0  // for 万/亿 sections
+
+        for c in chars {
+            if let digit = chineseDigits[c] {
+                current = digit
+            } else if let mult = chineseMultipliers[c] {
+                if mult >= 10000 {
+                    // 万 or 亿 — finalize current section
+                    if current > 0 {
+                        sectionTotal += current
+                        current = 0
+                    }
+                    if sectionTotal == 0 { sectionTotal = 1 }
+                    total += sectionTotal * mult
+                    sectionTotal = 0
+                } else {
+                    // 十, 百, 千
+                    if current == 0 { current = 1 }  // handles bare 十 = 10
+                    sectionTotal += current * mult
+                    current = 0
+                }
+            }
+        }
+
+        // Add remaining
+        sectionTotal += current
+        total += sectionTotal
+
+        return String(total)
     }
 
     // MARK: - Advanced Number Parsing
