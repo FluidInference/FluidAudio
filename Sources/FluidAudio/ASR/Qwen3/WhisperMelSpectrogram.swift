@@ -6,7 +6,7 @@ import Foundation
 /// Matches the HuggingFace `WhisperFeatureExtractor` used during training:
 /// - n_fft: 400 (window size and DFT length)
 /// - hop_length: 160
-/// - n_mels: 128
+/// - n_mels: 128 (from `Qwen3AsrConfig.numMelBins`)
 /// - Window: periodic Hann (not symmetric)
 /// - No preemphasis
 /// - log10 (not ln)
@@ -18,16 +18,20 @@ import Foundation
 /// DFT matrix (cos/sin tables), using vDSP vector operations for efficiency.
 /// This gives bit-exact results matching Python's `torch.stft(n_fft=400)`.
 ///
-/// - Warning: This class is NOT thread-safe due to shared reusable buffers.
-///   Each thread should use its own instance.
+/// - Warning: This class is NOT thread-safe and NOT `Sendable` due to mutable
+///   reusable buffers. Each thread/task should use its own instance.
 public final class WhisperMelSpectrogram {
 
     // MARK: Config
 
+    /// Window size and DFT length (Whisper-specific, not in Qwen3AsrConfig).
     private let nFFT: Int = 400
+    /// Hop length between frames (Whisper-specific, not in Qwen3AsrConfig).
     private let hopLength: Int = 160
-    private let nMels: Int = 128
-    private let sampleRate: Int = 16000
+    /// Number of mel bins (matches `Qwen3AsrConfig.numMelBins`).
+    private let nMels: Int = Qwen3AsrConfig.numMelBins
+    /// Sample rate (matches `Qwen3AsrConfig.sampleRate`).
+    private let sampleRate: Int = Qwen3AsrConfig.sampleRate
 
     /// Number of frequency bins used (nFFT / 2 + 1, including Nyquist).
     private var numFreqBins: Int { nFFT / 2 + 1 }
@@ -48,11 +52,10 @@ public final class WhisperMelSpectrogram {
     private var realPart: [Float]  // Re(X[k]) for k=0..numFreqBins-1
     private var imagPart: [Float]  // Im(X[k])
     private var powerSpec: [Float]
+    private var imagSq: [Float]  // Temporary for Im^2 in power spectrum
     private var melFrame: [Float]
 
     public init() {
-        let nFFT = 400
-        let nMels = 128
         let numFreqBins = nFFT / 2 + 1  // 201 (including Nyquist, matches Python)
 
         // Periodic Hann window: np.hanning(n_fft + 1)[:-1]
@@ -62,7 +65,7 @@ public final class WhisperMelSpectrogram {
         let filterbank = Self.createMelFilterbank(
             nFFT: nFFT,
             nMels: nMels,
-            sampleRate: 16000,
+            sampleRate: sampleRate,
             fMin: 0.0,
             fMax: 8000.0
         )
@@ -79,24 +82,25 @@ public final class WhisperMelSpectrogram {
         // Pre-compute DFT cos/sin tables for k=0..numFreqBins-1, n=0..nFFT-1
         // X[k] = sum_{n=0}^{N-1} x[n] * exp(-2πi*k*n/N)
         //       = sum_{n=0}^{N-1} x[n] * (cos(-2π*k*n/N) + i*sin(-2π*k*n/N))
-        var cos_table = [Float](repeating: 0, count: numFreqBins * nFFT)
-        var sin_table = [Float](repeating: 0, count: numFreqBins * nFFT)
+        var cosTable = [Float](repeating: 0, count: numFreqBins * nFFT)
+        var sinTable = [Float](repeating: 0, count: numFreqBins * nFFT)
         let invN = Float(2.0 * .pi) / Float(nFFT)
         for k in 0..<numFreqBins {
             for n in 0..<nFFT {
                 let angle = -invN * Float(k) * Float(n)
-                cos_table[k * nFFT + n] = cosf(angle)
-                sin_table[k * nFFT + n] = sinf(angle)
+                cosTable[k * nFFT + n] = cosf(angle)
+                sinTable[k * nFFT + n] = sinf(angle)
             }
         }
-        self.dftCos = cos_table
-        self.dftSin = sin_table
+        self.dftCos = cosTable
+        self.dftSin = sinTable
 
         // Pre-allocate buffers
         self.windowedFrame = [Float](repeating: 0, count: nFFT)
         self.realPart = [Float](repeating: 0, count: numFreqBins)
         self.imagPart = [Float](repeating: 0, count: numFreqBins)
         self.powerSpec = [Float](repeating: 0, count: numFreqBins)
+        self.imagSq = [Float](repeating: 0, count: numFreqBins)
         self.melFrame = [Float](repeating: 0, count: nMels)
     }
 
@@ -169,7 +173,6 @@ public final class WhisperMelSpectrogram {
 
             // Power spectrum: |X[k]|^2 = Re^2 + Im^2
             vDSP_vsq(realPart, 1, &powerSpec, 1, vDSP_Length(numFreqBins))
-            var imagSq = [Float](repeating: 0, count: numFreqBins)
             vDSP_vsq(imagPart, 1, &imagSq, 1, vDSP_Length(numFreqBins))
             vDSP_vadd(powerSpec, 1, imagSq, 1, &powerSpec, 1, vDSP_Length(numFreqBins))
 
@@ -189,31 +192,43 @@ public final class WhisperMelSpectrogram {
                 }
             }
 
-            // log10(clip(x, 1e-10))
+            // log10(clip(x, 1e-10)) - vectorized per frame
+            // Clip to minimum value first
+            var minClip: Float = 1e-10
+            var maxClip: Float = Float.greatestFiniteMagnitude
+            vDSP_vclip(melFrame, 1, &minClip, &maxClip, &melFrame, 1, vDSP_Length(nMels))
+
+            // log10 via vForce
+            var count = Int32(nMels)
+            vvlog10f(&melFrame, melFrame, &count)
+
+            // Copy to output
             for melIdx in 0..<nMels {
-                mel[melIdx][frameIdx] = log10f(max(melFrame[melIdx], 1e-10))
+                mel[melIdx][frameIdx] = melFrame[melIdx]
             }
         }
 
-        // Dynamic range compression: max(x, globalMax - 8.0)
+        // Dynamic range compression: max(x, globalMax - 8.0) - vectorized
         var globalMax: Float = -Float.infinity
         for melIdx in 0..<nMels {
-            for frameIdx in 0..<numFrames {
-                globalMax = max(globalMax, mel[melIdx][frameIdx])
-            }
+            var rowMax: Float = 0
+            vDSP_maxv(mel[melIdx], 1, &rowMax, vDSP_Length(numFrames))
+            globalMax = max(globalMax, rowMax)
         }
         let minVal = globalMax - 8.0
+
         for melIdx in 0..<nMels {
-            for frameIdx in 0..<numFrames {
-                mel[melIdx][frameIdx] = max(mel[melIdx][frameIdx], minVal)
-            }
+            var low = minVal
+            var high = Float.greatestFiniteMagnitude
+            vDSP_vclip(mel[melIdx], 1, &low, &high, &mel[melIdx], 1, vDSP_Length(numFrames))
         }
 
-        // Whisper normalization: (x + 4.0) / 4.0
+        // Whisper normalization: (x + 4.0) / 4.0 - vectorized
+        var addVal: Float = 4.0
+        var divVal: Float = 4.0
         for melIdx in 0..<nMels {
-            for frameIdx in 0..<numFrames {
-                mel[melIdx][frameIdx] = (mel[melIdx][frameIdx] + 4.0) / 4.0
-            }
+            vDSP_vsadd(mel[melIdx], 1, &addVal, &mel[melIdx], 1, vDSP_Length(numFrames))
+            vDSP_vsdiv(mel[melIdx], 1, &divVal, &mel[melIdx], 1, vDSP_Length(numFrames))
         }
 
         return mel

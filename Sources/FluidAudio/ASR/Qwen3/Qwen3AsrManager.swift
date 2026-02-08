@@ -18,14 +18,14 @@ private let logger = Logger(subsystem: "FluidAudio", category: "Qwen3AsrManager"
 /// 3. Prefill through decoder -> first token
 /// 4. Decode loop: Swift embedding -> decoder -> next token
 @available(macOS 15, iOS 18, *)
-public final class Qwen3AsrManager {
+public actor Qwen3AsrManager {
     private var models: Qwen3AsrModels?
-    private let config: Qwen3AsrConfig
     private let rope: Qwen3RoPE
+    private let melExtractor: WhisperMelSpectrogram
 
-    public init(config: Qwen3AsrConfig = .default) {
-        self.config = config
-        self.rope = Qwen3RoPE(config: config)
+    public init() {
+        self.rope = Qwen3RoPE()
+        self.melExtractor = WhisperMelSpectrogram()
     }
 
     /// Load all models from the specified directory.
@@ -35,17 +35,36 @@ public final class Qwen3AsrManager {
     }
 
     /// Transcribe raw audio samples.
+    ///
+    /// - Parameters:
+    ///   - audioSamples: 16kHz mono Float32 audio samples.
+    ///   - language: Optional language hint (ISO code like "en", "zh", or English name like "English").
+    ///               Pass nil for automatic language detection.
+    ///   - maxNewTokens: Maximum number of tokens to generate.
+    /// - Returns: Transcribed text.
     public func transcribe(
         audioSamples: [Float],
         language: String? = nil,
         maxNewTokens: Int = 512
     ) async throws -> String {
-        let melExtractor = WhisperMelSpectrogram()
         let mel = melExtractor.compute(audio: audioSamples)
         guard !mel.isEmpty else {
             throw Qwen3AsrError.generationFailed("Audio too short to extract mel spectrogram")
         }
         return try await transcribe(melSpectrogram: mel, language: language, maxNewTokens: maxNewTokens)
+    }
+
+    /// Transcribe raw audio samples with typed language.
+    public func transcribe(
+        audioSamples: [Float],
+        language: Qwen3AsrConfig.Language?,
+        maxNewTokens: Int = 512
+    ) async throws -> String {
+        try await transcribe(
+            audioSamples: audioSamples,
+            language: language?.englishName,
+            maxNewTokens: maxNewTokens
+        )
     }
 
     /// Transcribe from a pre-computed mel spectrogram.
@@ -60,14 +79,25 @@ public final class Qwen3AsrManager {
 
         let start = CFAbsoluteTimeGetCurrent()
 
+        // Resolve language
+        let resolvedLanguage: Qwen3AsrConfig.Language?
+        if let lang = language {
+            resolvedLanguage = Qwen3AsrConfig.Language(from: lang)
+            if resolvedLanguage == nil {
+                logger.warning("Unknown language '\(lang)', using automatic detection")
+            }
+        } else {
+            resolvedLanguage = nil
+        }
+
         // Step 1: Encode audio
         let t1 = CFAbsoluteTimeGetCurrent()
-        let audioFeatures = try await encodeAudio(melSpectrogram: melSpectrogram, models: models)
+        let audioFeatures = try encodeAudio(melSpectrogram: melSpectrogram, models: models)
         let numAudioFrames = audioFeatures.count
         let audioEncodeTime = CFAbsoluteTimeGetCurrent() - t1
 
         // Step 2: Build chat template with audio tokens
-        let promptTokens = buildPromptTokens(numAudioFrames: numAudioFrames, language: language)
+        let promptTokens = buildPromptTokens(numAudioFrames: numAudioFrames, language: resolvedLanguage)
 
         // Step 3: Swift-side embedding + audio merge
         let t3 = CFAbsoluteTimeGetCurrent()
@@ -80,7 +110,7 @@ public final class Qwen3AsrManager {
 
         // Step 4: Autoregressive generation
         let t4 = CFAbsoluteTimeGetCurrent()
-        let generatedTokenIds = try await generate(
+        let generatedTokenIds = try generate(
             initialEmbeddings: initialEmbeddings,
             promptLength: promptTokens.count,
             maxNewTokens: maxNewTokens,
@@ -92,8 +122,8 @@ public final class Qwen3AsrManager {
         let text = decodeTokens(generatedTokenIds, vocabulary: models.vocabulary)
 
         let elapsed = CFAbsoluteTimeGetCurrent() - start
-        print(
-            "[Qwen3] Timing: audio=\(String(format: "%.2f", audioEncodeTime))s embed=\(String(format: "%.2f", embedTime))s gen=\(String(format: "%.2f", generateTime))s total=\(String(format: "%.2f", elapsed))s prompt=\(promptTokens.count) decoded=\(generatedTokenIds.count)"
+        logger.debug(
+            "Timing: audio=\(String(format: "%.2f", audioEncodeTime))s embed=\(String(format: "%.2f", embedTime))s gen=\(String(format: "%.2f", generateTime))s total=\(String(format: "%.2f", elapsed))s prompt=\(promptTokens.count) decoded=\(generatedTokenIds.count)"
         )
 
         return text
@@ -104,8 +134,8 @@ public final class Qwen3AsrManager {
     private func encodeAudio(
         melSpectrogram: [[Float]],
         models: Qwen3AsrModels
-    ) async throws -> [[Float]] {
-        let windowSize = config.melWindowSize
+    ) throws -> [[Float]] {
+        let windowSize = Qwen3AsrConfig.melWindowSize
         let numFrames = melSpectrogram.first?.count ?? 0
 
         var allFeatures: [[Float]] = []
@@ -122,22 +152,24 @@ public final class Qwen3AsrManager {
                 padTo: windowSize
             )
 
-            let prediction = try await models.audioEncoder.prediction(from: melInput)
+            let prediction = try models.audioEncoder.prediction(from: melInput)
             guard let features = prediction.featureValue(for: "audio_features")?.multiArrayValue else {
                 throw Qwen3AsrError.encoderFailed("No audio_features output")
             }
 
             let numOutputFrames: Int
             if currentWindowSize == windowSize {
-                numOutputFrames = config.outputFramesPerWindow
+                numOutputFrames = Qwen3AsrConfig.outputFramesPerWindow
             } else {
-                numOutputFrames = (currentWindowSize + config.convDownsampleFactor - 1) / config.convDownsampleFactor
+                numOutputFrames =
+                    (currentWindowSize + Qwen3AsrConfig.convDownsampleFactor - 1)
+                    / Qwen3AsrConfig.convDownsampleFactor
             }
 
             for f in 0..<numOutputFrames {
-                var vec = [Float](repeating: 0.0, count: config.encoderOutputDim)
-                for d in 0..<config.encoderOutputDim {
-                    let idx = f * config.encoderOutputDim + d
+                var vec = [Float](repeating: 0.0, count: Qwen3AsrConfig.encoderOutputDim)
+                for d in 0..<Qwen3AsrConfig.encoderOutputDim {
+                    let idx = f * Qwen3AsrConfig.encoderOutputDim + d
                     vec[d] = features[idx].floatValue
                 }
                 allFeatures.append(vec)
@@ -155,13 +187,13 @@ public final class Qwen3AsrManager {
         windowSize: Int,
         padTo: Int
     ) throws -> MLDictionaryFeatureProvider {
-        let shape: [NSNumber] = [1, NSNumber(value: config.numMelBins), NSNumber(value: padTo)]
+        let shape: [NSNumber] = [1, NSNumber(value: Qwen3AsrConfig.numMelBins), NSNumber(value: padTo)]
         let array = try MLMultiArray(shape: shape, dataType: .float32)
         let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: array.count)
 
         ptr.initialize(repeating: 0.0, count: array.count)
 
-        for bin in 0..<config.numMelBins {
+        for bin in 0..<Qwen3AsrConfig.numMelBins {
             for t in 0..<windowSize {
                 let srcIdx = offset + t
                 if srcIdx < (melSpectrogram[bin].count) {
@@ -178,32 +210,70 @@ public final class Qwen3AsrManager {
 
     // MARK: - Token Building
 
-    private func buildPromptTokens(numAudioFrames: Int, language: String?) -> [Int32] {
+    /// Task description token IDs for language-specific transcription.
+    /// These are tokenized versions of "Transcribe the audio to {Language} text."
+    private static let taskTokens: [Qwen3AsrConfig.Language: [Int32]] = [
+        .english: [3246, 56541, 279, 7461, 311, 6364, 1467, 13],
+        .chinese: [3246, 56541, 279, 7461, 311, 8449, 1467, 13],
+        .cantonese: [3246, 56541, 279, 7461, 311, 56782, 26730, 1467, 13],
+        .japanese: [3246, 56541, 279, 7461, 311, 11411, 1467, 13],
+        .korean: [3246, 56541, 279, 7461, 311, 15791, 1467, 13],
+        .french: [3246, 56541, 279, 7461, 311, 8620, 1467, 13],
+        .german: [3246, 56541, 279, 7461, 311, 6581, 1467, 13],
+        .spanish: [3246, 56541, 279, 7461, 311, 14610, 1467, 13],
+        .portuguese: [3246, 56541, 279, 7461, 311, 42322, 1467, 13],
+        .italian: [3246, 56541, 279, 7461, 311, 15333, 1467, 13],
+        .russian: [3246, 56541, 279, 7461, 311, 10479, 1467, 13],
+        .arabic: [3246, 56541, 279, 7461, 311, 17900, 1467, 13],
+        .hindi: [3246, 56541, 279, 7461, 311, 43083, 1467, 13],
+        .thai: [3246, 56541, 279, 7461, 311, 40764, 1467, 13],
+        .vietnamese: [3246, 56541, 279, 7461, 311, 48416, 1467, 13],
+        .indonesian: [3246, 56541, 279, 7461, 311, 66986, 1467, 13],
+        .malay: [3246, 56541, 279, 7461, 311, 80985, 1467, 13],
+        .turkish: [3246, 56541, 279, 7461, 311, 38703, 1467, 13],
+        .dutch: [3246, 56541, 279, 7461, 311, 19227, 1467, 13],
+        .swedish: [3246, 56541, 279, 7461, 311, 54259, 1467, 13],
+        .danish: [3246, 56541, 279, 7461, 311, 39093, 1467, 13],
+        .finnish: [3246, 56541, 279, 7461, 311, 56391, 1467, 13],
+        .polish: [3246, 56541, 279, 7461, 311, 34827, 1467, 13],
+        .czech: [3246, 56541, 279, 7461, 311, 51728, 1467, 13],
+        .greek: [3246, 56541, 279, 7461, 311, 18173, 1467, 13],
+        .hungarian: [3246, 56541, 279, 7461, 311, 57751, 1467, 13],
+        .romanian: [3246, 56541, 279, 7461, 311, 56949, 1467, 13],
+        .persian: [3246, 56541, 279, 7461, 311, 59181, 1467, 13],
+        .filipino: [3246, 56541, 279, 7461, 311, 66847, 1467, 13],
+        .macedonian: [3246, 56541, 279, 7461, 311, 17067, 103881, 1467, 13],
+    ]
+
+    private func buildPromptTokens(numAudioFrames: Int, language: Qwen3AsrConfig.Language?) -> [Int32] {
         var tokens: [Int32] = []
 
-        // System message (empty)
-        tokens.append(Int32(config.imStartTokenId))
-        tokens.append(Int32(config.systemTokenId))
-        tokens.append(Int32(config.newlineTokenId))
-        tokens.append(Int32(config.imEndTokenId))
-        tokens.append(Int32(config.newlineTokenId))
+        // System message with optional task description
+        tokens.append(Int32(Qwen3AsrConfig.imStartTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.systemTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.newlineTokenId))
+        if let lang = language, let taskToks = Self.taskTokens[lang] {
+            tokens.append(contentsOf: taskToks)
+        }
+        tokens.append(Int32(Qwen3AsrConfig.imEndTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.newlineTokenId))
 
         // User message with audio
-        tokens.append(Int32(config.imStartTokenId))
-        tokens.append(Int32(config.userTokenId))
-        tokens.append(Int32(config.newlineTokenId))
-        tokens.append(Int32(config.audioStartTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.imStartTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.userTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.newlineTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.audioStartTokenId))
         for _ in 0..<numAudioFrames {
-            tokens.append(Int32(config.audioTokenId))
+            tokens.append(Int32(Qwen3AsrConfig.audioTokenId))
         }
-        tokens.append(Int32(config.audioEndTokenId))
-        tokens.append(Int32(config.imEndTokenId))
-        tokens.append(Int32(config.newlineTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.audioEndTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.imEndTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.newlineTokenId))
 
         // Assistant start
-        tokens.append(Int32(config.imStartTokenId))
-        tokens.append(Int32(config.assistantTokenId))
-        tokens.append(Int32(config.newlineTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.imStartTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.assistantTokenId))
+        tokens.append(Int32(Qwen3AsrConfig.newlineTokenId))
 
         return tokens
     }
@@ -221,7 +291,7 @@ public final class Qwen3AsrManager {
         // Replace audio_token positions with audio features
         var audioIdx = 0
         for i in 0..<promptTokens.count {
-            if promptTokens[i] == Int32(config.audioTokenId), audioIdx < audioFeatures.count {
+            if promptTokens[i] == Int32(Qwen3AsrConfig.audioTokenId), audioIdx < audioFeatures.count {
                 embeddings[i] = audioFeatures[audioIdx]
                 audioIdx += 1
             }
@@ -237,7 +307,7 @@ public final class Qwen3AsrManager {
         promptLength: Int,
         maxNewTokens: Int,
         models: Qwen3AsrModels
-    ) async throws -> [Int] {
+    ) throws -> [Int] {
         let state = models.decoderStateful.makeState()
         var generatedTokens: [Int] = []
         var currentPosition = 0
@@ -246,10 +316,10 @@ public final class Qwen3AsrManager {
             throw Qwen3AsrError.generationFailed("Empty prompt")
         }
 
-        let effectiveMaxNew = min(maxNewTokens, config.maxCacheSeqLen - promptLength)
+        let effectiveMaxNew = min(maxNewTokens, Qwen3AsrConfig.maxCacheSeqLen - promptLength)
         guard effectiveMaxNew > 0 else {
             throw Qwen3AsrError.generationFailed(
-                "Prompt length \(promptLength) exceeds cache capacity \(config.maxCacheSeqLen)"
+                "Prompt length \(promptLength) exceeds cache capacity \(Qwen3AsrConfig.maxCacheSeqLen)"
             )
         }
 
@@ -277,52 +347,48 @@ public final class Qwen3AsrManager {
 
         // Preallocate decode buffers
         let decHiddenArray = try MLMultiArray(
-            shape: [1, 1, NSNumber(value: config.hiddenSize)], dataType: .float32
+            shape: [1, 1, NSNumber(value: Qwen3AsrConfig.hiddenSize)], dataType: .float32
         )
         let decHiddenPtr = decHiddenArray.dataPointer.bindMemory(
-            to: Float.self, capacity: config.hiddenSize
+            to: Float.self, capacity: Qwen3AsrConfig.hiddenSize
         )
         let decodeCosArray = try MLMultiArray(
-            shape: [1, 1, NSNumber(value: config.headDim)], dataType: .float32
+            shape: [1, 1, NSNumber(value: Qwen3AsrConfig.headDim)], dataType: .float32
         )
         let decodeCosPtr = decodeCosArray.dataPointer.bindMemory(
-            to: Float.self, capacity: config.headDim
+            to: Float.self, capacity: Qwen3AsrConfig.headDim
         )
         let decodeSinArray = try MLMultiArray(
-            shape: [1, 1, NSNumber(value: config.headDim)], dataType: .float32
+            shape: [1, 1, NSNumber(value: Qwen3AsrConfig.headDim)], dataType: .float32
         )
         let decodeSinPtr = decodeSinArray.dataPointer.bindMemory(
-            to: Float.self, capacity: config.headDim
+            to: Float.self, capacity: Qwen3AsrConfig.headDim
         )
 
         // Get first token from prefill logits
-        let firstTokenId = try argmaxFromLogits(prefillLogits, generatedTokens: generatedTokens)
-        if !config.eosTokenIds.contains(firstTokenId) {
+        let firstTokenId = argmaxFromLogits(prefillLogits)
+        if !Qwen3AsrConfig.eosTokenIds.contains(firstTokenId) {
             generatedTokens.append(firstTokenId)
         }
 
         let prefillTime = CFAbsoluteTimeGetCurrent() - prefillStart
-        print(
-            "[Qwen3]   Prefill: \(String(format: "%.3f", prefillTime))s for \(promptLength) tokens"
-        )
+        logger.debug("Prefill: \(String(format: "%.3f", prefillTime))s for \(promptLength) tokens")
 
         // ---- Decode ----
-        if config.eosTokenIds.contains(firstTokenId) {
+        if Qwen3AsrConfig.eosTokenIds.contains(firstTokenId) {
             return generatedTokens
         }
 
         let decodeStart = CFAbsoluteTimeGetCurrent()
-        var decoderTotal = 0.0
 
         for _ in 1..<effectiveMaxNew {
             guard let lastTokenId = generatedTokens.last else { break }
 
             // Swift-side embedding lookup (no CoreML call!)
-            let t1 = CFAbsoluteTimeGetCurrent()
             let nextEmbedding = models.embeddingWeights.embedding(for: lastTokenId)
 
             nextEmbedding.withUnsafeBufferPointer { src in
-                _ = memcpy(decHiddenPtr, src.baseAddress!, config.hiddenSize * MemoryLayout<Float>.size)
+                _ = memcpy(decHiddenPtr, src.baseAddress!, Qwen3AsrConfig.hiddenSize * MemoryLayout<Float>.size)
             }
             rope.fill(position: currentPosition, cosPtr: decodeCosPtr, sinPtr: decodeSinPtr)
             let endStep = currentPosition + 1
@@ -338,11 +404,10 @@ public final class Qwen3AsrManager {
             )
 
             currentPosition += 1
-            decoderTotal += CFAbsoluteTimeGetCurrent() - t1
 
-            let tokenId = try argmaxFromLogits(logits, generatedTokens: generatedTokens)
+            let tokenId = argmaxFromLogits(logits)
 
-            if config.eosTokenIds.contains(tokenId) {
+            if Qwen3AsrConfig.eosTokenIds.contains(tokenId) {
                 break
             }
 
@@ -351,8 +416,8 @@ public final class Qwen3AsrManager {
 
         let decodeTime = CFAbsoluteTimeGetCurrent() - decodeStart
         let perToken = generatedTokens.isEmpty ? 0.0 : decodeTime / Double(generatedTokens.count)
-        print(
-            "[Qwen3]   Decode: \(String(format: "%.3f", decodeTime))s for \(generatedTokens.count) tokens (\(String(format: "%.1f", perToken * 1000))ms/tok)"
+        logger.debug(
+            "Decode: \(String(format: "%.3f", decodeTime))s for \(generatedTokens.count) tokens (\(String(format: "%.1f", perToken * 1000))ms/tok)"
         )
         return generatedTokens
     }
@@ -385,36 +450,15 @@ public final class Qwen3AsrManager {
 
     // MARK: - Argmax
 
-    private static let repetitionPenalty: Float = 1.0
-
-    private func argmaxFromLogits(
-        _ logits: MLMultiArray,
-        generatedTokens: [Int]
-    ) throws -> Int {
-        let ptr = logits.dataPointer.bindMemory(to: Float.self, capacity: config.vocabSize)
-
-        if Self.repetitionPenalty != 1.0 {
-            let seen = Set(generatedTokens)
-            for tokenId in seen {
-                guard tokenId >= 0, tokenId < config.vocabSize else { continue }
-                let logit = ptr[tokenId]
-                if logit > 0 {
-                    ptr[tokenId] = logit / Self.repetitionPenalty
-                } else {
-                    ptr[tokenId] = logit * Self.repetitionPenalty
-                }
-            }
-        }
-
+    private func argmaxFromLogits(_ logits: MLMultiArray) -> Int {
+        let ptr = logits.dataPointer.bindMemory(to: Float.self, capacity: Qwen3AsrConfig.vocabSize)
         var maxVal: Float = 0
         var maxIdx: vDSP_Length = 0
-        vDSP_maxvi(ptr, 1, &maxVal, &maxIdx, vDSP_Length(config.vocabSize))
+        vDSP_maxvi(ptr, 1, &maxVal, &maxIdx, vDSP_Length(Qwen3AsrConfig.vocabSize))
         return Int(maxIdx)
     }
 
     // MARK: - Text Decoding
-
-    private static let asrTextTokenId = 151_704
 
     private static let bpeUnicodeToByte: [UInt32: UInt8] = {
         var printable = [Int]()
@@ -439,7 +483,7 @@ public final class Qwen3AsrManager {
 
     private func decodeTokens(_ tokenIds: [Int], vocabulary: [Int: String]) -> String {
         var startIdx = 0
-        if let asrIdx = tokenIds.firstIndex(of: Self.asrTextTokenId) {
+        if let asrIdx = tokenIds.firstIndex(of: Qwen3AsrConfig.asrTextTokenId) {
             startIdx = asrIdx + 1
         }
         let transcriptionTokens = Array(tokenIds[startIdx...])
@@ -489,14 +533,14 @@ public final class Qwen3AsrManager {
 
     private func createBatchedHiddenArray(embeddings: [[Float]]) throws -> MLMultiArray {
         let seqLen = embeddings.count
-        let shape: [NSNumber] = [1, NSNumber(value: seqLen), NSNumber(value: config.hiddenSize)]
+        let shape: [NSNumber] = [1, NSNumber(value: seqLen), NSNumber(value: Qwen3AsrConfig.hiddenSize)]
         let array = try MLMultiArray(shape: shape, dataType: .float32)
-        let totalCount = seqLen * config.hiddenSize
+        let totalCount = seqLen * Qwen3AsrConfig.hiddenSize
         let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: totalCount)
         for i in 0..<seqLen {
-            let offset = i * config.hiddenSize
+            let offset = i * Qwen3AsrConfig.hiddenSize
             let emb = embeddings[i]
-            for j in 0..<config.hiddenSize {
+            for j in 0..<Qwen3AsrConfig.hiddenSize {
                 ptr[offset + j] = emb[j]
             }
         }
@@ -504,7 +548,7 @@ public final class Qwen3AsrManager {
     }
 
     private func createBatchedPositionArray(values: [Float], seqLen: Int) throws -> MLMultiArray {
-        let shape: [NSNumber] = [1, NSNumber(value: seqLen), NSNumber(value: config.headDim)]
+        let shape: [NSNumber] = [1, NSNumber(value: seqLen), NSNumber(value: Qwen3AsrConfig.headDim)]
         let array = try MLMultiArray(shape: shape, dataType: .float32)
         let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: values.count)
         for i in 0..<values.count {

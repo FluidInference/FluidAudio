@@ -1,9 +1,29 @@
 import Foundation
-import RegexBuilder
 
 /// HuggingFace-compatible text normalizer for ASR evaluation
 /// Matches the normalization used in the Open ASR Leaderboard
-struct TextNormalizer {
+enum TextNormalizer {
+
+    // MARK: - Static Regex Patterns (compiled once)
+
+    private static let bracketsPattern = try! NSRegularExpression(pattern: "[<\\[].*?[>\\]]")
+    private static let parenthesesPattern = try! NSRegularExpression(pattern: "\\([^)]+?\\)")
+    private static let whitespacePattern = try! NSRegularExpression(pattern: "\\s+")
+    private static let fillerPattern = try! NSRegularExpression(pattern: "\\b(hmm|mm|mhm|mmm|uh|um)\\b")
+    private static let stutterPattern = try! NSRegularExpression(pattern: "\\b[a-z]+-\\s*")
+    private static let numberLetterPattern1 = try! NSRegularExpression(pattern: "([a-z])([0-9])")
+    private static let numberLetterPattern2 = try! NSRegularExpression(pattern: "([0-9])([a-z])")
+    private static let suffixPattern = try! NSRegularExpression(pattern: "([0-9])\\s+(st|nd|rd|th|s)\\b")
+    private static let punctuationPattern = try! NSRegularExpression(pattern: "[^\\w\\s']")
+    private static let commaPattern = try! NSRegularExpression(pattern: "(\\d),(\\d)")
+    private static let periodPattern = try! NSRegularExpression(pattern: "\\.([^0-9]|$)")
+    private static let timePattern = try! NSRegularExpression(
+        pattern: "\\b(\\d{1,2})\\s+(\\d{2})\\s+(am|pm)\\b")
+    private static let symbolCleanup1 = try! NSRegularExpression(pattern: "[.$¢€£]([^0-9])")
+    private static let symbolCleanup2 = try! NSRegularExpression(pattern: "([^0-9])%")
+    private static let finalCleanPattern = try! NSRegularExpression(pattern: "[^\\w\\s]")
+
+    // MARK: - Character Mappings
 
     private static let additionalDiacritics: [Character: String] = [
         "œ": "oe", "Œ": "OE", "ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE",
@@ -26,25 +46,23 @@ struct TextNormalizer {
         var normalized = text.lowercased()
 
         // Remove words between brackets
-        let bracketsPattern = try! NSRegularExpression(pattern: "[<\\[].*?[>\\]]", options: [])
         normalized = bracketsPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: ""
         )
 
         // Remove words between parentheses
-        let parenthesesPattern = try! NSRegularExpression(pattern: "\\([^)]+?\\)", options: [])
         normalized = parenthesesPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: ""
         )
 
         // Apply NFKD normalization and handle diacritics/symbols
-        normalized = normalized.precomposedStringWithCompatibilityMapping
+        normalized = normalized.decomposedStringWithCompatibilityMapping
 
         if removeDiacritics {
             normalized = removeSymbolsAndDiacritics(normalized)
@@ -53,11 +71,10 @@ struct TextNormalizer {
         }
 
         // Replace successive whitespace with single space
-        let whitespacePattern = try! NSRegularExpression(pattern: "\\s+", options: [])
         normalized = whitespacePattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: " "
         )
 
@@ -70,7 +87,9 @@ struct TextNormalizer {
                 return replacement
             }
 
-            let category = char.unicodeScalars.first?.properties.generalCategory
+            guard let category = char.unicodeScalars.first?.properties.generalCategory else {
+                return String(char)
+            }
 
             // Remove combining marks (diacritics)
             if category == .nonspacingMark {
@@ -78,9 +97,7 @@ struct TextNormalizer {
             }
 
             // Replace symbols, punctuation, separators with space
-            if let cat = category,
-                ["symbol", "punctuation", "separator"].contains(String(describing: cat).prefix(1).lowercased())
-            {
+            if isSymbolPunctuationOrSeparator(category) {
                 return " "
             }
 
@@ -90,17 +107,36 @@ struct TextNormalizer {
 
     private static func removeSymbols(_ text: String) -> String {
         return text.compactMap { char in
-            let category = char.unicodeScalars.first?.properties.generalCategory
+            guard let category = char.unicodeScalars.first?.properties.generalCategory else {
+                return String(char)
+            }
 
             // Replace symbols, punctuation, separators with space, but keep diacritics
-            if let cat = category,
-                ["symbol", "punctuation", "separator"].contains(String(describing: cat).prefix(1).lowercased())
-            {
+            if isSymbolPunctuationOrSeparator(category) {
                 return " "
             }
 
             return String(char)
         }.joined()
+    }
+
+    private static func isSymbolPunctuationOrSeparator(
+        _ category: Unicode.GeneralCategory
+    ) -> Bool {
+        switch category {
+        // Symbols
+        case .mathSymbol, .currencySymbol, .modifierSymbol, .otherSymbol:
+            return true
+        // Punctuation
+        case .connectorPunctuation, .dashPunctuation, .openPunctuation,
+            .closePunctuation, .initialPunctuation, .finalPunctuation, .otherPunctuation:
+            return true
+        // Separators
+        case .spaceSeparator, .lineSeparator, .paragraphSeparator:
+            return true
+        default:
+            return false
+        }
     }
 
     /// Normalize text using HuggingFace ASR leaderboard standards
@@ -114,9 +150,6 @@ struct TextNormalizer {
         normalized = normalized.lowercased()
 
         // British to American normalization
-        if britishToAmerican.isEmpty {
-            print("WARNING: english.json failed to load or is empty!")
-        }
         for (british, american) in britishToAmerican {
             let pattern = "\\b" + NSRegularExpression.escapedPattern(for: british) + "\\b"
             normalized = normalized.replacingOccurrences(
@@ -176,37 +209,33 @@ struct TextNormalizer {
             )
         }
 
-        let bracketsPattern = try! NSRegularExpression(pattern: "[<\\[].*?[>\\]]", options: [])
         normalized = bracketsPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: ""
         )
 
-        let parenthesesPattern = try! NSRegularExpression(pattern: "\\([^)]+?\\)", options: [])
         normalized = parenthesesPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: ""
         )
 
         // Remove filler words and interjections
-        let fillerPattern = try! NSRegularExpression(pattern: "\\b(hmm|mm|mhm|mmm|uh|um)\\b", options: [])
         normalized = fillerPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: ""
         )
 
         // Remove stuttering patterns like "th-", "o-", "y-" (single letter followed by dash)
-        let stutterPattern = try! NSRegularExpression(pattern: "\\b[a-z]+-\\s*", options: [])
         normalized = stutterPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: ""
         )
 
@@ -217,28 +246,25 @@ struct TextNormalizer {
         normalized = normalized.replacingOccurrences(of: " and a half", with: " point five")
 
         // Add spaces at number/letter boundaries
-        let numberLetterPattern1 = try! NSRegularExpression(pattern: "([a-z])([0-9])", options: [])
         normalized = numberLetterPattern1.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: "$1 $2"
         )
 
-        let numberLetterPattern2 = try! NSRegularExpression(pattern: "([0-9])([a-z])", options: [])
         normalized = numberLetterPattern2.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: "$1 $2"
         )
 
         // Remove spaces before suffixes
-        let suffixPattern = try! NSRegularExpression(pattern: "([0-9])\\s+(st|nd|rd|th|s)\\b", options: [])
         normalized = suffixPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: "$1$2"
         )
 
@@ -253,11 +279,10 @@ struct TextNormalizer {
         normalized = normalized.replacingOccurrences(of: "&", with: " and ")
         normalized = normalized.replacingOccurrences(of: "%", with: " percent ")
 
-        let punctuationPattern = try! NSRegularExpression(pattern: "[^\\w\\s']", options: [])
         normalized = punctuationPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: " "
         )
 
@@ -333,12 +358,10 @@ struct TextNormalizer {
             normalized = normalized.replacingOccurrences(of: contraction, with: expansion)
         }
 
-        // Abbreviations moved to top
-
         let numberWords = [
             // English numbers
             "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
-            "five": "5", "seven": "7", "eight": "8", "nine": "9",
+            "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
             "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
             "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
             "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
@@ -403,22 +426,18 @@ struct TextNormalizer {
         }
 
         // Remove commas between digits
-        let commaPattern = try! NSRegularExpression(pattern: "(\\d),(\\d)", options: [])
         normalized = commaPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: "$1$2"
         )
 
-        // Merge consecutive digits logic removed due to regression
-
         // Remove periods not followed by numbers
-        let periodPattern = try! NSRegularExpression(pattern: "\\.([^0-9]|$)", options: [])
         normalized = periodPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: " $1"
         )
 
@@ -426,11 +445,10 @@ struct TextNormalizer {
         normalized = normalized.replacingOccurrences(of: "a d", with: "ad")
 
         // Handle time formats: "11 35 pm" -> "11 35 p m"
-        let timePattern = try! NSRegularExpression(pattern: "\\b(\\d{1,2})\\s+(\\d{2})\\s+(am|pm)\\b", options: [])
         normalized = timePattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: "$1 $2 $3"
         )
 
@@ -442,35 +460,31 @@ struct TextNormalizer {
         normalized = normalized.replacingOccurrences(of: "™", with: " trademark ")
 
         // Remove symbols not preceded/followed by numbers
-        let symbolCleanup1 = try! NSRegularExpression(pattern: "[.$¢€£]([^0-9])", options: [])
         normalized = symbolCleanup1.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: " $1"
         )
 
-        let symbolCleanup2 = try! NSRegularExpression(pattern: "([^0-9])%", options: [])
         normalized = symbolCleanup2.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: "$1 "
         )
 
-        let finalCleanPattern = try! NSRegularExpression(pattern: "[^\\w\\s]", options: [])
         normalized = finalCleanPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: " "
         )
 
-        let whitespacePattern = try! NSRegularExpression(pattern: "\\s+", options: [])
         normalized = whitespacePattern.stringByReplacingMatches(
             in: normalized,
             options: [],
-            range: NSRange(location: 0, length: normalized.count),
+            range: NSRange(location: 0, length: normalized.utf16.count),
             withTemplate: " "
         )
 

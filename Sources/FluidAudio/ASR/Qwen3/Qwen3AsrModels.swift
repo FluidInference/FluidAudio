@@ -21,7 +21,6 @@ public struct Qwen3AsrModels {
     public let decoderStateful: MLModel
     public let embeddingWeights: EmbeddingWeights
     public let vocabulary: [Int: String]
-    public let config: Qwen3AsrConfig
 
     /// Load Qwen3-ASR models (2-model pipeline with Swift-side embedding) from a directory.
     ///
@@ -35,12 +34,10 @@ public struct Qwen3AsrModels {
     /// ```
     public static func load(
         from directory: URL,
-        computeUnits: MLComputeUnits = .cpuAndGPU
+        computeUnits: MLComputeUnits = .all
     ) async throws -> Qwen3AsrModels {
-        let config = Qwen3AsrConfig.default
-
         let modelConfig = MLModelConfiguration()
-        modelConfig.computeUnits = .all
+        modelConfig.computeUnits = computeUnits
 
         logger.info("Loading Qwen3-ASR models (2-model pipeline) from \(directory.path)")
         let start = CFAbsoluteTimeGetCurrent()
@@ -72,8 +69,7 @@ public struct Qwen3AsrModels {
             audioEncoder: audioEncoder,
             decoderStateful: decoderStateful,
             embeddingWeights: embeddingWeights,
-            vocabulary: vocabulary,
-            config: config
+            vocabulary: vocabulary
         )
     }
 
@@ -99,7 +95,6 @@ public struct Qwen3AsrModels {
         force: Bool = false
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory()
-
         let modelsRoot = modelsRootDirectory()
 
         if !force && modelsExist(at: targetDir) {
@@ -124,18 +119,25 @@ public struct Qwen3AsrModels {
             ModelNames.Qwen3ASR.audioEncoderFile,
             ModelNames.Qwen3ASR.decoderStatefulFile,
             ModelNames.Qwen3ASR.embeddingsFile,
+            "vocab.json",
         ]
         return requiredFiles.allSatisfy { file in
-            let path = directory.appendingPathComponent(file)
-            return fm.fileExists(atPath: path.path)
+            fm.fileExists(atPath: directory.appendingPathComponent(file).path)
         }
     }
 
     /// Root directory for all FluidAudio model caches.
     private static func modelsRootDirectory() -> URL {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
+        guard
+            let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first
+        else {
+            // Fallback to temporary directory if application support unavailable
+            return FileManager.default.temporaryDirectory
+                .appendingPathComponent("FluidAudio", isDirectory: true)
+                .appendingPathComponent("Models", isDirectory: true)
+        }
         return
             appSupport
             .appendingPathComponent("FluidAudio", isDirectory: true)
@@ -171,13 +173,12 @@ public struct Qwen3AsrModels {
             logger.info("  \(name): compiled in \(String(format: "%.2f", compileElapsed))s")
 
             // Move compiled model next to the package for caching
-            let cachedCompiledPath = compiledPath
-            try? FileManager.default.removeItem(at: cachedCompiledPath)
-            try FileManager.default.copyItem(at: compiledURL, to: cachedCompiledPath)
+            try? FileManager.default.removeItem(at: compiledPath)
+            try FileManager.default.copyItem(at: compiledURL, to: compiledPath)
             // Clean up the temp compiled model
             try? FileManager.default.removeItem(at: compiledURL)
 
-            modelURL = cachedCompiledPath
+            modelURL = compiledPath
         } else {
             throw Qwen3AsrError.modelNotFound(name)
         }
@@ -207,8 +208,7 @@ public struct Qwen3AsrModels {
     private static func loadVocabulary(from directory: URL) throws -> [Int: String] {
         let vocabPath = directory.appendingPathComponent("vocab.json")
         guard FileManager.default.fileExists(atPath: vocabPath.path) else {
-            logger.warning("vocab.json not found at \(vocabPath.path), using empty vocabulary")
-            return [:]
+            throw Qwen3AsrError.modelNotFound("vocab.json")
         }
 
         let data = try Data(contentsOf: vocabPath)
@@ -218,6 +218,7 @@ public struct Qwen3AsrModels {
 
         // Invert: token string -> token ID becomes token ID -> token string
         var idToString: [Int: String] = [:]
+        idToString.reserveCapacity(stringToId.count)
         for (token, id) in stringToId {
             idToString[id] = token
         }
@@ -249,7 +250,19 @@ public final class EmbeddingWeights: Sendable {
         self.vocabSize = Int(vocab)
         self.hiddenSize = Int(hidden)
 
-        // Verify size
+        // Validate against config
+        guard vocabSize == Qwen3AsrConfig.vocabSize else {
+            throw Qwen3AsrError.generationFailed(
+                "Embedding vocab size \(vocabSize) != config \(Qwen3AsrConfig.vocabSize)"
+            )
+        }
+        guard hiddenSize == Qwen3AsrConfig.hiddenSize else {
+            throw Qwen3AsrError.generationFailed(
+                "Embedding hidden size \(hiddenSize) != config \(Qwen3AsrConfig.hiddenSize)"
+            )
+        }
+
+        // Verify file size
         let expectedSize = 8 + vocabSize * hiddenSize * 2  // header + float16 data
         guard fileData.count == expectedSize else {
             throw Qwen3AsrError.generationFailed(
@@ -272,11 +285,10 @@ public final class EmbeddingWeights: Sendable {
 
         data.withUnsafeBytes { ptr in
             let f16Ptr = ptr.baseAddress!.advanced(by: offset)
-                .assumingMemoryBound(to: UInt16.self)
+                .assumingMemoryBound(to: Float16.self)
 
             for i in 0..<hiddenSize {
-                // Convert float16 to float32
-                result[i] = float16ToFloat32(f16Ptr[i])
+                result[i] = Float(f16Ptr[i])
             }
         }
 
@@ -287,34 +299,6 @@ public final class EmbeddingWeights: Sendable {
     /// Returns [seqLen][hiddenSize] array.
     public func embeddings(for tokenIds: [Int32]) -> [[Float]] {
         tokenIds.map { embedding(for: Int($0)) }
-    }
-
-    /// Convert float16 (stored as UInt16) to float32.
-    @inline(__always)
-    private func float16ToFloat32(_ h: UInt16) -> Float {
-        let sign = (h >> 15) & 0x1
-        let exp = (h >> 10) & 0x1F
-        let mant = h & 0x3FF
-
-        if exp == 0 {
-            // Subnormal or zero
-            if mant == 0 {
-                return sign == 0 ? 0.0 : -0.0
-            }
-            // Subnormal: value = (-1)^sign * 2^-14 * (mant/1024)
-            let f = Float(mant) / 1024.0 * powf(2.0, -14.0)
-            return sign == 0 ? f : -f
-        } else if exp == 31 {
-            // Inf or NaN
-            if mant == 0 {
-                return sign == 0 ? Float.infinity : -Float.infinity
-            }
-            return Float.nan
-        }
-
-        // Normal: value = (-1)^sign * 2^(exp-15) * (1 + mant/1024)
-        let f = (1.0 + Float(mant) / 1024.0) * powf(2.0, Float(Int(exp) - 15))
-        return sign == 0 ? f : -f
     }
 }
 

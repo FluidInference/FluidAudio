@@ -1,5 +1,4 @@
 #if os(macOS)
-import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -9,24 +8,36 @@ import Foundation
 enum Qwen3AsrBenchmark {
     private static let logger = AppLogger(category: "Qwen3Benchmark")
 
-    /// Map FLEURS language codes to the short language tags Qwen3-ASR expects.
-    private static let fleursToQwen3Language: [String: String] = [
-        "cmn_hans_cn": "zh",
-        "yue_hant_hk": "yue",
-        "ja_jp": "ja",
-        "ko_kr": "ko",
-        "vi_vn": "vi",
-        "th_th": "th",
-        "id_id": "id",
-        "ms_my": "ms",
-        "hi_in": "hi",
-        "ar_eg": "ar",
-        "tr_tr": "tr",
-        "ru_ru": "ru",
-        "de_de": "de",
-        "fr_fr": "fr",
-        "es_419": "es",
-        "en_us": "en",
+    /// Map FLEURS language codes to Qwen3AsrConfig.Language.
+    private static let fleursToQwen3Language: [String: Qwen3AsrConfig.Language] = [
+        "cmn_hans_cn": .chinese,
+        "yue_hant_hk": .cantonese,
+        "ja_jp": .japanese,
+        "ko_kr": .korean,
+        "vi_vn": .vietnamese,
+        "th_th": .thai,
+        "id_id": .indonesian,
+        "ms_my": .malay,
+        "hi_in": .hindi,
+        "ar_eg": .arabic,
+        "tr_tr": .turkish,
+        "ru_ru": .russian,
+        "de_de": .german,
+        "fr_fr": .french,
+        "es_419": .spanish,
+        "pt_br": .portuguese,
+        "it_it": .italian,
+        "nl_nl": .dutch,
+        "pl_pl": .polish,
+        "sv_se": .swedish,
+        "da_dk": .danish,
+        "fi_fi": .finnish,
+        "cs_cz": .czech,
+        "el_gr": .greek,
+        "hu_hu": .hungarian,
+        "ro_ro": .romanian,
+        "fa_ir": .persian,
+        "en_us": .english,
     ]
 
     static func runCLI(arguments: [String]) async {
@@ -160,7 +171,7 @@ enum Qwen3AsrBenchmark {
         let benchmark = ASRBenchmark()
         try await benchmark.downloadLibriSpeech(subset: subset)
         let datasetPath = benchmark.getLibriSpeechDirectory().appendingPathComponent(subset)
-        let allFiles = try collectLibriSpeechFiles(from: datasetPath)
+        let allFiles = try collectBenchmarkAudioFiles(from: datasetPath)
         let files = Array(allFiles.prefix(maxFiles ?? allFiles.count))
         logger.info("Collected \(files.count) files from LibriSpeech \(subset)")
 
@@ -170,10 +181,15 @@ enum Qwen3AsrBenchmark {
             language: nil
         )
 
-        printSummary(results: results, dataset: "librispeech", subset: subset, language: nil)
+        let summary = Qwen3BenchmarkSummary(results: results)
+        printSummary(summary: summary, datasetLabel: "LibriSpeech \(subset)")
         try writeJSON(
-            results: results, outputFile: outputFile,
-            dataset: "librispeech", subset: subset, language: nil
+            results: results,
+            summary: summary,
+            outputFile: outputFile,
+            dataset: "librispeech",
+            subset: subset,
+            language: nil
         )
     }
 
@@ -226,10 +242,15 @@ enum Qwen3AsrBenchmark {
                 langOutputFile = outputFile
             }
 
-            printSummary(results: results, dataset: "fleurs", subset: nil, language: language)
+            let summary = Qwen3BenchmarkSummary(results: results)
+            printSummary(summary: summary, datasetLabel: "FLEURS \(language)")
             try writeJSON(
-                results: results, outputFile: langOutputFile,
-                dataset: "fleurs", subset: nil, language: language
+                results: results,
+                summary: summary,
+                outputFile: langOutputFile,
+                dataset: "fleurs",
+                subset: nil,
+                language: language
             )
         }
     }
@@ -261,17 +282,22 @@ enum Qwen3AsrBenchmark {
         let results = try await runBenchmarkLoop(
             manager: manager,
             files: files.map { ($0.fileName, $0.audioPath, $0.transcript) },
-            language: "zh"
+            language: .chinese
         )
 
-        printSummary(results: results, dataset: "AISHELL-1", subset: "test", language: "zh")
+        let summary = Qwen3BenchmarkSummary(results: results)
+        printSummary(summary: summary, datasetLabel: "AISHELL-1 test")
         try writeJSON(
-            results: results, outputFile: outputFile,
-            dataset: "aishell", subset: "test", language: "zh"
+            results: results,
+            summary: summary,
+            outputFile: outputFile,
+            dataset: "aishell",
+            subset: "test",
+            language: "zh"
         )
     }
 
-    private static func collectAishellFiles(directory: URL) throws -> [LibriSpeechFile] {
+    private static func collectAishellFiles(directory: URL) throws -> [BenchmarkAudioFile] {
         let transFile = directory.appendingPathComponent("cmn_hans_cn.trans.txt")
         guard FileManager.default.fileExists(atPath: transFile.path) else {
             throw Qwen3AsrError.generationFailed(
@@ -281,7 +307,7 @@ enum Qwen3AsrBenchmark {
 
         let content = try String(contentsOf: transFile)
         let lines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
-        var files: [LibriSpeechFile] = []
+        var files: [BenchmarkAudioFile] = []
 
         for line in lines {
             guard let spaceIndex = line.firstIndex(of: " ") else { continue }
@@ -292,7 +318,7 @@ enum Qwen3AsrBenchmark {
             guard FileManager.default.fileExists(atPath: wavPath.path) else { continue }
 
             files.append(
-                LibriSpeechFile(
+                BenchmarkAudioFile(
                     fileName: wavPath.lastPathComponent,
                     audioPath: wavPath,
                     transcript: transcript
@@ -307,7 +333,7 @@ enum Qwen3AsrBenchmark {
 
     private static func collectFLEURSFiles(
         language: String, directory: URL
-    ) throws -> [LibriSpeechFile] {
+    ) throws -> [BenchmarkAudioFile] {
         let transFile = directory.appendingPathComponent("\(language).trans.txt")
         guard FileManager.default.fileExists(atPath: transFile.path) else {
             throw Qwen3AsrError.generationFailed(
@@ -317,7 +343,7 @@ enum Qwen3AsrBenchmark {
 
         let content = try String(contentsOf: transFile)
         let lines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
-        var files: [LibriSpeechFile] = []
+        var files: [BenchmarkAudioFile] = []
 
         for line in lines {
             // Format: file_id transcription
@@ -339,7 +365,7 @@ enum Qwen3AsrBenchmark {
             }
 
             files.append(
-                LibriSpeechFile(
+                BenchmarkAudioFile(
                     fileName: audioPath.lastPathComponent,
                     audioPath: audioPath,
                     transcript: transcript
@@ -356,16 +382,17 @@ enum Qwen3AsrBenchmark {
     private static func runBenchmarkLoop(
         manager: Qwen3AsrManager,
         files: [(fileName: String, audioPath: URL, transcript: String)],
-        language: String?
+        language: Qwen3AsrConfig.Language?
     ) async throws -> [Qwen3BenchmarkResult] {
         var results: [Qwen3BenchmarkResult] = []
+        let audioConverter = AudioConverter()
 
         for (index, file) in files.enumerated() {
             do {
                 logger.info("[\(index + 1)/\(files.count)] \(file.fileName)")
 
-                let samples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
-                let audioLength = Double(samples.count) / 16000.0
+                let samples = try audioConverter.resampleAudioFile(path: file.audioPath.path)
+                let audioLength = Double(samples.count) / Double(Qwen3AsrConfig.sampleRate)
 
                 let inferenceStart = CFAbsoluteTimeGetCurrent()
                 let hypothesis = try await manager.transcribe(
@@ -410,53 +437,29 @@ enum Qwen3AsrBenchmark {
 
     // MARK: - Summary & Output
 
-    private static func printSummary(
-        results: [Qwen3BenchmarkResult],
-        dataset: String,
-        subset: String?,
-        language: String?
-    ) {
-        guard !results.isEmpty else {
+    private static func printSummary(summary: Qwen3BenchmarkSummary, datasetLabel: String) {
+        guard summary.filesProcessed > 0 else {
             logger.error("No results produced")
             return
-        }
-
-        let avgWER = results.map(\.wer).reduce(0, +) / Double(results.count)
-        let avgCER = results.map(\.cer).reduce(0, +) / Double(results.count)
-        let totalAudio = results.map(\.audioLength).reduce(0, +)
-        let totalInference = results.map(\.processingTime).reduce(0, +)
-        let overallRTFx = totalAudio / totalInference
-        let medianWER = results.map(\.wer).sorted()[results.count / 2]
-        let medianCER = results.map(\.cer).sorted()[results.count / 2]
-
-        let sortedRTFx = results.map { $0.audioLength / $0.processingTime }.sorted()
-        let medianRTFx = sortedRTFx[sortedRTFx.count / 2]
-
-        let datasetLabel: String
-        if let language = language {
-            datasetLabel = "FLEURS \(language)"
-        } else if let subset = subset {
-            datasetLabel = "LibriSpeech \(subset)"
-        } else {
-            datasetLabel = dataset
         }
 
         print("")
         print("--- Qwen3-ASR Benchmark Results ---")
         print("   Dataset: \(datasetLabel)")
-        print("   Files processed: \(results.count)")
-        print("   Average WER: \(String(format: "%.1f", avgWER * 100))%")
-        print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
-        print("   Average CER: \(String(format: "%.1f", avgCER * 100))%")
-        print("   Median CER: \(String(format: "%.1f", medianCER * 100))%")
-        print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
+        print("   Files processed: \(summary.filesProcessed)")
+        print("   Average WER: \(String(format: "%.1f", summary.avgWER * 100))%")
+        print("   Median WER: \(String(format: "%.1f", summary.medianWER * 100))%")
+        print("   Average CER: \(String(format: "%.1f", summary.avgCER * 100))%")
+        print("   Median CER: \(String(format: "%.1f", summary.medianCER * 100))%")
+        print("   Median RTFx: \(String(format: "%.1f", summary.medianRTFx))x")
         print(
-            "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudio))s / \(String(format: "%.1f", totalInference))s)"
+            "   Overall RTFx: \(String(format: "%.1f", summary.overallRTFx))x (\(String(format: "%.1f", summary.totalAudio))s / \(String(format: "%.1f", summary.totalInference))s)"
         )
     }
 
     private static func writeJSON(
         results: [Qwen3BenchmarkResult],
+        summary: Qwen3BenchmarkSummary,
         outputFile: String,
         dataset: String,
         subset: String?,
@@ -464,34 +467,25 @@ enum Qwen3AsrBenchmark {
     ) throws {
         guard !results.isEmpty else { return }
 
-        let avgWER = results.map(\.wer).reduce(0, +) / Double(results.count)
-        let avgCER = results.map(\.cer).reduce(0, +) / Double(results.count)
-        let totalAudio = results.map(\.audioLength).reduce(0, +)
-        let totalInference = results.map(\.processingTime).reduce(0, +)
-        let overallRTFx = totalAudio / totalInference
-        let medianWER = results.map(\.wer).sorted()[results.count / 2]
-
-        let sortedRTFx = results.map { $0.audioLength / $0.processingTime }.sorted()
-        let medianRTFx = sortedRTFx[sortedRTFx.count / 2]
-
-        var summary: [String: Any] = [
+        var summaryDict: [String: Any] = [
             "model": "qwen3-asr-0.6b",
             "dataset": dataset,
-            "filesProcessed": results.count,
-            "averageWER": avgWER,
-            "medianWER": medianWER,
-            "averageCER": avgCER,
-            "medianRTFx": medianRTFx,
-            "overallRTFx": overallRTFx,
-            "totalAudioDuration": totalAudio,
-            "totalInferenceTime": totalInference,
+            "filesProcessed": summary.filesProcessed,
+            "averageWER": summary.avgWER,
+            "medianWER": summary.medianWER,
+            "averageCER": summary.avgCER,
+            "medianCER": summary.medianCER,
+            "medianRTFx": summary.medianRTFx,
+            "overallRTFx": summary.overallRTFx,
+            "totalAudioDuration": summary.totalAudio,
+            "totalInferenceTime": summary.totalInference,
         ]
 
         if let subset = subset {
-            summary["subset"] = subset
+            summaryDict["subset"] = subset
         }
         if let language = language {
-            summary["language"] = language
+            summaryDict["language"] = language
         }
 
         let jsonResults = results.map { r -> [String: Any] in
@@ -508,7 +502,7 @@ enum Qwen3AsrBenchmark {
         }
 
         let output: [String: Any] = [
-            "summary": summary,
+            "summary": summaryDict,
             "results": jsonResults,
         ]
 
@@ -520,8 +514,8 @@ enum Qwen3AsrBenchmark {
 
     // MARK: - LibriSpeech File Collection
 
-    private static func collectLibriSpeechFiles(from directory: URL) throws -> [LibriSpeechFile] {
-        var files: [LibriSpeechFile] = []
+    private static func collectBenchmarkAudioFiles(from directory: URL) throws -> [BenchmarkAudioFile] {
+        var files: [BenchmarkAudioFile] = []
         let fileManager = FileManager.default
         let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: nil)
 
@@ -543,7 +537,7 @@ enum Qwen3AsrBenchmark {
 
                 if fileManager.fileExists(atPath: audioPath.path) {
                     files.append(
-                        LibriSpeechFile(
+                        BenchmarkAudioFile(
                             fileName: audioFileName,
                             audioPath: audioPath,
                             transcript: transcript
@@ -606,7 +600,7 @@ enum Qwen3AsrBenchmark {
     }
 }
 
-// MARK: - Result Type
+// MARK: - Types
 
 private struct Qwen3BenchmarkResult {
     let fileName: String
@@ -616,5 +610,50 @@ private struct Qwen3BenchmarkResult {
     let cer: Double
     let audioLength: Double
     let processingTime: Double
+}
+
+private struct BenchmarkAudioFile {
+    let fileName: String
+    let audioPath: URL
+    let transcript: String
+}
+
+private struct Qwen3BenchmarkSummary {
+    let filesProcessed: Int
+    let avgWER: Double
+    let medianWER: Double
+    let avgCER: Double
+    let medianCER: Double
+    let medianRTFx: Double
+    let overallRTFx: Double
+    let totalAudio: Double
+    let totalInference: Double
+
+    init(results: [Qwen3BenchmarkResult]) {
+        guard !results.isEmpty else {
+            self.filesProcessed = 0
+            self.avgWER = 0
+            self.medianWER = 0
+            self.avgCER = 0
+            self.medianCER = 0
+            self.medianRTFx = 0
+            self.overallRTFx = 0
+            self.totalAudio = 0
+            self.totalInference = 0
+            return
+        }
+
+        self.filesProcessed = results.count
+        self.avgWER = results.map(\.wer).reduce(0, +) / Double(results.count)
+        self.avgCER = results.map(\.cer).reduce(0, +) / Double(results.count)
+        self.totalAudio = results.map(\.audioLength).reduce(0, +)
+        self.totalInference = results.map(\.processingTime).reduce(0, +)
+        self.overallRTFx = totalAudio / totalInference
+        self.medianWER = results.map(\.wer).sorted()[results.count / 2]
+        self.medianCER = results.map(\.cer).sorted()[results.count / 2]
+
+        let sortedRTFx = results.map { $0.audioLength / $0.processingTime }.sorted()
+        self.medianRTFx = sortedRTFx[sortedRTFx.count / 2]
+    }
 }
 #endif

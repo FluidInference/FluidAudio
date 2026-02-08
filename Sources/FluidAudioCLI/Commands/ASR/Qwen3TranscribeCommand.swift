@@ -1,5 +1,4 @@
 #if os(macOS)
-@preconcurrency import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -16,7 +15,7 @@ enum Qwen3TranscribeCommand {
 
         let audioFile = arguments[0]
         var modelDir: String?
-        var language: String?
+        var language: Qwen3AsrConfig.Language?
 
         // Parse options
         var i = 1
@@ -32,7 +31,14 @@ enum Qwen3TranscribeCommand {
                 }
             case "--language", "-l":
                 if i + 1 < arguments.count {
-                    language = arguments[i + 1]
+                    let langStr = arguments[i + 1]
+                    if let lang = Qwen3AsrConfig.Language(from: langStr) {
+                        language = lang
+                    } else {
+                        logger.warning(
+                            "Unknown language '\(langStr)'. Use --help to see supported languages."
+                        )
+                    }
                     i += 1
                 }
             default:
@@ -44,7 +50,11 @@ enum Qwen3TranscribeCommand {
         await transcribe(audioFile: audioFile, modelDir: modelDir, language: language)
     }
 
-    private static func transcribe(audioFile: String, modelDir: String?, language: String?) async {
+    private static func transcribe(
+        audioFile: String,
+        modelDir: String?,
+        language: Qwen3AsrConfig.Language?
+    ) async {
         guard #available(macOS 15, iOS 18, *) else {
             logger.error("Qwen3-ASR requires macOS 15 or later")
             return
@@ -65,20 +75,21 @@ enum Qwen3TranscribeCommand {
             }
 
             // Load and resample audio to 16kHz mono
-            let audioURL = URL(fileURLWithPath: audioFile)
-            let audioFileHandle = try AVAudioFile(forReading: audioURL)
-            let format = audioFileHandle.processingFormat
-            let duration = Double(audioFileHandle.length) / format.sampleRate
-
             let samples = try AudioConverter().resampleAudioFile(path: audioFile)
+            let duration = Double(samples.count) / Double(Qwen3AsrConfig.sampleRate)
             logger.info(
                 "Audio: \(String(format: "%.2f", duration))s, \(samples.count) samples at 16kHz"
             )
 
             // Transcribe
-            logger.info("Transcribing...")
+            let langDesc = language?.englishName ?? "auto-detect"
+            logger.info("Transcribing (language: \(langDesc))...")
             let startTime = CFAbsoluteTimeGetCurrent()
-            let text = try await manager.transcribe(audioSamples: samples, language: language)
+            let text = try await manager.transcribe(
+                audioSamples: samples,
+                language: language,
+                maxNewTokens: 512
+            )
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
 
             let rtfx = duration / elapsed
@@ -100,7 +111,6 @@ enum Qwen3TranscribeCommand {
     }
 
     private static func printUsage() {
-        let logger = AppLogger(category: "Qwen3Transcribe")
         logger.info(
             """
 
@@ -113,14 +123,17 @@ enum Qwen3TranscribeCommand {
                 --model-dir <path>      Path to local model directory (skips download)
                 --language, -l <code>   Language hint (e.g., zh, en, ja, ko, yue, ar, fr, de)
 
-            Supported languages:
-                en   English        zh   Chinese (Mandarin)   yue  Cantonese
-                ja   Japanese       ko   Korean               vi   Vietnamese
-                th   Thai           id   Indonesian           ms   Malay
-                hi   Hindi          ar   Arabic               tr   Turkish
-                ru   Russian        de   German               fr   French
-                es   Spanish        pt   Portuguese           it   Italian
-                nl   Dutch          pl   Polish               sv   Swedish
+            Supported languages (30 total):
+                zh   Chinese (Mandarin)   yue  Cantonese          en   English
+                ja   Japanese             ko   Korean             vi   Vietnamese
+                th   Thai                 id   Indonesian         ms   Malay
+                hi   Hindi                ar   Arabic             tr   Turkish
+                ru   Russian              de   German             fr   French
+                es   Spanish              pt   Portuguese         it   Italian
+                nl   Dutch                pl   Polish             sv   Swedish
+                da   Danish               fi   Finnish            cs   Czech
+                fil  Filipino             fa   Persian            el   Greek
+                hu   Hungarian            mk   Macedonian         ro   Romanian
 
             Examples:
                 fluidaudio qwen3-transcribe audio.wav
