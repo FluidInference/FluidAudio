@@ -77,6 +77,8 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Hex](https://github.com/kitlangton/Hex)** | macOS app that lets you press-and-hold a hotkey to record your voice, transcribe it, and paste into any application. Uses Parakeet ASR. |
 | **[Super Voice Assistant](https://github.com/ykdojo/super-voice-assistant)** | Open-source macOS voice assistant with local transcription. Uses Parakeet ASR. |
 | **[VoiceTypr](https://github.com/moinulmoin/voicetypr)** | Open-source voice-to-text dictation for macOS and Windows. Uses Parakeet ASR. |
+| **[Summit AI Notes](https://summitnotes.app/)** | Local meeting transcription and summarization with speaker identification. Supports 100+ languages. |
+| **[Ora](https://futurelab.studio/ora)** | Local voice assistant for macOS with speech recognition and text-to-speech. |
 
 ## Installation
 
