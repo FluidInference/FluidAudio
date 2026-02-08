@@ -49,63 +49,7 @@ let text = try await manager.transcribe(audioSamples: samples)
 
 ## Benchmarks
 
-Hardware: Apple M2, 2022, macOS 26
-
-### LibriSpeech test-clean (English, 2620 files)
-
-| Metric | Value |
-|--------|-------|
-| WER (Avg) | 4.4% |
-| WER (Median) | 0.0% |
-| RTFx | 2.8x |
-| Per-token | ~75ms |
-
-### AISHELL-1 (Chinese, 6920 files, 9.7h audio)
-
-| Metric | Value |
-|--------|-------|
-| CER (Avg) | 6.6% |
-| WER (Avg) | 10.3% |
-| Median RTFx | 4.6x |
-| Overall RTFx | 3.8x |
-
-### Running Benchmarks
-
-```bash
-# English (LibriSpeech test-clean)
-swift run -c release fluidaudiocli qwen3-benchmark --subset test-clean
-
-# Chinese (AISHELL-1)
-swift run -c release fluidaudiocli qwen3-benchmark --dataset aishell
-```
-
-## Evaluation Methodology
-
-### English (WER)
-
-Word Error Rate calculated using standard whitespace tokenization with text normalization (lowercase, punctuation removal).
-
-### Chinese (CER/WER)
-
-- **CER** (Character Error Rate) is the primary metric for Chinese ASR
-- **WER** uses Apple's `NLTokenizer` for word segmentation
-- Per [Qwen3-ASR Technical Report](https://arxiv.org/html/2601.21337v1): *"We use CER for character-based languages (e.g., Mandarin Chinese, Cantonese, and Korean) and WER for word-delimited languages"*
-
-We were unable to verify the exact tokenization methodology used in official Qwen3-ASR evaluation.
-
-## Comparison with Official Results
-
-| Dataset | Official | CoreML |
-|---------|----------|--------|
-| LibriSpeech test-clean | 2.11% WER | 4.4% WER |
-| AISHELL-2 | 3.15% | - |
-| AISHELL-1 | - | 6.6% CER |
-
-The CoreML conversion shows higher error rates, likely due to precision differences during model conversion.
-
-**Sources:**
-- [Qwen3-ASR-0.6B Model Card](https://huggingface.co/Qwen/Qwen3-ASR-0.6B)
-- [Qwen3-ASR Technical Report](https://arxiv.org/html/2601.21337v1)
+See [Benchmarks.md](Benchmarks.md#qwen3-asr-experimental) for performance results on LibriSpeech and AISHELL-1.
 
 ## Limitations
 
