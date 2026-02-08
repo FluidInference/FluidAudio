@@ -16,13 +16,44 @@ Qwen3-ASR uses an encoder-decoder architecture with autoregressive text generati
 2. **Decoder**: 28-layer transformer with KV-cache for efficient token generation
 3. **Generation**: Autoregressive decoding at ~60-80ms per token
 
+## Supported Languages
+
+Qwen3-ASR supports 30 languages with automatic language detection:
+
+| Code | Language | Code | Language | Code | Language |
+|------|----------|------|----------|------|----------|
+| zh | Chinese | en | English | yue | Cantonese |
+| ja | Japanese | ko | Korean | vi | Vietnamese |
+| th | Thai | id | Indonesian | ms | Malay |
+| hi | Hindi | ar | Arabic | tr | Turkish |
+| ru | Russian | de | German | fr | French |
+| es | Spanish | pt | Portuguese | it | Italian |
+| nl | Dutch | pl | Polish | sv | Swedish |
+| da | Danish | fi | Finnish | cs | Czech |
+| fil | Filipino | fa | Persian | el | Greek |
+| hu | Hungarian | mk | Macedonian | ro | Romanian |
+
+### Usage with Language Hint
+
+```swift
+// Auto-detect language (default)
+let text = try await manager.transcribe(audioSamples: samples)
+
+// Specify language for better accuracy
+let text = try await manager.transcribe(audioSamples: samples, language: .chinese)
+let text = try await manager.transcribe(audioSamples: samples, language: .japanese)
+```
+
 ## Usage
 
 ### CLI
 
 ```bash
-# Transcribe a file
+# Transcribe a file (auto-detect language)
 swift run -c release fluidaudiocli qwen3-transcribe audio.wav
+
+# Transcribe with language hint
+swift run -c release fluidaudiocli qwen3-transcribe audio.wav --language zh
 
 # Transcribe with local model
 swift run -c release fluidaudiocli qwen3-transcribe audio.wav --model-dir /path/to/model
