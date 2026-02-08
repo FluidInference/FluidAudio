@@ -1,6 +1,6 @@
 # Qwen3-ASR
 
-> **Beta**: This API is experimental and subject to change.
+> **Beta phase**
 
 Encoder-decoder automatic speech recognition using [Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) converted to CoreML.
 
