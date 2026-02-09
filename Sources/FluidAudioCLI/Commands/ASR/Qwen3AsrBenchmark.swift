@@ -10,7 +10,10 @@ enum Qwen3AsrBenchmark {
     private static let logger = AppLogger(category: "Qwen3Benchmark")
 
     /// Map FLEURS language codes to Qwen3AsrConfig.Language.
+    /// Note: FluidInference/fleurs only has European languages.
+    /// Asian languages require downloading from Google's original FLEURS dataset.
     private static let fleursToQwen3Language: [String: Qwen3AsrConfig.Language] = [
+        // Asian languages (NOT in FluidInference/fleurs)
         "cmn_hans_cn": .chinese,
         "yue_hant_hk": .cantonese,
         "ja_jp": .japanese,
@@ -22,13 +25,17 @@ enum Qwen3AsrBenchmark {
         "hi_in": .hindi,
         "ar_eg": .arabic,
         "tr_tr": .turkish,
-        "ru_ru": .russian,
+        "fa_ir": .persian,
+        "fil_ph": .filipino,
+        // European languages (available in FluidInference/fleurs)
+        "en_us": .english,
         "de_de": .german,
         "fr_fr": .french,
         "es_419": .spanish,
         "pt_br": .portuguese,
         "it_it": .italian,
         "nl_nl": .dutch,
+        "ru_ru": .russian,
         "pl_pl": .polish,
         "sv_se": .swedish,
         "da_dk": .danish,
@@ -37,8 +44,7 @@ enum Qwen3AsrBenchmark {
         "el_gr": .greek,
         "hu_hu": .hungarian,
         "ro_ro": .romanian,
-        "fa_ir": .persian,
-        "en_us": .english,
+        "mk_mk": .macedonian,
     ]
 
     static func runCLI(arguments: [String]) async {
@@ -686,17 +692,26 @@ enum Qwen3AsrBenchmark {
                 # Multiple languages (FLEURS)
                 fluidaudio qwen3-benchmark --dataset fleurs --languages cmn_hans_cn,ja_jp,ko_kr
 
-            Supported FLEURS languages:
-                cmn_hans_cn  Chinese (Mandarin)     ja_jp   Japanese
-                yue_hant_hk  Chinese (Cantonese)    ko_kr   Korean
-                vi_vn        Vietnamese             th_th   Thai
-                id_id        Indonesian             ms_my   Malay
-                hi_in        Hindi                  ar_eg   Arabic
-                tr_tr        Turkish                ru_ru   Russian
-                de_de        German                 fr_fr   French
-                es_419       Spanish                en_us   English
+            Supported FLEURS languages (30 Qwen3 languages):
 
-            Note: FLEURS data must be prepared first using prepare_fleurs_chinese.py
+            European (auto-download from FluidInference/fleurs):
+                en_us   English         de_de   German          fr_fr   French
+                es_419  Spanish         pt_br   Portuguese      it_it   Italian
+                nl_nl   Dutch           ru_ru   Russian         pl_pl   Polish
+                sv_se   Swedish         da_dk   Danish          fi_fi   Finnish
+                cs_cz   Czech           el_gr   Greek           hu_hu   Hungarian
+                ro_ro   Romanian        mk_mk   Macedonian
+
+            Asian (requires manual preparation from Google FLEURS):
+                cmn_hans_cn  Chinese (Mandarin)     yue_hant_hk  Cantonese
+                ja_jp        Japanese               ko_kr        Korean
+                vi_vn        Vietnamese             th_th        Thai
+                id_id        Indonesian             ms_my        Malay
+                hi_in        Hindi                  ar_eg        Arabic
+                tr_tr        Turkish                fa_ir        Persian
+                fil_ph       Filipino
+
+            Note: European languages auto-download. Asian languages need manual prep.
             """
         )
     }

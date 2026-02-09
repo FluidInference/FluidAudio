@@ -220,15 +220,19 @@ public final class WhisperMelSpectrogram {
         for melIdx in 0..<nMels {
             var low = minVal
             var high = Float.greatestFiniteMagnitude
-            vDSP_vclip(mel[melIdx], 1, &low, &high, &mel[melIdx], 1, vDSP_Length(numFrames))
+            mel[melIdx].withUnsafeMutableBufferPointer { buffer in
+                vDSP_vclip(buffer.baseAddress!, 1, &low, &high, buffer.baseAddress!, 1, vDSP_Length(numFrames))
+            }
         }
 
         // Whisper normalization: (x + 4.0) / 4.0 - vectorized
         var addVal: Float = 4.0
         var divVal: Float = 4.0
         for melIdx in 0..<nMels {
-            vDSP_vsadd(mel[melIdx], 1, &addVal, &mel[melIdx], 1, vDSP_Length(numFrames))
-            vDSP_vsdiv(mel[melIdx], 1, &divVal, &mel[melIdx], 1, vDSP_Length(numFrames))
+            mel[melIdx].withUnsafeMutableBufferPointer { buffer in
+                vDSP_vsadd(buffer.baseAddress!, 1, &addVal, buffer.baseAddress!, 1, vDSP_Length(numFrames))
+                vDSP_vsdiv(buffer.baseAddress!, 1, &divVal, buffer.baseAddress!, 1, vDSP_Length(numFrames))
+            }
         }
 
         return mel
