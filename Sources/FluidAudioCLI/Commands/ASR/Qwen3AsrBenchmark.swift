@@ -10,10 +10,9 @@ enum Qwen3AsrBenchmark {
     private static let logger = AppLogger(category: "Qwen3Benchmark")
 
     /// Map FLEURS language codes to Qwen3AsrConfig.Language.
-    /// Note: FluidInference/fleurs only has European languages.
-    /// Asian languages require downloading from Google's original FLEURS dataset.
+    /// All 30 languages auto-download from FluidInference/fleurs-full.
     private static let fleursToQwen3Language: [String: Qwen3AsrConfig.Language] = [
-        // Asian languages (NOT in FluidInference/fleurs)
+        // Asian languages
         "cmn_hans_cn": .chinese,
         "yue_hant_hk": .cantonese,
         "ja_jp": .japanese,
@@ -27,7 +26,7 @@ enum Qwen3AsrBenchmark {
         "tr_tr": .turkish,
         "fa_ir": .persian,
         "fil_ph": .filipino,
-        // European languages (available in FluidInference/fleurs)
+        // European languages
         "en_us": .english,
         "de_de": .german,
         "fr_fr": .french,
@@ -280,7 +279,7 @@ enum Qwen3AsrBenchmark {
     ) async throws {
         try FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
 
-        let datasetRepo = "FluidInference/fleurs"
+        let datasetRepo = "FluidInference/fleurs-full"
         logger.info("Downloading from HuggingFace: \(datasetRepo)/\(language)...")
 
         // List files in the language directory
@@ -538,6 +537,13 @@ enum Qwen3AsrBenchmark {
             } catch {
                 logger.error("Failed \(file.fileName): \(error)")
             }
+
+            // Give system time to reclaim CoreML MLState IOSurface resources every 25 files.
+            // Without this pause, IOSurface limit (~200) is exhausted causing crashes.
+            if (index + 1) % 25 == 0 {
+                logger.info("Memory cleanup pause...")
+                try? await Task.sleep(for: .seconds(1))
+            }
         }
 
         return results
@@ -692,17 +698,9 @@ enum Qwen3AsrBenchmark {
                 # Multiple languages (FLEURS)
                 fluidaudio qwen3-benchmark --dataset fleurs --languages cmn_hans_cn,ja_jp,ko_kr
 
-            Supported FLEURS languages (30 Qwen3 languages):
+            Supported FLEURS languages (30 Qwen3 languages, all auto-download):
 
-            European (auto-download from FluidInference/fleurs):
-                en_us   English         de_de   German          fr_fr   French
-                es_419  Spanish         pt_br   Portuguese      it_it   Italian
-                nl_nl   Dutch           ru_ru   Russian         pl_pl   Polish
-                sv_se   Swedish         da_dk   Danish          fi_fi   Finnish
-                cs_cz   Czech           el_gr   Greek           hu_hu   Hungarian
-                ro_ro   Romanian        mk_mk   Macedonian
-
-            Asian (requires manual preparation from Google FLEURS):
+            Asian (13 languages):
                 cmn_hans_cn  Chinese (Mandarin)     yue_hant_hk  Cantonese
                 ja_jp        Japanese               ko_kr        Korean
                 vi_vn        Vietnamese             th_th        Thai
@@ -711,7 +709,15 @@ enum Qwen3AsrBenchmark {
                 tr_tr        Turkish                fa_ir        Persian
                 fil_ph       Filipino
 
-            Note: European languages auto-download. Asian languages need manual prep.
+            European (17 languages):
+                en_us   English         de_de   German          fr_fr   French
+                es_419  Spanish         pt_br   Portuguese      it_it   Italian
+                nl_nl   Dutch           ru_ru   Russian         pl_pl   Polish
+                sv_se   Swedish         da_dk   Danish          fi_fi   Finnish
+                cs_cz   Czech           el_gr   Greek           hu_hu   Hungarian
+                ro_ro   Romanian        mk_mk   Macedonian
+
+            All languages auto-download from FluidInference/fleurs-full.
             """
         )
     }
