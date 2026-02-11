@@ -353,47 +353,47 @@ Full benchmark across all 30 languages supported by Qwen3-ASR, matching the offi
 
 #### Full Results (sorted by CER)
 
-| Language | RTFx | CER% | WER% | Use |
-|----------|------|------|------|-----|
-| en_us | 1.16x | 4.0% | 7.3% | WER |
-| es_419 | 2.04x | 4.9% | 10.5% | WER |
-| it_it | 3.46x | 5.1% | 12.4% | WER |
-| ru_ru | 1.84x | 6.9% | 18.0% | WER |
-| de_de | 1.22x | 8.1% | 16.6% | WER |
-| pt_br | 3.27x | 8.6% | 17.5% | WER |
-| fr_fr | 1.72x | 8.9% | 17.3% | WER |
-| cmn_hans_cn | 1.74x | 9.4% | 99.7%* | CER |
-| ko_kr | 1.10x | 10.6% | 23.5% | CER |
-| tr_tr | 2.84x | 11.6% | 33.0% | WER |
-| id_id | 2.86x | 16.0% | 30.9% | WER |
-| nl_nl | 2.29x | 17.2% | 36.5% | WER |
-| ms_my | 2.24x | 17.4% | 37.6% | WER |
-| th_th | 1.42x | 18.3% | 96.8%* | CER |
-| ar_eg | 1.53x | 18.5% | 40.3% | WER |
-| ja_jp | 0.83x | 19.3% | 94.4%* | CER |
-| yue_hant_hk | 0.87x | 19.5% | 99.8%* | CER |
-| vi_vn | 2.69x | 25.4% | 35.9% | CER |
-| fi_fi | 1.56x | 25.9% | 70.3% | WER |
-| hi_in | 0.74x | 30.8% | 36.0% | WER |
-| pl_pl | 1.69x | 30.8% | 61.9% | WER |
-| sv_se | 2.38x | 31.3% | 67.8% | WER |
-| fil_ph | 1.56x | 32.2% | 64.8% | WER |
-| mk_mk | 0.79x | 43.2% | - | WER |
-| da_dk | 2.33x | 45.5% | 81.1% | WER |
-| fa_ir | 1.88x | 48.9% | 75.1% | WER |
-| el_gr | 0.95x | 51.9% | - | WER |
-| hu_hu | 1.05x | 59.0% | - | WER |
-| ro_ro | 1.03x | 60.9% | - | WER |
-| cs_cz | 2.26x | 62.2% | 88.2% | WER |
+| Language | RTFx | Avg CER | Med CER | Avg WER | Med WER | Use |
+|----------|------|---------|---------|---------|---------|-----|
+| en_us | 1.16x | 4.0% | 2.3% | 7.3% | 5.3% | WER |
+| es_419 | 2.04x | 4.9% | 3.0% | 10.5% | 8.1% | WER |
+| it_it | 3.46x | 5.1% | 2.8% | 12.4% | 10.0% | WER |
+| ru_ru | 1.84x | 6.9% | 4.6% | 18.0% | 15.6% | WER |
+| de_de | 1.22x | 8.1% | 5.1% | 16.6% | 13.3% | WER |
+| pt_br | 3.27x | 8.6% | 5.4% | 17.5% | 13.0% | WER |
+| fr_fr | 1.72x | 8.9% | 6.2% | 17.3% | 13.3% | WER |
+| cmn_hans_cn | 1.74x | 9.4% | 5.1% | 99.7%* | 100%* | CER |
+| ko_kr | 1.10x | 10.6% | 7.9% | 23.5% | 21.7% | CER |
+| tr_tr | 2.84x | 11.6% | 9.6% | 33.0% | 31.2% | WER |
+| id_id | 2.86x | 16.0% | 9.1% | 30.9% | 22.2% | WER |
+| nl_nl | 2.29x | 17.2% | 13.6% | 36.5% | 30.3% | WER |
+| ms_my | 2.24x | 17.4% | 13.2% | 37.6% | 33.3% | WER |
+| th_th | 1.42x | 18.3% | 15.4% | 96.8%* | 100%* | CER |
+| ar_eg | 1.53x | 18.5% | 13.8% | 40.3% | 36.4% | WER |
+| ja_jp | 0.83x | 19.3% | 17.1% | 94.4%* | 100%* | CER |
+| yue_hant_hk | 0.87x | 19.5% | 13.8% | 99.8%* | 100%* | CER |
+| vi_vn | 2.69x | 25.4% | 21.0% | 35.9% | 31.0% | CER |
+| fi_fi | 1.56x | 25.9% | 22.7% | 70.3% | 70.0% | WER |
+| hi_in | 0.74x | 30.8% | 21.4% | 36.0% | 30.6% | WER |
+| pl_pl | 1.69x | 30.8% | 27.4% | 61.9% | 60.0% | WER |
+| sv_se | 2.38x | 31.3% | 30.1% | 67.8% | 66.7% | WER |
+| fil_ph | 1.56x | 32.2% | 22.4% | 64.8% | 61.1% | WER |
+| mk_mk | 0.79x | 43.2% | 27.9% | 73.0% | 75.9% | WER |
+| da_dk | 2.33x | 45.5% | 46.5% | 81.1% | 84.6% | WER |
+| fa_ir | 1.88x | 48.9% | 34.4% | 75.1% | 75.0% | WER |
+| el_gr | 0.95x | 51.9% | 39.2% | 78.2% | 76.5% | WER |
+| hu_hu | 1.05x | 59.0% | 55.7% | 91.8% | 95.8% | WER |
+| ro_ro | 1.03x | 60.9% | 56.2% | 97.2% | 100% | WER |
+| cs_cz | 2.26x | 62.2% | 56.5% | 88.2% | 96.2% | WER |
 
 *\*WER >90% is expected for CJK/Thai due to word segmentation - FLEURS references have artificial character-by-character spacing while our output is natural continuous text. CER shows actual transcription quality.*
 
 #### Averages
 
-| Metric | Value |
-|--------|-------|
-| Avg CER (all 30) | 25.1% |
-| Avg RTFx | 1.78x |
+| Metric | Average | Median |
+|--------|---------|--------|
+| CER (all 30) | 25.1% | 19.4% |
+| RTFx | 1.78x | 1.72x |
 
 #### Speed by Language Type
 
