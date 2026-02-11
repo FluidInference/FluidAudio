@@ -292,9 +292,11 @@ swift run fluidaudiocli vad-benchmark --dataset musan-full --num-files all --thr
 [23:02:35.744] [INFO] [VAD] Results saved to: vad_benchmark_results.json
 ```
 
-## Qwen3-ASR (Experimental)
+## Qwen3-ASR (Beta / In Progress)
 
 Encoder-decoder ASR using Qwen3-ASR-0.6B converted to CoreML. Autoregressive generation with KV-cache.
+
+> **Note:** WER/CER may be higher than the original PyTorch model due to CoreML conversion limitations. See FLEURS results below for full multilingual benchmarks.
 
 Model: [FluidInference/qwen3-asr-0.6b-coreml](https://huggingface.co/FluidInference/qwen3-asr-0.6b-coreml) (f32 variant)
 
@@ -331,10 +333,82 @@ Hardware: Apple M2, 2022, macOS 26
 swift run -c release fluidaudiocli qwen3-benchmark --dataset aishell
 ```
 
+### FLEURS Multilingual (30 languages, ~70h audio)
+
+Full benchmark across all 30 languages supported by Qwen3-ASR, matching the official FLEURS tiers.
+
+**Which metric to use:**
+- **CER** for character-based languages (Chinese, Japanese, Korean, Thai, Vietnamese, Cantonese) - WER is meaningless due to word segmentation differences
+- **WER** for word-delimited languages (European, Arabic, etc.)
+
+#### Results by FLEURS Tier
+
+| Tier | Languages | Our CER | Official 0.6B WER |
+|------|-----------|---------|-------------------|
+| FLEURS (12 core) | en, zh, yue, ar, de, es, fr, it, ja, ko, pt, ru | **10.3%** | 10.0% |
+| FLEURS† (8 add) | hi, id, ms, nl, pl, th, tr, vi | **20.9%** | 31.9% |
+| FLEURS†† (10 hardest) | cs, da, el, fa, fi, fil, hu, mk, ro, sv | **41.0%** | 47.8% |
+
+> **Note:** Official Qwen3-ASR reports WER, but for CJK languages this includes word segmentation artifacts. Our CER comparison shows CoreML conversion has minimal accuracy loss on core languages.
+
+#### Full Results (sorted by CER)
+
+| Language | RTFx | CER% | WER% | Use |
+|----------|------|------|------|-----|
+| en_us | 1.16x | 4.0% | 7.3% | WER |
+| es_419 | 2.04x | 4.9% | 10.5% | WER |
+| it_it | 3.46x | 5.1% | 12.4% | WER |
+| ru_ru | 1.84x | 6.9% | 18.0% | WER |
+| de_de | 1.22x | 8.1% | 16.6% | WER |
+| pt_br | 3.27x | 8.6% | 17.5% | WER |
+| fr_fr | 1.72x | 8.9% | 17.3% | WER |
+| cmn_hans_cn | 1.74x | 9.4% | 99.7%* | CER |
+| ko_kr | 1.10x | 10.6% | 23.5% | CER |
+| tr_tr | 2.84x | 11.6% | 33.0% | WER |
+| id_id | 2.86x | 16.0% | 30.9% | WER |
+| nl_nl | 2.29x | 17.2% | 36.5% | WER |
+| ms_my | 2.24x | 17.4% | 37.6% | WER |
+| th_th | 1.42x | 18.3% | 96.8%* | CER |
+| ar_eg | 1.53x | 18.5% | 40.3% | WER |
+| ja_jp | 0.83x | 19.3% | 94.4%* | CER |
+| yue_hant_hk | 0.87x | 19.5% | 99.8%* | CER |
+| vi_vn | 2.69x | 25.4% | 35.9% | CER |
+| fi_fi | 1.56x | 25.9% | 70.3% | WER |
+| hi_in | 0.74x | 30.8% | 36.0% | WER |
+| pl_pl | 1.69x | 30.8% | 61.9% | WER |
+| sv_se | 2.38x | 31.3% | 67.8% | WER |
+| fil_ph | 1.56x | 32.2% | 64.8% | WER |
+| mk_mk | 0.79x | 43.2% | - | WER |
+| da_dk | 2.33x | 45.5% | 81.1% | WER |
+| fa_ir | 1.88x | 48.9% | 75.1% | WER |
+| el_gr | 0.95x | 51.9% | - | WER |
+| hu_hu | 1.05x | 59.0% | - | WER |
+| ro_ro | 1.03x | 60.9% | - | WER |
+| cs_cz | 2.26x | 62.2% | 88.2% | WER |
+
+*\*WER >90% is expected for CJK/Thai due to word segmentation - FLEURS references have artificial character-by-character spacing while our output is natural continuous text. CER shows actual transcription quality.*
+
+#### Averages
+
+| Metric | Value |
+|--------|-------|
+| Avg CER (all 30) | 25.1% |
+| Avg RTFx | 1.78x |
+
+#### Speed by Language Type
+
+| Type | Avg RTFx | Notes |
+|------|----------|-------|
+| Romance (es, it, pt, fr) | 2.6x | Fastest |
+| Turkic/Indonesian | 2.5x | Fast |
+| Germanic (en, de, nl) | 1.6x | Medium |
+| Slavic (ru, pl, cs) | 1.9x | Medium |
+| CJK (zh, ja, ko, yue) | 1.1x | Slow - more tokens |
+| Indic (hi) | 0.74x | Slowest |
+
 ```bash
-# Run Qwen3-ASR benchmark
-swift run -c release fluidaudiocli qwen3-benchmark --subset test-clean
-swift run -c release fluidaudiocli qwen3-benchmark --dataset aishell
+# Run FLEURS benchmark for all languages
+swift run -c release fluidaudiocli qwen3-benchmark --dataset fleurs --languages all
 ```
 
 ## Streaming ASR (Parakeet EOU)

@@ -1,6 +1,8 @@
 # Qwen3-ASR
 
-> **Beta phase**
+> **Beta**
+>
+> This implementation is under active development. Accuracy (WER/CER) may be worse than the original PyTorch model due to CoreML limitations. See [Benchmarks.md](Benchmarks.md#qwen3-asr-beta--in-progress) for full FLEURS results across all 30 languages.
 
 Encoder-decoder automatic speech recognition using [Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) converted to CoreML.
 
@@ -118,3 +120,20 @@ This differs from parallel decoders like Parakeet TDT, where:
 - int8 dequantization cost is amortized across batch output
 
 For autoregressive LLM-style decoders, fp16 compute precision (used by f32 models internally) provides the best speed/accuracy tradeoff on Apple Silicon.
+
+## Performance by Language
+
+Autoregressive ASR speed varies by language due to differing natural speech rates. Languages spoken faster produce more syllables (and thus tokens) per second of audio, requiring more decoder iterations.
+
+| Language | Speech Rate | Impact on RTFx |
+|----------|-------------|----------------|
+| Japanese | 8.03 syl/sec | Slower (more tokens) |
+| Spanish | 7.73 syl/sec | |
+| English | 6.34 syl/sec | |
+| Mandarin | 5.86 syl/sec | Faster (fewer tokens) |
+| Cantonese | 5.57 syl/sec | |
+| Vietnamese | 5.30 syl/sec | |
+
+*Speech rate data from [Scientific American](https://www.scientificamerican.com/article/fast-talkers/) and [Science.org](https://www.science.org/content/article/human-speech-may-have-universal-transmission-rate-39-bits-second) based on Dr. François Pellegrino's 2019 research.*
+
+**Why this matters:** Japanese speakers produce ~37% more syllables per second than Mandarin speakers. For autoregressive models like Qwen3-ASR, more syllables = more tokens = more decoder calls = slower inference.
