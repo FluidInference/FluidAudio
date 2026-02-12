@@ -283,6 +283,7 @@ public class DownloadUtils {
                         shouldInclude =
                             patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
                             || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
+                            || itemPath.hasSuffix(".npy") || itemPath.hasSuffix(".bin")
                     }
                     if shouldInclude {
                         let fileSize = item["size"] as? Int ?? -1
