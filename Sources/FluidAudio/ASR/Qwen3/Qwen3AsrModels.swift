@@ -283,6 +283,7 @@ public final class EmbeddingWeights: Sendable {
         let offset = 8 + tokenId * hiddenSize * 2  // header + token offset (float16)
         var result = [Float](repeating: 0, count: hiddenSize)
 
+        #if arch(arm64)
         data.withUnsafeBytes { ptr in
             let f16Ptr = ptr.baseAddress!.advanced(by: offset)
                 .assumingMemoryBound(to: Float16.self)
@@ -291,6 +292,10 @@ public final class EmbeddingWeights: Sendable {
                 result[i] = Float(f16Ptr[i])
             }
         }
+        #else
+        // Float16 is only available on Apple Silicon
+        fatalError("Qwen3-ASR requires Apple Silicon (arm64)")
+        #endif
 
         return result
     }
