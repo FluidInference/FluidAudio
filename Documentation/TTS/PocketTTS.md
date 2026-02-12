@@ -184,8 +184,10 @@ See [Kokoro.md](Kokoro.md) if you need pronunciation control.
 
 ## Usage
 
+PocketTTS is part of core `FluidAudio` - no GPL dependencies required.
+
 ```swift
-import FluidAudioTTS
+import FluidAudio
 
 let manager = PocketTtsManager()
 try await manager.initialize()
@@ -205,4 +207,5 @@ try await manager.synthesizeToFile(
 
 ## License
 
-CC-BY-4.0, inherited from [kyutai/pocket-tts](https://huggingface.co/kyutai/pocket-tts).
+- **PocketTTS models**: CC-BY-4.0, inherited from [kyutai/pocket-tts](https://huggingface.co/kyutai/pocket-tts)
+- **FluidAudio SDK**: MIT licensed (no GPL dependencies)

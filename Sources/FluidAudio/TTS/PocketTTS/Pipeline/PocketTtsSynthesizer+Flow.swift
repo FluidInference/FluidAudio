@@ -91,7 +91,7 @@ extension PocketTtsSynthesizer {
         // Extract velocity — take the first (and likely only) output
         let outputNames = Array(output.featureNames)
         guard let velocityArray = output.featureValue(for: outputNames[0])?.multiArrayValue else {
-            throw TTSError.processingFailed("Missing flow decoder velocity output")
+            throw PocketTTSError.processingFailed("Missing flow decoder velocity output")
         }
 
         let velocityPtr = velocityArray.dataPointer.bindMemory(to: Float.self, capacity: latentDim)

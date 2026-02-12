@@ -94,28 +94,29 @@ dependencies: [
 
 FluidAudio provides two library products:
 
-- **`FluidAudio`** (default) - Core functionality: ASR, diarization, VAD
+- **`FluidAudio`** (default) - Core functionality: ASR, diarization, VAD, **PocketTTS**
   - Lightweight, no GPL dependencies
-  - Recommended for most apps
+  - Includes PocketTTS for GPL-free text-to-speech
+  - Recommended for most apps, including closed-source
 
-- **`FluidAudioTTS`** - Text-to-Speech (Kokoro)
+- **`FluidAudioTTS`** - Full TTS Suite (Kokoro + ESpeakNG)
   - Separate optional product
   - Includes ESpeakNG framework (GPL-3.0)
-  - Only bundled if you explicitly add it as a dependency
+  - Use if you need Kokoro's SSML/phoneme control features
 
 **In Xcode:**
 1. Add the FluidAudio package to your project
 2. In the "Add Package" dialog, select your desired product(s):
-   - `FluidAudio` for core features (ASR, diarization, VAD)
-   - `FluidAudioTTS` if you need text-to-speech
+   - `FluidAudio` for core features (ASR, diarization, VAD, PocketTTS)
+   - `FluidAudioTTS` if you need Kokoro TTS with SSML support
 3. Add the selected product(s) to your app target
 
 **In Package.swift:**
 ```swift
-// Core features only (no GPL dependencies):
+// Core features + PocketTTS (no GPL dependencies):
 .product(name: "FluidAudio", package: "FluidAudio")
 
-// Add TTS support (includes GPL ESpeakNG):
+// Add Kokoro TTS support (includes GPL ESpeakNG):
 .product(name: "FluidAudioTTS", package: "FluidAudio")
 ```
 
