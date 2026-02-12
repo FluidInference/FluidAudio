@@ -31,7 +31,7 @@ public struct PocketTtsSynthesizer {
 
     static func currentModelStore() throws -> PocketTtsModelStore {
         guard let store = Context.modelStore else {
-            throw TTSError.processingFailed(
+            throw PocketTTSError.processingFailed(
                 "PocketTtsSynthesizer requires a model store context.")
         }
         return store

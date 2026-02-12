@@ -26,7 +26,7 @@ extension PocketTtsSynthesizer {
         guard let manifest = try JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
             let mimiManifest = manifest["mimi_init_state"] as? [String: Any]
         else {
-            throw TTSError.processingFailed("Failed to parse mimi_init_state from manifest.json")
+            throw PocketTTSError.processingFailed("Failed to parse mimi_init_state from manifest.json")
         }
 
         var tensors: [String: MLMultiArray] = [:]
@@ -124,7 +124,7 @@ extension PocketTtsSynthesizer {
 
         // Extract audio output [1, 1, 1920]
         guard let audioArray = output.featureValue(for: MimiKeys.audioOutput)?.multiArrayValue else {
-            throw TTSError.processingFailed("Missing Mimi audio output")
+            throw PocketTTSError.processingFailed("Missing Mimi audio output")
         }
 
         let sampleCount = PocketTtsConstants.samplesPerFrame
@@ -133,7 +133,7 @@ extension PocketTtsSynthesizer {
         // Update streaming state
         for (inputName, outputName) in mimiStateMapping {
             guard let updated = output.featureValue(for: outputName)?.multiArrayValue else {
-                throw TTSError.processingFailed(
+                throw PocketTTSError.processingFailed(
                     "Missing Mimi state output: \(outputName) (for \(inputName))")
             }
             state.tensors[inputName] = updated

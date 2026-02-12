@@ -37,7 +37,7 @@ public enum PocketTtsVoiceCloner {
     ///   - samples: Audio samples at 24kHz mono float32.
     ///   - encoder: The Mimi encoder CoreML model.
     /// - Returns: Voice conditioning data ready for TTS.
-    /// - Throws: `TTSError.processingFailed` if samples are too short or too long.
+    /// - Throws: `PocketTTSError.processingFailed` if samples are too short or too long.
     public static func cloneVoice(
         from samples: [Float],
         using encoder: MLModel
@@ -45,13 +45,13 @@ public enum PocketTtsVoiceCloner {
         // Validate input
         let durationSeconds = Double(samples.count) / Double(sampleRate)
         guard durationSeconds >= minDurationSeconds else {
-            throw TTSError.processingFailed(
+            throw PocketTTSError.processingFailed(
                 "Audio too short for voice cloning: \(String(format: "%.1f", durationSeconds))s "
                     + "(minimum \(minDurationSeconds)s required)"
             )
         }
         guard durationSeconds <= maxDurationSeconds else {
-            throw TTSError.processingFailed(
+            throw PocketTTSError.processingFailed(
                 "Audio too long for voice cloning: \(String(format: "%.1f", durationSeconds))s "
                     + "(maximum \(maxDurationSeconds)s allowed)"
             )
@@ -74,7 +74,7 @@ public enum PocketTtsVoiceCloner {
 
         // Get conditioning output [1, num_frames, 1024]
         guard let conditioning = output.featureValue(for: "conditioning")?.multiArrayValue else {
-            throw TTSError.processingFailed("Failed to get conditioning output from encoder")
+            throw PocketTTSError.processingFailed("Failed to get conditioning output from encoder")
         }
 
         let numFrames = conditioning.shape[1].intValue
@@ -87,7 +87,7 @@ public enum PocketTtsVoiceCloner {
         let voiceData = extractConditioning(conditioning, frames: usableFrames, embDim: embDim)
 
         guard voiceData.count == totalFloats else {
-            throw TTSError.processingFailed(
+            throw PocketTTSError.processingFailed(
                 "Conditioning extraction mismatch: got \(voiceData.count), expected \(totalFloats)")
         }
 
@@ -103,7 +103,7 @@ public enum PocketTtsVoiceCloner {
     ///   - url: URL to the audio file.
     ///   - encoder: The Mimi encoder CoreML model.
     /// - Returns: Voice conditioning data ready for TTS.
-    /// - Throws: `TTSError.processingFailed` if the file cannot be read or audio is invalid.
+    /// - Throws: `PocketTTSError.processingFailed` if the file cannot be read or audio is invalid.
     public static func cloneVoice(
         from url: URL,
         using encoder: MLModel
@@ -137,14 +137,14 @@ public enum PocketTtsVoiceCloner {
     /// - Parameters:
     ///   - url: Path to the .bin file containing voice data.
     /// - Returns: Voice conditioning data ready for TTS.
-    /// - Throws: `TTSError.processingFailed` if the file cannot be read or has invalid size.
+    /// - Throws: `PocketTTSError.processingFailed` if the file cannot be read or has invalid size.
     public static func loadVoice(from url: URL) throws -> PocketTtsVoiceData {
         let data = try Data(contentsOf: url)
         let embDim = PocketTtsConstants.embeddingDim
         let floatCount = data.count / MemoryLayout<Float>.size
 
         guard floatCount > 0, floatCount % embDim == 0 else {
-            throw TTSError.processingFailed(
+            throw PocketTTSError.processingFailed(
                 "Invalid voice file size: \(data.count) bytes (not divisible by embedding dim \(embDim))"
             )
         }
@@ -152,7 +152,7 @@ public enum PocketTtsVoiceCloner {
         let promptLength = floatCount / embDim
 
         guard promptLength <= maxVoiceFrames else {
-            throw TTSError.processingFailed(
+            throw PocketTTSError.processingFailed(
                 "Voice file too large: \(promptLength) frames (max \(maxVoiceFrames))"
             )
         }
@@ -208,7 +208,7 @@ public enum PocketTtsVoiceCloner {
                 interleaved: false
             )
         else {
-            throw TTSError.processingFailed("Failed to create target audio format")
+            throw PocketTTSError.processingFailed("Failed to create target audio format")
         }
 
         let converter = AudioConverter(targetFormat: targetFormat)
@@ -217,12 +217,12 @@ public enum PocketTtsVoiceCloner {
             let samples = try converter.resampleAudioFile(url)
 
             guard !samples.isEmpty else {
-                throw TTSError.processingFailed("Audio file contains no samples")
+                throw PocketTTSError.processingFailed("Audio file contains no samples")
             }
 
             return samples
         } catch {
-            throw TTSError.processingFailed("Failed to load audio file: \(error.localizedDescription)")
+            throw PocketTTSError.processingFailed("Failed to load audio file: \(error.localizedDescription)")
         }
     }
 }

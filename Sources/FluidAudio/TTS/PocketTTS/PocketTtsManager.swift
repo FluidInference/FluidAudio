@@ -56,7 +56,7 @@ public actor PocketTtsManager {
         deEss: Bool = true
     ) async throws -> Data {
         guard isInitialized else {
-            throw TTSError.modelNotFound("PocketTTS model not initialized")
+            throw PocketTTSError.modelNotFound("PocketTTS model not initialized")
         }
 
         let selectedVoice = voice ?? defaultVoice
@@ -95,7 +95,7 @@ public actor PocketTtsManager {
         deEss: Bool = true
     ) async throws -> Data {
         guard isInitialized else {
-            throw TTSError.modelNotFound("PocketTTS model not initialized")
+            throw PocketTTSError.modelNotFound("PocketTTS model not initialized")
         }
 
         return try await PocketTtsSynthesizer.withModelStore(modelStore) {
@@ -117,7 +117,7 @@ public actor PocketTtsManager {
         deEss: Bool = true
     ) async throws -> PocketTtsSynthesizer.SynthesisResult {
         guard isInitialized else {
-            throw TTSError.modelNotFound("PocketTTS model not initialized")
+            throw PocketTTSError.modelNotFound("PocketTTS model not initialized")
         }
 
         let selectedVoice = voice ?? defaultVoice
@@ -178,7 +178,7 @@ public actor PocketTtsManager {
     /// - Parameters:
     ///   - audioURL: URL to the source audio file (WAV format, any sample rate).
     /// - Returns: Voice conditioning data.
-    /// - Throws: `TTSError.modelNotFound` if the mimi_encoder is not available.
+    /// - Throws: `PocketTTSError.modelNotFound` if the mimi_encoder is not available.
     ///
     /// Example:
     /// ```swift

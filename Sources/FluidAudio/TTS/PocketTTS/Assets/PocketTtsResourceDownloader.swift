@@ -49,7 +49,7 @@ public enum PocketTtsResourceDownloader {
         try await downloadMimiEncoder(to: repoDir)
 
         guard FileManager.default.fileExists(atPath: encoderPath.path) else {
-            throw TTSError.downloadFailed("Failed to download Mimi encoder model")
+            throw PocketTTSError.downloadFailed("Failed to download Mimi encoder model")
         }
 
         return encoderPath
@@ -69,7 +69,7 @@ public enum PocketTtsResourceDownloader {
         let (dirData, _) = try await DownloadUtils.fetchWithAuth(from: dirURL)
 
         guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
-            throw TTSError.downloadFailed("Failed to list Mimi encoder files")
+            throw PocketTTSError.downloadFailed("Failed to list Mimi encoder files")
         }
 
         // Collect all files recursively
@@ -131,7 +131,7 @@ public enum PocketTtsResourceDownloader {
             guard let httpResponse = response as? HTTPURLResponse,
                 (200..<300).contains(httpResponse.statusCode)
             else {
-                throw TTSError.downloadFailed("Failed to download \(file.path)")
+                throw PocketTTSError.downloadFailed("Failed to download \(file.path)")
             }
 
             if FileManager.default.fileExists(atPath: destPath.path) {
@@ -172,7 +172,7 @@ public enum PocketTtsResourceDownloader {
                 for: .cachesDirectory, in: .userDomainMask
             ).first
         else {
-            throw TTSError.processingFailed("Failed to locate caches directory")
+            throw PocketTTSError.processingFailed("Failed to locate caches directory")
         }
         baseDirectory = first
         #endif

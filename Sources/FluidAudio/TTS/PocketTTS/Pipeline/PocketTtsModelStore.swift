@@ -74,7 +74,7 @@ public actor PocketTtsModelStore {
     /// The conditioning step model (KV cache prefill).
     public func condStep() throws -> MLModel {
         guard let model = condStepModel else {
-            throw TTSError.modelNotFound("PocketTTS cond_step model not loaded")
+            throw PocketTTSError.modelNotFound("PocketTTS cond_step model not loaded")
         }
         return model
     }
@@ -82,7 +82,7 @@ public actor PocketTtsModelStore {
     /// The autoregressive generation step model.
     public func flowlmStep() throws -> MLModel {
         guard let model = flowlmStepModel else {
-            throw TTSError.modelNotFound("PocketTTS flowlm_step model not loaded")
+            throw PocketTTSError.modelNotFound("PocketTTS flowlm_step model not loaded")
         }
         return model
     }
@@ -90,7 +90,7 @@ public actor PocketTtsModelStore {
     /// The LSD flow decoder model.
     public func flowDecoder() throws -> MLModel {
         guard let model = flowDecoderModel else {
-            throw TTSError.modelNotFound("PocketTTS flow_decoder model not loaded")
+            throw PocketTTSError.modelNotFound("PocketTTS flow_decoder model not loaded")
         }
         return model
     }
@@ -98,7 +98,7 @@ public actor PocketTtsModelStore {
     /// The Mimi streaming audio decoder model.
     public func mimiDecoder() throws -> MLModel {
         guard let model = mimiDecoderModel else {
-            throw TTSError.modelNotFound("PocketTTS mimi_decoder model not loaded")
+            throw PocketTTSError.modelNotFound("PocketTTS mimi_decoder model not loaded")
         }
         return model
     }
@@ -106,7 +106,7 @@ public actor PocketTtsModelStore {
     /// The pre-loaded binary constants.
     public func constants() throws -> PocketTtsConstantsBundle {
         guard let bundle = constantsBundle else {
-            throw TTSError.modelNotFound("PocketTTS constants not loaded")
+            throw PocketTTSError.modelNotFound("PocketTTS constants not loaded")
         }
         return bundle
     }
@@ -114,7 +114,7 @@ public actor PocketTtsModelStore {
     /// The repository directory containing models and constants.
     public func repoDir() throws -> URL {
         guard let dir = repoDirectory else {
-            throw TTSError.modelNotFound("PocketTTS repository not loaded")
+            throw PocketTTSError.modelNotFound("PocketTTS repository not loaded")
         }
         return dir
     }
@@ -125,7 +125,7 @@ public actor PocketTtsModelStore {
             return cached
         }
         guard let repoDir = repoDirectory else {
-            throw TTSError.modelNotFound("PocketTTS repository not loaded")
+            throw PocketTTSError.modelNotFound("PocketTTS repository not loaded")
         }
         let data = try PocketTtsResourceDownloader.ensureVoice(voice, repoDirectory: repoDir)
         voiceCache[voice] = data
@@ -161,7 +161,7 @@ public actor PocketTtsModelStore {
     /// The Mimi encoder model for voice cloning.
     public func mimiEncoder() throws -> MLModel {
         guard let model = mimiEncoderModel else {
-            throw TTSError.modelNotFound(
+            throw PocketTTSError.modelNotFound(
                 "Mimi encoder not loaded. Call loadMimiEncoderIfNeeded() first."
             )
         }

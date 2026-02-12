@@ -60,12 +60,12 @@ extension PocketTtsSynthesizer {
         for i in 0..<PocketTtsConstants.kvCacheLayers {
             guard let newCache = output.featureValue(for: CondStepKeys.cacheKeys[i])?.multiArrayValue
             else {
-                throw TTSError.processingFailed(
+                throw PocketTTSError.processingFailed(
                     "Missing cond_step cache output: \(CondStepKeys.cacheKeys[i])")
             }
             guard let newPos = output.featureValue(for: CondStepKeys.positionKeys[i])?.multiArrayValue
             else {
-                throw TTSError.processingFailed(
+                throw PocketTTSError.processingFailed(
                     "Missing cond_step position output: \(CondStepKeys.positionKeys[i])")
             }
             state.caches[i] = newCache
@@ -144,13 +144,13 @@ extension PocketTtsSynthesizer {
         // Extract transformer output
         guard let transformerOut = output.featureValue(for: FlowLMStepKeys.transformerOut)?.multiArrayValue
         else {
-            throw TTSError.processingFailed("Missing flowlm_step transformer output")
+            throw PocketTTSError.processingFailed("Missing flowlm_step transformer output")
         }
 
         // Extract EOS logit
         guard let eosArray = output.featureValue(for: FlowLMStepKeys.eosLogit)?.multiArrayValue
         else {
-            throw TTSError.processingFailed("Missing flowlm_step EOS logit")
+            throw PocketTTSError.processingFailed("Missing flowlm_step EOS logit")
         }
         let eosLogit = eosArray[0].floatValue
 
@@ -159,12 +159,12 @@ extension PocketTtsSynthesizer {
             guard
                 let newCache = output.featureValue(for: FlowLMStepKeys.cacheKeys[i])?.multiArrayValue
             else {
-                throw TTSError.processingFailed(
+                throw PocketTTSError.processingFailed(
                     "Missing flowlm_step cache output: \(FlowLMStepKeys.cacheKeys[i])")
             }
             guard let newPos = output.featureValue(for: FlowLMStepKeys.positionKeys[i])?.multiArrayValue
             else {
-                throw TTSError.processingFailed(
+                throw PocketTTSError.processingFailed(
                     "Missing flowlm_step position output: \(FlowLMStepKeys.positionKeys[i])")
             }
             state.caches[i] = newCache
