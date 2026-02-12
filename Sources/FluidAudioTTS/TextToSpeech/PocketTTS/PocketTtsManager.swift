@@ -72,6 +72,43 @@ public actor PocketTtsManager {
         }
     }
 
+    /// Synthesize text to WAV audio data using custom voice data.
+    ///
+    /// Use this for cloned voices without saving to disk first.
+    ///
+    /// - Parameters:
+    ///   - text: The text to synthesize.
+    ///   - voiceData: Voice conditioning data (e.g., from cloneVoice).
+    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - deEss: Whether to apply de-essing post-processing (default: true).
+    /// - Returns: WAV audio data at 24kHz.
+    ///
+    /// Example:
+    /// ```swift
+    /// let voiceData = try await manager.cloneVoice(from: audioURL)
+    /// let audio = try await manager.synthesize(text: "Hello!", voiceData: voiceData)
+    /// ```
+    public func synthesize(
+        text: String,
+        voiceData: PocketTtsVoiceData,
+        temperature: Float = PocketTtsConstants.temperature,
+        deEss: Bool = true
+    ) async throws -> Data {
+        guard isInitialized else {
+            throw TTSError.modelNotFound("PocketTTS model not initialized")
+        }
+
+        return try await PocketTtsSynthesizer.withModelStore(modelStore) {
+            let result = try await PocketTtsSynthesizer.synthesize(
+                text: text,
+                voiceData: voiceData,
+                temperature: temperature,
+                deEss: deEss
+            )
+            return result.audio
+        }
+    }
+
     /// Synthesize text and return detailed results including frame count and EOS info.
     public func synthesizeDetailed(
         text: String,
@@ -125,5 +162,75 @@ public actor PocketTtsManager {
 
     public func cleanup() {
         isInitialized = false
+    }
+
+    // MARK: - Voice Cloning
+
+    /// Check if voice cloning is available (mimi_encoder model present).
+    public func isVoiceCloningAvailable() async -> Bool {
+        await modelStore.isMimiEncoderAvailable()
+    }
+
+    /// Clone a voice from an audio file.
+    ///
+    /// Creates voice conditioning data that can be used for TTS synthesis.
+    ///
+    /// - Parameters:
+    ///   - audioURL: URL to the source audio file (WAV format, any sample rate).
+    /// - Returns: Voice conditioning data.
+    /// - Throws: `TTSError.modelNotFound` if the mimi_encoder is not available.
+    ///
+    /// Example:
+    /// ```swift
+    /// let voiceData = try await manager.cloneVoice(from: audioURL)
+    /// try manager.saveClonedVoice(voiceData, to: outputURL)
+    /// ```
+    public func cloneVoice(from audioURL: URL) async throws -> PocketTtsVoiceData {
+        try await modelStore.loadMimiEncoderIfNeeded()
+        return try await modelStore.cloneVoice(from: audioURL)
+    }
+
+    /// Clone a voice from audio samples.
+    ///
+    /// - Parameters:
+    ///   - samples: Audio samples at 24kHz mono float32.
+    /// - Returns: Voice conditioning data.
+    public func cloneVoice(from samples: [Float]) async throws -> PocketTtsVoiceData {
+        try await modelStore.loadMimiEncoderIfNeeded()
+        return try await modelStore.cloneVoice(from: samples)
+    }
+
+    /// Save cloned voice data to a binary file.
+    ///
+    /// The output file can be placed in the constants_bin directory
+    /// and used with the `voice:` parameter in synthesize calls.
+    ///
+    /// - Parameters:
+    ///   - voiceData: The voice conditioning data from `cloneVoice`.
+    ///   - url: Destination URL (should end with `_audio_prompt.bin`).
+    public nonisolated func saveClonedVoice(_ voiceData: PocketTtsVoiceData, to url: URL) throws {
+        try PocketTtsVoiceCloner.saveVoice(voiceData, to: url)
+    }
+
+    /// Clone a voice and save it in one step.
+    ///
+    /// - Parameters:
+    ///   - audioURL: URL to the source audio file.
+    ///   - outputURL: Destination URL for the voice data file.
+    /// - Returns: The cloned voice data.
+    @discardableResult
+    public func cloneVoiceToFile(from audioURL: URL, to outputURL: URL) async throws -> PocketTtsVoiceData {
+        let voiceData = try await cloneVoice(from: audioURL)
+        try saveClonedVoice(voiceData, to: outputURL)
+        return voiceData
+    }
+
+    /// Load previously saved voice data from a binary file.
+    ///
+    /// - Parameters:
+    ///   - url: Path to the .bin file containing voice data.
+    /// - Returns: Voice conditioning data ready for TTS.
+    public nonisolated func loadClonedVoice(from url: URL) throws -> PocketTtsVoiceData {
+        try PocketTtsVoiceCloner.loadVoice(from: url)
     }
 }
