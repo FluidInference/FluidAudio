@@ -13,6 +13,7 @@ public enum Repo: String, CaseIterable {
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
     case pocketTts = "FluidInference/pocket-tts-coreml"
+    case qwen3Asr = "FluidInference/qwen3-asr-0.6b-coreml/f32"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -39,6 +40,8 @@ public enum Repo: String, CaseIterable {
             return "diar-streaming-sortformer-coreml"
         case .pocketTts:
             return "pocket-tts-coreml"
+        case .qwen3Asr:
+            return "qwen3-asr-0.6b-coreml/f32"
         }
     }
 
@@ -53,6 +56,8 @@ public enum Repo: String, CaseIterable {
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .sortformer:
             return "FluidInference/diar-streaming-sortformer-coreml"
+        case .qwen3Asr:
+            return "FluidInference/qwen3-asr-0.6b-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -65,6 +70,8 @@ public enum Repo: String, CaseIterable {
             return "160ms"
         case .parakeetEou320:
             return "320ms"
+        case .qwen3Asr:
+            return "qwen3-asr-0.6b-coreml-f32"
         default:
             return nil
         }
@@ -268,6 +275,34 @@ public enum ModelNames {
         }
     }
 
+    /// Qwen3-ASR model names
+    public enum Qwen3ASR {
+        public static let audioEncoderFile = "qwen3_asr_audio_encoder.mlmodelc"
+        public static let embeddingFile = "qwen3_asr_embedding.mlmodelc"
+        public static let decoderStatefulFile = "qwen3_asr_decoder_stateful.mlmodelc"
+        public static let decoderFullFile = "qwen3_asr_decoder_full.mlmodelc"
+        public static let embeddingsFile = "qwen3_asr_embeddings.bin"
+
+        /// Legacy model names (lmHead is now fused into decoder_stateful)
+        public static let lmHeadFile = "qwen3_asr_lm_head.mlmodelc"
+        public static let decoderStackFile = "qwen3_asr_decoder_stack.mlmodelc"
+        public static let decoderPrefillFile = "qwen3_asr_decoder_prefill.mlmodelc"
+
+        /// Required models for 3-model pipeline (with embedding CoreML model)
+        public static let requiredModels: Set<String> = [
+            audioEncoderFile,
+            embeddingFile,
+            decoderStatefulFile,
+        ]
+
+        /// Required files for 2-model pipeline (with Swift-side embedding)
+        public static let requiredModelsFull: Set<String> = [
+            audioEncoderFile,
+            decoderStatefulFile,
+            embeddingsFile,
+        ]
+    }
+
     /// PocketTTS model names (flow-matching language model TTS)
     public enum PocketTTS {
         public static let condStep = "cond_step"
@@ -361,6 +396,8 @@ public enum ModelNames {
             return ModelNames.PocketTTS.requiredModels
         case .sortformer:
             return ModelNames.Sortformer.requiredModels
+        case .qwen3Asr:
+            return ModelNames.Qwen3ASR.requiredModels
         }
     }
 }
