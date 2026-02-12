@@ -1,7 +1,7 @@
 import XCTest
 
 #if canImport(FluidAudioTTS)
-@testable import FluidAudioTTS
+@testable import FluidAudioEspeak
 
 final class SSMLTests: XCTestCase {
 
