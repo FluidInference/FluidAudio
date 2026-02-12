@@ -133,9 +133,17 @@ public struct Qwen3TtsSynthesizer {
         }
 
         // Strip leading/trailing silence (sampling can produce silent codec frames)
-        let trimmedSamples = trimSilence(frameTrimmed, sampleRate: Qwen3TtsConstants.audioSampleRate)
+        var trimmedSamples = trimSilence(frameTrimmed, sampleRate: Qwen3TtsConstants.audioSampleRate)
 
-        // 6. Encode as WAV
+        // 6. Apply audio post-processing to reduce noise/artifacts
+        AudioPostProcessor.applyTtsPostProcessing(
+            &trimmedSamples,
+            sampleRate: Float(Qwen3TtsConstants.audioSampleRate),
+            deEssAmount: -4.0,
+            smoothing: true
+        )
+
+        // 7. Encode as WAV
         let audioData = try AudioWAV.data(
             from: trimmedSamples,
             sampleRate: Double(Qwen3TtsConstants.audioSampleRate)
@@ -266,8 +274,20 @@ public struct Qwen3TtsSynthesizer {
                 throw TTSError.processingFailed("Missing V10 decode outputs")
             }
 
-            // Sample next CB0 token from logits
-            let logits = extractFloatArray(from: logitsArray)
+            // Sample next CB0 token from logits with repetition penalty
+            var logits = extractFloatArray(from: logitsArray)
+
+            // Apply repetition penalty (matching PyTorch default of 1.3)
+            let repetitionPenalty: Float = 1.3
+            let recentTokens = allCodebooks.suffix(20).map { $0[0] }  // Last 20 CB0 tokens
+            for token in recentTokens {
+                if token < logits.count && logits[token] > 0 {
+                    logits[token] /= repetitionPenalty
+                } else if token < logits.count {
+                    logits[token] *= repetitionPenalty
+                }
+            }
+
             let nextCb0 = sampleToken(from: logits)
 
             // Update state
@@ -300,6 +320,7 @@ public struct Qwen3TtsSynthesizer {
 
         // CP Prefill: past_hidden + cb0_token → all_logits + kv_cache
         let cb0Input = try createTokenInput(token: cb0Token)
+
         let prefillFeatures = try MLDictionaryFeatureProvider(dictionary: [
             "past_hidden": pastHidden,
             "cb0_token": cb0Input,
@@ -343,7 +364,7 @@ public struct Qwen3TtsSynthesizer {
                 throw TTSError.processingFailed("Missing CP decode outputs")
             }
 
-            // Sample logits[step] for the current codebook (sampling required!)
+            // Sample logits[step] for current codebook (each slice is a different LM head)
             let nextToken = sampleFromSlice(decodeLogits, sliceIndex: step)
             tokens.append(nextToken)
             currentCpKv = newCpKv

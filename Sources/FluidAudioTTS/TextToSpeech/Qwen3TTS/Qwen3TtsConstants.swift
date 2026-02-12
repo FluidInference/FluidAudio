@@ -40,8 +40,8 @@ public enum Qwen3TtsConstants {
 
     public static let maxTextLength: Int = 128
     public static let maxCodecTokens: Int = 125
-    public static let temperature: Float = 0.9
-    public static let topK: Int = 50
+    public static let temperature: Float = 0.7
+    public static let topK: Int = 30
     public static let topP: Float = 1.0
 
     // MARK: - KV cache
