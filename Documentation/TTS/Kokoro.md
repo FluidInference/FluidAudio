@@ -99,12 +99,12 @@ PocketTTS cannot support phoneme-level features because it has no phoneme stage 
 
 ### App/Library Development (Xcode & SwiftPM)
 
-When adding FluidAudio to your Xcode project or Package.swift, select the **`FluidAudioWithTTS`** product:
+When adding FluidAudio to your Xcode project or Package.swift, select the **`FluidAudioTTS`** product:
 
 **Xcode:**
 1. File > Add Package Dependencies
 2. Enter FluidAudio repository URL
-3. Choose **`FluidAudioWithTTS`**
+3. Choose **`FluidAudioTTS`**
 4. Add it to your app target
 
 **Package.swift:**
@@ -116,7 +116,7 @@ targets: [
     .target(
         name: "YourTarget",
         dependencies: [
-            .product(name: "FluidAudioWithTTS", package: "FluidAudio")
+            .product(name: "FluidAudioTTS", package: "FluidAudio")
         ]
     )
 ]
