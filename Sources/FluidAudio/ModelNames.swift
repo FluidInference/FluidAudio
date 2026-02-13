@@ -404,7 +404,7 @@ public enum ModelNames {
         case .sortformer:
             return ModelNames.Sortformer.requiredModels
         case .qwen3Asr:
-            return ModelNames.Qwen3ASR.requiredModels
+            return ModelNames.Qwen3ASR.requiredModelsFull
         }
     }
 }
