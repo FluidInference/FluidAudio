@@ -34,6 +34,7 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 ## Highlights
 
 - **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) for transcription; supports all 25 European languages
+- **Inverse Text Normalization (ITN)**: Post-process ASR output to convert spoken-form to written-form ("two hundred" → "200"). See [NeMo-text-processing-rs](https://github.com/FluidInference/NeMo-text-processing-rs)
 - **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
@@ -132,6 +133,14 @@ Building with a different framework? Use one of our official wrappers:
 |----------|---------|---------|
 | **React Native / Expo** | [@fluidinference/react-native-fluidaudio](https://github.com/FluidInference/react-native-fluidaudio) | `npm install @fluidinference/react-native-fluidaudio` |
 | **Rust / Tauri** | [fluidaudio-rs](https://github.com/FluidInference/fluidaudio-rs) | `cargo add fluidaudio-rs` |
+
+### Post-Processing Tools
+
+Enhance ASR output with post-processing:
+
+| Tool | Description | Language |
+|------|-------------|----------|
+| **[NeMo-text-processing-rs](https://github.com/FluidInference/NeMo-text-processing-rs)** | Inverse Text Normalization (ITN) - converts spoken-form ASR output to written form ("two hundred" → "200", "five dollars" → "$5"). Rust port of [NVIDIA NeMo Text Processing](https://github.com/NVIDIA/NeMo-text-processing) with Swift wrapper. | Rust, Swift |
 
 ## Configuration
 
