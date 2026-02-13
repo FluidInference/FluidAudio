@@ -201,6 +201,8 @@ public struct TTS {
                         backend = .kokoro
                     case "pocket", "pockettts":
                         backend = .pocketTts
+                    case "qwen3", "qwen3tts":
+                        backend = .qwen3Tts
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro")
                     }
@@ -260,6 +262,11 @@ public struct TTS {
                 text: text, output: output, voice: voice, deEss: deEss,
                 metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
                 voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath)
+            return
+        }
+
+        if backend == .qwen3Tts {
+            await runQwen3Tts(text: text, output: output, metricsPath: metricsPath)
             return
         }
 
@@ -641,6 +648,152 @@ public struct TTS {
         }
     }
 
+    private static func runQwen3Tts(
+        text: String,
+        output: String,
+        metricsPath: String?
+    ) async {
+        do {
+            let tStart = Date()
+
+            // Qwen3 TTS requires pre-tokenized input
+            // For now, use hardcoded token IDs for common test sentences
+            // TODO: Add proper tokenizer support
+            let tokenIds: [Int]
+            let normalizedText = text.lowercased()
+
+            if normalizedText.contains("hello world") && normalizedText.contains("test") {
+                // "Hello world, this is a test of the text to speech system."
+                // Token IDs from Qwen3 processor (processor(text=...).input_ids)
+                tokenIds = [9707, 1879, 11, 419, 374, 264, 1273, 315, 279, 1467, 311, 8806, 1849, 13]
+            } else if text.contains("你好世界") {
+                // "你好世界，这是一个文字转语音系统的测试。"
+                // Token IDs from Qwen3 processor for Chinese test sentence
+                tokenIds = [108386, 99489, 3837, 105464, 87335, 46670, 105761, 105743, 81705, 1773]
+            } else {
+                logger.error(
+                    "Qwen3-TTS requires pre-tokenized input. Supported test sentences:\n"
+                        + "  English: 'Hello world, this is a test of the text to speech system.'\n"
+                        + "  Chinese: '你好世界，这是一个文字转语音系统的测试。'")
+                exit(1)
+            }
+
+            let manager = Qwen3TtsManager()
+
+            let tLoad0 = Date()
+            if let envPath = ProcessInfo.processInfo.environment["QWEN3_TTS_MODEL_DIR"] {
+                let modelDir = URL(fileURLWithPath: envPath)
+                logger.info("Loading Qwen3-TTS models from: \(modelDir.path)")
+                try await manager.loadFromDirectory(modelDir)
+            } else {
+                logger.info("Downloading/loading Qwen3-TTS models from HuggingFace...")
+                try await manager.initialize()
+            }
+            let tLoad1 = Date()
+
+            let tSynth0 = Date()
+            let wav = try await manager.synthesize(
+                text: text,
+                tokenIds: tokenIds,
+                useSpeaker: true
+            )
+            let tSynth1 = Date()
+
+            let outURL = {
+                let expanded = (output as NSString).expandingTildeInPath
+                if expanded.hasPrefix("/") {
+                    return URL(fileURLWithPath: expanded)
+                }
+                let cwd = URL(
+                    fileURLWithPath: FileManager.default.currentDirectoryPath,
+                    isDirectory: true)
+                return cwd.appendingPathComponent(expanded)
+            }()
+
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try wav.write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let totalS = tSynth1.timeIntervalSince(tStart)
+            let sampleRate = Double(Qwen3TtsConstants.audioSampleRate)
+            let payload = max(0, wav.count - 44)
+            let audioSecs = Double(payload) / (sampleRate * 2.0)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+
+            logger.info("Qwen3-TTS synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Total: \(String(format: "%.3f", totalS))s")
+            logger.info("  Output: \(outURL.path)")
+
+            // ASR round-trip evaluation
+            var asrHypothesis: String? = nil
+            var werValue: Double? = nil
+
+            if metricsPath != nil {
+                logger.info("--- Running ASR for TTS→STT evaluation ---")
+                do {
+                    let asrModels = try await AsrModels.downloadAndLoad()
+                    let asr = AsrManager()
+                    try await asr.initialize(models: asrModels)
+
+                    let transcription = try await asr.transcribe(outURL)
+                    asrHypothesis = transcription.text
+
+                    let werMetrics = WERCalculator.calculateWERMetrics(
+                        hypothesis: transcription.text, reference: text)
+                    werValue = werMetrics.wer
+
+                    logger.info("Reference:  \(text)")
+                    logger.info("Hypothesis: \(transcription.text)")
+                    logger.info(String(format: "WER: %.1f%%", werValue! * 100))
+
+                    asr.cleanup()
+                } catch {
+                    logger.warning("ASR evaluation failed: \(error.localizedDescription)")
+                }
+            }
+
+            if let metricsPath {
+                var metricsDict: [String: Any] = [
+                    "backend": "qwen3tts",
+                    "text": text,
+                    "output": outURL.path,
+                    "model_load_time_s": loadS,
+                    "inference_time_s": synthS,
+                    "audio_duration_s": audioSecs,
+                    "realtime_speed": rtfx,
+                    "total_time_s": totalS,
+                ]
+                if let asrHypothesis {
+                    metricsDict["asr_hypothesis"] = asrHypothesis
+                }
+                if let werValue {
+                    metricsDict["wer"] = werValue
+                }
+
+                let artifactsRoot = try ensureArtifactsRoot()
+                let mURL = resolveOutputURL(
+                    metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+                try FileManager.default.createDirectory(
+                    at: mURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let json = try JSONSerialization.data(
+                    withJSONObject: metricsDict, options: [.prettyPrinted])
+                try json.write(to: mURL)
+                logger.info("Metrics saved: \(mURL.path)")
+            }
+        } catch {
+            logger.error("Qwen3-TTS Error: \(error)")
+            print("Qwen3-TTS failed: \(error)")
+            exit(1)
+        }
+    }
+
     private static func printUsage() {
         print(
             """
@@ -649,7 +802,7 @@ public struct TTS {
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS)
-              --backend            TTS backend: kokoro (default) or pocket
+              --backend            TTS backend: kokoro (default), pocket, or qwen3
               --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)
@@ -663,6 +816,11 @@ public struct TTS {
               --clone-voice FILE   Clone voice from audio file (WAV, MP3, M4A, etc.)
               --voice-file FILE    Load previously saved voice .bin file
               --save-voice FILE    Save cloned voice to .bin file for later use
+
+            Qwen3-TTS Notes:
+              Models auto-download from HuggingFace on first use (~5.9GB)
+              Set QWEN3_TTS_MODEL_DIR env var to use a local model directory instead
+              Currently only supports pre-tokenized test sentences
 
             Lexicon file format:
               # Comments start with #
