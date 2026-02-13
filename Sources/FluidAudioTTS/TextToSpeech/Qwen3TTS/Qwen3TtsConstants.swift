@@ -40,9 +40,16 @@ public enum Qwen3TtsConstants {
 
     public static let maxTextLength: Int = 128
     public static let maxCodecTokens: Int = 125
+
+    /// CB0 (outer LM) sampling parameters
     public static let temperature: Float = 0.7
     public static let topK: Int = 30
-    public static let topP: Float = 1.0
+    public static let repetitionPenalty: Float = 1.05
+    public static let minNewTokens: Int = 2
+
+    /// CB1-15 (code predictor) sampling parameters
+    public static let cpTemperature: Float = 0.9
+    public static let cpTopK: Int = 50
 
     // MARK: - KV cache
 

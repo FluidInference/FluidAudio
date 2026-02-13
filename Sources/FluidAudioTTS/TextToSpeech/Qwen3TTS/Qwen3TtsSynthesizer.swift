@@ -8,7 +8,7 @@ import OSLog
 /// Pipeline (V10 decode + KV-cached code predictor):
 /// 1. Prefill: Process text context → logits, kv_cache, past_hidden
 /// 2. Decode Loop:
-///    a. CB0 = argmax(logits) with suppression mask
+///    a. CB0 = sample(logits) with rep_penalty + suppression + temp + top_k
 ///    b. Code Predictor (CP prefill + 14 CP decode steps) → CB1-15 (temperature + top-k sampling)
 ///    c. V10 Decode(CB0, CB1-15, pad_embed, kv_cache, position) → new logits, kv_cache, past_hidden
 /// 3. Audio Decoder: All 16 codebooks → waveform
@@ -89,8 +89,8 @@ public struct Qwen3TtsSynthesizer {
         let prefillTime = Date().timeIntervalSince(prefillStart)
         logger.info("Prefill completed in \(String(format: "%.2f", prefillTime))s")
 
-        // 2. Sample first token from prefill logits
-        let firstToken = sampleToken(from: firstLogits)
+        // 2. Sample first token from prefill logits (step=0, no prior tokens)
+        let firstToken = sampleToken(from: firstLogits, generatedIds: [], step: 0)
         logger.info("First token: \(firstToken)")
 
         // 3. Run greedy decode loop to generate all 16 codebooks per step
@@ -108,6 +108,19 @@ public struct Qwen3TtsSynthesizer {
         logger.info(
             "Generated \(allCodebooks.count) frames (16 codebooks each) in \(String(format: "%.2f", decodeTime))s"
         )
+
+        // DEBUG: Dump codebooks for comparison with PyTorch
+        do {
+            let dumpPath = "/tmp/swift_codebooks.txt"
+            var lines: [String] = ["# Swift CoreML codebooks: \(allCodebooks.count) frames x 16 codebooks"]
+            for (t, frame) in allCodebooks.enumerated() {
+                lines.append("frame \(t): \(frame)")
+            }
+            try lines.joined(separator: "\n").write(toFile: dumpPath, atomically: true, encoding: .utf8)
+            logger.info("Dumped codebooks to \(dumpPath)")
+        } catch {
+            logger.warning("Failed to dump codebooks: \(error)")
+        }
 
         // 4. Run audio decoder
         let decoderStart = Date()
@@ -135,13 +148,14 @@ public struct Qwen3TtsSynthesizer {
         // Strip leading/trailing silence (sampling can produce silent codec frames)
         var trimmedSamples = trimSilence(frameTrimmed, sampleRate: Qwen3TtsConstants.audioSampleRate)
 
-        // 6. Apply audio post-processing to reduce noise/artifacts
-        AudioPostProcessor.applyTtsPostProcessing(
-            &trimmedSamples,
-            sampleRate: Float(Qwen3TtsConstants.audioSampleRate),
-            deEssAmount: -4.0,
-            smoothing: true
-        )
+        // 6. Audio post-processing disabled — was causing muffled output
+        // (de-essing at -4dB + smoothing low-pass at 10kHz was too aggressive)
+        // AudioPostProcessor.applyTtsPostProcessing(
+        //     &trimmedSamples,
+        //     sampleRate: Float(Qwen3TtsConstants.audioSampleRate),
+        //     deEssAmount: -4.0,
+        //     smoothing: true
+        // )
 
         // 7. Encode as WAV
         let audioData = try AudioWAV.data(
@@ -237,6 +251,8 @@ public struct Qwen3TtsSynthesizer {
         var currentPastHidden = pastHidden
         var currentCb0 = firstToken
         var position = startPosition
+        // Track ALL previously generated CB0 tokens for repetition penalty
+        var generatedCb0s: Set<Int> = [firstToken]
 
         while allCodebooks.count < maxTokens {
             // Step 1: Run code predictor to get CB1-15
@@ -274,21 +290,10 @@ public struct Qwen3TtsSynthesizer {
                 throw TTSError.processingFailed("Missing V10 decode outputs")
             }
 
-            // Sample next CB0 token from logits with repetition penalty
-            var logits = extractFloatArray(from: logitsArray)
-
-            // Apply repetition penalty (matching PyTorch default of 1.3)
-            let repetitionPenalty: Float = 1.3
-            let recentTokens = allCodebooks.suffix(20).map { $0[0] }  // Last 20 CB0 tokens
-            for token in recentTokens {
-                if token < logits.count && logits[token] > 0 {
-                    logits[token] /= repetitionPenalty
-                } else if token < logits.count {
-                    logits[token] *= repetitionPenalty
-                }
-            }
-
-            let nextCb0 = sampleToken(from: logits)
+            // Sample next CB0 with full pipeline (rep_penalty → suppress → min_new_tokens → temp → top_k)
+            let logits = extractFloatArray(from: logitsArray)
+            let currentStep = allCodebooks.count  // step index for min_new_tokens guard
+            let nextCb0 = sampleToken(from: logits, generatedIds: generatedCb0s, step: currentStep)
 
             // Update state
             currentKvCache = newKvCache
@@ -301,6 +306,8 @@ public struct Qwen3TtsSynthesizer {
                 logger.info("EOS at frame \(allCodebooks.count)")
                 break
             }
+
+            generatedCb0s.insert(nextCb0)
         }
 
         return allCodebooks
@@ -583,13 +590,13 @@ public struct Qwen3TtsSynthesizer {
     /// Sample from a slice of code predictor logits with temperature + top-k.
     ///
     /// The all_logits array has shape [15, 1, 2048]. We pick logits[sliceIndex],
-    /// apply temperature scaling and top-k filtering, then sample from the distribution.
-    /// This is required for the code predictor — greedy decoding produces silent audio.
+    /// apply temperature scaling (0.9) and top-k filtering (50), then sample.
+    /// CP does NOT use repetition penalty. Greedy decoding produces silent audio.
     private static func sampleFromSlice(
         _ allLogits: MLMultiArray,
         sliceIndex: Int,
-        temperature: Float = Qwen3TtsConstants.temperature,
-        topK: Int = Qwen3TtsConstants.topK
+        temperature: Float = Qwen3TtsConstants.cpTemperature,
+        topK: Int = Qwen3TtsConstants.cpTopK
     ) -> Int {
         let vocabSize = 2048
         let sliceOffset = sliceIndex * vocabSize
@@ -638,36 +645,60 @@ public struct Qwen3TtsSynthesizer {
         return vocabSize - 1  // Fallback
     }
 
-    /// Sample CB0 token from logits with suppression mask and temperature sampling.
+    /// Sample CB0 token from logits with the full transformers-compatible sampling pipeline.
     ///
-    /// Uses temperature + top-k sampling (matching PyTorch default: do_sample=True,
-    /// temperature=0.9, top_k=50). Greedy argmax never produces EOS because a codec
-    /// token always has higher logit than EOS — sampling allows natural EOS generation.
-    private static func sampleToken(from logits: [Float]) -> Int {
+    /// Processing order matches transformers `_get_logits_processor`:
+    /// 1. Repetition penalty (1.05) on all previously generated CB0 tokens
+    /// 2. Suppress tokens 2048-3071 except EOS (2150)
+    /// 3. min_new_tokens: suppress EOS for first 2 steps
+    /// 4. Temperature (0.7)
+    /// 5. Top-K (30)
+    /// 6. Softmax → multinomial sampling
+    private static func sampleToken(
+        from logits: [Float],
+        generatedIds: Set<Int> = [],
+        step: Int = 0
+    ) -> Int {
         let eosToken = Qwen3TtsConstants.codecEosTokenId
         let temperature = Qwen3TtsConstants.temperature
         let topK = Qwen3TtsConstants.topK
+        let repetitionPenalty = Qwen3TtsConstants.repetitionPenalty
+        let minNewTokens = Qwen3TtsConstants.minNewTokens
 
-        // Apply suppression: only allow tokens 0-2047 and EOS token
-        var masked = [Float](repeating: -.infinity, count: logits.count)
-        for i in 0..<min(2048, logits.count) {
-            masked[i] = logits[i]
-        }
-        if eosToken < logits.count {
-            masked[eosToken] = logits[eosToken]
-        }
+        var masked = Array(logits)
 
-        // Apply temperature
-        let allowedCount = min(2048, logits.count) + 1  // 2048 codec tokens + EOS
-        for i in 0..<masked.count {
-            if masked[i] > -.infinity {
-                masked[i] /= temperature
+        // 1. Repetition penalty on all previously generated CB0 tokens
+        if repetitionPenalty != 1.0 {
+            for tokenId in generatedIds {
+                guard tokenId < masked.count else { continue }
+                if masked[tokenId] < 0 {
+                    masked[tokenId] *= repetitionPenalty
+                } else {
+                    masked[tokenId] /= repetitionPenalty
+                }
             }
         }
 
-        // Top-k filtering
-        if topK > 0 && topK < allowedCount {
-            // Find top-k threshold
+        // 2. Suppress tokens 2048-3071 except EOS (2150)
+        for i in 2048..<min(eosToken, masked.count) {
+            masked[i] = -.infinity
+        }
+        for i in (eosToken + 1)..<min(3072, masked.count) {
+            masked[i] = -.infinity
+        }
+
+        // 3. min_new_tokens: suppress EOS for first N steps
+        if step < minNewTokens, eosToken < masked.count {
+            masked[eosToken] = -.infinity
+        }
+
+        // 4. Temperature
+        for i in 0..<masked.count where masked[i] > -.infinity {
+            masked[i] /= temperature
+        }
+
+        // 5. Top-K filtering
+        if topK > 0 && topK < masked.count {
             var sortable = masked.filter { $0 > -.infinity }
             sortable.sort(by: >)
             if sortable.count > topK {
@@ -678,19 +709,17 @@ public struct Qwen3TtsSynthesizer {
             }
         }
 
-        // Softmax
+        // 6. Softmax
         let maxLogit = masked.max() ?? 0
         var expSum: Float = 0
         var exps = [Float](repeating: 0, count: masked.count)
-        for i in 0..<masked.count {
-            if masked[i] > -.infinity {
-                let e = exp(masked[i] - maxLogit)
-                exps[i] = e
-                expSum += e
-            }
+        for i in 0..<masked.count where masked[i] > -.infinity {
+            let e = exp(masked[i] - maxLogit)
+            exps[i] = e
+            expSum += e
         }
 
-        // Multinomial sample
+        // 7. Multinomial sample
         let r = Float.random(in: 0..<1)
         var cumulative: Float = 0
         for i in 0..<exps.count {
