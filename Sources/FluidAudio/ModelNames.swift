@@ -71,7 +71,7 @@ public enum Repo: String, CaseIterable {
         case .parakeetEou320:
             return "320ms"
         case .qwen3Asr:
-            return "qwen3-asr-0.6b-coreml-f32"
+            return "f32"
         default:
             return nil
         }
