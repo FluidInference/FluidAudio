@@ -248,7 +248,8 @@ public class DownloadUtils {
                         let isInSubPath = itemPath.hasPrefix("\(sub)/")
                         let matchesPattern =
                             patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
-                        let isMetadata = itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model") || itemPath.hasSuffix(".bin")
+                        let isMetadata =
+                            itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model") || itemPath.hasSuffix(".bin")
                         shouldInclude = isInSubPath && (matchesPattern || isMetadata)
                     } else {
                         shouldInclude =
