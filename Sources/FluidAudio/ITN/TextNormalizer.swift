@@ -8,8 +8,8 @@ import OSLog
 /// - "five dollars and fifty cents" → "$5.50"
 /// - "january fifth twenty twenty five" → "January 5, 2025"
 ///
-/// For full ITN support, use NeMo-text-processing-rs:
-/// https://github.com/FluidInference/NeMo-text-processing-rs
+/// For full ITN support, use text-processing-rs:
+/// https://github.com/FluidInference/text-processing-rs
 ///
 /// ## Usage
 ///
@@ -43,7 +43,8 @@ public final class TextNormalizer: @unchecked Sendable {
         }
 
         guard let normalize = Self.nemoNormalize,
-              let freeString = Self.nemoFreeString else {
+            let freeString = Self.nemoFreeString
+        else {
             return input
         }
 
@@ -81,8 +82,9 @@ public final class TextNormalizer: @unchecked Sendable {
     /// Get the native library version, or nil if not available.
     public var version: String? {
         guard isNativeAvailable,
-              let getVersion = Self.nemoVersion,
-              let versionPtr = getVersion() else {
+            let getVersion = Self.nemoVersion,
+            let versionPtr = getVersion()
+        else {
             return nil
         }
         return String(cString: versionPtr)
@@ -90,12 +92,14 @@ public final class TextNormalizer: @unchecked Sendable {
 
     // MARK: - Dynamic Library Loading
 
-    nonisolated(unsafe) private static var nemoNormalize: (
-        @convention(c) (UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
-    )?
-    nonisolated(unsafe) private static var nemoFreeString: (
-        @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
-    )?
+    nonisolated(unsafe) private static var nemoNormalize:
+        (
+            @convention(c) (UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
+        )?
+    nonisolated(unsafe) private static var nemoFreeString:
+        (
+            @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
+        )?
     nonisolated(unsafe) private static var nemoVersion: (@convention(c) () -> UnsafePointer<CChar>?)?
 
     private static func checkNativeAvailability() -> Bool {
@@ -105,8 +109,8 @@ public final class TextNormalizer: @unchecked Sendable {
         }
 
         guard let normalizePtr = dlsym(handle, "nemo_normalize"),
-              let freePtr = dlsym(handle, "nemo_free_string"),
-              let versionPtr = dlsym(handle, "nemo_version")
+            let freePtr = dlsym(handle, "nemo_free_string"),
+            let versionPtr = dlsym(handle, "nemo_version")
         else {
             return false
         }
