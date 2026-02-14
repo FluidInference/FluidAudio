@@ -347,7 +347,13 @@ swift run fluidaudio diarization-benchmark --mode offline --auto-download \
 
 `offline_results.json` contains DER/JER/RTFx along with timing breakdowns for segmentation, embedding extraction, and VBx clustering. CI now runs this workflow on every PR to ensure the offline models stay healthy and the Hugging Face assets remain accessible.
 
-### Streaming/Online Speaker Diarization
+### Sortformer (End-to-End Neural Diarization)
+
+End-to-end neural diarization using [NVIDIA's Sortformer](https://arxiv.org/abs/2409.06656). No separate VAD, segmentation, or clustering needed. Limited to 4 speakers and does not remember speakers across recordings. Licensed under NVIDIA Open Model License (no restrictions).
+
+See [Documentation/Diarization/Sortformer.md](Documentation/Diarization/Sortformer.md) for usage, comparison with Pyannote, streaming config, and architecture details.
+
+### Streaming/Online Speaker Diarization (Pyannote)
 
 Use this if you need to show speaker labels while the transcription is happening, in most use cases, offline should be more than enough.
 

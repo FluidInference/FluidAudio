@@ -9,6 +9,12 @@ Sortformer is an end-to-end neural speaker diarization model that answers "who s
 - 4 fixed speaker slots (no clustering required)
 - ~80ms frame resolution (8x subsampling of 10ms mel frames)
 - CoreML-optimized for Apple Silicon
+- Licensed under [NVIDIA Open Model License](https://developer.nvidia.com/open-model-license) (no restrictions)
+
+**Limitations:**
+- 4 speaker maximum — cannot handle 5+ speakers (will miss or merge them)
+- Does not remember speakers across recordings (no persistent speaker embeddings)
+- May miss quiet or distant speech (trained to ignore background conversations)
 
 ## Sortformer vs DiarizerManager (Pyannote-based)
 
