@@ -16,6 +16,7 @@ enum Qwen3TranscribeCommand {
         let audioFile = arguments[0]
         var modelDir: String?
         var language: Qwen3AsrConfig.Language?
+        var variant: Qwen3AsrVariant = .f32
 
         // Parse options
         var i = 1
@@ -41,19 +42,31 @@ enum Qwen3TranscribeCommand {
                     }
                     i += 1
                 }
+            case "--variant":
+                if i + 1 < arguments.count {
+                    let v = arguments[i + 1].lowercased()
+                    if let parsed = Qwen3AsrVariant(rawValue: v) {
+                        variant = parsed
+                    } else {
+                        logger.error("Unknown variant '\(arguments[i + 1])'. Use 'f32' or 'int8'.")
+                        exit(1)
+                    }
+                    i += 1
+                }
             default:
                 logger.warning("Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
-        await transcribe(audioFile: audioFile, modelDir: modelDir, language: language)
+        await transcribe(audioFile: audioFile, modelDir: modelDir, language: language, variant: variant)
     }
 
     private static func transcribe(
         audioFile: String,
         modelDir: String?,
-        language: Qwen3AsrConfig.Language?
+        language: Qwen3AsrConfig.Language?,
+        variant: Qwen3AsrVariant = .f32
     ) async {
         guard #available(macOS 15, iOS 18, *) else {
             logger.error("Qwen3-ASR requires macOS 15 or later")
@@ -69,8 +82,8 @@ enum Qwen3TranscribeCommand {
                 let dirURL = URL(fileURLWithPath: dir)
                 try await manager.loadModels(from: dirURL)
             } else {
-                logger.info("Downloading Qwen3-ASR models from HuggingFace...")
-                let cacheDir = try await Qwen3AsrModels.download()
+                logger.info("Downloading Qwen3-ASR \(variant.rawValue) models from HuggingFace...")
+                let cacheDir = try await Qwen3AsrModels.download(variant: variant)
                 try await manager.loadModels(from: cacheDir)
             }
 
@@ -121,6 +134,7 @@ enum Qwen3TranscribeCommand {
             Options:
                 --help, -h              Show this help message
                 --model-dir <path>      Path to local model directory (skips download)
+                --variant <f32|int8>    Model variant (default: f32). int8 uses ~50% less RAM.
                 --language, -l <code>   Language hint (e.g., zh, en, ja, ko, yue, ar, fr, de)
 
             Supported languages (30 total):

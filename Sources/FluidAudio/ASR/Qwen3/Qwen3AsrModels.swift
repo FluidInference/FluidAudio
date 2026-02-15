@@ -4,6 +4,22 @@ import OSLog
 
 private let logger = Logger(subsystem: "FluidAudio", category: "Qwen3AsrModels")
 
+/// Qwen3-ASR model variant (precision).
+public enum Qwen3AsrVariant: String, CaseIterable, Sendable {
+    /// Full precision (FP16 weights). Best speed, ~1.75 GB.
+    case f32
+    /// Int8 quantized weights. Half the RAM (~900 MB), same quality.
+    case int8
+
+    /// Corresponding HuggingFace model repository.
+    public var repo: Repo {
+        switch self {
+        case .f32: return .qwen3Asr
+        case .int8: return .qwen3AsrInt8
+        }
+    }
+}
+
 // MARK: - Qwen3-ASR CoreML Model Container (2-model pipeline)
 
 /// Holds CoreML model components for the optimized 2-model Qwen3-ASR pipeline.
@@ -78,27 +94,32 @@ public struct Qwen3AsrModels: Sendable {
     /// Downloads to the default cache directory if not already present,
     /// then loads all model components.
     public static func downloadAndLoad(
+        variant: Qwen3AsrVariant = .f32,
         to directory: URL? = nil,
         computeUnits: MLComputeUnits = .all
     ) async throws -> Qwen3AsrModels {
-        let targetDir = try await download(to: directory)
+        let targetDir = try await download(variant: variant, to: directory)
         return try await load(from: targetDir, computeUnits: computeUnits)
     }
 
     /// Download Qwen3-ASR models from HuggingFace.
     ///
-    /// - Parameter directory: Target directory. Uses default cache directory if nil.
+    /// - Parameters:
+    ///   - variant: Model variant to download (`.f32` or `.int8`).
+    ///   - directory: Target directory. Uses default cache directory if nil.
+    ///   - force: Force re-download even if models exist.
     /// - Returns: Path to the directory containing the downloaded models.
     @discardableResult
     public static func download(
+        variant: Qwen3AsrVariant = .f32,
         to directory: URL? = nil,
         force: Bool = false
     ) async throws -> URL {
-        let targetDir = directory ?? defaultCacheDirectory()
+        let targetDir = directory ?? defaultCacheDirectory(variant: variant)
         let modelsRoot = modelsRootDirectory()
 
         if !force && modelsExist(at: targetDir) {
-            logger.info("Qwen3-ASR models already present at: \(targetDir.path)")
+            logger.info("Qwen3-ASR \(variant.rawValue) models already present at: \(targetDir.path)")
             return targetDir
         }
 
@@ -106,9 +127,9 @@ public struct Qwen3AsrModels: Sendable {
             try? FileManager.default.removeItem(at: targetDir)
         }
 
-        logger.info("Downloading Qwen3-ASR models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(.qwen3Asr, to: modelsRoot)
-        logger.info("Successfully downloaded Qwen3-ASR models")
+        logger.info("Downloading Qwen3-ASR \(variant.rawValue) models from HuggingFace...")
+        try await DownloadUtils.downloadRepo(variant.repo, to: modelsRoot)
+        logger.info("Successfully downloaded Qwen3-ASR \(variant.rawValue) models")
         return targetDir
     }
 
@@ -145,9 +166,9 @@ public struct Qwen3AsrModels: Sendable {
     }
 
     /// Default cache directory for Qwen3-ASR models.
-    public static func defaultCacheDirectory() -> URL {
+    public static func defaultCacheDirectory(variant: Qwen3AsrVariant = .f32) -> URL {
         modelsRootDirectory()
-            .appendingPathComponent(Repo.qwen3Asr.folderName, isDirectory: true)
+            .appendingPathComponent(variant.repo.folderName, isDirectory: true)
     }
 
     // MARK: Private
