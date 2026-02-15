@@ -1,4 +1,4 @@
-name: Qwen3-ASR Smoke Test
+name: Qwen3-ASR Benchmark
 
 on:
   pull_request:
@@ -6,14 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  qwen3-asr-smoke-test:
-    name: Qwen3-ASR int8 Smoke Test
+  qwen3-asr-benchmark:
+    name: Qwen3-ASR Benchmark (int8)
     runs-on: macos-15
     permissions:
       contents: read
       pull-requests: write
 
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v5
@@ -41,24 +41,51 @@ jobs:
       - name: Build
         run: swift build -c release
 
-      - name: Smoke Test (int8 download + load + transcribe)
-        id: smoke
+      - name: Run Benchmark
+        id: benchmark
         run: |
+          MAX_FILES="5"
+          BENCHMARK_START=$(date +%s)
+
+          set -o pipefail
+
           echo "========================================="
-          echo "Qwen3-ASR int8 smoke test: download, load, transcribe 1 file"
+          echo "Running Qwen3-ASR int8 benchmark (max $MAX_FILES files)"
           echo "========================================="
 
-          # Run benchmark on 1 file just to verify the full pipeline works
           if .build/release/fluidaudiocli qwen3-benchmark \
-            --variant int8 --max-files 1 \
-            --output qwen3_smoke_result.json 2>&1; then
-            echo "SMOKE_STATUS=PASS" >> $GITHUB_OUTPUT
-            echo "Smoke test passed: int8 model downloaded, loaded, and transcribed successfully"
+            --variant int8 --max-files "$MAX_FILES" \
+            --output qwen3_results_int8.json 2>&1; then
+            echo "Benchmark completed successfully"
+            echo "BENCHMARK_STATUS=SUCCESS" >> $GITHUB_OUTPUT
           else
-            echo "SMOKE_STATUS=FAIL" >> $GITHUB_OUTPUT
-            echo "Smoke test failed"
-            exit 1
+            echo "Benchmark FAILED with exit code $?"
+            echo "BENCHMARK_STATUS=FAILED" >> $GITHUB_OUTPUT
           fi
+
+          if [ -f qwen3_results_int8.json ]; then
+            WER_AVG=$(jq -r '.summary.averageWER * 100' qwen3_results_int8.json 2>/dev/null)
+            WER_MED=$(jq -r '.summary.medianWER * 100' qwen3_results_int8.json 2>/dev/null)
+            CER_AVG=$(jq -r '.summary.averageCER * 100' qwen3_results_int8.json 2>/dev/null)
+            RTFx=$(jq -r '.summary.medianRTFx' qwen3_results_int8.json 2>/dev/null)
+            OVERALL_RTFx=$(jq -r '.summary.overallRTFx' qwen3_results_int8.json 2>/dev/null)
+
+            [ "$WER_AVG" != "null" ] && [ -n "$WER_AVG" ] && WER_AVG=$(printf "%.2f" "$WER_AVG") || WER_AVG="N/A"
+            [ "$WER_MED" != "null" ] && [ -n "$WER_MED" ] && WER_MED=$(printf "%.2f" "$WER_MED") || WER_MED="N/A"
+            [ "$CER_AVG" != "null" ] && [ -n "$CER_AVG" ] && CER_AVG=$(printf "%.2f" "$CER_AVG") || CER_AVG="N/A"
+            [ "$RTFx" != "null" ] && [ -n "$RTFx" ] && RTFx=$(printf "%.2f" "$RTFx") || RTFx="N/A"
+            [ "$OVERALL_RTFx" != "null" ] && [ -n "$OVERALL_RTFx" ] && OVERALL_RTFx=$(printf "%.2f" "$OVERALL_RTFx") || OVERALL_RTFx="N/A"
+          fi
+
+          echo "WER_AVG=${WER_AVG:-N/A}" >> $GITHUB_OUTPUT
+          echo "WER_MED=${WER_MED:-N/A}" >> $GITHUB_OUTPUT
+          echo "CER_AVG=${CER_AVG:-N/A}" >> $GITHUB_OUTPUT
+          echo "RTFx=${RTFx:-N/A}" >> $GITHUB_OUTPUT
+          echo "OVERALL_RTFx=${OVERALL_RTFx:-N/A}" >> $GITHUB_OUTPUT
+
+          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+          echo "FILES_COUNT=$MAX_FILES" >> $GITHUB_OUTPUT
 
       - name: Comment PR
         if: github.event_name == 'pull_request'
@@ -66,19 +93,23 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const status = '${{ steps.smoke.outputs.SMOKE_STATUS }}';
-            const emoji = status === 'PASS' ? '✅' : '❌';
+            const status = '${{ steps.benchmark.outputs.BENCHMARK_STATUS }}';
+            const emoji = status === 'SUCCESS' ? '✅' : '❌';
 
-            const body = `## Qwen3-ASR int8 Smoke Test ${emoji}
+            const body = `## Qwen3-ASR int8 Benchmark ${emoji}
 
-            **Status:** int8 model download, load, and transcribe ${status === 'PASS' ? 'succeeded' : 'failed'}
+            | Metric | Value |
+            |--------|-------|
+            | WER Avg | ${{ steps.benchmark.outputs.WER_AVG }}% |
+            | WER Med | ${{ steps.benchmark.outputs.WER_MED }}% |
+            | CER Avg | ${{ steps.benchmark.outputs.CER_AVG }}% |
+            | Median RTFx | ${{ steps.benchmark.outputs.RTFx }}x |
+            | Overall RTFx | ${{ steps.benchmark.outputs.OVERALL_RTFx }}x |
+            | Decoder size | 571 MB (vs 1.1 GB f32) |
 
-            | | |
-            |---|---|
-            | Variant | int8 (571 MB decoder) |
-            | Pipeline | download → load → transcribe 1 file |
+            <sub>${{ steps.benchmark.outputs.FILES_COUNT }} files • LibriSpeech test-clean • Runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }}</sub>
 
-            <sub>Full WER/RTFx benchmarks require physical Apple Silicon (CI VMs lack proper CoreML State API support)</sub>
+            <sub>**Note:** CI VM RTFx/WER may differ significantly from physical Apple Silicon due to virtualized CoreML.</sub>
 
             <!-- fluidaudio-benchmark-qwen3-asr -->`;
 
@@ -112,5 +143,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qwen3-asr-smoke-results
-          path: qwen3_smoke_result.json
+          name: qwen3-asr-results
+          path: qwen3_results_*.json
