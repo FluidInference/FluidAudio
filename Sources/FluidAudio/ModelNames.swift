@@ -14,6 +14,7 @@ public enum Repo: String, CaseIterable {
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
     case pocketTts = "FluidInference/pocket-tts-coreml"
     case qwen3Asr = "FluidInference/qwen3-asr-0.6b-coreml/f32"
+    case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -42,6 +43,8 @@ public enum Repo: String, CaseIterable {
             return "pocket-tts-coreml"
         case .qwen3Asr:
             return "qwen3-asr-0.6b-coreml/f32"
+        case .qwen3AsrInt8:
+            return "qwen3-asr-0.6b-coreml/int8"
         }
     }
 
@@ -56,7 +59,7 @@ public enum Repo: String, CaseIterable {
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .sortformer:
             return "FluidInference/diar-streaming-sortformer-coreml"
-        case .qwen3Asr:
+        case .qwen3Asr, .qwen3AsrInt8:
             return "FluidInference/qwen3-asr-0.6b-coreml"
         default:
             return "FluidInference/\(name)"
@@ -72,6 +75,8 @@ public enum Repo: String, CaseIterable {
             return "320ms"
         case .qwen3Asr:
             return "f32"
+        case .qwen3AsrInt8:
+            return "int8"
         default:
             return nil
         }
@@ -403,7 +408,7 @@ public enum ModelNames {
             return ModelNames.PocketTTS.requiredModels
         case .sortformer:
             return ModelNames.Sortformer.requiredModels
-        case .qwen3Asr:
+        case .qwen3Asr, .qwen3AsrInt8:
             return ModelNames.Qwen3ASR.requiredModelsFull
         }
     }
