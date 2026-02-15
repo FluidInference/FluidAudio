@@ -54,14 +54,13 @@ jobs:
           echo "Running Qwen3-ASR int8 benchmark (max $MAX_FILES files)"
           echo "========================================="
 
-          if swift run fluidaudiocli qwen3-benchmark \
+          if .build/release/fluidaudiocli qwen3-benchmark \
             --variant int8 --max-files "$MAX_FILES" \
-            --output qwen3_results_int8.json > benchmark_log.txt 2>&1; then
+            --output qwen3_results_int8.json 2>&1; then
             echo "Benchmark completed successfully"
             echo "BENCHMARK_STATUS=SUCCESS" >> $GITHUB_OUTPUT
           else
             echo "Benchmark FAILED with exit code $?"
-            cat benchmark_log.txt
             echo "BENCHMARK_STATUS=FAILED" >> $GITHUB_OUTPUT
           fi
 
