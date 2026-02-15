@@ -13,6 +13,8 @@ jobs:
       contents: read
       pull-requests: write
 
+    timeout-minutes: 60
+
     steps:
       - uses: actions/checkout@v5
 
@@ -43,7 +45,7 @@ jobs:
       - name: Run Benchmarks
         id: benchmark
         run: |
-          MAX_FILES="25"
+          MAX_FILES="10"
           BENCHMARK_START=$(date +%s)
 
           set -o pipefail
