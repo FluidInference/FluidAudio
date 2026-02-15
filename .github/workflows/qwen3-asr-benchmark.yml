@@ -93,7 +93,7 @@ jobs:
 
             <sub>Runtime: ${{ steps.smoketest.outputs.EXECUTION_TIME }}</sub>
 
-            <sub>**Note:** CI VM lacks physical GPU — CoreML stateful decoder (KV cache) produces degraded results. On Apple Silicon: ~1.3% WER / 2.5x RTFx.</sub>
+            <sub>**Note:** CI VM lacks physical GPU — CoreML MLState (macOS 15) KV cache produces degraded results on virtualized runners. On Apple Silicon: ~1.3% WER / 2.5x RTFx.</sub>
 
             <!-- fluidaudio-benchmark-qwen3-asr -->`;
 
