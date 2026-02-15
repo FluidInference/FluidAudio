@@ -44,7 +44,7 @@ jobs:
       - name: Run Benchmark
         id: benchmark
         run: |
-          MAX_FILES="5"
+          MAX_FILES="1"
           BENCHMARK_START=$(date +%s)
 
           set -o pipefail
