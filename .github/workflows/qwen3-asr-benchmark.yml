@@ -1,9 +1,12 @@
 name: Qwen3-ASR Benchmark
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      max_files:
+        description: 'Max files per variant'
+        default: '10'
+        type: string
 
 jobs:
   qwen3-asr-benchmark:
@@ -11,7 +14,6 @@ jobs:
     runs-on: macos-15
     permissions:
       contents: read
-      pull-requests: write
 
     timeout-minutes: 60
 
@@ -45,7 +47,7 @@ jobs:
       - name: Run Benchmarks
         id: benchmark
         run: |
-          MAX_FILES="10"
+          MAX_FILES="${{ github.event.inputs.max_files || '10' }}"
           BENCHMARK_START=$(date +%s)
 
           set -o pipefail
@@ -133,65 +135,24 @@ jobs:
             echo "All benchmarks completed successfully"
           fi
 
-      - name: Comment PR
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const benchmarkStatus = '${{ steps.benchmark.outputs.BENCHMARK_STATUS }}';
-            const statusEmoji = benchmarkStatus === 'SUCCESS' ? '✅' : '⚠️';
-            const statusText = benchmarkStatus === 'SUCCESS' ? 'All benchmarks passed' : 'Some benchmarks failed (see logs)';
-
-            const body = `## Qwen3-ASR Benchmark Results ${statusEmoji}
-
-            **Status:** ${statusText}
-
-            ### LibriSpeech test-clean
-
-            | Variant | WER Avg | WER Med | CER Avg | Median RTFx | Overall RTFx | Status |
-            |---------|---------|---------|---------|-------------|--------------|--------|
-            | f32 (FP16) | ${{ steps.benchmark.outputs.F32_WER_AVG }}% | ${{ steps.benchmark.outputs.F32_WER_MED }}% | ${{ steps.benchmark.outputs.F32_CER_AVG }}% | ${{ steps.benchmark.outputs.F32_RTFx }}x | ${{ steps.benchmark.outputs.F32_OVERALL_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.F32_WER_AVG }}') < 10 ? '✅' : '${{ steps.benchmark.outputs.F32_WER_AVG }}' === 'N/A' ? '❌' : '⚠️'} |
-            | int8 | ${{ steps.benchmark.outputs.INT8_WER_AVG }}% | ${{ steps.benchmark.outputs.INT8_WER_MED }}% | ${{ steps.benchmark.outputs.INT8_CER_AVG }}% | ${{ steps.benchmark.outputs.INT8_RTFx }}x | ${{ steps.benchmark.outputs.INT8_OVERALL_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.INT8_WER_AVG }}') < 10 ? '✅' : '${{ steps.benchmark.outputs.INT8_WER_AVG }}' === 'N/A' ? '❌' : '⚠️'} |
-
-            ### Model Sizes
-
-            | Variant | Decoder | Total (approx) |
-            |---------|---------|----------------|
-            | f32 (FP16) | 1.1 GB | ~1.75 GB |
-            | int8 | 571 MB | ~900 MB |
-
-            <sub>${{ steps.benchmark.outputs.FILES_COUNT }} files per variant • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
-
-            <sub>**RTFx** = Real-Time Factor (higher is better) • Audio duration / Processing time</sub>
-
-            <!-- fluidaudio-benchmark-qwen3-asr -->`;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const existing = comments.find(c =>
-              c.body.includes('<!-- fluidaudio-benchmark-qwen3-asr -->')
-            );
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body: body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: body
-              });
-            }
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Qwen3-ASR Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### LibriSpeech test-clean" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Variant | WER Avg | WER Med | CER Avg | Median RTFx | Overall RTFx |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|---------|---------|---------|-------------|--------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| f32 (FP16) | ${{ steps.benchmark.outputs.F32_WER_AVG }}% | ${{ steps.benchmark.outputs.F32_WER_MED }}% | ${{ steps.benchmark.outputs.F32_CER_AVG }}% | ${{ steps.benchmark.outputs.F32_RTFx }}x | ${{ steps.benchmark.outputs.F32_OVERALL_RTFx }}x |" >> $GITHUB_STEP_SUMMARY
+          echo "| int8 | ${{ steps.benchmark.outputs.INT8_WER_AVG }}% | ${{ steps.benchmark.outputs.INT8_WER_MED }}% | ${{ steps.benchmark.outputs.INT8_CER_AVG }}% | ${{ steps.benchmark.outputs.INT8_RTFx }}x | ${{ steps.benchmark.outputs.INT8_OVERALL_RTFx }}x |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Variant | Decoder Size | Total (approx) |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------------|----------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| f32 (FP16) | 1.1 GB | ~1.75 GB |" >> $GITHUB_STEP_SUMMARY
+          echo "| int8 | 571 MB | ~900 MB |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_${{ steps.benchmark.outputs.FILES_COUNT }} files per variant • Runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }}_" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Results
         if: always()
