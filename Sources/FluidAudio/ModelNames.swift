@@ -15,6 +15,7 @@ public enum Repo: String, CaseIterable {
     case pocketTts = "FluidInference/pocket-tts-coreml"
     case qwen3Asr = "FluidInference/qwen3-asr-0.6b-coreml/f32"
     case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
+    case forcedAlignerInt8 = "alexwengg/Qwen3-ForcedAligner-0.6B-Coreml/qwen3-forced-aligner-coreml-int8"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -45,6 +46,8 @@ public enum Repo: String, CaseIterable {
             return "qwen3-asr-0.6b-coreml/f32"
         case .qwen3AsrInt8:
             return "qwen3-asr-0.6b-coreml/int8"
+        case .forcedAlignerInt8:
+            return "Qwen3-ForcedAligner-0.6B-Coreml/qwen3-forced-aligner-coreml-int8"
         }
     }
 
@@ -61,6 +64,8 @@ public enum Repo: String, CaseIterable {
             return "FluidInference/diar-streaming-sortformer-coreml"
         case .qwen3Asr, .qwen3AsrInt8:
             return "FluidInference/qwen3-asr-0.6b-coreml"
+        case .forcedAlignerInt8:
+            return "alexwengg/Qwen3-ForcedAligner-0.6B-Coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -77,6 +82,8 @@ public enum Repo: String, CaseIterable {
             return "f32"
         case .qwen3AsrInt8:
             return "int8"
+        case .forcedAlignerInt8:
+            return "qwen3-forced-aligner-coreml-int8"
         default:
             return nil
         }
@@ -95,6 +102,8 @@ public enum Repo: String, CaseIterable {
             return "sortformer"
         case .pocketTts:
             return "pocket-tts"
+        case .forcedAlignerInt8:
+            return "forced-aligner-int8"
         default:
             return name
         }
@@ -308,6 +317,19 @@ public enum ModelNames {
         ]
     }
 
+    /// Qwen3-ForcedAligner model names
+    public enum ForcedAligner {
+        public static let audioEncoderFile = "forced_aligner_audio_encoder.mlmodelc"
+        public static let embeddingFile = "forced_aligner_embedding.mlmodelc"
+        public static let decoderWithLmHeadFile = "forced_aligner_decoder_with_lm_head.mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            audioEncoderFile,
+            embeddingFile,
+            decoderWithLmHeadFile,
+        ]
+    }
+
     /// PocketTTS model names (flow-matching language model TTS)
     public enum PocketTTS {
         public static let condStep = "cond_step"
@@ -410,6 +432,8 @@ public enum ModelNames {
             return ModelNames.Sortformer.requiredModels
         case .qwen3Asr, .qwen3AsrInt8:
             return ModelNames.Qwen3ASR.requiredModelsFull
+        case .forcedAlignerInt8:
+            return ModelNames.ForcedAligner.requiredModels
         }
     }
 }
