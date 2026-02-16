@@ -30,8 +30,14 @@ public actor ForcedAlignerManager {
     ///
     /// The directory must contain the 3 CoreML models and tokenizer files
     /// (vocab.json, merges.txt).
-    public func loadModels(from directory: URL, computeUnits: MLComputeUnits = .cpuAndGPU) async throws {
-        models = try await ForcedAlignerModels.load(from: directory, computeUnits: computeUnits)
+    public func loadModels(
+        from directory: URL,
+        computeUnits: MLComputeUnits = .cpuAndGPU
+    ) async throws {
+        models = try await ForcedAlignerModels.load(
+            from: directory,
+            computeUnits: computeUnits
+        )
 
         // Load tokenizer from the same directory or download
         let vocabURL = directory.appendingPathComponent("vocab.json")
@@ -52,14 +58,19 @@ public actor ForcedAlignerManager {
     }
 
     /// Download models from HuggingFace and load them.
-    public func downloadAndLoadModels(computeUnits: MLComputeUnits = .cpuAndGPU) async throws {
+    public func downloadAndLoadModels(
+        computeUnits: MLComputeUnits = .cpuAndGPU
+    ) async throws {
         let cacheDir = try await ForcedAlignerModels.download()
 
         // Download tokenizer files to the same cache directory
         let (vocabURL, mergesURL) = try await ForcedAlignerTokenizer.download(to: cacheDir)
         tokenizer = try ForcedAlignerTokenizer(vocabURL: vocabURL, mergesURL: mergesURL)
 
-        models = try await ForcedAlignerModels.load(from: cacheDir, computeUnits: computeUnits)
+        models = try await ForcedAlignerModels.load(
+            from: cacheDir,
+            computeUnits: computeUnits
+        )
         logger.info("ForcedAligner models downloaded and loaded successfully")
     }
 

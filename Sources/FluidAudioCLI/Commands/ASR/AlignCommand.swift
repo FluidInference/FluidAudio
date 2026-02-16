@@ -74,7 +74,6 @@ enum AlignCommand {
                 "Audio: \(String(format: "%.2f", duration))s, \(samples.count) samples at 16kHz"
             )
 
-            // Run alignment
             logger.info("Aligning text: \(text.prefix(80))...")
             let result = try await manager.align(audioSamples: samples, text: text)
 
@@ -93,11 +92,13 @@ enum AlignCommand {
                 print(line)
             }
 
-            logger.info("")
-            logger.info("Performance:")
-            logger.info("  Audio duration: \(String(format: "%.2f", duration))s")
-            logger.info("  Alignment time: \(String(format: "%.0f", result.latencyMs))ms")
-            logger.info("  Words aligned: \(result.alignments.count)")
+            let rtfx = duration / (result.latencyMs / 1000.0)
+            print("")
+            print("Performance:")
+            print("  Audio duration: \(String(format: "%.2f", duration))s")
+            print("  Alignment time: \(String(format: "%.0f", result.latencyMs))ms")
+            print("  RTFx: \(String(format: "%.2f", rtfx))x")
+            print("  Words aligned: \(result.alignments.count)")
 
         } catch {
             logger.error("Forced alignment failed: \(error)")
