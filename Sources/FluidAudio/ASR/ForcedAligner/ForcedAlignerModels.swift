@@ -27,7 +27,7 @@ public struct ForcedAlignerModels: Sendable {
     /// ```
     public static func load(
         from directory: URL,
-        computeUnits: MLComputeUnits = .all
+        computeUnits: MLComputeUnits = .cpuAndGPU
     ) async throws -> ForcedAlignerModels {
         let modelConfig = MLModelConfiguration()
         modelConfig.computeUnits = computeUnits
@@ -66,7 +66,7 @@ public struct ForcedAlignerModels: Sendable {
     /// Download models from HuggingFace and load them.
     public static func downloadAndLoad(
         to directory: URL? = nil,
-        computeUnits: MLComputeUnits = .all
+        computeUnits: MLComputeUnits = .cpuAndGPU
     ) async throws -> ForcedAlignerModels {
         let targetDir = try await download(to: directory)
         return try await load(from: targetDir, computeUnits: computeUnits)

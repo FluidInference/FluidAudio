@@ -1,5 +1,6 @@
 import Accelerate
 @preconcurrency import CoreML
+import CoreMLPredictionWrapper
 import Foundation
 import OSLog
 
@@ -131,29 +132,41 @@ struct ForcedAlignerInference {
         let windowSize = ForcedAlignerConfig.melWindowSize
         var allFeatures: [[Float]] = []
 
+        // Collect all mel inputs and expected output counts
+        var melInputs: [MLDictionaryFeatureProvider] = []
+        var expectedOuts: [Int] = []
+
         var offset = 0
         while offset < numFrames {
             let end = min(offset + windowSize, numFrames)
             let actualChunkLen = end - offset
 
-            // Compute expected output frames for this chunk (3 conv layers, stride 2)
             var expectedOut = actualChunkLen
             for _ in 0..<3 {
                 expectedOut = (expectedOut - 1) / 2 + 1
             }
 
-            // Create mel input padded to windowSize
             let melInput = try createMelInput(
                 mel: mel, offset: offset, chunkLen: actualChunkLen, padTo: windowSize
             )
+            melInputs.append(melInput)
+            expectedOuts.append(expectedOut)
 
-            let prediction = try models.audioEncoder.prediction(from: melInput)
-            guard let features = prediction.featureValue(for: "audio_features")?.multiArrayValue else {
+            offset += windowSize
+        }
+
+        // Use CoreML native batch API: MLModel.predictions(fromBatch:)
+        let batchProvider = MLArrayBatchProvider(array: melInputs)
+        let batchResults = try models.audioEncoder.predictions(fromBatch: batchProvider)
+
+        // Extract features from batch results
+        for i in 0..<batchResults.count {
+            let prediction = batchResults.features(at: i)
+            guard let features = prediction.featureValue(for: "audio_features")?.multiArrayValue
+            else {
                 throw ForcedAlignerError.encoderFailed("No audio_features output")
             }
 
-            // Extract features using strides (trimming to expected output length)
-            // Handle both 2D [N, dim] and 3D [1, N, dim] outputs
             let featStride: Int
             if features.shape.count == 3 {
                 featStride = features.strides[1].intValue
@@ -164,7 +177,7 @@ struct ForcedAlignerInference {
             let featPtr = features.dataPointer.bindMemory(
                 to: Float.self, capacity: features.count
             )
-            for f in 0..<expectedOut {
+            for f in 0..<expectedOuts[i] {
                 var vec = [Float](repeating: 0.0, count: ForcedAlignerConfig.encoderOutputDim)
                 let base = f * featStride
                 for d in 0..<ForcedAlignerConfig.encoderOutputDim {
@@ -172,8 +185,6 @@ struct ForcedAlignerInference {
                 }
                 allFeatures.append(vec)
             }
-
-            offset += windowSize
         }
 
         return allFeatures
@@ -222,7 +233,7 @@ struct ForcedAlignerInference {
             "input_ids": MLFeatureValue(multiArray: array)
         ])
 
-        let prediction = try models.embedding.prediction(from: input)
+        let prediction = try CoreMLPredictionWrapper.predict(with: models.embedding, input: input)
         guard let embeddings = prediction.featureValue(for: "embeddings")?.multiArrayValue else {
             throw ForcedAlignerError.decoderFailed("No embeddings output")
         }
@@ -289,7 +300,7 @@ struct ForcedAlignerInference {
             "position_sin": MLFeatureValue(multiArray: sinArray),
         ])
 
-        let prediction = try models.decoderWithLmHead.prediction(from: input)
+        let prediction = try CoreMLPredictionWrapper.predict(with: models.decoderWithLmHead, input: input)
         guard let logits = prediction.featureValue(for: "logits")?.multiArrayValue else {
             throw ForcedAlignerError.decoderFailed("No logits output from decoder+lm_head")
         }

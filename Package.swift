@@ -30,6 +30,7 @@ let package = Package(
             dependencies: [
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
+                "CoreMLPredictionWrapper",
                 .product(name: "Tokenizers", package: "swift-transformers"),
             ],
             path: "Sources/FluidAudio",
@@ -45,6 +46,11 @@ let package = Package(
         .target(
             name: "MachTaskSelfWrapper",
             path: "Sources/MachTaskSelfWrapper",
+            publicHeadersPath: "include"
+        ),
+        .target(
+            name: "CoreMLPredictionWrapper",
+            path: "Sources/CoreMLPredictionWrapper",
             publicHeadersPath: "include"
         ),
         // TTS targets are always available for FluidAudioEspeak product
