@@ -62,6 +62,8 @@ struct FluidAudioCLI {
             await Qwen3TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "align":
             await AlignCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "align-benchmark":
+            await AlignBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -93,6 +95,7 @@ struct FluidAudioCLI {
                 sortformer              Run Sortformer streaming diarization
                 sortformer-benchmark    Run Sortformer benchmark on AMI dataset
                 align                   Run forced alignment on audio with transcript
+                align-benchmark         Run forced alignment benchmark on Buckeye corpus
                 download                Download evaluation datasets
                 help                    Show this help message
 
