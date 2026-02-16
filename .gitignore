@@ -115,3 +115,20 @@ fluidaudio_cli/*
 # Continuous Claude cache (local only)
 .claude/cache/
 .aider*
+
+# Buckeye benchmark - local data (audio/results on HuggingFace: alexwengg/buckeye)
+buckeye/s*.zip
+buckeye/extracted/
+buckeye/buckeye-benchmark/audio/
+buckeye/*.json
+buckeye/uv.lock
+buckeye/__pycache__/
+
+# IDE configs
+.minimax/
+.trae/
+
+# Mobius local build artifacts
+mobius/models/stt/qwen3-forced-aligner-0.6b/coreml/build/
+mobius/models/stt/qwen3-forced-aligner-0.6b/coreml/__pycache__/
+mobius/models/stt/qwen3-forced-aligner-0.6b/coreml/audio/
