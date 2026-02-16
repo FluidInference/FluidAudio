@@ -114,3 +114,4 @@ fluidaudio_cli/*
 
 # Continuous Claude cache (local only)
 .claude/cache/
+.aider*
