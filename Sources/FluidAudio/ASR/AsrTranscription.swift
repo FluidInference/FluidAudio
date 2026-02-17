@@ -85,6 +85,13 @@ extension AsrManager {
         let preprocessorInput = try await preparePreprocessorInput(
             paddedAudio, actualLength: originalLength)
 
+        let preprocessorAudioArray = preprocessorInput.featureValue(for: "audio_signal")?.multiArrayValue
+        defer {
+            if let preprocessorAudioArray {
+                Task { await sharedMLArrayCache.returnArray(preprocessorAudioArray) }
+            }
+        }
+
         guard let preprocessorModel = preprocessorModel, let encoderModel = encoderModel else {
             throw ASRError.notInitialized
         }

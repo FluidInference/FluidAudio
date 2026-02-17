@@ -279,6 +279,7 @@ public final class AsrManager {
     public func resetState() {
         microphoneDecoderState = TdtDecoderState.make()
         systemDecoderState = TdtDecoderState.make()
+        Task { await sharedMLArrayCache.clear() }
     }
 
     public func cleanup() {
@@ -291,6 +292,7 @@ public final class AsrManager {
         systemDecoderState = TdtDecoderState.make()
         // Release vocabulary boosting resources
         disableVocabularyBoosting()
+        Task { await sharedMLArrayCache.clear() }
         logger.info("AsrManager resources cleaned up")
     }
 
