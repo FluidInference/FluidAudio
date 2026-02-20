@@ -27,11 +27,12 @@ public struct TtsModels: Sendable {
     public static func download(
         variants requestedVariants: Set<ModelNames.TTS.Variant>? = nil,
         from repo: String = TtsConstants.defaultRepository,
+        directory: URL? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> TtsModels {
-        let cacheDirectory = try getCacheDirectory()
+        let targetDir = try directory ?? getCacheDirectory()
         // Pass Models subdirectory so models end up in ~/.cache/fluidaudio/Models/kokoro/
-        let modelsDirectory = cacheDirectory.appendingPathComponent(TtsConstants.defaultModelsSubdirectory)
+        let modelsDirectory = targetDir.appendingPathComponent(TtsConstants.defaultModelsSubdirectory)
         let targetVariants: [ModelNames.TTS.Variant] = {
             if let requested = requestedVariants, !requested.isEmpty {
                 return requested.sorted { $0.fileName < $1.fileName }
