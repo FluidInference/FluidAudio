@@ -509,7 +509,7 @@ extension AsrManager {
     }
 
     /// Calculate start frame offset for a sliding window segment (deprecated - now handled by timeJump)
-    internal func calculateStartFrameOffset(segmentIndex: Int, leftContextSeconds: Double) -> Int {
+    nonisolated internal func calculateStartFrameOffset(segmentIndex: Int, leftContextSeconds: Double) -> Int {
         // This method is deprecated as frame tracking is now handled by the decoder's timeJump mechanism
         // Kept for test compatibility
         return 0

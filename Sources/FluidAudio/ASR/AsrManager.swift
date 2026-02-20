@@ -572,7 +572,7 @@ public actor AsrManager {
         return (text, adjustedTimings)
     }
 
-    internal func extractFeatureValue(
+    nonisolated internal func extractFeatureValue(
         from provider: MLFeatureProvider, key: String, errorMessage: String
     ) throws -> MLMultiArray {
         guard let value = provider.featureValue(for: key)?.multiArrayValue else {
@@ -581,7 +581,7 @@ public actor AsrManager {
         return value
     }
 
-    internal func extractFeatureValues(
+    nonisolated internal func extractFeatureValues(
         from provider: MLFeatureProvider, keys: [(key: String, errorSuffix: String)]
     ) throws -> [String: MLMultiArray] {
         var results: [String: MLMultiArray] = [:]
