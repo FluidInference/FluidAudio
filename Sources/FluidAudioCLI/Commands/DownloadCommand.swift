@@ -69,6 +69,8 @@ enum DownloadCommand {
             }
         case "earnings22-kws":
             await DatasetDownloader.downloadEarnings22KWS(force: forceDownload)
+        case "buckeye":
+            await DatasetDownloader.downloadBuckeyeDataset(force: forceDownload)
         case "all":
             await DatasetDownloader.downloadAMIDataset(variant: .sdm, force: forceDownload)
             await DatasetDownloader.downloadAMIDataset(variant: .ihm, force: forceDownload)
@@ -102,6 +104,7 @@ enum DownloadCommand {
                 librispeech-test-clean      LibriSpeech test-clean subset
                 librispeech-test-other      LibriSpeech test-other subset
                 earnings22-kws              Earnings22 keyword spotting dataset
+                buckeye                     Buckeye forced alignment benchmark
                 parakeet-models             Parakeet ASR models
                 all                         All diarization datasets
 

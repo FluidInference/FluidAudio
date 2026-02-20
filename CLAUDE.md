@@ -26,6 +26,14 @@ FluidAudio is a comprehensive Swift framework for local, low-latency audio proce
 - Mock models produce meaningless results and waste development time
 - Placeholder models with random weights will destroy performance (e.g., 17.8% → 77.1% DER)
 
+### ⚠️ FORCED ALIGNMENT BENCHMARKING — USE BUCKEYE, NOT LIBRISPEECH
+
+- **DO NOT** use LibriSpeech for forced alignment benchmarking — it has no ground truth timestamps
+- **DO NOT** use PyTorch output as a proxy for ground truth — we need objective human-annotated timestamps
+- Use the **Buckeye Corpus** (buckeyecorpus.osu.edu) for forced alignment evaluation — it has hand-corrected word-level timestamps from human annotators
+- Metric: **AAS (Accumulated Average Shift)** — mean absolute boundary error in milliseconds
+- Both PyTorch f32 and CoreML int8 should be measured against Buckeye human ground truth independently
+
 ### ⚠️ MODEL OPERATIONS - CONSULT BEFORE IMPLEMENTING
 
 - When asked to merge, convert, or modify models:

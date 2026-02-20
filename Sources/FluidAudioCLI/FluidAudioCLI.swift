@@ -60,6 +60,10 @@ struct FluidAudioCLI {
             await Qwen3AsrBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "qwen3-transcribe":
             await Qwen3TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "align":
+            await AlignCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "align-benchmark":
+            await AlignBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -90,6 +94,8 @@ struct FluidAudioCLI {
                 ctc-earnings-benchmark  Run CTC keyword spotting benchmark on Earnings22
                 sortformer              Run Sortformer streaming diarization
                 sortformer-benchmark    Run Sortformer benchmark on AMI dataset
+                align                   Run forced alignment on audio with transcript
+                align-benchmark         Run forced alignment benchmark on Buckeye corpus
                 download                Download evaluation datasets
                 help                    Show this help message
 
