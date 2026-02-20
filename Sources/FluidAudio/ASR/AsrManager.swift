@@ -8,7 +8,7 @@ public enum AudioSource: Sendable {
     case system
 }
 
-public final class AsrManager {
+public actor AsrManager {
 
     internal let logger = AppLogger(category: "ASR")
     internal let config: ASRConfig
@@ -48,9 +48,7 @@ public final class AsrManager {
     internal var vocabBoostingEnabled: Bool { customVocabulary != nil && vocabularyRescorer != nil }
 
     // Cached prediction options for reuse
-    internal lazy var predictionOptions: MLPredictionOptions = {
-        AsrModels.optimizedPredictionOptions()
-    }()
+    internal var predictionOptions: MLPredictionOptions = AsrModels.optimizedPredictionOptions()
 
     public init(config: ASRConfig = .default) {
         self.config = config
@@ -477,11 +475,15 @@ public final class AsrManager {
             let result: ASRResult
             switch source {
             case .microphone:
+                var state = microphoneDecoderState
                 result = try await transcribeWithState(
-                    audioSamples, decoderState: &microphoneDecoderState)
+                    audioSamples, decoderState: &state)
+                microphoneDecoderState = state
             case .system:
+                var state = systemDecoderState
                 result = try await transcribeWithState(
-                    audioSamples, decoderState: &systemDecoderState)
+                    audioSamples, decoderState: &state)
+                systemDecoderState = state
             }
 
             // Stateless architecture: reset decoder state after each transcription to ensure
@@ -511,9 +513,13 @@ public final class AsrManager {
     public func resetDecoderState(for source: AudioSource) async throws {
         switch source {
         case .microphone:
-            try await initializeDecoderState(decoderState: &microphoneDecoderState)
+            var state = microphoneDecoderState
+            try await initializeDecoderState(decoderState: &state)
+            microphoneDecoderState = state
         case .system:
-            try await initializeDecoderState(decoderState: &systemDecoderState)
+            var state = systemDecoderState
+            try await initializeDecoderState(decoderState: &state)
+            systemDecoderState = state
         }
     }
 

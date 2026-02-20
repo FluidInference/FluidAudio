@@ -85,14 +85,15 @@ struct ChunkProcessor {
             let chunkLengthWithContext = chunkEnd - contextStart
             let chunkSamplesArray = try readSamples(offset: contextStart, count: chunkLengthWithContext)
 
-            let (windowTokens, windowTimestamps, windowConfidences) = try await transcribeChunk(
+            let (windowTokens, windowTimestamps, windowConfidences, updatedState) = try await transcribeChunk(
                 samples: chunkSamplesArray,
                 contextSamples: contextSamples,
                 chunkStart: chunkStart,
                 isLastChunk: isLastChunk,
                 using: manager,
-                decoderState: &chunkDecoderState
+                decoderState: chunkDecoderState
             )
+            chunkDecoderState = updatedState
 
             // Combine tokens, timestamps, and confidences into aligned tuples
             guard windowTokens.count == windowTimestamps.count && windowTokens.count == windowConfidences.count else {
@@ -119,7 +120,7 @@ struct ChunkProcessor {
         }
 
         guard var mergedTokens = chunkOutputs.first else {
-            return manager.processTranscriptionResult(
+            return await manager.processTranscriptionResult(
                 tokenIds: [],
                 timestamps: [],
                 confidences: [],
@@ -143,7 +144,7 @@ struct ChunkProcessor {
         let allTimestamps = mergedTokens.map { $0.timestamp }
         let allConfidences = mergedTokens.map { $0.confidence }
 
-        return manager.processTranscriptionResult(
+        return await manager.processTranscriptionResult(
             tokenIds: allTokens,
             timestamps: allTimestamps,
             confidences: allConfidences,
@@ -167,9 +168,9 @@ struct ChunkProcessor {
         chunkStart: Int,
         isLastChunk: Bool,
         using manager: AsrManager,
-        decoderState: inout TdtDecoderState
-    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float]) {
-        guard !samples.isEmpty else { return ([], [], []) }
+        decoderState: TdtDecoderState
+    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], updatedState: TdtDecoderState) {
+        guard !samples.isEmpty else { return ([], [], [], decoderState) }
 
         let paddedChunk = manager.padAudioIfNeeded(samples, targetLength: maxModelSamples)
 
@@ -183,21 +184,21 @@ struct ChunkProcessor {
         // Context frame adjustment tells decoder to skip the prepended context frames
         let contextFrames = contextSamples / ASRConstants.samplesPerEncoderFrame
 
-        let (hypothesis, encoderSequenceLength) = try await manager.executeMLInferenceWithTimings(
+        let (hypothesis, encoderSequenceLength, updatedState) = try await manager.executeMLInferenceReturningState(
             paddedChunk,
             originalLength: samples.count,  // Full length including context
             actualAudioFrames: actualFrameCount,  // Only actual audio frames (excluding context)
-            decoderState: &decoderState,
+            decoderState: decoderState,
             contextFrameAdjustment: contextFrames,  // Skip context frames in decoder
             isLastChunk: isLastChunk,
             globalFrameOffset: globalFrameOffset
         )
 
         if hypothesis.isEmpty || encoderSequenceLength == 0 {
-            return ([], [], [])
+            return ([], [], [], updatedState)
         }
 
-        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences)
+        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, updatedState)
     }
 
     private func mergeChunks(

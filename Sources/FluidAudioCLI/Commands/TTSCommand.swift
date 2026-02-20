@@ -396,7 +396,7 @@ public struct TTS {
                     logger.info(String(format: "WER: %.1f%%", werValue! * 100))
 
                     // Clean up ASR resources
-                    asr.cleanup()
+                    await asr.cleanup()
                 } catch {
                     logger.warning("ASR evaluation failed: \(error.localizedDescription)")
                 }
@@ -599,7 +599,7 @@ public struct TTS {
                     logger.info("Hypothesis: \(transcription.text)")
                     logger.info(String(format: "WER: %.1f%%", werValue! * 100))
 
-                    asr.cleanup()
+                    await asr.cleanup()
                 } catch {
                     logger.warning("ASR evaluation failed: \(error.localizedDescription)")
                 }

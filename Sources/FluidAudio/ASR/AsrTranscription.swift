@@ -72,6 +72,30 @@ extension AsrManager {
         return result
     }
 
+    /// Execute ML inference with an externally-managed decoder state.
+    /// Returns the result along with the updated decoder state.
+    internal func executeMLInferenceReturningState(
+        _ paddedAudio: [Float],
+        originalLength: Int? = nil,
+        actualAudioFrames: Int? = nil,
+        decoderState: TdtDecoderState,
+        contextFrameAdjustment: Int = 0,
+        isLastChunk: Bool = false,
+        globalFrameOffset: Int = 0
+    ) async throws -> (hypothesis: TdtHypothesis, encoderSequenceLength: Int, updatedState: TdtDecoderState) {
+        var state = decoderState
+        let (hypothesis, encoderSequenceLength) = try await executeMLInferenceWithTimings(
+            paddedAudio,
+            originalLength: originalLength,
+            actualAudioFrames: actualAudioFrames,
+            decoderState: &state,
+            contextFrameAdjustment: contextFrameAdjustment,
+            isLastChunk: isLastChunk,
+            globalFrameOffset: globalFrameOffset
+        )
+        return (hypothesis, encoderSequenceLength, state)
+    }
+
     internal func executeMLInferenceWithTimings(
         _ paddedAudio: [Float],
         originalLength: Int? = nil,
@@ -281,7 +305,7 @@ extension AsrManager {
         )
     }
 
-    internal func padAudioIfNeeded(_ audioSamples: [Float], targetLength: Int) -> [Float] {
+    nonisolated internal func padAudioIfNeeded(_ audioSamples: [Float], targetLength: Int) -> [Float] {
         guard audioSamples.count < targetLength else { return audioSamples }
         return audioSamples + Array(repeating: 0, count: targetLength - audioSamples.count)
     }

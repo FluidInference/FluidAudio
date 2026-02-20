@@ -17,9 +17,8 @@ public actor StreamingAsrManager {
     private var updateContinuation: AsyncStream<StreamingTranscriptionUpdate>.Continuation?
 
     // ASR components
-    // AsrManager contains CoreML models which are not Sendable.
-    // We manage the safety ourselves by only accessing it from within the actor.
-    nonisolated(unsafe) private var asrManager: AsrManager?
+    // AsrManager is an actor, so it can be safely held without nonisolated(unsafe).
+    private var asrManager: AsrManager?
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
 
@@ -48,11 +47,9 @@ public actor StreamingAsrManager {
 
     // Vocabulary boosting
     // These are initialized via configureVocabularyBoosting() before start()
-    // CtcKeywordSpotter and VocabularyRescorer contain CoreML models which are not Sendable.
-    // We manage the safety ourselves by only accessing them from within the actor.
     private var customVocabulary: CustomVocabularyContext?
-    nonisolated(unsafe) private var ctcSpotter: CtcKeywordSpotter?
-    nonisolated(unsafe) private var vocabularyRescorer: VocabularyRescorer?
+    private var ctcSpotter: CtcKeywordSpotter?
+    private var vocabularyRescorer: VocabularyRescorer?
     private var vocabSizeConfig: ContextBiasingConstants.VocabSizeConfig?
     private var vocabBoostingEnabled: Bool { customVocabulary != nil && vocabularyRescorer != nil }
 
@@ -223,7 +220,7 @@ public actor StreamingAsrManager {
             if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
             finalText = parts.joined(separator: " ")
         } else if let asrManager = asrManager, !accumulatedTokens.isEmpty {
-            let finalResult = asrManager.processTranscriptionResult(
+            let finalResult = await asrManager.processTranscriptionResult(
                 tokenIds: accumulatedTokens,
                 timestamps: [],
                 confidences: [],  // No per-token confidences needed for final text
@@ -254,9 +251,7 @@ public actor StreamingAsrManager {
         nextWindowCenterStart = 0
 
         // Reset decoder state for the current audio source
-        if let asrManager = asrManager {
-            try await asrManager.resetDecoderState(for: audioSource)
-        }
+        try await asrManager?.resetDecoderState(for: audioSource)
 
         // Reset sliding window state
         segmentIndex = 0
@@ -368,7 +363,7 @@ public actor StreamingAsrManager {
         windowStartSample: Int,
         isLastChunk: Bool = false
     ) async {
-        guard let asrManager = asrManager else { return }
+        guard let asrManager else { return }
 
         do {
             let chunkStartTime = Date()
@@ -398,7 +393,7 @@ public actor StreamingAsrManager {
 
             // Convert only the current chunk tokens to text for clean incremental updates
             // The final result will use all accumulated tokens for proper deduplication
-            let interim = asrManager.processTranscriptionResult(
+            let interim = await asrManager.processTranscriptionResult(
                 tokenIds: tokens,  // Only current chunk tokens for progress updates
                 timestamps: adjustedTimestamps,
                 confidences: confidences,
@@ -420,7 +415,7 @@ public actor StreamingAsrManager {
             var displayResult = interim
             if shouldConfirm && vocabBoostingEnabled {
                 let chunkLocalTimings =
-                    asrManager.processTranscriptionResult(
+                    await asrManager.processTranscriptionResult(
                         tokenIds: tokens,
                         timestamps: timestamps,  // Original chunk-local timestamps (not adjusted)
                         confidences: confidences,
@@ -616,23 +611,22 @@ public actor StreamingAsrManager {
 
     /// Reset decoder state for error recovery
     private func resetDecoderForRecovery() async {
-        if let asrManager = asrManager {
-            do {
-                try await asrManager.resetDecoderState(for: audioSource)
-                logger.info("Successfully reset decoder state during error recovery")
-            } catch {
-                logger.error("Failed to reset decoder state during recovery: \(error)")
+        guard asrManager != nil else { return }
+        do {
+            try await asrManager?.resetDecoderState(for: audioSource)
+            logger.info("Successfully reset decoder state during error recovery")
+        } catch {
+            logger.error("Failed to reset decoder state during recovery: \(error)")
 
-                // Last resort: try to reinitialize the ASR manager
-                do {
-                    let models = try await AsrModels.downloadAndLoad()
-                    let newAsrManager = AsrManager(config: config.asrConfig)
-                    try await newAsrManager.initialize(models: models)
-                    self.asrManager = newAsrManager
-                    logger.info("Successfully reinitialized ASR manager during error recovery")
-                } catch {
-                    logger.error("Failed to reinitialize ASR manager during recovery: \(error)")
-                }
+            // Last resort: try to reinitialize the ASR manager
+            do {
+                let models = try await AsrModels.downloadAndLoad()
+                let newManager = AsrManager(config: config.asrConfig)
+                try await newManager.initialize(models: models)
+                self.asrManager = newManager
+                logger.info("Successfully reinitialized ASR manager during error recovery")
+            } catch {
+                logger.error("Failed to reinitialize ASR manager during recovery: \(error)")
             }
         }
     }
