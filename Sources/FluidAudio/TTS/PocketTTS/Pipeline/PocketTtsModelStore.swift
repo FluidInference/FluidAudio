@@ -20,14 +20,19 @@ public actor PocketTtsModelStore {
     private var constantsBundle: PocketTtsConstantsBundle?
     private var voiceCache: [String: PocketTtsVoiceData] = [:]
     private var repoDirectory: URL?
+    private let directory: URL?
 
-    public init() {}
+    /// - Parameter directory: Optional override for the base cache directory.
+    ///   When `nil`, uses the default platform cache location.
+    public init(directory: URL? = nil) {
+        self.directory = directory
+    }
 
     /// Load all four CoreML models and the constants bundle.
     public func loadIfNeeded() async throws {
         guard condStepModel == nil else { return }
 
-        let repoDir = try await PocketTtsResourceDownloader.ensureModels()
+        let repoDir = try await PocketTtsResourceDownloader.ensureModels(directory: directory)
         self.repoDirectory = repoDir
 
         logger.info("Loading PocketTTS CoreML models...")
@@ -141,7 +146,7 @@ public actor PocketTtsModelStore {
         guard mimiEncoderModel == nil else { return }
 
         // Ensure the mimi_encoder is downloaded (downloads if needed)
-        let modelURL = try await PocketTtsResourceDownloader.ensureMimiEncoder()
+        let modelURL = try await PocketTtsResourceDownloader.ensureMimiEncoder(directory: directory)
 
         // Update repoDirectory if not set
         if repoDirectory == nil {

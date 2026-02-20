@@ -22,6 +22,7 @@ public final class KokoroTtsManager {
     private var ttsModels: TtsModels?
     private var isInitialized = false
     private var assetsReady = false
+    private let directory: URL?
     private var defaultVoice: String
     private var defaultSpeakerId: Int
     private var ensuredVoices: Set<String> = []
@@ -34,16 +35,20 @@ public final class KokoroTtsManager {
     /// - Parameters:
     ///   - defaultVoice: Default voice identifier for synthesis.
     ///   - defaultSpeakerId: Default speaker ID for multi-speaker voices.
+    ///   - directory: Optional override for the base cache directory.
+    ///     When `nil`, uses the default platform cache location.
     ///   - modelCache: Cache for loaded CoreML models.
     ///   - customLexicon: Optional custom pronunciation dictionary. Entries in this dictionary
     ///     take precedence over all built-in dictionaries and grapheme-to-phoneme conversion.
     public init(
         defaultVoice: String = TtsConstants.recommendedVoice,
         defaultSpeakerId: Int = 0,
+        directory: URL? = nil,
         modelCache: KokoroModelCache = KokoroModelCache(),
         customLexicon: TtsCustomLexicon? = nil
     ) {
-        self.modelCache = modelCache
+        self.directory = directory
+        self.modelCache = directory != nil ? KokoroModelCache(directory: directory) : modelCache
         self.lexiconAssets = LexiconAssetManager()
         self.defaultVoice = Self.normalizeVoice(defaultVoice)
         self.defaultSpeakerId = defaultSpeakerId
@@ -53,11 +58,13 @@ public final class KokoroTtsManager {
     init(
         defaultVoice: String = TtsConstants.recommendedVoice,
         defaultSpeakerId: Int = 0,
+        directory: URL? = nil,
         modelCache: KokoroModelCache = KokoroModelCache(),
         lexiconAssets: LexiconAssetManager,
         customLexicon: TtsCustomLexicon? = nil
     ) {
-        self.modelCache = modelCache
+        self.directory = directory
+        self.modelCache = directory != nil ? KokoroModelCache(directory: directory) : modelCache
         self.lexiconAssets = lexiconAssets
         self.defaultVoice = Self.normalizeVoice(defaultVoice)
         self.defaultSpeakerId = defaultSpeakerId
@@ -84,7 +91,7 @@ public final class KokoroTtsManager {
     }
 
     public func initialize(preloadVoices: Set<String>? = nil) async throws {
-        let models = try await TtsModels.download()
+        let models = try await TtsModels.download(directory: directory)
         try await initialize(models: models, preloadVoices: preloadVoices)
     }
 

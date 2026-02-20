@@ -10,8 +10,13 @@ public actor KokoroModelCache {
     private var tokenLengthCache: [ModelNames.TTS.Variant: Int] = [:]
     private var downloadedModels: [ModelNames.TTS.Variant: MLModel] = [:]
     private var referenceDimension: Int?
+    private let directory: URL?
 
-    public init() {}
+    /// - Parameter directory: Optional override for the base cache directory.
+    ///   When `nil`, uses the default platform cache location.
+    public init(directory: URL? = nil) {
+        self.directory = directory
+    }
 
     public func loadModelsIfNeeded(variants: Set<ModelNames.TTS.Variant>? = nil) async throws {
         let targetVariants: Set<ModelNames.TTS.Variant> = {
@@ -27,7 +32,8 @@ public actor KokoroModelCache {
         let variantsNeedingDownload = missingVariants.filter { downloadedModels[$0] == nil }
 
         if !variantsNeedingDownload.isEmpty {
-            let newlyDownloaded = try await TtsModels.download(variants: Set(variantsNeedingDownload))
+            let newlyDownloaded = try await TtsModels.download(
+                variants: Set(variantsNeedingDownload), directory: directory)
             for (variant, model) in newlyDownloaded.modelsByVariant {
                 downloadedModels[variant] = model
             }
