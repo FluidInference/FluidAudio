@@ -8,7 +8,7 @@ public enum AudioSource: Sendable {
     case system
 }
 
-public final class AsrManager {
+public final class AsrManager: @unchecked Sendable {
 
     internal let logger = AppLogger(category: "ASR")
     internal let config: ASRConfig
