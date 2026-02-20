@@ -8,9 +8,12 @@ public enum PocketTtsResourceDownloader {
     private static let logger = AppLogger(category: "PocketTtsResourceDownloader")
 
     /// Ensure all PocketTTS models are downloaded and return the cache directory.
-    public static func ensureModels() async throws -> URL {
-        let cacheDirectory = try cacheDirectory()
-        let modelsDirectory = cacheDirectory.appendingPathComponent(
+    ///
+    /// - Parameter directory: Optional override for the base cache directory.
+    ///   When `nil`, uses the default platform cache location.
+    public static func ensureModels(directory: URL? = nil) async throws -> URL {
+        let targetDir = try directory ?? cacheDirectory()
+        let modelsDirectory = targetDir.appendingPathComponent(
             PocketTtsConstants.defaultModelsSubdirectory)
 
         let repoDir = modelsDirectory.appendingPathComponent(Repo.pocketTts.folderName)
@@ -36,8 +39,10 @@ public enum PocketTtsResourceDownloader {
     ///
     /// This is an optional model that's only needed for voice cloning functionality.
     /// It's downloaded separately from the main models to reduce initial download size.
-    public static func ensureMimiEncoder() async throws -> URL {
-        let repoDir = try await ensureModels()
+    /// - Parameter directory: Optional override for the base cache directory.
+    ///   When `nil`, uses the default platform cache location.
+    public static func ensureMimiEncoder(directory: URL? = nil) async throws -> URL {
+        let repoDir = try await ensureModels(directory: directory)
         let encoderPath = repoDir.appendingPathComponent(ModelNames.PocketTTS.mimiEncoderFile)
 
         if FileManager.default.fileExists(atPath: encoderPath.path) {

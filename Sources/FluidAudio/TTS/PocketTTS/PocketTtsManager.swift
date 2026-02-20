@@ -25,8 +25,13 @@ public actor PocketTtsManager {
     ///
     /// - Parameters:
     ///   - defaultVoice: Default voice identifier (default: "alba").
-    public init(defaultVoice: String = PocketTtsConstants.defaultVoice) {
-        self.modelStore = PocketTtsModelStore()
+    ///   - directory: Optional override for the base cache directory.
+    ///     When `nil`, uses the default platform cache location.
+    public init(
+        defaultVoice: String = PocketTtsConstants.defaultVoice,
+        directory: URL? = nil
+    ) {
+        self.modelStore = PocketTtsModelStore(directory: directory)
         self.defaultVoice = defaultVoice
     }
 
