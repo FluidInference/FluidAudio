@@ -6,7 +6,7 @@
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 [![Documentation](https://img.shields.io/badge/Documentation-docs.fluidinference.com-008574.svg)](https://docs.fluidinference.com/introduction)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/WNsvaCtmDe)
-[![Hugging Face Models](https://img.shields.io/badge/Hugging%20Face%20Models-100k%2B%20downloads-brightgreen?logo=huggingface)](https://huggingface.co/FluidInference)
+[![Hugging Face Models](https://img.shields.io/badge/Hugging%20Face%20Models-500k%2B%20downloads-brightgreen?logo=huggingface)](https://huggingface.co/FluidInference)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/FluidInference/FluidAudio)
 
 FluidAudio is a Swift SDK for fully local, low-latency audio AI on Apple devices, with inference offloaded to the Apple Neural Engine (ANE), resulting in less memory and generally faster inference.
