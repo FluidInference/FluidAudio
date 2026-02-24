@@ -81,6 +81,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Summit AI Notes](https://summitnotes.app/)** | Local meeting transcription and summarization with speaker identification. Supports 100+ languages. |
 | **[Ora](https://futurelab.studio/ora)** | Local voice assistant for macOS with speech recognition and text-to-speech. |
 | **[Flowstay](https://flowstay.app)** | Easy text-to-speech, local post-processing and Claude Code integration for macOS. Free forever. |
+| **[macos-speech-server](https://github.com/dokterbob/macos-speech-server)** | OpenAI compatible STT/transcription and TTS/speech API server. | 
 
 ## Installation
 
