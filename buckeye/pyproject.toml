@@ -1,0 +1,22 @@
+[project]
+name = "buckeye-benchmark"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+  "torch",
+  "transformers>=4.57",
+  "soundfile",
+  "typer",
+  "numpy",
+  "librosa",
+  "accelerate",
+  "qwen-omni-utils",
+  "nagisa",
+  "soynlp",
+]
+
+[tool.uv.sources]
+qwen-asr = { path = "/Users/kikow/brandon/voicelink/qwen3-asr", editable = true }
+
+[project.optional-dependencies]
+dev = ["qwen-asr"]
