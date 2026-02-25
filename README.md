@@ -25,7 +25,7 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
   <a href="https://boltai.com/"><img src="Documentation/assets/boltai.png" height="40" alt="BoltAI"></a>
   <a href="https://paraspeech.com"><img src="Documentation/assets/paraspeech.png" height="40" alt="Paraspeech"></a>
   <a href="https://altic.dev/fluid"><img src="Documentation/assets/fluidvoice.png" height="40" alt="Fluid Voice"></a>
-
+<a href="https://snaply.ai"><img src="Documentation/assets/snaply.png" height="40" alt="Snaply"></a>
   <!-- Add your app: submit logo via PR -->
 </p>
 
@@ -82,6 +82,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Ora](https://futurelab.studio/ora)** | Local voice assistant for macOS with speech recognition and text-to-speech. |
 | **[Flowstay](https://flowstay.app)** | Easy text-to-speech, local post-processing and Claude Code integration for macOS. Free forever. |
 | **[macos-speech-server](https://github.com/dokterbob/macos-speech-server)** | OpenAI compatible STT/transcription and TTS/speech API server. | 
+| **[Snaply](https://snaply.ai)** |Free, Fast, 100% local AI dictation for Mac. |
 
 ## Installation
 
