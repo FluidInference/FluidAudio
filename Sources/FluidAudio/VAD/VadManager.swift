@@ -159,7 +159,7 @@ public actor VadManager {
         return audioChunk.allSatisfy { abs($0) <= silenceThreshold }
     }
 
-    internal func processChunk(_ audioChunk: [Float], inputState: VadState? = nil) async throws -> VadResult {
+    public func processChunk(_ audioChunk: [Float], inputState: VadState? = nil) async throws -> VadResult {
         guard let loadedModel = vadModel else {
             throw VadError.notInitialized
         }

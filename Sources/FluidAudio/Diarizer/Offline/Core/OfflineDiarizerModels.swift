@@ -85,7 +85,7 @@ public struct OfflineDiarizerModels: Sendable {
         logger.info("Loading offline diarization models from \(modelsDirectory.path)")
 
         let loadStart = Date()
-        let inferenceComputeUnits: MLComputeUnits = .all
+        let inferenceComputeUnits: MLComputeUnits = .cpuAndNeuralEngine
 
         let segmentationAndEmbeddingNames: [String] = [
             ModelNames.OfflineDiarizer.segmentationPath,

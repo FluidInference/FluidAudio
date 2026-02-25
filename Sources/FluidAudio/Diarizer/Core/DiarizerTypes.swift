@@ -35,7 +35,7 @@ public struct DiarizerConfig: Sendable {
     public static let `default` = DiarizerConfig()
 
     public init(
-        clusteringThreshold: Float = 0.7,
+        clusteringThreshold: Float = 0.5,
         minSpeechDuration: Float = 1.0,
         minEmbeddingUpdateDuration: Float = 2.0,
         minSilenceGap: Float = 0.5,
