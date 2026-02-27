@@ -40,37 +40,40 @@ public struct TtsModels: Sendable {
             return ModelNames.TTS.Variant.allCases
         }()
         let modelNames = targetVariants.map { $0.fileName }
-        let dict = try await DownloadUtils.loadModels(
+        var dict = try await DownloadUtils.loadModels(
             .kokoro,
             modelNames: modelNames,
             directory: modelsDirectory,
             // Only a small fraction of the model can run on ANE, and compile time takes a long time because of the complicated arch
             computeUnits: .cpuAndGPU
         )
-        var loaded: [ModelNames.TTS.Variant: MLModel] = [:]
+
         var warmUpDurations: [ModelNames.TTS.Variant: TimeInterval] = [:]
 
-        for variant in targetVariants {
-            let name = variant.fileName
-            guard let model = dict[name] else {
-                throw TTSError.modelNotFound(name)
-            }
-            loaded[variant] = model
-        }
+        let loaded = try await withThrowingTaskGroup(of: (ModelNames.TTS.Variant, MLModel, TimeInterval).self) { group in
+            for variant in targetVariants {
+                let name = variant.fileName
+                // By removing the model from `dict`, we disconnect its region.
+                // This allows the non-Sendable MLModel to be transferred into the task closure safely.
+                guard let model = dict.removeValue(forKey: name) else {
+                    throw TTSError.modelNotFound(name)
+                }
 
-        try await withThrowingTaskGroup(of: (ModelNames.TTS.Variant, TimeInterval).self) { group in
-            for (variant, model) in loaded {
                 group.addTask(priority: .userInitiated) {
                     let warmUpStart = Date()
                     await warmUpModel(model, variant: variant)
                     let warmUpDuration = Date().timeIntervalSince(warmUpStart)
-                    return (variant, warmUpDuration)
+                    // Transfer the model back out of the task
+                    return (variant, model, warmUpDuration)
                 }
             }
 
-            for try await (variant, duration) in group {
+            var finalLoaded: [ModelNames.TTS.Variant: MLModel] = [:]
+            for try await (variant, model, duration) in group {
                 warmUpDurations[variant] = duration
+                finalLoaded[variant] = model
             }
+            return finalLoaded
         }
 
         for variant in targetVariants {
