@@ -35,6 +35,9 @@ let package = Package(
             path: "Sources/FluidAudio",
             exclude: [
                 "Frameworks"
+            ],
+            swiftSettings: [
+                .unsafeFlags(["-Xcc", "-DACCELERATE_NEW_LAPACK"], .when(platforms: [.macOS, .iOS]))
             ]
         ),
         .target(

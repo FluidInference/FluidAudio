@@ -3,6 +3,23 @@ import XCTest
 
 @testable import FluidAudio
 
+private actor ANEMemoryOptimizerActorAdapter {
+    private let optimizer: ANEMemoryOptimizer
+
+    init(optimizer: ANEMemoryOptimizer) {
+        self.optimizer = optimizer
+    }
+
+    func pooledBufferCount(for key: String, shape: [NSNumber], dataType: MLMultiArrayDataType) throws -> Int {
+        let buffer = try optimizer.getPooledBuffer(
+            key: key,
+            shape: shape,
+            dataType: dataType
+        )
+        return buffer.count
+    }
+}
+
 final class ANEMemoryOptimizerTests: XCTestCase {
 
     var optimizer: ANEMemoryOptimizer!
@@ -219,25 +236,30 @@ final class ANEMemoryOptimizerTests: XCTestCase {
 
     // MARK: - Thread Safety Tests
 
-    func testConcurrentBufferAccess() {
-        let expectation = XCTestExpectation(description: "Concurrent access")
-        expectation.expectedFulfillmentCount = 10
-
-        DispatchQueue.concurrentPerform(iterations: 10) { index in
-            do {
-                let buffer = try optimizer.getPooledBuffer(
-                    key: "concurrent_\(index % 3)",  // Share some keys
-                    shape: [100] as [NSNumber],
-                    dataType: .float32
-                )
-                XCTAssertEqual(buffer.count, 100)
-                expectation.fulfill()
-            } catch {
-                XCTFail("Failed to get buffer: \(error)")
+    func testConcurrentBufferAccess() async throws {
+        let unwrappedOptimizer = try XCTUnwrap(optimizer)
+        nonisolated(unsafe) let optimizer = unwrappedOptimizer
+        let optimizerAdapter = ANEMemoryOptimizerActorAdapter(optimizer: optimizer)
+        let counts = try await withThrowingTaskGroup(of: Int.self, returning: [Int].self) { group in
+            for index in 0..<10 {
+                group.addTask {
+                    try await optimizerAdapter.pooledBufferCount(
+                        for: "concurrent_\(index % 3)",  // Share some keys
+                        shape: [100] as [NSNumber],
+                        dataType: MLMultiArrayDataType.float32
+                    )
+                }
             }
+
+            var collected: [Int] = []
+            for try await count in group {
+                collected.append(count)
+            }
+            return collected
         }
 
-        wait(for: [expectation], timeout: 5.0)
+        XCTAssertEqual(counts.count, 10)
+        XCTAssertTrue(counts.allSatisfy { $0 == 100 })
     }
 
     // MARK: - Performance Tests

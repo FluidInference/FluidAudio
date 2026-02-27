@@ -139,7 +139,9 @@ public enum SystemInfo {
             sysctlbyname(key, ptr.baseAddress, &size, nil, 0)
         }
         guard result == 0 else { return nil }
-        return String(cString: buffer)
+        let bytes = buffer.map { UInt8(bitPattern: $0) }
+        let payload = bytes.prefix { $0 != 0 }
+        return String(decoding: payload, as: UTF8.self)
         #else
         return nil
         #endif

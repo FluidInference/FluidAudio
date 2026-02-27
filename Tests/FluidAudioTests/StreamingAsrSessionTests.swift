@@ -132,7 +132,8 @@ final class StreamingAsrSessionTests: XCTestCase {
         await session?.cleanup()
 
         // Weak reference for testing
-        weak var weakSession = session
+        weak var weakSession: StreamingAsrSession?
+        weakSession = session
         session = nil
 
         // Session should be deallocated

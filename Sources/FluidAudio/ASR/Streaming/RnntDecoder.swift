@@ -45,10 +45,10 @@ public final class RnntDecoder {
         // Zero out states
         let count = hState.count
         hState.withUnsafeMutableBufferPointer(ofType: Float.self) { ptr, _ in
-            ptr.baseAddress?.assign(repeating: 0, count: count)
+            ptr.baseAddress?.update(repeating: 0, count: count)
         }
         cState.withUnsafeMutableBufferPointer(ofType: Float.self) { ptr, _ in
-            ptr.baseAddress?.assign(repeating: 0, count: count)
+            ptr.baseAddress?.update(repeating: 0, count: count)
         }
         lastToken = blankId
     }
@@ -77,8 +77,6 @@ public final class RnntDecoder {
         let startT = min(skipFrames, maxT)
 
         outerLoop: for t in startT..<maxT {
-            let globalT = timeOffset + t
-
             // Extract encoder step
             let encoderStep = try extractEncoderStep(from: encoderOutput, timeIndex: t, hiddenDim: hiddenDim)
 

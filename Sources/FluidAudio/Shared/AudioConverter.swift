@@ -123,7 +123,7 @@ final public class AudioConverter {
 
         // Copy samples into buffer
         if let channelData = inputBuffer.floatChannelData {
-            samples.withUnsafeBufferPointer { src in
+            _ = samples.withUnsafeBufferPointer { src in
                 memcpy(channelData[0], src.baseAddress!, samples.count * MemoryLayout<Float>.stride)
             }
         }
