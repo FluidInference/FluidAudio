@@ -280,15 +280,45 @@ public final class EmbeddingWeights: Sendable {
             return [Float](repeating: 0, count: hiddenSize)
         }
 
-        let offset = 8 + tokenId * hiddenSize * 2  // header + token offset (float16)
+        @inline(__always)
+        func halfToFloat(_ bits: UInt16) -> Float {
+            let sign = UInt32(bits & 0x8000) << 16
+            var exponent = Int((bits & 0x7C00) >> 10)
+            var fraction = UInt32(bits & 0x03FF)
+
+            let resultBits: UInt32
+            if exponent == 0 {
+                if fraction == 0 {
+                    resultBits = sign
+                } else {
+                    // Normalize subnormal half to build a valid float32.
+                    while (fraction & 0x0400) == 0 {
+                        fraction <<= 1
+                        exponent -= 1
+                    }
+                    fraction &= 0x03FF
+                    let exp32 = UInt32(exponent + (127 - 15) + 1)
+                    resultBits = sign | (exp32 << 23) | (fraction << 13)
+                }
+            } else if exponent == 0x1F {
+                resultBits = sign | 0x7F80_0000 | (fraction << 13)
+            } else {
+                let exp32 = UInt32(exponent + (127 - 15))
+                resultBits = sign | (exp32 << 23) | (fraction << 13)
+            }
+
+            return Float(bitPattern: resultBits)
+        }
+
+        let offset: Int = 8 + tokenId * hiddenSize * 2  // header + token offset (float16)
         var result = [Float](repeating: 0, count: hiddenSize)
 
-        data.withUnsafeBytes { ptr in
+        data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) in
             let f16Ptr = ptr.baseAddress!.advanced(by: offset)
-                .assumingMemoryBound(to: Float16.self)
+                .assumingMemoryBound(to: UInt16.self)
 
             for i in 0..<hiddenSize {
-                result[i] = Float(f16Ptr[i])
+                result[i] = halfToFloat(f16Ptr[i])
             }
         }
 
