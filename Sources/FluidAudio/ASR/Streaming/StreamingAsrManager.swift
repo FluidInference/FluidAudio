@@ -2,6 +2,57 @@
 import Foundation
 import OSLog
 
+private actor StreamingAsrEngine {
+    private let manager: AsrManager
+
+    init(config: ASRConfig) {
+        manager = AsrManager(config: config)
+    }
+
+    func initialize(models: AsrModels) async throws {
+        nonisolated(unsafe) let manager = manager
+        try await manager.initialize(models: models)
+    }
+
+    func resetDecoderState(for source: AudioSource) async throws {
+        nonisolated(unsafe) let manager = manager
+        try await manager.resetDecoderState(for: source)
+    }
+
+    func transcribeStreamingChunk(
+        _ chunkSamples: [Float],
+        source: AudioSource,
+        previousTokens: [Int],
+        isLastChunk: Bool
+    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
+        nonisolated(unsafe) let manager = manager
+        return try await manager.transcribeStreamingChunk(
+            chunkSamples,
+            source: source,
+            previousTokens: previousTokens,
+            isLastChunk: isLastChunk
+        )
+    }
+
+    func processTranscriptionResult(
+        tokenIds: [Int],
+        timestamps: [Int],
+        confidences: [Float],
+        encoderSequenceLength: Int,
+        audioSamples: [Float],
+        processingTime: TimeInterval
+    ) -> ASRResult {
+        manager.processTranscriptionResult(
+            tokenIds: tokenIds,
+            timestamps: timestamps,
+            confidences: confidences,
+            encoderSequenceLength: encoderSequenceLength,
+            audioSamples: audioSamples,
+            processingTime: processingTime
+        )
+    }
+}
+
 /// A high-level streaming ASR manager that provides a simple API for real-time transcription
 /// Similar to Apple's SpeechAnalyzer, it handles audio conversion and buffering automatically
 public actor StreamingAsrManager {
@@ -17,9 +68,7 @@ public actor StreamingAsrManager {
     private var updateContinuation: AsyncStream<StreamingTranscriptionUpdate>.Continuation?
 
     // ASR components
-    // AsrManager contains CoreML models which are not Sendable.
-    // We manage the safety ourselves by only accessing it from within the actor.
-    nonisolated(unsafe) private var asrManager: AsrManager?
+    private var asrEngine: StreamingAsrEngine?
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
 
@@ -135,12 +184,11 @@ public actor StreamingAsrManager {
 
         self.audioSource = source
 
-        // Initialize ASR manager with provided models
-        asrManager = AsrManager(config: config.asrConfig)
-        try await asrManager?.initialize(models: models)
-
-        // Reset decoder state for the specific source
-        try await asrManager?.resetDecoderState(for: source)
+        // Initialize ASR engine with provided models
+        let newAsrEngine = StreamingAsrEngine(config: config.asrConfig)
+        try await newAsrEngine.initialize(models: models)
+        try await newAsrEngine.resetDecoderState(for: source)
+        asrEngine = newAsrEngine
 
         // Reset sliding window state
         segmentIndex = 0
@@ -222,8 +270,8 @@ public actor StreamingAsrManager {
             if !confirmedTranscript.isEmpty { parts.append(confirmedTranscript) }
             if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
             finalText = parts.joined(separator: " ")
-        } else if let asrManager = asrManager, !accumulatedTokens.isEmpty {
-            let finalResult = asrManager.processTranscriptionResult(
+        } else if let asrEngine = asrEngine, !accumulatedTokens.isEmpty {
+            let finalResult = await asrEngine.processTranscriptionResult(
                 tokenIds: accumulatedTokens,
                 timestamps: [],
                 confidences: [],  // No per-token confidences needed for final text
@@ -254,8 +302,8 @@ public actor StreamingAsrManager {
         nextWindowCenterStart = 0
 
         // Reset decoder state for the current audio source
-        if let asrManager = asrManager {
-            try await asrManager.resetDecoderState(for: audioSource)
+        if let asrEngine = asrEngine {
+            try await asrEngine.resetDecoderState(for: audioSource)
         }
 
         // Reset sliding window state
@@ -291,8 +339,6 @@ public actor StreamingAsrManager {
         let chunk = config.chunkSamples
         let right = config.rightContextSamples
         let left = config.leftContextSamples
-        let sampleRate = config.asrConfig.sampleRate
-
         var currentAbsEnd = bufferStartIndex + sampleBuffer.count
         while currentAbsEnd >= (nextWindowCenterStart + chunk + right) {
             let leftStartAbs = max(0, nextWindowCenterStart - left)
@@ -325,8 +371,6 @@ public actor StreamingAsrManager {
     private func flushRemaining() async {
         let chunk = config.chunkSamples
         let left = config.leftContextSamples
-        let sampleRate = config.asrConfig.sampleRate
-
         var currentAbsEnd = bufferStartIndex + sampleBuffer.count
         while currentAbsEnd > nextWindowCenterStart {  // process until we exhaust
             // If we have less than a chunk ahead, process the final partial chunk
@@ -368,7 +412,7 @@ public actor StreamingAsrManager {
         windowStartSample: Int,
         isLastChunk: Bool = false
     ) async {
-        guard let asrManager = asrManager else { return }
+        guard let asrEngine = asrEngine else { return }
 
         do {
             let chunkStartTime = Date()
@@ -376,7 +420,7 @@ public actor StreamingAsrManager {
             // Start frame offset is now handled by decoder's timeJump mechanism
 
             // Call AsrManager directly with deduplication
-            let (tokens, timestamps, confidences, _) = try await asrManager.transcribeStreamingChunk(
+            let (tokens, timestamps, confidences, _) = try await asrEngine.transcribeStreamingChunk(
                 windowSamples,
                 source: audioSource,
                 previousTokens: accumulatedTokens,
@@ -398,7 +442,7 @@ public actor StreamingAsrManager {
 
             // Convert only the current chunk tokens to text for clean incremental updates
             // The final result will use all accumulated tokens for proper deduplication
-            let interim = asrManager.processTranscriptionResult(
+            let interim = await asrEngine.processTranscriptionResult(
                 tokenIds: tokens,  // Only current chunk tokens for progress updates
                 timestamps: adjustedTimestamps,
                 confidences: confidences,
@@ -420,7 +464,7 @@ public actor StreamingAsrManager {
             var displayResult = interim
             if shouldConfirm && vocabBoostingEnabled {
                 let chunkLocalTimings =
-                    asrManager.processTranscriptionResult(
+                    await asrEngine.processTranscriptionResult(
                         tokenIds: tokens,
                         timestamps: timestamps,  // Original chunk-local timestamps (not adjusted)
                         confidences: confidences,
@@ -616,9 +660,9 @@ public actor StreamingAsrManager {
 
     /// Reset decoder state for error recovery
     private func resetDecoderForRecovery() async {
-        if let asrManager = asrManager {
+        if let asrEngine = asrEngine {
             do {
-                try await asrManager.resetDecoderState(for: audioSource)
+                try await asrEngine.resetDecoderState(for: audioSource)
                 logger.info("Successfully reset decoder state during error recovery")
             } catch {
                 logger.error("Failed to reset decoder state during recovery: \(error)")
@@ -626,9 +670,10 @@ public actor StreamingAsrManager {
                 // Last resort: try to reinitialize the ASR manager
                 do {
                     let models = try await AsrModels.downloadAndLoad()
-                    let newAsrManager = AsrManager(config: config.asrConfig)
-                    try await newAsrManager.initialize(models: models)
-                    self.asrManager = newAsrManager
+                    let newAsrEngine = StreamingAsrEngine(config: config.asrConfig)
+                    try await newAsrEngine.initialize(models: models)
+                    try await newAsrEngine.resetDecoderState(for: audioSource)
+                    self.asrEngine = newAsrEngine
                     logger.info("Successfully reinitialized ASR manager during error recovery")
                 } catch {
                     logger.error("Failed to reinitialize ASR manager during recovery: \(error)")

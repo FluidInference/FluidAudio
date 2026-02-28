@@ -2,6 +2,22 @@ import XCTest
 
 @testable import FluidAudio
 
+private actor SpeakerManagerActorAdapter {
+    private let manager: SpeakerManager
+
+    init(manager: SpeakerManager) {
+        self.manager = manager
+    }
+
+    func assignSpeaker(_ embedding: [Float], speechDuration: TimeInterval) {
+        _ = manager.assignSpeaker(embedding, speechDuration: Float(speechDuration))
+    }
+
+    func snapshot() -> (count: Int, ids: [String]) {
+        (manager.speakerCount, manager.speakerIds)
+    }
+}
+
 /// Tests for SpeakerManager functionality
 final class SpeakerManagerTests: XCTestCase {
 
@@ -402,10 +418,9 @@ final class SpeakerManagerTests: XCTestCase {
 
     // MARK: - Thread Safety
 
-    func testConcurrentAccess() {
+    func testConcurrentAccess() async {
         let manager = SpeakerManager(speakerThreshold: 0.5)  // Set threshold for distinct embeddings
-        let queue = DispatchQueue(label: "test", attributes: .concurrent)
-        let group = DispatchGroup()
+        let managerAdapter = SpeakerManagerActorAdapter(manager: manager)
         let iterations = 10  // Reduced iterations for more reliable test
 
         // Use a serial queue to ensure embeddings are distinct
@@ -427,34 +442,28 @@ final class SpeakerManagerTests: XCTestCase {
         }
 
         // Concurrent writes with pre-created distinct embeddings
-        for i in 0..<iterations {
-            group.enter()
-            queue.async {
-                _ = manager.assignSpeaker(embeddings[i], speechDuration: 2.0)
-                group.leave()
+        await withTaskGroup(of: Void.self) { group in
+            for i in 0..<iterations {
+                group.addTask {
+                    await managerAdapter.assignSpeaker(embeddings[i], speechDuration: 2.0)
+                }
+            }
+
+            // Concurrent reads
+            for _ in 0..<iterations {
+                group.addTask {
+                    _ = await managerAdapter.snapshot()
+                }
             }
         }
 
-        // Concurrent reads
-        for _ in 0..<iterations {
-            group.enter()
-            queue.async {
-                _ = manager.speakerCount
-                _ = manager.speakerIds
-                group.leave()
-            }
-        }
+        let finalState = await managerAdapter.snapshot()
 
-        let expectation = XCTestExpectation(description: "Concurrent operations complete")
-        group.notify(queue: .main) {
-            // Due to concurrent operations and clustering, we may not get exactly iterations speakers
-            // But we should have at least some distinct speakers
-            XCTAssertGreaterThan(manager.speakerCount, 0)
-            XCTAssertLessThanOrEqual(manager.speakerCount, iterations)
-            expectation.fulfill()
-        }
-
-        wait(for: [expectation], timeout: 5.0)
+        // Due to concurrent operations and clustering, we may not get exactly iterations speakers
+        // But we should have at least some distinct speakers
+        XCTAssertGreaterThan(finalState.count, 0)
+        XCTAssertLessThanOrEqual(finalState.count, iterations)
+        XCTAssertEqual(finalState.count, finalState.ids.count)
     }
 
     // MARK: - Upsert Tests

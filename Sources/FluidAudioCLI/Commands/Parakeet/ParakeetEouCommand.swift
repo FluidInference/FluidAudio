@@ -221,8 +221,6 @@ struct ParakeetEouCommand {
 
             try audioFile.read(into: buffer)
 
-            let audioDuration = Double(frameCount) / format.sampleRate
-
             await manager.reset()
 
             // No padding - NeMo doesn't add any, and the cache-aware encoder handles context properly
@@ -383,7 +381,6 @@ struct ParakeetEouCommand {
         }
 
         let avgWer = totalWer / Double(testFiles.count)
-        let avgRtf = totalAudioDuration / totalTime
 
         // Calculate medians
         let sortedWers = results.map(\.wer).sorted()

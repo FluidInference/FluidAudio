@@ -12,7 +12,7 @@
 
 #if defined(__clang__)
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpragma-messages"
+#pragma clang diagnostic ignored "-W#pragma-messages"
 #endif
 
 #include "fastcluster_internal.hpp"
