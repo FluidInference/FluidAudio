@@ -1,0 +1,5 @@
+module AHCClustering {
+    header "clustering-includes.h"
+    requires cplusplus
+    export *
+}

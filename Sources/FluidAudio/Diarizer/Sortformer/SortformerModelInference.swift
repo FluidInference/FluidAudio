@@ -235,34 +235,13 @@ extension SortformerModels {
         let output = try mainModel.prediction(from: inputFeatures)
 
         // Extract outputs (names must match CoreML Sortformer model)
-        // Note: Output names use _out suffix to avoid macOS 26+ BNNS compiler error
-        // where input and output tensors cannot share the same name
         guard let predictions = output.featureValue(for: "speaker_preds")?.shapedArrayValue(of: Float32.self)?.scalars,
-            let chunkEmbeddingsLength = output.featureValue(for: "chunk_pre_encoder_lengths_out")?.shapedArrayValue(
+            let chunkEmbeddings = output.featureValue(for: "chunk_pre_encoder_embs")?.shapedArrayValue(
+                of: Float32.self)?.scalars,
+            let chunkEmbeddingsLength = output.featureValue(for: "chunk_pre_encoder_lengths")?.shapedArrayValue(
                 of: Int32.self)?.scalars.first
         else {
             throw SortformerError.inferenceFailed("Missing model outputs")
-        }
-
-        // Chunk embeddings may be Float16 (head module uses fp16) or Float32
-        let chunkEmbeddings: [Float]
-        if let fp32 = output.featureValue(for: "chunk_pre_encoder_embs_out")?.shapedArrayValue(of: Float32.self)?
-            .scalars
-        {
-            chunkEmbeddings = fp32
-        } else {
-            #if arch(arm64)
-            if #available(macOS 15.0, iOS 18.0, *),
-                let fp16 = output.featureValue(for: "chunk_pre_encoder_embs_out")?.shapedArrayValue(of: Float16.self)?
-                    .scalars
-            {
-                chunkEmbeddings = fp16.map { Float($0) }
-            } else {
-                throw SortformerError.inferenceFailed("Missing chunk_pre_encoder_embs_out")
-            }
-            #else
-            throw SortformerError.inferenceFailed("Missing chunk_pre_encoder_embs_out")
-            #endif
         }
 
         return MainModelOutput(
