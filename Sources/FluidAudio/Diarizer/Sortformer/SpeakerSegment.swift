@@ -208,7 +208,7 @@ public struct SpeakerSegment: SpeakerSegment64 {
     
     @inline(__always)
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(bits)
+        hasher.combine(bits | Self.finalizedMask)
     }
     
     @inline(__always)
@@ -220,7 +220,7 @@ public struct SpeakerSegment: SpeakerSegment64 {
     @inline(__always)
     public static func == <S>(lhs: Self, rhs: S) -> Bool
     where S: SpeakerSegment64 {
-        return lhs.bits == rhs.bits
+        return (lhs.bits | Self.finalizedMask) == (rhs.bits | Self.finalizedMask)
     }
     
     // MARK: - Speaker Frame Range
@@ -275,7 +275,7 @@ public struct SpeakerSegment: SpeakerSegment64 {
 }
 
 
-public struct AnonymousSpeakerSegment: SpeakerSegment64 {    
+public struct TimelineSegment: SpeakerSegment64 {    
     public var speakerSegment: SpeakerSegment
     
     @inlinable
@@ -284,7 +284,7 @@ public struct AnonymousSpeakerSegment: SpeakerSegment64 {
     }
 
     @inlinable
-    public init(from segment: AnonymousSpeakerSegment) {
+    public init(from segment: TimelineSegment) {
         self.speakerSegment = segment.speakerSegment
     }
     
@@ -476,5 +476,19 @@ public struct AnonymousSpeakerSegment: SpeakerSegment64 {
     public func overlapLength<T>(with other: T, ensuringSameSpeaker: Bool = true) -> Int
     where T: SpeakerFrameRange {
         return SortformerFrameRangeHelpers.overlapLength(self, other, ensuringSameSpeaker: ensuringSameSpeaker)
+    }
+}
+
+public extension SpeakerSegment {
+    var slot: Int {
+        get { speakerId }
+        set { speakerId = newValue }
+    }
+}
+
+public extension TimelineSegment {
+    var slot: Int {
+        get { speakerId }
+        set { speakerId = newValue }
     }
 }

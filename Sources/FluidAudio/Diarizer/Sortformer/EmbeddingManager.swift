@@ -125,6 +125,7 @@ public class EmbeddingManager {
                     embedding: embeddingVector,
                     startFrame: request.startFrame,
                     endFrame: request.endFrame,
+                    shouldNormalize: true
                 )
                 
                 embeddings.append(embedding)

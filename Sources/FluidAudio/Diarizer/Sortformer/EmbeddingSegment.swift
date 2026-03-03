@@ -204,8 +204,8 @@ public class EmbeddingSegment: SpeakerFrameRange, Identifiable {
     /// Extracted embedding regions for this segment
     public private(set) var embeddings: [SpeakerEmbedding]
     
-    /// IDs of the corresponding `SortformerSegments`
-    public var segments: [SpeakerSegment]
+    /// Array of it's corresponding SpeakerSegments
+    public var segments: [TimelineSegment]
     
     public var isNone: Bool { speakerId < 0 }
     public var isValid: Bool { speakerId >= 0 }
@@ -218,7 +218,7 @@ public class EmbeddingSegment: SpeakerFrameRange, Identifiable {
         startFrame: Int,
         endFrame: Int,
         finalized: Bool = true,
-        segments: [SpeakerSegment] = []
+        segments: [TimelineSegment] = []
     ) {
         self.speakerId = slot
         self.startFrame = startFrame
@@ -233,7 +233,7 @@ public class EmbeddingSegment: SpeakerFrameRange, Identifiable {
         startFrame: Int,
         endFrame: Int,
         finalized: Bool = true,
-        segment: SpeakerSegment
+        segment: TimelineSegment
     ) {
         self.speakerId = slot
         self.startFrame = startFrame
@@ -696,6 +696,12 @@ public struct EmbeddingRequest: SortformerFrameRange, Hashable {
     }
 }
 
+public extension EmbeddingSegment {
+    var segmentIds: [UInt64] {
+        segments.map(\.id)
+    }
+}
+
 
 extension UUID {
     static var zero: UUID {
@@ -703,4 +709,3 @@ extension UUID {
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00))
     }
 }
-

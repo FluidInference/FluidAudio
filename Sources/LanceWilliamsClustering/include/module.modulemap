@@ -1,4 +1,4 @@
-module AHCClustering {
+module LanceWilliamsClustering {
     header "clustering-includes.h"
     requires cplusplus
     export *

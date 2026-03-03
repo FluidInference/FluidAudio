@@ -11,12 +11,13 @@ public class SpeakerDatabase {
     public let config: ClusteringConfig
     public private(set) var inactiveSpeakers: [SpeakerProfile] = []
     public private(set) var activeSpeakers: [Int : SpeakerProfile] = [:]
-    public private(set) var isOverflowing: Bool = false
     
     private var nextSpeakerId: Int = 0
     
-    public var droppableSpeakerIndices: [Int] {
-        activeSpeakers.filter{ !$1.hasOutliers }.map(\.key)
+    public var droppableSlots: [Int] {
+        activeSpeakers
+            .filter { $1.isDroppable }
+            .map(\.key)
     }
     
     public var numSlots: Int {
@@ -33,11 +34,12 @@ public class SpeakerDatabase {
         self.activeSpeakers.reserveCapacity(config.numSpeakers)
     }
     
-    public func stream<CFinalized, CTentative>(
-        newFinalized: CFinalized,
-        newTentative: CTentative
-    ) where CFinalized: Sequence, CFinalized.Element == EmbeddingSegment,
-            CTentative: Sequence, CTentative.Element == EmbeddingSegment
+    public func stream<F, T>(
+        newFinalized: F,
+        newTentative: T,
+        onSlotFreed: ((Int) -> Void)?
+    ) where F: Sequence, F.Element == EmbeddingSegment,
+            T: Sequence, T.Element == EmbeddingSegment
     {
         var binnedSegments: [Int : (finalized: [EmbeddingSegment], tentative: [EmbeddingSegment])] = [:]
         binnedSegments.reserveCapacity(activeSpeakers.count)
@@ -54,16 +56,22 @@ public class SpeakerDatabase {
             binnedSegments[segment.speakerId]?.tentative.append(segment)
         }
         
-        isOverflowing = false
-        
-        let checkOutliers = !self.hasVacantSlots
-        
         for (slot, (finalized, tentative)) in binnedSegments {
             // Initialize the speaker if needed
             guard let speaker = activeSpeakers[slot] else {
                 debugPrint("WARNING: Found a new speaker in the stream, but it was not active.")
                 continue
             }
+
+            // Trial speaker received no assignments, so parent speaker reclaimed ownership.
+            // Return trial segments/clusters before this update path clears tentative clusters.
+            if speaker.parent != nil, finalized.isEmpty, tentative.isEmpty {
+                speaker.returnToParent()
+                activeSpeakers[slot] = nil
+                continue
+            }
+
+            let checkOutliers = !self.hasVacantSlots
             
             speaker.stream(
                 newFinalized: finalized,
@@ -77,10 +85,13 @@ public class SpeakerDatabase {
                 activeSpeakers[slot] = nil
                 continue
             }
-            
-            if speaker.hasOutliers {
-                isOverflowing = true
-            }
+        }
+        
+        updateSpeakerIds()
+        
+        while let droppedSlot = pickSlotToDrop() {
+            freeSlot(droppedSlot)
+            onSlotFreed?(droppedSlot)
         }
     }
     
@@ -104,48 +115,75 @@ public class SpeakerDatabase {
             return existing
         }
         
-        let newSpeaker = SpeakerProfile(config: config, speakerId: nextSpeakerId)
-        activeSpeakers[slot] = newSpeaker
-        nextSpeakerId += 1
+        let newSpeaker = SpeakerProfile(config: config, speakerId: inactiveSpeakers.count + slot)
+        
         return newSpeaker
     }
     
     public func freeSlot(_ slot: Int) {
-        // Purge the old speaker
-        if let speaker = activeSpeakers[slot] {
-            if let match = checkInactiveMatches(for: speaker, threshold: config.matchThreshold) {
+        // Remove the old speaker
+        var removedId: Int? = nil
+        if let speaker = activeSpeakers.removeValue(forKey: slot) {
+            if let match = findMatchingSpeaker(for: speaker) {
                 match.absorbAndFinalize(speaker)
             } else {
                 inactiveSpeakers.append(speaker)
             }
+            
+            removedId = speaker.speakerId
+            
+            // Only update cannot-link constraints from speakers as they are deactivated to avoid stale IDs
+            for other in activeSpeakers.values {
+                other.updateCannotLink(with: speaker.speakerId)
+            }
+            
+            // I don't think this is necessary since it only needs to be one sided anyway
+//            let cannotLink = speaker.cannotLink
+//            for other in inactiveSpeakers where cannotLink.contains(other.speakerId) {
+//                other.updateCannotLink(with: speaker.speakerId)
+//            }
         }
+        shiftSlotsLeft(startingAt: slot)
         
         // Take outliers from the speaker with the most outliers
         guard let splitSpeaker = activeSpeakers.values.max(by: {
-            $0.outlierWeight > $1.outlierWeight
+            $0.outlierWeight < $1.outlierWeight
         }), splitSpeaker.hasOutliers
         else {
-            activeSpeakers[slot] = nil
+            guard let removedId else { return }
             return
         }
         
-        let cannotLink = Set(activeSpeakers.values.map(\.speakerId))
-        let newSpeaker = splitSpeaker.takeOutliers(speakerId: nextSpeakerId,
-                                                   cannotLink: cannotLink)
-        if let match = checkInactiveMatches(for: newSpeaker, threshold: config.matchThreshold) {
+        // Initialize the new speaker profile
+        let newSlot = numSlots - 1
+        let newId = inactiveSpeakers.count + newSlot
+        let newSpeaker = splitSpeaker.extractOutlierProfile(speakerId: newId)
+        
+        if let removedId {
+            newSpeaker.updateCannotLink(with: removedId)
+        }
+         
+        // Check for matches
+        if let match = findMatchingSpeaker(for: newSpeaker) {
             newSpeaker.speakerId = match.speakerId
-        } else {
-            nextSpeakerId += 1
         }
         
-        activeSpeakers[slot] = newSpeaker
+        activeSpeakers[newSlot] = newSpeaker
     }
     
-    private func checkInactiveMatches(for speaker: SpeakerProfile, threshold: Float) -> SpeakerProfile? {
-        var bestDistance: Float = threshold.nextUp
+    private func findMatchingSpeaker(for speaker: SpeakerProfile) -> SpeakerProfile? {
+        var bestDistance: Float = config.matchThreshold.nextUp
         var bestMatch: SpeakerProfile? = nil
         
+        let activeIds = activeSpeakers.values.map(\.speakerId)
+        
         for candidate in inactiveSpeakers {
+            // Skip if the speaker is assigned to someone already
+            guard !activeIds.contains(candidate.speakerId) else {
+                continue
+            }
+            
+            // Determine how close it is
             let distance = speaker.distance(to: candidate)
             if distance <= bestDistance {
                 bestMatch = candidate
@@ -154,5 +192,126 @@ public class SpeakerDatabase {
         }
         
         return bestMatch
+    }
+    
+    private func pickSlotToDrop() -> Int? {
+        guard activeSpeakers.values.contains(where: \.hasOutliers) else {
+            return nil
+        }
+        
+        guard activeSpeakers.count == numSlots else {
+            // Return the first unused slot
+            var isUnused = Array(repeating: true, count: config.numSlots)
+            for slot in activeSpeakers.keys {
+                isUnused[slot] = false
+            }
+            return isUnused.firstIndex(of: true)
+        }
+        
+        guard let droppedSlot = droppableSlots.min(by: {
+            guard let end0 = activeSpeakers[$0]?.lastActiveFrame,
+                  let end1 = activeSpeakers[$1]?.lastActiveFrame else {
+                return false
+            }
+            return end0 < end1
+        }) else {
+            return nil
+        }
+        
+        return droppedSlot
+    }
+    
+    private func shiftSlotsLeft(startingAt slot: Int) {
+        guard slot < config.numSlots - 1 else {
+            return
+        }
+        
+        for i in (slot + 1)..<config.numSlots {
+            activeSpeakers[i - 1] = activeSpeakers[i]
+        }
+        activeSpeakers[config.numSlots - 1] = nil
+    }
+    
+    // TODO: I might need a better ID selection mechanism to minimize ID swaps
+    private func updateSpeakerIds() {
+        guard !inactiveSpeakers.isEmpty else { return }
+        
+        let threshold = config.clusteringThreshold
+
+        var numRows = activeSpeakers.count
+        var numCols = inactiveSpeakers.count
+        
+        var costMatrix: [Float] = []
+        var rowToSlot: [Int] = []
+        var columnToIndex: [Int] = Array(0..<numCols)
+        costMatrix.reserveCapacity(numRows * numCols)
+        rowToSlot.reserveCapacity(numRows)
+        
+        var isColumnMatched = Array(repeating: false, count: numCols)
+        
+        // Build cost matrix
+        for (slot, speaker) in activeSpeakers {
+            var foundMatch = false
+            
+            for (i, candidate) in inactiveSpeakers.enumerated() {
+                let distance = speaker.distance(to: candidate)
+                
+                guard distance <= threshold else {
+                    costMatrix.append(.infinity)
+                    continue
+                }
+                
+                foundMatch = true
+                isColumnMatched[i] = true
+            }
+            
+            guard foundMatch else {
+                // Undo the row
+                costMatrix.removeLast(numCols)
+                continue
+            }
+            
+            rowToSlot.append(slot)
+        }
+        
+        numRows = rowToSlot.count
+        
+        // Note: if numRows > 0, then numCols > 0
+        guard numRows > 0 else {
+            for (slot, speaker) in activeSpeakers {
+                speaker.speakerId = inactiveSpeakers.count + slot
+            }
+            return
+        }
+        
+        // Remove columns with no matches
+        while let removedCol = isColumnMatched.lastIndex(of: false) {
+            for row in (0..<numRows).reversed() {
+                costMatrix.remove(at: row * numCols + removedCol)
+            }
+            isColumnMatched.remove(at: removedCol)
+            columnToIndex.remove(at: removedCol)
+            numCols -= 1
+        }
+        
+        // Solve the assignment
+        guard let assignments = solveRectangularLinearAssignment(
+            numRows: numRows, numCols: numCols, costMatrix: costMatrix) else {
+            fatalError("Failed to solve ID assignments")
+        }
+        
+        // Assign IDs
+        var isSlotMatched = Array(repeating: false, count: numSlots)
+        for (row, col) in zip(assignments.rows, assignments.cols) {
+            let slot = rowToSlot[row]
+            let inactiveIndex = columnToIndex[col]
+            isSlotMatched[slot] = true
+            
+            activeSpeakers[row]?.speakerId = inactiveSpeakers[inactiveIndex].speakerId
+        }
+        
+        for (slot, speaker) in activeSpeakers where !isSlotMatched[slot] {
+            speaker.speakerId = inactiveSpeakers.count + slot
+        }
     }
 }

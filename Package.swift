@@ -30,6 +30,8 @@ let package = Package(
             dependencies: [
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
+                "LanceWilliamsClustering",
+                "LinearAssignmentWrapper",
                 .product(name: "Tokenizers", package: "swift-transformers"),
             ],
             path: "Sources/FluidAudio",
@@ -40,6 +42,16 @@ let package = Package(
         .target(
             name: "FastClusterWrapper",
             path: "Sources/FastClusterWrapper",
+            publicHeadersPath: "include"
+        ),
+        .target(
+            name: "LanceWilliamsClustering",
+            path: "Sources/LanceWilliamsClustering",
+            publicHeadersPath: "include"
+        ),
+        .target(
+            name: "LinearAssignmentWrapper",
+            path: "Sources/LinearAssignmentWrapper",
             publicHeadersPath: "include"
         ),
         .target(

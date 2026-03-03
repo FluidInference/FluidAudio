@@ -8,7 +8,7 @@
 import Foundation
 import Accelerate
 import OrderedCollections
-import AHCClustering
+import LanceWilliamsClustering
 
 public class SpeakerProfile: Hashable {
     public let id = UUID()
@@ -17,13 +17,11 @@ public class SpeakerProfile: Hashable {
     public private(set) var tentativeClusters: [SpeakerClusterCentroid] = []
     public private(set) var outliers: [SpeakerClusterCentroid] = []
     
-    public private(set) var finalizedSegments: OrderedSet<AnonymousSpeakerSegment> = []
-    public private(set) var tentativeSegments: Set<AnonymousSpeakerSegment> = []
-    
-    private var lastTentativeSegment: AnonymousSpeakerSegment? = nil
+    public private(set) var finalizedSegments: [TimelineSegment] = []
+    public private(set) var tentativeSegments: [TimelineSegment] = []
     
     public var segments: [SpeakerSegment] {
-        (finalizedSegments.sorted() + tentativeSegments.sorted()).map(\.speakerSegment)
+        (finalizedSegments + tentativeSegments).map(\.speakerSegment)
     }
     
     /// The ID of the speaker whose outliers formed this speaker profile
@@ -37,7 +35,17 @@ public class SpeakerProfile: Hashable {
     public var cannotLink: Set<Int> = []
     
     /// Speaker ID
-    public var speakerId: Int
+    public var speakerId: Int {
+        didSet {
+            guard oldValue != speakerId else { return }
+            for i in finalizedSegments.indices {
+                finalizedSegments[i].speakerId = speakerId
+            }
+            for i in tentativeSegments.indices {
+                tentativeSegments[i].speakerId = speakerId
+            }
+        }
+    }
     
     public var isFinalized: Bool = false
     
@@ -78,12 +86,26 @@ public class SpeakerProfile: Hashable {
     public var outlierCount: Int { outliers.count }
     public var childCount: Int { children.count }
     
+    public var finalizedOutliers: [SpeakerClusterCentroid] {
+        outliers.filter(\.isFinalized)
+    }
+    
+    public var tentativeOutliers: [SpeakerClusterCentroid] {
+        outliers.filter { !$0.isFinalized }
+    }
+    
     public var isDroppable: Bool {
         outliers.isEmpty && parent == nil && children.isEmpty
     }
     
-    public var droppabilityScore: Float {
-        (parent == nil ? 1 : 0) - outlierWeight - Float(children.count)
+    var lastActiveFrame: Int {
+        return (tentativeSegments.last?.endFrame ??
+                finalizedSegments.last?.endFrame ?? .min)
+    }
+
+    var firstActiveFrame: Int {
+        return (finalizedSegments.first?.startFrame ??
+                tentativeSegments.first?.startFrame ?? .max)
     }
     
     // MARK: - Init
@@ -93,12 +115,16 @@ public class SpeakerProfile: Hashable {
         self.speakerId = speakerId
     }
     
+    convenience init(config: ClusteringConfig, speakerIndex: Int) {
+        self.init(config: config, speakerId: speakerIndex)
+    }
+    
     private init(
         config: ClusteringConfig,
         speakerId: Int,
         parent: SpeakerProfile? = nil,
-        finalizedSegments: OrderedSet<AnonymousSpeakerSegment>,
-        tentativeSegments: Set<AnonymousSpeakerSegment>,
+        finalizedSegments: [TimelineSegment],
+        tentativeSegments: [TimelineSegment],
         finalizedClusters: [SpeakerClusterCentroid],
         tentativeClusters: [SpeakerClusterCentroid],
         cannotLink: Set<Int>
@@ -108,7 +134,6 @@ public class SpeakerProfile: Hashable {
         self.tentativeClusters = tentativeClusters
         self.finalizedSegments = finalizedSegments
         self.tentativeSegments = tentativeSegments
-        self.lastTentativeSegment = nil
         self.parent = parent
         self.speakerId = speakerId
         self.cannotLink = cannotLink
@@ -121,23 +146,20 @@ public class SpeakerProfile: Hashable {
     // MARK: - Segment Updates
     
     @inline(__always)
-    public func appendFinalizedSegment<S>(_ segment: S) where S: SpeakerSegment64 {
+    public func appendFinalizedSegment(_ segment: TimelineSegment) {
         detachFromParent() // This confirms that this speaker is new
-        let newSegment = AnonymousSpeakerSegment(from: segment.reassigned(toSpeaker: speakerId))
-        finalizedSegments.updateOrAppend(newSegment)
+        let newSegment = segment.reassigned(toSpeaker: speakerId)
+        finalizedSegments.append(newSegment)
     }
     
     @inline(__always)
-    public func appendTentativeSegment<S>(_ segment: S)
-    where S: SpeakerSegment64 {
-        let newSegment = AnonymousSpeakerSegment(from: segment.reassigned(toSpeaker: speakerId))
-        tentativeSegments.insert(newSegment)
-        lastTentativeSegment = newSegment
+    public func appendTentativeSegment(_ segment: TimelineSegment) {
+        let newSegment = segment.reassigned(toSpeaker: speakerId)
+        tentativeSegments.append(newSegment)
     }
     
     @inline(__always)
-    public func appendSegment<S>(_ segment: S)
-    where S: SpeakerSegment64 {
+    public func appendSegment(_ segment: TimelineSegment) {
         if segment.isFinalized {
             appendFinalizedSegment(segment)
         } else {
@@ -146,27 +168,24 @@ public class SpeakerProfile: Hashable {
     }
     
     @inline(__always) @discardableResult
-    public func popFinalizedSegment() -> AnonymousSpeakerSegment? {
+    public func popFinalizedSegment() -> TimelineSegment? {
         guard !finalizedSegments.isEmpty else { return nil }
         return finalizedSegments.removeLast()
     }
     
     @inline(__always) @discardableResult
-    public func popTentativeSegment() -> AnonymousSpeakerSegment? {
-        guard let lastTentativeSegment else { return nil }
-        self.lastTentativeSegment = nil
-        return finalizedSegments.remove(lastTentativeSegment)
+    public func popTentativeSegment() -> TimelineSegment? {
+        return tentativeSegments.popLast()
     }
     
     @inline(__always) @discardableResult
-    public func popSegment(finalized: Bool) -> AnonymousSpeakerSegment? {
+    public func popSegment(finalized: Bool) -> TimelineSegment? {
         return finalized ? popFinalizedSegment() : popTentativeSegment()
     }
     
     @inline(__always)
-    public func clearTentativeSegments() {
-        lastTentativeSegment = nil
-        return tentativeSegments.removeAll()
+    func clearTentativeSegments() {
+        return tentativeSegments.removeAll(keepingCapacity: true)
     }
     
     // MARK: - Embedding Updates
@@ -325,27 +344,36 @@ public class SpeakerProfile: Hashable {
     
     
     /// Separate the outlier clusters speaker profile from the outlier clusters.
-    public func takeOutliers(speakerId: Int, cannotLink: Set<Int> = []) -> SpeakerProfile {
+    public func extractOutlierProfile(speakerId: Int, cannotLink: Set<Int> = []) -> SpeakerProfile {
         // Collect segments
         var outlierSegments = outliers
             .flatMap(\.segments)
-            .map { AnonymousSpeakerSegment(from: $0.reassigned(toSpeaker: speakerId)) }
+            .map { $0.reassigned(toSpeaker: speakerId) }
+        
         let numTentativeOutlierSegments = outlierSegments.partition(by: \.isFinalized)
         
+        outlierSegments[0..<numTentativeOutlierSegments].sort()
         outlierSegments[numTentativeOutlierSegments...].sort()
         
-        var outlierTentativeSegments = Set(outlierSegments
+        var outlierTentativeSegments = Array(outlierSegments
             .prefix(numTentativeOutlierSegments))
-        var outlierFinalizedSegments = OrderedSet(outlierSegments
+        var outlierFinalizedSegments = Array(outlierSegments
             .suffix(from: numTentativeOutlierSegments))
         
-        self.tentativeSegments.subtract(outlierTentativeSegments)
-        self.finalizedSegments.subtract(outlierFinalizedSegments)
-        lastTentativeSegment = nil
+        for segment in outlierTentativeSegments {
+            guard let index = tentativeSegments.lastIndex(of: segment) else { continue }
+            tentativeSegments.remove(at: index)
+        }
+        
+        for segment in outlierFinalizedSegments {
+            guard let index = finalizedSegments.lastIndex(of: segment) else { continue }
+            finalizedSegments.remove(at: index)
+        }
         
         let result = SpeakerProfile(
             config: self.config,
             speakerId: speakerId,
+            parent: self,
             finalizedSegments: outlierFinalizedSegments,
             tentativeSegments: outlierTentativeSegments,
             finalizedClusters: [],
@@ -353,8 +381,9 @@ public class SpeakerProfile: Hashable {
             cannotLink: cannotLink
         )
         
-        self.outliers.removeAll()
-        self.children.insert(result)
+        outliers.removeAll()
+        result.parent = self
+        children.insert(result)
         
         return result
     }
@@ -366,15 +395,39 @@ public class SpeakerProfile: Hashable {
     
     public func returnToParent() {
         guard let parent else { return }
+        
+        for cluster in tentativeClusters {
+            if let (existing, _) = self.findCluster(for: cluster, in: parent.tentativeClusters) {
+                existing.update(with: cluster)
+            } else {
+                parent.tentativeClusters.append(cluster)
+            }
+        }
+        
+        for cluster in finalizedClusters {
+            if let (existing, _) = self.findCluster(for: cluster, in: parent.finalizedClusters) {
+                existing.update(with: cluster)
+            } else {
+                parent.finalizedClusters.append(cluster)
+            }
+        }
+        
         for outlier in outliers {
             if let (cluster, _) = self.findCluster(for: outlier, in: parent.tentativeClusters) {
                 cluster.update(with: outlier)
             } else {
-                parent.outliers.append(outlier)
+                parent.tentativeClusters.append(outlier)
             }
         }
         
         parent.mergeFinalizedSegments(of: self)
+        parent.mergeTentativeSegments(of: self)
+        
+        tentativeClusters.removeAll(keepingCapacity: true)
+        finalizedClusters.removeAll(keepingCapacity: true)
+        outliers.removeAll(keepingCapacity: true)
+        tentativeSegments.removeAll(keepingCapacity: true)
+        finalizedSegments.removeAll(keepingCapacity: true)
         
         self.parent = nil
     }
@@ -389,7 +442,7 @@ public class SpeakerProfile: Hashable {
         }
         
         if !tentativeSegments.isEmpty {
-            finalizedSegments.formUnion(tentativeSegments)
+            finalizedSegments.append(contentsOf: tentativeSegments)
             tentativeSegments.removeAll()
         }
         
@@ -403,7 +456,7 @@ public class SpeakerProfile: Hashable {
     
     public func updateCannotLink(with speakerIds: Set<Int>) {
         cannotLink.formUnion(speakerIds)
-        cannotLink.remove(speakerId)
+        cannotLink.remove(self.speakerId)
     }
     
     public func updateCannotLink(with speakerId: Int) {
@@ -417,6 +470,7 @@ public class SpeakerProfile: Hashable {
     public func absorbAndFinalize(_ other: SpeakerProfile) {
         self.finalize(keepOutliers: true)
         other.finalize(keepOutliers: true)
+        other.speakerId = self.speakerId
         
         // 1. Compress clusters and outliers
         
@@ -493,6 +547,19 @@ public class SpeakerProfile: Hashable {
         }
     }
     
+    private func mergeTentativeSegments(of other: SpeakerProfile) {
+        guard !other.tentativeSegments.isEmpty else { return }
+        
+        if self.speakerId == other.speakerId {
+            tentativeSegments.append(contentsOf: other.tentativeSegments)
+        } else {
+            let newSegments = other.tentativeSegments.map {
+                $0.reassigned(toSpeaker: self.speakerId)
+            }
+            tentativeSegments.append(contentsOf: newSegments)
+        }
+    }
+    
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
@@ -503,16 +570,17 @@ public class SpeakerProfile: Hashable {
 }
 
 public class SpeakerClusterCentroid: EmbeddingVector {
-    
     public var id: UUID { embedding.id }
     public let embedding: SpeakerEmbedding
     public var weight: Float
-    public var segments: [SpeakerSegment]
+    public var segments: [TimelineSegment]
     public var isFinalized: Bool
     
     public var bufferView: UnsafeBufferPointer<Float> { embedding.bufferView }
+    public var buffer: UnsafeBufferPointer<Float> { embedding.bufferView }
     public var baseAddress: UnsafePointer<Float>? { embedding.baseAddress }
     public var magnitude: Float { embedding.magnitude }
+    public var segmentIds: [UInt64] { segments.map(\.id) }
     
     @inline(__always)
     public var cppView: SpeakerEmbeddingWrapper { cppWrapper(isOutlier: false) }
@@ -520,14 +588,25 @@ public class SpeakerClusterCentroid: EmbeddingVector {
     @inline(__always)
     public var cppOutlierView: SpeakerEmbeddingWrapper { cppWrapper(isOutlier: true) }
     
-    public init(id: UUID = UUID(), segments: [SpeakerSegment] = [], weight: Float, isFinalized: Bool = true) {
+    public init(
+        id: UUID = UUID(),
+        segments: [TimelineSegment] = [],
+        weight: Float,
+        isFinalized: Bool = true
+    ) {
         self.embedding = SpeakerEmbedding(id: id, startFrame: 0, endFrame: 0)
         self.segments = segments
         self.isFinalized = isFinalized
         self.weight = weight
     }
     
-    public init(id: UUID = UUID(), embedding: SpeakerEmbedding, segments: [SpeakerSegment] = [], weight: Float, isFinalized: Bool = true) {
+    public init(
+        id: UUID = UUID(),
+        embedding: SpeakerEmbedding,
+        segments: [TimelineSegment] = [],
+        weight: Float,
+        isFinalized: Bool = true
+    ) {
         // Create a deep copy of the embedding
         self.embedding = SpeakerEmbedding(id: id, embedding: embedding.bufferView, startFrame: embedding.startFrame, endFrame: embedding.endFrame)
         self.segments = segments
@@ -556,7 +635,7 @@ public class SpeakerClusterCentroid: EmbeddingVector {
         let segmentCount: Int = embeddingView.segmentCount()
         self.segments = Array(unsafeUninitializedCapacity: segmentCount) { buffer, count in
             embeddingView.segments().withContiguousStorageIfAvailable { segmentsBuf in
-                segmentsBuf.withMemoryRebound(to: SpeakerSegment.self) { srcBuf in
+                segmentsBuf.withMemoryRebound(to: TimelineSegment.self) { srcBuf in
                     _ = buffer.initialize(fromContentsOf: srcBuf)
                 }
             }
