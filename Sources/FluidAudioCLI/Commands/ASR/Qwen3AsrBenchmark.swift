@@ -550,12 +550,6 @@ enum Qwen3AsrBenchmark {
                 logger.error("Failed \(file.fileName): \(error)")
             }
 
-            // Give system time to reclaim CoreML MLState IOSurface resources every 25 files.
-            // Without this pause, IOSurface limit (~200) is exhausted causing crashes.
-            if (index + 1) % 25 == 0 {
-                logger.info("Memory cleanup pause...")
-                try? await Task.sleep(for: .seconds(1))
-            }
         }
 
         return results

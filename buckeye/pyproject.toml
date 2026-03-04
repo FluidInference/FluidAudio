@@ -13,10 +13,5 @@ dependencies = [
   "qwen-omni-utils",
   "nagisa",
   "soynlp",
+  "qwen-asr",
 ]
-
-[tool.uv.sources]
-qwen-asr = { path = "/Users/kikow/brandon/voicelink/qwen3-asr", editable = true }
-
-[project.optional-dependencies]
-dev = ["qwen-asr"]

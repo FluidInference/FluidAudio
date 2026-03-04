@@ -138,7 +138,9 @@ public actor Qwen3AsrManager {
         let windowSize = Qwen3AsrConfig.melWindowSize
         let numFrames = melSpectrogram.first?.count ?? 0
 
-        var allFeatures: [[Float]] = []
+        // Phase 1: collect all mel inputs and expected output frame counts
+        var melInputs: [MLDictionaryFeatureProvider] = []
+        var outputFrameCounts: [Int] = []
         var offset = 0
 
         while offset < numFrames {
@@ -151,11 +153,7 @@ public actor Qwen3AsrManager {
                 windowSize: currentWindowSize,
                 padTo: windowSize
             )
-
-            let prediction = try models.audioEncoder.prediction(from: melInput)
-            guard let features = prediction.featureValue(for: "audio_features")?.multiArrayValue else {
-                throw Qwen3AsrError.encoderFailed("No audio_features output")
-            }
+            melInputs.append(melInput)
 
             let numOutputFrames: Int
             if currentWindowSize == windowSize {
@@ -165,7 +163,25 @@ public actor Qwen3AsrManager {
                     (currentWindowSize + Qwen3AsrConfig.convDownsampleFactor - 1)
                     / Qwen3AsrConfig.convDownsampleFactor
             }
+            outputFrameCounts.append(numOutputFrames)
 
+            offset += windowSize
+        }
+
+        // Phase 2: single batch prediction (avoids per-call IOSurface leak on ANE)
+        let batchProvider = MLArrayBatchProvider(array: melInputs)
+        let batchResults = try models.audioEncoder.predictions(fromBatch: batchProvider)
+
+        // Phase 3: extract features from batch results
+        var allFeatures: [[Float]] = []
+        for i in 0..<batchResults.count {
+            let prediction = batchResults.features(at: i)
+            guard let features = prediction.featureValue(for: "audio_features")?.multiArrayValue
+            else {
+                throw Qwen3AsrError.encoderFailed("No audio_features output")
+            }
+
+            let numOutputFrames = outputFrameCounts[i]
             for f in 0..<numOutputFrames {
                 var vec = [Float](repeating: 0.0, count: Qwen3AsrConfig.encoderOutputDim)
                 for d in 0..<Qwen3AsrConfig.encoderOutputDim {
@@ -174,8 +190,6 @@ public actor Qwen3AsrManager {
                 }
                 allFeatures.append(vec)
             }
-
-            offset += windowSize
         }
 
         return allFeatures
