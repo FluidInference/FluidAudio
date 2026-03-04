@@ -119,6 +119,7 @@ FluidAudio/
 │   └── FluidAudioCLI/       # Command-line interface (macOS only)
 ├── Tests/                   # Test suite
 ├── Scripts/                 # Python utilities (benchmarks, evaluation tools)
+├── mobius/                  # Research submodule: model conversions, trials, and known issues
 ├── Documentation/           # Reference documentation
 ├── Frameworks/              # Vendored frameworks
 └── ThirdPartyLicenses/      # Third-party license files
