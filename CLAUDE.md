@@ -40,7 +40,7 @@ FluidAudio is a Swift framework for local, low-latency audio processing on Apple
 ## Development Guidelines
 
 1. **Follow Instructions**: Implementation first, explanation second
-2. **Testing Policy**: Add unit tests when writing new code. Only run tests when explicitly requested by the user.
+2. **Testing Policy**: Add unit tests when writing new code.
 3. **Git Operations**: Never run `git push` unless explicitly requested. Only commit when asked.
    - **No Co-Author Tags**: Do not add `Co-Authored-By` lines for Claude, Copilot, or any AI assistant in commit messages.
 4. **Code Formatting**: All code must pass swift-format checks before merge
