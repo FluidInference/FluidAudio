@@ -41,7 +41,7 @@ FluidAudio is a Swift framework for local, low-latency audio processing on Apple
 
 1. **Follow Instructions**: Implementation first, explanation second
 2. **Testing Policy**: Add unit tests when writing new code.
-3. **Git Operations**: Never run `git push` unless explicitly requested. Only commit when asked.
+3. **Git Operations**: Never run `git push` unless explicitly requested.
    - **No Co-Author Tags**: Do not add `Co-Authored-By` lines for Claude, Copilot, or any AI assistant in commit messages.
 4. **Code Formatting**: All code must pass swift-format checks before merge
 5. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested
@@ -55,7 +55,8 @@ FluidAudio is a Swift framework for local, low-latency audio processing on Apple
 - **Indentation**: 4 spaces
 - **Import order**: Alphabetical (OrderedImports rule)
 - **Naming**: lowerCamelCase for variables/functions, UpperCamelCase for types
-- **Error handling**: Proper Swift error handling, no force unwrapping in production
+- **Error handling**: Proper Swift error handling, no force unwrapping in production. Per-module error enums conforming to `Error, LocalizedError` (e.g. `ASRError`, `VadError`, `OfflineDiarizationError`, `Qwen3AsrError`)
+- **Logging**: Use `AppLogger(category:)` from `Shared/AppLogger.swift` — not `print()` in production code. One logger per component (e.g. `AppLogger(category: "VadManager")`)
 - **Documentation**: Triple-slash comments (`///`) for public APIs
 - **Control flow**: Prefer guard statements and early returns over nested if statements
 
@@ -85,24 +86,24 @@ swift package clean
 
 ```bash
 # Transcription
-swift run fluidaudio transcribe audio.wav
-swift run fluidaudio transcribe audio.wav --low-latency
+swift run fluidaudiocli transcribe audio.wav
+swift run fluidaudiocli transcribe audio.wav --low-latency
 
 # Diarization
-swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
+swift run fluidaudiocli process meeting.wav --output results.json --threshold 0.6
 
 # Multi-stream processing
-swift run fluidaudio multi-stream audio1.wav audio2.wav
+swift run fluidaudiocli multi-stream audio1.wav audio2.wav
 
 # Benchmarks
-swift run fluidaudio asr-benchmark --subset test-clean --max-files 100
-swift run fluidaudio diarization-benchmark --auto-download
-swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.5
-swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
+swift run fluidaudiocli asr-benchmark --subset test-clean --max-files 100
+swift run fluidaudiocli diarization-benchmark --auto-download
+swift run fluidaudiocli vad-benchmark --num-files 40 --threshold 0.5
+swift run fluidaudiocli fleurs-benchmark --languages en_us,fr_fr --samples 10
 
 # Dataset downloads
-swift run fluidaudio download --dataset ami-sdm
-swift run fluidaudio download --dataset librispeech-test-clean
+swift run fluidaudiocli download --dataset ami-sdm
+swift run fluidaudiocli download --dataset librispeech-test-clean
 ```
 
 ## Project Structure
@@ -129,6 +130,7 @@ FluidAudio/
 
 ### Core Components
 - **AsrManager** (`ASR/`): Speech-to-text via TDT (Token Duration Transducer) decoding. Stateless per-chunk processing with automatic decoder state reset.
+- **StreamingAsrManager** (`ASR/Streaming/`): Real-time streaming ASR with sliding window processing and cancellation support.
 - **OfflineDiarizerManager** (`Diarizer/`): Speaker separation via segmentation, embedding extraction, and VBx clustering. 17.7% DER on AMI dataset.
 - **VadManager** (`VAD/`): Voice activity detection with CoreML models.
 - **KokoroSynthesizer** (`FluidAudioTTS/`): Text-to-speech synthesis.
@@ -137,11 +139,13 @@ FluidAudio/
 - **Actor-based concurrency**: Thread-safe processing, no `@unchecked Sendable`
 - **Stateless ASR**: Each chunk transcribed independently (~14.96s chunks, 2.0s overlap)
 - **Auto-recovery**: Corrupt CoreML model detection and re-download from HuggingFace
+- **Model management**: Models auto-download from HuggingFace on first use. Can be pre-fetched via `swift run fluidaudiocli download`.
 - **Cross-platform**: macOS 14.0+, iOS 17.0+ (library), CLI macOS-only
 
 ## Platform Requirements
 
 - **Swift**: 5.10+ (Swift 6+ for swift-format)
+- **C++17**: Required for `FastClusterWrapper` (set via `cxxLanguageStandard: .cxx17` in Package.swift)
 - **Platforms**: macOS 14.0+, iOS 17.0+
 - **Hardware**: Apple Silicon recommended
 
