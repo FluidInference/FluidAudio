@@ -254,9 +254,7 @@ public actor StreamingAsrManager {
         nextWindowCenterStart = 0
 
         // Reset decoder state for the current audio source
-        if let asrManager = asrManager {
-            try await asrManager.resetDecoderState(for: audioSource)
-        }
+        try await resetAsrDecoderState(for: audioSource)
 
         // Reset sliding window state
         segmentIndex = 0
@@ -278,6 +276,27 @@ public actor StreamingAsrManager {
     /// Clear the update continuation
     private func clearUpdateContinuation() {
         updateContinuation = nil
+    }
+
+    // MARK: - Nonisolated Wrappers for Swift 6 Concurrency
+
+    /// Nonisolated wrapper: avoids sending actor-isolated local binding across isolation boundary.
+    /// Safe because asrManager is nonisolated(unsafe) and all parameters are Sendable value types.
+    nonisolated private func resetAsrDecoderState(for source: AudioSource) async throws {
+        try await asrManager?.resetDecoderState(for: source)
+    }
+
+    /// Nonisolated wrapper: avoids sending actor-isolated local binding across isolation boundary.
+    nonisolated private func transcribeAsrStreamingChunk(
+        _ samples: [Float],
+        source: AudioSource,
+        previousTokens: [Int],
+        isLastChunk: Bool
+    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
+        guard let mgr = asrManager else { return ([], [], [], 0) }
+        return try await mgr.transcribeStreamingChunk(
+            samples, source: source, previousTokens: previousTokens, isLastChunk: isLastChunk
+        )
     }
 
     // MARK: - Private Methods
@@ -376,7 +395,8 @@ public actor StreamingAsrManager {
             // Start frame offset is now handled by decoder's timeJump mechanism
 
             // Call AsrManager directly with deduplication
-            let (tokens, timestamps, confidences, _) = try await asrManager.transcribeStreamingChunk(
+            // Use nonisolated wrapper to avoid sending actor-isolated local binding across isolation boundary
+            let (tokens, timestamps, confidences, _) = try await transcribeAsrStreamingChunk(
                 windowSamples,
                 source: audioSource,
                 previousTokens: accumulatedTokens,
@@ -616,23 +636,22 @@ public actor StreamingAsrManager {
 
     /// Reset decoder state for error recovery
     private func resetDecoderForRecovery() async {
-        if let asrManager = asrManager {
-            do {
-                try await asrManager.resetDecoderState(for: audioSource)
-                logger.info("Successfully reset decoder state during error recovery")
-            } catch {
-                logger.error("Failed to reset decoder state during recovery: \(error)")
+        do {
+            // Use nonisolated wrapper to avoid sending actor-isolated local binding across isolation boundary
+            try await resetAsrDecoderState(for: audioSource)
+            logger.info("Successfully reset decoder state during error recovery")
+        } catch {
+            logger.error("Failed to reset decoder state during recovery: \(error)")
 
-                // Last resort: try to reinitialize the ASR manager
-                do {
-                    let models = try await AsrModels.downloadAndLoad()
-                    let newAsrManager = AsrManager(config: config.asrConfig)
-                    try await newAsrManager.initialize(models: models)
-                    self.asrManager = newAsrManager
-                    logger.info("Successfully reinitialized ASR manager during error recovery")
-                } catch {
-                    logger.error("Failed to reinitialize ASR manager during recovery: \(error)")
-                }
+            // Last resort: try to reinitialize the ASR manager
+            do {
+                let models = try await AsrModels.downloadAndLoad()
+                let newAsrManager = AsrManager(config: config.asrConfig)
+                try await newAsrManager.initialize(models: models)
+                self.asrManager = newAsrManager
+                logger.info("Successfully reinitialized ASR manager during error recovery")
+            } catch {
+                logger.error("Failed to reinitialize ASR manager during recovery: \(error)")
             }
         }
     }
