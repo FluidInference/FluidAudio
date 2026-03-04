@@ -155,7 +155,10 @@ struct ForcedAlignerInference {
             offset += windowSize
         }
 
-        // Use CoreML native batch API: MLModel.predictions(fromBatch:)
+        // Use CoreML native batch API: single allocation/release cycle per batch
+        // avoids per-prediction IOSurface leak from ANE Conv2d layers.
+        // Note: for very long runs (1000+ files), periodic model reload is needed
+        // as a safety net since the ANE runtime still leaks across batch calls.
         let batchProvider = MLArrayBatchProvider(array: melInputs)
         let batchResults = try models.audioEncoder.predictions(fromBatch: batchProvider)
 

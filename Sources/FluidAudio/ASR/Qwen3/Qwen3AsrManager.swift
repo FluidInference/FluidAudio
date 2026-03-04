@@ -168,7 +168,8 @@ public actor Qwen3AsrManager {
             offset += windowSize
         }
 
-        // Phase 2: single batch prediction (avoids per-call IOSurface leak on ANE)
+        // Phase 2: single batch prediction via native batch API.
+        // Avoids per-prediction IOSurface leak from ANE Conv2d layers.
         let batchProvider = MLArrayBatchProvider(array: melInputs)
         let batchResults = try models.audioEncoder.predictions(fromBatch: batchProvider)
 

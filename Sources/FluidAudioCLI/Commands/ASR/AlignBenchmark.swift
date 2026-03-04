@@ -350,6 +350,18 @@ enum AlignBenchmark {
                 logger.warning(
                     "  [\(idx + 1)/\(samples.count)] \(sample.id): FAILED - \(error)")
             }
+
+            // Reload models every 300 samples to reclaim leaked ANE IOSurface buffers.
+            // The audio encoder's Conv2d layers cause slow IOSurface accumulation in Apple's
+            // e5rt runtime that the batch API alone cannot prevent on very long runs.
+            if (idx + 1) % 300 == 0, idx + 1 < samples.count {
+                logger.info("Reloading models to reclaim ANE memory...")
+                if let dir = modelDir {
+                    try? await manager.loadModels(from: URL(fileURLWithPath: dir))
+                } else {
+                    try? await manager.downloadAndLoadModels()
+                }
+            }
         }
 
         // 7. Aggregate metrics
