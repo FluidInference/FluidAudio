@@ -302,6 +302,7 @@ The project uses GitHub Actions with the following workflows:
 7. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested. Keep the codebase clean by only supporting current versions.
 8. **Testing Policy**: ONLY add or run tests when explicitly requested by the user
 9. **Git Operations**: NEVER run `git push` unless explicitly requested by the user. Only commit when asked.
+   - **No Co-Author Tags**: Do NOT add `Co-Authored-By` lines for Claude, Copilot, or any AI assistant in commit messages.
 10. **Code Formatting**: All code must pass swift-format checks before merge
 
 ## Next Steps
