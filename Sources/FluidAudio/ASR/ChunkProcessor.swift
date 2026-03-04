@@ -68,6 +68,7 @@ struct ChunkProcessor {
         var chunkDecoderState = TdtDecoderState.make()
 
         while chunkStart < totalSamples {
+            try Task.checkCancellation()
             let candidateEnd = chunkStart + chunkSamples
             let isLastChunk = candidateEnd >= totalSamples
             let chunkEnd = isLastChunk ? totalSamples : candidateEnd
