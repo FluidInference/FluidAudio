@@ -225,6 +225,7 @@ internal struct TdtDecoderV3 {
         // ===== MAIN DECODING LOOP =====
         // Process each encoder frame until we've consumed all audio
         while activeMask {
+            try Task.checkCancellation()
             // Use last emitted token for decoder context, or blank if starting
             var label = hypothesis.lastToken ?? config.tdtConfig.blankId
             let stateToUse = hypothesis.decState ?? decoderState
@@ -324,6 +325,7 @@ internal struct TdtDecoderV3 {
             // - Maintains linguistic continuity across gaps in speech
             // - Speeds up processing by 2-3x for audio with silence
             while advanceMask {
+                try Task.checkCancellation()
                 timeIndicesCurrentLabels = timeIndices
 
                 // INTENTIONAL: Reusing prepared decoder step from outside loop
@@ -428,6 +430,7 @@ internal struct TdtDecoderV3 {
 
             // Continue until we get consecutive blanks or hit max steps
             while additionalSteps < maxSymbolsPerStep && consecutiveBlanks < maxConsecutiveBlanks {
+                try Task.checkCancellation()
                 let stateToUse = hypothesis.decState ?? decoderState
 
                 // Get decoder output for final processing
