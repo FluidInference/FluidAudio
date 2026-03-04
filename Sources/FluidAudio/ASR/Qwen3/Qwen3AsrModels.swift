@@ -305,7 +305,7 @@ public final class EmbeddingWeights: Sendable {
         var result = [Float](repeating: 0, count: hiddenSize)
 
         #if arch(arm64)
-        data.withUnsafeBytes { ptr in
+        data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) in
             let f16Ptr = ptr.baseAddress!.advanced(by: offset)
                 .assumingMemoryBound(to: Float16.self)
 
