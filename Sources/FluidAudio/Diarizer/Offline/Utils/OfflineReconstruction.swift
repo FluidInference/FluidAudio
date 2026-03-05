@@ -410,7 +410,7 @@ struct OfflineReconstruction {
             ($0.endTimeSeconds - $0.startTimeSeconds) >= minimumDuration
         }
 
-        if config.embeddingExcludeOverlap {
+        if config.exclusiveSegments {
             ordered = excludeOverlaps(in: ordered)
         }
 
