@@ -504,60 +504,71 @@ Offline mode also reports RTFx using the model's per-chunk processing time.
 
 ## Text‑To‑Speech (TTS)
 
-> **⚠️ Beta:** The TTS system is currently in beta and only supports American English. Additional language support is planned for future releases.
+> **⚠️ Beta:** TTS currently supports American English only. Additional language support is planned.
 
-- Model: Kokoro (CoreML unified model)
-- Language: American English (beta)
-- G2P: Dictionary first, then eSpeak NG (CEspeakNG) for OOV words
-- Output: 24 kHz mono WAV
+FluidAudio ships two TTS backends:
 
-Requirements (macOS)
-Ensure eSpeak NG headers/libs are available via pkg-config (`espeak-ng`).
-<https://github.com/espeak-ng/espeak-ng/tree/master>
+| | PocketTTS | Kokoro |
+|---|---|---|
+| **Product** | `FluidAudio` (core) | `FluidAudioEspeak` |
+| **GPL dependencies** | None | eSpeak NG (GPL-3.0) |
+| **Tokenizer** | SentencePiece | eSpeak G2P → IPA phonemes |
+| **Generation** | Frame-by-frame autoregressive (80ms) | Parallel (all frames at once) |
+| **Streaming** | Yes | No |
+| **Voice cloning** | Yes (1–30s audio sample) | No |
+| **Pronunciation control** | No | Yes (SSML, custom lexicon) |
+| **Output** | 24 kHz mono WAV | 24 kHz mono WAV |
 
-**For CLI usage:**
-- The `fluidaudio` CLI is built with TTS support enabled by default:
-  - `swift run fluidaudio tts "Hello" --output out.wav`
-  - `swift build` (builds CLI with TTS)
-  - `swift test` (runs tests including TTS coverage)
+### PocketTTS (Recommended)
 
-### Quick Start (CLI)
-
-```bash
-# First run will download the Kokoro model and vocab
-swift run fluidaudio tts "Hello from FluidAudio." --auto-download --output out.wav
-
-# Another example with punctuation and OOV handling
-swift run fluidaudio tts "Edge-cases: URLs like https://example.com and e-mail test@example.com." --output out2.wav
-```
-
-Notes
-
-- The TTS pipeline uses a word→phoneme dictionary first; unknown words are phonemized with eSpeak NG (C API) and mapped to the model’s token set.
-- OOV words are printed with their IPA and mapped tokens for visibility during synthesis.
-- We do not prepend any “language token” to avoid leading vowel artifacts.
-
-### Quick Start (Code)
+GPL-free, streaming-friendly TTS included in the core `FluidAudio` product. Supports voice cloning from short audio samples.
 
 ```swift
 import FluidAudio
 
 Task {
-  do {
-    let data = try await KokoroModel.synthesize(text: "Hello from FluidAudio.")
-    try data.write(to: URL(fileURLWithPath: "out.wav"))
-  } catch {
-    print("TTS error: \(error)")
-  }
+    let manager = try await PocketTtsManager()
+    let audioData = try await manager.synthesize("Hello from FluidAudio.")
+    try audioData.write(to: URL(fileURLWithPath: "out.wav"))
 }
 ```
 
-Troubleshooting
+```bash
+# Synthesize with default voice
+swift run fluidaudio tts "Hello from FluidAudio." --output out.wav --backend pocket
+
+# Clone a voice from an audio sample
+swift run fluidaudio tts "Hello world." --output out.wav --backend pocket --voice-sample speaker.wav
+```
+
+### Kokoro (via FluidAudioEspeak)
+
+Requires the `FluidAudioEspeak` product and eSpeak NG headers/libs via pkg-config. Use this if you need SSML or phoneme-level pronunciation control.
+
+```swift
+import FluidAudioEspeak
+
+Task {
+    let data = try await KokoroModel.synthesize(text: "Hello from FluidAudio.")
+    try data.write(to: URL(fileURLWithPath: "out.wav"))
+}
+```
+
+```bash
+swift run fluidaudio tts "Hello from FluidAudio." --auto-download --output out.wav
+```
+
+<details>
+<summary><b>Kokoro Troubleshooting</b></summary>
+
 Build requires eSpeak NG headers/libs for the C API discoverable via pkg-config (`espeak-ng`).
+<https://github.com/espeak-ng/espeak-ng/tree/master>
 
 - If SwiftPM cannot find headers, build with explicit paths:
   - `swift build -Xcc -I/opt/homebrew/include -Xlinker -L/opt/homebrew/lib`
 - Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.
+
+</details>
 
 ## Continuous Integration
 
