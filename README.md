@@ -2,7 +2,7 @@
 
 # FluidAudio - Transcription, Text-to-speech, VAD, Speaker diarization with CoreML Models
 
-[![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
+[![Swift](https://img.shields.io/badge/Swift-6.0+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 [![Documentation](https://img.shields.io/badge/Documentation-docs.fluidinference.com-008574.svg)](https://docs.fluidinference.com/introduction)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/WNsvaCtmDe)
@@ -90,7 +90,7 @@ Add FluidAudio to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.2"),
 ],
 ```
 
@@ -103,7 +103,7 @@ FluidAudio provides two library products:
   - Includes PocketTTS for GPL-free text-to-speech
   - Recommended for most apps, including closed-source
 
-- **`FluidAudioTTS`** - Full TTS Suite (Kokoro + ESpeakNG)
+- **`FluidAudioEspeak`** - Full TTS Suite (Kokoro + ESpeakNG)
   - Separate optional product
   - Includes ESpeakNG framework (GPL-3.0)
   - Use if you need Kokoro's SSML/phoneme control features
@@ -112,7 +112,7 @@ FluidAudio provides two library products:
 1. Add the FluidAudio package to your project
 2. In the "Add Package" dialog, select your desired product(s):
    - `FluidAudio` for core features (ASR, diarization, VAD, PocketTTS)
-   - `FluidAudioTTS` if you need Kokoro TTS with SSML support
+   - `FluidAudioEspeak` if you need Kokoro TTS with SSML support
 3. Add the selected product(s) to your app target
 
 **In Package.swift:**
@@ -121,10 +121,10 @@ FluidAudio provides two library products:
 .product(name: "FluidAudio", package: "FluidAudio")
 
 // Add Kokoro TTS support (includes GPL ESpeakNG):
-.product(name: "FluidAudioTTS", package: "FluidAudio")
+.product(name: "FluidAudioEspeak", package: "FluidAudio")
 ```
 
-**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.7.8'`
+**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.12.2'`
 
 > **Note:** The Kokoro TTS tooling currently ships arm64-only dependencies. See the [arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds) guide if you hit linker errors targeting x86_64.
 
@@ -271,7 +271,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - `FluidInference/parakeet-tdt-0.6b-v2-coreml` (English-only, highest recall)
 - **Processing Mode**: Batch transcription for complete audio files
 - **Real-time Factor**: ~190x on M4 Pro (processes 1 hour of audio in ~19 seconds)
-- **Streaming Support**: Coming soon — batch processing is recommended for production use
+- **Streaming Support**: Real-time streaming via `StreamingAsrManager` with sliding window processing and cancellation support
 - **Backend**: Same Parakeet TDT v3 model powers our backend ASR
 
 ### ASR Quick Start
@@ -596,15 +596,15 @@ Kokoro-82M: <https://huggingface.co/hexgrad/Kokoro-82M>
 
 If you use FluidAudio in your work, please cite:
 
-FluidInference Team. (2024). FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms (Version 0.7.0) [Computer software]. GitHub. <https://github.com/FluidInference/FluidAudio>
+FluidInference Team. (2025). FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms (Version 0.12.2) [Computer software]. GitHub. <https://github.com/FluidInference/FluidAudio>
 
 ```bibtex
-@software{FluidInferenceTeam_FluidAudio_2024,
+@software{FluidInferenceTeam_FluidAudio_2025,
   author = {{FluidInference Team}},
   title = {{FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms}},
-  year = {2024},
-  month = {12},
-  version = {0.7.0},
+  year = {2025},
+  month = {3},
+  version = {0.12.2},
   url = {https://github.com/FluidInference/FluidAudio},
   note = {Computer software}
 }
