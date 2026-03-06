@@ -549,7 +549,9 @@ Requires the `FluidAudioEspeak` product and eSpeak NG headers/libs via pkg-confi
 import FluidAudioEspeak
 
 Task {
-    let data = try await KokoroModel.synthesize(text: "Hello from FluidAudio.")
+    let manager = KokoroTtsManager()
+    try await manager.initialize()
+    let data = try await manager.synthesize(text: "Hello from FluidAudio.")
     try data.write(to: URL(fileURLWithPath: "out.wav"))
 }
 ```
