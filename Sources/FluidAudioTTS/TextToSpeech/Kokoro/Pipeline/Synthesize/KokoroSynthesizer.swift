@@ -85,7 +85,7 @@ public struct KokoroSynthesizer {
         let hasLang = false
         let lexicons = await lexiconCache.lexicons()
         let customLexicon = currentCustomLexicon()
-        return try KokoroChunker.chunk(
+        return try await KokoroChunker.chunk(
             text: text,
             wordToPhonemes: lexicons.word,
             caseSensitiveLexicon: lexicons.caseSensitive,

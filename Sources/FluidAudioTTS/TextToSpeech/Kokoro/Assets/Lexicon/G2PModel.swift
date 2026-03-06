@@ -4,7 +4,7 @@ import Foundation
 
 /// Thread-safe CoreML-based grapheme-to-phoneme converter.
 /// Uses a small BART encoder-decoder model to convert English words to IPA phonemes.
-final class G2PModel {
+actor G2PModel {
     enum G2PModelError: Error, LocalizedError {
         case vocabLoadFailed(String)
         case modelLoadFailed(String)
@@ -25,10 +25,8 @@ final class G2PModel {
         }
     }
 
-    nonisolated(unsafe) static let shared = G2PModel()
+    static let shared = G2PModel()
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "G2PModel")
-
-    private let queue = DispatchQueue(label: "com.fluidaudio.tts.g2p")
 
     // Vocab tables (loaded once)
     private var graphemeToId: [Character: Int]?
@@ -44,126 +42,123 @@ final class G2PModel {
     private init() {}
 
     func phonemize(word: String) throws -> [String]? {
-        return try queue.sync {
-            do {
-                try loadIfNeeded()
-            } catch {
-                if ProcessInfo.processInfo.environment["CI"] != nil {
-                    logger.warning("G2P unavailable in CI, returning nil for word: \(word)")
-                    return nil
-                }
-                throw error
-            }
-
-            guard let graphemeToId, let idToPhoneme, let encoder, let decoder else {
+        do {
+            try loadIfNeeded()
+        } catch {
+            if ProcessInfo.processInfo.environment["CI"] != nil {
+                logger.warning("G2P unavailable in CI, returning nil for word: \(word)")
                 return nil
             }
-
-            // Encode: [BOS] + grapheme IDs + [EOS]
-            var inputIds: [Int32] = [Int32(bosTokenId)]
-            for ch in word {
-                inputIds.append(Int32(graphemeToId[ch] ?? unkTokenId))
-            }
-            inputIds.append(Int32(eosTokenId))
-
-            let encLen = inputIds.count
-
-            // Build encoder input MLMultiArray
-            let encoderInput = try MLMultiArray(shape: [1, NSNumber(value: encLen)], dataType: .int32)
-            for i in 0..<encLen {
-                encoderInput[[0, i] as [NSNumber]] = NSNumber(value: inputIds[i])
-            }
-
-            // Run encoder
-            let encoderProvider = try MLDictionaryFeatureProvider(
-                dictionary: ["input_ids": MLFeatureValue(multiArray: encoderInput)]
-            )
-            guard let encoderOutput = try? encoder.prediction(from: encoderProvider),
-                let encoderHidden = encoderOutput.featureValue(for: "encoder_hidden_states")?.multiArrayValue
-            else {
-                throw G2PModelError.encoderPredictionFailed
-            }
-
-            // Greedy decode loop
-            let maxSteps = 64
-            var decoderIds: [Int32] = [Int32(bosTokenId)]
-
-            for _ in 0..<maxSteps {
-                let decLen = decoderIds.count
-
-                // decoder_input_ids
-                let decInput = try MLMultiArray(shape: [1, NSNumber(value: decLen)], dataType: .int32)
-                for i in 0..<decLen {
-                    decInput[[0, i] as [NSNumber]] = NSNumber(value: decoderIds[i])
-                }
-
-                // position_ids (BART offset = 2)
-                let posIds = try MLMultiArray(shape: [1, NSNumber(value: decLen)], dataType: .int32)
-                for i in 0..<decLen {
-                    posIds[[0, i] as [NSNumber]] = NSNumber(value: Int32(i + 2))
-                }
-
-                // causal_mask: upper triangular with -1e4
-                let mask = try MLMultiArray(
-                    shape: [1, NSNumber(value: decLen), NSNumber(value: decLen)], dataType: .float32)
-                for i in 0..<decLen {
-                    for j in 0..<decLen {
-                        let val: Float = j > i ? -1e4 : 0
-                        mask[[0, i, j] as [NSNumber]] = NSNumber(value: val)
-                    }
-                }
-
-                let decoderProvider = try MLDictionaryFeatureProvider(
-                    dictionary: [
-                        "decoder_input_ids": MLFeatureValue(multiArray: decInput),
-                        "encoder_hidden_states": MLFeatureValue(multiArray: encoderHidden),
-                        "position_ids": MLFeatureValue(multiArray: posIds),
-                        "causal_mask": MLFeatureValue(multiArray: mask),
-                    ]
-                )
-
-                guard let decoderOutput = try? decoder.prediction(from: decoderProvider),
-                    let logits = decoderOutput.featureValue(for: "logits")?.multiArrayValue
-                else {
-                    throw G2PModelError.decoderPredictionFailed
-                }
-
-                // Argmax of last position's logits
-                let vocabSize = logits.shape.last!.intValue
-                let lastPos = decLen - 1
-                var bestId = 0
-                var bestVal: Float = -Float.infinity
-                for v in 0..<vocabSize {
-                    let val = logits[[0, lastPos, v] as [NSNumber]].floatValue
-                    if val > bestVal {
-                        bestVal = val
-                        bestId = v
-                    }
-                }
-
-                if bestId == eosTokenId { break }
-                decoderIds.append(Int32(bestId))
-            }
-
-            // Convert token IDs to phoneme string, skipping special tokens
-            var phonemes: [String] = []
-            for id in decoderIds {
-                let intId = Int(id)
-                if intId <= 3 { continue }  // skip pad, bos, eos, unk
-                if let ph = idToPhoneme[intId] {
-                    phonemes.append(ph)
-                }
-            }
-
-            return phonemes.isEmpty ? nil : phonemes
+            throw error
         }
+
+        guard let graphemeToId, let idToPhoneme, let encoder, let decoder else {
+            return nil
+        }
+
+        // Encode: [BOS] + grapheme IDs + [EOS]
+        var inputIds: [Int32] = [Int32(bosTokenId)]
+        for ch in word {
+            inputIds.append(Int32(graphemeToId[ch] ?? unkTokenId))
+        }
+        inputIds.append(Int32(eosTokenId))
+
+        let encLen = inputIds.count
+
+        // Build encoder input MLMultiArray
+        let encoderInput = try MLMultiArray(shape: [1, NSNumber(value: encLen)], dataType: .int32)
+        for i in 0..<encLen {
+            encoderInput[[0, i] as [NSNumber]] = NSNumber(value: inputIds[i])
+        }
+
+        // Run encoder
+        let encoderProvider = try MLDictionaryFeatureProvider(
+            dictionary: ["input_ids": MLFeatureValue(multiArray: encoderInput)]
+        )
+        guard let encoderOutput = try? encoder.prediction(from: encoderProvider),
+            let encoderHidden = encoderOutput.featureValue(for: "encoder_hidden_states")?.multiArrayValue
+        else {
+            throw G2PModelError.encoderPredictionFailed
+        }
+
+        // Greedy decode loop
+        let maxSteps = 64
+        var decoderIds: [Int32] = [Int32(bosTokenId)]
+
+        for _ in 0..<maxSteps {
+            let decLen = decoderIds.count
+
+            // decoder_input_ids
+            let decInput = try MLMultiArray(shape: [1, NSNumber(value: decLen)], dataType: .int32)
+            for i in 0..<decLen {
+                decInput[[0, i] as [NSNumber]] = NSNumber(value: decoderIds[i])
+            }
+
+            // position_ids (BART offset = 2)
+            let posIds = try MLMultiArray(shape: [1, NSNumber(value: decLen)], dataType: .int32)
+            for i in 0..<decLen {
+                posIds[[0, i] as [NSNumber]] = NSNumber(value: Int32(i + 2))
+            }
+
+            // causal_mask: upper triangular with -1e4
+            let mask = try MLMultiArray(
+                shape: [1, NSNumber(value: decLen), NSNumber(value: decLen)], dataType: .float32)
+            for i in 0..<decLen {
+                for j in 0..<decLen {
+                    let val: Float = j > i ? -1e4 : 0
+                    mask[[0, i, j] as [NSNumber]] = NSNumber(value: val)
+                }
+            }
+
+            let decoderProvider = try MLDictionaryFeatureProvider(
+                dictionary: [
+                    "decoder_input_ids": MLFeatureValue(multiArray: decInput),
+                    "encoder_hidden_states": MLFeatureValue(multiArray: encoderHidden),
+                    "position_ids": MLFeatureValue(multiArray: posIds),
+                    "causal_mask": MLFeatureValue(multiArray: mask),
+                ]
+            )
+
+            guard let decoderOutput = try? decoder.prediction(from: decoderProvider),
+                let logits = decoderOutput.featureValue(for: "logits")?.multiArrayValue
+            else {
+                throw G2PModelError.decoderPredictionFailed
+            }
+
+            // Argmax of last position's logits
+            let vocabSize = logits.shape.last!.intValue
+            let lastPos = decLen - 1
+            var bestId = 0
+            var bestVal: Float = -Float.infinity
+            for v in 0..<vocabSize {
+                let val = logits[[0, lastPos, v] as [NSNumber]].floatValue
+                if val > bestVal {
+                    bestVal = val
+                    bestId = v
+                }
+            }
+
+            if bestId == eosTokenId { break }
+            decoderIds.append(Int32(bestId))
+        }
+
+        // Convert token IDs to phoneme string, skipping special tokens
+        let specialTokens: Set<Int> = [0, bosTokenId, eosTokenId, unkTokenId]
+        var phonemes: [String] = []
+        for id in decoderIds {
+            let intId = Int(id)
+            if specialTokens.contains(intId) { continue }
+            if let ph = idToPhoneme[intId] {
+                phonemes.append(ph)
+            }
+        }
+
+        return phonemes.isEmpty ? nil : phonemes
     }
 
     /// Verifies that CoreML models and vocab can be loaded.
     func ensureModelsAvailable() throws {
-        try queue.sync {
-            try loadIfNeeded()
-        }
+        try loadIfNeeded()
     }
 
     // MARK: - Private

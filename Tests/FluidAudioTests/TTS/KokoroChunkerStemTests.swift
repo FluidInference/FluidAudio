@@ -42,8 +42,8 @@ final class KokoroChunkerStemTests: XCTestCase {
     // MARK: - Helpers
 
     /// Runs the chunker with the test lexicon and returns all phonemes from the first chunk.
-    private func phonemize(_ text: String) throws -> [String] {
-        let chunks = try KokoroChunker.chunk(
+    private func phonemize(_ text: String) async throws -> [String] {
+        let chunks = try await KokoroChunker.chunk(
             text: text,
             wordToPhonemes: lexicon,
             caseSensitiveLexicon: [:],
@@ -64,164 +64,164 @@ final class KokoroChunkerStemTests: XCTestCase {
 
     // MARK: - stemEd: words ending in "d" that are NOT past tense
 
-    func testBandIsNotStemmedToBan() throws {
-        let phonemes = try phonemize("band")
+    func testBandIsNotStemmedToBan() async throws {
+        let phonemes = try await phonemize("band")
         // "band" has its own lexicon entry — must use it, not "ban" + /d/
         XCTAssertEqual(phonemes, stemPhonemes("band"))
     }
 
-    func testFindIsNotStemmedToFin() throws {
-        let phonemes = try phonemize("find")
+    func testFindIsNotStemmedToFin() async throws {
+        let phonemes = try await phonemize("find")
         XCTAssertEqual(phonemes, stemPhonemes("find"))
     }
 
-    func testFundIsNotStemmedToFun() throws {
-        let phonemes = try phonemize("fund")
+    func testFundIsNotStemmedToFun() async throws {
+        let phonemes = try await phonemize("fund")
         XCTAssertEqual(phonemes, stemPhonemes("fund"))
     }
 
-    func testKindIsNotStemmedToKin() throws {
-        let phonemes = try phonemize("kind")
+    func testKindIsNotStemmedToKin() async throws {
+        let phonemes = try await phonemize("kind")
         XCTAssertEqual(phonemes, stemPhonemes("kind"))
     }
 
-    func testWindIsNotStemmedToWin() throws {
-        let phonemes = try phonemize("wind")
+    func testWindIsNotStemmedToWin() async throws {
+        let phonemes = try await phonemize("wind")
         XCTAssertEqual(phonemes, stemPhonemes("wind"))
     }
 
     // MARK: - stemEd: legitimate past tense forms
 
-    func testJumpedStemmingProducesVoicelessT() throws {
+    func testJumpedStemmingProducesVoicelessT() async throws {
         // "jumped" → "jump" + voiceless stop suffix → /t/
-        let phonemes = try phonemize("jumped")
+        let phonemes = try await phonemize("jumped")
         let expected = stemPhonemes("jump") + ["t"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testPhrasedStemmingPreservesEStem() throws {
+    func testPhrasedStemmingPreservesEStem() async throws {
         // "phrased" → "phrase" (drop "d", keep the "e") + /d/
-        let phonemes = try phonemize("phrased")
+        let phonemes = try await phonemize("phrased")
         let expected = stemPhonemes("phrase") + ["d"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testWalkedStemmingProducesVoicelessT() throws {
+    func testWalkedStemmingProducesVoicelessT() async throws {
         // "walked" → "walk" + voiceless suffix → /t/
-        let phonemes = try phonemize("walked")
+        let phonemes = try await phonemize("walked")
         let expected = stemPhonemes("walk") + ["t"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testHelpedStemmingProducesVoicelessT() throws {
+    func testHelpedStemmingProducesVoicelessT() async throws {
         // "helped" → "help" + voiceless stop suffix → /t/
-        let phonemes = try phonemize("helped")
+        let phonemes = try await phonemize("helped")
         let expected = stemPhonemes("help") + ["t"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testBannedStemmingProducesVoicedD() throws {
+    func testBannedStemmingProducesVoicedD() async throws {
         // "banned" → "ban" (dropLast(2) after doubled consonant isn't handled by stemEd,
         // but dropLast(1) = "banne" also fails, so test with a non-doubled form)
         // Use "helped" which stems cleanly: "help" + voiceless /p/ → /t/
         // Already tested above, so test "kissed" → "kiss" + sibilant /s/ → /t/
-        let phonemes = try phonemize("kissed")
+        let phonemes = try await phonemize("kissed")
         let expected = stemPhonemes("kiss") + ["t"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testMatchedStemmingProducesVoicelessT() throws {
+    func testMatchedStemmingProducesVoicelessT() async throws {
         // "matched" → dropLast(2) = "match" (in lexicon). Final /ʧ/ is voiceless stop → /t/
-        let phonemes = try phonemize("matched")
+        let phonemes = try await phonemize("matched")
         let expected = stemPhonemes("match") + ["t"]
         XCTAssertEqual(phonemes, expected)
     }
 
     // MARK: - stemS: plural / 3rd person
 
-    func testCatsProducesVoicelessS() throws {
+    func testCatsProducesVoicelessS() async throws {
         // "cats" → "cat" + voiceless stop /t/ → /s/
-        let phonemes = try phonemize("cats")
+        let phonemes = try await phonemize("cats")
         let expected = stemPhonemes("cat") + ["s"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testRunsProducesVoicedZ() throws {
+    func testRunsProducesVoicedZ() async throws {
         // "runs" → "run" + voiced /n/ → /z/
-        let phonemes = try phonemize("runs")
+        let phonemes = try await phonemize("runs")
         let expected = stemPhonemes("run") + ["z"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testWishesProducesSibilantIZ() throws {
+    func testWishesProducesSibilantIZ() async throws {
         // "wishes" → "wish" + sibilant /ʃ/ → /ᵻz/
-        let phonemes = try phonemize("wishes")
+        let phonemes = try await phonemize("wishes")
         let expected = stemPhonemes("wish") + ["ᵻ", "z"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testMatchesProducesSibilantIZ() throws {
+    func testMatchesProducesSibilantIZ() async throws {
         // "matches" → "match" + sibilant /ʧ/ → /ᵻz/
-        let phonemes = try phonemize("matches")
+        let phonemes = try await phonemize("matches")
         let expected = stemPhonemes("match") + ["ᵻ", "z"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testKissesDoesNotFalsePositive() throws {
+    func testKissesDoesNotFalsePositive() async throws {
         // "kisses" → ends in "ss" so the first -s branch is skipped,
         // but "kiss" + "es" (dropLast(2)) should match → "kiss" + sibilant → /ᵻz/
-        let phonemes = try phonemize("kisses")
+        let phonemes = try await phonemize("kisses")
         let expected = stemPhonemes("kiss") + ["ᵻ", "z"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testCarriesProducesIesStemming() throws {
+    func testCarriesProducesIesStemming() async throws {
         // "carries" → "carry" (ies→y) + voiced → /z/
-        let phonemes = try phonemize("carries")
+        let phonemes = try await phonemize("carries")
         let expected = stemPhonemes("carry") + ["z"]
         XCTAssertEqual(phonemes, expected)
     }
 
     // MARK: - stemIng: progressive forms
 
-    func testJumpingProducesIngSuffix() throws {
+    func testJumpingProducesIngSuffix() async throws {
         // "jumping" → "jump" + /ɪŋ/
-        let phonemes = try phonemize("jumping")
+        let phonemes = try await phonemize("jumping")
         let expected = stemPhonemes("jump") + ["ɪ", "ŋ"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testMakingDropsEBeforeIng() throws {
+    func testMakingDropsEBeforeIng() async throws {
         // "making" → "make" (drop e, add ing) + /ɪŋ/
-        let phonemes = try phonemize("making")
+        let phonemes = try await phonemize("making")
         let expected = stemPhonemes("make") + ["ɪ", "ŋ"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testRunningHandlesDoubledConsonant() throws {
+    func testRunningHandlesDoubledConsonant() async throws {
         // "running" → "run" (doubled n) + /ɪŋ/
-        let phonemes = try phonemize("running")
+        let phonemes = try await phonemize("running")
         let expected = stemPhonemes("run") + ["ɪ", "ŋ"]
         XCTAssertEqual(phonemes, expected)
     }
 
-    func testSittingProducesFlapping() throws {
+    func testSittingProducesFlapping() async throws {
         // "sitting" → "sit" ends in /t/ preceded by vowel /ɪ/ → flapping: /ɾɪŋ/
-        let phonemes = try phonemize("sitting")
+        let phonemes = try await phonemize("sitting")
         let expected = ["s", "ɪ", "ɾ", "ɪ", "ŋ"]
         XCTAssertEqual(phonemes, expected)
     }
 
     // MARK: - Edge cases
 
-    func testShortWordNotStemmed() throws {
+    func testShortWordNotStemmed() async throws {
         // "abed" (4 chars) should not trigger stemEd (guard requires count > 4).
         // Add "ab" so a false stem match would be possible, and "abed" so it resolves directly.
         var testLexicon = lexicon
         testLexicon["ab"] = ["æ", "b"]
         testLexicon["abed"] = ["ə", "b", "ɛ", "d"]
 
-        let chunks = try KokoroChunker.chunk(
+        let chunks = try await KokoroChunker.chunk(
             text: "abed",
             wordToPhonemes: testLexicon,
             caseSensitiveLexicon: [:],
@@ -239,20 +239,20 @@ final class KokoroChunkerStemTests: XCTestCase {
         XCTAssertEqual(chunk.phonemes, ["ə", "b", "ɛ", "d"])
     }
 
-    func testWordAlreadyInLexiconUsesDirectEntry() throws {
+    func testWordAlreadyInLexiconUsesDirectEntry() async throws {
         // When the word itself exists in the lexicon, stemming should not be attempted.
-        let phonemes = try phonemize("run")
+        let phonemes = try await phonemize("run")
         XCTAssertEqual(phonemes, stemPhonemes("run"))
     }
 
-    func testStemEdDoesNotMatchEedSuffix() throws {
+    func testStemEdDoesNotMatchEedSuffix() async throws {
         // Words ending in "eed" are excluded from the -ed branch.
         // "freed" should not stem to "fr" (not in lexicon anyway),
         // but verifies the guard works. We add "free" to test properly.
         var testLexicon = lexicon
         testLexicon["free"] = ["f", "ɹ", "i"]
 
-        let chunks = try KokoroChunker.chunk(
+        let chunks = try await KokoroChunker.chunk(
             text: "freed",
             wordToPhonemes: testLexicon,
             caseSensitiveLexicon: [:],
