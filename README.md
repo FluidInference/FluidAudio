@@ -94,39 +94,17 @@ dependencies: [
 ],
 ```
 
-### Choosing a Product
-
-FluidAudio provides two library products:
-
-- **`FluidAudio`** (default) - Core functionality: ASR, diarization, VAD, **PocketTTS**
-  - Lightweight, no GPL dependencies
-  - Includes PocketTTS for GPL-free text-to-speech
-  - Recommended for most apps, including closed-source
-
-- **`FluidAudioEspeak`** - Full TTS Suite (Kokoro + ESpeakNG)
-  - Separate optional product
-  - Includes ESpeakNG framework (GPL-3.0)
-  - Use if you need Kokoro's SSML/phoneme control features
-
 **In Xcode:**
 1. Add the FluidAudio package to your project
-2. In the "Add Package" dialog, select your desired product(s):
-   - `FluidAudio` for core features (ASR, diarization, VAD, PocketTTS)
-   - `FluidAudioEspeak` if you need Kokoro TTS with SSML support
-3. Add the selected product(s) to your app target
+2. In the "Add Package" dialog, select `FluidAudio`
+3. Add it to your app target
 
 **In Package.swift:**
 ```swift
-// Core features + PocketTTS (no GPL dependencies):
 .product(name: "FluidAudio", package: "FluidAudio")
-
-// Add Kokoro TTS support (includes GPL ESpeakNG):
-.product(name: "FluidAudioEspeak", package: "FluidAudio")
 ```
 
 **CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.12.2'`
-
-> **Note:** The Kokoro TTS tooling currently ships arm64-only dependencies. See the [arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds) guide if you hit linker errors targeting x86_64.
 
 ### Other Frameworks
 
@@ -230,7 +208,6 @@ swift run fluidaudio transcribe audio.wav
   - [Audio Conversion for Inference](Documentation/Guides/AudioConversion.md)
   - Manual model download & loading options: [ASR](Documentation/ASR/ManualModelLoading.md), [Diarizer](Documentation/Diarization/GettingStarted.md#manual-model-loading), [VAD](Documentation/VAD/GettingStarted.md#manual-model-loading)
   - Routing Hugging Face (or compatible) requests through a proxy? Set `https_proxy` before running the download helpers (see [Documentation/API.md](Documentation/API.md:9)).
-  - [Kokoro TTS arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds)
 - Models
   - Automatic Speech Recognition/Transcription
     - [Getting Started](Documentation/ASR/GettingStarted.md)
@@ -510,18 +487,17 @@ FluidAudio ships two TTS backends:
 
 | | PocketTTS | Kokoro |
 |---|---|---|
-| **Product** | `FluidAudio` (core) | `FluidAudioEspeak` |
-| **GPL dependencies** | None | eSpeak NG (GPL-3.0) |
-| **Tokenizer** | SentencePiece | eSpeak G2P → IPA phonemes |
+| **GPL dependencies** | None | None |
+| **Tokenizer** | SentencePiece | CoreML G2P → IPA phonemes |
 | **Generation** | Frame-by-frame autoregressive (80ms) | Parallel (all frames at once) |
 | **Streaming** | Yes | No |
 | **Voice cloning** | Yes (1–30s audio sample) | No |
 | **Pronunciation control** | No | Yes (SSML, custom lexicon) |
 | **Output** | 24 kHz mono WAV | 24 kHz mono WAV |
 
-### PocketTTS (Recommended)
+### PocketTTS
 
-GPL-free, streaming-friendly TTS included in the core `FluidAudio` product. Supports voice cloning from short audio samples.
+Streaming-friendly TTS with voice cloning support from short audio samples.
 
 ```swift
 import FluidAudio
@@ -541,12 +517,12 @@ swift run fluidaudio tts "Hello from FluidAudio." --output out.wav --backend poc
 swift run fluidaudio tts "Hello world." --output out.wav --backend pocket --clone-voice speaker.wav
 ```
 
-### Kokoro (via FluidAudioEspeak)
+### Kokoro
 
-Requires the `FluidAudioEspeak` product and eSpeak NG headers/libs via pkg-config. Use this if you need SSML or phoneme-level pronunciation control.
+High-quality parallel TTS with SSML and phoneme-level pronunciation control. Uses a CoreML G2P (grapheme-to-phoneme) model for out-of-vocabulary words — no external dependencies required.
 
 ```swift
-import FluidAudioEspeak
+import FluidAudio
 
 Task {
     let manager = KokoroTtsManager()
@@ -560,17 +536,7 @@ Task {
 swift run fluidaudio tts "Hello from FluidAudio." --auto-download --output out.wav
 ```
 
-<details>
-<summary><b>Kokoro Troubleshooting</b></summary>
-
-Build requires eSpeak NG headers/libs for the C API discoverable via pkg-config (`espeak-ng`).
-<https://github.com/espeak-ng/espeak-ng/tree/master>
-
-- If SwiftPM cannot find headers, build with explicit paths:
-  - `swift build -Xcc -I/opt/homebrew/include -Xlinker -L/opt/homebrew/lib`
-- Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.
-
-</details>
+Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.
 
 ## Continuous Integration
 
