@@ -1,55 +1,52 @@
-import ESpeakNG
+import CoreML
 import FluidAudio
 import Foundation
 
-/// Thread-safe wrapper around eSpeak NG C API to get IPA phonemes for a word.
-/// Uses espeak_TextToPhonemes with IPA mode.
+/// Thread-safe CoreML-based grapheme-to-phoneme converter.
+/// Uses a small BART encoder-decoder model to convert English words to IPA phonemes.
 final class EspeakG2P {
     enum EspeakG2PError: Error, LocalizedError {
-        case frameworkBundleMissing
-        case dataBundleMissing
-        case voicesDirectoryMissing
-        case initializationFailed(code: Int32)
-        case voiceSelectionFailed(voice: String, error: espeak_ERROR)
+        case vocabLoadFailed(String)
+        case modelLoadFailed(String)
+        case encoderPredictionFailed
+        case decoderPredictionFailed
 
         var errorDescription: String? {
             switch self {
-            case .frameworkBundleMissing:
-                return "ESpeakNG.framework is not bundled with this build."
-            case .dataBundleMissing:
-                return "espeak-ng-data.bundle is missing from the ESpeakNG framework resources."
-            case .voicesDirectoryMissing:
-                return "eSpeak NG voices directory is missing inside espeak-ng-data.bundle."
-            case .initializationFailed(let code):
-                return "eSpeak NG initialization failed with status code \(code)."
-            case .voiceSelectionFailed(let voice, let error):
-                return "Failed to select eSpeak NG voice \(voice) (status code \(error.rawValue))."
+            case .vocabLoadFailed(let detail):
+                return "Failed to load G2P \(ModelNames.G2P.vocabularyFile): \(detail)"
+            case .modelLoadFailed(let detail):
+                return "Failed to load G2P CoreML model: \(detail)"
+            case .encoderPredictionFailed:
+                return "G2P encoder prediction failed."
+            case .decoderPredictionFailed:
+                return "G2P decoder prediction failed."
             }
         }
     }
 
-    // Thread-safe singleton using DispatchQueue internally
     nonisolated(unsafe) static let shared = EspeakG2P()
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
 
     private let queue = DispatchQueue(label: "com.fluidaudio.tts.espeak.g2p")
-    private var initialized = false
-    private var currentVoice: String = ""
+
+    // Vocab tables (loaded once)
+    private var graphemeToId: [Character: Int]?
+    private var idToPhoneme: [Int: String]?
+    private var bosTokenId: Int = 1
+    private var eosTokenId: Int = 2
+    private var unkTokenId: Int = 3
+
+    // CoreML models (lazy-loaded)
+    private var encoder: MLModel?
+    private var decoder: MLModel?
 
     private init() {}
-
-    deinit {
-        queue.sync {
-            if initialized {
-                espeak_Terminate()
-            }
-        }
-    }
 
     func phonemize(word: String, espeakVoice: String = "en-us") throws -> [String]? {
         return try queue.sync {
             do {
-                try initializeIfNeeded(espeakVoice: espeakVoice)
+                try loadIfNeeded()
             } catch {
                 if ProcessInfo.processInfo.environment["CI"] != nil {
                     logger.warning("G2P unavailable in CI, returning nil for word: \(word)")
@@ -58,166 +55,175 @@ final class EspeakG2P {
                 throw error
             }
 
-            return word.withCString { cstr -> [String]? in
-                var raw: UnsafeRawPointer? = UnsafeRawPointer(cstr)
-                let modeIPA = Int32(espeakPHONEMES_IPA)
-                let textmode = Int32(espeakCHARS_AUTO)
-                guard let outPtr = espeak_TextToPhonemes(&raw, textmode, modeIPA) else {
-                    logger.warning("espeak_TextToPhonemes returned nil for word: \(word)")
-                    return nil
+            guard let graphemeToId, let idToPhoneme, let encoder, let decoder else {
+                return nil
+            }
+
+            // Encode: [BOS] + grapheme IDs + [EOS]
+            var inputIds: [Int32] = [Int32(bosTokenId)]
+            for ch in word {
+                inputIds.append(Int32(graphemeToId[ch] ?? unkTokenId))
+            }
+            inputIds.append(Int32(eosTokenId))
+
+            let encLen = inputIds.count
+
+            // Build encoder input MLMultiArray
+            let encoderInput = try MLMultiArray(shape: [1, NSNumber(value: encLen)], dataType: .int32)
+            for i in 0..<encLen {
+                encoderInput[[0, i] as [NSNumber]] = NSNumber(value: inputIds[i])
+            }
+
+            // Run encoder
+            let encoderProvider = try MLDictionaryFeatureProvider(
+                dictionary: ["input_ids": MLFeatureValue(multiArray: encoderInput)]
+            )
+            guard let encoderOutput = try? encoder.prediction(from: encoderProvider),
+                let encoderHidden = encoderOutput.featureValue(for: "encoder_hidden_states")?.multiArrayValue
+            else {
+                throw EspeakG2PError.encoderPredictionFailed
+            }
+
+            // Greedy decode loop
+            let maxSteps = 64
+            var decoderIds: [Int32] = [Int32(bosTokenId)]
+
+            for _ in 0..<maxSteps {
+                let decLen = decoderIds.count
+
+                // decoder_input_ids
+                let decInput = try MLMultiArray(shape: [1, NSNumber(value: decLen)], dataType: .int32)
+                for i in 0..<decLen {
+                    decInput[[0, i] as [NSNumber]] = NSNumber(value: decoderIds[i])
                 }
-                let phonemeString = String(cString: outPtr)
-                if phonemeString.isEmpty { return nil }
-                if phonemeString.contains(where: { $0.isWhitespace }) {
-                    return phonemeString.split { $0.isWhitespace }.map { String($0) }
-                } else {
-                    return phonemeString.unicodeScalars.map { String($0) }
+
+                // position_ids (BART offset = 2)
+                let posIds = try MLMultiArray(shape: [1, NSNumber(value: decLen)], dataType: .int32)
+                for i in 0..<decLen {
+                    posIds[[0, i] as [NSNumber]] = NSNumber(value: Int32(i + 2))
+                }
+
+                // causal_mask: upper triangular with -1e4
+                let mask = try MLMultiArray(
+                    shape: [1, NSNumber(value: decLen), NSNumber(value: decLen)], dataType: .float32)
+                for i in 0..<decLen {
+                    for j in 0..<decLen {
+                        let val: Float = j > i ? -1e4 : 0
+                        mask[[0, i, j] as [NSNumber]] = NSNumber(value: val)
+                    }
+                }
+
+                let decoderProvider = try MLDictionaryFeatureProvider(
+                    dictionary: [
+                        "decoder_input_ids": MLFeatureValue(multiArray: decInput),
+                        "encoder_hidden_states": MLFeatureValue(multiArray: encoderHidden),
+                        "position_ids": MLFeatureValue(multiArray: posIds),
+                        "causal_mask": MLFeatureValue(multiArray: mask),
+                    ]
+                )
+
+                guard let decoderOutput = try? decoder.prediction(from: decoderProvider),
+                    let logits = decoderOutput.featureValue(for: "logits")?.multiArrayValue
+                else {
+                    throw EspeakG2PError.decoderPredictionFailed
+                }
+
+                // Argmax of last position's logits
+                let vocabSize = logits.shape.last!.intValue
+                let lastPos = decLen - 1
+                var bestId = 0
+                var bestVal: Float = -Float.infinity
+                for v in 0..<vocabSize {
+                    let val = logits[[0, lastPos, v] as [NSNumber]].floatValue
+                    if val > bestVal {
+                        bestVal = val
+                        bestId = v
+                    }
+                }
+
+                if bestId == eosTokenId { break }
+                decoderIds.append(Int32(bestId))
+            }
+
+            // Convert token IDs to phoneme string, skipping special tokens
+            var phonemes: [String] = []
+            for id in decoderIds {
+                let intId = Int(id)
+                if intId <= 3 { continue }  // skip pad, bos, eos, unk
+                if let ph = idToPhoneme[intId] {
+                    phonemes.append(ph)
                 }
             }
+
+            return phonemes.isEmpty ? nil : phonemes
         }
     }
 
-    private func initializeIfNeeded(espeakVoice: String = "en-us") throws {
-        if initialized {
-            if espeakVoice != currentVoice {
-                let result = espeakVoice.withCString { espeak_SetVoiceByName($0) }
-                guard result == EE_OK else {
-                    logger.error("Failed to set voice to \(espeakVoice), error code: \(result)")
-                    throw EspeakG2PError.voiceSelectionFailed(voice: espeakVoice, error: result)
-                }
-                currentVoice = espeakVoice
-            }
-            return
+    /// Verifies that CoreML models and vocab can be loaded.
+    func ensureModelsAvailable() throws {
+        try queue.sync {
+            try loadIfNeeded()
         }
-
-        let dataDir = try Self.ensureResourcesAvailable()
-        logger.info("Using eSpeak NG data from framework: \(dataDir.path)")
-        let rc: Int32 = dataDir.path.withCString { espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS, 0, $0, 0) }
-
-        guard rc >= 0 else {
-            logger.error("eSpeak NG initialization failed (rc=\(rc))")
-            throw EspeakG2PError.initializationFailed(code: rc)
-        }
-        let voiceResult = espeakVoice.withCString { espeak_SetVoiceByName($0) }
-        guard voiceResult == EE_OK else {
-            logger.error("Failed to set initial voice to \(espeakVoice), error code: \(voiceResult)")
-            espeak_Terminate()
-            throw EspeakG2PError.voiceSelectionFailed(voice: espeakVoice, error: voiceResult)
-        }
-        currentVoice = espeakVoice
-        initialized = true
     }
 
-    private static let staticLogger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
+    // MARK: - Private
 
-    @discardableResult
-    static func ensureResourcesAvailable() throws -> URL {
-        let url = try frameworkBundledDataPath()
-        staticLogger.info("eSpeak NG data directory: \(url.path)")
-        return url
-    }
+    private func loadIfNeeded() throws {
+        if graphemeToId != nil && encoder != nil { return }
 
-    private static func frameworkBundledDataPath() throws -> URL {
-        var espeakBundle = Bundle(identifier: "com.fluidinference.espeakng")
-        if espeakBundle == nil {
-            espeakBundle = Bundle.allBundles.first { $0.bundlePath.hasSuffix("ESpeakNG.framework") }
+        let kokoroDir = try TtsModels.cacheDirectoryURL().appendingPathComponent("Models/kokoro")
+
+        // Load g2p_vocab.json from cache directory
+        let vocabURL = kokoroDir.appendingPathComponent(ModelNames.G2P.vocabularyFile)
+        guard FileManager.default.fileExists(atPath: vocabURL.path) else {
+            throw EspeakG2PError.vocabLoadFailed("\(ModelNames.G2P.vocabularyFile) not found at \(vocabURL.path)")
         }
 
-        // Fallback: Check for framework on disk relative to the executable (for CLI/SPM builds)
-        if espeakBundle == nil {
-            let bundlePath = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(
-                "ESpeakNG.framework")
-            if FileManager.default.fileExists(atPath: bundlePath.path) {
-                espeakBundle = Bundle(url: bundlePath)
+        let vocabData = try Data(contentsOf: vocabURL)
+        guard let vocab = try JSONSerialization.jsonObject(with: vocabData) as? [String: Any],
+            let g2id = vocab["grapheme_to_id"] as? [String: Int],
+            let id2ph = vocab["id_to_phoneme"] as? [String: String]
+        else {
+            throw EspeakG2PError.vocabLoadFailed("invalid JSON structure")
+        }
+
+        var gMap: [Character: Int] = [:]
+        for (key, val) in g2id {
+            if let ch = key.first, key.count == 1 {
+                gMap[ch] = val
             }
         }
+        graphemeToId = gMap
 
-        // Fallback: Check for PackageFrameworks directory (common in SPM builds)
-        if espeakBundle == nil {
-            let bundlePath = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(
-                "PackageFrameworks/ESpeakNG.framework")
-            if FileManager.default.fileExists(atPath: bundlePath.path) {
-                espeakBundle = Bundle(url: bundlePath)
+        var pMap: [Int: String] = [:]
+        for (key, val) in id2ph {
+            if let intKey = Int(key) {
+                pMap[intKey] = val
             }
         }
+        idToPhoneme = pMap
 
-        // Final Fallback: Check if resources are flattened into the main bundle (common in some release builds)
-        if espeakBundle == nil {
-            if let resourceURL = Bundle.main.resourceURL {
-                let flattenedDataDir = resourceURL.appendingPathComponent("espeak-ng-data")
-                if FileManager.default.fileExists(atPath: flattenedDataDir.path) {
-                    staticLogger.info("Found espeak-ng-data flattened in main bundle resources")
-                    return flattenedDataDir
-                }
-            }
+        if let bos = vocab["bos_token_id"] as? Int { bosTokenId = bos }
+        if let eos = vocab["eos_token_id"] as? Int { eosTokenId = eos }
+
+        logger.info("Loaded G2P vocab (\(gMap.count) graphemes, \(pMap.count) phonemes)")
+
+        // Load CoreML models from cache directory
+        let encoderURL = kokoroDir.appendingPathComponent(ModelNames.G2P.encoderFile)
+        guard FileManager.default.fileExists(atPath: encoderURL.path) else {
+            throw EspeakG2PError.modelLoadFailed("\(ModelNames.G2P.encoderFile) not found at \(encoderURL.path)")
+        }
+        let decoderURL = kokoroDir.appendingPathComponent(ModelNames.G2P.decoderFile)
+        guard FileManager.default.fileExists(atPath: decoderURL.path) else {
+            throw EspeakG2PError.modelLoadFailed("\(ModelNames.G2P.decoderFile) not found at \(decoderURL.path)")
         }
 
-        guard let espeakBundle = espeakBundle else {
-            staticLogger.error("ESpeakNG.framework not found; ensure it is embedded with the application.")
-            staticLogger.debug("Available bundles: \(Bundle.allBundles.map { $0.bundleIdentifier ?? $0.bundlePath })")
-            throw EspeakG2PError.frameworkBundleMissing
-        }
+        let config = MLModelConfiguration()
+        config.computeUnits = .cpuAndGPU
 
-        guard let resourceURL = espeakBundle.resourceURL else {
-            staticLogger.error("ESpeakNG.framework has no resource URL at \(espeakBundle.bundlePath)")
-            throw EspeakG2PError.dataBundleMissing  // Or a more specific error if needed
-        }
-        var dataDir = resourceURL.appendingPathComponent("espeak-ng-data")
+        encoder = try MLModel(contentsOf: encoderURL, configuration: config)
+        decoder = try MLModel(contentsOf: decoderURL, configuration: config)
 
-        // Check for .bundle variant (espeak-ng-data.bundle/espeak-ng-data)
-        // The xcframework packages data inside a .bundle wrapper
-        if !FileManager.default.fileExists(atPath: dataDir.path) {
-            let bundleDataDir =
-                resourceURL
-                .appendingPathComponent("espeak-ng-data.bundle")
-                .appendingPathComponent("espeak-ng-data")
-            if FileManager.default.fileExists(atPath: bundleDataDir.path) {
-                staticLogger.info("Found espeak-ng-data inside .bundle wrapper")
-                dataDir = bundleDataDir
-            }
-        }
-
-        if !FileManager.default.fileExists(atPath: dataDir.path) {
-            // One last check: maybe it's not in the framework resource URL but in the main bundle resource URL?
-            // This happens if the framework resources are copied to the main bundle during build.
-            if let mainResourceURL = Bundle.main.resourceURL {
-                let mainDataDir = mainResourceURL.appendingPathComponent("espeak-ng-data")
-                let mainBundleDataDir =
-                    mainResourceURL
-                    .appendingPathComponent("espeak-ng-data.bundle")
-                    .appendingPathComponent("espeak-ng-data")
-                if FileManager.default.fileExists(atPath: mainDataDir.path) {
-                    staticLogger.info("Found espeak-ng-data in main bundle resources (fallback)")
-                    dataDir = mainDataDir
-                } else if FileManager.default.fileExists(atPath: mainBundleDataDir.path) {
-                    staticLogger.info("Found espeak-ng-data.bundle in main bundle resources (fallback)")
-                    dataDir = mainBundleDataDir
-                } else {
-                    staticLogger.error(
-                        "espeak-ng-data directory missing from ESpeakNG.framework resources at \(dataDir.path)")
-                    throw EspeakG2PError.dataBundleMissing
-                }
-            } else {
-                staticLogger.error(
-                    "espeak-ng-data directory missing from ESpeakNG.framework resources at \(dataDir.path)")
-                throw EspeakG2PError.dataBundleMissing
-            }
-        }
-
-        // Check for nested espeak-ng-data (common in some framework structures)
-        let nestedDataDir = dataDir.appendingPathComponent("espeak-ng-data")
-        if FileManager.default.fileExists(atPath: nestedDataDir.path) {
-            staticLogger.debug("Found nested espeak-ng-data directory, descending...")
-            dataDir = nestedDataDir
-        }
-
-        let voicesPath = dataDir.appendingPathComponent("voices")
-
-        guard FileManager.default.fileExists(atPath: voicesPath.path) else {
-            staticLogger.error("espeak-ng-data found but voices directory missing at \(voicesPath.path)")
-            throw EspeakG2PError.voicesDirectoryMissing
-        }
-
-        return dataDir
+        logger.info("Loaded G2P CoreML models")
     }
 }

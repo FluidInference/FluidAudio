@@ -47,16 +47,10 @@ let package = Package(
             path: "Sources/MachTaskSelfWrapper",
             publicHeadersPath: "include"
         ),
-        // TTS targets are always available for FluidAudioEspeak product
-        .binaryTarget(
-            name: "ESpeakNG",
-            path: "Frameworks/ESpeakNG.xcframework"
-        ),
         .target(
             name: "FluidAudioEspeak",
             dependencies: [
-                "FluidAudio",
-                "ESpeakNG",
+                "FluidAudio"
             ],
             path: "Sources/FluidAudioEspeak"
         ),
