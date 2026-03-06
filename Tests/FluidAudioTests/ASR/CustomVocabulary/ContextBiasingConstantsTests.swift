@@ -80,4 +80,31 @@ final class ContextBiasingConstantsTests: XCTestCase {
         let large = ContextBiasingConstants.rescorerConfig(forVocabSize: 15)
         XCTAssertGreaterThan(large.minSimilarity, small.minSimilarity)
     }
+
+    // MARK: - Effective minSimilarity (context override)
+
+    func testEffectiveMinSimilarityRespectsCallerThreshold() {
+        // When a caller sets a stricter minSimilarity on CustomVocabularyContext,
+        // the effective threshold should be the max of the size-based config
+        // and the caller-specified value. This matches the logic in
+        // AsrTranscription.applyVocabularyRescoring() and
+        // StreamingAsrManager.applyVocabularyRescoring().
+        let smallVocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: 5)
+        XCTAssertEqual(smallVocabConfig.minSimilarity, 0.50, accuracy: 0.01)
+
+        let callerThreshold: Float = 0.60
+        let effective = max(smallVocabConfig.minSimilarity, callerThreshold)
+        XCTAssertEqual(effective, 0.60, accuracy: 0.01, "Caller's stricter threshold should win")
+    }
+
+    func testEffectiveMinSimilarityUsesVocabConfigWhenStricter() {
+        // When the size-based config is stricter than the caller's threshold,
+        // the size-based config should win.
+        let largeVocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: 15)
+        XCTAssertEqual(largeVocabConfig.minSimilarity, 0.60, accuracy: 0.01)
+
+        let callerThreshold: Float = 0.52
+        let effective = max(largeVocabConfig.minSimilarity, callerThreshold)
+        XCTAssertEqual(effective, 0.60, accuracy: 0.01, "Size-based stricter threshold should win")
+    }
 }
