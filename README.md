@@ -538,7 +538,7 @@ Task {
 swift run fluidaudio tts "Hello from FluidAudio." --output out.wav --backend pocket
 
 # Clone a voice from an audio sample
-swift run fluidaudio tts "Hello world." --output out.wav --backend pocket --voice-sample speaker.wav
+swift run fluidaudio tts "Hello world." --output out.wav --backend pocket --clone-voice speaker.wav
 ```
 
 ### Kokoro (via FluidAudioEspeak)
