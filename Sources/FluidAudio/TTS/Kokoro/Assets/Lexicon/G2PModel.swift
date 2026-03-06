@@ -163,7 +163,7 @@ actor G2PModel {
     // MARK: - Private
 
     private func loadIfNeeded() throws {
-        if graphemeToId != nil && encoder != nil { return }
+        if graphemeToId != nil && encoder != nil && decoder != nil { return }
 
         let kokoroDir = try TtsModels.cacheDirectoryURL().appendingPathComponent("Models/kokoro")
 
@@ -199,6 +199,7 @@ actor G2PModel {
 
         if let bos = vocab["bos_token_id"] as? Int { bosTokenId = bos }
         if let eos = vocab["eos_token_id"] as? Int { eosTokenId = eos }
+        if let unk = vocab["unk_token_id"] as? Int { unkTokenId = unk }
 
         logger.info("Loaded G2P vocab (\(gMap.count) graphemes, \(pMap.count) phonemes)")
 
