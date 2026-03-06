@@ -24,17 +24,18 @@ extension KokoroSynthesizer {
         private var storage: [MultiArrayKey: [MLMultiArray]] = [:]
 
         func rent(
-            shape: [NSNumber],
+            shape: [Int],
             dataType: MLMultiArrayDataType,
             zeroFill: Bool
         ) async throws -> MLMultiArray {
-            let key = MultiArrayKey(dataType: dataType, shape: shape)
+            let nsShape = shape.map { NSNumber(value: $0) }
+            let key = MultiArrayKey(dataType: dataType, shape: nsShape)
             let array: MLMultiArray
             if var cached = storage[key], let candidate = cached.popLast() {
                 storage[key] = cached
                 array = candidate
             } else {
-                array = try MLMultiArray(shape: shape, dataType: dataType)
+                array = try MLMultiArray(shape: nsShape, dataType: dataType)
             }
 
             if zeroFill {

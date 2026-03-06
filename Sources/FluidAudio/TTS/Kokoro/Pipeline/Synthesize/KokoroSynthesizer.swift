@@ -257,9 +257,8 @@ public struct KokoroSynthesizer {
 
         let kokoro = try await model(for: variant)
 
-        let refShape: [NSNumber] = [1, NSNumber(value: referenceVector.count)]
         let refStyle = try await multiArrayPool.rent(
-            shape: refShape,
+            shape: [1, referenceVector.count],
             dataType: .float32,
             zeroFill: false
         )
@@ -283,20 +282,18 @@ public struct KokoroSynthesizer {
             trimmedIds.append(contentsOf: Array(repeating: Int32(0), count: targetTokens - trimmedIds.count))
         }
 
-        let inputShape: [NSNumber] = [1, NSNumber(value: targetTokens)]
-        let phasesShape: [NSNumber] = [1, 9]
         let inputArray = try await multiArrayPool.rent(
-            shape: inputShape,
+            shape: [1, targetTokens],
             dataType: .int32,
             zeroFill: false
         )
         let attentionMask = try await multiArrayPool.rent(
-            shape: inputShape,
+            shape: [1, targetTokens],
             dataType: .int32,
             zeroFill: false
         )
         let phasesArray = try await multiArrayPool.rent(
-            shape: phasesShape,
+            shape: [1, 9],
             dataType: .float32,
             zeroFill: true
         )
