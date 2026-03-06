@@ -200,7 +200,7 @@ enum TtsTextPreprocessor {
 
     // MARK: - Currency Processing
 
-    /// Process currencies ($12.50 → 12 dollars and 50 cents)
+    /// Process currencies ($12.50 → twelve dollars and fifty cents)
     private static func processCurrencies(_ text: String) -> String {
         let currencyPattern = try! NSRegularExpression(
             pattern:
@@ -221,15 +221,19 @@ enum TtsTextPreprocessor {
 
             let value = String(matchText.dropFirst())
             let components = value.components(separatedBy: ".")
-            let dollars = components[0]
-            let cents = components.count > 1 ? components[1] : "0"
+            guard let dollarsInt = Int(components[0]) else { continue }
+            let centsInt = components.count > 1 ? (Int(components[1]) ?? 0) : 0
 
+            let dollarsWord = spellOutFormatter.string(from: NSNumber(value: dollarsInt)) ?? components[0]
             let replacement: String
-            if Int(cents) == 0 {
-                replacement = Int(dollars) == 1 ? "\(dollars) \(currency.bill)" : "\(dollars) \(currency.bill)s"
+            if centsInt == 0 {
+                replacement = dollarsInt == 1 ? "\(dollarsWord) \(currency.bill)" : "\(dollarsWord) \(currency.bill)s"
             } else {
-                let dollarPart = Int(dollars) == 1 ? "\(dollars) \(currency.bill)" : "\(dollars) \(currency.bill)s"
-                replacement = "\(dollarPart) and \(cents) \(currency.cent)s"
+                let centsWord = spellOutFormatter.string(from: NSNumber(value: centsInt)) ?? "\(centsInt)"
+                let dollarPart =
+                    dollarsInt == 1 ? "\(dollarsWord) \(currency.bill)" : "\(dollarsWord) \(currency.bill)s"
+                let centPart = centsInt == 1 ? "\(centsWord) \(currency.cent)" : "\(centsWord) \(currency.cent)s"
+                replacement = "\(dollarPart) and \(centPart)"
             }
 
             result.replaceSubrange(fullRange, with: replacement)
