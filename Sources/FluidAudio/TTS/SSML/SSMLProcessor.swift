@@ -73,7 +73,7 @@ public enum SSMLProcessor {
         var inWord = false
 
         for char in prefix {
-            if FluidAudioTTS.isWordCharacter(char) {
+            if isWordCharacter(char) {
                 if !inWord {
                     inWord = true
                 }

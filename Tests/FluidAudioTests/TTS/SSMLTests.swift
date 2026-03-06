@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import FluidAudioTTS
+@testable import FluidAudio
 
 final class SSMLTests: XCTestCase {
 

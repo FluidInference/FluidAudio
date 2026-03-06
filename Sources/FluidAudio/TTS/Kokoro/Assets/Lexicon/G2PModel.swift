@@ -1,5 +1,4 @@
 import CoreML
-import FluidAudio
 import Foundation
 
 /// Thread-safe CoreML-based grapheme-to-phoneme converter.

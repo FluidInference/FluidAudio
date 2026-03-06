@@ -1,5 +1,4 @@
 @preconcurrency import CoreML
-import FluidAudio
 import Foundation
 
 extension PocketTtsSynthesizer {

@@ -12,11 +12,7 @@ let package = Package(
             name: "FluidAudio",
             targets: ["FluidAudio"]
         ),
-        .library(
-            name: "FluidAudioTTS",
-            targets: ["FluidAudioTTS"]
-        ),
-        .executable(
+.executable(
             name: "fluidaudiocli",
             targets: ["FluidAudioCLI"]
         ),
@@ -47,18 +43,10 @@ let package = Package(
             path: "Sources/MachTaskSelfWrapper",
             publicHeadersPath: "include"
         ),
-        .target(
-            name: "FluidAudioTTS",
-            dependencies: [
-                "FluidAudio"
-            ],
-            path: "Sources/FluidAudioTTS"
-        ),
-        .executableTarget(
+.executableTarget(
             name: "FluidAudioCLI",
             dependencies: [
                 "FluidAudio",
-                "FluidAudioTTS",
             ],
             path: "Sources/FluidAudioCLI",
             exclude: ["README.md"],
@@ -70,7 +58,6 @@ let package = Package(
             name: "FluidAudioTests",
             dependencies: [
                 "FluidAudio",
-                "FluidAudioTTS",
             ]
         ),
     ],
