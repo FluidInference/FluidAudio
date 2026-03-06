@@ -1,6 +1,5 @@
 import Accelerate
 @preconcurrency import CoreML
-import FluidAudio
 import Foundation
 import OSLog
 
@@ -85,7 +84,7 @@ public struct KokoroSynthesizer {
         let hasLang = false
         let lexicons = await lexiconCache.lexicons()
         let customLexicon = currentCustomLexicon()
-        return try KokoroChunker.chunk(
+        return try await KokoroChunker.chunk(
             text: text,
             wordToPhonemes: lexicons.word,
             caseSensitiveLexicon: lexicons.caseSensitive,

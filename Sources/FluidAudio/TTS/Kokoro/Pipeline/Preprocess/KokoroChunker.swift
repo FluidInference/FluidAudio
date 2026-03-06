@@ -1,4 +1,3 @@
-import FluidAudio
 import Foundation
 import NaturalLanguage
 
@@ -42,7 +41,7 @@ enum KokoroChunker {
         hasLanguageToken: Bool,
         allowedPhonemes: Set<String>,
         phoneticOverrides: [TtsPhoneticOverride]
-    ) throws -> [TextChunk] {
+    ) async throws -> [TextChunk] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
@@ -62,7 +61,7 @@ enum KokoroChunker {
             return []
         }
 
-        let mergedSentences = try mergeShortSentences(
+        let mergedSentences = try await mergeShortSentences(
             refinedSentences,
             lexicon: wordToPhonemes,
             caseSensitiveLexicon: caseSensitiveLexicon,
@@ -77,7 +76,7 @@ enum KokoroChunker {
         segmentsByPunctuations.reserveCapacity(segmentsByPeriods.count)
 
         for (periodIndex, segment) in segmentsByPeriods.enumerated() {
-            let count = try tokenCountForSegment(
+            let count = try await tokenCountForSegment(
                 for: segment,
                 lexicon: wordToPhonemes,
                 caseSensitiveLexicon: caseSensitiveLexicon,
@@ -88,7 +87,7 @@ enum KokoroChunker {
 
             if count > capacity {
                 let fragments = splitByPunctuation(segment)
-                let reassembled = try reassembleFragments(
+                let reassembled = try await reassembleFragments(
                     fragments,
                     lexicon: wordToPhonemes,
                     caseSensitiveLexicon: caseSensitiveLexicon,
@@ -125,7 +124,7 @@ enum KokoroChunker {
         chunks.reserveCapacity(segmentsByPunctuations.count)
 
         for chunkText in segmentsByPunctuations {
-            let built = try buildChunks(
+            let built = try await buildChunks(
                 from: chunkText,
                 lexicon: wordToPhonemes,
                 caseSensitiveLexicon: caseSensitiveLexicon,
@@ -188,7 +187,7 @@ enum KokoroChunker {
         customLexicon: TtsCustomLexicon?,
         allowed: Set<String>,
         capacity: Int
-    ) throws -> [String] {
+    ) async throws -> [String] {
         guard !sentences.isEmpty else { return [] }
 
         let threshold = max(1, min(capacity, TtsConstants.shortSentenceMergeTokenThreshold))
@@ -210,7 +209,7 @@ enum KokoroChunker {
             let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
 
-            let sentenceTokens = try tokenCountForSegment(
+            let sentenceTokens = try await tokenCountForSegment(
                 for: trimmed,
                 lexicon: lexicon,
                 caseSensitiveLexicon: caseSensitiveLexicon,
@@ -239,7 +238,7 @@ enum KokoroChunker {
             }
 
             let candidate = appendSegment(buffer, with: trimmed)
-            let candidateTokens = try tokenCountForSegment(
+            let candidateTokens = try await tokenCountForSegment(
                 for: candidate,
                 lexicon: lexicon,
                 caseSensitiveLexicon: caseSensitiveLexicon,
@@ -280,7 +279,7 @@ enum KokoroChunker {
         wordIndex: inout Int,
         overrides: [TtsPhoneticOverride],
         overrideIndex: inout Int
-    ) throws -> [TextChunk] {
+    ) async throws -> [TextChunk] {
         let atoms = tokenizeAtoms(text)
         guard !atoms.isEmpty else { return [] }
 
@@ -383,7 +382,7 @@ enum KokoroChunker {
 
                 if resolved == nil {
                     guard
-                        let fallback = try resolvePhonemes(
+                        let fallback = try await resolvePhonemes(
                             for: original,
                             normalized: normalized,
                             lexicon: lexicon,
@@ -520,7 +519,7 @@ enum KokoroChunker {
         caseSensitiveLexicon: [String: [String]],
         allowed: Set<String>,
         missing: inout Set<String>
-    ) throws -> [String]? {
+    ) async throws -> [String]? {
         var phonemes = caseSensitiveLexicon[original]
 
         if phonemes == nil, let exactNormalized = caseSensitiveLexicon[normalized] {
@@ -531,10 +530,15 @@ enum KokoroChunker {
             phonemes = lexicon[normalized]
         }
 
-        if phonemes == nil, let ipa = try EspeakG2P.shared.phonemize(word: normalized) {
-            let mapped = PhonemeMapper.mapIPA(ipa, allowed: allowed)
-            if !mapped.isEmpty {
-                phonemes = mapped
+        // Morphological stemming: derive inflected forms from known stems
+        if phonemes == nil {
+            phonemes = stemInflected(normalized, lexicon: lexicon, allowed: allowed)
+        }
+
+        if phonemes == nil, let g2pTokens = try await G2PModel.shared.phonemize(word: normalized) {
+            let filtered = g2pTokens.filter { allowed.contains($0) }
+            if !filtered.isEmpty {
+                phonemes = filtered
             }
         }
 
@@ -548,10 +552,10 @@ enum KokoroChunker {
             for spelled in spelledTokens {
                 var segment = lexicon[spelled]
 
-                if segment == nil, let ipa = try EspeakG2P.shared.phonemize(word: spelled) {
-                    let mapped = PhonemeMapper.mapIPA(ipa, allowed: allowed)
-                    if !mapped.isEmpty {
-                        segment = mapped
+                if segment == nil, let g2pTokens = try await G2PModel.shared.phonemize(word: spelled) {
+                    let filtered = g2pTokens.filter { allowed.contains($0) }
+                    if !filtered.isEmpty {
+                        segment = filtered
                     }
                 }
 
@@ -613,7 +617,7 @@ enum KokoroChunker {
         customLexicon: TtsCustomLexicon?,
         allowed: Set<String>,
         capacity: Int
-    ) throws -> Int {
+    ) async throws -> Int {
         let atoms = tokenizeAtoms(text)
         guard !atoms.isEmpty else { return 0 }
 
@@ -640,7 +644,7 @@ enum KokoroChunker {
                 }
 
                 if phonemes == nil {
-                    phonemes = try resolvePhonemes(
+                    phonemes = try await resolvePhonemes(
                         for: original,
                         normalized: normalized,
                         lexicon: lexicon,
@@ -680,7 +684,7 @@ enum KokoroChunker {
         customLexicon: TtsCustomLexicon?,
         allowed: Set<String>,
         capacity: Int
-    ) throws -> [String] {
+    ) async throws -> [String] {
         guard !fragments.isEmpty else { return [] }
 
         var assembled: [String] = []
@@ -702,7 +706,7 @@ enum KokoroChunker {
                 current.isEmpty
                 ? trimmedFragment
                 : appendSegment(current, with: trimmedFragment)
-            let candidateTokens = try tokenCountForSegment(
+            let candidateTokens = try await tokenCountForSegment(
                 for: candidate,
                 lexicon: lexicon,
                 caseSensitiveLexicon: caseSensitiveLexicon,
@@ -716,7 +720,7 @@ enum KokoroChunker {
             } else {
                 flushCurrent()
                 current = trimmedFragment
-                let fragmentTokens = try tokenCountForSegment(
+                let fragmentTokens = try await tokenCountForSegment(
                     for: current,
                     lexicon: lexicon,
                     caseSensitiveLexicon: caseSensitiveLexicon,
@@ -809,7 +813,7 @@ enum KokoroChunker {
             return nil
         }
         guard let value = Int(token) else { return nil }
-        guard let spelled = FluidAudioEspeak.spellOutFormatter.string(from: NSNumber(value: value)) else { return nil }
+        guard let spelled = spellOutFormatter.string(from: NSNumber(value: value)) else { return nil }
         let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "-"))
         let components =
             spelled
@@ -851,4 +855,173 @@ enum KokoroChunker {
         "y": ["w", "a", "ɪ"],
         "z": ["z", "i"],
     ]
+
+    // MARK: - Morphological Stemming
+
+    // Vowels that trigger t→ɾ flapping in American English (before -ed/-ing)
+    private static let usTaus: Set<Character> = Set("AIOWYiuæɑəɛɪɹʊʌ")
+
+    /// Try to derive phonemes for an inflected word by stripping -s/-ed/-ing
+    /// and looking up the stem in the lexicon, then reapplying the suffix phonetically.
+    private static func stemInflected(
+        _ word: String,
+        lexicon: [String: [String]],
+        allowed: Set<String>
+    ) -> [String]? {
+        if let result = stemS(word, lexicon: lexicon, allowed: allowed) { return result }
+        if let result = stemEd(word, lexicon: lexicon, allowed: allowed) { return result }
+        if let result = stemIng(word, lexicon: lexicon, allowed: allowed) { return result }
+        return nil
+    }
+
+    /// Strip -s/-es/-ies suffix and apply phonetic plural/3rd-person rule.
+    private static func stemS(
+        _ word: String,
+        lexicon: [String: [String]],
+        allowed: Set<String>
+    ) -> [String]? {
+        guard word.count >= 3, word.hasSuffix("s") else { return nil }
+
+        var stem: String?
+        if !word.hasSuffix("ss"), lexicon[String(word.dropLast(1))] != nil {
+            // word-s → word
+            stem = String(word.dropLast(1))
+        } else if word.hasSuffix("'s") || (word.count > 4 && word.hasSuffix("es") && !word.hasSuffix("ies")),
+            lexicon[String(word.dropLast(2))] != nil
+        {
+            // word-es → word, word's → word
+            stem = String(word.dropLast(2))
+        } else if word.count > 4, word.hasSuffix("ies"),
+            lexicon[String(word.dropLast(3)) + "y"] != nil
+        {
+            // word-ies → word-y
+            stem = String(word.dropLast(3)) + "y"
+        }
+
+        guard let stem, var stemPhonemes = lexicon[stem] else { return nil }
+        stemPhonemes = stemPhonemes.filter { allowed.contains($0) }
+        guard !stemPhonemes.isEmpty else { return nil }
+        return appendSSuffix(to: stemPhonemes)
+    }
+
+    /// Strip -ed/-d suffix and apply phonetic past tense rule.
+    private static func stemEd(
+        _ word: String,
+        lexicon: [String: [String]],
+        allowed: Set<String>
+    ) -> [String]? {
+        guard word.count > 4, word.hasSuffix("ed") else { return nil }
+
+        var stem: String?
+        if lexicon[String(word.dropLast(1))] != nil {
+            // word-e-d → word-e (e.g. "phrased" → "phrase", "rated" → "rate")
+            // Check silent-e stems first to avoid matching shorter stems like "rat" for "rated".
+            stem = String(word.dropLast(1))
+        } else if !word.hasSuffix("eed"), lexicon[String(word.dropLast(2))] != nil {
+            // word-ed → word (e.g. "jumped" → "jump")
+            stem = String(word.dropLast(2))
+        }
+
+        guard let stem, var stemPhonemes = lexicon[stem] else { return nil }
+        stemPhonemes = stemPhonemes.filter { allowed.contains($0) }
+        guard !stemPhonemes.isEmpty else { return nil }
+        return appendEdSuffix(to: stemPhonemes)
+    }
+
+    /// Strip -ing suffix and apply phonetic progressive rule.
+    private static func stemIng(
+        _ word: String,
+        lexicon: [String: [String]],
+        allowed: Set<String>
+    ) -> [String]? {
+        guard word.count >= 5, word.hasSuffix("ing") else { return nil }
+
+        var stem: String?
+        if word.count > 5, lexicon[String(word.dropLast(3))] != nil {
+            // word-ing → word (e.g. "jumping" → "jump")
+            stem = String(word.dropLast(3))
+        } else if lexicon[String(word.dropLast(3)) + "e"] != nil {
+            // word-ing → word-e (e.g. "making" → "make")
+            stem = String(word.dropLast(3)) + "e"
+        } else if word.count > 5 {
+            // Doubled consonant: word-Xing → word (e.g. "running" → "run")
+            let base = String(word.dropLast(3))
+            if base.count >= 2 {
+                let lastChar = base.last!
+                let secondLastIdx = base.index(base.endIndex, offsetBy: -2)
+                let secondLastChar = base[secondLastIdx]
+                let doublingConsonants: Set<Character> = Set("bcdgklmnprstvxz")
+                if (lastChar == secondLastChar && doublingConsonants.contains(lastChar))
+                    || (lastChar == "k" && secondLastChar == "c")  // "cking" → stem without k
+                {
+                    let stemCandidate = String(base.dropLast(1))
+                    if lexicon[stemCandidate] != nil {
+                        stem = stemCandidate
+                    }
+                }
+            }
+        }
+
+        guard let stem, var stemPhonemes = lexicon[stem] else { return nil }
+        stemPhonemes = stemPhonemes.filter { allowed.contains($0) }
+        guard !stemPhonemes.isEmpty else { return nil }
+        return appendIngSuffix(to: stemPhonemes)
+    }
+
+    // MARK: - Phonetic suffix rules (US English)
+
+    /// Append -s/-z/-ᵻz based on final phoneme of stem.
+    private static func appendSSuffix(to stem: [String]) -> [String] {
+        guard let last = stem.last?.first else { return stem }
+        let voiceless: Set<Character> = Set("ptkfθ")
+        let sibilants: Set<Character> = Set("szʃʒʧʤ")
+        if voiceless.contains(last) {
+            return stem + ["s"]
+        } else if sibilants.contains(last) {
+            return stem + ["ᵻ", "z"]
+        }
+        return stem + ["z"]
+    }
+
+    /// Append -t/-d/-ᵻd based on final phoneme of stem.
+    private static func appendEdSuffix(to stem: [String]) -> [String] {
+        guard let last = stem.last?.first else { return stem }
+        let voicelessStops: Set<Character> = Set("pkfθʃsʧ")
+        if voicelessStops.contains(last) {
+            return stem + ["t"]
+        } else if last == "d" {
+            return stem + ["ᵻ", "d"]
+        } else if last != "t" {
+            return stem + ["d"]
+        }
+        // Ends in "t": check for flapping (t→ɾ before ᵻd)
+        if stem.count >= 2 {
+            let secondLast = stem[stem.count - 2]
+            if let ch = secondLast.first, usTaus.contains(ch) {
+                var result = Array(stem.dropLast())
+                result.append("ɾ")
+                result.append("ᵻ")
+                result.append("d")
+                return result
+            }
+        }
+        return stem + ["ᵻ", "d"]
+    }
+
+    /// Append -ɪŋ based on final phoneme of stem, with t→ɾ flapping.
+    private static func appendIngSuffix(to stem: [String]) -> [String] {
+        guard let last = stem.last?.first else { return stem }
+        // Flapping: vowel + t → vowel + ɾɪŋ
+        if last == "t", stem.count >= 2 {
+            let secondLast = stem[stem.count - 2]
+            if let ch = secondLast.first, usTaus.contains(ch) {
+                var result = Array(stem.dropLast())
+                result.append("ɾ")
+                result.append("ɪ")
+                result.append("ŋ")
+                return result
+            }
+        }
+        return stem + ["ɪ", "ŋ"]
+    }
 }

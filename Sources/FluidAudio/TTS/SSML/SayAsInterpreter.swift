@@ -76,7 +76,7 @@ public enum SayAsInterpreter {
         guard let number = Int(content.filter { $0.isNumber || $0 == "-" }) else {
             return content
         }
-        return FluidAudioEspeak.spellOutFormatter.string(from: NSNumber(value: number)) ?? content
+        return spellOutFormatter.string(from: NSNumber(value: number)) ?? content
     }
 
     /// Ordinal number: "1" -> "first", "23" -> "twenty third"
@@ -90,7 +90,7 @@ public enum SayAsInterpreter {
     /// Spell each digit: "123" -> "one two three"
     private static func interpretDigits(_ content: String) -> String {
         content.compactMap { char -> String? in
-            FluidAudioEspeak.digitToWord(char)
+            digitToWord(char)
         }.joined(separator: " ")
     }
 
@@ -159,7 +159,7 @@ public enum SayAsInterpreter {
         }
 
         // For numbers 20+, spell out the cardinal and add appropriate suffix
-        guard let spelled = FluidAudioEspeak.spellOutFormatter.string(from: NSNumber(value: number)) else {
+        guard let spelled = spellOutFormatter.string(from: NSNumber(value: number)) else {
             return "\(number)th"
         }
 

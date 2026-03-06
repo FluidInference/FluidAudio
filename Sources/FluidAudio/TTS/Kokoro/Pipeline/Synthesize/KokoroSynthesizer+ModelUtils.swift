@@ -1,5 +1,4 @@
 @preconcurrency import CoreML
-import FluidAudio
 import Foundation
 
 extension KokoroSynthesizer {
@@ -99,19 +98,17 @@ extension KokoroSynthesizer {
         if !oov.isEmpty {
             let sample = Set(oov).sorted().prefix(5).joined(separator: ", ")
             do {
-                try EspeakG2P.ensureResourcesAvailable()
+                try await G2PModel.shared.ensureModelsAvailable()
             } catch {
-                // In CI environments, we might want to proceed even if G2P is missing
-                // (e.g. for basic smoke tests that don't verify audio content).
                 if ProcessInfo.processInfo.environment["CI"] != nil {
                     print(
-                        "Warning: G2P (eSpeak NG) unavailable in CI environment. OOV words (\(sample)) will be skipped or incorrect."
+                        "Warning: G2P models unavailable in CI environment. OOV words (\(sample)) will be skipped or incorrect."
                     )
                     return
                 }
 
                 throw TTSError.processingFailed(
-                    "G2P (eSpeak NG) unavailable but required for OOV words (\(sample)): \(error.localizedDescription)"
+                    "G2P models unavailable but required for OOV words (\(sample)): \(error.localizedDescription)"
                 )
             }
         }
