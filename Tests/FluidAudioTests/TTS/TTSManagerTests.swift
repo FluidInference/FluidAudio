@@ -1,7 +1,6 @@
+import FluidAudioTTS
 import XCTest
 
-#if canImport(FluidAudioTTS) && canImport(ESpeakNG)
-import FluidAudioEspeak
 @testable import FluidAudio
 
 final class KokoroTtsManagerTests: XCTestCase {
@@ -163,4 +162,3 @@ final class KokoroTtsManagerTests: XCTestCase {
         }
     }
 }
-#endif

@@ -13,8 +13,8 @@ let package = Package(
             targets: ["FluidAudio"]
         ),
         .library(
-            name: "FluidAudioEspeak",
-            targets: ["FluidAudioEspeak"]
+            name: "FluidAudioTTS",
+            targets: ["FluidAudioTTS"]
         ),
         .executable(
             name: "fluidaudiocli",
@@ -48,17 +48,17 @@ let package = Package(
             publicHeadersPath: "include"
         ),
         .target(
-            name: "FluidAudioEspeak",
+            name: "FluidAudioTTS",
             dependencies: [
                 "FluidAudio"
             ],
-            path: "Sources/FluidAudioEspeak"
+            path: "Sources/FluidAudioTTS"
         ),
         .executableTarget(
             name: "FluidAudioCLI",
             dependencies: [
                 "FluidAudio",
-                "FluidAudioEspeak",
+                "FluidAudioTTS",
             ],
             path: "Sources/FluidAudioCLI",
             exclude: ["README.md"],
@@ -70,7 +70,7 @@ let package = Package(
             name: "FluidAudioTests",
             dependencies: [
                 "FluidAudio",
-                "FluidAudioEspeak",
+                "FluidAudioTTS",
             ]
         ),
     ],

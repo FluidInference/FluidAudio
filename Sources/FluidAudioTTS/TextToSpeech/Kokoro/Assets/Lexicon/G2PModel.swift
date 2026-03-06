@@ -4,8 +4,8 @@ import Foundation
 
 /// Thread-safe CoreML-based grapheme-to-phoneme converter.
 /// Uses a small BART encoder-decoder model to convert English words to IPA phonemes.
-final class EspeakG2P {
-    enum EspeakG2PError: Error, LocalizedError {
+final class G2PModel {
+    enum G2PModelError: Error, LocalizedError {
         case vocabLoadFailed(String)
         case modelLoadFailed(String)
         case encoderPredictionFailed
@@ -25,10 +25,10 @@ final class EspeakG2P {
         }
     }
 
-    nonisolated(unsafe) static let shared = EspeakG2P()
-    private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
+    nonisolated(unsafe) static let shared = G2PModel()
+    private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "G2PModel")
 
-    private let queue = DispatchQueue(label: "com.fluidaudio.tts.espeak.g2p")
+    private let queue = DispatchQueue(label: "com.fluidaudio.tts.g2p")
 
     // Vocab tables (loaded once)
     private var graphemeToId: [Character: Int]?
@@ -43,7 +43,7 @@ final class EspeakG2P {
 
     private init() {}
 
-    func phonemize(word: String, espeakVoice: String = "en-us") throws -> [String]? {
+    func phonemize(word: String) throws -> [String]? {
         return try queue.sync {
             do {
                 try loadIfNeeded()
@@ -81,7 +81,7 @@ final class EspeakG2P {
             guard let encoderOutput = try? encoder.prediction(from: encoderProvider),
                 let encoderHidden = encoderOutput.featureValue(for: "encoder_hidden_states")?.multiArrayValue
             else {
-                throw EspeakG2PError.encoderPredictionFailed
+                throw G2PModelError.encoderPredictionFailed
             }
 
             // Greedy decode loop
@@ -125,7 +125,7 @@ final class EspeakG2P {
                 guard let decoderOutput = try? decoder.prediction(from: decoderProvider),
                     let logits = decoderOutput.featureValue(for: "logits")?.multiArrayValue
                 else {
-                    throw EspeakG2PError.decoderPredictionFailed
+                    throw G2PModelError.decoderPredictionFailed
                 }
 
                 // Argmax of last position's logits
@@ -176,7 +176,7 @@ final class EspeakG2P {
         // Load g2p_vocab.json from cache directory
         let vocabURL = kokoroDir.appendingPathComponent(ModelNames.G2P.vocabularyFile)
         guard FileManager.default.fileExists(atPath: vocabURL.path) else {
-            throw EspeakG2PError.vocabLoadFailed("\(ModelNames.G2P.vocabularyFile) not found at \(vocabURL.path)")
+            throw G2PModelError.vocabLoadFailed("\(ModelNames.G2P.vocabularyFile) not found at \(vocabURL.path)")
         }
 
         let vocabData = try Data(contentsOf: vocabURL)
@@ -184,7 +184,7 @@ final class EspeakG2P {
             let g2id = vocab["grapheme_to_id"] as? [String: Int],
             let id2ph = vocab["id_to_phoneme"] as? [String: String]
         else {
-            throw EspeakG2PError.vocabLoadFailed("invalid JSON structure")
+            throw G2PModelError.vocabLoadFailed("invalid JSON structure")
         }
 
         var gMap: [Character: Int] = [:]
@@ -211,11 +211,11 @@ final class EspeakG2P {
         // Load CoreML models from cache directory
         let encoderURL = kokoroDir.appendingPathComponent(ModelNames.G2P.encoderFile)
         guard FileManager.default.fileExists(atPath: encoderURL.path) else {
-            throw EspeakG2PError.modelLoadFailed("\(ModelNames.G2P.encoderFile) not found at \(encoderURL.path)")
+            throw G2PModelError.modelLoadFailed("\(ModelNames.G2P.encoderFile) not found at \(encoderURL.path)")
         }
         let decoderURL = kokoroDir.appendingPathComponent(ModelNames.G2P.decoderFile)
         guard FileManager.default.fileExists(atPath: decoderURL.path) else {
-            throw EspeakG2PError.modelLoadFailed("\(ModelNames.G2P.decoderFile) not found at \(decoderURL.path)")
+            throw G2PModelError.modelLoadFailed("\(ModelNames.G2P.decoderFile) not found at \(decoderURL.path)")
         }
 
         let config = MLModelConfiguration()

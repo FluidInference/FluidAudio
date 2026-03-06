@@ -536,7 +536,7 @@ enum KokoroChunker {
             phonemes = stemInflected(normalized, lexicon: lexicon, allowed: allowed)
         }
 
-        if phonemes == nil, let g2pTokens = try EspeakG2P.shared.phonemize(word: normalized) {
+        if phonemes == nil, let g2pTokens = try G2PModel.shared.phonemize(word: normalized) {
             let filtered = g2pTokens.filter { allowed.contains($0) }
             if !filtered.isEmpty {
                 phonemes = filtered
@@ -553,7 +553,7 @@ enum KokoroChunker {
             for spelled in spelledTokens {
                 var segment = lexicon[spelled]
 
-                if segment == nil, let g2pTokens = try EspeakG2P.shared.phonemize(word: spelled) {
+                if segment == nil, let g2pTokens = try G2PModel.shared.phonemize(word: spelled) {
                     let filtered = g2pTokens.filter { allowed.contains($0) }
                     if !filtered.isEmpty {
                         segment = filtered
@@ -814,7 +814,7 @@ enum KokoroChunker {
             return nil
         }
         guard let value = Int(token) else { return nil }
-        guard let spelled = FluidAudioEspeak.spellOutFormatter.string(from: NSNumber(value: value)) else { return nil }
+        guard let spelled = FluidAudioTTS.spellOutFormatter.string(from: NSNumber(value: value)) else { return nil }
         let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "-"))
         let components =
             spelled

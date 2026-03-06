@@ -177,13 +177,13 @@ enum TtsTextPreprocessor {
             let integerWords: String
             if let integerValue = Int(integerPart) {
                 integerWords =
-                    FluidAudioEspeak.spellOutFormatter.string(from: NSNumber(value: integerValue)) ?? integerPart
+                    FluidAudioTTS.spellOutFormatter.string(from: NSNumber(value: integerValue)) ?? integerPart
             } else {
                 integerWords = integerPart
             }
 
             // Convert each decimal digit to individual words
-            let decimalWords = decimalPart.compactMap { FluidAudioEspeak.digitToWord($0) }.joined(separator: " ")
+            let decimalWords = decimalPart.compactMap { FluidAudioTTS.digitToWord($0) }.joined(separator: " ")
 
             let replacement = "\(integerWords) point \(decimalWords)"
 
@@ -446,7 +446,7 @@ enum TtsTextPreprocessor {
 
         var accumulator = WordAccumulator(
             expectedScalarCount: text.unicodeScalars.count,
-            apostrophes: FluidAudioEspeak.phoneticApostropheCharacters
+            apostrophes: FluidAudioTTS.phoneticApostropheCharacters
         )
 
         let end = text.endIndex
@@ -618,7 +618,7 @@ enum TtsTextPreprocessor {
         }
 
         private static func isWordLike(_ character: Character, apostrophes: Set<Character>) -> Bool {
-            FluidAudioEspeak.isWordCharacter(character, apostrophes: apostrophes)
+            FluidAudioTTS.isWordCharacter(character, apostrophes: apostrophes)
         }
 
         private static func isCombiningMark(_ character: Character) -> Bool {

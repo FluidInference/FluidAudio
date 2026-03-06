@@ -99,7 +99,7 @@ extension KokoroSynthesizer {
         if !oov.isEmpty {
             let sample = Set(oov).sorted().prefix(5).joined(separator: ", ")
             do {
-                try EspeakG2P.shared.ensureModelsAvailable()
+                try G2PModel.shared.ensureModelsAvailable()
             } catch {
                 if ProcessInfo.processInfo.environment["CI"] != nil {
                     print(

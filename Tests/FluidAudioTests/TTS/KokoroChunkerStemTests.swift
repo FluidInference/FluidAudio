@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import FluidAudioEspeak
+@testable import FluidAudioTTS
 
 final class KokoroChunkerStemTests: XCTestCase {
 

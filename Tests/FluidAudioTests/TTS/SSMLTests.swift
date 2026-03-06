@@ -1,7 +1,6 @@
 import XCTest
 
-#if canImport(FluidAudioTTS)
-@testable import FluidAudioEspeak
+@testable import FluidAudioTTS
 
 final class SSMLTests: XCTestCase {
 
@@ -668,5 +667,3 @@ final class SSMLTests: XCTestCase {
         XCTAssertEqual(result.text, "replaced")
     }
 }
-
-#endif

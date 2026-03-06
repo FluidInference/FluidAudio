@@ -1,7 +1,6 @@
 import XCTest
 
-#if canImport(FluidAudioTTS)
-@testable import FluidAudioEspeak
+@testable import FluidAudioTTS
 
 final class TtsCustomLexiconTests: XCTestCase {
 
@@ -555,4 +554,3 @@ final class TtsCustomLexiconTests: XCTestCase {
         XCTAssertTrue(lexicon.isEmpty)
     }
 }
-#endif
