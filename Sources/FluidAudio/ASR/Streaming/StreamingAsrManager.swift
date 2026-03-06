@@ -531,9 +531,10 @@ public actor StreamingAsrManager {
                 return nil
             }
 
-            // Determine rescoring parameters based on vocabulary size
+            // Determine rescoring parameters based on vocabulary size,
+            // but respect the caller-specified threshold when stricter.
             let vocabConfig = vocabSizeConfig ?? ContextBiasingConstants.rescorerConfig(forVocabSize: 0)
-            let minSimilarity = vocabConfig.minSimilarity
+            let minSimilarity = max(vocabConfig.minSimilarity, vocab.minSimilarity)
             let cbw = vocabConfig.cbw
 
             // Apply constrained CTC rescoring
