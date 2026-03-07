@@ -381,23 +381,34 @@ public class DownloadUtils {
             let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedFilePath)
             let request = authorizedRequest(url: fileURL)
 
-            let baseBytes = completedBytes
-            let fileCount = filesToDownload.count
-            let totalBytesSnapshot = totalBytes
-            let (tempFileURL, httpResponse) = try await downloadWithProgress(
-                request: request,
-                onProgress: { bytesWritten, _ in
-                    guard let handler = progressHandler, totalBytesSnapshot > 0 else { return }
-                    let current = baseBytes + bytesWritten
-                    // Download phase occupies 0.0–0.5 of the overall range.
-                    let fraction = 0.5 * Double(current) / Double(totalBytesSnapshot)
-                    handler(
-                        DownloadProgress(
-                            fractionCompleted: min(fraction, 0.5),
-                            phase: .downloading(completedFiles: index, totalFiles: fileCount)
-                        ))
+            let tempFileURL: URL
+            let httpResponse: HTTPURLResponse
+            if let handler = progressHandler {
+                let baseBytes = completedBytes
+                let fileCount = filesToDownload.count
+                let totalBytesSnapshot = totalBytes
+                (tempFileURL, httpResponse) = try await downloadWithProgress(
+                    request: request,
+                    onProgress: { bytesWritten, _ in
+                        guard totalBytesSnapshot > 0 else { return }
+                        let current = baseBytes + bytesWritten
+                        // Download phase occupies 0.0–0.5 of the overall range.
+                        let fraction = 0.5 * Double(current) / Double(totalBytesSnapshot)
+                        handler(
+                            DownloadProgress(
+                                fractionCompleted: min(fraction, 0.5),
+                                phase: .downloading(completedFiles: index, totalFiles: fileCount)
+                            ))
+                    }
+                )
+            } else {
+                let (url, response) = try await sharedSession.download(for: request)
+                guard let resp = response as? HTTPURLResponse else {
+                    throw HuggingFaceDownloadError.invalidResponse
                 }
-            )
+                tempFileURL = url
+                httpResponse = resp
+            }
 
             if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
                 throw HuggingFaceDownloadError.rateLimited(
