@@ -166,6 +166,56 @@ public final class SortformerDiarizer {
         logger.info("Sortformer resources cleaned up")
     }
 
+    // MARK: - Speaker Priming
+
+    /// Prime the diarizer with enrollment audio to warm up speaker state.
+    ///
+    /// Processes the audio through the full pipeline to populate the speaker cache
+    /// and FIFO buffers, then resets the timeline so subsequent processing starts
+    /// from frame 0. Call this after `initialize()` and before streaming real audio.
+    ///
+    /// ```swift
+    /// diarizer.initialize(models: models)
+    /// try diarizer.primeWithAudio(aliceSamples)   // 5s of Alice speaking
+    /// try diarizer.primeWithAudio(bobSamples)     // 5s of Bob speaking
+    /// // Now stream real audio — speakers are already in cache
+    /// diarizer.addAudio(liveAudio)
+    /// let result = try diarizer.process()
+    /// ```
+    ///
+    /// - Parameter samples: Audio samples (16kHz mono) of known speakers
+    /// - Throws: `SortformerError.notInitialized` if models not loaded
+    public func primeWithAudio(_ samples: [Float]) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard _models != nil else {
+            throw SortformerError.notInitialized
+        }
+
+        // Process enrollment audio through the normal pipeline
+        audioBuffer.append(contentsOf: samples)
+        preprocessAudioToFeaturesLocked()
+
+        // Run all available chunks to populate spkcache/fifo
+        while let _ = try processLocked() {}
+
+        // Reset timeline and counters — keep streaming state (spkcache, fifo, silence)
+        _numFramesProcessed = 0
+        _timeline.reset()
+
+        // Clear audio/feature buffers but preserve lastAudioSample for mel continuity
+        audioBuffer = []
+        featureBuffer = []
+        startFeat = 0
+        // Keep diarizerChunkIndex so leftContext is nonzero for next real chunk
+
+        logger.info(
+            "Primed with \(samples.count) samples (\(String(format: "%.1f", Float(samples.count) / 16000.0))s), "
+                + "spkcache=\(_state.spkcacheLength), fifo=\(_state.fifoLength)"
+        )
+    }
+
     // MARK: - Streaming Processing
 
     /// Add audio samples to the processing buffer.

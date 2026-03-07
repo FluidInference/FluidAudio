@@ -75,6 +75,33 @@ public final class DiarizerManager {
         speakerManager.initializeKnownSpeakers(speakers)
     }
 
+    /// Extract a 256-dimensional speaker embedding from audio samples.
+    ///
+    /// Use this to build a `Speaker` for `initializeKnownSpeakers()` from a recording
+    /// of a single known speaker.
+    ///
+    /// ```swift
+    /// let embedding = try diarizer.extractSpeakerEmbedding(from: aliceSamples)
+    /// let alice = Speaker(id: "alice", name: "Alice", currentEmbedding: embedding, isPermanent: true)
+    /// diarizer.initializeKnownSpeakers([alice])
+    /// ```
+    ///
+    /// - Parameter audio: Audio samples (16kHz mono) of a single speaker
+    /// - Returns: L2-normalized 256-dimensional embedding
+    /// - Throws: `DiarizerError.notInitialized` if models not loaded
+    public func extractSpeakerEmbedding<C>(from audio: C) throws -> [Float]
+    where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
+        guard let extractor = embeddingExtractor else {
+            throw DiarizerError.notInitialized
+        }
+        let mask = [Float](repeating: 1.0, count: audio.count)
+        let embeddings = try extractor.getEmbeddings(audio: audio, masks: [mask])
+        guard let embedding = embeddings.first else {
+            throw DiarizerError.embeddingExtractionFailed
+        }
+        return embedding
+    }
+
     /// Perform complete speaker diarization on audio samples.
     ///
     /// Processes the entire audio to identify "who spoke when" by:
