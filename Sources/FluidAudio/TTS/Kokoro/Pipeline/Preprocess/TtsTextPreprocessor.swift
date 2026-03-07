@@ -40,36 +40,42 @@ enum TtsTextPreprocessor {
     static func preprocessDetailed(_ text: String) -> TtsPreprocessingResult {
         var processed = text
 
-        // 0. Process SSML tags first (before all other preprocessing)
+        // 0. Normalize smart quotes to ASCII equivalents (' " → ' ")
+        processed = normalizeSmartQuotes(processed)
+
+        // 1. Process SSML tags (before all other preprocessing)
         let ssmlResult = SSMLProcessor.process(processed)
         processed = ssmlResult.text
         let ssmlOverrides = ssmlResult.phoneticOverrides
 
-        // 1. Remove commas from numbers (1,000 → 1000)
+        // 2. Remove commas from numbers (1,000 → 1000)
         processed = removeCommasFromNumbers(processed)
 
-        // 2. Handle ranges (5-10 → 5 to 10)
+        // 3. Handle ranges (5-10 → 5 to 10)
         processed = processRanges(processed)
 
-        // 3. Process currencies ($12.50 → 12 dollars and 50 cents)
+        // 4. Process currencies ($12.50 → 12 dollars and 50 cents)
         processed = processCurrencies(processed)
 
-        // 4. Process times (12:30 → 12 30)
+        // 5. Process times (12:30 → 12 30)
         processed = processTimes(processed)
 
-        // 5. Handle decimal numbers (12.3 → 12 point 3)
+        // 6. Handle decimal numbers (12.3 → 12 point 3)
         processed = processDecimalNumbers(processed)
 
-        // 6. Handle unit abbreviations (g → grams)
+        // 7. Handle unit abbreviations (g → grams)
         processed = processUnitAbbreviations(processed)
 
-        // 7. Handle common abbreviations and symbols
+        // 8. Handle common abbreviations and symbols
         processed = processCommonAbbreviations(processed)
 
-        // 8. Handle alias replacement [LOL](laugh out loud)
+        // 9. Handle alias replacement [LOL](laugh out loud)
         processed = processAliasReplacement(processed)
 
-        // 9. Handle phonetic replacement [Kokoro](/kˈOkəɹO/)
+        // 10. Spell out remaining whole numbers (5 → five, 10 → ten)
+        processed = spellOutWholeNumbers(processed)
+
+        // 11. Handle phonetic replacement [Kokoro](/kˈOkəɹO/)
         let phoneticResult = processPhoneticReplacement(processed)
         processed = phoneticResult.text
 
@@ -116,6 +122,16 @@ enum TtsTextPreprocessor {
         merged.append(contentsOf: markdownOverrides[markdownIndex...])
 
         return merged
+    }
+
+    // MARK: - Smart Quote Normalization
+
+    /// Replace curly/smart quotes with their ASCII equivalents.
+    private static func normalizeSmartQuotes(_ text: String) -> String {
+        text.replacingOccurrences(of: "\u{2018}", with: "'")  // '
+            .replacingOccurrences(of: "\u{2019}", with: "'")  // '
+            .replacingOccurrences(of: "\u{201C}", with: "\"")  // "
+            .replacingOccurrences(of: "\u{201D}", with: "\"")  // "
     }
 
     // MARK: - Number Processing
@@ -193,6 +209,31 @@ enum TtsTextPreprocessor {
             let finalReplacement = needsSpace ? replacement + " " : replacement
 
             result.replaceSubrange(fullRange, with: finalReplacement)
+        }
+
+        return result
+    }
+
+    /// Spell out remaining whole numbers (e.g. "5" → "five", "100" → "one hundred").
+    /// Runs after all other normalization so that numbers produced by earlier steps
+    /// (ranges, times, units) are also converted.
+    private static func spellOutWholeNumbers(_ text: String) -> String {
+        let wholeNumberPattern = try! NSRegularExpression(
+            pattern: "\\b\\d+\\b",
+            options: []
+        )
+
+        let matches = wholeNumberPattern.matches(
+            in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
+
+        var result = text
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: result) else { continue }
+            let digits = String(result[range])
+            guard let value = Int(digits),
+                let spelled = spellOutFormatter.string(from: NSNumber(value: value))
+            else { continue }
+            result.replaceSubrange(range, with: spelled)
         }
 
         return result
