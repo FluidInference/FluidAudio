@@ -96,9 +96,10 @@ public struct Qwen3AsrModels: Sendable {
     public static func downloadAndLoad(
         variant: Qwen3AsrVariant = .f32,
         to directory: URL? = nil,
-        computeUnits: MLComputeUnits = .all
+        computeUnits: MLComputeUnits = .all,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> Qwen3AsrModels {
-        let targetDir = try await download(variant: variant, to: directory)
+        let targetDir = try await download(variant: variant, to: directory, progressHandler: progressHandler)
         return try await load(from: targetDir, computeUnits: computeUnits)
     }
 
@@ -108,12 +109,14 @@ public struct Qwen3AsrModels: Sendable {
     ///   - variant: Model variant to download (`.f32` or `.int8`).
     ///   - directory: Target directory. Uses default cache directory if nil.
     ///   - force: Force re-download even if models exist.
+    ///   - progressHandler: Optional callback for download progress updates.
     /// - Returns: Path to the directory containing the downloaded models.
     @discardableResult
     public static func download(
         variant: Qwen3AsrVariant = .f32,
         to directory: URL? = nil,
-        force: Bool = false
+        force: Bool = false,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory(variant: variant)
         let modelsRoot = modelsRootDirectory()
@@ -128,7 +131,7 @@ public struct Qwen3AsrModels: Sendable {
         }
 
         logger.info("Downloading Qwen3-ASR \(variant.rawValue) models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(variant.repo, to: modelsRoot)
+        try await DownloadUtils.downloadRepo(variant.repo, to: modelsRoot, progressHandler: progressHandler)
         logger.info("Successfully downloaded Qwen3-ASR \(variant.rawValue) models")
         return targetDir
     }

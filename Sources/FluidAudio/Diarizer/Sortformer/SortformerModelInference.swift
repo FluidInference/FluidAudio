@@ -109,7 +109,8 @@ extension SortformerModels {
     public static func loadFromHuggingFace(
         config: SortformerConfig,
         cacheDirectory: URL? = nil,
-        computeUnits: MLComputeUnits = .all
+        computeUnits: MLComputeUnits = .all,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from HuggingFace...")
 
@@ -137,7 +138,8 @@ extension SortformerModels {
             .sortformer,
             modelNames: [bundle],
             directory: directory,
-            computeUnits: computeUnits
+            computeUnits: computeUnits,
+            progressHandler: progressHandler
         )
 
         guard let sortformer = models[bundle]

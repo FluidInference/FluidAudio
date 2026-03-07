@@ -60,8 +60,35 @@ public class DownloadUtils {
     }
 
     /// Download configuration
-    /// Progress handler type for download progress callbacks (unused but kept for API compatibility)
-    public typealias ProgressHandler = (Double) -> Void
+
+    /// Phase of a model download operation.
+    public enum DownloadPhase: Sendable {
+        /// Listing files from the remote repository.
+        case listing
+        /// Downloading model files. `completedFiles` / `totalFiles` track per-file progress.
+        case downloading(completedFiles: Int, totalFiles: Int)
+        /// Compiling CoreML models after download.
+        case compiling(modelName: String)
+    }
+
+    /// Progress snapshot passed to ``ProgressHandler`` closures.
+    public struct DownloadProgress: Sendable {
+        /// Fraction complete in [0, 1].
+        public let fractionCompleted: Double
+        /// Current phase of the operation.
+        public let phase: DownloadPhase
+
+        public init(fractionCompleted: Double, phase: DownloadPhase) {
+            self.fractionCompleted = fractionCompleted
+            self.phase = phase
+        }
+    }
+
+    /// Callback type for download progress reporting.
+    ///
+    /// Called on an unspecified queue. If you need to update UI, dispatch to
+    /// the main actor inside your handler.
+    public typealias ProgressHandler = @Sendable (DownloadProgress) -> Void
 
     public struct DownloadConfig: Sendable {
         public let timeout: TimeInterval
@@ -78,13 +105,15 @@ public class DownloadUtils {
         modelNames: [String],
         directory: URL,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        variant: String? = nil
+        variant: String? = nil,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> [String: MLModel] {
         await SystemInfo.logOnce(using: logger)
         do {
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
-                directory: directory, computeUnits: computeUnits, variant: variant)
+                directory: directory, computeUnits: computeUnits, variant: variant,
+                progressHandler: progressHandler)
         } catch {
             logger.warning("First load failed: \(error.localizedDescription)")
             logger.info("Deleting cache and re-downloading…")
@@ -93,7 +122,8 @@ public class DownloadUtils {
 
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
-                directory: directory, computeUnits: computeUnits, variant: variant)
+                directory: directory, computeUnits: computeUnits, variant: variant,
+                progressHandler: progressHandler)
         }
     }
 
@@ -136,7 +166,8 @@ public class DownloadUtils {
         modelNames: [String],
         directory: URL,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        variant: String? = nil
+        variant: String? = nil,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> [String: MLModel] {
         await SystemInfo.logOnce(using: logger)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -150,9 +181,11 @@ public class DownloadUtils {
 
         if !allModelsExist {
             logger.info("Models not found in cache at \(repoPath.path)")
-            try await downloadRepo(repo, to: directory, variant: variant)
+            try await downloadRepo(repo, to: directory, variant: variant, progressHandler: progressHandler)
         } else {
             logger.info("Found \(repo.folderName) locally, no download needed")
+            progressHandler?(
+                DownloadProgress(fractionCompleted: 0.5, phase: .downloading(completedFiles: 0, totalFiles: 0)))
         }
 
         let config = MLModelConfiguration()
@@ -160,7 +193,7 @@ public class DownloadUtils {
         config.allowLowPrecisionAccumulationOnGPU = true
 
         var models: [String: MLModel] = [:]
-        for name in modelNames {
+        for (index, name) in modelNames.enumerated() {
             let modelPath = repoPath.appendingPathComponent(name)
             guard FileManager.default.fileExists(atPath: modelPath.path) else {
                 throw CocoaError(
@@ -195,6 +228,12 @@ public class DownloadUtils {
                     ])
             }
 
+            progressHandler?(
+                DownloadProgress(
+                    fractionCompleted: 0.5 + 0.5 * Double(index) / Double(modelNames.count),
+                    phase: .compiling(modelName: name)
+                ))
+
             let start = Date()
             let model = try MLModel(contentsOf: modelPath, configuration: config)
             let elapsed = Date().timeIntervalSince(start)
@@ -206,11 +245,17 @@ public class DownloadUtils {
             logger.info("Compiled model \(name) in \(formatted) ms :: \(SystemInfo.summary())")
         }
 
+        progressHandler?(DownloadProgress(fractionCompleted: 1.0, phase: .compiling(modelName: "")))
         return models
     }
 
     /// Download a HuggingFace repository using URLSession (does not load models)
-    public static func downloadRepo(_ repo: Repo, to directory: URL, variant: String? = nil) async throws {
+    public static func downloadRepo(
+        _ repo: Repo,
+        to directory: URL,
+        variant: String? = nil,
+        progressHandler: ProgressHandler? = nil
+    ) async throws {
         logger.info("Downloading \(repo.folderName) from HuggingFace...")
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
@@ -294,8 +339,14 @@ public class DownloadUtils {
         }
 
         // Start listing from subPath if specified, otherwise from root
+        progressHandler?(DownloadProgress(fractionCompleted: 0.0, phase: .listing))
         try await listDirectory(path: subPath ?? "")
         logger.info("Found \(filesToDownload.count) files to download")
+
+        // Compute total known bytes for byte-weighted progress.
+        // Files with unknown sizes (size == -1) are treated as 0 for weighting.
+        let totalBytes: Int64 = filesToDownload.reduce(0) { $0 + Int64(max(0, $1.size)) }
+        var completedBytes: Int64 = 0
 
         // Download each file
         for (index, file) in filesToDownload.enumerated() {
@@ -308,6 +359,7 @@ public class DownloadUtils {
 
             // Skip if already exists
             if FileManager.default.fileExists(atPath: destPath.path) {
+                completedBytes += Int64(max(0, file.size))
                 continue
             }
 
@@ -329,11 +381,23 @@ public class DownloadUtils {
             let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedFilePath)
             let request = authorizedRequest(url: fileURL)
 
-            let (tempFileURL, response) = try await sharedSession.download(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw HuggingFaceDownloadError.invalidResponse
-            }
+            let baseBytes = completedBytes
+            let fileCount = filesToDownload.count
+            let totalBytesSnapshot = totalBytes
+            let (tempFileURL, httpResponse) = try await downloadWithProgress(
+                request: request,
+                onProgress: { bytesWritten, _ in
+                    guard let handler = progressHandler, totalBytesSnapshot > 0 else { return }
+                    let current = baseBytes + bytesWritten
+                    // Download phase occupies 0.0–0.5 of the overall range.
+                    let fraction = 0.5 * Double(current) / Double(totalBytesSnapshot)
+                    handler(
+                        DownloadProgress(
+                            fractionCompleted: min(fraction, 0.5),
+                            phase: .downloading(completedFiles: index, totalFiles: fileCount)
+                        ))
+                }
+            )
 
             if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
                 throw HuggingFaceDownloadError.rateLimited(
@@ -354,9 +418,20 @@ public class DownloadUtils {
             }
             try FileManager.default.moveItem(at: tempFileURL, to: destPath)
 
+            completedBytes += Int64(max(0, file.size))
+
             if (index + 1) % 10 == 0 || index == filesToDownload.count - 1 {
                 logger.info("Downloaded \(index + 1)/\(filesToDownload.count) files")
             }
+
+            // Report completed-file progress
+            progressHandler?(
+                DownloadProgress(
+                    fractionCompleted: totalBytes > 0
+                        ? 0.5 * Double(completedBytes) / Double(totalBytes)
+                        : 0.5 * Double(index + 1) / Double(filesToDownload.count),
+                    phase: .downloading(completedFiles: index + 1, totalFiles: filesToDownload.count)
+                ))
         }
 
         // Verify required models are present
@@ -368,6 +443,34 @@ public class DownloadUtils {
         }
 
         logger.info("Downloaded all required models for \(repo.folderName)")
+    }
+
+    // MARK: - Delegate-based download with per-byte progress
+
+    /// Download a single file using a delegate to get byte-level progress.
+    ///
+    /// - Parameters:
+    ///   - request: The URLRequest to download.
+    ///   - onProgress: Called with `(bytesWritten, totalBytesExpected)` as data arrives.
+    /// - Returns: `(tempFileURL, HTTPURLResponse)`.
+    private static func downloadWithProgress(
+        request: URLRequest,
+        onProgress: @escaping @Sendable (Int64, Int64) -> Void
+    ) async throws -> (URL, HTTPURLResponse) {
+        let delegate = DownloadProgressDelegate(onProgress: onProgress)
+        // Dedicated session with delegate — one per download to avoid cross-talk.
+        let session = URLSession(
+            configuration: sharedSession.configuration,
+            delegate: delegate,
+            delegateQueue: nil
+        )
+        defer { session.finishTasksAndInvalidate() }
+
+        let (tempURL, response) = try await session.download(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw HuggingFaceDownloadError.invalidResponse
+        }
+        return (tempURL, httpResponse)
     }
 
     /// Fetch a single file from HuggingFace with retry
@@ -414,5 +517,34 @@ public class DownloadUtils {
         }
 
         throw lastError ?? HuggingFaceDownloadError.invalidResponse
+    }
+}
+
+// MARK: - URLSession download delegate for byte-level progress
+
+/// Lightweight delegate that forwards `didWriteData` callbacks to a closure.
+private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, Sendable {
+    private let onProgress: @Sendable (Int64, Int64) -> Void
+
+    init(onProgress: @escaping @Sendable (Int64, Int64) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        onProgress(totalBytesWritten, totalBytesExpectedToWrite)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        // Required by protocol — the async download(for:) API handles the file.
     }
 }
