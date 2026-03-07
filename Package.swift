@@ -12,10 +12,6 @@ let package = Package(
             name: "FluidAudio",
             targets: ["FluidAudio"]
         ),
-        .library(
-            name: "FluidAudioEspeak",
-            targets: ["FluidAudioEspeak"]
-        ),
         .executable(
             name: "fluidaudiocli",
             targets: ["FluidAudioCLI"]
@@ -53,24 +49,10 @@ let package = Package(
             path: "Sources/CoreMLPredictionWrapper",
             publicHeadersPath: "include"
         ),
-        // TTS targets are always available for FluidAudioEspeak product
-        .binaryTarget(
-            name: "ESpeakNG",
-            path: "Frameworks/ESpeakNG.xcframework"
-        ),
-        .target(
-            name: "FluidAudioEspeak",
-            dependencies: [
-                "FluidAudio",
-                "ESpeakNG",
-            ],
-            path: "Sources/FluidAudioEspeak"
-        ),
         .executableTarget(
             name: "FluidAudioCLI",
             dependencies: [
                 "FluidAudio",
-                "FluidAudioEspeak",
             ],
             path: "Sources/FluidAudioCLI",
             exclude: ["README.md"],
@@ -82,7 +64,6 @@ let package = Package(
             name: "FluidAudioTests",
             dependencies: [
                 "FluidAudio",
-                "FluidAudioEspeak",
             ]
         ),
     ],

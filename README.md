@@ -2,7 +2,7 @@
 
 # FluidAudio - Transcription, Text-to-speech, VAD, Speaker diarization with CoreML Models
 
-[![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
+[![Swift](https://img.shields.io/badge/Swift-6.0+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 [![Documentation](https://img.shields.io/badge/Documentation-docs.fluidinference.com-008574.svg)](https://docs.fluidinference.com/introduction)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/WNsvaCtmDe)
@@ -90,43 +90,21 @@ Add FluidAudio to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.2"),
 ],
 ```
 
-### Choosing a Product
-
-FluidAudio provides two library products:
-
-- **`FluidAudio`** (default) - Core functionality: ASR, diarization, VAD, **PocketTTS**
-  - Lightweight, no GPL dependencies
-  - Includes PocketTTS for GPL-free text-to-speech
-  - Recommended for most apps, including closed-source
-
-- **`FluidAudioTTS`** - Full TTS Suite (Kokoro + ESpeakNG)
-  - Separate optional product
-  - Includes ESpeakNG framework (GPL-3.0)
-  - Use if you need Kokoro's SSML/phoneme control features
-
 **In Xcode:**
 1. Add the FluidAudio package to your project
-2. In the "Add Package" dialog, select your desired product(s):
-   - `FluidAudio` for core features (ASR, diarization, VAD, PocketTTS)
-   - `FluidAudioTTS` if you need Kokoro TTS with SSML support
-3. Add the selected product(s) to your app target
+2. In the "Add Package" dialog, select `FluidAudio`
+3. Add it to your app target
 
 **In Package.swift:**
 ```swift
-// Core features + PocketTTS (no GPL dependencies):
 .product(name: "FluidAudio", package: "FluidAudio")
-
-// Add Kokoro TTS support (includes GPL ESpeakNG):
-.product(name: "FluidAudioTTS", package: "FluidAudio")
 ```
 
-**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.7.8'`
-
-> **Note:** The Kokoro TTS tooling currently ships arm64-only dependencies. See the [arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds) guide if you hit linker errors targeting x86_64.
+**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.12.2'`
 
 ### Other Frameworks
 
@@ -230,7 +208,6 @@ swift run fluidaudio transcribe audio.wav
   - [Audio Conversion for Inference](Documentation/Guides/AudioConversion.md)
   - Manual model download & loading options: [ASR](Documentation/ASR/ManualModelLoading.md), [Diarizer](Documentation/Diarization/GettingStarted.md#manual-model-loading), [VAD](Documentation/VAD/GettingStarted.md#manual-model-loading)
   - Routing Hugging Face (or compatible) requests through a proxy? Set `https_proxy` before running the download helpers (see [Documentation/API.md](Documentation/API.md:9)).
-  - [Kokoro TTS arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds)
 - Models
   - Automatic Speech Recognition/Transcription
     - [Getting Started](Documentation/ASR/GettingStarted.md)
@@ -271,7 +248,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - `FluidInference/parakeet-tdt-0.6b-v2-coreml` (English-only, highest recall)
 - **Processing Mode**: Batch transcription for complete audio files
 - **Real-time Factor**: ~190x on M4 Pro (processes 1 hour of audio in ~19 seconds)
-- **Streaming Support**: Coming soon — batch processing is recommended for production use
+- **Streaming Support**: Real-time streaming via `StreamingAsrManager` with sliding window processing and cancellation support
 - **Backend**: Same Parakeet TDT v3 model powers our backend ASR
 
 ### ASR Quick Start
@@ -504,60 +481,62 @@ Offline mode also reports RTFx using the model's per-chunk processing time.
 
 ## Text‑To‑Speech (TTS)
 
-> **⚠️ Beta:** The TTS system is currently in beta and only supports American English. Additional language support is planned for future releases.
+> **⚠️ Beta:** TTS currently supports American English only. Additional language support is planned.
 
-- Model: Kokoro (CoreML unified model)
-- Language: American English (beta)
-- G2P: Dictionary first, then eSpeak NG (CEspeakNG) for OOV words
-- Output: 24 kHz mono WAV
+FluidAudio ships two TTS backends:
 
-Requirements (macOS)
-Ensure eSpeak NG headers/libs are available via pkg-config (`espeak-ng`).
-<https://github.com/espeak-ng/espeak-ng/tree/master>
+| | PocketTTS | Kokoro |
+|---|---|---|
+| **GPL dependencies** | None | None |
+| **Tokenizer** | SentencePiece | CoreML G2P → IPA phonemes |
+| **Generation** | Frame-by-frame autoregressive (80ms) | Parallel (all frames at once) |
+| **Streaming** | Yes | No |
+| **Voice cloning** | Yes (1–30s audio sample) | No |
+| **Pronunciation control** | No | Yes (SSML, custom lexicon) |
+| **Output** | 24 kHz mono WAV | 24 kHz mono WAV |
 
-**For CLI usage:**
-- The `fluidaudio` CLI is built with TTS support enabled by default:
-  - `swift run fluidaudio tts "Hello" --output out.wav`
-  - `swift build` (builds CLI with TTS)
-  - `swift test` (runs tests including TTS coverage)
+### PocketTTS
 
-### Quick Start (CLI)
-
-```bash
-# First run will download the Kokoro model and vocab
-swift run fluidaudio tts "Hello from FluidAudio." --auto-download --output out.wav
-
-# Another example with punctuation and OOV handling
-swift run fluidaudio tts "Edge-cases: URLs like https://example.com and e-mail test@example.com." --output out2.wav
-```
-
-Notes
-
-- The TTS pipeline uses a word→phoneme dictionary first; unknown words are phonemized with eSpeak NG (C API) and mapped to the model’s token set.
-- OOV words are printed with their IPA and mapped tokens for visibility during synthesis.
-- We do not prepend any “language token” to avoid leading vowel artifacts.
-
-### Quick Start (Code)
+Streaming-friendly TTS with voice cloning support from short audio samples.
 
 ```swift
 import FluidAudio
 
 Task {
-  do {
-    let data = try await KokoroModel.synthesize(text: "Hello from FluidAudio.")
-    try data.write(to: URL(fileURLWithPath: "out.wav"))
-  } catch {
-    print("TTS error: \(error)")
-  }
+    let manager = try await PocketTtsManager()
+    let audioData = try await manager.synthesize("Hello from FluidAudio.")
+    try audioData.write(to: URL(fileURLWithPath: "out.wav"))
 }
 ```
 
-Troubleshooting
-Build requires eSpeak NG headers/libs for the C API discoverable via pkg-config (`espeak-ng`).
+```bash
+# Synthesize with default voice
+swift run fluidaudio tts "Hello from FluidAudio." --output out.wav --backend pocket
 
-- If SwiftPM cannot find headers, build with explicit paths:
-  - `swift build -Xcc -I/opt/homebrew/include -Xlinker -L/opt/homebrew/lib`
-- Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.
+# Clone a voice from an audio sample
+swift run fluidaudio tts "Hello world." --output out.wav --backend pocket --clone-voice speaker.wav
+```
+
+### Kokoro
+
+High-quality parallel TTS with SSML and phoneme-level pronunciation control. Uses a CoreML G2P (grapheme-to-phoneme) model for out-of-vocabulary words — no external dependencies required.
+
+```swift
+import FluidAudio
+
+Task {
+    let manager = KokoroTtsManager()
+    try await manager.initialize()
+    let data = try await manager.synthesize(text: "Hello from FluidAudio.")
+    try data.write(to: URL(fileURLWithPath: "out.wav"))
+}
+```
+
+```bash
+swift run fluidaudio tts "Hello from FluidAudio." --auto-download --output out.wav
+```
+
+Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.
 
 ## Continuous Integration
 
@@ -596,15 +575,15 @@ Kokoro-82M: <https://huggingface.co/hexgrad/Kokoro-82M>
 
 If you use FluidAudio in your work, please cite:
 
-FluidInference Team. (2024). FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms (Version 0.7.0) [Computer software]. GitHub. <https://github.com/FluidInference/FluidAudio>
+FluidInference Team. (2025). FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms (Version 0.12.2) [Computer software]. GitHub. <https://github.com/FluidInference/FluidAudio>
 
 ```bibtex
-@software{FluidInferenceTeam_FluidAudio_2024,
+@software{FluidInferenceTeam_FluidAudio_2025,
   author = {{FluidInference Team}},
   title = {{FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms}},
-  year = {2024},
-  month = {12},
-  version = {0.7.0},
+  year = {2025},
+  month = {3},
+  version = {0.12.2},
   url = {https://github.com/FluidInference/FluidAudio},
   note = {Computer software}
 }

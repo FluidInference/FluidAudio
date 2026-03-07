@@ -361,6 +361,23 @@ public enum ModelNames {
         ]
     }
 
+    /// G2P (grapheme-to-phoneme) model names
+    public enum G2P {
+        public static let encoder = "G2PEncoder"
+        public static let decoder = "G2PDecoder"
+        public static let vocabulary = "g2p_vocab"
+
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+        public static let vocabularyFile = vocabulary + ".json"
+
+        public static let requiredModels: Set<String> = [
+            encoderFile,
+            decoderFile,
+            vocabularyFile,
+        ]
+    }
+
     /// TTS model names
     public enum TTS {
 
@@ -425,7 +442,7 @@ public enum ModelNames {
             }
             return ModelNames.Diarizer.requiredModels
         case .kokoro:
-            return ModelNames.TTS.requiredModels
+            return ModelNames.TTS.requiredModels.union(ModelNames.G2P.requiredModels)
         case .pocketTts:
             return ModelNames.PocketTTS.requiredModels
         case .sortformer:
