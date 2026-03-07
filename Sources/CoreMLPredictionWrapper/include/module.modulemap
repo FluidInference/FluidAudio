@@ -1,0 +1,4 @@
+module CoreMLPredictionWrapper {
+    header "CoreMLPredictionWrapper.h"
+    export *
+}

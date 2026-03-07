@@ -815,6 +815,117 @@ struct DatasetDownloader {
         logger.info("Earnings22 KWS ready: \(wavFiles.count) files (\(totalExtracted) extracted)")
     }
 
+    // MARK: - Buckeye Forced Alignment Dataset
+
+    /// Get Buckeye dataset cache directory
+    static func getBuckeyeDatasetDirectory() -> URL {
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        return appSupport.appendingPathComponent("FluidAudio/Buckeye", isDirectory: true)
+    }
+
+    /// Download Buckeye forced alignment benchmark dataset from HuggingFace
+    static func downloadBuckeyeDataset(force: Bool) async {
+        let cacheDir = getBuckeyeDatasetDirectory()
+        let audioDir = cacheDir.appendingPathComponent("audio")
+        let manifestPath = cacheDir.appendingPathComponent("manifest.json")
+
+        logger.info("Downloading Buckeye dataset to \(cacheDir.path)")
+
+        do {
+            try FileManager.default.createDirectory(at: audioDir, withIntermediateDirectories: true)
+        } catch {
+            logger.error("Failed to create directory: \(error)")
+            return
+        }
+
+        // Check if already downloaded
+        if !force && FileManager.default.fileExists(atPath: manifestPath.path) {
+            let existingFiles =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: audioDir, includingPropertiesForKeys: nil)) ?? []
+            let wavCount = existingFiles.filter { $0.pathExtension == "wav" }.count
+            if wavCount >= 2400 {
+                logger.info("Buckeye dataset exists (\(wavCount) audio files)")
+                return
+            }
+        }
+
+        let repoBase = ModelRegistry.resolveDatasetBase("alexwengg/buckeye")
+
+        // Download manifest.json
+        logger.info("Downloading manifest.json...")
+        do {
+            guard let url = URL(string: "\(repoBase)/manifest.json") else {
+                logger.error("Invalid manifest URL")
+                return
+            }
+            let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                logger.error("Failed to download manifest.json")
+                return
+            }
+            try data.write(to: manifestPath)
+        } catch {
+            logger.error("Failed to download manifest: \(error)")
+            return
+        }
+
+        // Parse manifest for audio file list
+        guard let manifestData = try? Data(contentsOf: manifestPath),
+            let json = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
+            let samples = json["samples"] as? [[String: Any]]
+        else {
+            logger.error("Failed to parse manifest.json")
+            return
+        }
+
+        logger.info("Downloading \(samples.count) audio files...")
+
+        var downloaded = 0
+        var skipped = 0
+        var failed = 0
+
+        for (i, sample) in samples.enumerated() {
+            guard let audioPath = sample["audio"] as? String else { continue }
+            let destination = cacheDir.appendingPathComponent(audioPath)
+            let downloadURL = "\(repoBase)/\(audioPath)"
+
+            if !force && FileManager.default.fileExists(atPath: destination.path) {
+                skipped += 1
+                continue
+            }
+
+            guard let url = URL(string: downloadURL) else {
+                failed += 1
+                continue
+            }
+
+            do {
+                let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    failed += 1
+                    continue
+                }
+                try data.write(to: destination)
+                downloaded += 1
+            } catch {
+                failed += 1
+            }
+
+            let total = i + 1
+            if total % 100 == 0 || total == samples.count {
+                logger.info(
+                    "Progress: \(total)/\(samples.count) "
+                        + "(\(downloaded) new, \(skipped) skipped, \(failed) failed)")
+            }
+        }
+
+        logger.info(
+            "Buckeye dataset ready: \(downloaded) downloaded, \(skipped) skipped, \(failed) failed")
+    }
+
     /// Download VOiCES subset dataset from GitHub
     static func downloadVoicesSubset(force: Bool) async {
         let cacheDir = FileManager.default.urls(

@@ -12,7 +12,7 @@ let package = Package(
             name: "FluidAudio",
             targets: ["FluidAudio"]
         ),
-.executable(
+        .executable(
             name: "fluidaudiocli",
             targets: ["FluidAudioCLI"]
         ),
@@ -26,6 +26,7 @@ let package = Package(
             dependencies: [
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
+                "CoreMLPredictionWrapper",
                 .product(name: "Tokenizers", package: "swift-transformers"),
             ],
             path: "Sources/FluidAudio",
@@ -43,7 +44,12 @@ let package = Package(
             path: "Sources/MachTaskSelfWrapper",
             publicHeadersPath: "include"
         ),
-.executableTarget(
+        .target(
+            name: "CoreMLPredictionWrapper",
+            path: "Sources/CoreMLPredictionWrapper",
+            publicHeadersPath: "include"
+        ),
+        .executableTarget(
             name: "FluidAudioCLI",
             dependencies: [
                 "FluidAudio",
