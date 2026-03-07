@@ -12,7 +12,7 @@ let package = Package(
             name: "FluidAudio",
             targets: ["FluidAudio"]
         ),
-.executable(
+        .executable(
             name: "fluidaudiocli",
             targets: ["FluidAudioCLI"]
         ),
@@ -43,7 +43,7 @@ let package = Package(
             path: "Sources/MachTaskSelfWrapper",
             publicHeadersPath: "include"
         ),
-.executableTarget(
+        .executableTarget(
             name: "FluidAudioCLI",
             dependencies: [
                 "FluidAudio",
