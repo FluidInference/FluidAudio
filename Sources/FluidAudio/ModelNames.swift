@@ -420,10 +420,19 @@ public enum ModelNames {
             }
             return ModelNames.Diarizer.requiredModels
         case .kokoro:
-            return ModelNames.TTS.requiredModels.union(ModelNames.G2P.requiredModels)
+            let ttsModels: Set<String>
+            if let variant = variant {
+                ttsModels = [variant]
+            } else {
+                ttsModels = ModelNames.TTS.requiredModels
+            }
+            return ttsModels.union(ModelNames.G2P.requiredModels)
         case .pocketTts:
             return ModelNames.PocketTTS.requiredModels
         case .sortformer:
+            if let variant = variant {
+                return [variant]
+            }
             return ModelNames.Sortformer.requiredModels
         case .qwen3Asr, .qwen3AsrInt8:
             return ModelNames.Qwen3ASR.requiredModelsFull

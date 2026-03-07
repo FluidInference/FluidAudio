@@ -8,9 +8,14 @@ public enum PocketTtsResourceDownloader {
 
     /// Ensure all PocketTTS models are downloaded and return the cache directory.
     ///
-    /// - Parameter directory: Optional override for the base cache directory.
-    ///   When `nil`, uses the default platform cache location.
-    public static func ensureModels(directory: URL? = nil) async throws -> URL {
+    /// - Parameters:
+    ///   - directory: Optional override for the base cache directory.
+    ///     When `nil`, uses the default platform cache location.
+    ///   - progressHandler: Optional callback for download progress updates.
+    public static func ensureModels(
+        directory: URL? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws -> URL {
         let targetDir = try directory ?? cacheDirectory()
         let modelsDirectory = targetDir.appendingPathComponent(
             PocketTtsConstants.defaultModelsSubdirectory)
@@ -26,7 +31,7 @@ public enum PocketTtsResourceDownloader {
 
         if !allPresent {
             logger.info("Downloading PocketTTS models from HuggingFace...")
-            try await DownloadUtils.downloadRepo(.pocketTts, to: modelsDirectory)
+            try await DownloadUtils.downloadRepo(.pocketTts, to: modelsDirectory, progressHandler: progressHandler)
         } else {
             logger.info("PocketTTS models found in cache")
         }

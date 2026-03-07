@@ -39,7 +39,8 @@ extension DiarizerModels {
 
     public static func download(
         to directory: URL? = nil,
-        configuration: MLModelConfiguration? = nil
+        configuration: MLModelConfiguration? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> DiarizerModels {
         let logger = AppLogger(category: "DiarizerModels")
         logger.info("Checking for diarizer models...")
@@ -56,7 +57,8 @@ extension DiarizerModels {
             .diarizer,
             modelNames: Array(requiredModelNames),
             directory: directory.deletingLastPathComponent(),
-            computeUnits: config.computeUnits
+            computeUnits: config.computeUnits,
+            progressHandler: progressHandler
         )
 
         // Load segmentation model
@@ -80,17 +82,19 @@ extension DiarizerModels {
 
     public static func load(
         from directory: URL? = nil,
-        configuration: MLModelConfiguration? = nil
+        configuration: MLModelConfiguration? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> DiarizerModels {
         let directory = directory ?? defaultModelsDirectory()
-        return try await download(to: directory, configuration: configuration)
+        return try await download(to: directory, configuration: configuration, progressHandler: progressHandler)
     }
 
     public static func downloadIfNeeded(
         to directory: URL? = nil,
-        configuration: MLModelConfiguration? = nil
+        configuration: MLModelConfiguration? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> DiarizerModels {
-        return try await download(to: directory, configuration: configuration)
+        return try await download(to: directory, configuration: configuration, progressHandler: progressHandler)
     }
 
     public static func defaultModelsDirectory() -> URL {
