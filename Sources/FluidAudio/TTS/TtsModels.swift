@@ -39,12 +39,15 @@ public struct TtsModels: Sendable {
             return ModelNames.TTS.Variant.allCases
         }()
         let modelNames = targetVariants.map { $0.fileName }
+        // Pass single variant name so only the requested model is downloaded
+        let variantFilter: String? = targetVariants.count == 1 ? targetVariants[0].fileName : nil
         let dict = try await DownloadUtils.loadModels(
             .kokoro,
             modelNames: modelNames,
             directory: modelsDirectory,
             // Only a small fraction of the model can run on ANE, and compile time takes a long time because of the complicated arch
             computeUnits: .cpuAndGPU,
+            variant: variantFilter,
             progressHandler: progressHandler
         )
         var loaded: [ModelNames.TTS.Variant: MLModel] = [:]

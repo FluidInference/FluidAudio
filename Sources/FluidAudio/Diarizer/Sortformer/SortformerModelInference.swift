@@ -139,6 +139,7 @@ extension SortformerModels {
             modelNames: [bundle],
             directory: directory,
             computeUnits: computeUnits,
+            variant: bundle,
             progressHandler: progressHandler
         )
 
