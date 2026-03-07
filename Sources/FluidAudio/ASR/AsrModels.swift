@@ -317,30 +317,22 @@ extension AsrModels {
             }
         }
 
-        struct DownloadSpec {
-            let fileName: String
-            let computeUnits: MLComputeUnits
-        }
-
-        let defaultUnits = defaultConfiguration().computeUnits
-
-        let specs: [DownloadSpec] = [
-            // Preprocessor ops map to CPU-only across all platforms.
-            DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
-            DownloadSpec(fileName: Names.encoderFile, computeUnits: defaultUnits),
-            DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
-            DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
-        ]
-
-        for spec in specs {
-            _ = try await DownloadUtils.loadModels(
-                version.repo,
-                modelNames: [spec.fileName],
-                directory: parentDir,
-                computeUnits: spec.computeUnits,
-                progressHandler: progressHandler
-            )
-        }
+        // Download files only — skip CoreML compilation.
+        //
+        // The previous implementation called loadModels() which runs
+        // MLModel(contentsOf:configuration:) on every model and then discards the
+        // loaded objects.  That compilation step triggers CoreML's MPS shader
+        // generation on the background, writing gigabytes to disk.  On first
+        // install the combined download + compilation I/O has been observed to
+        // exceed macOS's per-process disk-write budget, causing the system to kill
+        // the process (writesCaused ≈ 8.5 GB on a MacBookPro18,1 / macOS 15.6.1).
+        //
+        // Models are compiled once when load() is called.
+        try await DownloadUtils.downloadRepo(
+            version.repo,
+            to: parentDir,
+            progressHandler: progressHandler
+        )
 
         logger.info("Successfully downloaded ASR models")
         return targetDir
