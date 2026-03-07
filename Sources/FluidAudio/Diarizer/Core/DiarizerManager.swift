@@ -91,10 +91,26 @@ public final class DiarizerManager {
     /// - Throws: `DiarizerError.notInitialized` if models not loaded
     public func extractSpeakerEmbedding<C>(from audio: C) throws -> [Float]
     where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
-        guard let extractor = embeddingExtractor else {
+        guard let extractor = embeddingExtractor, let models else {
             throw DiarizerError.notInitialized
         }
-        let mask = [Float](repeating: 1.0, count: audio.count)
+
+        // Determine the segmentation frame count from the model's output shape.
+        // The pyannote segmentation model outputs [1, numFrames, 7] — we need
+        // numFrames to size the mask correctly for the WeSpeaker embedding model.
+        guard
+            let segShape = models.segmentationModel.modelDescription
+                .outputDescriptionsByName["segments"]?.multiArrayConstraint?.shape,
+            segShape.count >= 2
+        else {
+            throw DiarizerError.processingFailed(
+                "Cannot determine segmentation frame count from model output shape"
+            )
+        }
+        let numFrames = segShape[1].intValue
+
+        // All-ones mask: assume the entire clip is the target speaker
+        let mask = [Float](repeating: 1.0, count: numFrames)
         let embeddings = try extractor.getEmbeddings(audio: audio, masks: [mask])
         guard let embedding = embeddings.first else {
             throw DiarizerError.embeddingExtractionFailed
