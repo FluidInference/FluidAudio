@@ -1,0 +1,5 @@
+module LinearAssignmentWrapper {
+    header "RLAP.hpp"
+    requires cplusplus
+    export *
+}
