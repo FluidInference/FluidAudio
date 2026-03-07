@@ -57,19 +57,10 @@ public struct TtsModels: Sendable {
             loaded[variant] = model
         }
 
-        try await withThrowingTaskGroup(of: (ModelNames.TTS.Variant, TimeInterval).self) { group in
-            for (variant, model) in loaded {
-                group.addTask(priority: .userInitiated) {
-                    let warmUpStart = Date()
-                    await warmUpModel(model, variant: variant)
-                    let warmUpDuration = Date().timeIntervalSince(warmUpStart)
-                    return (variant, warmUpDuration)
-                }
-            }
-
-            for try await (variant, duration) in group {
-                warmUpDurations[variant] = duration
-            }
+        for (variant, model) in loaded {
+            let warmUpStart = Date()
+            await warmUpModel(model, variant: variant)
+            warmUpDurations[variant] = Date().timeIntervalSince(warmUpStart)
         }
 
         for variant in targetVariants {
