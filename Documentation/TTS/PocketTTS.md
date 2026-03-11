@@ -208,4 +208,4 @@ try await manager.synthesizeToFile(
 ## License
 
 - **PocketTTS models**: CC-BY-4.0, inherited from [kyutai/pocket-tts](https://huggingface.co/kyutai/pocket-tts)
-- **FluidAudio SDK**: MIT licensed (no GPL dependencies)
+- **FluidAudio SDK**: Apache 2.0 licensed (no GPL dependencies)
