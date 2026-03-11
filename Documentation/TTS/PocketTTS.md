@@ -154,7 +154,7 @@ text → SentencePiece tokenizer → subword tokens → PocketTTS model → audi
                                           (no external control)
 ```
 
-Unlike Kokoro which uses espeak to convert text to IPA phonemes **before** the model, PocketTTS feeds raw text tokens directly into the neural network. The model learned text→pronunciation mappings during training — there is no phoneme stage to intercept.
+Unlike Kokoro which uses a CoreML G2P model to convert text to IPA phonemes **before** the model, PocketTTS feeds raw text tokens directly into the neural network. The model learned text→pronunciation mappings during training — there is no phoneme stage to intercept.
 
 ### Feature Support
 
