@@ -26,7 +26,6 @@
 ## TTS
 - [Getting Started](TTS/README.md)
 - [SSML](TTS/SSML.md)
-- [eSpeak Framework](TTS/EspeakFramework.md)
 
 ## Guides
 - [Audio Conversion](Guides/AudioConversion.md)

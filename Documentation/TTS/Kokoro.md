@@ -95,6 +95,10 @@ Kokoro parallelizes across time (fast total, but must wait for everything). Pock
 
 PocketTTS cannot support phoneme-level features because it has no phoneme stage — the model was trained on text tokens, not IPA. See [PocketTTS.md](PocketTTS.md) for details on what can and cannot be added.
 
+## Known Issues
+
+- **Sibilance in high-pitched voices**: Some female `af_*` voices (e.g. `af_heart`, `af_bella`) produce harsh sibilant sounds (s, sh, z). This is baked into the model output and cannot be fixed with post-processing EQ. Lower-pitched voices (male `am_*` variants and some female voices) are unaffected. See [mobius#23](https://github.com/FluidInference/mobius/issues/23).
+
 ## Enable TTS in Your Project
 
 Kokoro TTS is included in the `FluidAudio` product — no separate product needed.
