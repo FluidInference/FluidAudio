@@ -83,6 +83,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Flowstay](https://flowstay.app)** | Easy text-to-speech, local post-processing and Claude Code integration for macOS. Free forever. |
 | **[macos-speech-server](https://github.com/dokterbob/macos-speech-server)** | OpenAI compatible STT/transcription and TTS/speech API server. | 
 | **[Snaply](https://snaply.ai)** |Free, Fast, 100% local AI dictation for Mac. |
+| **[Enconvo](https://enconvo.com)** | AI Agent Launcher for macOS with voice input, live captions, and text-to-speech. Uses Parakeet ASR for local speech recognition. |
 
 ## Installation
 
