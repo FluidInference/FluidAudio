@@ -95,7 +95,7 @@ extension KokoroSynthesizer {
             case .float16:
                 let pointer = array.dataPointer.bindMemory(to: UInt16.self, capacity: elementCount)
                 pointer.initialize(repeating: 0, count: elementCount)
-            #if swift(>=6.2)
+            #if canImport(FoundationModels)
             case .int8:
                 array.dataPointer.initializeMemory(as: Int8.self, repeating: 0, count: elementCount)
             @unknown default:
