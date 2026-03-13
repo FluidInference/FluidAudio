@@ -243,6 +243,24 @@ public struct KokoroSynthesizer {
         return .fifteenSecond
     }
 
+    /// Fill a buffer with standard-normal Gaussian noise using the Box-Muller transform.
+    private static func fillGaussianNoise(_ pointer: UnsafeMutablePointer<Float>, count: Int) {
+        var index = 0
+        while index < count - 1 {
+            let u1 = max(Float.random(in: 0..<1), Float.leastNonzeroMagnitude)
+            let u2 = Float.random(in: 0..<1)
+            let mag = sqrtf(-2.0 * logf(u1))
+            pointer[index] = mag * cosf(2.0 * Float.pi * u2)
+            pointer[index + 1] = mag * sinf(2.0 * Float.pi * u2)
+            index += 2
+        }
+        if index < count {
+            let u1 = max(Float.random(in: 0..<1), Float.leastNonzeroMagnitude)
+            let u2 = Float.random(in: 0..<1)
+            pointer[index] = sqrtf(-2.0 * logf(u1)) * cosf(2.0 * Float.pi * u2)
+        }
+    }
+
     /// Synthesize a single chunk of text using precomputed token IDs.
     private static func synthesizeChunk(
         _ chunk: TextChunk,
@@ -298,11 +316,33 @@ public struct KokoroSynthesizer {
             zeroFill: true
         )
 
+        // Create source_noise for UV-dependent excitation if the model supports it (backward compat).
+        let sourceNoiseArray: MLMultiArray?
+        if let noiseDesc = kokoro.modelDescription.inputDescriptionsByName["source_noise"],
+            let noiseConstraint = noiseDesc.multiArrayConstraint
+        {
+            let noiseShape = noiseConstraint.shape.map { $0.intValue }
+            let noiseArray = try await multiArrayPool.rent(
+                shape: noiseShape,
+                dataType: .float32,
+                zeroFill: false
+            )
+            let noiseCount = noiseArray.count
+            let noisePointer = noiseArray.dataPointer.bindMemory(to: Float.self, capacity: noiseCount)
+            fillGaussianNoise(noisePointer, count: noiseCount)
+            sourceNoiseArray = noiseArray
+        } else {
+            sourceNoiseArray = nil
+        }
+
         func recycleModelArrays() async {
             await multiArrayPool.recycle(phasesArray, zeroFill: true)
             await multiArrayPool.recycle(attentionMask, zeroFill: false)
             await multiArrayPool.recycle(inputArray, zeroFill: false)
             await multiArrayPool.recycle(refStyle, zeroFill: false)
+            if let noiseArray = sourceNoiseArray {
+                await multiArrayPool.recycle(noiseArray, zeroFill: false)
+            }
         }
 
         let inputPointer = inputArray.dataPointer.bindMemory(to: Int32.self, capacity: targetTokens)
@@ -324,15 +364,17 @@ public struct KokoroSynthesizer {
         let phasesPointer = phasesArray.dataPointer.bindMemory(to: Float.self, capacity: 9)
         phasesPointer.initialize(repeating: 0, count: 9)
 
-        // Debug: print model IO
-
         // Run inference
-        let modelInput = try MLDictionaryFeatureProvider(dictionary: [
+        var inputDict: [String: Any] = [
             "input_ids": inputArray,
             "attention_mask": attentionMask,
             "ref_s": refStyle,
             "random_phases": phasesArray,
-        ])
+        ]
+        if let noiseArray = sourceNoiseArray {
+            inputDict["source_noise"] = noiseArray
+        }
+        let modelInput = try MLDictionaryFeatureProvider(dictionary: inputDict)
 
         let predictionStart = Date()
         let output: MLFeatureProvider

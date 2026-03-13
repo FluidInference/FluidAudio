@@ -152,12 +152,28 @@ public struct TtsModels: Sendable {
                 randomPhases[index] = NSNumber(value: Float(0))
             }
 
-            let features = try MLDictionaryFeatureProvider(dictionary: [
+            var featureDict: [String: Any] = [
                 "input_ids": inputIds,
                 "attention_mask": attentionMask,
                 "ref_s": refStyle,
                 "random_phases": randomPhases,
-            ])
+            ]
+
+            // Add source_noise input if the model supports it (backward compat with older models).
+            if let noiseDesc = model.modelDescription.inputDescriptionsByName["source_noise"],
+                let noiseConstraint = noiseDesc.multiArrayConstraint
+            {
+                let sourceNoise = try MLMultiArray(
+                    shape: noiseConstraint.shape,
+                    dataType: .float32
+                )
+                for index in 0..<sourceNoise.count {
+                    sourceNoise[index] = NSNumber(value: Float(0))
+                }
+                featureDict["source_noise"] = sourceNoise
+            }
+
+            let features = try MLDictionaryFeatureProvider(dictionary: featureDict)
 
             let options: MLPredictionOptions = optimizedPredictionOptions()
             _ = try await model.compatPrediction(from: features, options: options)

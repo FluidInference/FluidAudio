@@ -197,6 +197,19 @@ public final class KokoroTtsManager {
         customLexicon
     }
 
+    /// Converts a word to IPA phoneme tokens using the G2P (grapheme-to-phoneme) model.
+    ///
+    /// Use this to generate phonemes for custom lexicon entries from user-friendly
+    /// "sounds like" input. For example, phonemize "co KO ro" to get the IPA tokens
+    /// for a custom pronunciation of "Kokoro".
+    ///
+    /// - Parameter word: The word or respelling to convert to phonemes.
+    /// - Returns: An array of IPA phoneme tokens, or `nil` if the model is unavailable.
+    /// - Throws: If the G2P model fails to load or predict.
+    public func phonemize(word: String) async throws -> [String]? {
+        try await G2PModel.shared.phonemize(word: word)
+    }
+
     private func resolveVoice(_ requested: String?, speakerId: Int) -> String {
         guard let requested = requested?.trimmingCharacters(in: .whitespacesAndNewlines), !requested.isEmpty else {
             return voiceName(for: speakerId)

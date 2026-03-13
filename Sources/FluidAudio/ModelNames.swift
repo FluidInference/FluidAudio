@@ -13,6 +13,7 @@ public enum Repo: String, CaseIterable {
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
     case pocketTts = "FluidInference/pocket-tts-coreml"
+    case magpieTts = "FluidInference/magpie-tts-357m-coreml"
     case qwen3Asr = "FluidInference/qwen3-asr-0.6b-coreml/f32"
     case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
 
@@ -41,6 +42,8 @@ public enum Repo: String, CaseIterable {
             return "diar-streaming-sortformer-coreml"
         case .pocketTts:
             return "pocket-tts-coreml"
+        case .magpieTts:
+            return "magpie-tts-357m-coreml"
         case .qwen3Asr:
             return "qwen3-asr-0.6b-coreml/f32"
         case .qwen3AsrInt8:
@@ -429,6 +432,8 @@ public enum ModelNames {
             return ttsModels.union(ModelNames.G2P.requiredModels)
         case .pocketTts:
             return ModelNames.PocketTTS.requiredModels
+        case .magpieTts:
+            return []  // TODO: MagpieTTS required models
         case .sortformer:
             if let variant = variant {
                 return [variant]
