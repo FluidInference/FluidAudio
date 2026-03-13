@@ -40,7 +40,8 @@ enum KokoroChunker {
         targetTokens: Int,
         hasLanguageToken: Bool,
         allowedPhonemes: Set<String>,
-        phoneticOverrides: [TtsPhoneticOverride]
+        phoneticOverrides: [TtsPhoneticOverride],
+        multilingualLanguage: MultilingualG2PLanguage? = nil
     ) async throws -> [TextChunk] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -67,7 +68,8 @@ enum KokoroChunker {
             caseSensitiveLexicon: caseSensitiveLexicon,
             customLexicon: customLexicon,
             allowed: allowedPhonemes,
-            capacity: capacity
+            capacity: capacity,
+            multilingualLanguage: multilingualLanguage
         )
 
         let segmentsByPeriods = mergedSentences.isEmpty ? refinedSentences : mergedSentences
@@ -82,7 +84,8 @@ enum KokoroChunker {
                 caseSensitiveLexicon: caseSensitiveLexicon,
                 customLexicon: customLexicon,
                 allowed: allowedPhonemes,
-                capacity: capacity
+                capacity: capacity,
+                multilingualLanguage: multilingualLanguage
             )
 
             if count > capacity {
@@ -93,7 +96,8 @@ enum KokoroChunker {
                     caseSensitiveLexicon: caseSensitiveLexicon,
                     customLexicon: customLexicon,
                     allowed: allowedPhonemes,
-                    capacity: capacity
+                    capacity: capacity,
+                    multilingualLanguage: multilingualLanguage
                 )
                 if !reassembled.isEmpty {
                     segmentsByPunctuations.append(contentsOf: reassembled)
@@ -133,7 +137,8 @@ enum KokoroChunker {
                 capacity: capacity,
                 wordIndex: &globalWordIndex,
                 overrides: sortedOverrides,
-                overrideIndex: &overrideIndex
+                overrideIndex: &overrideIndex,
+                multilingualLanguage: multilingualLanguage
             )
             chunks.append(contentsOf: built)
         }
@@ -186,7 +191,8 @@ enum KokoroChunker {
         caseSensitiveLexicon: [String: [String]],
         customLexicon: TtsCustomLexicon?,
         allowed: Set<String>,
-        capacity: Int
+        capacity: Int,
+        multilingualLanguage: MultilingualG2PLanguage? = nil
     ) async throws -> [String] {
         guard !sentences.isEmpty else { return [] }
 
@@ -215,7 +221,8 @@ enum KokoroChunker {
                 caseSensitiveLexicon: caseSensitiveLexicon,
                 customLexicon: customLexicon,
                 allowed: allowed,
-                capacity: capacity
+                capacity: capacity,
+                multilingualLanguage: multilingualLanguage
             )
 
             if sentenceTokens > threshold {
@@ -244,7 +251,8 @@ enum KokoroChunker {
                 caseSensitiveLexicon: caseSensitiveLexicon,
                 customLexicon: customLexicon,
                 allowed: allowed,
-                capacity: capacity
+                capacity: capacity,
+                multilingualLanguage: multilingualLanguage
             )
 
             if candidateTokens <= threshold {
@@ -278,7 +286,8 @@ enum KokoroChunker {
         capacity: Int,
         wordIndex: inout Int,
         overrides: [TtsPhoneticOverride],
-        overrideIndex: inout Int
+        overrideIndex: inout Int,
+        multilingualLanguage: MultilingualG2PLanguage? = nil
     ) async throws -> [TextChunk] {
         let atoms = tokenizeAtoms(text)
         guard !atoms.isEmpty else { return [] }
@@ -388,7 +397,8 @@ enum KokoroChunker {
                             lexicon: lexicon,
                             caseSensitiveLexicon: caseSensitiveLexicon,
                             allowed: allowed,
-                            missing: &missing
+                            missing: &missing,
+                            multilingualLanguage: multilingualLanguage
                         )
                     else {
                         wordIndex += 1
@@ -518,7 +528,8 @@ enum KokoroChunker {
         lexicon: [String: [String]],
         caseSensitiveLexicon: [String: [String]],
         allowed: Set<String>,
-        missing: inout Set<String>
+        missing: inout Set<String>,
+        multilingualLanguage: MultilingualG2PLanguage? = nil
     ) async throws -> [String]? {
         var phonemes = caseSensitiveLexicon[original]
 
@@ -535,7 +546,22 @@ enum KokoroChunker {
             phonemes = stemInflected(normalized, lexicon: lexicon, allowed: allowed)
         }
 
-        if phonemes == nil, let g2pTokens = try await G2PModel.shared.phonemize(word: normalized) {
+        // Multilingual G2P for non-English languages
+        if phonemes == nil, let lang = multilingualLanguage {
+            if let ipaTokens = try await MultilingualG2PModel.shared.phonemize(
+                word: normalized, language: lang
+            ) {
+                let mapped = PhonemeMapper.mapIPA(ipaTokens, allowed: allowed)
+                if !mapped.isEmpty {
+                    phonemes = mapped
+                }
+            }
+        }
+
+        // English G2P fallback (skipped when multilingual language is active)
+        if phonemes == nil, multilingualLanguage == nil,
+            let g2pTokens = try await G2PModel.shared.phonemize(word: normalized)
+        {
             let filtered = g2pTokens.filter { allowed.contains($0) }
             if !filtered.isEmpty {
                 phonemes = filtered
@@ -552,7 +578,21 @@ enum KokoroChunker {
             for spelled in spelledTokens {
                 var segment = lexicon[spelled]
 
-                if segment == nil, let g2pTokens = try await G2PModel.shared.phonemize(word: spelled) {
+                // Spelled-out G2P: use multilingual model when available, else English
+                if segment == nil, let lang = multilingualLanguage {
+                    if let ipaTokens = try await MultilingualG2PModel.shared.phonemize(
+                        word: spelled, language: lang
+                    ) {
+                        let mapped = PhonemeMapper.mapIPA(ipaTokens, allowed: allowed)
+                        if !mapped.isEmpty {
+                            segment = mapped
+                        }
+                    }
+                }
+
+                if segment == nil, multilingualLanguage == nil,
+                    let g2pTokens = try await G2PModel.shared.phonemize(word: spelled)
+                {
                     let filtered = g2pTokens.filter { allowed.contains($0) }
                     if !filtered.isEmpty {
                         segment = filtered
@@ -616,7 +656,8 @@ enum KokoroChunker {
         caseSensitiveLexicon: [String: [String]],
         customLexicon: TtsCustomLexicon?,
         allowed: Set<String>,
-        capacity: Int
+        capacity: Int,
+        multilingualLanguage: MultilingualG2PLanguage? = nil
     ) async throws -> Int {
         let atoms = tokenizeAtoms(text)
         guard !atoms.isEmpty else { return 0 }
@@ -650,7 +691,8 @@ enum KokoroChunker {
                         lexicon: lexicon,
                         caseSensitiveLexicon: caseSensitiveLexicon,
                         allowed: allowed,
-                        missing: &dummyMissing
+                        missing: &dummyMissing,
+                        multilingualLanguage: multilingualLanguage
                     )
                 }
 
@@ -683,7 +725,8 @@ enum KokoroChunker {
         caseSensitiveLexicon: [String: [String]],
         customLexicon: TtsCustomLexicon?,
         allowed: Set<String>,
-        capacity: Int
+        capacity: Int,
+        multilingualLanguage: MultilingualG2PLanguage? = nil
     ) async throws -> [String] {
         guard !fragments.isEmpty else { return [] }
 
@@ -712,7 +755,8 @@ enum KokoroChunker {
                 caseSensitiveLexicon: caseSensitiveLexicon,
                 customLexicon: customLexicon,
                 allowed: allowed,
-                capacity: capacity
+                capacity: capacity,
+                multilingualLanguage: multilingualLanguage
             )
 
             if candidateTokens <= capacity || current.isEmpty {
@@ -726,7 +770,8 @@ enum KokoroChunker {
                     caseSensitiveLexicon: caseSensitiveLexicon,
                     customLexicon: customLexicon,
                     allowed: allowed,
-                    capacity: capacity
+                    capacity: capacity,
+                    multilingualLanguage: multilingualLanguage
                 )
                 if fragmentTokens > capacity {
                     // Fall back to returning empty so caller can handle via chunk builder.
