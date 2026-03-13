@@ -18,6 +18,19 @@ swift format lint --recursive --configuration .swift-format Sources/ Tests/
 # cp .build/release/swift-format /usr/local/bin/
 ```
 
+## Running Tests
+
+```bash
+# Run all tests
+swift test
+
+# Run CI-specific tests only
+swift test --filter CITests
+
+# Run a specific test class
+swift test --filter AsrManagerTests
+```
+
 ## Automatic Checks
 
 - PRs will fail if code is not properly formatted
