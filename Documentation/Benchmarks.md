@@ -615,3 +615,55 @@ TS3003a          41.8     36.8      0.7      4.3 4/4           125.7
 AVERAGE          31.7     21.5      0.5      9.7         -    126.7
 ======================================================================
 ```
+
+## Multilingual G2P (Grapheme-to-Phoneme)
+
+CharsiuG2P ByT5 encoder-decoder model converted to CoreML for multilingual grapheme-to-phoneme conversion. Used by Kokoro TTS for non-English phonemization.
+
+Model: [FluidInference/charsiu-g2p-byt5-coreml](https://huggingface.co/FluidInference/charsiu-g2p-byt5-coreml)
+
+Hardware: Apple M2, 2022, macOS 26
+
+### CharsiuG2P Test Set (500 words/language)
+
+```bash
+swift run -c release fluidaudiocli g2p-benchmark --data-dir /path/to/CharsiuG2P/data/test
+```
+
+| Language | PER | WER | ms/word |
+|---|---|---|---|
+| Spanish | 0.1% | 0.8% | 32.6 |
+| French | 0.8% | 2.0% | 26.5 |
+| Italian | 2.8% | 20.0% | 20.9 |
+| Hindi | 4.5% | 21.4% | 45.4 |
+| Japanese | 10.5% | 23.8% | 31.7 |
+| Portuguese (BR) | 8.9% | 43.2% | 24.0 |
+| British English | 13.6% | 29.4% | 34.0 |
+| American English | 19.0% | 38.8% | 28.2 |
+| Chinese | 86.2%* | 95.0%* | 53.9 |
+| **Average** | **16.3%** | **30.5%** | **33.0** |
+
+*\*Chinese PER is inflated due to tone notation mismatch between model output and reference data (tone contour marks vs model format), not a model accuracy issue.*
+
+- **PER** (Phoneme Error Rate): Character-level Levenshtein distance / reference length, stress marks stripped
+- **WER** (Word Error Rate): Fraction of words with any phoneme error
+
+### Compute Unit Comparison
+
+Both the English BART G2P and multilingual ByT5 G2P models run fastest on CPU-only due to GPU/ANE dispatch overhead on small autoregressive decoder steps.
+
+**Multilingual G2P (ByT5)**
+
+| Compute Units | ms/word |
+|---|---|
+| cpuOnly | **38.7** |
+| cpuAndGPU | 94.7 |
+| all (ANE+GPU+CPU) | 95.2 |
+
+**English G2P (BART)**
+
+| Compute Units | ms/word |
+|---|---|
+| cpuOnly | **13.0** |
+| all (ANE+GPU+CPU) | 17.3 |
+| cpuAndGPU | 23.4 |
