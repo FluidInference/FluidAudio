@@ -16,7 +16,7 @@ Inverse Text Normalization converts spoken-form ASR output to written form:
 
 | Tool | Description | Language |
 |------|-------------|----------|
-| **[text-processing-rs](https://github.com/FluidInference/text-processing-rs)** | Inverse Text Normalization (ITN) - converts spoken-form ASR output to written form. Rust port of [NVIDIA NeMo Text Processing](https://github.com/NVIDIA/NeMo-text-processing) with Swift wrapper. | Rust, Swift |
+| **[text-processing-rs](https://github.com/FluidInference/text-processing-rs)** | Inverse Text Normalization (ITN) and Text Normalization (TN) across 7 languages (EN, DE, ES, FR, HI, JA, ZH). 100% NeMo test compatibility (3,011 tests). Rust port of [NVIDIA NeMo Text Processing](https://github.com/NVIDIA/NeMo-text-processing) with Swift wrapper. | Rust, Swift |
 
 ## Using ITN with FluidAudio
 
