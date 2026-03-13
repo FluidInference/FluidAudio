@@ -27,6 +27,11 @@ struct G2PBenchmark {
         "zho-s": .mandarinChinese
     ]
 
+    /// Maps model rawValues to TSV filename codes when they differ.
+    private static let languageToTsvCode: [String: String] = [
+        "cmn": "zho-s"
+    ]
+
     static func run(arguments: [String]) async {
         if arguments.contains("--help") || arguments.contains("-h") {
             printUsage()
@@ -86,11 +91,12 @@ struct G2PBenchmark {
         if let codes = languageCodes {
             languages = codes.compactMap { code in
                 // Accept both CharsiuG2P model codes (rawValue) and TSV filename codes
-                if let lang = MultilingualG2PLanguage(rawValue: code) {
-                    return (code, lang)
-                }
                 if let lang = tsvCodeToLanguage[code] {
                     return (code, lang)
+                }
+                if let lang = MultilingualG2PLanguage(rawValue: code) {
+                    let tsvCode = languageToTsvCode[code] ?? code
+                    return (tsvCode, lang)
                 }
                 logger.warning("Unknown language code: \(code), skipping")
                 return nil

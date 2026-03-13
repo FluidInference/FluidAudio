@@ -547,14 +547,14 @@ enum KokoroChunker {
         }
 
         // Multilingual G2P for non-English languages
-        if phonemes == nil, let lang = multilingualLanguage {
-            if let ipaTokens = try await MultilingualG2PModel.shared.phonemize(
+        if phonemes == nil, let lang = multilingualLanguage,
+            let ipaTokens = try await MultilingualG2PModel.shared.phonemize(
                 word: normalized, language: lang
-            ) {
-                let mapped = PhonemeMapper.mapIPA(ipaTokens, allowed: allowed)
-                if !mapped.isEmpty {
-                    phonemes = mapped
-                }
+            )
+        {
+            let mapped = PhonemeMapper.mapIPA(ipaTokens, allowed: allowed)
+            if !mapped.isEmpty {
+                phonemes = mapped
             }
         }
 
@@ -579,14 +579,14 @@ enum KokoroChunker {
                 var segment = lexicon[spelled]
 
                 // Spelled-out G2P: use multilingual model when available, else English
-                if segment == nil, let lang = multilingualLanguage {
-                    if let ipaTokens = try await MultilingualG2PModel.shared.phonemize(
+                if segment == nil, let lang = multilingualLanguage,
+                    let ipaTokens = try await MultilingualG2PModel.shared.phonemize(
                         word: spelled, language: lang
-                    ) {
-                        let mapped = PhonemeMapper.mapIPA(ipaTokens, allowed: allowed)
-                        if !mapped.isEmpty {
-                            segment = mapped
-                        }
+                    )
+                {
+                    let mapped = PhonemeMapper.mapIPA(ipaTokens, allowed: allowed)
+                    if !mapped.isEmpty {
+                        segment = mapped
                     }
                 }
 
