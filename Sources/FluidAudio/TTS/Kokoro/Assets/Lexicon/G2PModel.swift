@@ -214,7 +214,7 @@ actor G2PModel {
         }
 
         let config = MLModelConfiguration()
-        config.computeUnits = .cpuAndGPU
+        config.computeUnits = .cpuOnly
 
         encoder = try MLModel(contentsOf: encoderURL, configuration: config)
         decoder = try MLModel(contentsOf: decoderURL, configuration: config)

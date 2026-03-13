@@ -60,6 +60,8 @@ struct FluidAudioCLI {
             await Qwen3AsrBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "qwen3-transcribe":
             await Qwen3TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "g2p-benchmark":
+            await G2PBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -90,6 +92,7 @@ struct FluidAudioCLI {
                 ctc-earnings-benchmark  Run CTC keyword spotting benchmark on Earnings22
                 sortformer              Run Sortformer streaming diarization
                 sortformer-benchmark    Run Sortformer benchmark on AMI dataset
+                g2p-benchmark           Run multilingual G2P benchmark
                 download                Download evaluation datasets
                 help                    Show this help message
 
