@@ -76,12 +76,17 @@ public struct KokoroSynthesizer {
 
     private static func chunkText(
         _ text: String,
+        voice: String,
         vocabulary: [String: Int32],
         longVariantTokenBudget: Int,
         phoneticOverrides: [TtsPhoneticOverride]
     ) async throws -> [TextChunk] {
         try await loadSimplePhonemeDictionary()
         let hasLang = false
+        let language = MultilingualG2PLanguage.fromKokoroVoice(voice)
+        let multilingualLanguage: MultilingualG2PLanguage? =
+            (language != nil && language != .americanEnglish && language != .britishEnglish)
+            ? language : nil
         let lexicons = await lexiconCache.lexicons()
         let customLexicon = currentCustomLexicon()
         return try await KokoroChunker.chunk(
@@ -92,7 +97,8 @@ public struct KokoroSynthesizer {
             targetTokens: longVariantTokenBudget,
             hasLanguageToken: hasLang,
             allowedPhonemes: Set(vocabulary.keys),
-            phoneticOverrides: phoneticOverrides
+            phoneticOverrides: phoneticOverrides,
+            multilingualLanguage: multilingualLanguage
         )
     }
 
@@ -457,6 +463,12 @@ public struct KokoroSynthesizer {
             try? await TtsResourceDownloader.ensureVoiceEmbedding(voice: voice)
         }
 
+        // Pre-load multilingual G2P models for non-English voices
+        let language = MultilingualG2PLanguage.fromKokoroVoice(voice)
+        if let language, language != .americanEnglish, language != .britishEnglish {
+            try await MultilingualG2PModel.shared.ensureModelsAvailable()
+        }
+
         try await loadModel(variant: variantPreference)
 
         try await loadSimplePhonemeDictionary()
@@ -470,6 +482,7 @@ public struct KokoroSynthesizer {
 
         let chunks = try await chunkText(
             text,
+            voice: voice,
             vocabulary: vocabulary,
             longVariantTokenBudget: capacities.long,
             phoneticOverrides: phoneticOverrides

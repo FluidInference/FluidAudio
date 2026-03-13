@@ -15,6 +15,7 @@ public enum Repo: String, CaseIterable {
     case pocketTts = "FluidInference/pocket-tts-coreml"
     case qwen3Asr = "FluidInference/qwen3-asr-0.6b-coreml/f32"
     case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
+    case multilingualG2p = "FluidInference/charsiu-g2p-byt5-coreml"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -45,6 +46,8 @@ public enum Repo: String, CaseIterable {
             return "qwen3-asr-0.6b-coreml/f32"
         case .qwen3AsrInt8:
             return "qwen3-asr-0.6b-coreml/int8"
+        case .multilingualG2p:
+            return "charsiu-g2p-byt5-coreml"
         }
     }
 
@@ -95,6 +98,8 @@ public enum Repo: String, CaseIterable {
             return "sortformer"
         case .pocketTts:
             return "pocket-tts"
+        case .multilingualG2p:
+            return "charsiu-g2p-byt5"
         default:
             return name
         }
@@ -339,6 +344,20 @@ public enum ModelNames {
         ]
     }
 
+    /// Multilingual G2P (CharsiuG2P ByT5) model names
+    public enum MultilingualG2P {
+        public static let encoder = "MultilingualG2PEncoder"
+        public static let decoder = "MultilingualG2PDecoder"
+
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            encoderFile,
+            decoderFile,
+        ]
+    }
+
     /// G2P (grapheme-to-phoneme) model names
     public enum G2P {
         public static let encoder = "G2PEncoder"
@@ -436,6 +455,8 @@ public enum ModelNames {
             return ModelNames.Sortformer.requiredModels
         case .qwen3Asr, .qwen3AsrInt8:
             return ModelNames.Qwen3ASR.requiredModelsFull
+        case .multilingualG2p:
+            return ModelNames.MultilingualG2P.requiredModels
         }
     }
 }
