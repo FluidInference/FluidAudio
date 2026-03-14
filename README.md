@@ -33,12 +33,12 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 ## Highlights
 
-- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) for transcription; supports all 25 European languages
+- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) for batch transcription supporting all 25 European languages; Parakeet EOU (120m) for streaming ASR with end-of-utterance detection
 - **Inverse Text Normalization (ITN)**: Post-process ASR output to convert spoken-form to written-form ("two hundred" → "200"). See [text-processing-rs](https://github.com/FluidInference/text-processing-rs)
+- **Text-to-Speech (TTS)**: Kokoro (82m) for high-quality parallel synthesis with SSML and pronunciation control; PocketTTS for streaming TTS with voice cloning support
 - **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
-- **Real-time Processing**: Designed for near real-time workloads but also works for offline processing
 - **Apple Neural Engine**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 - **Open-Source Models**: All models are publicly available on HuggingFace — converted and optimized by our team; permissive licenses
 
