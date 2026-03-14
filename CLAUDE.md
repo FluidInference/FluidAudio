@@ -43,6 +43,7 @@ FluidAudio is a Swift framework for local, low-latency audio processing on Apple
 2. **Testing Policy**: Add unit tests when writing new code.
 3. **Git Operations**: Never run `git push` unless explicitly requested.
    - **No Co-Author Tags**: Do not add `Co-Authored-By` lines for Claude, Copilot, or any AI assistant in commit messages.
+   - **No GitHub comments**: Never post comments, reviews, or reactions on issues or PRs via `gh`. Reading issues, PRs, and comments is fine. Creating PRs and editing PR titles/bodies is fine.
 4. **Code Formatting**: All code must pass swift-format checks before merge
 5. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested
 6. **Performance**: Keep RTFx > 1.0x for real-time capability
