@@ -33,7 +33,7 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 ## Highlights
 
-- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) for batch transcription supporting all 25 European languages; Parakeet EOU (120m) for streaming ASR with end-of-utterance detection (English only)
+- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) for batch transcription supporting 25 European languages; Parakeet EOU (120m) for streaming ASR with end-of-utterance detection (English only)
 - **Inverse Text Normalization (ITN)**: Post-process ASR output to convert spoken-form to written-form ("two hundred" → "200"). See [text-processing-rs](https://github.com/FluidInference/text-processing-rs)
 - **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control; PocketTTS for streaming TTS with voice cloning support
 - **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
