@@ -192,14 +192,14 @@ Read as a fraction.
 <!-- Output: "three and one half" -->
 ```
 
-## Usage with TtSManager
+## Usage with KokoroTtsManager
 
 SSML tags are processed automatically when you call `synthesize()`:
 
 ```swift
-import FluidAudioTTS
+import FluidAudio
 
-let ttsManager = TtSManager()
+let ttsManager = KokoroTtsManager()
 try await ttsManager.initialize()
 
 // SSML is processed automatically
