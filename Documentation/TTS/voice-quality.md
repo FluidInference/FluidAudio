@@ -1,5 +1,14 @@
 # Kokoro English Voice Quality Report
 
+Quality assessment for all 28 English Kokoro TTS voices (11 AF, 9 AM, 4 BF, 4 BM). Includes upstream Kokoro grades, training data, pitch analysis, character traits, and our own quality ratings. Voice descriptions sourced from VoiceRankings, grades from Kokoro VOICES.md.
+
+## Key Findings
+
+- Only af_heart (A) and af_bella (A-) are top-graded, but both have sibilance issues
+- Male voices have fewer sibilance problems but several have subtle background noise
+- British English voices are the strongest group overall, with bf_emma rated "quite good"
+- Kokoro's own grades don't always match perceived quality (e.g. am_adam graded F+ but sounds usable)
+
 ## Methodology
 
 **Test Sentence:** "The quick brown fox jumps over the lazy dog near the riverbank, while the morning sun casts golden light across the meadow."
