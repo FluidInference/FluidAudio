@@ -56,7 +56,7 @@ jobs:
 
           TEXT="The quick brown fox jumps over the lazy dog near the riverbank."
 
-          if .build/release/fluidaudiocli tts "$TEXT" \
+          if .build/release/fluidaudio tts "$TEXT" \
             --backend pocket \
             --output pocket_tts_output.wav 2>&1; then
             echo "Smoke test PASSED - pipeline completed without crash"

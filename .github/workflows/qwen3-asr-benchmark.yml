@@ -58,7 +58,7 @@ jobs:
           echo "(download, load, transcribe) does not crash."
           echo ""
 
-          if .build/release/fluidaudiocli qwen3-benchmark \
+          if .build/release/fluidaudio qwen3-benchmark \
             --variant int8 --max-files 1 \
             --output qwen3_results_int8.json 2>&1; then
             echo "Smoke test PASSED - pipeline completed without crash"

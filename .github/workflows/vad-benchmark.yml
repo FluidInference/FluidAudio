@@ -58,7 +58,7 @@ jobs:
         id: musan_benchmark
         run: |
           echo "🎯 Running MUSAN benchmark..."
-          swift run fluidaudiocli vad-benchmark \
+          swift run fluidaudio vad-benchmark \
             --dataset mini50 \
             --all-files \
             --threshold 0.5 \
@@ -68,7 +68,7 @@ jobs:
         id: voices_benchmark
         run: |
           echo "🎯 Running VOiCES benchmark..."
-          swift run fluidaudiocli vad-benchmark \
+          swift run fluidaudio vad-benchmark \
             --dataset voices-subset \
             --all-files \
             --threshold 0.5 \

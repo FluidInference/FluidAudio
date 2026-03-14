@@ -13,7 +13,7 @@ let package = Package(
             targets: ["FluidAudio"]
         ),
         .executable(
-            name: "fluidaudiocli",
+            name: "fluidaudio",
             targets: ["FluidAudioCLI"]
         ),
     ],

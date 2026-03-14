@@ -54,7 +54,7 @@ jobs:
 
           BENCHMARK_START=$(date +%s)
 
-          swift run fluidaudiocli sortformer-benchmark \
+          swift run fluidaudio sortformer-benchmark \
             --single-file ES2004a \
             --nvidia-high-latency \
             --hf \
