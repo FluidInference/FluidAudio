@@ -92,7 +92,7 @@ Add FluidAudio to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.2"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.4"),
 ],
 ```
 
@@ -106,7 +106,7 @@ dependencies: [
 .product(name: "FluidAudio", package: "FluidAudio")
 ```
 
-**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.12.2'`
+**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.12.4'`
 
 ### Other Frameworks
 
@@ -577,7 +577,7 @@ Kokoro-82M: <https://huggingface.co/hexgrad/Kokoro-82M>
 
 If you use FluidAudio in your work, please cite:
 
-FluidInference Team. (2025). FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms (Version 0.12.2) [Computer software]. GitHub. <https://github.com/FluidInference/FluidAudio>
+FluidInference Team. (2025). FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms (Version 0.12.4) [Computer software]. GitHub. <https://github.com/FluidInference/FluidAudio>
 
 ```bibtex
 @software{FluidInferenceTeam_FluidAudio_2025,
@@ -585,7 +585,7 @@ FluidInference Team. (2025). FluidAudio: Local Speaker Diarization, ASR, and VAD
   title = {{FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms}},
   year = {2025},
   month = {3},
-  version = {0.12.2},
+  version = {0.12.4},
   url = {https://github.com/FluidInference/FluidAudio},
   note = {Computer software}
 }

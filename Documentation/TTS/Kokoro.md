@@ -35,7 +35,7 @@ Swap in `manager.initialize(models:)` when you want to preload only the long-for
 ## Inspecting Chunk Metadata
 
 ```swift
-let manager = TtSManager()
+let manager = KokoroTtsManager()
 try await manager.initialize()
 
 let detailed = try await manager.synthesizeDetailed(
@@ -106,7 +106,7 @@ Kokoro TTS is included in the `FluidAudio` product — no separate product neede
 **Package.swift:**
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.2"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.4"),
 ],
 targets: [
     .target(
