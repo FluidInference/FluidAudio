@@ -162,11 +162,11 @@ let diarizer = DiarizerManager()
 ```bash
 # Use custom registry
 export REGISTRY_URL=https://your-mirror.example.com
-swift run fluidaudio transcribe audio.wav
+swift run fluidaudiocli transcribe audio.wav
 
 # Or use the MODEL_REGISTRY_URL alias
 export MODEL_REGISTRY_URL=https://models.internal.corp
-swift run fluidaudio diarization-benchmark --auto-download
+swift run fluidaudiocli diarization-benchmark --auto-download
 ```
 
 **Xcode Scheme Configuration:**
@@ -189,7 +189,7 @@ export https_proxy=http://proxy.company.com:8080
 # or for authenticated proxies:
 export https_proxy=http://user:password@proxy.company.com:8080
 
-swift run fluidaudio transcribe audio.wav
+swift run fluidaudiocli transcribe audio.wav
 ```
 
 **Xcode Scheme Configuration for Proxy:**
@@ -279,10 +279,10 @@ Task {
 
 ```bash
 # Transcribe an audio file (batch)
-swift run fluidaudio transcribe audio.wav
+swift run fluidaudiocli transcribe audio.wav
 
 # English-only run with higher recall
-swift run fluidaudio transcribe audio.wav --model-version v2
+swift run fluidaudiocli transcribe audio.wav --model-version v2
 ```
 
 ## Speaker Diarization
@@ -319,11 +319,11 @@ for segment in result.segments {
 
 ```bash
 # Process a meeting with full VBx clustering
-swift run fluidaudio process ~/FluidAudioDatasets/ami_official/sdm/ES2004a.Mix-Headset.wav \
+swift run fluidaudiocli process ~/FluidAudioDatasets/ami_official/sdm/ES2004a.Mix-Headset.wav \
   --mode offline --threshold 0.6 --output es2004a_offline.json
 
 # Run the AMI single-file benchmark with automatic downloads
-swift run fluidaudio diarization-benchmark --mode offline --auto-download \
+swift run fluidaudiocli diarization-benchmark --mode offline --auto-download \
   --single-file ES2004a --threshold 0.6 --output offline_results.json
 ```
 
@@ -362,7 +362,7 @@ Task {
 For diarization streaming see [Documentation/Diarization/GettingStarted.md](Documentation/Diarization/GettingStarted.md)
 
 ```bash
-swift run fluidaudio diarization-benchmark --single-file ES2004a \
+swift run fluidaudiocli diarization-benchmark --single-file ES2004a \
   --chunk-seconds 3 --overlap-seconds 2
 ```
 
@@ -370,7 +370,7 @@ swift run fluidaudio diarization-benchmark --single-file ES2004a \
 
 ```bash
 # Process an individual file and save JSON
-swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
+swift run fluidaudiocli process meeting.wav --output results.json --threshold 0.6
 ```
 
 ## Voice Activity Detection (VAD)
@@ -461,23 +461,23 @@ Start with the general-purpose `process` command, which runs the diarization
 pipeline (and therefore VAD) end-to-end on a single file:
 
 ```bash
-swift run fluidaudio process path/to/audio.wav
+swift run fluidaudiocli process path/to/audio.wav
 ```
 
 Once you need to experiment with VAD-specific knobs directly, reach for:
 
 ```bash
 # Inspect offline segments (default mode)
-swift run fluidaudio vad-analyze path/to/audio.wav
+swift run fluidaudiocli vad-analyze path/to/audio.wav
 
 # Streaming simulation only (timestamps printed in seconds by default)
-swift run fluidaudio vad-analyze path/to/audio.wav --streaming
+swift run fluidaudiocli vad-analyze path/to/audio.wav --streaming
 
 # Benchmark accuracy/precision trade-offs
-swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
+swift run fluidaudiocli vad-benchmark --num-files 50 --threshold 0.3
 ```
 
-`swift run fluidaudio vad-analyze --help` lists every tuning option, including
+`swift run fluidaudiocli vad-analyze --help` lists every tuning option, including
 negative-threshold overrides, max-speech splitting, padding, and chunk size.
 Offline mode also reports RTFx using the model's per-chunk processing time.
 
@@ -513,10 +513,10 @@ Task {
 
 ```bash
 # Synthesize with default voice
-swift run fluidaudio tts "Hello from FluidAudio." --output out.wav --backend pocket
+swift run fluidaudiocli tts "Hello from FluidAudio." --output out.wav --backend pocket
 
 # Clone a voice from an audio sample
-swift run fluidaudio tts "Hello world." --output out.wav --backend pocket --clone-voice speaker.wav
+swift run fluidaudiocli tts "Hello world." --output out.wav --backend pocket --clone-voice speaker.wav
 ```
 
 ### Kokoro
@@ -535,7 +535,7 @@ Task {
 ```
 
 ```bash
-swift run fluidaudio tts "Hello from FluidAudio." --auto-download --output out.wav
+swift run fluidaudiocli tts "Hello from FluidAudio." --auto-download --output out.wav
 ```
 
 Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.

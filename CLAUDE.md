@@ -43,6 +43,7 @@ FluidAudio is a Swift framework for local, low-latency audio processing on Apple
 2. **Testing Policy**: Add unit tests when writing new code.
 3. **Git Operations**: Never run `git push` unless explicitly requested.
    - **No Co-Author Tags**: Do not add `Co-Authored-By` lines for Claude, Copilot, or any AI assistant in commit messages.
+   - **No GitHub comments**: Never post comments, reviews, or reactions on issues or PRs via `gh`. Reading issues, PRs, and comments is fine. Creating PRs and editing PR titles/bodies is fine.
 4. **Code Formatting**: All code must pass swift-format checks before merge
 5. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested
 6. **Performance**: Keep RTFx > 1.0x for real-time capability
@@ -86,32 +87,32 @@ swift package clean
 
 ```bash
 # Transcription
-swift run fluidaudio transcribe audio.wav
-swift run fluidaudio transcribe audio.wav --low-latency
-swift run fluidaudio qwen3-transcribe audio.wav
-swift run fluidaudio multi-stream audio1.wav audio2.wav
+swift run fluidaudiocli transcribe audio.wav
+swift run fluidaudiocli transcribe audio.wav --low-latency
+swift run fluidaudiocli qwen3-transcribe audio.wav
+swift run fluidaudiocli multi-stream audio1.wav audio2.wav
 
 # TTS
-swift run fluidaudio tts "Hello world" --output hello.wav
+swift run fluidaudiocli tts "Hello world" --output hello.wav
 
 # Diarization
-swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
-swift run fluidaudio sortformer audio.wav
-swift run fluidaudio parakeet-eou --input audio.wav
+swift run fluidaudiocli process meeting.wav --output results.json --threshold 0.6
+swift run fluidaudiocli sortformer audio.wav
+swift run fluidaudiocli parakeet-eou --input audio.wav
 
 # Benchmarks
-swift run fluidaudio asr-benchmark --subset test-clean --max-files 100
-swift run fluidaudio diarization-benchmark --auto-download
-swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.5
-swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
-swift run fluidaudio sortformer-benchmark
-swift run fluidaudio qwen3-benchmark
-swift run fluidaudio ctc-earnings-benchmark
-swift run fluidaudio g2p-benchmark
+swift run fluidaudiocli asr-benchmark --subset test-clean --max-files 100
+swift run fluidaudiocli diarization-benchmark --auto-download
+swift run fluidaudiocli vad-benchmark --num-files 40 --threshold 0.5
+swift run fluidaudiocli fleurs-benchmark --languages en_us,fr_fr --samples 10
+swift run fluidaudiocli sortformer-benchmark
+swift run fluidaudiocli qwen3-benchmark
+swift run fluidaudiocli ctc-earnings-benchmark
+swift run fluidaudiocli g2p-benchmark
 
 # Dataset downloads
-swift run fluidaudio download --dataset ami-sdm
-swift run fluidaudio download --dataset librispeech-test-clean
+swift run fluidaudiocli download --dataset ami-sdm
+swift run fluidaudiocli download --dataset librispeech-test-clean
 ```
 
 ## Project Structure
@@ -148,7 +149,7 @@ FluidAudio/
 - **Actor-based concurrency**: Thread-safe processing, no `@unchecked Sendable`
 - **Stateless ASR**: Each chunk transcribed independently (~14.96s chunks, 2.0s overlap)
 - **Auto-recovery**: Corrupt CoreML model detection and re-download from HuggingFace
-- **Model management**: Models auto-download from HuggingFace on first use. Can be pre-fetched via `swift run fluidaudio download`.
+- **Model management**: Models auto-download from HuggingFace on first use. Can be pre-fetched via `swift run fluidaudiocli download`.
 - **Cross-platform**: macOS 14.0+, iOS 17.0+ (library), CLI macOS-only
 
 ## Platform Requirements

@@ -142,7 +142,7 @@ return normalizedEntries[normalized]
 ### CLI
 
 ```bash
-swift run fluidaudio tts "The NASDAQ index rose today" --lexicon custom.txt --output output.wav
+swift run fluidaudiocli tts "The NASDAQ index rose today" --lexicon custom.txt --output output.wav
 ```
 
 ### Swift API

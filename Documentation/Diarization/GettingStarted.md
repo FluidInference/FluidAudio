@@ -206,8 +206,8 @@ The offline controller mirrors the reference pipeline:
 The CLI exposes the same controller via `fluidaudio process` and the diarization benchmark tooling:
 
 ```bash
-swift run fluidaudio process meeting.wav --mode offline --threshold 0.6 --debug --chunk-seconds 10.0 --overlap-seconds 0.0
-swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --threshold 0.6 --auto-download
+swift run fluidaudiocli process meeting.wav --mode offline --threshold 0.6 --debug --chunk-seconds 10.0 --overlap-seconds 0.0
+swift run fluidaudiocli diarization-benchmark --mode offline --dataset ami-sdm --threshold 0.6 --auto-download
 ```
 
 Add `--rttm path/to/meeting.rttm` when you have ground-truth annotations to emit DER/JER directly on the console, or `--export-embeddings embeddings.json` to inspect cluster assignments. The GitHub Actions workflow [`offline-pipeline.yml`](../.github/workflows/offline-pipeline.yml) executes the single-file AMI benchmark on every PR, keeping downloads, PLDA transforms, and VBx clustering guard-railed.
@@ -531,7 +531,7 @@ Evaluate performance on your audio:
 
 ```bash
 # Command-line benchmark
-swift run fluidaudio diarization-benchmark --single-file ES2004a
+swift run fluidaudiocli diarization-benchmark --single-file ES2004a
 
 # Results:
 # DER: 17.7% (Miss: 10.3%, FA: 1.6%, Speaker Error: 5.8%)
