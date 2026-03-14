@@ -9,7 +9,7 @@ Kokoro is a high-quality, English-only TTS backend. It generates the entire audi
 ### CLI
 
 ```bash
-swift run fluidaudio tts "Welcome to FluidAudio text to speech" \
+swift run fluidaudiocli tts "Welcome to FluidAudio text to speech" \
   --output ~/Desktop/demo.wav \
   --voice af_heart
 ```
@@ -126,5 +126,5 @@ import FluidAudio
 ### CLI
 
 ```bash
-swift run fluidaudio tts "Welcome to FluidAudio" --output ~/Desktop/demo.wav
+swift run fluidaudiocli tts "Welcome to FluidAudio" --output ~/Desktop/demo.wav
 ```
