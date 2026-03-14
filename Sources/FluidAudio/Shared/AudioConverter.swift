@@ -36,6 +36,20 @@ final public class AudioConverter {
         }
     }
 
+    /// Public initializer so external modules (e.g. CLI) can construct the converter
+    /// - Parameters:
+    ///   - sampleRate: Target audio sample rate
+    ///   - debug: Whether to log debug messages
+    public init(sampleRate: Double, debug: Bool = false) {
+        self.debug = debug
+        self.targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        )!
+    }
+
     // MARK: - Public Resampling Methods
 
     /// Resample a float array from one sample rate to the target sample rate.
@@ -77,14 +91,24 @@ final public class AudioConverter {
     public func resampleAudioFile(_ url: URL) throws -> [Float] {
         let audioFile = try AVAudioFile(forReading: url)
         let format = audioFile.processingFormat
-        let frameCount = AVAudioFrameCount(audioFile.length)
+        let chunkSize = max(4096, Int(format.sampleRate))
+        var monoSamples: [Float] = []
+        monoSamples.reserveCapacity(Int(audioFile.length))
 
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            throw AudioConverterError.failedToCreateBuffer
+        while audioFile.framePosition < audioFile.length {
+            let remaining = Int(audioFile.length - audioFile.framePosition)
+            let framesToRead = AVAudioFrameCount(min(chunkSize, remaining))
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: framesToRead) else {
+                throw AudioConverterError.failedToCreateBuffer
+            }
+            try audioFile.read(into: buffer)
+            if buffer.frameLength == 0 {
+                break
+            }
+            monoSamples.append(contentsOf: try extractMonoFloat32(from: buffer))
         }
 
-        try audioFile.read(into: buffer)
-        return try resampleBuffer(buffer)
+        return try resample(monoSamples, from: format.sampleRate)
     }
 
     /// Convert an audio file path to target sample rate mono Float32 samples.
@@ -173,6 +197,7 @@ final public class AudioConverter {
         guard let converter = AVAudioConverter(from: format, to: monoFormat) else {
             throw AudioConverterError.failedToCreateConverter
         }
+        configure(converter: converter)
 
         guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: buffer.frameCapacity) else {
             throw AudioConverterError.failedToCreateBuffer
@@ -264,6 +289,7 @@ final public class AudioConverter {
         guard let converter = AVAudioConverter(from: inputFormat, to: format) else {
             throw AudioConverterError.failedToCreateConverter
         }
+        configure(converter: converter)
 
         // Estimate first pass capacity and allocate
         let sampleRateRatio = format.sampleRate / inputFormat.sampleRate
@@ -279,19 +305,13 @@ final public class AudioConverter {
         var aggregated: [Float] = []
         aggregated.reserveCapacity(Int(estimatedOutputFrames))
 
-        // Provide input once, then signal end-of-stream
-        let provided = OSAllocatedUnfairLock(initialState: false)
-        // Buffer is only accessed synchronously by AVAudioConverter's input block callback
+        // AVAudioConverter consumes this input block synchronously within convert(...),
+        // so a simple local flag is sufficient and avoids extra allocator state.
+        nonisolated(unsafe) var provided = false
         nonisolated(unsafe) let capturedBuffer = buffer
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            let wasProvided = provided.withLock { state -> Bool in
-                if state {
-                    return true
-                }
-                state = true
-                return false
-            }
-            if !wasProvided {
+            if !provided {
+                provided = true
                 status.pointee = .haveData
                 return capturedBuffer
             } else {
@@ -326,6 +346,11 @@ final public class AudioConverter {
         }
 
         return aggregated
+    }
+
+    private func configure(converter: AVAudioConverter) {
+        converter.sampleRateConverterAlgorithm = AVSampleRateConverterAlgorithm_Mastering
+        converter.sampleRateConverterQuality = AVAudioQuality.max.rawValue
     }
 
     /// Check if a format already matches the target output format.
