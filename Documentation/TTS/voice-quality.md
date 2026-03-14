@@ -1,24 +1,35 @@
 # Kokoro English Voice Quality Report
 
-Test sentence: "The quick brown fox jumps over the lazy dog near the riverbank, while the morning sun casts golden light across the meadow."
+## Methodology
 
-Upstream grades from [Kokoro VOICES.md](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md). Voice descriptions from [VoiceRankings](https://voicerankings.com).
+**Test Sentence:** "The quick brown fox jumps over the lazy dog near the riverbank, while the morning sun casts golden light across the meadow."
+
+**Data Sources:**
+- Upstream grades from [Kokoro VOICES.md](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md)
+- Voice descriptions from [VoiceRankings](https://voicerankings.com)
+
+**Quality Scale:**
+- **Unusable**: Significant artifacts, distortion, or background noise that interferes with comprehension
+- **Slightly unusable**: Noticeable quality issues (sibilance, noise) that may distract but don't prevent understanding
+- **Borderline usable**: Minor quality concerns; acceptable for some use cases
+- **Usable**: Good quality with minimal issues; suitable for most applications
+- **Quite good**: High quality with no significant artifacts
 
 ## American English Female (af_*)
 
 | Voice | Kokoro Grade | Training Data | Pitch | Character | Our Quality | Notes |
 |-------|-------------|---------------|-------|-----------|-------------|-------|
-| af_heart | A | — | 200 Hz, High | Warm, conversational, breathy, relaxed. Young adult (20s-30s). Energy 6/10 | Very slightly unusable | Sibilant, stronger than af_bella |
-| af_bella | A- | 10-100 hours | 205 Hz, High | Natural, intimate, slightly husky, vocal fry. Young adult. Energy 6/10 | Very slightly unusable | Subtle sibilant |
+| af_heart | A | — | 200 Hz, High | Warm, conversational, breathy, relaxed. Young adult (20s-30s). Energy 6/10 | Slightly unusable | Sibilant, stronger than af_bella |
+| af_bella | A- | 10-100 hours | 205 Hz, High | Natural, intimate, slightly husky, vocal fry. Young adult. Energy 6/10 | Slightly unusable | Subtle sibilant |
 | af_nicole | B- | 10-100 hours | 171 Hz, Medium-High | Whisper-soft, deeply intimate, ASMR-like, very breathy. Mature adult (30-50). Very slow. Energy 2/10 | Usable | |
 | af_aoede | C+ | 1-10 hours | 184 Hz, Medium-High | Warm, velvety, intimate, empathetic. Young adult. Mild breathiness, subtle vocal fry. Energy 6/10 | Slightly unusable | |
-| af_kore | C+ | 1-10 hours | 160 Hz, Medium | Warm, empathetic, calm, professional. Mature adult (30-50). Subtle vocal fry. Energy 6/10 | Borderline usable | Very very slightly unusable |
-| af_sarah | C+ | 1-10 hours | 200 Hz, High | Polite, approachable, clean, mild breathiness. Young adult. Energy 6/10 | Usable enough | |
+| af_kore | C+ | 1-10 hours | 160 Hz, Medium | Warm, empathetic, calm, professional. Mature adult (30-50). Subtle vocal fry. Energy 6/10 | Borderline usable | |
+| af_sarah | C+ | 1-10 hours | 200 Hz, High | Polite, approachable, clean, mild breathiness. Young adult. Energy 6/10 | Usable | |
 | af_alloy | C | 10-100 min | 146 Hz, Medium | Bright, cheerful, crisp, minimal breathiness. Mature adult. Fast (192 WPM). Energy 6/10 | Unusable | |
 | af_nova | C | 10-100 min | 164 Hz, Medium | Polished, professional, clear, no breathiness. Young adult. Fast (194 WPM). Energy 6/10 | Unusable | Notable background noise, subtle sibilant |
 | af_sky | C- | 1-10 min | 159 Hz, Medium | Professional, smooth, consistent. Mature adult. Mild breathiness. Fast (184 WPM). Energy 6/10 | Unusable | Distortion, background noise |
 | af_jessica | D | 10-100 min | 223 Hz, High | Bright, energetic, breathy, fast (206 WPM). Young adult (20s-30s). Energy 8/10 | Unusable | Noticeably low quality |
-| af_river | D | 10-100 min | 177 Hz, Medium-High | Relaxed, textured, casual, vocal fry, no breathiness. Young adult. Fast (208 WPM). Energy 8/10 | Usable enough | |
+| af_river | D | 10-100 min | 177 Hz, Medium-High | Relaxed, textured, casual, vocal fry, no breathiness. Young adult. Fast (208 WPM). Energy 8/10 | Usable | |
 
 ## American English Male (am_*)
 
@@ -39,9 +50,9 @@ Upstream grades from [Kokoro VOICES.md](https://huggingface.co/hexgrad/Kokoro-82
 | Voice | Kokoro Grade | Training Data | Pitch | Character | Our Quality | Notes |
 |-------|-------------|---------------|-------|-----------|-------------|-------|
 | bf_emma | B- | 10-100 hours | 187 Hz, Medium-High | Polished, inviting, clear, friendly. Young adult. Fast (185 WPM). Energy 6/10 | Quite good | |
-| bf_isabella | C | 10-100 min | 214 Hz, High | Warm, articulate, gentle breathiness, lively. Young adult. Energy 7/10 | Decent | Some sibilant |
+| bf_isabella | C | 10-100 min | 214 Hz, High | Warm, articulate, gentle breathiness, lively. Young adult. Energy 7/10 | Usable | Some sibilant |
 | bf_alice | D | 10-100 min | 218 Hz, High | Polished, articulate, RP accent, glass-like texture. Young adult (20s-30s). Energy 6/10 | Unusable | Quality quite bad |
-| bf_lily | D | 10-100 min | 196 Hz, Medium-High | Polished, articulate, calm, subtle vocal fry. Young adult. Energy 5/10 | Pretty usable | |
+| bf_lily | D | 10-100 min | 196 Hz, Medium-High | Polished, articulate, calm, subtle vocal fry. Young adult. Energy 5/10 | Usable | |
 
 ## British English Male (bm_*)
 
