@@ -24,8 +24,7 @@
 - [Segmentation](VAD/Segmentation.md)
 
 ## TTS
-- [Kokoro](TTS/Kokoro.md)
-- [PocketTTS](TTS/PocketTTS.md)
+- [Getting Started](TTS/README.md)
 - [SSML](TTS/SSML.md)
 
 ## Guides

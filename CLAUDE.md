@@ -86,32 +86,24 @@ swift package clean
 
 ```bash
 # Transcription
-swift run fluidaudio transcribe audio.wav
-swift run fluidaudio transcribe audio.wav --low-latency
-swift run fluidaudio qwen3-transcribe audio.wav
-swift run fluidaudio multi-stream audio1.wav audio2.wav
-
-# TTS
-swift run fluidaudio tts "Hello world" --output hello.wav
+swift run fluidaudiocli transcribe audio.wav
+swift run fluidaudiocli transcribe audio.wav --low-latency
 
 # Diarization
-swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
-swift run fluidaudio sortformer audio.wav
-swift run fluidaudio parakeet-eou --input audio.wav
+swift run fluidaudiocli process meeting.wav --output results.json --threshold 0.6
+
+# Multi-stream processing
+swift run fluidaudiocli multi-stream audio1.wav audio2.wav
 
 # Benchmarks
-swift run fluidaudio asr-benchmark --subset test-clean --max-files 100
-swift run fluidaudio diarization-benchmark --auto-download
-swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.5
-swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
-swift run fluidaudio sortformer-benchmark
-swift run fluidaudio qwen3-benchmark
-swift run fluidaudio ctc-earnings-benchmark
-swift run fluidaudio g2p-benchmark
+swift run fluidaudiocli asr-benchmark --subset test-clean --max-files 100
+swift run fluidaudiocli diarization-benchmark --auto-download
+swift run fluidaudiocli vad-benchmark --num-files 40 --threshold 0.5
+swift run fluidaudiocli fleurs-benchmark --languages en_us,fr_fr --samples 10
 
 # Dataset downloads
-swift run fluidaudio download --dataset ami-sdm
-swift run fluidaudio download --dataset librispeech-test-clean
+swift run fluidaudiocli download --dataset ami-sdm
+swift run fluidaudiocli download --dataset librispeech-test-clean
 ```
 
 ## Project Structure
@@ -119,12 +111,12 @@ swift run fluidaudio download --dataset librispeech-test-clean
 ```
 FluidAudio/
 ├── Sources/
-│   ├── FluidAudio/           # Main library (single product)
+│   ├── FluidAudio/           # Main library
 │   │   ├── ASR/             # Automatic Speech Recognition (Parakeet TDT, Qwen3)
 │   │   ├── Diarizer/        # Speaker diarization (segmentation, embedding, clustering)
-│   │   ├── TTS/             # Text-to-speech (Kokoro, PocketTTS)
 │   │   ├── VAD/             # Voice Activity Detection (Silero VAD)
 │   │   └── Shared/          # Common utilities (audio conversion, model downloading)
+│   ├── FluidAudioTTS/       # Text-to-speech (Kokoro TTS)
 │   └── FluidAudioCLI/       # Command-line interface (macOS only)
 ├── Tests/                   # Test suite
 ├── Scripts/                 # Python utilities (benchmarks, evaluation tools)
@@ -141,14 +133,13 @@ FluidAudio/
 - **StreamingAsrManager** (`ASR/Streaming/`): Real-time streaming ASR with sliding window processing and cancellation support.
 - **OfflineDiarizerManager** (`Diarizer/`): Speaker separation via segmentation, embedding extraction, and VBx clustering. 17.7% DER on AMI dataset.
 - **VadManager** (`VAD/`): Voice activity detection with CoreML models.
-- **KokoroSynthesizer** (`TTS/Kokoro/`): Kokoro text-to-speech synthesis.
-- **PocketTtsSynthesizer** (`TTS/PocketTTS/`): PocketTTS streaming text-to-speech synthesis.
+- **KokoroSynthesizer** (`FluidAudioTTS/`): Text-to-speech synthesis.
 
 ### Key Patterns
 - **Actor-based concurrency**: Thread-safe processing, no `@unchecked Sendable`
 - **Stateless ASR**: Each chunk transcribed independently (~14.96s chunks, 2.0s overlap)
 - **Auto-recovery**: Corrupt CoreML model detection and re-download from HuggingFace
-- **Model management**: Models auto-download from HuggingFace on first use. Can be pre-fetched via `swift run fluidaudio download`.
+- **Model management**: Models auto-download from HuggingFace on first use. Can be pre-fetched via `swift run fluidaudiocli download`.
 - **Cross-platform**: macOS 14.0+, iOS 17.0+ (library), CLI macOS-only
 
 ## Platform Requirements

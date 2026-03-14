@@ -162,8 +162,8 @@ let lexicon = TtsCustomLexicon(entries: [
     "kokoro": ["k", "ə", "k", "ˈ", "ɔ", "ɹ", "O"]
 ])
 
-// Use with KokoroTtsManager
-let manager = KokoroTtsManager(customLexicon: lexicon)
+// Use with TtSManager
+let manager = TtSManager(customLexicon: lexicon)
 try await manager.initialize()
 let audio = try await manager.synthesize(text: "Welcome to Kokoro TTS")
 
