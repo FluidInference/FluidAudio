@@ -8,6 +8,9 @@ TTS is built into the CLI. Run it directly:
 
 ```bash
 swift run fluidaudio tts "Hello from FluidAudio" --output out.wav
+
+# Multilingual G2P benchmark
+swift run fluidaudio g2p-benchmark
 ```
 
 ## ASR
@@ -18,6 +21,12 @@ swift run fluidaudio transcribe audio.wav
 
 # English-only run with higher accuracy
 swift run fluidaudio transcribe audio.wav --model-version v2
+
+# Transcribe with Qwen3 ASR
+swift run fluidaudio qwen3-transcribe audio.wav
+
+# Streaming ASR with Parakeet EOU
+swift run fluidaudio parakeet-eou --input audio.wav
 
 # Transcribe multiple files in parallel
 swift run fluidaudio multi-stream audio1.wav audio2.wav
@@ -30,6 +39,12 @@ swift run fluidaudio asr-benchmark --subset test-clean --max-files 50 --model-ve
 
 # Multilingual ASR (FLEURS) benchmark
 swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
+
+# Qwen3 ASR benchmark
+swift run fluidaudio qwen3-benchmark
+
+# CTC keyword spotting benchmark on Earnings22
+swift run fluidaudio ctc-earnings-benchmark
 ```
 
 ## Diarization
@@ -58,6 +73,12 @@ swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --th
 # Process a single file with streaming vs. offline inference
 swift run fluidaudio process meeting.wav --mode streaming --threshold 0.7
 swift run fluidaudio process meeting.wav --mode offline --threshold 0.6 --debug
+
+# Sortformer streaming diarization
+swift run fluidaudio sortformer audio.wav
+
+# Sortformer benchmark on AMI dataset
+swift run fluidaudio sortformer-benchmark
 ```
 
 - `--mode offline` switches the CLI to `OfflineDiarizerManager`, running the full VBx pipeline with PLDA refinement. Expect DER ≈ 18–20 % on AMI-SDM with threshold 0.6.
