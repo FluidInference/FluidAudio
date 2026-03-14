@@ -146,14 +146,15 @@ public actor PocketTtsManager {
     ///   - text: The text to synthesize.
     ///   - voice: Voice identifier (default: uses the manager's default voice).
     ///   - temperature: Generation temperature (default: 0.7).
-    /// - Returns: An `AsyncStream` of audio frames.
+    /// - Returns: An `AsyncThrowingStream` of audio frames. Throws if a model
+    ///   inference error occurs during generation.
     ///
     /// Example:
     /// ```swift
     /// let manager = PocketTtsManager()
     /// try await manager.initialize()
     /// let stream = try await manager.synthesizeStreaming(text: "Hello, world!")
-    /// for await frame in stream {
+    /// for try await frame in stream {
     ///     audioEngine.schedule(frame.samples)
     /// }
     /// ```
@@ -161,7 +162,7 @@ public actor PocketTtsManager {
         text: String,
         voice: String? = nil,
         temperature: Float = PocketTtsConstants.temperature
-    ) async throws -> AsyncStream<PocketTtsSynthesizer.AudioFrame> {
+    ) async throws -> AsyncThrowingStream<PocketTtsSynthesizer.AudioFrame, Error> {
         guard isInitialized else {
             throw PocketTTSError.modelNotFound("PocketTTS model not initialized")
         }
@@ -185,12 +186,13 @@ public actor PocketTtsManager {
     ///   - text: The text to synthesize.
     ///   - voiceData: Voice conditioning data (e.g., from cloneVoice).
     ///   - temperature: Generation temperature (default: 0.7).
-    /// - Returns: An `AsyncStream` of audio frames.
+    /// - Returns: An `AsyncThrowingStream` of audio frames. Throws if a model
+    ///   inference error occurs during generation.
     public func synthesizeStreaming(
         text: String,
         voiceData: PocketTtsVoiceData,
         temperature: Float = PocketTtsConstants.temperature
-    ) async throws -> AsyncStream<PocketTtsSynthesizer.AudioFrame> {
+    ) async throws -> AsyncThrowingStream<PocketTtsSynthesizer.AudioFrame, Error> {
         guard isInitialized else {
             throw PocketTTSError.modelNotFound("PocketTTS model not initialized")
         }
