@@ -395,17 +395,19 @@ public struct PocketTtsSynthesizer {
 
         logger.info("PocketTTS streaming synthesis: '\(text)'")
 
-        // Pre-load all resources before returning the stream
-        let constants = try await store.constants()
-        let voiceData = try await store.voiceData(for: voice)
+        // Pre-load all resources before returning the stream.
+        // nonisolated(unsafe) is required because MLModel/MLMultiArray are not Sendable,
+        // but each stream's Task exclusively owns these values with no concurrent access.
+        nonisolated(unsafe) let constants = try await store.constants()
+        nonisolated(unsafe) let voiceData = try await store.voiceData(for: voice)
         let chunks = chunkText(text, tokenizer: constants.tokenizer)
-        let condModel = try await store.condStep()
-        let stepModel = try await store.flowlmStep()
-        let flowModel = try await store.flowDecoder()
-        let mimiModel = try await store.mimiDecoder()
+        nonisolated(unsafe) let condModel = try await store.condStep()
+        nonisolated(unsafe) let stepModel = try await store.flowlmStep()
+        nonisolated(unsafe) let flowModel = try await store.flowDecoder()
+        nonisolated(unsafe) let mimiModel = try await store.mimiDecoder()
         let repoDir = try await store.repoDir()
-        let mimiInitialState = try loadMimiInitialState(from: repoDir)
-        let bosEmb = try createBosEmbedding(constants.bosEmbedding)
+        nonisolated(unsafe) let mimiInitialState = try loadMimiInitialState(from: repoDir)
+        nonisolated(unsafe) let bosEmb = try createBosEmbedding(constants.bosEmbedding)
         let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
         let chunkCount = chunks.count
 
@@ -515,15 +517,17 @@ public struct PocketTtsSynthesizer {
 
         logger.info("PocketTTS streaming synthesis with custom voice: '\(text)'")
 
-        let constants = try await store.constants()
+        // nonisolated(unsafe): same rationale as the voice-name overload above —
+        // each stream's Task exclusively owns these non-Sendable CoreML values.
+        nonisolated(unsafe) let constants = try await store.constants()
         let chunks = chunkText(text, tokenizer: constants.tokenizer)
-        let condModel = try await store.condStep()
-        let stepModel = try await store.flowlmStep()
-        let flowModel = try await store.flowDecoder()
-        let mimiModel = try await store.mimiDecoder()
+        nonisolated(unsafe) let condModel = try await store.condStep()
+        nonisolated(unsafe) let stepModel = try await store.flowlmStep()
+        nonisolated(unsafe) let flowModel = try await store.flowDecoder()
+        nonisolated(unsafe) let mimiModel = try await store.mimiDecoder()
         let repoDir = try await store.repoDir()
-        let mimiInitialState = try loadMimiInitialState(from: repoDir)
-        let bosEmb = try createBosEmbedding(constants.bosEmbedding)
+        nonisolated(unsafe) let mimiInitialState = try loadMimiInitialState(from: repoDir)
+        nonisolated(unsafe) let bosEmb = try createBosEmbedding(constants.bosEmbedding)
         let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
         let chunkCount = chunks.count
 
