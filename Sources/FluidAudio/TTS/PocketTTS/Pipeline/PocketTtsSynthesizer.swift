@@ -412,6 +412,7 @@ public struct PocketTtsSynthesizer {
 
         return AsyncStream { continuation in
             let task = Task {
+                defer { continuation.finish() }
                 var rng = SeededRNG(seed: seedValue)
                 var mimiState = mimiInitialState
 
@@ -480,8 +481,6 @@ public struct PocketTtsSynthesizer {
 
                     if Task.isCancelled { break }
                 }
-
-                continuation.finish()
             }
 
             continuation.onTermination = { _ in
@@ -524,6 +523,7 @@ public struct PocketTtsSynthesizer {
 
         return AsyncStream { continuation in
             let task = Task {
+                defer { continuation.finish() }
                 var rng = SeededRNG(seed: seedValue)
                 var mimiState = mimiInitialState
 
@@ -592,8 +592,6 @@ public struct PocketTtsSynthesizer {
 
                     if Task.isCancelled { break }
                 }
-
-                continuation.finish()
             }
 
             continuation.onTermination = { _ in
