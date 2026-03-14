@@ -395,107 +395,37 @@ public struct PocketTtsSynthesizer {
 
         logger.info("PocketTTS streaming synthesis: '\(text)'")
 
-        // Pre-load all resources before returning the stream.
-        // nonisolated(unsafe) is required because MLModel/MLMultiArray are not Sendable,
-        // but each stream's Task exclusively owns these values with no concurrent access.
         let constants = try await store.constants()
         let voiceData = try await store.voiceData(for: voice)
         let chunks = chunkText(text, tokenizer: constants.tokenizer)
-        nonisolated(unsafe) let condModel = try await store.condStep()
-        nonisolated(unsafe) let stepModel = try await store.flowlmStep()
-        nonisolated(unsafe) let flowModel = try await store.flowDecoder()
-        nonisolated(unsafe) let mimiModel = try await store.mimiDecoder()
+        let condModel = try await store.condStep()
+        let stepModel = try await store.flowlmStep()
+        let flowModel = try await store.flowDecoder()
+        let mimiModel = try await store.mimiDecoder()
         let repoDir = try await store.repoDir()
         let mimiInitialState = try loadMimiInitialState(from: repoDir)
-        nonisolated(unsafe) let bosEmb = try createBosEmbedding(constants.bosEmbedding)
+        let bosEmb = try createBosEmbedding(constants.bosEmbedding)
         let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
         let chunkCount = chunks.count
 
         logger.info("Streaming \(chunkCount) chunk(s)")
 
-        let (stream, continuation) = AsyncThrowingStream.makeStream(of: AudioFrame.self)
+        let context = StreamingContext(
+            constants: constants,
+            voiceData: voiceData,
+            chunks: chunks,
+            condModel: condModel,
+            stepModel: stepModel,
+            flowModel: flowModel,
+            mimiModel: mimiModel,
+            mimiInitialState: mimiInitialState,
+            bosEmb: bosEmb,
+            seedValue: seedValue,
+            chunkCount: chunkCount,
+            temperature: temperature
+        )
 
-        let task = Task {
-            do {
-                var rng = SeededRNG(seed: seedValue)
-                var mimiState = mimiInitialState
-
-                for (chunkIdx, chunkText) in chunks.enumerated() {
-                    let (normalizedChunk, framesAfterEos) = normalizeText(chunkText)
-                    logger.info(
-                        "Stream chunk \(chunkIdx + 1)/\(chunkCount): '\(normalizedChunk)'")
-
-                    let tokenIds = constants.tokenizer.encode(normalizedChunk)
-                    let textEmbeddings = embedTokens(tokenIds, constants: constants)
-
-                    var kvState = try await prefillKVCache(
-                        voiceData: voiceData,
-                        textEmbeddings: textEmbeddings,
-                        model: condModel
-                    )
-
-                    let maxGenLen = estimateMaxFrames(text: chunkText)
-                    var eosStep: Int?
-                    var sequence = try createNaNSequence()
-                    let totalFramesAfterEos =
-                        framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
-
-                    for step in 0..<maxGenLen {
-                        if Task.isCancelled { break }
-
-                        let (transformerOut, eosLogit) = try await runFlowLMStep(
-                            sequence: sequence,
-                            bosEmb: bosEmb,
-                            state: &kvState,
-                            model: stepModel
-                        )
-
-                        if eosLogit > PocketTtsConstants.eosThreshold && eosStep == nil {
-                            eosStep = step
-                            logger.info("Stream chunk \(chunkIdx + 1) EOS at step \(step)")
-                        }
-                        if let eos = eosStep, step >= eos + totalFramesAfterEos {
-                            break
-                        }
-
-                        let latent = try await flowDecode(
-                            transformerOut: transformerOut,
-                            numSteps: PocketTtsConstants.numLsdSteps,
-                            temperature: temperature,
-                            model: flowModel,
-                            rng: &rng
-                        )
-
-                        let frameSamples = try await runMimiDecoder(
-                            latent: latent,
-                            state: &mimiState,
-                            model: mimiModel
-                        )
-
-                        continuation.yield(
-                            AudioFrame(
-                                samples: frameSamples,
-                                frameIndex: step,
-                                chunkIndex: chunkIdx,
-                                chunkCount: chunkCount
-                            ))
-
-                        sequence = try createSequenceFromLatent(latent)
-                    }
-
-                    if Task.isCancelled { break }
-                }
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: error)
-            }
-        }
-
-        continuation.onTermination = { _ in
-            task.cancel()
-        }
-
-        return stream
+        return makeStream(context: context)
     }
 
     /// Synthesize audio as a stream using custom voice data.
@@ -519,39 +449,82 @@ public struct PocketTtsSynthesizer {
 
         logger.info("PocketTTS streaming synthesis with custom voice: '\(text)'")
 
-        // nonisolated(unsafe): same rationale as the voice-name overload above —
-        // each stream's Task exclusively owns these non-Sendable CoreML values.
         let constants = try await store.constants()
         let chunks = chunkText(text, tokenizer: constants.tokenizer)
-        nonisolated(unsafe) let condModel = try await store.condStep()
-        nonisolated(unsafe) let stepModel = try await store.flowlmStep()
-        nonisolated(unsafe) let flowModel = try await store.flowDecoder()
-        nonisolated(unsafe) let mimiModel = try await store.mimiDecoder()
+        let condModel = try await store.condStep()
+        let stepModel = try await store.flowlmStep()
+        let flowModel = try await store.flowDecoder()
+        let mimiModel = try await store.mimiDecoder()
         let repoDir = try await store.repoDir()
         let mimiInitialState = try loadMimiInitialState(from: repoDir)
-        nonisolated(unsafe) let bosEmb = try createBosEmbedding(constants.bosEmbedding)
+        let bosEmb = try createBosEmbedding(constants.bosEmbedding)
         let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
         let chunkCount = chunks.count
 
+        let context = StreamingContext(
+            constants: constants,
+            voiceData: voiceData,
+            chunks: chunks,
+            condModel: condModel,
+            stepModel: stepModel,
+            flowModel: flowModel,
+            mimiModel: mimiModel,
+            mimiInitialState: mimiInitialState,
+            bosEmb: bosEmb,
+            seedValue: seedValue,
+            chunkCount: chunkCount,
+            temperature: temperature
+        )
+
+        return makeStream(context: context)
+    }
+
+    // MARK: - Streaming Internals
+
+    /// Bundles all pre-loaded resources needed for streaming generation.
+    ///
+    /// Marked `@unchecked Sendable` because the contained CoreML models (`MLModel`,
+    /// `MLMultiArray`) are not Sendable, but each stream's Task exclusively owns its
+    /// context with no concurrent access.
+    private struct StreamingContext: @unchecked Sendable {
+        let constants: PocketTtsConstantsBundle
+        let voiceData: PocketTtsVoiceData
+        let chunks: [String]
+        let condModel: MLModel
+        let stepModel: MLModel
+        let flowModel: MLModel
+        let mimiModel: MLModel
+        let mimiInitialState: MimiState
+        let bosEmb: MLMultiArray
+        let seedValue: UInt64
+        let chunkCount: Int
+        let temperature: Float
+    }
+
+    /// Create the AsyncThrowingStream and spawn the generation task.
+    private static func makeStream(
+        context: StreamingContext
+    ) -> AsyncThrowingStream<AudioFrame, Error> {
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: AudioFrame.self)
 
         let task = Task {
             do {
-                var rng = SeededRNG(seed: seedValue)
-                var mimiState = mimiInitialState
+                var rng = SeededRNG(seed: context.seedValue)
+                var mimiState = context.mimiInitialState
 
-                for (chunkIdx, chunkText) in chunks.enumerated() {
+                for (chunkIdx, chunkText) in context.chunks.enumerated() {
                     let (normalizedChunk, framesAfterEos) = normalizeText(chunkText)
                     logger.info(
-                        "Stream chunk \(chunkIdx + 1)/\(chunkCount): '\(normalizedChunk)'")
+                        "Stream chunk \(chunkIdx + 1)/\(context.chunkCount): '\(normalizedChunk)'"
+                    )
 
-                    let tokenIds = constants.tokenizer.encode(normalizedChunk)
-                    let textEmbeddings = embedTokens(tokenIds, constants: constants)
+                    let tokenIds = context.constants.tokenizer.encode(normalizedChunk)
+                    let textEmbeddings = embedTokens(tokenIds, constants: context.constants)
 
                     var kvState = try await prefillKVCache(
-                        voiceData: voiceData,
+                        voiceData: context.voiceData,
                         textEmbeddings: textEmbeddings,
-                        model: condModel
+                        model: context.condModel
                     )
 
                     let maxGenLen = estimateMaxFrames(text: chunkText)
@@ -565,9 +538,9 @@ public struct PocketTtsSynthesizer {
 
                         let (transformerOut, eosLogit) = try await runFlowLMStep(
                             sequence: sequence,
-                            bosEmb: bosEmb,
+                            bosEmb: context.bosEmb,
                             state: &kvState,
-                            model: stepModel
+                            model: context.stepModel
                         )
 
                         if eosLogit > PocketTtsConstants.eosThreshold && eosStep == nil {
@@ -581,15 +554,15 @@ public struct PocketTtsSynthesizer {
                         let latent = try await flowDecode(
                             transformerOut: transformerOut,
                             numSteps: PocketTtsConstants.numLsdSteps,
-                            temperature: temperature,
-                            model: flowModel,
+                            temperature: context.temperature,
+                            model: context.flowModel,
                             rng: &rng
                         )
 
                         let frameSamples = try await runMimiDecoder(
                             latent: latent,
                             state: &mimiState,
-                            model: mimiModel
+                            model: context.mimiModel
                         )
 
                         continuation.yield(
@@ -597,7 +570,7 @@ public struct PocketTtsSynthesizer {
                                 samples: frameSamples,
                                 frameIndex: step,
                                 chunkIndex: chunkIdx,
-                                chunkCount: chunkCount
+                                chunkCount: context.chunkCount
                             ))
 
                         sequence = try createSequenceFromLatent(latent)
