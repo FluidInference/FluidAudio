@@ -40,13 +40,15 @@ enum LSEENDRuntimeProbeSupport {
         case "offline":
             let variant = try parseVariant(from: arguments)
             let audioURL = try parseAudioURL(from: arguments)
-            let engine = try LSEENDInferenceEngine(descriptor: .defaultDescriptor(for: variant), computeUnits: .cpuOnly)
+            let descriptor = try loadDescriptorSync(variant: variant)
+            let engine = try LSEENDInferenceEngine(descriptor: descriptor, computeUnits: .cpuOnly)
             return try encodeJSON(ProbeInferenceResult(engine.infer(audioFileURL: audioURL)))
         case "streaming":
             let variant = try parseVariant(from: arguments)
             let audioURL = try parseAudioURL(from: arguments)
             let chunkSeconds = try parseDouble(flag: "--chunk-seconds", from: arguments)
-            let engine = try LSEENDInferenceEngine(descriptor: .defaultDescriptor(for: variant), computeUnits: .cpuOnly)
+            let descriptor = try loadDescriptorSync(variant: variant)
+            let engine = try LSEENDInferenceEngine(descriptor: descriptor, computeUnits: .cpuOnly)
             return try encodeJSON(ProbeStreamingResult(engine.simulateStreaming(audioFileURL: audioURL, chunkSeconds: chunkSeconds)))
         case "session-check":
             let variant = try parseVariant(from: arguments)
@@ -58,15 +60,10 @@ enum LSEENDRuntimeProbeSupport {
         }
     }
 
-    private static func runSessionCheck(
-        variant: LSEENDVariant,
-        audioURL: URL,
-        chunkSeconds: Double
-    ) throws -> ProbeSessionCheckResult {
-        
+    private static func loadDescriptorSync(variant: LSEENDVariant) throws -> LSEENDModelDescriptor {
         let semaphore = DispatchSemaphore(value: 0)
         var descriptorResult: Result<LSEENDModelDescriptor, Error>!
-        
+
         Task {
             do {
                 let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: variant)
@@ -74,13 +71,19 @@ enum LSEENDRuntimeProbeSupport {
             } catch {
                 descriptorResult = .failure(error)
             }
-            
             semaphore.signal()
         }
-        
+
         semaphore.wait()
-        
-        let descriptor = try descriptorResult.get()
+        return try descriptorResult.get()
+    }
+
+    private static func runSessionCheck(
+        variant: LSEENDVariant,
+        audioURL: URL,
+        chunkSeconds: Double
+    ) throws -> ProbeSessionCheckResult {
+        let descriptor = try loadDescriptorSync(variant: variant)
         let engine = try LSEENDInferenceEngine(descriptor: descriptor, computeUnits: .cpuOnly)
         let converter = AudioConverter(
             targetFormat: AVAudioFormat(
