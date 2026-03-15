@@ -166,6 +166,9 @@ public enum PocketTtsResourceDownloader {
         _ voice: String, repoDirectory: URL
     ) async throws -> PocketTtsVoiceData {
         let sanitized = voice.filter { $0.isLetter || $0.isNumber || $0 == "_" }
+        guard !sanitized.isEmpty else {
+            throw PocketTTSError.processingFailed("Invalid voice name: \(voice)")
+        }
         let constantsDir = repoDirectory.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
         let voiceFile = "\(sanitized)_audio_prompt.bin"
         let voiceURL = constantsDir.appendingPathComponent(voiceFile)
@@ -179,7 +182,7 @@ public enum PocketTtsResourceDownloader {
                 description: "\(sanitized) voice prompt",
                 logger: logger
             )
-            try data.write(to: voiceURL)
+            try data.write(to: voiceURL, options: [.atomic])
             logger.info("Downloaded voice '\(sanitized)' (\(data.count / 1024) KB)")
         }
 

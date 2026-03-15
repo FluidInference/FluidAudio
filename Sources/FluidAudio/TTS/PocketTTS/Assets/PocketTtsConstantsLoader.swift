@@ -98,6 +98,13 @@ public enum PocketTtsConstantsLoader {
         }
 
         let promptLength = floatCount / embDim
+        guard promptLength <= PocketTtsVoiceCloner.maxVoiceFrames else {
+            throw LoadError.invalidSize(
+                "\(sanitized)_audio_prompt",
+                expected: PocketTtsVoiceCloner.maxVoiceFrames,
+                actual: promptLength
+            )
+        }
         let audioPrompt = data.withUnsafeBytes { rawBuffer in
             let floatBuffer = rawBuffer.bindMemory(to: Float.self)
             return Array(floatBuffer)
