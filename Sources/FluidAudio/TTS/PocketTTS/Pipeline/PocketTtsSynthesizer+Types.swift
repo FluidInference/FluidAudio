@@ -15,6 +15,9 @@ extension PocketTtsSynthesizer {
     }
 
     /// CoreML output key names for the conditioning step model.
+    ///
+    /// These names are auto-generated during CoreML model tracing and must match
+    /// the compiled `.mlmodelc` exactly. They only change when models are re-converted.
     enum CondStepKeys {
         static let cacheKeys: [String] = [
             "new_cache_1_internal_tensor_assign_2",
@@ -30,6 +33,8 @@ extension PocketTtsSynthesizer {
     }
 
     /// CoreML output key names for the generation step model.
+    ///
+    /// Auto-generated during CoreML model tracing. Must match the compiled model.
     enum FlowLMStepKeys {
         /// CoreML assigned this output the name "input" during model tracing —
         /// it is the transformer hidden state output, not an input tensor.
@@ -55,8 +60,15 @@ extension PocketTtsSynthesizer {
 
     /// Mimi decoder streaming state key mappings (input name → output name).
     ///
-    /// 26 state tensors including 3 zero-length tensors (res{0,1,2}_conv1_prev)
-    /// whose input and output names are identical pass-throughs.
+    /// 26 state tensors that carry the decoder's streaming context across frames:
+    /// - Upsampling: `upsample_partial` — partial output buffer for upsampling layers
+    /// - Attention: `attn{0,1}_cache/offset/end_offset` — causal attention KV caches
+    /// - Convolutions: `conv*_prev/first` — causal conv padding buffers
+    /// - Residual blocks: `res{0,1,2}_conv{0,1}_prev/first` — residual conv state
+    /// - Transposed convs: `convtr{0,1,2}_partial` — transposed conv overlap buffers
+    ///
+    /// 3 zero-length tensors (`res{0,1,2}_conv1_prev`) are pass-throughs where
+    /// input and output names are identical.
     static let mimiStateMapping: [(input: String, output: String)] = [
         ("upsample_partial", "var_82"),
         ("attn0_cache", "var_262"),
