@@ -33,12 +33,12 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 ## Highlights
 
-- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) for transcription; supports all 25 European languages
+- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) for batch transcription supporting 25 European languages; Parakeet EOU (120m) for streaming ASR with end-of-utterance detection (English only)
 - **Inverse Text Normalization (ITN)**: Post-process ASR output to convert spoken-form to written-form ("two hundred" → "200"). See [text-processing-rs](https://github.com/FluidInference/text-processing-rs)
+- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (English only)
 - **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
-- **Real-time Processing**: Designed for near real-time workloads but also works for offline processing
 - **Apple Neural Engine**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 - **Open-Source Models**: All models are publicly available on HuggingFace — converted and optimized by our team; permissive licenses
 
@@ -92,7 +92,7 @@ Add FluidAudio to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.2"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.4"),
 ],
 ```
 
@@ -106,7 +106,7 @@ dependencies: [
 .product(name: "FluidAudio", package: "FluidAudio")
 ```
 
-**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.12.2'`
+**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.12.4'`
 
 ### Other Frameworks
 
@@ -162,11 +162,11 @@ let diarizer = DiarizerManager()
 ```bash
 # Use custom registry
 export REGISTRY_URL=https://your-mirror.example.com
-swift run fluidaudio transcribe audio.wav
+swift run fluidaudiocli transcribe audio.wav
 
 # Or use the MODEL_REGISTRY_URL alias
 export MODEL_REGISTRY_URL=https://models.internal.corp
-swift run fluidaudio diarization-benchmark --auto-download
+swift run fluidaudiocli diarization-benchmark --auto-download
 ```
 
 **Xcode Scheme Configuration:**
@@ -189,7 +189,7 @@ export https_proxy=http://proxy.company.com:8080
 # or for authenticated proxies:
 export https_proxy=http://user:password@proxy.company.com:8080
 
-swift run fluidaudio transcribe audio.wav
+swift run fluidaudiocli transcribe audio.wav
 ```
 
 **Xcode Scheme Configuration for Proxy:**
@@ -279,10 +279,10 @@ Task {
 
 ```bash
 # Transcribe an audio file (batch)
-swift run fluidaudio transcribe audio.wav
+swift run fluidaudiocli transcribe audio.wav
 
 # English-only run with higher recall
-swift run fluidaudio transcribe audio.wav --model-version v2
+swift run fluidaudiocli transcribe audio.wav --model-version v2
 ```
 
 ## Speaker Diarization
@@ -319,11 +319,11 @@ for segment in result.segments {
 
 ```bash
 # Process a meeting with full VBx clustering
-swift run fluidaudio process ~/FluidAudioDatasets/ami_official/sdm/ES2004a.Mix-Headset.wav \
+swift run fluidaudiocli process ~/FluidAudioDatasets/ami_official/sdm/ES2004a.Mix-Headset.wav \
   --mode offline --threshold 0.6 --output es2004a_offline.json
 
 # Run the AMI single-file benchmark with automatic downloads
-swift run fluidaudio diarization-benchmark --mode offline --auto-download \
+swift run fluidaudiocli diarization-benchmark --mode offline --auto-download \
   --single-file ES2004a --threshold 0.6 --output offline_results.json
 ```
 
@@ -362,7 +362,7 @@ Task {
 For diarization streaming see [Documentation/Diarization/GettingStarted.md](Documentation/Diarization/GettingStarted.md)
 
 ```bash
-swift run fluidaudio diarization-benchmark --single-file ES2004a \
+swift run fluidaudiocli diarization-benchmark --single-file ES2004a \
   --chunk-seconds 3 --overlap-seconds 2
 ```
 
@@ -370,7 +370,7 @@ swift run fluidaudio diarization-benchmark --single-file ES2004a \
 
 ```bash
 # Process an individual file and save JSON
-swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
+swift run fluidaudiocli process meeting.wav --output results.json --threshold 0.6
 ```
 
 ## Voice Activity Detection (VAD)
@@ -461,23 +461,23 @@ Start with the general-purpose `process` command, which runs the diarization
 pipeline (and therefore VAD) end-to-end on a single file:
 
 ```bash
-swift run fluidaudio process path/to/audio.wav
+swift run fluidaudiocli process path/to/audio.wav
 ```
 
 Once you need to experiment with VAD-specific knobs directly, reach for:
 
 ```bash
 # Inspect offline segments (default mode)
-swift run fluidaudio vad-analyze path/to/audio.wav
+swift run fluidaudiocli vad-analyze path/to/audio.wav
 
 # Streaming simulation only (timestamps printed in seconds by default)
-swift run fluidaudio vad-analyze path/to/audio.wav --streaming
+swift run fluidaudiocli vad-analyze path/to/audio.wav --streaming
 
 # Benchmark accuracy/precision trade-offs
-swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
+swift run fluidaudiocli vad-benchmark --num-files 50 --threshold 0.3
 ```
 
-`swift run fluidaudio vad-analyze --help` lists every tuning option, including
+`swift run fluidaudiocli vad-analyze --help` lists every tuning option, including
 negative-threshold overrides, max-speech splitting, padding, and chunk size.
 Offline mode also reports RTFx using the model's per-chunk processing time.
 
@@ -513,10 +513,10 @@ Task {
 
 ```bash
 # Synthesize with default voice
-swift run fluidaudio tts "Hello from FluidAudio." --output out.wav --backend pocket
+swift run fluidaudiocli tts "Hello from FluidAudio." --output out.wav --backend pocket
 
 # Clone a voice from an audio sample
-swift run fluidaudio tts "Hello world." --output out.wav --backend pocket --clone-voice speaker.wav
+swift run fluidaudiocli tts "Hello world." --output out.wav --backend pocket --clone-voice speaker.wav
 ```
 
 ### Kokoro
@@ -535,7 +535,7 @@ Task {
 ```
 
 ```bash
-swift run fluidaudio tts "Hello from FluidAudio." --auto-download --output out.wav
+swift run fluidaudiocli tts "Hello from FluidAudio." --auto-download --output out.wav
 ```
 
 Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.
@@ -577,7 +577,7 @@ Kokoro-82M: <https://huggingface.co/hexgrad/Kokoro-82M>
 
 If you use FluidAudio in your work, please cite:
 
-FluidInference Team. (2025). FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms (Version 0.12.2) [Computer software]. GitHub. <https://github.com/FluidInference/FluidAudio>
+FluidInference Team. (2025). FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms (Version 0.12.4) [Computer software]. GitHub. <https://github.com/FluidInference/FluidAudio>
 
 ```bibtex
 @software{FluidInferenceTeam_FluidAudio_2025,
@@ -585,7 +585,7 @@ FluidInference Team. (2025). FluidAudio: Local Speaker Diarization, ASR, and VAD
   title = {{FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms}},
   year = {2025},
   month = {3},
-  version = {0.12.2},
+  version = {0.12.4},
   url = {https://github.com/FluidInference/FluidAudio},
   note = {Computer software}
 }

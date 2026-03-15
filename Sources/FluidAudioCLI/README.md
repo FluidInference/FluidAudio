@@ -16,13 +16,13 @@ Process a single audio file to identify speakers and their segments.
 
 ```bash
 # Basic usage
-swift run fluidaudio process audio.wav
+swift run fluidaudiocli process audio.wav
 
 # With custom output and threshold
-swift run fluidaudio process audio.wav --output results.json --threshold 0.7
+swift run fluidaudiocli process audio.wav --output results.json --threshold 0.7
 
 # With debug mode
-swift run fluidaudio process audio.wav --debug
+swift run fluidaudiocli process audio.wav --debug
 ```
 
 **Options:**
@@ -35,16 +35,16 @@ Transcribe audio files using streaming ASR with real-time updates.
 
 ```bash
 # Basic transcription
-swift run fluidaudio transcribe audio.wav
+swift run fluidaudiocli transcribe audio.wav
 
 # With low-latency configuration
-swift run fluidaudio transcribe audio.wav --config low-latency
+swift run fluidaudiocli transcribe audio.wav --config low-latency
 
 # With debug output
-swift run fluidaudio transcribe audio.wav --debug
+swift run fluidaudiocli transcribe audio.wav --debug
 
 # Compare with direct ASR API
-swift run fluidaudio transcribe audio.wav --compare
+swift run fluidaudiocli transcribe audio.wav --compare
 ```
 
 **Options:**
@@ -63,13 +63,13 @@ Transcribe multiple audio files in parallel using shared ASR models.
 
 ```bash
 # Process two different files
-swift run fluidaudio multi-stream mic_audio.wav system_audio.wav
+swift run fluidaudiocli multi-stream mic_audio.wav system_audio.wav
 
 # Process same file on both streams
-swift run fluidaudio multi-stream audio.wav
+swift run fluidaudiocli multi-stream audio.wav
 
 # With debug output
-swift run fluidaudio multi-stream audio1.wav audio2.wav --debug
+swift run fluidaudiocli multi-stream audio1.wav audio2.wav --debug
 ```
 
 **Options:**
@@ -81,16 +81,16 @@ Run comprehensive benchmarks on evaluation datasets.
 
 ```bash
 # Run on AMI dataset with auto-download
-swift run fluidaudio diarization-benchmark --auto-download
+swift run fluidaudiocli diarization-benchmark --auto-download
 
 # Test single file
-swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.7
+swift run fluidaudiocli diarization-benchmark --single-file ES2004a --threshold 0.7
 
 # Run on specific dataset
-swift run fluidaudio diarization-benchmark --dataset ami-sdm --max-files 10
+swift run fluidaudiocli diarization-benchmark --dataset ami-sdm --max-files 10
 
 # Save results to file
-swift run fluidaudio diarization-benchmark --output benchmark_results.json
+swift run fluidaudiocli diarization-benchmark --output benchmark_results.json
 ```
 
 **Options:**
@@ -107,13 +107,13 @@ Benchmark VAD performance on test datasets.
 
 ```bash
 # Run VAD benchmark
-swift run fluidaudio vad-benchmark --num-files 40
+swift run fluidaudiocli vad-benchmark --num-files 40
 
 # With custom threshold 
-swift run fluidaudio vad-benchmark --threshold 0.8
+swift run fluidaudiocli vad-benchmark --threshold 0.8
 
 # Test on specific dataset
-swift run fluidaudio vad-benchmark --dataset voices-subset
+swift run fluidaudiocli vad-benchmark --dataset voices-subset
 ```
 
 **Options:**
@@ -127,13 +127,13 @@ Benchmark ASR performance on LibriSpeech or other datasets.
 
 ```bash
 # Run on LibriSpeech test-clean
-swift run fluidaudio asr-benchmark --subset test-clean --max-files 100
+swift run fluidaudiocli asr-benchmark --subset test-clean --max-files 100
 
 # Run on test-other subset
-swift run fluidaudio asr-benchmark --subset test-other --max-files 50
+swift run fluidaudiocli asr-benchmark --subset test-other --max-files 50
 
 # With verbose output
-swift run fluidaudio asr-benchmark --verbose
+swift run fluidaudiocli asr-benchmark --verbose
 ```
 
 **Options:**
@@ -145,8 +145,8 @@ swift run fluidaudio asr-benchmark --verbose
 Real-time streaming transcription with end-of-utterance detection.
 
 ```bash
-swift run fluidaudio parakeet-eou --input audio.wav --use-cache
-swift run fluidaudio parakeet-eou --benchmark --chunk-size 160 --max-files 100 --use-cache
+swift run fluidaudiocli parakeet-eou --input audio.wav --use-cache
+swift run fluidaudiocli parakeet-eou --benchmark --chunk-size 160 --max-files 100 --use-cache
 ```
 
 **Options:** `--input <path>`, `--benchmark`, `--max-files <n>`, `--chunk-size <160|320|1600>`, `--eou-debounce <ms>`, `--use-cache`, `--models <path>`, `--output <path>`, `--verbose`
@@ -154,8 +154,8 @@ swift run fluidaudio parakeet-eou --benchmark --chunk-size 160 --max-files 100 -
 ### 8. `download` - Download Datasets
 
 ```bash
-swift run fluidaudio download --dataset ami-sdm
-swift run fluidaudio download --list
+swift run fluidaudiocli download --dataset ami-sdm
+swift run fluidaudiocli download --list
 ```
 
 **Options:** `--dataset <name>`, `--list`
@@ -197,26 +197,26 @@ swift run fluidaudio download --list
 ### Complete Workflow Example
 ```bash
 # 1. Download dataset
-swift run fluidaudio download --dataset ami-sdm
+swift run fluidaudiocli download --dataset ami-sdm
 
 # 2. Run diarization benchmark
-swift run fluidaudio diarization-benchmark --dataset ami-sdm --output results.json
+swift run fluidaudiocli diarization-benchmark --dataset ami-sdm --output results.json
 
 # 3. Process individual file
-swift run fluidaudio process audio.wav --threshold 0.7
+swift run fluidaudiocli process audio.wav --threshold 0.7
 
 # 4. Transcribe audio
-swift run fluidaudio transcribe audio.wav --config low-latency
+swift run fluidaudiocli transcribe audio.wav --config low-latency
 
 # 5. Multi-stream transcription
-swift run fluidaudio multi-stream mic.wav system.wav
+swift run fluidaudiocli multi-stream mic.wav system.wav
 ```
 
 ### Quick Test
 ```bash
 # Test with included sample files
-swift run fluidaudio transcribe medical.wav
-swift run fluidaudio process IS1001a.Mix-Headset.wav --threshold 0.7
+swift run fluidaudiocli transcribe medical.wav
+swift run fluidaudiocli process IS1001a.Mix-Headset.wav --threshold 0.7
 ```
 
 ## Troubleshooting

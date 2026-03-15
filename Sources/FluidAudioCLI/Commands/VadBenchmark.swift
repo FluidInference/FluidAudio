@@ -177,7 +177,7 @@ struct VadBenchmark {
 
         // No fallback to mock data - fail cleanly
         logger.error(
-            "Failed to load VAD dataset from all sources:\nLocal dataset not found\nHugging Face cache empty\nHugging Face download failed\nTry: swift run fluidaudio download --dataset vad"
+            "Failed to load VAD dataset from all sources:\nLocal dataset not found\nHugging Face cache empty\nHugging Face download failed\nTry: swift run fluidaudiocli download --dataset vad"
         )
         throw NSError(
             domain: "VadError", code: 404,
@@ -597,7 +597,7 @@ struct VadBenchmark {
 
         guard FileManager.default.fileExists(atPath: voicesDir.path) else {
             logger.warning(
-                "VOiCES subset not found. Run: swift run fluidaudio download --dataset voices-subset"
+                "VOiCES subset not found. Run: swift run fluidaudiocli download --dataset voices-subset"
             )
             return nil
         }
@@ -675,7 +675,7 @@ struct VadBenchmark {
 
         guard FileManager.default.fileExists(atPath: musanDir.path) else {
             logger.warning(
-                "Full MUSAN dataset not found. Run: swift run fluidaudio download --dataset musan-full"
+                "Full MUSAN dataset not found. Run: swift run fluidaudiocli download --dataset musan-full"
             )
             return nil
         }

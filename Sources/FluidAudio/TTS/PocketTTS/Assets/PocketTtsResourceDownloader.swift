@@ -161,11 +161,32 @@ public enum PocketTtsResourceDownloader {
         try PocketTtsConstantsLoader.load(from: repoDirectory)
     }
 
-    /// Ensure voice conditioning data is available.
+    /// Ensure voice conditioning data is available, downloading from HuggingFace if missing.
     public static func ensureVoice(
         _ voice: String, repoDirectory: URL
-    ) throws -> PocketTtsVoiceData {
-        try PocketTtsConstantsLoader.loadVoice(voice, from: repoDirectory)
+    ) async throws -> PocketTtsVoiceData {
+        let sanitized = voice.filter { $0.isLetter || $0.isNumber || $0 == "_" }
+        guard !sanitized.isEmpty else {
+            throw PocketTTSError.processingFailed("Invalid voice name: \(voice)")
+        }
+        let constantsDir = repoDirectory.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
+        let voiceFile = "\(sanitized)_audio_prompt.bin"
+        let voiceURL = constantsDir.appendingPathComponent(voiceFile)
+
+        if !FileManager.default.fileExists(atPath: voiceURL.path) {
+            logger.info("Downloading voice '\(sanitized)' from HuggingFace...")
+            let remotePath = "constants_bin/\(voiceFile)"
+            let remoteURL = try ModelRegistry.resolveModel(Repo.pocketTts.remotePath, remotePath)
+            let data = try await AssetDownloader.fetchData(
+                from: remoteURL,
+                description: "\(sanitized) voice prompt",
+                logger: logger
+            )
+            try data.write(to: voiceURL, options: [.atomic])
+            logger.info("Downloaded voice '\(sanitized)' (\(data.count / 1024) KB)")
+        }
+
+        return try PocketTtsConstantsLoader.loadVoice(voice, from: repoDirectory)
     }
 
     // MARK: - Private

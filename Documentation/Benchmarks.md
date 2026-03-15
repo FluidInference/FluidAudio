@@ -584,7 +584,7 @@ Hardware: Apple M2, 2022, macOS 26.1
 ### AMI SDM Dataset (NVIDIA High-Latency Config - 30.4s chunks)
 
 ```bash
-swift run fluidaudio sortformer-benchmark --nvidia-high-latency --hf --auto-download
+swift run fluidaudiocli sortformer-benchmark --nvidia-high-latency --hf --auto-download
 ```
 
 ```text

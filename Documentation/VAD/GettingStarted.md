@@ -213,7 +213,7 @@ Start with the general-purpose `process` command, which runs the diarization
 pipeline (and therefore VAD) end-to-end on a single file:
 
 ```bash
-swift run fluidaudio process path/to/audio.wav
+swift run fluidaudiocli process path/to/audio.wav
 ```
 
 Once you need to experiment with the VAD-specific heuristics directly, use the
@@ -221,21 +221,21 @@ CLI commands below:
 
 ```bash
 # Inspect offline segments (default mode is offline only)
-swift run fluidaudio vad-analyze path/to/audio.wav
+swift run fluidaudiocli vad-analyze path/to/audio.wav
 
 # Streaming only, 128 ms chunks, tighter silence rules (timestamps are emitted in seconds)
-swift run fluidaudio vad-analyze path/to/audio.wav --streaming --min-silence-ms 300
+swift run fluidaudiocli vad-analyze path/to/audio.wav --streaming --min-silence-ms 300
 
 # Run both offline + streaming in one pass
-swift run fluidaudio vad-analyze path/to/audio.wav --mode both
+swift run fluidaudiocli vad-analyze path/to/audio.wav --mode both
 
 # Classic benchmark tooling remains available
-swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
+swift run fluidaudiocli vad-benchmark --num-files 50 --threshold 0.3
 ```
 
-`swift run fluidaudio vad-analyze --help` prints the full list of tuning
+`swift run fluidaudiocli vad-analyze --help` prints the full list of tuning
 options, including negative-threshold overrides and max-duration splitting.
 Offline runs emit an RTFx summary calculated from per-chunk inference time. Use
 `--mode both` if you also want to see streaming start/end events in the same run.
 
-Datasets for benchmarking can be fetched with `swift run fluidaudio download --dataset vad`.
+Datasets for benchmarking can be fetched with `swift run fluidaudiocli download --dataset vad`.

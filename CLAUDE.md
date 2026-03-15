@@ -43,6 +43,7 @@ FluidAudio is a Swift framework for local, low-latency audio processing on Apple
 2. **Testing Policy**: Add unit tests when writing new code.
 3. **Git Operations**: Never run `git push` unless explicitly requested.
    - **No Co-Author Tags**: Do not add `Co-Authored-By` lines for Claude, Copilot, or any AI assistant in commit messages.
+   - **No GitHub comments**: Never post comments, reviews, or reactions on issues or PRs via `gh`. Reading issues, PRs, and comments is fine. Creating PRs and editing PR titles/bodies is fine.
 4. **Code Formatting**: All code must pass swift-format checks before merge
 5. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested
 6. **Performance**: Keep RTFx > 1.0x for real-time capability
@@ -88,18 +89,26 @@ swift package clean
 # Transcription
 swift run fluidaudiocli transcribe audio.wav
 swift run fluidaudiocli transcribe audio.wav --low-latency
+swift run fluidaudiocli qwen3-transcribe audio.wav
+swift run fluidaudiocli multi-stream audio1.wav audio2.wav
+
+# TTS
+swift run fluidaudiocli tts "Hello world" --output hello.wav
 
 # Diarization
 swift run fluidaudiocli process meeting.wav --output results.json --threshold 0.6
-
-# Multi-stream processing
-swift run fluidaudiocli multi-stream audio1.wav audio2.wav
+swift run fluidaudiocli sortformer audio.wav
+swift run fluidaudiocli parakeet-eou --input audio.wav
 
 # Benchmarks
 swift run fluidaudiocli asr-benchmark --subset test-clean --max-files 100
 swift run fluidaudiocli diarization-benchmark --auto-download
 swift run fluidaudiocli vad-benchmark --num-files 40 --threshold 0.5
 swift run fluidaudiocli fleurs-benchmark --languages en_us,fr_fr --samples 10
+swift run fluidaudiocli sortformer-benchmark
+swift run fluidaudiocli qwen3-benchmark
+swift run fluidaudiocli ctc-earnings-benchmark
+swift run fluidaudiocli g2p-benchmark
 
 # Dataset downloads
 swift run fluidaudiocli download --dataset ami-sdm
@@ -111,12 +120,12 @@ swift run fluidaudiocli download --dataset librispeech-test-clean
 ```
 FluidAudio/
 ├── Sources/
-│   ├── FluidAudio/           # Main library
+│   ├── FluidAudio/           # Main library (single product)
 │   │   ├── ASR/             # Automatic Speech Recognition (Parakeet TDT, Qwen3)
 │   │   ├── Diarizer/        # Speaker diarization (segmentation, embedding, clustering)
+│   │   ├── TTS/             # Text-to-speech (Kokoro, PocketTTS)
 │   │   ├── VAD/             # Voice Activity Detection (Silero VAD)
 │   │   └── Shared/          # Common utilities (audio conversion, model downloading)
-│   ├── FluidAudioTTS/       # Text-to-speech (Kokoro TTS)
 │   └── FluidAudioCLI/       # Command-line interface (macOS only)
 ├── Tests/                   # Test suite
 ├── Scripts/                 # Python utilities (benchmarks, evaluation tools)
@@ -133,7 +142,8 @@ FluidAudio/
 - **StreamingAsrManager** (`ASR/Streaming/`): Real-time streaming ASR with sliding window processing and cancellation support.
 - **OfflineDiarizerManager** (`Diarizer/`): Speaker separation via segmentation, embedding extraction, and VBx clustering. 17.7% DER on AMI dataset.
 - **VadManager** (`VAD/`): Voice activity detection with CoreML models.
-- **KokoroSynthesizer** (`FluidAudioTTS/`): Text-to-speech synthesis.
+- **KokoroSynthesizer** (`TTS/Kokoro/`): Kokoro text-to-speech synthesis.
+- **PocketTtsSynthesizer** (`TTS/PocketTTS/`): PocketTTS streaming text-to-speech synthesis.
 
 ### Key Patterns
 - **Actor-based concurrency**: Thread-safe processing, no `@unchecked Sendable`

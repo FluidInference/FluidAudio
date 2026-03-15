@@ -142,7 +142,7 @@ return normalizedEntries[normalized]
 ### CLI
 
 ```bash
-swift run fluidaudio tts "The NASDAQ index rose today" --lexicon custom.txt --output output.wav
+swift run fluidaudiocli tts "The NASDAQ index rose today" --lexicon custom.txt --output output.wav
 ```
 
 ### Swift API
@@ -162,8 +162,8 @@ let lexicon = TtsCustomLexicon(entries: [
     "kokoro": ["k", "ə", "k", "ˈ", "ɔ", "ɹ", "O"]
 ])
 
-// Use with TtSManager
-let manager = TtSManager(customLexicon: lexicon)
+// Use with KokoroTtsManager
+let manager = KokoroTtsManager(customLexicon: lexicon)
 try await manager.initialize()
 let audio = try await manager.synthesize(text: "Welcome to Kokoro TTS")
 
