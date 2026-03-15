@@ -402,17 +402,13 @@ public final class LSEENDDiarizer: Diarizer {
         audioFileURL: URL,
         progressCallback: ((Int, Int, Int) -> Void)? = nil
     ) throws -> DiarizerTimeline {
-        guard let engine = _engine else {
-            throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
+        let engine = try lock.withLock {
+            guard let engine = _engine else {
+                throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
+            }
+            return engine
         }
-        let converter = AudioConverter(
-            targetFormat: AVAudioFormat(
-                commonFormat: .pcmFormatFloat32,
-                sampleRate: Double(engine.targetSampleRate),
-                channels: 1,
-                interleaved: false
-            )!
-        )
+        let converter = AudioConverter(sampleRate: Double(engine.targetSampleRate))
         let audio = try converter.resampleAudioFile(audioFileURL)
         return try processComplete(audio, progressCallback: progressCallback)
     }
