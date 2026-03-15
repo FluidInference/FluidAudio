@@ -1,18 +1,29 @@
 import Foundation
 
+/// A single speaker turn entry from an RTTM (Rich Transcription Time Marked) file.
 public struct LSEENDRTTMEntry: Sendable, Codable {
+    /// The recording or file identifier.
     public let recordingID: String
+    /// Start time of the speaker turn in seconds.
     public let start: Double
+    /// Duration of the speaker turn in seconds.
     public let duration: Double
+    /// Speaker label (e.g. `"spk0"`, `"speaker_A"`).
     public let speaker: String
 }
 
+/// Configuration for DER (Diarization Error Rate) evaluation.
 public struct LSEENDEvaluationSettings: Sendable, Codable {
+    /// Probability threshold for binarizing speaker predictions (e.g. 0.5).
     public let threshold: Float
+    /// Median filter kernel width applied after thresholding (0 or 1 to disable).
     public let medianWidth: Int
+    /// Collar duration in seconds around reference speaker transitions to exclude from scoring.
     public let collarSeconds: Double
+    /// Frame rate in Hz used to convert between time and frame indices.
     public let frameRate: Double
 
+    /// Creates evaluation settings.
     public init(threshold: Float, medianWidth: Int, collarSeconds: Double, frameRate: Double) {
         self.threshold = threshold
         self.medianWidth = medianWidth
@@ -21,23 +32,45 @@ public struct LSEENDEvaluationSettings: Sendable, Codable {
     }
 }
 
+/// Detailed results of a DER evaluation, including error breakdown and speaker mapping.
 public struct LSEENDEvaluationResult: Sendable {
+    /// Overall Diarization Error Rate: `(miss + falseAlarm + speakerError) / speakerScored`.
     public let der: Double
+    /// Total number of reference speaker-active frames scored (after collar exclusion).
     public let speakerScored: Double
+    /// Missed speech: reference-active frames with no corresponding prediction.
     public let speakerMiss: Double
+    /// False alarm: predicted-active frames with no corresponding reference.
     public let speakerFalseAlarm: Double
+    /// Speaker confusion: frames where both reference and prediction are active but mapped to different speakers.
     public let speakerError: Double
+    /// The probability threshold used for binarization.
     public let threshold: Float
+    /// The median filter width applied after thresholding.
     public let medianWidth: Int
+    /// The collar duration in seconds used during scoring.
     public let collarSeconds: Double
+    /// Binary predictions remapped to reference speaker order via optimal assignment.
     public let mappedBinary: LSEENDMatrix
+    /// Continuous probabilities remapped to reference speaker order.
     public let mappedProbabilities: LSEENDMatrix
+    /// Per-frame mask: `true` for frames included in scoring, `false` for collar-excluded frames.
     public let validMask: [Bool]
+    /// Optimal speaker assignment mapping: `[referenceIndex: predictionIndex]`.
     public let assignment: [Int: Int]
+    /// Prediction column indices that were not matched to any reference speaker.
     public let unmatchedPredictionIndices: [Int]
 }
 
+/// Utilities for evaluating LS-EEND diarization output against reference annotations.
+///
+/// Provides RTTM parsing/writing, post-processing (threshold + median filter),
+/// and DER computation with collar masking and optimal speaker assignment.
 public enum LSEENDEvaluation {
+    /// Parses an RTTM file into speaker turn entries.
+    ///
+    /// - Parameter url: Path to the RTTM file.
+    /// - Returns: A tuple of parsed entries and an ordered list of unique speaker labels.
     public static func parseRTTM(url: URL) throws -> (entries: [LSEENDRTTMEntry], speakers: [String]) {
         let text = try String(contentsOf: url, encoding: .utf8)
         var entries: [LSEENDRTTMEntry] = []
@@ -61,6 +94,14 @@ public enum LSEENDEvaluation {
         return (entries, speakers)
     }
 
+    /// Converts RTTM entries into a binary frame-level matrix.
+    ///
+    /// - Parameters:
+    ///   - entries: Speaker turn entries from ``parseRTTM(url:)``.
+    ///   - speakers: Ordered speaker labels defining column order.
+    ///   - numFrames: Total number of output frames.
+    ///   - frameRate: Frame rate in Hz for time-to-frame conversion.
+    /// - Returns: A binary matrix of shape `[numFrames, speakers.count]` where 1 indicates active speech.
     public static func rttmToFrameMatrix(
         entries: [LSEENDRTTMEntry],
         speakers: [String],
@@ -81,6 +122,14 @@ public enum LSEENDEvaluation {
         return matrix
     }
 
+    /// Writes a binary prediction matrix to an RTTM file.
+    ///
+    /// - Parameters:
+    ///   - recordingID: The recording identifier to use in each RTTM line.
+    ///   - binaryPrediction: Binary matrix of shape `[frames, speakers]`.
+    ///   - outputURL: Path where the RTTM file will be written.
+    ///   - frameRate: Frame rate in Hz for frame-to-time conversion.
+    ///   - speakerLabels: Optional speaker label names; defaults to `"spk0"`, `"spk1"`, etc.
     public static func writeRTTM(
         recordingID: String,
         binaryPrediction: LSEENDMatrix,
@@ -130,6 +179,15 @@ public enum LSEENDEvaluation {
         try lines.joined(separator: "\n").appending("\n").write(to: outputURL, atomically: true, encoding: .utf8)
     }
 
+    /// Computes a validity mask that excludes frames near speaker transitions.
+    ///
+    /// Frames within `collarFrames` of any speaker onset or offset in the reference
+    /// are marked `false` (excluded from DER scoring).
+    ///
+    /// - Parameters:
+    ///   - reference: Binary reference matrix of shape `[frames, speakers]`.
+    ///   - collarFrames: Number of frames on each side of a transition to exclude.
+    /// - Returns: Boolean mask of length `reference.rows`.
     public static func collarMask(reference: LSEENDMatrix, collarFrames: Int) -> [Bool] {
         guard collarFrames > 0 else {
             return [Bool](repeating: true, count: reference.rows)
@@ -158,6 +216,12 @@ public enum LSEENDEvaluation {
         return mask
     }
 
+    /// Binarizes a probability matrix: values above `value` become 1, others become 0.
+    ///
+    /// - Parameters:
+    ///   - probabilities: Continuous probability matrix.
+    ///   - value: Threshold (exclusive). Values strictly greater than this are set to 1.
+    /// - Returns: Binary matrix with the same shape.
     public static func threshold(probabilities: LSEENDMatrix, value: Float) -> LSEENDMatrix {
         var binary = probabilities
         for index in binary.values.indices {
@@ -166,6 +230,15 @@ public enum LSEENDEvaluation {
         return binary
     }
 
+    /// Applies a 1D median filter along the time axis of each speaker column.
+    ///
+    /// Smooths binary predictions to remove brief spurious activations or gaps.
+    /// Even widths are rounded up to the next odd number.
+    ///
+    /// - Parameters:
+    ///   - binary: Binary matrix to filter.
+    ///   - width: Kernel width in frames (1 or 0 to skip filtering).
+    /// - Returns: Filtered binary matrix with the same shape.
     public static func medianFilter(binary: LSEENDMatrix, width: Int) -> LSEENDMatrix {
         guard width > 1, binary.rows > 0, binary.columns > 0 else {
             return binary
@@ -190,6 +263,16 @@ public enum LSEENDEvaluation {
         return output
     }
 
+    /// Computes the Diarization Error Rate (DER) between predictions and a reference.
+    ///
+    /// Applies thresholding, median filtering, collar masking, and optimal speaker
+    /// assignment (Hungarian-style) before computing miss, false alarm, and speaker error rates.
+    ///
+    /// - Parameters:
+    ///   - probabilities: Continuous prediction matrix of shape `[frames, predSpeakers]`.
+    ///   - referenceBinary: Binary reference matrix of shape `[frames, refSpeakers]`.
+    ///   - settings: Evaluation parameters (threshold, median width, collar, frame rate).
+    /// - Returns: Detailed evaluation result including DER, error breakdown, and speaker mapping.
     public static func computeDER(
         probabilities: LSEENDMatrix,
         referenceBinary: LSEENDMatrix,

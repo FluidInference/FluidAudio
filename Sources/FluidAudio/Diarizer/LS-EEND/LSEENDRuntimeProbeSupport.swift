@@ -59,11 +59,29 @@ enum LSEENDRuntimeProbeSupport {
     }
 
     private static func runSessionCheck(
-        variant: LSEENDModelVariant,
+        variant: LSEENDVariant,
         audioURL: URL,
         chunkSeconds: Double
     ) throws -> ProbeSessionCheckResult {
-        let engine = try LSEENDInferenceEngine(descriptor: .defaultDescriptor(for: variant), computeUnits: .cpuOnly)
+        
+        let semaphore = DispatchSemaphore(value: 0)
+        var descriptorResult: Result<LSEENDModelDescriptor, Error>!
+        
+        Task {
+            do {
+                let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: variant)
+                descriptorResult = .success(descriptor)
+            } catch {
+                descriptorResult = .failure(error)
+            }
+            
+            semaphore.signal()
+        }
+        
+        semaphore.wait()
+        
+        let descriptor = try descriptorResult.get()
+        let engine = try LSEENDInferenceEngine(descriptor: descriptor, computeUnits: .cpuOnly)
         let converter = AudioConverter(
             targetFormat: AVAudioFormat(
                 commonFormat: .pcmFormatFloat32,
@@ -116,7 +134,7 @@ enum LSEENDRuntimeProbeSupport {
         return try encoder.encode(value)
     }
 
-    private static func parseVariant(from arguments: [String]) throws -> LSEENDModelVariant {
+    private static func parseVariant(from arguments: [String]) throws -> LSEENDVariant {
         let raw = try parseString(flag: "--variant", from: arguments)
         switch raw.lowercased() {
         case "ami":
