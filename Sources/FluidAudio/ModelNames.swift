@@ -239,7 +239,7 @@ public enum ModelNames {
             case nvidiaLowLatencyV2_1
             case nvidiaHighLatencyV2
             case nvidiaHighLatencyV2_1
-            
+
             public var name: String {
                 switch self {
                 case .gradientDecentV2:
@@ -256,7 +256,7 @@ public enum ModelNames {
                     return "SortformerNvidiaHigh_v2.1"
                 }
             }
-            
+
             public var defaultConfiguration: SortformerConfig {
                 switch self {
                 case .gradientDecentV2:
@@ -273,24 +273,24 @@ public enum ModelNames {
                     return .nvidiaHighLatencyV2_1
                 }
             }
-            
+
             public var fileName: String {
                 return "\(name).mlmodelc"
             }
-            
+
             public func isCompatible(with config: SortformerConfig) -> Bool {
                 defaultConfiguration.isCompatible(with: config)
             }
         }
-        
+
         /// Lowest latency for streaming
         public static let defaultVariant: Variant = .gradientDecentV2_1
-        
+
         /// Bundle name for a specific variant
         public static func bundle(for varient: Variant) -> String {
             return varient.fileName
         }
-        
+
         /// Bundle name for a given configuration
         public static func bundle(for config: SortformerConfig) -> String? {
             guard let variant = config.modelVariant else {
@@ -299,7 +299,7 @@ public enum ModelNames {
             assert(variant.isCompatible(with: config), "ERROR: Model variant and configuration are not compatible.")
             return variant.fileName
         }
-        
+
         /// Default bundle name
         public static var defaultBundle: String {
             return defaultVariant.fileName
@@ -310,7 +310,7 @@ public enum ModelNames {
             Set(Variant.allCases.map(\.fileName))
         }
     }
-    
+
     /// LS-EEND streaming diarization model names
     public enum LSEEND {
         public enum Variant: String, CaseIterable, Sendable, CustomStringConvertible {
@@ -318,7 +318,7 @@ public enum ModelNames {
             case callhome = "CALLHOME"
             case dihard2 = "DIHARD II"
             case dihard3 = "DIHARD III"
-            
+
             public var name: String {
                 switch self {
                 case .ami:
@@ -331,26 +331,26 @@ public enum ModelNames {
                     return "ls_eend_dih3_step"
                 }
             }
-            
+
             public var description: String { rawValue }
-            
+
             public var stem: String { "\(rawValue)/\(name)" }
-            
+
             public var modelFile: String { "\(stem).mlmodelc" }
-            
+
             public var configFile: String { "\(stem).json" }
-            
+
             public var fileNames: [String] { [modelFile, configFile] }
         }
-        
+
         /// Lowest latency for streaming
         public static let defaultVariant: Variant = .dihard3
-        
+
         /// Bundle name for a specific variant
         public static func bundle(for varient: Variant) -> [String] {
             return varient.fileNames
         }
-        
+
         /// Default bundle name
         public static var defaultBundle: [String] {
             return defaultVariant.fileNames
@@ -532,7 +532,7 @@ public enum ModelNames {
             return ModelNames.Sortformer.requiredModels
         case .lseend:
             if let variant = variant {
-                return [ variant + ".mlmodelc", variant + ".json" ]
+                return [variant + ".mlmodelc", variant + ".json"]
             }
             return ModelNames.LSEEND.requiredModels
         case .qwen3Asr, .qwen3AsrInt8:

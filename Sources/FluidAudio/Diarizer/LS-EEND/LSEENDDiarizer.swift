@@ -144,7 +144,7 @@ public final class LSEENDDiarizer: Diarizer {
         )
         self._timeline = DiarizerTimeline(config: _timelineConfig)
     }
-    
+
     /// Create a processor with default settings.
     ///
     /// Call `initialize(descriptor:)` before processing audio.
@@ -172,8 +172,7 @@ public final class LSEENDDiarizer: Diarizer {
         let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: variant)
         try initialize(descriptor: descriptor)
     }
-    
-    
+
     /// Initialize with a model descriptor. Loads the CoreML model.
     ///
     /// - Parameter descriptor: Model descriptor specifying variant and file paths
@@ -193,9 +192,9 @@ public final class LSEENDDiarizer: Diarizer {
 
         logger.info(
             "Initialized LS-EEND \(descriptor.variant.rawValue): "
-            + "\(engine.metadata.realOutputDim) speakers, "
-            + "\(String(format: "%.1f", engine.modelFrameHz)) Hz, "
-            + "\(String(format: "%.2f", engine.streamingLatencySeconds))s latency"
+                + "\(engine.metadata.realOutputDim) speakers, "
+                + "\(String(format: "%.1f", engine.modelFrameHz)) Hz, "
+                + "\(String(format: "%.2f", engine.streamingLatencySeconds))s latency"
         )
     }
 
@@ -252,7 +251,8 @@ public final class LSEENDDiarizer: Diarizer {
 
         // Lazily create session on first process call
         if _session == nil {
-            _session = try engine.createSession(inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
+            _session = try engine.createSession(
+                inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
         }
 
         guard let session = _session else { return nil }
@@ -293,7 +293,8 @@ public final class LSEENDDiarizer: Diarizer {
         guard !pendingAudio.isEmpty else { return nil }
 
         if _session == nil {
-            _session = try engine.createSession(inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
+            _session = try engine.createSession(
+                inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
         }
         guard let session = _session else { return nil }
 
@@ -350,7 +351,8 @@ public final class LSEENDDiarizer: Diarizer {
         _session = nil
         pendingAudio.removeAll(keepingCapacity: true)
 
-        let session = try engine.createSession(inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
+        let session = try engine.createSession(
+            inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
         let numSpeakers = engine.metadata.realOutputDim
 
         // Push all audio at once

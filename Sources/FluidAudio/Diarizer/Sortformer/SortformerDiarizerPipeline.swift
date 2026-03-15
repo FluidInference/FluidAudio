@@ -33,7 +33,7 @@ public final class SortformerDiarizer: Diarizer {
         defer { lock.unlock() }
         return _timeline
     }
-    
+
     private var _timeline: DiarizerTimeline
 
     /// Check if diarizer is ready for processing.
@@ -94,14 +94,17 @@ public final class SortformerDiarizer: Diarizer {
 
     // MARK: - Initialization
 
-    @available(*, deprecated, renamed: "init(config:timelineConfig:)", message: "Use `timelineConfig` instead of `postProcessingConfig`.")
+    @available(
+        *, deprecated, renamed: "init(config:timelineConfig:)",
+        message: "Use `timelineConfig` instead of `postProcessingConfig`."
+    )
     public convenience init(
         config: SortformerConfig = .default,
         postProcessingConfig: DiarizerTimelineConfig = .default(numSpeakers: 4, frameDurationSeconds: 0.08)
     ) {
         self.init(config: config, timelineConfig: postProcessingConfig)
     }
-    
+
     public init(
         config: SortformerConfig = .default,
         timelineConfig: DiarizerTimelineConfig = .sortformerDefault
@@ -221,27 +224,27 @@ public final class SortformerDiarizer: Diarizer {
             guard _models != nil else {
                 throw SortformerError.notInitialized
             }
-            
+
             // Process enrollment audio through the normal pipeline
             audioBuffer.append(contentsOf: samples)
             preprocessAudioToFeaturesLocked()
-            
+
             // Run all available chunks to populate spkcache/fifo
             while let _ = try processLocked(updateTimeline: false) {}
-            
+
             // Reset timeline and counters — keep streaming state (spkcache, fifo, silence)
             _numFramesProcessed = 0
             _timeline.reset()
-            
+
             // Clear audio/feature buffers but preserve lastAudioSample for mel continuity
             audioBuffer = []
             featureBuffer = []
             startFeat = 0
             // Keep diarizerChunkIndex so leftContext is nonzero for next real chunk
-            
+
             logger.info(
                 "Primed with \(samples.count) samples (\(String(format: "%.1f", Float(samples.count) / 16000.0))s), "
-                + "spkcache=\(_state.spkcacheLength), fifo=\(_state.fifoLength)"
+                    + "spkcache=\(_state.spkcacheLength), fifo=\(_state.fifoLength)"
             )
         }
     }
@@ -267,7 +270,7 @@ public final class SortformerDiarizer: Diarizer {
             preprocessAudioToFeaturesLocked()
         }
     }
-    
+
     /// Process buffered audio and return any new results.
     ///
     /// Call this after adding audio with `addAudio()`.
@@ -289,7 +292,7 @@ public final class SortformerDiarizer: Diarizer {
     public func processSamples(_ samples: [Float]) throws -> DiarizerTimelineUpdate? {
         return try process(samples: samples)
     }
-    
+
     /// Process a chunk of audio in one call.
     ///
     /// Convenience method that combines `addAudio()` and `process()`.
@@ -391,21 +394,21 @@ public final class SortformerDiarizer: Diarizer {
             guard let models = _models else {
                 throw SortformerError.notInitialized
             }
-            
+
             // Reset for fresh processing
             _state = SortformerStreamingState(config: config)
             lastAudioSample = 0
             resetBuffersLocked()
-            
+
             var featureProvider = SortformerFeatureLoader(config: self.config, audio: samples)
-            
+
             var chunksProcessed = 0
-            
+
             var finalizedPredictions: [Float] = []
             var tentativePredictions: [Float] = []
-            
+
             let coreFrames = config.chunkLen * config.subsamplingFactor  // 48 mel frames core
-            
+
             while let (chunkFeatures, chunkLength, leftOffset, rightOffset) = featureProvider.next() {
                 // Run main model
                 let output = try models.runMainModel(
@@ -417,17 +420,17 @@ public final class SortformerDiarizer: Diarizer {
                     fifoLength: _state.fifoLength,
                     config: config
                 )
-                
+
                 let probabilities = output.predictions
-                
+
                 // Trim embeddings to actual length
                 let embLength = output.chunkLength
                 let chunkEmbs = Array(output.chunkEmbeddings.prefix(embLength * config.preEncoderDims))
-                
+
                 // Compute left/right context for prediction extraction
                 let leftContext = (leftOffset + config.subsamplingFactor / 2) / config.subsamplingFactor
                 let rightContext = (rightOffset + config.subsamplingFactor - 1) / config.subsamplingFactor
-                
+
                 // Update state
                 let updateResult = try stateUpdater.streamingUpdate(
                     state: &_state,
@@ -436,14 +439,14 @@ public final class SortformerDiarizer: Diarizer {
                     leftContext: leftContext,
                     rightContext: rightContext
                 )
-                
+
                 // Accumulate confirmed results (tentative not needed for batch processing)
                 finalizedPredictions.append(contentsOf: updateResult.confirmed)
                 tentativePredictions = updateResult.tentative
-                
+
                 chunksProcessed += 1
                 diarizerChunkIndex += 1
-                
+
                 // Progress callback
                 // processedFrames is in mel frames (after subsampling)
                 // Each mel frame corresponds to melStride samples
@@ -451,24 +454,24 @@ public final class SortformerDiarizer: Diarizer {
                 let progress = min(processedMelFrames * config.melStride, samples.count)
                 progressCallback?(progress, samples.count, chunksProcessed)
             }
-            
+
             // Save updated state
             let numPredictions = finalizedPredictions.count + tentativePredictions.count
             _numFramesProcessed = numPredictions / config.numSpeakers
-            
+
             if config.debugMode {
                 print(
                     "[DEBUG] Phase 2 complete: diarizerChunks=\(diarizerChunkIndex), totalProbs=\(numPredictions), totalFrames=\(_numFramesProcessed)"
                 )
                 fflush(stdout)
             }
-            
+
             try _timeline.rebuild(
                 finalizedPredictions: finalizedPredictions,
                 tentativePredictions: tentativePredictions,
                 isComplete: finalizeOnCompletion
             )
-            
+
             return _timeline
         }
     }

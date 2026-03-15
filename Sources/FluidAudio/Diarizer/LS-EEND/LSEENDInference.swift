@@ -1,6 +1,6 @@
 import AVFoundation
-import CryptoKit
 import CoreML
+import CryptoKit
 import Foundation
 
 private final class LSEENDModelState {
@@ -175,7 +175,8 @@ public final class LSEENDInferenceEngine {
     ///   - inputSampleRate: Must match ``targetSampleRate``.
     ///   - melSpectrogram: A mel spectrogram instance owned by the caller.
     /// - Returns: A session that accepts audio via ``LSEENDStreamingSession/pushAudio(_:)``.
-    public func createSession(inputSampleRate: Int, melSpectrogram: NeMoMelSpectrogram) throws -> LSEENDStreamingSession {
+    public func createSession(inputSampleRate: Int, melSpectrogram: NeMoMelSpectrogram) throws -> LSEENDStreamingSession
+    {
         try LSEENDStreamingSession(engine: self, inputSampleRate: inputSampleRate, melSpectrogram: melSpectrogram)
     }
 
@@ -195,7 +196,9 @@ public final class LSEENDInferenceEngine {
         session.totalInputSamples = normalizedAudio.count
         let committed = try session.ingestFeatures(features)
         let pending = session.totalFeatureFrames - session.emittedFrames
-        let tail = try pending > 0 ? session.flushTail(from: session.state, pendingFrames: pending) : .empty(columns: decodeMaxSpeakers)
+        let tail =
+            try pending > 0
+            ? session.flushTail(from: session.state, pendingFrames: pending) : .empty(columns: decodeMaxSpeakers)
         let fullLogits = committed.appendingRows(tail)
         session.fullLogitChunks = fullLogits.isEmpty ? [] : [fullLogits]
         session.emittedFrames = fullLogits.rows
@@ -343,12 +346,14 @@ public final class LSEENDInferenceEngine {
         if modelURL.pathExtension == "mlmodelc" {
             return modelURL
         }
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+        let caches =
+            FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let compiledRoot = caches.appendingPathComponent("LS-EENDCompiledModels", isDirectory: true)
         try FileManager.default.createDirectory(at: compiledRoot, withIntermediateDirectories: true)
         let fingerprint = try cacheFingerprint(for: modelURL)
-        let compiledName = modelURL.deletingPathExtension().lastPathComponent
+        let compiledName =
+            modelURL.deletingPathExtension().lastPathComponent
             + "-"
             + fingerprint
             + ".mlmodelc"
@@ -446,7 +451,9 @@ public final class LSEENDStreamingSession {
     fileprivate var totalFeatureFrames = 0
     fileprivate var emittedFrames = 0
 
-    fileprivate init(engine: LSEENDInferenceEngine, inputSampleRate: Int, melSpectrogram: NeMoMelSpectrogram? = nil) throws {
+    fileprivate init(
+        engine: LSEENDInferenceEngine, inputSampleRate: Int, melSpectrogram: NeMoMelSpectrogram? = nil
+    ) throws {
         guard inputSampleRate == engine.targetSampleRate else {
             throw LSEENDError.unsupportedAudio(
                 "Stateful LS-EEND streaming expects \(engine.targetSampleRate) Hz audio, received \(inputSampleRate) Hz."
@@ -454,7 +461,8 @@ public final class LSEENDStreamingSession {
         }
         self.engine = engine
         self.inputSampleRate = inputSampleRate
-        featureExtractor = LSEENDStreamingFeatureExtractor(metadata: engine.metadata, spectrogram: melSpectrogram ?? engine.melSpectrogram)
+        featureExtractor = LSEENDStreamingFeatureExtractor(
+            metadata: engine.metadata, spectrogram: melSpectrogram ?? engine.melSpectrogram)
         state = try engine.initialState()
         zeroFrame = [Float](repeating: 0, count: engine.metadata.inputDim)
     }
@@ -492,7 +500,8 @@ public final class LSEENDStreamingSession {
         let features = try featureExtractor.finalize()
         let committed = try ingestFeatures(features)
         let pending = totalFeatureFrames - emittedFrames
-        let tail = try pending > 0 ? flushTail(from: state, pendingFrames: pending) : .empty(columns: engine.decodeMaxSpeakers)
+        let tail =
+            try pending > 0 ? flushTail(from: state, pendingFrames: pending) : .empty(columns: engine.decodeMaxSpeakers)
         finalized = true
         return try buildUpdate(committedFullLogits: committed.appendingRows(tail), includePreview: false)
     }
@@ -502,7 +511,8 @@ public final class LSEENDStreamingSession {
     /// Can be called at any time (before or after finalization) to get a complete
     /// ``LSEENDInferenceResult`` covering all frames produced up to this point.
     public func snapshot() -> LSEENDInferenceResult {
-        let fullLogits = fullLogitChunks.reduce(LSEENDMatrix.empty(columns: engine.decodeMaxSpeakers)) { partial, matrix in
+        let fullLogits = fullLogitChunks.reduce(LSEENDMatrix.empty(columns: engine.decodeMaxSpeakers)) {
+            partial, matrix in
             partial.appendingRows(matrix)
         }
         let fullProbabilities = fullLogits.applyingSigmoid()

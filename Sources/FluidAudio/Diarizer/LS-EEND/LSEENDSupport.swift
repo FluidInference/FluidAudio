@@ -83,7 +83,8 @@ public struct LSEENDMatrix: Sendable, Equatable {
 
     /// Creates a zero-filled matrix with the given dimensions.
     public static func zeros(rows: Int, columns: Int) -> LSEENDMatrix {
-        LSEENDMatrix(validatingRows: rows, columns: columns, values: [Float](repeating: 0, count: max(0, rows * columns)))
+        LSEENDMatrix(
+            validatingRows: rows, columns: columns, values: [Float](repeating: 0, count: max(0, rows * columns)))
     }
 
     /// Creates an empty matrix (zero rows) with the given column count.
@@ -149,7 +150,8 @@ public struct LSEENDMatrix: Sendable, Equatable {
         let clipped = max(0, min(count, rows))
         guard clipped > 0 else { return self }
         let start = clipped * columns
-        return LSEENDMatrix(validatingRows: rows - clipped, columns: columns, values: Array(values[start..<values.count]))
+        return LSEENDMatrix(
+            validatingRows: rows - clipped, columns: columns, values: Array(values[start..<values.count]))
     }
 
     /// Returns a submatrix containing rows in the half-open range `[start, end)`.
@@ -320,22 +322,23 @@ public struct LSEENDModelDescriptor: Sendable {
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> LSEENDModelDescriptor {
         await SystemInfo.logOnce(using: logger)
-        
-        let directory = cacheDirectory
+
+        let directory =
+            cacheDirectory
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("FluidAudio/Models")
-        
+            .appendingPathComponent("FluidAudio/Models")
+
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let repo = Repo.lseend
         let repoPath = directory.appendingPathComponent(repo.folderName)
         let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant.stem)
-        
+
         let allModelsExist = requiredModels.allSatisfy { model in
             let modelPath = repoPath.appendingPathComponent(model)
             return FileManager.default.fileExists(atPath: modelPath.path)
         }
-        
+
         if !allModelsExist {
             logger.info("Models not found in cache at \(repoPath.path)")
             try await DownloadUtils.downloadRepo(
@@ -345,7 +348,7 @@ public struct LSEENDModelDescriptor: Sendable {
                 progressHandler: progressHandler
             )
         }
-        
+
         let modelURL = repoPath.appendingPathComponent(variant.modelFile)
         let metadataURL = repoPath.appendingPathComponent(variant.configFile)
 
@@ -535,7 +538,9 @@ public struct LSEENDModelMetadata: Decodable, Sendable {
     /// Accounts for the FFT center padding, context receptive field, and convolutional delay.
     public var streamingLatencySeconds: Double {
         let fftSize = resolvedFFTSize
-        return Double((fftSize / 2) + (resolvedContextRecp * resolvedHopLength) + (convDelay * resolvedSubsampling * resolvedHopLength))
+        return Double(
+            (fftSize / 2) + (resolvedContextRecp * resolvedHopLength)
+                + (convDelay * resolvedSubsampling * resolvedHopLength))
             / Double(max(resolvedSampleRate, 1))
     }
 }

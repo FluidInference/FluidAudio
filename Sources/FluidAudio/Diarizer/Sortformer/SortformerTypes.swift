@@ -8,11 +8,11 @@ import Foundation
 /// Reference: NeMo sortformer_modules.py
 public struct SortformerConfig: Sendable {
     public typealias ModelVariant = ModelNames.Sortformer.Variant
-    
+
     // MARK: - Model Architecture
 
     public let modelVariant: ModelVariant?
-    
+
     /// Number of speaker slots (fixed at 4 for current model)
     public let numSpeakers: Int = 4
 
@@ -131,7 +131,7 @@ public struct SortformerConfig: Sendable {
         spkcacheLen: 188,
         spkcacheUpdatePeriod: 31
     )
-    
+
     /// Configuration matching Gradient Descent's Streaming-Sortformer-Conversion models with Sortformer v2.1 weights
     public static let `gradientDescentV2_1` = SortformerConfig(
         modelVariant: .gradientDecentV2_1,
@@ -142,11 +142,11 @@ public struct SortformerConfig: Sendable {
         spkcacheLen: 188,
         spkcacheUpdatePeriod: 31
     )
-    
+
     /// Backwards compatible alias for NVIDIA's 30.4s latency configuration with Sortformer v2.1 weights
     @available(*, deprecated, renamed: "nvidiaHighLatencyV2_1")
     public static let nvidiaHighLatency = nvidiaHighLatencyV2_1
-    
+
     /// NVIDIA's 30.4s latency configuration with Sortformer v2 weights
     public static let nvidiaHighLatencyV2 = SortformerConfig(
         modelVariant: .nvidiaHighLatencyV2,
@@ -157,7 +157,7 @@ public struct SortformerConfig: Sendable {
         spkcacheLen: 188,
         spkcacheUpdatePeriod: 300
     )
-    
+
     /// NVIDIA's 30.4s latency configuration with Sortformer v2.1 weights
     public static let nvidiaHighLatencyV2_1 = SortformerConfig(
         modelVariant: .nvidiaHighLatencyV2_1,
@@ -172,7 +172,7 @@ public struct SortformerConfig: Sendable {
     /// Backwards compatible alias for NVIDIA's 1.04s latency configuration with Sortformer v2.1 weights
     @available(*, deprecated, renamed: "nvidiaLowLatencyV2_1")
     public static let nvidiaLowLatency = nvidiaLowLatencyV2_1
-    
+
     /// NVIDIA's 1.04s latency configuration with Sortformer v2 weights
     public static let nvidiaLowLatencyV2 = SortformerConfig(
         modelVariant: .nvidiaLowLatencyV2,
@@ -183,7 +183,7 @@ public struct SortformerConfig: Sendable {
         spkcacheLen: 188,
         spkcacheUpdatePeriod: 144
     )
-    
+
     /// NVIDIA's 1.04s latency configuration with Sortformer v2.1 weights (20.57% DER on AMI SDM)
     public static let nvidiaLowLatencyV2_1 = SortformerConfig(
         modelVariant: .nvidiaLowLatencyV2_1,
