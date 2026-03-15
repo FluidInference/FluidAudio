@@ -7,9 +7,12 @@ import Foundation
 /// Based on NVIDIA's Streaming Sortformer 4-speaker model.
 /// Reference: NeMo sortformer_modules.py
 public struct SortformerConfig: Sendable {
-
+    public typealias ModelVariant = ModelNames.Sortformer.Variant
+    
     // MARK: - Model Architecture
 
+    public let modelVariant: ModelVariant?
+    
     /// Number of speaker slots (fixed at 4 for current model)
     public let numSpeakers: Int = 4
 
@@ -118,8 +121,42 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 31
     )
 
-    /// NVIDIA's 30.4s latency configuration
-    public static let nvidiaHighLatency = SortformerConfig(
+    /// Configuration matching Gradient Descent's Streaming-Sortformer-Conversion models with Sortformer v2 weights
+    public static let `gradientDescentV2` = SortformerConfig(
+        modelVariant: .gradientDecentV2,
+        chunkLen: 6,
+        chunkLeftContext: 1,
+        chunkRightContext: 7,
+        fifoLen: 40,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 31
+    )
+    
+    /// Configuration matching Gradient Descent's Streaming-Sortformer-Conversion models with Sortformer v2.1 weights
+    public static let `gradientDescentV2_1` = SortformerConfig(
+        modelVariant: .gradientDecentV2_1,
+        chunkLen: 6,
+        chunkLeftContext: 1,
+        chunkRightContext: 7,
+        fifoLen: 40,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 31
+    )
+    
+    /// NVIDIA's 30.4s latency configuration with Sortformer v2 weights
+    public static let nvidiaHighLatencyV2 = SortformerConfig(
+        modelVariant: .nvidiaHighLatencyV2,
+        chunkLen: 340,
+        chunkLeftContext: 1,
+        chunkRightContext: 40,
+        fifoLen: 40,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 300
+    )
+    
+    /// NVIDIA's 30.4s latency configuration with Sortformer v2.1 weights
+    public static let nvidiaHighLatencyV2_1 = SortformerConfig(
+        modelVariant: .nvidiaHighLatencyV2_1,
         chunkLen: 340,
         chunkLeftContext: 1,
         chunkRightContext: 40,
@@ -128,8 +165,20 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 300
     )
 
-    /// NVIDIA's 1.04s latency configuration (20.57% DER on AMI SDM)
-    public static let nvidiaLowLatency = SortformerConfig(
+    /// NVIDIA's 1.04s latency configuration with Sortformer v2 weights
+    public static let nvidiaLowLatencyV2 = SortformerConfig(
+        modelVariant: .nvidiaLowLatencyV2,
+        chunkLen: 6,
+        chunkLeftContext: 1,
+        chunkRightContext: 7,
+        fifoLen: 188,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 144
+    )
+    
+    /// NVIDIA's 1.04s latency configuration with Sortformer v2.1 weights (20.57% DER on AMI SDM)
+    public static let nvidiaLowLatencyV2_1 = SortformerConfig(
+        modelVariant: .nvidiaLowLatencyV2_1,
         chunkLen: 6,
         chunkLeftContext: 1,
         chunkRightContext: 7,
@@ -140,6 +189,7 @@ public struct SortformerConfig: Sendable {
 
     /// - Warning: If you don't use one of the default configurations, you must use a local model converted with that configuration.
     public init(
+        modelVariant: ModelVariant? = .gradientDecentV2_1,
         chunkLen: Int = 6,
         chunkLeftContext: Int = 1,
         chunkRightContext: Int = 7,
@@ -155,6 +205,7 @@ public struct SortformerConfig: Sendable {
         minPosScoresRate: Float = 0.5,
         debugMode: Bool = false
     ) {
+        self.modelVariant = modelVariant
         self.chunkLen = max(1, chunkLen)
         self.chunkLeftContext = chunkLeftContext
         self.chunkRightContext = chunkRightContext
@@ -181,6 +232,7 @@ public struct SortformerConfig: Sendable {
 }
 
 /// Configuration for post-processing Sortformer diarizer predictions
+@available(*, deprecated, message: "Use DiarizerPostProcessingConfig instead")
 public struct SortformerPostProcessingConfig {
     /// Onset threshold for detecting the beginning and end of a speech
     public var onsetThreshold: Float
@@ -280,7 +332,29 @@ public struct SortformerPostProcessingConfig {
         self.minFramesOff = minFramesOff
         self.maxStoredFrames = maxStoredFrames
     }
+
+    /// Convert to the unified DiarizerPostProcessingConfig
+    public func toDiarizerConfig() -> DiarizerTimelineConfig {
+        DiarizerTimelineConfig(
+            numSpeakers: numSpeakers,
+            frameDurationSeconds: frameDurationSeconds,
+            onsetThreshold: onsetThreshold,
+            offsetThreshold: offsetThreshold,
+            onsetPadFrames: onsetPadFrames,
+            offsetPadFrames: offsetPadFrames,
+            minFramesOn: minFramesOn,
+            minFramesOff: minFramesOff,
+            maxStoredFrames: maxStoredFrames
+        )
+    }
 }
+
+/// Backward-compatible typealiases — SortformerTimeline is now DiarizerTimeline
+@available(*, deprecated, renamed: "DiarizerTimeline")
+public typealias SortformerTimeline = DiarizerTimeline
+
+@available(*, deprecated, renamed: "DiarizerSegment")
+public typealias SortformerSegment = DiarizerSegment
 
 // MARK: - Streaming State
 
@@ -440,56 +514,9 @@ public struct StreamingUpdateResult: Sendable {
     }
 }
 
-/// Result from a single streaming diarization step
-public struct SortformerChunkResult: Sendable {
-    /// Speaker probabilities for confirmed frames in this chunk
-    /// Shape: [chunkLen, numSpeakers] (e.g., [6, 4])
-    public let speakerPredictions: [Float]
-
-    /// Number of confirmed frames in this result
-    public let frameCount: Int
-
-    /// Frame index of the first confirmed frame
-    public let startFrame: Int
-
-    /// Tentative predictions for right context frames (may change with next chunk)
-    /// Shape: [rightContext, numSpeakers]. Empty if no right context.
-    public let tentativePredictions: [Float]
-
-    /// Number of tentative frames
-    public let tentativeFrameCount: Int
-
-    /// Frame index of first tentative frame
-    public var tentativeStartFrame: Int {
-        startFrame + frameCount
-    }
-
-    public init(
-        startFrame: Int,
-        speakerPredictions: [Float],
-        frameCount: Int,
-        tentativePredictions: [Float] = [],
-        tentativeFrameCount: Int = 0
-    ) {
-        self.speakerPredictions = speakerPredictions
-        self.frameCount = frameCount
-        self.startFrame = startFrame
-        self.tentativePredictions = tentativePredictions
-        self.tentativeFrameCount = tentativeFrameCount
-    }
-
-    /// Get probability for a specific speaker at a specific confirmed frame
-    public func getSpeakerPrediction(speaker: Int, frame: Int, numSpeakers: Int = 4) -> Float {
-        guard frame < frameCount, speaker < numSpeakers else { return 0.0 }
-        return speakerPredictions[frame * numSpeakers + speaker]
-    }
-
-    /// Get tentative probability for a specific speaker at a specific tentative frame
-    public func getTentativePrediction(speaker: Int, frame: Int, numSpeakers: Int = 4) -> Float {
-        guard frame < tentativeFrameCount, speaker < numSpeakers else { return 0.0 }
-        return tentativePredictions[frame * numSpeakers + speaker]
-    }
-}
+/// Backward-compatible typealias — SortformerChunkResult is now DiarizerChunkResult
+@available(*, deprecated, renamed: "DiarizerChunkResult")
+public typealias SortformerChunkResult = DiarizerChunkResult
 
 // MARK: - Errors
 
