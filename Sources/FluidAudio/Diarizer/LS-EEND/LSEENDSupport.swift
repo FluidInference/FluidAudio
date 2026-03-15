@@ -303,31 +303,6 @@ public struct LSEENDModelDescriptor: Sendable {
         self.metadataURL = metadataURL
     }
 
-    /// Synchronously downloads and returns a descriptor for the given variant.
-    ///
-    /// > Warning: This method blocks the calling thread using `DispatchSemaphore`.
-    /// > It should not be called from the cooperative thread pool or the main actor.
-    /// > Prefer ``loadFromHuggingFace(variant:cacheDirectory:computeUnits:progressHandler:)`` in async contexts.
-    // TODO: Remove this for FluidAudio
-    public static func defaultDescriptor(for variant: LSEENDVariant) throws -> LSEENDModelDescriptor {
-        let semaphore = DispatchSemaphore(value: 0)
-        var descriptorResult: Result<LSEENDModelDescriptor, Error>!
-        
-        Task {
-            do {
-                let descriptor = try await loadFromHuggingFace(variant: variant)
-                descriptorResult = .success(descriptor)
-            } catch {
-                descriptorResult = .failure(error)
-            }
-            
-            semaphore.signal()
-        }
-        
-        semaphore.wait()
-        return try descriptorResult.get()
-    }
-
     /// Download LS-EEND models from HuggingFace and construct a descriptor.
     ///
     /// Downloads all variant files on first call; subsequent calls use the cache.
