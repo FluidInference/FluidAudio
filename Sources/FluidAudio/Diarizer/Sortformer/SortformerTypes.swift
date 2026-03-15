@@ -143,6 +143,10 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 31
     )
     
+    /// Backwards compatible alias for NVIDIA's 30.4s latency configuration with Sortformer v2.1 weights
+    @available(*, deprecated, renamed: "nvidiaHighLatencyV2_1")
+    public static let nvidiaHighLatency = nvidiaHighLatencyV2_1
+    
     /// NVIDIA's 30.4s latency configuration with Sortformer v2 weights
     public static let nvidiaHighLatencyV2 = SortformerConfig(
         modelVariant: .nvidiaHighLatencyV2,
@@ -165,6 +169,10 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 300
     )
 
+    /// Backwards compatible alias for NVIDIA's 1.04s latency configuration with Sortformer v2.1 weights
+    @available(*, deprecated, renamed: "nvidiaLowLatencyV2_1")
+    public static let nvidiaLowLatency = nvidiaLowLatencyV2_1
+    
     /// NVIDIA's 1.04s latency configuration with Sortformer v2 weights
     public static let nvidiaLowLatencyV2 = SortformerConfig(
         modelVariant: .nvidiaLowLatencyV2,
