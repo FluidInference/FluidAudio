@@ -40,19 +40,23 @@ enum LSEENDRuntimeProbeSupport {
         case "offline":
             let variant = try parseVariant(from: arguments)
             let audioURL = try parseAudioURL(from: arguments)
-            let engine = try LSEENDInferenceEngine(descriptor: await .loadFromHuggingFace(variant: variant), computeUnits: .cpuOnly)
+            let engine = try LSEENDInferenceEngine(
+                descriptor: await .loadFromHuggingFace(variant: variant), computeUnits: .cpuOnly)
             return try encodeJSON(ProbeInferenceResult(engine.infer(audioFileURL: audioURL)))
         case "streaming":
             let variant = try parseVariant(from: arguments)
             let audioURL = try parseAudioURL(from: arguments)
             let chunkSeconds = try parseDouble(flag: "--chunk-seconds", from: arguments)
-            let engine = try LSEENDInferenceEngine(descriptor: await .loadFromHuggingFace(variant: variant), computeUnits: .cpuOnly)
-            return try encodeJSON(ProbeStreamingResult(engine.simulateStreaming(audioFileURL: audioURL, chunkSeconds: chunkSeconds)))
+            let engine = try LSEENDInferenceEngine(
+                descriptor: await .loadFromHuggingFace(variant: variant), computeUnits: .cpuOnly)
+            return try encodeJSON(
+                ProbeStreamingResult(engine.simulateStreaming(audioFileURL: audioURL, chunkSeconds: chunkSeconds)))
         case "session-check":
             let variant = try parseVariant(from: arguments)
             let audioURL = try parseAudioURL(from: arguments)
             let chunkSeconds = try parseDouble(flag: "--chunk-seconds", from: arguments)
-            return try encodeJSON(try await runSessionCheck(variant: variant, audioURL: audioURL, chunkSeconds: chunkSeconds))
+            return try encodeJSON(
+                try await runSessionCheck(variant: variant, audioURL: audioURL, chunkSeconds: chunkSeconds))
         default:
             throw ProbeError.invalidArguments("Unknown command: \(command)")
         }

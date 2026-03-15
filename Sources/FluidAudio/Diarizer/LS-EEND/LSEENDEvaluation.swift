@@ -10,6 +10,13 @@ public struct LSEENDRTTMEntry: Sendable, Codable {
     public let duration: Double
     /// Speaker label (e.g. `"spk0"`, `"speaker_A"`).
     public let speaker: String
+
+    public init(recordingID: String, start: Double, duration: Double, speaker: String) {
+        self.recordingID = recordingID
+        self.start = start
+        self.duration = duration
+        self.speaker = speaker
+    }
 }
 
 /// Configuration for DER (Diarization Error Rate) evaluation.
@@ -297,7 +304,8 @@ public enum LSEENDEvaluation {
                 mappedProbabilities[rowIndex, referenceIndex] = probabilities[rowIndex, predictionIndex]
             }
         }
-        let extraBinary = mapping.unmatchedPredictionIndices.isEmpty
+        let extraBinary =
+            mapping.unmatchedPredictionIndices.isEmpty
             ? LSEENDMatrix.empty(columns: 0)
             : selectColumns(from: predictionBinary, indices: mapping.unmatchedPredictionIndices)
 
@@ -319,7 +327,8 @@ public enum LSEENDEvaluation {
                 scoredPrediction[rowIndex, columnIndex] = mapping.mappedBinary[rowIndex, columnIndex]
             }
             for columnIndex in 0..<extraBinary.columns {
-                scoredPrediction[rowIndex, mapping.mappedBinary.columns + columnIndex] = extraBinary[rowIndex, columnIndex]
+                scoredPrediction[rowIndex, mapping.mappedBinary.columns + columnIndex] =
+                    extraBinary[rowIndex, columnIndex]
             }
         }
 
