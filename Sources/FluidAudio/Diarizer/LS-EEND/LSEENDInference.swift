@@ -29,12 +29,12 @@ private final class LSEENDModelState {
 
     func copy() throws -> LSEENDModelState {
         try LSEENDModelState(
-            encRetKv: cloneMultiArray(encRetKv),
-            encRetScale: cloneMultiArray(encRetScale),
-            encConvCache: cloneMultiArray(encConvCache),
-            decRetKv: cloneMultiArray(decRetKv),
-            decRetScale: cloneMultiArray(decRetScale),
-            topBuffer: cloneMultiArray(topBuffer)
+            encRetKv: cloneAlignedMultiArray(encRetKv),
+            encRetScale: cloneAlignedMultiArray(encRetScale),
+            encConvCache: cloneAlignedMultiArray(encConvCache),
+            decRetKv: cloneAlignedMultiArray(decRetKv),
+            decRetScale: cloneAlignedMultiArray(decRetScale),
+            topBuffer: cloneAlignedMultiArray(topBuffer)
         )
     }
 }
@@ -56,6 +56,12 @@ private final class LSEENDInferenceSharedResources {
     let decodeMaxSpeakers: Int
     let melSpectrogram: NeMoMelSpectrogram
     let offlineFeatureExtractor: LSEENDOfflineFeatureExtractor
+
+    // Preallocated ANE-aligned input arrays reused across predictStep calls
+    let memoryOptimizer: ANEMemoryOptimizer
+    let frameArray: MLMultiArray       // [1, 1, inputDim]
+    let ingestArray: MLMultiArray      // [1]
+    let decodeArray: MLMultiArray      // [1]
 
     init(
         descriptor: LSEENDModelDescriptor,
@@ -92,6 +98,21 @@ private final class LSEENDInferenceSharedResources {
             configuration: configuration
         )
         offlineFeatureExtractor = LSEENDOfflineFeatureExtractor(metadata: metadata, spectrogram: melSpectrogram)
+
+        // Preallocate ANE-aligned input arrays
+        memoryOptimizer = ANEMemoryOptimizer()
+        frameArray = try memoryOptimizer.createAlignedArray(
+            shape: [1, 1, NSNumber(value: metadata.inputDim)],
+            dataType: .float32
+        )
+        ingestArray = try memoryOptimizer.createAlignedArray(
+            shape: [1],
+            dataType: .float32
+        )
+        decodeArray = try memoryOptimizer.createAlignedArray(
+            shape: [1],
+            dataType: .float32
+        )
     }
 }
 
@@ -283,29 +304,31 @@ public final class LSEENDInferenceEngine {
         ingest: Float,
         decode: Float
     ) throws -> LSEENDStepOutput {
-        let frameArray = try multiArray(shape: [1, 1, metadata.inputDim], values: frame)
-        let ingestArray = try multiArray(shape: [1], values: [ingest])
-        let decodeArray = try multiArray(shape: [1], values: [decode])
+        // Write into preallocated ANE-aligned arrays instead of allocating new ones
+        sharedResources.memoryOptimizer.optimizedCopy(from: frame, to: sharedResources.frameArray)
+        sharedResources.ingestArray[0] = NSNumber(value: ingest)
+        sharedResources.decodeArray[0] = NSNumber(value: decode)
+
         let provider = try MLDictionaryFeatureProvider(dictionary: [
-            "frame": MLFeatureValue(multiArray: frameArray),
+            "frame": MLFeatureValue(multiArray: sharedResources.frameArray),
             "enc_ret_kv": MLFeatureValue(multiArray: state.encRetKv),
             "enc_ret_scale": MLFeatureValue(multiArray: state.encRetScale),
             "enc_conv_cache": MLFeatureValue(multiArray: state.encConvCache),
             "dec_ret_kv": MLFeatureValue(multiArray: state.decRetKv),
             "dec_ret_scale": MLFeatureValue(multiArray: state.decRetScale),
             "top_buffer": MLFeatureValue(multiArray: state.topBuffer),
-            "ingest": MLFeatureValue(multiArray: ingestArray),
-            "decode": MLFeatureValue(multiArray: decodeArray),
+            "ingest": MLFeatureValue(multiArray: sharedResources.ingestArray),
+            "decode": MLFeatureValue(multiArray: sharedResources.decodeArray),
         ])
         let prediction = try model.prediction(from: provider)
         let fullLogitsArray = try feature(named: "full_logits", from: prediction)
         let nextState = LSEENDModelState(
-            encRetKv: try clonedFeature(named: "enc_ret_kv_out", from: prediction),
-            encRetScale: try clonedFeature(named: "enc_ret_scale_out", from: prediction),
-            encConvCache: try clonedFeature(named: "enc_conv_cache_out", from: prediction),
-            decRetKv: try clonedFeature(named: "dec_ret_kv_out", from: prediction),
-            decRetScale: try clonedFeature(named: "dec_ret_scale_out", from: prediction),
-            topBuffer: try clonedFeature(named: "top_buffer_out", from: prediction)
+            encRetKv: try cloneAligned(feature(named: "enc_ret_kv_out", from: prediction)),
+            encRetScale: try cloneAligned(feature(named: "enc_ret_scale_out", from: prediction)),
+            encConvCache: try cloneAligned(feature(named: "enc_conv_cache_out", from: prediction)),
+            decRetKv: try cloneAligned(feature(named: "dec_ret_kv_out", from: prediction)),
+            decRetScale: try cloneAligned(feature(named: "dec_ret_scale_out", from: prediction)),
+            topBuffer: try cloneAligned(feature(named: "top_buffer_out", from: prediction))
         )
         return LSEENDStepOutput(
             fullLogits: floatValues(from: fullLogitsArray, count: metadata.fullOutputDim),
@@ -314,13 +337,20 @@ public final class LSEENDInferenceEngine {
     }
 
     fileprivate func initialState() throws -> LSEENDModelState {
-        try LSEENDModelState(
-            encRetKv: zerosMultiArray(shape: metadata.stateShapes.encRetKv),
-            encRetScale: zerosMultiArray(shape: metadata.stateShapes.encRetScale),
-            encConvCache: zerosMultiArray(shape: metadata.stateShapes.encConvCache),
-            decRetKv: zerosMultiArray(shape: metadata.stateShapes.decRetKv),
-            decRetScale: zerosMultiArray(shape: metadata.stateShapes.decRetScale),
-            topBuffer: zerosMultiArray(shape: metadata.stateShapes.topBuffer)
+        let optimizer = sharedResources.memoryOptimizer
+        return try LSEENDModelState(
+            encRetKv: optimizer.createAlignedArray(
+                shape: metadata.stateShapes.encRetKv.map(NSNumber.init(value:)), dataType: .float32),
+            encRetScale: optimizer.createAlignedArray(
+                shape: metadata.stateShapes.encRetScale.map(NSNumber.init(value:)), dataType: .float32),
+            encConvCache: optimizer.createAlignedArray(
+                shape: metadata.stateShapes.encConvCache.map(NSNumber.init(value:)), dataType: .float32),
+            decRetKv: optimizer.createAlignedArray(
+                shape: metadata.stateShapes.decRetKv.map(NSNumber.init(value:)), dataType: .float32),
+            decRetScale: optimizer.createAlignedArray(
+                shape: metadata.stateShapes.decRetScale.map(NSNumber.init(value:)), dataType: .float32),
+            topBuffer: optimizer.createAlignedArray(
+                shape: metadata.stateShapes.topBuffer.map(NSNumber.init(value:)), dataType: .float32)
         )
     }
 
@@ -373,8 +403,16 @@ public final class LSEENDInferenceEngine {
         return value
     }
 
-    private func clonedFeature(named name: String, from provider: MLFeatureProvider) throws -> MLMultiArray {
-        try cloneMultiArray(feature(named: name, from: provider))
+    /// Clone an MLMultiArray into a new ANE-aligned allocation using vDSP.
+    private func cloneAligned(_ source: MLMultiArray) throws -> MLMultiArray {
+        let copy = try sharedResources.memoryOptimizer.createAlignedArray(
+            shape: source.shape,
+            dataType: .float32
+        )
+        let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
+        let dstPtr = copy.dataPointer.assumingMemoryBound(to: Float.self)
+        memcpy(dstPtr, srcPtr, source.count * MemoryLayout<Float>.size)
+        return copy
     }
 
     private static func cacheFingerprint(for url: URL) throws -> String {
@@ -644,28 +682,16 @@ private func roundedMillis(_ value: Double) -> Double {
     (value * 1000).rounded() / 1000
 }
 
-private func zerosMultiArray(shape: [Int]) throws -> MLMultiArray {
-    try multiArray(shape: shape, values: [Float](repeating: 0, count: shape.reduce(1, *)))
-}
-
-private func multiArray(shape: [Int], values: [Float]) throws -> MLMultiArray {
-    let array = try MLMultiArray(shape: shape.map(NSNumber.init(value:)), dataType: .float32)
-    let pointer = array.dataPointer.bindMemory(to: Float.self, capacity: values.count)
-    values.withUnsafeBufferPointer { source in
-        memcpy(pointer, source.baseAddress!, values.count * MemoryLayout<Float>.size)
-    }
-    return array
-}
-
-private func cloneMultiArray(_ source: MLMultiArray) throws -> MLMultiArray {
-    let shape = source.shape.map(\.intValue)
-    let copy = try MLMultiArray(shape: source.shape, dataType: .float32)
-    let sourcePointer = source.dataPointer.bindMemory(to: Float.self, capacity: source.count)
-    let destinationPointer = copy.dataPointer.bindMemory(to: Float.self, capacity: copy.count)
-    memcpy(destinationPointer, sourcePointer, source.count * MemoryLayout<Float>.size)
-    if copy.count != shape.reduce(1, *) {
-        return copy
-    }
+/// Clone an MLMultiArray into a new ANE-aligned allocation.
+private func cloneAlignedMultiArray(_ source: MLMultiArray) throws -> MLMultiArray {
+    let copy = try ANEMemoryUtils.createAlignedArray(
+        shape: source.shape,
+        dataType: .float32,
+        zeroClear: false
+    )
+    let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
+    let dstPtr = copy.dataPointer.assumingMemoryBound(to: Float.self)
+    memcpy(dstPtr, srcPtr, source.count * MemoryLayout<Float>.size)
     return copy
 }
 
