@@ -18,7 +18,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/huggingface/swift-transformers", from: "1.1.6")
+        .package(url: "https://github.com/huggingface/swift-transformers", from: "1.2.0")
     ],
     targets: [
         .target(
