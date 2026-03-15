@@ -17,6 +17,7 @@
 - [Getting Started](Diarization/GettingStarted.md)
 - [Speaker Manager](Diarization/SpeakerManager.md)
 - [Sortformer](Diarization/Sortformer.md)
+- [LS-EEND](Diarization/LSEEND.md)
 - [Investigation Report](Diarization/InvestigationReport.md)
 
 ## VAD
