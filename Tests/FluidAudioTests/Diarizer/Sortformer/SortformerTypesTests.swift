@@ -146,20 +146,20 @@ final class SortformerTypesTests: XCTestCase {
         let predictions: [Float] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
         let result = SortformerChunkResult(
             startFrame: 0,
-            speakerPredictions: predictions,
-            frameCount: 2
+            finalizedPredictions: predictions,
+            finalizedFrameCount: 2
         )
 
-        XCTAssertEqual(result.getSpeakerPrediction(speaker: 0, frame: 0), 0.1, accuracy: 1e-5)
-        XCTAssertEqual(result.getSpeakerPrediction(speaker: 3, frame: 1), 0.8, accuracy: 1e-5)
-        XCTAssertEqual(result.getSpeakerPrediction(speaker: 0, frame: 5), 0.0, "Out of bounds returns 0")
+        XCTAssertEqual(result.probability(speaker: 0, frame: 0, numSpeakers: 4), 0.1, accuracy: 1e-5)
+        XCTAssertEqual(result.probability(speaker: 3, frame: 1, numSpeakers: 4), 0.8, accuracy: 1e-5)
+        XCTAssertEqual(result.probability(speaker: 0, frame: 5, numSpeakers: 4), 0.0, "Out of bounds returns 0")
     }
 
     func testChunkResultTentativeStartFrame() {
         let result = SortformerChunkResult(
             startFrame: 10,
-            speakerPredictions: [Float](repeating: 0, count: 24),
-            frameCount: 6
+            finalizedPredictions: [Float](repeating: 0, count: 24),
+            finalizedFrameCount: 6
         )
         XCTAssertEqual(result.tentativeStartFrame, 16, "10 + 6 = 16")
     }

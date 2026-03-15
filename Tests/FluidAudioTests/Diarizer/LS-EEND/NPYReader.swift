@@ -1,5 +1,6 @@
 import Foundation
-@testable import LS_EENDTest
+
+@testable import FluidAudio
 
 struct NPYFloatArray {
     let shape: [Int]
@@ -96,7 +97,8 @@ enum NPYReader {
         }
 
         let shapeText = try capture(in: header, pattern: #"'shape':\s*\(([^)]*)\)"#)
-        let shape = shapeText
+        let shape =
+            shapeText
             .split(separator: ",")
             .compactMap { component -> Int? in
                 let trimmed = component.trimmingCharacters(in: .whitespacesAndNewlines)

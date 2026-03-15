@@ -51,7 +51,7 @@ final class SortformerTests: XCTestCase {
     // MARK: - Timeline Tests
 
     func testTimelineEquivalency() throws {
-        let config = SortformerPostProcessingConfig.default
+        let config = DiarizerTimelineConfig.sortformerDefault
         let numSpeakers = config.numSpeakers
 
         // Create random meaningful probabilities for 20 frames
@@ -71,7 +71,7 @@ final class SortformerTests: XCTestCase {
         }
 
         // 1. Batch Timeline (Finalized immediately)
-        let batchTimeline = SortformerTimeline(
+        let batchTimeline = try SortformerTimeline(
             allPredictions: predictions,
             config: config,
             isComplete: true
@@ -87,13 +87,13 @@ final class SortformerTests: XCTestCase {
 
             let chunk = SortformerChunkResult(
                 startFrame: i,
-                speakerPredictions: chunkPreds,
-                frameCount: chunkSize,
+                finalizedPredictions: chunkPreds,
+                finalizedFrameCount: chunkSize,
                 tentativePredictions: [],  // No tentative for this basic test
                 tentativeFrameCount: 0
             )
 
-            streamingTimeline.addChunk(chunk)
+            try streamingTimeline.addChunk(chunk)
         }
 
         // Finalize streaming timeline
@@ -129,14 +129,12 @@ final class SortformerTests: XCTestCase {
     // For exact batch-matching results, feed all audio at once via addAudio() before extracting chunks.
 
     func testBufferBounds() throws {
-        var config = SortformerPostProcessingConfig.default
+        var config = DiarizerTimelineConfig.sortformerDefault
         let numSpeakers = config.numSpeakers
         config.maxStoredFrames = 50
 
         // Create timeline with maxFrames limit
-        let timeline = SortformerTimeline(
-            config: config,
-        )
+        let timeline = SortformerTimeline(config: config)
 
         // Feed 200 frames of predictions (way more than maxFrames)
         let totalFrames = 200
@@ -148,12 +146,12 @@ final class SortformerTests: XCTestCase {
 
             let chunk = SortformerChunkResult(
                 startFrame: frameOffset,
-                speakerPredictions: chunkPreds,
-                frameCount: 10,
+                finalizedPredictions: chunkPreds,
+                finalizedFrameCount: 10,
                 tentativePredictions: [],
                 tentativeFrameCount: 0
             )
-            timeline.addChunk(chunk)
+            try timeline.addChunk(chunk)
         }
 
         // Verify framePredictions is bounded to maxFrames
@@ -189,9 +187,9 @@ final class SortformerTests: XCTestCase {
             }
         }
 
-        let timeline = SortformerTimeline(
+        let timeline = try SortformerTimeline(
             allPredictions: predictions,
-            config: .default,
+            config: .sortformerDefault,
             isComplete: true
         )
 
@@ -212,17 +210,17 @@ final class SortformerTests: XCTestCase {
         let config = SortformerConfig.default
         let numSpeakers = config.numSpeakers
 
-        let timeline = SortformerTimeline(config: .default)
+        let timeline = SortformerTimeline(config: .sortformerDefault)
 
         // Add some data
         let chunk = SortformerChunkResult(
             startFrame: 0,
-            speakerPredictions: [Float](repeating: 0.5, count: 10 * numSpeakers),
-            frameCount: 10,
+            finalizedPredictions: [Float](repeating: 0.5, count: 10 * numSpeakers),
+            finalizedFrameCount: 10,
             tentativePredictions: [],
             tentativeFrameCount: 0
         )
-        timeline.addChunk(chunk)
+        try timeline.addChunk(chunk)
         timeline.finalize()
 
         XCTAssertGreaterThan(timeline.numFrames, 0, "Should have frames before reset")

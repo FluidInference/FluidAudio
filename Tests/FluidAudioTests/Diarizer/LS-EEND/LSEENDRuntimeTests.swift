@@ -2,10 +2,18 @@ import AVFoundation
 import CoreML
 import Foundation
 import XCTest
-@testable import LS_EENDTest
+
+@testable import FluidAudio
 
 final class LSEENDRuntimeTests: XCTestCase {
-    private static let rootURL = LSEENDWorkspace.rootURL
+    private static var rootURL: URL {
+        if let path = ProcessInfo.processInfo.environment["LSEEND_WORKSPACE_ROOT"] {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("LS-EENDWorkspace")
+    }
+
     private static let probeExecutableURL = rootURL.appendingPathComponent("artifacts/bin/lseend_runtime_probe")
     private static let probeSourceURLs: [URL] = [
         rootURL.appendingPathComponent("LS-EENDTest/Tools/LSEENDRuntimeProbe.swift"),
@@ -14,12 +22,13 @@ final class LSEENDRuntimeTests: XCTestCase {
         rootURL.appendingPathComponent("LS-EENDTest/LS-EENDTest/FluidAudio/Shared/AudioConverter.swift"),
         rootURL.appendingPathComponent("LS-EENDTest/LS-EENDTest/FluidAudio/Shared/NeMoMelSpectrogram.swift"),
         rootURL.appendingPathComponent("LS-EENDTest/LS-EENDTest/FluidAudio/LS-EEND-Diarizer/LSEENDSupport.swift"),
-        rootURL.appendingPathComponent("LS-EENDTest/LS-EENDTest/FluidAudio/LS-EEND-Diarizer/LSEENDFeatureExtraction.swift"),
+        rootURL.appendingPathComponent(
+            "LS-EENDTest/LS-EENDTest/FluidAudio/LS-EEND-Diarizer/LSEENDFeatureExtraction.swift"),
         rootURL.appendingPathComponent("LS-EENDTest/LS-EENDTest/FluidAudio/LS-EEND-Diarizer/LSEENDInference.swift"),
         rootURL.appendingPathComponent("LS-EENDTest/LS-EENDTest/FluidAudio/LS-EEND-Diarizer/LSEENDEvaluation.swift"),
     ]
-    private static var cachedEngines: [LSEENDVariant: LSEENDInferenceEngine] = [:]
-    private static var didEnsureProbeExecutable = false
+    nonisolated(unsafe) private static var cachedEngines: [LSEENDVariant: LSEENDInferenceEngine] = [:]
+    nonisolated(unsafe) private static var didEnsureProbeExecutable = false
 
     private struct ErrorStats {
         let maxAbs: Double
@@ -190,10 +199,14 @@ final class LSEENDRuntimeTests: XCTestCase {
 
         for variant in LSEENDVariant.allCases {
             let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: variant)
-            XCTAssertTrue(FileManager.default.fileExists(atPath: descriptor.modelURL.path), "Missing model package for \(variant.rawValue)")
-            XCTAssertTrue(FileManager.default.fileExists(atPath: descriptor.metadataURL.path), "Missing metadata for \(variant.rawValue)")
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: descriptor.modelURL.path),
+                "Missing model package for \(variant.rawValue)")
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: descriptor.metadataURL.path),
+                "Missing metadata for \(variant.rawValue)")
 
-            let engine = try makeEngine(variant: variant)
+            let engine = try await makeEngine(variant: variant)
             let metadata = engine.metadata
             XCTAssertEqual(metadata.realOutputDim, expectedColumns[variant])
             XCTAssertEqual(metadata.fullOutputDim, (expectedColumns[variant] ?? 0) + 2)
@@ -228,7 +241,8 @@ final class LSEENDRuntimeTests: XCTestCase {
             from: Self.rootURL.appendingPathComponent("artifacts/coreml/LDC2022S14/LDC2022S14_coreml_probabilities.npy")
         ).matrix2D()
         let expectedFullProbabilities = try NPYReader.loadFloatArray(
-            from: Self.rootURL.appendingPathComponent("artifacts/coreml/LDC2022S14/LDC2022S14_coreml_full_probabilities.npy")
+            from: Self.rootURL.appendingPathComponent(
+                "artifacts/coreml/LDC2022S14/LDC2022S14_coreml_full_probabilities.npy")
         ).matrix2D()
 
         let realStats = compare(actualProbabilities, expectedProbabilities)
@@ -270,7 +284,8 @@ final class LSEENDRuntimeTests: XCTestCase {
         )
         let streamingFixture = try decode(
             StreamingUpdateFixtureFile.self,
-            from: Self.rootURL.appendingPathComponent("artifacts/coreml/LDC2022S14_streaming/LDC2022S14_streaming_updates.json")
+            from: Self.rootURL.appendingPathComponent(
+                "artifacts/coreml/LDC2022S14_streaming/LDC2022S14_streaming_updates.json")
         )
         XCTAssertEqual(simulation.updates.count, streamingFixture.updates.count)
         for (actual, expected) in zip(simulation.updates, streamingFixture.updates) {
@@ -281,7 +296,8 @@ final class LSEENDRuntimeTests: XCTestCase {
         }
 
         let expectedStreamingFull = try NPYReader.loadFloatArray(
-            from: Self.rootURL.appendingPathComponent("artifacts/coreml/LDC2022S14_streaming/LDC2022S14_full_probabilities.npy")
+            from: Self.rootURL.appendingPathComponent(
+                "artifacts/coreml/LDC2022S14_streaming/LDC2022S14_full_probabilities.npy")
         ).matrix2D()
         let actualFullProbabilities = simulation.result.fullProbabilities.matrix()
         let actualProbabilities = simulation.result.probabilities.matrix()
@@ -313,7 +329,8 @@ final class LSEENDRuntimeTests: XCTestCase {
         let sessionCheck = try runSessionCheckProbe(
             variant: .dihard3,
             audioURL: try findFirstWAV(
-                in: Self.rootURL.appendingPathComponent("artifacts/LDC2022S14_repo_eval/dihard3_nominal/kaldi", isDirectory: true)
+                in: Self.rootURL.appendingPathComponent(
+                    "artifacts/LDC2022S14_repo_eval/dihard3_nominal/kaldi", isDirectory: true)
             ),
             chunkSeconds: 0.5
         )
@@ -357,10 +374,14 @@ final class LSEENDRuntimeTests: XCTestCase {
             logitMaxTolerance = 0.01
         }
 
-        XCTAssertLessThanOrEqual(logitStats.maxAbs, logitMaxTolerance, "\(variant.rawValue) max abs error \(logitStats.maxAbs)")
+        XCTAssertLessThanOrEqual(
+            logitStats.maxAbs, logitMaxTolerance, "\(variant.rawValue) max abs error \(logitStats.maxAbs)")
         XCTAssertLessThanOrEqual(logitStats.meanAbs, 0.001, "\(variant.rawValue) mean abs error \(logitStats.meanAbs)")
-        XCTAssertLessThanOrEqual(probabilityStats.maxAbs, 0.01, "\(variant.rawValue) probability max abs error \(probabilityStats.maxAbs)")
-        XCTAssertLessThanOrEqual(probabilityStats.meanAbs, 0.001, "\(variant.rawValue) probability mean abs error \(probabilityStats.meanAbs)")
+        XCTAssertLessThanOrEqual(
+            probabilityStats.maxAbs, 0.01, "\(variant.rawValue) probability max abs error \(probabilityStats.maxAbs)")
+        XCTAssertLessThanOrEqual(
+            probabilityStats.meanAbs, 0.001,
+            "\(variant.rawValue) probability mean abs error \(probabilityStats.meanAbs)")
 
         let referenceBinary = try referenceBinaryMatrix(
             rttmURL: fixture.referenceRTTMURL,
@@ -388,13 +409,17 @@ final class LSEENDRuntimeTests: XCTestCase {
         let metricsURL: URL
         switch variant {
         case .ami:
-            metricsURL = Self.rootURL.appendingPathComponent("artifacts/ahnss_repo_eval/ami/ahnss_repo_eval_metrics.json")
+            metricsURL = Self.rootURL.appendingPathComponent(
+                "artifacts/ahnss_repo_eval/ami/ahnss_repo_eval_metrics.json")
         case .callhome:
-            metricsURL = Self.rootURL.appendingPathComponent("artifacts/ahnss_repo_eval/callhome/ahnss_repo_eval_metrics.json")
+            metricsURL = Self.rootURL.appendingPathComponent(
+                "artifacts/ahnss_repo_eval/callhome/ahnss_repo_eval_metrics.json")
         case .dihard2:
-            metricsURL = Self.rootURL.appendingPathComponent("artifacts/czlvt_repo_eval/dihard2/czlvt_repo_eval_metrics.json")
+            metricsURL = Self.rootURL.appendingPathComponent(
+                "artifacts/czlvt_repo_eval/dihard2/czlvt_repo_eval_metrics.json")
         case .dihard3:
-            metricsURL = Self.rootURL.appendingPathComponent("artifacts/LDC2022S14_repo_eval/dihard3_nominal/LDC2022S14_repo_eval_metrics.json")
+            metricsURL = Self.rootURL.appendingPathComponent(
+                "artifacts/LDC2022S14_repo_eval/dihard3_nominal/LDC2022S14_repo_eval_metrics.json")
         }
         let metrics = try decode(RepoEvalMetrics.self, from: metricsURL)
         return RepoFixture(
@@ -407,11 +432,12 @@ final class LSEENDRuntimeTests: XCTestCase {
         )
     }
 
-    private func makeEngine(variant: LSEENDVariant) throws -> LSEENDInferenceEngine {
+    private func makeEngine(variant: LSEENDVariant) async throws -> LSEENDInferenceEngine {
         if let cached = Self.cachedEngines[variant] {
             return cached
         }
-        let created = try LSEENDInferenceEngine(descriptor: .defaultDescriptor(for: variant), computeUnits: .cpuOnly)
+        let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: variant)
+        let created = try LSEENDInferenceEngine(descriptor: descriptor, computeUnits: .cpuOnly)
         Self.cachedEngines[variant] = created
         return created
     }
@@ -466,10 +492,12 @@ final class LSEENDRuntimeTests: XCTestCase {
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         )
-        guard let wavURL = contents
-            .filter({ $0.pathExtension.lowercased() == "wav" })
-            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
-            .first
+        guard
+            let wavURL =
+                contents
+                .filter({ $0.pathExtension.lowercased() == "wav" })
+                .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+                .first
         else {
             throw NSError(
                 domain: "LSEENDRuntimeTests",
@@ -593,7 +621,8 @@ final class LSEENDRuntimeTests: XCTestCase {
         let fileManager = FileManager.default
         let binaryExists = fileManager.fileExists(atPath: probeExecutableURL.path)
         let binaryDate = binaryExists ? try modificationDate(for: probeExecutableURL) : .distantPast
-        let newestSourceDate = try probeSourceURLs
+        let newestSourceDate =
+            try probeSourceURLs
             .map(modificationDate(for:))
             .max() ?? .distantPast
 
@@ -603,12 +632,13 @@ final class LSEENDRuntimeTests: XCTestCase {
 
             let process = Process()
             process.executableURL = try swiftCompilerURL()
-            process.arguments = [
-                "-sdk", try macOSSDKURL().path,
-                "-target", currentTargetTriple(),
-                "-O",
-                "-o", probeExecutableURL.path,
-            ] + probeSourceURLs.map(\.path)
+            process.arguments =
+                [
+                    "-sdk", try macOSSDKURL().path,
+                    "-target", currentTargetTriple(),
+                    "-O",
+                    "-o", probeExecutableURL.path,
+                ] + probeSourceURLs.map(\.path)
             let stderr = Pipe()
             process.standardError = stderr
             try process.run()
