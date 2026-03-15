@@ -5,7 +5,7 @@
 LS-EEND (Long-Form Streaming End-to-End Neural Diarization) answers "who spoke when" in real-time. A causal Conformer encoder with a retention mechanism feeds an online attractor decoder that tracks speaker identities frame by frame, without separate VAD, segmentation, or clustering.
 
 **Key specs:**
-- Up to 8 simultaneous speakers
+- 4–10 simultaneous speakers depending on variant (see below)
 - ~100ms frame resolution (10 Hz output)
 - Handles recordings up to one hour
 - 8000 Hz input sample rate (automatic resampling via `processComplete(audioFileURL:)`)
@@ -25,23 +25,27 @@ Each variant is a separate CoreML model trained on a specific corpus. Choose the
 
 ### `.ami` — In-person meetings
 Multi-speaker conference room recordings with close-talk and distant microphones.
-Best for: boardroom meetings, panel discussions, 3–5 speakers in a shared space.
+Best for: boardroom meetings, panel discussions, speakers in a shared physical space.
 - **DER (AMI test set):** 20.76%
+- **Max speakers:** 4
 
 ### `.callhome` — Phone calls
-Two-party telephone conversations with codec noise and narrow bandwidth.
-Best for: call center recordings, customer service calls, 2-speaker telephony audio.
+Telephone conversations with codec noise and narrow bandwidth.
+Best for: call center recordings, customer service calls, telephony audio.
 - **DER (CALLHOME test set):** 12.11%
+- **Max speakers:** 7
 
 ### `.dihard2` — Difficult mixed conditions
 Dinner parties, clinical interviews, conference rooms, multi-channel arrays, child speech.
 Best for: challenging acoustics, heavy overlap, non-standard recording setups.
 - **DER (DIHARD II test set):** 27.58%
+- **Max speakers:** 10
 
 ### `.dihard3` — In-the-wild conversations *(default)*
 Podcasts, audiobooks, broadcast media, YouTube, field recordings — deliberately broad.
 Best for: unknown or mixed recording conditions; the safest general-purpose choice.
 - **DER (DIHARD III test set):** 19.61%
+- **Max speakers:** 10
 
 ---
 
@@ -49,13 +53,13 @@ Best for: unknown or mixed recording conditions; the safest general-purpose choi
 
 | Feature | LS-EEND | Sortformer |
 |---------|:-------:|:----------:|
-| Max speakers | 8 | 4 |
+| Max speakers | 4–10 (variant-dependent) | 4 |
 | Sample rate | 8000 Hz | 16000 Hz |
-| Phone/telephony audio | Best (.callhome) | Poor |
-| In-person meetings | Good (.ami) | Good |
-| Wild/unconstrained audio | Good (.dihard3) | Good |
+| Phone/telephony audio | Best (.callhome, up to 7) | Poor |
+| In-person meetings | Good (.ami, up to 4) | Good |
+| Wild/unconstrained audio | Good (.dihard3, up to 10) | Good |
 | Background noise robustness | Good | Best |
-| Speaker count > 4 | Yes | No |
+| Speaker count > 4 | Yes (.callhome, .dihard2, .dihard3) | No |
 | Domain-specialized variants | Yes (4) | No |
 
 ---
