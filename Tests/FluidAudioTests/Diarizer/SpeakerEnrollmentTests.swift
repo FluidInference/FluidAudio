@@ -1,3 +1,4 @@
+import CoreML
 import XCTest
 
 @testable import FluidAudio
@@ -6,6 +7,11 @@ import XCTest
 /// - `DiarizerManager.extractSpeakerEmbedding(from:)`
 /// - `SortformerDiarizer.primeWithAudio(_:)`
 final class SpeakerEnrollmentTests: XCTestCase {
+
+    private func loadSortformerModelsForTest(config: SortformerConfig) async throws -> SortformerModels {
+        // These tests validate Sortformer behavior after initialization, not accelerator selection.
+        try await SortformerModels.loadFromHuggingFace(config: config, computeUnits: .cpuOnly)
+    }
 
     // MARK: - extractSpeakerEmbedding: Error Cases
 
@@ -140,7 +146,7 @@ final class SpeakerEnrollmentTests: XCTestCase {
         let config = SortformerConfig.default
         let diarizer = SortformerDiarizer(config: config)
 
-        let models = try await SortformerModels.loadFromHuggingFace(config: config)
+        let models = try await loadSortformerModelsForTest(config: config)
         diarizer.initialize(models: models)
 
         // Prime with 5 seconds of audio
@@ -149,7 +155,7 @@ final class SpeakerEnrollmentTests: XCTestCase {
 
         // Timeline should be reset (frame count = 0)
         XCTAssertEqual(diarizer.numFramesProcessed, 0, "Frame counter should be 0 after priming")
-        XCTAssertEqual(diarizer.timeline.numFrames, 0, "Timeline should have 0 frames after priming")
+        XCTAssertEqual(diarizer.timeline.numFinalizedFrames, 0, "Timeline should have 0 frames after priming")
 
         // Streaming state should be preserved (spkcache or fifo may be populated)
         let state = diarizer.state
@@ -163,7 +169,7 @@ final class SpeakerEnrollmentTests: XCTestCase {
         let config = SortformerConfig.default
         let diarizer = SortformerDiarizer(config: config)
 
-        let models = try await SortformerModels.loadFromHuggingFace(config: config)
+        let models = try await loadSortformerModelsForTest(config: config)
         diarizer.initialize(models: models)
 
         // Prime with enrollment audio
@@ -186,7 +192,7 @@ final class SpeakerEnrollmentTests: XCTestCase {
         let config = SortformerConfig.default
         let diarizer = SortformerDiarizer(config: config)
 
-        let models = try await SortformerModels.loadFromHuggingFace(config: config)
+        let models = try await loadSortformerModelsForTest(config: config)
         diarizer.initialize(models: models)
 
         // Prime with speaker A

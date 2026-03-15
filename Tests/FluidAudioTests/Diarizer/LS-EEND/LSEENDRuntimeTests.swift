@@ -29,6 +29,8 @@ final class LSEENDRuntimeTests: XCTestCase {
     ]
     nonisolated(unsafe) private static var cachedEngines: [LSEENDVariant: LSEENDInferenceEngine] = [:]
     nonisolated(unsafe) private static var didEnsureProbeExecutable = false
+    private static let workspaceSetupHint =
+        "Set LSEEND_WORKSPACE_ROOT to an LS-EEND workspace checkout that includes the runtime probe sources and parity artifacts."
 
     private struct ErrorStats {
         let maxAbs: Double
@@ -232,17 +234,16 @@ final class LSEENDRuntimeTests: XCTestCase {
     func testEndToEndDIHARD3FLACMatchesCoreMLGolden() throws {
         let result = try runOfflineProbe(
             variant: .dihard3,
-            audioURL: Self.rootURL.appendingPathComponent("LDC2022S14.flac")
+            audioURL: try requireWorkspaceArtifact("LDC2022S14.flac")
         )
         let actualProbabilities = result.probabilities.matrix()
         let actualFullProbabilities = result.fullProbabilities.matrix()
 
         let expectedProbabilities = try NPYReader.loadFloatArray(
-            from: Self.rootURL.appendingPathComponent("artifacts/coreml/LDC2022S14/LDC2022S14_coreml_probabilities.npy")
+            from: try requireWorkspaceArtifact("artifacts/coreml/LDC2022S14/LDC2022S14_coreml_probabilities.npy")
         ).matrix2D()
         let expectedFullProbabilities = try NPYReader.loadFloatArray(
-            from: Self.rootURL.appendingPathComponent(
-                "artifacts/coreml/LDC2022S14/LDC2022S14_coreml_full_probabilities.npy")
+            from: try requireWorkspaceArtifact("artifacts/coreml/LDC2022S14/LDC2022S14_coreml_full_probabilities.npy")
         ).matrix2D()
 
         let realStats = compare(actualProbabilities, expectedProbabilities)
@@ -255,10 +256,10 @@ final class LSEENDRuntimeTests: XCTestCase {
 
         let metrics = try decode(
             CoreMLMetrics.self,
-            from: Self.rootURL.appendingPathComponent("artifacts/coreml/LDC2022S14/LDC2022S14_coreml_metrics.json")
+            from: try requireWorkspaceArtifact("artifacts/coreml/LDC2022S14/LDC2022S14_coreml_metrics.json")
         )
         let referenceBinary = try referenceBinaryMatrix(
-            rttmURL: Self.rootURL.appendingPathComponent("LDC2022S14.rttm"),
+            rttmURL: try requireWorkspaceArtifact("LDC2022S14.rttm"),
             numFrames: actualProbabilities.rows,
             frameRate: result.frameHz
         )
@@ -276,7 +277,7 @@ final class LSEENDRuntimeTests: XCTestCase {
     }
 
     func testStreamingDIHARD3MatchesGoldenAndSessionBehavior() throws {
-        let audioURL = Self.rootURL.appendingPathComponent("LDC2022S14.flac")
+        let audioURL = try requireWorkspaceArtifact("LDC2022S14.flac")
         let simulation = try runStreamingProbe(
             variant: .dihard3,
             audioURL: audioURL,
@@ -284,7 +285,7 @@ final class LSEENDRuntimeTests: XCTestCase {
         )
         let streamingFixture = try decode(
             StreamingUpdateFixtureFile.self,
-            from: Self.rootURL.appendingPathComponent(
+            from: try requireWorkspaceArtifact(
                 "artifacts/coreml/LDC2022S14_streaming/LDC2022S14_streaming_updates.json")
         )
         XCTAssertEqual(simulation.updates.count, streamingFixture.updates.count)
@@ -296,7 +297,7 @@ final class LSEENDRuntimeTests: XCTestCase {
         }
 
         let expectedStreamingFull = try NPYReader.loadFloatArray(
-            from: Self.rootURL.appendingPathComponent(
+            from: try requireWorkspaceArtifact(
                 "artifacts/coreml/LDC2022S14_streaming/LDC2022S14_full_probabilities.npy")
         ).matrix2D()
         let actualFullProbabilities = simulation.result.fullProbabilities.matrix()
@@ -307,10 +308,10 @@ final class LSEENDRuntimeTests: XCTestCase {
 
         let streamingMetrics = try decode(
             StreamingMetrics.self,
-            from: Self.rootURL.appendingPathComponent("artifacts/coreml/LDC2022S14_streaming/LDC2022S14_metrics.json")
+            from: try requireWorkspaceArtifact("artifacts/coreml/LDC2022S14_streaming/LDC2022S14_metrics.json")
         )
         let referenceBinary = try referenceBinaryMatrix(
-            rttmURL: Self.rootURL.appendingPathComponent("LDC2022S14.rttm"),
+            rttmURL: try requireWorkspaceArtifact("LDC2022S14.rttm"),
             numFrames: actualProbabilities.rows,
             frameRate: simulation.result.frameHz
         )
@@ -329,8 +330,7 @@ final class LSEENDRuntimeTests: XCTestCase {
         let sessionCheck = try runSessionCheckProbe(
             variant: .dihard3,
             audioURL: try findFirstWAV(
-                in: Self.rootURL.appendingPathComponent(
-                    "artifacts/LDC2022S14_repo_eval/dihard3_nominal/kaldi", isDirectory: true)
+                in: try requireWorkspaceArtifact("artifacts/LDC2022S14_repo_eval/dihard3_nominal/kaldi")
             ),
             chunkSeconds: 0.5
         )
@@ -406,29 +406,38 @@ final class LSEENDRuntimeTests: XCTestCase {
     }
 
     private func repoFixture(for variant: LSEENDVariant) throws -> RepoFixture {
-        let metricsURL: URL
+        let metricsRelativePath: String
         switch variant {
         case .ami:
-            metricsURL = Self.rootURL.appendingPathComponent(
-                "artifacts/ahnss_repo_eval/ami/ahnss_repo_eval_metrics.json")
+            metricsRelativePath = "artifacts/ahnss_repo_eval/ami/ahnss_repo_eval_metrics.json"
         case .callhome:
-            metricsURL = Self.rootURL.appendingPathComponent(
-                "artifacts/ahnss_repo_eval/callhome/ahnss_repo_eval_metrics.json")
+            metricsRelativePath = "artifacts/ahnss_repo_eval/callhome/ahnss_repo_eval_metrics.json"
         case .dihard2:
-            metricsURL = Self.rootURL.appendingPathComponent(
-                "artifacts/czlvt_repo_eval/dihard2/czlvt_repo_eval_metrics.json")
+            metricsRelativePath = "artifacts/czlvt_repo_eval/dihard2/czlvt_repo_eval_metrics.json"
         case .dihard3:
-            metricsURL = Self.rootURL.appendingPathComponent(
-                "artifacts/LDC2022S14_repo_eval/dihard3_nominal/LDC2022S14_repo_eval_metrics.json")
+            metricsRelativePath = "artifacts/LDC2022S14_repo_eval/dihard3_nominal/LDC2022S14_repo_eval_metrics.json"
         }
+        let metricsURL = try requireWorkspaceArtifact(metricsRelativePath)
         let metrics = try decode(RepoEvalMetrics.self, from: metricsURL)
+        let kaldiDirURL = try requireExistingPath(
+            URL(fileURLWithPath: metrics.artifacts.kaldiDir, isDirectory: true),
+            description: metrics.artifacts.kaldiDir
+        )
+        let rawLogitsURL = try requireExistingPath(
+            URL(fileURLWithPath: metrics.artifacts.rawLogitsNPY),
+            description: metrics.artifacts.rawLogitsNPY
+        )
+        let referenceRTTMURL = try requireExistingPath(
+            URL(fileURLWithPath: metrics.referenceRTTM),
+            description: metrics.referenceRTTM
+        )
         return RepoFixture(
             variant: variant,
             metrics: metrics,
             metricsURL: metricsURL,
-            audio8kURL: try findFirstWAV(in: URL(fileURLWithPath: metrics.artifacts.kaldiDir, isDirectory: true)),
-            rawLogitsURL: URL(fileURLWithPath: metrics.artifacts.rawLogitsNPY),
-            referenceRTTMURL: URL(fileURLWithPath: metrics.referenceRTTM)
+            audio8kURL: try findFirstWAV(in: kaldiDirURL),
+            rawLogitsURL: rawLogitsURL,
+            referenceRTTMURL: referenceRTTMURL
         )
     }
 
@@ -484,6 +493,23 @@ final class LSEENDRuntimeTests: XCTestCase {
 
     private func decode<T: Decodable>(_ type: T.Type, from url: URL) throws -> T {
         try JSONDecoder().decode(T.self, from: Data(contentsOf: url))
+    }
+
+    private func requireWorkspaceArtifact(_ relativePath: String) throws -> URL {
+        try requireExistingPath(
+            Self.rootURL.appendingPathComponent(relativePath),
+            description: relativePath
+        )
+    }
+
+    private func requireExistingPath(_ url: URL, description: String) throws -> URL {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw XCTSkip(
+                "Skipping LS-EEND runtime parity test: missing \(description) under \(Self.rootURL.path). "
+                    + Self.workspaceSetupHint
+            )
+        }
+        return url
     }
 
     private func findFirstWAV(in directory: URL) throws -> URL {
@@ -619,6 +645,13 @@ final class LSEENDRuntimeTests: XCTestCase {
         }
 
         let fileManager = FileManager.default
+        let missingSources = probeSourceURLs.filter { !fileManager.fileExists(atPath: $0.path) }
+        guard missingSources.isEmpty else {
+            throw XCTSkip(
+                "Skipping LS-EEND runtime parity test: missing runtime probe sources under \(rootURL.path). "
+                    + workspaceSetupHint
+            )
+        }
         let binaryExists = fileManager.fileExists(atPath: probeExecutableURL.path)
         let binaryDate = binaryExists ? try modificationDate(for: probeExecutableURL) : .distantPast
         let newestSourceDate =
