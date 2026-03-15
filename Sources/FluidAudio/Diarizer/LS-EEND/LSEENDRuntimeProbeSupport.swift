@@ -5,7 +5,7 @@ import Foundation
 enum LSEENDRuntimeProbeSupport {
     private static let probeFlag = "--lseend-probe"
 
-    static func runIfRequested(arguments: [String] = CommandLine.arguments) {
+    static func runIfRequested(arguments: [String] = CommandLine.arguments) async {
         guard let flagIndex = arguments.firstIndex(of: probeFlag) else {
             return
         }
@@ -13,7 +13,7 @@ enum LSEENDRuntimeProbeSupport {
         let probeArguments = Array(arguments[(flagIndex + 1)...])
         let outputURL = try? parseOptionalOutputURL(from: probeArguments)
         do {
-            let payload = try run(arguments: probeArguments)
+            let payload = try await run(arguments: probeArguments)
             if let outputURL {
                 try payload.write(to: outputURL, options: .atomic)
             } else {
@@ -31,7 +31,7 @@ enum LSEENDRuntimeProbeSupport {
         }
     }
 
-    private static func run(arguments: [String]) throws -> Data {
+    private static func run(arguments: [String]) async throws -> Data {
         guard let command = arguments.first else {
             throw ProbeError.invalidArguments("Missing command.")
         }
@@ -40,13 +40,13 @@ enum LSEENDRuntimeProbeSupport {
         case "offline":
             let variant = try parseVariant(from: arguments)
             let audioURL = try parseAudioURL(from: arguments)
-            let engine = try LSEENDInferenceEngine(descriptor: .defaultDescriptor(for: variant), computeUnits: .cpuOnly)
+            let engine = try LSEENDInferenceEngine(descriptor: await .loadFromHuggingFace(variant: variant), computeUnits: .cpuOnly)
             return try encodeJSON(ProbeInferenceResult(engine.infer(audioFileURL: audioURL)))
         case "streaming":
             let variant = try parseVariant(from: arguments)
             let audioURL = try parseAudioURL(from: arguments)
             let chunkSeconds = try parseDouble(flag: "--chunk-seconds", from: arguments)
-            let engine = try LSEENDInferenceEngine(descriptor: .defaultDescriptor(for: variant), computeUnits: .cpuOnly)
+            let engine = try LSEENDInferenceEngine(descriptor: await .loadFromHuggingFace(variant: variant), computeUnits: .cpuOnly)
             return try encodeJSON(ProbeStreamingResult(engine.simulateStreaming(audioFileURL: audioURL, chunkSeconds: chunkSeconds)))
         case "session-check":
             let variant = try parseVariant(from: arguments)
