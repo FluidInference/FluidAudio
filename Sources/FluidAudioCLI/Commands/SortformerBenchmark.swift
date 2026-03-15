@@ -279,13 +279,6 @@ enum SortformerBenchmark {
 
         do {
             if useHuggingFace {
-                // Clear cache to force re-download
-                let cacheDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                    .appendingPathComponent("FluidAudio/Models/sortformer")
-                try? FileManager.default.removeItem(at: cacheDir)
-                print("   Downloading models from HuggingFace...")
-                fflush(stdout)
-
                 let models = try await SortformerModels.loadFromHuggingFace(config: config)
                 diarizer.initialize(models: models)
             } else {
