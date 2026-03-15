@@ -93,7 +93,7 @@ public enum PocketTtsConstantsLoader {
             throw LoadError.invalidSize(
                 "\(sanitized)_audio_prompt",
                 expected: embDim,
-                actual: data.count
+                actual: floatCount
             )
         }
 
