@@ -8,7 +8,7 @@ import OSLog
 /// an 80ms audio frame (1920 samples at 24kHz).
 ///
 /// Long text is split into sentence-based chunks (≤50 tokens each)
-/// to stay within the KV cache limit (200 positions).
+/// to stay within the KV cache limit (512 positions).
 ///
 /// Pipeline: text → chunk → [tokenize → embed → prefill KV → generate → flow decode → mimi decode] → WAV
 public struct PocketTtsSynthesizer {
@@ -961,6 +961,9 @@ public struct PocketTtsSynthesizer {
     // MARK: - Helpers
 
     /// Estimate maximum generation frames based on text length.
+    ///
+    /// At 80ms per frame, 12.5 frames ≈ 1 second of audio per word.
+    /// The +2 adds margin for pauses and trailing silence.
     private static func estimateMaxFrames(text: String) -> Int {
         let wordCount = text.split(separator: " ").count
         let genLenSec = Double(wordCount) + 2.0
@@ -979,7 +982,10 @@ public struct PocketTtsSynthesizer {
         return array
     }
 
-    /// Create a NaN-filled sequence [1, 1, 32] (signals BOS to the model).
+    /// Create a NaN-filled sequence `[1, 1, 32]` to signal beginning-of-sequence.
+    ///
+    /// The first generation step has no previous audio latent. NaN values tell
+    /// the model to use the BOS embedding instead, triggering the start of speech.
     private static func createNaNSequence() throws -> MLMultiArray {
         let dim = PocketTtsConstants.latentDim
         let array = try MLMultiArray(
@@ -991,7 +997,10 @@ public struct PocketTtsSynthesizer {
         return array
     }
 
-    /// Create a sequence [1, 1, 32] from a latent vector.
+    /// Create a sequence `[1, 1, 32]` from a latent vector.
+    ///
+    /// Autoregressive feedback: each generated audio latent becomes the input
+    /// for the next flowlm_step, so the model conditions on its own output.
     private static func createSequenceFromLatent(_ latent: [Float]) throws -> MLMultiArray {
         let dim = PocketTtsConstants.latentDim
         let array = try MLMultiArray(
