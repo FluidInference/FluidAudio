@@ -317,7 +317,7 @@ enum LSEENDBenchmark {
             print(String(repeating: "=", count: 60))
             fflush(stdout)
 
-            let result = processMeeting(
+            let result = await processMeeting(
                 meetingName: meetingName,
                 dataset: dataset,
                 diarizer: diarizer,
@@ -368,7 +368,7 @@ enum LSEENDBenchmark {
         frameHz: Double,
         numSpeakers: Int,
         verbose: Bool
-    ) -> BenchmarkResult? {
+    ) async -> BenchmarkResult? {
         let audioPath = getAudioPath(for: meetingName, dataset: dataset)
         guard FileManager.default.fileExists(atPath: audioPath) else {
             print("Audio file not found: \(audioPath)")
@@ -397,14 +397,49 @@ enum LSEENDBenchmark {
                 print("   Total frames: \(numFrames)")
             }
 
-            // Load ground truth RTTM
+            // Load ground truth RTTM (or fall back to AMI XML annotations)
+            let rttmEntries: [LSEENDRTTMEntry]
+            let rttmSpeakers: [String]
+
             let rttmURL = getRTTMURL(for: meetingName, dataset: dataset)
-            guard let rttmURL = rttmURL, FileManager.default.fileExists(atPath: rttmURL.path) else {
+            if let rttmURL = rttmURL, FileManager.default.fileExists(atPath: rttmURL.path) {
+                let parsed = try LSEENDEvaluation.parseRTTM(url: rttmURL)
+                rttmEntries = parsed.entries
+                rttmSpeakers = parsed.speakers
+            } else if dataset == .ami {
+                // Fall back to AMI XML annotations (same as SortformerBenchmark)
+                print("   [RTTM] No RTTM file, falling back to AMI annotations")
+                let groundTruth = await AMIParser.loadAMIGroundTruth(
+                    for: meetingName,
+                    duration: duration
+                )
+                guard !groundTruth.isEmpty else {
+                    print("⚠️ No ground truth found for \(meetingName)")
+                    return nil
+                }
+                // Convert TimedSpeakerSegment to LSEENDRTTMEntry
+                var speakers: [String] = []
+                var entries: [LSEENDRTTMEntry] = []
+                for segment in groundTruth {
+                    if !speakers.contains(segment.speakerId) {
+                        speakers.append(segment.speakerId)
+                    }
+                    entries.append(
+                        LSEENDRTTMEntry(
+                            recordingID: meetingName,
+                            start: Double(segment.startTimeSeconds),
+                            duration: Double(segment.endTimeSeconds - segment.startTimeSeconds),
+                            speaker: segment.speakerId
+                        )
+                    )
+                }
+                rttmEntries = entries
+                rttmSpeakers = speakers
+            } else {
                 print("No RTTM ground truth found for \(meetingName)")
                 return nil
             }
 
-            let (rttmEntries, rttmSpeakers) = try LSEENDEvaluation.parseRTTM(url: rttmURL)
             let referenceBinary = LSEENDEvaluation.rttmToFrameMatrix(
                 entries: rttmEntries,
                 speakers: rttmSpeakers,
@@ -436,11 +471,14 @@ enum LSEENDBenchmark {
             )
 
             let derPercent = Float(evalResult.der * 100)
-            let missPercent = evalResult.speakerScored > 0
+            let missPercent =
+                evalResult.speakerScored > 0
                 ? Float(evalResult.speakerMiss / evalResult.speakerScored * 100) : 0
-            let faPercent = evalResult.speakerScored > 0
+            let faPercent =
+                evalResult.speakerScored > 0
                 ? Float(evalResult.speakerFalseAlarm / evalResult.speakerScored * 100) : 0
-            let sePercent = evalResult.speakerScored > 0
+            let sePercent =
+                evalResult.speakerScored > 0
                 ? Float(evalResult.speakerError / evalResult.speakerScored * 100) : 0
 
             print(
