@@ -733,10 +733,12 @@ public final class DiarizerTimeline: @unchecked Sendable {
                 isFinalized: false,
                 addTrailingTentative: true
             )
-            
-            if isComplete {
-                finalize()
-            } else {
+        }
+        
+        if isComplete {
+            finalize()
+        } else {
+            queue.sync(flags: .barrier) {
                 trimPredictions()
             }
         }
@@ -858,7 +860,7 @@ public final class DiarizerTimeline: @unchecked Sendable {
             }
         }
     }
-    
+
     private func provideSpeaker(forSlot speakerIndex: Int) -> DiarizerSpeaker {
         if let speaker = _speakers[speakerIndex] { return speaker }
         
@@ -874,7 +876,7 @@ public final class DiarizerTimeline: @unchecked Sendable {
             _finalizedPredictions.removeFirst(numToRemove)
         }
     }
-    
+
     private func verifyPredictionCounts(finalized: borrowing [Float], tentative: borrowing [Float]) throws {
         guard finalized.count.isMultiple(of: config.numSpeakers) else {
             throw DiarizerTimelineError.misalignedFinalizedPredictions(finalized.count, config.numSpeakers)
