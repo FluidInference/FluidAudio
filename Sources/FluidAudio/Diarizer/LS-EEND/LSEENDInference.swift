@@ -59,9 +59,9 @@ private final class LSEENDInferenceSharedResources {
 
     // Preallocated ANE-aligned input arrays reused across predictStep calls
     let memoryOptimizer: ANEMemoryOptimizer
-    let frameArray: MLMultiArray       // [1, 1, inputDim]
-    let ingestArray: MLMultiArray      // [1]
-    let decodeArray: MLMultiArray      // [1]
+    let frameArray: MLMultiArray  // [1, 1, inputDim]
+    let ingestArray: MLMultiArray  // [1]
+    let decodeArray: MLMultiArray  // [1]
 
     init(
         descriptor: LSEENDModelDescriptor,
