@@ -104,14 +104,10 @@ public final class SortformerDiarizer: Diarizer {
     
     public init(
         config: SortformerConfig = .default,
-        timelineConfig: DiarizerTimelineConfig = .default(numSpeakers: 4, frameDurationSeconds: 0.08)
+        timelineConfig: DiarizerTimelineConfig = .sortformerDefault
     ) {
         var timelineConfig = timelineConfig
-        if timelineConfig.numSpeakers != config.numSpeakers {
-            timelineConfig.numSpeakers = config.numSpeakers
-            logger.warning("Sortformer only supports \(config.numSpeakers) speakers. " +
-                           "Setting numSpeakers to \(config.numSpeakers) in the timeline config.")
-        }
+        timelineConfig.numSpeakers = config.numSpeakers
         self.config = config
         self.stateUpdater = SortformerStateUpdater(config: config)
         self._state = SortformerStreamingState(config: config)

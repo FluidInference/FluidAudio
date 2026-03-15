@@ -72,7 +72,7 @@ public final class LSEENDDiarizer: Diarizer {
     public let computeUnits: MLComputeUnits
 
     /// Post-processing configuration
-    public var postProcessingConfig: DiarizerTimelineConfig {
+    public var timelineConfig: DiarizerTimelineConfig {
         lock.lock()
         defer { lock.unlock() }
         return _timeline.config
@@ -99,12 +99,10 @@ public final class LSEENDDiarizer: Diarizer {
     private var _melSpectrogram: NeMoMelSpectrogram?
     private var _timeline: DiarizerTimeline
     private var _numFramesProcessed: Int = 0
+    private var _timelineConfig: DiarizerTimelineConfig
 
     // Audio buffering
     private var pendingAudio: [Float] = []
-
-    // Post-processing overrides (held before model is loaded)
-    private let _postProcessingOverrides: PartialPostProcessingConfig
 
     // MARK: - Init
 
@@ -116,6 +114,11 @@ public final class LSEENDDiarizer: Diarizer {
     ///   - computeUnits: CoreML compute units (default: `.cpuOnly`)
     ///   - onsetThreshold: Onset threshold for segment detection
     ///   - offsetThreshold: Offset threshold for segment detection
+    ///   - onsetPadFrames: Padding frames added before each speech segment
+    ///   - offsetPadFrames: Padding frames added after each speech segment
+    ///   - minFramesOn: Minimum segment length in frames (shorter segments are discarded)
+    ///   - minFramesOff: Minimum gap length in frames (shorter gaps are closed)
+    ///   - maxStoredFrames: Maximum number of finalized prediction frames to retain (`nil` = unlimited)
     public init(
         computeUnits: MLComputeUnits = .cpuOnly,
         onsetThreshold: Float = 0.5,
@@ -127,7 +130,10 @@ public final class LSEENDDiarizer: Diarizer {
         maxStoredFrames: Int? = nil
     ) {
         self.computeUnits = computeUnits
-        _postProcessingOverrides = PartialPostProcessingConfig(
+        // Placeholder timeline until model is loaded and numSpeakers/frameHz are known
+        self._timelineConfig = .init(
+            numSpeakers: 1,
+            frameDurationSeconds: 0.1,
             onsetThreshold: onsetThreshold,
             offsetThreshold: offsetThreshold,
             onsetPadFrames: onsetPadFrames,
@@ -136,8 +142,25 @@ public final class LSEENDDiarizer: Diarizer {
             minFramesOff: minFramesOff,
             maxStoredFrames: maxStoredFrames
         )
+        self._timeline = DiarizerTimeline(config: _timelineConfig)
+    }
+    
+    /// Create a processor with default settings.
+    ///
+    /// Call `initialize(descriptor:)` before processing audio.
+    ///
+    /// - Parameters:
+    ///   - computeUnits: CoreML compute units (default: `.cpuOnly`)
+    ///   - onsetThreshold: Onset threshold for segment detection
+    ///   - offsetThreshold: Offset threshold for segment detection
+    public init(
+        computeUnits: MLComputeUnits = .cpuOnly,
+        timelineConfig: DiarizerTimelineConfig
+    ) {
+        self.computeUnits = computeUnits
+        self._timelineConfig = timelineConfig
         // Placeholder timeline until model is loaded and numSpeakers/frameHz are known
-        _timeline = DiarizerTimeline(config: .default(numSpeakers: 1, frameDurationSeconds: 0.1))
+        self._timeline = DiarizerTimeline(config: timelineConfig)
     }
 
     // MARK: - Initialization
@@ -161,9 +184,10 @@ public final class LSEENDDiarizer: Diarizer {
         lock.lock()
         defer { lock.unlock() }
 
+        updateTimelineConfig(engine: engine)
         _engine = engine
         _melSpectrogram = melSpectrogram
-        _timeline = DiarizerTimeline(config: makePostProcessingConfig(engine: engine))
+        _timeline = DiarizerTimeline(config: _timelineConfig)
         _session = nil
         resetBuffersLocked()
 
@@ -182,9 +206,10 @@ public final class LSEENDDiarizer: Diarizer {
         lock.lock()
         defer { lock.unlock() }
 
+        updateTimelineConfig(engine: engine)
         _engine = engine
         _melSpectrogram = melSpectrogram
-        _timeline = DiarizerTimeline(config: makePostProcessingConfig(engine: engine))
+        _timeline = DiarizerTimeline(config: _timelineConfig)
         _session = nil
         resetBuffersLocked()
 
@@ -319,8 +344,8 @@ public final class LSEENDDiarizer: Diarizer {
         }
 
         // Reset for fresh processing
-        let config = makePostProcessingConfig(engine: engine)
-        _timeline = DiarizerTimeline(config: config)
+        updateTimelineConfig(engine: engine)
+        _timeline = DiarizerTimeline(config: _timelineConfig)
         _numFramesProcessed = 0
         _session = nil
         pendingAudio.removeAll(keepingCapacity: true)
@@ -486,19 +511,9 @@ public final class LSEENDDiarizer: Diarizer {
         )
     }
 
-    private func makePostProcessingConfig(engine: LSEENDInferenceEngine) -> DiarizerTimelineConfig {
-        let o = _postProcessingOverrides
-        return DiarizerTimelineConfig(
-            numSpeakers: engine.metadata.realOutputDim,
-            frameDurationSeconds: Float(1.0 / engine.modelFrameHz),
-            onsetThreshold: o.onsetThreshold,
-            offsetThreshold: o.offsetThreshold,
-            onsetPadFrames: o.onsetPadFrames,
-            offsetPadFrames: o.offsetPadFrames,
-            minFramesOn: o.minFramesOn,
-            minFramesOff: o.minFramesOff,
-            maxStoredFrames: o.maxStoredFrames
-        )
+    private func updateTimelineConfig(engine: LSEENDInferenceEngine) {
+        self._timelineConfig.numSpeakers = engine.metadata.realOutputDim
+        self._timelineConfig.frameDurationSeconds = Float(1.0 / engine.modelFrameHz)
     }
 
     /// Convert an LSEENDMatrix to a flat [Float] in row-major layout.
@@ -506,15 +521,4 @@ public final class LSEENDDiarizer: Diarizer {
         guard matrix.rows > 0, matrix.columns > 0 else { return [] }
         return matrix.values
     }
-}
-
-/// Internal struct to carry post-processing overrides before the model is loaded.
-private struct PartialPostProcessingConfig {
-    let onsetThreshold: Float
-    let offsetThreshold: Float
-    let onsetPadFrames: Int
-    let offsetPadFrames: Int
-    let minFramesOn: Int
-    let minFramesOff: Int
-    let maxStoredFrames: Int?
 }

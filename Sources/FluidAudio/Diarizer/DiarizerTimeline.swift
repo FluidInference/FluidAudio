@@ -125,6 +125,9 @@ public struct DiarizerTimelineConfig: Sendable {
             minFramesOff: 0
         )
     }
+    
+    public static let sortformerDefault = Self.default(numSpeakers: 4, frameDurationSeconds: 0.08)
+    
 
     // MARK: - Init
     
@@ -139,8 +142,8 @@ public struct DiarizerTimelineConfig: Sendable {
     ///   - minFramesOff: Minimum gap length in frames (shorter gaps are closed)
     ///   - maxStoredFrames: Maximum number of finalized prediction frames to retain (nil = unlimited)
     public init(
-        numSpeakers: Int,
-        frameDurationSeconds: Float,
+        numSpeakers: Int? = nil,
+        frameDurationSeconds: Float? = nil,
         onsetThreshold: Float = 0.5,
         offsetThreshold: Float = 0.5,
         onsetPadFrames: Int = 0,
@@ -149,8 +152,8 @@ public struct DiarizerTimelineConfig: Sendable {
         minFramesOff: Int = 0,
         maxStoredFrames: Int? = nil
     ) {
-        self.numSpeakers = numSpeakers
-        self.frameDurationSeconds = frameDurationSeconds
+        self.numSpeakers = numSpeakers ?? 0
+        self.frameDurationSeconds = frameDurationSeconds ?? 0.08
         self.onsetThreshold = onsetThreshold
         self.offsetThreshold = offsetThreshold
         self.onsetPadFrames = onsetPadFrames
@@ -171,8 +174,8 @@ public struct DiarizerTimelineConfig: Sendable {
     ///   - minDurationOff: Minimum gap length in seconds (shorter gaps are closed)
     ///   - maxStoredFrames: Maximum number of finalized raw prediction frames to retain (nil = unlimited)
     public init(
-        numSpeakers: Int,
-        frameDurationSeconds: Float,
+        numSpeakers: Int? = nil,
+        frameDurationSeconds: Float? = nil,
         onsetThreshold: Float = 0.5,
         offsetThreshold: Float = 0.5,
         onsetPadSeconds: Float = 0,
@@ -181,14 +184,14 @@ public struct DiarizerTimelineConfig: Sendable {
         minDurationOff: Float = 0,
         maxStoredFrames: Int? = nil
     ) {
-        self.numSpeakers = numSpeakers
-        self.frameDurationSeconds = frameDurationSeconds
+        self.numSpeakers = numSpeakers ?? 0
+        self.frameDurationSeconds = frameDurationSeconds ?? 0.08
         self.onsetThreshold = onsetThreshold
         self.offsetThreshold = offsetThreshold
-        self.onsetPadFrames = Int(round(onsetPadSeconds / frameDurationSeconds))
-        self.offsetPadFrames = Int(round(offsetPadSeconds / frameDurationSeconds))
-        self.minFramesOn = Int(round(minDurationOn / frameDurationSeconds))
-        self.minFramesOff = Int(round(minDurationOff / frameDurationSeconds))
+        self.onsetPadFrames = Int(round(onsetPadSeconds / self.frameDurationSeconds))
+        self.offsetPadFrames = Int(round(offsetPadSeconds / self.frameDurationSeconds))
+        self.minFramesOn = Int(round(minDurationOn / self.frameDurationSeconds))
+        self.minFramesOff = Int(round(minDurationOff / self.frameDurationSeconds))
         self.maxStoredFrames = maxStoredFrames
     }
 }
