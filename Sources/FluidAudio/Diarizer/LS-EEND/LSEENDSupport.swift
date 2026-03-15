@@ -393,10 +393,6 @@ public struct LSEENDStateShapes: Decodable, Sendable {
 /// Optional audio fields (`sampleRate`, `winLength`, etc.) fall back to defaults
 /// via the `resolved*` computed properties.
 public struct LSEENDModelMetadata: Decodable, Sendable {
-    /// Original training checkpoint path (informational).
-    public let checkpoint: String?
-    /// Original training config path (informational).
-    public let config: String?
     /// Input feature dimension per frame (nMels × splice window width).
     public let inputDim: Int
     /// Total output dimension including boundary tracks.
@@ -449,8 +445,6 @@ public struct LSEENDModelMetadata: Decodable, Sendable {
     public let featType: String?
 
     enum CodingKeys: String, CodingKey {
-        case checkpoint
-        case config
         case inputDim = "input_dim"
         case fullOutputDim = "full_output_dim"
         case realOutputDim = "real_output_dim"
@@ -544,25 +538,4 @@ public struct LSEENDModelMetadata: Decodable, Sendable {
         return Double((fftSize / 2) + (resolvedContextRecp * resolvedHopLength) + (convDelay * resolvedSubsampling * resolvedHopLength))
             / Double(max(resolvedSampleRate, 1))
     }
-}
-
-/// Resolves the LS-EEND workspace root directory for development and testing.
-///
-/// The workspace root is determined by:
-/// 1. The `LSEEND_WORKSPACE_ROOT` environment variable (if set), or
-/// 2. Walking up from this source file's path to find the `LS-EEND` directory.
-///
-/// This is used internally by tests and the runtime probe to locate model artifacts.
-public enum LSEENDWorkspace {
-    /// The resolved workspace root URL.
-    public static let rootURL: URL = {
-        if let override = ProcessInfo.processInfo.environment["LSEEND_WORKSPACE_ROOT"], !override.isEmpty {
-            return URL(fileURLWithPath: override, isDirectory: true)
-        }
-        var url = URL(fileURLWithPath: #filePath)
-        while url.lastPathComponent != "LS-EEND" && url.path != "/" {
-            url.deleteLastPathComponent()
-        }
-        return url
-    }()
 }
