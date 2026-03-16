@@ -224,16 +224,38 @@ public final class LSEENDDiarizer: Diarizer {
     /// predictions, and resets the visible timeline so subsequent calls to
     /// `process()` start again from frame 0 while keeping the warmed model state.
     ///
-    /// - Parameter samples: Audio samples at the model's target sample rate.
+    /// - Parameters:
+    ///   - samples: Audio samples to use for priming.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
     /// - Throws: ``LSEENDError/modelPredictionFailed(_:)`` if the diarizer is not initialized.
-    public func primeWithAudio(_ samples: [Float]) throws {
+    public func primeWithAudio(_ samples: [Float], sourceSampleRate: Double? = nil) throws {
+        try primeWithAudioInternal(samples, sourceSampleRate: sourceSampleRate)
+    }
+
+    /// Prime the diarizer with enrollment audio to warm the streaming state.
+    ///
+    /// - Parameters:
+    ///   - samples: Audio samples to use for priming.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
+    public func primeWithAudio<C: Collection>(
+        _ samples: C,
+        sourceSampleRate: Double? = nil
+    ) throws where C.Element == Float {
+        try primeWithAudioInternal(Array(samples), sourceSampleRate: sourceSampleRate)
+    }
+
+    private func primeWithAudioInternal(
+        _ samples: [Float],
+        sourceSampleRate: Double?
+    ) throws {
         lock.lock()
         defer { lock.unlock() }
 
         guard let engine = _engine else {
             throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
         }
-        guard !samples.isEmpty else { return }
+        let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) ?? samples
+        guard !normalized.isEmpty else { return }
 
         if _session == nil {
             _session = try engine.createSession(
@@ -242,15 +264,15 @@ public final class LSEENDDiarizer: Diarizer {
         guard let session = _session else { return }
 
         pendingAudio.removeAll(keepingCapacity: true)
-        let _ = try session.pushAudio(samples)
+        let _ = try session.pushAudio(normalized)
 
         _visibleStartFrameOffset = session.snapshot().probabilities.rows
         _numFramesProcessed = 0
         _timeline.reset()
 
         logger.info(
-            "Primed LS-EEND with \(samples.count) samples "
-                + "(\(String(format: "%.1f", Float(samples.count) / Float(engine.targetSampleRate)))s), "
+            "Primed LS-EEND with \(normalized.count) samples "
+                + "(\(String(format: "%.1f", Float(normalized.count) / Float(engine.targetSampleRate)))s), "
                 + "visible offset=\(_visibleStartFrameOffset)"
         )
     }
@@ -262,18 +284,27 @@ public final class LSEENDDiarizer: Diarizer {
     /// Audio must be at the model's target sample rate (typically 8000 Hz).
     /// Call `process()` after adding audio to run inference.
     public func addAudio(_ samples: [Float]) {
-        lock.lock()
-        defer { lock.unlock() }
-
-        pendingAudio.append(contentsOf: samples)
+        try? addAudio(samples, sourceSampleRate: nil)
     }
 
+    /// Add audio samples to the processing buffer, resampling when needed.
+    ///
+    /// - Parameters:
+    ///   - samples: Mono audio samples to enqueue.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
     /// Add audio samples from any `Collection` of `Float` to the processing buffer.
-    public func addAudio<C: Collection>(_ samples: C) where C.Element == Float {
+    public func addAudio<C: Collection>(
+        _ samples: C,
+        sourceSampleRate: Double? = nil
+    ) throws where C.Element == Float {
         lock.lock()
         defer { lock.unlock() }
 
-        pendingAudio.append(contentsOf: samples)
+        if let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) {
+            pendingAudio.append(contentsOf: normalized)
+        } else {
+            pendingAudio.append(contentsOf: samples)
+        }
     }
 
     /// Process buffered audio and return any new results.
@@ -320,7 +351,25 @@ public final class LSEENDDiarizer: Diarizer {
     /// Process a chunk of audio in one call.
     ///
     /// Convenience method that combines `addAudio()` and `process()`.
-    public func process(samples: [Float]) throws -> DiarizerTimelineUpdate? {
+    ///
+    /// - Parameters:
+    ///   - samples: Audio samples to process.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
+    /// - Returns: New chunk result if inference produced frames, nil otherwise.
+    public func process(samples: [Float], sourceSampleRate: Double? = nil) throws -> DiarizerTimelineUpdate? {
+        try processInternal(samples, sourceSampleRate: sourceSampleRate)
+    }
+
+    /// Process a chunk of audio in one call.
+    ///
+    /// - Parameters:
+    ///   - samples: Audio samples to process.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
+    /// - Returns: New chunk result if inference produced frames, nil otherwise.
+    public func process<C: Collection>(
+        samples: C,
+        sourceSampleRate: Double? = nil
+    ) throws -> DiarizerTimelineUpdate? where C.Element == Float {
         lock.lock()
         defer { lock.unlock() }
 
@@ -328,7 +377,56 @@ public final class LSEENDDiarizer: Diarizer {
             throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
         }
 
-        pendingAudio.append(contentsOf: samples)
+        if let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) {
+            pendingAudio.append(contentsOf: normalized)
+        } else {
+            pendingAudio.append(contentsOf: samples)
+        }
+
+        guard !pendingAudio.isEmpty else { return nil }
+
+        if _session == nil {
+            _session = try engine.createSession(
+                inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
+        }
+        guard let session = _session else { return nil }
+
+        let chunk = pendingAudio
+        pendingAudio.removeAll(keepingCapacity: true)
+
+        guard let update = try session.pushAudio(chunk) else {
+            return nil
+        }
+
+        let numSpeakers = engine.metadata.realOutputDim
+        let result = DiarizerChunkResult(
+            startFrame: max(0, update.startFrame - _visibleStartFrameOffset),
+            finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
+            finalizedFrameCount: update.probabilities.rows,
+            tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
+            tentativeFrameCount: update.previewProbabilities.rows
+        )
+
+        _numFramesProcessed += result.finalizedFrameCount
+        return try _timeline.addChunk(result)
+    }
+
+    private func processInternal(
+        _ samples: [Float],
+        sourceSampleRate: Double?
+    ) throws -> DiarizerTimelineUpdate? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let engine = _engine else {
+            throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
+        }
+
+        if let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) {
+            pendingAudio.append(contentsOf: normalized)
+        } else {
+            pendingAudio.append(contentsOf: samples)
+        }
 
         guard !pendingAudio.isEmpty else { return nil }
 
@@ -372,14 +470,11 @@ public final class LSEENDDiarizer: Diarizer {
     ///   - finalizeOnCompletion: Whether to finalize the timeline after processing
     ///   - progressCallback: Optional callback (processedSamples, totalSamples, chunksProcessed)
     /// - Returns: Finalized timeline with segments
-    public func processComplete(
+    private func processCompleteLocked(
         _ samples: [Float],
-        finalizeOnCompletion: Bool = true,
-        progressCallback: ((Int, Int, Int) -> Void)? = nil
+        finalizeOnCompletion: Bool,
+        progressCallback: ((Int, Int, Int) -> Void)?
     ) throws -> DiarizerTimeline {
-        lock.lock()
-        defer { lock.unlock() }
-
         guard let engine = _engine else {
             throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
         }
@@ -430,6 +525,70 @@ public final class LSEENDDiarizer: Diarizer {
         return _timeline
     }
 
+    /// Process a complete audio buffer.
+    ///
+    /// Resets state and pushes all audio at once, then finalizes.
+    ///
+    /// - Parameters:
+    ///   - samples: Complete audio samples at the model's target sample rate
+    ///   - sourceSampleRate: Source audio sample rate (if nil, assumes that it matches the engine's sample rate)
+    ///   - finalizeOnCompletion: Whether to finalize the timeline after processing
+    ///   - progressCallback: Optional callback (processedSamples, totalSamples, chunksProcessed)
+    /// - Returns: Finalized timeline with segments
+    public func processComplete(
+        _ samples: [Float],
+        sourceSampleRate: Double? = nil,
+        finalizeOnCompletion: Bool = true,
+        progressCallback: ((Int, Int, Int) -> Void)? = nil
+    ) throws -> DiarizerTimeline {
+        try processCompleteInternal(
+            samples,
+            sourceSampleRate: sourceSampleRate,
+            finalizeOnCompletion: finalizeOnCompletion,
+            progressCallback: progressCallback
+        )
+    }
+
+    /// Process a complete audio buffer.
+    ///
+    /// Resets state and pushes all audio at once, then finalizes.
+    ///
+    /// - Parameters:
+    ///   - samples: Complete audio samples.
+    ///   - sourceSampleRate: Source audio sample rate (if `nil`, assumes the model rate).
+    ///   - finalizeOnCompletion: Whether to finalize the timeline after processing.
+    ///   - progressCallback: Optional callback `(processedSamples, totalSamples, chunksProcessed)`.
+    /// - Returns: Finalized timeline with segments.
+    public func processComplete<C: Collection>(
+        _ samples: C,
+        sourceSampleRate: Double? = nil,
+        finalizeOnCompletion: Bool,
+        progressCallback: ((Int, Int, Int) -> Void)?
+    ) throws -> DiarizerTimeline where C.Element == Float {
+        try processCompleteInternal(
+            Array(samples),
+            sourceSampleRate: sourceSampleRate,
+            finalizeOnCompletion: finalizeOnCompletion,
+            progressCallback: progressCallback
+        )
+    }
+
+    private func processCompleteInternal(
+        _ samples: [Float],
+        sourceSampleRate: Double?,
+        finalizeOnCompletion: Bool,
+        progressCallback: ((Int, Int, Int) -> Void)?
+    ) throws -> DiarizerTimeline {
+        return try lock.withLock {
+            let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) ?? samples
+            return try processCompleteLocked(
+                normalized,
+                finalizeOnCompletion: finalizeOnCompletion,
+                progressCallback: progressCallback
+            )
+        }
+    }
+
     /// Process a complete audio file from a URL.
     ///
     /// Reads and resamples the file to ``targetSampleRate``, then delegates to
@@ -437,21 +596,28 @@ public final class LSEENDDiarizer: Diarizer {
     ///
     /// - Parameters:
     ///   - audioFileURL: Path to a WAV, CAF, or other audio file.
+    ///   - finalizeOnCompletion: Whether to finalize the timeline after processing
     ///   - progressCallback: Optional callback (processedSamples, totalSamples, chunksProcessed).
     /// - Returns: Finalized timeline with segments.
     public func processComplete(
         audioFileURL: URL,
+        finalizeOnCompletion: Bool = true,
         progressCallback: ((Int, Int, Int) -> Void)? = nil
     ) throws -> DiarizerTimeline {
-        let engine = try lock.withLock {
+        try lock.withLock {
             guard let engine = _engine else {
                 throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
             }
-            return engine
+
+            let converter = AudioConverter(sampleRate: Double(engine.targetSampleRate))
+            let audio = try converter.resampleAudioFile(audioFileURL)
+
+            return try processCompleteLocked(
+                audio,
+                finalizeOnCompletion: finalizeOnCompletion,
+                progressCallback: progressCallback
+            )
         }
-        let converter = AudioConverter(sampleRate: Double(engine.targetSampleRate))
-        let audio = try converter.resampleAudioFile(audioFileURL)
-        return try processComplete(audio, progressCallback: progressCallback)
     }
 
     // MARK: - Lifecycle (Diarizer Protocol)
@@ -545,6 +711,21 @@ public final class LSEENDDiarizer: Diarizer {
         pendingAudio.removeAll(keepingCapacity: true)
         _numFramesProcessed = 0
         _visibleStartFrameOffset = 0
+    }
+
+    private func normalizeSamplesLocked<C: Collection>(
+        _ samples: C,
+        sourceSampleRate: Double?
+    ) throws -> [Float]? where C.Element == Float {
+        guard let engine = _engine,
+            let sourceSampleRate,
+            sourceSampleRate != Double(engine.targetSampleRate)
+        else {
+            return nil
+        }
+
+        return try AudioConverter(sampleRate: Double(engine.targetSampleRate))
+            .resample(Array(samples), from: sourceSampleRate)
     }
 
     /// Create a new mel spectrogram instance owned by this diarizer.

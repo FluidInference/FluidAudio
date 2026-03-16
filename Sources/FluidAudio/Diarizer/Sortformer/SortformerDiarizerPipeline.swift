@@ -219,31 +219,47 @@ public final class SortformerDiarizer: Diarizer {
     ///
     /// - Parameter samples: Audio samples (16kHz mono) of known speakers
     /// - Throws: `SortformerError.notInitialized` if models not loaded
-    public func primeWithAudio(_ samples: [Float]) throws {
+    public func primeWithAudio(_ samples: [Float], sourceSampleRate: Double? = nil) throws {
+        try primeWithAudioInternal(samples, sourceSampleRate: sourceSampleRate)
+    }
+
+    /// Prime the diarizer with enrollment audio to warm up speaker state.
+    ///
+    /// - Parameters:
+    ///   - samples: Audio samples of known speakers.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
+    public func primeWithAudio<C: Collection>(
+        _ samples: C,
+        sourceSampleRate: Double? = nil
+    ) throws where C.Element == Float {
+        try primeWithAudioInternal(Array(samples), sourceSampleRate: sourceSampleRate)
+    }
+
+    private func primeWithAudioInternal(
+        _ samples: [Float],
+        sourceSampleRate: Double?
+    ) throws {
+        let normalized = try normalizeSamples(Array(samples), sourceSampleRate: sourceSampleRate)
+
         try lock.withLock {
             guard _models != nil else {
                 throw SortformerError.notInitialized
             }
 
-            // Process enrollment audio through the normal pipeline
-            audioBuffer.append(contentsOf: samples)
+            audioBuffer.append(contentsOf: normalized)
             preprocessAudioToFeaturesLocked()
 
-            // Run all available chunks to populate spkcache/fifo
             while let _ = try processLocked(updateTimeline: false) {}
 
-            // Reset timeline and counters — keep streaming state (spkcache, fifo, silence)
             _numFramesProcessed = 0
             _timeline.reset()
-
-            // Clear audio/feature buffers but preserve lastAudioSample for mel continuity
             audioBuffer = []
             featureBuffer = []
             startFeat = 0
-            // Keep diarizerChunkIndex so leftContext is nonzero for next real chunk
 
             logger.info(
-                "Primed with \(samples.count) samples (\(String(format: "%.1f", Float(samples.count) / 16000.0))s), "
+                "Primed with \(normalized.count) samples "
+                    + "(\(String(format: "%.1f", Float(normalized.count) / Float(config.sampleRate)))s), "
                     + "spkcache=\(_state.spkcacheLength), fifo=\(_state.fifoLength)"
             )
         }
@@ -253,7 +269,9 @@ public final class SortformerDiarizer: Diarizer {
 
     /// Add audio samples to the processing buffer (protocol conformance).
     ///
-    /// - Parameter samples: Audio samples (16kHz mono)
+    /// - Parameters:
+    ///   - samples: Audio samples (16kHz mono)
+    ///   - sourceSampleRate: Source audio sample rate
     public func addAudio(_ samples: [Float]) {
         lock.withLock {
             audioBuffer.append(contentsOf: samples)
@@ -261,12 +279,38 @@ public final class SortformerDiarizer: Diarizer {
         }
     }
 
+    /// Add audio samples to the processing buffer, resampling when needed.
+    ///
+    /// - Parameters:
+    ///   - samples: Mono audio samples.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
+    public func addAudio(
+        _ samples: [Float],
+        sourceSampleRate: Double? = nil
+    ) throws {
+        let normalized = try normalizeSamples(samples, sourceSampleRate: sourceSampleRate)
+        lock.withLock {
+            audioBuffer.append(contentsOf: normalized)
+            preprocessAudioToFeaturesLocked()
+        }
+    }
+
     /// Add audio samples to the processing buffer (generic variant).
     ///
-    /// - Parameter samples: Audio samples (16kHz mono)
-    public func addAudio<C: Collection>(_ samples: C) where C.Element == Float {
-        lock.withLock {
-            audioBuffer.append(contentsOf: samples)
+    /// - Parameters:
+    ///   - samples: Audio samples (16kHz mono)
+    ///   - sourceSampleRate: Source audio sample rate
+    public func addAudio<C: Collection>(
+        _ samples: C,
+        sourceSampleRate: Double? = nil
+    ) throws where C.Element == Float {
+        try lock.withLock {
+            if let sourceSampleRate, sourceSampleRate != Double(config.sampleRate) {
+                let normalized = try normalizeSamples(Array(samples), sourceSampleRate: sourceSampleRate)
+                audioBuffer.append(contentsOf: normalized)
+            } else {
+                audioBuffer.append(contentsOf: samples)
+            }
             preprocessAudioToFeaturesLocked()
         }
     }
@@ -286,22 +330,38 @@ public final class SortformerDiarizer: Diarizer {
     ///
     /// Convenience method that combines `addAudio()` and `process()`.
     ///
-    /// - Parameter samples: Audio samples (16kHz mono)
+    /// - Parameters:
+    ///   - samples: Audio samples (16kHz mono)
+    ///   - sourceSampleRate: Source audio sample rate
     /// - Returns: New chunk results if enough audio was processed
     @available(*, deprecated, renamed: "process(samples:)")
-    public func processSamples(_ samples: [Float]) throws -> DiarizerTimelineUpdate? {
-        return try process(samples: samples)
+    public func processSamples(
+        _ samples: [Float],
+        sourceSampleRate: Double? = nil
+    ) throws -> DiarizerTimelineUpdate? {
+        return try process(samples: samples, sourceSampleRate: sourceSampleRate)
     }
 
     /// Process a chunk of audio in one call.
     ///
     /// Convenience method that combines `addAudio()` and `process()`.
     ///
-    /// - Parameter samples: Audio samples (16kHz mono)
+    /// - Parameters:
+    ///   - samples: Audio samples (16kHz mono)
+    ///   - sourceSampleRate: Source audio sample rate
     /// - Returns: New chunk results if enough audio was processed
-    public func process(samples: [Float]) throws -> DiarizerTimelineUpdate? {
-        try lock.withLock {
-            audioBuffer.append(contentsOf: samples)
+    public func process<C: Collection>(
+        samples: C,
+        sourceSampleRate: Double? = nil
+    ) throws -> DiarizerTimelineUpdate?
+    where C.Element == Float {
+        return try lock.withLock {
+            if let sourceSampleRate, sourceSampleRate != Double(config.sampleRate) {
+                let normalized = try normalizeSamples(Array(samples), sourceSampleRate: sourceSampleRate)
+                audioBuffer.append(contentsOf: normalized)
+            } else {
+                audioBuffer.append(contentsOf: samples)
+            }
             preprocessAudioToFeaturesLocked()
             return try processLocked()
         }
@@ -387,10 +447,50 @@ public final class SortformerDiarizer: Diarizer {
     /// - Returns: Complete diarization timeline
     public func processComplete(
         _ samples: [Float],
+        sourceSampleRate: Double? = nil,
         finalizeOnCompletion: Bool = true,
         progressCallback: ProgressCallback? = nil
     ) throws -> DiarizerTimeline {
-        try lock.withLock {
+        try processCompleteInternal(
+            samples,
+            sourceSampleRate: sourceSampleRate,
+            finalizeOnCompletion: finalizeOnCompletion,
+            progressCallback: progressCallback
+        )
+    }
+
+    /// Process a complete audio buffer and return the resulting timeline.
+    ///
+    /// - Parameters:
+    ///   - samples: Complete mono audio buffer.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
+    ///   - finalizeOnCompletion: Whether to finalize the timeline before returning it.
+    ///   - progressCallback: Optional callback receiving `(processedSamples, totalSamples, chunksProcessed)`.
+    /// - Returns: The diarization timeline for the provided audio.
+    public func processComplete<C: Collection>(
+        _ samples: C,
+        sourceSampleRate: Double? = nil,
+        finalizeOnCompletion: Bool = true,
+        progressCallback: ProgressCallback? = nil
+    ) throws -> DiarizerTimeline
+    where C.Element == Float {
+        try processCompleteInternal(
+            Array(samples),
+            sourceSampleRate: sourceSampleRate,
+            finalizeOnCompletion: finalizeOnCompletion,
+            progressCallback: progressCallback
+        )
+    }
+
+    private func processCompleteInternal(
+        _ samples: [Float],
+        sourceSampleRate: Double?,
+        finalizeOnCompletion: Bool,
+        progressCallback: ProgressCallback?
+    ) throws -> DiarizerTimeline {
+        let normalized = try normalizeSamples(samples, sourceSampleRate: sourceSampleRate)
+
+        return try lock.withLock {
             guard let models = _models else {
                 throw SortformerError.notInitialized
             }
@@ -400,7 +500,7 @@ public final class SortformerDiarizer: Diarizer {
             lastAudioSample = 0
             resetBuffersLocked()
 
-            var featureProvider = SortformerFeatureLoader(config: self.config, audio: samples)
+            var featureProvider = SortformerFeatureLoader(config: self.config, audio: normalized)
 
             var chunksProcessed = 0
 
@@ -451,8 +551,8 @@ public final class SortformerDiarizer: Diarizer {
                 // processedFrames is in mel frames (after subsampling)
                 // Each mel frame corresponds to melStride samples
                 let processedMelFrames = diarizerChunkIndex * coreFrames
-                let progress = min(processedMelFrames * config.melStride, samples.count)
-                progressCallback?(progress, samples.count, chunksProcessed)
+                let progress = min(processedMelFrames * config.melStride, normalized.count)
+                progressCallback?(progress, normalized.count, chunksProcessed)
             }
 
             // Save updated state
@@ -545,6 +645,20 @@ public final class SortformerDiarizer: Diarizer {
             lastAudioSample = 0
             audioBuffer.removeAll()
         }
+    }
+
+    private func normalizeSamples(
+        _ samples: [Float],
+        sourceSampleRate: Double?
+    ) throws -> [Float] {
+        guard let sourceSampleRate,
+            sourceSampleRate != Double(config.sampleRate)
+        else {
+            return samples
+        }
+
+        return try AudioConverter(sampleRate: Double(config.sampleRate))
+            .resample(samples, from: sourceSampleRate)
     }
 
     /// Get next chunk features (for testing)

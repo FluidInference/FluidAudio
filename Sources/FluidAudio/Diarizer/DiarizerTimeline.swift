@@ -27,23 +27,47 @@ public protocol Diarizer: AnyObject {
 
     // MARK: Streaming
 
-    /// Add audio samples to the processing buffer
-    func addAudio(_ samples: [Float])
+    /// Add audio samples to the processing buffer.
+    ///
+    /// Implementations may resample the input when `sourceSampleRate` differs from
+    /// the model's target sample rate.
+    ///
+    /// - Parameters:
+    ///   - samples: Mono audio samples to enqueue for diarization.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the target rate.
+    func addAudio<C: Collection>(_ samples: C, sourceSampleRate: Double?) throws
+    where C.Element == Float
 
-    /// Process buffered audio and return any new results
+    /// Process buffered audio and return any newly available diarization output.
     func process() throws -> DiarizerTimelineUpdate?
 
-    /// Add audio and process in one call
-    func process(samples: [Float]) throws -> DiarizerTimelineUpdate?
+    /// Add audio and process it in one call.
+    ///
+    /// - Parameters:
+    ///   - samples: Mono audio samples to process.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the target rate.
+    /// - Returns: A timeline update containing finalized and tentative output, or `nil`
+    ///   if not enough buffered audio was available to emit frames.
+    func process<C: Collection>(samples: C, sourceSampleRate: Double?) throws -> DiarizerTimelineUpdate?
+    where C.Element == Float
 
     // MARK: Offline
 
-    /// Process complete audio and return finalized timeline
-    func processComplete(
-        _ samples: [Float],
+    /// Process a complete audio buffer and return the resulting timeline.
+    ///
+    /// - Parameters:
+    ///   - samples: Complete mono audio buffer to diarize.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the target rate.
+    ///   - finalizeOnCompletion: Whether to finalize the timeline before returning it.
+    ///   - progressCallback: Optional callback receiving `(processedSamples, totalSamples, chunksProcessed)`.
+    /// - Returns: The diarization timeline for the provided audio.
+    func processComplete<C: Collection>(
+        _ samples: C,
+        sourceSampleRate: Double?,
         finalizeOnCompletion: Bool,
         progressCallback: ((Int, Int, Int) -> Void)?
     ) throws -> DiarizerTimeline
+    where C.Element == Float
 
     // MARK: Lifecycle
 
@@ -52,6 +76,17 @@ public protocol Diarizer: AnyObject {
 
     /// Clean up all resources
     func cleanup()
+
+    /// Prime the diarizer with enrollment audio before processing live audio.
+    ///
+    /// Implementations may use this to warm internal state while resetting exposed
+    /// timeline/frame counters so subsequent real audio starts from frame 0.
+    ///
+    /// - Parameters:
+    ///   - samples: Enrollment audio samples.
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the target rate.
+    func primeWithAudio<C: Collection>(_ samples: C, sourceSampleRate: Double?) throws
+    where C.Element == Float
 }
 
 // MARK: - Post-Processing Configuration
@@ -197,7 +232,7 @@ public struct DiarizerTimelineConfig: Sendable {
 
 // MARK: - Speaker
 
-public final class DiarizerSpeaker: @unchecked Sendable, Identifiable, CustomStringConvertible {
+public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
     /// Speaker ID
     public let id: UUID
 
@@ -479,7 +514,7 @@ public struct DiarizerChunkResult: Sendable {
 ///
 /// Generalizes `SortformerTimeline` for any frame-based diarizer. Works with
 /// both Sortformer (fixed 4 speakers) and LS-EEND (variable speaker count).
-public final class DiarizerTimeline: @unchecked Sendable {
+public final class DiarizerTimeline {
     private struct StreamingState {
         var startFrame: Int
         var isSpeaking: Bool
