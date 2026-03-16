@@ -240,7 +240,7 @@ public final class SortformerDiarizer: Diarizer {
         _ samples: [Float],
         sourceSampleRate: Double?
     ) throws {
-        let normalized = try normalizeSamples(Array(samples), sourceSampleRate: sourceSampleRate)
+        let normalized = try normalizeSamples(samples, sourceSampleRate: sourceSampleRate)
 
         try lock.withLock {
             guard _models != nil else {

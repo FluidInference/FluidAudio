@@ -329,10 +329,13 @@ public final class LSEENDDiarizer: Diarizer {
 
         guard let session = _session else { return nil }
 
-        let chunk = pendingAudio
-        pendingAudio.removeAll(keepingCapacity: true)
+        // Clear unconditionally (even on throw) so failed audio isn't re-fed.
+        // Using defer + direct pass avoids a CoW copy — pushAudio receives a
+        // temporary reference, and removeAll runs after it returns (refcount == 1).
+        defer { pendingAudio.removeAll(keepingCapacity: true) }
+        let update = try session.pushAudio(pendingAudio)
 
-        guard let update = try session.pushAudio(chunk) else {
+        guard let update else {
             return nil
         }
 
@@ -392,10 +395,10 @@ public final class LSEENDDiarizer: Diarizer {
         }
         guard let session = _session else { return nil }
 
-        let chunk = pendingAudio
-        pendingAudio.removeAll(keepingCapacity: true)
+        defer { pendingAudio.removeAll(keepingCapacity: true) }
+        let update = try session.pushAudio(pendingAudio)
 
-        guard let update = try session.pushAudio(chunk) else {
+        guard let update else {
             return nil
         }
 
@@ -437,10 +440,9 @@ public final class LSEENDDiarizer: Diarizer {
         }
         guard let session = _session else { return nil }
 
-        let chunk = pendingAudio
-        pendingAudio.removeAll(keepingCapacity: true)
+        defer { pendingAudio.removeAll(keepingCapacity: true) }
 
-        guard let update = try session.pushAudio(chunk) else {
+        guard let update = try session.pushAudio(pendingAudio) else {
             return nil
         }
 
@@ -665,11 +667,11 @@ public final class LSEENDDiarizer: Diarizer {
 
         guard let engine = _engine, let session = _session else { return nil }
 
-        // Flush pending audio first
+        // Flush pending audio first — clear unconditionally so failed audio isn't retained.
+        // Using defer + direct pass avoids a CoW copy.
         if !pendingAudio.isEmpty {
-            let chunk = pendingAudio
-            pendingAudio.removeAll(keepingCapacity: true)
-            let pushedUpdate = try session.pushAudio(chunk)
+            defer { pendingAudio.removeAll(keepingCapacity: true) }
+            let pushedUpdate = try session.pushAudio(pendingAudio)
             if let update = pushedUpdate {
                 let numSpeakers = engine.metadata.realOutputDim
                 let flushedResult = DiarizerChunkResult(
