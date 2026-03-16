@@ -7,7 +7,7 @@ struct ChunkProcessor {
     let totalSamples: Int
 
     private let logger = AppLogger(category: "ChunkProcessor")
-    private typealias TokenWindow = (token: Int, timestamp: Int, confidence: Float)
+    private typealias TokenWindow = (token: Int, timestamp: Int, confidence: Float, duration: Int)
     private struct IndexedToken {
         let index: Int
         let token: TokenWindow
@@ -86,7 +86,7 @@ struct ChunkProcessor {
             let chunkLengthWithContext = chunkEnd - contextStart
             let chunkSamplesArray = try readSamples(offset: contextStart, count: chunkLengthWithContext)
 
-            let (windowTokens, windowTimestamps, windowConfidences) = try await transcribeChunk(
+            let (windowTokens, windowTimestamps, windowConfidences, windowDurations) = try await transcribeChunk(
                 samples: chunkSamplesArray,
                 contextSamples: contextSamples,
                 chunkStart: chunkStart,
@@ -100,8 +100,15 @@ struct ChunkProcessor {
                 throw ASRError.processingFailed("Token, timestamp, and confidence arrays are misaligned")
             }
 
-            let windowData: [TokenWindow] = zip(zip(windowTokens, windowTimestamps), windowConfidences).map {
-                (token: $0.0.0, timestamp: $0.0.1, confidence: $0.1)
+            // Default to 0 per token if durations array is misaligned (shouldn't happen in practice)
+            let durations =
+                windowDurations.count == windowTokens.count
+                ? windowDurations : Array(repeating: 0, count: windowTokens.count)
+
+            let windowData: [TokenWindow] = zip(
+                zip(zip(windowTokens, windowTimestamps), windowConfidences), durations
+            ).map {
+                (token: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
             }
             chunkOutputs.append(windowData)
 
@@ -143,11 +150,13 @@ struct ChunkProcessor {
         let allTokens = mergedTokens.map { $0.token }
         let allTimestamps = mergedTokens.map { $0.timestamp }
         let allConfidences = mergedTokens.map { $0.confidence }
+        let allDurations = mergedTokens.map { $0.duration }
 
         return manager.processTranscriptionResult(
             tokenIds: allTokens,
             timestamps: allTimestamps,
             confidences: allConfidences,
+            tokenDurations: allDurations,
             encoderSequenceLength: 0,  // Not relevant for chunk processing
             audioSamples: [],
             processingTime: Date().timeIntervalSince(startTime)
@@ -169,8 +178,8 @@ struct ChunkProcessor {
         isLastChunk: Bool,
         using manager: AsrManager,
         decoderState: inout TdtDecoderState
-    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float]) {
-        guard !samples.isEmpty else { return ([], [], []) }
+    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], durations: [Int]) {
+        guard !samples.isEmpty else { return ([], [], [], []) }
 
         let paddedChunk = manager.padAudioIfNeeded(samples, targetLength: maxModelSamples)
 
@@ -195,10 +204,10 @@ struct ChunkProcessor {
         )
 
         if hypothesis.isEmpty || encoderSequenceLength == 0 {
-            return ([], [], [])
+            return ([], [], [], [])
         }
 
-        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences)
+        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, hypothesis.tokenDurations)
     }
 
     private func mergeChunks(
