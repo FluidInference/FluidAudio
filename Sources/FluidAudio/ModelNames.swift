@@ -233,8 +233,8 @@ public enum ModelNames {
     /// Sortformer streaming diarization model names
     public enum Sortformer {
         public enum Variant: CaseIterable, Sendable {
-            case gradientDecentV2
-            case gradientDecentV2_1
+            case gradientDescentV2
+            case gradientDescentV2_1
             case nvidiaLowLatencyV2
             case nvidiaLowLatencyV2_1
             case nvidiaHighLatencyV2
@@ -242,9 +242,9 @@ public enum ModelNames {
 
             public var name: String {
                 switch self {
-                case .gradientDecentV2:
+                case .gradientDescentV2:
                     return "Sortformer_v2"
-                case .gradientDecentV2_1:
+                case .gradientDescentV2_1:
                     return "Sortformer_v2.1"
                 case .nvidiaLowLatencyV2:
                     return "SortformerNvidiaLow_v2"
@@ -259,10 +259,10 @@ public enum ModelNames {
 
             public var defaultConfiguration: SortformerConfig {
                 switch self {
-                case .gradientDecentV2:
-                    return .gradientDescentV2
-                case .gradientDecentV2_1:
-                    return .gradientDescentV2_1
+                case .gradientDescentV2:
+                    return .fastestV2
+                case .gradientDescentV2_1:
+                    return .fastestV2_1
                 case .nvidiaLowLatencyV2:
                     return .nvidiaLowLatencyV2
                 case .nvidiaLowLatencyV2_1:
@@ -284,7 +284,7 @@ public enum ModelNames {
         }
 
         /// Lowest latency for streaming
-        public static let defaultVariant: Variant = .gradientDecentV2_1
+        public static let defaultVariant: Variant = .gradientDescentV2_1
 
         /// Bundle name for a specific variant
         public static func bundle(for varient: Variant) -> String {
