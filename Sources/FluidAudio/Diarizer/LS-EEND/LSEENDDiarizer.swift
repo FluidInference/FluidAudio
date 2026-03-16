@@ -502,7 +502,19 @@ public final class LSEENDDiarizer: Diarizer {
         if !pendingAudio.isEmpty {
             let chunk = pendingAudio
             pendingAudio.removeAll(keepingCapacity: true)
-            let _ = try session.pushAudio(chunk)
+            let pushedUpdate = try session.pushAudio(chunk)
+            if let update = pushedUpdate {
+                let numSpeakers = engine.metadata.realOutputDim
+                let flushedResult = DiarizerChunkResult(
+                    startFrame: _numFramesProcessed,
+                    finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
+                    finalizedFrameCount: update.probabilities.rows,
+                    tentativePredictions: [],
+                    tentativeFrameCount: 0
+                )
+                _numFramesProcessed += flushedResult.finalizedFrameCount
+                try _timeline.addChunk(flushedResult)
+            }
         }
 
         guard let finalUpdate = try session.finalize() else {

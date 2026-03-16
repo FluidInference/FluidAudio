@@ -189,10 +189,11 @@ enum LSEENDCommand {
             let predictions = timeline.finalizedPredictions
             let numFrames = timeline.numFinalizedFrames
             var speakerActivity = [Float](repeating: 0, count: numSpeakers)
+            let activityThreshold = timeline.config.onsetThreshold
             for frame in 0..<numFrames {
                 for spk in 0..<numSpeakers {
                     let idx = frame * numSpeakers + spk
-                    if idx < predictions.count, predictions[idx] > threshold {
+                    if idx < predictions.count, predictions[idx] > activityThreshold {
                         speakerActivity[spk] += timeline.config.frameDurationSeconds
                     }
                 }

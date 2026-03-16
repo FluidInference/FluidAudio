@@ -307,13 +307,12 @@ final public class AudioConverter {
 
         // AVAudioConverter consumes this input block synchronously within convert(...),
         // so a simple local flag is sufficient and avoids extra allocator state.
-        nonisolated(unsafe) var provided = false
-        nonisolated(unsafe) let capturedBuffer = buffer
+        var provided = false
         let inputBlock: AVAudioConverterInputBlock = { _, status in
             if !provided {
                 provided = true
                 status.pointee = .haveData
-                return capturedBuffer
+                return buffer
             } else {
                 status.pointee = .endOfStream
                 return nil
