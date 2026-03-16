@@ -287,8 +287,8 @@ public enum ModelNames {
         public static let defaultVariant: Variant = .gradientDescentV2_1
 
         /// Bundle name for a specific variant
-        public static func bundle(for varient: Variant) -> String {
-            return varient.fileName
+        public static func bundle(for variant: Variant) -> String {
+            return variant.fileName
         }
 
         /// Bundle name for a given configuration
@@ -347,8 +347,8 @@ public enum ModelNames {
         public static let defaultVariant: Variant = .dihard3
 
         /// Bundle name for a specific variant
-        public static func bundle(for varient: Variant) -> [String] {
-            return varient.fileNames
+        public static func bundle(for variant: Variant) -> [String] {
+            return variant.fileNames
         }
 
         /// Default bundle name
