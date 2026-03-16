@@ -317,9 +317,25 @@ public final class AsrManager {
         guard let models = asrModels, let decoder_ = decoderModel, let joint = jointModel else {
             throw ASRError.notInitialized
         }
+
+        // Adapt config's encoderHiddenSize to match the loaded model version
+        // (e.g. default config uses 1024 but tdtCtc110m needs 512)
+        let adaptedConfig: ASRConfig
+        if config.encoderHiddenSize != models.version.encoderHiddenSize {
+            adaptedConfig = ASRConfig(
+                sampleRate: config.sampleRate,
+                tdtConfig: config.tdtConfig,
+                encoderHiddenSize: models.version.encoderHiddenSize,
+                streamingEnabled: config.streamingEnabled,
+                streamingThreshold: config.streamingThreshold
+            )
+        } else {
+            adaptedConfig = config
+        }
+
         switch models.version {
         case .v2, .tdtCtc110m:
-            let decoder = TdtDecoderV2(config: config)
+            let decoder = TdtDecoderV2(config: adaptedConfig)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
                 encoderSequenceLength: encoderSequenceLength,
@@ -332,7 +348,7 @@ public final class AsrManager {
                 globalFrameOffset: globalFrameOffset
             )
         case .v3:
-            let decoder = TdtDecoderV3(config: config)
+            let decoder = TdtDecoderV3(config: adaptedConfig)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
                 encoderSequenceLength: encoderSequenceLength,
