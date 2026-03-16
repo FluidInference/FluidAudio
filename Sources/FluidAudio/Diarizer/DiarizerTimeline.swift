@@ -291,8 +291,11 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         self._name = name
     }
 
-    public func finalize() {
+    public func finalize(enforcingMinFramesOn minFramesOn: Int? = nil) {
         queue.sync(flags: .barrier) {
+            if let minFramesOn {
+                _tentativeSegments.removeAll { $0.length >= minFramesOn }
+            }
             _finalizedSegments.append(contentsOf: _tentativeSegments)
             _tentativeSegments.removeAll()
         }
@@ -684,7 +687,7 @@ public final class DiarizerTimeline {
                 speaker.removeAllTentative(keepingCapacity: true)
             }
 
-            var confirmedCounts = Array<Int>(repeating: 0, count: config.numSpeakers)
+            var confirmedCounts = [Int](repeating: 0, count: config.numSpeakers)
             for (index, speaker) in _speakers {
                 confirmedCounts[index] = speaker.finalizedSegmentCount
             }
@@ -732,7 +735,7 @@ public final class DiarizerTimeline {
             _numFinalizedFrames += _tentativePredictions.count / config.numSpeakers
             _tentativePredictions.removeAll()
             for speaker in _speakers.values {
-                speaker.finalize()
+                speaker.finalize(enforcingMinFramesOn: config.minFramesOn)
             }
             trimPredictions()
         }
