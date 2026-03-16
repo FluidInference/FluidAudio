@@ -100,6 +100,7 @@ public final class LSEENDDiarizer: Diarizer {
     private var _timeline: DiarizerTimeline
     private var _numFramesProcessed: Int = 0
     private var _timelineConfig: DiarizerTimelineConfig
+    private var _visibleStartFrameOffset: Int = 0
 
     // Audio buffering
     private var pendingAudio: [Float] = []
@@ -215,6 +216,45 @@ public final class LSEENDDiarizer: Diarizer {
         logger.info("Initialized LS-EEND with pre-loaded engine")
     }
 
+    // MARK: - Speaker Priming
+
+    /// Prime the diarizer with enrollment audio to warm the streaming state.
+    ///
+    /// This feeds audio through the active streaming session, discards any emitted
+    /// predictions, and resets the visible timeline so subsequent calls to
+    /// `process()` start again from frame 0 while keeping the warmed model state.
+    ///
+    /// - Parameter samples: Audio samples at the model's target sample rate.
+    /// - Throws: ``LSEENDError/modelPredictionFailed(_:)`` if the diarizer is not initialized.
+    public func primeWithAudio(_ samples: [Float]) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let engine = _engine else {
+            throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
+        }
+        guard !samples.isEmpty else { return }
+
+        if _session == nil {
+            _session = try engine.createSession(
+                inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
+        }
+        guard let session = _session else { return }
+
+        pendingAudio.removeAll(keepingCapacity: true)
+        let _ = try session.pushAudio(samples)
+
+        _visibleStartFrameOffset = session.snapshot().probabilities.rows
+        _numFramesProcessed = 0
+        _timeline.reset()
+
+        logger.info(
+            "Primed LS-EEND with \(samples.count) samples "
+                + "(\(String(format: "%.1f", Float(samples.count) / Float(engine.targetSampleRate)))s), "
+                + "visible offset=\(_visibleStartFrameOffset)"
+        )
+    }
+
     // MARK: - Streaming (Diarizer Protocol)
 
     /// Add audio samples to the processing buffer.
@@ -266,7 +306,7 @@ public final class LSEENDDiarizer: Diarizer {
 
         let numSpeakers = engine.metadata.realOutputDim
         let result = DiarizerChunkResult(
-            startFrame: update.startFrame,
+            startFrame: max(0, update.startFrame - _visibleStartFrameOffset),
             finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
             finalizedFrameCount: update.probabilities.rows,
             tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
@@ -307,7 +347,7 @@ public final class LSEENDDiarizer: Diarizer {
 
         let numSpeakers = engine.metadata.realOutputDim
         let result = DiarizerChunkResult(
-            startFrame: update.startFrame,
+            startFrame: max(0, update.startFrame - _visibleStartFrameOffset),
             finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
             finalizedFrameCount: update.probabilities.rows,
             tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
@@ -348,6 +388,7 @@ public final class LSEENDDiarizer: Diarizer {
         updateTimelineConfig(engine: engine)
         _timeline = DiarizerTimeline(config: _timelineConfig)
         _numFramesProcessed = 0
+        _visibleStartFrameOffset = 0
         _session = nil
         pendingAudio.removeAll(keepingCapacity: true)
 
@@ -491,6 +532,7 @@ public final class LSEENDDiarizer: Diarizer {
     private func resetBuffersLocked() {
         pendingAudio.removeAll(keepingCapacity: true)
         _numFramesProcessed = 0
+        _visibleStartFrameOffset = 0
     }
 
     /// Create a new mel spectrogram instance owned by this diarizer.

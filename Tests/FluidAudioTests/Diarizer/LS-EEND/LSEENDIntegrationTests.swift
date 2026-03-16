@@ -1,3 +1,4 @@
+import CoreML
 import Foundation
 import XCTest
 
@@ -176,6 +177,52 @@ final class LSEENDIntegrationTests: XCTestCase {
         diarizer.reset()
         XCTAssertEqual(diarizer.numFramesProcessed, 0)
         XCTAssertEqual(diarizer.timeline.numFinalizedFrames, 0)
+    }
+
+    func testPrimeWithAudioThrowsWhenNotInitialized() {
+        let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
+        let samples = [Float](repeating: 0.1, count: 16000)
+
+        XCTAssertThrowsError(try diarizer.primeWithAudio(samples)) { error in
+            guard case LSEENDError.modelPredictionFailed(let message) = error else {
+                XCTFail("Expected modelPredictionFailed but got \(error)")
+                return
+            }
+            XCTAssertTrue(message.contains("not initialized"))
+        }
+    }
+
+    func testPrimeWithAudioResetsVisibleTimelineAndAllowsStreaming() async throws {
+        let engine = try await makeEngine(variant: .dihard3)
+        let samples = try fixtureAudio(sampleRate: engine.targetSampleRate, limitSeconds: 6.0)
+        let enrollmentCount = min(samples.count / 2, engine.targetSampleRate * 2)
+        let enrollment = Array(samples.prefix(enrollmentCount))
+        let live = Array(samples.dropFirst(enrollmentCount))
+
+        let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
+        diarizer.initialize(engine: engine)
+
+        try diarizer.primeWithAudio(enrollment)
+
+        XCTAssertEqual(diarizer.numFramesProcessed, 0)
+        XCTAssertEqual(diarizer.timeline.numFinalizedFrames, 0)
+
+        var firstUpdate: DiarizerTimelineUpdate?
+        for chunk in chunk(live, sizes: [977, 1231, 1607]) {
+            if let update = try diarizer.process(samples: chunk) {
+                firstUpdate = update
+                break
+            }
+        }
+
+        let finalChunk = try diarizer.finalizeSession()
+
+        XCTAssertTrue(firstUpdate != nil || finalChunk != nil)
+        if let firstUpdate {
+            XCTAssertEqual(firstUpdate.chunkResult.startFrame, 0)
+        }
+        XCTAssertGreaterThan(diarizer.timeline.numFinalizedFrames, 0)
+        XCTAssertEqual(diarizer.numFramesProcessed, diarizer.timeline.numFinalizedFrames)
     }
 
     private func makeEngine(variant: LSEENDVariant) async throws -> LSEENDInferenceEngine {
