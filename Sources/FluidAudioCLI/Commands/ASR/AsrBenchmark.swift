@@ -815,8 +815,11 @@ extension ASRBenchmark {
                         modelVersion = .v2
                     case "v3", "3":
                         modelVersion = .v3
+                    case "tdt-ctc-110m", "110m":
+                        modelVersion = .tdtCtc110m
                     default:
-                        logger.error("Invalid model version: \(arguments[i + 1]). Use 'v2' or 'v3'")
+                        logger.error(
+                            "Invalid model version: \(arguments[i + 1]). Use 'v2', 'v3', or 'tdt-ctc-110m'")
                         exit(1)
                     }
                     i += 1
@@ -834,7 +837,13 @@ extension ASRBenchmark {
             logger.info("   Max files: \(maxFiles?.description ?? "all")")
         }
         logger.info("   Output file: \(outputFile)")
-        logger.info("   Model version: \(modelVersion == .v2 ? "v2" : "v3")")
+        let versionLabel: String
+        switch modelVersion {
+        case .v2: versionLabel = "v2"
+        case .v3: versionLabel = "v3"
+        case .tdtCtc110m: versionLabel = "tdt-ctc-110m"
+        }
+        logger.info("   Model version: \(versionLabel)")
         logger.info("   Debug mode: \(debugMode ? "enabled" : "disabled")")
         logger.info("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
         logger.info("   Test streaming: \(testStreaming ? "enabled" : "disabled")")
@@ -856,9 +865,11 @@ extension ASRBenchmark {
 
         let benchmark = ASRBenchmark(config: config)
 
-        // Initialize ASR manager with fast benchmark preset
+        // Initialize ASR manager with model-version-aware config
+        let tdtConfig = TdtConfig(blankId: modelVersion.blankId)
         let asrConfig = ASRConfig(
-            tdtConfig: TdtConfig()
+            tdtConfig: tdtConfig,
+            encoderHiddenSize: modelVersion.encoderHiddenSize
         )
 
         let asrManager = AsrManager(config: asrConfig)
@@ -912,10 +923,7 @@ extension ASRBenchmark {
 
                 if ProcessInfo.processInfo.environment["CI"] != nil {
                     logger.debug("🔍 CI Debug Information:")
-                    let modelsDir = FileManager.default.homeDirectoryForCurrentUser
-                        .appendingPathComponent(
-                            "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-\(modelVersion == .v2 ? "v2" : "v3")-coreml"
-                        )
+                    let modelsDir = AsrModels.defaultCacheDirectory(for: modelVersion)
                     logger.debug("Models directory: \(modelsDir.path)")
                     logger.debug(
                         "   Directory exists: \(FileManager.default.fileExists(atPath: modelsDir.path))"
@@ -1115,7 +1123,7 @@ extension ASRBenchmark {
                 --max-files <number>      Maximum number of files to process (default: all)
                 --single-file <id>        Process only a specific file (e.g., 1089-134686-0011)
                 --output <file>           Output JSON file path (default: asr_benchmark_results.json)
-                --model-version <version> ASR model version to use: v2 or v3 (default: v3)
+                --model-version <version> ASR model version to use: v2, v3, or tdt-ctc-110m (default: v3)
                 --debug                   Enable debug logging
                 --auto-download           Automatically download LibriSpeech dataset (default)
                 --no-auto-download        Disable automatic dataset download
