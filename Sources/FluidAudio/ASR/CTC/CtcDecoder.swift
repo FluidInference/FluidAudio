@@ -177,12 +177,12 @@ public func ctcBeamSearch(
                 var lmDelta: Float = 0.0
                 if let lm = lm, piece.hasPrefix("▁") {
                     let completedWord = newWordPieces.joined()
-                    if !completedWord.isEmpty {
-                        lmDelta =
-                            lmWeight * lm.score(word: completedWord, prev: newPrevWord)
-                            + wordBonus
-                        newPrevWord = completedWord
-                    }
+                    let hasCompletedWord = !completedWord.isEmpty
+                    lmDelta =
+                        hasCompletedWord
+                        ? lmWeight * lm.score(word: completedWord, prev: newPrevWord) + wordBonus
+                        : 0.0
+                    newPrevWord = hasCompletedWord ? completedWord : newPrevWord
                     let stripped = String(piece.dropFirst())
                     newWordPieces = stripped.isEmpty ? [] : [stripped]
                 } else if lm != nil {

@@ -52,10 +52,10 @@ public struct ARPALanguageModel: Sendable {
         while let line = reader.readLine() {
             if line.isEmpty || line.hasPrefix("\\data\\") { continue }
             if line.hasPrefix("\\") {
+                if line == "\\end\\" { break }
                 section = line
                 continue
             }
-            if line == "\\end\\" { break }
             let parts = line.components(separatedBy: "\t")
             guard let log10prob = Float(parts[0]) else { continue }
             let prob = log10prob * log10ToNat
@@ -125,7 +125,8 @@ final class ARPALineReader {
             }
             if eof {
                 guard !buffer.isEmpty else { return nil }
-                let result = String(data: buffer, encoding: .utf8)
+                let result = String(data: buffer, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespaces)
                 buffer = Data()
                 return result
             }
