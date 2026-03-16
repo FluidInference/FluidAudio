@@ -684,10 +684,10 @@ public final class DiarizerTimeline {
                 speaker.removeAllTentative(keepingCapacity: true)
             }
 
-            let confirmedCounts = Dictionary(
-                uniqueKeysWithValues: _speakers.map { (index, speaker) in
-                    (index, speaker.finalizedSegmentCount)
-                })
+            var confirmedCounts = Array<Int>(repeating: 0, count: config.numSpeakers)
+            for (index, speaker) in _speakers {
+                confirmedCounts[index] = speaker.finalizedSegmentCount
+            }
 
             updateSegments(
                 predictions: chunk.finalizedPredictions,
@@ -708,10 +708,14 @@ public final class DiarizerTimeline {
             trimPredictions()
 
             let newConfirmed = _speakers.flatMap { (index, speaker) in
-                speaker.finalizedSegments.suffix(from: confirmedCounts[index, default: 0])
+                let startIndex = confirmedCounts[index]
+                guard startIndex < speaker.finalizedSegmentCount else {
+                    return ArraySlice<DiarizerSegment>()
+                }
+                return speaker.finalizedSegments.suffix(from: startIndex)
             }
 
-            let newTentative = _speakers.flatMap(\.value.tentativeSegments)
+            let newTentative = _speakers.values.flatMap(\.tentativeSegments)
 
             return DiarizerTimelineUpdate(
                 finalizedSegments: newConfirmed,
