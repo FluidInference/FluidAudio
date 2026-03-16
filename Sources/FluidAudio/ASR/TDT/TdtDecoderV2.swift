@@ -66,6 +66,10 @@ internal struct TdtDecoderV2 {
             consecutiveBlankLimit: tdt.consecutiveBlankLimit
         )
 
-        return ASRConfig(sampleRate: config.sampleRate, tdtConfig: adaptedTdt)
+        return ASRConfig(
+            sampleRate: config.sampleRate,
+            tdtConfig: adaptedTdt,
+            encoderHiddenSize: config.encoderHiddenSize
+        )
     }
 }

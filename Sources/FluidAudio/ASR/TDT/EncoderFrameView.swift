@@ -16,7 +16,8 @@ struct EncoderFrameView {
     private let timeBaseOffset: Int
     private let basePointer: UnsafeMutablePointer<Float>
 
-    init(encoderOutput: MLMultiArray, validLength: Int) throws {
+    /// Initialize with explicit hidden size (for model-version-aware callers)
+    init(encoderOutput: MLMultiArray, validLength: Int, expectedHiddenSize: Int) throws {
         let shape = encoderOutput.shape.map { $0.intValue }
         guard shape.count == 3 else {
             throw ASRError.processingFailed("Invalid encoder output shape: \(shape)")
@@ -25,11 +26,11 @@ struct EncoderFrameView {
             throw ASRError.processingFailed("Unsupported batch dimension: \(shape[0])")
         }
 
-        let hiddenSize = ASRConstants.encoderHiddenSize
+        let hiddenSize = expectedHiddenSize
         let axis1MatchesHidden = shape[1] == hiddenSize
         let axis2MatchesHidden = shape[2] == hiddenSize
         guard axis1MatchesHidden || axis2MatchesHidden else {
-            throw ASRError.processingFailed("Encoder hidden size mismatch: \(shape)")
+            throw ASRError.processingFailed("Encoder hidden size mismatch: \(shape), expected \(hiddenSize)")
         }
 
         self.hiddenAxis = axis1MatchesHidden ? 1 : 2
@@ -59,6 +60,15 @@ struct EncoderFrameView {
         } else {
             self.timeBaseOffset = (availableFrames - 1) * timeStride
         }
+    }
+
+    /// Convenience initializer using default encoder hidden size from ASRConstants
+    init(encoderOutput: MLMultiArray, validLength: Int) throws {
+        try self.init(
+            encoderOutput: encoderOutput,
+            validLength: validLength,
+            expectedHiddenSize: ASRConstants.encoderHiddenSize
+        )
     }
 
     func copyFrame(

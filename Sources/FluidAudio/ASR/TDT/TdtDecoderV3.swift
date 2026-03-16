@@ -111,9 +111,15 @@ internal struct TdtDecoderV3 {
             return TdtHypothesis(decState: decoderState)
         }
 
+        // Use encoder hidden size from config (512 for 110m, 1024 for 0.6B)
+        let expectedEncoderHidden = config.encoderHiddenSize
+
         // Build a stride-aware view so we can access encoder frames without extra copies
         let encoderFrames = try EncoderFrameView(
-            encoderOutput: encoderOutput, validLength: encoderSequenceLength)
+            encoderOutput: encoderOutput,
+            validLength: encoderSequenceLength,
+            expectedHiddenSize: expectedEncoderHidden
+        )
 
         var hypothesis = TdtHypothesis(decState: decoderState)
         hypothesis.lastToken = decoderState.lastToken
@@ -167,7 +173,7 @@ internal struct TdtDecoderV3 {
         reusableTargetLengthArray[0] = NSNumber(value: 1)
 
         // Preallocate joint input tensors and a reusable provider to avoid per-step allocations.
-        let encoderHidden = encoderFrames.hiddenSize
+        let encoderHidden = expectedEncoderHidden
         let decoderHidden = ASRConstants.decoderHiddenSize
         let reusableEncoderStep = try ANEOptimizer.createANEAlignedArray(
             shape: [1, NSNumber(value: encoderHidden), 1],
@@ -191,9 +197,8 @@ internal struct TdtDecoderV3 {
         // Initialize decoder LSTM state for a fresh utterance
         // This ensures clean state when starting transcription
         if decoderState.lastToken == nil && decoderState.predictorOutput == nil {
-            let zero = TdtDecoderState.make()
-            decoderState.hiddenState.copyData(from: zero.hiddenState)
-            decoderState.cellState.copyData(from: zero.cellState)
+            decoderState.hiddenState.resetData(to: 0)
+            decoderState.cellState.resetData(to: 0)
         }
 
         // Prime the decoder with Start-of-Sequence token if needed

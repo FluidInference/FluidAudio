@@ -6,11 +6,46 @@ import OSLog
 public enum AsrModelVersion: Sendable {
     case v2
     case v3
+    /// 110M parameter hybrid TDT-CTC model with fused preprocessor+encoder
+    case tdtCtc110m
 
     var repo: Repo {
         switch self {
         case .v2: return .parakeetV2
         case .v3: return .parakeet
+        case .tdtCtc110m: return .parakeetTdtCtc110m
+        }
+    }
+
+    /// Whether this model version uses a fused preprocessor+encoder (no separate Encoder model)
+    public var hasFusedEncoder: Bool {
+        switch self {
+        case .tdtCtc110m: return true
+        default: return false
+        }
+    }
+
+    /// Encoder hidden dimension for this model version
+    public var encoderHiddenSize: Int {
+        switch self {
+        case .tdtCtc110m: return 512
+        default: return 1024
+        }
+    }
+
+    /// Blank token ID for this model version
+    public var blankId: Int {
+        switch self {
+        case .v2, .tdtCtc110m: return 1024
+        case .v3: return 8192
+        }
+    }
+
+    /// Number of LSTM layers in the decoder prediction network
+    public var decoderLayers: Int {
+        switch self {
+        case .tdtCtc110m: return 1
+        default: return 2
         }
     }
 }
@@ -20,7 +55,8 @@ public struct AsrModels: Sendable {
     /// Required model names for ASR
     public static let requiredModelNames = ModelNames.ASR.requiredModels
 
-    public let encoder: MLModel
+    /// Separate encoder model (nil for fused models like tdtCtc110m where preprocessor includes encoder)
+    public let encoder: MLModel?
     public let preprocessor: MLModel
     public let decoder: MLModel
     public let joint: MLModel
@@ -31,7 +67,7 @@ public struct AsrModels: Sendable {
     private static let logger = AppLogger(category: "AsrModels")
 
     public init(
-        encoder: MLModel,
+        encoder: MLModel?,
         preprocessor: MLModel,
         decoder: MLModel,
         joint: MLModel,
@@ -48,8 +84,9 @@ public struct AsrModels: Sendable {
         self.version = version
     }
 
+    /// Whether this model uses a separate preprocessor and encoder (true for 0.6B, false for 110m fused)
     public var usesSplitFrontend: Bool {
-        true
+        !version.hasFusedEncoder
     }
 }
 
@@ -60,7 +97,15 @@ extension AsrModels {
         let computeUnits: MLComputeUnits
     }
 
-    private static func createModelSpecs(using config: MLModelConfiguration) -> [ModelSpec] {
+    private static func createModelSpecs(
+        using config: MLModelConfiguration, version: AsrModelVersion
+    ) -> [ModelSpec] {
+        if version.hasFusedEncoder {
+            // Fused preprocessor+encoder runs on ANE (it contains the conformer encoder)
+            return [
+                ModelSpec(fileName: Names.preprocessorFile, computeUnits: config.computeUnits)
+            ]
+        }
         return [
             // Preprocessor ops map to CPU-only across all platforms. XCode profiling shows
             // that 100% of the the operations map to the CPU anyways.
@@ -78,7 +123,7 @@ extension AsrModels {
 
     private static func inferredVersion(from directory: URL) -> AsrModelVersion? {
         let directoryPath = directory.path.lowercased()
-        let knownVersions: [AsrModelVersion] = [.v2, .v3]
+        let knownVersions: [AsrModelVersion] = [.tdtCtc110m, .v2, .v3]
 
         for version in knownVersions {
             if directoryPath.contains(version.repo.folderName.lowercased()) {
@@ -118,7 +163,7 @@ extension AsrModels {
 
         let parentDirectory = directory.deletingLastPathComponent()
         // Load preprocessor and encoder first; decoder and joint are loaded below as well.
-        let specs = createModelSpecs(using: config)
+        let specs = createModelSpecs(using: config, version: version)
 
         var loadedModels: [String: MLModel] = [:]
 
@@ -138,10 +183,13 @@ extension AsrModels {
             }
         }
 
-        guard let preprocessorModel = loadedModels[Names.preprocessorFile],
-            let encoderModel = loadedModels[Names.encoderFile]
-        else {
-            throw AsrModelsError.loadingFailed("Failed to load preprocessor or encoder model")
+        guard let preprocessorModel = loadedModels[Names.preprocessorFile] else {
+            throw AsrModelsError.loadingFailed("Failed to load preprocessor model")
+        }
+        let encoderModel = loadedModels[Names.encoderFile]  // nil for fused models
+
+        if !version.hasFusedEncoder && encoderModel == nil {
+            throw AsrModelsError.loadingFailed("Failed to load encoder model (required for split frontend)")
         }
 
         // Load decoder and joint as well
@@ -185,18 +233,30 @@ extension AsrModels {
 
         do {
             let data = try Data(contentsOf: vocabPath)
-            let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: String] ?? [:]
+            let json = try JSONSerialization.jsonObject(with: data)
 
             var vocabulary: [Int: String] = [:]
 
-            for (key, value) in jsonDict {
-                if let tokenId = Int(key) {
-                    vocabulary[tokenId] = value
+            if let jsonArray = json as? [String] {
+                // Array format (110m hybrid): index = token ID
+                for (index, token) in jsonArray.enumerated() {
+                    vocabulary[index] = token
                 }
+            } else if let jsonDict = json as? [String: String] {
+                // Dictionary format (0.6B v2/v3): key = token ID string
+                for (key, value) in jsonDict {
+                    if let tokenId = Int(key) {
+                        vocabulary[tokenId] = value
+                    }
+                }
+            } else {
+                throw AsrModelsError.loadingFailed("Vocabulary file has unexpected format")
             }
 
             logger.info("Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
             return vocabulary
+        } catch let error as AsrModelsError {
+            throw error
         } catch {
             logger.error(
                 "Failed to load or parse vocabulary file at \(vocabPath.path): \(error.localizedDescription)"
@@ -324,13 +384,23 @@ extension AsrModels {
 
         let defaultUnits = defaultConfiguration().computeUnits
 
-        let specs: [DownloadSpec] = [
-            // Preprocessor ops map to CPU-only across all platforms.
-            DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
-            DownloadSpec(fileName: Names.encoderFile, computeUnits: defaultUnits),
-            DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
-            DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
-        ]
+        let specs: [DownloadSpec]
+        if version.hasFusedEncoder {
+            specs = [
+                // Fused preprocessor+encoder runs on ANE
+                DownloadSpec(fileName: Names.preprocessorFile, computeUnits: defaultUnits),
+                DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
+                DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
+            ]
+        } else {
+            specs = [
+                // Preprocessor ops map to CPU-only across all platforms.
+                DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
+                DownloadSpec(fileName: Names.encoderFile, computeUnits: defaultUnits),
+                DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
+                DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
+            ]
+        }
 
         for spec in specs {
             _ = try await DownloadUtils.loadModels(
@@ -365,7 +435,8 @@ extension AsrModels {
 
     public static func modelsExist(at directory: URL, version: AsrModelVersion) -> Bool {
         let fileManager = FileManager.default
-        let requiredFiles = ModelNames.ASR.requiredModels
+        let requiredFiles =
+            version.hasFusedEncoder ? ModelNames.ASR.requiredModelsFused : ModelNames.ASR.requiredModels
 
         // Check in the DownloadUtils repo structure
         let repoPath = repoPath(from: directory, version: version)
@@ -397,12 +468,14 @@ extension AsrModels {
         let config = MLModelConfiguration()
         config.computeUnits = .cpuOnly
 
-        let modelsToValidate = [
+        var modelsToValidate = [
             ("Preprocessor", ModelNames.ASR.preprocessorFile),
-            ("Encoder", ModelNames.ASR.encoderFile),
             ("Decoder", ModelNames.ASR.decoderFile),
             ("Joint", ModelNames.ASR.jointFile),
         ]
+        if !version.hasFusedEncoder {
+            modelsToValidate.insert(("Encoder", ModelNames.ASR.encoderFile), at: 1)
+        }
 
         for (name, fileName) in modelsToValidate {
             let modelPath = repoPath.appendingPathComponent(fileName)

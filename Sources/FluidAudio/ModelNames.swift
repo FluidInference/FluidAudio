@@ -16,6 +16,7 @@ public enum Repo: String, CaseIterable {
     case qwen3Asr = "FluidInference/qwen3-asr-0.6b-coreml/f32"
     case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
     case multilingualG2p = "FluidInference/charsiu-g2p-byt5-coreml"
+    case parakeetTdtCtc110m = "FluidInference/parakeet-tdt-ctc-110m-coreml"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -48,6 +49,8 @@ public enum Repo: String, CaseIterable {
             return "qwen3-asr-0.6b-coreml/int8"
         case .multilingualG2p:
             return "charsiu-g2p-byt5-coreml"
+        case .parakeetTdtCtc110m:
+            return "parakeet-tdt-ctc-110m-coreml"
         }
     }
 
@@ -64,6 +67,8 @@ public enum Repo: String, CaseIterable {
             return "FluidInference/diar-streaming-sortformer-coreml"
         case .qwen3Asr, .qwen3AsrInt8:
             return "FluidInference/qwen3-asr-0.6b-coreml"
+        case .parakeetTdtCtc110m:
+            return "FluidInference/parakeet-tdt-ctc-110m-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -100,6 +105,8 @@ public enum Repo: String, CaseIterable {
             return "pocket-tts"
         case .multilingualG2p:
             return "charsiu-g2p-byt5"
+        case .parakeetTdtCtc110m:
+            return "parakeet-tdt-ctc-110m"
         default:
             return name
         }
@@ -170,9 +177,24 @@ public enum ModelNames {
             jointFile,
         ]
 
+        /// Vocabulary filename for the 110m hybrid TDT-CTC model (JSON array format)
+        public static let vocabularyFileArray = "vocab.json"
+
+        /// Required models for fused frontend (110m hybrid: preprocessor contains encoder)
+        public static let requiredModelsFused: Set<String> = [
+            preprocessorFile,
+            decoderFile,
+            jointFile,
+        ]
+
         /// Get vocabulary filename for specific model version
         public static func vocabulary(for repo: Repo) -> String {
-            return vocabularyFile
+            switch repo {
+            case .parakeetTdtCtc110m:
+                return vocabularyFileArray
+            default:
+                return vocabularyFile
+            }
         }
     }
 
@@ -429,6 +451,8 @@ public enum ModelNames {
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels
+        case .parakeetTdtCtc110m:
+            return ModelNames.ASR.requiredModelsFused
         case .parakeetCtc110m, .parakeetCtc06b:
             return ModelNames.CTC.requiredModels
         case .parakeetEou160, .parakeetEou320:
