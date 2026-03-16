@@ -730,26 +730,30 @@ public final class DiarizerTimeline {
 
     /// Finalize all tentative data at end of recording
     public func finalize() {
-        queue.sync(flags: .barrier) {
-            _finalizedPredictions.append(contentsOf: _tentativePredictions)
-            _numFinalizedFrames += _tentativePredictions.count / config.numSpeakers
-            _tentativePredictions.removeAll()
-            for speaker in _speakers.values {
-                speaker.finalize(enforcingMinFramesOn: config.minFramesOn)
-            }
-            trimPredictions()
+        queue.sync(flags: .barrier) { finalizeLocked() }
+    }
+    
+    private func finalizeLocked() {
+        _finalizedPredictions.append(contentsOf: _tentativePredictions)
+        _numFinalizedFrames += _tentativePredictions.count / config.numSpeakers
+        _tentativePredictions.removeAll()
+        for speaker in _speakers.values {
+            speaker.finalize(enforcingMinFramesOn: config.minFramesOn)
         }
+        trimPredictions()
     }
 
     /// Reset to initial state
     public func reset() {
-        queue.sync(flags: .barrier) {
-            _finalizedPredictions.removeAll()
-            _tentativePredictions.removeAll()
-            _numFinalizedFrames = 0
-            _speakers = [:]
-            states = Array(repeating: .init(), count: config.numSpeakers)
-        }
+        queue.sync(flags: .barrier) { resetLocked() }
+    }
+    
+    private func resetLocked() {
+        _finalizedPredictions.removeAll()
+        _tentativePredictions.removeAll()
+        _numFinalizedFrames = 0
+        _speakers = [:]
+        states = Array(repeating: .init(), count: config.numSpeakers)
     }
 
     public func rebuild(
@@ -759,8 +763,8 @@ public final class DiarizerTimeline {
     ) throws {
         try verifyPredictionCounts(finalized: finalizedPredictions, tentative: tentativePredictions)
 
-        reset()
         queue.sync(flags: .barrier) {
+            resetLocked()
             _finalizedPredictions = finalizedPredictions
             _tentativePredictions = tentativePredictions
 
@@ -782,12 +786,9 @@ public final class DiarizerTimeline {
                 isFinalized: false,
                 addTrailingTentative: true
             )
-        }
-
-        if isComplete {
-            finalize()
-        } else {
-            queue.sync(flags: .barrier) {
+            if isComplete {
+                finalizeLocked()
+            } else {
                 trimPredictions()
             }
         }
