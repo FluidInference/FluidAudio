@@ -267,15 +267,10 @@ public actor StreamingEouAsrManager {
         logger.info("Models loaded successfully.")
     }
 
-    /// Downloads and loads Parakeet EOU streaming models from Hugging Face.
-    ///
-    /// If the required CoreML bundle and vocabulary are already present on disk, this
-    /// method reuses them and skips the download. When `directory` is `nil`, models are
-    /// cached under Application Support using the same layout as the CLI.
+    /// Downloads and loads Parakeet EOU streaming models from Hugging Face if not cached locally.
     ///
     /// - Parameters:
     ///   - directory: Root directory that should contain the chunk-specific model folder.
-    ///     Defaults to `~/Library/Application Support/FluidAudio/Models/parakeet-eou-streaming`.
     ///   - configuration: Optional model configuration override applied before loading.
     ///   - version: Streaming chunk-size variant to download/load.
     ///   - progressHandler: Optional callback for download progress updates.
