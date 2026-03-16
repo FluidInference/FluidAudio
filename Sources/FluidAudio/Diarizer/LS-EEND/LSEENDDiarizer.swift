@@ -18,6 +18,7 @@ import Foundation
 /// // Or complete file
 /// let timeline = try processor.processComplete(audioSamples)
 /// ```
+/// - Important: This class is **not** thread-safe.
 public final class LSEENDDiarizer: Diarizer {
     private let lock = NSLock()
     private let logger = AppLogger(category: "LSEENDDiarizer")

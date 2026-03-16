@@ -23,6 +23,7 @@ import OSLog
 /// // Or complete file
 /// let result = try diarizer.processComplete(audioSamples)
 /// ```
+/// - Important: This class is **not** thread-safe.
 public final class SortformerDiarizer: Diarizer {
     /// Lock for thread-safe access to mutable state
     private let lock = NSLock()
