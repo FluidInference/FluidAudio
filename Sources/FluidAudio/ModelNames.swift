@@ -9,7 +9,7 @@ public enum Repo: String, CaseIterable {
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
-    case parakeetEou1280 = "FluidInference/parakeet-realtime-eou-1280m-coreml/320ms"
+    case parakeetEou1280 = "FluidInference/parakeet-realtime-eou-120m-coreml/1280ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
