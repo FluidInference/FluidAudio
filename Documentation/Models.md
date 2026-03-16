@@ -53,6 +53,8 @@ Models we converted and tested but haven't shipped yet — either still in devel
 | Model | Status |
 |-------|--------|
 | **Nemotron Speech Streaming 0.6B** ([#254](https://github.com/FluidInference/FluidAudio/pull/254)) | Streaming model with 1.12s chunks. Not significantly faster or more accurate than existing Parakeet models: streaming (EOU) and batch (TDT) modes. |
+| **Qwen3-TTS** ([FluidAudio#290](https://github.com/FluidInference/FluidAudio/pull/290), [mobius#20](https://github.com/FluidInference/mobius/pull/20), [HF](https://huggingface.co/alexwengg/qwen3-tts-coreml)) | ~5.9GB CoreML is too large for on-device. Low upstream adoption (Qwen ASR CoreML model downloads). |
+| **Qwen3-ForcedAligner-0.6B** ([FluidAudio#315](https://github.com/FluidInference/FluidAudio/pull/315), [mobius#21](https://github.com/FluidInference/mobius/pull/21), [HF](https://huggingface.co/alexwengg/Qwen3-ForcedAligner-0.6B-Coreml)) | 5-model CoreML pipeline, large footprint. Low upstream adoption (Qwen ASR CoreML model downloads). |
 
 ## Model Sources
 
