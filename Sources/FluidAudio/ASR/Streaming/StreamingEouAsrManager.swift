@@ -272,12 +272,10 @@ public actor StreamingEouAsrManager {
     /// - Parameters:
     ///   - directory: Root directory that should contain the chunk-specific model folder.
     ///   - configuration: Optional model configuration override applied before loading.
-    ///   - version: Streaming chunk-size variant to download/load.
     ///   - progressHandler: Optional callback for download progress updates.
     public func loadModelsFromHuggingFace(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        version: StreamingChunkSize = .ms160,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws {
         if let configuration {
@@ -287,7 +285,7 @@ public actor StreamingEouAsrManager {
         let modelsRoot = directory ?? Self.defaultCacheDirectory()
         let modelDir: URL
         let repo: Repo
-        switch version {
+        switch chunkSize {
         case .ms160:
             modelDir = modelsRoot.appendingPathComponent(StreamingChunkSize.ms160.modelSubdirectory, isDirectory: true)
             repo = .parakeetEou160
