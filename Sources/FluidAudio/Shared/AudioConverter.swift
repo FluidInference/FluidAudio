@@ -306,11 +306,11 @@ final public class AudioConverter {
         aggregated.reserveCapacity(Int(estimatedOutputFrames))
 
         // AVAudioConverter consumes this input block synchronously within convert(...),
-        // so a simple local flag is sufficient and avoids extra allocator state.
-        var provided = false
+        // but Swift 6 rejects mutation of captured vars in this callback.
+        let provided = OSAllocatedUnfairLock(initialState: false)
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if !provided {
-                provided = true
+            if !provided.withLock({ $0 }) {
+                provided.withLock { $0 = true }
                 status.pointee = .haveData
                 return buffer
             } else {
