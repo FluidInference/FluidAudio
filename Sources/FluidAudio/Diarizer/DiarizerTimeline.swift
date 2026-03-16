@@ -290,7 +290,7 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         self._index = index
         self._name = name
     }
-    
+
     public func finalize(enforcingMinFramesOn minFramesOn: Int? = nil) {
         queue.sync(flags: .barrier) {
             if let minFramesOn {
