@@ -103,8 +103,17 @@ final class SortformerTests: XCTestCase {
         XCTAssertEqual(batchTimeline.numFinalizedFrames, streamingTimeline.numFinalizedFrames, "Total frames mismatch")
         XCTAssertEqual(batchTimeline.speakers.count, streamingTimeline.speakers.count, "Segment count mismatch")
 
-        // Compare segments
-        for (batchSpk, streamSpk) in zip(batchTimeline.speakers.values, streamingTimeline.speakers.values) {
+        // Compare segments deterministically by speaker slot.
+        let batchSpeakers = batchTimeline.speakers.sorted { $0.key < $1.key }.map(\.value)
+        let streamingSpeakers = streamingTimeline.speakers.sorted { $0.key < $1.key }.map(\.value)
+        XCTAssertEqual(batchSpeakers.count, streamingSpeakers.count, "Speaker count mismatch")
+
+        for (batchSpk, streamSpk) in zip(batchSpeakers, streamingSpeakers) {
+            XCTAssertEqual(
+                batchSpk.finalizedSegments.count,
+                streamSpk.finalizedSegments.count,
+                "Segment count mismatch for speaker \(batchSpk.index)"
+            )
             for (batchSeg, streamSeg) in zip(batchSpk.finalizedSegments, streamSpk.finalizedSegments) {
                 XCTAssertEqual(batchSeg.speakerIndex, streamSeg.speakerIndex, "Segment speaker mismatch")
                 XCTAssertEqual(batchSeg.startFrame, streamSeg.startFrame, "Segment start mismatch")
