@@ -64,39 +64,97 @@ Best for: unknown or mixed recording conditions; the safest general-purpose choi
 
 ---
 
-## Architecture
+## Call Flow
+
+### Complete Audio
 
 ```
-Audio (8kHz) → Mel Spectrogram → Splice & Subsample → Causal Encoder → Attractor Decoder → Probabilities
-                [T, 128]             [T', inputDim]      Retention          Cross-attn      [T', speakers]
+LSEENDDiarizer.processComplete(_:sourceSampleRate:)
+  |
+  |-- normalizeSamplesLocked()            resample to 8 kHz when needed
+  |-- processCompleteLocked()
+  |     |
+  |     |-- engine.createSession()        fresh streaming session
+  |     |-- session.pushAudio()           run full buffer through LS-EEND
+  |     |-- session.finalize()            flush remaining committed frames
+  |     |-- DiarizerTimeline.addChunk()
+  |     |-- DiarizerTimeline.finalize()
+  |
+  |-- return DiarizerTimeline
 ```
 
-1. **Mel spectrogram** (`NeMoMelSpectrogram`): 128 mel bins, 25ms window (200 samples), 10ms hop (80 samples) at 8 kHz.
-2. **Splice-and-subsample**: Adjacent mel frames are concatenated with a `contextRecp` context window, then subsampled to ~10 Hz model frames. Input dimension = `nMels × (2 × contextRecp + 1)`.
-3. **Causal encoder**: Conformer transformer with a **retention mechanism** instead of full self-attention, giving $O(n)$ memory over long recordings. Carries six recurrent state buffers between steps.
-4. **Online attractor decoder**: Cross-attention between encoder and a `topBuffer` that tracks speaker identities. Produces per-frame logits for `maxNspks` slots.
-5. **Boundary tracks**: The raw model output has two extra boundary tracks that are stripped before returning results to callers. `realOutputDim` = `fullOutputDim - 2`.
-6. **Post-processing** (`DiarizerTimeline`): Sigmoid → optional median filter → onset/offset thresholding → minimum duration filtering → discrete segments.
-
-### Streaming State
-
-Six recurrent tensors are carried between inference steps (shapes come from the metadata JSON):
-
-| Tensor | Description |
-|--------|-------------|
-| `encRetKv` | Encoder retention key-value cache |
-| `encRetScale` | Encoder retention normalization scale |
-| `encConvCache` | Encoder convolutional cache |
-| `decRetKv` | Decoder retention key-value cache |
-| `decRetScale` | Decoder retention normalization scale |
-| `topBuffer` | Cross-attention buffer between encoder and decoder |
-
-### Startup Latency
-
-The model has a `convDelay` warmup period before the decoder can produce output. Minimum latency before the first frame:
+Under the hood, offline engine inference follows this path:
 
 ```
-streamingLatencySeconds = (nFFT/2 + contextRecp×hopLength + convDelay×subsampling×hopLength) / sampleRate
+LSEENDInferenceEngine.infer(samples:sampleRate:)
+  |
+  |-- resampleIfNeeded()
+  |-- offlineFeatureExtractor.extractFeatures(audio:)
+  |     |
+  |     |-- computeFlatTransposed()       STFT -> mel spectrogram
+  |     |-- applyLogMelCumMeanNormalization()
+  |     |-- spliceAndSubsample()
+  |
+  |-- createSession(inputSampleRate:)
+  |-- session.ingestFeatures(features)
+  |     |
+  |     |-- FOR EACH MODEL FRAME:
+  |     |     |
+  |     |     |-- predictStep(frame:state:ingest:decode:)
+  |     |     |     |
+  |     |     |     |-- write frame into preallocated MLMultiArray
+  |     |     |     |-- pass 6 recurrent state tensors:
+  |     |     |     |     encRetKv, encRetScale, encConvCache,
+  |     |     |     |     decRetKv, decRetScale, topBuffer
+  |     |     |     |-- CoreML model.prediction()
+  |     |     |     |-- read logits + next recurrent state tensors
+  |     |     |
+  |     |     |-- append committed full-output logits
+  |
+  |-- flushTail(from:pendingFrames:)      decode remaining tail frames
+  |-- cropRealTracks()                    drop 2 boundary tracks
+  |-- applyingSigmoid()                   logits -> probabilities
+  |-- snapshot()
+  |-- return LSEENDInferenceResult
+```
+
+### Streaming
+
+```
+LSEENDDiarizer.addAudio(_:sourceSampleRate:)
+  |
+  |-- normalizeSamplesLocked()            resample to 8 kHz when needed
+  |-- append to pendingAudio
+  |
+  v
+LSEENDDiarizer.process()
+  |
+  |-- engine.createSession()              first call only
+  |-- session.pushAudio(pendingAudio)
+  |     |
+  |     |-- featureExtractor.pushAudio()
+  |     |     |
+  |     |     |-- append raw audio to buffer
+  |     |     |-- appendSTFTFrames()
+  |     |     |-- applyLogMelCumMeanNormalization()
+  |     |     |-- emitModelFrames()
+  |     |
+  |     |-- ingestFeatures()
+  |     |     |
+  |     |     |-- predictStep(... ingest=1, decode=0) for stable frames
+  |     |     |-- update 6 recurrent state tensors each step
+  |     |     |-- append committed full-output logits
+  |     |
+  |     |-- copy current state
+  |     |-- flushTail(from:pendingFrames:) on copied state
+  |     |     -> speculative preview logits
+  |     |
+  |     |-- cropRealTracks()              remove boundary tracks
+  |     |-- applyingSigmoid()             logits -> probabilities
+  |     |-- return committed + preview update
+  |
+  |-- DiarizerTimeline.addChunk()
+  |-- return DiarizerTimelineUpdate
 ```
 
 ---
@@ -161,9 +219,10 @@ diarizer.initialize(engine: engine)
 // From a file URL (resamples to 8kHz automatically)
 let timeline = try diarizer.processComplete(audioFileURL: audioURL)
 
-// From raw samples (must already be at targetSampleRate)
+// From raw samples (specify sample rate if it's not 8kHz already)
 let timeline = try diarizer.processComplete(
     samples,
+    sourceSampleRate: 8000, 
     finalizeOnCompletion: true,
     progressCallback: { processed, total, chunks in
         print("\(processed)/\(total) samples")
@@ -172,15 +231,14 @@ let timeline = try diarizer.processComplete(
 ```
 
 ### Streaming
-
-Audio must be at the model's target sample rate (8000 Hz). Resample before calling `addAudio`.
+The `sourceSampleRate` argument is only needed if the audio samples are not already at 8kHz. 
 
 ```swift
 // Push audio in chunks
-diarizer.addAudio(audioChunk)                            // [Float] or any Collection<Float>
+diarizer.addAudio(audioChunk, sourceSampleRate: 8000)    // [Float] or any Collection<Float>
 if let update = try diarizer.process() {
-    for segment in update.newSegments { ... }
-    for tentative in update.tentativeSegments { ... }    // Speculative, may change
+    for segment in update.finalizedSegments { ... }
+    for tentative in update.tentativeSegments { ... } 
 }
 
 // Convenience: add + process in one call
@@ -618,7 +676,6 @@ Static utility namespace for DER computation and RTTM I/O.
 #### RTTM Parsing
 
 ```swift
-// Parse an RTTM file
 let (entries, speakers) = try LSEENDEvaluation.parseRTTM(url: rttmURL)
 // entries: [LSEENDRTTMEntry]
 // speakers: ordered [String] of unique speaker labels
@@ -856,6 +913,7 @@ swift run fluidaudiocli download --repo lseend
 ## References
 
 - [LS-EEND Paper (arXiv 2410.06670)](https://arxiv.org/abs/2410.06670) — Di Liang, Xiaofei Li. *LS-EEND: Long-Form Streaming End-to-End Neural Diarization with Online Attractor Extraction.* IEEE TASLP.
+- [LS-EEND GitHub Repository](https://github.com/Audio-WestlakeU/FS-EEND)
 - [HuggingFace Models](https://huggingface.co/FluidInference/lseend-coreml)
 - [AMI Corpus](https://groups.inf.ed.ac.uk/ami/corpus/)
 - [CALLHOME Corpus](https://catalog.ldc.upenn.edu/LDC97S42)
