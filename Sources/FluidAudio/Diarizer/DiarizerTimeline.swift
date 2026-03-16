@@ -904,11 +904,13 @@ extension DiarizerTimeline {
         message: "Use Timeline.speakers[index].confirmedSegments to access a speaker's confirmed segments."
     )
     public var segments: [[DiarizerSegment]] {
-        var result: [[DiarizerSegment]] = Array(repeating: [], count: config.numSpeakers)
-        for (index, speaker) in _speakers {
-            result[index] = speaker.finalizedSegments
+        queue.sync {
+            var result: [[DiarizerSegment]] = Array(repeating: [], count: config.numSpeakers)
+            for (index, speaker) in _speakers {
+                result[index] = speaker.finalizedSegments
+            }
+            return result
         }
-        return result
     }
 
     @available(
@@ -916,11 +918,13 @@ extension DiarizerTimeline {
         message: "Use Timeline.speakers[index].tentativeSegments to access a speaker's tentative segments."
     )
     public var tentativeSegments: [[DiarizerSegment]] {
-        var result: [[DiarizerSegment]] = Array(repeating: [], count: config.numSpeakers)
-        for (index, speaker) in _speakers {
-            result[index] = speaker.tentativeSegments
+        queue.sync {
+            var result: [[DiarizerSegment]] = Array(repeating: [], count: config.numSpeakers)
+            for (index, speaker) in _speakers {
+                result[index] = speaker.tentativeSegments
+            }
+            return result
         }
-        return result
     }
 
     @available(*, deprecated, renamed: "numTentativeFrames")
