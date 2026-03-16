@@ -46,9 +46,12 @@ final class LSEENDIntegrationTests: XCTestCase {
             let samples = try fixtureAudio(sampleRate: engine.targetSampleRate, limitSeconds: 2.0)
             let result = try engine.infer(samples: samples, sampleRate: engine.targetSampleRate)
 
-            try assertResultInvariants(result, engine: engine, expectedDurationSeconds: duration(of: samples, sampleRate: engine.targetSampleRate))
+            try assertResultInvariants(
+                result, engine: engine,
+                expectedDurationSeconds: duration(of: samples, sampleRate: engine.targetSampleRate))
             assertMatrixClose(result.probabilities, result.logits.applyingSigmoid(), maxAbs: 1e-7, meanAbs: 1e-8)
-            assertMatrixClose(result.fullProbabilities, result.fullLogits.applyingSigmoid(), maxAbs: 1e-7, meanAbs: 1e-8)
+            assertMatrixClose(
+                result.fullProbabilities, result.fullLogits.applyingSigmoid(), maxAbs: 1e-7, meanAbs: 1e-8)
         }
     }
 
@@ -172,7 +175,8 @@ final class LSEENDIntegrationTests: XCTestCase {
 
         XCTAssertEqual(diarizer.numFramesProcessed, expected.probabilities.rows)
         XCTAssertEqual(diarizer.timeline.numFinalizedFrames, expected.probabilities.rows)
-        assertArrayClose(diarizer.timeline.finalizedPredictions, expected.probabilities.values, maxAbs: 1e-5, meanAbs: 1e-6)
+        assertArrayClose(
+            diarizer.timeline.finalizedPredictions, expected.probabilities.values, maxAbs: 1e-5, meanAbs: 1e-6)
 
         diarizer.reset()
         XCTAssertEqual(diarizer.numFramesProcessed, 0)

@@ -240,7 +240,9 @@ extension SortformerModels {
         // Extract outputs (names must match CoreML Sortformer model)
         // Note: Output names use _out suffix to avoid macOS 26+ BNNS compiler error
         // where input and output tensors cannot share the same name
-        guard let predictions = output.featureValue(for: "speaker_preds_out")?.shapedArrayValue(of: Float32.self)?.scalars,
+        guard
+            let predictions = output.featureValue(for: "speaker_preds_out")?.shapedArrayValue(of: Float32.self)?
+                .scalars,
             let chunkEmbeddingsLength = output.featureValue(for: "chunk_pre_encoder_lengths_out")?.shapedArrayValue(
                 of: Int32.self)?.scalars.first
         else {

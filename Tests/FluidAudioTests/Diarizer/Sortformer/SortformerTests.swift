@@ -231,7 +231,8 @@ final class SortformerTests: XCTestCase {
         // Verify state is cleared
         XCTAssertEqual(timeline.numFinalizedFrames, 0, "numFrames should be 0 after reset")
         XCTAssertEqual(timeline.finalizedPredictions.count, 0, "framePredictions should be empty")
-        XCTAssertEqual(timeline.speakers.values.reduce(0) { $0 + $1.finalizedSegmentCount }, 0, "segments should be empty")
+        XCTAssertEqual(
+            timeline.speakers.values.reduce(0) { $0 + $1.finalizedSegmentCount }, 0, "segments should be empty")
         XCTAssertEqual(timeline.tentativePredictions.count, 0, "tentativePredictions should be empty")
     }
 }
