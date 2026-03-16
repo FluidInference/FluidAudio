@@ -267,6 +267,68 @@ public actor StreamingEouAsrManager {
         logger.info("Models loaded successfully.")
     }
 
+    /// Downloads and loads Parakeet EOU streaming models from Hugging Face.
+    ///
+    /// If the required CoreML bundle and vocabulary are already present on disk, this
+    /// method reuses them and skips the download. When `directory` is `nil`, models are
+    /// cached under Application Support using the same layout as the CLI.
+    ///
+    /// - Parameters:
+    ///   - directory: Root directory that should contain the chunk-specific model folder.
+    ///     Defaults to `~/Library/Application Support/FluidAudio/Models/parakeet-eou-streaming`.
+    ///   - configuration: Optional model configuration override applied before loading.
+    ///   - version: Streaming chunk-size variant to download/load.
+    ///   - progressHandler: Optional callback for download progress updates.
+    public func loadModelsFromHuggingFace(
+        to directory: URL? = nil,
+        configuration: MLModelConfiguration? = nil,
+        version: StreamingChunkSize = .ms160,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws {
+        if let configuration {
+            self.configuration = configuration
+        }
+
+        let modelsRoot = directory ?? Self.defaultCacheDirectory()
+        let modelDir: URL
+        let repo: Repo
+        switch version {
+        case .ms160:
+            modelDir = modelsRoot.appendingPathComponent(StreamingChunkSize.ms160.modelSubdirectory, isDirectory: true)
+            repo = .parakeetEou160
+        case .ms320:
+            modelDir = modelsRoot.appendingPathComponent(StreamingChunkSize.ms320.modelSubdirectory, isDirectory: true)
+            repo = .parakeetEou320
+        case .ms1600:
+            modelDir = modelsRoot.appendingPathComponent(StreamingChunkSize.ms320.modelSubdirectory, isDirectory: true)
+            repo = .parakeetEou320
+        }
+
+        let requiredModels = ModelNames.ParakeetEOU.requiredModels
+        let modelsExist = requiredModels.allSatisfy { modelName in
+            FileManager.default.fileExists(atPath: modelDir.appendingPathComponent(modelName).path)
+        }
+
+        if !modelsExist {
+            logger.info("Downloading Parakeet EOU models to \(modelsRoot.path)...")
+            try await DownloadUtils.downloadRepo(repo, to: modelsRoot, progressHandler: progressHandler)
+        } else {
+            logger.info("Using cached Parakeet EOU models at \(modelDir.path)")
+        }
+
+        try await loadModels(modelDir: modelDir)
+    }
+
+    private static func defaultCacheDirectory() -> URL {
+        let applicationSupportURL = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        return applicationSupportURL
+            .appendingPathComponent("FluidAudio", isDirectory: true)
+            .appendingPathComponent("Models", isDirectory: true)
+            .appendingPathComponent("parakeet-eou-streaming", isDirectory: true)
+    }
+
     private func resetStates() throws {
         // Initialize with Zeros
         // pre_cache: [1, 128, preCacheSize] - size varies by chunk size
