@@ -240,7 +240,7 @@ public struct SortformerConfig: Sendable {
 }
 
 /// Configuration for post-processing Sortformer diarizer predictions
-@available(*, deprecated, message: "Use DiarizerPostProcessingConfig instead")
+@available(*, deprecated, message: "Use DiarizerTimelineConfig instead", renamed: "DiarizerTimelineConfig")
 public struct SortformerPostProcessingConfig {
     /// Onset threshold for detecting the beginning and end of a speech
     public var onsetThreshold: Float

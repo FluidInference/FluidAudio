@@ -8,7 +8,7 @@ final class SortformerTimelineTests: XCTestCase {
     // MARK: - Empty Timeline
 
     func testEmptyTimelineHasZeroDuration() {
-        let timeline = SortformerTimeline(config: .sortformerDefault)
+        let timeline = DiarizerTimeline(config: .sortformerDefault)
         XCTAssertEqual(timeline.numFinalizedFrames, 0)
         XCTAssertEqual(timeline.finalizedDuration, 0)
         XCTAssertTrue(timeline.finalizedPredictions.isEmpty)
@@ -16,21 +16,20 @@ final class SortformerTimelineTests: XCTestCase {
     }
 
     func testEmptyTimelineHasEmptySegments() {
-        let timeline = SortformerTimeline(config: .sortformerDefault)
-        XCTAssertEqual(timeline.segments.count, 4, "Should have segment arrays for 4 speakers")
-        for speakerSegments in timeline.segments {
-            XCTAssertTrue(speakerSegments.isEmpty)
+        let timeline = DiarizerTimeline(config: .sortformerDefault)
+        for speakerSegments in timeline.speakers {
+            XCTAssertTrue(speakerSegments.value.finalizedSegments.isEmpty)
         }
     }
 
     // MARK: - Adding Chunks
 
     func testAddChunkUpdatesDuration() throws {
-        let timeline = SortformerTimeline(config: .sortformerDefault)
+        let timeline = DiarizerTimeline(config: .sortformerDefault)
         let numSpeakers = 4
         let frameCount = 6
 
-        let chunk = SortformerChunkResult(
+        let chunk = DiarizerChunkResult(
             startFrame: 0,
             finalizedPredictions: [Float](repeating: 0, count: frameCount * numSpeakers),
             finalizedFrameCount: frameCount
@@ -43,12 +42,12 @@ final class SortformerTimelineTests: XCTestCase {
     }
 
     func testAddMultipleChunksAccumulatesFrames() throws {
-        let timeline = SortformerTimeline(config: .sortformerDefault)
+        let timeline = DiarizerTimeline(config: .sortformerDefault)
         let numSpeakers = 4
         let frameCount = 6
 
         for i in 0..<3 {
-            let chunk = SortformerChunkResult(
+            let chunk = DiarizerChunkResult(
                 startFrame: i * frameCount,
                 finalizedPredictions: [Float](repeating: 0, count: frameCount * numSpeakers),
                 finalizedFrameCount: frameCount
@@ -62,7 +61,7 @@ final class SortformerTimelineTests: XCTestCase {
     // MARK: - Segment Generation
 
     func testHighProbabilityUpdatesFramePredictions() throws {
-        let timeline = SortformerTimeline(config: .sortformerDefault)
+        let timeline = DiarizerTimeline(config: .sortformerDefault)
         let numSpeakers = 4
         let frameCount = 12
 
@@ -72,7 +71,7 @@ final class SortformerTimelineTests: XCTestCase {
             predictions[frame * numSpeakers + 0] = 0.9
         }
 
-        let chunk = SortformerChunkResult(
+        let chunk = DiarizerChunkResult(
             startFrame: 0,
             finalizedPredictions: predictions,
             finalizedFrameCount: frameCount
@@ -89,11 +88,11 @@ final class SortformerTimelineTests: XCTestCase {
     // MARK: - Reset
 
     func testResetClearsState() throws {
-        let timeline = SortformerTimeline(config: .sortformerDefault)
+        let timeline = DiarizerTimeline(config: .sortformerDefault)
         let numSpeakers = 4
         let frameCount = 6
 
-        let chunk = SortformerChunkResult(
+        let chunk = DiarizerChunkResult(
             startFrame: 0,
             finalizedPredictions: [Float](repeating: 0.9, count: frameCount * numSpeakers),
             finalizedFrameCount: frameCount
@@ -104,21 +103,21 @@ final class SortformerTimelineTests: XCTestCase {
         XCTAssertEqual(timeline.numFinalizedFrames, 0)
         XCTAssertTrue(timeline.finalizedPredictions.isEmpty)
         XCTAssertTrue(timeline.tentativePredictions.isEmpty)
-        for speakerSegments in timeline.segments {
-            XCTAssertTrue(speakerSegments.isEmpty)
+        for speakerSegments in timeline.speakers.values {
+            XCTAssertTrue(speakerSegments.finalizedSegments.isEmpty)
         }
     }
 
     // MARK: - Finalize
 
     func testFinalizeMovesDataToFinalized() throws {
-        let timeline = SortformerTimeline(config: .sortformerDefault)
+        let timeline = DiarizerTimeline(config: .sortformerDefault)
         let numSpeakers = 4
         let frameCount = 6
 
         // Create chunk with tentative predictions
         let tentativeCount = 4
-        let chunk = SortformerChunkResult(
+        let chunk = DiarizerChunkResult(
             startFrame: 0,
             finalizedPredictions: [Float](repeating: 0, count: frameCount * numSpeakers),
             finalizedFrameCount: frameCount,
@@ -143,7 +142,7 @@ final class SortformerTimelineTests: XCTestCase {
         let numSpeakers = 4
         // [f0s0=0.1, f0s1=0.2, f0s2=0.3, f0s3=0.4, f1s0=0.5, ...]
         let predictions: [Float] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-        let timeline = try SortformerTimeline(
+        let timeline = try DiarizerTimeline(
             allPredictions: predictions,
             config: .sortformerDefault,
             isComplete: true
@@ -162,7 +161,7 @@ final class SortformerTimelineTests: XCTestCase {
     // MARK: - SortformerSegment
 
     func testSegmentTimeConversion() {
-        let segment = SortformerSegment(speakerIndex: 0, startFrame: 10, endFrame: 20, frameDurationSeconds: 0.08)
+        let segment = DiarizerSegment(speakerIndex: 0, startFrame: 10, endFrame: 20, frameDurationSeconds: 0.08)
         XCTAssertEqual(segment.startTime, 0.8, accuracy: 1e-5, "10 * 0.08 = 0.8")
         XCTAssertEqual(segment.endTime, 1.6, accuracy: 1e-5, "20 * 0.08 = 1.6")
         XCTAssertEqual(segment.duration, 0.8, accuracy: 1e-5, "(20-10) * 0.08 = 0.8")
@@ -170,17 +169,17 @@ final class SortformerTimelineTests: XCTestCase {
     }
 
     func testSegmentOverlap() {
-        let a = SortformerSegment(speakerIndex: 0, startFrame: 0, endFrame: 10, frameDurationSeconds: 0.08)
-        let b = SortformerSegment(speakerIndex: 0, startFrame: 5, endFrame: 15, frameDurationSeconds: 0.08)
-        let c = SortformerSegment(speakerIndex: 0, startFrame: 11, endFrame: 20, frameDurationSeconds: 0.08)
+        let a = DiarizerSegment(speakerIndex: 0, startFrame: 0, endFrame: 10, frameDurationSeconds: 0.08)
+        let b = DiarizerSegment(speakerIndex: 0, startFrame: 5, endFrame: 15, frameDurationSeconds: 0.08)
+        let c = DiarizerSegment(speakerIndex: 0, startFrame: 11, endFrame: 20, frameDurationSeconds: 0.08)
 
         XCTAssertTrue(a.overlaps(with: b), "Overlapping segments")
         XCTAssertFalse(a.overlaps(with: c), "Non-overlapping segments")
     }
 
     func testSegmentAbsorb() {
-        var a = SortformerSegment(speakerIndex: 0, startFrame: 5, endFrame: 10, frameDurationSeconds: 0.08)
-        let b = SortformerSegment(speakerIndex: 0, startFrame: 3, endFrame: 15, frameDurationSeconds: 0.08)
+        var a = DiarizerSegment(speakerIndex: 0, startFrame: 5, endFrame: 10, frameDurationSeconds: 0.08)
+        let b = DiarizerSegment(speakerIndex: 0, startFrame: 3, endFrame: 15, frameDurationSeconds: 0.08)
         a.absorb(b)
 
         XCTAssertEqual(a.startFrame, 3)
@@ -188,7 +187,7 @@ final class SortformerTimelineTests: XCTestCase {
     }
 
     func testSegmentInitFromTime() {
-        let segment = SortformerSegment(
+        let segment = DiarizerSegment(
             speakerIndex: 1,
             startTime: 0.8,
             endTime: 1.6,
