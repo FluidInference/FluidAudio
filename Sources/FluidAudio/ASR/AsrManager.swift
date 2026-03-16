@@ -290,6 +290,7 @@ public final class AsrManager {
 
     public func cleanup() {
         let layers = asrModels?.version.decoderLayers ?? 2
+        asrModels = nil
         preprocessorModel = nil
         encoderModel = nil
         decoderModel = nil
