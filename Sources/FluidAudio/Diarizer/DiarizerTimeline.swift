@@ -151,7 +151,7 @@ public struct DiarizerTimelineConfig: Sendable {
         minFramesOff: Int = 0,
         maxStoredFrames: Int? = nil
     ) {
-        self.numSpeakers = numSpeakers ?? 0
+        self.numSpeakers = numSpeakers ?? 1
         self.frameDurationSeconds = frameDurationSeconds ?? 0.08
         self.onsetThreshold = onsetThreshold
         self.offsetThreshold = offsetThreshold
@@ -183,7 +183,7 @@ public struct DiarizerTimelineConfig: Sendable {
         minDurationOff: Float = 0,
         maxStoredFrames: Int? = nil
     ) {
-        self.numSpeakers = numSpeakers ?? 0
+        self.numSpeakers = numSpeakers ?? 1
         self.frameDurationSeconds = frameDurationSeconds ?? 0.08
         self.onsetThreshold = onsetThreshold
         self.offsetThreshold = offsetThreshold
