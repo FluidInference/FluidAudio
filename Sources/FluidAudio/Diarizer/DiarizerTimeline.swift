@@ -732,7 +732,7 @@ public final class DiarizerTimeline {
     public func finalize() {
         queue.sync(flags: .barrier) { finalizeLocked() }
     }
-    
+
     private func finalizeLocked() {
         _finalizedPredictions.append(contentsOf: _tentativePredictions)
         _numFinalizedFrames += _tentativePredictions.count / config.numSpeakers
@@ -747,7 +747,7 @@ public final class DiarizerTimeline {
     public func reset() {
         queue.sync(flags: .barrier) { resetLocked() }
     }
-    
+
     private func resetLocked() {
         _finalizedPredictions.removeAll()
         _tentativePredictions.removeAll()
