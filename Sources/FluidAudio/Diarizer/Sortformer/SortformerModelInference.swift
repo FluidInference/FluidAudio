@@ -245,7 +245,7 @@ extension SortformerModels {
         let chunkEmbeddings: [Float]
         let predictions: [Float]
         let chunkEmbeddingsLength: Int
-        
+
         // Get speaker probabilities
         if let preds = output.featureValue(for: "speaker_preds_out")?.shapedArrayValue(of: Float32.self)?.scalars {
             predictions = preds
@@ -254,7 +254,7 @@ extension SortformerModels {
         } else {
             throw SortformerError.inferenceFailed("Missing speaker_preds or speaker_preds_out")
         }
-        
+
         // Get chunk length
         if let length = output.featureValue(for: "chunk_pre_encoder_lengths_out")?.shapedArrayValue(
             of: Int32.self)?.scalars.first
@@ -267,7 +267,7 @@ extension SortformerModels {
         } else {
             throw SortformerError.inferenceFailed("Missing chunk_pre_encoder_lengths or chunk_pre_encoder_lengths_out")
         }
-        
+
         // Get acoustic embeddings
         if let fp32 = output.featureValue(for: "chunk_pre_encoder_embs_out")?.shapedArrayValue(of: Float32.self)?
             .scalars
