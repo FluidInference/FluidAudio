@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreML
 import Foundation
 import XCTest
@@ -10,13 +11,8 @@ final class LSEENDIntegrationTests: XCTestCase {
         let meanAbs: Double
     }
 
-    private static let repositoryRootURL = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-    private static let fixtureAudioURL = repositoryRootURL.appendingPathComponent("audio.wav")
+    private static let fixtureSampleRate = 16_000
+    nonisolated(unsafe) private static var cachedFixtureAudioURL: URL?
     nonisolated(unsafe) private static var cachedEngines: [LSEENDVariant: LSEENDInferenceEngine] = [:]
 
     func testVariantRegistryResolvesAllExportedArtifacts() async throws {
@@ -57,7 +53,7 @@ final class LSEENDIntegrationTests: XCTestCase {
 
     func testAudioFileInferenceMatchesInferenceOnResampledFixtureSamples() async throws {
         let engine = try await makeEngine(variant: .dihard3)
-        let fileResult = try engine.infer(audioFileURL: Self.fixtureAudioURL)
+        let fileResult = try engine.infer(audioFileURL: try fixtureAudioFileURL())
         let resampled = try fixtureAudio(sampleRate: engine.targetSampleRate)
         let sampleResult = try engine.infer(samples: resampled, sampleRate: engine.targetSampleRate)
 
@@ -119,8 +115,9 @@ final class LSEENDIntegrationTests: XCTestCase {
 
     func testStreamingSimulationMatchesOfflineInferenceAndReportsMonotonicProgress() async throws {
         let engine = try await makeEngine(variant: .dihard3)
-        let offline = try engine.infer(audioFileURL: Self.fixtureAudioURL)
-        let simulation = try engine.simulateStreaming(audioFileURL: Self.fixtureAudioURL, chunkSeconds: 0.37)
+        let fixtureURL = try fixtureAudioFileURL()
+        let offline = try engine.infer(audioFileURL: fixtureURL)
+        let simulation = try engine.simulateStreaming(audioFileURL: fixtureURL, chunkSeconds: 0.37)
 
         assertMatrixClose(simulation.result.logits, offline.logits, maxAbs: 1e-5, meanAbs: 1e-6)
         assertMatrixClose(simulation.result.probabilities, offline.probabilities, maxAbs: 1e-5, meanAbs: 1e-6)
@@ -240,14 +237,94 @@ final class LSEENDIntegrationTests: XCTestCase {
     }
 
     private func fixtureAudio(sampleRate: Int, limitSeconds: Double? = nil) throws -> [Float] {
-        XCTAssertTrue(FileManager.default.fileExists(atPath: Self.fixtureAudioURL.path))
         let converter = AudioConverter(sampleRate: Double(sampleRate))
-        let audio = try converter.resampleAudioFile(Self.fixtureAudioURL)
+        let audio = try converter.resampleAudioFile(try fixtureAudioFileURL())
         guard let limitSeconds else {
             return audio
         }
         let sampleCount = min(audio.count, Int(limitSeconds * Double(sampleRate)))
         return Array(audio.prefix(sampleCount))
+    }
+
+    private func fixtureAudioFileURL() throws -> URL {
+        if let cached = Self.cachedFixtureAudioURL,
+            FileManager.default.fileExists(atPath: cached.path)
+        {
+            return cached
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lseend-fixture-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        try writeFixtureAudio(to: url)
+        Self.cachedFixtureAudioURL = url
+        return url
+    }
+
+    private func writeFixtureAudio(to url: URL) throws {
+        let sampleRate = Double(Self.fixtureSampleRate)
+        let samples = makeFixtureSamples(sampleRate: sampleRate)
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        )!
+        guard
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(samples.count)
+            )
+        else {
+            XCTFail("Failed to allocate fixture audio buffer")
+            return
+        }
+
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { source in
+            guard let destination = buffer.floatChannelData?[0] else { return }
+            destination.update(from: source.baseAddress!, count: samples.count)
+        }
+
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: format.settings,
+            commonFormat: .pcmFormatFloat32,
+            interleaved: false
+        )
+        try file.write(from: buffer)
+    }
+
+    private func makeFixtureSamples(sampleRate: Double) -> [Float] {
+        let segments: [(duration: Double, amplitude: Float, frequency: Double)] = [
+            (1.0, 0.20, 220),
+            (0.35, 0.00, 0),
+            (1.1, 0.32, 330),
+            (0.25, 0.00, 0),
+            (1.0, 0.28, 180),
+            (0.40, 0.00, 0),
+            (1.3, 0.36, 260),
+            (0.30, 0.00, 0),
+            (1.1, 0.24, 410),
+        ]
+
+        var output: [Float] = []
+        for (duration, amplitude, frequency) in segments {
+            let frameCount = Int(duration * sampleRate)
+            guard amplitude > 0, frequency > 0 else {
+                output.append(contentsOf: repeatElement(0, count: frameCount))
+                continue
+            }
+
+            for frame in 0..<frameCount {
+                let time = Double(frame) / sampleRate
+                let envelope = Float(min(1.0, time * 12.0)) * Float(min(1.0, (duration - time) * 12.0))
+                let carrier = sin(2.0 * Double.pi * frequency * time)
+                let harmonic = 0.35 * sin(2.0 * Double.pi * frequency * 2.03 * time)
+                output.append(Float((carrier + harmonic) * Double(amplitude * envelope)))
+            }
+        }
+        return output
     }
 
     private func duration(of samples: [Float], sampleRate: Int) -> Double {
