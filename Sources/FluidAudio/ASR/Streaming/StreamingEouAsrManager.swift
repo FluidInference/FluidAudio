@@ -323,8 +323,7 @@ public actor StreamingEouAsrManager {
         let applicationSupportURL = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
-        return
-            applicationSupportURL
+        return applicationSupportURL
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent("parakeet-eou-streaming", isDirectory: true)
