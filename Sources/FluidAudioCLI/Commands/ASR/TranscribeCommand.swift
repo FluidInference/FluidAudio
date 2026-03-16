@@ -406,7 +406,12 @@ enum TranscribeCommand {
 
             if let outputJsonPath = outputJsonPath {
                 let wordTimings = WordTimingMerger.mergeTokensIntoWords(result.tokenTimings ?? [])
-                let modelVersionLabel = modelVersion == .v2 ? "v2" : "v3"
+                let modelVersionLabel: String
+                switch modelVersion {
+                case .v2: modelVersionLabel = "v2"
+                case .v3: modelVersionLabel = "v3"
+                case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
+                }
                 let output = TranscriptionJSONOutput(
                     audioFile: audioFile,
                     mode: "batch",
@@ -655,7 +660,12 @@ enum TranscribeCommand {
                 let snapshot = await tracker.metadataSnapshot()
                 let wordTimings = WordTimingMerger.mergeTokensIntoWords(snapshot?.timings ?? [])
                 let latestUpdate = await tracker.latestUpdateSnapshot()
-                let modelVersionLabel = modelVersion == .v2 ? "v2" : "v3"
+                let modelVersionLabel: String
+                switch modelVersion {
+                case .v2: modelVersionLabel = "v2"
+                case .v3: modelVersionLabel = "v3"
+                case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
+                }
                 let output = TranscriptionJSONOutput(
                     audioFile: audioFile,
                     mode: "streaming",
@@ -754,7 +764,8 @@ enum TranscribeCommand {
                 --metadata         Show confidence, start time, and end time in results
                 --word-timestamps  Show word-level timestamps for each word in the transcription
                 --output-json <file>  Save full transcription result to JSON (includes word timings)
-                --model-version <version>  ASR model version to use: v2 or v3 (default: v2)
+                --model-version <version>  ASR model version: v2, v3, or tdt-ctc-110m (default: v3)
+                --model-dir <path>     Path to local model directory (skips download)
                 --custom-vocab <file>  Apply vocabulary boosting using terms from file (batch mode only)
 
             Examples:

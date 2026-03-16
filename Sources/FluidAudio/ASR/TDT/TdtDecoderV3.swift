@@ -886,7 +886,8 @@ internal struct TdtDecoderV3 {
     ) throws -> MLFeatureProvider {
         let encoderFrames = try EncoderFrameView(
             encoderOutput: encoderOutput,
-            validLength: encoderOutput.count)
+            validLength: encoderOutput.count,
+            expectedHiddenSize: config.encoderHiddenSize)
         let encoderStep = try ANEOptimizer.createANEAlignedArray(
             shape: [1, NSNumber(value: encoderFrames.hiddenSize), 1],
             dataType: .float32)
