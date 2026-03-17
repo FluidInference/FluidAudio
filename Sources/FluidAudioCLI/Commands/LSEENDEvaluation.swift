@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 
 /// A single speaker turn entry from an RTTM (Rich Transcription Time Marked) file.

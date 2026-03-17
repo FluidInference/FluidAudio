@@ -4,20 +4,7 @@ import Foundation
 
 /// Speaker diarization using LS-EEND (Linear Streaming End-to-End Neural Diarization).
 ///
-/// Supports both streaming and offline processing, matching the `SortformerDiarizer` API:
-/// ```swift
-/// let processor = LSEENDDiarizer()
-/// try processor.initialize(descriptor: .defaultDescriptor(for: .dihard3))
-///
-/// // Streaming
-/// processor.addAudio(audioChunk)
-/// if let result = try processor.process() {
-///     // Handle speaker probabilities
-/// }
-///
-/// // Or complete file
-/// let timeline = try processor.processComplete(audioSamples)
-/// ```
+/// Supports both streaming and offline processing, matching the `SortformerDiarizer` API
 /// - Important: This class is **not** thread-safe.
 public final class LSEENDDiarizer: Diarizer {
     private let lock = NSLock()
