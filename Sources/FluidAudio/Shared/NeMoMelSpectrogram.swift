@@ -282,7 +282,7 @@ public final class NeMoMelSpectrogram {
 
             // Apply log(x + guard_value) and store in output
             for melIdx in 0..<nMels {
-                mel[melIdx * numFrames + frameIdx] = logValue(melFrame[melIdx])
+                mel[melIdx * numPaddedFrames + frameIdx] = logValue(melFrame[melIdx])
             }
         }
 
