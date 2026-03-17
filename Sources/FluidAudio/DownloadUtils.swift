@@ -502,9 +502,9 @@ public class DownloadUtils {
             delegate: delegate,
             delegateQueue: nil
         )
+        defer { session.finishTasksAndInvalidate() }
 
         let (tempURL, response) = try await session.download(for: request)
-        defer { session.finishTasksAndInvalidate() }
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw HuggingFaceDownloadError.invalidResponse
