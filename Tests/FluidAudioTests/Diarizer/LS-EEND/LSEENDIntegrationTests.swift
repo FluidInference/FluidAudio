@@ -13,7 +13,7 @@ final class LSEENDIntegrationTests: XCTestCase {
 
     private static let fixtureSampleRate = 16_000
     nonisolated(unsafe) private static var cachedFixtureAudioURL: URL?
-    nonisolated(unsafe) private static var cachedEngines: [LSEENDVariant: LSEENDInferenceEngine] = [:]
+    nonisolated(unsafe) private static var cachedEngines: [LSEENDVariant: LSEENDInferenceHelper] = [:]
 
     func testVariantRegistryResolvesAllExportedArtifacts() async throws {
         let expectedColumns: [LSEENDVariant: Int] = [
@@ -249,12 +249,12 @@ final class LSEENDIntegrationTests: XCTestCase {
         XCTAssertFalse(hasActiveSession(diarizer))
     }
 
-    private func makeEngine(variant: LSEENDVariant) async throws -> LSEENDInferenceEngine {
+    private func makeEngine(variant: LSEENDVariant) async throws -> LSEENDInferenceHelper {
         if let cached = Self.cachedEngines[variant] {
             return cached
         }
         let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: variant)
-        let engine = try LSEENDInferenceEngine(descriptor: descriptor, computeUnits: .cpuOnly)
+        let engine = try LSEENDInferenceHelper(descriptor: descriptor, computeUnits: .cpuOnly)
         Self.cachedEngines[variant] = engine
         return engine
     }
@@ -370,7 +370,7 @@ final class LSEENDIntegrationTests: XCTestCase {
 
     private func assertResultInvariants(
         _ result: LSEENDInferenceResult,
-        engine: LSEENDInferenceEngine,
+        engine: LSEENDInferenceHelper,
         expectedDurationSeconds: Double,
         file: StaticString = #filePath,
         line: UInt = #line

@@ -94,7 +94,7 @@ private final class LSEENDInferenceSharedResources {
         configuration.computeUnits = computeUnits
         configuration.allowLowPrecisionAccumulationOnGPU = true
         model = try MLModel(
-            contentsOf: try LSEENDInferenceEngine.compiledModelURL(for: descriptor.modelURL),
+            contentsOf: try LSEENDInferenceHelper.compiledModelURL(for: descriptor.modelURL),
             configuration: configuration
         )
         offlineFeatureExtractor = LSEENDOfflineFeatureExtractor(metadata: metadata, spectrogram: melSpectrogram)
@@ -127,7 +127,7 @@ private final class LSEENDInferenceSharedResources {
 ///   incremental audio processing.
 /// - **Simulation**: ``simulateStreaming(audioFileURL:chunkSeconds:)`` to replay a file through the
 ///   streaming pipeline with fixed-size chunks.
-public final class LSEENDInferenceEngine {
+public final class LSEENDInferenceHelper {
     private let logger = AppLogger(category: "LSEENDInference")
     private let sharedResources: LSEENDInferenceSharedResources
 
@@ -455,7 +455,7 @@ public final class LSEENDInferenceEngine {
 /// 
 /// - Important: This class is **not** thread-safe. All calls must be serialized externally.
 public final class LSEENDStreamingSession {
-    fileprivate let engine: LSEENDInferenceEngine
+    fileprivate let engine: LSEENDInferenceHelper
     /// The sample rate of audio being fed to this session.
     public let inputSampleRate: Int
     fileprivate let featureExtractor: LSEENDStreamingFeatureExtractor
@@ -469,7 +469,7 @@ public final class LSEENDStreamingSession {
     fileprivate var emittedFrames = 0
 
     fileprivate init(
-        engine: LSEENDInferenceEngine, inputSampleRate: Int, melSpectrogram: NeMoMelSpectrogram? = nil
+        engine: LSEENDInferenceHelper, inputSampleRate: Int, melSpectrogram: NeMoMelSpectrogram? = nil
     ) throws {
         guard inputSampleRate == engine.targetSampleRate else {
             throw LSEENDError.unsupportedAudio(

@@ -82,7 +82,7 @@ public final class LSEENDDiarizer: Diarizer {
 
     // MARK: - Private State
 
-    private var _engine: LSEENDInferenceEngine?
+    private var _engine: LSEENDInferenceHelper?
     private var _session: LSEENDStreamingSession?
     private var _melSpectrogram: NeMoMelSpectrogram?
     private var _timeline: DiarizerTimeline
@@ -166,7 +166,7 @@ public final class LSEENDDiarizer: Diarizer {
     ///
     /// - Parameter descriptor: Model descriptor specifying variant and file paths
     public func initialize(descriptor: LSEENDModelDescriptor) throws {
-        let engine = try LSEENDInferenceEngine(descriptor: descriptor, computeUnits: computeUnits)
+        let engine = try LSEENDInferenceHelper(descriptor: descriptor, computeUnits: computeUnits)
         let melSpectrogram = Self.createMelSpectrogram(featureConfig: engine.featureConfig)
 
         lock.lock()
@@ -188,7 +188,7 @@ public final class LSEENDDiarizer: Diarizer {
     }
 
     /// Initialize with a pre-loaded engine.
-    public func initialize(engine: LSEENDInferenceEngine) {
+    public func initialize(engine: LSEENDInferenceHelper) {
         let melSpectrogram = Self.createMelSpectrogram(featureConfig: engine.featureConfig)
 
         lock.lock()
@@ -833,7 +833,7 @@ public final class LSEENDDiarizer: Diarizer {
         )
     }
 
-    private func updateTimelineConfig(engine: LSEENDInferenceEngine) {
+    private func updateTimelineConfig(engine: LSEENDInferenceHelper) {
         self._timelineConfig.numSpeakers = engine.metadata.realOutputDim
         self._timelineConfig.frameDurationSeconds = Float(1.0 / engine.modelFrameHz)
     }

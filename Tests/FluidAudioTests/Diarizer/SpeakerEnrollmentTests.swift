@@ -11,20 +11,20 @@ import XCTest
 final class SpeakerEnrollmentTests: XCTestCase {
     private static let fixtureSampleRate = 16_000
     nonisolated(unsafe) private static var cachedFixtureAudioURL: URL?
-    nonisolated(unsafe) private static var cachedLseendEngine: LSEENDInferenceEngine?
+    nonisolated(unsafe) private static var cachedLseendEngine: LSEENDInferenceHelper?
 
     private func loadSortformerModelsForTest(config: SortformerConfig) async throws -> SortformerModels {
         // These tests validate Sortformer behavior after initialization, not accelerator selection.
         try await SortformerModels.loadFromHuggingFace(config: config, computeUnits: .cpuOnly)
     }
 
-    private func loadLseendEngineForTest(variant: LSEENDVariant = .dihard3) async throws -> LSEENDInferenceEngine {
+    private func loadLseendEngineForTest(variant: LSEENDVariant = .dihard3) async throws -> LSEENDInferenceHelper {
         if let cached = Self.cachedLseendEngine {
             return cached
         }
 
         let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: variant)
-        let engine = try LSEENDInferenceEngine(descriptor: descriptor, computeUnits: .cpuOnly)
+        let engine = try LSEENDInferenceHelper(descriptor: descriptor, computeUnits: .cpuOnly)
         Self.cachedLseendEngine = engine
         return engine
     }
