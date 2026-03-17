@@ -280,7 +280,7 @@ public final class SortformerDiarizer: Diarizer {
                 throw SortformerError.notInitialized
             }
 
-            if timeline.hasSegments {
+            if _timeline.hasSegments {
                 logger.warning("Trying to enroll a speaker while timeline has segments; timeline will be reset")
             }
 
