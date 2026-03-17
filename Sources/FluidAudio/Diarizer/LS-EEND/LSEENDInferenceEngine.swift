@@ -684,6 +684,7 @@ private func roundedMillis(_ value: Double) -> Double {
 
 /// Clone an MLMultiArray into a new ANE-aligned allocation.
 private func cloneAlignedMultiArray(_ source: MLMultiArray) throws -> MLMultiArray {
+
     let copy = try ANEMemoryUtils.createAlignedArray(
         shape: source.shape,
         dataType: .float32,
