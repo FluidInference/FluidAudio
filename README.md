@@ -82,8 +82,9 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Summit AI Notes](https://summitnotes.app/)** | Local meeting transcription and summarization with speaker identification. Supports 100+ languages. |
 | **[Ora](https://futurelab.studio/ora)** | Local voice assistant for macOS with speech recognition and text-to-speech. |
 | **[Flowstay](https://flowstay.app)** | Easy text-to-speech, local post-processing and Claude Code integration for macOS. Free forever. |
-| **[macos-speech-server](https://github.com/dokterbob/macos-speech-server)** | OpenAI compatible STT/transcription and TTS/speech API server. | 
+| **[macos-speech-server](https://github.com/dokterbob/macos-speech-server)** | OpenAI compatible STT/transcription and TTS/speech API server. |
 | **[Snaply](https://snaply.ai)** |Free, Fast, 100% local AI dictation for Mac. |
+| **[OpenGranola](https://github.com/yazinsai/OpenGranola)** | Open-source meeting note-taker that transcribes conversations in real time and surfaces relevant notes from your knowledge base. Uses FluidAudio for local transcription. |
 | **[Enconvo](https://enconvo.com)** | AI Agent Launcher for macOS with voice input, live captions, and text-to-speech. Uses Parakeet ASR for local speech recognition. |
 | **[Meeting Transcriber](https://github.com/pasrom/meeting-transcriber)** | macOS menu bar app that auto-detects, records, and transcribes meetings (Teams, Zoom, Webex) with dual-track speaker diarization. Uses speaker diarization. |
 | **[Hitoku Draft](https://hitoku.me/draft)** | A local, private, voice writing assistant on your macOS menu bar. Uses Parakeet ASR. |
