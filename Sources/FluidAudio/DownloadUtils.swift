@@ -504,14 +504,30 @@ public class DownloadUtils {
         )
 
         let (tempURL, response) = try await session.download(for: request)
+        defer { session.finishTasksAndInvalidate() }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw HuggingFaceDownloadError.invalidResponse
+        }
+
+        if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
+            throw HuggingFaceDownloadError.rateLimited(
+                statusCode: httpResponse.statusCode,
+                message: "HTTP \(httpResponse.statusCode)"
+            )
+        }
+
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw HuggingFaceDownloadError.downloadFailed(
+                path: destinationURL.lastPathComponent,
+                underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
+            )
+        }
+
         if FileManager.default.fileExists(atPath: destinationURL.path) {
             try? FileManager.default.removeItem(at: destinationURL)
         }
         try FileManager.default.moveItem(at: tempURL, to: destinationURL)
-        session.finishTasksAndInvalidate()
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw HuggingFaceDownloadError.invalidResponse
-        }
         return httpResponse
     }
 
