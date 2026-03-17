@@ -452,7 +452,7 @@ public final class LSEENDInferenceHelper {
 ///
 /// Created via ``LSEENDInferenceEngine/createSession(inputSampleRate:)``.
 /// The session maintains internal RNN state across calls to ``pushAudio(_:)``.
-/// 
+///
 /// - Important: This class is **not** thread-safe. All calls must be serialized externally.
 public final class LSEENDStreamingSession {
     fileprivate let engine: LSEENDInferenceHelper
