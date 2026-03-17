@@ -9,6 +9,7 @@ public enum Repo: String, CaseIterable {
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
+    case parakeetEou1280 = "FluidInference/parakeet-realtime-eou-120m-coreml/1280ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
@@ -34,6 +35,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-realtime-eou-120m-coreml/160ms"
         case .parakeetEou320:
             return "parakeet-realtime-eou-120m-coreml/320ms"
+        case .parakeetEou1280:
+            return "parakeet-realtime-eou-120m-coreml/1280ms"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -58,7 +61,7 @@ public enum Repo: String, CaseIterable {
             return "FluidInference/parakeet-ctc-110m-coreml"
         case .parakeetCtc06b:
             return "FluidInference/parakeet-ctc-0.6b-coreml"
-        case .parakeetEou160, .parakeetEou320:
+        case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .sortformer:
             return "FluidInference/diar-streaming-sortformer-coreml"
@@ -76,6 +79,8 @@ public enum Repo: String, CaseIterable {
             return "160ms"
         case .parakeetEou320:
             return "320ms"
+        case .parakeetEou1280:
+            return "1280ms"
         case .qwen3Asr:
             return "f32"
         case .qwen3AsrInt8:
@@ -94,6 +99,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-eou-streaming/160ms"
         case .parakeetEou320:
             return "parakeet-eou-streaming/320ms"
+        case .parakeetEou1280:
+            return "parakeet-eou-streaming/1280ms"
         case .sortformer:
             return "sortformer"
         case .pocketTts:
@@ -431,7 +438,7 @@ public enum ModelNames {
             return ModelNames.ASR.requiredModels
         case .parakeetCtc110m, .parakeetCtc06b:
             return ModelNames.CTC.requiredModels
-        case .parakeetEou160, .parakeetEou320:
+        case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return ModelNames.ParakeetEOU.requiredModels
         case .diarizer:
             if variant == "offline" {
