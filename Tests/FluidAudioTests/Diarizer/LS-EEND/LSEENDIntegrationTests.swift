@@ -1,4 +1,3 @@
-import AVFoundation
 import CoreML
 import Foundation
 import XCTest
@@ -11,8 +10,6 @@ final class LSEENDIntegrationTests: XCTestCase {
         let meanAbs: Double
     }
 
-    private static let fixtureSampleRate = 16_000
-    nonisolated(unsafe) private static var cachedFixtureAudioURL: URL?
     nonisolated(unsafe) private static var cachedEngines: [LSEENDVariant: LSEENDInferenceHelper] = [:]
 
     func testVariantRegistryResolvesAllExportedArtifacts() async throws {
@@ -39,7 +36,8 @@ final class LSEENDIntegrationTests: XCTestCase {
     func testOfflineInferenceProducesConsistentShapesAcrossVariants() async throws {
         for variant in LSEENDVariant.allCases {
             let engine = try await makeEngine(variant: variant)
-            let samples = try fixtureAudio(sampleRate: engine.targetSampleRate, limitSeconds: 2.0)
+            let samples = try DiarizationTestFixtures.fixtureAudio(
+                sampleRate: engine.targetSampleRate, limitSeconds: 2.0)
             let result = try engine.infer(samples: samples, sampleRate: engine.targetSampleRate)
 
             try assertResultInvariants(
@@ -53,8 +51,8 @@ final class LSEENDIntegrationTests: XCTestCase {
 
     func testAudioFileInferenceMatchesInferenceOnResampledFixtureSamples() async throws {
         let engine = try await makeEngine(variant: .dihard3)
-        let fileResult = try engine.infer(audioFileURL: try fixtureAudioFileURL())
-        let resampled = try fixtureAudio(sampleRate: engine.targetSampleRate)
+        let fileResult = try engine.infer(audioFileURL: try DiarizationTestFixtures.fixtureAudioFileURL())
+        let resampled = try DiarizationTestFixtures.fixtureAudio(sampleRate: engine.targetSampleRate)
         let sampleResult = try engine.infer(samples: resampled, sampleRate: engine.targetSampleRate)
 
         assertMatrixClose(fileResult.logits, sampleResult.logits, maxAbs: 1e-6, meanAbs: 1e-7)
@@ -65,7 +63,8 @@ final class LSEENDIntegrationTests: XCTestCase {
 
     func testStreamingSessionMatchesOfflineInferenceOnRealFixtureAudio() async throws {
         let engine = try await makeEngine(variant: .dihard3)
-        let samples = try fixtureAudio(sampleRate: engine.targetSampleRate, limitSeconds: 4.0)
+        let samples = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: engine.targetSampleRate, limitSeconds: 4.0)
         let offline = try engine.infer(samples: samples, sampleRate: engine.targetSampleRate)
         let session = try engine.createSession(inputSampleRate: engine.targetSampleRate)
 
@@ -115,7 +114,7 @@ final class LSEENDIntegrationTests: XCTestCase {
 
     func testStreamingSimulationMatchesOfflineInferenceAndReportsMonotonicProgress() async throws {
         let engine = try await makeEngine(variant: .dihard3)
-        let fixtureURL = try fixtureAudioFileURL()
+        let fixtureURL = try DiarizationTestFixtures.fixtureAudioFileURL()
         let offline = try engine.infer(audioFileURL: fixtureURL)
         let simulation = try engine.simulateStreaming(audioFileURL: fixtureURL, chunkSeconds: 0.37)
 
@@ -142,7 +141,8 @@ final class LSEENDIntegrationTests: XCTestCase {
 
     func testDiarizerProcessCompleteMatchesEngineInference() async throws {
         let engine = try await makeEngine(variant: .dihard3)
-        let samples = try fixtureAudio(sampleRate: engine.targetSampleRate, limitSeconds: 4.0)
+        let samples = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: engine.targetSampleRate, limitSeconds: 4.0)
         let expected = try engine.infer(samples: samples, sampleRate: engine.targetSampleRate)
         let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
         diarizer.initialize(engine: engine)
@@ -159,13 +159,14 @@ final class LSEENDIntegrationTests: XCTestCase {
 
     func testDiarizerStreamingFinalizeMatchesProcessComplete() async throws {
         let engine = try await makeEngine(variant: .dihard3)
-        let samples = try fixtureAudio(sampleRate: engine.targetSampleRate, limitSeconds: 4.0)
+        let samples = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: engine.targetSampleRate, limitSeconds: 4.0)
         let expected = try engine.infer(samples: samples, sampleRate: engine.targetSampleRate)
 
         let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
         diarizer.initialize(engine: engine)
 
-        for chunk in chunk(samples, sizes: [701, 977, 1153]) {
+        for chunk in DiarizationTestFixtures.chunk(samples, sizes: [701, 977, 1153]) {
             let _ = try diarizer.process(samples: chunk)
         }
         let _ = try diarizer.finalizeSession()
@@ -195,7 +196,8 @@ final class LSEENDIntegrationTests: XCTestCase {
 
     func testEnrollSpeakerResetsVisibleTimelineAndAllowsStreaming() async throws {
         let engine = try await makeEngine(variant: .dihard3)
-        let samples = try fixtureAudio(sampleRate: engine.targetSampleRate, limitSeconds: 6.0)
+        let samples = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: engine.targetSampleRate, limitSeconds: 6.0)
         let enrollmentCount = min(samples.count / 2, engine.targetSampleRate * 2)
         let enrollment = Array(samples.prefix(enrollmentCount))
         let live = Array(samples.dropFirst(enrollmentCount))
@@ -212,7 +214,7 @@ final class LSEENDIntegrationTests: XCTestCase {
         XCTAssertEqual(diarizer.timeline.numFinalizedFrames, 0)
 
         var firstUpdate: DiarizerTimelineUpdate?
-        for chunk in chunk(live, sizes: [977, 1231, 1607]) {
+        for chunk in DiarizationTestFixtures.chunk(live, sizes: [977, 1231, 1607]) {
             if let update = try diarizer.process(samples: chunk) {
                 firstUpdate = update
                 break
@@ -231,7 +233,8 @@ final class LSEENDIntegrationTests: XCTestCase {
 
     func testProcessCompleteKeepsPrimedSessionOnlyWhenRequested() async throws {
         let engine = try await makeEngine(variant: .dihard3)
-        let samples = try fixtureAudio(sampleRate: engine.targetSampleRate, limitSeconds: 6.0)
+        let samples = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: engine.targetSampleRate, limitSeconds: 6.0)
         let enrollmentSampleCount = engine.targetSampleRate * 2
         let enrollment = Array(samples.prefix(enrollmentSampleCount))
         let complete = Array(samples.dropFirst(enrollmentSampleCount).prefix(enrollmentSampleCount))
@@ -240,13 +243,13 @@ final class LSEENDIntegrationTests: XCTestCase {
         diarizer.initialize(engine: engine)
 
         _ = try diarizer.enrollSpeaker(withSamples: enrollment, named: "Alice")
-        XCTAssertTrue(hasActiveSession(diarizer))
+        XCTAssertTrue(diarizer.hasActiveSession)
 
         _ = try diarizer.processComplete(complete, keepingEnrolledSpeakers: true)
-        XCTAssertFalse(hasActiveSession(diarizer))
+        XCTAssertFalse(diarizer.hasActiveSession)
 
         _ = try diarizer.processComplete(complete, keepingEnrolledSpeakers: false)
-        XCTAssertFalse(hasActiveSession(diarizer))
+        XCTAssertFalse(diarizer.hasActiveSession)
     }
 
     private func makeEngine(variant: LSEENDVariant) async throws -> LSEENDInferenceHelper {
@@ -259,113 +262,8 @@ final class LSEENDIntegrationTests: XCTestCase {
         return engine
     }
 
-    private func fixtureAudio(sampleRate: Int, limitSeconds: Double? = nil) throws -> [Float] {
-        let converter = AudioConverter(sampleRate: Double(sampleRate))
-        let audio = try converter.resampleAudioFile(try fixtureAudioFileURL())
-        guard let limitSeconds else {
-            return audio
-        }
-        let sampleCount = min(audio.count, Int(limitSeconds * Double(sampleRate)))
-        return Array(audio.prefix(sampleCount))
-    }
-
-    private func fixtureAudioFileURL() throws -> URL {
-        if let cached = Self.cachedFixtureAudioURL,
-            FileManager.default.fileExists(atPath: cached.path)
-        {
-            return cached
-        }
-
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("lseend-fixture-\(UUID().uuidString)")
-            .appendingPathExtension("wav")
-        try writeFixtureAudio(to: url)
-        Self.cachedFixtureAudioURL = url
-        return url
-    }
-
-    private func writeFixtureAudio(to url: URL) throws {
-        let sampleRate = Double(Self.fixtureSampleRate)
-        let samples = makeFixtureSamples(sampleRate: sampleRate)
-        let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sampleRate,
-            channels: 1,
-            interleaved: false
-        )!
-        guard
-            let buffer = AVAudioPCMBuffer(
-                pcmFormat: format,
-                frameCapacity: AVAudioFrameCount(samples.count)
-            )
-        else {
-            XCTFail("Failed to allocate fixture audio buffer")
-            return
-        }
-
-        buffer.frameLength = AVAudioFrameCount(samples.count)
-        samples.withUnsafeBufferPointer { source in
-            guard let destination = buffer.floatChannelData?[0] else { return }
-            destination.update(from: source.baseAddress!, count: samples.count)
-        }
-
-        let file = try AVAudioFile(
-            forWriting: url,
-            settings: format.settings,
-            commonFormat: .pcmFormatFloat32,
-            interleaved: false
-        )
-        try file.write(from: buffer)
-    }
-
-    private func makeFixtureSamples(sampleRate: Double) -> [Float] {
-        let segments: [(duration: Double, amplitude: Float, frequency: Double)] = [
-            (1.0, 0.20, 220),
-            (0.35, 0.00, 0),
-            (1.1, 0.32, 330),
-            (0.25, 0.00, 0),
-            (1.0, 0.28, 180),
-            (0.40, 0.00, 0),
-            (1.3, 0.36, 260),
-            (0.30, 0.00, 0),
-            (1.1, 0.24, 410),
-        ]
-
-        var output: [Float] = []
-        for (duration, amplitude, frequency) in segments {
-            let frameCount = Int(duration * sampleRate)
-            guard amplitude > 0, frequency > 0 else {
-                output.append(contentsOf: repeatElement(0, count: frameCount))
-                continue
-            }
-
-            for frame in 0..<frameCount {
-                let time = Double(frame) / sampleRate
-                let envelope = Float(min(1.0, time * 12.0)) * Float(min(1.0, (duration - time) * 12.0))
-                let carrier = sin(2.0 * Double.pi * frequency * time)
-                let harmonic = 0.35 * sin(2.0 * Double.pi * frequency * 2.03 * time)
-                output.append(Float((carrier + harmonic) * Double(amplitude * envelope)))
-            }
-        }
-        return output
-    }
-
     private func duration(of samples: [Float], sampleRate: Int) -> Double {
         Double(samples.count) / Double(sampleRate)
-    }
-
-    private func chunk(_ samples: [Float], sizes: [Int]) -> [[Float]] {
-        var chunks: [[Float]] = []
-        var start = 0
-        var index = 0
-        while start < samples.count {
-            let size = sizes[index % sizes.count]
-            let stop = min(samples.count, start + size)
-            chunks.append(Array(samples[start..<stop]))
-            start = stop
-            index += 1
-        }
-        return chunks
     }
 
     private func assertResultInvariants(
@@ -431,17 +329,5 @@ final class LSEENDIntegrationTests: XCTestCase {
             maxAbs: maxAbs,
             meanAbs: actual.isEmpty ? 0 : sumAbs / Double(actual.count)
         )
-    }
-
-    private func hasActiveSession(_ diarizer: LSEENDDiarizer) -> Bool {
-        let mirror = Mirror(reflecting: diarizer)
-        guard let sessionValue = mirror.children.first(where: { $0.label == "_session" })?.value else {
-            XCTFail("Expected LS-EEND diarizer to expose _session via reflection")
-            return false
-        }
-
-        let optionalMirror = Mirror(reflecting: sessionValue)
-        XCTAssertEqual(optionalMirror.displayStyle, .optional)
-        return optionalMirror.children.count == 1
     }
 }

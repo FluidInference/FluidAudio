@@ -80,6 +80,13 @@ public final class LSEENDDiarizer: Diarizer {
         return _engine?.decodeMaxSpeakers
     }
 
+    /// Whether a streaming session is currently active.
+    var hasActiveSession: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _session != nil
+    }
+
     // MARK: - Private State
 
     private var _engine: LSEENDInferenceHelper?

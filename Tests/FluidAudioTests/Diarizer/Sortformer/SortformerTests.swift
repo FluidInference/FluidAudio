@@ -12,7 +12,7 @@ final class SortformerTests: XCTestCase {
         // Create 5 seconds of deterministic random audio
         let sampleRate = 16000
         let audioCount = sampleRate * 5
-        srand48(Int(Date().timeIntervalSince1970 * 1e6))
+        srand48(42)
         let audio = (0..<audioCount).map { _ in Float(drand48() - 0.5) }
 
         // 1. Get chunks from Batch Feature Provider
