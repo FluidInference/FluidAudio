@@ -246,7 +246,7 @@ Every new model needs benchmark results before merging. The metrics depend on th
 
 **Existing benchmark datasets:**
 
-FluidAudio already ships with datasets (or auto-downloads them) for each model type. Use these when benchmarking a new model — don't create new datasets unless your model covers a domain that isn't represented.
+FluidAudio already ships with datasets (or auto-downloads them) for each model type. We recommend using these when benchmarking a new model, but feel free to use or create new datasets as needed.
 
 | Dataset | Domain | Size | Format | Location / Download |
 |---------|--------|------|--------|---------------------|
@@ -264,7 +264,7 @@ FluidAudio already ships with datasets (or auto-downloads them) for each model t
 
 Most benchmark CLI commands accept `--auto-download` or will fetch datasets on first run. You can also point to a local directory with `--cache-dir` or `--data-dir` if you've already downloaded the data.
 
-To add a new dataset for a domain that isn't covered, follow the existing pattern: host it on HuggingFace under `FluidInference/`, register it in the download infrastructure, and document it in this table.
+To add a new dataset, follow the existing pattern: host it on HuggingFace under `FluidInference/`, register it in the download infrastructure, and document it in this table.
 
 **What to report:**
 
