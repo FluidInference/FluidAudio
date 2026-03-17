@@ -332,15 +332,88 @@ swift run fluidaudiocli diarization-benchmark --mode offline --auto-download \
 
 `offline_results.json` contains DER/JER/RTFx along with timing breakdowns for segmentation, embedding extraction, and VBx clustering. CI now runs this workflow on every PR to ensure the offline models stay healthy and the Hugging Face assets remain accessible.
 
+### LS-EEND (LongForm Streaming End-to-End Neural Diarization)
+
+State-of-the-art end-to-end streaming diarization with fully local CoreML inference. This is the best default option for online and streaming diarization when you want low-latency speaker activity updates from a single model without a separate clustering pipeline. Multiple exported variants are available for different benchmark domains, and the diarizer supports both streaming and complete-buffer processing.
+
+Why use LS-EEND:
+- Robust to noise and high speaker overlap
+- Supports up to 10 speakers in a session
+- Generally achieves better benchmark results than Sortformer on CALLHOME, AMI, and DIHARD III
+- Frame-by-frame inference with 100ms frames, and 900ms of tentative frames.
+- Much more lightweight than Sortformer, and can be faster on CPU than Sortformer on ANE
+- Does not suffer from the missed-quiet-speech issues that Sortformer can show
+- End-to-end model without separate segmentation, embedding extraction, and clustering stages
+- Also works well for complete-buffer inference when you want the same model in offline mode
+
+Tradeoffs:
+- Can pick up background speakers more readily than Sortformer
+- Speaker identity stability is usually somewhat weaker than Sortformer
+- Speaker indices are expected to follow chronological arrival order, but Sortformer tends to maintain that ordering more reliably
+- Supports speaker pre-enrollment, but it may be less reliable than the WeSpeaker pipeline
+
+See [Documentation/Diarization/GettingStarted.md](Documentation/Diarization/GettingStarted.md) for model loading and integration details.
+
+```swift
+import FluidAudio
+
+Task {
+    let diarizer = LSEENDDiarizer()
+    try await diarizer.initialize(variant: .dihard3)
+
+    let samples = try await loadSamples16kMono(path: "path/to/meeting.wav")
+    let timeline = try diarizer.processComplete(samples, sourceSampleRate: 16_000)
+
+    for segment in timeline.segments {
+        print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
+    }
+}
+```
+
 ### Sortformer (End-to-End Neural Diarization)
 
-End-to-end neural diarization using [NVIDIA's Sortformer](https://arxiv.org/abs/2409.06656). No separate VAD, segmentation, or clustering needed. Limited to 4 speakers and does not remember speakers across recordings. Licensed under NVIDIA Open Model License (no restrictions).
+End-to-end neural diarization using [NVIDIA's Sortformer](https://arxiv.org/abs/2409.06656). This is the secondary streaming/online diarizer behind LS-EEND. It offers nearly the same live-update workflow and API flexibility, but trades LS-EEND's stronger benchmark results and higher speaker capacity for better identity stability. No separate VAD, segmentation, or clustering needed. Limited to 4 speakers and does not remember speakers across recordings. Licensed under NVIDIA Open Model License (no restrictions).
+
+Why use Sortformer:
+- Simple streaming pipeline with low latency
+- Supports live-update flexibility like LS-EEND
+- Handles overlapping speech without an external clustering stage
+- Better speaker identity stability than LS-EEND
+- Ignores speech from background conversations 
+- Good choice when the 4-speaker limit is acceptable
+
+Tradeoffs:
+- Limited to 4 unique speakers
+- Updates are performed less frequently than for LS-EEND 
+- Can get overwhelmed when there are too many background speakers
+- Can miss speech when the audio is too quiet
+- Supports speaker pre-enrollment, but it may be less reliable than the WeSpeaker pipeline
+
+Like LS-EEND, Sortformer supports ultra-low-latency inference with 0.5s updates, 0.5s preview frames, and a fixed 1.0s latency before finalized predictions. Both models emit their results into a `DiarizerTimeline`, so you do not need to manage incremental diarization state externally.
 
 See [Documentation/Diarization/Sortformer.md](Documentation/Diarization/Sortformer.md) for usage, comparison with Pyannote, streaming config, and architecture details.
 
 ### Streaming/Online Speaker Diarization (Pyannote)
 
-Use this if you need to show speaker labels while the transcription is happening, in most use cases, offline should be more than enough.
+This pipeline uses segmentation plus speaker embeddings and is the third choice behind LS-EEND and Sortformer. It can be useful if you specifically want the classic multi-stage pipeline, but it is much slower than LS-EEND or Sortformer for live diarization.
+
+Why use the WeSpeaker/Pyannote pipeline:
+- More modular pipeline if you want separate segmentation and embedding stages
+- Better fit when you need to integrate external speaker identification or clustering logic
+- Speaker pre-enrollment is reliable
+- Speaker database management is much easier
+- Purging or updating individual speakers is straightforward
+- Not recommended when low-latency live diarization is the priority
+
+In most applications:
+- Use LS-EEND as the default online diarizer
+- Use Sortformer as the second choice when its stronger identity stability and participant focus matter more than the 4-speaker limit
+- Use the WeSpeaker/Pyannote pipeline only when you specifically need its modular design despite the speed cost
+
+Tradeoffs:
+- Slower in both inference time and practical latency than LS-EEND or Sortformer
+- Needs larger chunks, with at least 5 seconds usually required for decent results
+- Unlike LS-EEND and Sortformer, speaker state is much easier to manipulate explicitly
 
 ```swift
 import FluidAudio

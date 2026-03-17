@@ -13,6 +13,7 @@ public enum Repo: String, CaseIterable {
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
+    case lseend = "FluidInference/ls-eend-coreml"
     case pocketTts = "FluidInference/pocket-tts-coreml"
     case qwen3Asr = "FluidInference/qwen3-asr-0.6b-coreml/f32"
     case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
@@ -43,6 +44,8 @@ public enum Repo: String, CaseIterable {
             return "kokoro-82m-coreml"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
+        case .lseend:
+            return "ls-eend-coreml"
         case .pocketTts:
             return "pocket-tts-coreml"
         case .qwen3Asr:
@@ -65,6 +68,8 @@ public enum Repo: String, CaseIterable {
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .sortformer:
             return "FluidInference/diar-streaming-sortformer-coreml"
+        case .lseend:
+            return "FluidInference/ls-eend-coreml"
         case .qwen3Asr, .qwen3AsrInt8:
             return "FluidInference/qwen3-asr-0.6b-coreml"
         default:
@@ -103,6 +108,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-eou-streaming/1280ms"
         case .sortformer:
             return "sortformer"
+        case .lseend:
+            return "ls-eend"
         case .pocketTts:
             return "pocket-tts"
         case .multilingualG2p:
@@ -233,29 +240,44 @@ public enum ModelNames {
     /// Sortformer streaming diarization model names
     public enum Sortformer {
         public enum Variant: CaseIterable, Sendable {
-            case `default`
-            case nvidiaLowLatency
-            case nvidiaHighLatency
+            case fastestV2
+            case fastestV2_1
+            case nvidiaLowLatencyV2
+            case nvidiaLowLatencyV2_1
+            case nvidiaHighLatencyV2
+            case nvidiaHighLatencyV2_1
 
             public var name: String {
                 switch self {
-                case .default:
-                    return "SortformerV2"
-                case .nvidiaLowLatency:
-                    return "SortformerNvidiaLowV2"
-                case .nvidiaHighLatency:
-                    return "SortformerNvidiaHighV2"
+                case .fastestV2:
+                    return "Sortformer_v2"
+                case .fastestV2_1:
+                    return "Sortformer_v2.1"
+                case .nvidiaLowLatencyV2:
+                    return "SortformerNvidiaLow_v2"
+                case .nvidiaLowLatencyV2_1:
+                    return "SortformerNvidiaLow_v2.1"
+                case .nvidiaHighLatencyV2:
+                    return "SortformerNvidiaHigh_v2"
+                case .nvidiaHighLatencyV2_1:
+                    return "SortformerNvidiaHigh_v2.1"
                 }
             }
 
             public var defaultConfiguration: SortformerConfig {
                 switch self {
-                case .default:
-                    return .default
-                case .nvidiaLowLatency:
-                    return .nvidiaLowLatency
-                case .nvidiaHighLatency:
-                    return .nvidiaHighLatency
+                case .fastestV2:
+                    return .fastestV2
+                case .fastestV2_1:
+                    return .fastestV2_1
+                case .nvidiaLowLatencyV2:
+                    return .nvidiaLowLatencyV2
+                case .nvidiaLowLatencyV2_1:
+                    return .nvidiaLowLatencyV2_1
+                case .nvidiaHighLatencyV2:
+                    return .nvidiaHighLatencyV2
+                case .nvidiaHighLatencyV2_1:
+                    return .nvidiaHighLatencyV2_1
                 }
             }
 
@@ -269,7 +291,7 @@ public enum ModelNames {
         }
 
         /// Lowest latency for streaming
-        public static let defaultVariant: Variant = .default
+        public static let defaultVariant: Variant = .fastestV2_1
 
         /// Bundle name for a specific variant
         public static func bundle(for variant: Variant) -> String {
@@ -278,7 +300,11 @@ public enum ModelNames {
 
         /// Bundle name for a given configuration
         public static func bundle(for config: SortformerConfig) -> String? {
-            return Variant.allCases.first { $0.isCompatible(with: config) }?.fileName
+            guard let variant = config.modelVariant else {
+                return nil
+            }
+            assert(variant.isCompatible(with: config), "ERROR: Model variant and configuration are not compatible.")
+            return variant.fileName
         }
 
         /// Default bundle name
@@ -289,6 +315,57 @@ public enum ModelNames {
         /// All Sortformer bundle models required by the downloader
         public static var requiredModels: Set<String> {
             Set(Variant.allCases.map(\.fileName))
+        }
+    }
+
+    /// LS-EEND streaming diarization model names
+    public enum LSEEND {
+        public enum Variant: String, CaseIterable, Sendable, CustomStringConvertible {
+            case ami = "AMI"
+            case callhome = "CALLHOME"
+            case dihard2 = "DIHARD II"
+            case dihard3 = "DIHARD III"
+
+            public var name: String {
+                switch self {
+                case .ami:
+                    return "ls_eend_ami_step"
+                case .callhome:
+                    return "ls_eend_callhome_step"
+                case .dihard2:
+                    return "ls_eend_dih2_step"
+                case .dihard3:
+                    return "ls_eend_dih3_step"
+                }
+            }
+
+            public var description: String { rawValue }
+
+            public var stem: String { "\(rawValue)/\(name)" }
+
+            public var modelFile: String { "\(stem).mlmodelc" }
+
+            public var configFile: String { "\(stem).json" }
+
+            public var fileNames: [String] { [modelFile, configFile] }
+        }
+
+        /// Lowest latency for streaming
+        public static let defaultVariant: Variant = .dihard3
+
+        /// Bundle name for a specific variant
+        public static func bundle(for variant: Variant) -> [String] {
+            return variant.fileNames
+        }
+
+        /// Default bundle name
+        public static var defaultBundle: [String] {
+            return defaultVariant.fileNames
+        }
+
+        /// All Sortformer bundle models required by the downloader
+        public static var requiredModels: Set<String> {
+            Set(Variant.allCases.flatMap(\.fileNames))
         }
     }
 
@@ -460,6 +537,11 @@ public enum ModelNames {
                 return [variant]
             }
             return ModelNames.Sortformer.requiredModels
+        case .lseend:
+            if let variant = variant {
+                return [variant + ".mlmodelc", variant + ".json"]
+            }
+            return ModelNames.LSEEND.requiredModels
         case .qwen3Asr, .qwen3AsrInt8:
             return ModelNames.Qwen3ASR.requiredModelsFull
         case .multilingualG2p:

@@ -240,16 +240,40 @@ extension SortformerModels {
         // Extract outputs (names must match CoreML Sortformer model)
         // Note: Output names use _out suffix to avoid macOS 26+ BNNS compiler error
         // where input and output tensors cannot share the same name
-        guard let predictions = output.featureValue(for: "speaker_preds")?.shapedArrayValue(of: Float32.self)?.scalars,
-            let chunkEmbeddingsLength = output.featureValue(for: "chunk_pre_encoder_lengths_out")?.shapedArrayValue(
-                of: Int32.self)?.scalars.first
-        else {
-            throw SortformerError.inferenceFailed("Missing model outputs")
-        }
 
         // Chunk embeddings may be Float16 (head module uses fp16) or Float32
         let chunkEmbeddings: [Float]
+        let predictions: [Float]
+        let chunkEmbeddingsLength: Int
+
+        // Get speaker probabilities
+        if let preds = output.featureValue(for: "speaker_preds_out")?.shapedArrayValue(of: Float32.self)?.scalars {
+            predictions = preds
+        } else if let preds = output.featureValue(for: "speaker_preds")?.shapedArrayValue(of: Float32.self)?.scalars {
+            predictions = preds
+        } else {
+            throw SortformerError.inferenceFailed("Missing speaker_preds or speaker_preds_out")
+        }
+
+        // Get chunk length
+        if let length = output.featureValue(for: "chunk_pre_encoder_lengths_out")?.shapedArrayValue(
+            of: Int32.self)?.scalars.first
+        {
+            chunkEmbeddingsLength = Int(length)
+        } else if let length = output.featureValue(for: "chunk_pre_encoder_lengths")?.shapedArrayValue(
+            of: Int32.self)?.scalars.first
+        {
+            chunkEmbeddingsLength = Int(length)
+        } else {
+            throw SortformerError.inferenceFailed("Missing chunk_pre_encoder_lengths or chunk_pre_encoder_lengths_out")
+        }
+
+        // Get acoustic embeddings
         if let fp32 = output.featureValue(for: "chunk_pre_encoder_embs_out")?.shapedArrayValue(of: Float32.self)?
+            .scalars
+        {
+            chunkEmbeddings = fp32
+        } else if let fp32 = output.featureValue(for: "chunk_pre_encoder_embs")?.shapedArrayValue(of: Float32.self)?
             .scalars
         {
             chunkEmbeddings = fp32

@@ -16,21 +16,6 @@ Sortformer is an end-to-end neural speaker diarization model that answers "who s
 - Does not remember speakers across recordings (no persistent speaker embeddings)
 - May miss quiet or distant speech (trained to ignore background conversations)
 
-## Sortformer vs DiarizerManager (Pyannote-based)
-
-**Sortformer** handles noisy environments and overlapping speakers well, but is limited to 4 speakers (for now). It also misses quiet speech as it's trained to ignore background conversations. The most common source of error is missed speech.
-
-**DiarizerManager** works better when you have more than 4 speakers, but struggles with background noise, background conversations, and similar-sounding speakers. The most common source of error is incorrect labeling.
-
-| Environment | Sortformer | DiarizerManager |
-|-------------|:----------:|:---------------:|
-| Clean/silent room | Best | Good |
-| Background noise | Best | Poor |
-| Speech from another room | Poor | Good |
-| High overlap | Best | Good |
-| More than 4 speakers | No | Yes |
-| Remembering speakers across meetings | No | Yes |
-
 ## Production Notes
 
 Benchmark DER does not always reflect real-world performance. Key things to know:
@@ -218,32 +203,30 @@ SortformerConfig.nvidiaLowLatency
 Main entry point for diarization:
 
 ```swift
-let diarizer = Pipeline()
-
-// Initialize with HuggingFace models
-try await diarizer.initialize(mainModelPath: modelURL)
+let diarizer = SortformerDiarizer(config: .default)
+let models = try await SortformerModels.loadFromHuggingFace(config: .default)
+diarizer.initialize(models: models)
 
 // Streaming mode
 for audioChunk in audioStream {
-    if let result = try diarizer.processSamples(audioChunk) {
-        // Handle speaker probabilities
-        for frame in 0..<result.frameCount {
-            for speaker in 0..<4 {
-                let prob = result.getSpeakerPrediction(speaker: speaker, frame: frame)
-            }
+    if let update = try diarizer.process(samples: audioChunk, sourceSampleRate: 16_000) {
+        for segment in update.finalizedSegments {
+            print(segment)
         }
     }
 }
 
-// Or process complete file
-let timeline = try diarizer.processComplete(audioSamples)
+// Or process a complete buffer / file
+let timeline = try diarizer.processComplete(audioSamples, sourceSampleRate: 16_000)
+let fileTimeline = try diarizer.processComplete(audioFileURL: audioURL)
 ```
 
 **Key Methods:**
 - `addAudio(_:)` - Buffer audio samples
 - `process()` - Run inference on buffered audio
-- `processSamples(_:)` - Convenience method combining add + process
-- `processComplete(_:)` - Batch process entire audio file
+- `process(samples:sourceSampleRate:)` - Convenience method combining add + process
+- `processComplete(_:sourceSampleRate:keepingEnrolledSpeakers:...)` - Batch process a full sample buffer
+- `processComplete(audioFileURL:keepingEnrolledSpeakers:...)` - Batch process a file with automatic resampling
 
 ### DiarizerInference.swift
 
@@ -443,12 +426,15 @@ Three CoreML models are available on HuggingFace:
 ```swift
 let diarizer = SortformerDiarizer(config: .default)
 let models = try await SortformerModels.loadFromHuggingFace(config: .default)
-try await diarizer.initialize(models: models)
+diarizer.initialize(models: models)
 
 // Process audio in chunks (e.g., from microphone)
 audioEngine.installTap { buffer in
-    let samples = buffer.floatChannelData![0]
-    if let result = try? diarizer.processSamples(Array(samples)) {
+    let samples = Array(UnsafeBufferPointer(
+        start: buffer.floatChannelData![0],
+        count: Int(buffer.frameLength)
+    ))
+    if let result = try? diarizer.process(samples: samples, sourceSampleRate: buffer.format.sampleRate) {
         // Update UI with speaker probabilities
         updateSpeakerDisplay(result)
 
@@ -462,10 +448,13 @@ audioEngine.installTap { buffer in
 
 ```swift
 let diarizer = SortformerDiarizer(config: .nvidiaHighLatency)
-let models = try await SortformerModels.loadFromHuggingFace(config: .default)
-try await diarizer.initialize(models: models)
+let models = try await SortformerModels.loadFromHuggingFace(config: .nvidiaHighLatency)
+diarizer.initialize(models: models)
 
-let timeline = try diarizer.processComplete(audioSamples)
+let timeline = try diarizer.processComplete(audioSamples, sourceSampleRate: 16_000)
+
+// Or let Sortformer load and resample a file directly
+let fileTimeline = try diarizer.processComplete(audioFileURL: audioURL)
 
 // Get segments per speaker
 for (speakerIndex, segments) in timeline.segments.enumerated() {
@@ -474,6 +463,31 @@ for (speakerIndex, segments) in timeline.segments.enumerated() {
     }
 }
 ```
+
+### Speaker Enrollment
+
+Use speaker enrollment to warm Sortformer with known speakers before live audio starts. Enrollment preserves the speaker cache / FIFO state, resets the visible timeline, and keeps the speaker name in the `DiarizerTimeline`.
+
+```swift
+let speaker = try diarizer.enrollSpeaker(
+    withAudio: enrollmentAudio,
+    sourceSampleRate: 16_000,
+    named: "Alice",
+    overwritingAssignedSpeakerName: false
+)
+
+let liveTimeline = try diarizer.processComplete(
+    meetingAudio,
+    sourceSampleRate: 16_000,
+    keepingEnrolledSpeakers: true
+)
+```
+
+Notes:
+- Enrollment is per diarizer instance and does not create a persistent speaker database.
+- Enrollment improves live identity continuity, but it is still less reliable than the WeSpeaker / Pyannote speaker database.
+- Sortformer still uses chronological speaker slots, and it is still limited to four unique speakers.
+- Use `overwritingAssignedSpeakerName: false` if you want enrollment to fail instead of replacing the name on an already-named slot.
 
 ## References
 
