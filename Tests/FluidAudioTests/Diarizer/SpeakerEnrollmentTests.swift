@@ -282,7 +282,8 @@ final class SpeakerEnrollmentTests: XCTestCase {
         let engine = try await loadLseendEngineForTest()
         let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
         diarizer.initialize(engine: engine)
-        let enrollmentAudio = try fixtureAudio(sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
+        let enrollmentAudio = try fixtureAudio(
+            sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
 
         let speaker = try diarizer.enrollSpeaker(withSamples: enrollmentAudio, named: "Alice")
 
@@ -300,7 +301,8 @@ final class SpeakerEnrollmentTests: XCTestCase {
         let engine = try await loadLseendEngineForTest()
         let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
         diarizer.initialize(engine: engine)
-        let enrollmentAudio = try fixtureAudio(sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
+        let enrollmentAudio = try fixtureAudio(
+            sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
         let liveAudio = try fixtureAudio(sampleRate: engine.targetSampleRate, startSeconds: 3.0, durationSeconds: 3.0)
 
         let speaker = try diarizer.enrollSpeaker(withSamples: enrollmentAudio, named: "Alice")
@@ -329,8 +331,10 @@ final class SpeakerEnrollmentTests: XCTestCase {
         let engine = try await loadLseendEngineForTest()
         let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
         diarizer.initialize(engine: engine)
-        let speakerAAudio = try fixtureAudio(sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
-        let speakerBAudio = try fixtureAudio(sampleRate: engine.targetSampleRate, startSeconds: 3.0, durationSeconds: 3.0)
+        let speakerAAudio = try fixtureAudio(
+            sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
+        let speakerBAudio = try fixtureAudio(
+            sampleRate: engine.targetSampleRate, startSeconds: 3.0, durationSeconds: 3.0)
 
         let speakerA = try diarizer.enrollSpeaker(withSamples: speakerAAudio, named: "Alice")
         let speakerB = try diarizer.enrollSpeaker(withSamples: speakerBAudio, named: "Bob")
@@ -349,7 +353,8 @@ final class SpeakerEnrollmentTests: XCTestCase {
         let engine = try await loadLseendEngineForTest()
         let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
         diarizer.initialize(engine: engine)
-        let enrollmentAudio = try fixtureAudio(sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
+        let enrollmentAudio = try fixtureAudio(
+            sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
 
         let firstSpeaker = try diarizer.enrollSpeaker(withSamples: enrollmentAudio, named: "Alice")
         let secondSpeaker = try diarizer.enrollSpeaker(

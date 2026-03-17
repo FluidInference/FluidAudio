@@ -268,7 +268,7 @@ public final class SortformerDiarizer: Diarizer {
             guard let name else { return "(no name)" }
             return "named '\(name)'"
         }
-        
+
         guard !samples.isEmpty else {
             logger.warning("Failed to enroll speaker \(description) because no speech detected")
             return nil
@@ -279,14 +279,14 @@ public final class SortformerDiarizer: Diarizer {
             guard _models != nil else {
                 throw SortformerError.notInitialized
             }
-            
+
             if timeline.hasSegments {
                 logger.warning("Trying to enroll a speaker while timeline has segments; timeline will be reset")
             }
 
             _timeline.reset(keepingSpeakers: true)
             var occupiedIndices = Set(_timeline.speakers.keys)
-            
+
             // Clear audio and feature buffers to avoid enrolling this speaker with stale audio.
             startFeat = 0
             lastAudioSample = 0
@@ -294,19 +294,20 @@ public final class SortformerDiarizer: Diarizer {
             audioBuffer.removeAll(keepingCapacity: true)
             featureBuffer.removeAll(keepingCapacity: true)
             audioBuffer.append(contentsOf: normalized)
-            
+
             preprocessAudioToFeaturesLocked()
 
             var didProcess: Bool = false
             while let _ = try processLocked(updateTimeline: true) { didProcess = true }
-            
+
             guard didProcess else {
                 let minDuration = Float(config.chunkLen + config.chunkRightContext) * config.frameDurationSeconds
-                logger.warning("Failed to enroll speaker \(description): not enough audio was provided. " +
-                               "Please provide at least \(String(format: "%.2f", minDuration)) seconds of speech.")
+                logger.warning(
+                    "Failed to enroll speaker \(description): not enough audio was provided. "
+                        + "Please provide at least \(String(format: "%.2f", minDuration)) seconds of speech.")
                 return nil
             }
-            
+
             let speaker = _timeline.speakers.values.max { $0.numSpeechFrames < $1.numSpeechFrames }
             let enrolledSpeaker: DiarizerSpeaker?
             if let speaker, speaker.hasSegments {
@@ -326,7 +327,9 @@ public final class SortformerDiarizer: Diarizer {
                         featureBuffer.removeAll(keepingCapacity: true)
                         return nil
                     }
-                    logger.warning("Newly-enrolled speaker \(description) will overwrite the old one named \(oldName) at index \(speaker.index)")
+                    logger.warning(
+                        "Newly-enrolled speaker \(description) will overwrite the old one named \(oldName) at index \(speaker.index)"
+                    )
                 }
                 speaker.name = name
                 occupiedIndices.insert(speaker.index)
@@ -335,7 +338,7 @@ public final class SortformerDiarizer: Diarizer {
                 logger.warning("Failed to enroll speaker \(description) because no speech detected")
                 enrolledSpeaker = nil
             }
-        
+
             _timeline.reset(keepingSpeakersWhere: { occupiedIndices.contains($0.index) })
             _numFramesProcessed = 0
             diarizerChunkIndex = 0
@@ -577,7 +580,7 @@ public final class SortformerDiarizer: Diarizer {
             progressCallback: progressCallback
         )
     }
-    
+
     /// Process a complete audio file from a URL.
     ///
     /// Reads and resamples the file to ``targetSampleRate``, then delegates to
