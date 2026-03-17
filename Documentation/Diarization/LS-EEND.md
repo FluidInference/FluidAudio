@@ -105,7 +105,7 @@ LSEENDDiarizer.processComplete(_:sourceSampleRate:)
 Under the hood, offline engine inference follows this path:
 
 ```
-LSEENDInferenceEngine.infer(samples:sampleRate:)
+LSEENDInferenceHelper.infer(samples:sampleRate:)
   |
   |-- resampleIfNeeded()
   |-- offlineFeatureExtractor.extractFeatures(audio:)
@@ -183,7 +183,7 @@ LSEENDDiarizer.process()
 ```
 Sources/FluidAudio/Diarizer/LS-EEND/
 ├── LSEENDDiarizer.swift           # High-level Diarizer protocol implementation
-├── LSEENDInference.swift          # LSEENDInferenceEngine, LSEENDStreamingSession
+├── LSEENDInference.swift          # LSEENDInferenceHelper, LSEENDStreamingSession
 ├── LSEENDFeatureExtraction.swift  # LSEENDFeatureConfig, offline + streaming feature extractors
 ├── LSEENDSupport.swift            # Data types: LSEENDMatrix, LSEENDModelDescriptor, LSEENDVariant,
 │                                  #   LSEENDModelMetadata, LSEENDStateShapes, result structs, errors
@@ -228,7 +228,7 @@ let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: .a
 try diarizer.initialize(descriptor: descriptor)
 
 // From a pre-loaded engine
-let engine = try LSEENDInferenceEngine(descriptor: descriptor)
+let engine = try LSEENDInferenceHelper(descriptor: descriptor)
 diarizer.initialize(engine: engine)
 ```
 
@@ -317,7 +317,7 @@ diarizer.cleanup()   // Release all resources including the loaded model
 
 ---
 
-## LSEENDInferenceEngine
+## LSEENDInferenceHelper
 
 Lower-level engine for direct CoreML inference. Use this when you need access to raw logits, want to manage sessions manually, or are building tooling around the model.
 
@@ -326,7 +326,7 @@ Lower-level engine for direct CoreML inference. Use this when you need access to
 ```swift
 // Synchronous — model loading happens here
 let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: .dihard3)
-let engine = try LSEENDInferenceEngine(
+let engine = try LSEENDInferenceHelper(
     descriptor: descriptor,
     computeUnits: .cpuOnly   // default
 )
@@ -386,7 +386,7 @@ for update in simulation.updates {
 
 ## LSEENDStreamingSession
 
-A stateful streaming session created by `LSEENDInferenceEngine.createSession(inputSampleRate:)`. Maintains all six recurrent state tensors across calls.
+A stateful streaming session created by `LSEENDInferenceHelper.createSession(inputSampleRate:)`. Maintains all six recurrent state tensors across calls.
 
 > **Not thread-safe.** All calls must be serialized.
 
@@ -458,7 +458,7 @@ matrix.isEmpty   // Bool
 
 ### LSEENDInferenceResult
 
-Output from `LSEENDInferenceEngine.infer(...)` or `LSEENDStreamingSession.snapshot()`.
+Output from `LSEENDInferenceHelper.infer(...)` or `LSEENDStreamingSession.snapshot()`.
 
 | Property | Type | Description |
 |----------|------|-------------|
@@ -845,7 +845,7 @@ audioEngine.installTap(onBus: 0, bufferSize: 1600, format: format) { buffer, _ i
 
 ```swift
 let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: .callhome)
-let engine = try LSEENDInferenceEngine(descriptor: descriptor)
+let engine = try LSEENDInferenceHelper(descriptor: descriptor)
 let session = try engine.createSession(inputSampleRate: engine.targetSampleRate)
 
 for chunk in chunkedAudio(samples, chunkSize: 800) {
@@ -861,7 +861,7 @@ let result = session.snapshot()   // LSEENDInferenceResult
 ### Custom DER Evaluation
 
 ```swift
-let engine = try LSEENDInferenceEngine(descriptor: descriptor)
+let engine = try LSEENDInferenceHelper(descriptor: descriptor)
 let result = try engine.infer(audioFileURL: audioURL)
 
 let (entries, speakers) = try LSEENDEvaluation.parseRTTM(url: rttmURL)
