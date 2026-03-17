@@ -577,13 +577,15 @@ public final class LSEENDDiarizer: Diarizer {
         finalizeOnCompletion: Bool = true,
         progressCallback: ((Int, Int, Int) -> Void)? = nil
     ) throws -> DiarizerTimeline {
-        try processCompleteInternal(
-            samples,
-            sourceSampleRate: sourceSampleRate,
-            keepingEnrolledSpeakers: keepSpeakers,
-            finalizeOnCompletion: finalizeOnCompletion,
-            progressCallback: progressCallback
-        )
+        try lock.withLock {
+            try processCompleteLocked(
+                samples,
+                sourceSampleRate: sourceSampleRate,
+                keepingEnrolledSpeakers: keepSpeakers,
+                finalizeOnCompletion: finalizeOnCompletion,
+                progressCallback: progressCallback
+            )
+        }
     }
 
     /// Process a complete audio buffer.
@@ -604,78 +606,14 @@ public final class LSEENDDiarizer: Diarizer {
         finalizeOnCompletion: Bool,
         progressCallback: ((Int, Int, Int) -> Void)?
     ) throws -> DiarizerTimeline where C.Element == Float {
-        try processCompleteInternal(
-            Array(samples),
-            sourceSampleRate: sourceSampleRate,
-            keepingEnrolledSpeakers: keepSpeakers,
-            finalizeOnCompletion: finalizeOnCompletion,
-            progressCallback: progressCallback
-        )
-    }
-
-    private func processCompleteInternal(
-        _ samples: [Float],
-        sourceSampleRate: Double?,
-        keepingEnrolledSpeakers keepSpeakers: Bool? = nil,
-        finalizeOnCompletion: Bool,
-        progressCallback: ((Int, Int, Int) -> Void)?
-    ) throws -> DiarizerTimeline {
-        return try lock.withLock {
-            let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) ?? samples
-
-            guard let engine = _engine else {
-                throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
-            }
-
-            // Reset for fresh processing
-            updateTimelineConfig(engine: engine)
-
-            let keepSpeakers = keepSpeakers ?? (_numFramesProcessed == 0) && pendingAudio.isEmpty
-
-            _timeline.reset(keepingSpeakers: keepSpeakers)
-            _numFramesProcessed = 0
-            pendingAudio.removeAll(keepingCapacity: true)
-            if !keepSpeakers {
-                _visibleStartFrameOffset = 0
-                _session = nil
-            }
-
-            let session = try engine.createSession(
-                inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
-            let numSpeakers = engine.metadata.realOutputDim
-
-            // Push all audio at once
-            if let update = try session.pushAudio(normalized) {
-                let chunk = DiarizerChunkResult(
-                    startFrame: update.startFrame,
-                    finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
-                    finalizedFrameCount: update.probabilities.rows,
-                    tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
-                    tentativeFrameCount: update.previewProbabilities.rows
-                )
-                _numFramesProcessed += chunk.finalizedFrameCount
-                try _timeline.addChunk(chunk)
-            }
-
-            progressCallback?(normalized.count, normalized.count, 1)
-
-            // Finalize remaining frames
-            if let finalUpdate = try session.finalize() {
-                let chunk = DiarizerChunkResult(
-                    startFrame: _numFramesProcessed,
-                    finalizedPredictions: flattenRowMajor(finalUpdate.probabilities, numSpeakers: numSpeakers),
-                    finalizedFrameCount: finalUpdate.probabilities.rows,
-                    tentativePredictions: [],
-                    tentativeFrameCount: 0
-                )
-                _numFramesProcessed += chunk.finalizedFrameCount
-                try _timeline.addChunk(chunk)
-            }
-
-            if finalizeOnCompletion {
-                _timeline.finalize()
-            }
-            return _timeline
+        try lock.withLock {
+            try processCompleteLocked(
+                Array(samples),
+                sourceSampleRate: sourceSampleRate,
+                keepingEnrolledSpeakers: keepSpeakers,
+                finalizeOnCompletion: finalizeOnCompletion,
+                progressCallback: progressCallback
+            )
         }
     }
 
@@ -704,7 +642,7 @@ public final class LSEENDDiarizer: Diarizer {
             let converter = AudioConverter(sampleRate: Double(engine.targetSampleRate))
             let audio = try converter.resampleAudioFile(audioFileURL)
 
-            return try processCompleteInternal(
+            return try processCompleteLocked(
                 audio,
                 sourceSampleRate: nil,
                 keepingEnrolledSpeakers: keepSpeakers,
@@ -712,6 +650,70 @@ public final class LSEENDDiarizer: Diarizer {
                 progressCallback: progressCallback
             )
         }
+    }
+
+    private func processCompleteLocked(
+        _ samples: [Float],
+        sourceSampleRate: Double?,
+        keepingEnrolledSpeakers keepSpeakers: Bool? = nil,
+        finalizeOnCompletion: Bool,
+        progressCallback: ((Int, Int, Int) -> Void)?
+    ) throws -> DiarizerTimeline {
+        let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) ?? samples
+
+        guard let engine = _engine else {
+            throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
+        }
+
+        // Reset for fresh processing
+        updateTimelineConfig(engine: engine)
+
+        let keepSpeakers = keepSpeakers ?? (_numFramesProcessed == 0) && pendingAudio.isEmpty
+
+        _timeline.reset(keepingSpeakers: keepSpeakers)
+        _numFramesProcessed = 0
+        pendingAudio.removeAll(keepingCapacity: true)
+        if !keepSpeakers {
+            _visibleStartFrameOffset = 0
+            _session = nil
+        }
+
+        let session = try engine.createSession(
+            inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
+        let numSpeakers = engine.metadata.realOutputDim
+
+        // Push all audio at once
+        if let update = try session.pushAudio(normalized) {
+            let chunk = DiarizerChunkResult(
+                startFrame: update.startFrame,
+                finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
+                finalizedFrameCount: update.probabilities.rows,
+                tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
+                tentativeFrameCount: update.previewProbabilities.rows
+            )
+            _numFramesProcessed += chunk.finalizedFrameCount
+            try _timeline.addChunk(chunk)
+        }
+
+        progressCallback?(normalized.count, normalized.count, 1)
+
+        // Finalize remaining frames
+        if let finalUpdate = try session.finalize() {
+            let chunk = DiarizerChunkResult(
+                startFrame: _numFramesProcessed,
+                finalizedPredictions: flattenRowMajor(finalUpdate.probabilities, numSpeakers: numSpeakers),
+                finalizedFrameCount: finalUpdate.probabilities.rows,
+                tentativePredictions: [],
+                tentativeFrameCount: 0
+            )
+            _numFramesProcessed += chunk.finalizedFrameCount
+            try _timeline.addChunk(chunk)
+        }
+
+        if finalizeOnCompletion {
+            _timeline.finalize()
+        }
+        return _timeline
     }
 
     // MARK: - Lifecycle (Diarizer Protocol)
