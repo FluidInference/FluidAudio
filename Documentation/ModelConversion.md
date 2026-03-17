@@ -244,6 +244,16 @@ Every new model needs benchmark results before merging. The metrics depend on th
 - **RTFx** (Real-Time Factor): How many times faster than real-time (higher is better, >1.0 means real-time capable)
 - **PER** (Phoneme Error Rate): Character-level Levenshtein distance over reference phonemes
 
+**Datasets:**
+
+Datasets for each model type already exist and most auto-download on first run. We recommend using these, but feel free to use or create new ones as needed.
+
+- **ASR:** LibriSpeech (`test-clean`), FLEURS (24+ languages), AISHELL-1 (Chinese), Earnings22
+- **VAD:** Buckeye Corpus, VOiCES Subset, MUSAN Full
+- **Diarization:** AMI-SDM, VoxConverse
+- **G2P:** CharsiuG2P (9 languages)
+- **TTS text processing:** Text normalization test data (`text-processing-rs/tests/data/`)
+
 **What to report:**
 
 - Run benchmarks on Apple Silicon hardware and note the exact device (e.g., "M4 Pro, 48GB, macOS 26")
@@ -288,7 +298,7 @@ The PR description should include:
 - [ ] `swift format` passes
 - [ ] `swift build` succeeds
 - [ ] `swift test` passes
-- [ ] Benchmarks run on Apple Silicon with hardware noted
+- [ ] Benchmarks run using existing or new datasets (see table in §3.6) on Apple Silicon with hardware noted
 - [ ] Compared against base PyTorch model (accuracy loss check)
 - [ ] Compared against existing FluidAudio models in the same category
 - [ ] Results added to `Documentation/Benchmarks.md`
