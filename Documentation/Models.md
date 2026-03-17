@@ -36,9 +36,9 @@ TDT models process audio in chunks (~15s with overlap) as batch operations. Fast
 
 | Model | Description | Context |
 |-------|-------------|---------|
-| **LS-EEND** | End-to-end streaming speaker diarization for up to 10 speakers. Works best for near-real-time diarization with 0.5s chunks. Single neural network, no external segmentation or clustering. Uses attractors and a retention mechanism to remember speakers. Extremely lightweight. | A state-of-the-art research prototype from late 2025. Converted after Sortformer to address limited speaker count. |
-| **Sortformer** | End-to-end streaming speaker diarization for up to 4 speakers. Works well for near-real-time diarization and works decently for offline. Single neural network — no separate segmentation or clustering. Caches high-confidence speech segments remember speakers. | Created & converted after Pyannote was released. |
-| **Pyannote CoreML Pipeline** | Speaker diarization. Segmentation model + WeSpeaker embeddings for clustering. Supports both online (streaming) and offline (VBx) modes, but works best for offline. | First diarization system added. Two-stage pipeline. |
+| **LS-EEND** | End-to-end diarization for low-latency streaming and complete-buffer inference. Supports more speakers than Sortformer. | Default streaming diarizer. |
+| **Sortformer** | End-to-end streaming diarization with stronger identity stability, limited to 4 speakers. | Secondary streaming diarizer. |
+| **Pyannote CoreML Pipeline** | Speaker diarization. Segmentation model + WeSpeaker embeddings for clustering. Supports both online (streaming) and offline (VBx) modes. | Best offline diarization pipeline, but poor for online use. |
 
 ## TTS Models
 
@@ -68,6 +68,7 @@ Models we converted and tested but haven't shipped yet — either still in devel
 | Parakeet EOU | [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml) |
 | Silero VAD | [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml) |
 | Diarization (Pyannote) | [FluidInference/speaker-diarization-coreml](https://huggingface.co/FluidInference/speaker-diarization-coreml) |
+| LS-EEND | [FluidInference/lseend-coreml](https://huggingface.co/FluidInference/lseend-coreml) |
 | Sortformer | [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml) |
 | Kokoro TTS | [FluidInference/kokoro-82m-coreml](https://huggingface.co/FluidInference/kokoro-82m-coreml) |
 | PocketTTS | [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml) |
