@@ -378,7 +378,9 @@ enum LSEENDBenchmark {
 
         do {
             // Load and process audio
+            let startLoadTime = Date()
             let audioURL = URL(fileURLWithPath: audioPath)
+            let audioLoadTime = Date().timeIntervalSince(startLoadTime)
 
             let startTime = Date()
             let timeline = try diarizer.processComplete(audioFileURL: audioURL)
