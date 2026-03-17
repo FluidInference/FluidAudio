@@ -127,13 +127,6 @@ private final class LSEENDInferenceSharedResources {
 ///   incremental audio processing.
 /// - **Simulation**: ``simulateStreaming(audioFileURL:chunkSeconds:)`` to replay a file through the
 ///   streaming pipeline with fixed-size chunks.
-///
-/// Typical usage:
-/// ```swift
-/// let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: .dihard3)
-/// let engine = try LSEENDInferenceEngine(descriptor: descriptor)
-/// let result = try engine.infer(audioFileURL: url)
-/// ```
 public final class LSEENDInferenceEngine {
     private let logger = AppLogger(category: "LSEENDInference")
     private let sharedResources: LSEENDInferenceSharedResources
@@ -459,21 +452,7 @@ public final class LSEENDInferenceEngine {
 ///
 /// Created via ``LSEENDInferenceEngine/createSession(inputSampleRate:)``.
 /// The session maintains internal RNN state across calls to ``pushAudio(_:)``.
-///
-/// Typical usage:
-/// ```swift
-/// let session = try engine.createSession(inputSampleRate: 8000)
-/// for chunk in audioChunks {
-///     if let update = try session.pushAudio(chunk) {
-///         // Handle committed + preview frames
-///     }
-/// }
-/// if let final = try session.finalize() {
-///     // Handle remaining frames
-/// }
-/// let result = session.snapshot()  // Full assembled result
-/// ```
-///
+/// 
 /// - Important: This class is **not** thread-safe. All calls must be serialized externally.
 public final class LSEENDStreamingSession {
     fileprivate let engine: LSEENDInferenceEngine
