@@ -197,7 +197,7 @@ public struct SortformerConfig: Sendable {
 
     /// - Warning: If you don't use one of the default configurations, you must use a local model converted with that configuration.
     public init(
-        modelVariant: ModelVariant? = .gradientDescentV2_1,
+        modelVariant: ModelVariant? = .fastestV2_1,
         chunkLen: Int = 6,
         chunkLeftContext: Int = 1,
         chunkRightContext: Int = 7,
