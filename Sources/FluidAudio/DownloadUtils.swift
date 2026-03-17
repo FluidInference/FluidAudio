@@ -381,14 +381,14 @@ public class DownloadUtils {
             let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedFilePath)
             let request = authorizedRequest(url: fileURL)
 
-            let tempFileURL: URL
             let httpResponse: HTTPURLResponse
             if let handler = progressHandler {
                 let baseBytes = completedBytes
                 let fileCount = filesToDownload.count
                 let totalBytesSnapshot = totalBytes
-                (tempFileURL, httpResponse) = try await downloadWithProgress(
+                httpResponse = try await downloadWithProgress(
                     request: request,
+                    destinationURL: destPath,
                     onProgress: { bytesWritten, _ in
                         guard totalBytesSnapshot > 0 else { return }
                         let current = baseBytes + bytesWritten
@@ -406,8 +406,39 @@ public class DownloadUtils {
                 guard let resp = response as? HTTPURLResponse else {
                     throw HuggingFaceDownloadError.invalidResponse
                 }
-                tempFileURL = url
                 httpResponse = resp
+                if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
+                    throw HuggingFaceDownloadError.rateLimited(
+                        statusCode: httpResponse.statusCode,
+                        message: "Rate limited while downloading \(file.path)")
+                }
+
+                guard (200..<300).contains(httpResponse.statusCode) else {
+                    throw HuggingFaceDownloadError.downloadFailed(
+                        path: file.path,
+                        underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
+                    )
+                }
+
+                // Remove existing file if present (handles parallel download race conditions)
+                if FileManager.default.fileExists(atPath: destPath.path) {
+                    try? FileManager.default.removeItem(at: destPath)
+                }
+                try FileManager.default.moveItem(at: url, to: destPath)
+                completedBytes += Int64(max(0, file.size))
+                if (index + 1) % 10 == 0 || index == filesToDownload.count - 1 {
+                    logger.info("Downloaded \(index + 1)/\(filesToDownload.count) files")
+                }
+
+                // Report completed-file progress
+                progressHandler?(
+                    DownloadProgress(
+                        fractionCompleted: totalBytes > 0
+                            ? 0.5 * Double(completedBytes) / Double(totalBytes)
+                            : 0.5 * Double(index + 1) / Double(filesToDownload.count),
+                        phase: .downloading(completedFiles: index + 1, totalFiles: filesToDownload.count)
+                    ))
+                continue
             }
 
             if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
@@ -422,12 +453,6 @@ public class DownloadUtils {
                     underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
                 )
             }
-
-            // Remove existing file if present (handles parallel download race conditions)
-            if FileManager.default.fileExists(atPath: destPath.path) {
-                try? FileManager.default.removeItem(at: destPath)
-            }
-            try FileManager.default.moveItem(at: tempFileURL, to: destPath)
 
             completedBytes += Int64(max(0, file.size))
 
@@ -463,11 +488,13 @@ public class DownloadUtils {
     /// - Parameters:
     ///   - request: The URLRequest to download.
     ///   - onProgress: Called with `(bytesWritten, totalBytesExpected)` as data arrives.
-    /// - Returns: `(tempFileURL, HTTPURLResponse)`.
+    /// - Parameter destinationURL: Final destination path for the downloaded file.
+    /// - Returns: The HTTP response for the completed download.
     private static func downloadWithProgress(
         request: URLRequest,
+        destinationURL: URL,
         onProgress: @escaping @Sendable (Int64, Int64) -> Void
-    ) async throws -> (URL, HTTPURLResponse) {
+    ) async throws -> HTTPURLResponse {
         let delegate = DownloadProgressDelegate(onProgress: onProgress)
         // Dedicated session with delegate — one per download to avoid cross-talk.
         let session = URLSession(
@@ -475,13 +502,17 @@ public class DownloadUtils {
             delegate: delegate,
             delegateQueue: nil
         )
-        defer { session.finishTasksAndInvalidate() }
 
         let (tempURL, response) = try await session.download(for: request)
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try? FileManager.default.removeItem(at: destinationURL)
+        }
+        try FileManager.default.moveItem(at: tempURL, to: destinationURL)
+        session.finishTasksAndInvalidate()
         guard let httpResponse = response as? HTTPURLResponse else {
             throw HuggingFaceDownloadError.invalidResponse
         }
-        return (tempURL, httpResponse)
+        return httpResponse
     }
 
     /// Fetch a single file from HuggingFace with retry
