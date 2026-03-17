@@ -167,6 +167,7 @@ public final class SortformerDiarizer: Diarizer {
         lastAudioSample = 0
         startFeat = 0
         diarizerChunkIndex = 0
+        _numFramesProcessed = 0
         _timeline.reset(keepingSpeakers: keepingSpeakers)
 
         featureBuffer.reserveCapacity((config.chunkMelFrames + config.coreFrames) * config.melFeatures)
