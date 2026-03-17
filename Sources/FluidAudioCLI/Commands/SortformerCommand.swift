@@ -86,7 +86,7 @@ enum SortformerCommand {
 
         // Initialize Sortformer with default config (NVIDIA low latency: 1.04s)
         var config = SortformerConfig.default
-        var postConfig = SortformerPostProcessingConfig.default
+        var postConfig = DiarizerTimelineConfig.sortformerDefault
         config.debugMode = debugMode
 
         if let v = onset { postConfig.onsetThreshold = v }
@@ -95,7 +95,7 @@ enum SortformerCommand {
         if let v = padOffset { postConfig.offsetPadSeconds = v }
         if let v = minDurationOn { postConfig.minDurationOn = v }
         if let v = minDurationOff { postConfig.minDurationOff = v }
-        let diarizer = SortformerDiarizer(config: config, postProcessingConfig: postConfig)
+        let diarizer = SortformerDiarizer(config: config, timelineConfig: postConfig)
 
         do {
             let loadStart = Date()
@@ -160,11 +160,11 @@ enum SortformerCommand {
             let rtfx = duration / Float(processingTime)
             print("Processing completed in \(String(format: "%.2f", processingTime))s")
             print("   Real-time factor (RTFx): \(String(format: "%.1f", rtfx))x")
-            print("   Total frames: \(result.numFrames)")
+            print("   Total frames: \(result.numFinalizedFrames)")
             print("   Frame duration: \(String(format: "%.3f", result.config.frameDurationSeconds))s")
 
             // Extract segments
-            let segments = result.segments.flatMap { $0 }
+            let segments = result.speakers.values.flatMap { $0.finalizedSegments }
             print("   Found \(segments.count) segments")
 
             // Print segments
@@ -180,9 +180,9 @@ enum SortformerCommand {
             print("\n--- Speaker Activity Summary ---")
             let numSpeakers = 4
             var speakerActivity = [Float](repeating: 0, count: numSpeakers)
-            for frame in 0..<result.numFrames {
+            for frame in 0..<result.numFinalizedFrames {
                 for spk in 0..<numSpeakers {
-                    let prob = result.framePredictions[frame * numSpeakers + spk]
+                    let prob = result.finalizedPredictions[frame * numSpeakers + spk]
                     if prob > 0.5 {
                         speakerActivity[spk] += result.config.frameDurationSeconds
                     }
@@ -201,7 +201,7 @@ enum SortformerCommand {
                     "durationSeconds": duration,
                     "processingTimeSeconds": processingTime,
                     "rtfx": rtfx,
-                    "totalFrames": result.numFrames,
+                    "totalFrames": result.numFinalizedFrames,
                     "frameDurationSeconds": result.config.frameDurationSeconds,
                     "segmentCount": segments.count,
                 ]

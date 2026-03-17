@@ -402,14 +402,17 @@ enum SortformerBenchmark {
             if verbose {
                 print("   Processing time: \(String(format: "%.2f", processingTime))s")
                 print("   RTFx: \(String(format: "%.1f", rtfx))x")
-                print("   Total frames: \(result.numFrames)")
+                print("   Total frames: \(result.numFinalizedFrames)")
             }
 
             // Extract segments
-            let segments = result.segments
+            var segments: [[DiarizerSegment]] = Array(repeating: [], count: result.config.numSpeakers)
+            for (index, speaker) in result.speakers {
+                segments[index] = speaker.finalizedSegments
+            }
 
             // Print probability statistics
-            let preds = result.framePredictions
+            let preds = result.finalizedPredictions
             let count = preds.count
             let minVal = preds.min() ?? 0
             let maxVal = preds.max() ?? 0
@@ -443,13 +446,13 @@ enum SortformerBenchmark {
             }
 
             // Get filtered predictions for simple DER calculation (matches Python/NeMo)
-            let filteredPredictions = result.framePredictions
+            let filteredPredictions = result.finalizedPredictions
 
             // Calculate DER using simple frame-level approach (matches NeMo evaluation)
             // Frame shift is 0.08s (80ms) to match NeMo's subsampling_factor * window_stride
             let simpleMetrics = calculateSimpleDER(
                 predictions: filteredPredictions,
-                numFrames: result.numFrames,
+                numFrames: result.numFinalizedFrames,
                 numSpeakers: 4,
                 groundTruth: groundTruth,
                 threshold: threshold,
@@ -479,7 +482,7 @@ enum SortformerBenchmark {
                 speakerErrorRate: simpleMetrics.se,
                 rtfx: rtfx,
                 processingTime: processingTime,
-                totalFrames: result.numFrames,
+                totalFrames: result.numFinalizedFrames,
                 detectedSpeakers: detectedSpeakers,
                 groundTruthSpeakers: groundTruthSpeakers,
                 modelLoadTime: modelLoadTime,
