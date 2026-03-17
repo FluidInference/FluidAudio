@@ -676,6 +676,7 @@ public final class SortformerDiarizer: Diarizer {
             try _timeline.rebuild(
                 finalizedPredictions: finalizedPredictions,
                 tentativePredictions: tentativePredictions,
+                keepingSpeakers: keepSpeakers,
                 isComplete: finalizeOnCompletion
             )
 
