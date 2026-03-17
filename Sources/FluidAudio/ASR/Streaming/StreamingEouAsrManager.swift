@@ -4,13 +4,13 @@ import Foundation
 
 /// Streaming encoder configuration for different chunk sizes.
 ///
-/// The Parakeet EOU model (`nvidia/parakeet_realtime_eou_120m-v1`) supports 160ms, 320ms, and 1600ms
-/// streaming chunk sizes. Each requires a separately exported CoreML encoder model with the
-/// correct NeMo streaming configuration baked in.
+/// The Parakeet EOU model (`nvidia/parakeet_realtime_eou_120m-v1`) supports 160ms, 320ms, and 1280ms
+/// streaming chunk sizes. Each requires a separately exported CoreML encoder model with
+/// the correct NeMo streaming configuration baked in.
 ///
 /// **160ms (default)**: Uses `chunk_size=[9, 16]`, `valid_out_len=2`
 /// **320ms**: Uses `setup_streaming_params(chunk_size=8, shift_size=4)` → `chunk_size=[57, 64]`, `valid_out_len=4`
-/// **1600ms**: Uses `setup_streaming_params(chunk_size=40, shift_size=20)` → `chunk_size=[313, 320]`, `valid_out_len=20`
+/// **1280ms**: Uses `setup_streaming_params(chunk_size=16, shift_size=16)` → 129 mel frames, `valid_out_len=16`
 ///
 /// Larger chunk sizes provide better throughput but higher latency.
 public enum StreamingChunkSize: Sendable {
@@ -35,14 +35,16 @@ public enum StreamingChunkSize: Sendable {
     /// Performance: ~5.73% WER, 14x RTFx on LibriSpeech test-clean
     case ms320
 
-    /// 1600ms mode (latency 1600ms, chunk ~3200ms audio → 320 mel frames)
-    /// Encoder steps: 40, Shift: 20 (1600ms latency)
-    /// Requires separately exported 1600ms model with NeMo's `setup_streaming_params(chunk_size=40)`.
-    /// Note: The "1600ms" refers to the latency (shift), not the chunk duration.
-    /// - Chunk: 320 mel frames (~3183ms of audio)
-    /// - Shift: 160 mel frames (1600ms latency between outputs)
-    /// - Output: 20 valid encoder frames per chunk
-    case ms1600
+    /// 1280ms mode - higher throughput, 1280ms latency between outputs
+    ///
+    /// NeMo config: `encoder.setup_streaming_params(chunk_size=16, shift_size=16)`
+    /// - 129 mel frames per chunk (from CoreML conversion with `--chunk-frames 129`)
+    /// - `pre_encode_cache_size: 16` (same as 160ms default)
+    /// - `valid_out_len: 16` (produces 16 encoder output frames per chunk)
+    /// - Shift: 128 mel frames (1280ms latency)
+    ///
+    /// Model available at: FluidInference/parakeet-realtime-eou-120m-coreml/1280ms
+    case ms1280
 
     /// Number of audio samples per chunk
     /// Calculated from mel frames: (mel_frames - 1) * hop_length for center-padded mel spectrogram
@@ -54,14 +56,14 @@ public enum StreamingChunkSize: Sendable {
             // Formula: (mel_frames - 1) * hop_length = (64-1) * 160 = 10080 samples
             // This is ~630ms of audio per chunk (but 320ms latency due to shift)
             return 10080
-        case .ms1600: return 50928  // ~3183ms: (320-1)*160 + 400 - 512 = 50928 samples
+        case .ms1280: return 20480  // (129-1) * 160 = 20480 samples (1280ms)
         }
     }
 
     /// Number of mel spectrogram frames (from NeMo's chunk_size config)
     /// For 160ms: 17 mel frames → 2 valid encoder outputs
     /// For 320ms: 64 mel frames → 4 valid encoder outputs
-    /// For 1600ms: 320 mel frames → 20 valid encoder outputs
+    /// For 1280ms: 129 mel frames → 16 valid encoder outputs
     public var melFrames: Int {
         switch self {
         case .ms160: return 17
@@ -69,7 +71,7 @@ public enum StreamingChunkSize: Sendable {
             // 320ms: NeMo's streaming_cfg.chunk_size = [57, 64] after setup_streaming_params(8, 4)
             // Use index [1] = 64 mel frames (the larger/padded size)
             return 64
-        case .ms1600: return 320  // From NeMo cfg.chunk_size[1]
+        case .ms1280: return 129  // From CoreML conversion with --chunk-frames 129
         }
     }
 
@@ -78,7 +80,7 @@ public enum StreamingChunkSize: Sendable {
         switch self {
         case .ms160: return 160
         case .ms320: return 630  // 10080 samples / 16 = 630ms audio
-        case .ms1600: return 3183  // ~3.2s of audio per chunk (latency is 1600ms)
+        case .ms1280: return 1280  // 20480 samples / 16 = 1280ms
         }
     }
 
@@ -87,7 +89,7 @@ public enum StreamingChunkSize: Sendable {
         switch self {
         case .ms160: return "160ms"
         case .ms320: return "320ms"
-        case .ms1600: return "1600ms"
+        case .ms1280: return "1280ms"
         }
     }
 
@@ -96,7 +98,7 @@ public enum StreamingChunkSize: Sendable {
         switch self {
         case .ms160: return 2
         case .ms320: return 4
-        case .ms1600: return 20
+        case .ms1280: return 16
         }
     }
 
@@ -110,7 +112,7 @@ public enum StreamingChunkSize: Sendable {
             // Smaller than 160ms (16) because 64 mel frames already contain more context
             // Bigger chunks are more self-contained, need less external lookahead
             return 9
-        case .ms1600: return 9  // From NeMo cfg.pre_encode_cache_size[1]
+        case .ms1280: return 16  // From CoreML conversion (same as 160ms default)
         }
     }
 
@@ -124,10 +126,10 @@ public enum StreamingChunkSize: Sendable {
     /// NeMo shift_size (mel frames) * hopLength = audio samples shift
     /// - 160ms: shift_size=16 mel frames → 16*160 = 2560 samples (but use 1280 for 50% overlap)
     /// - 320ms: shift_size=32 mel frames → 32*160 = 5120 samples (but use custom)
-    /// - 1600ms: shift_size=160 mel frames → 160*160 = 25600 samples (1600ms latency)
+    /// - 1280ms: shift_size=128 mel frames → 128*160 = 20480 samples (1280ms latency)
     ///
     /// For 160ms, we use 50% overlap (1280 samples) because the model was trained that way.
-    /// For 1600ms, use NeMo's shift_size directly (160 mel frames = 1600ms).
+    /// For 1280ms, use NeMo's shift_size directly.
     public var shiftSamples: Int {
         switch self {
         case .ms160:
@@ -138,9 +140,10 @@ public enum StreamingChunkSize: Sendable {
             // Use index [1] = 32 mel frames × 10ms/frame = 320ms latency
             // shift_samples = 32 * hop_length = 32 * 160 = 5120 samples
             return 5120
-        case .ms1600:
-            // NeMo shift_size=160 mel frames (1600ms latency)
-            return 160 * 160  // 25600 samples
+        case .ms1280:
+            // 1280ms: shift_size=128 mel frames (1280ms latency)
+            // Context provided by mel pre-cache (16 frames), no audio overlap needed
+            return 128 * 160  // 20480 samples
         }
     }
 }
