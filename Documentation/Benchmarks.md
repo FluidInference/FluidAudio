@@ -617,7 +617,7 @@ AVERAGE          31.7     21.5      0.5      9.7         -     126.7
 ```
 
 ## LS-EEND Streaming Diarization
-This model was detailed in the paper ["LS-EEND: LongForm Streaming End-to-End Neural Diarization with Online Attractor Extraction" by Di Liang and Xiaofei Li](https://arxiv.org/pdf/2410.06670), converted to CoreML. It is a low-latency online diarizer that supports up to 10 speakers.
+A research prototype from Westlake University for streaming speaker diarization.
 
 Model: [GradientDescent2718/ls-eend-coreml](https://huggingface.co/GradientDescent2718/ls-eend-coreml). 
 
