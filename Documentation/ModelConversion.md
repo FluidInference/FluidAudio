@@ -310,7 +310,7 @@ The PR description should include:
 - [ ] `swift format` passes
 - [ ] `swift build` succeeds
 - [ ] `swift test` passes
-- [ ] Benchmarks run using existing datasets (see table in §3.6) on Apple Silicon with hardware noted
+- [ ] Benchmarks run using existing or new datasets (see table in §3.6) on Apple Silicon with hardware noted
 - [ ] Compared against base PyTorch model (accuracy loss check)
 - [ ] Compared against existing FluidAudio models in the same category
 - [ ] Results added to `Documentation/Benchmarks.md`
