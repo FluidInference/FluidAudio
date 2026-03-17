@@ -6,10 +6,25 @@ Real-time speaker diarization for iOS and macOS, answering "who spoke when" in a
 
 Pick the diarizer based on the workflow:
 
-- **LS-EEND**: Best default for online and streaming diarization. Supports up to 10 speakers, has very low latency (100 ms between updates), and generally outperforms Sortformer on the main diarization benchmarks.
-- **Sortformer**: Best when identity stability matters more than speaker capacity. It is still low-latency (480 ms between updates) and streaming-friendly, but is limited to 4 speakers and can miss quieter speech.
-- **WeSpeaker/Pyannote**: Best when you need explicit speaker-database control or reliable pre-enrollment. It is much slower and needs larger chunks (typically around 5 seconds), so it is the weakest option for live streaming UX.
-- **Offline VBx pipeline**: Best when you want the highest-fidelity batch pipeline with segmentation, embedding extraction, and clustering over a complete file.
+**LS-EEND** handles noisy environments and overlapping speakers well and supports up to 10 speakers. It is also much more lightweight than Sortformer, able to run entirely on an M4 MAX CPU at a comparable speed to Sortformer on ANE. However, it is more prone to false alarms and usually less stable than Sortformer, unless many speakers are talking simultaneously. Streaming updates occur every 100ms with about 900ms of tentative predictions. 
+
+**Sortformer** handles noisy environments and overlapping speakers well, but is limited to 4 speakers. Speaker identities are extremely stable, but it struggles when many loud voices are present. It also misses quiet speech as it's trained to ignore background conversations. The most common source of error is missed speech. Streaming updates occur every 480ms, with 560ms of tentative predictions.
+
+**DiarizerManager** Legacy online diarizer. Struggles with background noise, background conversations, overlapping speech with more than 2 speakers, short utterances, and similar-sounding speakers. The most common source of error is incorrect labeling. Performs poorly for low-latency streaming. Requires external timestamp alignment between chunks if operating on a sliding window. This is also the most computationally heavy online diarizer.
+
+**Offline VBx pipeline** is the best offline-quality option when you want a full batch pipeline with segmentation, embedding extraction, and clustering over a complete file.
+
+| Environment | Sortformer | DiarizerManager | LS-EEND | 
+|-------------|:----------:|:---------------:|:-------:|
+| Clean/silent room | Best | Good | Best |
+| Background noise | Best | Poor | Good |
+| Speech from another room | Poor | Good | Good |
+| Whispers | Poor | Good | Best |
+| High overlap | Good | Poor | Best |
+| Max speakers | 4 | No max | 10 |
+| Benchmarks | Good | Poor | Best |
+| Remembering speakers across meetings | Great | Best | Good |
+
 
 ## Quick Start
 

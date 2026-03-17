@@ -17,25 +17,6 @@ LS-EEND (Long-Form Streaming End-to-End Neural Diarization) answers "who spoke w
 - Speaker identity is local to the recording; no persistent speaker embeddings
 - Variants are domain-specialized: using the wrong variant for a domain hurts accuracy
 
-## LS-EEND vs Sortformer and DiarizerManager (Pyannote-based)
-
-**LS-EEND** handles noisy environments and overlapping speakers well and supports up to 10 speakers. It is also much more lightweight than Sortformer, able to run entirely on an M4 MAX CPU at a comparable speed to Sortformer on ANE. However, it is more prone to false alarms and usually less stable than Sortformer, unless many speakers are talking simultaneously. Streaming updates occur every 100ms with about 900ms of tentative predictions. 
-
-**Sortformer** handles noisy environments and overlapping speakers well, but is limited to 4 speakers. Speaker identities are extremely stable, but it struggles when many loud voices are present. It also misses quiet speech as it's trained to ignore background conversations. The most common source of error is missed speech. Streaming updates occur every 480ms, with 560ms of tentative predictions.
-
-**DiarizerManager** Legacy online diarizer. Struggles with background noise, background conversations, overlapping speech with more than 2 speakers, short utterances, and similar-sounding speakers. The most common source of error is incorrect labeling. Performs poorly for low-latency streaming. Requires external timestamp alignment between chunks if operating on a sliding window. This is also the most computationally heavy online diarizer.
-
-| Environment | Sortformer | DiarizerManager | LS-EEND | 
-|-------------|:----------:|:---------------:|:-------:|
-| Clean/silent room | Best | Good | Best |
-| Background noise | Best | Poor | Good |
-| Speech from another room | Poor | Good | Good |
-| Whispers | Poor | Good | Best |
-| High overlap | Good | Poor | Best |
-| Max speakers | 4 | No max | 10 |
-| Benchmarks | Good | Poor | Best |
-| Remembering speakers across meetings | Great | Best | Good |
-
 ---
 
 ## Variant Selection
@@ -65,23 +46,6 @@ Podcasts, audiobooks, broadcast media, YouTube, field recordings — deliberatel
 Best for: unknown or mixed recording conditions; the safest general-purpose choice.
 - **DER (DIHARD III test set):** 19.61%
 - **Max speakers:** 10
-
----
-
-## LS-EEND vs Sortformer
-
-| Feature | LS-EEND | Sortformer |
-|---------|:-------:|:----------:|
-| Max speakers | 4–10 (variant-dependent) | 4 |
-| Sample rate | 8000 Hz | 16000 Hz |
-| Phone/telephony audio | Best (.callhome, up to 7) | Poor |
-| In-person meetings | Good (.ami, up to 4) | Good |
-| Wild/unconstrained audio | Good (.dihard3, up to 10) | Good |
-| Background noise robustness | Good | Best |
-| Speaker count > 4 | Yes (.callhome, .dihard2, .dihard3) | No |
-| Domain-specialized variants | Yes (4) | No |
-
----
 
 ## Call Flow
 
@@ -184,9 +148,8 @@ LSEENDDiarizer.process()
 Sources/FluidAudio/Diarizer/LS-EEND/
 ├── LSEENDDiarizer.swift           # High-level Diarizer protocol implementation
 ├── LSEENDInference.swift          # LSEENDInferenceHelper, LSEENDStreamingSession
-├── LSEENDFeatureExtraction.swift  # LSEENDFeatureConfig, offline + streaming feature extractors
-├── LSEENDSupport.swift            # Data types: LSEENDMatrix, LSEENDModelDescriptor, LSEENDVariant,
-│                                  #   LSEENDModelMetadata, LSEENDStateShapes, result structs, errors
+├── LSEENDFeatureExtraction.swift  # Internal offline + streaming feature extraction
+├── LSEENDSupport.swift            # Supporting data types, metadata, result structs, errors
 └── LSEENDEvaluation.swift         # DER computation, RTTM parsing/writing, collar masking,
                                    #   optimal speaker assignment
 ```
@@ -353,21 +316,6 @@ let mel = NeMoMelSpectrogram(...)
 let session = try engine.createSession(inputSampleRate: engine.targetSampleRate, melSpectrogram: mel)
 ```
 
-### Streaming Simulation
-
-Replays a file through the streaming pipeline in fixed-size chunks. Useful for benchmarking or comparing streaming vs offline output.
-
-```swift
-let simulation: LSEENDStreamingSimulationResult = try engine.simulateStreaming(
-    audioFileURL: url,
-    chunkSeconds: 1.0
-)
-print("Final DER input frames: \(simulation.result.probabilities.rows)")
-for update in simulation.updates {
-    print("Chunk \(update.chunkIndex): \(update.numFramesEmitted) frames emitted")
-}
-```
-
 ### Properties
 
 | Property | Type | Description |
@@ -375,7 +323,6 @@ for update in simulation.updates {
 | `descriptor` | `LSEENDModelDescriptor` | Model variant and file paths |
 | `computeUnits` | `MLComputeUnits` | CoreML compute units |
 | `metadata` | `LSEENDModelMetadata` | Decoded model configuration |
-| `featureConfig` | `LSEENDFeatureConfig` | Resolved audio feature parameters |
 | `model` | `MLModel` | Loaded CoreML model |
 | `targetSampleRate` | `Int` | Expected input sample rate |
 | `modelFrameHz` | `Double` | Output frame rate |
@@ -428,33 +375,7 @@ let result: LSEENDInferenceResult = session.snapshot()
 
 ### LSEENDMatrix
 
-A row-major 2D `Float` matrix used throughout the pipeline. Rows are time frames; columns are speakers or feature dimensions.
-
-```swift
-// Creation
-let matrix = try LSEENDMatrix(rows: 100, columns: 4, values: floats)   // validated
-let matrix = LSEENDMatrix(validatingRows: 100, columns: 4, values: floats)  // unvalidated
-let zeros  = LSEENDMatrix.zeros(rows: 100, columns: 4)
-let empty  = LSEENDMatrix.empty(columns: 4)      // 0 rows
-
-// Access
-let value = matrix[row, col]
-let rowSlice: ArraySlice<Float> = matrix.row(3)
-
-// Transforms (all return new matrices)
-matrix.appendingRows(other)          // Vertical concatenation
-matrix.droppingFirstRows(n)          // Remove first n rows
-matrix.slicingRows(start: 10, end: 50)
-matrix.prefixingColumns(n)           // Keep first n columns
-matrix.applyingSigmoid()             // Element-wise σ(x)
-matrix.rowMajorRows()                // [[Float]] per row
-
-// Properties
-matrix.rows      // Int
-matrix.columns   // Int
-matrix.values    // [Float] flat row-major
-matrix.isEmpty   // Bool
-```
+A row-major 2D `Float` matrix used throughout LS-EEND. Rows are time frames; columns are speakers or feature dimensions.
 
 ### LSEENDInferenceResult
 
@@ -487,79 +408,11 @@ Returned by `LSEENDStreamingSession.pushAudio(_:)` and `finalize()`. Contains tw
 
 **Committed vs preview:** Committed frames have passed through the full causal encoder and are final. Preview frames are decoded by zero-padding the pending encoder state — they are a speculative "look ahead" that will be updated by the next `pushAudio` call.
 
-### LSEENDStreamingProgress
-
-Per-chunk entry in a streaming simulation, from `LSEENDStreamingSimulationResult.updates`.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `chunkIndex` | `Int` | One-based chunk index |
-| `bufferSeconds` | `Double` | Cumulative audio duration fed, in seconds |
-| `numFramesEmitted` | `Int` | New committed frames emitted by this chunk |
-| `totalFramesEmitted` | `Int` | Running total of committed frames |
-| `flush` | `Bool` | `true` for the final finalization entry |
-
-### LSEENDStreamingSimulationResult
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `result` | `LSEENDInferenceResult` | Complete assembled inference result after all chunks |
-| `updates` | `[LSEENDStreamingProgress]` | Per-chunk progress log |
-
 ---
 
 ## Feature Extraction
 
-### LSEENDFeatureConfig
-
-Resolved audio feature parameters derived from `LSEENDModelMetadata`. Constructed automatically by the engine and diarizer — you only need this if you're building custom pipelines.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `sampleRate` | `Int` | Audio sample rate (e.g. 8000) |
-| `winLength` | `Int` | STFT window length in samples |
-| `hopLength` | `Int` | STFT hop length in samples |
-| `nFFT` | `Int` | FFT size |
-| `nMels` | `Int` | Mel filterbank channels |
-| `contextRecp` | `Int` | Splice context half-width |
-| `subsampling` | `Int` | STFT frames per model frame |
-| `inputDim` | `Int` | `nMels × (2 × contextRecp + 1)` |
-| `stableBlockSize` | `Int` | Minimum audio chunk for whole-frame output (`hopLength × subsampling`) |
-
-```swift
-let config = LSEENDFeatureConfig(metadata: engine.metadata)
-print("Stable chunk: \(config.stableBlockSize) samples")
-```
-
-### LSEENDOfflineFeatureExtractor
-
-Converts a complete audio buffer into model input features in one pass: STFT → log-mel with cumulative mean normalization → splice-and-subsample.
-
-```swift
-let extractor = LSEENDOfflineFeatureExtractor(metadata: engine.metadata)
-let features: LSEENDMatrix = try extractor.extractFeatures(audio: samples)
-// features.shape: [frames, inputDim]
-```
-
-Use `LSEENDStreamingFeatureExtractor` for incremental processing.
-
-### LSEENDStreamingFeatureExtractor
-
-Incremental version. Maintains internal buffers and emits model frames as audio arrives.
-
-> **Not thread-safe.**
-
-```swift
-let extractor = LSEENDStreamingFeatureExtractor(metadata: engine.metadata)
-
-// Feed audio incrementally
-let frames: LSEENDMatrix = try extractor.pushAudio(audioChunk)
-
-// Flush remaining frames at end of stream
-let remaining: LSEENDMatrix = try extractor.finalize()
-```
-
-Both methods return an `LSEENDMatrix` with shape `[newFrames, inputDim]`, or an empty matrix if no new frames are available.
+Feature extraction is internal. `LSEENDDiarizer` and `LSEENDInferenceHelper` handle it automatically.
 
 ---
 
@@ -617,168 +470,20 @@ let descriptor = LSEENDModelDescriptor(
 
 ### LSEENDModelMetadata
 
-Decoded from the JSON file at `descriptor.metadataURL`. Describes the model's architecture and audio parameters. Read via `engine.metadata`.
+Decoded from the JSON file at `descriptor.metadataURL`. Read via `engine.metadata`.
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `inputDim` | `Int` | Feature dimension per frame |
-| `fullOutputDim` | `Int` | Total output tracks (including 2 boundary tracks) |
 | `realOutputDim` | `Int` | Usable speaker tracks (`fullOutputDim - 2`) |
-| `encoderLayers` | `Int` | Encoder transformer layer count |
-| `decoderLayers` | `Int` | Decoder transformer layer count |
-| `encoderDim` | `Int` | Encoder hidden dimension |
-| `numHeads` | `Int` | Attention head count |
-| `keyDim` | `Int` | Key dimension per head |
-| `headDim` | `Int` | Value dimension per head |
-| `encoderConvCacheLen` | `Int` | Convolutional cache length in frames |
-| `topBufferLen` | `Int` | Cross-attention buffer length |
-| `convDelay` | `Int` | Warmup frames before decoder starts decoding |
-| `maxNspks` | `Int` | Max speaker slots in model output |
 | `frameHz` | `Double` | Output frame rate (frames per second) |
 | `targetSampleRate` | `Int` | Required audio sample rate |
-| `stateShapes` | `LSEENDStateShapes` | Shapes for the six recurrent state tensors |
-| `streamingLatencySeconds` | `Double` | Computed minimum startup latency |
-
-Computed properties (`resolvedSampleRate`, `resolvedWinLength`, `resolvedHopLength`, `resolvedFFTSize`, `resolvedMelCount`, `resolvedContextRecp`, `resolvedSubsampling`) resolve optional fields to their defaults.
-
-### LSEENDStateShapes
-
-Tensor dimension arrays for the six recurrent state buffers. Read from metadata; used to allocate zero-initialized tensors at session start.
-
-| Property | Type |
-|----------|------|
-| `encRetKv` | `[Int]` |
-| `encRetScale` | `[Int]` |
-| `encConvCache` | `[Int]` |
-| `decRetKv` | `[Int]` |
-| `decRetScale` | `[Int]` |
-| `topBuffer` | `[Int]` |
+| `streamingLatencySeconds` | `Double` | Minimum startup latency before the first stable output |
 
 ---
 
 ## Evaluation API
 
-These types support offline DER computation against RTTM ground truth. They are used by `LSEENDBenchmark` and can be used directly for custom evaluation pipelines.
-
-### LSEENDRTTMEntry
-
-A single speaker turn entry from an RTTM file.
-
-```swift
-let entry = LSEENDRTTMEntry(
-    recordingID: "meeting_001",
-    start: 12.5,       // seconds
-    duration: 3.2,     // seconds
-    speaker: "spk0"
-)
-```
-
-| Property | Type |
-|----------|------|
-| `recordingID` | `String` |
-| `start` | `Double` |
-| `duration` | `Double` |
-| `speaker` | `String` |
-
-### LSEENDEvaluationSettings
-
-Parameters for a DER evaluation run.
-
-```swift
-let settings = LSEENDEvaluationSettings(
-    threshold: 0.5,       // Binarization threshold
-    medianWidth: 1,       // Median filter kernel width (1 = disabled)
-    collarSeconds: 0.25,  // Collar around speaker transitions to exclude from scoring
-    frameRate: 10.0       // Frame rate in Hz
-)
-```
-
-### LSEENDEvaluationResult
-
-Detailed DER result including error breakdown and speaker mapping.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `der` | `Double` | `(miss + falseAlarm + speakerError) / speakerScored` |
-| `speakerScored` | `Double` | Reference-active frames scored (after collar exclusion) |
-| `speakerMiss` | `Double` | Reference-active frames with no matching prediction |
-| `speakerFalseAlarm` | `Double` | Predicted-active frames with no matching reference |
-| `speakerError` | `Double` | Frames where both are active but mapped to different speakers |
-| `threshold` | `Float` | Threshold used for binarization |
-| `medianWidth` | `Int` | Median filter width applied |
-| `collarSeconds` | `Double` | Collar used during scoring |
-| `mappedBinary` | `LSEENDMatrix` | Binary predictions remapped to reference speaker order |
-| `mappedProbabilities` | `LSEENDMatrix` | Continuous probabilities remapped to reference speaker order |
-| `validMask` | `[Bool]` | Per-frame mask: `true` = included in scoring |
-| `assignment` | `[Int: Int]` | Optimal speaker mapping `[refIndex: predIndex]` |
-| `unmatchedPredictionIndices` | `[Int]` | Prediction columns with no reference match |
-
-### LSEENDEvaluation
-
-Static utility namespace for DER computation and RTTM I/O.
-
-#### RTTM Parsing
-
-```swift
-let (entries, speakers) = try LSEENDEvaluation.parseRTTM(url: rttmURL)
-// entries: [LSEENDRTTMEntry]
-// speakers: ordered [String] of unique speaker labels
-
-// Convert to frame-level binary matrix
-let referenceBinary: LSEENDMatrix = LSEENDEvaluation.rttmToFrameMatrix(
-    entries: entries,
-    speakers: speakers,
-    numFrames: timeline.numFinalizedFrames,
-    frameRate: 10.0
-)
-// Shape: [numFrames, speakers.count] — 1.0 where speaker is active
-```
-
-#### RTTM Writing
-
-```swift
-// Write binary prediction matrix to RTTM file
-try LSEENDEvaluation.writeRTTM(
-    recordingID: "meeting_001",
-    binaryPrediction: binaryMatrix,    // [frames, speakers]
-    outputURL: outputURL,
-    frameRate: 10.0,
-    speakerLabels: ["Alice", "Bob"]    // optional; defaults to "spk0", "spk1", ...
-)
-```
-
-#### DER Computation
-
-```swift
-let result: LSEENDEvaluationResult = LSEENDEvaluation.computeDER(
-    probabilities: probMatrix,         // [frames, predSpeakers] — continuous
-    referenceBinary: referenceBinary,  // [frames, refSpeakers] — binary
-    settings: settings
-)
-print("DER: \(result.der * 100)%")
-print("Miss: \(result.speakerMiss / result.speakerScored * 100)%")
-```
-
-`computeDER` applies thresholding, median filtering, collar masking, and optimal Hungarian-style speaker assignment internally.
-
-#### Lower-Level Primitives
-
-```swift
-// Binarize a probability matrix
-let binary: LSEENDMatrix = LSEENDEvaluation.threshold(
-    probabilities: probMatrix,
-    value: 0.5    // strictly-greater-than
-)
-
-// Apply median filter along the time axis (1 or 0 = no-op)
-let filtered: LSEENDMatrix = LSEENDEvaluation.medianFilter(binary: binary, width: 5)
-
-// Compute collar validity mask
-let mask: [Bool] = LSEENDEvaluation.collarMask(
-    reference: referenceBinary,
-    collarFrames: 3    // 0 = all frames valid
-)
-```
+`LSEENDEvaluation` provides RTTM parsing/writing and DER computation for benchmarks. If you need detailed scoring workflows, read the source or move that material into a separate evaluation-specific doc.
 
 ---
 
@@ -856,46 +561,6 @@ for chunk in chunkedAudio(samples, chunkSize: 800) {
 
 let final = try session.finalize()
 let result = session.snapshot()   // LSEENDInferenceResult
-```
-
-### Custom DER Evaluation
-
-```swift
-let engine = try LSEENDInferenceHelper(descriptor: descriptor)
-let result = try engine.infer(audioFileURL: audioURL)
-
-let (entries, speakers) = try LSEENDEvaluation.parseRTTM(url: rttmURL)
-let reference = LSEENDEvaluation.rttmToFrameMatrix(
-    entries: entries,
-    speakers: speakers,
-    numFrames: result.probabilities.rows,
-    frameRate: result.frameHz
-)
-
-let evaluation = LSEENDEvaluation.computeDER(
-    probabilities: result.probabilities,
-    referenceBinary: reference,
-    settings: LSEENDEvaluationSettings(
-        threshold: 0.5,
-        medianWidth: 1,
-        collarSeconds: 0.25,
-        frameRate: result.frameHz
-    )
-)
-print("DER: \(String(format: "%.1f", evaluation.der * 100))%")
-```
-
-### Save Predictions as RTTM
-
-```swift
-let binaryPred = LSEENDEvaluation.threshold(
-    probabilities: result.probabilities, value: 0.5)
-try LSEENDEvaluation.writeRTTM(
-    recordingID: "recording_001",
-    binaryPrediction: binaryPred,
-    outputURL: URL(fileURLWithPath: "output.rttm"),
-    frameRate: result.frameHz
-)
 ```
 
 ---
