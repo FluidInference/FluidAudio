@@ -378,9 +378,7 @@ enum LSEENDBenchmark {
 
         do {
             // Load and process audio
-            let audioLoadStart = Date()
             let audioURL = URL(fileURLWithPath: audioPath)
-            let audioLoadTime = Date().timeIntervalSince(audioLoadStart)
 
             let startTime = Date()
             let timeline = try diarizer.processComplete(audioFileURL: audioURL)
@@ -391,7 +389,6 @@ enum LSEENDBenchmark {
             let numFrames = timeline.numFinalizedFrames
 
             if verbose {
-                print("   Audio load time: \(String(format: "%.3f", audioLoadTime))s")
                 print("   Processing time: \(String(format: "%.2f", processingTime))s")
                 print("   RTFx: \(String(format: "%.1f", rtfx))x")
                 print("   Total frames: \(numFrames)")
