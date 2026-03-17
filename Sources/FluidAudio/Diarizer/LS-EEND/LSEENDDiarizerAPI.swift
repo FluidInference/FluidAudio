@@ -396,57 +396,12 @@ public final class LSEENDDiarizer: Diarizer {
     public func process() throws -> DiarizerTimelineUpdate? {
         lock.lock()
         defer { lock.unlock() }
-
-        guard let engine = _engine else {
-            throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
-        }
-
-        guard !pendingAudio.isEmpty else { return nil }
-
-        // Lazily create session on first process call
-        if _session == nil {
-            _session = try engine.createSession(
-                inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
-        }
-
-        guard let session = _session else { return nil }
-
-        // Clear unconditionally (even on throw) so failed audio isn't re-fed.
-        // Using defer + direct pass avoids a CoW copy — pushAudio receives a
-        // temporary reference, and removeAll runs after it returns (refcount == 1).
-        defer { pendingAudio.removeAll(keepingCapacity: true) }
-        let update = try session.pushAudio(pendingAudio)
-
-        guard let update else {
-            return nil
-        }
-
-        let numSpeakers = engine.metadata.realOutputDim
-        let result = DiarizerChunkResult(
-            startFrame: max(0, update.startFrame - _visibleStartFrameOffset),
-            finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
-            finalizedFrameCount: update.probabilities.rows,
-            tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
-            tentativeFrameCount: update.previewProbabilities.rows
-        )
-
-        _numFramesProcessed += result.finalizedFrameCount
-        return try _timeline.addChunk(result)
+        return try processLocked()
     }
 
     /// Process a chunk of audio in one call.
     ///
     /// Convenience method that combines `addAudio()` and `process()`.
-    ///
-    /// - Parameters:
-    ///   - samples: Audio samples to process.
-    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
-    /// - Returns: New chunk result if inference produced frames, nil otherwise.
-    public func process(samples: [Float], sourceSampleRate: Double? = nil) throws -> DiarizerTimelineUpdate? {
-        try processInternal(samples, sourceSampleRate: sourceSampleRate)
-    }
-
-    /// Process a chunk of audio in one call.
     ///
     /// - Parameters:
     ///   - samples: Audio samples to process.
@@ -459,69 +414,33 @@ public final class LSEENDDiarizer: Diarizer {
         lock.lock()
         defer { lock.unlock() }
 
-        guard let engine = _engine else {
-            throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
-        }
-
         if let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) {
             pendingAudio.append(contentsOf: normalized)
         } else {
             pendingAudio.append(contentsOf: samples)
         }
 
-        guard !pendingAudio.isEmpty else { return nil }
-
-        if _session == nil {
-            _session = try engine.createSession(
-                inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
-        }
-        guard let session = _session else { return nil }
-
-        defer { pendingAudio.removeAll(keepingCapacity: true) }
-        let update = try session.pushAudio(pendingAudio)
-
-        guard let update else {
-            return nil
-        }
-
-        let numSpeakers = engine.metadata.realOutputDim
-        let result = DiarizerChunkResult(
-            startFrame: max(0, update.startFrame - _visibleStartFrameOffset),
-            finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
-            finalizedFrameCount: update.probabilities.rows,
-            tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
-            tentativeFrameCount: update.previewProbabilities.rows
-        )
-
-        _numFramesProcessed += result.finalizedFrameCount
-        return try _timeline.addChunk(result)
+        return try processLocked()
     }
 
-    private func processInternal(
-        _ samples: [Float],
-        sourceSampleRate: Double?
-    ) throws -> DiarizerTimelineUpdate? {
-        lock.lock()
-        defer { lock.unlock() }
-
+    /// Internal process — caller must hold lock.
+    private func processLocked() throws -> DiarizerTimelineUpdate? {
         guard let engine = _engine else {
             throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
         }
 
-        if let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) {
-            pendingAudio.append(contentsOf: normalized)
-        } else {
-            pendingAudio.append(contentsOf: samples)
-        }
-
         guard !pendingAudio.isEmpty else { return nil }
 
+        // Lazily create session on first process call
         if _session == nil {
             _session = try engine.createSession(
                 inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
         }
         guard let session = _session else { return nil }
 
+        // Clear unconditionally (even on throw) so failed audio isn't re-fed.
+        // Using defer + direct pass avoids a CoW copy — pushAudio receives a
+        // temporary reference, and removeAll runs after it returns (refcount == 1).
         defer { pendingAudio.removeAll(keepingCapacity: true) }
 
         guard let update = try session.pushAudio(pendingAudio) else {
