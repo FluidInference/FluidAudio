@@ -601,7 +601,7 @@ public final class SortformerDiarizer: Diarizer {
             }
 
             // Reset for fresh processing
-            let keepSpeakers = keepSpeakers ?? featureBuffer.isEmpty && audioBuffer.isEmpty && (diarizerChunkIndex == 0)
+            let keepSpeakers = keepSpeakers ?? (featureBuffer.isEmpty && audioBuffer.isEmpty && diarizerChunkIndex == 0)
             if !keepSpeakers {
                 _state = SortformerStreamingState(config: config)
             }
