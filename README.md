@@ -340,7 +340,7 @@ Why use LS-EEND:
 - Primary recommendation for live speaker updates
 - Supports up to 10 speakers in a session
 - Generally achieves better benchmark results than Sortformer on CALLHOME, AMI, and DIHARD III
-- Ultra-low-latency inference with 0.5s chunks, and 0.5s of tentative frames.
+- Frame-by-frame inference with 100ms frames, and 900ms of tentative frames.
 - Much more lightweight than Sortformer, and can be faster on CPU than Sortformer on ANE
 - Does not suffer from the missed-quiet-speech issues that Sortformer can show
 - End-to-end model without separate segmentation, embedding extraction, and clustering stages
@@ -376,7 +376,7 @@ End-to-end neural diarization using [NVIDIA's Sortformer](https://arxiv.org/abs/
 
 Why use Sortformer:
 - Simple streaming pipeline with low latency
-- Supports the same live-update flexibility as LS-EEND
+- Supports live-update flexibility like LS-EEND
 - Handles overlapping speech without an external clustering stage
 - Better speaker identity stability than LS-EEND
 - Ignores speech from background conversations 
@@ -384,6 +384,7 @@ Why use Sortformer:
 
 Tradeoffs:
 - Limited to 4 unique speakers
+- Updates are performed less frequently than for LS-EEND 
 - Can get overwhelmed when there are too many background speakers
 - Can miss speech when the audio is too quiet
 - Supports speaker pre-enrollment, but it may be less reliable than the WeSpeaker pipeline

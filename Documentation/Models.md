@@ -36,9 +36,9 @@ TDT models process audio in chunks (~15s with overlap) as batch operations. Fast
 
 | Model | Description | Context |
 |-------|-------------|---------|
-| **LS-EEND** | End-to-end diarization for low-latency streaming and complete-buffer inference. Supports more speakers than Sortformer. | Default streaming diarizer. |
-| **Sortformer** | End-to-end streaming diarization with stronger identity stability, limited to 4 speakers. | Secondary streaming diarizer. |
-| **Pyannote CoreML Pipeline** | Speaker diarization. Segmentation model + WeSpeaker embeddings for clustering. Supports both online (streaming) and offline (VBx) modes. | Best offline diarization pipeline, but poor for online use. |
+| **LS-EEND** | Research prototype end-to-end streaming diarization model from Westlake University. Supports both streaming and complete-buffer inference for up to 10 speakers. Does not miss quiet speech. Uses frame-in, frame-out processing, requiring 900ms of warmup audio and 100ms per update. | Added after Sortformer to support largers speaker counts. |
+| **Sortformer** | NVIDIA's enterprise-grade end-to-end streaming diarization model. Supports both streaming and complete-buffer inference for up to 4 speakers. More stable than LS-EEND, but sometimes misses speech. Processes audio in chunks, requiring 1040ms of warmup audio and 480ms per update for the low latency versions. | Added after Pyannote to support low-latency streaming diarization. |
+| **Pyannote CoreML Pipeline** | Speaker diarization. Segmentation model + WeSpeaker embeddings for clustering. Best offline diarization pipeline, but poor for online use, although both are supported. | First diarizer model added. Converted from Pyannote. |
 
 ## TTS Models
 
