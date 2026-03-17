@@ -670,19 +670,25 @@ public final class LSEENDDiarizer: Diarizer {
         _timeline.reset(keepingSpeakers: keepSpeakers)
         _numFramesProcessed = 0
         pendingAudio.removeAll(keepingCapacity: true)
+        let useRetainedSession = keepSpeakers && _session != nil
         if !keepSpeakers {
             _visibleStartFrameOffset = 0
             _session = nil
         }
 
-        let session = try engine.createSession(
-            inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
+        let session =
+            if let retainedSession = _session, useRetainedSession {
+                retainedSession
+            } else {
+                try engine.createSession(
+                    inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
+            }
         let numSpeakers = engine.metadata.realOutputDim
 
         // Push all audio at once
         if let update = try session.pushAudio(normalized) {
             let chunk = DiarizerChunkResult(
-                startFrame: update.startFrame,
+                startFrame: max(0, update.startFrame - _visibleStartFrameOffset),
                 finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
                 finalizedFrameCount: update.probabilities.rows,
                 tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
@@ -697,7 +703,7 @@ public final class LSEENDDiarizer: Diarizer {
         // Finalize remaining frames
         if let finalUpdate = try session.finalize() {
             let chunk = DiarizerChunkResult(
-                startFrame: _numFramesProcessed,
+                startFrame: max(0, finalUpdate.startFrame - _visibleStartFrameOffset),
                 finalizedPredictions: flattenRowMajor(finalUpdate.probabilities, numSpeakers: numSpeakers),
                 finalizedFrameCount: finalUpdate.probabilities.rows,
                 tentativePredictions: [],
@@ -705,6 +711,9 @@ public final class LSEENDDiarizer: Diarizer {
             )
             _numFramesProcessed += chunk.finalizedFrameCount
             try _timeline.addChunk(chunk)
+        }
+        if useRetainedSession {
+            _session = nil
         }
 
         if finalizeOnCompletion {
