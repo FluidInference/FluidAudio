@@ -264,19 +264,6 @@ extension LSEENDVariant: Identifiable {
 
 /// Locates the CoreML model and metadata files for a specific LS-EEND variant.
 ///
-/// Create a descriptor either from local file paths or by downloading from HuggingFace:
-/// ```swift
-/// // From HuggingFace (downloads on first call, then uses cache)
-/// let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: .dihard3)
-///
-/// // From local paths
-/// let descriptor = LSEENDModelDescriptor(
-///     variant: .dihard3,
-///     modelURL: modelURL,
-///     metadataURL: metadataURL
-/// )
-/// ```
-///
 /// Pass the descriptor to ``LSEENDInferenceEngine/init(descriptor:computeUnits:)``
 /// or ``LSEENDDiarizer/initialize(descriptor:)`` to load the model.
 public struct LSEENDModelDescriptor: Sendable {

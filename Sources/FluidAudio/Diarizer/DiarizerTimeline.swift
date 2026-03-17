@@ -150,21 +150,25 @@ public struct DiarizerTimelineConfig: Sendable {
 
     // MARK: - Seconds Accessors
 
+    /// Padding duration added before each speech segment in seconds
     public var onsetPadSeconds: Float {
         get { Float(onsetPadFrames) * frameDurationSeconds }
         set { onsetPadFrames = Int(round(newValue / frameDurationSeconds)) }
     }
 
+    /// Padding duration added after each speech segment in seconds
     public var offsetPadSeconds: Float {
         get { Float(offsetPadFrames) * frameDurationSeconds }
         set { offsetPadFrames = Int(round(newValue / frameDurationSeconds)) }
     }
 
+    /// Minimum duration for a speech segment in seconds
     public var minDurationOn: Float {
         get { Float(minFramesOn) * frameDurationSeconds }
         set { minFramesOn = Int(round(newValue / frameDurationSeconds)) }
     }
 
+    /// Minimum gap duration between speech segments in seconds (shorter gaps are closed)
     public var minDurationOff: Float {
         get { Float(minFramesOff) * frameDurationSeconds }
         set { minFramesOff = Int(round(newValue / frameDurationSeconds)) }
@@ -186,6 +190,7 @@ public struct DiarizerTimelineConfig: Sendable {
         )
     }
 
+    /// Default timeline configuration for Sortformer (4 speakers, 80ms frames)
     public static let sortformerDefault = Self.default(numSpeakers: 4, frameDurationSeconds: 0.08)
 
     // MARK: - Init
@@ -360,6 +365,10 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
     private var _tentativeSegments: [DiarizerSegment] = []
     private let queue = DispatchQueue(label: "FluidAudio.Diarization.DiarizerSpeaker")
 
+    /// - Parameters:
+    ///   - id: Speaker UUID
+    ///   - index: Index in diarizer output
+    ///   - name: Speaker display name
     public init(
         id: UUID = UUID(),
         index: Int,
@@ -370,6 +379,8 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         self._name = name
     }
 
+    /// Finalize all segments
+    /// - Parameter minFramesOn: Minimum segment length
     public func finalize(enforcingMinFramesOn minFramesOn: Int? = nil) {
         queue.sync(flags: .barrier) {
             if let minFramesOn {
@@ -380,6 +391,7 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         }
     }
 
+    /// Clear segments
     public func reset() {
         queue.sync(flags: .barrier) {
             _tentativeSegments.removeAll()
