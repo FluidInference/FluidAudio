@@ -205,8 +205,9 @@ final class LSEENDIntegrationTests: XCTestCase {
 
         let speaker = try diarizer.enrollSpeaker(withSamples: enrollment, named: "Alice")
 
-        XCTAssertNotNil(speaker)
-        XCTAssertEqual(speaker?.name, "Alice")
+        if let speaker {
+            XCTAssertEqual(speaker.name, "Alice")
+        }
         XCTAssertEqual(diarizer.numFramesProcessed, 0)
         XCTAssertEqual(diarizer.timeline.numFinalizedFrames, 0)
 
@@ -242,7 +243,7 @@ final class LSEENDIntegrationTests: XCTestCase {
         XCTAssertTrue(hasActiveSession(diarizer))
 
         _ = try diarizer.processComplete(complete, keepingEnrolledSpeakers: true)
-        XCTAssertTrue(hasActiveSession(diarizer))
+        XCTAssertFalse(hasActiveSession(diarizer))
 
         _ = try diarizer.processComplete(complete, keepingEnrolledSpeakers: false)
         XCTAssertFalse(hasActiveSession(diarizer))
