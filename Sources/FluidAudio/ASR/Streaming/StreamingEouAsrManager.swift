@@ -295,10 +295,9 @@ public actor StreamingEouAsrManager {
         case .ms320:
             modelDir = modelsRoot.appendingPathComponent(StreamingChunkSize.ms320.modelSubdirectory, isDirectory: true)
             repo = .parakeetEou320
-        default:
-            // There is not a 1600 ms version on HuggingFace. Only 160ms, 320ms, and 1280ms.
-            // This should be fixed in another PR
-            throw ASRError.modelLoadFailed
+        case .ms1280:
+            modelDir = modelsRoot.appendingPathComponent(StreamingChunkSize.ms1280.modelSubdirectory, isDirectory: true)
+            repo = .parakeetEou1280
         }
 
         let requiredModels = ModelNames.ParakeetEOU.requiredModels
