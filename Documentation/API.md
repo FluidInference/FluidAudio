@@ -167,7 +167,7 @@ End-to-end streaming diarization using NVIDIA's Sortformer model. Tracks **4 fix
 - **Sample rate:** 16 kHz
 - **Frame duration:** 80 ms (12.5 Hz output)
 - **Streaming latency:** ~0.64 s (`default` config) or ~1.04 s (`nvidiaLowLatency` configs)
-- **Accuracy:** ~11% DER on DIHARD III (streaming), ~20.6% DER on AMI SDM (`nvidiaLowLatencyV2_1`)
+- **Accuracy:** 31.7% DER on AMI SDM (`nvidiaHighLatencyV2_1`; other configs untested)
 
 **Initialization:**
 ```swift
@@ -183,9 +183,12 @@ diarizer.initialize(models: sortformerModels)
 
 | Preset | Latency | Notes |
 |---|---|---|
-| `.default` / `.fastestV2_1` | ~0.64 s | Gradient Descent conversion, fastest |
-| `.nvidiaLowLatencyV2_1` | ~1.04 s | 20.6% DER on AMI SDM |
-| `.nvidiaHighLatencyV2_1` | ~30.4 s | Highest accuracy, offline-style |
+| `.default` / `.fastestV2_1` | 1.04 s | Fastest inference speed and update rate. |
+| `.fastestV2_0` | 1.04 s | Uses NVIDIA's Sortformer v2 weights. |
+| `.nvidiaLowLatencyV2_1` | 1.04 s | Uses more context than `fastest`; Improvement is minimal |
+| `.nvidiaLowLatencyV2_0` | 1.04 s | Uses NVIDIA's Sortformer v2 weights |
+| `.nvidiaHighLatencyV2_1` | 30.4 s | 31.7% DER on AMI SDM |
+| `.nvidiaHighLatencyV2_0` | 30.4 s | Uses NVIDIA's Sortformer v2 weights |
 
 All streaming methods are defined by the `Diarizer` protocol above. Additionally:
 - `state: SortformerStreamingState` — Live speaker cache and FIFO queue state (for diagnostics)
@@ -199,6 +202,7 @@ End-to-end streaming diarization using LS-EEND (Linear Streaming End-to-End Neur
 
 - **Sample rate:** 8 kHz
 - **Frame duration:** 100 ms (10 Hz output)
+- **Accuracy:** 20.7% DER on AMI SDM (AMI variant)
 - **Variants:** `LSEENDVariant` (`LSEENDModelDescriptor.LSEENDVariant`)
 
 **Initialization:**
