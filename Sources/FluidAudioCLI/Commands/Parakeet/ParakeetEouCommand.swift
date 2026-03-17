@@ -92,8 +92,6 @@ struct ParakeetEouCommand {
             chunkSize = .ms320
         case 1280:
             chunkSize = .ms1280
-        case 1600:
-            chunkSize = .ms1600
         default:
             chunkSize = .ms160
         }
@@ -185,9 +183,6 @@ struct ParakeetEouCommand {
             repo = .parakeetEou320
         case .ms1280:
             repo = .parakeetEou1280
-        case .ms1600:
-            // 1600ms uses 320ms models (same architecture, different streaming config)
-            repo = .parakeetEou320
         }
 
         // Check if models already exist
@@ -532,7 +527,7 @@ struct ParakeetEouCommand {
                 --input <path>           Audio file to transcribe
                 --benchmark              Run benchmark on LibriSpeech test-clean
                 --max-files <number>     Maximum files for benchmark (default: all)
-                --chunk-size <ms>        Streaming chunk size: 160, 320, 1280, or 1600 (default: 160)
+                --chunk-size <ms>        Streaming chunk size: 160, 320, or 1280 (default: 160)
                 --eou-debounce <ms>      Minimum silence duration before EOU triggers (default: 1280)
                 --use-cache              Download models to Application Support cache
                 --models <path>          Custom path to models directory
