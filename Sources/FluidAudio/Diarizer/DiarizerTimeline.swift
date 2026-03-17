@@ -662,7 +662,7 @@ public final class DiarizerTimeline {
     }
 
     public var hasSegments: Bool {
-        !speakers.values.contains(where: \.hasSegments)
+        speakers.values.contains(where: \.hasSegments)
     }
 
     /// Duration of all predictions in seconds
