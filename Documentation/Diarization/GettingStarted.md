@@ -2,6 +2,15 @@
 
 Real-time speaker diarization for iOS and macOS, answering "who spoke when" in audio streams.
 
+## Model Choice
+
+Pick the diarizer based on the workflow:
+
+- **LS-EEND**: Best default for online and streaming diarization. Supports up to 10 speakers, has very low latency, and generally outperforms Sortformer on the main diarization benchmarks.
+- **Sortformer**: Best when identity stability matters more than speaker capacity. It is still low-latency and streaming-friendly, but is limited to 4 speakers and can miss quieter speech.
+- **WeSpeaker/Pyannote**: Best when you need explicit speaker-database control or reliable pre-enrollment. It is much slower and needs larger chunks, so it is the weakest option for live streaming UX.
+- **Offline VBx pipeline**: Best when you want the highest-fidelity batch pipeline with segmentation, embedding extraction, and clustering over a complete file.
+
 ## Quick Start
 
 ```swift
@@ -248,6 +257,63 @@ For most use cases, the simpler `manager.process(url)` API is recommended.
 
 ## Streaming/Real-time Processing
 
+For online diarization, prefer LS-EEND first, then Sortformer, and use WeSpeaker/Pyannote only when you specifically need its speaker-database behavior.
+
+### LS-EEND Streaming
+
+Use `LSEENDDiarizer` when you want the best default live diarizer with low latency and up to 10 speakers.
+
+```swift
+import FluidAudio
+
+let diarizer = LSEENDDiarizer()
+try await diarizer.initialize(variant: .dihard3)
+
+try diarizer.addAudio(audioChunk, sourceSampleRate: 16_000)
+if let update = try diarizer.process() {
+    for segment in update.finalizedSegments {
+        print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
+    }
+}
+```
+
+Notes:
+
+- Supports streaming and complete-buffer inference with the same API.
+- Returns `DiarizerTimelineUpdate` values with finalized and tentative segments.
+- Use `primeWithAudio(...)` if you want to warm the speaker state with enrollment audio.
+- See [LS-EEND.md](LS-EEND.md) for the full API and call flow.
+
+### Sortformer Streaming
+
+Use `SortformerDiarizer` when you want low-latency streaming with stronger speaker identity stability, and the 4-speaker limit is acceptable.
+
+```swift
+import FluidAudio
+
+let diarizer = SortformerDiarizer()
+let models = try await SortformerModels.loadFromHuggingFace(config: .default)
+diarizer.initialize(models: models)
+
+try diarizer.addAudio(audioChunk, sourceSampleRate: 16_000)
+if let update = try diarizer.process() {
+    for segment in update.finalizedSegments {
+        print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
+    }
+}
+```
+
+Notes:
+
+- Best when speaker ordering and identity stability matter more than maximum speaker count.
+- Limited to 4 speakers and can miss quiet speech more often than LS-EEND.
+- Also returns `DiarizerTimelineUpdate` / `DiarizerTimeline` so the integration shape matches LS-EEND.
+- See [Sortformer.md](Sortformer.md) for model loading, tuning, and behavior details.
+
+### WeSpeaker/Pyannote Streaming
+
+Use `DiarizerManager` when you need the classic segmentation + embedding + speaker-database pipeline. This is the slowest streaming option and works best with larger chunks.
+
 Process audio in chunks for real-time applications:
 
 ```swift
@@ -280,6 +346,7 @@ Notes:
 - Always rebase per-chunk timestamps by `(chunkStartSample / sampleRate)`.
 - Provide 16 kHz mono Float32 samples; pad final chunk to the model window.
 - Tune `speakerThreshold` and `embeddingThreshold` to trade off ID stability vs. sensitivity.
+- Prefer chunk sizes of at least 5 seconds; 10 seconds is usually better.
 
 **Speaker Enrollment:** The `Speaker` class includes a `name` field for enrollment workflows. When users introduce themselves ("My name is Alice"), update the speaker's name from the default (e.g. "Speaker_1") to enable personalized identification.
 
