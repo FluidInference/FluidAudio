@@ -1,5 +1,4 @@
 #if os(macOS)
-import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -20,8 +19,6 @@ enum LSEENDCommand {
         var outputFile: String?
         var variant: LSEENDVariant = .dihard3
         var threshold: Float = 0.5
-        var medianWidth: Int = 1
-        var collarSeconds: Double = 0.25
 
         // Post-processing parameters
         var onset: Float?
@@ -60,16 +57,6 @@ enum LSEENDCommand {
             case "--threshold":
                 if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
                     threshold = v
-                    i += 1
-                }
-            case "--median-width":
-                if i + 1 < arguments.count, let v = Int(arguments[i + 1]) {
-                    medianWidth = v
-                    i += 1
-                }
-            case "--collar":
-                if i + 1 < arguments.count, let v = Double(arguments[i + 1]) {
-                    collarSeconds = v
                     i += 1
                 }
             case "--onset":
@@ -244,7 +231,7 @@ enum LSEENDCommand {
     }
 
     private static func printUsage() {
-        logger.info(
+        print(
             """
 
             LS-EEND Command Usage:
@@ -253,8 +240,6 @@ enum LSEENDCommand {
             Options:
                 --variant <name>        Model variant: ami, callhome, dihard2, dihard3 (default: dihard3)
                 --threshold <value>     Speaker activity threshold (default: 0.5)
-                --median-width <value>  Median filter width for post-processing (default: 1)
-                --collar <value>        Collar duration in seconds for evaluation (default: 0.25)
                 --onset <value>         Onset threshold for speech detection (default: 0.5)
                 --offset <value>        Offset threshold for speech detection (default: 0.5)
                 --pad-onset <value>     Padding before speech segments in seconds
@@ -273,8 +258,7 @@ enum LSEENDCommand {
 
                 # Save results to file
                 fluidaudio lseend audio.wav --output results.json
-            """
-        )
+            """)
     }
 }
 #endif

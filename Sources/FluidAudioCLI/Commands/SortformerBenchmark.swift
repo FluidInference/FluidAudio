@@ -1,5 +1,4 @@
 #if os(macOS)
-import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -42,7 +41,6 @@ enum SortformerBenchmark {
                 --single-file <name>     Process a specific meeting (e.g., ES2004a)
                 --max-files <n>          Maximum number of files to process
                 --threshold <value>      Speaker activity threshold (default: 0.5)
-                --preprocessor <path>    Path to SortformerPreprocessor.mlpackage
                 --model <path>           Path to Sortformer.mlpackage
                 --nvidia-low-latency     Use NVIDIA 1.04s latency config (20.57% DER target)
                 --nvidia-high-latency            Use NVIDIA 30.4s latency config (20.57% DER target)
@@ -102,7 +100,7 @@ enum SortformerBenchmark {
                     if let d = Dataset(rawValue: arguments[i + 1].lowercased()) {
                         dataset = d
                     } else {
-                        print("⚠️ Unknown dataset: \(arguments[i + 1]). Using ami.")
+                        print("Unknown dataset: \(arguments[i + 1]). Using ami.")
                     }
                     i += 1
                 }
@@ -170,7 +168,7 @@ enum SortformerBenchmark {
             useHuggingFace = true
         }
 
-        print("🚀 Starting Sortformer Benchmark")
+        print("Starting Sortformer Benchmark")
         fflush(stdout)
         print("   Dataset: \(dataset.rawValue)")
         print("   Threshold: \(threshold)")
@@ -209,7 +207,7 @@ enum SortformerBenchmark {
 
         // Download dataset if needed
         if autoDownload && dataset == .ami {
-            print("📥 Downloading AMI dataset if needed...")
+            print("Downloading AMI dataset if needed...")
             await DatasetDownloader.downloadAMIDataset(
                 variant: .sdm,
                 force: false,
@@ -234,12 +232,12 @@ enum SortformerBenchmark {
         }
 
         if filesToProcess.isEmpty {
-            print("❌ No files found to process")
+            print("No files found to process")
             fflush(stdout)
             return
         }
 
-        print("📂 Processing \(filesToProcess.count) file(s)")
+        print("Processing \(filesToProcess.count) file(s)")
         print("   Progress file: \(progressFile)")
         fflush(stdout)
 
@@ -250,19 +248,19 @@ enum SortformerBenchmark {
             if let loaded = loadProgress(from: progressFile) {
                 completedResults = loaded
                 completedMeetings = Set(loaded.map { $0.meetingName })
-                print("📥 Resuming: loaded \(completedResults.count) previous results")
+                print("Resuming: loaded \(completedResults.count) previous results")
                 for result in completedResults {
-                    print("   ✅ \(result.meetingName): \(String(format: "%.1f", result.der))% DER")
+                    print("   \(result.meetingName): \(String(format: "%.1f", result.der))% DER")
                 }
             } else {
-                print("📥 No previous progress found, starting fresh")
+                print("No previous progress found, starting fresh")
             }
         }
         print("")
         fflush(stdout)
 
         // Initialize Sortformer
-        print("🔧 Loading Sortformer models...")
+        print("Loading Sortformer models...")
         fflush(stdout)
         let modelLoadStart = Date()
         var config: SortformerConfig
@@ -287,12 +285,12 @@ enum SortformerBenchmark {
                 )
             }
         } catch {
-            print("❌ Failed to initialize Sortformer: \(error)")
+            print("Failed to initialize Sortformer: \(error)")
             return
         }
 
         let modelLoadTime = Date().timeIntervalSince(modelLoadStart)
-        print("✅ Models loaded in \(String(format: "%.2f", modelLoadTime))s\n")
+        print("Models loaded in \(String(format: "%.2f", modelLoadTime))s\n")
         fflush(stdout)
 
         // Process each file
@@ -324,14 +322,14 @@ enum SortformerBenchmark {
                 allResults.append(result)
 
                 // Print summary
-                print("📊 Results for \(meetingName):")
+                print("Results for \(meetingName):")
                 print("   DER: \(String(format: "%.1f", result.der))%")
                 print("   RTFx: \(String(format: "%.1f", result.rtfx))x")
                 print("   Speakers: \(result.detectedSpeakers) detected / \(result.groundTruthSpeakers) truth")
 
                 // Save progress after each file
                 saveProgress(results: allResults, to: progressFile)
-                print("💾 Progress saved (\(allResults.count) files complete)")
+                print("Progress saved (\(allResults.count) files complete)")
             }
             fflush(stdout)
 
@@ -359,7 +357,7 @@ enum SortformerBenchmark {
 
         let audioPath = getAudioPath(for: meetingName, dataset: dataset)
         guard FileManager.default.fileExists(atPath: audioPath) else {
-            print("❌ Audio file not found: \(audioPath)")
+            print("Audio file not found: \(audioPath)")
             fflush(stdout)
             return nil
         }
@@ -441,7 +439,7 @@ enum SortformerBenchmark {
             }
 
             guard !groundTruth.isEmpty else {
-                print("⚠️ No ground truth found for \(meetingName)")
+                print("No ground truth found for \(meetingName)")
                 return nil
             }
 
@@ -453,7 +451,7 @@ enum SortformerBenchmark {
             let simpleMetrics = calculateSimpleDER(
                 predictions: filteredPredictions,
                 numFrames: result.numFinalizedFrames,
-                numSpeakers: 4,
+                numSpeakers: result.config.numSpeakers,
                 groundTruth: groundTruth,
                 threshold: threshold,
                 frameShift: 0.08  // 80ms frames like NeMo
@@ -490,7 +488,7 @@ enum SortformerBenchmark {
             )
 
         } catch {
-            print("❌ Error processing \(meetingName): \(error)")
+            print("Error processing \(meetingName): \(error)")
             return nil
         }
     }
@@ -614,7 +612,7 @@ enum SortformerBenchmark {
         print("SORTFORMER BENCHMARK SUMMARY")
         print(String(repeating: "=", count: 80))
 
-        print("📋 Results Sorted by DER:")
+        print("Results Sorted by DER:")
         print(String(repeating: "-", count: 70))
         print("Meeting        DER %    Miss %     FA %     SE %   Speakers     RTFx")
         print(String(repeating: "-", count: 70))
@@ -649,19 +647,19 @@ enum SortformerBenchmark {
                 avgDER, avgMiss, avgFA, avgSE, avgRTFx))
         print(String(repeating: "=", count: 70))
 
-        print("\n✅ Target Check:")
+        print("\nTarget Check:")
         if avgDER < 15 {
-            print("   ✅ DER < 15% (achieved: \(String(format: "%.1f", avgDER))%)")
+            print("   DER < 15% (achieved: \(String(format: "%.1f", avgDER))%)")
         } else if avgDER < 20 {
-            print("   🟡 DER < 20% (achieved: \(String(format: "%.1f", avgDER))%)")
+            print("   DER < 20% (achieved: \(String(format: "%.1f", avgDER))%)")
         } else {
-            print("   ❌ DER > 20% (achieved: \(String(format: "%.1f", avgDER))%)")
+            print("   DER > 20% (achieved: \(String(format: "%.1f", avgDER))%)")
         }
 
         if avgRTFx > 1 {
-            print("   ✅ RTFx > 1x (achieved: \(String(format: "%.1f", avgRTFx))x)")
+            print("   RTFx > 1x (achieved: \(String(format: "%.1f", avgRTFx))x)")
         } else {
-            print("   ❌ RTFx < 1x (achieved: \(String(format: "%.1f", avgRTFx))x)")
+            print("   RTFx < 1x (achieved: \(String(format: "%.1f", avgRTFx))x)")
         }
     }
 
@@ -673,9 +671,9 @@ enum SortformerBenchmark {
         do {
             let data = try JSONSerialization.data(withJSONObject: jsonData, options: .prettyPrinted)
             try data.write(to: URL(fileURLWithPath: path))
-            print("💾 JSON results saved to: \(path)")
+            print("JSON results saved to: \(path)")
         } catch {
-            print("❌ Failed to save JSON: \(error)")
+            print("Failed to save JSON: \(error)")
         }
     }
 
@@ -704,7 +702,7 @@ enum SortformerBenchmark {
             let data = try JSONSerialization.data(withJSONObject: jsonData, options: .prettyPrinted)
             try data.write(to: URL(fileURLWithPath: path))
         } catch {
-            print("⚠️ Failed to save progress: \(error)")
+            print("Failed to save progress: \(error)")
         }
     }
 
@@ -750,7 +748,7 @@ enum SortformerBenchmark {
                 )
             }
         } catch {
-            print("⚠️ Failed to load progress: \(error)")
+            print("Failed to load progress: \(error)")
             return nil
         }
     }
@@ -765,7 +763,10 @@ enum SortformerBenchmark {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         switch dataset {
         case .ami:
-            rttmPath = "Streaming-Sortformer-Conversion/\(meetingName).rttm"
+            rttmPath =
+                homeDir.appendingPathComponent(
+                    "FluidAudioDatasets/ami_official/rttm/\(meetingName).rttm"
+                ).path
         case .voxconverse:
             rttmPath =
                 homeDir.appendingPathComponent(

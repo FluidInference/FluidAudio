@@ -1,5 +1,4 @@
 #if os(macOS)
-import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -25,7 +24,6 @@ enum LSEENDBenchmark {
         let detectedSpeakers: Int
         let groundTruthSpeakers: Int
         let modelLoadTime: Double
-        let audioLoadTime: Double
     }
 
     static func printUsage() {
@@ -378,10 +376,7 @@ enum LSEENDBenchmark {
 
         do {
             // Load and process audio
-            let startLoadTime = Date()
             let audioURL = URL(fileURLWithPath: audioPath)
-            let audioLoadTime = Date().timeIntervalSince(startLoadTime)
-
             let startTime = Date()
             let timeline = try diarizer.processComplete(audioFileURL: audioURL)
             let processingTime = Date().timeIntervalSince(startTime)
@@ -413,7 +408,7 @@ enum LSEENDBenchmark {
                     duration: duration
                 )
                 guard !groundTruth.isEmpty else {
-                    print("⚠️ No ground truth found for \(meetingName)")
+                    print("No ground truth found for \(meetingName)")
                     return nil
                 }
                 // Convert TimedSpeakerSegment to LSEENDRTTMEntry
@@ -506,8 +501,7 @@ enum LSEENDBenchmark {
                 totalFrames: numFrames,
                 detectedSpeakers: detectedSpeakerIndices.count,
                 groundTruthSpeakers: rttmSpeakers.count,
-                modelLoadTime: modelLoadTime,
-                audioLoadTime: audioLoadTime
+                modelLoadTime: modelLoadTime
             )
 
         } catch {
@@ -562,15 +556,9 @@ enum LSEENDBenchmark {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         switch dataset {
         case .ami:
-            // Try local RTTM first, then fall back to dataset directory
-            let localPath = "Streaming-Sortformer-Conversion/\(meeting).rttm"
-            if FileManager.default.fileExists(atPath: localPath) {
-                return URL(fileURLWithPath: localPath)
-            }
-            let datasetPath = homeDir.appendingPathComponent(
+            return homeDir.appendingPathComponent(
                 "FluidAudioDatasets/ami_official/rttm/\(meeting).rttm"
             )
-            return datasetPath
         case .voxconverse:
             return homeDir.appendingPathComponent(
                 "FluidAudioDatasets/voxconverse/rttm_repo/test/\(meeting).rttm"
@@ -730,7 +718,6 @@ enum LSEENDBenchmark {
             "detectedSpeakers": result.detectedSpeakers,
             "groundTruthSpeakers": result.groundTruthSpeakers,
             "modelLoadTime": result.modelLoadTime,
-            "audioLoadTime": result.audioLoadTime,
         ]
     }
 
@@ -764,8 +751,7 @@ enum LSEENDBenchmark {
                     let totalFrames = (dict["totalFrames"] as? NSNumber)?.intValue,
                     let detectedSpeakers = (dict["detectedSpeakers"] as? NSNumber)?.intValue,
                     let groundTruthSpeakers = (dict["groundTruthSpeakers"] as? NSNumber)?.intValue,
-                    let modelLoadTime = (dict["modelLoadTime"] as? NSNumber)?.doubleValue,
-                    let audioLoadTime = (dict["audioLoadTime"] as? NSNumber)?.doubleValue
+                    let modelLoadTime = (dict["modelLoadTime"] as? NSNumber)?.doubleValue
                 else {
                     return nil
                 }
@@ -781,8 +767,7 @@ enum LSEENDBenchmark {
                     totalFrames: totalFrames,
                     detectedSpeakers: detectedSpeakers,
                     groundTruthSpeakers: groundTruthSpeakers,
-                    modelLoadTime: modelLoadTime,
-                    audioLoadTime: audioLoadTime
+                    modelLoadTime: modelLoadTime
                 )
             }
         } catch {

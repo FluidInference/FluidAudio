@@ -444,6 +444,7 @@ public enum LSEENDEvaluation {
     }
 
     private static func solveAssignmentRowsToColumns(cost: [Float], rows: Int, columns: Int) -> [Int] {
+        precondition(columns <= 20, "Assignment solver is O(2^columns); columns=\(columns) is too large")
         let stateCount = 1 << columns
         var dp = [Float](repeating: .greatestFiniteMagnitude, count: stateCount)
         var parent = [Int](repeating: -1, count: stateCount)
