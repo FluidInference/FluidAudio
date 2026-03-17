@@ -36,7 +36,7 @@ final class SortformerTests: XCTestCase {
         // 3. Compare
         XCTAssertEqual(batchChunks.count, streamingChunks.count, "Chunk count mismatch")
 
-        for i in 0..<min(batchChunks.count, streamingChunks.count) {
+        for i in 0..<batchChunks.count {
             let batch = batchChunks[i]
             let stream = streamingChunks[i]
 
@@ -140,18 +140,15 @@ final class SortformerTests: XCTestCase {
     func testBufferBounds() throws {
         var config = DiarizerTimelineConfig.sortformerDefault
         let numSpeakers = config.numSpeakers
-        config.maxStoredFrames = 50
+        let maxFrames = 50
+        config.maxStoredFrames = maxFrames
 
         // Create timeline with maxFrames limit
         let timeline = DiarizerTimeline(config: config)
 
         // Feed 200 frames of predictions (way more than maxFrames)
-        let totalFrames = 200
-        for frameOffset in stride(from: 0, to: totalFrames, by: 10) {
-            var chunkPreds: [Float] = []
-            for _ in 0..<10 {
-                chunkPreds.append(contentsOf: [Float](repeating: 0.5, count: numSpeakers))
-            }
+        for frameOffset in stride(from: 0, to: 200, by: 10) {
+            let chunkPreds = [Float](repeating: 0.5, count: 10 * numSpeakers)
 
             let chunk = DiarizerChunkResult(
                 startFrame: frameOffset,
@@ -165,16 +162,25 @@ final class SortformerTests: XCTestCase {
 
         // Verify framePredictions is bounded to maxFrames
         XCTAssertLessThanOrEqual(
-            timeline.finalizedPredictions.count, config.maxStoredFrames! * config.numSpeakers,
+            timeline.finalizedPredictions.count, maxFrames * numSpeakers,
             "framePredictions should be bounded to maxFrames")
 
         // Verify we still have some predictions (not all trimmed)
         XCTAssertGreaterThan(timeline.numFinalizedFrames, 0, "Should have some predictions")
 
+        // Verify probability() returns valid values for stored frames and NaN for trimmed frames
+        let storedFrames = timeline.finalizedPredictions.count / numSpeakers
+        let firstStoredFrame = timeline.numFinalizedFrames - storedFrames
+        XCTAssertFalse(
+            timeline.probability(speaker: 0, frame: firstStoredFrame).isNaN,
+            "First stored frame should have a valid probability")
+        XCTAssertTrue(
+            timeline.probability(speaker: 0, frame: firstStoredFrame - 1).isNaN,
+            "Frame before stored range should return NaN")
     }
 
     func testSegmentExtraction() throws {
-        let config = SortformerConfig.default
+        let config = DiarizerTimelineConfig.sortformerDefault
         let numSpeakers = config.numSpeakers
 
         // Create predictions with clear speaker pattern:
@@ -198,12 +204,13 @@ final class SortformerTests: XCTestCase {
 
         let timeline = try DiarizerTimeline(
             allPredictions: predictions,
-            config: .sortformerDefault,
+            config: config,
             isComplete: true
         )
 
-        // Check that we have segments
-        XCTAssertGreaterThan(timeline.speakers.count, 0, "Should have extracted segments")
+        // Check that segments were actually extracted (not just that the speakers dict exists)
+        let totalSegments = timeline.speakers.values.reduce(0) { $0 + $1.finalizedSegmentCount }
+        XCTAssertGreaterThan(totalSegments, 0, "Should have extracted at least one segment")
 
         // Verify segment speakers are valid
         for speaker in timeline.speakers.values {
@@ -216,10 +223,10 @@ final class SortformerTests: XCTestCase {
     }
 
     func testReset() throws {
-        let config = SortformerConfig.default
+        let config = DiarizerTimelineConfig.sortformerDefault
         let numSpeakers = config.numSpeakers
 
-        let timeline = DiarizerTimeline(config: .sortformerDefault)
+        let timeline = DiarizerTimeline(config: config)
 
         // Add some data
         let chunk = DiarizerChunkResult(
