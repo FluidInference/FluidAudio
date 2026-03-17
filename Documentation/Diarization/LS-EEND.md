@@ -14,7 +14,7 @@ LS-EEND (Long-Form Streaming End-to-End Neural Diarization) answers "who spoke w
 
 **Limitations:**
 - 8000 Hz sample rate — lower audio fidelity than 16 kHz models
-- Speaker identity is local to the recording; no persistent speaker embeddings
+- Speaker identity is local to the recording; persistent speaker enrollment may be unreliable
 - Variants are domain-specialized: using the wrong variant for a domain hurts accuracy
 
 ---

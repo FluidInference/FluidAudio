@@ -337,8 +337,7 @@ swift run fluidaudiocli diarization-benchmark --mode offline --auto-download \
 State-of-the-art end-to-end streaming diarization with fully local CoreML inference. This is the best default option for online and streaming diarization when you want low-latency speaker activity updates from a single model without a separate clustering pipeline. Multiple exported variants are available for different benchmark domains, and the diarizer supports both streaming and complete-buffer processing.
 
 Why use LS-EEND:
-- Best overall default for online and streaming diarization
-- Primary recommendation for live speaker updates
+- Robust to noise and high speaker overlap
 - Supports up to 10 speakers in a session
 - Generally achieves better benchmark results than Sortformer on CALLHOME, AMI, and DIHARD III
 - Frame-by-frame inference with 100ms frames, and 900ms of tentative frames.
