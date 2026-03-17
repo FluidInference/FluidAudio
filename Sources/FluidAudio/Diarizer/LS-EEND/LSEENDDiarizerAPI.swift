@@ -665,9 +665,6 @@ public final class LSEENDDiarizer: Diarizer {
             throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
         }
 
-        // Reset for fresh processing
-        updateTimelineConfig(engine: engine)
-
         let keepSpeakers = keepSpeakers ?? (_numFramesProcessed == 0) && pendingAudio.isEmpty
 
         _timeline.reset(keepingSpeakers: keepSpeakers)
