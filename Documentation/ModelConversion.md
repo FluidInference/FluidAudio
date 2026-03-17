@@ -244,27 +244,15 @@ Every new model needs benchmark results before merging. The metrics depend on th
 - **RTFx** (Real-Time Factor): How many times faster than real-time (higher is better, >1.0 means real-time capable)
 - **PER** (Phoneme Error Rate): Character-level Levenshtein distance over reference phonemes
 
-**Existing benchmark datasets:**
+**Datasets:**
 
-FluidAudio already ships with datasets (or auto-downloads them) for each model type. We recommend using these when benchmarking a new model, but feel free to use or create new datasets as needed.
+Datasets for each model type already exist and most auto-download on first run. We recommend using these, but feel free to use or create new ones as needed.
 
-| Dataset | Domain | Size | Format | Location / Download |
-|---------|--------|------|--------|---------------------|
-| **LibriSpeech** | ASR (English) | 2,620 files / ~5.4h (`test-clean`) | FLAC + `.trans.txt` | Auto-downloads from `FluidInference/librispeech` to `~/Library/Application Support/FluidAudio/Datasets/LibriSpeech/` |
-| **FLEURS** | ASR (multilingual, 24+ langs) | ~350 samples/language | WAV + `.trans.txt` | Auto-downloads from `FluidInference/fleurs` to `~/Library/Application Support/FluidAudio/FLEURS/` |
-| **AISHELL-1** | ASR (Chinese) | 6,920 files / 9.7h | Audio + Chinese transcripts | Auto-downloads from `AudioLLMs/aishell_1_zh_test` |
-| **Earnings22** | ASR + keyword spotting | 773 files / ~3.2h | Audio + transcripts | Auto-downloads to `~/Library/Application Support/FluidAudio/earnings22-kws/` |
-| **Buckeye Corpus** | Forced alignment / VAD | 2,478 utterances, 20 speakers, ~3.6GB | WAV + `manifest.json` (word-level timestamps) | Checked in at `buckeye/buckeye-benchmark/` |
-| **VOiCES Subset** | VAD | Variable | Audio + annotations | Downloaded via `vad-benchmark` CLI |
-| **MUSAN Full** | VAD (large-scale) | 2,016 files / ~109h | Audio | Downloaded via `vad-benchmark` CLI |
-| **AMI-SDM** | Speaker diarization | ~232 clips | Audio + speaker ground truth | Auto-downloads via `diarization-benchmark --auto-download` |
-| **VoxConverse** | Streaming diarization | 232 clips | Audio + speaker ground truth | Used by `sortformer-benchmark` CLI |
-| **CharsiuG2P** | Grapheme-to-Phoneme | 500 words × 9 languages | Text (grapheme/phoneme pairs) | Configured via `g2p-benchmark --data-dir` |
-| **Text normalization** | TTS text processing | Per-language TSV files | TSV (input/expected pairs) | Checked in at `text-processing-rs/tests/data/` |
-
-Most benchmark CLI commands accept `--auto-download` or will fetch datasets on first run. You can also point to a local directory with `--cache-dir` or `--data-dir` if you've already downloaded the data.
-
-To add a new dataset, follow the existing pattern: host it on HuggingFace under `FluidInference/`, register it in the download infrastructure, and document it in this table.
+- **ASR:** LibriSpeech (`test-clean`), FLEURS (24+ languages), AISHELL-1 (Chinese), Earnings22
+- **VAD:** Buckeye Corpus, VOiCES Subset, MUSAN Full
+- **Diarization:** AMI-SDM, VoxConverse
+- **G2P:** CharsiuG2P (9 languages)
+- **TTS text processing:** Text normalization test data (`text-processing-rs/tests/data/`)
 
 **What to report:**
 
