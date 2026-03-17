@@ -18,6 +18,7 @@
 - [LS-EEND](Diarization/LS-EEND.md)
 - [Sortformer](Diarization/Sortformer.md)
 - [Speaker Manager](Diarization/SpeakerManager.md)
+- [DiarizerTimeline](Diarization/DiarizerTimeline.md)
 - [Investigation Report](Diarization/InvestigationReport.md)
 
 ## VAD
