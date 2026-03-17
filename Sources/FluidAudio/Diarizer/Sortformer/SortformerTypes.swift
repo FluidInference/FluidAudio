@@ -123,7 +123,7 @@ public struct SortformerConfig: Sendable {
 
     /// Configuration matching Gradient Descent's Streaming-Sortformer-Conversion models with Sortformer v2 weights
     public static let `fastestV2` = SortformerConfig(
-        modelVariant: .gradientDescentV2,
+        modelVariant: .fastestV2,
         chunkLen: 6,
         chunkLeftContext: 1,
         chunkRightContext: 7,
@@ -134,7 +134,7 @@ public struct SortformerConfig: Sendable {
 
     /// Configuration matching Gradient Descent's Streaming-Sortformer-Conversion models with Sortformer v2.1 weights
     public static let `fastestV2_1` = SortformerConfig(
-        modelVariant: .gradientDescentV2_1,
+        modelVariant: .fastestV2_1,
         chunkLen: 6,
         chunkLeftContext: 1,
         chunkRightContext: 7,
