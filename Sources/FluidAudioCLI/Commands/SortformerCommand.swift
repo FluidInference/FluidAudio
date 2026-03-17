@@ -180,10 +180,11 @@ enum SortformerCommand {
             print("\n--- Speaker Activity Summary ---")
             let numSpeakers = result.config.numSpeakers
             var speakerActivity = [Float](repeating: 0, count: numSpeakers)
+            let predictions = result.finalizedPredictions
             for frame in 0..<result.numFinalizedFrames {
                 for spk in 0..<numSpeakers {
-                    let prob = result.finalizedPredictions[frame * numSpeakers + spk]
-                    if prob > 0.5 {
+                    let idx = frame * numSpeakers + spk
+                    if idx < predictions.count, predictions[idx] > 0.5 {
                         speakerActivity[spk] += result.config.frameDurationSeconds
                     }
                 }

@@ -85,7 +85,7 @@ public enum LSEENDEvaluation {
         var speakers: [String] = []
         for line in text.split(whereSeparator: \.isNewline) {
             let parts = line.split(separator: " ")
-            guard parts.count >= 8 else { continue }
+            guard parts.count >= 8, parts[0] == "SPEAKER" else { continue }
             let speaker = String(parts[7])
             if !speakers.contains(speaker) {
                 speakers.append(speaker)
