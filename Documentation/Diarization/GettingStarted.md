@@ -257,11 +257,11 @@ For most use cases, the simpler `manager.process(url)` API is recommended.
 
 ## Streaming/Real-time Processing
 
-For online diarization, prefer LS-EEND first, then Sortformer, and use WeSpeaker/Pyannote only when you specifically need its speaker-database behavior.
+For online diarization, prefer LS-EEND or Sortformer first, and use WeSpeaker/Pyannote only when you specifically need its speaker-database behavior.
 
 ### LS-EEND Streaming
 
-Use `LSEENDDiarizer` when you want the best default live diarizer with low latency and up to 10 speakers.
+Use `LSEENDDiarizer` when you want live diarizer with low latency and up to 10 speakers. It is very eager to detect speech, and performs well even when many simultaneous speakers are present.
 
 ```swift
 import FluidAudio
@@ -286,7 +286,7 @@ Notes:
 
 ### Sortformer Streaming
 
-Use `SortformerDiarizer` when you want low-latency streaming with stronger speaker identity stability, and the 4-speaker limit is acceptable.
+Use `SortformerDiarizer` when you want robust low-latency streaming with stronger speaker identity stability, and the 4-speaker limit is acceptable. It attempts to ignore background speakers, so it may miss quiet speech. It also sometimes gets overwhelmed when too many speakers are talking simultaneously.
 
 ```swift
 import FluidAudio
