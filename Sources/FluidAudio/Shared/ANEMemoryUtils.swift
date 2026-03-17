@@ -142,6 +142,70 @@ public enum ANEMemoryUtils {
         )
     }
 
+    /// Stride-aware copy between two MLMultiArrays that may have different stride layouts.
+    ///
+    /// Copies all logical elements from `source` to `destination` (which must have the same shape).
+    /// The innermost dimension is copied as a contiguous block (stride-1), while outer dimensions
+    /// are iterated respecting each array's strides.
+    public static func strideAwareCopy(from source: MLMultiArray, to destination: MLMultiArray) {
+        let shape = source.shape.map { $0.intValue }
+        let srcStrides = source.strides.map { $0.intValue }
+        let dstStrides = destination.strides.map { $0.intValue }
+
+        let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
+        let dstPtr = destination.dataPointer.assumingMemoryBound(to: Float.self)
+
+        let ndim = shape.count
+        guard ndim > 0 else { return }
+
+        // If strides match, a single memcpy suffices (fast path).
+        if srcStrides == dstStrides {
+            // Total backing storage = first-dim stride * first-dim size
+            let totalBacking = srcStrides[0] * shape[0]
+            memcpy(dstPtr, srcPtr, totalBacking * MemoryLayout<Float>.size)
+            return
+        }
+
+        // Innermost dimension length
+        let innerLen = shape[ndim - 1]
+
+        if ndim == 1 {
+            // 1-D: just copy innerLen elements (both have stride 1 for innermost)
+            memcpy(dstPtr, srcPtr, innerLen * MemoryLayout<Float>.size)
+            return
+        }
+
+        // Number of outer "rows" = product of all dimensions except the last
+        let outerCount = shape.dropLast().reduce(1, *)
+
+        // Multi-index iteration over outer dimensions
+        var indices = [Int](repeating: 0, count: ndim - 1)
+
+        for _ in 0..<outerCount {
+            // Compute flat offset for source and destination
+            var srcOffset = 0
+            var dstOffset = 0
+            for d in 0..<(ndim - 1) {
+                srcOffset += indices[d] * srcStrides[d]
+                dstOffset += indices[d] * dstStrides[d]
+            }
+
+            // Copy innermost dimension as contiguous block
+            memcpy(dstPtr + dstOffset, srcPtr + srcOffset, innerLen * MemoryLayout<Float>.size)
+
+            // Increment multi-index (odometer style)
+            var carry = ndim - 2
+            while carry >= 0 {
+                indices[carry] += 1
+                if indices[carry] < shape[carry] {
+                    break
+                }
+                indices[carry] = 0
+                carry -= 1
+            }
+        }
+    }
+
     /// Prefetch memory pages for ANE processing
     public static func prefetchForANE(_ array: MLMultiArray) {
         let dataPointer = array.dataPointer

@@ -396,15 +396,13 @@ public final class LSEENDInferenceHelper {
         return value
     }
 
-    /// Clone an MLMultiArray into a new ANE-aligned allocation using vDSP.
+    /// Clone an MLMultiArray into a new ANE-aligned allocation using stride-aware copy.
     private func cloneAligned(_ source: MLMultiArray) throws -> MLMultiArray {
         let copy = try sharedResources.memoryOptimizer.createAlignedArray(
             shape: source.shape,
             dataType: .float32
         )
-        let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
-        let dstPtr = copy.dataPointer.assumingMemoryBound(to: Float.self)
-        memcpy(dstPtr, srcPtr, source.count * MemoryLayout<Float>.size)
+        ANEMemoryUtils.strideAwareCopy(from: source, to: copy)
         return copy
     }
 
@@ -663,15 +661,12 @@ private func roundedMillis(_ value: Double) -> Double {
 
 /// Clone an MLMultiArray into a new ANE-aligned allocation.
 private func cloneAlignedMultiArray(_ source: MLMultiArray) throws -> MLMultiArray {
-
     let copy = try ANEMemoryUtils.createAlignedArray(
         shape: source.shape,
         dataType: .float32,
         zeroClear: false
     )
-    let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
-    let dstPtr = copy.dataPointer.assumingMemoryBound(to: Float.self)
-    memcpy(dstPtr, srcPtr, source.count * MemoryLayout<Float>.size)
+    ANEMemoryUtils.strideAwareCopy(from: source, to: copy)
     return copy
 }
 
