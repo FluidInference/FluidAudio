@@ -153,6 +153,8 @@ public final class LSEENDInferenceHelper {
     fileprivate var melSpectrogram: NeMoMelSpectrogram { sharedResources.melSpectrogram }
     private var offlineFeatureExtractor: LSEENDOfflineFeatureExtractor { sharedResources.offlineFeatureExtractor }
 
+    private let lock = NSLock()
+
     /// Creates an inference engine by loading and compiling the CoreML model.
     ///
     /// - Parameters:
@@ -297,40 +299,43 @@ public final class LSEENDInferenceHelper {
         ingest: Float,
         decode: Float
     ) throws -> LSEENDStepOutput {
-        // Write into preallocated ANE-aligned arrays instead of allocating new ones
-        sharedResources.memoryOptimizer.optimizedCopy(from: frame, to: sharedResources.frameArray)
-        sharedResources.ingestArray[0] = NSNumber(value: ingest)
-        sharedResources.decodeArray[0] = NSNumber(value: decode)
+        try lock.withLock {
+            // Write into preallocated ANE-aligned arrays instead of allocating new ones
+            sharedResources.memoryOptimizer.optimizedCopy(from: frame, to: sharedResources.frameArray)
+            sharedResources.ingestArray[0] = NSNumber(value: ingest)
+            sharedResources.decodeArray[0] = NSNumber(value: decode)
 
-        let provider = try MLDictionaryFeatureProvider(dictionary: [
-            "frame": MLFeatureValue(multiArray: sharedResources.frameArray),
-            "enc_ret_kv": MLFeatureValue(multiArray: state.encRetKv),
-            "enc_ret_scale": MLFeatureValue(multiArray: state.encRetScale),
-            "enc_conv_cache": MLFeatureValue(multiArray: state.encConvCache),
-            "dec_ret_kv": MLFeatureValue(multiArray: state.decRetKv),
-            "dec_ret_scale": MLFeatureValue(multiArray: state.decRetScale),
-            "top_buffer": MLFeatureValue(multiArray: state.topBuffer),
-            "ingest": MLFeatureValue(multiArray: sharedResources.ingestArray),
-            "decode": MLFeatureValue(multiArray: sharedResources.decodeArray),
-        ])
-        let prediction = try model.prediction(from: provider)
-        let fullLogitsArray = try feature(named: "full_logits", from: prediction)
-        let nextState = LSEENDModelState(
-            encRetKv: try cloneAligned(feature(named: "enc_ret_kv_out", from: prediction)),
-            encRetScale: try cloneAligned(feature(named: "enc_ret_scale_out", from: prediction)),
-            encConvCache: try cloneAligned(feature(named: "enc_conv_cache_out", from: prediction)),
-            decRetKv: try cloneAligned(feature(named: "dec_ret_kv_out", from: prediction)),
-            decRetScale: try cloneAligned(feature(named: "dec_ret_scale_out", from: prediction)),
-            topBuffer: try cloneAligned(feature(named: "top_buffer_out", from: prediction))
-        )
-        return LSEENDStepOutput(
-            fullLogits: floatValues(from: fullLogitsArray, count: metadata.fullOutputDim),
-            nextState: nextState
-        )
+            let provider = try MLDictionaryFeatureProvider(dictionary: [
+                "frame": MLFeatureValue(multiArray: sharedResources.frameArray),
+                "enc_ret_kv": MLFeatureValue(multiArray: state.encRetKv),
+                "enc_ret_scale": MLFeatureValue(multiArray: state.encRetScale),
+                "enc_conv_cache": MLFeatureValue(multiArray: state.encConvCache),
+                "dec_ret_kv": MLFeatureValue(multiArray: state.decRetKv),
+                "dec_ret_scale": MLFeatureValue(multiArray: state.decRetScale),
+                "top_buffer": MLFeatureValue(multiArray: state.topBuffer),
+                "ingest": MLFeatureValue(multiArray: sharedResources.ingestArray),
+                "decode": MLFeatureValue(multiArray: sharedResources.decodeArray),
+            ])
+            let prediction = try model.prediction(from: provider)
+            let fullLogitsArray = try feature(named: "full_logits", from: prediction)
+            let nextState = LSEENDModelState(
+                encRetKv: try cloneAligned(feature(named: "enc_ret_kv_out", from: prediction)),
+                encRetScale: try cloneAligned(feature(named: "enc_ret_scale_out", from: prediction)),
+                encConvCache: try cloneAligned(feature(named: "enc_conv_cache_out", from: prediction)),
+                decRetKv: try cloneAligned(feature(named: "dec_ret_kv_out", from: prediction)),
+                decRetScale: try cloneAligned(feature(named: "dec_ret_scale_out", from: prediction)),
+                topBuffer: try cloneAligned(feature(named: "top_buffer_out", from: prediction))
+            )
+            return LSEENDStepOutput(
+                fullLogits: floatValues(from: fullLogitsArray, count: metadata.fullOutputDim),
+                nextState: nextState
+            )
+        }
     }
 
     fileprivate func initialState() throws -> LSEENDModelState {
         let optimizer = sharedResources.memoryOptimizer
+
         return try LSEENDModelState(
             encRetKv: optimizer.createAlignedArray(
                 shape: metadata.stateShapes.encRetKv.map(NSNumber.init(value:)), dataType: .float32),
