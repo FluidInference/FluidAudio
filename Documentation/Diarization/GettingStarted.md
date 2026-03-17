@@ -6,9 +6,9 @@ Real-time speaker diarization for iOS and macOS, answering "who spoke when" in a
 
 Pick the diarizer based on the workflow:
 
-- **LS-EEND**: Best default for online and streaming diarization. Supports up to 10 speakers, has very low latency, and generally outperforms Sortformer on the main diarization benchmarks.
-- **Sortformer**: Best when identity stability matters more than speaker capacity. It is still low-latency and streaming-friendly, but is limited to 4 speakers and can miss quieter speech.
-- **WeSpeaker/Pyannote**: Best when you need explicit speaker-database control or reliable pre-enrollment. It is much slower and needs larger chunks, so it is the weakest option for live streaming UX.
+- **LS-EEND**: Best default for online and streaming diarization. Supports up to 10 speakers, has very low latency (100 ms between updates), and generally outperforms Sortformer on the main diarization benchmarks.
+- **Sortformer**: Best when identity stability matters more than speaker capacity. It is still low-latency (480 ms between updates) and streaming-friendly, but is limited to 4 speakers and can miss quieter speech.
+- **WeSpeaker/Pyannote**: Best when you need explicit speaker-database control or reliable pre-enrollment. It is much slower and needs larger chunks (typically around 5 seconds), so it is the weakest option for live streaming UX.
 - **Offline VBx pipeline**: Best when you want the highest-fidelity batch pipeline with segmentation, embedding extraction, and clustering over a complete file.
 
 ## Quick Start
@@ -281,7 +281,7 @@ Notes:
 
 - Supports streaming and complete-buffer inference with the same API.
 - Returns `DiarizerTimelineUpdate` values with finalized and tentative segments.
-- Use `primeWithAudio(...)` if you want to warm the speaker state with enrollment audio.
+- Use `enrollSpeaker(withSamples:named:overwritingAssignedSpeakerName:)` to pre-enroll speakers before streaming. This keeps the warmed LS-EEND session state while resetting the visible timeline.
 - See [LS-EEND.md](LS-EEND.md) for the full API and call flow.
 
 ### Sortformer Streaming
@@ -307,6 +307,7 @@ Notes:
 
 - Best when speaker ordering and identity stability matter more than maximum speaker count.
 - Limited to 4 speakers and can miss quiet speech more often than LS-EEND.
+- Use `enrollSpeaker(withAudio:named:overwritingAssignedSpeakerName:)` to pre-enroll speakers before streaming. This preserves the speaker cache/FIFO state and clears the visible timeline.
 - Also returns `DiarizerTimelineUpdate` / `DiarizerTimeline` so the integration shape matches LS-EEND.
 - See [Sortformer.md](Sortformer.md) for model loading, tuning, and behavior details.
 

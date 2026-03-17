@@ -180,11 +180,11 @@ final class LSEENDIntegrationTests: XCTestCase {
         XCTAssertEqual(diarizer.timeline.numFinalizedFrames, 0)
     }
 
-    func testPrimeWithAudioThrowsWhenNotInitialized() {
+    func testEnrollSpeakerThrowsWhenNotInitialized() {
         let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
         let samples = [Float](repeating: 0.1, count: 16000)
 
-        XCTAssertThrowsError(try diarizer.primeWithAudio(samples)) { error in
+        XCTAssertThrowsError(try diarizer.enrollSpeaker(withSamples: samples)) { error in
             guard case LSEENDError.modelPredictionFailed(let message) = error else {
                 XCTFail("Expected modelPredictionFailed but got \(error)")
                 return
@@ -193,7 +193,7 @@ final class LSEENDIntegrationTests: XCTestCase {
         }
     }
 
-    func testPrimeWithAudioResetsVisibleTimelineAndAllowsStreaming() async throws {
+    func testEnrollSpeakerResetsVisibleTimelineAndAllowsStreaming() async throws {
         let engine = try await makeEngine(variant: .dihard3)
         let samples = try fixtureAudio(sampleRate: engine.targetSampleRate, limitSeconds: 6.0)
         let enrollmentCount = min(samples.count / 2, engine.targetSampleRate * 2)
@@ -203,8 +203,10 @@ final class LSEENDIntegrationTests: XCTestCase {
         let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
         diarizer.initialize(engine: engine)
 
-        try diarizer.primeWithAudio(enrollment)
+        let speaker = try diarizer.enrollSpeaker(withSamples: enrollment, named: "Alice")
 
+        XCTAssertNotNil(speaker)
+        XCTAssertEqual(speaker?.name, "Alice")
         XCTAssertEqual(diarizer.numFramesProcessed, 0)
         XCTAssertEqual(diarizer.timeline.numFinalizedFrames, 0)
 
@@ -224,6 +226,26 @@ final class LSEENDIntegrationTests: XCTestCase {
         }
         XCTAssertGreaterThan(diarizer.timeline.numFinalizedFrames, 0)
         XCTAssertEqual(diarizer.numFramesProcessed, diarizer.timeline.numFinalizedFrames)
+    }
+
+    func testProcessCompleteKeepsPrimedSessionOnlyWhenRequested() async throws {
+        let engine = try await makeEngine(variant: .dihard3)
+        let samples = try fixtureAudio(sampleRate: engine.targetSampleRate, limitSeconds: 6.0)
+        let enrollmentSampleCount = engine.targetSampleRate * 2
+        let enrollment = Array(samples.prefix(enrollmentSampleCount))
+        let complete = Array(samples.dropFirst(enrollmentSampleCount).prefix(enrollmentSampleCount))
+
+        let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
+        diarizer.initialize(engine: engine)
+
+        _ = try diarizer.enrollSpeaker(withSamples: enrollment, named: "Alice")
+        XCTAssertTrue(hasActiveSession(diarizer))
+
+        _ = try diarizer.processComplete(complete, keepingEnrolledSpeakers: true)
+        XCTAssertTrue(hasActiveSession(diarizer))
+
+        _ = try diarizer.processComplete(complete, keepingEnrolledSpeakers: false)
+        XCTAssertFalse(hasActiveSession(diarizer))
     }
 
     private func makeEngine(variant: LSEENDVariant) async throws -> LSEENDInferenceEngine {
@@ -408,5 +430,17 @@ final class LSEENDIntegrationTests: XCTestCase {
             maxAbs: maxAbs,
             meanAbs: actual.isEmpty ? 0 : sumAbs / Double(actual.count)
         )
+    }
+
+    private func hasActiveSession(_ diarizer: LSEENDDiarizer) -> Bool {
+        let mirror = Mirror(reflecting: diarizer)
+        guard let sessionValue = mirror.children.first(where: { $0.label == "_session" })?.value else {
+            XCTFail("Expected LS-EEND diarizer to expose _session via reflection")
+            return false
+        }
+
+        let optionalMirror = Mirror(reflecting: sessionValue)
+        XCTAssertEqual(optionalMirror.displayStyle, .optional)
+        return optionalMirror.children.count == 1
     }
 }

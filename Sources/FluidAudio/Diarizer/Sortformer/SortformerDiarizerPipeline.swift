@@ -142,7 +142,6 @@ public final class SortformerDiarizer: Diarizer {
         withLock {
             self._models = loadedModels
             self._state = SortformerStreamingState(config: config)
-            self.lastAudioSample = 0
             self.resetBuffersLocked()
         }
         logger.info("Sortformer initialized in \(String(format: "%.2f", loadedModels.compilationDuration))s")
@@ -162,7 +161,6 @@ public final class SortformerDiarizer: Diarizer {
 
         self._models = models
         self._state = SortformerStreamingState(config: config)
-        self.lastAudioSample = 0
         resetBuffersLocked()
         logger.info("Sortformer initialized with pre-loaded models")
     }
@@ -173,19 +171,18 @@ public final class SortformerDiarizer: Diarizer {
         defer { lock.unlock() }
 
         _state = SortformerStreamingState(config: config)
-        lastAudioSample = 0
         resetBuffersLocked()
         logger.debug("Sortformer state reset")
     }
 
     /// Internal reset - caller must hold lock
-    private func resetBuffersLocked() {
+    private func resetBuffersLocked(keepingSpeakers: Bool = false) {
         audioBuffer = []
         featureBuffer = []
         lastAudioSample = 0
         startFeat = 0
         diarizerChunkIndex = 0
-        _timeline.reset()
+        _timeline.reset(keepingSpeakers: keepingSpeakers)
 
         featureBuffer.reserveCapacity((config.chunkMelFrames + config.coreFrames) * config.melFeatures)
     }
@@ -218,10 +215,25 @@ public final class SortformerDiarizer: Diarizer {
     /// let result = try diarizer.process()
     /// ```
     ///
-    /// - Parameter samples: Audio samples (16kHz mono) of known speakers
+    /// - Parameters:
+    ///   - samples: Audio samples (16kHz mono) of known speakers
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
+    ///   - name: The speaker's name.
+    ///   - overwriteAssignedSpeakerName: Whether enrollment may overwrite the name on an already-named slot
+    ///     if the diarizer assigns the audio to that speaker.
     /// - Throws: `SortformerError.notInitialized` if models not loaded
-    public func primeWithAudio(_ samples: [Float], sourceSampleRate: Double? = nil) throws {
-        try primeWithAudioInternal(samples, sourceSampleRate: sourceSampleRate)
+    public func enrollSpeaker(
+        withAudio samples: [Float],
+        sourceSampleRate: Double? = nil,
+        named name: String? = nil,
+        overwritingAssignedSpeakerName overwriteAssignedSpeakerName: Bool = true
+    ) throws -> DiarizerSpeaker? {
+        try enrollSpeakerInternal(
+            withAudio: samples,
+            sourceSampleRate: sourceSampleRate,
+            named: name,
+            overwritingAssignedSpeakerName: overwriteAssignedSpeakerName
+        )
     }
 
     /// Prime the diarizer with enrollment audio to warm up speaker state.
@@ -229,40 +241,116 @@ public final class SortformerDiarizer: Diarizer {
     /// - Parameters:
     ///   - samples: Audio samples of known speakers.
     ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
-    public func primeWithAudio<C: Collection>(
-        _ samples: C,
-        sourceSampleRate: Double? = nil
-    ) throws where C.Element == Float {
-        try primeWithAudioInternal(Array(samples), sourceSampleRate: sourceSampleRate)
+    ///   - name: The speaker's name.
+    ///   - overwriteAssignedSpeakerName: Whether enrollment may overwrite the name on an already-named slot
+    ///     if the diarizer assigns the audio to that speaker.
+    public func enrollSpeaker<C: Collection>(
+        withAudio samples: C,
+        sourceSampleRate: Double? = nil,
+        named name: String? = nil,
+        overwritingAssignedSpeakerName overwriteAssignedSpeakerName: Bool = true
+    ) throws -> DiarizerSpeaker? where C.Element == Float {
+        try enrollSpeakerInternal(
+            withAudio: Array(samples),
+            sourceSampleRate: sourceSampleRate,
+            named: name,
+            overwritingAssignedSpeakerName: overwriteAssignedSpeakerName
+        )
     }
 
-    private func primeWithAudioInternal(
-        _ samples: [Float],
-        sourceSampleRate: Double?
-    ) throws {
+    private func enrollSpeakerInternal(
+        withAudio samples: [Float],
+        sourceSampleRate: Double?,
+        named name: String?,
+        overwritingAssignedSpeakerName overwriteAssignedSpeakerName: Bool
+    ) throws -> DiarizerSpeaker? {
+        var description: String {
+            guard let name else { return "(no name)" }
+            return "named '\(name)'"
+        }
+        
+        guard !samples.isEmpty else {
+            logger.warning("Failed to enroll speaker \(description) because no speech detected")
+            return nil
+        }
         let normalized = try normalizeSamples(samples, sourceSampleRate: sourceSampleRate)
 
-        try lock.withLock {
+        return try lock.withLock {
             guard _models != nil else {
                 throw SortformerError.notInitialized
             }
+            
+            if timeline.hasSegments {
+                logger.warning("Trying to enroll a speaker while timeline has segments; timeline will be reset")
+            }
 
+            _timeline.reset(keepingSpeakers: true)
+            var occupiedIndices = Set(_timeline.speakers.keys)
+            
+            // Clear audio and feature buffers to avoid enrolling this speaker with stale audio.
+            startFeat = 0
+            lastAudioSample = 0
+            diarizerChunkIndex = 0
+            audioBuffer.removeAll(keepingCapacity: true)
+            featureBuffer.removeAll(keepingCapacity: true)
             audioBuffer.append(contentsOf: normalized)
+            
             preprocessAudioToFeaturesLocked()
 
-            while let _ = try processLocked(updateTimeline: false) {}
-
+            var didProcess: Bool = false
+            while let _ = try processLocked(updateTimeline: true) { didProcess = true }
+            
+            guard didProcess else {
+                let minDuration = Float(config.chunkLen + config.chunkRightContext) * config.frameDurationSeconds
+                logger.warning("Failed to enroll speaker \(description): not enough audio was provided. " +
+                               "Please provide at least \(String(format: "%.2f", minDuration)) seconds of speech.")
+                return nil
+            }
+            
+            let speaker = _timeline.speakers.values.max { $0.numSpeechFrames < $1.numSpeechFrames }
+            let enrolledSpeaker: DiarizerSpeaker?
+            if let speaker, speaker.hasSegments {
+                // Provide warnings if the diarizer failed to recognize this person as a new speaker
+                if let oldName = speaker.name {
+                    guard overwriteAssignedSpeakerName else {
+                        logger.warning(
+                            "Failed to enroll speaker \(description): diarizer matched existing speaker '\(oldName)' "
+                                + "at index \(speaker.index) and overwritingAssignedSpeakerName=false"
+                        )
+                        _timeline.reset(keepingSpeakersWhere: { occupiedIndices.contains($0.index) })
+                        _numFramesProcessed = 0
+                        diarizerChunkIndex = 0
+                        startFeat = 0
+                        lastAudioSample = 0
+                        audioBuffer.removeAll(keepingCapacity: true)
+                        featureBuffer.removeAll(keepingCapacity: true)
+                        return nil
+                    }
+                    logger.warning("Newly-enrolled speaker \(description) will overwrite the old one named \(oldName) at index \(speaker.index)")
+                }
+                speaker.name = name
+                occupiedIndices.insert(speaker.index)
+                enrolledSpeaker = speaker
+            } else {
+                logger.warning("Failed to enroll speaker \(description) because no speech detected")
+                enrolledSpeaker = nil
+            }
+        
+            _timeline.reset(keepingSpeakersWhere: { occupiedIndices.contains($0.index) })
             _numFramesProcessed = 0
-            _timeline.reset()
-            audioBuffer = []
-            featureBuffer = []
+            diarizerChunkIndex = 0
             startFeat = 0
+            lastAudioSample = 0
+            audioBuffer.removeAll(keepingCapacity: true)
+            featureBuffer.removeAll(keepingCapacity: true)
 
             logger.info(
-                "Primed with \(normalized.count) samples "
+                "Enrolled speaker \(description) with \(normalized.count) samples "
                     + "(\(String(format: "%.1f", Float(normalized.count) / Float(config.sampleRate)))s), "
                     + "spkcache=\(_state.spkcacheLength), fifo=\(_state.fifoLength)"
             )
+
+            return enrolledSpeaker
         }
     }
 
@@ -443,18 +531,22 @@ public final class SortformerDiarizer: Diarizer {
     ///
     /// - Parameters:
     ///   - samples: Complete audio samples (16kHz mono)
+    ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
+    ///   - keepSpeakers: Whether to keep pre-enrolled speakers. If `nil`, it will keep the speakers if no audio has been added.
     ///   - finalizeOnCompletion: Whether to finalize the timeline after completing the processing
     ///   - progressCallback: Optional callback for progress updates
     /// - Returns: Complete diarization timeline
     public func processComplete(
         _ samples: [Float],
         sourceSampleRate: Double? = nil,
+        keepingEnrolledSpeakers keepSpeakers: Bool? = nil,
         finalizeOnCompletion: Bool = true,
         progressCallback: ProgressCallback? = nil
     ) throws -> DiarizerTimeline {
         try processCompleteInternal(
             samples,
             sourceSampleRate: sourceSampleRate,
+            keepingEnrolledSpeakers: keepSpeakers,
             finalizeOnCompletion: finalizeOnCompletion,
             progressCallback: progressCallback
         )
@@ -465,12 +557,14 @@ public final class SortformerDiarizer: Diarizer {
     /// - Parameters:
     ///   - samples: Complete mono audio buffer.
     ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
+    ///   - keepSpeakers: Whether to keep pre-enrolled speakers. If `nil`, it will keep the speakers if no audio has been added.
     ///   - finalizeOnCompletion: Whether to finalize the timeline before returning it.
     ///   - progressCallback: Optional callback receiving `(processedSamples, totalSamples, chunksProcessed)`.
     /// - Returns: The diarization timeline for the provided audio.
     public func processComplete<C: Collection>(
         _ samples: C,
         sourceSampleRate: Double? = nil,
+        keepingEnrolledSpeakers keepSpeakers: Bool? = nil,
         finalizeOnCompletion: Bool = true,
         progressCallback: ProgressCallback? = nil
     ) throws -> DiarizerTimeline
@@ -478,6 +572,36 @@ public final class SortformerDiarizer: Diarizer {
         try processCompleteInternal(
             Array(samples),
             sourceSampleRate: sourceSampleRate,
+            keepingEnrolledSpeakers: keepSpeakers,
+            finalizeOnCompletion: finalizeOnCompletion,
+            progressCallback: progressCallback
+        )
+    }
+    
+    /// Process a complete audio file from a URL.
+    ///
+    /// Reads and resamples the file to ``targetSampleRate``, then delegates to
+    /// ``processComplete(_:finalizeOnCompletion:progressCallback:)``.
+    ///
+    /// - Parameters:
+    ///   - audioFileURL: Path to a WAV, CAF, or other audio file.
+    ///   - keepSpeakers: Whether to keep pre-enrolled speakers.
+    ///   - finalizeOnCompletion: Whether to finalize the timeline after processing
+    ///   - progressCallback: Optional callback (processedSamples, totalSamples, chunksProcessed).
+    /// - Returns: Finalized timeline with segments.
+    public func processComplete(
+        audioFileURL: URL,
+        keepingEnrolledSpeakers keepSpeakers: Bool? = nil,
+        finalizeOnCompletion: Bool = true,
+        progressCallback: ((Int, Int, Int) -> Void)? = nil
+    ) throws -> DiarizerTimeline {
+        let converter = AudioConverter(sampleRate: Double(config.sampleRate))
+        let audio = try converter.resampleAudioFile(audioFileURL)
+
+        return try processCompleteInternal(
+            audio,
+            sourceSampleRate: nil,
+            keepingEnrolledSpeakers: keepSpeakers,
             finalizeOnCompletion: finalizeOnCompletion,
             progressCallback: progressCallback
         )
@@ -486,6 +610,7 @@ public final class SortformerDiarizer: Diarizer {
     private func processCompleteInternal(
         _ samples: [Float],
         sourceSampleRate: Double?,
+        keepingEnrolledSpeakers keepSpeakers: Bool?,
         finalizeOnCompletion: Bool,
         progressCallback: ProgressCallback?
     ) throws -> DiarizerTimeline {
@@ -497,9 +622,11 @@ public final class SortformerDiarizer: Diarizer {
             }
 
             // Reset for fresh processing
-            _state = SortformerStreamingState(config: config)
-            lastAudioSample = 0
-            resetBuffersLocked()
+            let keepSpeakers = keepSpeakers ?? featureBuffer.isEmpty && audioBuffer.isEmpty && (diarizerChunkIndex == 0)
+            if !keepSpeakers {
+                _state = SortformerStreamingState(config: config)
+            }
+            resetBuffersLocked(keepingSpeakers: keepSpeakers)
 
             var featureProvider = SortformerFeatureLoader(config: self.config, audio: normalized)
 

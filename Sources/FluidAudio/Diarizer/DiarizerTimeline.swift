@@ -58,16 +58,36 @@ public protocol Diarizer: AnyObject {
     /// - Parameters:
     ///   - samples: Complete mono audio buffer to diarize.
     ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the target rate.
+    ///   - keepSpeakers: Whether to keep pre-enrolled speakers. If `nil`, it will keep the speakers if no audio has been added.
     ///   - finalizeOnCompletion: Whether to finalize the timeline before returning it.
     ///   - progressCallback: Optional callback receiving `(processedSamples, totalSamples, chunksProcessed)`.
     /// - Returns: The diarization timeline for the provided audio.
     func processComplete<C: Collection>(
         _ samples: C,
         sourceSampleRate: Double?,
+        keepingEnrolledSpeakers keepSpeakers: Bool?,
         finalizeOnCompletion: Bool,
         progressCallback: ((Int, Int, Int) -> Void)?
     ) throws -> DiarizerTimeline
     where C.Element == Float
+    
+    /// Process a complete audio file from a URL.
+    ///
+    /// Reads and resamples the file to ``targetSampleRate``, then delegates to
+    /// ``processComplete(_:finalizeOnCompletion:progressCallback:)``.
+    ///
+    /// - Parameters:
+    ///   - audioFileURL: Path to a WAV, CAF, or other audio file.
+    ///   - keepSpeakers: Whether to keep pre-enrolled speakers.
+    ///   - finalizeOnCompletion: Whether to finalize the timeline after processing
+    ///   - progressCallback: Optional callback (processedSamples, totalSamples, chunksProcessed).
+    /// - Returns: Finalized timeline with segments.
+    func processComplete(
+        audioFileURL: URL,
+        keepingEnrolledSpeakers keepSpeakers: Bool?,
+        finalizeOnCompletion: Bool,
+        progressCallback: ((Int, Int, Int) -> Void)?
+    ) throws -> DiarizerTimeline
 
     // MARK: Lifecycle
 
@@ -77,16 +97,21 @@ public protocol Diarizer: AnyObject {
     /// Clean up all resources
     func cleanup()
 
-    /// Prime the diarizer with enrollment audio before processing live audio.
-    ///
-    /// Implementations may use this to warm internal state while resetting exposed
-    /// timeline/frame counters so subsequent real audio starts from frame 0.
+    /// Pre-enroll a speaker before running the diarizer.
     ///
     /// - Parameters:
     ///   - samples: Enrollment audio samples.
     ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the target rate.
-    func primeWithAudio<C: Collection>(_ samples: C, sourceSampleRate: Double?) throws
-    where C.Element == Float
+    ///   - name: The speaker's name.
+    ///   - overwriteAssignedSpeakerName: Whether enrollment may overwrite the name of an already-named slot
+    ///     if the diarizer assigns the audio to that speaker.
+    /// - Returns: The enrolled speaker.
+    func enrollSpeaker<C: Collection>(
+        withAudio samples: C,
+        sourceSampleRate: Double?,
+        named name: String?,
+        overwritingAssignedSpeakerName overwriteAssignedSpeakerName: Bool
+    ) throws -> DiarizerSpeaker? where C.Element == Float
 }
 
 // MARK: - Post-Processing Configuration
@@ -264,6 +289,16 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         get { queue.sync { _tentativeSegments } }
         set { queue.sync(flags: .barrier) { _tentativeSegments = newValue } }
     }
+    
+    /// Whether this speaker has any segments
+    public var hasSegments: Bool {
+        queue.sync { !(_finalizedSegments.isEmpty && _tentativeSegments.isEmpty) }
+    }
+    
+    /// Number of segments (finalized + tentative)
+    public var segmentCount: Int {
+        queue.sync { _finalizedSegments.count + _tentativeSegments.count }
+    }
 
     /// Number of confirmed segments
     public var finalizedSegmentCount: Int {
@@ -273,6 +308,50 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
     /// Number of tentative segments
     public var tentativeSegmentCount: Int {
         queue.sync { _tentativeSegments.count }
+    }
+    
+    /// Total duration of segments in seconds (finalized + tentative)
+    public var speechDuration: Float {
+        queue.sync {
+            return (_finalizedSegments.reduce(0.0) { $0 + $1.duration } +
+                    _tentativeSegments.reduce(0.0) { $0 + $1.duration })
+        }
+    }
+    
+    /// Duration of all finalized segments in seconds
+    public var finalizedSpeechDuration: Float {
+        queue.sync {
+            _finalizedSegments.reduce(0.0) { $0 + $1.duration }
+        }
+    }
+    
+    /// Duration of all tentative segments in seconds
+    public var tentativeSpeechDuration: Float {
+        queue.sync {
+            _tentativeSegments.reduce(0.0) { $0 + $1.duration }
+        }
+    }
+    
+    /// Total number of frames spanned by all segments (finalized + tentative)
+    public var numSpeechFrames: Int {
+        queue.sync {
+            return (_finalizedSegments.reduce(0) { $0 + $1.length } +
+                    _tentativeSegments.reduce(0) { $0 + $1.length })
+        }
+    }
+    
+    /// Number of frames in all finalized segments
+    public var numFinalizedSpeechFrames: Int {
+        queue.sync {
+            _finalizedSegments.reduce(0) { $0 + $1.length }
+        }
+    }
+
+    /// Number of frames in all tentative segments
+    public var numTentativeSpeechFrames: Int {
+        queue.sync {
+            _tentativeSegments.reduce(0) { $0 + $1.length }
+        }
     }
 
     private var _name: String?
@@ -518,6 +597,14 @@ public struct DiarizerChunkResult: Sendable {
 /// Generalizes `SortformerTimeline` for any frame-based diarizer. Works with
 /// both Sortformer (fixed 4 speakers) and LS-EEND (variable speaker count).
 public final class DiarizerTimeline {
+    public enum KeptOnReset {
+        case nothing
+        case namedSpeakers
+        case allSpeakers
+        case speakersWithoutSegments
+        case speakersWithSegments
+    }
+    
     private struct StreamingState {
         var startFrame: Int
         var isSpeaking: Bool
@@ -572,6 +659,10 @@ public final class DiarizerTimeline {
     /// Speakers in the timeline
     public var speakers: [Int: DiarizerSpeaker] {
         queue.sync { _speakers }
+    }
+    
+    public var hasSegments: Bool {
+        !speakers.values.contains(where: \.hasSegments)
     }
 
     /// Duration of all predictions in seconds
@@ -651,9 +742,10 @@ public final class DiarizerTimeline {
     }
 
     // MARK: - Streaming API
-
+    
+    /// Add new predictions from the diarizer
     @discardableResult
-    public func addChunk(
+    public func addPredictions(
         finalizedPredictions: [Float],
         tentativePredictions: [Float]
     ) throws -> DiarizerTimelineUpdate {
@@ -744,27 +836,65 @@ public final class DiarizerTimeline {
     }
 
     /// Reset to initial state
-    public func reset() {
-        queue.sync(flags: .barrier) { resetLocked() }
+    /// - Parameter condition: Condition for when to keep a speaker. All speakers still have their segments reset.
+    public func reset(keepingSpeakersWhere condition: (DiarizerSpeaker) -> Bool) {
+        queue.sync(flags: .barrier) { resetLocked(keepingSpeakersWhere: condition) }
+    }
+    
+    /// Reset to initial state
+    /// - Parameter keepingSpeakers: Whether to keep existing speakers enrolled. Their segments are still reset.
+    public func reset(keepingSpeakers: Bool = false) {
+        queue.sync(flags: .barrier) {
+            resetLocked(keepingSpeakers: keepingSpeakers)
+        }
     }
 
-    private func resetLocked() {
+    private func resetLocked(keepingSpeakersWhere condition: (DiarizerSpeaker) -> Bool) {
         _finalizedPredictions.removeAll()
         _tentativePredictions.removeAll()
         _numFinalizedFrames = 0
-        _speakers = [:]
         states = Array(repeating: .init(), count: config.numSpeakers)
+        
+        _speakers = _speakers.filter {
+            condition($0.value)
+        }
+        
+        for speaker in _speakers.values {
+            speaker.reset()
+        }
+    }
+    
+    private func resetLocked(keepingSpeakers: Bool) {
+        _finalizedPredictions.removeAll()
+        _tentativePredictions.removeAll()
+        _numFinalizedFrames = 0
+        states = Array(repeating: .init(), count: config.numSpeakers)
+        
+        if keepingSpeakers {
+            for speaker in _speakers.values {
+                speaker.reset()
+            }
+        } else {
+            _speakers = [:]
+        }
     }
 
+    /// Rebuild the timeline from initial predictions. This is equivalent to reinitializing the timeline.
+    /// - Parameters:
+    ///   - finalizedPredictions: Finalized prediction matrix `[numFrames, numSpeakers]` flattened
+    ///   - tentativePredictions: Tentative prediction matrix `[numFrames, numSpeakers]` flattened
+    ///   - keepingSpeakers: Whether to keep the old speaker names and slots.
+    ///   - isComplete: Whether to finalize the timeline afterward.
     public func rebuild(
         finalizedPredictions: [Float],
         tentativePredictions: [Float],
+        keepingSpeakers: Bool = false,
         isComplete: Bool = true
     ) throws {
         try verifyPredictionCounts(finalized: finalizedPredictions, tentative: tentativePredictions)
 
         queue.sync(flags: .barrier) {
-            resetLocked()
+            resetLocked(keepingSpeakers: keepingSpeakers)
             _finalizedPredictions = finalizedPredictions
             _tentativePredictions = tentativePredictions
 
@@ -791,6 +921,32 @@ public final class DiarizerTimeline {
             } else {
                 trimPredictions()
             }
+        }
+    }
+    
+    /// Add a speaker to the timeline at a given slot, or update their name if one already exists
+    /// - Parameters:
+    ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
+    ///   - name: The speaker's name
+    /// - Returns: The upserted speaker if created successfully
+    @discardableResult
+    public func upsertSpeaker(atIndex index: Int? = nil, name: String? = nil) -> DiarizerSpeaker? {
+        queue.sync(flags: .barrier) {
+            let index = index ?? (0..<config.numSpeakers).first { _speakers[$0] == nil }
+            
+            // Ensure index is within bounds
+            guard let index, index >= 0, index < config.numSpeakers else { return nil }
+            
+            if let speaker = _speakers[index] {
+                // Update old speaker
+                speaker.name = name
+                return speaker
+            }
+            
+            // New speaker
+            let speaker = DiarizerSpeaker(index: index, name: name)
+            _speakers[index] = speaker
+            return speaker
         }
     }
 
@@ -828,7 +984,7 @@ public final class DiarizerTimeline {
         isFinalized: Bool,
         addTrailingTentative: Bool
     ) {
-        guard numFrames > 0 else { return }
+        guard numFrames > 0 || addTrailingTentative else { return }
 
         let frameOffset = _numFinalizedFrames
         let numSpeakers = config.numSpeakers
