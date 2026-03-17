@@ -8,21 +8,6 @@ import OSLog
 /// Sortformer provides end-to-end streaming diarization with 4 fixed speaker slots,
 /// achieving ~11% DER on DI-HARD III in real-time.
 ///
-/// Usage:
-/// ```swift
-/// let diarizer = SortformerDiarizerPipeline()
-/// try await diarizer.initialize(preprocessorPath: url1, mainModelPath: url2)
-///
-/// // Streaming mode
-/// for audioChunk in audioStream {
-///     if let result = try diarizer.processSamples(audioChunk) {
-///         // Handle speaker probabilities
-///     }
-/// }
-///
-/// // Or complete file
-/// let result = try diarizer.processComplete(audioSamples)
-/// ```
 /// - Important: This class is **not** thread-safe.
 public final class SortformerDiarizer: Diarizer {
     /// Lock for thread-safe access to mutable state
@@ -205,15 +190,6 @@ public final class SortformerDiarizer: Diarizer {
     /// Processes the audio through the full pipeline to populate the speaker cache
     /// and FIFO buffers, then resets the timeline so subsequent processing starts
     /// from frame 0. Call this after `initialize()` and before streaming real audio.
-    ///
-    /// ```swift
-    /// diarizer.initialize(models: models)
-    /// try diarizer.primeWithAudio(aliceSamples)   // 5s of Alice speaking
-    /// try diarizer.primeWithAudio(bobSamples)     // 5s of Bob speaking
-    /// // Now stream real audio — speakers are already in cache
-    /// diarizer.addAudio(liveAudio)
-    /// let result = try diarizer.process()
-    /// ```
     ///
     /// - Parameters:
     ///   - samples: Audio samples (16kHz mono) of known speakers
