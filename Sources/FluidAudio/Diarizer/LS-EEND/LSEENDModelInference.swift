@@ -116,7 +116,7 @@ private final class LSEENDInferenceSharedResources {
     }
 }
 
-/// CoreML inference engine for LS-EEND speaker diarization.
+/// Low level CoreML inference engine for LS-EEND speaker diarization.
 ///
 /// Each engine instance owns its own compiled model, mel spectrogram, and feature extractor.
 /// There are no shared singletons — multiple engines can run concurrently without interference.
