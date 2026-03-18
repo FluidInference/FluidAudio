@@ -110,8 +110,8 @@ final class MultilingualG2PTests: XCTestCase {
     }
 
     func testRepoMultilingualG2P() {
-        XCTAssertEqual(Repo.multilingualG2p.folderName, "charsiu-g2p-byt5")
+        XCTAssertEqual(Repo.kokoro.folderName, "charsiu-g2p-byt5")
         XCTAssertEqual(
-            Repo.multilingualG2p.remotePath, "FluidInference/charsiu-g2p-byt5-coreml")
+            Repo.kokoro.remotePath, "FluidInference/charsiu-g2p-byt5-coreml")
     }
 }
