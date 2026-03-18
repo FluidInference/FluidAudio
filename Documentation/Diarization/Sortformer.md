@@ -191,11 +191,11 @@ Defines streaming parameters that must match the CoreML model's static shapes:
 // Default (~1.04s latency, lowest latency)
 SortformerConfig.default
 
-// NVIDIA High Latency (30.4s latency, best quality)
-SortformerConfig.nvidiaHighLatency
+// NVIDIA Low Latency (1.04s latency, best quality on AMI SDM)
+SortformerConfig.nvidiaLowLatencyV2_1
 
-// NVIDIA Low Latency (1.04s latency)
-SortformerConfig.nvidiaLowLatency
+// NVIDIA High Latency (30.4s latency, most context)
+SortformerConfig.nvidiaHighLatencyV2_1
 ```
 
 ### Pipeline.swift
@@ -376,8 +376,8 @@ public struct SortformerSegment {
 | Config | Chunk Size | Latency | Quality |
 |--------|------------|---------|---------|
 | `default` / `fastestV2_1` | 6 frames | ~1.04s | Good |
-| `nvidiaLowLatencyV2_1` | 6 frames | ~1.04s | Better (20.6% DER on AMI SDM) |
-| `nvidiaHighLatencyV2_1` | 340 frames | ~30.4s | Best (31.7% DER on AMI SDM) |
+| `nvidiaLowLatencyV2_1` | 6 frames | ~1.04s | Best (20.6% DER on AMI SDM) |
+| `nvidiaHighLatencyV2_1` | 340 frames | ~30.4s | Good (31.7% DER on AMI SDM) |
 
 > **Note:** v2.1 variants may degrade when many speakers are talking simultaneously. v2 variants (`fastestV2`, `nvidiaLowLatencyV2`, `nvidiaHighLatencyV2`) are available as alternatives.
 

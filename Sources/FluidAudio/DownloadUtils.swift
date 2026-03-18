@@ -509,7 +509,14 @@ public class DownloadUtils {
 
         func listFiles(at path: String) async throws {
             let dirURL = try ModelRegistry.apiModels(repo.remotePath, "tree/main/\(path)")
-            let (dirData, _) = try await fetchWithAuth(from: dirURL)
+            let (dirData, response) = try await fetchWithAuth(from: dirURL)
+            if let httpResponse = response as? HTTPURLResponse,
+                httpResponse.statusCode == 429 || httpResponse.statusCode == 503
+            {
+                throw HuggingFaceDownloadError.rateLimited(
+                    statusCode: httpResponse.statusCode,
+                    message: "Rate limited while listing files in \(path)")
+            }
             guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
                 return
             }

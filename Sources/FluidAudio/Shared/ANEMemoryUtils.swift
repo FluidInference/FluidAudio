@@ -106,8 +106,6 @@ public enum ANEMemoryUtils {
             return 8
         case .int32:
             return MemoryLayout<Int32>.stride
-        case .int8:
-            return 1
         @unknown default:
             return MemoryLayout<Float>.stride
         }
