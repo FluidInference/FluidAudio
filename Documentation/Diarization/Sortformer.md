@@ -79,8 +79,8 @@ FIFO Queue Role:
 | Config | `fifoLen` | Effect |
 |--------|-----------|--------|
 | Default | 40 | Smaller memory, faster compression cycles |
-| NVIDIA Low | 188 | Larger context before compression |
-| NVIDIA High | 40 | Same as default |
+| Balanced | 188 | Larger context before compression |
+| High Context | 40 | Same as default |
 
 When `fifoLen + newChunkFrames > fifoLen` capacity, frames are popped from FIFO and either:
 1. Added to speaker cache (if speaker was active)
@@ -105,8 +105,8 @@ Chunk with Context:
 | Config | `rightContext` | Look-ahead | Latency Impact |
 |--------|----------------|------------|----------------|
 | Default | 7 | 7 × 80ms = 560ms | Low latency |
-| NVIDIA Low | 7 | 7 × 80ms = 560ms | Low latency |
-| NVIDIA High | 40 | 40 × 80ms = 3.2s | High latency, better quality |
+| Balanced | 7 | 7 × 80ms = 560ms | Low latency |
+| High Context | 40 | 40 × 80ms = 3.2s | High latency, better quality |
 
 **Why Right Context Matters:**
 
@@ -142,7 +142,7 @@ Default config:
   = 13 × 8 × 0.01
   = 1.04 seconds
 
-NVIDIA High Latency config:
+High Context config:
   = (340 + 40) × 8 × 160 / 16000
   = 380 × 8 × 0.01
   = 30.4 seconds
@@ -191,11 +191,11 @@ Defines streaming parameters that must match the CoreML model's static shapes:
 // Default (~1.04s latency, lowest latency)
 SortformerConfig.default
 
-// NVIDIA Low Latency (1.04s latency, best quality on AMI SDM)
-SortformerConfig.nvidiaLowLatencyV2_1
+// Balanced (1.04s latency, best quality on AMI SDM)
+SortformerConfig.balancedV2_1
 
-// NVIDIA High Latency (30.4s latency, most context)
-SortformerConfig.nvidiaHighLatencyV2_1
+// High Context (30.4s latency, most context)
+SortformerConfig.highContextV2_1
 ```
 
 ### Pipeline.swift
@@ -375,11 +375,11 @@ public struct SortformerSegment {
 
 | Config | Chunk Size | Latency | Quality |
 |--------|------------|---------|---------|
-| `default` / `fastestV2_1` | 6 frames | ~1.04s | Good |
-| `nvidiaLowLatencyV2_1` | 6 frames | ~1.04s | Best (20.6% DER on AMI SDM) |
-| `nvidiaHighLatencyV2_1` | 340 frames | ~30.4s | Good (31.7% DER on AMI SDM) |
+| `default` / `fastV2_1` | 6 frames | ~1.04s | Good |
+| `balancedV2_1` | 6 frames | ~1.04s | Best (20.6% DER on AMI SDM) |
+| `highContextV2_1` | 340 frames | ~30.4s | Good (31.7% DER on AMI SDM) |
 
-> **Note:** v2.1 variants may degrade when many speakers are talking simultaneously. v2 variants (`fastestV2`, `nvidiaLowLatencyV2`, `nvidiaHighLatencyV2`) are available as alternatives.
+> **Note:** v2.1 variants may degrade when many speakers are talking simultaneously. v2 variants (`fastV2`, `balancedV2`, `highContextV2`) are available as alternatives.
 
 Latency is determined by:
 - `chunkLen * subsamplingFactor * melStride / sampleRate`
@@ -416,8 +416,8 @@ Three CoreML models are available on HuggingFace:
 | Variant | File | Config |
 |---------|------|--------|
 | Default | `Sortformer.mlmodelc` | `SortformerConfig.default` |
-| NVIDIA Low | `SortformerNvidiaLow.mlmodelc` | `SortformerConfig.nvidiaLowLatencyV2_1` |
-| NVIDIA High | `SortformerNvidiaHigh.mlmodelc` | `SortformerConfig.nvidiaHighLatencyV2_1` |
+| Balanced | `SortformerNvidiaLow.mlmodelc` | `SortformerConfig.balancedV2_1` |
+| High Context | `SortformerNvidiaHigh.mlmodelc` | `SortformerConfig.highContextV2_1` |
 
 **Important:** Each model has baked-in static shapes. You must use the matching configuration.
 
@@ -449,8 +449,8 @@ audioEngine.installTap { buffer in
 ### Batch Processing
 
 ```swift
-let diarizer = SortformerDiarizer(config: .nvidiaHighLatencyV2_1)
-let models = try await SortformerModels.loadFromHuggingFace(config: .nvidiaHighLatencyV2_1)
+let diarizer = SortformerDiarizer(config: .highContextV2_1)
+let models = try await SortformerModels.loadFromHuggingFace(config: .highContextV2_1)
 diarizer.initialize(models: models)
 
 let timeline = try diarizer.processComplete(audioSamples, sourceSampleRate: 16_000)

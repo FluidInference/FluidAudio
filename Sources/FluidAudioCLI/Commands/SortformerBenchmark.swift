@@ -238,9 +238,9 @@ enum SortformerBenchmark {
         let modelLoadStart = Date()
         var config: SortformerConfig
         if useNvidiaHighLatency {
-            config = SortformerConfig.nvidiaHighLatencyV2_1
+            config = SortformerConfig.highContextV2_1
         } else if useNvidiaLowLatency {
-            config = SortformerConfig.nvidiaLowLatencyV2_1
+            config = SortformerConfig.balancedV2_1
         } else {
             config = SortformerConfig.default
         }

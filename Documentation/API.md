@@ -104,7 +104,7 @@ let diarizer = SortformerDiarizer(config: .default, timelineConfig: .sortformerD
 try await diarizer.initialize(mainModelPath: modelURL)
 ```
 
-**Config presets:** `.default` / `.fastestV2_1` (1.04 s latency), `.nvidiaHighLatencyV2_1` (30.4 s latency, 31.7% DER on AMI SDM). v2.0 variants also available.
+**Config presets:** `.default` / `.fastV2_1` (1.04 s latency), `.balancedV2_1` (1.04 s, 20.6% DER on AMI SDM), `.highContextV2_1` (30.4 s latency). v2 variants also available.
 
 ---
 

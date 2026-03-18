@@ -121,10 +121,10 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 31
     )
 
-    /// Fastest config with Sortformer v2 weights. May handle high-speaker-count scenarios
-    /// better than v2.1 (v2.1 can degrade when many speakers overlap).
-    public static let `fastestV2` = SortformerConfig(
-        modelVariant: .fastestV2,
+    /// Fast config with Sortformer v2 weights (~1.04s latency, smallest context).
+    /// May handle high-speaker-count scenarios better than v2.1 (v2.1 can degrade when many speakers overlap).
+    public static let `fastV2` = SortformerConfig(
+        modelVariant: .fastV2,
         chunkLen: 6,
         chunkLeftContext: 1,
         chunkRightContext: 7,
@@ -133,10 +133,10 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 31
     )
 
-    /// Fastest config with Sortformer v2.1 weights.
+    /// Fast config with Sortformer v2.1 weights (~1.04s latency, smallest context).
     /// - Note: v2.1 may degrade when many speakers are talking simultaneously.
-    public static let `fastestV2_1` = SortformerConfig(
-        modelVariant: .fastestV2_1,
+    public static let `fastV2_1` = SortformerConfig(
+        modelVariant: .fastV2_1,
         chunkLen: 6,
         chunkLeftContext: 1,
         chunkRightContext: 7,
@@ -145,32 +145,10 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 31
     )
 
-    /// NVIDIA's 30.4s latency configuration with Sortformer v2 weights
-    public static let nvidiaHighLatencyV2 = SortformerConfig(
-        modelVariant: .nvidiaHighLatencyV2,
-        chunkLen: 340,
-        chunkLeftContext: 1,
-        chunkRightContext: 40,
-        fifoLen: 40,
-        spkcacheLen: 188,
-        spkcacheUpdatePeriod: 300
-    )
-
-    /// NVIDIA's 30.4s latency configuration with Sortformer v2.1 weights.
-    /// - Note: v2.1 may degrade when many speakers are talking simultaneously.
-    public static let nvidiaHighLatencyV2_1 = SortformerConfig(
-        modelVariant: .nvidiaHighLatencyV2_1,
-        chunkLen: 340,
-        chunkLeftContext: 1,
-        chunkRightContext: 40,
-        fifoLen: 40,
-        spkcacheLen: 188,
-        spkcacheUpdatePeriod: 300
-    )
-
-    /// NVIDIA's 1.04s latency configuration with Sortformer v2 weights
-    public static let nvidiaLowLatencyV2 = SortformerConfig(
-        modelVariant: .nvidiaLowLatencyV2,
+    /// Balanced config with Sortformer v2 weights (~1.04s latency, larger FIFO for better quality).
+    /// 20.57% DER on AMI SDM. May handle high-speaker-count scenarios better than v2.1.
+    public static let balancedV2 = SortformerConfig(
+        modelVariant: .balancedV2,
         chunkLen: 6,
         chunkLeftContext: 1,
         chunkRightContext: 7,
@@ -179,21 +157,46 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 144
     )
 
-    /// NVIDIA's 1.04s latency configuration with Sortformer v2.1 weights (20.57% DER on AMI SDM).
+    /// Balanced config with Sortformer v2.1 weights (~1.04s latency, larger FIFO for better quality).
+    /// 20.57% DER on AMI SDM.
     /// - Note: v2.1 may degrade when many speakers are talking simultaneously.
-    public static let nvidiaLowLatencyV2_1 = SortformerConfig(
-        modelVariant: .nvidiaLowLatencyV2_1,
+    public static let balancedV2_1 = SortformerConfig(
+        modelVariant: .balancedV2_1,
         chunkLen: 6,
         chunkLeftContext: 1,
         chunkRightContext: 7,
         fifoLen: 188,
         spkcacheLen: 188,
         spkcacheUpdatePeriod: 144
+    )
+
+    /// High-context config with Sortformer v2 weights (~30.4s latency, most context window).
+    /// May handle high-speaker-count scenarios better than v2.1.
+    public static let highContextV2 = SortformerConfig(
+        modelVariant: .highContextV2,
+        chunkLen: 340,
+        chunkLeftContext: 1,
+        chunkRightContext: 40,
+        fifoLen: 40,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 300
+    )
+
+    /// High-context config with Sortformer v2.1 weights (~30.4s latency, most context window).
+    /// - Note: v2.1 may degrade when many speakers are talking simultaneously.
+    public static let highContextV2_1 = SortformerConfig(
+        modelVariant: .highContextV2_1,
+        chunkLen: 340,
+        chunkLeftContext: 1,
+        chunkRightContext: 40,
+        fifoLen: 40,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 300
     )
 
     /// - Warning: If you don't use one of the default configurations, you must use a local model converted with that configuration.
     public init(
-        modelVariant: ModelVariant? = .fastestV2_1,
+        modelVariant: ModelVariant? = .fastV2_1,
         chunkLen: Int = 6,
         chunkLeftContext: Int = 1,
         chunkRightContext: Int = 7,

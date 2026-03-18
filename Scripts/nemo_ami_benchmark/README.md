@@ -82,7 +82,7 @@ HF_TOKEN="your_token" python nemo_ami_benchmark.py --output results.json
 
 ### High-Latency Streaming Config
 
-These settings match the Swift `SortformerConfig.nvidiaHighLatencyV2_1`:
+These settings match the Swift `SortformerConfig.highContextV2_1`:
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|

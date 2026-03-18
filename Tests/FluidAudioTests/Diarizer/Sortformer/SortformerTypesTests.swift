@@ -60,7 +60,7 @@ final class SortformerTypesTests: XCTestCase {
 
     func testConfigIncompatibleWithDifferentShape() {
         let a = SortformerConfig.default
-        let b = SortformerConfig.nvidiaHighLatencyV2_1
+        let b = SortformerConfig.highContextV2_1
         XCTAssertFalse(a.isCompatible(with: b))
     }
 
