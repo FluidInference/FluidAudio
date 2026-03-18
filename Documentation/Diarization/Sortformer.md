@@ -38,7 +38,7 @@ Audio (16kHz) → Mel Spectrogram → CoreML Model → Speaker Probabilities
 
 The pipeline consists of:
 
-1. **Mel Spectrogram** (`NeMoMelSpectrogram`): Converts raw audio to 128-bin mel features
+1. **Mel Spectrogram** (`AudioMelSpectrogram`): Converts raw audio to 128-bin mel features
 2. **CoreML Model** (`DiarizerInference`): Combined encoder + attention + head
 3. **Streaming State** (`SortformerStreamingState`): Maintains speaker cache and FIFO queue
 4. **Post-processing** (`SortformerTimeline`): Converts probabilities to speaker segments
@@ -375,9 +375,11 @@ public struct SortformerSegment {
 
 | Config | Chunk Size | Latency | Quality |
 |--------|------------|---------|---------|
-| `default` | 6 frames | ~1.04s | Good |
-| `nvidiaLowLatency` | 6 frames | ~1.04s | Better |
-| `nvidiaHighLatency` | 340 frames | ~30.4s | Best |
+| `default` / `fastestV2_1` | 6 frames | ~1.04s | Good |
+| `nvidiaLowLatencyV2_1` | 6 frames | ~1.04s | Better (20.6% DER on AMI SDM) |
+| `nvidiaHighLatencyV2_1` | 340 frames | ~30.4s | Best (31.7% DER on AMI SDM) |
+
+> **Note:** v2.1 variants may degrade when many speakers are talking simultaneously. v2 variants (`fastestV2`, `nvidiaLowLatencyV2`, `nvidiaHighLatencyV2`) are available as alternatives.
 
 Latency is determined by:
 - `chunkLen * subsamplingFactor * melStride / sampleRate`
@@ -396,10 +398,10 @@ This preserves the most informative historical context while bounding memory usa
 
 ## Post-Processing
 
-`SortformerPostProcessingConfig` controls segment extraction:
+`DiarizerTimelineConfig` controls segment extraction:
 
 ```swift
-let config = SortformerPostProcessingConfig(
+let config = DiarizerTimelineConfig(
     onsetThreshold: 0.5,    // Probability to start speech
     offsetThreshold: 0.5,   // Probability to end speech
     minDurationOn: 0.25,    // Min speech segment (seconds)
@@ -414,8 +416,8 @@ Three CoreML models are available on HuggingFace:
 | Variant | File | Config |
 |---------|------|--------|
 | Default | `Sortformer.mlmodelc` | `SortformerConfig.default` |
-| NVIDIA Low | `SortformerNvidiaLow.mlmodelc` | `SortformerConfig.nvidiaLowLatency` |
-| NVIDIA High | `SortformerNvidiaHigh.mlmodelc` | `SortformerConfig.nvidiaHighLatency` |
+| NVIDIA Low | `SortformerNvidiaLow.mlmodelc` | `SortformerConfig.nvidiaLowLatencyV2_1` |
+| NVIDIA High | `SortformerNvidiaHigh.mlmodelc` | `SortformerConfig.nvidiaHighLatencyV2_1` |
 
 **Important:** Each model has baked-in static shapes. You must use the matching configuration.
 
@@ -447,8 +449,8 @@ audioEngine.installTap { buffer in
 ### Batch Processing
 
 ```swift
-let diarizer = SortformerDiarizer(config: .nvidiaHighLatency)
-let models = try await SortformerModels.loadFromHuggingFace(config: .nvidiaHighLatency)
+let diarizer = SortformerDiarizer(config: .nvidiaHighLatencyV2_1)
+let models = try await SortformerModels.loadFromHuggingFace(config: .nvidiaHighLatencyV2_1)
 diarizer.initialize(models: models)
 
 let timeline = try diarizer.processComplete(audioSamples, sourceSampleRate: 16_000)
@@ -457,9 +459,9 @@ let timeline = try diarizer.processComplete(audioSamples, sourceSampleRate: 16_0
 let fileTimeline = try diarizer.processComplete(audioFileURL: audioURL)
 
 // Get segments per speaker
-for (speakerIndex, segments) in timeline.segments.enumerated() {
-    for segment in segments {
-        print("Speaker \(speakerIndex): \(segment.startTime)s - \(segment.endTime)s")
+for (index, speaker) in timeline.speakers {
+    for segment in speaker.finalizedSegments {
+        print("Speaker \(index): \(segment.startTime)s - \(segment.endTime)s")
     }
 }
 ```

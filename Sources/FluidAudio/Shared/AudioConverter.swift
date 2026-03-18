@@ -193,23 +193,25 @@ final public class AudioConverter {
             throw AudioConverterError.failedToCreateSourceFormat
         }
 
-        // Use AVAudioConverter for channel mixing and format conversion
+        // Use AVAudioConverter for channel mixing (same sample rate, no resampling needed)
         guard let converter = AVAudioConverter(from: format, to: monoFormat) else {
             throw AudioConverterError.failedToCreateConverter
         }
-        configure(converter: converter)
 
         guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: buffer.frameCapacity) else {
             throw AudioConverterError.failedToCreateBuffer
         }
 
-        nonisolated(unsafe) var provided = false
-        nonisolated(unsafe) let capturedBuffer = buffer
+        let provided = OSAllocatedUnfairLock(initialState: false)
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if !provided {
-                provided = true
+            let wasProvided = provided.withLock { state -> Bool in
+                if state { return true }
+                state = true
+                return false
+            }
+            if !wasProvided {
                 status.pointee = .haveData
-                return capturedBuffer
+                return buffer
             } else {
                 status.pointee = .endOfStream
                 return nil
@@ -309,8 +311,12 @@ final public class AudioConverter {
         // but Swift 6 rejects mutation of captured vars in this callback.
         let provided = OSAllocatedUnfairLock(initialState: false)
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if !provided.withLock({ $0 }) {
-                provided.withLock { $0 = true }
+            let wasProvided = provided.withLock { state -> Bool in
+                if state { return true }
+                state = true
+                return false
+            }
+            if !wasProvided {
                 status.pointee = .haveData
                 return buffer
             } else {

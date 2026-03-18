@@ -648,16 +648,6 @@ public final class DiarizerTimeline {
         queue.sync { _tentativePredictions }
     }
 
-    /// Total number of frames (finalized + tentative)
-    @available(
-        *, deprecated,
-        message: "`numFrames` now includes tentative frames. Use 'numFinalizedFrames' for only finalized frames.",
-        renamed: "numFinalizedFrames"
-    )
-    public var numFrames: Int {
-        queue.sync { _numFinalizedFrames + _tentativePredictions.count / config.numSpeakers }
-    }
-
     /// Total number of finalized frames
     public var numFinalizedFrames: Int {
         queue.sync { _numFinalizedFrames }
@@ -677,29 +667,9 @@ public final class DiarizerTimeline {
         speakers.values.contains(where: \.hasSegments)
     }
 
-    /// Duration of all predictions in seconds
-    @available(
-        *, deprecated,
-        message: "`duration` now includes tentative frames. Use 'finalizedDuration' for only finalized frames.",
-        renamed: "finalizedDuration"
-    )
-    public var duration: Float {
-        Float(numFrames) * config.frameDurationSeconds
-    }
-
     /// Duration of finalized predictions in seconds
     public var finalizedDuration: Float {
         Float(numFinalizedFrames) * config.frameDurationSeconds
-    }
-
-    /// Duration of tentative predictions in seconds
-    @available(
-        *, deprecated,
-        message: "tentativeDuration now excludes finalized frames. Use 'duration' for the full timeline duration.",
-        renamed: "duration"
-    )
-    public var tentativeDuration: Float {
-        Float(numTentativeFrames) * config.frameDurationSeconds
     }
 
     private var _finalizedPredictions: [Float] = []
@@ -1104,42 +1074,6 @@ public final class DiarizerTimeline {
             throw DiarizerTimelineError.misalignedTentativePredictions(tentative.count, config.numSpeakers)
         }
     }
-}
-
-extension DiarizerTimeline {
-    @available(*, deprecated, renamed: "finalizedPredictions")
-    public var framePredictions: [Float] { finalizedPredictions }
-
-    @available(
-        *, deprecated,
-        message: "Use Timeline.speakers[index].confirmedSegments to access a speaker's confirmed segments."
-    )
-    public var segments: [[DiarizerSegment]] {
-        queue.sync {
-            var result: [[DiarizerSegment]] = Array(repeating: [], count: config.numSpeakers)
-            for (index, speaker) in _speakers {
-                result[index] = speaker.finalizedSegments
-            }
-            return result
-        }
-    }
-
-    @available(
-        *, deprecated,
-        message: "Use Timeline.speakers[index].tentativeSegments to access a speaker's tentative segments."
-    )
-    public var tentativeSegments: [[DiarizerSegment]] {
-        queue.sync {
-            var result: [[DiarizerSegment]] = Array(repeating: [], count: config.numSpeakers)
-            for (index, speaker) in _speakers {
-                result[index] = speaker.tentativeSegments
-            }
-            return result
-        }
-    }
-
-    @available(*, deprecated, renamed: "numTentativeFrames")
-    public var numTentative: Int { numTentativeFrames }
 }
 
 // MARK: - Timeline Update

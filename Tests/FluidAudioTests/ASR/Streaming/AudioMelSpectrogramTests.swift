@@ -3,13 +3,13 @@ import XCTest
 
 @testable import FluidAudio
 
-final class NeMoMelSpectrogramTests: XCTestCase {
+final class AudioMelSpectrogramTests: XCTestCase {
 
-    private var mel: NeMoMelSpectrogram!
+    private var mel: AudioMelSpectrogram!
 
     override func setUp() {
         super.setUp()
-        mel = NeMoMelSpectrogram()
+        mel = AudioMelSpectrogram()
     }
 
     override func tearDown() {

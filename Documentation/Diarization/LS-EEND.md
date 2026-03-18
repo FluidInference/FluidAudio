@@ -312,7 +312,7 @@ let result: LSEENDInferenceResult = try engine.infer(audioFileURL: url)
 let session = try engine.createSession(inputSampleRate: engine.targetSampleRate)
 
 // Or with a caller-owned mel spectrogram (for thread isolation)
-let mel = NeMoMelSpectrogram(...)
+let mel = AudioMelSpectrogram(...)
 let session = try engine.createSession(inputSampleRate: engine.targetSampleRate, melSpectrogram: mel)
 ```
 

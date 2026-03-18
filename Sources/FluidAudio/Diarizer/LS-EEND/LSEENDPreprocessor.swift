@@ -45,8 +45,8 @@ public struct LSEENDFeatureConfig: Sendable, Hashable {
     }
 }
 
-private func createMelSpectrogram(for config: LSEENDFeatureConfig) -> NeMoMelSpectrogram {
-    NeMoMelSpectrogram(
+private func createMelSpectrogram(for config: LSEENDFeatureConfig) -> AudioMelSpectrogram {
+    AudioMelSpectrogram(
         sampleRate: config.sampleRate,
         nMels: config.nMels,
         nFFT: config.nFFT,
@@ -70,14 +70,14 @@ private func createMelSpectrogram(for config: LSEENDFeatureConfig) -> NeMoMelSpe
 /// For incremental processing, use ``LSEENDStreamingFeatureExtractor`` instead.
 public final class LSEENDOfflineFeatureExtractor {
     private let config: LSEENDFeatureConfig
-    private let spectrogram: NeMoMelSpectrogram
+    private let spectrogram: AudioMelSpectrogram
 
     /// Creates an offline feature extractor.
     ///
     /// - Parameters:
     ///   - metadata: Model metadata from which feature parameters are derived.
     ///   - spectrogram: Optional pre-configured mel spectrogram; one is created if `nil`.
-    public init(metadata: LSEENDModelMetadata, spectrogram: NeMoMelSpectrogram? = nil) {
+    public init(metadata: LSEENDModelMetadata, spectrogram: AudioMelSpectrogram? = nil) {
         let featureConfig = LSEENDFeatureConfig(metadata: metadata)
         config = featureConfig
         self.spectrogram = spectrogram ?? createMelSpectrogram(for: featureConfig)
@@ -182,7 +182,7 @@ public final class LSEENDOfflineFeatureExtractor {
 /// - Important: This class is **not** thread-safe. All calls must be serialized externally.
 public final class LSEENDStreamingFeatureExtractor {
     private let config: LSEENDFeatureConfig
-    private let spectrogram: NeMoMelSpectrogram
+    private let spectrogram: AudioMelSpectrogram
 
     private var audioBuffer: [Float] = []
     private var audioStartSample = 0
@@ -201,7 +201,7 @@ public final class LSEENDStreamingFeatureExtractor {
     /// - Parameters:
     ///   - metadata: Model metadata from which feature parameters are derived.
     ///   - spectrogram: Optional pre-configured mel spectrogram; one is created if `nil`.
-    public init(metadata: LSEENDModelMetadata, spectrogram: NeMoMelSpectrogram? = nil) {
+    public init(metadata: LSEENDModelMetadata, spectrogram: AudioMelSpectrogram? = nil) {
         let featureConfig = LSEENDFeatureConfig(metadata: metadata)
         config = featureConfig
         self.spectrogram = spectrogram ?? createMelSpectrogram(for: featureConfig)

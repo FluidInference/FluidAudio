@@ -172,7 +172,7 @@ public actor StreamingEouAsrManager {
     private var rnntDecoder: RnntDecoder?
     private let audioConverter = AudioConverter()
     private var tokenizer: Tokenizer?
-    private let melProcessor = NeMoMelSpectrogram()  // Native Swift mel spectrogram
+    private let melProcessor = AudioMelSpectrogram()  // Native Swift mel spectrogram
 
     // Configuration - now based on chunkSize
     public let chunkSize: StreamingChunkSize
@@ -247,7 +247,7 @@ public actor StreamingEouAsrManager {
     public func loadModels(modelDir: URL) async throws {
         logger.info("Loading CoreML models from \(modelDir.path)...")
 
-        // No longer loading preprocessor - using native Swift NeMoMelSpectrogram instead
+        // No longer loading preprocessor - using native Swift AudioMelSpectrogram instead
         self.streamingEncoder = try await MLModel.load(
             contentsOf: modelDir.appendingPathComponent("streaming_encoder.mlmodelc"), configuration: self.configuration
         )
@@ -450,7 +450,7 @@ public actor StreamingEouAsrManager {
         let mel = try MLMultiArray(shape: [1, 128, NSNumber(value: numFrames)], dataType: .float32)
         let melPtr = mel.dataPointer.bindMemory(to: Float.self, capacity: mel.count)
 
-        // NeMoMelSpectrogram returns [nMels, T] row-major (mel bin, then time)
+        // AudioMelSpectrogram returns [nMels, T] row-major (mel bin, then time)
         // CoreML expects [1, 128, T] which is the same layout
         melPtr.update(from: melFlat, count: melFlat.count)
 

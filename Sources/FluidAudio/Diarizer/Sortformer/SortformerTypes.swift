@@ -121,7 +121,8 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 31
     )
 
-    /// Configuration matching Gradient Descent's Streaming-Sortformer-Conversion models with Sortformer v2 weights
+    /// Fastest config with Sortformer v2 weights. May handle high-speaker-count scenarios
+    /// better than v2.1 (v2.1 can degrade when many speakers overlap).
     public static let `fastestV2` = SortformerConfig(
         modelVariant: .fastestV2,
         chunkLen: 6,
@@ -132,7 +133,8 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 31
     )
 
-    /// Configuration matching Gradient Descent's Streaming-Sortformer-Conversion models with Sortformer v2.1 weights
+    /// Fastest config with Sortformer v2.1 weights.
+    /// - Note: v2.1 may degrade when many speakers are talking simultaneously.
     public static let `fastestV2_1` = SortformerConfig(
         modelVariant: .fastestV2_1,
         chunkLen: 6,
@@ -142,10 +144,6 @@ public struct SortformerConfig: Sendable {
         spkcacheLen: 188,
         spkcacheUpdatePeriod: 31
     )
-
-    /// Backwards compatible alias for NVIDIA's 30.4s latency configuration with Sortformer v2.1 weights
-    @available(*, deprecated, renamed: "nvidiaHighLatencyV2_1")
-    public static let nvidiaHighLatency = nvidiaHighLatencyV2_1
 
     /// NVIDIA's 30.4s latency configuration with Sortformer v2 weights
     public static let nvidiaHighLatencyV2 = SortformerConfig(
@@ -158,7 +156,8 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 300
     )
 
-    /// NVIDIA's 30.4s latency configuration with Sortformer v2.1 weights
+    /// NVIDIA's 30.4s latency configuration with Sortformer v2.1 weights.
+    /// - Note: v2.1 may degrade when many speakers are talking simultaneously.
     public static let nvidiaHighLatencyV2_1 = SortformerConfig(
         modelVariant: .nvidiaHighLatencyV2_1,
         chunkLen: 340,
@@ -168,10 +167,6 @@ public struct SortformerConfig: Sendable {
         spkcacheLen: 188,
         spkcacheUpdatePeriod: 300
     )
-
-    /// Backwards compatible alias for NVIDIA's 1.04s latency configuration with Sortformer v2.1 weights
-    @available(*, deprecated, renamed: "nvidiaLowLatencyV2_1")
-    public static let nvidiaLowLatency = nvidiaLowLatencyV2_1
 
     /// NVIDIA's 1.04s latency configuration with Sortformer v2 weights
     public static let nvidiaLowLatencyV2 = SortformerConfig(
@@ -184,7 +179,8 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 144
     )
 
-    /// NVIDIA's 1.04s latency configuration with Sortformer v2.1 weights (20.57% DER on AMI SDM)
+    /// NVIDIA's 1.04s latency configuration with Sortformer v2.1 weights (20.57% DER on AMI SDM).
+    /// - Note: v2.1 may degrade when many speakers are talking simultaneously.
     public static let nvidiaLowLatencyV2_1 = SortformerConfig(
         modelVariant: .nvidiaLowLatencyV2_1,
         chunkLen: 6,
@@ -238,131 +234,6 @@ public struct SortformerConfig: Sendable {
             && self.spkcacheLen == other.spkcacheLen)
     }
 }
-
-/// Configuration for post-processing Sortformer diarizer predictions
-@available(*, deprecated, message: "Use DiarizerTimelineConfig instead", renamed: "DiarizerTimelineConfig")
-public struct SortformerPostProcessingConfig {
-    /// Onset threshold for detecting the beginning and end of a speech
-    public var onsetThreshold: Float
-
-    /// Offset threshold for detecting the end of a speech
-    public var offsetThreshold: Float
-
-    /// Adding frames before each speech segment
-    public var onsetPadFrames: Int
-
-    /// Adding frames after each speech segment
-    public var offsetPadFrames: Int
-
-    /// Threshold for short speech segment deletion in frames
-    public var minFramesOn: Int
-
-    /// Threshold for small non-speech deletion in frames
-    public var minFramesOff: Int
-
-    /// Adding durations before each speech segment
-    public var onsetPadSeconds: Float {
-        get { Float(onsetPadFrames) * frameDurationSeconds }
-        set { onsetPadFrames = Int(round(newValue / frameDurationSeconds)) }
-    }
-
-    /// Adding durations after each speech segment
-    public var offsetPadSeconds: Float {
-        get { Float(offsetPadFrames) * frameDurationSeconds }
-        set { offsetPadFrames = Int(round(newValue / frameDurationSeconds)) }
-    }
-
-    /// Threshold for short speech segment deletion (seconds)
-    public var minDurationOn: Float {
-        get { Float(minFramesOn) * frameDurationSeconds }
-        set { minFramesOn = Int(round(newValue / frameDurationSeconds)) }
-    }
-
-    /// Threshold for small non-speech deletion (seconds)
-    public var minDurationOff: Float {
-        get { Float(minFramesOff) * frameDurationSeconds }
-        set { minFramesOff = Int(round(newValue / frameDurationSeconds)) }
-    }
-
-    /// Maximum number of predictions to retain
-    public var maxStoredFrames: Int? = nil
-
-    /// Number of speakers
-    public let numSpeakers: Int = 4
-
-    /// Number of speakers
-    public let frameDurationSeconds: Float = 0.08
-
-    /// Default configurations
-    public static var `default`: SortformerPostProcessingConfig {
-        SortformerPostProcessingConfig(
-            onsetThreshold: 0.5,
-            offsetThreshold: 0.5,
-            onsetPadFrames: 0,
-            offsetPadFrames: 0,
-            minFramesOn: 0,
-            minFramesOff: 0
-        )
-    }
-
-    public init(
-        onsetThreshold: Float = 0.5,
-        offsetThreshold: Float = 0.5,
-        onsetPadSeconds: Float = 0,
-        offsetPadSeconds: Float = 0,
-        minDurationOn: Float = 0,
-        minDurationOff: Float = 0,
-        maxStoredFrames: Int? = nil
-    ) {
-        self.onsetThreshold = onsetThreshold
-        self.offsetThreshold = offsetThreshold
-        self.onsetPadFrames = Int(round(onsetPadSeconds / frameDurationSeconds))
-        self.offsetPadFrames = Int(round(offsetPadSeconds / frameDurationSeconds))
-        self.minFramesOn = Int(round(minDurationOn / frameDurationSeconds))
-        self.minFramesOff = Int(round(minDurationOff / frameDurationSeconds))
-        self.maxStoredFrames = maxStoredFrames
-    }
-
-    public init(
-        onsetThreshold: Float = 0.5,
-        offsetThreshold: Float = 0.5,
-        onsetPadFrames: Int = 0,
-        offsetPadFrames: Int = 0,
-        minFramesOn: Int = 0,
-        minFramesOff: Int = 0,
-        maxStoredFrames: Int? = nil
-    ) {
-        self.onsetThreshold = onsetThreshold
-        self.offsetThreshold = offsetThreshold
-        self.onsetPadFrames = onsetPadFrames
-        self.offsetPadFrames = offsetPadFrames
-        self.minFramesOn = minFramesOn
-        self.minFramesOff = minFramesOff
-        self.maxStoredFrames = maxStoredFrames
-    }
-
-    /// Convert to the unified DiarizerPostProcessingConfig
-    public func toDiarizerConfig() -> DiarizerTimelineConfig {
-        DiarizerTimelineConfig(
-            numSpeakers: numSpeakers,
-            frameDurationSeconds: frameDurationSeconds,
-            onsetThreshold: onsetThreshold,
-            offsetThreshold: offsetThreshold,
-            onsetPadFrames: onsetPadFrames,
-            offsetPadFrames: offsetPadFrames,
-            minFramesOn: minFramesOn,
-            minFramesOff: minFramesOff,
-            maxStoredFrames: maxStoredFrames
-        )
-    }
-}
-
-/// Backward-compatible typealiases — SortformerTimeline is now DiarizerTimeline
-@available(*, deprecated, renamed: "DiarizerTimeline")
-public typealias SortformerTimeline = DiarizerTimeline
-
-@available(*, deprecated, renamed: "DiarizerSegment")
-public typealias SortformerSegment = DiarizerSegment
 
 // MARK: - Streaming State
 
@@ -455,7 +326,7 @@ public struct SortformerFeatureLoader: Sendable {
 
         self.startFeat = 0
         self.endFeat = 0
-        (self.featSeq, self.featLength, self.featSeqLength) = NeMoMelSpectrogram().computeFlatTransposed(audio: audio)
+        (self.featSeq, self.featLength, self.featSeqLength) = AudioMelSpectrogram().computeFlatTransposed(audio: audio)
         // numChunks accounts for right context requirement: need endFeat + rc <= featLength
         // Chunk n has endFeat = (n+1) * chunkLen, so valid when (n+1) * chunkLen + rc <= featLength
         // numChunks = floor((featLength - rc) / chunkLen)
@@ -521,10 +392,6 @@ public struct StreamingUpdateResult: Sendable {
         self.numSpeakers = numSpeakers
     }
 }
-
-/// Backward-compatible typealias — SortformerChunkResult is now DiarizerChunkResult
-@available(*, deprecated, renamed: "DiarizerChunkResult")
-public typealias SortformerChunkResult = DiarizerChunkResult
 
 // MARK: - Errors
 

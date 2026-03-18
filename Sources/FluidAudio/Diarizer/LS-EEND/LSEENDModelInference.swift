@@ -54,7 +54,7 @@ private final class LSEENDInferenceSharedResources {
     let modelFrameHz: Double
     let streamingLatencySeconds: Double
     let decodeMaxSpeakers: Int
-    let melSpectrogram: NeMoMelSpectrogram
+    let melSpectrogram: AudioMelSpectrogram
     let offlineFeatureExtractor: LSEENDOfflineFeatureExtractor
 
     // Preallocated ANE-aligned input arrays reused across predictStep calls
@@ -77,7 +77,7 @@ private final class LSEENDInferenceSharedResources {
         modelFrameHz = metadata.frameHz
         streamingLatencySeconds = metadata.streamingLatencySeconds
         decodeMaxSpeakers = metadata.maxNspks
-        melSpectrogram = NeMoMelSpectrogram(
+        melSpectrogram = AudioMelSpectrogram(
             sampleRate: featureConfig.sampleRate,
             nMels: featureConfig.nMels,
             nFFT: featureConfig.nFFT,
@@ -150,7 +150,7 @@ public final class LSEENDInferenceHelper {
     /// Maximum number of speaker slots in the model output (including boundary tracks).
     public var decodeMaxSpeakers: Int { sharedResources.decodeMaxSpeakers }
 
-    fileprivate var melSpectrogram: NeMoMelSpectrogram { sharedResources.melSpectrogram }
+    fileprivate var melSpectrogram: AudioMelSpectrogram { sharedResources.melSpectrogram }
     private var offlineFeatureExtractor: LSEENDOfflineFeatureExtractor { sharedResources.offlineFeatureExtractor }
 
     private let lock = NSLock()
@@ -191,8 +191,9 @@ public final class LSEENDInferenceHelper {
     ///   - inputSampleRate: Must match ``targetSampleRate``.
     ///   - melSpectrogram: A mel spectrogram instance owned by the caller.
     /// - Returns: A session that accepts audio via ``LSEENDStreamingSession/pushAudio(_:)``.
-    public func createSession(inputSampleRate: Int, melSpectrogram: NeMoMelSpectrogram) throws -> LSEENDStreamingSession
-    {
+    public func createSession(
+        inputSampleRate: Int, melSpectrogram: AudioMelSpectrogram
+    ) throws -> LSEENDStreamingSession {
         try LSEENDStreamingSession(engine: self, inputSampleRate: inputSampleRate, melSpectrogram: melSpectrogram)
     }
 
@@ -472,7 +473,7 @@ public final class LSEENDStreamingSession {
     fileprivate var emittedFrames = 0
 
     fileprivate init(
-        engine: LSEENDInferenceHelper, inputSampleRate: Int, melSpectrogram: NeMoMelSpectrogram? = nil
+        engine: LSEENDInferenceHelper, inputSampleRate: Int, melSpectrogram: AudioMelSpectrogram? = nil
     ) throws {
         guard inputSampleRate == engine.targetSampleRate else {
             throw LSEENDError.unsupportedAudio(
