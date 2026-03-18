@@ -491,6 +491,14 @@ Notes:
 - Sortformer still uses chronological speaker slots, and it is still limited to four unique speakers.
 - Use `overwritingAssignedSpeakerName: false` if you want enrollment to fail instead of replacing the name on an already-named slot.
 
+### Enrollment Strengths (Integration Feedback)
+
+In real-world 4-speaker integration testing, Sortformer's auto-mapping is consistently strong: all 4 speakers — including two with very similar voices — map with high confidence. This is the key advantage over LS-EEND for pre-enrolled speaker workflows.
+
+**Why Sortformer wins here:** Sortformer was trained on a large volume of real-world data, which gives it better generalization for speaker disambiguation. It can utilize past context extremely well through the speaker cache and FIFO mechanism.
+
+**LS-EEND comparison:** LS-EEND enrollment can fail when two speakers are too similar, rejecting the 4th speaker due to slot collision. Sortformer does not have this problem because its slot assignment mechanism is more tolerant of similar voices. See [LS-EEND Enrollment Limitations](LS-EEND.md#enrollment-limitations-integration-feedback) for details.
+
 ## References
 
 - [NVIDIA Sortformer Paper](https://arxiv.org/abs/2409.06656)

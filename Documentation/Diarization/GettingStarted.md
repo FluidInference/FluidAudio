@@ -24,7 +24,19 @@ Pick the diarizer based on the workflow:
 | Max speakers | 4 | No max | 10 |
 | Benchmarks | Good | Poor | Best |
 | Remembering speakers across meetings | Great | Best | Good |
+| Pre-enrolled speaker mapping | Best | Good | Weak |
 
+### Speaker Enrollment: Sortformer vs LS-EEND
+
+For workflows that pre-enroll known speakers before live audio, Sortformer is the stronger choice:
+
+- **Sortformer** auto-maps all speakers with high confidence, even when two voices are similar. It benefits from training on a large volume of real-world data and uses past context effectively through its speaker cache.
+- **LS-EEND** can fail enrollment when voices are too similar ("too close to existing speaker" collision). Its scores are bounded to roughly 0.2–0.8 due to the internal sigmoid-over-cosine architecture. An external score-extraction + global assignment fallback avoids hard rejection but produces weaker mappings.
+- **LS-EEND** is an end-to-end model, which makes it difficult to force speaker registration into a specific slot. There is no API for per-slot similarity outputs or explicit slot-lock assignment.
+
+LS-EEND was trained primarily on simulated data (fine-tuned on real data), while Sortformer was trained on predominantly real-world data. This training data difference is the main reason for the enrollment accuracy gap.
+
+See [LS-EEND.md](LS-EEND.md#enrollment-limitations-integration-feedback) and [Sortformer.md](Sortformer.md#enrollment-strengths-integration-feedback) for details.
 
 ## Quick Start
 

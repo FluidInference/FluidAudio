@@ -256,6 +256,20 @@ Notes:
 - Enrollment can help with live identity continuity, but it is still less reliable than the WeSpeaker/Pyannote speaker database.
 - Speaker slots are still chronological. Use `overwritingAssignedSpeakerName: false` if you want enrollment to fail instead of replacing the name on an already-named slot.
 
+### Enrollment Limitations (Integration Feedback)
+
+Real-world integration testing with 4-speaker audio reveals specific enrollment weaknesses compared to Sortformer:
+
+**Score range:** LS-EEND scores are bounded between `sigmoid(-1)` and `sigmoid(1)`, roughly **0.2 to 0.8**. Internally the model applies sigmoid to cosine similarity scores, so raw outputs will never reach the 0.9+ confidence levels that external post-processing might suggest.
+
+**Close-voice slot collision:** When enrolling speakers one at a time (strict enrollment path), LS-EEND's internal collision logic can reject a speaker whose voice is too similar to an already-enrolled slot. In a 4-speaker test, 3 speakers enrolled with strong mapping (~0.9 post-normalized confidence), but the 4th failed due to "too close to existing speaker." Sortformer auto-mapped all 4 with high confidence in the same test.
+
+**Score-extraction fallback is weaker:** An alternative integration strategy — extracting per-slot scores over a sample, building a full score matrix, then running global assignment (e.g. Hungarian algorithm + threshold) — avoids hard enrollment rejection but produces weaker results. Non-dominant speakers can drop to ~0.2 confidence and one speaker can dominate multiple slot assignments.
+
+**Root cause:** LS-EEND is an end-to-end model, making it difficult to force speaker registration into a specific slot. There is currently no API for per-slot similarity outputs or explicit slot-lock assignment. Suppressing existing attractors may be a path forward, but this has not been validated.
+
+**Training data gap:** Sortformer was trained on a large volume of real-world data, giving it stronger generalization for speaker identity. LS-EEND was trained primarily on simulated data and then fine-tuned on real data — the base model without fine-tuning performs poorly.
+
 ### Properties
 
 | Property | Type | Description |
