@@ -85,7 +85,7 @@ public enum LSEENDEvaluation {
         var speakers: [String] = []
         for line in text.split(whereSeparator: \.isNewline) {
             let parts = line.split(separator: " ")
-            guard parts.count >= 8 else { continue }
+            guard parts.count >= 8, parts[0] == "SPEAKER" else { continue }
             let speaker = String(parts[7])
             if !speakers.contains(speaker) {
                 speakers.append(speaker)
@@ -444,6 +444,7 @@ public enum LSEENDEvaluation {
     }
 
     private static func solveAssignmentRowsToColumns(cost: [Float], rows: Int, columns: Int) -> [Int] {
+        precondition(columns <= 20, "Assignment solver is O(2^columns); columns=\(columns) is too large")
         let stateCount = 1 << columns
         var dp = [Float](repeating: .greatestFiniteMagnitude, count: stateCount)
         var parent = [Int](repeating: -1, count: stateCount)

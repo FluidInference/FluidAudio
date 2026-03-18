@@ -65,7 +65,7 @@ public final class SortformerDiarizer: Diarizer {
     private var _models: SortformerModels?
 
     // Native mel spectrogram (used when useNativePreprocessing is enabled)
-    private let melSpectrogram = NeMoMelSpectrogram()
+    private let melSpectrogram = AudioMelSpectrogram()
 
     // Audio buffering
     private var audioBuffer: [Float] = []
@@ -80,17 +80,6 @@ public final class SortformerDiarizer: Diarizer {
 
     // MARK: - Initialization
 
-    @available(
-        *, deprecated, renamed: "init(config:timelineConfig:)",
-        message: "Use `timelineConfig` instead of `postProcessingConfig`."
-    )
-    public convenience init(
-        config: SortformerConfig = .default,
-        postProcessingConfig: DiarizerTimelineConfig = .default(numSpeakers: 4, frameDurationSeconds: 0.08)
-    ) {
-        self.init(config: config, timelineConfig: postProcessingConfig)
-    }
-
     public init(
         config: SortformerConfig = .default,
         timelineConfig: DiarizerTimelineConfig = .sortformerDefault
@@ -101,12 +90,6 @@ public final class SortformerDiarizer: Diarizer {
         self.stateUpdater = SortformerStateUpdater(config: config)
         self._state = SortformerStreamingState(config: config)
         self._timeline = DiarizerTimeline(config: timelineConfig)
-    }
-
-    /// Backward-compatible initializer accepting the legacy SortformerPostProcessingConfig.
-    @available(*, deprecated, message: "Use init(config:timelineConfig:) with DiarizerTimelineConfig instead")
-    public convenience init(config: SortformerConfig = .default, postProcessingConfig: SortformerPostProcessingConfig) {
-        self.init(config: config, timelineConfig: postProcessingConfig.toDiarizerConfig())
     }
 
     /// Initialize with CoreML models (combined pipeline mode).
@@ -399,18 +382,6 @@ public final class SortformerDiarizer: Diarizer {
     ///
     /// Convenience method that combines `addAudio()` and `process()`.
     ///
-    /// - Parameters:
-    ///   - samples: Audio samples (16kHz mono)
-    ///   - sourceSampleRate: Source audio sample rate
-    /// - Returns: New chunk results if enough audio was processed
-    @available(*, deprecated, renamed: "process(samples:)")
-    public func processSamples(
-        _ samples: [Float],
-        sourceSampleRate: Double? = nil
-    ) throws -> DiarizerTimelineUpdate? {
-        return try process(samples: samples, sourceSampleRate: sourceSampleRate)
-    }
-
     /// Process a chunk of audio in one call.
     ///
     /// Convenience method that combines `addAudio()` and `process()`.

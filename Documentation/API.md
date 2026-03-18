@@ -75,161 +75,51 @@ Use `OfflineDiarizerManager` when you need offline DER parity or want to run the
 
 ### Diarizer Protocol
 
-`SortformerDiarizer` and `LSEENDDiarizer` both conform to the `Diarizer` protocol, which provides a unified streaming and offline API.
+`SortformerDiarizer` and `LSEENDDiarizer` both conform to the `Diarizer` protocol, providing a unified streaming and offline API.
 
-**Protocol Properties:**
-- `isAvailable: Bool` — Whether the model is loaded and ready
-- `numFramesProcessed: Int` — Confirmed frames processed so far
-- `targetSampleRate: Int?` — Model's expected audio sample rate in Hz
-- `modelFrameHz: Double?` — Output frame rate in Hz (frames per second)
-- `numSpeakers: Int?` — Number of real speaker output tracks
-- `timeline: DiarizerTimeline` — Accumulated diarization results
+**Streaming:** `addAudio(_:sourceSampleRate:)` → `process()` → read `timeline`. Convenience `process(samples:sourceSampleRate:)` combines both steps. Returns `DiarizerTimelineUpdate?` (`nil` when not enough audio has accumulated).
 
-**Streaming:**
-- `addAudio<C: Collection>(_ samples: C, sourceSampleRate: Double?) throws` — Buffer audio for processing; pass a non-nil `sourceSampleRate` to resample on the fly
-- `process() throws -> DiarizerTimelineUpdate?` — Run inference on buffered audio; returns `nil` if not enough audio has accumulated
-- `process<C: Collection>(samples: C, sourceSampleRate: Double?) throws -> DiarizerTimelineUpdate?` — Convenience combining `addAudio` + `process` in one call
+**Offline:** `processComplete(_:sourceSampleRate:...)` or `processComplete(audioFileURL:...)` to process a full recording in one call.
 
-**Offline:**
-- `processComplete<C: Collection>(_ samples: C, sourceSampleRate:, keepingEnrolledSpeakers:, finalizeOnCompletion:, progressCallback:) throws -> DiarizerTimeline` — Process a complete audio buffer in one call
-- `processComplete(audioFileURL: URL, keepingEnrolledSpeakers:, finalizeOnCompletion:, progressCallback:) throws -> DiarizerTimeline` — Read, resample, and process an audio file end-to-end
+**Speaker Enrollment:** `enrollSpeaker(withAudio:sourceSampleRate:named:...)` feeds known-speaker audio before streaming to label a slot.
 
-**Speaker Enrollment:**
-- `enrollSpeaker<C: Collection>(withAudio samples: C, sourceSampleRate:, named:, overwritingAssignedSpeakerName:) throws -> DiarizerSpeaker?` — Feed audio of a known speaker before streaming begins; warms model state and labels that speaker's slot for subsequent `process()` calls
-
-**Lifecycle:**
-- `reset()` — Clear all streaming state (session, buffers, timeline) while keeping the model loaded
-- `cleanup()` — Release all resources including the loaded model
+**Lifecycle:** `reset()` clears streaming state but keeps the model loaded. `cleanup()` releases everything.
 
 ---
 
-### DiarizerTimeline
+### DiarizerTimeline & DiarizerSpeaker
 
-Holds accumulated streaming predictions and derived speaker segments. Returned by `Diarizer.timeline` and `processComplete(...)`.
+`DiarizerTimeline` accumulates per-frame speaker probabilities and derives `DiarizerSpeaker` segments. Each speaker has `finalizedSegments` (confirmed) and `tentativeSegments` (may be revised). Segments expose `startTime`, `endTime`, `duration`, and `isFinalized`.
 
-**Key Properties:**
-- `config: DiarizerTimelineConfig` — Post-processing configuration used to build segments
-- `speakers: [Int: DiarizerSpeaker]` — Speaker slots keyed by output track index
-- `finalizedPredictions: [Float]` — Flat `[frames × numSpeakers]` array of finalized per-frame probabilities
-- `tentativePredictions: [Float]` — Same layout; frames still within the right-context window that may be revised
-- `numFinalizedFrames: Int` — Count of finalized frames
-- `numTentativeFrames: Int` — Count of tentative frames
-- `finalizedDuration: Float` — Duration in seconds of finalized audio
-- `hasSegments: Bool` — Whether any speaker has at least one segment
-
-**Mutation:**
-- `addChunk(_ chunk: DiarizerChunkResult) throws -> DiarizerTimelineUpdate` — Append new predictions and rebuild segments; called internally by the diarizer
-- `rebuild(finalizedPredictions:tentativePredictions:keepingSpeakers:isComplete:) throws` — Replace all predictions from scratch (used by offline processing)
-- `reset(keepingSpeakers:)` / `reset(keepingSpeakersWhere:)` — Clear segments and optionally preserve named speakers or speaker metadata
-- `finalize()` — Promote all tentative segments to finalized
-
-**`DiarizerTimelineConfig`** — Shared configuration used by both diarizers:
-| Parameter | Default | Description |
-|---|---|---|
-| `numSpeakers` | model-specific | Number of speaker output tracks |
-| `frameDurationSeconds` | model-specific | Duration of one output frame |
-| `onsetThreshold` | 0.5 | Probability threshold to begin a speech segment |
-| `offsetThreshold` | 0.5 | Probability threshold to end a speech segment |
-| `onsetPadFrames` | 0 | Frames prepended to each segment onset |
-| `offsetPadFrames` | 0 | Frames appended to each segment offset |
-| `minFramesOn` | 0 | Minimum segment length; shorter segments are dropped |
-| `minFramesOff` | 0 | Minimum gap; shorter silences are closed |
-| `maxStoredFrames` | nil | Rolling window cap on finalized frames (nil = unlimited) |
-
----
-
-### DiarizerSpeaker
-
-Represents a single speaker track within a `DiarizerTimeline`.
-
-**Key Properties:**
-- `id: UUID` — Stable identity across resets
-- `index: Int` — Slot index in the diarizer output (0-based)
-- `name: String?` — Optional display name (set via enrollment or manually)
-- `finalizedSegments: [DiarizerSegment]` — Confirmed speech segments
-- `tentativeSegments: [DiarizerSegment]` — Speculative segments within the right-context window
-- `hasSegments: Bool` — Whether any finalized or tentative segments exist
-- `numSpeechFrames: Int` — Total frames spanned by all segments (finalized + tentative)
-- `speechDuration: Float` — Total speech duration in seconds
-
-**`DiarizerSegment`** — A single time-range for one speaker:
-- `startFrame / endFrame: Int` — Frame indices (convert using `frameDurationSeconds`)
-- `startTime / endTime: Float` — Seconds
-- `duration: Float` — Segment length in seconds
-- `isFinalized: Bool` — Whether the segment has been confirmed
+**`DiarizerTimelineConfig`** controls post-processing (onset/offset thresholds default to 0.5, min segment/gap duration, optional rolling window cap). Both diarizers accept this at init.
 
 ---
 
 ### SortformerDiarizer
 
-End-to-end streaming diarization using NVIDIA's Sortformer model. Tracks **4 fixed speaker slots**.
+Streaming diarization using NVIDIA's Sortformer. 4 fixed speaker slots, 16 kHz input, 80 ms frame duration.
 
-- **Sample rate:** 16 kHz
-- **Frame duration:** 80 ms (12.5 Hz output)
-- **Streaming latency:** ~0.64 s (`default` config) or ~1.04 s (`nvidiaLowLatency` configs)
-- **Accuracy:** 31.7% DER on AMI SDM (`nvidiaHighLatencyV2_1`; other configs untested)
-
-**Initialization:**
 ```swift
-// Preferred: download and compile model automatically
 let diarizer = SortformerDiarizer(config: .default, timelineConfig: .sortformerDefault)
 try await diarizer.initialize(mainModelPath: modelURL)
-
-// Or with pre-loaded models
-diarizer.initialize(models: sortformerModels)
 ```
 
-**`SortformerConfig` Presets:**
-
-| Preset | Latency | Notes |
-|---|---|---|
-| `.default` / `.fastestV2_1` | 1.04 s | Fastest inference speed and update rate. |
-| `.fastestV2_0` | 1.04 s | Uses NVIDIA's Sortformer v2 weights. |
-| `.nvidiaLowLatencyV2_1` | 1.04 s | Uses more context than `fastest`; Improvement is minimal |
-| `.nvidiaLowLatencyV2_0` | 1.04 s | Uses NVIDIA's Sortformer v2 weights |
-| `.nvidiaHighLatencyV2_1` | 30.4 s | 31.7% DER on AMI SDM |
-| `.nvidiaHighLatencyV2_0` | 30.4 s | Uses NVIDIA's Sortformer v2 weights |
-
-All streaming methods are defined by the `Diarizer` protocol above. Additionally:
-- `state: SortformerStreamingState` — Live speaker cache and FIFO queue state (for diagnostics)
-- `config: SortformerConfig` — The configuration this instance was created with
+**Config presets:** `.default` / `.fastV2_1` (1.04 s latency), `.balancedV2_1` (1.04 s, 20.6% DER on AMI SDM), `.highContextV2_1` (30.4 s latency). v2 variants also available.
 
 ---
 
 ### LSEENDDiarizer
 
-End-to-end streaming diarization using LS-EEND (Linear Streaming End-to-End Neural Diarization). Supports a **variable number of speaker slots** depending on the model variant.
+Streaming diarization using LS-EEND. Variable speaker slots, 8 kHz input, 100 ms frame duration, 20.7% DER on AMI SDM.
 
-- **Sample rate:** 8 kHz
-- **Frame duration:** 100 ms (10 Hz output)
-- **Accuracy:** 20.7% DER on AMI SDM (AMI variant)
-- **Variants:** `LSEENDVariant` (`LSEENDModelDescriptor.LSEENDVariant`)
-
-**Initialization:**
 ```swift
-// Auto-download from HuggingFace
 let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
 try await diarizer.initialize(variant: .dihard3)
-
-// Or with an explicit descriptor
-let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: .dihard3)
-try diarizer.initialize(descriptor: descriptor)
 ```
 
-**LS-EEND–Specific Properties:**
-- `computeUnits: MLComputeUnits` — CoreML compute target (`.cpuOnly` is typically fastest)
-- `streamingLatencySeconds: Double?` — Minimum audio required before first output frame
-- `decodeMaxSpeakers: Int?` — Total output slots including internal boundary tracks
-- `timelineConfig: DiarizerTimelineConfig` — Active post-processing configuration
+**Variants:** ami, callhome, dihard2, dihard3 (via `LSEENDModelDescriptor.loadFromHuggingFace(variant:)`).
 
-**Additional Method:**
-- `finalizeSession() throws -> DiarizerChunkResult?` — Flush pending audio and finalize the timeline; call at end of a stream before reading the final timeline
-
-**`LSEENDModelDescriptor`:**
-- `LSEENDModelDescriptor.loadFromHuggingFace(variant:cacheDirectory:computeUnits:) async throws -> LSEENDModelDescriptor` — Download and cache all model files; returns a descriptor ready for `initialize(descriptor:)`
-- `init(variant:modelURL:metadataURL:)` — Construct from local paths if already cached
-
-All streaming and offline methods are defined by the `Diarizer` protocol above.
+Call `finalizeSession()` at end-of-stream to flush pending audio before reading the final timeline.
 
 ## Voice Activity Detection
 

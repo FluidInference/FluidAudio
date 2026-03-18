@@ -240,44 +240,44 @@ public enum ModelNames {
     /// Sortformer streaming diarization model names
     public enum Sortformer {
         public enum Variant: CaseIterable, Sendable {
-            case fastestV2
-            case fastestV2_1
-            case nvidiaLowLatencyV2
-            case nvidiaLowLatencyV2_1
-            case nvidiaHighLatencyV2
-            case nvidiaHighLatencyV2_1
+            case fastV2
+            case fastV2_1
+            case balancedV2
+            case balancedV2_1
+            case highContextV2
+            case highContextV2_1
 
             public var name: String {
                 switch self {
-                case .fastestV2:
+                case .fastV2:
                     return "Sortformer_v2"
-                case .fastestV2_1:
+                case .fastV2_1:
                     return "Sortformer_v2.1"
-                case .nvidiaLowLatencyV2:
+                case .balancedV2:
                     return "SortformerNvidiaLow_v2"
-                case .nvidiaLowLatencyV2_1:
+                case .balancedV2_1:
                     return "SortformerNvidiaLow_v2.1"
-                case .nvidiaHighLatencyV2:
+                case .highContextV2:
                     return "SortformerNvidiaHigh_v2"
-                case .nvidiaHighLatencyV2_1:
+                case .highContextV2_1:
                     return "SortformerNvidiaHigh_v2.1"
                 }
             }
 
             public var defaultConfiguration: SortformerConfig {
                 switch self {
-                case .fastestV2:
-                    return .fastestV2
-                case .fastestV2_1:
-                    return .fastestV2_1
-                case .nvidiaLowLatencyV2:
-                    return .nvidiaLowLatencyV2
-                case .nvidiaLowLatencyV2_1:
-                    return .nvidiaLowLatencyV2_1
-                case .nvidiaHighLatencyV2:
-                    return .nvidiaHighLatencyV2
-                case .nvidiaHighLatencyV2_1:
-                    return .nvidiaHighLatencyV2_1
+                case .fastV2:
+                    return .fastV2
+                case .fastV2_1:
+                    return .fastV2_1
+                case .balancedV2:
+                    return .balancedV2
+                case .balancedV2_1:
+                    return .balancedV2_1
+                case .highContextV2:
+                    return .highContextV2
+                case .highContextV2_1:
+                    return .highContextV2_1
                 }
             }
 
@@ -291,7 +291,7 @@ public enum ModelNames {
         }
 
         /// Lowest latency for streaming
-        public static let defaultVariant: Variant = .fastestV2_1
+        public static let defaultVariant: Variant = .fastV2_1
 
         /// Bundle name for a specific variant
         public static func bundle(for variant: Variant) -> String {

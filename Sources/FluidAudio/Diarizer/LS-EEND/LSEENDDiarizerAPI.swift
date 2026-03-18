@@ -80,11 +80,18 @@ public final class LSEENDDiarizer: Diarizer {
         return _engine?.decodeMaxSpeakers
     }
 
+    /// Whether a streaming session is currently active.
+    var hasActiveSession: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _session != nil
+    }
+
     // MARK: - Private State
 
     private var _engine: LSEENDInferenceHelper?
     private var _session: LSEENDStreamingSession?
-    private var _melSpectrogram: NeMoMelSpectrogram?
+    private var _melSpectrogram: AudioMelSpectrogram?
     private var _timeline: DiarizerTimeline
     private var _numFramesProcessed: Int = 0
     private var _timelineConfig: DiarizerTimelineConfig
@@ -737,8 +744,8 @@ public final class LSEENDDiarizer: Diarizer {
     }
 
     /// Create a new mel spectrogram instance owned by this diarizer.
-    private static func createMelSpectrogram(featureConfig: LSEENDFeatureConfig) -> NeMoMelSpectrogram {
-        NeMoMelSpectrogram(
+    private static func createMelSpectrogram(featureConfig: LSEENDFeatureConfig) -> AudioMelSpectrogram {
+        AudioMelSpectrogram(
             sampleRate: featureConfig.sampleRate,
             nMels: featureConfig.nMels,
             nFFT: featureConfig.nFFT,

@@ -1,5 +1,4 @@
 #if os(macOS)
-import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -131,9 +130,10 @@ enum SortformerCommand {
                 print(
                     "[DEBUG] First 10 audio samples: \((0..<min(10, audioSamples.count)).map { String(format: "%.6f", audioSamples[$0]) }.joined(separator: ", "))"
                 )
+                let debugPath = NSTemporaryDirectory() + "swift_audio_16k.bin"
                 let audioData = audioSamples.withUnsafeBytes { Data($0) }
-                try? audioData.write(to: URL(fileURLWithPath: "swift_audio_16k.bin"))
-                print("[DEBUG] Saved \(audioSamples.count) samples to swift_audio_16k.bin")
+                try? audioData.write(to: URL(fileURLWithPath: debugPath))
+                print("[DEBUG] Saved \(audioSamples.count) samples to \(debugPath)")
             }
 
             // Process with progress
@@ -178,12 +178,13 @@ enum SortformerCommand {
 
             // Print speaker probabilities summary
             print("\n--- Speaker Activity Summary ---")
-            let numSpeakers = 4
+            let numSpeakers = result.config.numSpeakers
             var speakerActivity = [Float](repeating: 0, count: numSpeakers)
+            let predictions = result.finalizedPredictions
             for frame in 0..<result.numFinalizedFrames {
                 for spk in 0..<numSpeakers {
-                    let prob = result.finalizedPredictions[frame * numSpeakers + spk]
-                    if prob > 0.5 {
+                    let idx = frame * numSpeakers + spk
+                    if idx < predictions.count, predictions[idx] > 0.5 {
                         speakerActivity[spk] += result.config.frameDurationSeconds
                     }
                 }
@@ -233,7 +234,7 @@ enum SortformerCommand {
     }
 
     private static func printUsage() {
-        logger.info(
+        print(
             """
 
             Sortformer Command Usage:
@@ -259,8 +260,7 @@ enum SortformerCommand {
 
                 # Save results to file
                 fluidaudio sortformer audio.wav --output results.json
-            """
-        )
+            """)
     }
 }
 #endif

@@ -409,12 +409,6 @@ public struct OfflineDiarizerConfig: Sendable {
         set { embedding.excludeOverlap = newValue }
     }
 
-    @available(*, deprecated, renamed: "embeddingExcludeOverlap")
-    public var shouldExcludeOverlaps: Bool {
-        get { embeddingExcludeOverlap }
-        set { embeddingExcludeOverlap = newValue }
-    }
-
     public var minSegmentDuration: Double {
         get { embedding.minSegmentDurationSeconds }
         set { embedding.minSegmentDurationSeconds = newValue }

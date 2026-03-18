@@ -58,9 +58,9 @@ final class SortformerTimelineTests: XCTestCase {
         XCTAssertEqual(timeline.numFinalizedFrames, 18, "3 chunks of 6 frames = 18")
     }
 
-    // MARK: - Segment Generation
+    // MARK: - Prediction Storage
 
-    func testHighProbabilityUpdatesFramePredictions() throws {
+    func testHighProbabilityStoresPredictions() throws {
         let timeline = DiarizerTimeline(config: .sortformerDefault)
         let numSpeakers = 4
         let frameCount = 12
@@ -139,7 +139,6 @@ final class SortformerTimelineTests: XCTestCase {
     // MARK: - Probability Access
 
     func testProbabilityAccess() throws {
-        let numSpeakers = 4
         // [f0s0=0.1, f0s1=0.2, f0s2=0.3, f0s3=0.4, f1s0=0.5, ...]
         let predictions: [Float] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
         let timeline = try DiarizerTimeline(
@@ -155,7 +154,6 @@ final class SortformerTimelineTests: XCTestCase {
             timeline.probability(speaker: 0, frame: 999).isNaN,
             "Out of range should return NaN"
         )
-        _ = numSpeakers  // used above
     }
 
     // MARK: - SortformerSegment
@@ -172,9 +170,11 @@ final class SortformerTimelineTests: XCTestCase {
         let a = DiarizerSegment(speakerIndex: 0, startFrame: 0, endFrame: 10, frameDurationSeconds: 0.08)
         let b = DiarizerSegment(speakerIndex: 0, startFrame: 5, endFrame: 15, frameDurationSeconds: 0.08)
         let c = DiarizerSegment(speakerIndex: 0, startFrame: 11, endFrame: 20, frameDurationSeconds: 0.08)
+        let d = DiarizerSegment(speakerIndex: 0, startFrame: 10, endFrame: 20, frameDurationSeconds: 0.08)
 
         XCTAssertTrue(a.overlaps(with: b), "Overlapping segments")
-        XCTAssertFalse(a.overlaps(with: c), "Non-overlapping segments")
+        XCTAssertFalse(a.overlaps(with: c), "Non-overlapping segments (gap of 1)")
+        XCTAssertTrue(a.overlaps(with: d), "Touching segments (endFrame == startFrame) count as overlapping")
     }
 
     func testSegmentAbsorb() {

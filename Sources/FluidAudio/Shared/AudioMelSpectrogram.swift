@@ -15,7 +15,7 @@ import Foundation
 /// - center: True with pad_mode='constant' (zero padding)
 /// - normalize: "NA" (no normalization)
 /// - dither: 0.0 (disabled for determinism)
-public final class NeMoMelSpectrogram {
+public final class AudioMelSpectrogram {
     public enum PaddingMode: Sendable {
         case center
         case prePadded
