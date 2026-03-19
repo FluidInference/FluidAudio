@@ -660,7 +660,8 @@ public final class DiarizerTimeline {
 
     /// Speakers in the timeline
     public var speakers: [Int: DiarizerSpeaker] {
-        queue.sync { _speakers }
+        get { queue.sync { _speakers } }
+        set { queue.sync { _speakers = newValue } }
     }
 
     public var hasSegments: Bool {
