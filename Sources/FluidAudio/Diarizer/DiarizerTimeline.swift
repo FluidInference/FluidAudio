@@ -662,7 +662,7 @@ public final class DiarizerTimeline {
     public var speakers: [Int: DiarizerSpeaker] {
         get { queue.sync { _speakers } }
         set {
-            queue.sync {
+            queue.sync(flags: .barrier) {
                 let maxSpeakers = config.numSpeakers
                 _speakers = newValue.filter { key, _ in
                     key >= 0 && key < maxSpeakers
