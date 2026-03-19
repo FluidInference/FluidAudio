@@ -907,18 +907,29 @@ public final class DiarizerTimeline {
         }
     }
 
+    // MARK: Speaker Management
+
     /// Add a speaker to the timeline at a given slot, or update their name if one already exists
     /// - Parameters:
-    ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
     ///   - name: The speaker's name
+    ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
+    ///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
     /// - Returns: The upserted speaker if created successfully
     @discardableResult
-    public func upsertSpeaker(atIndex index: Int? = nil, name: String? = nil) -> DiarizerSpeaker? {
+    public func upsertSpeaker(
+        named name: String? = nil,
+        atIndex index: Int? = nil,
+        clearCurrentSegment: Bool = false
+    ) -> DiarizerSpeaker? {
         queue.sync(flags: .barrier) {
             let index = index ?? (0..<config.numSpeakers).first { _speakers[$0] == nil }
 
             // Ensure index is within bounds
             guard let index, index >= 0, index < config.numSpeakers else { return nil }
+
+            if clearCurrentSegment {
+                states[index] = StreamingState()
+            }
 
             if let speaker = _speakers[index] {
                 // Update old speaker
@@ -930,6 +941,45 @@ public final class DiarizerTimeline {
             let speaker = DiarizerSpeaker(index: index, name: name)
             _speakers[index] = speaker
             return speaker
+        }
+    }
+
+    /// Add a speaker to the timeline at a given slot, or replace the old one if it's already occupied
+    /// - Parameters:
+    ///   - speaker: The new speaker to put in the slot.
+    ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
+    ///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
+    /// - Returns: The upserted speaker if created successfully
+    @discardableResult
+    public func upsertSpeaker(
+        _ speaker: DiarizerSpeaker,
+        atIndex index: Int? = nil,
+        clearCurrentSegment: Bool = false
+    ) -> DiarizerSpeaker? {
+        queue.sync(flags: .barrier) {
+            let index = index ?? (0..<config.numSpeakers).first { _speakers[$0] == nil }
+
+            // Ensure index is within bounds
+            guard let index, index >= 0, index < config.numSpeakers else {
+                return nil
+            }
+
+            _speakers[index] = speaker
+
+            if clearCurrentSegment {
+                states[index] = StreamingState()
+            }
+
+            return speaker
+        }
+    }
+
+    /// Remove speaker at a given index
+    /// - Parameter index: Speaker index to remove in diarizer output
+    /// - Returns: The removed speaker
+    public func removeSpeaker(atIndex index: Int) -> DiarizerSpeaker? {
+        queue.sync(flags: .barrier) {
+            _speakers.removeValue(forKey: index)
         }
     }
 
