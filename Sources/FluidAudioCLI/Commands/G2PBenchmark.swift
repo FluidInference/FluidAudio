@@ -124,7 +124,7 @@ struct G2PBenchmark {
         } catch {
             logger.error("Failed to load multilingual G2P models: \(error)")
             logger.error(
-                "Ensure models are downloaded to the TTS cache directory under Models/\(Repo.multilingualG2p.folderName)/"
+                "Ensure models are downloaded to the TTS cache directory under Models/\(Repo.kokoro.folderName)/"
             )
             return
         }
