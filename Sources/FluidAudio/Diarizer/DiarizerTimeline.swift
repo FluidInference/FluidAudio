@@ -667,6 +667,10 @@ public final class DiarizerTimeline {
                 _speakers = newValue.filter { key, _ in
                     key >= 0 && key < maxSpeakers
                 }
+
+                for (index, speaker) in _speakers {
+                    speaker.index = index
+                }
             }
         }
     }
