@@ -41,6 +41,50 @@ print("Speech Detected: \(timeline.hasSegments)")
 let speakers = timeline.speakers
 ```
 
+**Speaker Management API:**
+
+```swift
+/// Add a speaker to the timeline at a given slot, or update their name if one already exists
+/// - Parameters:
+///   - name: The speaker's name
+///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
+///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
+/// - Returns: The upserted speaker if created successfully
+@discardableResult
+public func upsertSpeaker(
+    named name: String? = nil,
+    atIndex index: Int? = nil,
+    clearCurrentSegment: Bool = false
+) -> DiarizerSpeaker?
+
+/// Add a speaker to the timeline at a given slot, or replace the old one if it's already occupied
+/// - Parameters:
+///   - speaker: The new speaker to put in the slot.
+///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
+///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
+/// - Returns: The upserted speaker if created successfully
+@discardableResult
+public func upsertSpeaker(
+    _ speaker: DiarizerSpeaker,
+    atIndex index: Int? = nil,
+    clearCurrentSegment: Bool = false
+) -> DiarizerSpeaker?
+
+/// Remove speaker at a given index
+/// - Parameter index: Speaker index to remove in diarizer output
+/// - Returns: The removed speaker
+@discardableResult
+public func removeSpeaker(atIndex index: Int) -> DiarizerSpeaker? {
+    queue.sync(flags: .barrier) {
+        _speakers.removeValue(forKey: index)
+    }
+}
+```
+
+`upsertSpeaker(named:atIndex:clearCurrentSegment:)` is the convenience form when you only need to reserve or rename a slot. `upsertSpeaker(_:atIndex:clearCurrentSegment:)` lets you inject an existing `DiarizerSpeaker` instance into a slot, replacing whatever was there before. In both cases, leaving `atIndex` as `nil` picks the first unused diarizer slot, and setting `clearCurrentSegment` resets the slot's active streaming state before future predictions are processed.
+
+`removeSpeaker(atIndex:)` removes the speaker currently assigned to a diarizer output slot and returns it if one existed. This only updates the slot mapping. It does not retroactively rewrite already-derived segments or probabilities.
+
 ### DiarizerSpeaker
 
 Represents a single speaker slot (e.g., "Speaker 0", "Speaker 1"). 
