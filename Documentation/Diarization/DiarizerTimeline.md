@@ -71,17 +71,19 @@ public func upsertSpeaker(
 ) -> DiarizerSpeaker?
 
 /// Remove speaker at a given index
-/// - Parameter index: Speaker index to remove in diarizer output
-/// - Returns: The removed speaker
+/// - Parameters:
+///   - index: Speaker index to remove in diarizer output.
+///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
+/// - Returns: The removed speaker.
 @discardableResult
-public func removeSpeaker(atIndex index: Int) -> DiarizerSpeaker? {
-    queue.sync(flags: .barrier) {
-        _speakers.removeValue(forKey: index)
-    }
-}
+public func removeSpeaker(atIndex index: Int, clearCurrentSegment: Bool = false) -> DiarizerSpeaker?
 ```
 
-Use `upsertSpeaker(named:...)` to reserve or rename a slot, `upsertSpeaker(_:)` to replace a slot with an existing `DiarizerSpeaker`, and `removeSpeaker(atIndex:)` to clear a slot. When `atIndex` is `nil`, the first unused diarizer slot is chosen.
+Use `upsertSpeaker(named:...)` to reserve or rename a slot, or use `upsertSpeaker(_:)` to insert or replace a slot with an existing `DiarizerSpeaker`. When `atIndex` is `nil`, the first unused diarizer slot is chosen. 
+
+Use `removeSpeaker(atIndex:...)` to clear a slot. 
+
+When `clearCurrentSegment` is `true`, then segments that were never closed (i.e., the current segment) will start anew in the new speaker at that slot. If it is false, then the entire unclosed segment may be added instead. 
 
 ### DiarizerSpeaker
 
