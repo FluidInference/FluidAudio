@@ -987,12 +987,21 @@ public final class DiarizerTimeline {
     }
 
     /// Remove speaker at a given index
-    /// - Parameter index: Speaker index to remove in diarizer output
-    /// - Returns: The removed speaker
+    /// - Parameters:
+    ///   - index: Speaker index to remove in diarizer output.
+    ///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
+    /// - Returns: The removed speaker.
     @discardableResult
-    public func removeSpeaker(atIndex index: Int) -> DiarizerSpeaker? {
+    public func removeSpeaker(
+        atIndex index: Int,
+        clearCurrentSegment: Bool = false
+    ) -> DiarizerSpeaker? {
         queue.sync(flags: .barrier) {
-            _speakers.removeValue(forKey: index)
+            if clearCurrentSegment {
+                states[index] = StreamingState()
+            }
+
+            return _speakers.removeValue(forKey: index)
         }
     }
 
