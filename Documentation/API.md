@@ -94,18 +94,18 @@ Use `OfflineDiarizerManager` when you need offline DER parity or want to run the
 **`DiarizerTimelineConfig`** controls post-processing (onset/offset thresholds default to 0.5, min segment/gap duration, optional rolling window cap). Both diarizers accept this at init.
 
 **Speaker Management:**
-- `upsertSpeaker(named:atIndex:clearCurrentSegment:) -> DiarizerSpeaker?`
+- `upsertSpeaker(named:atIndex:) -> DiarizerSpeaker?`
   - Add a speaker to a slot, or update the existing speaker's name if that slot is already occupied
   - If `atIndex` is `nil`, the first unused diarizer slot is chosen
-  - `clearCurrentSegment` resets the in-progress speaking state for that slot before continuing
-- `upsertSpeaker(_:atIndex:clearCurrentSegment:) -> DiarizerSpeaker?`
+- `upsertSpeaker(_:atIndex:transferCurrentSegment:) -> DiarizerSpeaker?`
   - Insert an existing `DiarizerSpeaker` into a slot, replacing any speaker already assigned there
   - If `atIndex` is `nil`, the first unused diarizer slot is chosen
-  - `clearCurrentSegment` resets the in-progress speaking state for that slot before continuing
-- `removeSpeaker(atIndex:) -> DiarizerSpeaker?`
+  - `transferCurrentSegment` moves the in-progress segment (if one exists) to the new speaker before continuing
+- `removeSpeaker(atIndex:clearCurrentSegment:) -> DiarizerSpeaker?`
   - Remove the speaker assigned to a diarizer output slot and return the removed speaker if present
 - `speakers: [Int: DiarizerSpeaker]`
   - Read or replace the full slot-to-speaker mapping directly when needed
+  - `clearCurrentSegment` resets the in-progress speaking state for that slot before continuing
 
 ---
 

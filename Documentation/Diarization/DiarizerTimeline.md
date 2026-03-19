@@ -74,7 +74,7 @@ public func upsertSpeaker(
 ///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
 /// - Returns: The removed speaker.
 @discardableResult
-public func removeSpeaker(atIndex index: Int, clearCurrentSegment: Bool = true) -> DiarizerSpeaker?
+public func removeSpeaker(atIndex index: Int, clearCurrentSegment: Bool = false) -> DiarizerSpeaker?
 ```
 
 Use `upsertSpeaker(named:...)` to reserve or rename a slot, or use `upsertSpeaker(_:)` to insert or replace a slot with an existing `DiarizerSpeaker`. When `atIndex` is `nil`, the first unused diarizer slot is chosen. When `transferCurrentSegment` is `true`, then the current segment (if it's still ongoing) will be moved to the new speaker. 
