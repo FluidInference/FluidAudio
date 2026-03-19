@@ -977,6 +977,7 @@ public final class DiarizerTimeline {
     /// Remove speaker at a given index
     /// - Parameter index: Speaker index to remove in diarizer output
     /// - Returns: The removed speaker
+    @discardableResult
     public func removeSpeaker(atIndex index: Int) -> DiarizerSpeaker? {
         queue.sync(flags: .barrier) {
             _speakers.removeValue(forKey: index)
