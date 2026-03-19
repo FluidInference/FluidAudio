@@ -694,7 +694,7 @@ public final class DiarizerTimeline {
         set {
             queue.sync(flags: .barrier) {
                 let maxSpeakers = speakerCapacity
-                
+
                 _speakers = newValue.filter { key, _ in
                     key >= 0 && key < maxSpeakers
                 }
@@ -714,7 +714,7 @@ public final class DiarizerTimeline {
     public var finalizedDuration: Float {
         Float(numFinalizedFrames) * config.frameDurationSeconds
     }
-    
+
     /// Maximum number of speakers
     public var speakerCapacity: Int {
         config.numSpeakers
