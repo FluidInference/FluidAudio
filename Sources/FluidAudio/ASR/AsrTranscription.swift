@@ -88,7 +88,7 @@ extension AsrManager {
         let preprocessorAudioArray = preprocessorInput.featureValue(for: "audio_signal")?.multiArrayValue
 
         do {
-            guard let preprocessorModel = preprocessorModel, let encoderModel = encoderModel else {
+            guard let preprocessorModel = preprocessorModel else {
                 throw ASRError.notInitialized
             }
 
@@ -98,17 +98,24 @@ extension AsrManager {
                 options: predictionOptions
             )
 
-            let encoderInput = try prepareEncoderInput(
-                encoder: encoderModel,
-                preprocessorOutput: preprocessorOutput,
-                originalInput: preprocessorInput
-            )
+            let encoderOutputProvider: MLFeatureProvider
+            if let encoderModel = encoderModel {
+                // Split frontend: run separate encoder
+                let encoderInput = try prepareEncoderInput(
+                    encoder: encoderModel,
+                    preprocessorOutput: preprocessorOutput,
+                    originalInput: preprocessorInput
+                )
 
-            try Task.checkCancellation()
-            let encoderOutputProvider = try await encoderModel.compatPrediction(
-                from: encoderInput,
-                options: predictionOptions
-            )
+                try Task.checkCancellation()
+                encoderOutputProvider = try await encoderModel.compatPrediction(
+                    from: encoderInput,
+                    options: predictionOptions
+                )
+            } else {
+                // Fused frontend: preprocessor output already contains encoder features
+                encoderOutputProvider = preprocessorOutput
+            }
 
             let rawEncoderOutput = try extractFeatureValue(
                 from: encoderOutputProvider, key: "encoder", errorMessage: "Invalid encoder output")

@@ -20,7 +20,7 @@ public final class AsrManager {
     internal var jointModel: MLModel?
 
     /// The AsrModels instance if initialized with models
-    private var asrModels: AsrModels?
+    internal var asrModels: AsrModels?
 
     internal let progressEmitter = ProgressEmitter()
 
@@ -88,14 +88,16 @@ public final class AsrManager {
     }
 
     public var isAvailable: Bool {
-        let baseModelsReady = encoderModel != nil && decoderModel != nil && jointModel != nil
-        guard baseModelsReady else { return false }
+        let decoderReady = decoderModel != nil && jointModel != nil
+        guard decoderReady else { return false }
 
         if asrModels?.usesSplitFrontend == true {
+            // Split frontend: need both preprocessor and encoder
+            return preprocessorModel != nil && encoderModel != nil
+        } else {
+            // Fused frontend: preprocessor contains encoder
             return preprocessorModel != nil
         }
-
-        return true
     }
 
     /// Initialize ASR Manager with pre-loaded models
@@ -110,7 +112,10 @@ public final class AsrManager {
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
 
-        logger.info("Token duration optimization model loaded successfully")
+        // Recreate decoder states with the correct layer count for this model version
+        let layers = models.version.decoderLayers
+        self.microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
+        self.systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
 
         logger.info("AsrManager initialized successfully with provided models")
     }
@@ -277,19 +282,22 @@ public final class AsrManager {
     }
 
     public func resetState() {
-        microphoneDecoderState = TdtDecoderState.make()
-        systemDecoderState = TdtDecoderState.make()
+        let layers = asrModels?.version.decoderLayers ?? 2
+        microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
+        systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
         Task { await sharedMLArrayCache.clear() }
     }
 
     public func cleanup() {
+        let layers = asrModels?.version.decoderLayers ?? 2
+        asrModels = nil
         preprocessorModel = nil
         encoderModel = nil
         decoderModel = nil
         jointModel = nil
         // Reset decoder states using fresh allocations for deterministic behavior
-        microphoneDecoderState = TdtDecoderState.make()
-        systemDecoderState = TdtDecoderState.make()
+        microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
+        systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
         // Release vocabulary boosting resources
         disableVocabularyBoosting()
         Task { await sharedMLArrayCache.clear() }
@@ -310,9 +318,25 @@ public final class AsrManager {
         guard let models = asrModels, let decoder_ = decoderModel, let joint = jointModel else {
             throw ASRError.notInitialized
         }
+
+        // Adapt config's encoderHiddenSize to match the loaded model version
+        // (e.g. default config uses 1024 but tdtCtc110m needs 512)
+        let adaptedConfig: ASRConfig
+        if config.encoderHiddenSize != models.version.encoderHiddenSize {
+            adaptedConfig = ASRConfig(
+                sampleRate: config.sampleRate,
+                tdtConfig: config.tdtConfig,
+                encoderHiddenSize: models.version.encoderHiddenSize,
+                streamingEnabled: config.streamingEnabled,
+                streamingThreshold: config.streamingThreshold
+            )
+        } else {
+            adaptedConfig = config
+        }
+
         switch models.version {
-        case .v2:
-            let decoder = TdtDecoderV2(config: config)
+        case .v2, .tdtCtc110m:
+            let decoder = TdtDecoderV2(config: adaptedConfig)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
                 encoderSequenceLength: encoderSequenceLength,
@@ -325,7 +349,7 @@ public final class AsrManager {
                 globalFrameOffset: globalFrameOffset
             )
         case .v3:
-            let decoder = TdtDecoderV3(config: config)
+            let decoder = TdtDecoderV3(config: adaptedConfig)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
                 encoderSequenceLength: encoderSequenceLength,

@@ -24,15 +24,15 @@ struct TdtDecoderState: Sendable {
     /// - zero: Decoder exactly at the end of encoder frames
     var timeJump: Int?
 
-    init() throws {
+    init(decoderLayers: Int = 2) throws {
         // Use ANE-aligned arrays for optimal performance
         let decoderHiddenSize = ASRConstants.decoderHiddenSize
         hiddenState = try ANEOptimizer.createANEAlignedArray(
-            shape: [2, 1, NSNumber(value: decoderHiddenSize)],
+            shape: [NSNumber(value: decoderLayers), 1, NSNumber(value: decoderHiddenSize)],
             dataType: .float32
         )
         cellState = try ANEOptimizer.createANEAlignedArray(
-            shape: [2, 1, NSNumber(value: decoderHiddenSize)],
+            shape: [NSNumber(value: decoderLayers), 1, NSNumber(value: decoderHiddenSize)],
             dataType: .float32
         )
 
@@ -41,9 +41,9 @@ struct TdtDecoderState: Sendable {
         cellState.resetData(to: 0)
     }
 
-    static func make() -> TdtDecoderState {
+    static func make(decoderLayers: Int = 2) -> TdtDecoderState {
         do {
-            return try TdtDecoderState()
+            return try TdtDecoderState(decoderLayers: decoderLayers)
         } catch {
             fatalError("Failed to allocate decoder state: \(error)")
         }

@@ -212,6 +212,7 @@ enum TranscribeCommand {
         var outputJsonPath: String?
         var modelVersion: AsrModelVersion = .v3  // Default to v3
         var customVocabPath: String?
+        var modelDir: String?
 
         // Parse options
         var i = 1
@@ -238,10 +239,18 @@ enum TranscribeCommand {
                         modelVersion = .v2
                     case "v3", "3":
                         modelVersion = .v3
+                    case "tdt-ctc-110m", "110m":
+                        modelVersion = .tdtCtc110m
                     default:
-                        logger.error("Invalid model version: \(arguments[i + 1]). Use 'v2' or 'v3'")
+                        logger.error(
+                            "Invalid model version: \(arguments[i + 1]). Use 'v2', 'v3', or 'tdt-ctc-110m'")
                         exit(1)
                     }
+                    i += 1
+                }
+            case "--model-dir":
+                if i + 1 < arguments.count {
+                    modelDir = arguments[i + 1]
                     i += 1
                 }
             case "--custom-vocab":
@@ -266,19 +275,31 @@ enum TranscribeCommand {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
-                outputJsonPath: outputJsonPath, modelVersion: modelVersion, customVocabPath: customVocabPath)
+                outputJsonPath: outputJsonPath, modelVersion: modelVersion, customVocabPath: customVocabPath,
+                modelDir: modelDir)
         }
     }
 
     /// Test batch transcription using AsrManager directly
     private static func testBatchTranscription(
         audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
-        modelVersion: AsrModelVersion, customVocabPath: String?
+        modelVersion: AsrModelVersion, customVocabPath: String?, modelDir: String? = nil
     ) async {
         do {
             // Initialize ASR models
-            let models = try await AsrModels.downloadAndLoad(version: modelVersion)
-            let asrManager = AsrManager(config: .default)
+            let models: AsrModels
+            if let modelDir = modelDir {
+                let dir = URL(fileURLWithPath: modelDir)
+                models = try await AsrModels.load(from: dir, version: modelVersion)
+            } else {
+                models = try await AsrModels.downloadAndLoad(version: modelVersion)
+            }
+            let tdtConfig = TdtConfig(blankId: modelVersion.blankId)
+            let asrConfig = ASRConfig(
+                tdtConfig: tdtConfig,
+                encoderHiddenSize: modelVersion.encoderHiddenSize
+            )
+            let asrManager = AsrManager(config: asrConfig)
             try await asrManager.initialize(models: models)
 
             logger.info("ASR Manager initialized successfully")
@@ -385,7 +406,12 @@ enum TranscribeCommand {
 
             if let outputJsonPath = outputJsonPath {
                 let wordTimings = WordTimingMerger.mergeTokensIntoWords(result.tokenTimings ?? [])
-                let modelVersionLabel = modelVersion == .v2 ? "v2" : "v3"
+                let modelVersionLabel: String
+                switch modelVersion {
+                case .v2: modelVersionLabel = "v2"
+                case .v3: modelVersionLabel = "v3"
+                case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
+                }
                 let output = TranscriptionJSONOutput(
                     audioFile: audioFile,
                     mode: "batch",
@@ -634,7 +660,12 @@ enum TranscribeCommand {
                 let snapshot = await tracker.metadataSnapshot()
                 let wordTimings = WordTimingMerger.mergeTokensIntoWords(snapshot?.timings ?? [])
                 let latestUpdate = await tracker.latestUpdateSnapshot()
-                let modelVersionLabel = modelVersion == .v2 ? "v2" : "v3"
+                let modelVersionLabel: String
+                switch modelVersion {
+                case .v2: modelVersionLabel = "v2"
+                case .v3: modelVersionLabel = "v3"
+                case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
+                }
                 let output = TranscriptionJSONOutput(
                     audioFile: audioFile,
                     mode: "streaming",
@@ -733,7 +764,8 @@ enum TranscribeCommand {
                 --metadata         Show confidence, start time, and end time in results
                 --word-timestamps  Show word-level timestamps for each word in the transcription
                 --output-json <file>  Save full transcription result to JSON (includes word timings)
-                --model-version <version>  ASR model version to use: v2 or v3 (default: v2)
+                --model-version <version>  ASR model version: v2, v3, or tdt-ctc-110m (default: v3)
+                --model-dir <path>     Path to local model directory (skips download)
                 --custom-vocab <file>  Apply vocabulary boosting using terms from file (batch mode only)
 
             Examples:
