@@ -661,7 +661,14 @@ public final class DiarizerTimeline {
     /// Speakers in the timeline
     public var speakers: [Int: DiarizerSpeaker] {
         get { queue.sync { _speakers } }
-        set { queue.sync { _speakers = newValue } }
+        set {
+            queue.sync {
+                let maxSpeakers = config.numSpeakers
+                _speakers = newValue.filter { key, _ in
+                    key >= 0 && key < maxSpeakers
+                }
+            }
+        }
     }
 
     public var hasSegments: Bool {
