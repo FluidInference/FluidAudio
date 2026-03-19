@@ -48,26 +48,24 @@ let speakers = timeline.speakers
 /// - Parameters:
 ///   - name: The speaker's name
 ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
-///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
 /// - Returns: The upserted speaker if created successfully
 @discardableResult
 public func upsertSpeaker(
     named name: String? = nil,
-    atIndex index: Int? = nil,
-    clearCurrentSegment: Bool = false
+    atIndex index: Int? = nil
 ) -> DiarizerSpeaker?
 
 /// Add a speaker to the timeline at a given slot, or replace the old one if it's already occupied
 /// - Parameters:
 ///   - speaker: The new speaker to put in the slot.
 ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
-///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
+///   - transferCurrentSegment: Whether the current segment should be moved from the old speaker to the new speaker
 /// - Returns: The upserted speaker if created successfully
 @discardableResult
 public func upsertSpeaker(
     _ speaker: DiarizerSpeaker,
     atIndex index: Int? = nil,
-    clearCurrentSegment: Bool = false
+    transferCurrentSegment: Bool = true
 ) -> DiarizerSpeaker?
 
 /// Remove speaker at a given index
@@ -76,14 +74,12 @@ public func upsertSpeaker(
 ///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
 /// - Returns: The removed speaker.
 @discardableResult
-public func removeSpeaker(atIndex index: Int, clearCurrentSegment: Bool = false) -> DiarizerSpeaker?
+public func removeSpeaker(atIndex index: Int, clearCurrentSegment: Bool = true) -> DiarizerSpeaker?
 ```
 
-Use `upsertSpeaker(named:...)` to reserve or rename a slot, or use `upsertSpeaker(_:)` to insert or replace a slot with an existing `DiarizerSpeaker`. When `atIndex` is `nil`, the first unused diarizer slot is chosen. 
+Use `upsertSpeaker(named:...)` to reserve or rename a slot, or use `upsertSpeaker(_:)` to insert or replace a slot with an existing `DiarizerSpeaker`. When `atIndex` is `nil`, the first unused diarizer slot is chosen. When `transferCurrentSegment` is `true`, then the current segment (if it's still ongoing) will be moved to the new speaker. 
 
-Use `removeSpeaker(atIndex:...)` to clear a slot. 
-
-When `clearCurrentSegment` is `true`, then segments that were never closed (i.e., the current segment) will start anew in the new speaker at that slot. If it is false, then the entire unclosed segment may be added instead. 
+Use `removeSpeaker(atIndex:...)` to clear a slot. When `clearCurrentSegment` is `true`, then the next segment will start anew in at the current timestamp. 
 
 ### DiarizerSpeaker
 

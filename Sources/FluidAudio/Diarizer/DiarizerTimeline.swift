@@ -315,6 +315,11 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         queue.sync { _tentativeSegments.count }
     }
 
+    /// Last segment (tentative or finalized). Checks tentative segments first, falls back to finalized if none found.
+    public var lastSegment: DiarizerSegment? {
+        queue.sync { _finalizedSegments.last ?? _tentativeSegments.last }
+    }
+
     /// Total duration of segments in seconds (finalized + tentative)
     public var speechDuration: Float {
         queue.sync {
@@ -399,24 +404,32 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         }
     }
 
+    /// Clear all tentative segments
+    /// - Parameter keepingCapacity: Whether to keep the reserved capacity in the tentative segments list.
     public func removeAllTentative(keepingCapacity: Bool = false) {
         queue.sync(flags: .barrier) {
             _tentativeSegments.removeAll(keepingCapacity: keepingCapacity)
         }
     }
 
+    /// Append a tentative segment
+    /// - Parameter segment: The segment to append
     public func appendTentative(_ segment: DiarizerSegment) {
         queue.sync(flags: .barrier) {
             _tentativeSegments.append(segment)
         }
     }
 
+    /// Append a finalized segment
+    /// - Parameter segment: The segment to append
     public func appendFinalized(_ segment: DiarizerSegment) {
         queue.sync(flags: .barrier) {
             _finalizedSegments.append(segment)
         }
     }
 
+    /// Append a segment, automatically detecting if it's finalized or tentative
+    /// - Parameter segment: The segment to append
     public func append(_ segment: DiarizerSegment) {
         queue.sync(flags: .barrier) {
             if segment.isFinalized {
@@ -427,6 +440,8 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         }
     }
 
+    /// Pop last tentative segment
+    /// - Returns: The popped segment
     @discardableResult
     public func popLastTentative() -> DiarizerSegment? {
         queue.sync(flags: .barrier) {
@@ -434,6 +449,8 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         }
     }
 
+    /// Pop last finalized segment
+    /// - Returns: The popped segment
     @discardableResult
     public func popLastFinalized() -> DiarizerSegment? {
         queue.sync(flags: .barrier) {
@@ -441,13 +458,26 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         }
     }
 
+    /// Pop last tentative or finalized segment
+    /// - Parameter fromFinalized: Whether to pop the segment from the finalized segment list
+    /// - Returns: The popped segment
     @discardableResult
-    public func popLast(fromFinalized: Bool = true) -> DiarizerSegment? {
+    public func popLast(fromFinalized: Bool) -> DiarizerSegment? {
         queue.sync(flags: .barrier) {
             return
                 (fromFinalized
                 ? _finalizedSegments.popLast()
                 : _tentativeSegments.popLast())
+        }
+    }
+
+    /// Pop last segment. Pops the last tentative segment first. Falls back to the last finalized segment if no
+    /// tentative segments are found.
+    /// - Returns: The popped segment
+    @discardableResult
+    public func popLast() -> DiarizerSegment? {
+        queue.sync(flags: .barrier) {
+            return _tentativeSegments.popLast() ?? _finalizedSegments.popLast()
         }
     }
 }
@@ -924,23 +954,17 @@ public final class DiarizerTimeline {
     /// - Parameters:
     ///   - name: The speaker's name
     ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
-    ///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
     /// - Returns: The upserted speaker if created successfully
     @discardableResult
     public func upsertSpeaker(
         named name: String? = nil,
-        atIndex index: Int? = nil,
-        clearCurrentSegment: Bool = false
+        atIndex index: Int? = nil
     ) -> DiarizerSpeaker? {
         queue.sync(flags: .barrier) {
             let index = index ?? (0..<config.numSpeakers).first { _speakers[$0] == nil }
 
             // Ensure index is within bounds
             guard let index, index >= 0, index < config.numSpeakers else { return nil }
-
-            if clearCurrentSegment {
-                states[index] = StreamingState()
-            }
 
             if let speaker = _speakers[index] {
                 // Update old speaker
@@ -959,13 +983,13 @@ public final class DiarizerTimeline {
     /// - Parameters:
     ///   - speaker: The new speaker to put in the slot.
     ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
-    ///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
+    ///   - transferCurrentSegment: Whether the current segment should be moved from the old speaker to the new speaker
     /// - Returns: The upserted speaker if created successfully
     @discardableResult
     public func upsertSpeaker(
         _ speaker: DiarizerSpeaker,
         atIndex index: Int? = nil,
-        clearCurrentSegment: Bool = false
+        transferCurrentSegment: Bool = true
     ) -> DiarizerSpeaker? {
         queue.sync(flags: .barrier) {
             // Ensure index is within bounds
@@ -975,12 +999,22 @@ public final class DiarizerTimeline {
                 return nil
             }
 
-            _speakers[index] = speaker
-            speaker.index = index
+            if transferCurrentSegment {
+                // Check if the last segment in the old speaker is still ongoing
+                if states[index].isSpeaking,
+                    let oldSpeaker = _speakers[index],
+                    let oldStartFrame = oldSpeaker.lastSegment?.startFrame,
+                    oldStartFrame >= states[index].startFrame,
+                    let segment = oldSpeaker.popLast()
+                {
+                    speaker.append(segment)
+                }
 
-            if clearCurrentSegment {
                 states[index] = StreamingState()
             }
+
+            _speakers[index] = speaker
+            speaker.index = index
 
             return speaker
         }
@@ -994,7 +1028,7 @@ public final class DiarizerTimeline {
     @discardableResult
     public func removeSpeaker(
         atIndex index: Int,
-        clearCurrentSegment: Bool = false
+        clearCurrentSegment: Bool = true
     ) -> DiarizerSpeaker? {
         guard index >= 0, index < config.numSpeakers else {
             return nil
