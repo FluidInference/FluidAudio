@@ -81,9 +81,7 @@ public func removeSpeaker(atIndex index: Int) -> DiarizerSpeaker? {
 }
 ```
 
-`upsertSpeaker(named:atIndex:clearCurrentSegment:)` is the convenience form when you only need to reserve or rename a slot. `upsertSpeaker(_:atIndex:clearCurrentSegment:)` lets you inject an existing `DiarizerSpeaker` instance into a slot, replacing whatever was there before. In both cases, leaving `atIndex` as `nil` picks the first unused diarizer slot, and setting `clearCurrentSegment` resets the slot's active streaming state before future predictions are processed.
-
-`removeSpeaker(atIndex:)` removes the speaker currently assigned to a diarizer output slot and returns it if one existed. This only updates the slot mapping. It does not retroactively rewrite already-derived segments or probabilities.
+Use `upsertSpeaker(named:...)` to reserve or rename a slot, `upsertSpeaker(_:)` to replace a slot with an existing `DiarizerSpeaker`, and `removeSpeaker(atIndex:)` to clear a slot. When `atIndex` is `nil`, the first unused diarizer slot is chosen.
 
 ### DiarizerSpeaker
 
