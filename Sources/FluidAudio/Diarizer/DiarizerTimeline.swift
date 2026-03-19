@@ -996,7 +996,11 @@ public final class DiarizerTimeline {
         atIndex index: Int,
         clearCurrentSegment: Bool = false
     ) -> DiarizerSpeaker? {
-        queue.sync(flags: .barrier) {
+        guard index >= 0, index < config.numSpeakers else {
+            return nil
+        }
+
+        return queue.sync(flags: .barrier) {
             if clearCurrentSegment {
                 states[index] = StreamingState()
             }
