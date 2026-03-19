@@ -149,7 +149,7 @@ public actor MultilingualG2PModel {
 
         let modelsDir = try TtsModels.cacheDirectoryURL()
             .appendingPathComponent("Models")
-            .appendingPathComponent(Repo.multilingualG2p.folderName)
+            .appendingPathComponent(Repo.kokoro.folderName)
 
         let encoderURL = modelsDir.appendingPathComponent(ModelNames.MultilingualG2P.encoderFile)
         guard FileManager.default.fileExists(atPath: encoderURL.path) else {
