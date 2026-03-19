@@ -965,6 +965,8 @@ public final class DiarizerTimeline {
     ) -> DiarizerSpeaker? {
         queue.sync(flags: .barrier) {
             // Ensure index is within bounds
+            let index = index ?? (0..<config.numSpeakers).first { _speakers[$0] == nil }
+
             guard let index, index >= 0, index < config.numSpeakers else {
                 return nil
             }
