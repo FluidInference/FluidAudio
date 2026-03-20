@@ -1018,7 +1018,6 @@ public final class DiarizerTimeline {
             if transferCurrentSegment {
                 states[index] = StreamingState()
             }
-            }
 
             _speakers[index] = speaker
             speaker.index = index
