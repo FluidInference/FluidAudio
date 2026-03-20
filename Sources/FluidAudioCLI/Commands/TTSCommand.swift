@@ -65,6 +65,102 @@ public struct TTS {
         return lexicon
     }
 
+    private static func runVoxCpm(
+        text: String, output: String,
+        promptPath: String?, promptText: String?,
+        maxLen: Int, metricsPath: String?
+    ) async {
+        do {
+            let tStart = Date()
+            let manager = VoxCpmManager()
+
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+
+            let promptURL: URL?
+            if let promptPath = promptPath {
+                promptURL = resolveInputURL(promptPath)
+                logger.info("Voice cloning from: \(promptURL!.path)")
+            } else {
+                promptURL = nil
+            }
+
+            let tSynth0 = Date()
+            let wav = try await manager.synthesize(
+                text: text,
+                promptAudioURL: promptURL,
+                promptText: promptText,
+                maxLen: maxLen
+            )
+            let tSynth1 = Date()
+
+            let outURL = {
+                let expanded = (output as NSString).expandingTildeInPath
+                if expanded.hasPrefix("/") {
+                    return URL(fileURLWithPath: expanded)
+                }
+                let cwd = URL(
+                    fileURLWithPath: FileManager.default.currentDirectoryPath,
+                    isDirectory: true)
+                return cwd.appendingPathComponent(expanded)
+            }()
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try wav.write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let totalS = tSynth1.timeIntervalSince(tStart)
+            let sampleRate = Double(VoxCpmConstants.audioSampleRate)
+            let payload = max(0, wav.count - 44)
+            let audioSecs = Double(payload) / (sampleRate * 2.0)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+
+            logger.info("VoxCPM synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s @ 44.1kHz")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Total: \(String(format: "%.3f", totalS))s")
+            logger.info("  Output: \(outURL.path)")
+
+            if let metricsPath {
+                let artifactsRoot = try ensureArtifactsRoot()
+                var metricsDict: [String: Any] = [
+                    "backend": "voxcpm",
+                    "text": text,
+                    "output": outURL.path,
+                    "model_load_time_s": loadS,
+                    "inference_time_s": synthS,
+                    "audio_duration_s": audioSecs,
+                    "realtime_speed": rtfx,
+                    "total_time_s": totalS,
+                ]
+                if let promptPath {
+                    metricsDict["prompt_audio"] = promptPath
+                }
+                if let promptText {
+                    metricsDict["prompt_text"] = promptText
+                }
+
+                let mURL = resolveOutputURL(
+                    metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+                try FileManager.default.createDirectory(
+                    at: mURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let json = try JSONSerialization.data(
+                    withJSONObject: metricsDict, options: [.prettyPrinted])
+                try json.write(to: mURL)
+                logger.info("Metrics saved: \(mURL.path)")
+            }
+        } catch {
+            logger.error("VoxCPM Error: \(error)")
+            print("VoxCPM failed: \(error)")
+            exit(1)
+        }
+    }
+
     private static let longFormBenchmark: String = """
         The purpose of this extended benchmark passage is to emulate a five minute narration that exercises every
         stage of the Kokoro text to speech pipeline. It begins with a calm introduction that invites the listener
@@ -146,6 +242,9 @@ public struct TTS {
         var cloneVoicePath: String? = nil
         var voiceFilePath: String? = nil
         var saveVoicePath: String? = nil
+        var promptPath: String? = nil
+        var promptText: String? = nil
+        var maxLen: Int = VoxCpmConstants.defaultMaxLen
 
         var i = 0
         while i < arguments.count {
@@ -200,6 +299,8 @@ public struct TTS {
                         backend = .kokoro
                     case "pocket", "pockettts":
                         backend = .pocketTts
+                    case "voxcpm":
+                        backend = .voxCpm
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro")
                     }
@@ -227,6 +328,21 @@ public struct TTS {
                     saveVoicePath = arguments[i + 1]
                     i += 1
                 }
+            case "--prompt":
+                if i + 1 < arguments.count {
+                    promptPath = arguments[i + 1]
+                    i += 1
+                }
+            case "--prompt-text":
+                if i + 1 < arguments.count {
+                    promptText = arguments[i + 1]
+                    i += 1
+                }
+            case "--max-len":
+                if i + 1 < arguments.count {
+                    maxLen = Int(arguments[i + 1]) ?? VoxCpmConstants.defaultMaxLen
+                    i += 1
+                }
             default:
                 if text == nil {
                     text = argument
@@ -251,6 +367,14 @@ public struct TTS {
 
         guard let text = text else {
             printUsage()
+            return
+        }
+
+        if backend == .voxCpm {
+            await runVoxCpm(
+                text: text, output: output,
+                promptPath: promptPath, promptText: promptText,
+                maxLen: maxLen, metricsPath: metricsPath)
             return
         }
 
@@ -669,15 +793,19 @@ public struct TTS {
               ketorolac=kˈɛtɔːɹˌɒlak
               xiaomi=zˌaɪəɹˈəʊmi
 
-            Voice Cloning examples:
-              # Clone and synthesize in one step
+            Voice Cloning examples (PocketTTS):
               fluidaudio tts "Hello world" --backend pocket --clone-voice speaker.wav
-
-              # Clone, save, and synthesize
               fluidaudio tts "Hello world" --backend pocket --clone-voice speaker.wav --save-voice my_voice.bin
-
-              # Use previously saved voice
               fluidaudio tts "Hello world" --backend pocket --voice-file my_voice.bin
+
+            VoxCPM 1.5 (44.1kHz, EN/ZH):
+              --prompt FILE        Prompt audio file for voice cloning (VoxCPM only)
+              --prompt-text TEXT   Transcript of prompt audio (required with --prompt)
+              --max-len N          Maximum generation steps (default: 200)
+
+            VoxCPM examples:
+              fluidaudio tts "Hello, this is a test." --backend voxcpm --output test.wav
+              fluidaudio tts "Hello" --backend voxcpm --prompt voice.wav --prompt-text "Hi there" --output cloned.wav
             """
         )
     }
