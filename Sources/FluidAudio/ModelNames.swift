@@ -440,7 +440,6 @@ public enum ModelNames {
         public static let baseLmStep = "base_lm_step"
         public static let residualLmStep = "residual_lm_step"
         public static let locditStep = "locdit_step"
-
         public static let audioVaeEncoderFile = audioVaeEncoder + ".mlmodelc"
         public static let audioVaeDecoderFile = audioVaeDecoder + ".mlmodelc"
         public static let featEncoderFile = featEncoder + ".mlmodelc"

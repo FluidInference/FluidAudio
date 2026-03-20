@@ -52,19 +52,7 @@ public actor VoxCpmModelStore {
 
         var loadedModels: [MLModel] = []
         for name in modelNames {
-            // Prefer .mlmodelc (pre-compiled), fall back to compiling .mlpackage
-            let compiledURL = repoDir.appendingPathComponent("\(name).mlmodelc")
-            let packageURL = repoDir.appendingPathComponent("\(name).mlpackage")
-
-            let model: MLModel
-            if FileManager.default.fileExists(atPath: compiledURL.path) {
-                model = try MLModel(contentsOf: compiledURL, configuration: config)
-            } else if FileManager.default.fileExists(atPath: packageURL.path) {
-                let compiled = try await MLModel.compileModel(at: packageURL)
-                model = try MLModel(contentsOf: compiled, configuration: config)
-            } else {
-                throw VoxCpmError.modelNotFound("\(name) not found at \(repoDir.path)")
-            }
+            let model = try await loadModel(name: name, repoDir: repoDir, config: config)
             loadedModels.append(model)
             logger.info("Loaded \(name)")
         }
@@ -83,6 +71,23 @@ public actor VoxCpmModelStore {
         constantsBundle = try await VoxCpmResourceDownloader.ensureConstants(
             repoDirectory: repoDir)
         logger.info("VoxCPM constants loaded")
+    }
+
+    /// Load a single model by name, preferring .mlmodelc over .mlpackage.
+    private func loadModel(
+        name: String, repoDir: URL, config: MLModelConfiguration
+    ) async throws -> MLModel {
+        let compiledURL = repoDir.appendingPathComponent("\(name).mlmodelc")
+        let packageURL = repoDir.appendingPathComponent("\(name).mlpackage")
+
+        if FileManager.default.fileExists(atPath: compiledURL.path) {
+            return try MLModel(contentsOf: compiledURL, configuration: config)
+        } else if FileManager.default.fileExists(atPath: packageURL.path) {
+            let compiled = try await MLModel.compileModel(at: packageURL)
+            return try MLModel(contentsOf: compiled, configuration: config)
+        } else {
+            throw VoxCpmError.modelNotFound("\(name) not found at \(repoDir.path)")
+        }
     }
 
     /// The audio VAE encoder model.

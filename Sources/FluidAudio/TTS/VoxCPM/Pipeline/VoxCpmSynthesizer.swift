@@ -118,10 +118,11 @@ public struct VoxCpmSynthesizer {
                 "Sequence length \(seqLen) exceeds max \(VoxCpmConstants.maxSeqLen)")
         }
 
-        // Prefill
+        // Sequential prefill: process tokens one at a time through base_lm_step.
+        // This uses the same model for both prefill and generation, ensuring
+        // KV cache compatibility and correct stop head behavior.
         logger.info("  Prefilling...")
         var caches = try createCacheState()
-        var lmHidden: MLMultiArray!
         var lmHiddenFsq: MLMultiArray!
         var stopLogit: MLMultiArray!
         var resHidden: MLMultiArray!
@@ -139,7 +140,7 @@ public struct VoxCpmSynthesizer {
 
             let baseResult = try runBaseLmStep(
                 embed: tokenEmb, position: pos, caches: &caches, model: baseLm)
-            lmHidden = baseResult.lmHidden
+            let lmHidden = baseResult.lmHidden
             lmHiddenFsq = baseResult.lmHiddenFsq
             stopLogit = baseResult.stopLogit
 
@@ -163,11 +164,20 @@ public struct VoxCpmSynthesizer {
             "  Prefill: \(seqLen) tokens in \(String(format: "%.1f", prefillTime))s (\(String(format: "%.1f", Double(seqLen) / prefillTime)) tok/s)"
         )
 
+        // Effective minimum steps: use the caller's minLen but ensure it's at least
+        // proportional to text length. Each text token produces ~2 audio patches on average.
+        let textBasedMinLen = max(minLen, textLen * 2)
+        logger.info(
+            "  minLen=\(textBasedMinLen) (text-based=\(textLen * 2), caller=\(minLen))")
+
         // Generate
         logger.info("  Generating...")
         var generatedLatents: [MLMultiArray] = []
         var pos = seqLen
         var currentPrefixCond = prefixCond
+        var currentLmHiddenFsq = lmHiddenFsq!
+        var currentResHidden = resHidden!
+        var currentStopLogit = stopLogit!
 
         let genStart = Date()
         for step in 0..<maxLen {
@@ -178,15 +188,16 @@ public struct VoxCpmSynthesizer {
 
             // dit_hidden = lm_to_dit_proj(fsq) + res_to_dit_proj(res_hidden)
             let ditHidden = try computeDitHidden(
-                lmHiddenFsq: lmHiddenFsq, resHidden: resHidden, constants: constants)
+                lmHiddenFsq: currentLmHiddenFsq, resHidden: currentResHidden,
+                constants: constants)
 
             // Run LocDiT diffusion
             let predFeat = try runLocDiT(mu: ditHidden, cond: currentPrefixCond, model: locdit)
             generatedLatents.append(predFeat)
 
             // Check stop
-            let stopPtr = stopLogit.dataPointer.bindMemory(to: Float.self, capacity: 2)
-            if step >= minLen && stopPtr[1] > stopPtr[0] {
+            let stopPtr = currentStopLogit.dataPointer.bindMemory(to: Float.self, capacity: 2)
+            if step >= textBasedMinLen && stopPtr[1] > stopPtr[0] {
                 logger.info("  Stop at step \(step + 1)")
                 break
             }
@@ -203,13 +214,12 @@ public struct VoxCpmSynthesizer {
             // Run base LM step
             let baseResult = try runBaseLmStep(
                 embed: currLmEmbML, position: pos, caches: &caches, model: baseLm)
-            lmHidden = baseResult.lmHidden
-            lmHiddenFsq = baseResult.lmHiddenFsq
-            stopLogit = baseResult.stopLogit
+            currentLmHiddenFsq = baseResult.lmHiddenFsq
+            currentStopLogit = baseResult.stopLogit
 
             // Run residual LM step: input = fsq(lm_hidden) + feat_embed
-            let resInput = try addArrays(lmHiddenFsq, currLmEmbML)
-            resHidden = try runResidualLmStep(
+            let resInput = try addArrays(currentLmHiddenFsq, currLmEmbML)
+            currentResHidden = try runResidualLmStep(
                 embed: resInput, position: pos, caches: &caches, model: resLm)
 
             pos += 1

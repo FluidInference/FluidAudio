@@ -54,7 +54,12 @@ public enum VoxCpmConstants {
     /// Maximum generation steps (patches).
     public static let defaultMaxLen: Int = 200
     /// Minimum steps before stop head can trigger.
-    public static let defaultMinLen: Int = 5
+    ///
+    /// The FP16 CoreML step model's stop head is noisy for the first ~13 steps
+    /// in unconditioned mode, predicting "stop" despite having more speech to generate.
+    /// Setting this to 15 ensures enough audio is generated before the stop head
+    /// can terminate. Each step produces ~0.16s of audio, so 15 steps = ~2.4s minimum.
+    public static let defaultMinLen: Int = 15
 
     // MARK: - Special tokens
 

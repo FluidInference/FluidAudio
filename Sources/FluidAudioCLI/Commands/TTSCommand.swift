@@ -247,6 +247,7 @@ public struct TTS {
         var promptPath: String? = nil
         var promptText: String? = nil
         var maxLen: Int = VoxCpmConstants.defaultMaxLen
+        var minLen: Int? = nil
         var noStop = false
 
         var i = 0
@@ -346,6 +347,11 @@ public struct TTS {
                     maxLen = Int(arguments[i + 1]) ?? VoxCpmConstants.defaultMaxLen
                     i += 1
                 }
+            case "--min-len":
+                if i + 1 < arguments.count {
+                    minLen = Int(arguments[i + 1])
+                    i += 1
+                }
             case "--no-stop":
                 noStop = true
             default:
@@ -376,7 +382,7 @@ public struct TTS {
         }
 
         if backend == .voxCpm {
-            let effectiveMinLen = noStop ? maxLen : VoxCpmConstants.defaultMinLen
+            let effectiveMinLen = noStop ? maxLen : (minLen ?? VoxCpmConstants.defaultMinLen)
             await runVoxCpm(
                 text: text, output: output,
                 promptPath: promptPath, promptText: promptText,
