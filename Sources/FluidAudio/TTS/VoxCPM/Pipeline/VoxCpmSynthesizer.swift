@@ -71,11 +71,9 @@ public struct VoxCpmSynthesizer {
         let textIds: [Int]
         let promptTextIds: [Int]?
         if let promptText = promptText {
-            let fullText = promptText + text
-            let allIds = constants.tokenizer.encode(fullText)
             let pIds = constants.tokenizer.encode(promptText)
             promptTextIds = pIds
-            textIds = Array(allIds.dropFirst(pIds.count))
+            textIds = constants.tokenizer.encode(text)
             logger.info("  Prompt text: \(pIds.count) tokens, text: \(textIds.count) tokens")
         } else {
             promptTextIds = nil

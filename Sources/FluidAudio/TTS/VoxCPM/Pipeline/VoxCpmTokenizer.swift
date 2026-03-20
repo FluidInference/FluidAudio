@@ -11,7 +11,7 @@ private typealias HFTokenizerProtocol = Tokenizers.Tokenizer
 ///
 /// Includes Chinese character splitting to match VoxCPM's
 /// `mask_multichar_chinese_tokens` behavior.
-public struct VoxCpmTokenizer: @unchecked Sendable {
+public struct VoxCpmTokenizer: Sendable {
 
     private let tokenizer: any HFTokenizerProtocol
 
