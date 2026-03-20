@@ -1005,18 +1005,19 @@ public final class DiarizerTimeline {
                 return nil
             }
 
-            if transferCurrentSegment {
-                // Check if the last segment in the old speaker is still ongoing
-                if states[index].isSpeaking,
-                    let oldSpeaker = _speakers[index],
-                    let oldStartFrame = oldSpeaker.lastSegment?.startFrame,
-                    oldStartFrame >= states[index].startFrame,
-                    let segment = oldSpeaker.popLast()
-                {
-                    speaker.append(segment)
-                }
+            if transferCurrentSegment,
+                states[index].isSpeaking,
+                let oldSpeaker = _speakers[index],
+                let oldStartFrame = oldSpeaker.lastSegment?.startFrame,
+                oldStartFrame >= states[index].startFrame,
+                let segment = oldSpeaker.popLast()
+            {
+                speaker.append(segment)
+            }
 
+            if transferCurrentSegment {
                 states[index] = StreamingState()
+            }
             }
 
             _speakers[index] = speaker
