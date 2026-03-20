@@ -50,7 +50,8 @@ public actor VoxCpmManager {
         promptAudioURL: URL? = nil,
         promptText: String? = nil,
         maxLen: Int = VoxCpmConstants.defaultMaxLen,
-        minLen: Int = VoxCpmConstants.defaultMinLen
+        minLen: Int = VoxCpmConstants.defaultMinLen,
+        seed: UInt64? = nil
     ) async throws -> Data {
         guard isInitialized else {
             throw VoxCpmError.modelNotFound("VoxCPM not initialized")
@@ -62,7 +63,8 @@ public actor VoxCpmManager {
                 promptAudioURL: promptAudioURL,
                 promptText: promptText,
                 maxLen: maxLen,
-                minLen: minLen
+                minLen: minLen,
+                seed: seed
             )
             return result.audio
         }
@@ -74,7 +76,8 @@ public actor VoxCpmManager {
         promptAudioURL: URL? = nil,
         promptText: String? = nil,
         maxLen: Int = VoxCpmConstants.defaultMaxLen,
-        minLen: Int = VoxCpmConstants.defaultMinLen
+        minLen: Int = VoxCpmConstants.defaultMinLen,
+        seed: UInt64? = nil
     ) async throws -> VoxCpmSynthesizer.SynthesisResult {
         guard isInitialized else {
             throw VoxCpmError.modelNotFound("VoxCPM not initialized")
@@ -86,7 +89,8 @@ public actor VoxCpmManager {
                 promptAudioURL: promptAudioURL,
                 promptText: promptText,
                 maxLen: maxLen,
-                minLen: minLen
+                minLen: minLen,
+                seed: seed
             )
         }
     }

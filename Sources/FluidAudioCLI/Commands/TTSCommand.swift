@@ -69,6 +69,7 @@ public struct TTS {
         text: String, output: String,
         promptPath: String?, promptText: String?,
         maxLen: Int, minLen: Int = VoxCpmConstants.defaultMinLen,
+        seed: UInt64? = nil,
         metricsPath: String?
     ) async {
         do {
@@ -93,7 +94,8 @@ public struct TTS {
                 promptAudioURL: promptURL,
                 promptText: promptText,
                 maxLen: maxLen,
-                minLen: minLen
+                minLen: minLen,
+                seed: seed
             )
             let tSynth1 = Date()
 
@@ -248,6 +250,7 @@ public struct TTS {
         var promptText: String? = nil
         var maxLen: Int = VoxCpmConstants.defaultMaxLen
         var minLen: Int? = nil
+        var seed: UInt64? = nil
         var noStop = false
 
         var i = 0
@@ -352,6 +355,11 @@ public struct TTS {
                     minLen = Int(arguments[i + 1])
                     i += 1
                 }
+            case "--seed":
+                if i + 1 < arguments.count {
+                    seed = UInt64(arguments[i + 1])
+                    i += 1
+                }
             case "--no-stop":
                 noStop = true
             default:
@@ -387,7 +395,7 @@ public struct TTS {
                 text: text, output: output,
                 promptPath: promptPath, promptText: promptText,
                 maxLen: maxLen, minLen: effectiveMinLen,
-                metricsPath: metricsPath)
+                seed: seed, metricsPath: metricsPath)
             return
         }
 

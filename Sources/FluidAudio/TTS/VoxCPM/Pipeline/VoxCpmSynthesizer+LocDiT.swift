@@ -16,7 +16,8 @@ extension VoxCpmSynthesizer {
     static func runLocDiT(
         mu: MLMultiArray,
         cond: MLMultiArray,
-        model: MLModel
+        model: MLModel,
+        rng: inout SeededRandomNumberGenerator
     ) throws -> MLMultiArray {
         let patchSize = VoxCpmConstants.patchSize
         let featDim = VoxCpmConstants.featDim
@@ -28,7 +29,7 @@ extension VoxCpmSynthesizer {
         let noise = try MLMultiArray(shape: noiseShape, dataType: .float32)
         let noisePtr = noise.dataPointer.bindMemory(to: Float.self, capacity: featDim * patchSize)
         for i in 0..<(featDim * patchSize) {
-            noisePtr[i] = gaussianRandom()
+            noisePtr[i] = gaussianRandom(using: &rng)
         }
 
         // Build batch=2 for CFG [conditioned, unconditioned]
@@ -122,9 +123,26 @@ extension VoxCpmSynthesizer {
     }
 
     /// Box-Muller transform for Gaussian random number generation.
-    private static func gaussianRandom() -> Float {
-        let u1 = Float.random(in: Float.leastNormalMagnitude...1.0)
-        let u2 = Float.random(in: 0.0...1.0)
+    private static func gaussianRandom<G: RandomNumberGenerator>(using rng: inout G) -> Float {
+        let u1 = Float.random(in: Float.leastNormalMagnitude...1.0, using: &rng)
+        let u2 = Float.random(in: 0.0...1.0, using: &rng)
         return sqrtf(-2.0 * logf(u1)) * cosf(2.0 * .pi * u2)
+    }
+}
+
+/// A seedable random number generator using SplitMix64.
+struct SeededRandomNumberGenerator: RandomNumberGenerator {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        state = seed
+    }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
     }
 }

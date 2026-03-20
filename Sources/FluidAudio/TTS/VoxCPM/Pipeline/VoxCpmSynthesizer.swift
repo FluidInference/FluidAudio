@@ -45,17 +45,21 @@ public struct VoxCpmSynthesizer {
     ///   - promptText: Transcript of prompt audio (required when using prompt audio).
     ///   - maxLen: Maximum generation steps (default: 200).
     ///   - minLen: Minimum steps before stop head can trigger (default: 5).
+    ///   - seed: Optional random seed for reproducible voice generation.
     /// - Returns: A synthesis result containing WAV audio data at 44.1kHz.
     public static func synthesize(
         text: String,
         promptAudioURL: URL? = nil,
         promptText: String? = nil,
         maxLen: Int = VoxCpmConstants.defaultMaxLen,
-        minLen: Int = VoxCpmConstants.defaultMinLen
+        minLen: Int = VoxCpmConstants.defaultMinLen,
+        seed: UInt64? = nil
     ) async throws -> SynthesisResult {
         let store = try currentModelStore()
 
-        logger.info("VoxCPM synthesizing: '\(text)'")
+        let effectiveSeed = seed ?? UInt64.random(in: 0...UInt64.max)
+        var rng = SeededRandomNumberGenerator(seed: effectiveSeed)
+        logger.info("VoxCPM synthesizing: '\(text)' (seed=\(effectiveSeed))")
 
         let constants = try await store.constants()
 
@@ -192,7 +196,7 @@ public struct VoxCpmSynthesizer {
                 constants: constants)
 
             // Run LocDiT diffusion
-            let predFeat = try runLocDiT(mu: ditHidden, cond: currentPrefixCond, model: locdit)
+            let predFeat = try runLocDiT(mu: ditHidden, cond: currentPrefixCond, model: locdit, rng: &rng)
             generatedLatents.append(predFeat)
 
             // Check stop
