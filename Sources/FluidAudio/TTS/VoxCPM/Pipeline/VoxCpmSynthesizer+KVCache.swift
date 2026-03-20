@@ -73,9 +73,10 @@ extension VoxCpmSynthesizer {
 
         // Update caches from outputs
         for i in 0..<VoxCpmConstants.baseLmLayers {
-            caches.baseCaches[i * 2] = pred.featureValue(for: BaseLmKeys.outK(i))!.multiArrayValue!
-            caches.baseCaches[i * 2 + 1] = pred.featureValue(for: BaseLmKeys.outV(i))!
-                .multiArrayValue!
+            caches.baseCaches[i * 2] = try ensureFloat32(
+                pred.featureValue(for: BaseLmKeys.outK(i))!.multiArrayValue!)
+            caches.baseCaches[i * 2 + 1] = try ensureFloat32(
+                pred.featureValue(for: BaseLmKeys.outV(i))!.multiArrayValue!)
         }
 
         return BaseLmResult(
@@ -109,10 +110,10 @@ extension VoxCpmSynthesizer {
 
         // Update caches from outputs
         for i in 0..<VoxCpmConstants.residualLmLayers {
-            caches.residualCaches[i * 2] = pred.featureValue(for: ResidualLmKeys.outK(i))!
-                .multiArrayValue!
-            caches.residualCaches[i * 2 + 1] = pred.featureValue(for: ResidualLmKeys.outV(i))!
-                .multiArrayValue!
+            caches.residualCaches[i * 2] = try ensureFloat32(
+                pred.featureValue(for: ResidualLmKeys.outK(i))!.multiArrayValue!)
+            caches.residualCaches[i * 2 + 1] = try ensureFloat32(
+                pred.featureValue(for: ResidualLmKeys.outV(i))!.multiArrayValue!)
         }
 
         return try ensureFloat32(

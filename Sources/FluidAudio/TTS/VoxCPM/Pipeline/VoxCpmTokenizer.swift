@@ -15,6 +15,10 @@ public struct VoxCpmTokenizer: Sendable {
 
     private let tokenizer: any HFTokenizerProtocol
 
+    /// Pre-computed set of multi-character pure-Chinese tokens from the vocabulary.
+    /// These tokens need to be split into individual characters for VoxCPM.
+    private let multicharChineseTokens: Set<String>
+
     /// Load tokenizer from a local directory containing tokenizer.json.
     public static func load(from directory: URL) async throws -> VoxCpmTokenizer {
         guard
@@ -26,52 +30,66 @@ public struct VoxCpmTokenizer: Sendable {
                 "tokenizer.json not found in \(directory.lastPathComponent)")
         }
         let hfTokenizer = try await AutoTokenizer.from(modelFolder: directory)
-        return VoxCpmTokenizer(tokenizer: hfTokenizer)
+
+        // Pre-compute multi-character Chinese tokens from vocabulary.
+        // This matches Python's mask_multichar_chinese_tokens which finds all vocab
+        // entries with length >= 2 where every character is CJK Unified Ideographs.
+        var multichar = Set<String>()
+        // Iterate vocab by trying to decode each possible token ID
+        // and checking if the result is a multi-char Chinese string.
+        // We use a range covering typical vocab sizes.
+        let vocabSize = VoxCpmConstants.vocabSize
+        for id in 0..<vocabSize {
+            guard let token = hfTokenizer.convertIdToToken(id) else { continue }
+            // Strip subword prefix (▁) for checking
+            let clean = token.hasPrefix("▁") ? String(token.dropFirst()) : token
+            if clean.count >= 2 && clean.allSatisfy({ isCJK($0) }) {
+                multichar.insert(clean)
+            }
+        }
+
+        return VoxCpmTokenizer(
+            tokenizer: hfTokenizer,
+            multicharChineseTokens: multichar
+        )
     }
 
     /// Encode text to token IDs, applying Chinese character splitting.
     ///
-    /// VoxCPM requires `mask_multichar_chinese_tokens` which splits multi-character
-    /// Chinese tokens into individual characters. Without this, Chinese text
-    /// produces garbage output.
+    /// Matches Python's `mask_multichar_chinese_tokens` behavior:
+    /// 1. Tokenize text normally with BPE
+    /// 2. For each token, strip `▁` prefix and check if it's a multi-character
+    ///    pure-Chinese token
+    /// 3. If yes, split into individual characters
+    /// 4. Convert processed tokens to IDs
     public func encode(_ text: String) -> [Int] {
-        // Apply Chinese character splitting before tokenization
-        let processed = maskMulticharChineseTokens(text)
-        return tokenizer.encode(text: processed, addSpecialTokens: false)
-    }
+        let tokens = tokenizer.tokenize(text: text)
 
-    // MARK: - Chinese Character Splitting
-
-    /// Check if a character is in the CJK Unified Ideographs range.
-    private func isChinese(_ char: Character) -> Bool {
-        guard let scalar = char.unicodeScalars.first else { return false }
-        let value = scalar.value
-        // CJK Unified Ideographs: U+4E00 to U+9FFF
-        // CJK Extension A: U+3400 to U+4DBF
-        // CJK Extension B: U+20000 to U+2A6DF
-        // CJK Compatibility Ideographs: U+F900 to U+FAFF
-        return (0x4E00...0x9FFF).contains(value)
-            || (0x3400...0x4DBF).contains(value)
-            || (0x20000...0x2A6DF).contains(value)
-            || (0xF900...0xFAFF).contains(value)
-    }
-
-    /// Split text so each Chinese character is separated by spaces.
-    ///
-    /// This matches VoxCPM's `mask_multichar_chinese_tokens` behavior:
-    /// the tokenizer then sees each Chinese character as a separate token.
-    private func maskMulticharChineseTokens(_ text: String) -> String {
-        var result = ""
-        for char in text {
-            if isChinese(char) {
-                result += " \(char) "
+        var processed: [String] = []
+        for token in tokens {
+            let clean = token.hasPrefix("▁") ? String(token.dropFirst()) : token
+            if multicharChineseTokens.contains(clean) {
+                // Split multi-character Chinese token into individual characters
+                for char in clean {
+                    processed.append(String(char))
+                }
             } else {
-                result.append(char)
+                processed.append(token)
             }
         }
-        // Collapse multiple spaces
-        return result.replacingOccurrences(
-            of: "\\s+", with: " ", options: .regularExpression
-        ).trimmingCharacters(in: .whitespaces)
+
+        // Convert tokens to IDs
+        let ids = tokenizer.convertTokensToIds(processed)
+        return ids.map { $0 ?? 0 }
+    }
+
+    // MARK: - CJK Detection
+
+    /// Check if a character is in the CJK Unified Ideographs range.
+    private static func isCJK(_ char: Character) -> Bool {
+        guard let scalar = char.unicodeScalars.first else { return false }
+        let value = scalar.value
+        // Match Python: '\u4e00' <= c <= '\u9fff'
+        return (0x4E00...0x9FFF).contains(value)
     }
 }

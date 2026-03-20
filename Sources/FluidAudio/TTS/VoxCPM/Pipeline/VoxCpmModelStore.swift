@@ -41,21 +41,32 @@ public actor VoxCpmModelStore {
 
         let loadStart = Date()
 
-        let modelFiles = [
-            ModelNames.VoxCPM.audioVaeEncoderFile,
-            ModelNames.VoxCPM.audioVaeDecoderFile,
-            ModelNames.VoxCPM.featEncoderFile,
-            ModelNames.VoxCPM.baseLmStepFile,
-            ModelNames.VoxCPM.residualLmStepFile,
-            ModelNames.VoxCPM.locditStepFile,
+        let modelNames = [
+            ModelNames.VoxCPM.audioVaeEncoder,
+            ModelNames.VoxCPM.audioVaeDecoder,
+            ModelNames.VoxCPM.featEncoder,
+            ModelNames.VoxCPM.baseLmStep,
+            ModelNames.VoxCPM.residualLmStep,
+            ModelNames.VoxCPM.locditStep,
         ]
 
         var loadedModels: [MLModel] = []
-        for file in modelFiles {
-            let modelURL = repoDir.appendingPathComponent(file)
-            let model = try MLModel(contentsOf: modelURL, configuration: config)
+        for name in modelNames {
+            // Prefer .mlmodelc (pre-compiled), fall back to compiling .mlpackage
+            let compiledURL = repoDir.appendingPathComponent("\(name).mlmodelc")
+            let packageURL = repoDir.appendingPathComponent("\(name).mlpackage")
+
+            let model: MLModel
+            if FileManager.default.fileExists(atPath: compiledURL.path) {
+                model = try MLModel(contentsOf: compiledURL, configuration: config)
+            } else if FileManager.default.fileExists(atPath: packageURL.path) {
+                let compiled = try await MLModel.compileModel(at: packageURL)
+                model = try MLModel(contentsOf: compiled, configuration: config)
+            } else {
+                throw VoxCpmError.modelNotFound("\(name) not found at \(repoDir.path)")
+            }
             loadedModels.append(model)
-            logger.info("Loaded \(file)")
+            logger.info("Loaded \(name)")
         }
 
         audioVaeEncoderModel = loadedModels[0]

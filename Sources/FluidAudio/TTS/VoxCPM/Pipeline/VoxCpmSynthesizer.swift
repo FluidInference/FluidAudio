@@ -185,12 +185,10 @@ public struct VoxCpmSynthesizer {
             generatedLatents.append(predFeat)
 
             // Check stop
-            if step >= minLen {
-                let stopPtr = stopLogit.dataPointer.bindMemory(to: Float.self, capacity: 2)
-                if stopPtr[1] > stopPtr[0] {
-                    logger.info("  Stop at step \(step + 1)")
-                    break
-                }
+            let stopPtr = stopLogit.dataPointer.bindMemory(to: Float.self, capacity: 2)
+            if step >= minLen && stopPtr[1] > stopPtr[0] {
+                logger.info("  Stop at step \(step + 1)")
+                break
             }
 
             // Update prefix conditioning
@@ -631,8 +629,9 @@ public struct VoxCpmSynthesizer {
 
     /// Convert an MLMultiArray to Float32 if it's Float16. Returns as-is if already Float32.
     ///
-    /// INT8-quantized CoreML models often output Float16 tensors even when
-    /// the model spec declares Float32. This helper ensures safe Float32 access.
+    /// CoreML models often output Float16 tensors with non-contiguous strides
+    /// (padding between dimensions). This helper correctly handles strided layouts
+    /// by checking whether the data is contiguous before choosing a conversion path.
     static func ensureFloat32(_ array: MLMultiArray) throws -> MLMultiArray {
         if array.dataType == .float32 {
             return array
@@ -640,21 +639,69 @@ public struct VoxCpmSynthesizer {
         if array.dataType == .float16 {
             let count = array.count
             let result = try MLMultiArray(shape: array.shape, dataType: .float32)
-            let srcPtr = array.dataPointer
             let dstPtr = result.dataPointer.bindMemory(to: Float.self, capacity: count)
-            var src = vImage_Buffer(
-                data: UnsafeMutableRawPointer(mutating: srcPtr),
-                height: 1,
-                width: vImagePixelCount(count),
-                rowBytes: count * MemoryLayout<UInt16>.size
-            )
-            var dst = vImage_Buffer(
-                data: dstPtr,
-                height: 1,
-                width: vImagePixelCount(count),
-                rowBytes: count * MemoryLayout<Float>.size
-            )
-            vImageConvert_Planar16FtoPlanarF(&src, &dst, 0)
+
+            // Check if strides are contiguous (row-major with no padding)
+            let isContiguous = Self.isContiguousRowMajor(array)
+
+            if isContiguous {
+                // Fast path: flat buffer copy via vImage
+                let srcPtr = array.dataPointer
+                var src = vImage_Buffer(
+                    data: UnsafeMutableRawPointer(mutating: srcPtr),
+                    height: 1,
+                    width: vImagePixelCount(count),
+                    rowBytes: count * MemoryLayout<UInt16>.size
+                )
+                var dst = vImage_Buffer(
+                    data: dstPtr,
+                    height: 1,
+                    width: vImagePixelCount(count),
+                    rowBytes: count * MemoryLayout<Float>.size
+                )
+                vImageConvert_Planar16FtoPlanarF(&src, &dst, 0)
+            } else {
+                // Strided path: gather Float16 values respecting strides, then batch convert
+                let srcRaw = array.dataPointer.assumingMemoryBound(to: UInt16.self)
+                let shape = array.shape.map { $0.intValue }
+                let strides = array.strides.map { $0.intValue }
+                let ndim = shape.count
+
+                // Gather strided Float16 values into a contiguous buffer
+                var gathered = [UInt16](repeating: 0, count: count)
+                var indices = [Int](repeating: 0, count: ndim)
+                for flatIdx in 0..<count {
+                    var srcOffset = 0
+                    for d in 0..<ndim {
+                        srcOffset += indices[d] * strides[d]
+                    }
+                    gathered[flatIdx] = srcRaw[srcOffset]
+
+                    // Increment indices (row-major order)
+                    for d in stride(from: ndim - 1, through: 0, by: -1) {
+                        indices[d] += 1
+                        if indices[d] < shape[d] { break }
+                        indices[d] = 0
+                    }
+                }
+
+                // Batch convert the contiguous Float16 buffer to Float32
+                gathered.withUnsafeMutableBufferPointer { srcBuf in
+                    var src = vImage_Buffer(
+                        data: srcBuf.baseAddress!,
+                        height: 1,
+                        width: vImagePixelCount(count),
+                        rowBytes: count * MemoryLayout<UInt16>.size
+                    )
+                    var dst = vImage_Buffer(
+                        data: dstPtr,
+                        height: 1,
+                        width: vImagePixelCount(count),
+                        rowBytes: count * MemoryLayout<Float>.size
+                    )
+                    vImageConvert_Planar16FtoPlanarF(&src, &dst, 0)
+                }
+            }
             return result
         }
         // For other types (double, int32), do element-by-element conversion
@@ -665,5 +712,22 @@ public struct VoxCpmSynthesizer {
             dstPtr[i] = array[i].floatValue
         }
         return result
+    }
+
+    /// Check if an MLMultiArray has contiguous row-major strides.
+    private static func isContiguousRowMajor(_ array: MLMultiArray) -> Bool {
+        let shape = array.shape.map { $0.intValue }
+        let strides = array.strides.map { $0.intValue }
+        let ndim = shape.count
+        if ndim == 0 { return true }
+        // Expected row-major strides: last dim stride=1, each preceding dim = product of following dims
+        var expectedStride = 1
+        for d in stride(from: ndim - 1, through: 0, by: -1) {
+            if strides[d] != expectedStride {
+                return false
+            }
+            expectedStride *= shape[d]
+        }
+        return true
     }
 }

@@ -68,7 +68,8 @@ public struct TTS {
     private static func runVoxCpm(
         text: String, output: String,
         promptPath: String?, promptText: String?,
-        maxLen: Int, metricsPath: String?
+        maxLen: Int, minLen: Int = VoxCpmConstants.defaultMinLen,
+        metricsPath: String?
     ) async {
         do {
             let tStart = Date()
@@ -91,7 +92,8 @@ public struct TTS {
                 text: text,
                 promptAudioURL: promptURL,
                 promptText: promptText,
-                maxLen: maxLen
+                maxLen: maxLen,
+                minLen: minLen
             )
             let tSynth1 = Date()
 
@@ -245,6 +247,7 @@ public struct TTS {
         var promptPath: String? = nil
         var promptText: String? = nil
         var maxLen: Int = VoxCpmConstants.defaultMaxLen
+        var noStop = false
 
         var i = 0
         while i < arguments.count {
@@ -343,6 +346,8 @@ public struct TTS {
                     maxLen = Int(arguments[i + 1]) ?? VoxCpmConstants.defaultMaxLen
                     i += 1
                 }
+            case "--no-stop":
+                noStop = true
             default:
                 if text == nil {
                     text = argument
@@ -371,10 +376,12 @@ public struct TTS {
         }
 
         if backend == .voxCpm {
+            let effectiveMinLen = noStop ? maxLen : VoxCpmConstants.defaultMinLen
             await runVoxCpm(
                 text: text, output: output,
                 promptPath: promptPath, promptText: promptText,
-                maxLen: maxLen, metricsPath: metricsPath)
+                maxLen: maxLen, minLen: effectiveMinLen,
+                metricsPath: metricsPath)
             return
         }
 
@@ -802,6 +809,7 @@ public struct TTS {
               --prompt FILE        Prompt audio file for voice cloning (VoxCPM only)
               --prompt-text TEXT   Transcript of prompt audio (required with --prompt)
               --max-len N          Maximum generation steps (default: 200)
+              --no-stop            Disable stop head (generate exactly max-len steps)
 
             VoxCPM examples:
               fluidaudio tts "Hello, this is a test." --backend voxcpm --output test.wav
