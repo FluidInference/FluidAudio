@@ -315,6 +315,11 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         queue.sync { _tentativeSegments.count }
     }
 
+    /// Last segment (tentative or finalized). Checks tentative segments first, falls back to finalized if none found.
+    public var lastSegment: DiarizerSegment? {
+        queue.sync { _tentativeSegments.last ?? _finalizedSegments.last }
+    }
+
     /// Total duration of segments in seconds (finalized + tentative)
     public var speechDuration: Float {
         queue.sync {
@@ -399,24 +404,32 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         }
     }
 
+    /// Clear all tentative segments
+    /// - Parameter keepingCapacity: Whether to keep the reserved capacity in the tentative segments list.
     public func removeAllTentative(keepingCapacity: Bool = false) {
         queue.sync(flags: .barrier) {
             _tentativeSegments.removeAll(keepingCapacity: keepingCapacity)
         }
     }
 
+    /// Append a tentative segment
+    /// - Parameter segment: The segment to append
     public func appendTentative(_ segment: DiarizerSegment) {
         queue.sync(flags: .barrier) {
             _tentativeSegments.append(segment)
         }
     }
 
+    /// Append a finalized segment
+    /// - Parameter segment: The segment to append
     public func appendFinalized(_ segment: DiarizerSegment) {
         queue.sync(flags: .barrier) {
             _finalizedSegments.append(segment)
         }
     }
 
+    /// Append a segment, automatically detecting if it's finalized or tentative
+    /// - Parameter segment: The segment to append
     public func append(_ segment: DiarizerSegment) {
         queue.sync(flags: .barrier) {
             if segment.isFinalized {
@@ -427,6 +440,8 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         }
     }
 
+    /// Pop last tentative segment
+    /// - Returns: The popped segment
     @discardableResult
     public func popLastTentative() -> DiarizerSegment? {
         queue.sync(flags: .barrier) {
@@ -434,6 +449,8 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         }
     }
 
+    /// Pop last finalized segment
+    /// - Returns: The popped segment
     @discardableResult
     public func popLastFinalized() -> DiarizerSegment? {
         queue.sync(flags: .barrier) {
@@ -441,13 +458,26 @@ public final class DiarizerSpeaker: Identifiable, CustomStringConvertible {
         }
     }
 
+    /// Pop last tentative or finalized segment
+    /// - Parameter fromFinalized: Whether to pop the segment from the finalized segment list
+    /// - Returns: The popped segment
     @discardableResult
-    public func popLast(fromFinalized: Bool = true) -> DiarizerSegment? {
+    public func popLast(fromFinalized: Bool) -> DiarizerSegment? {
         queue.sync(flags: .barrier) {
             return
                 (fromFinalized
                 ? _finalizedSegments.popLast()
                 : _tentativeSegments.popLast())
+        }
+    }
+
+    /// Pop last segment. Pops the last tentative segment first. Falls back to the last finalized segment if no
+    /// tentative segments are found.
+    /// - Returns: The popped segment
+    @discardableResult
+    public func popLast() -> DiarizerSegment? {
+        queue.sync(flags: .barrier) {
+            return _tentativeSegments.popLast() ?? _finalizedSegments.popLast()
         }
     }
 }
@@ -655,12 +685,25 @@ public final class DiarizerTimeline {
 
     /// Number of tentative frames
     public var numTentativeFrames: Int {
-        queue.sync { _tentativePredictions.count / config.numSpeakers }
+        queue.sync { _tentativePredictions.count / speakerCapacity }
     }
 
     /// Speakers in the timeline
     public var speakers: [Int: DiarizerSpeaker] {
-        queue.sync { _speakers }
+        get { queue.sync { _speakers } }
+        set {
+            queue.sync(flags: .barrier) {
+                let maxSpeakers = speakerCapacity
+
+                _speakers = newValue.filter { key, _ in
+                    key >= 0 && key < maxSpeakers
+                }
+
+                for (index, speaker) in _speakers {
+                    speaker.index = index
+                }
+            }
+        }
     }
 
     public var hasSegments: Bool {
@@ -670,6 +713,11 @@ public final class DiarizerTimeline {
     /// Duration of finalized predictions in seconds
     public var finalizedDuration: Float {
         Float(numFinalizedFrames) * config.frameDurationSeconds
+    }
+
+    /// Maximum number of speakers
+    public var speakerCapacity: Int {
+        config.numSpeakers
     }
 
     private var _finalizedPredictions: [Float] = []
@@ -731,8 +779,8 @@ public final class DiarizerTimeline {
         finalizedPredictions: [Float],
         tentativePredictions: [Float]
     ) throws -> DiarizerTimelineUpdate {
-        let numFinalized = finalizedPredictions.count / config.numSpeakers
-        let numTentative = tentativePredictions.count / config.numSpeakers
+        let numFinalized = finalizedPredictions.count / speakerCapacity
+        let numTentative = tentativePredictions.count / speakerCapacity
 
         let chunk = DiarizerChunkResult(
             startFrame: self.numFinalizedFrames,
@@ -761,7 +809,7 @@ public final class DiarizerTimeline {
                 speaker.removeAllTentative(keepingCapacity: true)
             }
 
-            var confirmedCounts = [Int](repeating: 0, count: config.numSpeakers)
+            var confirmedCounts = [Int](repeating: 0, count: speakerCapacity)
             for (index, speaker) in _speakers {
                 confirmedCounts[index] = speaker.finalizedSegmentCount
             }
@@ -809,7 +857,7 @@ public final class DiarizerTimeline {
 
     private func finalizeLocked() {
         _finalizedPredictions.append(contentsOf: _tentativePredictions)
-        _numFinalizedFrames += _tentativePredictions.count / config.numSpeakers
+        _numFinalizedFrames += _tentativePredictions.count / speakerCapacity
         _tentativePredictions.removeAll()
         for speaker in _speakers.values {
             speaker.finalize(enforcingMinFramesOn: config.minFramesOn)
@@ -835,7 +883,7 @@ public final class DiarizerTimeline {
         _finalizedPredictions.removeAll()
         _tentativePredictions.removeAll()
         _numFinalizedFrames = 0
-        states = Array(repeating: .init(), count: config.numSpeakers)
+        states = Array(repeating: .init(), count: speakerCapacity)
 
         _speakers = _speakers.filter {
             condition($0.value)
@@ -850,7 +898,7 @@ public final class DiarizerTimeline {
         _finalizedPredictions.removeAll()
         _tentativePredictions.removeAll()
         _numFinalizedFrames = 0
-        states = Array(repeating: .init(), count: config.numSpeakers)
+        states = Array(repeating: .init(), count: speakerCapacity)
 
         if keepingSpeakers {
             for speaker in _speakers.values {
@@ -880,8 +928,8 @@ public final class DiarizerTimeline {
             _finalizedPredictions = finalizedPredictions
             _tentativePredictions = tentativePredictions
 
-            let numFinalizedFrames = finalizedPredictions.count / config.numSpeakers
-            let numTentativeFrames = tentativePredictions.count / config.numSpeakers
+            let numFinalizedFrames = finalizedPredictions.count / speakerCapacity
+            let numTentativeFrames = tentativePredictions.count / speakerCapacity
 
             updateSegments(
                 predictions: finalizedPredictions,
@@ -906,18 +954,23 @@ public final class DiarizerTimeline {
         }
     }
 
+    // MARK: Speaker Management
+
     /// Add a speaker to the timeline at a given slot, or update their name if one already exists
     /// - Parameters:
-    ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
     ///   - name: The speaker's name
+    ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
     /// - Returns: The upserted speaker if created successfully
     @discardableResult
-    public func upsertSpeaker(atIndex index: Int? = nil, name: String? = nil) -> DiarizerSpeaker? {
+    public func upsertSpeaker(
+        named name: String? = nil,
+        atIndex index: Int? = nil
+    ) -> DiarizerSpeaker? {
         queue.sync(flags: .barrier) {
-            let index = index ?? (0..<config.numSpeakers).first { _speakers[$0] == nil }
+            let index = index ?? (0..<speakerCapacity).first { _speakers[$0] == nil }
 
             // Ensure index is within bounds
-            guard let index, index >= 0, index < config.numSpeakers else { return nil }
+            guard let index, index >= 0, index < speakerCapacity else { return nil }
 
             if let speaker = _speakers[index] {
                 // Update old speaker
@@ -932,15 +985,79 @@ public final class DiarizerTimeline {
         }
     }
 
+    /// Add a speaker to the timeline at a given slot, or replace the old one if it's already occupied
+    /// - Parameters:
+    ///   - speaker: The new speaker to put in the slot.
+    ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
+    ///   - transferCurrentSegment: Whether the current segment should be moved from the old speaker to the new speaker
+    /// - Returns: The upserted speaker if created successfully
+    @discardableResult
+    public func upsertSpeaker(
+        _ speaker: DiarizerSpeaker,
+        atIndex index: Int? = nil,
+        transferCurrentSegment: Bool = true
+    ) -> DiarizerSpeaker? {
+        queue.sync(flags: .barrier) {
+            // Ensure index is within bounds
+            let index = index ?? (0..<speakerCapacity).first { _speakers[$0] == nil }
+
+            guard let index, index >= 0, index < speakerCapacity else {
+                return nil
+            }
+
+            if transferCurrentSegment,
+                states[index].isSpeaking,
+                let oldSpeaker = _speakers[index],
+                let oldStartFrame = oldSpeaker.lastSegment?.startFrame,
+                oldStartFrame >= states[index].startFrame,
+                let segment = oldSpeaker.popLast()
+            {
+                speaker.append(segment)
+            }
+
+            if transferCurrentSegment {
+                states[index] = StreamingState()
+            }
+
+            _speakers[index] = speaker
+            speaker.index = index
+
+            return speaker
+        }
+    }
+
+    /// Remove speaker at a given index
+    /// - Parameters:
+    ///   - index: Speaker index to remove in diarizer output.
+    ///   - clearCurrentSegment: Whether to clear the current segment if the speaker was still talking.
+    /// - Returns: The removed speaker.
+    @discardableResult
+    public func removeSpeaker(
+        atIndex index: Int,
+        clearCurrentSegment: Bool = false
+    ) -> DiarizerSpeaker? {
+        guard index >= 0, index < speakerCapacity else {
+            return nil
+        }
+
+        return queue.sync(flags: .barrier) {
+            if clearCurrentSegment {
+                states[index] = StreamingState()
+            }
+
+            return _speakers.removeValue(forKey: index)
+        }
+    }
+
     // MARK: - Query
 
     /// Get probability for a specific speaker at a finalized frame
     public func probability(speaker: Int, frame: Int) -> Float {
         queue.sync {
-            let frameOffset = (frame - _numFinalizedFrames) * config.numSpeakers + _finalizedPredictions.count
+            let frameOffset = (frame - _numFinalizedFrames) * speakerCapacity + _finalizedPredictions.count
             guard frameOffset >= 0,
                 frameOffset < _finalizedPredictions.count,
-                speaker < config.numSpeakers
+                speaker < speakerCapacity
             else { return .nan }
             return _finalizedPredictions[frameOffset + speaker]
         }
@@ -949,10 +1066,10 @@ public final class DiarizerTimeline {
     /// Get probability for a specific speaker at a tentative frame
     public func tentativeProbability(speaker: Int, frame: Int) -> Float {
         queue.sync {
-            let frameOffset = (frame - _numFinalizedFrames) * config.numSpeakers
+            let frameOffset = (frame - _numFinalizedFrames) * speakerCapacity
             guard frameOffset >= 0,
                 frameOffset < _tentativePredictions.count,
-                speaker < config.numSpeakers
+                speaker < speakerCapacity
             else { return .nan }
             return _tentativePredictions[frameOffset + speaker]
         }
@@ -969,7 +1086,7 @@ public final class DiarizerTimeline {
         guard numFrames > 0 || addTrailingTentative else { return }
 
         let frameOffset = _numFinalizedFrames
-        let numSpeakers = config.numSpeakers
+        let numSpeakers = speakerCapacity
         let onset = config.onsetThreshold
         let offset = config.offsetThreshold
         let padOnset = config.onsetPadFrames
@@ -1059,19 +1176,19 @@ public final class DiarizerTimeline {
 
     private func trimPredictions() {
         guard let maxStoredFrames = config.maxStoredFrames else { return }
-        let numToRemove = _finalizedPredictions.count - maxStoredFrames * config.numSpeakers
+        let numToRemove = _finalizedPredictions.count - maxStoredFrames * speakerCapacity
         if numToRemove > 0 {
             _finalizedPredictions.removeFirst(numToRemove)
         }
     }
 
     private func verifyPredictionCounts(finalized: borrowing [Float], tentative: borrowing [Float]) throws {
-        guard finalized.count.isMultiple(of: config.numSpeakers) else {
-            throw DiarizerTimelineError.misalignedFinalizedPredictions(finalized.count, config.numSpeakers)
+        guard finalized.count.isMultiple(of: speakerCapacity) else {
+            throw DiarizerTimelineError.misalignedFinalizedPredictions(finalized.count, speakerCapacity)
         }
 
-        guard tentative.count.isMultiple(of: config.numSpeakers) else {
-            throw DiarizerTimelineError.misalignedTentativePredictions(tentative.count, config.numSpeakers)
+        guard tentative.count.isMultiple(of: speakerCapacity) else {
+            throw DiarizerTimelineError.misalignedTentativePredictions(tentative.count, speakerCapacity)
         }
     }
 }
