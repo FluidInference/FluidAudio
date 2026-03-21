@@ -87,7 +87,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Snaply](https://snaply.ai)** |Free, Fast, 100% local AI dictation for Mac. |
 | **[OpenOats](https://github.com/yazinsai/OpenOats)** | Open-source meeting note-taker that transcribes conversations in real time and surfaces relevant notes from your knowledge base. Uses FluidAudio for local transcription. |
 | **[Enconvo](https://enconvo.com)** | AI Agent Launcher for macOS with voice input, live captions, and text-to-speech. Uses Parakeet ASR for local speech recognition. |
-| **[Meeting Transcriber](https://github.com/pasrom/meeting-transcriber)** | macOS menu bar app that auto-detects, records, and transcribes meetings (Teams, Zoom, Webex) with dual-track speaker diarization. Uses speaker diarization. |
+| **[Meeting Transcriber](https://github.com/pasrom/meeting-transcriber)** | macOS menu bar app that auto-detects, records, and transcribes meetings (Teams, Zoom, Webex) with dual-track speaker diarization. Uses Parakeet ASR, Qwen3-ASR, and speaker diarization. |
 | **[Hitoku Draft](https://hitoku.me/draft)** | A local, private, voice writing assistant on your macOS menu bar. Uses Parakeet ASR. |
 | **[Audite](https://github.com/zachatrocity/audite)** | macOS menu-bar app that records meetings and transcribes them locally into Markdown notes for Obsidian. Uses Parakeet ASR via FluidAudio on the Apple Neural Engine. |
 | **[Muesli](https://github.com/pHequals7/muesli)** | Native macOS dictation and meeting transcription with ~0.13s latency. Captures microphone and system audio with automatic speaker diarization. Uses Parakeet TDT and Qwen3 ASR. |
