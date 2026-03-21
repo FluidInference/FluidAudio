@@ -143,6 +143,7 @@ public struct TTS {
         var benchmarkMode = false
         var deEss = true
         var backend: TtsBackend = .kokoro
+        var speed: Float = 1.0
         var cloneVoicePath: String? = nil
         var voiceFilePath: String? = nil
         var saveVoicePath: String? = nil
@@ -200,9 +201,18 @@ public struct TTS {
                         backend = .kokoro
                     case "pocket", "pockettts":
                         backend = .pocketTts
+                    case "kitten-nano", "kittennano":
+                        backend = .kittenTts(.nano)
+                    case "kitten-mini", "kittenmini":
+                        backend = .kittenTts(.mini)
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro")
                     }
+                    i += 1
+                }
+            case "--speed":
+                if i + 1 < arguments.count, let val = Float(arguments[i + 1]) {
+                    speed = val
                     i += 1
                 }
             case "--auto-download":
@@ -254,11 +264,18 @@ public struct TTS {
             return
         }
 
-        if backend == .pocketTts {
+        if case .pocketTts = backend {
             await runPocketTts(
                 text: text, output: output, voice: voice, deEss: deEss,
                 metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
                 voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath)
+            return
+        }
+
+        if case .kittenTts(let variant) = backend {
+            await runKittenTts(
+                text: text, output: output, voice: voice, speed: speed,
+                variant: variant, deEss: deEss)
             return
         }
 
@@ -640,6 +657,61 @@ public struct TTS {
         }
     }
 
+    private static func runKittenTts(
+        text: String, output: String, voice: String, speed: Float,
+        variant: KittenTtsVariant, deEss: Bool
+    ) async {
+        do {
+            let tStart = Date()
+            let kittenVoice =
+                voice == TtsConstants.recommendedVoice
+                ? KittenTtsConstants.defaultVoice : voice
+            let manager = KittenTtsManager(variant: variant, defaultVoice: kittenVoice)
+
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+
+            let tSynth0 = Date()
+            let wav = try await manager.synthesize(
+                text: text, voice: kittenVoice, speed: speed, deEss: deEss)
+            let tSynth1 = Date()
+
+            let outURL = {
+                let expanded = (output as NSString).expandingTildeInPath
+                if expanded.hasPrefix("/") {
+                    return URL(fileURLWithPath: expanded)
+                }
+                let cwd = URL(
+                    fileURLWithPath: FileManager.default.currentDirectoryPath,
+                    isDirectory: true)
+                return cwd.appendingPathComponent(expanded)
+            }()
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try wav.write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let totalS = tSynth1.timeIntervalSince(tStart)
+            let sampleRate = Double(KittenTtsConstants.audioSampleRate)
+            let payload = max(0, wav.count - 44)
+            let audioSecs = Double(payload) / (sampleRate * 2.0)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+
+            logger.info("KittenTTS \(variant.rawValue) synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Total: \(String(format: "%.3f", totalS))s")
+            logger.info("  Output: \(outURL.path)")
+        } catch {
+            logger.error("KittenTTS synthesis failed: \(error)")
+        }
+    }
+
     private static func printUsage() {
         print(
             """
@@ -647,8 +719,9 @@ public struct TTS {
 
             Options:
               --output, -o         Output WAV path (default: output.wav)
-              --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS)
-              --backend            TTS backend: kokoro (default) or pocket
+              --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS, expr-voice-3-f for KittenTTS)
+              --backend            TTS backend: kokoro (default), pocket, kitten-nano, kitten-mini
+              --speed              Speech speed multiplier (KittenTTS Mini only, default: 1.0)
               --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)
