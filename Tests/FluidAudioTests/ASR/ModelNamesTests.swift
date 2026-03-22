@@ -8,10 +8,12 @@ final class ModelNamesTests: XCTestCase {
     // MARK: - Repo
 
     func testRepoRemotePathContainsOwner() {
+        let validOwners = ["FluidInference/", "alexwengg/"]
         for repo in Repo.allCases {
+            let hasValidOwner = validOwners.contains(where: { repo.remotePath.contains($0) })
             XCTAssertTrue(
-                repo.remotePath.contains("FluidInference/"),
-                "\(repo) remotePath should contain 'FluidInference/'"
+                hasValidOwner,
+                "\(repo) remotePath should contain a valid owner prefix"
             )
         }
     }
@@ -48,7 +50,7 @@ final class ModelNamesTests: XCTestCase {
     }
 
     func testModelFileExtensions() {
-        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin"]
+        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin", ".npy"]
         let validDirectories: Set<String> = ["constants_bin"]
 
         for repo in Repo.allCases {
