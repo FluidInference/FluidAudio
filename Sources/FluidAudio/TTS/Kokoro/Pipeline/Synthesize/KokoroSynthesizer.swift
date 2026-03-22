@@ -304,7 +304,22 @@ public struct KokoroSynthesizer {
             zeroFill: true
         )
 
+        // Source noise for newer Kokoro models
+        let maxSeconds = variant.maxDurationSeconds
+        let noiseLength = TtsConstants.audioSampleRate * maxSeconds
+        let sourceNoise = try await multiArrayPool.rent(
+            shape: [1, noiseLength, 9],
+            dataType: .float16,
+            zeroFill: false
+        )
+        let noisePointer = sourceNoise.dataPointer.bindMemory(to: UInt16.self, capacity: noiseLength * 9)
+        for i in 0..<(noiseLength * 9) {
+            let randomValue = Float.random(in: -1...1)
+            noisePointer[i] = Float16(randomValue).bitPattern
+        }
+
         func recycleModelArrays() async {
+            await multiArrayPool.recycle(sourceNoise, zeroFill: false)
             await multiArrayPool.recycle(phasesArray, zeroFill: true)
             await multiArrayPool.recycle(attentionMask, zeroFill: false)
             await multiArrayPool.recycle(inputArray, zeroFill: false)
@@ -338,6 +353,7 @@ public struct KokoroSynthesizer {
             "attention_mask": attentionMask,
             "ref_s": refStyle,
             "random_phases": phasesArray,
+            "source_noise": sourceNoise,
         ])
 
         let predictionStart = Date()
