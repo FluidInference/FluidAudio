@@ -190,6 +190,7 @@ public actor Qwen3TtsModelStore {
     public var isLoaded: Bool {
         prefillModel != nil && decodeModel != nil && cpPrefillModel != nil
             && cpDecodeModel != nil && audioDecoderModel != nil
+            && cpEmbeddings != nil && ttsEmbeddings != nil
     }
 
     // MARK: - Private Helpers
