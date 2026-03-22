@@ -45,8 +45,8 @@ public struct TtsModels: Sendable {
             .kokoro,
             modelNames: modelNames,
             directory: modelsDirectory,
-            // Only a small fraction of the model can run on ANE, and compile time takes a long time because of the complicated arch
-            computeUnits: .cpuAndGPU,
+            // v2 models converted with fp16 precision schedule BERT + generator ops to ANE (1.67x speedup)
+            computeUnits: .all,
             variant: variantFilter,
             progressHandler: progressHandler
         )

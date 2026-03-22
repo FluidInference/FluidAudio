@@ -466,9 +466,9 @@ public enum ModelNames {
             public var fileName: String {
                 switch self {
                 case .fiveSecond:
-                    return "kokoro_21_5s.mlmodelc"
+                    return "kokoro_21_5s_v2.mlmodelc"
                 case .fifteenSecond:
-                    return "kokoro_21_15s.mlmodelc"
+                    return "kokoro_21_15s_v2.mlmodelc"
                 }
             }
 
