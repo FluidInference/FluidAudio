@@ -10,7 +10,7 @@ Encoder-decoder automatic speech recognition using [Qwen3-ASR-0.6B](https://hugg
 
 **CoreML Model**: [FluidInference/qwen3-asr-0.6b-coreml](https://huggingface.co/FluidInference/qwen3-asr-0.6b-coreml)
 
-Only the **f32** variant is recommended. See [Why not int8?](#why-not-int8) below.
+Both **f32** and **int8** variants use the v2 ANE-optimized audio encoder. See [Model Variants](#model-variants) for RAM/speed tradeoffs and [Why not int8?](#why-not-int8) for decoder quantization details.
 
 ## Architecture
 
@@ -87,10 +87,36 @@ See [Benchmarks.md](Benchmarks.md#qwen3-asr-experimental) for performance result
 
 | Component | Description |
 |-----------|-------------|
-| `qwen3_asr_audio_encoder.mlmodelc` | Audio feature extraction |
+| `qwen3_asr_audio_encoder_v2.mlmodelc` | Audio feature extraction (ANE-optimized, Conv2d + einsum) |
 | `qwen3_asr_decoder_stateful.mlmodelc` | Autoregressive decoder with KV-cache |
 | `qwen3_asr_embeddings.bin` | Token embedding weights (float16) |
 | `vocab.json` | Tokenizer vocabulary (151,936 tokens) |
+
+The original `qwen3_asr_audio_encoder.mlmodelc` (v1) is still available on HuggingFace for backward compatibility.
+
+## Model Variants
+
+Benchmarked on 10 LibriSpeech test-clean files (~70s total audio), M4 Max:
+
+| Variant | Encoder RAM | Decoder RAM | Embeds RAM | **Total RAM** | Overall RTFx | WER |
+|---------|------------|-------------|-----------|-----------|-------------|-----|
+| f32 (v2 encoder) | 100 MB | 988 MB | 391 MB | ~1480 MB | 3.1x | 0.7% |
+| int8 (v2 encoder) | 100 MB | 330 MB | 296 MB | **728 MB** | 2.8x | 0.7% |
+
+All variants produce identical transcriptions. The v2 encoder reduces encoder RAM from ~400 MB to 100 MB via Conv2d + einsum rewrite with fp16 precision.
+
+### V2 Audio Encoder (ANE-Optimized)
+
+The v2 encoder rewrites the 18 transformer layers for 100% Apple Neural Engine scheduling:
+
+- `nn.Linear` → `nn.Conv2d(kernel_size=1)` for all projections
+- Tensor layout changed from `(B, S, C)` to `(B, C, 1, S)`
+- Per-head einsum attention (14 heads × 64 channels)
+- Manual LayerNorm on channel dimension
+
+**Isolated encoder speedup:** 1.53x on M4 Max (11.61ms → 7.60ms median). End-to-end pipeline improvement is modest since the 28-layer autoregressive decoder dominates total inference time.
+
+Int8 quantization of the v2 encoder was tested: same WER, same RTFx, same RAM (encoder is already small at 100 MB). Only benefit is half the download size (179 MB vs 356 MB on disk).
 
 ## CoreML Limitations
 

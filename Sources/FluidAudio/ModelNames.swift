@@ -366,7 +366,7 @@ public enum ModelNames {
 
     /// Qwen3-ASR model names
     public enum Qwen3ASR {
-        public static let audioEncoderFile = "qwen3_asr_audio_encoder.mlmodelc"
+        public static let audioEncoderFile = "qwen3_asr_audio_encoder_v2.mlmodelc"
         public static let embeddingFile = "qwen3_asr_embedding.mlmodelc"
         public static let decoderStatefulFile = "qwen3_asr_decoder_stateful.mlmodelc"
         public static let decoderFullFile = "qwen3_asr_decoder_full.mlmodelc"
