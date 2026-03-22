@@ -17,6 +17,8 @@ public enum Repo: String, CaseIterable {
     case pocketTts = "FluidInference/pocket-tts-coreml"
     case qwen3Asr = "FluidInference/qwen3-asr-0.6b-coreml/f32"
     case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
+    case kittenTtsNano = "alexwengg/kittentts-coreml/nano"
+    case kittenTtsMini = "alexwengg/kittentts-coreml/mini"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -51,6 +53,10 @@ public enum Repo: String, CaseIterable {
             return "qwen3-asr-0.6b-coreml/f32"
         case .qwen3AsrInt8:
             return "qwen3-asr-0.6b-coreml/int8"
+        case .kittenTtsNano:
+            return "kittentts-coreml/nano"
+        case .kittenTtsMini:
+            return "kittentts-coreml/mini"
         }
     }
 
@@ -69,6 +75,8 @@ public enum Repo: String, CaseIterable {
             return "FluidInference/ls-eend-coreml"
         case .qwen3Asr, .qwen3AsrInt8:
             return "FluidInference/qwen3-asr-0.6b-coreml"
+        case .kittenTtsNano, .kittenTtsMini:
+            return "alexwengg/kittentts-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -87,6 +95,10 @@ public enum Repo: String, CaseIterable {
             return "f32"
         case .qwen3AsrInt8:
             return "int8"
+        case .kittenTtsNano:
+            return "nano"
+        case .kittenTtsMini:
+            return "mini"
         default:
             return nil
         }
@@ -109,6 +121,10 @@ public enum Repo: String, CaseIterable {
             return "ls-eend"
         case .pocketTts:
             return "pocket-tts"
+        case .kittenTtsNano:
+            return "kittentts-coreml/nano"
+        case .kittenTtsMini:
+            return "kittentts-coreml/mini"
         default:
             return name
         }
@@ -454,6 +470,77 @@ public enum ModelNames {
         ]
     }
 
+    /// KittenTTS model names (Nano 15M / Mini 80M StyleTTS2-based TTS)
+    public enum KittenTTS {
+
+        /// KittenTTS model duration variants.
+        public enum Variant: CaseIterable, Sendable {
+            /// 5-second model (70 max tokens).
+            case fiveSecond
+            /// 10-second model (140 max tokens).
+            case tenSecond
+
+            /// Nano model bundle filename for this variant.
+            public func nanoFileName() -> String {
+                switch self {
+                case .fiveSecond:
+                    return "kittentts_5s.mlmodelc"
+                case .tenSecond:
+                    return "kittentts_10s.mlmodelc"
+                }
+            }
+
+            /// Mini model bundle filename for this variant.
+            public func miniFileName() -> String {
+                switch self {
+                case .fiveSecond:
+                    return "kittentts_mini_5s.mlmodelc"
+                case .tenSecond:
+                    return "kittentts_mini_10s.mlmodelc"
+                }
+            }
+
+            /// Maximum number of phoneme tokens for this variant.
+            public var maxTokens: Int {
+                switch self {
+                case .fiveSecond:
+                    return 70
+                case .tenSecond:
+                    return 140
+                }
+            }
+        }
+
+        /// Preferred variant for general-purpose synthesis.
+        public static let defaultVariant: Variant = .tenSecond
+
+        /// Voice embeddings directory name.
+        public static let voicesDir = "voices"
+
+        /// Available voice identifiers.
+        public static let availableVoices: [String] = [
+            "expr-voice-2-m", "expr-voice-2-f",
+            "expr-voice-3-m", "expr-voice-3-f",
+            "expr-voice-4-m", "expr-voice-4-f",
+            "expr-voice-5-m", "expr-voice-5-f",
+        ]
+
+        /// Default voice for synthesis.
+        public static let defaultVoice = "expr-voice-3-f"
+
+        /// All Nano model bundles required by the downloader.
+        public static var nanoRequiredModels: Set<String> {
+            Set(Variant.allCases.map { $0.nanoFileName() })
+                .union([voicesDir])
+        }
+
+        /// All Mini model bundles required by the downloader.
+        public static var miniRequiredModels: Set<String> {
+            Set(Variant.allCases.map { $0.miniFileName() })
+                .union([voicesDir])
+        }
+    }
+
     /// TTS model names
     public enum TTS {
 
@@ -540,6 +627,10 @@ public enum ModelNames {
             return ModelNames.LSEEND.requiredModels
         case .qwen3Asr, .qwen3AsrInt8:
             return ModelNames.Qwen3ASR.requiredModelsFull
+        case .kittenTtsNano:
+            return ModelNames.KittenTTS.nanoRequiredModels
+        case .kittenTtsMini:
+            return ModelNames.KittenTTS.miniRequiredModels
         }
     }
 }
