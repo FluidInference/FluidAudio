@@ -72,11 +72,8 @@ public struct Qwen3TtsSynthesizer {
 
         logger.info("Qwen3-TTS synthesizing: '\(text)'")
 
-        // Get token IDs (either provided or placeholder)
-        let textTokens: [Int]
-        if let provided = tokenIds {
-            textTokens = provided
-        } else {
+        // Get token IDs (must be provided externally)
+        guard let textTokens = tokenIds else {
             throw TTSError.processingFailed(
                 "Qwen3-TTS requires pre-tokenized input. Please provide tokenIds.")
         }
@@ -135,7 +132,7 @@ public struct Qwen3TtsSynthesizer {
         }
 
         // Strip leading/trailing silence (sampling can produce silent codec frames)
-        var trimmedSamples = trimSilence(frameTrimmed, sampleRate: Qwen3TtsConstants.audioSampleRate)
+        let trimmedSamples = trimSilence(frameTrimmed, sampleRate: Qwen3TtsConstants.audioSampleRate)
 
         // 6. Audio post-processing disabled — was causing muffled output
         // (de-essing at -4dB + smoothing low-pass at 10kHz was too aggressive)
@@ -556,17 +553,23 @@ public struct Qwen3TtsSynthesizer {
         // For slice i: offset = i * 1 * 2048
         let vocabSize = 2048
         let sliceOffset = sliceIndex * vocabSize
+        let count = allLogits.count
 
         var maxIdx = 0
         var maxVal: Float = -.infinity
 
-        let count = allLogits.count
-        let rawPtr = allLogits.dataPointer.bindMemory(to: Float.self, capacity: count)
-
         for i in 0..<vocabSize {
             let idx = sliceOffset + i
             guard idx < count else { break }
-            let val = rawPtr[idx]
+            let val: Float
+            switch allLogits.dataType {
+            case .float16:
+                let ptr = allLogits.dataPointer.bindMemory(to: UInt16.self, capacity: count)
+                val = Float(Float16(bitPattern: ptr[idx]))
+            default:
+                let ptr = allLogits.dataPointer.bindMemory(to: Float.self, capacity: count)
+                val = ptr[idx]
+            }
             if val > maxVal {
                 maxVal = val
                 maxIdx = i
@@ -590,14 +593,22 @@ public struct Qwen3TtsSynthesizer {
         let vocabSize = 2048
         let sliceOffset = sliceIndex * vocabSize
         let count = allLogits.count
-        let rawPtr = allLogits.dataPointer.bindMemory(to: Float.self, capacity: count)
 
         // Extract logits for this slice and apply temperature
         var logits = [Float](repeating: -.infinity, count: vocabSize)
         for i in 0..<vocabSize {
             let idx = sliceOffset + i
             guard idx < count else { break }
-            logits[i] = rawPtr[idx] / temperature
+            let raw: Float
+            switch allLogits.dataType {
+            case .float16:
+                let ptr = allLogits.dataPointer.bindMemory(to: UInt16.self, capacity: count)
+                raw = Float(Float16(bitPattern: ptr[idx]))
+            default:
+                let ptr = allLogits.dataPointer.bindMemory(to: Float.self, capacity: count)
+                raw = ptr[idx]
+            }
+            logits[i] = raw / temperature
         }
 
         // Top-k filtering: keep only the top-k values

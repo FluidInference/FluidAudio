@@ -118,7 +118,8 @@ public actor Qwen3TtsManager {
         modelStore
     }
 
-    public func cleanup() {
+    public func cleanup() async {
+        await modelStore.reset()
         isInitialized = false
     }
 }

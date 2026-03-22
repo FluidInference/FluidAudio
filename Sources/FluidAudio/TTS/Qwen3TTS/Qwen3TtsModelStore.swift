@@ -13,7 +13,7 @@ import OSLog
 /// - CP Embeddings (cp_embeddings.npy) [15, 2048, 1024]
 public actor Qwen3TtsModelStore {
 
-    private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "Qwen3TtsModelStore")
+    private let logger = AppLogger(category: "Qwen3TtsModelStore")
 
     private var prefillModel: MLModel?
     private var decodeModel: MLModel?
@@ -171,6 +171,19 @@ public actor Qwen3TtsModelStore {
             throw TTSError.modelNotFound("Qwen3-TTS repository not loaded")
         }
         return dir
+    }
+
+    /// Reset all loaded models and embeddings, freeing memory.
+    public func reset() {
+        prefillModel = nil
+        decodeModel = nil
+        cpPrefillModel = nil
+        cpDecodeModel = nil
+        audioDecoderModel = nil
+        speakerEmbedding = nil
+        ttsEmbeddings = nil
+        cpEmbeddings = nil
+        repoDirectory = nil
     }
 
     /// Check if models are loaded.
