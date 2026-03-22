@@ -4,7 +4,7 @@
 
 Qwen3-TTS is an LLM-based multilingual TTS backend built on the Qwen3 language model. It supports 10 languages including English and Chinese, producing natural speech at 24 kHz via a 4-stage CoreML pipeline.
 
-> **Beta.** Qwen3-TTS does not yet include a built-in text tokenizer. Input must be pre-tokenized externally (e.g., via the Python `qwen-tts` package).
+> **Beta.** Qwen3-TTS is in early beta. It does not yet include a built-in text tokenizer — input must be pre-tokenized externally (e.g., via the Python `qwen-tts` package). If you run into issues or have feedback, please open an issue. We'd love help testing across languages and hardware configs.
 
 ## Quick Start
 
