@@ -83,7 +83,8 @@ public struct OfflineDiarizerModels: Sendable {
 
     public static func load(
         from directory: URL? = nil,
-        configuration: MLModelConfiguration? = nil
+        configuration: MLModelConfiguration? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> OfflineDiarizerModels {
         let modelsDirectory = directory ?? defaultModelsDirectory()
         let logger = Self.logger
@@ -103,7 +104,8 @@ public struct OfflineDiarizerModels: Sendable {
             modelNames: segmentationAndEmbeddingNames,
             directory: modelsDirectory,
             computeUnits: inferenceComputeUnits,
-            variant: "offline"
+            variant: "offline",
+            progressHandler: progressHandler
         )
 
         guard let segmentation = segmentationEmbeddingModels[ModelNames.OfflineDiarizer.segmentationPath] else {
@@ -122,7 +124,8 @@ public struct OfflineDiarizerModels: Sendable {
             modelNames: [ModelNames.OfflineDiarizer.fbankPath],
             directory: modelsDirectory,
             computeUnits: fbankComputeUnits,
-            variant: "offline"
+            variant: "offline",
+            progressHandler: progressHandler
         )
         guard let fbank = fbankModels[ModelNames.OfflineDiarizer.fbankPath] else {
             throw OfflineDiarizationError.modelNotLoaded(ModelNames.OfflineDiarizer.fbank)

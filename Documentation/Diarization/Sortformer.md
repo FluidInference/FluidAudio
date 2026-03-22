@@ -9,21 +9,12 @@ Sortformer is an end-to-end neural speaker diarization model that answers "who s
 - 4 fixed speaker slots (no clustering required)
 - ~80ms frame resolution (8x subsampling of 10ms mel frames)
 - CoreML-optimized for Apple Silicon
+- Licensed under [NVIDIA Open Model License](https://developer.nvidia.com/open-model-license) (no restrictions)
 
-## Sortformer vs DiarizerManager (Pyannote-based)
-
-**Sortformer** handles noisy environments and overlapping speakers well, but is limited to 4 speakers (for now). It also misses quiet speech as it's trained to ignore background conversations. The most common source of error is missed speech.
-
-**DiarizerManager** works better when you have more than 4 speakers, but struggles with background noise, background conversations, and similar-sounding speakers. The most common source of error is incorrect labeling.
-
-| Environment | Sortformer | DiarizerManager |
-|-------------|:----------:|:---------------:|
-| Clean/silent room | Best | Good |
-| Background noise | Best | Poor |
-| Speech from another room | Poor | Good |
-| High overlap | Best | Good |
-| More than 4 speakers | No | Yes |
-| Remembering speakers across meetings | No | Yes |
+**Limitations:**
+- 4 speaker maximum — cannot handle 5+ speakers (will miss or merge them)
+- Does not remember speakers across recordings (no persistent speaker embeddings)
+- May miss quiet or distant speech (trained to ignore background conversations)
 
 ## Production Notes
 
@@ -47,7 +38,7 @@ Audio (16kHz) → Mel Spectrogram → CoreML Model → Speaker Probabilities
 
 The pipeline consists of:
 
-1. **Mel Spectrogram** (`NeMoMelSpectrogram`): Converts raw audio to 128-bin mel features
+1. **Mel Spectrogram** (`AudioMelSpectrogram`): Converts raw audio to 128-bin mel features
 2. **CoreML Model** (`DiarizerInference`): Combined encoder + attention + head
 3. **Streaming State** (`SortformerStreamingState`): Maintains speaker cache and FIFO queue
 4. **Post-processing** (`SortformerTimeline`): Converts probabilities to speaker segments
@@ -88,8 +79,8 @@ FIFO Queue Role:
 | Config | `fifoLen` | Effect |
 |--------|-----------|--------|
 | Default | 40 | Smaller memory, faster compression cycles |
-| NVIDIA Low | 188 | Larger context before compression |
-| NVIDIA High | 40 | Same as default |
+| Balanced | 188 | Larger context before compression |
+| High Context | 40 | Same as default |
 
 When `fifoLen + newChunkFrames > fifoLen` capacity, frames are popped from FIFO and either:
 1. Added to speaker cache (if speaker was active)
@@ -114,8 +105,8 @@ Chunk with Context:
 | Config | `rightContext` | Look-ahead | Latency Impact |
 |--------|----------------|------------|----------------|
 | Default | 7 | 7 × 80ms = 560ms | Low latency |
-| NVIDIA Low | 7 | 7 × 80ms = 560ms | Low latency |
-| NVIDIA High | 40 | 40 × 80ms = 3.2s | High latency, better quality |
+| Balanced | 7 | 7 × 80ms = 560ms | Low latency |
+| High Context | 40 | 40 × 80ms = 3.2s | High latency, better quality |
 
 **Why Right Context Matters:**
 
@@ -151,7 +142,7 @@ Default config:
   = 13 × 8 × 0.01
   = 1.04 seconds
 
-NVIDIA High Latency config:
+High Context config:
   = (340 + 40) × 8 × 160 / 16000
   = 380 × 8 × 0.01
   = 30.4 seconds
@@ -200,11 +191,11 @@ Defines streaming parameters that must match the CoreML model's static shapes:
 // Default (~1.04s latency, lowest latency)
 SortformerConfig.default
 
-// NVIDIA High Latency (30.4s latency, best quality)
-SortformerConfig.nvidiaHighLatency
+// Balanced (1.04s latency, best quality on AMI SDM)
+SortformerConfig.balancedV2_1
 
-// NVIDIA Low Latency (1.04s latency)
-SortformerConfig.nvidiaLowLatency
+// High Context (30.4s latency, most context)
+SortformerConfig.highContextV2_1
 ```
 
 ### Pipeline.swift
@@ -212,32 +203,30 @@ SortformerConfig.nvidiaLowLatency
 Main entry point for diarization:
 
 ```swift
-let diarizer = Pipeline()
-
-// Initialize with HuggingFace models
-try await diarizer.initialize(mainModelPath: modelURL)
+let diarizer = SortformerDiarizer(config: .default)
+let models = try await SortformerModels.loadFromHuggingFace(config: .default)
+diarizer.initialize(models: models)
 
 // Streaming mode
 for audioChunk in audioStream {
-    if let result = try diarizer.processSamples(audioChunk) {
-        // Handle speaker probabilities
-        for frame in 0..<result.frameCount {
-            for speaker in 0..<4 {
-                let prob = result.getSpeakerPrediction(speaker: speaker, frame: frame)
-            }
+    if let update = try diarizer.process(samples: audioChunk, sourceSampleRate: 16_000) {
+        for segment in update.finalizedSegments {
+            print(segment)
         }
     }
 }
 
-// Or process complete file
-let timeline = try diarizer.processComplete(audioSamples)
+// Or process a complete buffer / file
+let timeline = try diarizer.processComplete(audioSamples, sourceSampleRate: 16_000)
+let fileTimeline = try diarizer.processComplete(audioFileURL: audioURL)
 ```
 
 **Key Methods:**
 - `addAudio(_:)` - Buffer audio samples
 - `process()` - Run inference on buffered audio
-- `processSamples(_:)` - Convenience method combining add + process
-- `processComplete(_:)` - Batch process entire audio file
+- `process(samples:sourceSampleRate:)` - Convenience method combining add + process
+- `processComplete(_:sourceSampleRate:keepingEnrolledSpeakers:...)` - Batch process a full sample buffer
+- `processComplete(audioFileURL:keepingEnrolledSpeakers:...)` - Batch process a file with automatic resampling
 
 ### DiarizerInference.swift
 
@@ -386,9 +375,11 @@ public struct SortformerSegment {
 
 | Config | Chunk Size | Latency | Quality |
 |--------|------------|---------|---------|
-| `default` | 6 frames | ~1.04s | Good |
-| `nvidiaLowLatency` | 6 frames | ~1.04s | Better |
-| `nvidiaHighLatency` | 340 frames | ~30.4s | Best |
+| `default` / `fastV2_1` | 6 frames | ~1.04s | Good |
+| `balancedV2_1` | 6 frames | ~1.04s | Best (20.6% DER on AMI SDM) |
+| `highContextV2_1` | 340 frames | ~30.4s | Good (31.7% DER on AMI SDM) |
+
+> **Note:** v2.1 variants may degrade when many speakers are talking simultaneously. v2 variants (`fastV2`, `balancedV2`, `highContextV2`) are available as alternatives.
 
 Latency is determined by:
 - `chunkLen * subsamplingFactor * melStride / sampleRate`
@@ -407,10 +398,10 @@ This preserves the most informative historical context while bounding memory usa
 
 ## Post-Processing
 
-`SortformerPostProcessingConfig` controls segment extraction:
+`DiarizerTimelineConfig` controls segment extraction:
 
 ```swift
-let config = SortformerPostProcessingConfig(
+let config = DiarizerTimelineConfig(
     onsetThreshold: 0.5,    // Probability to start speech
     offsetThreshold: 0.5,   // Probability to end speech
     minDurationOn: 0.25,    // Min speech segment (seconds)
@@ -425,8 +416,8 @@ Three CoreML models are available on HuggingFace:
 | Variant | File | Config |
 |---------|------|--------|
 | Default | `Sortformer.mlmodelc` | `SortformerConfig.default` |
-| NVIDIA Low | `SortformerNvidiaLow.mlmodelc` | `SortformerConfig.nvidiaLowLatency` |
-| NVIDIA High | `SortformerNvidiaHigh.mlmodelc` | `SortformerConfig.nvidiaHighLatency` |
+| Balanced | `SortformerNvidiaLow.mlmodelc` | `SortformerConfig.balancedV2_1` |
+| High Context | `SortformerNvidiaHigh.mlmodelc` | `SortformerConfig.highContextV2_1` |
 
 **Important:** Each model has baked-in static shapes. You must use the matching configuration.
 
@@ -437,12 +428,15 @@ Three CoreML models are available on HuggingFace:
 ```swift
 let diarizer = SortformerDiarizer(config: .default)
 let models = try await SortformerModels.loadFromHuggingFace(config: .default)
-try await diarizer.initialize(models: models)
+diarizer.initialize(models: models)
 
 // Process audio in chunks (e.g., from microphone)
 audioEngine.installTap { buffer in
-    let samples = buffer.floatChannelData![0]
-    if let result = try? diarizer.processSamples(Array(samples)) {
+    let samples = Array(UnsafeBufferPointer(
+        start: buffer.floatChannelData![0],
+        count: Int(buffer.frameLength)
+    ))
+    if let result = try? diarizer.process(samples: samples, sourceSampleRate: buffer.format.sampleRate) {
         // Update UI with speaker probabilities
         updateSpeakerDisplay(result)
 
@@ -455,19 +449,55 @@ audioEngine.installTap { buffer in
 ### Batch Processing
 
 ```swift
-let diarizer = SortformerDiarizer(config: .nvidiaHighLatency)
-let models = try await SortformerModels.loadFromHuggingFace(config: .default)
-try await diarizer.initialize(models: models)
+let diarizer = SortformerDiarizer(config: .highContextV2_1)
+let models = try await SortformerModels.loadFromHuggingFace(config: .highContextV2_1)
+diarizer.initialize(models: models)
 
-let timeline = try diarizer.processComplete(audioSamples)
+let timeline = try diarizer.processComplete(audioSamples, sourceSampleRate: 16_000)
+
+// Or let Sortformer load and resample a file directly
+let fileTimeline = try diarizer.processComplete(audioFileURL: audioURL)
 
 // Get segments per speaker
-for (speakerIndex, segments) in timeline.segments.enumerated() {
-    for segment in segments {
-        print("Speaker \(speakerIndex): \(segment.startTime)s - \(segment.endTime)s")
+for (index, speaker) in timeline.speakers {
+    for segment in speaker.finalizedSegments {
+        print("Speaker \(index): \(segment.startTime)s - \(segment.endTime)s")
     }
 }
 ```
+
+### Speaker Enrollment
+
+Use speaker enrollment to warm Sortformer with known speakers before live audio starts. Enrollment preserves the speaker cache / FIFO state, resets the visible timeline, and keeps the speaker name in the `DiarizerTimeline`.
+
+```swift
+let speaker = try diarizer.enrollSpeaker(
+    withAudio: enrollmentAudio,
+    sourceSampleRate: 16_000,
+    named: "Alice",
+    overwritingAssignedSpeakerName: false
+)
+
+let liveTimeline = try diarizer.processComplete(
+    meetingAudio,
+    sourceSampleRate: 16_000,
+    keepingEnrolledSpeakers: true
+)
+```
+
+Notes:
+- Enrollment is per diarizer instance and does not create a persistent speaker database.
+- Enrollment improves live identity continuity, but it is still less reliable than the WeSpeaker / Pyannote speaker database.
+- Sortformer still uses chronological speaker slots, and it is still limited to four unique speakers.
+- Use `overwritingAssignedSpeakerName: false` if you want enrollment to fail instead of replacing the name on an already-named slot.
+
+### Enrollment Strengths (Integration Feedback)
+
+In real-world 4-speaker integration testing, Sortformer's auto-mapping is consistently strong: all 4 speakers — including two with very similar voices — map with high confidence. This is the key advantage over LS-EEND for pre-enrolled speaker workflows.
+
+**Why Sortformer wins here:** Sortformer was trained on a large volume of real-world data, which gives it better generalization for speaker disambiguation. It can utilize past context extremely well through the speaker cache and FIFO mechanism.
+
+**LS-EEND comparison:** LS-EEND enrollment can fail when two speakers are too similar, rejecting the 4th speaker due to slot collision. Sortformer does not have this problem because its slot assignment mechanism is more tolerant of similar voices. See [LS-EEND Enrollment Limitations](LS-EEND.md#enrollment-limitations-integration-feedback) for details.
 
 ## References
 

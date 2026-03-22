@@ -1,14 +1,22 @@
 @preconcurrency import CoreML
-import FluidAudio
 import Foundation
 
 extension PocketTtsSynthesizer {
 
     /// Mutable KV cache state passed through conditioning and generation steps.
+    ///
+    /// One cache per transformer layer stores the K (key) and V (value) projections
+    /// for every processed token. This avoids recomputing K/V for past tokens —
+    /// each new step only computes its own K/V, then reads all cached K/V via attention.
     struct KVCacheState {
-        /// 6 KV cache arrays, each [2, 1, 200, 16, 64].
+        /// 6 KV cache arrays, each shaped `[2, 1, kvCacheMaxLen, 16, 64]`:
+        ///  - `2`: K and V tensors (index 0 = keys, index 1 = values)
+        ///  - `1`: batch size
+        ///  - `kvCacheMaxLen` (512): pre-allocated position slots
+        ///  - `16`: attention heads
+        ///  - `64`: dims per head (16 × 64 = 1024 total)
         var caches: [MLMultiArray]
-        /// 6 position counters, each [1].
+        /// 6 position counters (one per layer) tracking the next write slot in the cache.
         var positions: [MLMultiArray]
     }
 
@@ -40,6 +48,11 @@ extension PocketTtsSynthesizer {
     }
 
     /// Run the conditioning step model for a single token, updating the KV cache in place.
+    ///
+    /// `cond_step` and `flowlm_step` share the same transformer weights. This function
+    /// runs the transformer in "prefill mode": it processes one conditioning token
+    /// (voice embedding or text embedding), computes K/V projections, and writes them
+    /// into the cache at the current position. No audio is produced.
     static func runCondStep(
         conditioning: MLMultiArray,
         state: inout KVCacheState,
@@ -75,7 +88,10 @@ extension PocketTtsSynthesizer {
 
     /// Prefill the KV cache with voice and text conditioning tokens.
     ///
-    /// Processes voice tokens first, then text tokens (critical ordering).
+    /// Processes voice tokens first, then text tokens. This ordering is critical —
+    /// the model was trained with voice conditioning before text, so reversing it
+    /// produces garbage. Each chunk gets a fresh cache because the 512-position
+    /// limit can't hold multiple chunks' worth of context.
     static func prefillKVCache(
         voiceData: PocketTtsVoiceData,
         textEmbeddings: [[Float]],
@@ -107,7 +123,9 @@ extension PocketTtsSynthesizer {
         return state
     }
 
-    /// Create a [1, 1, 1024] MLMultiArray from a float slice.
+    /// Create a `[1, 1, 1024]` MLMultiArray from a float slice.
+    ///
+    /// Shape: batch=1, sequence_length=1 (one token at a time), embedding_dim=1024.
     private static func createConditioningToken(
         from source: [Float], offset: Int, dim: Int
     ) throws -> MLMultiArray {
@@ -122,6 +140,12 @@ extension PocketTtsSynthesizer {
     }
 
     /// Run the generation step model, returning transformer output and EOS logit.
+    ///
+    /// Same transformer as `cond_step`, now in "generate mode". Takes the previous
+    /// audio latent (or NaN for BOS), attends to all cached K/V from conditioning
+    /// and prior generation steps, and produces a 1024-d hidden state (for flow_decoder)
+    /// plus an EOS logit indicating whether the model is done speaking.
+    /// Also writes this step's own K/V into the cache for future steps.
     static func runFlowLMStep(
         sequence: MLMultiArray,
         bosEmb: MLMultiArray,

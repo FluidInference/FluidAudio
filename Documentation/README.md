@@ -15,8 +15,10 @@
 
 ## Diarization
 - [Getting Started](Diarization/GettingStarted.md)
-- [Speaker Manager](Diarization/SpeakerManager.md)
+- [LS-EEND](Diarization/LS-EEND.md)
 - [Sortformer](Diarization/Sortformer.md)
+- [Speaker Manager](Diarization/SpeakerManager.md)
+- [DiarizerTimeline](Diarization/DiarizerTimeline.md)
 - [Investigation Report](Diarization/InvestigationReport.md)
 
 ## VAD
@@ -24,9 +26,9 @@
 - [Segmentation](VAD/Segmentation.md)
 
 ## TTS
-- [Getting Started](TTS/README.md)
+- [Kokoro](TTS/Kokoro.md)
+- [PocketTTS](TTS/PocketTTS.md)
 - [SSML](TTS/SSML.md)
-- [eSpeak Framework](TTS/EspeakFramework.md)
 
 ## Guides
 - [Audio Conversion](Guides/AudioConversion.md)

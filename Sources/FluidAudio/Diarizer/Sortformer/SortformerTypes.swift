@@ -7,8 +7,11 @@ import Foundation
 /// Based on NVIDIA's Streaming Sortformer 4-speaker model.
 /// Reference: NeMo sortformer_modules.py
 public struct SortformerConfig: Sendable {
+    public typealias ModelVariant = ModelNames.Sortformer.Variant
 
     // MARK: - Model Architecture
+
+    public let modelVariant: ModelVariant?
 
     /// Number of speaker slots (fixed at 4 for current model)
     public let numSpeakers: Int = 4
@@ -118,18 +121,34 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 31
     )
 
-    /// NVIDIA's 30.4s latency configuration
-    public static let nvidiaHighLatency = SortformerConfig(
-        chunkLen: 340,
+    /// Fast config with Sortformer v2 weights (~1.04s latency, smallest context).
+    /// May handle high-speaker-count scenarios better than v2.1 (v2.1 can degrade when many speakers overlap).
+    public static let `fastV2` = SortformerConfig(
+        modelVariant: .fastV2,
+        chunkLen: 6,
         chunkLeftContext: 1,
-        chunkRightContext: 40,
+        chunkRightContext: 7,
         fifoLen: 40,
         spkcacheLen: 188,
-        spkcacheUpdatePeriod: 300
+        spkcacheUpdatePeriod: 31
     )
 
-    /// NVIDIA's 1.04s latency configuration (20.57% DER on AMI SDM)
-    public static let nvidiaLowLatency = SortformerConfig(
+    /// Fast config with Sortformer v2.1 weights (~1.04s latency, smallest context).
+    /// - Note: v2.1 may degrade when many speakers are talking simultaneously.
+    public static let `fastV2_1` = SortformerConfig(
+        modelVariant: .fastV2_1,
+        chunkLen: 6,
+        chunkLeftContext: 1,
+        chunkRightContext: 7,
+        fifoLen: 40,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 31
+    )
+
+    /// Balanced config with Sortformer v2 weights (~1.04s latency, larger FIFO for better quality).
+    /// 20.57% DER on AMI SDM. May handle high-speaker-count scenarios better than v2.1.
+    public static let balancedV2 = SortformerConfig(
+        modelVariant: .balancedV2,
         chunkLen: 6,
         chunkLeftContext: 1,
         chunkRightContext: 7,
@@ -138,8 +157,46 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 144
     )
 
+    /// Balanced config with Sortformer v2.1 weights (~1.04s latency, larger FIFO for better quality).
+    /// 20.57% DER on AMI SDM.
+    /// - Note: v2.1 may degrade when many speakers are talking simultaneously.
+    public static let balancedV2_1 = SortformerConfig(
+        modelVariant: .balancedV2_1,
+        chunkLen: 6,
+        chunkLeftContext: 1,
+        chunkRightContext: 7,
+        fifoLen: 188,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 144
+    )
+
+    /// High-context config with Sortformer v2 weights (~30.4s latency, most context window).
+    /// May handle high-speaker-count scenarios better than v2.1.
+    public static let highContextV2 = SortformerConfig(
+        modelVariant: .highContextV2,
+        chunkLen: 340,
+        chunkLeftContext: 1,
+        chunkRightContext: 40,
+        fifoLen: 40,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 300
+    )
+
+    /// High-context config with Sortformer v2.1 weights (~30.4s latency, most context window).
+    /// - Note: v2.1 may degrade when many speakers are talking simultaneously.
+    public static let highContextV2_1 = SortformerConfig(
+        modelVariant: .highContextV2_1,
+        chunkLen: 340,
+        chunkLeftContext: 1,
+        chunkRightContext: 40,
+        fifoLen: 40,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 300
+    )
+
     /// - Warning: If you don't use one of the default configurations, you must use a local model converted with that configuration.
     public init(
+        modelVariant: ModelVariant? = .fastV2_1,
         chunkLen: Int = 6,
         chunkLeftContext: Int = 1,
         chunkRightContext: Int = 7,
@@ -155,6 +212,7 @@ public struct SortformerConfig: Sendable {
         minPosScoresRate: Float = 0.5,
         debugMode: Bool = false
     ) {
+        self.modelVariant = modelVariant
         self.chunkLen = max(1, chunkLen)
         self.chunkLeftContext = chunkLeftContext
         self.chunkRightContext = chunkRightContext
@@ -177,108 +235,6 @@ public struct SortformerConfig: Sendable {
         return
             (self.chunkMelFrames == other.chunkMelFrames && self.fifoLen == other.fifoLen
             && self.spkcacheLen == other.spkcacheLen)
-    }
-}
-
-/// Configuration for post-processing Sortformer diarizer predictions
-public struct SortformerPostProcessingConfig {
-    /// Onset threshold for detecting the beginning and end of a speech
-    public var onsetThreshold: Float
-
-    /// Offset threshold for detecting the end of a speech
-    public var offsetThreshold: Float
-
-    /// Adding frames before each speech segment
-    public var onsetPadFrames: Int
-
-    /// Adding frames after each speech segment
-    public var offsetPadFrames: Int
-
-    /// Threshold for short speech segment deletion in frames
-    public var minFramesOn: Int
-
-    /// Threshold for small non-speech deletion in frames
-    public var minFramesOff: Int
-
-    /// Adding durations before each speech segment
-    public var onsetPadSeconds: Float {
-        get { Float(onsetPadFrames) * frameDurationSeconds }
-        set { onsetPadFrames = Int(round(newValue / frameDurationSeconds)) }
-    }
-
-    /// Adding durations after each speech segment
-    public var offsetPadSeconds: Float {
-        get { Float(offsetPadFrames) * frameDurationSeconds }
-        set { offsetPadFrames = Int(round(newValue / frameDurationSeconds)) }
-    }
-
-    /// Threshold for short speech segment deletion (seconds)
-    public var minDurationOn: Float {
-        get { Float(minFramesOn) * frameDurationSeconds }
-        set { minFramesOn = Int(round(newValue / frameDurationSeconds)) }
-    }
-
-    /// Threshold for small non-speech deletion (seconds)
-    public var minDurationOff: Float {
-        get { Float(minFramesOff) * frameDurationSeconds }
-        set { minFramesOff = Int(round(newValue / frameDurationSeconds)) }
-    }
-
-    /// Maximum number of predictions to retain
-    public var maxStoredFrames: Int? = nil
-
-    /// Number of speakers
-    public let numSpeakers: Int = 4
-
-    /// Number of speakers
-    public let frameDurationSeconds: Float = 0.08
-
-    /// Default configurations
-    public static var `default`: SortformerPostProcessingConfig {
-        SortformerPostProcessingConfig(
-            onsetThreshold: 0.5,
-            offsetThreshold: 0.5,
-            onsetPadFrames: 0,
-            offsetPadFrames: 0,
-            minFramesOn: 0,
-            minFramesOff: 0
-        )
-    }
-
-    public init(
-        onsetThreshold: Float = 0.5,
-        offsetThreshold: Float = 0.5,
-        onsetPadSeconds: Float = 0,
-        offsetPadSeconds: Float = 0,
-        minDurationOn: Float = 0,
-        minDurationOff: Float = 0,
-        maxStoredFrames: Int? = nil
-    ) {
-        self.onsetThreshold = onsetThreshold
-        self.offsetThreshold = offsetThreshold
-        self.onsetPadFrames = Int(round(onsetPadSeconds / frameDurationSeconds))
-        self.offsetPadFrames = Int(round(offsetPadSeconds / frameDurationSeconds))
-        self.minFramesOn = Int(round(minDurationOn / frameDurationSeconds))
-        self.minFramesOff = Int(round(minDurationOff / frameDurationSeconds))
-        self.maxStoredFrames = maxStoredFrames
-    }
-
-    public init(
-        onsetThreshold: Float = 0.5,
-        offsetThreshold: Float = 0.5,
-        onsetPadFrames: Int = 0,
-        offsetPadFrames: Int = 0,
-        minFramesOn: Int = 0,
-        minFramesOff: Int = 0,
-        maxStoredFrames: Int? = nil
-    ) {
-        self.onsetThreshold = onsetThreshold
-        self.offsetThreshold = offsetThreshold
-        self.onsetPadFrames = onsetPadFrames
-        self.offsetPadFrames = offsetPadFrames
-        self.minFramesOn = minFramesOn
-        self.minFramesOff = minFramesOff
-        self.maxStoredFrames = maxStoredFrames
     }
 }
 
@@ -373,7 +329,7 @@ public struct SortformerFeatureLoader: Sendable {
 
         self.startFeat = 0
         self.endFeat = 0
-        (self.featSeq, self.featLength, self.featSeqLength) = NeMoMelSpectrogram().computeFlatTransposed(audio: audio)
+        (self.featSeq, self.featLength, self.featSeqLength) = AudioMelSpectrogram().computeFlatTransposed(audio: audio)
         // numChunks accounts for right context requirement: need endFeat + rc <= featLength
         // Chunk n has endFeat = (n+1) * chunkLen, so valid when (n+1) * chunkLen + rc <= featLength
         // numChunks = floor((featLength - rc) / chunkLen)
@@ -437,57 +393,6 @@ public struct StreamingUpdateResult: Sendable {
         self.confirmed = confirmed
         self.tentative = tentative
         self.numSpeakers = numSpeakers
-    }
-}
-
-/// Result from a single streaming diarization step
-public struct SortformerChunkResult: Sendable {
-    /// Speaker probabilities for confirmed frames in this chunk
-    /// Shape: [chunkLen, numSpeakers] (e.g., [6, 4])
-    public let speakerPredictions: [Float]
-
-    /// Number of confirmed frames in this result
-    public let frameCount: Int
-
-    /// Frame index of the first confirmed frame
-    public let startFrame: Int
-
-    /// Tentative predictions for right context frames (may change with next chunk)
-    /// Shape: [rightContext, numSpeakers]. Empty if no right context.
-    public let tentativePredictions: [Float]
-
-    /// Number of tentative frames
-    public let tentativeFrameCount: Int
-
-    /// Frame index of first tentative frame
-    public var tentativeStartFrame: Int {
-        startFrame + frameCount
-    }
-
-    public init(
-        startFrame: Int,
-        speakerPredictions: [Float],
-        frameCount: Int,
-        tentativePredictions: [Float] = [],
-        tentativeFrameCount: Int = 0
-    ) {
-        self.speakerPredictions = speakerPredictions
-        self.frameCount = frameCount
-        self.startFrame = startFrame
-        self.tentativePredictions = tentativePredictions
-        self.tentativeFrameCount = tentativeFrameCount
-    }
-
-    /// Get probability for a specific speaker at a specific confirmed frame
-    public func getSpeakerPrediction(speaker: Int, frame: Int, numSpeakers: Int = 4) -> Float {
-        guard frame < frameCount, speaker < numSpeakers else { return 0.0 }
-        return speakerPredictions[frame * numSpeakers + speaker]
-    }
-
-    /// Get tentative probability for a specific speaker at a specific tentative frame
-    public func getTentativePrediction(speaker: Int, frame: Int, numSpeakers: Int = 4) -> Float {
-        guard frame < tentativeFrameCount, speaker < numSpeakers else { return 0.0 }
-        return tentativePredictions[frame * numSpeakers + speaker]
     }
 }
 

@@ -1,13 +1,14 @@
 @preconcurrency import CoreML
-import FluidAudio
 import Foundation
 
 extension PocketTtsSynthesizer {
 
     /// Run the flow decoder using Euler integration (LSD steps).
     ///
-    /// Converts transformer output to a 32-dimensional audio latent
-    /// via `numSteps` iterative denoising steps.
+    /// Converts the 1024-d transformer hidden state into a 32-d audio latent code.
+    /// Flow matching works by starting from random Gaussian noise and iteratively
+    /// moving it toward a valid audio code over `numSteps` Euler steps. The
+    /// transformer output guides each step by predicting a velocity field.
     static func flowDecode(
         transformerOut: MLMultiArray,
         numSteps: Int,
@@ -18,7 +19,8 @@ extension PocketTtsSynthesizer {
         let latentDim = PocketTtsConstants.latentDim
         let dt: Float = 1.0 / Float(numSteps)
 
-        // Initialize latent with scaled random noise: randn * sqrt(temperature)
+        // Initialize latent with scaled random noise.
+        // sqrt(temperature) because variance scales quadratically with the multiplier.
         var latent = [Float](repeating: 0, count: latentDim)
         let scale = sqrtf(temperature)
         for i in 0..<latentDim {
@@ -53,6 +55,13 @@ extension PocketTtsSynthesizer {
     // MARK: - Private
 
     /// Run a single flow decoder step.
+    ///
+    /// - Parameters:
+    ///   - s: Start time of this Euler interval (e.g., 0.0, 0.125, 0.25, ...).
+    ///   - t: End time of this Euler interval (e.g., 0.125, 0.25, 0.375, ...).
+    ///
+    /// The model predicts a velocity vector given the current noisy latent and time
+    /// interval. The caller applies the Euler update: `latent += velocity * dt`.
     private static func runFlowDecoderStep(
         transformerOut: MLMultiArray,
         latent: [Float],

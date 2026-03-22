@@ -71,6 +71,70 @@ Full batch pipeline that mirrors the pyannote/Core ML exporter (powerset segment
 
 Use `OfflineDiarizerManager` when you need offline DER parity or want to run the new CLI offline mode (`fluidaudio process --mode offline`, `fluidaudio diarization-benchmark --mode offline`).
 
+---
+
+### Diarizer Protocol
+
+`SortformerDiarizer` and `LSEENDDiarizer` both conform to the `Diarizer` protocol, providing a unified streaming and offline API.
+
+**Streaming:** `addAudio(_:sourceSampleRate:)` → `process()` → read `timeline`. Convenience `process(samples:sourceSampleRate:)` combines both steps. Returns `DiarizerTimelineUpdate?` (`nil` when not enough audio has accumulated).
+
+**Offline:** `processComplete(_:sourceSampleRate:...)` or `processComplete(audioFileURL:...)` to process a full recording in one call.
+
+**Speaker Enrollment:** `enrollSpeaker(withAudio:sourceSampleRate:named:...)` feeds known-speaker audio before streaming to label a slot.
+
+**Lifecycle:** `reset()` clears streaming state but keeps the model loaded. `cleanup()` releases everything.
+
+---
+
+### DiarizerTimeline & DiarizerSpeaker
+
+`DiarizerTimeline` accumulates per-frame speaker probabilities and derives `DiarizerSpeaker` segments. Each speaker has `finalizedSegments` (confirmed) and `tentativeSegments` (may be revised). Segments expose `startTime`, `endTime`, `duration`, and `isFinalized`.
+
+**`DiarizerTimelineConfig`** controls post-processing (onset/offset thresholds default to 0.5, min segment/gap duration, optional rolling window cap). Both diarizers accept this at init.
+
+**Speaker Management:**
+- `upsertSpeaker(named:atIndex:) -> DiarizerSpeaker?`
+  - Add a speaker to a slot, or update the existing speaker's name if that slot is already occupied
+  - If `atIndex` is `nil`, the first unused diarizer slot is chosen
+- `upsertSpeaker(_:atIndex:transferCurrentSegment:) -> DiarizerSpeaker?`
+  - Insert an existing `DiarizerSpeaker` into a slot, replacing any speaker already assigned there
+  - If `atIndex` is `nil`, the first unused diarizer slot is chosen
+  - `transferCurrentSegment` moves the in-progress segment (if one exists) to the new speaker before continuing
+- `removeSpeaker(atIndex:clearCurrentSegment:) -> DiarizerSpeaker?`
+  - Remove the speaker assigned to a diarizer output slot and return the removed speaker if present
+  - `clearCurrentSegment` resets the in-progress speaking state for that slot before continuing
+- `speakers: [Int: DiarizerSpeaker]`
+  - Read or replace the full slot-to-speaker mapping directly when needed
+
+---
+
+### SortformerDiarizer
+
+Streaming diarization using NVIDIA's Sortformer. 4 fixed speaker slots, 16 kHz input, 80 ms frame duration.
+
+```swift
+let diarizer = SortformerDiarizer(config: .default, timelineConfig: .sortformerDefault)
+try await diarizer.initialize(mainModelPath: modelURL)
+```
+
+**Config presets:** `.default` / `.fastV2_1` (1.04 s latency), `.balancedV2_1` (1.04 s, 20.6% DER on AMI SDM), `.highContextV2_1` (30.4 s latency). v2 variants also available.
+
+---
+
+### LSEENDDiarizer
+
+Streaming diarization using LS-EEND. Variable speaker slots, 8 kHz input, 100 ms frame duration, 20.7% DER on AMI SDM.
+
+```swift
+let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
+try await diarizer.initialize(variant: .dihard3)
+```
+
+**Variants:** ami, callhome, dihard2, dihard3 (via `LSEENDModelDescriptor.loadFromHuggingFace(variant:)`).
+
+Call `finalizeSession()` at end-of-stream to flush pending audio before reading the final timeline.
+
 ## Voice Activity Detection
 
 ### VadManager

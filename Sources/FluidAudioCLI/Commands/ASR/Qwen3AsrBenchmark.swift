@@ -54,6 +54,7 @@ enum Qwen3AsrBenchmark {
         var outputFile = "qwen3_asr_benchmark_results.json"
         var languages: [String] = ["cmn_hans_cn"]
         var fleursDir: String? = nil
+        var variant: Qwen3AsrVariant = .f32
 
         if arguments.contains("--help") || arguments.contains("-h") {
             printUsage()
@@ -100,13 +101,24 @@ enum Qwen3AsrBenchmark {
                     fleursDir = arguments[i + 1]
                     i += 1
                 }
+            case "--variant":
+                if i + 1 < arguments.count {
+                    let v = arguments[i + 1].lowercased()
+                    if let parsed = Qwen3AsrVariant(rawValue: v) {
+                        variant = parsed
+                    } else {
+                        logger.error("Unknown variant '\(arguments[i + 1])'. Use 'f32' or 'int8'.")
+                        exit(1)
+                    }
+                    i += 1
+                }
             default:
                 break
             }
             i += 1
         }
 
-        logger.info("Qwen3-ASR Benchmark (2-model pipeline)")
+        logger.info("Qwen3-ASR Benchmark (2-model pipeline, \(variant.rawValue))")
         logger.info("  Dataset: \(dataset)")
         if dataset == "librispeech" {
             logger.info("  Subset: \(subset)")
@@ -129,8 +141,8 @@ enum Qwen3AsrBenchmark {
                 logger.info("Loading models from \(dir)")
                 try await manager.loadModels(from: URL(fileURLWithPath: dir))
             } else {
-                logger.info("Downloading Qwen3-ASR models...")
-                let cacheDir = try await Qwen3AsrModels.download()
+                logger.info("Downloading Qwen3-ASR \(variant.rawValue) models...")
+                let cacheDir = try await Qwen3AsrModels.download(variant: variant)
                 try await manager.loadModels(from: cacheDir)
             }
 
@@ -679,6 +691,7 @@ enum Qwen3AsrBenchmark {
                 --languages <list>      FLEURS language codes, comma-separated (default: cmn_hans_cn)
                 --max-files <number>    Max files to process (default: all)
                 --model-dir <path>      Local model directory (skips download)
+                --variant <f32|int8>    Model variant (default: f32). int8 uses ~50% less RAM.
                 --fleurs-dir <path>     FLEURS data directory (default: ~/Library/Application Support/FluidAudio/FLEURS)
                 --output <file>         Output JSON path (default: qwen3_asr_benchmark_results.json)
                 --help, -h              Show this help

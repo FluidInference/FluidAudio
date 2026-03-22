@@ -1,5 +1,4 @@
 @preconcurrency import CoreML
-import FluidAudio
 import Foundation
 import OSLog
 
@@ -20,14 +19,19 @@ public actor PocketTtsModelStore {
     private var constantsBundle: PocketTtsConstantsBundle?
     private var voiceCache: [String: PocketTtsVoiceData] = [:]
     private var repoDirectory: URL?
+    private let directory: URL?
 
-    public init() {}
+    /// - Parameter directory: Optional override for the base cache directory.
+    ///   When `nil`, uses the default platform cache location.
+    public init(directory: URL? = nil) {
+        self.directory = directory
+    }
 
     /// Load all four CoreML models and the constants bundle.
     public func loadIfNeeded() async throws {
         guard condStepModel == nil else { return }
 
-        let repoDir = try await PocketTtsResourceDownloader.ensureModels()
+        let repoDir = try await PocketTtsResourceDownloader.ensureModels(directory: directory)
         self.repoDirectory = repoDir
 
         logger.info("Loading PocketTTS CoreML models...")
@@ -119,15 +123,15 @@ public actor PocketTtsModelStore {
         return dir
     }
 
-    /// Load and cache voice conditioning data.
-    public func voiceData(for voice: String) throws -> PocketTtsVoiceData {
+    /// Load and cache voice conditioning data, downloading from HuggingFace if missing.
+    public func voiceData(for voice: String) async throws -> PocketTtsVoiceData {
         if let cached = voiceCache[voice] {
             return cached
         }
         guard let repoDir = repoDirectory else {
             throw PocketTTSError.modelNotFound("PocketTTS repository not loaded")
         }
-        let data = try PocketTtsResourceDownloader.ensureVoice(voice, repoDirectory: repoDir)
+        let data = try await PocketTtsResourceDownloader.ensureVoice(voice, repoDirectory: repoDir)
         voiceCache[voice] = data
         return data
     }
@@ -141,7 +145,7 @@ public actor PocketTtsModelStore {
         guard mimiEncoderModel == nil else { return }
 
         // Ensure the mimi_encoder is downloaded (downloads if needed)
-        let modelURL = try await PocketTtsResourceDownloader.ensureMimiEncoder()
+        let modelURL = try await PocketTtsResourceDownloader.ensureMimiEncoder(directory: directory)
 
         // Update repoDirectory if not set
         if repoDirectory == nil {

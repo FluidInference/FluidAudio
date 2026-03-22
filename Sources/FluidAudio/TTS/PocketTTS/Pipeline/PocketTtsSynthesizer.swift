@@ -1,5 +1,4 @@
 @preconcurrency import CoreML
-import FluidAudio
 import Foundation
 import OSLog
 
@@ -9,7 +8,7 @@ import OSLog
 /// an 80ms audio frame (1920 samples at 24kHz).
 ///
 /// Long text is split into sentence-based chunks (≤50 tokens each)
-/// to stay within the KV cache limit (200 positions).
+/// to stay within the KV cache limit (512 positions).
 ///
 /// Pipeline: text → chunk → [tokenize → embed → prefill KV → generate → flow decode → mimi decode] → WAV
 public struct PocketTtsSynthesizer {
@@ -349,6 +348,323 @@ public struct PocketTtsSynthesizer {
         )
     }
 
+    // MARK: - Streaming API
+
+    /// An audio frame produced during streaming synthesis.
+    ///
+    /// Each frame contains 80ms of audio (1920 samples at 24kHz).
+    public struct AudioFrame: Sendable {
+        /// Raw Float32 audio samples for this frame.
+        public let samples: [Float]
+        /// Zero-based frame index within the current text chunk.
+        public let frameIndex: Int
+        /// Zero-based index of the text chunk being synthesized.
+        public let chunkIndex: Int
+        /// Total number of text chunks.
+        public let chunkCount: Int
+    }
+
+    /// Synthesize audio as a stream of 80ms frames.
+    ///
+    /// Each frame contains 1920 Float32 samples at 24kHz. Frames are yielded
+    /// as soon as they are generated, enabling real-time playback to start
+    /// before the full utterance is complete.
+    ///
+    /// - Parameters:
+    ///   - text: The text to synthesize.
+    ///   - voice: Voice identifier (default: "alba").
+    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - seed: Random seed for reproducibility (nil for random).
+    /// - Returns: An `AsyncThrowingStream` of audio frames. Throws if a model
+    ///   inference error occurs during generation.
+    ///
+    /// Example:
+    /// ```swift
+    /// let stream = try await PocketTtsSynthesizer.synthesizeStreaming(text: "Hello, world!")
+    /// for try await frame in stream {
+    ///     playAudio(frame.samples)  // Play each 80ms frame immediately
+    /// }
+    /// ```
+    public static func synthesizeStreaming(
+        text: String,
+        voice: String = PocketTtsConstants.defaultVoice,
+        temperature: Float = PocketTtsConstants.temperature,
+        seed: UInt64? = nil
+    ) async throws -> AsyncThrowingStream<AudioFrame, Error> {
+        let store = try currentModelStore()
+
+        logger.info("PocketTTS streaming synthesis: '\(text)'")
+
+        let constants = try await store.constants()
+        let voiceData = try await store.voiceData(for: voice)
+        let chunks = chunkText(text, tokenizer: constants.tokenizer)
+        let condModel = try await store.condStep()
+        let stepModel = try await store.flowlmStep()
+        let flowModel = try await store.flowDecoder()
+        let mimiModel = try await store.mimiDecoder()
+        let repoDir = try await store.repoDir()
+        let mimiInitialState = try loadMimiInitialState(from: repoDir)
+        let bosEmb = try createBosEmbedding(constants.bosEmbedding)
+        let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
+        let chunkCount = chunks.count
+
+        logger.info("Streaming \(chunkCount) chunk(s)")
+
+        let generator = StreamingGenerator(
+            constants: constants,
+            voiceData: voiceData,
+            chunks: chunks,
+            condModel: condModel,
+            stepModel: stepModel,
+            flowModel: flowModel,
+            mimiModel: mimiModel,
+            mimiInitialState: mimiInitialState,
+            bosEmb: bosEmb,
+            seedValue: seedValue,
+            chunkCount: chunkCount,
+            temperature: temperature
+        )
+
+        return makeStream(generator: generator)
+    }
+
+    /// Synthesize audio as a stream using custom voice data.
+    ///
+    /// Use this overload for cloned voices without saving to disk first.
+    ///
+    /// - Parameters:
+    ///   - text: The text to synthesize.
+    ///   - voiceData: Voice conditioning data (e.g., from cloneVoice).
+    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - seed: Random seed for reproducibility (nil for random).
+    /// - Returns: An `AsyncThrowingStream` of audio frames. Throws if a model
+    ///   inference error occurs during generation.
+    public static func synthesizeStreaming(
+        text: String,
+        voiceData: PocketTtsVoiceData,
+        temperature: Float = PocketTtsConstants.temperature,
+        seed: UInt64? = nil
+    ) async throws -> AsyncThrowingStream<AudioFrame, Error> {
+        let store = try currentModelStore()
+
+        logger.info("PocketTTS streaming synthesis with custom voice: '\(text)'")
+
+        let constants = try await store.constants()
+        let chunks = chunkText(text, tokenizer: constants.tokenizer)
+        let condModel = try await store.condStep()
+        let stepModel = try await store.flowlmStep()
+        let flowModel = try await store.flowDecoder()
+        let mimiModel = try await store.mimiDecoder()
+        let repoDir = try await store.repoDir()
+        let mimiInitialState = try loadMimiInitialState(from: repoDir)
+        let bosEmb = try createBosEmbedding(constants.bosEmbedding)
+        let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
+        let chunkCount = chunks.count
+
+        let generator = StreamingGenerator(
+            constants: constants,
+            voiceData: voiceData,
+            chunks: chunks,
+            condModel: condModel,
+            stepModel: stepModel,
+            flowModel: flowModel,
+            mimiModel: mimiModel,
+            mimiInitialState: mimiInitialState,
+            bosEmb: bosEmb,
+            seedValue: seedValue,
+            chunkCount: chunkCount,
+            temperature: temperature
+        )
+
+        return makeStream(generator: generator)
+    }
+
+    // MARK: - Streaming Internals
+
+    /// Actor that owns all non-Sendable CoreML state for streaming generation.
+    ///
+    /// Using an actor ensures the non-Sendable `MLModel` and `MLMultiArray` types
+    /// are properly isolated. The `Task` in `makeStream()` only captures this
+    /// actor (which is `Sendable`) and the stream continuation.
+    private actor StreamingGenerator {
+        let constants: PocketTtsConstantsBundle
+        let voiceData: PocketTtsVoiceData
+        let chunks: [String]
+        let condModel: MLModel
+        let stepModel: MLModel
+        let flowModel: MLModel
+        let mimiModel: MLModel
+        var mimiState: MimiState
+        let bosEmb: MLMultiArray
+        var rng: SeededRNG
+        let chunkCount: Int
+        let temperature: Float
+
+        init(
+            constants: PocketTtsConstantsBundle,
+            voiceData: PocketTtsVoiceData,
+            chunks: [String],
+            condModel: MLModel,
+            stepModel: MLModel,
+            flowModel: MLModel,
+            mimiModel: MLModel,
+            mimiInitialState: MimiState,
+            bosEmb: MLMultiArray,
+            seedValue: UInt64,
+            chunkCount: Int,
+            temperature: Float
+        ) {
+            self.constants = constants
+            self.voiceData = voiceData
+            self.chunks = chunks
+            self.condModel = condModel
+            self.stepModel = stepModel
+            self.flowModel = flowModel
+            self.mimiModel = mimiModel
+            self.mimiState = mimiInitialState
+            self.bosEmb = bosEmb
+            self.rng = SeededRNG(seed: seedValue)
+            self.chunkCount = chunkCount
+            self.temperature = temperature
+        }
+
+        /// Flow decode using actor-isolated RNG state.
+        ///
+        /// Copies `rng` out before the async call and writes it back after,
+        /// avoiding the `inout` restriction on actor-isolated properties.
+        private func flowDecodeStep(
+            transformerOut: MLMultiArray
+        ) async throws -> [Float] {
+            var localRng = rng
+            let result = try await PocketTtsSynthesizer.flowDecode(
+                transformerOut: transformerOut,
+                numSteps: PocketTtsConstants.numLsdSteps,
+                temperature: temperature,
+                model: flowModel,
+                rng: &localRng
+            )
+            rng = localRng
+            return result
+        }
+
+        /// Mimi decode using actor-isolated streaming state.
+        ///
+        /// Copies `mimiState` out before the async call and writes it back after,
+        /// avoiding the `inout` restriction on actor-isolated properties.
+        private func mimiDecodeStep(latent: [Float]) async throws -> [Float] {
+            var localState = mimiState
+            let result = try await PocketTtsSynthesizer.runMimiDecoder(
+                latent: latent,
+                state: &localState,
+                model: mimiModel
+            )
+            mimiState = localState
+            return result
+        }
+
+        /// FlowLM step with local KV cache copy-in/copy-out.
+        private func flowLMStep(
+            sequence: MLMultiArray,
+            kvState: inout KVCacheState
+        ) async throws -> (transformerOut: MLMultiArray, eosLogit: Float) {
+            var localState = kvState
+            let result = try await PocketTtsSynthesizer.runFlowLMStep(
+                sequence: sequence,
+                bosEmb: bosEmb,
+                state: &localState,
+                model: stepModel
+            )
+            kvState = localState
+            return result
+        }
+
+        func generate(
+            continuation: AsyncThrowingStream<AudioFrame, Error>.Continuation
+        ) async {
+            do {
+                for (chunkIdx, chunkText) in chunks.enumerated() {
+                    let (normalizedChunk, framesAfterEos) =
+                        PocketTtsSynthesizer.normalizeText(chunkText)
+                    PocketTtsSynthesizer.logger.info(
+                        "Stream chunk \(chunkIdx + 1)/\(chunkCount): '\(normalizedChunk)'"
+                    )
+
+                    let tokenIds = constants.tokenizer.encode(normalizedChunk)
+                    let textEmbeddings = PocketTtsSynthesizer.embedTokens(
+                        tokenIds, constants: constants)
+
+                    var kvState = try await PocketTtsSynthesizer.prefillKVCache(
+                        voiceData: voiceData,
+                        textEmbeddings: textEmbeddings,
+                        model: condModel
+                    )
+
+                    let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: chunkText)
+                    var eosStep: Int?
+                    var sequence = try PocketTtsSynthesizer.createNaNSequence()
+                    let totalFramesAfterEos =
+                        framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
+
+                    for step in 0..<maxGenLen {
+                        if Task.isCancelled { break }
+
+                        let (transformerOut, eosLogit) = try await flowLMStep(
+                            sequence: sequence,
+                            kvState: &kvState
+                        )
+
+                        if eosLogit > PocketTtsConstants.eosThreshold && eosStep == nil {
+                            eosStep = step
+                            PocketTtsSynthesizer.logger.info(
+                                "Stream chunk \(chunkIdx + 1) EOS at step \(step)")
+                        }
+                        if let eos = eosStep, step >= eos + totalFramesAfterEos {
+                            break
+                        }
+
+                        let latent = try await flowDecodeStep(
+                            transformerOut: transformerOut
+                        )
+
+                        let frameSamples = try await mimiDecodeStep(latent: latent)
+
+                        continuation.yield(
+                            AudioFrame(
+                                samples: frameSamples,
+                                frameIndex: step,
+                                chunkIndex: chunkIdx,
+                                chunkCount: chunkCount
+                            ))
+
+                        sequence = try PocketTtsSynthesizer.createSequenceFromLatent(latent)
+                    }
+
+                    if Task.isCancelled { break }
+                }
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+    }
+
+    /// Create the AsyncThrowingStream and spawn the generation task.
+    private static func makeStream(
+        generator: StreamingGenerator
+    ) -> AsyncThrowingStream<AudioFrame, Error> {
+        let (stream, continuation) = AsyncThrowingStream.makeStream(of: AudioFrame.self)
+
+        let task = Task {
+            await generator.generate(continuation: continuation)
+        }
+
+        continuation.onTermination = { _ in
+            task.cancel()
+        }
+
+        return stream
+    }
+
     // MARK: - Text Processing
 
     /// Normalize a text chunk for PocketTTS (matching Python `prepare_text_prompt`).
@@ -645,6 +961,9 @@ public struct PocketTtsSynthesizer {
     // MARK: - Helpers
 
     /// Estimate maximum generation frames based on text length.
+    ///
+    /// At 80ms per frame, 12.5 frames ≈ 1 second of audio per word.
+    /// The +2 adds margin for pauses and trailing silence.
     private static func estimateMaxFrames(text: String) -> Int {
         let wordCount = text.split(separator: " ").count
         let genLenSec = Double(wordCount) + 2.0
@@ -663,7 +982,10 @@ public struct PocketTtsSynthesizer {
         return array
     }
 
-    /// Create a NaN-filled sequence [1, 1, 32] (signals BOS to the model).
+    /// Create a NaN-filled sequence `[1, 1, 32]` to signal beginning-of-sequence.
+    ///
+    /// The first generation step has no previous audio latent. NaN values tell
+    /// the model to use the BOS embedding instead, triggering the start of speech.
     private static func createNaNSequence() throws -> MLMultiArray {
         let dim = PocketTtsConstants.latentDim
         let array = try MLMultiArray(
@@ -675,7 +997,10 @@ public struct PocketTtsSynthesizer {
         return array
     }
 
-    /// Create a sequence [1, 1, 32] from a latent vector.
+    /// Create a sequence `[1, 1, 32]` from a latent vector.
+    ///
+    /// Autoregressive feedback: each generated audio latent becomes the input
+    /// for the next flowlm_step, so the model conditions on its own output.
     private static func createSequenceFromLatent(_ latent: [Float]) throws -> MLMultiArray {
         let dim = PocketTtsConstants.latentDim
         let array = try MLMultiArray(

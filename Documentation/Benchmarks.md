@@ -480,15 +480,15 @@ swift run fluidaudiocli diarization-benchmark --mode streaming \
 ------------------------------------------------------------------------------------------
 Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
 ------------------------------------------------------------------------------------------
-ES2004a          31.6     41.6      6.7      2.1     22.7 7/4            49.8
-ES2005a          39.7     65.0      6.9      7.3     25.5 5/4            59.1
-IS1002b          40.4     51.3      1.1      5.2     34.1 9/4            45.3
-ES2002a          41.5     56.0      5.3     10.1     26.1 6/4            48.6
-ES2003a          53.1     78.7      5.3      2.3     45.5 5/4            57.1
-IS1000a          66.7     74.0      6.1      7.6     53.0 7/4            50.7
-IS1001a          75.0     88.6      7.1      4.7     63.2 10/4           48.8
+ES2004a          31.6     41.6      6.7      2.1     22.7     7/4        49.8
+ES2005a          39.7     65.0      6.9      7.3     25.5     5/4        59.1
+IS1002b          40.4     51.3      1.1      5.2     34.1     9/4        45.3
+ES2002a          41.5     56.0      5.3     10.1     26.1     6/4        48.6
+ES2003a          53.1     78.7      5.3      2.3     45.5     5/4        57.1
+IS1000a          66.7     74.0      6.1      7.6     53.0     7/4        50.7
+IS1001a          75.0     88.6      7.1      4.7     63.2     10/4       48.8
 ------------------------------------------------------------------------------------------
-AVERAGE          49.7     65.0      5.5      5.6     38.6         -     51.4
+AVERAGE          49.7     65.0      5.5      5.6     38.6      -         51.4
 ==========================================================================================
 ```
 
@@ -515,7 +515,7 @@ ES2005a          22.5     36.8      7.7      6.8      8.0 4/4           460.8
 IS1000a          57.7     80.6     11.9      3.9     41.9 8/4           352.1
 IS1001a          70.1     85.4     11.2      2.4     56.5 7/4           370.9
 ------------------------------------------------------------------------------------------
-AVERAGE          33.3     45.1      8.4      3.5     21.5         -    392.4
+AVERAGE          33.3     45.1      8.4      3.5     21.5         -     392.4
 ==========================================================================================
 ```
 
@@ -534,15 +534,15 @@ swift run fluidaudiocli diarization-benchmark --mode streaming \
 ------------------------------------------------------------------------------------------
 Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
 ------------------------------------------------------------------------------------------
-IS1002b           9.8     11.7      3.5      3.8      2.6 5/4           205.2
-ES2003a          14.4     23.3      7.4      1.6      5.3 4/4           260.9
-ES2004a          17.0     26.0      9.0      1.3      6.7 7/4           218.1
-ES2005a          18.4     31.0      9.2      5.8      3.4 4/4           259.8
-ES2002a          20.8     30.5      9.5      7.4      3.9 5/4           198.0
-IS1000a          24.7     35.7     12.1      4.3      8.3 6/4           204.2
-IS1001a          78.0     94.5     13.3      3.0     61.6 6/4           215.7
+IS1002b           9.8     11.7      3.5      3.8      2.6      5/4       205.2
+ES2003a          14.4     23.3      7.4      1.6      5.3      4/4       260.9
+ES2004a          17.0     26.0      9.0      1.3      6.7      7/4       218.1
+ES2005a          18.4     31.0      9.2      5.8      3.4      4/4       259.8
+ES2002a          20.8     30.5      9.5      7.4      3.9      5/4       198.0
+IS1000a          24.7     35.7     12.1      4.3      8.3      6/4       204.2
+IS1001a          78.0     94.5     13.3      3.0     61.6      6/4       215.7
 ------------------------------------------------------------------------------------------
-AVERAGE          26.2     36.1      9.2      3.9     13.1         -    223.1
+AVERAGE          26.2     36.1      9.2      3.9     13.1       -        223.1
 ==========================================================================================
 ```
 
@@ -561,15 +561,15 @@ swift run fluidaudiocli diarization-benchmark --mode streaming \
 ------------------------------------------------------------------------------------------
 Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
 ------------------------------------------------------------------------------------------
-ES2003a          24.5     42.1      4.7      1.9     18.0 6/4            81.4
-ES2005a          27.5     50.6      5.5      7.6     14.4 5/4            76.8
-ES2004a          31.6     54.8      6.4      2.3     23.0 5/4            66.9
-IS1002b          39.6     57.0      0.8      5.1     33.7 6/4            63.7
-ES2002a          41.1     57.2      4.7      9.8     26.7 5/4            65.5
-IS1000a          57.4     54.2      6.1      7.7     43.6 9/4            67.2
-IS1001a          79.0     86.8      7.0      5.0     66.9 10/4           64.5
+ES2003a          24.5     42.1      4.7      1.9     18.0     6/4        81.4
+ES2005a          27.5     50.6      5.5      7.6     14.4     5/4        76.8
+ES2004a          31.6     54.8      6.4      2.3     23.0     5/4        66.9
+IS1002b          39.6     57.0      0.8      5.1     33.7     6/4        63.7
+ES2002a          41.1     57.2      4.7      9.8     26.7     5/4        65.5
+IS1000a          57.4     54.2      6.1      7.7     43.6     9/4        67.2
+IS1001a          79.0     86.8      7.0      5.0     66.9     10/4       64.5
 ------------------------------------------------------------------------------------------
-AVERAGE          43.0     57.5      5.0      5.6     32.3         -     69.4
+AVERAGE          43.0     57.5      5.0      5.6     32.3      -         69.4
 ==========================================================================================
 ```
 
@@ -584,7 +584,7 @@ Hardware: Apple M2, 2022, macOS 26.1
 ### AMI SDM Dataset (NVIDIA High-Latency Config - 30.4s chunks)
 
 ```bash
-swift run fluidaudio sortformer-benchmark --nvidia-high-latency --hf --auto-download
+swift run fluidaudiocli sortformer-benchmark --nvidia-high-latency --hf --auto-download
 ```
 
 ```text
@@ -612,6 +612,102 @@ IS1009c          38.1     12.8      0.9     24.4 4/4           129.2
 TS3003d          41.0     32.0      0.1      8.8 4/4           125.6
 TS3003a          41.8     36.8      0.7      4.3 4/4           125.7
 ----------------------------------------------------------------------
-AVERAGE          31.7     21.5      0.5      9.7         -    126.7
+AVERAGE          31.7     21.5      0.5      9.7         -     126.7
 ======================================================================
 ```
+
+## LS-EEND Streaming Diarization
+A research prototype from Westlake University for streaming speaker diarization.
+
+Model: [GradientDescent2718/ls-eend-coreml](https://huggingface.co/GradientDescent2718/ls-eend-coreml). 
+
+Hardware: Apple M4 MAX, 2026, macOS 26.1 (CPU only)
+
+### AMI SDM Dataset (AMI Config - 1s latency, 0.5s between updates)
+
+```bash
+swift run fluidaudiocli lseend-benchmark --variant ami --auto-download
+```
+
+```text
+================================================================================
+LS-EEND BENCHMARK SUMMARY
+[23:17:34.535] [DEBUG] [FluidAudio.LSEENDDiarizer] LS-EEND state reset
+================================================================================
+Results Sorted by DER:
+----------------------------------------------------------------------
+Meeting        DER %    Miss %     FA %     SE %   Speakers     RTFx
+----------------------------------------------------------------------
+ES2004c           8.8      7.2      1.3      0.4     4/4        72.4
+ES2004b           8.9      7.3      1.0      0.7     4/4        75.6
+TS3003c          13.3     11.1      0.9      1.3     4/4        72.2
+IS1009d          13.8      7.9      2.1      3.8     4/4        74.8
+TS3003b          16.2      5.9      1.6      8.8     4/4        73.0
+TS3003a          19.0     16.6      0.8      1.6     4/4        77.0
+EN2002b          20.4     16.0      1.7      2.8     4/4        75.9
+TS3003d          20.5     14.7      1.9      3.9     4/4        72.1
+IS1009c          22.1      6.8      2.0     13.4     4/4        74.4
+EN2002c          23.2     16.6      1.9      4.7     4/3        69.9
+IS1009a          23.3      7.9      2.7     12.7     4/4        81.8
+EN2002a          24.4     19.6      1.1      3.7     4/4        73.2
+IS1009b          25.7      4.8      1.7     19.2     4/4        74.9
+ES2004d          27.7     15.1      1.5     11.2     4/4        73.1
+EN2002d          27.9     21.9      2.2      3.7     4/4        73.2
+ES2004a          35.6     13.4     19.1      3.0     4/4        78.1
+----------------------------------------------------------------------
+AVERAGE          20.7     12.1      2.7      5.9          -     74.5
+======================================================================
+```
+
+
+## Multilingual G2P (Grapheme-to-Phoneme)
+
+CharsiuG2P ByT5 encoder-decoder model converted to CoreML for multilingual grapheme-to-phoneme conversion. Used by Kokoro TTS for non-English phonemization.
+
+Model: [FluidInference/charsiu-g2p-byt5-coreml](https://huggingface.co/FluidInference/charsiu-g2p-byt5-coreml)
+
+Hardware: Apple M2, 2022, macOS 26
+
+### CharsiuG2P Test Set (500 words/language)
+
+```bash
+swift run -c release fluidaudiocli g2p-benchmark --data-dir /path/to/CharsiuG2P/data/test
+```
+
+| Language | PER | WER | ms/word |
+|---|---|---|---|
+| Spanish | 0.1% | 0.8% | 32.6 |
+| French | 0.8% | 2.0% | 26.5 |
+| Italian | 2.8% | 20.0% | 20.9 |
+| Hindi | 4.5% | 21.4% | 45.4 |
+| Japanese | 10.5% | 23.8% | 31.7 |
+| Portuguese (BR) | 8.9% | 43.2% | 24.0 |
+| British English | 13.6% | 29.4% | 34.0 |
+| American English | 19.0% | 38.8% | 28.2 |
+| Chinese | 86.2%* | 95.0%* | 53.9 |
+| **Average** | **16.3%** | **30.5%** | **33.0** |
+
+*\*Chinese PER is inflated due to tone notation mismatch between model output and reference data (tone contour marks vs model format), not a model accuracy issue.*
+
+- **PER** (Phoneme Error Rate): Character-level Levenshtein distance / reference length, stress marks stripped
+- **WER** (Word Error Rate): Fraction of words with any phoneme error
+
+### Compute Unit Comparison
+
+Both the English BART G2P and multilingual ByT5 G2P models run fastest on CPU-only due to GPU/ANE dispatch overhead on small autoregressive decoder steps.
+
+**Multilingual G2P (ByT5)**
+
+| Compute Units | ms/word |
+|---|---|
+| cpuOnly | **38.7** |
+| cpuAndGPU | 94.7 |
+| all (ANE+GPU+CPU) | 95.2 |
+
+**English G2P (BART)**
+
+| Compute Units | ms/word |
+|---|---|
+| cpuOnly | **13.0** |
+| all (ANE+GPU+CPU) | 17.3 |
+| cpuAndGPU | 23.4 |

@@ -1,8 +1,6 @@
-import Accelerate
 import CoreML
 import Darwin
 import Foundation
-import Metal
 
 /// Shared ANE optimization utilities for all ML pipelines
 public enum ANEMemoryUtils {
@@ -120,13 +118,16 @@ public enum ANEMemoryUtils {
         shape: [NSNumber],
         strides: [NSNumber]? = nil
     ) throws -> MLMultiArray {
-        // Validate bounds
+        // Validate bounds using stride-aware backing size (accounts for ANE padding)
         let elementSize = getElementSize(for: array.dataType)
-        let totalElements = shape.map { $0.intValue }.reduce(1, *)
-        let bytesNeeded = totalElements * elementSize
+        let viewStrides = strides ?? calculateOptimalStrides(for: shape)
+        let viewBackingElements =
+            shape.isEmpty ? 0 : viewStrides[0].intValue * shape[0].intValue
+        let sourceBackingElements =
+            array.shape.isEmpty ? 0 : array.strides[0].intValue * array.shape[0].intValue
         let byteOffset = offset * elementSize
 
-        guard byteOffset + bytesNeeded <= array.count * elementSize else {
+        guard byteOffset + viewBackingElements * elementSize <= sourceBackingElements * elementSize else {
             throw ANEMemoryError.invalidShape
         }
 
@@ -142,33 +143,81 @@ public enum ANEMemoryUtils {
         )
     }
 
-    /// Prefetch memory pages for ANE processing
-    public static func prefetchForANE(_ array: MLMultiArray) {
-        let dataPointer = array.dataPointer
-        let elementSize = getElementSize(for: array.dataType)
-        let totalBytes = array.count * elementSize
+    /// Stride-aware copy between two MLMultiArrays that may have different stride layouts.
+    ///
+    /// Copies all logical elements from `source` to `destination` (which must have the same shape
+    /// and data type). The innermost dimension must have stride 1 in both arrays. Outer dimensions
+    /// are iterated respecting each array's strides.
+    public static func strideAwareCopy(from source: MLMultiArray, to destination: MLMultiArray) {
+        let shape = source.shape.map { $0.intValue }
+        let srcStrides = source.strides.map { $0.intValue }
+        let dstStrides = destination.strides.map { $0.intValue }
 
-        // Touch first and last cache lines to trigger ANE DMA prefetch
-        if totalBytes > 0 {
-            _ = dataPointer.load(as: UInt8.self)
-            if totalBytes > 1 {
-                _ = dataPointer.advanced(by: totalBytes - 1).load(as: UInt8.self)
+        let ndim = shape.count
+        guard ndim > 0 else { return }
+
+        // Validate shapes and types match
+        precondition(
+            source.shape == destination.shape,
+            "strideAwareCopy: shape mismatch \(source.shape) vs \(destination.shape)"
+        )
+        precondition(
+            source.dataType == destination.dataType,
+            "strideAwareCopy: dataType mismatch"
+        )
+        precondition(
+            srcStrides[ndim - 1] == 1 && dstStrides[ndim - 1] == 1,
+            "strideAwareCopy: innermost stride must be 1"
+        )
+
+        let elementSize = getElementSize(for: source.dataType)
+        let srcPtr = source.dataPointer
+        let dstPtr = destination.dataPointer
+
+        // If strides match, a single memcpy suffices (fast path).
+        if srcStrides == dstStrides {
+            let totalBytes = srcStrides[0] * shape[0] * elementSize
+            memcpy(dstPtr, srcPtr, totalBytes)
+            return
+        }
+
+        // Innermost dimension byte count
+        let innerBytes = shape[ndim - 1] * elementSize
+
+        if ndim == 1 {
+            memcpy(dstPtr, srcPtr, innerBytes)
+            return
+        }
+
+        // Number of outer "rows" = product of all dimensions except the last
+        let outerCount = shape.dropLast().reduce(1, *)
+
+        // Multi-index iteration over outer dimensions
+        var indices = [Int](repeating: 0, count: ndim - 1)
+
+        for _ in 0..<outerCount {
+            // Compute flat byte offset for source and destination
+            var srcByteOffset = 0
+            var dstByteOffset = 0
+            for d in 0..<(ndim - 1) {
+                srcByteOffset += indices[d] * srcStrides[d] * elementSize
+                dstByteOffset += indices[d] * dstStrides[d] * elementSize
+            }
+
+            // Copy innermost dimension as contiguous block
+            memcpy(dstPtr + dstByteOffset, srcPtr + srcByteOffset, innerBytes)
+
+            // Increment multi-index (odometer style)
+            var carry = ndim - 2
+            while carry >= 0 {
+                indices[carry] += 1
+                if indices[carry] < shape[carry] {
+                    break
+                }
+                indices[carry] = 0
+                carry -= 1
             }
         }
     }
-}
 
-/// Extension for MLMultiArray to add ANE optimization methods
-extension MLMultiArray {
-
-    /// Check if this array is ANE-aligned
-    public var isANEAligned: Bool {
-        let address = Int(bitPattern: self.dataPointer)
-        return address % ANEMemoryUtils.aneAlignment == 0
-    }
-
-    /// Prefetch this array for ANE processing
-    public func prefetchForANE() {
-        ANEMemoryUtils.prefetchForANE(self)
-    }
 }

@@ -36,15 +36,16 @@ TDT models process audio in chunks (~15s with overlap) as batch operations. Fast
 
 | Model | Description | Context |
 |-------|-------------|---------|
-| **Pyannote CoreML Pipeline** | Speaker diarization. Segmentation model + WeSpeaker embeddings for clustering. Supports both online (streaming) and offline (VBx) modes. | First diarization system added. Two-stage pipeline. |
-| **Sortformer** | End-to-end streaming speaker diarization. Single neural network — no separate segmentation + clustering. Streaming only, no offline mode. | Created & converted after Pyannote was released. |
+| **LS-EEND** | Research prototype end-to-end streaming diarization model from Westlake University. Supports both streaming and complete-buffer inference for up to 10 speakers. Uses frame-in, frame-out processing, requiring 900ms of warmup audio and 100ms per update. | Added after Sortformer to support largers speaker counts. |
+| **Sortformer** | NVIDIA's enterprise-grade end-to-end streaming diarization model. Supports both streaming and complete-buffer inference for up to 4 speakers. More stable than LS-EEND, but sometimes misses speech. Processes audio in chunks, requiring 1040ms of warmup audio and 480ms per update for the low latency versions. | Added after Pyannote to support low-latency streaming diarization. |
+| **Pyannote CoreML Pipeline** | Speaker diarization. Segmentation model + WeSpeaker embeddings for clustering. Best offline diarization pipeline, but poor for online use, since speaker confusion increases with more frequent updates, and at least 5 seconds of warmup is recommended for acceptable results. | First diarizer model added. Converted from Pyannote. |
 
 ## TTS Models
 
 | Model | Description | Context |
 |-------|-------------|---------|
-| **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Requires espeak for phonemization. | First TTS backend added. |
-| **PocketTTS** | Second TTS backend (~155M params). Upgrade over Kokoro with much better dynamic audio chunking. No espeak dependency. | Improvement over Kokoro TTS: simpler chunking, dynammic inputs & longer token counts |
+| **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Uses CoreML G2P model for phonemization. | First TTS backend added. |
+| **PocketTTS** | Second TTS backend (~155M params). Autoregressive frame-by-frame generation with dynamic audio chunking. No phoneme stage — works directly on text tokens. | Different tradeoffs: streaming-capable, simpler chunking, dynamic inputs & longer token counts |
 
 ## Evaluated Models (Not Shipped)
 
@@ -53,6 +54,8 @@ Models we converted and tested but haven't shipped yet — either still in devel
 | Model | Status |
 |-------|--------|
 | **Nemotron Speech Streaming 0.6B** ([#254](https://github.com/FluidInference/FluidAudio/pull/254)) | Streaming model with 1.12s chunks. Not significantly faster or more accurate than existing Parakeet models: streaming (EOU) and batch (TDT) modes. |
+| **Qwen3-TTS** ([FluidAudio#290](https://github.com/FluidInference/FluidAudio/pull/290), [mobius#20](https://github.com/FluidInference/mobius/pull/20), [HF](https://huggingface.co/alexwengg/qwen3-tts-coreml)) | ~5.9GB CoreML is too large for on-device. Low upstream adoption (Qwen ASR CoreML model downloads). |
+| **Qwen3-ForcedAligner-0.6B** ([FluidAudio#315](https://github.com/FluidInference/FluidAudio/pull/315), [mobius#21](https://github.com/FluidInference/mobius/pull/21), [HF](https://huggingface.co/alexwengg/Qwen3-ForcedAligner-0.6B-Coreml)) | 5-model CoreML pipeline, large footprint. Low upstream adoption (Qwen ASR CoreML model downloads). |
 
 ## Model Sources
 
@@ -65,6 +68,7 @@ Models we converted and tested but haven't shipped yet — either still in devel
 | Parakeet EOU | [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml) |
 | Silero VAD | [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml) |
 | Diarization (Pyannote) | [FluidInference/speaker-diarization-coreml](https://huggingface.co/FluidInference/speaker-diarization-coreml) |
+| LS-EEND | [FluidInference/lseend-coreml](https://huggingface.co/FluidInference/lseend-coreml) |
 | Sortformer | [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml) |
 | Kokoro TTS | [FluidInference/kokoro-82m-coreml](https://huggingface.co/FluidInference/kokoro-82m-coreml) |
 | PocketTTS | [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml) |

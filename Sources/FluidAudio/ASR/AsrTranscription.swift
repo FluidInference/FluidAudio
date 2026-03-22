@@ -1,4 +1,4 @@
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 
@@ -85,50 +85,65 @@ extension AsrManager {
         let preprocessorInput = try await preparePreprocessorInput(
             paddedAudio, actualLength: originalLength)
 
-        guard let preprocessorModel = preprocessorModel, let encoderModel = encoderModel else {
-            throw ASRError.notInitialized
+        let preprocessorAudioArray = preprocessorInput.featureValue(for: "audio_signal")?.multiArrayValue
+
+        do {
+            guard let preprocessorModel = preprocessorModel, let encoderModel = encoderModel else {
+                throw ASRError.notInitialized
+            }
+
+            try Task.checkCancellation()
+            let preprocessorOutput = try await preprocessorModel.compatPrediction(
+                from: preprocessorInput,
+                options: predictionOptions
+            )
+
+            let encoderInput = try prepareEncoderInput(
+                encoder: encoderModel,
+                preprocessorOutput: preprocessorOutput,
+                originalInput: preprocessorInput
+            )
+
+            try Task.checkCancellation()
+            let encoderOutputProvider = try await encoderModel.compatPrediction(
+                from: encoderInput,
+                options: predictionOptions
+            )
+
+            let rawEncoderOutput = try extractFeatureValue(
+                from: encoderOutputProvider, key: "encoder", errorMessage: "Invalid encoder output")
+            let encoderLength = try extractFeatureValue(
+                from: encoderOutputProvider, key: "encoder_length",
+                errorMessage: "Invalid encoder output length")
+
+            let encoderSequenceLength = encoderLength[0].intValue
+
+            // Calculate actual audio frames if not provided using shared constants
+            let actualFrames =
+                actualAudioFrames ?? ASRConstants.calculateEncoderFrames(from: originalLength ?? paddedAudio.count)
+
+            let hypothesis = try await tdtDecodeWithTimings(
+                encoderOutput: rawEncoderOutput,
+                encoderSequenceLength: encoderSequenceLength,
+                actualAudioFrames: actualFrames,
+                originalAudioSamples: paddedAudio,
+                decoderState: &decoderState,
+                contextFrameAdjustment: contextFrameAdjustment,
+                isLastChunk: isLastChunk,
+                globalFrameOffset: globalFrameOffset
+            )
+
+            if let preprocessorAudioArray {
+                await sharedMLArrayCache.returnArray(preprocessorAudioArray)
+            }
+
+            return (hypothesis, encoderSequenceLength)
+        } catch {
+            if let preprocessorAudioArray {
+                await sharedMLArrayCache.returnArray(preprocessorAudioArray)
+            }
+            throw error
         }
-
-        let preprocessorOutput = try await preprocessorModel.compatPrediction(
-            from: preprocessorInput,
-            options: predictionOptions
-        )
-
-        let encoderInput = try prepareEncoderInput(
-            encoder: encoderModel,
-            preprocessorOutput: preprocessorOutput,
-            originalInput: preprocessorInput
-        )
-
-        let encoderOutputProvider = try await encoderModel.compatPrediction(
-            from: encoderInput,
-            options: predictionOptions
-        )
-
-        let rawEncoderOutput = try extractFeatureValue(
-            from: encoderOutputProvider, key: "encoder", errorMessage: "Invalid encoder output")
-        let encoderLength = try extractFeatureValue(
-            from: encoderOutputProvider, key: "encoder_length",
-            errorMessage: "Invalid encoder output length")
-
-        let encoderSequenceLength = encoderLength[0].intValue
-
-        // Calculate actual audio frames if not provided using shared constants
-        let actualFrames =
-            actualAudioFrames ?? ASRConstants.calculateEncoderFrames(from: originalLength ?? paddedAudio.count)
-
-        let hypothesis = try await tdtDecodeWithTimings(
-            encoderOutput: rawEncoderOutput,
-            encoderSequenceLength: encoderSequenceLength,
-            actualAudioFrames: actualFrames,
-            originalAudioSamples: paddedAudio,
-            decoderState: &decoderState,
-            contextFrameAdjustment: contextFrameAdjustment,
-            isLastChunk: isLastChunk,
-            globalFrameOffset: globalFrameOffset
-        )
-
-        return (hypothesis, encoderSequenceLength)
     }
 
     private func prepareEncoderInput(
@@ -515,6 +530,9 @@ extension AsrManager {
             }
 
             let vocabConfig = vocabSizeConfig ?? ContextBiasingConstants.rescorerConfig(forVocabSize: 0)
+            // Use the higher of the size-based default and the caller-specified threshold
+            // so that CustomVocabularyContext.minSimilarity is respected when stricter.
+            let effectiveMinSimilarity = max(vocabConfig.minSimilarity, vocab.minSimilarity)
 
             let rescoreOutput = rescorer.ctcTokenRescore(
                 transcript: result.text,
@@ -523,7 +541,7 @@ extension AsrManager {
                 frameDuration: spotResult.frameDuration,
                 cbw: vocabConfig.cbw,
                 marginSeconds: 0.5,
-                minSimilarity: vocabConfig.minSimilarity
+                minSimilarity: effectiveMinSimilarity
             )
 
             guard rescoreOutput.wasModified else {

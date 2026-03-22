@@ -5,9 +5,11 @@ Tracks and manages speaker identities across audio chunks for streaming diarizat
 
 ## Overview
 
-`SpeakerManager` maintains an in-memory database of speakers, tracks their voice embeddings, and assigns consistent IDs across audio chunks. It's used by `DiarizerManager` for streaming/real-time speaker diarization.
+`SpeakerManager` maintains an in-memory database of speakers, tracks their voice embeddings, and assigns consistent IDs across audio chunks. It's used by `DiarizerManager` for streaming speaker diarization.
 
 > **Note:** `SpeakerManager` is only compatible with `DiarizerManager` (streaming pipeline). It is not currently supported with `OfflineDiarizerManager`, which uses VBx clustering for speaker assignment.
+
+---
 
 ## Configuration
 

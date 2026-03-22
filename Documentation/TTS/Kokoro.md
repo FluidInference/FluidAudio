@@ -9,7 +9,7 @@ Kokoro is a high-quality, English-only TTS backend. It generates the entire audi
 ### CLI
 
 ```bash
-swift run fluidaudio tts "Welcome to FluidAudio text to speech" \
+swift run fluidaudiocli tts "Welcome to FluidAudio text to speech" \
   --output ~/Desktop/demo.wav \
   --voice af_heart
 ```
@@ -19,9 +19,9 @@ The first invocation downloads Kokoro models, phoneme dictionaries, and voice em
 ### Swift
 
 ```swift
-import FluidAudioTTS
+import FluidAudio
 
-let manager = TtSManager()
+let manager = KokoroTtsManager()
 try await manager.initialize()
 
 let audioData = try await manager.synthesize(text: "Hello from FluidAudio!")
@@ -35,7 +35,7 @@ Swap in `manager.initialize(models:)` when you want to preload only the long-for
 ## Inspecting Chunk Metadata
 
 ```swift
-let manager = TtSManager()
+let manager = KokoroTtsManager()
 try await manager.initialize()
 
 let detailed = try await manager.synthesizeDetailed(
@@ -54,13 +54,13 @@ for chunk in detailed.chunks {
 ## Pipeline
 
 ```
-text → espeak G2P → IPA phonemes → Kokoro model → audio
+text → G2P model → IPA phonemes → Kokoro model → audio
          ↑                ↑
    custom lexicon    SSML <phoneme>
    overrides here    overrides here
 ```
 
-Because espeak runs **outside** the model as a preprocessing step, you can intercept and edit phonemes before they reach the neural network. This is what enables all pronunciation control features.
+The G2P (grapheme-to-phoneme) step runs **outside** the model as a preprocessing step using a CoreML BART encoder-decoder. Words found in the built-in lexicon use dictionary lookup; out-of-vocabulary words fall back to the G2P model. You can intercept and edit phonemes before they reach the neural network. This is what enables all pronunciation control features.
 
 ## Pronunciation Control
 
@@ -70,7 +70,7 @@ Kokoro supports three ways to override pronunciation:
 2. **Custom lexicon** — word → IPA mapping files loaded via `setCustomLexicon()`. Entries matched case-sensitive first, then case-insensitive, then normalized. See [CustomPronunciation.md](../ASR/CustomPronunciation.md).
 3. **Markdown syntax** — inline `[word](/ipa/)` overrides in the input text. Example: `[Kokoro](/kəˈkɔɹo/)`.
 
-Precedence: custom lexicon > built-in dictionaries > grapheme-to-phoneme conversion.
+Precedence: custom lexicon > built-in dictionaries > morphological stemming > G2P model.
 
 ## Text Preprocessing
 
@@ -80,7 +80,7 @@ Kokoro includes comprehensive text normalization (numbers, currencies, times, de
 
 | | Kokoro | PocketTTS |
 |---|---|---|
-| Pipeline | text → espeak G2P → IPA → model | text → SentencePiece → model |
+| Pipeline | text → CoreML G2P → IPA → model | text → SentencePiece → model |
 | Voice conditioning | Style embedding vector | 125 audio prompt tokens |
 | Generation | All frames at once | Frame-by-frame autoregressive |
 | Flow matching target | Mel spectrogram | 32-dim latent per frame |
@@ -95,28 +95,24 @@ Kokoro parallelizes across time (fast total, but must wait for everything). Pock
 
 PocketTTS cannot support phoneme-level features because it has no phoneme stage — the model was trained on text tokens, not IPA. See [PocketTTS.md](PocketTTS.md) for details on what can and cannot be added.
 
+## Known Issues
+
+- **Sibilance in high-pitched voices**: Some female `af_*` voices (e.g. `af_heart`, `af_bella`) produce harsh sibilant sounds (s, sh, z). This is baked into the model output and cannot be fixed with post-processing EQ. Lower-pitched voices (male `am_*` variants and some female voices) are unaffected. See [mobius#23](https://github.com/FluidInference/mobius/issues/23).
+
 ## Enable TTS in Your Project
 
-### App/Library Development (Xcode & SwiftPM)
-
-When adding FluidAudio to your Xcode project or Package.swift, select the **`FluidAudioTTS`** product:
-
-**Xcode:**
-1. File > Add Package Dependencies
-2. Enter FluidAudio repository URL
-3. Choose **`FluidAudioTTS`**
-4. Add it to your app target
+Kokoro TTS is included in the `FluidAudio` product — no separate product needed.
 
 **Package.swift:**
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.7"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.4"),
 ],
 targets: [
     .target(
         name: "YourTarget",
         dependencies: [
-            .product(name: "FluidAudioTTS", package: "FluidAudio")
+            .product(name: "FluidAudio", package: "FluidAudio")
         ]
     )
 ]
@@ -124,14 +120,11 @@ targets: [
 
 **Import in your code:**
 ```swift
-import FluidAudio       // Core functionality (ASR, diarization, VAD)
-import FluidAudioTTS    // TTS features
+import FluidAudio
 ```
 
-### CLI Development
-
-TTS support is enabled by default in the CLI:
+### CLI
 
 ```bash
-swift run fluidaudio tts "Welcome to FluidAudio" --output ~/Desktop/demo.wav
+swift run fluidaudiocli tts "Welcome to FluidAudio" --output ~/Desktop/demo.wav
 ```

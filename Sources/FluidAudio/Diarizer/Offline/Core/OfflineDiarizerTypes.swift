@@ -160,10 +160,20 @@ public struct OfflineDiarizerConfig: Sendable {
     public struct PostProcessing: Sendable {
         public var minGapDurationSeconds: Double
 
-        public static let community = PostProcessing(minGapDurationSeconds: 0.1)
+        /// When true, output segments are made non-overlapping by trimming later segments
+        /// so that only one speaker is active at any given time.
+        /// This is independent of `Embedding.excludeOverlap` which controls overlap masking
+        /// during embedding extraction.
+        public var exclusiveSegments: Bool
 
-        public init(minGapDurationSeconds: Double) {
+        public static let community = PostProcessing(
+            minGapDurationSeconds: 0.1,
+            exclusiveSegments: true
+        )
+
+        public init(minGapDurationSeconds: Double, exclusiveSegments: Bool = true) {
             self.minGapDurationSeconds = minGapDurationSeconds
+            self.exclusiveSegments = exclusiveSegments
         }
     }
 
@@ -211,6 +221,7 @@ public struct OfflineDiarizerConfig: Sendable {
         embeddingExcludeOverlap: Bool = Embedding.community.excludeOverlap,
         minSegmentDuration: Double = Embedding.community.minSegmentDurationSeconds,
         minGapDuration: Double = PostProcessing.community.minGapDurationSeconds,
+        exclusiveSegments: Bool = PostProcessing.community.exclusiveSegments,
         speechOnsetThreshold: Float = Segmentation.community.speechOnsetThreshold,
         speechOffsetThreshold: Float = Segmentation.community.speechOffsetThreshold,
         segmentationMinDurationOn: Double = Segmentation.community.minDurationOn,
@@ -243,7 +254,10 @@ public struct OfflineDiarizerConfig: Sendable {
                 maxIterations: maxVBxIterations,
                 convergenceTolerance: convergenceTolerance
             ),
-            postProcessing: PostProcessing(minGapDurationSeconds: minGapDuration),
+            postProcessing: PostProcessing(
+                minGapDurationSeconds: minGapDuration,
+                exclusiveSegments: exclusiveSegments
+            ),
             export: Export(embeddingsPath: embeddingExportPath)
         )
     }
@@ -395,12 +409,6 @@ public struct OfflineDiarizerConfig: Sendable {
         set { embedding.excludeOverlap = newValue }
     }
 
-    @available(*, deprecated, renamed: "embeddingExcludeOverlap")
-    public var shouldExcludeOverlaps: Bool {
-        get { embeddingExcludeOverlap }
-        set { embeddingExcludeOverlap = newValue }
-    }
-
     public var minSegmentDuration: Double {
         get { embedding.minSegmentDurationSeconds }
         set { embedding.minSegmentDurationSeconds = newValue }
@@ -409,6 +417,11 @@ public struct OfflineDiarizerConfig: Sendable {
     public var minGapDuration: Double {
         get { postProcessing.minGapDurationSeconds }
         set { postProcessing.minGapDurationSeconds = newValue }
+    }
+
+    public var exclusiveSegments: Bool {
+        get { postProcessing.exclusiveSegments }
+        set { postProcessing.exclusiveSegments = newValue }
     }
 
     public var embeddingExportPath: String? {

@@ -279,6 +279,7 @@ public final class AsrManager {
     public func resetState() {
         microphoneDecoderState = TdtDecoderState.make()
         systemDecoderState = TdtDecoderState.make()
+        Task { await sharedMLArrayCache.clear() }
     }
 
     public func cleanup() {
@@ -291,6 +292,7 @@ public final class AsrManager {
         systemDecoderState = TdtDecoderState.make()
         // Release vocabulary boosting resources
         disableVocabularyBoosting()
+        Task { await sharedMLArrayCache.clear() }
         logger.info("AsrManager resources cleaned up")
     }
 
@@ -305,15 +307,18 @@ public final class AsrManager {
         globalFrameOffset: Int = 0
     ) async throws -> TdtHypothesis {
         // Route to appropriate decoder based on model version
-        switch asrModels!.version {
+        guard let models = asrModels, let decoder_ = decoderModel, let joint = jointModel else {
+            throw ASRError.notInitialized
+        }
+        switch models.version {
         case .v2:
             let decoder = TdtDecoderV2(config: config)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
                 encoderSequenceLength: encoderSequenceLength,
                 actualAudioFrames: actualAudioFrames,
-                decoderModel: decoderModel!,
-                jointModel: jointModel!,
+                decoderModel: decoder_,
+                jointModel: joint,
                 decoderState: &decoderState,
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,
@@ -325,8 +330,8 @@ public final class AsrManager {
                 encoderOutput: encoderOutput,
                 encoderSequenceLength: encoderSequenceLength,
                 actualAudioFrames: actualAudioFrames,
-                decoderModel: decoderModel!,
-                jointModel: jointModel!,
+                decoderModel: decoder_,
+                jointModel: joint,
                 decoderState: &decoderState,
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,

@@ -1,4 +1,3 @@
-import FluidAudio
 import Foundation
 import OSLog
 
@@ -25,8 +24,13 @@ public actor PocketTtsManager {
     ///
     /// - Parameters:
     ///   - defaultVoice: Default voice identifier (default: "alba").
-    public init(defaultVoice: String = PocketTtsConstants.defaultVoice) {
-        self.modelStore = PocketTtsModelStore()
+    ///   - directory: Optional override for the base cache directory.
+    ///     When `nil`, uses the default platform cache location.
+    public init(
+        defaultVoice: String = PocketTtsConstants.defaultVoice,
+        directory: URL? = nil
+    ) {
+        self.modelStore = PocketTtsModelStore(directory: directory)
         self.defaultVoice = defaultVoice
     }
 
@@ -128,6 +132,76 @@ public actor PocketTtsManager {
                 voice: selectedVoice,
                 temperature: temperature,
                 deEss: deEss
+            )
+        }
+    }
+
+    /// Synthesize text as a stream of 80ms audio frames.
+    ///
+    /// Each frame contains 1920 Float32 samples at 24kHz. Frames are yielded
+    /// as they are generated, enabling playback to start before the full
+    /// utterance is complete.
+    ///
+    /// - Parameters:
+    ///   - text: The text to synthesize.
+    ///   - voice: Voice identifier (default: uses the manager's default voice).
+    ///   - temperature: Generation temperature (default: 0.7).
+    /// - Returns: An `AsyncThrowingStream` of audio frames. Throws if a model
+    ///   inference error occurs during generation.
+    ///
+    /// Example:
+    /// ```swift
+    /// let manager = PocketTtsManager()
+    /// try await manager.initialize()
+    /// let stream = try await manager.synthesizeStreaming(text: "Hello, world!")
+    /// for try await frame in stream {
+    ///     audioEngine.schedule(frame.samples)
+    /// }
+    /// ```
+    public func synthesizeStreaming(
+        text: String,
+        voice: String? = nil,
+        temperature: Float = PocketTtsConstants.temperature
+    ) async throws -> AsyncThrowingStream<PocketTtsSynthesizer.AudioFrame, Error> {
+        guard isInitialized else {
+            throw PocketTTSError.modelNotFound("PocketTTS model not initialized")
+        }
+
+        let selectedVoice = voice ?? defaultVoice
+
+        return try await PocketTtsSynthesizer.withModelStore(modelStore) {
+            try await PocketTtsSynthesizer.synthesizeStreaming(
+                text: text,
+                voice: selectedVoice,
+                temperature: temperature
+            )
+        }
+    }
+
+    /// Synthesize text as a stream of audio frames using custom voice data.
+    ///
+    /// Use this for cloned voices without saving to disk first.
+    ///
+    /// - Parameters:
+    ///   - text: The text to synthesize.
+    ///   - voiceData: Voice conditioning data (e.g., from cloneVoice).
+    ///   - temperature: Generation temperature (default: 0.7).
+    /// - Returns: An `AsyncThrowingStream` of audio frames. Throws if a model
+    ///   inference error occurs during generation.
+    public func synthesizeStreaming(
+        text: String,
+        voiceData: PocketTtsVoiceData,
+        temperature: Float = PocketTtsConstants.temperature
+    ) async throws -> AsyncThrowingStream<PocketTtsSynthesizer.AudioFrame, Error> {
+        guard isInitialized else {
+            throw PocketTTSError.modelNotFound("PocketTTS model not initialized")
+        }
+
+        return try await PocketTtsSynthesizer.withModelStore(modelStore) {
+            try await PocketTtsSynthesizer.synthesizeStreaming(
+                text: text,
+                voiceData: voiceData,
+                temperature: temperature
             )
         }
     }

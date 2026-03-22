@@ -1,13 +1,14 @@
 @preconcurrency import CoreML
-import FluidAudio
 import Foundation
 
 extension PocketTtsSynthesizer {
 
-    /// Mutable streaming state for the Mimi audio decoder.
+    /// Mutable streaming state for the Mimi neural audio codec decoder.
     ///
-    /// Contains 26 tensors that track convolutional history,
-    /// attention caches, and partial upsampling buffers.
+    /// Contains 26 tensors that track convolutional history, attention caches,
+    /// and partial upsampling buffers. Unlike the KV cache (which resets per
+    /// text chunk), Mimi state persists across all chunks to produce seamless
+    /// audio — the decoder needs prior frame context for smooth waveform continuity.
     struct MimiState {
         var tensors: [String: MLMultiArray]
     }
@@ -42,6 +43,8 @@ extension PocketTtsSynthesizer {
             let shape = shapeArray.map { NSNumber(value: $0) }
             let array = try MLMultiArray(shape: shape, dataType: .float32)
 
+            // Some tensors (e.g., res{0,1,2}_conv1_prev) have zero-length shapes
+            // and are empty pass-throughs — skip loading binary data for those.
             if byteCount > 0 && !shapeArray.contains(0) {
                 let binURL = stateDir.appendingPathComponent("\(name).bin")
                 let data = try Data(contentsOf: binURL)

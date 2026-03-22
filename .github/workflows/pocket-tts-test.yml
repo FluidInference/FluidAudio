@@ -1,0 +1,140 @@
+name: PocketTTS Smoke Test
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pocket-tts-smoke-test:
+    name: PocketTTS Smoke Test
+    runs-on: macos-15
+    permissions:
+      contents: read
+      pull-requests: write
+
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Application Support/FluidAudio/Models/pocket-tts
+            ~/Library/Caches/Homebrew
+            /usr/local/Cellar/ffmpeg
+            /opt/homebrew/Cellar/ffmpeg
+          key: ${{ runner.os }}-pocket-tts-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/PocketTTS/**', 'Sources/FluidAudio/ModelNames.swift') }}
+
+      - name: Install ffmpeg
+        run: |
+          brew install ffmpeg || echo "ffmpeg may already be installed"
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Run Smoke Test
+        id: smoketest
+        run: |
+          BENCHMARK_START=$(date +%s)
+
+          echo "========================================="
+          echo "PocketTTS smoke test"
+          echo "========================================="
+          echo ""
+          echo "NOTE: PocketTTS uses CoreML MLState (macOS 15) KV cache"
+          echo "and Mimi streaming state. Results on virtualized CI VMs"
+          echo "may differ from physical Apple Silicon."
+          echo ""
+
+          TEXT="The quick brown fox jumps over the lazy dog near the riverbank."
+
+          if .build/release/fluidaudiocli tts "$TEXT" \
+            --backend pocket \
+            --output pocket_tts_output.wav 2>&1; then
+            echo "Smoke test PASSED - pipeline completed without crash"
+            echo "SMOKE_STATUS=PASSED" >> $GITHUB_OUTPUT
+          else
+            EXIT_CODE=$?
+            echo "Smoke test FAILED with exit code $EXIT_CODE"
+            echo "SMOKE_STATUS=FAILED" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -f pocket_tts_output.wav ]; then
+            SIZE=$(stat -f%z pocket_tts_output.wav 2>/dev/null || stat -c%s pocket_tts_output.wav 2>/dev/null)
+            echo "Output file size: $SIZE bytes"
+            echo "FILE_SIZE=$SIZE" >> $GITHUB_OUTPUT
+          else
+            echo "FILE_SIZE=0" >> $GITHUB_OUTPUT
+          fi
+
+          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+
+      - name: Comment PR
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ steps.smoketest.outputs.SMOKE_STATUS }}';
+            const emoji = status === 'PASSED' ? '✅' : '❌';
+            const fileSize = '${{ steps.smoketest.outputs.FILE_SIZE }}';
+            const fileSizeKB = (parseInt(fileSize) / 1024).toFixed(1);
+
+            const body = `## PocketTTS Smoke Test ${emoji}
+
+            | Check | Result |
+            |-------|--------|
+            | Build | ✅ |
+            | Model download | ${emoji} |
+            | Model load | ${emoji} |
+            | Synthesis pipeline | ${emoji} |
+            | Output WAV | ${parseInt(fileSize) > 0 ? '✅' : '❌'} (${fileSizeKB} KB) |
+
+            <sub>Runtime: ${{ steps.smoketest.outputs.EXECUTION_TIME }}</sub>
+
+            <sub>**Note:** PocketTTS uses CoreML MLState (macOS 15) KV cache + Mimi streaming state. CI VM lacks physical GPU — audio quality may differ from Apple Silicon.</sub>
+
+            <!-- fluidaudio-pocket-tts-test -->`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.body.includes('<!-- fluidaudio-pocket-tts-test -->')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Upload Output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-tts-output
+          path: pocket_tts_output.wav
+          retention-days: 7

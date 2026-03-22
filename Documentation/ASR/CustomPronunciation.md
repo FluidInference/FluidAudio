@@ -12,7 +12,7 @@ Custom lexicons take **highest priority** in the pronunciation resolution pipeli
 2. **Custom lexicon** — Your `word=phonemes` file entries
 3. **Case-sensitive built-in lexicon** — Handles abbreviations like `F.B.I`
 4. **Standard built-in lexicon** — General English pronunciations
-5. **Grapheme-to-phoneme (G2P)** — eSpeak-NG fallback for unknown words
+5. **Grapheme-to-phoneme (G2P)** — CoreML G2P model fallback for unknown words
 
 ## File Format
 
@@ -142,7 +142,7 @@ return normalizedEntries[normalized]
 ### CLI
 
 ```bash
-swift run fluidaudio tts "The NASDAQ index rose today" --lexicon custom.txt --output output.wav
+swift run fluidaudiocli tts "The NASDAQ index rose today" --lexicon custom.txt --output output.wav
 ```
 
 ### Swift API
@@ -162,8 +162,8 @@ let lexicon = TtsCustomLexicon(entries: [
     "kokoro": ["k", "ə", "k", "ˈ", "ɔ", "ɹ", "O"]
 ])
 
-// Use with TtSManager
-let manager = TtSManager(customLexicon: lexicon)
+// Use with KokoroTtsManager
+let manager = KokoroTtsManager(customLexicon: lexicon)
 try await manager.initialize()
 let audio = try await manager.synthesize(text: "Welcome to Kokoro TTS")
 
@@ -282,7 +282,7 @@ if let phonemes = lexicon.phonemes(for: "problematic_word") {
 The Kokoro vocabulary uses a specific phoneme set. To find valid phonemes:
 
 1. Look at existing entries in the built-in lexicon
-2. Use eSpeak-NG's IPA output as a reference
+2. Use IPA reference charts or existing built-in lexicon entries as a guide
 3. Test with short phrases to verify pronunciation
 
 ## Best Practices
