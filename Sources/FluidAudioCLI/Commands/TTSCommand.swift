@@ -711,6 +711,7 @@ public struct TTS {
             logger.info("  Output: \(outURL.path)")
         } catch {
             logger.error("KittenTTS synthesis failed: \(error)")
+            exit(1)
         }
     }
 

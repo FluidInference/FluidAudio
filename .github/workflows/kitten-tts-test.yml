@@ -28,7 +28,7 @@ jobs:
           path: |
             .build
             ~/.cache/fluidaudio/Models/kokoro
-            ~/.cache/fluidaudio/Models/kittentts
+            ~/.cache/fluidaudio/Models/kittentts-coreml
             ~/Library/Caches/Homebrew
           key: ${{ runner.os }}-kitten-tts-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/KittenTTS/**', 'Sources/FluidAudio/ModelNames.swift') }}
 

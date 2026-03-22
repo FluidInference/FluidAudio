@@ -73,12 +73,9 @@ public struct KittenTtsSynthesizer {
 
         for phoneme in ipaPhonemes {
             for scalar in phoneme.unicodeScalars {
-                if let id = scalarToIndex[scalar] {
-                    if id != KittenTtsConstants.padTokenId {
-                        ids.append(id)
-                    }
-                }
-                // Scalars not in vocab are silently dropped
+                guard let id = scalarToIndex[scalar] else { continue }
+                guard id != KittenTtsConstants.padTokenId else { continue }
+                ids.append(id)
             }
         }
 
@@ -191,12 +188,14 @@ public struct KittenTtsSynthesizer {
         let allowedPhonemes = Set(vocabulary.keys)
 
         // Chunk the text into phonemes using Kokoro's pipeline
+        // KittenTTS models support max 70 tokens (5s) or 140 tokens (10s)
+        // Use conservative 70 token limit to fit all variants
         let chunks = try await KokoroChunker.chunk(
             text: text,
             wordToPhonemes: lexicons.word,
             caseSensitiveLexicon: lexicons.caseSensitive,
             customLexicon: nil,
-            targetTokens: 500,
+            targetTokens: 70,
             hasLanguageToken: false,
             allowedPhonemes: allowedPhonemes,
             phoneticOverrides: [],
