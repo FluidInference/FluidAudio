@@ -644,23 +644,19 @@ public struct Qwen3TtsSynthesizer {
         return vocabSize - 1  // Fallback
     }
 
-    /// Sample CB0 token from logits with the full transformers-compatible sampling pipeline.
+    /// Select CB0 token using greedy decoding (argmax) with logit processors.
     ///
-    /// Processing order matches transformers `_get_logits_processor`:
+    /// Matches PyTorch reference pipeline (`do_sample=False`):
     /// 1. Repetition penalty (1.05) on all previously generated CB0 tokens
     /// 2. Suppress tokens 2048-3071 except EOS (2150)
     /// 3. min_new_tokens: suppress EOS for first 2 steps
-    /// 4. Temperature (0.7)
-    /// 5. Top-K (30)
-    /// 6. Softmax → multinomial sampling
+    /// 4. Argmax (greedy)
     private static func sampleToken(
         from logits: [Float],
         generatedIds: Set<Int> = [],
         step: Int = 0
     ) -> Int {
         let eosToken = Qwen3TtsConstants.codecEosTokenId
-        let temperature = Qwen3TtsConstants.temperature
-        let topK = Qwen3TtsConstants.topK
         let repetitionPenalty = Qwen3TtsConstants.repetitionPenalty
         let minNewTokens = Qwen3TtsConstants.minNewTokens
 
@@ -691,45 +687,17 @@ public struct Qwen3TtsSynthesizer {
             masked[eosToken] = -.infinity
         }
 
-        // 4. Temperature
-        for i in 0..<masked.count where masked[i] > -.infinity {
-            masked[i] /= temperature
-        }
-
-        // 5. Top-K filtering
-        if topK > 0 && topK < masked.count {
-            var sortable = masked.filter { $0 > -.infinity }
-            sortable.sort(by: >)
-            if sortable.count > topK {
-                let threshold = sortable[topK - 1]
-                for i in 0..<masked.count where masked[i] < threshold {
-                    masked[i] = -.infinity
-                }
+        // 4. Greedy: argmax
+        var bestIdx = 0
+        var bestVal: Float = -.infinity
+        for i in 0..<masked.count {
+            if masked[i] > bestVal {
+                bestVal = masked[i]
+                bestIdx = i
             }
         }
 
-        // 6. Softmax
-        let maxLogit = masked.max() ?? 0
-        var expSum: Float = 0
-        var exps = [Float](repeating: 0, count: masked.count)
-        for i in 0..<masked.count where masked[i] > -.infinity {
-            let e = exp(masked[i] - maxLogit)
-            exps[i] = e
-            expSum += e
-        }
-
-        // 7. Multinomial sample
-        let r = Float.random(in: 0..<1)
-        var cumulative: Float = 0
-        for i in 0..<exps.count {
-            guard exps[i] > 0 else { continue }
-            cumulative += exps[i] / expSum
-            if cumulative >= r {
-                return i
-            }
-        }
-
-        return 0  // Fallback
+        return bestIdx
     }
 
     // MARK: - Audio Post-Processing
@@ -741,9 +709,9 @@ public struct Qwen3TtsSynthesizer {
     private static func trimSilence(
         _ samples: [Float],
         sampleRate: Int,
-        threshold: Float = 0.02,
-        windowMs: Int = 20,
-        padMs: Int = 50
+        threshold: Float = 0.005,
+        windowMs: Int = 10,
+        padMs: Int = 20
     ) -> [Float] {
         let windowSize = sampleRate * windowMs / 1000
         let padSize = sampleRate * padMs / 1000

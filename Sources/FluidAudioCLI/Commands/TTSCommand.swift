@@ -663,8 +663,8 @@ public struct TTS {
 
             if normalizedText.contains("hello world") && normalizedText.contains("test") {
                 // "Hello world, this is a test of the text to speech system."
-                // Token IDs from Qwen3 processor (processor(text=...).input_ids)
-                tokenIds = [9707, 1879, 11, 419, 374, 264, 1273, 315, 279, 1467, 311, 8806, 1849, 13]
+                // Token IDs from Qwen3 processor (verified from mobius test file)
+                tokenIds = [9707, 1879, 11, 419, 374, 264, 1273, 315, 279, 1467, 4686, 1331, 39586, 1849, 13]
             } else if text.contains("你好世界") {
                 // "你好世界，这是一个文字转语音系统的测试。"
                 // Token IDs from Qwen3 processor for Chinese test sentence
