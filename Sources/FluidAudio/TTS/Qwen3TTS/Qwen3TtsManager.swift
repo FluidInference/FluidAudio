@@ -3,6 +3,9 @@ import OSLog
 
 /// Manages text-to-speech synthesis using Qwen3-TTS CoreML models.
 ///
+/// - Important: **Beta.** Qwen3-TTS does not yet include a built-in text tokenizer.
+///   Input must be pre-tokenized externally (e.g., via the Python `qwen-tts` package).
+///
 /// Qwen3-TTS is a large language model-based TTS system that supports
 /// multiple languages including English and Chinese. It uses a 4-stage
 /// pipeline: prefill → LM decode → code predictor → audio decoder.
@@ -13,9 +16,6 @@ import OSLog
 /// try await manager.loadFromDirectory(modelDirectory)
 /// let audioData = try await manager.synthesize(text: "Hello world", tokenIds: [...])
 /// ```
-///
-/// NOTE: This implementation requires pre-tokenized input. The text must be
-/// tokenized using the Qwen3 tokenizer externally (e.g., in Python).
 public actor Qwen3TtsManager {
 
     private let logger = AppLogger(category: "Qwen3TtsManager")

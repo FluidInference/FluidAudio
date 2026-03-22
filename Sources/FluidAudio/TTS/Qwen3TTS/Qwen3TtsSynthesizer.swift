@@ -4,6 +4,9 @@ import OSLog
 
 /// Qwen3-TTS language model synthesizer.
 ///
+/// - Important: **Beta.** Qwen3-TTS does not yet include a built-in text tokenizer.
+///   Input must be pre-tokenized externally (e.g., via the Python `qwen-tts` package).
+///
 /// Pipeline (V10 decode + KV-cached code predictor):
 /// 1. Prefill: Process text context → logits, kv_cache, past_hidden
 /// 2. Decode Loop:
