@@ -97,7 +97,7 @@ public struct Qwen3TtsSynthesizer {
 
         // 3. Run greedy decode loop to generate all 16 codebooks per step
         let decodeStart = Date()
-        let actualPrefillLen = textTokens.count + 11  // role(3) + text + think(7) + speaker(1)
+        let actualPrefillLen = min(textTokens.count, Qwen3TtsConstants.maxTextLength) + 11  // role(3) + text + think(7) + speaker(1)
         let allCodebooks = try await runDecodeLoop(
             firstToken: firstToken,
             kvCache: kvCache,
@@ -110,19 +110,6 @@ public struct Qwen3TtsSynthesizer {
         logger.info(
             "Generated \(allCodebooks.count) frames (16 codebooks each) in \(String(format: "%.2f", decodeTime))s"
         )
-
-        // DEBUG: Dump codebooks for comparison with PyTorch
-        do {
-            let dumpPath = "/tmp/swift_codebooks.txt"
-            var lines: [String] = ["# Swift CoreML codebooks: \(allCodebooks.count) frames x 16 codebooks"]
-            for (t, frame) in allCodebooks.enumerated() {
-                lines.append("frame \(t): \(frame)")
-            }
-            try lines.joined(separator: "\n").write(toFile: dumpPath, atomically: true, encoding: .utf8)
-            logger.info("Dumped codebooks to \(dumpPath)")
-        } catch {
-            logger.warning("Failed to dump codebooks: \(error)")
-        }
 
         // 4. Run audio decoder
         let decoderStart = Date()
@@ -354,7 +341,7 @@ public struct Qwen3TtsSynthesizer {
             let embedArray = try createEmbeddingFromTable(
                 cpEmbeddings: cpEmbeddings,
                 tableIndex: step - 1,
-                tokenId: tokens.last!
+                tokenId: tokens[tokens.count - 1]
             )
 
             let posInput = try createPositionInput(position: step + 1)

@@ -207,7 +207,7 @@ public actor Qwen3TtsModelStore {
         let data = try Data(contentsOf: url)
 
         // NPY header: magic (6 bytes) + version (2 bytes) + header_len (2 or 4 bytes) + header
-        guard data.count >= 10 else {
+        guard data.count >= 12 else {
             throw TTSError.processingFailed("Invalid NPY file: too small")
         }
 
