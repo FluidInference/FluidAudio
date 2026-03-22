@@ -169,10 +169,30 @@ The decoder is a T=1 autoregressive transformer with 28 layers, GQA (8 KV heads 
 2. Stateful operations (KV cache concat) are GPU-managed
 3. The decoder runs per output token (hundreds of iterations) — GPU is efficient for this pattern
 
+## Variant Comparison (10 LibriSpeech test-clean files, M4 Max)
+
+| Variant | Encoder RAM | Decoder RAM | Embeds RAM | **Total RAM** | Overall RTFx | Median RTFx | WER |
+|---------|------------|-------------|-----------|-----------|-------------|-------------|-----|
+| f32 | 410 MB | 988 MB | 391 MB | **1790 MB** | 3.0x | 3.5x | 0.7% |
+| f32-ane | 100 MB | 988 MB | 391 MB | ~1480 MB | 3.1x | 3.5x | 0.7% |
+| int8 | 395 MB | 384 MB | 296 MB | **1076 MB** | 2.9x | 3.2x | 0.7% |
+| int8-ane (fp16 enc) | 100 MB | 330 MB | 296 MB | **728 MB** | 2.8x | 3.4x | 0.7% |
+| int4 | 401 MB | 53 MB | 296 MB | **751 MB** | 2.7x | 3.3x | 0.7% |
+
+All variants produce identical transcriptions on all 10 files. The encoder was never quantized in the original int8/int4 variants — only the decoder was. The ANE encoder (Conv2d + einsum rewrite with fp16 precision) reduces encoder RAM from ~400 MB to 100 MB.
+
+### Int8 Encoder Quantization
+
+Tested int8 quantization on the ANE encoder: same WER (0.7%), same RTFx (~2.9x), same RAM (727 MB). The only difference is half the encoder download size (179 MB vs 356 MB on disk). The encoder is already small relative to the decoder + embeddings, so quantizing it doesn't move the needle on total RAM.
+
+## Deployment
+
+The ANE encoder is uploaded to HuggingFace as `qwen3_asr_audio_encoder_v2` in both `f32/` and `int8/` variants. The original encoder remains available for backward compatibility.
+
 ## Next Steps
 
-1. **Integrate the ANE audio encoder into FluidAudio** — Replace the original `qwen3_asr_audio_encoder.mlmodelc` with the ANE-optimized version in the HuggingFace model package
-2. ~~**Measure actual inference speed**~~ — Done. 1.53x speedup confirmed on M4 Max (11.61ms → 7.60ms median).
+1. ~~**Integrate the ANE audio encoder into FluidAudio**~~ — Done. Uploaded as `qwen3_asr_audio_encoder_v2` to HuggingFace, Swift code updated to load v2.
+2. ~~**Measure actual inference speed**~~ — Done. 1.53x encoder speedup confirmed on M4 Max (11.61ms → 7.60ms median).
 3. **Test on different Apple Silicon** — Profile on M1/M2/M3/M4 to verify ANE scheduling is consistent
 4. **Decoder optimization** — Not recommended for the Conv2d/einsum approach (T=1 limitation). ANEMLL-style full rewrite would be needed to move the decoder to ANE.
 
