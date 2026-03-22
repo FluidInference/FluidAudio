@@ -201,6 +201,8 @@ public struct TTS {
                         backend = .kokoro
                     case "pocket", "pockettts":
                         backend = .pocketTts
+                    case "kitten", "kittentts":
+                        backend = .kittenTts(.mini)  // Default to Mini (82M)
                     case "kitten-nano", "kittennano":
                         backend = .kittenTts(.nano)
                     case "kitten-mini", "kittenmini":
@@ -720,7 +722,7 @@ public struct TTS {
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS, expr-voice-3-f for KittenTTS)
-              --backend            TTS backend: kokoro (default), pocket, kitten-nano, kitten-mini
+              --backend            TTS backend: kokoro (default), pocket, kitten (Mini 82M), kitten-nano, kitten-mini
               --speed              Speech speed multiplier (KittenTTS Mini only, default: 1.0)
               --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
