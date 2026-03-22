@@ -95,6 +95,19 @@ Kokoro parallelizes across time (fast total, but must wait for everything). Pock
 
 PocketTTS cannot support phoneme-level features because it has no phoneme stage — the model was trained on text tokens, not IPA. See [PocketTTS.md](PocketTTS.md) for details on what can and cannot be added.
 
+## V2 Models (ANE-Optimized)
+
+The v2 models (`kokoro_21_5s_v2`, `kokoro_21_15s_v2`) are converted with `compute_precision=FLOAT16`, which moves 833 ops (BERT transformer layers + generator convolutions) to the Apple Neural Engine.
+
+| Metric | V1 (fp32, cpuAndGPU) | V2 (fp16, .all) |
+|--------|---------------------|-----------------|
+| Median latency (5s) | 417 ms | 250 ms |
+| RTFx (5s audio) | 12.0x | 20.0x |
+| Speedup | — | **1.67x** |
+| Quality | baseline | identical (round-trip TTS→ASR) |
+
+The 6 LSTM ops (duration predictor) remain on CPU — CoreML does not schedule recurrent ops to ANE regardless of precision. The original v1 models are still available on HuggingFace for backward compatibility.
+
 ## Known Issues
 
 - **Sibilance in high-pitched voices**: Some female `af_*` voices (e.g. `af_heart`, `af_bella`) produce harsh sibilant sounds (s, sh, z). This is baked into the model output and cannot be fixed with post-processing EQ. Lower-pitched voices (male `am_*` variants and some female voices) are unaffected. See [mobius#23](https://github.com/FluidInference/mobius/issues/23).
