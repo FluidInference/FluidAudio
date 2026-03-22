@@ -1,0 +1,210 @@
+name: KittenTTS Smoke Test
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  kitten-tts-smoke-test:
+    name: KittenTTS Smoke Test
+    runs-on: macos-15
+    permissions:
+      contents: read
+      pull-requests: write
+
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/.cache/fluidaudio/Models/kokoro
+            ~/.cache/fluidaudio/Models/kittentts
+            ~/Library/Caches/Homebrew
+          key: ${{ runner.os }}-kitten-tts-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/KittenTTS/**', 'Sources/FluidAudio/ModelNames.swift') }}
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Run KittenTTS Nano Smoke Test
+        id: nano-test
+        run: |
+          echo "========================================="
+          echo "KittenTTS Nano smoke test"
+          echo "========================================="
+          echo ""
+
+          TEXT="Hello world"
+
+          if .build/release/fluidaudiocli tts "$TEXT" \
+            --backend kitten-nano \
+            --voice expr-voice-3-f \
+            --output kitten_nano_output.wav 2>&1; then
+            echo "Nano smoke test PASSED"
+            echo "NANO_STATUS=PASSED" >> $GITHUB_OUTPUT
+          else
+            EXIT_CODE=$?
+            echo "Nano smoke test FAILED with exit code $EXIT_CODE"
+            echo "NANO_STATUS=FAILED" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -f kitten_nano_output.wav ]; then
+            SIZE=$(stat -f%z kitten_nano_output.wav 2>/dev/null || stat -c%s kitten_nano_output.wav 2>/dev/null)
+            echo "Nano output file size: $SIZE bytes"
+            echo "NANO_FILE_SIZE=$SIZE" >> $GITHUB_OUTPUT
+          else
+            echo "NANO_FILE_SIZE=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run KittenTTS Mini Smoke Test
+        id: mini-test
+        run: |
+          echo "========================================="
+          echo "KittenTTS Mini smoke test"
+          echo "========================================="
+          echo ""
+
+          TEXT="The quick brown fox jumps over the lazy dog."
+
+          if .build/release/fluidaudiocli tts "$TEXT" \
+            --backend kitten-mini \
+            --voice expr-voice-3-f \
+            --speed 1.0 \
+            --output kitten_mini_output.wav 2>&1; then
+            echo "Mini smoke test PASSED"
+            echo "MINI_STATUS=PASSED" >> $GITHUB_OUTPUT
+          else
+            EXIT_CODE=$?
+            echo "Mini smoke test FAILED with exit code $EXIT_CODE"
+            echo "MINI_STATUS=FAILED" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -f kitten_mini_output.wav ]; then
+            SIZE=$(stat -f%z kitten_mini_output.wav 2>/dev/null || stat -c%s kitten_mini_output.wav 2>/dev/null)
+            echo "Mini output file size: $SIZE bytes"
+            echo "MINI_FILE_SIZE=$SIZE" >> $GITHUB_OUTPUT
+          else
+            echo "MINI_FILE_SIZE=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verify Lexicon Cache Downloaded
+        id: lexicon-check
+        run: |
+          LEXICON_PATH="$HOME/.cache/fluidaudio/Models/kokoro/us_lexicon_cache.json"
+          if [ -f "$LEXICON_PATH" ]; then
+            SIZE=$(stat -f%z "$LEXICON_PATH" 2>/dev/null || stat -c%s "$LEXICON_PATH" 2>/dev/null)
+            echo "✅ Lexicon cache downloaded: $SIZE bytes"
+            echo "LEXICON_STATUS=DOWNLOADED" >> $GITHUB_OUTPUT
+            echo "LEXICON_SIZE=$SIZE" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Lexicon cache NOT found at $LEXICON_PATH"
+            echo "LEXICON_STATUS=MISSING" >> $GITHUB_OUTPUT
+            echo "LEXICON_SIZE=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment PR
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const nanoStatus = '${{ steps.nano-test.outputs.NANO_STATUS }}';
+            const miniStatus = '${{ steps.mini-test.outputs.MINI_STATUS }}';
+            const lexiconStatus = '${{ steps.lexicon-check.outputs.LEXICON_STATUS }}';
+
+            const nanoEmoji = nanoStatus === 'PASSED' ? '✅' : '❌';
+            const miniEmoji = miniStatus === 'PASSED' ? '✅' : '❌';
+            const lexiconEmoji = lexiconStatus === 'DOWNLOADED' ? '✅' : '❌';
+
+            const nanoFileSize = '${{ steps.nano-test.outputs.NANO_FILE_SIZE }}';
+            const miniFileSize = '${{ steps.mini-test.outputs.MINI_FILE_SIZE }}';
+            const lexiconSize = '${{ steps.lexicon-check.outputs.LEXICON_SIZE }}';
+
+            const nanoSizeKB = (parseInt(nanoFileSize) / 1024).toFixed(1);
+            const miniSizeKB = (parseInt(miniFileSize) / 1024).toFixed(1);
+            const lexiconSizeMB = (parseInt(lexiconSize) / 1024 / 1024).toFixed(1);
+
+            const body = `## KittenTTS Smoke Test
+
+            ### Test Results
+
+            | Variant | Status | Output Size |
+            |---------|--------|-------------|
+            | **Nano** (15M) | ${nanoEmoji} | ${parseInt(nanoFileSize) > 0 ? nanoSizeKB + ' KB' : 'N/A'} |
+            | **Mini** (82M) | ${miniEmoji} | ${parseInt(miniFileSize) > 0 ? miniSizeKB + ' KB' : 'N/A'} |
+
+            ### Dependencies
+
+            | Component | Status | Size |
+            |-----------|--------|------|
+            | Build | ✅ | - |
+            | Lexicon cache (us_lexicon_cache.json) | ${lexiconEmoji} | ${parseInt(lexiconSize) > 0 ? lexiconSizeMB + ' MB' : 'N/A'} |
+            | Kokoro G2P pipeline | ${nanoStatus === 'PASSED' || miniStatus === 'PASSED' ? '✅' : '❌'} | - |
+
+            <sub>**Note:** KittenTTS reuses Kokoro's G2P pipeline for phonemization. This test verifies the lexicon cache auto-downloads correctly and both Nano/Mini variants can synthesize audio.</sub>
+
+            <!-- fluidaudio-kitten-tts-test -->`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.body.includes('<!-- fluidaudio-kitten-tts-test -->')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Upload Nano Output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kitten-nano-output
+          path: kitten_nano_output.wav
+          retention-days: 7
+
+      - name: Upload Mini Output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kitten-mini-output
+          path: kitten_mini_output.wav
+          retention-days: 7
+
+      - name: Fail if Tests Failed
+        run: |
+          NANO_STATUS="${{ steps.nano-test.outputs.NANO_STATUS }}"
+          MINI_STATUS="${{ steps.mini-test.outputs.MINI_STATUS }}"
+          LEXICON_STATUS="${{ steps.lexicon-check.outputs.LEXICON_STATUS }}"
+
+          if [ "$NANO_STATUS" != "PASSED" ] || [ "$MINI_STATUS" != "PASSED" ] || [ "$LEXICON_STATUS" != "DOWNLOADED" ]; then
+            echo "❌ One or more tests failed"
+            exit 1
+          fi
+
+          echo "✅ All tests passed"

@@ -17,6 +17,9 @@ extension KokoroSynthesizer {
     }
 
     public static func loadSimplePhonemeDictionary() async throws {
+        // Ensure lexicon cache file is downloaded first
+        try await TtsResourceDownloader.ensureLexiconFile(named: "us_lexicon_cache.json")
+
         let cacheDir = try TtsModels.cacheDirectoryURL()
         let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
         let vocabulary = try await KokoroVocabulary.shared.getVocabulary()
