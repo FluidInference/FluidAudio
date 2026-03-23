@@ -1,65 +1,90 @@
 import Foundation
 
-/// Constants for the Qwen3-TTS language model TTS backend.
+/// Constants for the Qwen3-TTS 6-model CoreML pipeline.
 public enum Qwen3TtsConstants {
 
     // MARK: - Audio
 
     public static let audioSampleRate: Int = 24_000
 
+    /// Audio samples per codec frame (80ms at 24kHz).
+    public static let samplesPerFrame: Int = 1_920
+
     // MARK: - Model dimensions
 
     public static let hiddenSize: Int = 1024
-    public static let numHeads: Int = 16
-    public static let numKvHeads: Int = 8
-    public static let headDim: Int = 128
-    public static let numLayers: Int = 28
-    public static let vocabSize: Int = 152064
     public static let numCodebooks: Int = 16
-    public static let numCodeGroups: Int = 16
+    public static let codecVocabSize: Int = 2048
 
-    // MARK: - Special token IDs
+    // MARK: - CodeDecoder KV cache
 
-    public static let ttsBosTokenId: Int = 151672
-    public static let ttsPadTokenId: Int = 151671
-    public static let ttsEosTokenId: Int = 151673
-    public static let codecBosTokenId: Int = 2149
-    public static let codecEosTokenId: Int = 2150
-    public static let codecPadTokenId: Int = 2050
+    /// Fixed KV cache sequence length for CodeDecoder.
+    /// key_cache / value_cache shape: [1, 28672, 1, 256] float16
+    public static let cdKvLen: Int = 256
+
+    /// Consolidated KV dimension for CodeDecoder (28 layers).
+    public static let cdKvDim: Int = 28_672
+
+    // MARK: - MultiCodeDecoder KV cache
+
+    /// Fixed KV cache sequence length for MultiCodeDecoder.
+    /// key_cache / value_cache shape: [1, 5120, 1, 16] float16
+    public static let mcdKvLen: Int = 16
+
+    /// Consolidated KV dimension for MultiCodeDecoder (5 layers).
+    public static let mcdKvDim: Int = 5_120
+
+    // MARK: - Codec special token IDs
+
+    public static let codecPadId: Int = 2148
+    public static let codecBosId: Int = 2149
+    public static let codecEosId: Int = 2150
+    public static let codecThinkId: Int = 2154
+    public static let codecNoThinkId: Int = 2155
+    public static let codecThinkBosId: Int = 2156
+    public static let codecThinkEosId: Int = 2157
 
     // MARK: - Language IDs
 
-    public static let languageEnglish: Int = 2050
-    public static let languageChinese: Int = 2055
+    public static let languageIds: [String: Int] = [
+        "english": 2050,
+        "chinese": 2055,
+        "german": 2053,
+        "italian": 2070,
+        "portuguese": 2071,
+        "spanish": 2054,
+        "japanese": 2058,
+        "korean": 2064,
+        "french": 2061,
+        "russian": 2069,
+    ]
+
+    // MARK: - TTS special token IDs
+
+    public static let ttsPadTokenId: Int = 151_671
+    public static let ttsBosTokenId: Int = 151_672
+    public static let ttsEosTokenId: Int = 151_673
 
     // MARK: - Role prefix tokens
 
-    public static let rolePrefixTokens: [Int] = [151644, 77091, 198]
+    /// [im_start, assistant, newline]
+    public static let rolePrefixTokens: [Int] = [151_644, 77_091, 198]
 
     // MARK: - Generation parameters
 
-    public static let maxTextLength: Int = 128
     public static let maxCodecTokens: Int = 125
-
-    /// CB0 (outer LM) sampling parameters
-    public static let temperature: Float = 0.7
-    public static let topK: Int = 30
+    public static let temperature: Float = 0.9
+    public static let topK: Int = 50
     public static let repetitionPenalty: Float = 1.05
     public static let minNewTokens: Int = 2
 
-    /// CB1-15 (code predictor) sampling parameters
-    public static let cpTemperature: Float = 0.9
-    public static let cpTopK: Int = 50
+    // MARK: - SpeechDecoder
 
-    // MARK: - KV cache
+    /// Fixed input time dimension for SpeechDecoder: [1, 16, 125].
+    public static let speechDecoderFrames: Int = 125
 
-    /// Maximum KV cache length (prefill + generated tokens)
-    public static let maxKvLength: Int = 200
-
-    /// Number of KV cache entries (2 per layer: key + value)
-    public static let kvCacheEntries: Int = 56
-
-    // MARK: - Default voice
+    // MARK: - Defaults
 
     public static let defaultVoice: String = "default"
+    public static let defaultLanguage: String = "english"
 }

@@ -143,6 +143,7 @@ public struct TTS {
         var benchmarkMode = false
         var deEss = true
         var backend: TtsBackend = .kokoro
+        var lang = "english"
         var cloneVoicePath: String? = nil
         var voiceFilePath: String? = nil
         var saveVoicePath: String? = nil
@@ -207,6 +208,11 @@ public struct TTS {
                     }
                     i += 1
                 }
+            case "--lang":
+                if i + 1 < arguments.count {
+                    lang = arguments[i + 1].lowercased()
+                    i += 1
+                }
             case "--auto-download":
                 // No-op: downloads are always ensured by the CLI
                 ()
@@ -265,7 +271,7 @@ public struct TTS {
         }
 
         if backend == .qwen3Tts {
-            await runQwen3Tts(text: text, output: output, metricsPath: metricsPath)
+            await runQwen3Tts(text: text, output: output, language: lang, metricsPath: metricsPath)
             return
         }
 
@@ -650,6 +656,7 @@ public struct TTS {
     private static func runQwen3Tts(
         text: String,
         output: String,
+        language: String = "english",
         metricsPath: String?
     ) async {
         do {
@@ -663,8 +670,8 @@ public struct TTS {
 
             if normalizedText.contains("hello world") && normalizedText.contains("test") {
                 // "Hello world, this is a test of the text to speech system."
-                // Token IDs from Qwen3 processor (verified from mobius test file)
-                tokenIds = [9707, 1879, 11, 419, 374, 264, 1273, 315, 279, 1467, 4686, 1331, 39586, 1849, 13]
+                // Token IDs from Qwen3 tokenizer (verified via Python tokenize())
+                tokenIds = [9707, 1879, 11, 419, 374, 264, 1273, 315, 279, 1467, 311, 8806, 1849, 13]
             } else if text.contains("你好世界") {
                 // "你好世界，这是一个文字转语音系统的测试。"
                 // Token IDs from Qwen3 processor for Chinese test sentence
@@ -694,7 +701,8 @@ public struct TTS {
             let wav = try await manager.synthesize(
                 text: text,
                 tokenIds: tokenIds,
-                useSpeaker: true
+                useSpeaker: true,
+                language: language
             )
             let tSynth1 = Date()
 
@@ -816,8 +824,9 @@ public struct TTS {
               --voice-file FILE    Load previously saved voice .bin file
               --save-voice FILE    Save cloned voice to .bin file for later use
 
-            Qwen3-TTS Notes:
-              Models auto-download from HuggingFace on first use (~5.9GB)
+            Qwen3-TTS Options:
+              --lang               Language: english (default), chinese, german, french, etc.
+              Models auto-download from HuggingFace on first use (~1GB)
               Set QWEN3_TTS_MODEL_DIR env var to use a local model directory instead
               Currently only supports pre-tokenized test sentences
 

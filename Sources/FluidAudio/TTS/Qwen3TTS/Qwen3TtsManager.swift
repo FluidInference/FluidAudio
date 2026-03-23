@@ -53,11 +53,13 @@ public actor Qwen3TtsManager {
     ///   - text: The text to synthesize (for logging purposes).
     ///   - tokenIds: Pre-tokenized text IDs from Qwen3 tokenizer.
     ///   - useSpeaker: Whether to use speaker embedding (default: true).
+    ///   - language: Language for synthesis (default: "english").
     /// - Returns: WAV audio data at 24kHz.
     public func synthesize(
         text: String,
         tokenIds: [Int],
-        useSpeaker: Bool = true
+        useSpeaker: Bool = true,
+        language: String = Qwen3TtsConstants.defaultLanguage
     ) async throws -> Data {
         guard isInitialized else {
             throw TTSError.modelNotFound("Qwen3-TTS models not initialized")
@@ -67,7 +69,8 @@ public actor Qwen3TtsManager {
             let result = try await Qwen3TtsSynthesizer.synthesize(
                 text: text,
                 tokenIds: tokenIds,
-                useSpeaker: useSpeaker
+                useSpeaker: useSpeaker,
+                language: language
             )
             return result.audio
         }
@@ -77,7 +80,8 @@ public actor Qwen3TtsManager {
     public func synthesizeDetailed(
         text: String,
         tokenIds: [Int],
-        useSpeaker: Bool = true
+        useSpeaker: Bool = true,
+        language: String = Qwen3TtsConstants.defaultLanguage
     ) async throws -> Qwen3TtsSynthesizer.SynthesisResult {
         guard isInitialized else {
             throw TTSError.modelNotFound("Qwen3-TTS models not initialized")
@@ -87,7 +91,8 @@ public actor Qwen3TtsManager {
             try await Qwen3TtsSynthesizer.synthesize(
                 text: text,
                 tokenIds: tokenIds,
-                useSpeaker: useSpeaker
+                useSpeaker: useSpeaker,
+                language: language
             )
         }
     }
@@ -97,7 +102,8 @@ public actor Qwen3TtsManager {
         text: String,
         tokenIds: [Int],
         outputURL: URL,
-        useSpeaker: Bool = true
+        useSpeaker: Bool = true,
+        language: String = Qwen3TtsConstants.defaultLanguage
     ) async throws {
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try FileManager.default.removeItem(at: outputURL)
@@ -106,7 +112,8 @@ public actor Qwen3TtsManager {
         let audioData = try await synthesize(
             text: text,
             tokenIds: tokenIds,
-            useSpeaker: useSpeaker
+            useSpeaker: useSpeaker,
+            language: language
         )
 
         try audioData.write(to: outputURL)

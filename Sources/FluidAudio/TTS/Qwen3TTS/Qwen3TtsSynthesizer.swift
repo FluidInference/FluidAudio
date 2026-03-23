@@ -2,21 +2,15 @@
 import Foundation
 import OSLog
 
-/// Qwen3-TTS language model synthesizer.
+/// Qwen3-TTS 6-model CoreML synthesizer.
 ///
-/// - Important: **Beta.** Qwen3-TTS does not yet include a built-in text tokenizer.
-///   Input must be pre-tokenized externally (e.g., via the Python `qwen-tts` package).
-///
-/// Pipeline (V10 decode + KV-cached code predictor):
-/// 1. Prefill: Process text context → logits, kv_cache, past_hidden
-/// 2. Decode Loop:
-///    a. CB0 = sample(logits) with rep_penalty + suppression + temp + top_k
-///    b. Code Predictor (CP prefill + 14 CP decode steps) → CB1-15 (temperature + top-k sampling)
-///    c. V10 Decode(CB0, CB1-15, pad_embed, kv_cache, position) → new logits, kv_cache, past_hidden
-/// 3. Audio Decoder: All 16 codebooks → waveform
-///
-/// IMPORTANT: CB1-15 MUST use temperature sampling (not greedy). Greedy code predictor
-/// produces silent/broken audio due to codebook pattern interference.
+/// Pipeline (Argmax-style, matching `inference.py`):
+/// 1. Build prefill embeddings: TextProjector(text) + CodeEmbedder(codec) per position
+/// 2. CodeDecoder prefill: feed each embedding one at a time with KV cache
+/// 3. Autoregressive decode loop:
+///    a. MultiCodeDecoder: hidden_states + CB0 → CB1-CB15
+///    b. Sum all 16 codec embeddings + tts_pad → CodeDecoder step → next CB0
+/// 4. SpeechDecoder: all codec frames → audio waveform
 public struct Qwen3TtsSynthesizer {
 
     static let logger = AppLogger(category: "Qwen3TtsSynthesizer")
@@ -60,88 +54,163 @@ public struct Qwen3TtsSynthesizer {
     ///
     /// - Parameters:
     ///   - text: The text to synthesize.
-    ///   - tokenIds: Pre-tokenized text IDs (if nil, text must be tokenized externally).
+    ///   - tokenIds: Pre-tokenized text IDs.
     ///   - useSpeaker: Whether to use speaker embedding (default: true).
+    ///   - language: Language for synthesis (default: "english").
     /// - Returns: A synthesis result containing WAV audio data.
     public static func synthesize(
         text: String,
         tokenIds: [Int]? = nil,
-        useSpeaker: Bool = true
+        useSpeaker: Bool = true,
+        language: String = Qwen3TtsConstants.defaultLanguage
     ) async throws -> SynthesisResult {
         let store = try currentModelStore()
 
         logger.info("Qwen3-TTS synthesizing: '\(text)'")
 
-        // Get token IDs (must be provided externally)
         guard let textTokens = tokenIds else {
             throw TTSError.processingFailed(
                 "Qwen3-TTS requires pre-tokenized input. Please provide tokenIds.")
         }
 
-        // 1. Run prefill
+        // 1. Build prefill embeddings
         let prefillStart = Date()
-        let (firstLogits, kvCache, pastHidden, padEmbed) = try await runPrefill(
+        let prefillEmbeds = try await buildPrefillEmbeddings(
             textTokens: textTokens,
             useSpeaker: useSpeaker,
+            language: language,
             store: store
         )
-        let prefillTime = Date().timeIntervalSince(prefillStart)
-        logger.info("Prefill completed in \(String(format: "%.2f", prefillTime))s")
+        let prefillBuildTime = Date().timeIntervalSince(prefillStart)
+        logger.info("Built \(prefillEmbeds.count) prefill embeddings in \(String(format: "%.2f", prefillBuildTime))s")
 
-        // 2. Sample first token from prefill logits (step=0, no prior tokens)
-        let firstToken = sampleToken(from: firstLogits, generatedIds: [], step: 0)
-        logger.info("First token: \(firstToken)")
+        // 2. CodeDecoder prefill
+        let cdPrefillStart = Date()
+        var cdState = CodeDecoderKVState()
+        var lastOutput: CodeDecoderOutput!
 
-        // 3. Run greedy decode loop to generate all 16 codebooks per step
-        let decodeStart = Date()
-        let actualPrefillLen = min(textTokens.count, Qwen3TtsConstants.maxTextLength) + 11  // role(3) + text + think(7) + speaker(1)
-        let allCodebooks = try await runDecodeLoop(
-            firstToken: firstToken,
-            kvCache: kvCache,
-            pastHidden: pastHidden,
-            padEmbed: padEmbed,
-            startPosition: actualPrefillLen,
-            store: store
-        )
-        let decodeTime = Date().timeIntervalSince(decodeStart)
+        for emb in prefillEmbeds {
+            lastOutput = try await runCodeDecoderStep(
+                inputEmbeds: emb, state: &cdState, store: store)
+        }
+        let cdPrefillTime = Date().timeIntervalSince(cdPrefillStart)
         logger.info(
-            "Generated \(allCodebooks.count) frames (16 codebooks each) in \(String(format: "%.2f", decodeTime))s"
+            "CodeDecoder prefill: \(prefillEmbeds.count) positions in \(String(format: "%.2f", cdPrefillTime))s"
         )
 
-        // 4. Run audio decoder
-        let decoderStart = Date()
-        let audioSamples = try await runAudioDecoder(
-            allCodebooks: allCodebooks,
-            store: store
-        )
-        let decoderTime = Date().timeIntervalSince(decoderStart)
-        logger.info("Audio decoder completed in \(String(format: "%.2f", decoderTime))s")
+        // 3. Sample first CB0 from prefill logits
+        var logits = extractFloatArray(from: lastOutput.logits)
 
-        // 5. Trim audio to actual content length and strip leading/trailing silence
-        // The audio decoder outputs fixed-length audio (maxCodecTokens frames),
-        // but actual content may be shorter if EOS was hit.
-        // Each codec frame = sampleRate / 12.5 = 1920 samples.
-        let samplesPerFrame = Qwen3TtsConstants.audioSampleRate / 125 * 10  // 1920
-        let expectedSamples = allCodebooks.count * samplesPerFrame
+        suppressControlTokens(&logits)
+        suppressEos(&logits)  // min_new_tokens: suppress EOS for step 0
+        let firstCb0 = sampleTopK(logits: &logits)
+        var generatedCb0s: [Int] = [firstCb0]
+
+        logger.info("First CB0: \(firstCb0)")
+
+        // 4. Autoregressive decode loop
+        let decodeStart = Date()
+        var allFrames: [[Int]] = []
+        var currentCb0 = firstCb0
+        var currentHidden = lastOutput.hiddenStates
+
+        // Cache tts_pad embedding for decode loop
+        let textProjector = try await store.textProjector()
+        let ttsPadEmbed = try runTextProjector(textProjector, tokenId: Qwen3TtsConstants.ttsPadTokenId)
+        let codeEmbedder = try await store.codeEmbedder()
+        let multiCodeEmbedder = try await store.multiCodeEmbedder()
+
+        for step in 0..<Qwen3TtsConstants.maxCodecTokens {
+            // MultiCodeDecoder: hidden + CB0 → CB1-CB15
+            let cb1to15 = try await runMultiCodeDecoder(
+                hiddenStates: currentHidden,
+                cb0Token: currentCb0,
+                codeEmbedder: codeEmbedder,
+                multiCodeEmbedder: multiCodeEmbedder,
+                store: store
+            )
+
+            let frame = [currentCb0] + cb1to15
+            allFrames.append(frame)
+
+            // Build decode input: sum(all 16 codec embeddings) + tts_pad
+            let cb0Embed = try runCodeEmbedder(codeEmbedder, tokenId: currentCb0)
+            var codecSum = extractFloatArray(from: cb0Embed)
+
+            for cbIdx in 0..<15 {
+                let linIdx = cbIdx * Qwen3TtsConstants.codecVocabSize + cb1to15[cbIdx]
+                let cbEmbed = try runMultiCodeEmbedder(multiCodeEmbedder, linearizedId: linIdx)
+                let cbFloats = extractFloatArray(from: cbEmbed)
+                for i in 0..<codecSum.count {
+                    codecSum[i] += cbFloats[i]
+                }
+            }
+
+            // Add tts_pad overlay
+            let padFloats = extractFloatArray(from: ttsPadEmbed)
+            for i in 0..<codecSum.count {
+                codecSum[i] += padFloats[i]
+            }
+
+            // Create input_embeds MLMultiArray [1, 1024, 1, 1]
+            let decodeInput = try createEmbedding(from: codecSum)
+
+            // CodeDecoder step
+            let cdOutput = try await runCodeDecoderStep(
+                inputEmbeds: decodeInput, state: &cdState, store: store)
+            currentHidden = cdOutput.hiddenStates
+
+            // Sample next CB0
+            var nextLogits = extractFloatArray(from: cdOutput.logits)
+            suppressControlTokens(&nextLogits)
+            if step >= 1 {
+                // Allow EOS after min_new_tokens=2 (step 0 was first token, step 1 is second)
+            } else {
+                suppressEos(&nextLogits)
+            }
+            applyRepetitionPenalty(&nextLogits, generatedIds: generatedCb0s)
+            let nextCb0 = sampleTopK(logits: &nextLogits)
+
+            if nextCb0 == Qwen3TtsConstants.codecEosId {
+                logger.info("EOS at step \(step + 1)")
+                break
+            }
+
+            if cdState.position >= Qwen3TtsConstants.cdKvLen - 1 {
+                logger.info("KV cache full at step \(step + 1)")
+                break
+            }
+
+            generatedCb0s.append(nextCb0)
+            currentCb0 = nextCb0
+        }
+
+        let decodeTime = Date().timeIntervalSince(decodeStart)
+        let fps = Double(allFrames.count) / max(decodeTime, 0.001)
+        logger.info(
+            "Decoded \(allFrames.count) frames in \(String(format: "%.2f", decodeTime))s"
+                + " (\(String(format: "%.1f", fps)) frames/s)"
+        )
+
+        // 5. SpeechDecoder: codes → audio
+        let speechStart = Date()
+        let audioSamples = try await runSpeechDecoder(
+            allFrames: allFrames, store: store)
+        let speechTime = Date().timeIntervalSince(speechStart)
+        logger.info("SpeechDecoder: \(String(format: "%.2f", speechTime))s")
+
+        // 6. Trim to actual frame count
+        let expectedSamples = allFrames.count * Qwen3TtsConstants.samplesPerFrame
         let frameTrimmed: [Float]
         if expectedSamples < audioSamples.count {
             frameTrimmed = Array(audioSamples.prefix(expectedSamples))
-            logger.info("Trimmed audio from \(audioSamples.count) to \(expectedSamples) samples")
         } else {
             frameTrimmed = audioSamples
         }
 
-        // Strip leading/trailing silence (sampling can produce silent codec frames)
-        let trimmedSamples = trimSilence(frameTrimmed, sampleRate: Qwen3TtsConstants.audioSampleRate)
-
-        // 6. Audio post-processing disabled — was causing muffled output
-        // (de-essing at -4dB + smoothing low-pass at 10kHz was too aggressive)
-        // AudioPostProcessor.applyTtsPostProcessing(
-        //     &trimmedSamples,
-        //     sampleRate: Float(Qwen3TtsConstants.audioSampleRate),
-        //     deEssAmount: -4.0,
-        //     smoothing: true
-        // )
+        // Strip leading/trailing silence
+        let trimmedSamples = trimSilence(
+            frameTrimmed, sampleRate: Qwen3TtsConstants.audioSampleRate)
 
         // 7. Encode as WAV
         let audioData = try AudioWAV.data(
@@ -155,469 +224,465 @@ public struct Qwen3TtsSynthesizer {
         return SynthesisResult(
             audio: audioData,
             samples: trimmedSamples,
-            tokenCount: allCodebooks.count
+            tokenCount: allFrames.count
         )
     }
 
-    // MARK: - Pipeline Steps
+    // MARK: - Prefill Embedding Construction
 
-    /// Run the LM prefill model.
-    private static func runPrefill(
+    /// Build dual-embedding prefill sequence matching inference.py.
+    ///
+    /// Layout: role(3) + control(4) + speaker?(0-1) + bos(1) + text(N) + eos(1) + final(1)
+    private static func buildPrefillEmbeddings(
         textTokens: [Int],
         useSpeaker: Bool,
+        language: String,
         store: Qwen3TtsModelStore
-    ) async throws -> (logits: [Float], kvCache: MLMultiArray, pastHidden: MLMultiArray, padEmbed: MLMultiArray) {
-        let model = try await store.prefill()
+    ) async throws -> [MLMultiArray] {
+        let textProjector = try await store.textProjector()
+        let codeEmbedder = try await store.codeEmbedder()
 
-        // Create role_ids [1, 3]
-        let roleIds = try createRoleIds()
+        var embeds: [MLMultiArray] = []
 
-        // Create text_ids [1, 128] and text_length [1]
-        let (textIds, textLength) = try createTextInputs(tokens: textTokens)
+        // [0:3] Role: text_proj only (no codec overlay)
+        for tokenId in Qwen3TtsConstants.rolePrefixTokens {
+            embeds.append(try runTextProjector(textProjector, tokenId: tokenId))
+        }
 
-        // Load embeddings (tts_bos, tts_pad, tts_eos)
-        let (bosEmbed, padEmbed, eosEmbed) = try await loadTtsEmbeddings(store: store)
+        // Cache tts_pad, tts_bos, tts_eos embeddings
+        let ttsPad = try runTextProjector(textProjector, tokenId: Qwen3TtsConstants.ttsPadTokenId)
+        let ttsBos = try runTextProjector(textProjector, tokenId: Qwen3TtsConstants.ttsBosTokenId)
+        let ttsEos = try runTextProjector(textProjector, tokenId: Qwen3TtsConstants.ttsEosTokenId)
 
-        // Create speaker embedding [1, 1024]
-        let speakerEmbed = try await createSpeakerEmbedding(useSpeaker: useSpeaker, store: store)
+        // [3:7] Control: tts_pad + codec_emb([think, think_bos, lang, think_eos])
+        let langId =
+            Qwen3TtsConstants.languageIds[language] ?? Qwen3TtsConstants.languageIds["english"]!
+        let codecCtrlTokens = [
+            Qwen3TtsConstants.codecThinkId,
+            Qwen3TtsConstants.codecThinkBosId,
+            langId,
+            Qwen3TtsConstants.codecThinkEosId,
+        ]
+        for ctok in codecCtrlTokens {
+            let codecEmb = try runCodeEmbedder(codeEmbedder, tokenId: ctok)
+            embeds.append(try addEmbeddings(ttsPad, codecEmb))
+        }
 
-        // Create feature provider
+        // [7] Optional speaker embedding
+        if useSpeaker, let speakerData = await store.speaker() {
+            let speakerEmbed = try createEmbedding(from: speakerData)
+            embeds.append(try addEmbeddings(ttsPad, speakerEmbed))
+        }
+
+        // Control: tts_bos + codec_emb(codec_pad)
+        let codecPadEmb = try runCodeEmbedder(codeEmbedder, tokenId: Qwen3TtsConstants.codecPadId)
+        embeds.append(try addEmbeddings(ttsBos, codecPadEmb))
+
+        // Text: text_proj(token) + codec_emb(codec_pad) for each token
+        for tokenId in textTokens {
+            let textEmb = try runTextProjector(textProjector, tokenId: tokenId)
+            embeds.append(try addEmbeddings(textEmb, codecPadEmb))
+        }
+
+        // EOS: text_proj(tts_eos) + codec_emb(codec_pad)
+        embeds.append(try addEmbeddings(ttsEos, codecPadEmb))
+
+        // Final: tts_pad + codec_emb(codec_bos)
+        let codecBosEmb = try runCodeEmbedder(
+            codeEmbedder, tokenId: Qwen3TtsConstants.codecBosId)
+        embeds.append(try addEmbeddings(ttsPad, codecBosEmb))
+
+        return embeds
+    }
+
+    // MARK: - CodeDecoder
+
+    /// KV cache state for the CodeDecoder (28-layer transformer).
+    private struct CodeDecoderKVState {
+        var keyCache: MLMultiArray
+        var valueCache: MLMultiArray
+        var position: Int = 0
+
+        init() {
+            // [1, 28672, 1, 256] float16
+            let shape: [NSNumber] = [
+                1, NSNumber(value: Qwen3TtsConstants.cdKvDim), 1,
+                NSNumber(value: Qwen3TtsConstants.cdKvLen),
+            ]
+            keyCache = try! MLMultiArray(shape: shape, dataType: .float16)
+            valueCache = try! MLMultiArray(shape: shape, dataType: .float16)
+        }
+    }
+
+    private struct CodeDecoderOutput {
+        let logits: MLMultiArray
+        let hiddenStates: MLMultiArray
+    }
+
+    /// Run a single CodeDecoder step (prefill or decode).
+    private static func runCodeDecoderStep(
+        inputEmbeds: MLMultiArray,
+        state: inout CodeDecoderKVState,
+        store: Qwen3TtsModelStore
+    ) async throws -> CodeDecoderOutput {
+        let model = try await store.codeDecoder()
+        let pos = state.position
+        let kvLen = Qwen3TtsConstants.cdKvLen
+
+        // key_padding_mask [1, 256] float16: 0..pos = 0.0, rest = -10000.0
+        let keyMask = try MLMultiArray(shape: [1, NSNumber(value: kvLen)], dataType: .float16)
+        for i in 0..<kvLen {
+            keyMask[i] = NSNumber(value: i <= pos ? Float(0.0) : Float(-10000.0))
+        }
+
+        // kv_cache_update_mask [1, 256] float16: only pos = 1.0
+        let updateMask = try MLMultiArray(shape: [1, NSNumber(value: kvLen)], dataType: .float16)
+        for i in 0..<kvLen {
+            updateMask[i] = NSNumber(value: i == pos ? Float(1.0) : Float(0.0))
+        }
+
+        let cacheLenArr = try MLMultiArray(shape: [1], dataType: .int32)
+        cacheLenArr[0] = NSNumber(value: pos)
+
+        // Cast input_embeds to float16
+        let f16Input = try toFloat16(inputEmbeds)
+
         let features = try MLDictionaryFeatureProvider(dictionary: [
-            "role_ids": roleIds,
-            "text_ids": textIds,
-            "text_length": textLength,
-            "tts_bos_embed": bosEmbed,
-            "tts_pad_embed": padEmbed,
-            "tts_eos_embed": eosEmbed,
-            "speaker_embed": speakerEmbed,
+            "input_embeds": f16Input,
+            "cache_length": cacheLenArr,
+            "key_padding_mask": keyMask,
+            "kv_cache_update_mask": updateMask,
+            "key_cache": state.keyCache,
+            "value_cache": state.valueCache,
         ])
 
-        // Run prediction
         let output = try await model.compatPrediction(from: features, options: MLPredictionOptions())
 
-        // Extract outputs
-        guard let logitsArray = output.featureValue(for: "logits")?.multiArrayValue,
-            let kvCacheRaw = output.featureValue(for: "kv_cache")?.multiArrayValue,
-            let pastHiddenArray = output.featureValue(for: "past_hidden")?.multiArrayValue
+        guard let newKeyCache = output.featureValue(for: "new_key_cache")?.multiArrayValue,
+            let newValueCache = output.featureValue(for: "new_value_cache")?.multiArrayValue,
+            let hiddenStates = output.featureValue(for: "hidden_states")?.multiArrayValue,
+            let logits = output.featureValue(for: "logits")?.multiArrayValue
         else {
-            throw TTSError.processingFailed("Missing prefill outputs")
+            throw TTSError.processingFailed("Missing CodeDecoder outputs")
         }
 
-        // CRITICAL: Trim KV cache to actual length.
-        // Prefill pads to maxTextLength+11 but only textLen+11 positions are valid.
-        // The decode model attends to ALL KV entries, so garbage entries corrupt output.
-        let actualLen = min(textTokens.count, Qwen3TtsConstants.maxTextLength) + 11
-        let kvCacheArray = try trimKvCache(kvCacheRaw, toLength: actualLen)
+        state.keyCache = newKeyCache
+        state.valueCache = newValueCache
+        state.position += 1
 
-        // Convert logits to [Float]
-        let logits = extractFloatArray(from: logitsArray)
-
-        return (logits, kvCacheArray, pastHiddenArray, padEmbed)
+        return CodeDecoderOutput(logits: logits, hiddenStates: hiddenStates)
     }
 
-    /// Run the decode loop using V10 LM decode + KV-cached code predictor.
-    ///
-    /// For each step:
-    /// 1. Run code predictor (CP prefill + 14 CP decode) to get CB1-15 from past_hidden + CB0
-    /// 2. Run V10 LM decode with all 16 codebook IDs to get next logits + past_hidden
-    private static func runDecodeLoop(
-        firstToken: Int,
-        kvCache: MLMultiArray,
-        pastHidden: MLMultiArray,
-        padEmbed: MLMultiArray,
-        startPosition: Int,
-        store: Qwen3TtsModelStore
-    ) async throws -> [[Int]] {
-        let lmModel = try await store.decode()
-        let maxTokens = Qwen3TtsConstants.maxCodecTokens
-        let eosToken = Qwen3TtsConstants.codecEosTokenId
+    // MARK: - MultiCodeDecoder
 
-        var allCodebooks: [[Int]] = []
-        var currentKvCache = kvCache
-        var currentPastHidden = pastHidden
-        var currentCb0 = firstToken
-        var position = startPosition
-        // Track ALL previously generated CB0 tokens for repetition penalty
-        var generatedCb0s: Set<Int> = [firstToken]
-
-        while allCodebooks.count < maxTokens {
-            // Step 1: Run code predictor to get CB1-15
-            let cb1_15 = try await runCodePredictor(
-                pastHidden: currentPastHidden,
-                cb0Token: currentCb0,
-                store: store
-            )
-
-            // Build full frame: [CB0, CB1, ..., CB15]
-            var frame = [currentCb0]
-            frame.append(contentsOf: cb1_15)
-            allCodebooks.append(frame)
-
-            // Step 2: Run V10 LM decode with all 16 codebook IDs
-            let cb0Input = try createTokenInput(token: currentCb0)
-            let cb1_15Input = try createCb1_15Input(tokens: cb1_15)
-            let positionInput = try createPositionInput(position: position)
-
-            let features = try MLDictionaryFeatureProvider(dictionary: [
-                "cb0_id": cb0Input,
-                "cb1_15_ids": cb1_15Input,
-                "trailing_text_embed": padEmbed,
-                "kv_cache": currentKvCache,
-                "position": positionInput,
-            ])
-
-            let output = try await lmModel.compatPrediction(
-                from: features, options: MLPredictionOptions())
-
-            guard let logitsArray = output.featureValue(for: "logits")?.multiArrayValue,
-                let newKvCache = output.featureValue(for: "new_kv_cache")?.multiArrayValue,
-                let newPastHidden = output.featureValue(for: "past_hidden")?.multiArrayValue
-            else {
-                throw TTSError.processingFailed("Missing V10 decode outputs")
-            }
-
-            // Sample next CB0 with full pipeline (rep_penalty → suppress → min_new_tokens → temp → top_k)
-            let logits = extractFloatArray(from: logitsArray)
-            let currentStep = allCodebooks.count  // step index for min_new_tokens guard
-            let nextCb0 = sampleToken(from: logits, generatedIds: generatedCb0s, step: currentStep)
-
-            // Update state
-            currentKvCache = newKvCache
-            currentPastHidden = newPastHidden
-            currentCb0 = nextCb0
-            position += 1
-
-            // Check for EOS
-            if nextCb0 == eosToken {
-                logger.info("EOS at frame \(allCodebooks.count)")
-                break
-            }
-
-            generatedCb0s.insert(nextCb0)
-        }
-
-        return allCodebooks
-    }
-
-    /// Run the code predictor to generate CB1-15 from past_hidden and CB0 token.
-    ///
-    /// Uses CP Prefill (2 tokens: past_hidden + cb0_embed) then 14 CP Decode steps.
-    private static func runCodePredictor(
-        pastHidden: MLMultiArray,
+    /// Run MultiCodeDecoder to generate CB1-CB15 from hidden_states + CB0.
+    private static func runMultiCodeDecoder(
+        hiddenStates: MLMultiArray,
         cb0Token: Int,
+        codeEmbedder: MLModel,
+        multiCodeEmbedder: MLModel,
         store: Qwen3TtsModelStore
     ) async throws -> [Int] {
-        let cpPrefillModel = try await store.cpPrefill()
-        let cpDecodeModel = try await store.cpDecode()
-        let cpEmbeddings = try await store.getCpEmbeddings()
+        let model = try await store.multiCodeDecoder()
+        let kvLen = Qwen3TtsConstants.mcdKvLen
 
-        // CP Prefill: past_hidden + cb0_token → all_logits + kv_cache
-        let cb0Input = try createTokenInput(token: cb0Token)
+        // Get properly-strided KV caches from the model via a warmup prediction.
+        // CoreML models require specific non-contiguous stride layouts that match
+        // their compiled internal representation. Creating MLMultiArrays with standard
+        // contiguous strides causes NaN outputs because the model reads wrong memory offsets.
+        var (mcdKey, mcdVal) = try await getModelStridedKVCaches(
+            model: model, kvLen: kvLen)
 
-        let prefillFeatures = try MLDictionaryFeatureProvider(dictionary: [
-            "past_hidden": pastHidden,
-            "cb0_token": cb0Input,
+        // Position 0: feed hidden_states
+        let (mask0, umask0) = try makeMcdMasks(pos: 0, kvLen: kvLen)
+        let cacheLen0 = try MLMultiArray(shape: [1], dataType: .int32)
+        cacheLen0[0] = NSNumber(value: 0)
+
+        let f16Hidden = try toFloat16(hiddenStates)
+        let feat0 = try MLDictionaryFeatureProvider(dictionary: [
+            "input_embeds": f16Hidden,
+            "cache_length": cacheLen0,
+            "key_cache": mcdKey,
+            "value_cache": mcdVal,
+            "key_padding_mask": mask0,
+            "kv_cache_update_mask": umask0,
         ])
-        let prefillOutput = try await cpPrefillModel.compatPrediction(
-            from: prefillFeatures, options: MLPredictionOptions())
+        let out0 = try await model.compatPrediction(from: feat0, options: MLPredictionOptions())
+        mcdKey = out0.featureValue(for: "new_key_cache")!.multiArrayValue!
+        mcdVal = out0.featureValue(for: "new_value_cache")!.multiArrayValue!
 
-        guard let allLogits = prefillOutput.featureValue(for: "all_logits")?.multiArrayValue,
-            let cpKvCache = prefillOutput.featureValue(for: "kv_cache")?.multiArrayValue
-        else {
-            throw TTSError.processingFailed("Missing CP prefill outputs")
-        }
+        // Position 1: feed CB0 embedding → lm_head[0] → CB1
+        let cb0Emb = try runCodeEmbedder(codeEmbedder, tokenId: cb0Token)
+        let (mask1, umask1) = try makeMcdMasks(pos: 1, kvLen: kvLen)
+        let cacheLen1 = try MLMultiArray(shape: [1], dataType: .int32)
+        cacheLen1[0] = NSNumber(value: 1)
 
-        // Extract CB1 from logits[0] using sampling (required for correct audio)
-        let cb1 = sampleFromSlice(allLogits, sliceIndex: 0)
-        var tokens = [cb1]
-        var currentCpKv = cpKvCache
+        let f16Cb0 = try toFloat16(cb0Emb)
+        let feat1 = try MLDictionaryFeatureProvider(dictionary: [
+            "input_embeds": f16Cb0,
+            "cache_length": cacheLen1,
+            "key_cache": mcdKey,
+            "value_cache": mcdVal,
+            "key_padding_mask": mask1,
+            "kv_cache_update_mask": umask1,
+        ])
+        let out1 = try await model.compatPrediction(from: feat1, options: MLPredictionOptions())
+        mcdKey = out1.featureValue(for: "new_key_cache")!.multiArrayValue!
+        mcdVal = out1.featureValue(for: "new_value_cache")!.multiArrayValue!
 
-        // CP Decode steps: generate CB2-CB15
-        for step in 1..<15 {
-            // Look up embedding for the last generated token
-            let embedArray = try createEmbeddingFromTable(
-                cpEmbeddings: cpEmbeddings,
-                tableIndex: step - 1,
-                tokenId: tokens[tokens.count - 1]
-            )
+        // CB1 from lm_head[0]
+        let allLogits1 = out1.featureValue(for: "all_logits")!.multiArrayValue!
+        var cb1Logits = extractSliceLogits(allLogits1, sliceIndex: 0)
 
-            let posInput = try createPositionInput(position: step + 1)
-            let decodeFeatures = try MLDictionaryFeatureProvider(dictionary: [
-                "input_embed": embedArray,
-                "kv_cache": currentCpKv,
-                "position": posInput,
+        let cb1 = sampleTopK(logits: &cb1Logits)
+        var cbTokens = [cb1]
+
+        // Positions 2-15: autoregressive decode for CB2-CB15
+        for cbStep in 1..<15 {
+            let prevCb = cbTokens.last!
+            let linIdx = (cbStep - 1) * Qwen3TtsConstants.codecVocabSize + prevCb
+            let cbEmb = try runMultiCodeEmbedder(multiCodeEmbedder, linearizedId: linIdx)
+
+            let mcdPos = cbStep + 1
+            let (mask, umask) = try makeMcdMasks(pos: mcdPos, kvLen: kvLen)
+            let cacheLen = try MLMultiArray(shape: [1], dataType: .int32)
+            cacheLen[0] = NSNumber(value: mcdPos)
+
+            let f16Emb = try toFloat16(cbEmb)
+            let feat = try MLDictionaryFeatureProvider(dictionary: [
+                "input_embeds": f16Emb,
+                "cache_length": cacheLen,
+                "key_cache": mcdKey,
+                "value_cache": mcdVal,
+                "key_padding_mask": mask,
+                "kv_cache_update_mask": umask,
             ])
+            let out = try await model.compatPrediction(from: feat, options: MLPredictionOptions())
+            mcdKey = out.featureValue(for: "new_key_cache")!.multiArrayValue!
+            mcdVal = out.featureValue(for: "new_value_cache")!.multiArrayValue!
 
-            let decodeOutput = try await cpDecodeModel.compatPrediction(
-                from: decodeFeatures, options: MLPredictionOptions())
-
-            guard let decodeLogits = decodeOutput.featureValue(for: "all_logits")?.multiArrayValue,
-                let newCpKv = decodeOutput.featureValue(for: "new_kv_cache")?.multiArrayValue
-            else {
-                throw TTSError.processingFailed("Missing CP decode outputs")
-            }
-
-            // Sample logits[step] for current codebook (each slice is a different LM head)
-            let nextToken = sampleFromSlice(decodeLogits, sliceIndex: step)
-            tokens.append(nextToken)
-            currentCpKv = newCpKv
+            let allLogits = out.featureValue(for: "all_logits")!.multiArrayValue!
+            var cbLogits = extractSliceLogits(allLogits, sliceIndex: cbStep)
+            cbTokens.append(sampleTopK(logits: &cbLogits))
         }
 
-        return tokens
+        return cbTokens
     }
 
-    /// Run the audio decoder model.
-    ///
-    /// Note: Audio decoder expects exactly 125 tokens. Uses fixed-length codes tensor.
-    private static func runAudioDecoder(
-        allCodebooks: [[Int]],
-        store: Qwen3TtsModelStore
-    ) async throws -> [Float] {
-        let model = try await store.audioDecoder()
-        let fixedLen = Qwen3TtsConstants.maxCodecTokens  // 125
-        let actualLen = allCodebooks.count
+    /// Create key_padding_mask and kv_cache_update_mask for MultiCodeDecoder.
+    private static func makeMcdMasks(
+        pos: Int, kvLen: Int
+    ) throws -> (MLMultiArray, MLMultiArray) {
+        let mask = try MLMultiArray(shape: [1, NSNumber(value: kvLen)], dataType: .float16)
+        let umask = try MLMultiArray(shape: [1, NSNumber(value: kvLen)], dataType: .float16)
 
-        // Build codes tensor [1, 16, 125]
-        let codes = try MLMultiArray(
-            shape: [1, 16, NSNumber(value: fixedLen)],
-            dataType: .int32
-        )
-        let codesPtr = codes.dataPointer.bindMemory(to: Int32.self, capacity: 16 * fixedLen)
-
-        // Initialize all to pad token
-        let padToken = Int32(Qwen3TtsConstants.codecPadTokenId)
-        for i in 0..<(16 * fixedLen) {
-            codesPtr[i] = padToken
+        for i in 0..<kvLen {
+            mask[i] = NSNumber(value: i <= pos ? Float(0.0) : Float(-10000.0))
+            umask[i] = NSNumber(value: i == pos ? Float(1.0) : Float(0.0))
         }
 
-        // Fill all 16 codebooks from the per-frame data
-        // allCodebooks[t] is the 16 codebook values for frame t
-        for t in 0..<min(actualLen, fixedLen) {
-            let frame = allCodebooks[t]
-            for cb in 0..<min(frame.count, 16) {
-                codesPtr[cb * fixedLen + t] = Int32(frame[cb])
+        return (mask, umask)
+    }
+
+    /// Get zero-initialized KV caches with the model's expected stride layout.
+    ///
+    /// CoreML compiled models use specific non-contiguous memory layouts.
+    /// The only reliable way to get properly-strided arrays is to run a
+    /// prediction and use the output KV caches, then zero them for reuse.
+    private static func getModelStridedKVCaches(
+        model: MLModel, kvLen: Int
+    ) async throws -> (MLMultiArray, MLMultiArray) {
+        // Create minimal inputs for a warmup prediction
+        let kvDim = Qwen3TtsConstants.mcdKvDim
+        let shape: [NSNumber] = [1, NSNumber(value: kvDim), 1, NSNumber(value: kvLen)]
+
+        // Use zero inputs — the output stride layout is what matters
+        let dummyInput = try MLMultiArray(shape: [1, 1024, 1, 1], dataType: .float16)
+        let dummyKey = try MLMultiArray(shape: shape, dataType: .float16)
+        let dummyVal = try MLMultiArray(shape: shape, dataType: .float16)
+        let mask = try MLMultiArray(shape: [1, NSNumber(value: kvLen)], dataType: .float16)
+        for i in 0..<kvLen {
+            mask[i] = NSNumber(value: Float(-10000.0))
+        }
+        let umask = try MLMultiArray(shape: [1, NSNumber(value: kvLen)], dataType: .float16)
+        let cacheLen = try MLMultiArray(shape: [1], dataType: .int32)
+
+        let feat = try MLDictionaryFeatureProvider(dictionary: [
+            "input_embeds": dummyInput,
+            "cache_length": cacheLen,
+            "key_cache": dummyKey,
+            "value_cache": dummyVal,
+            "key_padding_mask": mask,
+            "kv_cache_update_mask": umask,
+        ])
+
+        let out = try await model.compatPrediction(from: feat, options: MLPredictionOptions())
+        let outKey = out.featureValue(for: "new_key_cache")!.multiArrayValue!
+        let outVal = out.featureValue(for: "new_value_cache")!.multiArrayValue!
+
+        // Zero the caches while preserving their stride layout
+        for i in 0..<outKey.count { outKey[i] = NSNumber(value: Float(0.0)) }
+        for i in 0..<outVal.count { outVal[i] = NSNumber(value: Float(0.0)) }
+
+        return (outKey, outVal)
+    }
+
+    // MARK: - SpeechDecoder
+
+    /// Run the SpeechDecoder on all codec frames.
+    private static func runSpeechDecoder(
+        allFrames: [[Int]],
+        store: Qwen3TtsModelStore
+    ) async throws -> [Float] {
+        let model = try await store.speechDecoder()
+        let fixedLen = Qwen3TtsConstants.speechDecoderFrames  // 125
+        let numCb = Qwen3TtsConstants.numCodebooks  // 16
+
+        // Build codes tensor [1, 16, 125] int32
+        let codes = try MLMultiArray(
+            shape: [1, NSNumber(value: numCb), NSNumber(value: fixedLen)],
+            dataType: .int32
+        )
+
+        // Initialize to zero (pad) using subscript for stride safety
+        for i in 0..<(numCb * fixedLen) {
+            codes[i] = NSNumber(value: Int32(0))
+        }
+
+        // Fill: codes[0, cb, t] = allFrames[t][cb]
+        for t in 0..<min(allFrames.count, fixedLen) {
+            let frame = allFrames[t]
+            for cb in 0..<min(frame.count, numCb) {
+                codes[cb * fixedLen + t] = NSNumber(value: Int32(frame[cb]))
             }
         }
 
         let features = try MLDictionaryFeatureProvider(dictionary: [
-            "codes": codes
+            "audio_codes": codes
         ])
 
         let output = try await model.compatPrediction(from: features, options: MLPredictionOptions())
 
         guard let audioArray = output.featureValue(for: "audio")?.multiArrayValue else {
-            throw TTSError.processingFailed("Missing audio decoder output")
+            throw TTSError.processingFailed("Missing SpeechDecoder output")
         }
 
-        // Extract all audio samples - the model handles the actual length internally
         return extractFloatArray(from: audioArray)
     }
 
-    // MARK: - Input Creation Helpers
+    // MARK: - Model Runners
 
-    /// Create role_ids input [1, 3].
-    private static func createRoleIds() throws -> MLMultiArray {
-        let array = try MLMultiArray(shape: [1, 3], dataType: .int32)
-        let ptr = array.dataPointer.bindMemory(to: Int32.self, capacity: 3)
-        for (i, token) in Qwen3TtsConstants.rolePrefixTokens.enumerated() {
-            ptr[i] = Int32(token)
+    /// TextProjector: text_token → embedding [1, 1024, 1, 1].
+    private static func runTextProjector(_ model: MLModel, tokenId: Int) throws -> MLMultiArray {
+        let inputIds = try MLMultiArray(shape: [1], dataType: .int32)
+        inputIds[0] = NSNumber(value: tokenId)
+
+        let features = try MLDictionaryFeatureProvider(dictionary: ["input_ids": inputIds])
+        let output = try model.prediction(from: features, options: MLPredictionOptions())
+
+        guard let embeds = output.featureValue(for: "input_embeds")?.multiArrayValue else {
+            throw TTSError.processingFailed("Missing TextProjector output")
         }
-        return array
+        return embeds
     }
 
-    /// Create text_ids [1, 128] and text_length [1] inputs.
-    private static func createTextInputs(tokens: [Int]) throws -> (MLMultiArray, MLMultiArray) {
-        let maxLen = Qwen3TtsConstants.maxTextLength
-        let actualLen = min(tokens.count, maxLen)
+    /// CodeEmbedder: codec_token → embedding [1, 1024, 1, 1].
+    private static func runCodeEmbedder(_ model: MLModel, tokenId: Int) throws -> MLMultiArray {
+        let inputIds = try MLMultiArray(shape: [1], dataType: .int32)
+        inputIds[0] = NSNumber(value: tokenId)
 
-        // text_ids [1, 128]
-        let textIds = try MLMultiArray(shape: [1, NSNumber(value: maxLen)], dataType: .int32)
-        let textPtr = textIds.dataPointer.bindMemory(to: Int32.self, capacity: maxLen)
-        for i in 0..<maxLen {
-            textPtr[i] = i < actualLen ? Int32(tokens[i]) : 0
+        let features = try MLDictionaryFeatureProvider(dictionary: ["input_ids": inputIds])
+        let output = try model.prediction(from: features, options: MLPredictionOptions())
+
+        guard let embeds = output.featureValue(for: "input_embeds")?.multiArrayValue else {
+            throw TTSError.processingFailed("Missing CodeEmbedder output")
         }
-
-        // text_length [1]
-        let textLength = try MLMultiArray(shape: [1], dataType: .int32)
-        textLength[0] = NSNumber(value: actualLen)
-
-        return (textIds, textLength)
+        return embeds
     }
 
-    /// Create token_id input [1, 1].
-    private static func createTokenInput(token: Int) throws -> MLMultiArray {
-        let array = try MLMultiArray(shape: [1, 1], dataType: .int32)
-        array[0] = NSNumber(value: token)
-        return array
-    }
-
-    /// Create position input [1].
-    private static func createPositionInput(position: Int) throws -> MLMultiArray {
-        let array = try MLMultiArray(shape: [1], dataType: .int32)
-        array[0] = NSNumber(value: position)
-        return array
-    }
-
-    /// Create CB1-15 input [1, 15].
-    private static func createCb1_15Input(tokens: [Int]) throws -> MLMultiArray {
-        let array = try MLMultiArray(shape: [1, 15], dataType: .int32)
-        let ptr = array.dataPointer.bindMemory(to: Int32.self, capacity: 15)
-        for (i, token) in tokens.prefix(15).enumerated() {
-            ptr[i] = Int32(token)
-        }
-        return array
-    }
-
-    /// Create embedding array [1, 1, 1024] from CP embedding table lookup.
-    private static func createEmbeddingFromTable(
-        cpEmbeddings: [[[Float]]],
-        tableIndex: Int,
-        tokenId: Int
+    /// MultiCodeEmbedder: linearized CB index → embedding [1, 1024, 1, 1].
+    private static func runMultiCodeEmbedder(
+        _ model: MLModel, linearizedId: Int
     ) throws -> MLMultiArray {
-        let dim = Qwen3TtsConstants.hiddenSize
-        let array = try MLMultiArray(shape: [1, 1, NSNumber(value: dim)], dataType: .float32)
-        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: dim)
+        let inputIds = try MLMultiArray(shape: [1], dataType: .int32)
+        inputIds[0] = NSNumber(value: linearizedId)
 
-        let embedding = cpEmbeddings[tableIndex][tokenId]
-        for i in 0..<dim {
-            ptr[i] = embedding[i]
+        let features = try MLDictionaryFeatureProvider(dictionary: ["input_ids": inputIds])
+        let output = try model.prediction(from: features, options: MLPredictionOptions())
+
+        guard let embeds = output.featureValue(for: "input_embeds")?.multiArrayValue else {
+            throw TTSError.processingFailed("Missing MultiCodeEmbedder output")
         }
-        return array
-    }
-
-    /// Load TTS special token embeddings.
-    private static func loadTtsEmbeddings(
-        store: Qwen3TtsModelStore
-    ) async throws -> (bos: MLMultiArray, pad: MLMultiArray, eos: MLMultiArray) {
-        let dim = Qwen3TtsConstants.hiddenSize
-
-        // Check if embeddings were loaded from files
-        if let embeddings = await store.getTtsEmbeddings() {
-            let bosEmbed = try createEmbeddingArray(from: embeddings.bos)
-            let padEmbed = try createEmbeddingArray(from: embeddings.pad)
-            let eosEmbed = try createEmbeddingArray(from: embeddings.eos)
-            return (bosEmbed, padEmbed, eosEmbed)
-        }
-
-        // Create placeholder embeddings (zeros)
-        logger.warning("TTS embeddings not loaded - using zeros (synthesis may fail)")
-
-        let bosEmbed = try MLMultiArray(shape: [1, 1, NSNumber(value: dim)], dataType: .float32)
-        let padEmbed = try MLMultiArray(shape: [1, 1, NSNumber(value: dim)], dataType: .float32)
-        let eosEmbed = try MLMultiArray(shape: [1, 1, NSNumber(value: dim)], dataType: .float32)
-
-        return (bosEmbed, padEmbed, eosEmbed)
-    }
-
-    /// Create MLMultiArray [1, 1, dim] from Float array.
-    private static func createEmbeddingArray(from data: [Float]) throws -> MLMultiArray {
-        let dim = data.count
-        let array = try MLMultiArray(shape: [1, 1, NSNumber(value: dim)], dataType: .float32)
-        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: dim)
-        for (i, value) in data.enumerated() {
-            ptr[i] = value
-        }
-        return array
-    }
-
-    /// Create speaker embedding input [1, 1024].
-    private static func createSpeakerEmbedding(
-        useSpeaker: Bool,
-        store: Qwen3TtsModelStore
-    ) async throws -> MLMultiArray {
-        let dim = Qwen3TtsConstants.hiddenSize
-        let array = try MLMultiArray(shape: [1, NSNumber(value: dim)], dataType: .float32)
-        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: dim)
-
-        if useSpeaker, let speaker = await store.speaker() {
-            for (i, value) in speaker.enumerated() where i < dim {
-                ptr[i] = value
-            }
-        } else {
-            for i in 0..<dim {
-                ptr[i] = 0
-            }
-        }
-
-        return array
+        return embeds
     }
 
     // MARK: - Sampling
 
-    /// Get argmax from a slice of a multi-dimensional logits array.
-    ///
-    /// The all_logits array from code predictor has shape [15, 1, 2048].
-    /// We pick logits[sliceIndex] (shape [1, 2048]) and return argmax.
-    private static func argmaxFromSlice(_ allLogits: MLMultiArray, sliceIndex: Int) -> Int {
-        // all_logits shape: [15, 1, 2048]
-        // For slice i: offset = i * 1 * 2048
-        let vocabSize = 2048
-        let sliceOffset = sliceIndex * vocabSize
-        let count = allLogits.count
+    /// Suppress control tokens [2048, 3072) except EOS (2150).
+    private static func suppressControlTokens(_ logits: inout [Float]) {
+        let eosToken = Qwen3TtsConstants.codecEosId
+        let vocabSize = Qwen3TtsConstants.codecVocabSize
 
-        var maxIdx = 0
-        var maxVal: Float = -.infinity
+        // Save EOS logit before suppression
+        let eosLogit = eosToken < logits.count ? logits[eosToken] : -Float.infinity
 
-        for i in 0..<vocabSize {
-            let idx = sliceOffset + i
-            guard idx < count else { break }
-            let val: Float
-            switch allLogits.dataType {
-            case .float16:
-                let ptr = allLogits.dataPointer.bindMemory(to: UInt16.self, capacity: count)
-                val = Float(Float16(bitPattern: ptr[idx]))
-            default:
-                let ptr = allLogits.dataPointer.bindMemory(to: Float.self, capacity: count)
-                val = ptr[idx]
-            }
-            if val > maxVal {
-                maxVal = val
-                maxIdx = i
-            }
+        // Suppress [2048, 3072)
+        for i in vocabSize..<min(3072, logits.count) {
+            logits[i] = -.infinity
         }
 
-        return maxIdx
+        // Restore EOS
+        if eosToken < logits.count {
+            logits[eosToken] = eosLogit
+        }
     }
 
-    /// Sample from a slice of code predictor logits with temperature + top-k.
-    ///
-    /// The all_logits array has shape [15, 1, 2048]. We pick logits[sliceIndex],
-    /// apply temperature scaling (0.9) and top-k filtering (50), then sample.
-    /// CP does NOT use repetition penalty. Greedy decoding produces silent audio.
-    private static func sampleFromSlice(
-        _ allLogits: MLMultiArray,
-        sliceIndex: Int,
-        temperature: Float = Qwen3TtsConstants.cpTemperature,
-        topK: Int = Qwen3TtsConstants.cpTopK
-    ) -> Int {
-        let vocabSize = 2048
-        let sliceOffset = sliceIndex * vocabSize
-        let count = allLogits.count
+    /// Suppress EOS token (for min_new_tokens enforcement).
+    private static func suppressEos(_ logits: inout [Float]) {
+        let eosToken = Qwen3TtsConstants.codecEosId
+        if eosToken < logits.count {
+            logits[eosToken] = -.infinity
+        }
+    }
 
-        // Extract logits for this slice and apply temperature
-        var logits = [Float](repeating: -.infinity, count: vocabSize)
-        for i in 0..<vocabSize {
-            let idx = sliceOffset + i
-            guard idx < count else { break }
-            let raw: Float
-            switch allLogits.dataType {
-            case .float16:
-                let ptr = allLogits.dataPointer.bindMemory(to: UInt16.self, capacity: count)
-                raw = Float(Float16(bitPattern: ptr[idx]))
-            default:
-                let ptr = allLogits.dataPointer.bindMemory(to: Float.self, capacity: count)
-                raw = ptr[idx]
+    /// Apply repetition penalty to already-generated tokens.
+    private static func applyRepetitionPenalty(
+        _ logits: inout [Float], generatedIds: [Int]
+    ) {
+        let penalty = Qwen3TtsConstants.repetitionPenalty
+        guard penalty != 1.0 else { return }
+
+        let seen = Set(generatedIds)
+        for tokenId in seen {
+            guard tokenId < logits.count else { continue }
+            if logits[tokenId] > 0 {
+                logits[tokenId] /= penalty
+            } else {
+                logits[tokenId] *= penalty
             }
-            logits[i] = raw / temperature
+        }
+    }
+
+    /// Sample from logits with temperature + top-k.
+    private static func sampleTopK(
+        logits: inout [Float],
+        temperature: Float = Qwen3TtsConstants.temperature,
+        topK: Int = Qwen3TtsConstants.topK
+    ) -> Int {
+        let count = logits.count
+        guard count > 0 else { return 0 }
+
+        // Apply temperature
+        for i in 0..<count {
+            logits[i] /= temperature
         }
 
-        // Top-k filtering: keep only the top-k values
-        if topK > 0 && topK < vocabSize {
-            // Find the k-th largest value
+        // Top-k filtering
+        if topK > 0 && topK < count {
             var sorted = logits
             sorted.sort(by: >)
             let threshold = sorted[topK - 1]
-            for i in 0..<vocabSize where logits[i] < threshold {
+            for i in 0..<count where logits[i] < threshold {
                 logits[i] = -.infinity
             }
         }
@@ -625,8 +690,8 @@ public struct Qwen3TtsSynthesizer {
         // Softmax
         let maxLogit = logits.max() ?? 0
         var expSum: Float = 0
-        var expLogits = [Float](repeating: 0, count: vocabSize)
-        for i in 0..<vocabSize {
+        var expLogits = [Float](repeating: 0, count: count)
+        for i in 0..<count {
             let e = exp(logits[i] - maxLogit)
             expLogits[i] = e
             expSum += e
@@ -635,78 +700,36 @@ public struct Qwen3TtsSynthesizer {
         // Multinomial sampling
         let r = Float.random(in: 0..<1)
         var cumulative: Float = 0
-        for i in 0..<vocabSize {
+        for i in 0..<count {
             cumulative += expLogits[i] / expSum
             if cumulative >= r {
                 return i
             }
         }
 
-        return vocabSize - 1  // Fallback
+        return count - 1
     }
 
-    /// Select CB0 token using greedy decoding (argmax) with logit processors.
+    /// Extract logits for a specific lm_head slice from all_logits.
     ///
-    /// Matches PyTorch reference pipeline (`do_sample=False`):
-    /// 1. Repetition penalty (1.05) on all previously generated CB0 tokens
-    /// 2. Suppress tokens 2048-3071 except EOS (2150)
-    /// 3. min_new_tokens: suppress EOS for first 2 steps
-    /// 4. Argmax (greedy)
-    private static func sampleToken(
-        from logits: [Float],
-        generatedIds: Set<Int> = [],
-        step: Int = 0
-    ) -> Int {
-        let eosToken = Qwen3TtsConstants.codecEosTokenId
-        let repetitionPenalty = Qwen3TtsConstants.repetitionPenalty
-        let minNewTokens = Qwen3TtsConstants.minNewTokens
+    /// all_logits shape from MultiCodeDecoder: [1, 15, 2048].
+    /// We extract [0, sliceIndex, :] and return as [Float].
+    private static func extractSliceLogits(
+        _ allLogits: MLMultiArray, sliceIndex: Int
+    ) -> [Float] {
+        let vocabSize = Qwen3TtsConstants.codecVocabSize
+        let offset = sliceIndex * vocabSize
 
-        var masked = Array(logits)
-
-        // 1. Repetition penalty on all previously generated CB0 tokens
-        if repetitionPenalty != 1.0 {
-            for tokenId in generatedIds {
-                guard tokenId < masked.count else { continue }
-                if masked[tokenId] < 0 {
-                    masked[tokenId] *= repetitionPenalty
-                } else {
-                    masked[tokenId] /= repetitionPenalty
-                }
-            }
+        var result = [Float](repeating: 0, count: vocabSize)
+        for i in 0..<vocabSize {
+            result[i] = allLogits[offset + i].floatValue
         }
-
-        // 2. Suppress tokens 2048-3071 except EOS (2150)
-        for i in 2048..<min(eosToken, masked.count) {
-            masked[i] = -.infinity
-        }
-        for i in (eosToken + 1)..<min(3072, masked.count) {
-            masked[i] = -.infinity
-        }
-
-        // 3. min_new_tokens: suppress EOS for first N steps
-        if step < minNewTokens, eosToken < masked.count {
-            masked[eosToken] = -.infinity
-        }
-
-        // 4. Greedy: argmax
-        var bestIdx = 0
-        var bestVal: Float = -.infinity
-        for i in 0..<masked.count {
-            if masked[i] > bestVal {
-                bestVal = masked[i]
-                bestIdx = i
-            }
-        }
-
-        return bestIdx
+        return result
     }
 
     // MARK: - Audio Post-Processing
 
     /// Trim leading and trailing silence from audio samples.
-    ///
-    /// Temperature sampling can produce initial codec frames that decode to near-silence.
-    /// This trims those regions with a small padding to preserve natural onset.
     private static func trimSilence(
         _ samples: [Float],
         sampleRate: Int,
@@ -732,8 +755,8 @@ public struct Qwen3TtsSynthesizer {
             }
         }
 
-        // Find last non-silent window (use larger window to skip tiny blips)
-        let bigWindow = sampleRate / 5  // 200ms
+        // Find last non-silent window
+        let bigWindow = sampleRate / 5
         var end = samples.count
         for i in stride(from: samples.count - bigWindow, through: 0, by: -windowSize) {
             let windowEnd = min(i + bigWindow, samples.count)
@@ -752,97 +775,51 @@ public struct Qwen3TtsSynthesizer {
         return Array(samples[start..<end])
     }
 
-    // MARK: - KV Cache
+    // MARK: - MLMultiArray Helpers
 
-    /// Trim KV cache to actual sequence length.
-    ///
-    /// The prefill model pads to maxTextLength+11 but only textLen+11 positions are valid.
-    /// The decode model attends to ALL KV cache entries (no causal mask for single-query),
-    /// so padding entries must be removed to avoid corrupted attention.
-    ///
-    /// KV cache shape: [56, 1, 8, seqLen, 128] → [56, 1, 8, actualLen, 128]
-    private static func trimKvCache(_ kvCache: MLMultiArray, toLength actualLen: Int) throws -> MLMultiArray {
-        // kvCache shape: [kvEntries, batch, kvHeads, seqLen, headDim]
-        let kvEntries = kvCache.shape[0].intValue  // 56
-        let batch = kvCache.shape[1].intValue  // 1
-        let kvHeads = kvCache.shape[2].intValue  // 8
-        let fullLen = kvCache.shape[3].intValue  // maxTextLen + 11
-        let headDim = kvCache.shape[4].intValue  // 128
-
-        guard actualLen <= fullLen else {
-            throw TTSError.processingFailed(
-                "actualLen \(actualLen) exceeds KV cache length \(fullLen)")
-        }
-
-        // Already the right size? Return as-is.
-        guard actualLen < fullLen else { return kvCache }
-
-        let trimmed = try MLMultiArray(
-            shape: [
-                NSNumber(value: kvEntries), NSNumber(value: batch),
-                NSNumber(value: kvHeads), NSNumber(value: actualLen),
-                NSNumber(value: headDim),
-            ],
-            dataType: .float32
-        )
-
-        let srcPtr = kvCache.dataPointer.bindMemory(
-            to: Float.self, capacity: kvCache.count)
-        let dstPtr = trimmed.dataPointer.bindMemory(
-            to: Float.self, capacity: trimmed.count)
-
-        // Copy entry by entry: [e][b][h][0..<actualLen][d]
-        for e in 0..<kvEntries {
-            for b in 0..<batch {
-                for h in 0..<kvHeads {
-                    let srcBase = ((e * batch + b) * kvHeads + h) * fullLen * headDim
-                    let dstBase = ((e * batch + b) * kvHeads + h) * actualLen * headDim
-                    let copyCount = actualLen * headDim
-                    for i in 0..<copyCount {
-                        dstPtr[dstBase + i] = srcPtr[srcBase + i]
-                    }
-                }
-            }
-        }
-
-        return trimmed
-    }
-
-    // MARK: - Array Extraction
-
-    /// Extract Float array from MLMultiArray.
+    /// Extract Float array from MLMultiArray using subscript access (stride-safe).
     private static func extractFloatArray(from array: MLMultiArray) -> [Float] {
         let count = array.count
         var result = [Float](repeating: 0, count: count)
-
-        switch array.dataType {
-        case .float32:
-            let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: count)
-            for i in 0..<count {
-                result[i] = ptr[i]
-            }
-        case .float16:
-            let ptr = array.dataPointer.bindMemory(to: UInt16.self, capacity: count)
-            for i in 0..<count {
-                result[i] = Float(Float16(bitPattern: ptr[i]))
-            }
-        default:
-            logger.warning("Unexpected array data type: \(array.dataType.rawValue)")
-        }
-
-        return result
-    }
-
-    /// Extract Int32 array from MLMultiArray.
-    private static func extractInt32Array(from array: MLMultiArray) -> [Int] {
-        let count = array.count
-        var result = [Int](repeating: 0, count: count)
-
-        let ptr = array.dataPointer.bindMemory(to: Int32.self, capacity: count)
         for i in 0..<count {
-            result[i] = Int(ptr[i])
+            result[i] = array[i].floatValue
         }
-
         return result
     }
+
+    /// Create [1, 1024, 1, 1] float32 embedding from Float array.
+    private static func createEmbedding(from data: [Float]) throws -> MLMultiArray {
+        let dim = data.count
+        let array = try MLMultiArray(
+            shape: [1, NSNumber(value: dim), 1, 1], dataType: .float32)
+        for (i, value) in data.enumerated() {
+            array[i] = NSNumber(value: value)
+        }
+        return array
+    }
+
+    /// Add two embedding MLMultiArrays element-wise.
+    private static func addEmbeddings(_ a: MLMultiArray, _ b: MLMultiArray) throws -> MLMultiArray {
+        let count = a.count
+        let result = try MLMultiArray(shape: a.shape, dataType: .float32)
+        for i in 0..<count {
+            result[i] = NSNumber(value: a[i].floatValue + b[i].floatValue)
+        }
+        return result
+    }
+
+    /// Convert MLMultiArray to float16, preserving stride layout.
+    ///
+    /// If already float16, returns as-is. CoreML models expect their own output
+    /// stride layout, so we must not make non-contiguous arrays contiguous.
+    private static func toFloat16(_ array: MLMultiArray) throws -> MLMultiArray {
+        if array.dataType == .float16 { return array }
+        let count = array.count
+        let result = try MLMultiArray(shape: array.shape, dataType: .float16)
+        for i in 0..<count {
+            result[i] = array[i]
+        }
+        return result
+    }
+
 }
