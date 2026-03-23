@@ -120,15 +120,26 @@ public struct Qwen3TtsSynthesizer {
         let codeEmbedder = try await store.codeEmbedder()
         let multiCodeEmbedder = try await store.multiCodeEmbedder()
 
+        // PERFORMANCE: No KV cache template needed - each frame will create fresh arrays
+        // The first frame will call getModelStridedKVCaches(), subsequent frames will
+        // reuse the model's output arrays from the previous frame's final position.
+        var mcdKeyTemplate: MLMultiArray? = nil
+        var mcdValTemplate: MLMultiArray? = nil
+
         for step in 0..<Qwen3TtsConstants.maxCodecTokens {
             // MultiCodeDecoder: hidden + CB0 → CB1-CB15
-            let cb1to15 = try await runMultiCodeDecoder(
+            let (cb1to15, newKeyTemplate, newValTemplate) = try await runMultiCodeDecoder(
                 hiddenStates: currentHidden,
                 cb0Token: currentCb0,
                 codeEmbedder: codeEmbedder,
                 multiCodeEmbedder: multiCodeEmbedder,
+                kvKeyTemplate: mcdKeyTemplate,
+                kvValTemplate: mcdValTemplate,
                 store: store
             )
+            // Save the output KV caches as templates for next frame
+            mcdKeyTemplate = newKeyTemplate
+            mcdValTemplate = newValTemplate
 
             let frame = [currentCb0] + cb1to15
             allFrames.append(frame)
@@ -376,22 +387,35 @@ public struct Qwen3TtsSynthesizer {
     // MARK: - MultiCodeDecoder
 
     /// Run MultiCodeDecoder to generate CB1-CB15 from hidden_states + CB0.
+    ///
+    /// Returns: (CB tokens, final key cache, final value cache)
+    /// The final KV caches can be reused as templates for the next frame.
     private static func runMultiCodeDecoder(
         hiddenStates: MLMultiArray,
         cb0Token: Int,
         codeEmbedder: MLModel,
         multiCodeEmbedder: MLModel,
+        kvKeyTemplate: MLMultiArray?,
+        kvValTemplate: MLMultiArray?,
         store: Qwen3TtsModelStore
-    ) async throws -> [Int] {
+    ) async throws -> ([Int], MLMultiArray, MLMultiArray) {
         let model = try await store.multiCodeDecoder()
         let kvLen = Qwen3TtsConstants.mcdKvLen
 
-        // Get properly-strided KV caches from the model via a warmup prediction.
-        // CoreML models require specific non-contiguous stride layouts that match
-        // their compiled internal representation. Creating MLMultiArrays with standard
-        // contiguous strides causes NaN outputs because the model reads wrong memory offsets.
-        var (mcdKey, mcdVal) = try await getModelStridedKVCaches(
-            model: model, kvLen: kvLen)
+        // Get initial KV caches: either from cached template (subsequent frames)
+        // or from warmup prediction (first frame only)
+        var (mcdKey, mcdVal): (MLMultiArray, MLMultiArray)
+        if let keyTemplate = kvKeyTemplate, let valTemplate = kvValTemplate {
+            // Reuse previous frame's final KV caches as template, then zero them
+            mcdKey = keyTemplate
+            mcdVal = valTemplate
+            // Zero in-place
+            for i in 0..<mcdKey.count { mcdKey[i] = NSNumber(value: Float(0.0)) }
+            for i in 0..<mcdVal.count { mcdVal[i] = NSNumber(value: Float(0.0)) }
+        } else {
+            // First frame: run warmup prediction to get properly-strided arrays
+            (mcdKey, mcdVal) = try await getModelStridedKVCaches(model: model, kvLen: kvLen)
+        }
 
         // Position 0: feed hidden_states
         let (mask0, umask0) = try makeMcdMasks(pos: 0, kvLen: kvLen)
@@ -466,7 +490,8 @@ public struct Qwen3TtsSynthesizer {
             cbTokens.append(sampleTopK(logits: &cbLogits))
         }
 
-        return cbTokens
+        // Return CB tokens AND final KV caches (for reuse as templates in next frame)
+        return (cbTokens, mcdKey, mcdVal)
     }
 
     /// Create key_padding_mask and kv_cache_update_mask for MultiCodeDecoder.
