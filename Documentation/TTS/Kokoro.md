@@ -112,6 +112,8 @@ The 6 LSTM ops (duration predictor) remain on CPU — CoreML does not schedule r
 
 - **Sibilance in high-pitched voices**: Some female `af_*` voices (e.g. `af_heart`, `af_bella`) produce harsh sibilant sounds (s, sh, z). This is baked into the model output and cannot be fixed with post-processing EQ. Lower-pitched voices (male `am_*` variants and some female voices) are unaffected. See [mobius#23](https://github.com/FluidInference/mobius/issues/23).
 
+- **G2P phoneme mismatch limitation**: FluidAudio currently uses `graphemes_to_phonemes_en_us` (from HuggingFace: [PeterReid/graphemes_to_phonemes_en_us](https://huggingface.co/PeterReid/graphemes_to_phonemes_en_us)) for grapheme-to-phoneme conversion. The original Kokoro and KittenTTS models were trained using espeak for phoneme generation. This G2P mismatch can cause pronunciation issues in some words (e.g., "hello" and "day" in KittenTTS). We cannot use espeak directly due to licensing constraints. **Need**: An espeak-compatible alternative with a permissive license that produces matching phoneme outputs. This affects any TTS model in FluidAudio that relies on the shared Kokoro G2P pipeline. See [PR #409](https://github.com/FluidInference/FluidAudio/pull/409#issuecomment-2632827330) for examples.
+
 ## Enable TTS in Your Project
 
 Kokoro TTS is included in the `FluidAudio` product — no separate product needed.
