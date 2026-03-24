@@ -26,7 +26,7 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
   <a href="https://paraspeech.com"><img src="Documentation/assets/paraspeech.png" height="40" alt="Paraspeech"></a>
   <a href="https://altic.dev/fluid"><img src="Documentation/assets/fluidvoice.png" height="40" alt="Fluid Voice"></a>
   <a href="https://snaply.ai"><img src="Documentation/assets/snaply.png" height="40" alt="Snaply"></a>
-  <a href="https://hitoku.me/draft"><img src="Documentation/assets/hitokudraft.png" height="40" alt="Hitoku Draft"></a>
+  <a href="https://github.com/yazinsai/OpenOats"><img src="Documentation/assets/openoats.png" height="40" alt="OpenOats"></a>
 <!-- Add your app: submit logo via PR. The Fluid Inference team works to curate this and add new apps to the showcase section every couple of weeks. We appreciate your patience. -->
 </p>
 
