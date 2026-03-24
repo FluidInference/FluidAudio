@@ -304,22 +304,31 @@ public struct KokoroSynthesizer {
             zeroFill: true
         )
 
-        // Source noise for newer Kokoro models
-        let maxSeconds = variant.maxDurationSeconds
-        let noiseLength = TtsConstants.audioSampleRate * maxSeconds
-        let sourceNoise = try await multiArrayPool.rent(
-            shape: [1, noiseLength, 9],
-            dataType: .float16,
-            zeroFill: false
-        )
-        let noisePointer = sourceNoise.dataPointer.bindMemory(to: UInt16.self, capacity: noiseLength * 9)
-        for i in 0..<(noiseLength * 9) {
-            let randomValue = Float.random(in: -1...1)
-            noisePointer[i] = Float16(randomValue).bitPattern
+        // Source noise only required for v2 models (macOS)
+        // v1 models (iOS) don't have this input
+        let sourceNoise: MLMultiArray?
+        if kokoro.modelDescription.inputDescriptionsByName["source_noise"] != nil {
+            let maxSeconds = variant.maxDurationSeconds
+            let noiseLength = TtsConstants.audioSampleRate * maxSeconds
+            let noise = try await multiArrayPool.rent(
+                shape: [1, noiseLength, 9],
+                dataType: .float16,
+                zeroFill: false
+            )
+            let noisePointer = noise.dataPointer.bindMemory(to: UInt16.self, capacity: noiseLength * 9)
+            for i in 0..<(noiseLength * 9) {
+                let randomValue = Float.random(in: -1...1)
+                noisePointer[i] = Float16(randomValue).bitPattern
+            }
+            sourceNoise = noise
+        } else {
+            sourceNoise = nil
         }
 
         func recycleModelArrays() async {
-            await multiArrayPool.recycle(sourceNoise, zeroFill: false)
+            if let sourceNoise = sourceNoise {
+                await multiArrayPool.recycle(sourceNoise, zeroFill: false)
+            }
             await multiArrayPool.recycle(phasesArray, zeroFill: true)
             await multiArrayPool.recycle(attentionMask, zeroFill: false)
             await multiArrayPool.recycle(inputArray, zeroFill: false)
@@ -348,13 +357,16 @@ public struct KokoroSynthesizer {
         // Debug: print model IO
 
         // Run inference
-        let modelInput = try MLDictionaryFeatureProvider(dictionary: [
+        var inputDict: [String: Any] = [
             "input_ids": inputArray,
             "attention_mask": attentionMask,
             "ref_s": refStyle,
             "random_phases": phasesArray,
-            "source_noise": sourceNoise,
-        ])
+        ]
+        if let sourceNoise = sourceNoise {
+            inputDict["source_noise"] = sourceNoise
+        }
+        let modelInput = try MLDictionaryFeatureProvider(dictionary: inputDict)
 
         let predictionStart = Date()
         let output: MLFeatureProvider

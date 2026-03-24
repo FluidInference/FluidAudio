@@ -152,26 +152,31 @@ public struct TtsModels: Sendable {
                 randomPhases[index] = NSNumber(value: Float(0))
             }
 
-            // Source noise for newer Kokoro models
-            let maxSeconds = variant.maxDurationSeconds
-            let noiseLength = TtsConstants.audioSampleRate * maxSeconds
-            let sourceNoise = try MLMultiArray(
-                shape: [1, NSNumber(value: noiseLength), 9],
-                dataType: .float16
-            )
-            let noisePointer = sourceNoise.dataPointer.bindMemory(to: UInt16.self, capacity: noiseLength * 9)
-            for i in 0..<(noiseLength * 9) {
-                let randomValue = Float.random(in: -1...1)
-                noisePointer[i] = Float16(randomValue).bitPattern
-            }
-
-            let features = try MLDictionaryFeatureProvider(dictionary: [
+            var inputDict: [String: Any] = [
                 "input_ids": inputIds,
                 "attention_mask": attentionMask,
                 "ref_s": refStyle,
                 "random_phases": randomPhases,
-                "source_noise": sourceNoise,
-            ])
+            ]
+
+            // Source noise only required for v2 models (macOS)
+            // v1 models (iOS) don't have this input
+            if model.modelDescription.inputDescriptionsByName["source_noise"] != nil {
+                let maxSeconds = variant.maxDurationSeconds
+                let noiseLength = TtsConstants.audioSampleRate * maxSeconds
+                let sourceNoise = try MLMultiArray(
+                    shape: [1, NSNumber(value: noiseLength), 9],
+                    dataType: .float16
+                )
+                let noisePointer = sourceNoise.dataPointer.bindMemory(to: UInt16.self, capacity: noiseLength * 9)
+                for i in 0..<(noiseLength * 9) {
+                    let randomValue = Float.random(in: -1...1)
+                    noisePointer[i] = Float16(randomValue).bitPattern
+                }
+                inputDict["source_noise"] = sourceNoise
+            }
+
+            let features = try MLDictionaryFeatureProvider(dictionary: inputDict)
 
             let options: MLPredictionOptions = optimizedPredictionOptions()
             _ = try await model.compatPrediction(from: features, options: options)

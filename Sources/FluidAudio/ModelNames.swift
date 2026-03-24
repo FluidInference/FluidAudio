@@ -464,12 +464,23 @@ public enum ModelNames {
 
             /// Underlying model bundle filename.
             public var fileName: String {
+                #if os(iOS)
+                // Use v1 models on iOS - v2 fp16 models cause warm-up hangs
+                switch self {
+                case .fiveSecond:
+                    return "kokoro_21_5s.mlmodelc"
+                case .fifteenSecond:
+                    return "kokoro_21_15s.mlmodelc"
+                }
+                #else
+                // Use v2 models on macOS - fp16 ANE optimization (1.67x faster)
                 switch self {
                 case .fiveSecond:
                     return "kokoro_21_5s_v2.mlmodelc"
                 case .fifteenSecond:
                     return "kokoro_21_15s_v2.mlmodelc"
                 }
+                #endif
             }
 
             /// Approximate maximum duration in seconds handled by the variant.
