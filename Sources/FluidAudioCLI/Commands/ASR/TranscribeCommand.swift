@@ -461,7 +461,7 @@ enum TranscribeCommand {
             }
 
             // Cleanup
-            asrManager.cleanup()
+            await asrManager.cleanup()
 
         } catch {
             logger.error("Batch transcription failed: \(error)")

@@ -127,7 +127,7 @@ struct ChunkProcessor {
         }
 
         guard var mergedTokens = chunkOutputs.first else {
-            return manager.processTranscriptionResult(
+            return await manager.processTranscriptionResult(
                 tokenIds: [],
                 timestamps: [],
                 confidences: [],
@@ -152,7 +152,7 @@ struct ChunkProcessor {
         let allConfidences = mergedTokens.map { $0.confidence }
         let allDurations = mergedTokens.map { $0.duration }
 
-        return manager.processTranscriptionResult(
+        return await manager.processTranscriptionResult(
             tokenIds: allTokens,
             timestamps: allTimestamps,
             confidences: allConfidences,

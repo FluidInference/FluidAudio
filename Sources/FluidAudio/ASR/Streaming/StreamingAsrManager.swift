@@ -17,9 +17,7 @@ public actor StreamingAsrManager {
     private var updateContinuation: AsyncStream<StreamingTranscriptionUpdate>.Continuation?
 
     // ASR components
-    // AsrManager contains CoreML models which are not Sendable.
-    // We manage the safety ourselves by only accessing it from within the actor.
-    nonisolated(unsafe) private var asrManager: AsrManager?
+    private var asrManager: AsrManager?
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
 
@@ -223,7 +221,7 @@ public actor StreamingAsrManager {
             if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
             finalText = parts.joined(separator: " ")
         } else if let asrManager = asrManager, !accumulatedTokens.isEmpty {
-            let finalResult = asrManager.processTranscriptionResult(
+            let finalResult = await asrManager.processTranscriptionResult(
                 tokenIds: accumulatedTokens,
                 timestamps: [],
                 confidences: [],  // No per-token confidences needed for final text
@@ -398,7 +396,7 @@ public actor StreamingAsrManager {
 
             // Convert only the current chunk tokens to text for clean incremental updates
             // The final result will use all accumulated tokens for proper deduplication
-            let interim = asrManager.processTranscriptionResult(
+            let interim = await asrManager.processTranscriptionResult(
                 tokenIds: tokens,  // Only current chunk tokens for progress updates
                 timestamps: adjustedTimestamps,
                 confidences: confidences,
@@ -420,7 +418,7 @@ public actor StreamingAsrManager {
             var displayResult = interim
             if shouldConfirm && vocabBoostingEnabled {
                 let chunkLocalTimings =
-                    asrManager.processTranscriptionResult(
+                    await asrManager.processTranscriptionResult(
                         tokenIds: tokens,
                         timestamps: timestamps,  // Original chunk-local timestamps (not adjusted)
                         confidences: confidences,

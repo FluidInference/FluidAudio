@@ -5,12 +5,21 @@ import OSLog
 extension AsrManager {
 
     internal func transcribeWithState(
-        _ audioSamples: [Float], decoderState: inout TdtDecoderState
+        _ audioSamples: [Float], source: AudioSource
     ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
         guard audioSamples.count >= 16_000 else { throw ASRError.invalidAudioData }
 
         let startTime = Date()
+
+        // Get the appropriate decoder state
+        var decoderState: TdtDecoderState
+        switch source {
+        case .microphone:
+            decoderState = microphoneDecoderState
+        case .system:
+            decoderState = systemDecoderState
+        }
 
         // Route to appropriate processing method based on audio length
         if audioSamples.count <= ASRConstants.maxModelSamples {
@@ -50,6 +59,14 @@ extension AsrManager {
                 result = await applyVocabularyRescoring(result: result, audioSamples: audioSamples)
             }
 
+            // Store decoder state back
+            switch source {
+            case .microphone:
+                microphoneDecoderState = decoderState
+            case .system:
+                systemDecoderState = decoderState
+            }
+
             return result
         }
 
@@ -67,6 +84,14 @@ extension AsrManager {
         // Auto-apply vocabulary rescoring when configured
         if vocabBoostingEnabled {
             result = await applyVocabularyRescoring(result: result, audioSamples: audioSamples)
+        }
+
+        // Store decoder state back (ChunkProcessor uses the stored state directly)
+        switch source {
+        case .microphone:
+            microphoneDecoderState = decoderState
+        case .system:
+            systemDecoderState = decoderState
         }
 
         return result
@@ -283,7 +308,7 @@ extension AsrManager {
         )
     }
 
-    internal func padAudioIfNeeded(_ audioSamples: [Float], targetLength: Int) -> [Float] {
+    nonisolated internal func padAudioIfNeeded(_ audioSamples: [Float], targetLength: Int) -> [Float] {
         guard audioSamples.count < targetLength else { return audioSamples }
         return audioSamples + Array(repeating: 0, count: targetLength - audioSamples.count)
     }
@@ -487,7 +512,7 @@ extension AsrManager {
     }
 
     /// Calculate start frame offset for a sliding window segment (deprecated - now handled by timeJump)
-    internal func calculateStartFrameOffset(segmentIndex: Int, leftContextSeconds: Double) -> Int {
+    nonisolated internal func calculateStartFrameOffset(segmentIndex: Int, leftContextSeconds: Double) -> Int {
         // This method is deprecated as frame tracking is now handled by the decoder's timeJump mechanism
         // Kept for test compatibility
         return 0

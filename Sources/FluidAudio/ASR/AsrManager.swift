@@ -8,7 +8,7 @@ public enum AudioSource: Sendable {
     case system
 }
 
-public final class AsrManager {
+public actor AsrManager {
 
     internal let logger = AppLogger(category: "ASR")
     internal let config: ASRConfig
@@ -228,17 +228,26 @@ public final class AsrManager {
         ])
     }
 
-    internal func initializeDecoderState(decoderState: inout TdtDecoderState) async throws {
+    internal func initializeDecoderState(for source: AudioSource) async throws {
         guard let decoderModel = decoderModel else {
             throw ASRError.notInitialized
         }
 
+        // Get the appropriate decoder state
+        var state: TdtDecoderState
+        switch source {
+        case .microphone:
+            state = microphoneDecoderState
+        case .system:
+            state = systemDecoderState
+        }
+
         // Reset the existing decoder state to clear all cached values including predictorOutput
-        decoderState.reset()
+        state.reset()
 
         let initDecoderInput = try prepareDecoderInput(
-            hiddenState: decoderState.hiddenState,
-            cellState: decoderState.cellState
+            hiddenState: state.hiddenState,
+            cellState: state.cellState
         )
 
         let initDecoderOutput = try await decoderModel.compatPrediction(
@@ -246,8 +255,15 @@ public final class AsrManager {
             options: predictionOptions
         )
 
-        decoderState.update(from: initDecoderOutput)
+        state.update(from: initDecoderOutput)
 
+        // Store back
+        switch source {
+        case .microphone:
+            microphoneDecoderState = state
+        case .system:
+            systemDecoderState = state
+        }
     }
 
     private func loadModel(
@@ -474,15 +490,7 @@ public final class AsrManager {
             _ = await progressEmitter.ensureSession()
         }
         do {
-            let result: ASRResult
-            switch source {
-            case .microphone:
-                result = try await transcribeWithState(
-                    audioSamples, decoderState: &microphoneDecoderState)
-            case .system:
-                result = try await transcribeWithState(
-                    audioSamples, decoderState: &systemDecoderState)
-            }
+            let result = try await transcribeWithState(audioSamples, source: source)
 
             // Stateless architecture: reset decoder state after each transcription to ensure
             // independent processing for batch operations without state carryover
@@ -509,12 +517,7 @@ public final class AsrManager {
     /// Reset the decoder state for a specific audio source
     /// This should be called when starting a new transcription session or switching between different audio files
     public func resetDecoderState(for source: AudioSource) async throws {
-        switch source {
-        case .microphone:
-            try await initializeDecoderState(decoderState: &microphoneDecoderState)
-        case .system:
-            try await initializeDecoderState(decoderState: &systemDecoderState)
-        }
+        try await initializeDecoderState(for: source)
     }
 
     internal func normalizedTimingToken(_ token: String) -> String {
@@ -566,7 +569,7 @@ public final class AsrManager {
         return (text, adjustedTimings)
     }
 
-    internal func extractFeatureValue(
+    nonisolated internal func extractFeatureValue(
         from provider: MLFeatureProvider, key: String, errorMessage: String
     ) throws -> MLMultiArray {
         guard let value = provider.featureValue(for: key)?.multiArrayValue else {
@@ -575,7 +578,7 @@ public final class AsrManager {
         return value
     }
 
-    internal func extractFeatureValues(
+    nonisolated internal func extractFeatureValues(
         from provider: MLFeatureProvider, keys: [(key: String, errorSuffix: String)]
     ) throws -> [String: MLMultiArray] {
         var results: [String: MLMultiArray] = [:]
