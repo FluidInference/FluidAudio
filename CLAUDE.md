@@ -176,22 +176,14 @@ GitHub Actions workflows:
 
 ## Showcase Section Management
 
-When adding apps to the README.md showcase section:
-
-1. **Date Metadata**: Each entry must include an HTML comment with the date added in YYYY-MM-DD format:
-   ```markdown
-   | **[App Name](https://url.com)** <!-- 2026-03-25 --> | Description text |
-   ```
-
-2. **Chronological Order**: Apps must be ordered chronologically by date added (oldest to newest)
-
-3. **Date Placement**: Place the HTML comment immediately after the app link, before the pipe separator
-
-4. **Format**: Use today's date for new additions. The date is hidden from the UI but tracked in the source for maintenance.
+When adding apps to the README.md showcase:
+- Add date metadata as HTML comment after the app link: `<!-- YYYY-MM-DD -->`
+- Maintain chronological order (oldest to newest)
+- Use today's date for new entries
 
 Example:
 ```markdown
-| **[MyApp](https://myapp.com)** <!-- 2026-03-25 --> | Local transcription app built with FluidAudio. |
+| **[MyApp](https://myapp.com)** <!-- 2026-03-25 --> | Description text |
 ```
 
 ## Model Sources
