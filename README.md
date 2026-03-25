@@ -27,6 +27,7 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
   <a href="https://altic.dev/fluid"><img src="Documentation/assets/fluidvoice.png" height="40" alt="Fluid Voice"></a>
   <a href="https://snaply.ai"><img src="Documentation/assets/snaply.png" height="40" alt="Snaply"></a>
   <a href="https://github.com/yazinsai/OpenOats"><img src="Documentation/assets/openoats.png" height="40" alt="OpenOats"></a>
+  <a href="https://talat.app"><img src="Documentation/assets/talat.png" height="40" alt="Talat"></a>
 <!-- Add your app: submit logo via PR. The Fluid Inference team works to curate this and add new apps to the showcase section every couple of weeks. We appreciate your patience. -->
 </p>
 
@@ -92,6 +93,8 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Muesli](https://github.com/pHequals7/muesli)** | Native macOS dictation and meeting transcription with ~0.13s latency. Captures microphone and system audio with automatic speaker diarization. Uses Parakeet TDT and Qwen3 ASR. |
 | **[NanoVoice](https://apps.apple.com/kz/app/nanovoice/id6760539688)** | Free iOS voice keyboard for fast, private dictation in any app. Uses Parakeet ASR. |
 | **[MiniWhisper](https://github.com/andyhtran/MiniWhisper)** | Open-source macOS menu bar for quick local voice-to-text with minimal setup. Pick a shortcut, start talking. Uses Parakeet ASR. |
+| **[Talat](https://talat.app)** | Privacy-focused AI meeting notes app. Records and transcribes meetings locally on your Mac with speaker identification and LLM-powered summaries. Featured in [TechCrunch](https://techcrunch.com/2026/03/24/talats-ai-meeting-notes-stay-on-your-machine-not-in-the-cloud/). Uses Parakeet ASR. |
+| **[Volocal](https://github.com/fikrikarim/volocal)** | Fully local voice AI on iOS. Uses streaming Parakeet EOU ASR and streaming PocketTTS. |
 
 ## Installation
 
