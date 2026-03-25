@@ -406,10 +406,7 @@ public final class LSEENDDiarizer: Diarizer {
         return try processLocked()
     }
 
-    /// Process a chunk of audio in one call.
-    ///
-    /// Convenience method that combines `addAudio()` and `process()`.
-    ///
+    /// Add and process a chunk of audio in one call.
     /// - Parameters:
     ///   - samples: Audio samples to process.
     ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.

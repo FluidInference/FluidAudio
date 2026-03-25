@@ -387,10 +387,7 @@ public final class SortformerDiarizer: Diarizer {
         }
     }
 
-    /// Process a chunk of audio in one call.
-    ///
-    /// Convenience method that combines `addAudio()` and `process()`.
-    ///
+    /// Add and process a chunk of audio in one call.
     /// - Parameters:
     ///   - samples: Audio samples (16kHz mono)
     ///   - sourceSampleRate: Source audio sample rate
