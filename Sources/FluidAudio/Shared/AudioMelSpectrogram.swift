@@ -190,7 +190,10 @@ public final class AudioMelSpectrogram {
         C.Element == Float, C.Index == Int
     {
         let audioCount = audio.count
-        let numFrames = audioCount / hopLength
+        // Center padding adds nFFT/2 on each side, producing one extra
+        // frame from the leading pad. Without +1, 10080 samples at hop=160
+        // yields 63 frames instead of the EOU model's expected 64.
+        let numFrames = 1 + audioCount / hopLength
 
         guard numFrames > 0, let firstSample = audio.first else {
             return (mel: [Float](repeating: padValue, count: nMels), melLength: 0, numFrames: 1)
