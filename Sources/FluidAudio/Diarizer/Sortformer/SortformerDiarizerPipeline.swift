@@ -501,7 +501,9 @@ public final class SortformerDiarizer: Diarizer {
             }
 
             var lastResult: DiarizerChunkResult?
+            var tentativeToFlush = _timeline.numTentativeFrames
             if let chunk = try makeStreamingChunkLocked() {
+                tentativeToFlush = chunk.tentativeFrameCount
                 let finalizedChunk = DiarizerChunkResult(
                     startFrame: chunk.startFrame,
                     finalizedPredictions: chunk.finalizedPredictions,
@@ -514,7 +516,7 @@ public final class SortformerDiarizer: Diarizer {
                 lastResult = finalizedChunk
             }
 
-            let targetEndFrame = _numFramesProcessed + min(_timeline.numTentativeFrames, config.chunkLen)
+            let targetEndFrame = _numFramesProcessed + min(tentativeToFlush, config.chunkLen)
             let exactPaddingSamples = exactFinalizationPaddingSamples(targetEndFrame: targetEndFrame)
             if exactPaddingSamples > 0 {
                 audioBuffer.append(contentsOf: [Float](repeating: 0, count: exactPaddingSamples))
