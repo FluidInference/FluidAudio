@@ -678,6 +678,8 @@ public final class LSEENDDiarizer: Diarizer {
         defer { lock.unlock() }
 
         guard let engine = _engine, let session = _session else { return nil }
+        let numSpeakers = engine.metadata.realOutputDim
+        var lastResult: DiarizerChunkResult?
 
         // Flush pending audio first — clear unconditionally so failed audio isn't retained.
         // Using defer + direct pass avoids a CoW copy.
@@ -685,39 +687,35 @@ public final class LSEENDDiarizer: Diarizer {
             defer { pendingAudio.removeAll(keepingCapacity: true) }
             let pushedUpdate = try session.pushAudio(pendingAudio)
             if let update = pushedUpdate {
-                let numSpeakers = engine.metadata.realOutputDim
                 let flushedResult = DiarizerChunkResult(
                     startFrame: _numFramesProcessed,
                     finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
                     finalizedFrameCount: update.probabilities.rows,
-                    tentativePredictions: [],
-                    tentativeFrameCount: 0
+                    tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
+                    tentativeFrameCount: update.previewProbabilities.rows
                 )
                 _numFramesProcessed += flushedResult.finalizedFrameCount
                 try _timeline.addChunk(flushedResult)
+                lastResult = flushedResult
             }
         }
 
-        guard let finalUpdate = try session.finalize() else {
-            _session = nil
-            _timeline.finalize()
-            return nil
+        if let finalUpdate = try session.finalize() {
+            let finalResult = DiarizerChunkResult(
+                startFrame: _numFramesProcessed,
+                finalizedPredictions: flattenRowMajor(finalUpdate.probabilities, numSpeakers: numSpeakers),
+                finalizedFrameCount: finalUpdate.probabilities.rows,
+                tentativePredictions: [],
+                tentativeFrameCount: 0
+            )
+            _numFramesProcessed += finalResult.finalizedFrameCount
+            try _timeline.addChunk(finalResult)
+            lastResult = finalResult
         }
-
-        let numSpeakers = engine.metadata.realOutputDim
-        let result = DiarizerChunkResult(
-            startFrame: _numFramesProcessed,
-            finalizedPredictions: flattenRowMajor(finalUpdate.probabilities, numSpeakers: numSpeakers),
-            finalizedFrameCount: finalUpdate.probabilities.rows,
-            tentativePredictions: [],
-            tentativeFrameCount: 0
-        )
-        _numFramesProcessed += result.finalizedFrameCount
-        try _timeline.addChunk(result)
         _timeline.finalize()
         _session = nil
 
-        return result
+        return lastResult
     }
 
     // MARK: - Private

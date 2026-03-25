@@ -212,6 +212,50 @@ final class SpeakerEnrollmentTests: XCTestCase {
         XCTAssertEqual(namedSpeakerIndices(in: diarizer.timeline), [speaker?.index].compactMap { $0 })
     }
 
+    func testSortformerEnrollmentClearsDiscardedSampleCountBeforeFinalize() async throws {
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
+
+        let config = SortformerConfig.default
+        let models = try await loadSortformerModelsForTest(config: config)
+
+        let enrollmentAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 0.0, durationSeconds: 5.0)
+        let discardedAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 5.0, durationSeconds: 1.5)
+        let liveAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 6.5, durationSeconds: 3.0)
+
+        let dirtyDiarizer = SortformerDiarizer(config: config)
+        dirtyDiarizer.initialize(models: models)
+        dirtyDiarizer.addAudio(discardedAudio)
+        let enrolledSpeaker = try dirtyDiarizer.enrollSpeaker(withAudio: enrollmentAudio, named: "Alice")
+        try XCTSkipIf(
+            enrolledSpeaker == nil, "Fixture did not produce a confident Sortformer speaker segment on this host.")
+
+        for chunk in DiarizationTestFixtures.chunk(liveAudio, sizes: [4_800, 7_680, 9_600]) {
+            let _ = try dirtyDiarizer.process(samples: chunk)
+        }
+        let _ = try dirtyDiarizer.finalizeSession()
+
+        let cleanDiarizer = SortformerDiarizer(config: config)
+        cleanDiarizer.initialize(models: models)
+        let cleanSpeaker = try cleanDiarizer.enrollSpeaker(withAudio: enrollmentAudio, named: "Alice")
+        try XCTSkipIf(
+            cleanSpeaker == nil, "Fixture did not produce a confident Sortformer speaker segment on this host.")
+
+        for chunk in DiarizationTestFixtures.chunk(liveAudio, sizes: [4_800, 7_680, 9_600]) {
+            let _ = try cleanDiarizer.process(samples: chunk)
+        }
+        let _ = try cleanDiarizer.finalizeSession()
+
+        XCTAssertLessThanOrEqual(
+            abs(dirtyDiarizer.timeline.numFinalizedFrames - cleanDiarizer.timeline.numFinalizedFrames),
+            1
+        )
+        XCTAssertEqual(dirtyDiarizer.timeline.numTentativeFrames, 0)
+        XCTAssertEqual(cleanDiarizer.timeline.numTentativeFrames, 0)
+    }
+
     func testSortformerMultipleEnrollmentsRetainNamedSpeakersAndState() async throws {
         XCTExpectFailure("Download might fail in CI environment", strict: false)
 

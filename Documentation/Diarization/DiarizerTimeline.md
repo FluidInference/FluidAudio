@@ -157,4 +157,4 @@ When `timeline.addChunk(_:)` is called internally by the diarizer:
 3. It iterates over all `DiarizerSpeaker` tracks, evaluating the boundaries (using `onsetThreshold` and `offsetThreshold`) to grow existing segments or spawn new ones.
 4. Tentative segments are cleared and rebuilt from the trailing `tentativePredictions` array during every streaming tick. 
 
-When the stream naturally finishes, the `Diarizer` automatically invokes `timeline.finalize()`, which flushes any remaining tentative segments up to finalized status and applies the `minFramesOn` deletion rules.
+When the stream naturally finishes, call `Diarizer.finalizeSession()`. The diarizer flushes trailing context first, then invokes `timeline.finalize()`, which promotes any remaining tentative segments to finalized status and applies the `minFramesOn` deletion rules.

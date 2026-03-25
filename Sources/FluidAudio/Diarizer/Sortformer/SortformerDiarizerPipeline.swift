@@ -44,6 +44,7 @@ public final class SortformerDiarizer: Diarizer {
         return _numFramesProcessed
     }
     private var _numFramesProcessed: Int = 0
+    private var _realSamplesReceived: Int = 0
 
     /// Configuration
     public let config: SortformerConfig
@@ -151,6 +152,7 @@ public final class SortformerDiarizer: Diarizer {
         startFeat = 0
         diarizerChunkIndex = 0
         _numFramesProcessed = 0
+        _realSamplesReceived = 0
         _timeline.reset(keepingSpeakers: keepingSpeakers)
 
         featureBuffer.reserveCapacity((config.chunkMelFrames + config.coreFrames) * config.melFeatures)
@@ -253,6 +255,7 @@ public final class SortformerDiarizer: Diarizer {
             diarizerChunkIndex = 0
             audioBuffer.removeAll(keepingCapacity: true)
             featureBuffer.removeAll(keepingCapacity: true)
+            _realSamplesReceived = 0
             audioBuffer.append(contentsOf: normalized)
 
             preprocessAudioToFeaturesLocked()
@@ -285,6 +288,7 @@ public final class SortformerDiarizer: Diarizer {
                         lastAudioSample = 0
                         audioBuffer.removeAll(keepingCapacity: true)
                         featureBuffer.removeAll(keepingCapacity: true)
+                        _realSamplesReceived = 0
                         return nil
                     }
                     logger.warning(
@@ -306,6 +310,7 @@ public final class SortformerDiarizer: Diarizer {
             lastAudioSample = 0
             audioBuffer.removeAll(keepingCapacity: true)
             featureBuffer.removeAll(keepingCapacity: true)
+            _realSamplesReceived = 0
 
             logger.info(
                 "Enrolled speaker \(description) with \(normalized.count) samples "
@@ -327,6 +332,7 @@ public final class SortformerDiarizer: Diarizer {
     public func addAudio(_ samples: [Float]) {
         lock.withLock {
             audioBuffer.append(contentsOf: samples)
+            _realSamplesReceived += samples.count
             preprocessAudioToFeaturesLocked()
         }
     }
@@ -343,6 +349,7 @@ public final class SortformerDiarizer: Diarizer {
         let normalized = try normalizeSamples(samples, sourceSampleRate: sourceSampleRate)
         lock.withLock {
             audioBuffer.append(contentsOf: normalized)
+            _realSamplesReceived += normalized.count
             preprocessAudioToFeaturesLocked()
         }
     }
@@ -360,8 +367,10 @@ public final class SortformerDiarizer: Diarizer {
             if let sourceSampleRate, sourceSampleRate != Double(config.sampleRate) {
                 let normalized = try normalizeSamples(Array(samples), sourceSampleRate: sourceSampleRate)
                 audioBuffer.append(contentsOf: normalized)
+                _realSamplesReceived += normalized.count
             } else {
                 audioBuffer.append(contentsOf: samples)
+                _realSamplesReceived += samples.count
             }
             preprocessAudioToFeaturesLocked()
         }
@@ -382,10 +391,6 @@ public final class SortformerDiarizer: Diarizer {
     ///
     /// Convenience method that combines `addAudio()` and `process()`.
     ///
-    /// Process a chunk of audio in one call.
-    ///
-    /// Convenience method that combines `addAudio()` and `process()`.
-    ///
     /// - Parameters:
     ///   - samples: Audio samples (16kHz mono)
     ///   - sourceSampleRate: Source audio sample rate
@@ -399,8 +404,10 @@ public final class SortformerDiarizer: Diarizer {
             if let sourceSampleRate, sourceSampleRate != Double(config.sampleRate) {
                 let normalized = try normalizeSamples(Array(samples), sourceSampleRate: sourceSampleRate)
                 audioBuffer.append(contentsOf: normalized)
+                _realSamplesReceived += normalized.count
             } else {
                 audioBuffer.append(contentsOf: samples)
+                _realSamplesReceived += samples.count
             }
             preprocessAudioToFeaturesLocked()
             return try processLocked()
@@ -409,6 +416,16 @@ public final class SortformerDiarizer: Diarizer {
 
     /// Internal process - caller must hold lock
     private func processLocked(updateTimeline: Bool = true) throws -> DiarizerTimelineUpdate? {
+        guard let chunk = try makeStreamingChunkLocked() else {
+            return nil
+        }
+
+        _numFramesProcessed += chunk.finalizedFrameCount
+        guard updateTimeline else { return nil }
+        return try _timeline.addChunk(chunk)
+    }
+
+    private func makeStreamingChunkLocked() throws -> DiarizerChunkResult? {
         guard let models = _models else {
             throw SortformerError.notInitialized
         }
@@ -457,20 +474,94 @@ public final class SortformerDiarizer: Diarizer {
         }
 
         // Return new results if any
-        if newPredictions.count > 0 && updateTimeline {
-            let chunk = DiarizerChunkResult(
+        if newPredictions.count > 0 {
+            return DiarizerChunkResult(
                 startFrame: _numFramesProcessed,
                 finalizedPredictions: newPredictions,
                 finalizedFrameCount: newFrameCount,
                 tentativePredictions: newTentativePredictions,
                 tentativeFrameCount: newTentativeFrameCount
             )
-
-            _numFramesProcessed += newFrameCount
-            return try _timeline.addChunk(chunk)
         }
 
         return nil
+    }
+
+    /// Finalize the current streaming session.
+    ///
+    /// Pads the tail with silence until the last true frame has been emitted as
+    /// finalized output, then finalizes the timeline.
+    ///
+    /// - Returns: The last finalized chunk emitted during finalization, if any.
+    @discardableResult
+    public func finalizeSession() throws -> DiarizerChunkResult? {
+        try lock.withLock {
+            guard _models != nil else {
+                throw SortformerError.notInitialized
+            }
+
+            var lastResult: DiarizerChunkResult?
+            if let chunk = try makeStreamingChunkLocked() {
+                _numFramesProcessed = chunk.startFrame + chunk.finalizedFrameCount
+                try _timeline.addChunk(chunk)
+                lastResult = chunk
+            }
+
+            let targetEndFrame = max(
+                _numFramesProcessed + _timeline.numTentativeFrames,
+                Int(
+                    round(
+                        Double(_realSamplesReceived) * (1.0 / Double(config.frameDurationSeconds))
+                            / Double(config.sampleRate)))
+            )
+            let paddingSamples = max(
+                config.melWindow,
+                config.chunkRightContext * config.subsamplingFactor * config.melStride
+            )
+
+            var stalledPasses = 0
+            while _numFramesProcessed < targetEndFrame && stalledPasses < 4 {
+                audioBuffer.append(contentsOf: [Float](repeating: 0, count: paddingSamples))
+                preprocessAudioToFeaturesLocked()
+
+                guard let chunk = try makeStreamingChunkLocked(), chunk.finalizedFrameCount > 0 else {
+                    stalledPasses += 1
+                    continue
+                }
+
+                let remainingFrames = targetEndFrame - _numFramesProcessed
+                let finalizedFrameCount = min(remainingFrames, chunk.finalizedFrameCount)
+                guard finalizedFrameCount > 0 else {
+                    stalledPasses += 1
+                    continue
+                }
+
+                let finalizedPredictions = Array(
+                    chunk.finalizedPredictions.prefix(finalizedFrameCount * config.numSpeakers)
+                )
+                let finalizedResult = DiarizerChunkResult(
+                    startFrame: _numFramesProcessed,
+                    finalizedPredictions: finalizedPredictions,
+                    finalizedFrameCount: finalizedFrameCount,
+                    tentativePredictions: [],
+                    tentativeFrameCount: 0
+                )
+                _numFramesProcessed += finalizedFrameCount
+                try _timeline.addChunk(finalizedResult)
+                lastResult = finalizedResult
+                stalledPasses = 0
+            }
+
+            if _numFramesProcessed < targetEndFrame {
+                logger.warning(
+                    "Sortformer finalize stalled before last true frame was confirmed "
+                        + "(\(_numFramesProcessed) / \(targetEndFrame) frames)"
+                )
+            }
+
+            _timeline.finalize()
+            return lastResult
+        }
     }
 
     // MARK: - Complete File Processing

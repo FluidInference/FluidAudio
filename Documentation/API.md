@@ -83,7 +83,7 @@ Use `OfflineDiarizerManager` when you need offline DER parity or want to run the
 
 **Speaker Enrollment:** `enrollSpeaker(withAudio:sourceSampleRate:named:...)` feeds known-speaker audio before streaming to label a slot.
 
-**Lifecycle:** `reset()` clears streaming state but keeps the model loaded. `cleanup()` releases everything.
+**Lifecycle:** `finalizeSession()` flushes trailing context so the last true frame becomes finalized. `reset()` clears streaming state but keeps the model loaded. `cleanup()` releases everything.
 
 ---
 

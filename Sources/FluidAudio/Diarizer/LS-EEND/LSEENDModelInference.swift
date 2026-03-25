@@ -208,17 +208,11 @@ public final class LSEENDInferenceHelper {
     /// - Returns: Complete inference result with logits and probabilities.
     public func infer(samples: [Float], sampleRate: Int) throws -> LSEENDInferenceResult {
         let normalizedAudio = try resampleIfNeeded(samples: samples, sampleRate: sampleRate)
-        let features = try offlineFeatureExtractor.extractFeatures(audio: normalizedAudio)
         let session = try createSession(inputSampleRate: targetSampleRate)
-        session.totalInputSamples = normalizedAudio.count
-        let committed = try session.ingestFeatures(features)
-        let pending = session.totalFeatureFrames - session.emittedFrames
-        let tail =
-            try pending > 0
-            ? session.flushTail(from: session.state, pendingFrames: pending) : .empty(columns: decodeMaxSpeakers)
-        let fullLogits = committed.appendingRows(tail)
-        session.fullLogitChunks = fullLogits.isEmpty ? [] : [fullLogits]
-        session.emittedFrames = fullLogits.rows
+        if !normalizedAudio.isEmpty {
+            _ = try session.pushAudio(normalizedAudio)
+        }
+        _ = try session.finalize()
         return session.snapshot()
     }
 
@@ -518,13 +512,41 @@ public final class LSEENDStreamingSession {
         guard !finalized else {
             return nil
         }
-        let features = try featureExtractor.finalize()
-        let committed = try ingestFeatures(features)
+
+        var committedFullLogits = LSEENDMatrix.empty(columns: engine.decodeMaxSpeakers)
+        let targetEndFrame = max(
+            totalFeatureFrames,
+            Int(round(Double(totalInputSamples) / Double(max(inputSampleRate, 1)) * engine.modelFrameHz))
+        )
+        let paddingSamples = max(
+            1,
+            Int(ceil(max(engine.streamingLatencySeconds, 1.0 / engine.modelFrameHz) * Double(inputSampleRate)))
+        )
+
+        var stalledPasses = 0
+        while emittedFrames < targetEndFrame && stalledPasses < 4 {
+            let features = try featureExtractor.pushAudio([Float](repeating: 0, count: paddingSamples))
+            let committed = try ingestFeatures(features)
+            if committed.rows > 0 {
+                committedFullLogits = committedFullLogits.appendingRows(committed)
+                stalledPasses = 0
+            } else {
+                stalledPasses += 1
+            }
+        }
+
+        let finalFeatures = try featureExtractor.finalize()
+        let finalCommitted = try ingestFeatures(finalFeatures)
+        if finalCommitted.rows > 0 {
+            committedFullLogits = committedFullLogits.appendingRows(finalCommitted)
+        }
+
         let pending = totalFeatureFrames - emittedFrames
         let tail =
             try pending > 0 ? flushTail(from: state, pendingFrames: pending) : .empty(columns: engine.decodeMaxSpeakers)
+        emittedFrames += tail.rows
         finalized = true
-        return try buildUpdate(committedFullLogits: committed.appendingRows(tail), includePreview: false)
+        return try buildUpdate(committedFullLogits: committedFullLogits.appendingRows(tail), includePreview: false)
     }
 
     /// Assembles the full inference result from all committed frames emitted so far.
