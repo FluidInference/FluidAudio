@@ -502,9 +502,16 @@ public final class SortformerDiarizer: Diarizer {
 
             var lastResult: DiarizerChunkResult?
             if let chunk = try makeStreamingChunkLocked() {
-                _numFramesProcessed = chunk.startFrame + chunk.finalizedFrameCount
-                try _timeline.addChunk(chunk)
-                lastResult = chunk
+                let finalizedChunk = DiarizerChunkResult(
+                    startFrame: chunk.startFrame,
+                    finalizedPredictions: chunk.finalizedPredictions,
+                    finalizedFrameCount: chunk.finalizedFrameCount,
+                    tentativePredictions: [],
+                    tentativeFrameCount: 0
+                )
+                _numFramesProcessed = finalizedChunk.startFrame + finalizedChunk.finalizedFrameCount
+                try _timeline.addChunk(finalizedChunk)
+                lastResult = finalizedChunk
             }
 
             let targetEndFrame = max(

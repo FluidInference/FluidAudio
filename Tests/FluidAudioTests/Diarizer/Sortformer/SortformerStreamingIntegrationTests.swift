@@ -30,7 +30,7 @@ final class SortformerStreamingIntegrationTests: XCTestCase {
         for chunk in DiarizationTestFixtures.chunk(samples, sizes: [4_800, 7_680, 9_600]) {
             let _ = try streamingDiarizer.process(samples: chunk)
         }
-        let _ = try streamingDiarizer.finalizeSession()
+        let finalChunk = try streamingDiarizer.finalizeSession()
 
         let completeDiarizer = SortformerDiarizer(config: config)
         completeDiarizer.initialize(models: models)
@@ -40,6 +40,8 @@ final class SortformerStreamingIntegrationTests: XCTestCase {
             abs(streamingDiarizer.timeline.numFinalizedFrames - expectedTimeline.numFinalizedFrames),
             1
         )
+        XCTAssertEqual(finalChunk?.tentativeFrameCount, 0)
+        XCTAssertEqual(finalChunk?.tentativePredictions.count, 0)
         XCTAssertEqual(streamingDiarizer.timeline.numTentativeFrames, 0)
     }
 }

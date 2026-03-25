@@ -166,10 +166,13 @@ final class LSEENDIntegrationTests: XCTestCase {
         for chunk in DiarizationTestFixtures.chunk(samples, sizes: [701, 977, 1153]) {
             let _ = try diarizer.process(samples: chunk)
         }
-        let _ = try diarizer.finalizeSession()
+        let finalChunk = try diarizer.finalizeSession()
 
         XCTAssertEqual(diarizer.numFramesProcessed, expected.probabilities.rows)
         XCTAssertEqual(diarizer.timeline.numFinalizedFrames, expected.probabilities.rows)
+        XCTAssertEqual(finalChunk?.tentativeFrameCount, 0)
+        XCTAssertEqual(finalChunk?.tentativePredictions.count, 0)
+        XCTAssertEqual(diarizer.timeline.numTentativeFrames, 0)
         assertArrayClose(
             diarizer.timeline.finalizedPredictions, expected.probabilities.values, maxAbs: 1e-5, meanAbs: 1e-6)
 

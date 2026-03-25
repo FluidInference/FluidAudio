@@ -691,8 +691,8 @@ public final class LSEENDDiarizer: Diarizer {
                     startFrame: _numFramesProcessed,
                     finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
                     finalizedFrameCount: update.probabilities.rows,
-                    tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
-                    tentativeFrameCount: update.previewProbabilities.rows
+                    tentativePredictions: [],
+                    tentativeFrameCount: 0
                 )
                 _numFramesProcessed += flushedResult.finalizedFrameCount
                 try _timeline.addChunk(flushedResult)
