@@ -514,24 +514,14 @@ public final class LSEENDStreamingSession {
         }
 
         var committedFullLogits = LSEENDMatrix.empty(columns: engine.decodeMaxSpeakers)
-        let targetEndFrame = max(
-            totalFeatureFrames,
-            Int(round(Double(totalInputSamples) / Double(max(inputSampleRate, 1)) * engine.modelFrameHz))
-        )
-        let paddingSamples = max(
-            1,
-            Int(ceil(max(engine.streamingLatencySeconds, 1.0 / engine.modelFrameHz) * Double(inputSampleRate)))
-        )
-
-        var stalledPasses = 0
-        while emittedFrames < targetEndFrame && stalledPasses < 4 {
-            let features = try featureExtractor.pushAudio([Float](repeating: 0, count: paddingSamples))
+        let targetEndFrame = Int(
+            round(Double(totalInputSamples) / Double(max(inputSampleRate, 1)) * engine.modelFrameHz))
+        let exactPaddingSamples = exactFinalizationPaddingSamples(targetEndFrame: targetEndFrame)
+        if exactPaddingSamples > 0 {
+            let features = try featureExtractor.pushAudio([Float](repeating: 0, count: exactPaddingSamples))
             let committed = try ingestFeatures(features)
             if committed.rows > 0 {
                 committedFullLogits = committedFullLogits.appendingRows(committed)
-                stalledPasses = 0
-            } else {
-                stalledPasses += 1
             }
         }
 
@@ -547,6 +537,15 @@ public final class LSEENDStreamingSession {
         emittedFrames += tail.rows
         finalized = true
         return try buildUpdate(committedFullLogits: committedFullLogits.appendingRows(tail), includePreview: false)
+    }
+
+    private func exactFinalizationPaddingSamples(targetEndFrame: Int) -> Int {
+        guard targetEndFrame > 0 else {
+            return 0
+        }
+        let stableBlockSize = engine.metadata.resolvedHopLength * engine.metadata.resolvedSubsampling
+        let requiredTotalSamples = targetEndFrame * stableBlockSize
+        return max(0, requiredTotalSamples - totalInputSamples)
     }
 
     /// Assembles the full inference result from all committed frames emitted so far.

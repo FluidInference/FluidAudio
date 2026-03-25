@@ -495,7 +495,7 @@ public final class SortformerDiarizer: Diarizer {
     /// - Returns: The last finalized chunk emitted during finalization, if any.
     @discardableResult
     public func finalizeSession() throws -> DiarizerChunkResult? {
-        try lock.withLock {
+        return try lock.withLock {
             guard _models != nil else {
                 throw SortformerError.notInitialized
             }
@@ -514,33 +514,30 @@ public final class SortformerDiarizer: Diarizer {
                 lastResult = finalizedChunk
             }
 
-            let targetEndFrame = max(
-                _numFramesProcessed + _timeline.numTentativeFrames,
-                Int(
-                    round(
-                        Double(_realSamplesReceived) * (1.0 / Double(config.frameDurationSeconds))
-                            / Double(config.sampleRate)))
-            )
-            let paddingSamples = max(
-                config.melWindow,
-                config.chunkRightContext * config.subsamplingFactor * config.melStride
-            )
+            let targetEndFrame = _numFramesProcessed + min(_timeline.numTentativeFrames, config.chunkLen)
+            let exactPaddingSamples = exactFinalizationPaddingSamples(targetEndFrame: targetEndFrame)
+            if exactPaddingSamples > 0 {
+                audioBuffer.append(contentsOf: [Float](repeating: 0, count: exactPaddingSamples))
+            }
 
-            var stalledPasses = 0
-            while _numFramesProcessed < targetEndFrame && stalledPasses < 4 {
-                audioBuffer.append(contentsOf: [Float](repeating: 0, count: paddingSamples))
-                preprocessAudioToFeaturesLocked()
-
+            while _numFramesProcessed < targetEndFrame {
+                let remainingFrames = targetEndFrame - _numFramesProcessed
+                let targetFeatureFrames =
+                    startFeat
+                    + min(remainingFrames * config.subsamplingFactor, config.coreFrames)
+                    + config.chunkRightContext * config.subsamplingFactor
+                preprocessAudioToFeatureTargetLocked(targetFeatureFrames: targetFeatureFrames)
                 guard let chunk = try makeStreamingChunkLocked(), chunk.finalizedFrameCount > 0 else {
-                    stalledPasses += 1
-                    continue
+                    logger.warning(
+                        "Sortformer finalize could not emit enough confirmed frames "
+                            + "(\(_numFramesProcessed) / \(targetEndFrame) frames)"
+                    )
+                    break
                 }
 
-                let remainingFrames = targetEndFrame - _numFramesProcessed
                 let finalizedFrameCount = min(remainingFrames, chunk.finalizedFrameCount)
                 guard finalizedFrameCount > 0 else {
-                    stalledPasses += 1
-                    continue
+                    break
                 }
 
                 let finalizedPredictions = Array(
@@ -556,14 +553,6 @@ public final class SortformerDiarizer: Diarizer {
                 _numFramesProcessed += finalizedFrameCount
                 try _timeline.addChunk(finalizedResult)
                 lastResult = finalizedResult
-                stalledPasses = 0
-            }
-
-            if _numFramesProcessed < targetEndFrame {
-                logger.warning(
-                    "Sortformer finalize stalled before last true frame was confirmed "
-                        + "(\(_numFramesProcessed) / \(targetEndFrame) frames)"
-                )
             }
 
             _timeline.finalize()
@@ -758,38 +747,17 @@ public final class SortformerDiarizer: Diarizer {
 
     /// Preprocess audio into mel features - caller must hold lock
     private func preprocessAudioToFeaturesLocked() {
+        let targetFeatureFrames = startFeat + config.coreFrames + config.chunkRightContext * config.subsamplingFactor
+        preprocessAudioToFeatureTargetLocked(targetFeatureFrames: targetFeatureFrames)
+    }
+
+    private func preprocessAudioToFeatureTargetLocked(targetFeatureFrames: Int) {
         guard !audioBuffer.isEmpty else { return }
         if audioBuffer.count < config.melWindow { return }
 
-        // Demand-Driven Optimization:
-        // Calculate exactly how many features we need for the next chunk
-        // needed = (startFeat + core + RC) - currentFeatureCount
-
         let featLength = featureBuffer.count / config.melFeatures
-        let coreFrames = config.chunkLen * config.subsamplingFactor
-        let rightContextFrames = config.chunkRightContext * config.subsamplingFactor
-
-        // Calculate absolute target position in feature stream
-        // For Chunk 0: startFeat=0. Target=104.
-        // For Chunk 1: startFeat=8. Target=112.
-        let targetEnd = startFeat + coreFrames + rightContextFrames
-
-        let framesNeeded = targetEnd - featLength
-
-        // If we already have enough frames, we don't strictly need to process more right now.
-        // However, to keep the pipeline moving smoothly, we can process if we have a full chunk buffered.
-        // But to strictly prioritize efficiency/latency balance as requested:
-        if framesNeeded <= 0 {
-            // We have enough features for the next chunk!
-            // Check if we have A LOT of audio buffered (buffer pressure)?
-            // If we have > 1 second of audio, maybe process it batch-wise?
-            // For now, lazy approach: don't process.
-            return
-        }
-
-        // Calculate audio samples needed to produce 'framesNeeded'
-        // If we are appending to existing stream (featureBuffer not empty), we need stride * N.
-        // If featureBuffer is empty (start of stream), we need window + (N-1)*stride.
+        let framesNeeded = targetFeatureFrames - featLength
+        guard framesNeeded > 0 else { return }
 
         let samplesNeeded: Int
         if featureBuffer.isEmpty {
@@ -798,12 +766,7 @@ public final class SortformerDiarizer: Diarizer {
             samplesNeeded = framesNeeded * config.melStride
         }
 
-        // Wait until we have enough audio to satisfy the demand
-        if audioBuffer.count < samplesNeeded { return }
-
-        // We have enough audio! Process exactly what's needed (or slightly more if convenient?)
-        // Let's process everything we have, since we paid the initialization cost check.
-        // This prevents creating a backlog of unprocessed audio.
+        guard audioBuffer.count >= samplesNeeded else { return }
 
         let (mel, melLength, _) = melSpectrogram.computeFlatTransposed(
             audio: audioBuffer,
@@ -837,6 +800,54 @@ public final class SortformerDiarizer: Diarizer {
 
         return try AudioConverter(sampleRate: Double(config.sampleRate))
             .resample(samples, from: sourceSampleRate)
+    }
+
+    private func exactFinalizationPaddingSamples(targetEndFrame: Int) -> Int {
+        let targetFeatureFrames = max(
+            0,
+            startFeat + max(0, targetEndFrame - _numFramesProcessed) * config.subsamplingFactor
+                + config.chunkRightContext * config.subsamplingFactor
+        )
+        let currentFeatureFrames = featureBuffer.count / config.melFeatures
+        let additionalFeatureFramesNeeded = max(0, targetFeatureFrames - currentFeatureFrames)
+        guard additionalFeatureFramesNeeded > 0 else {
+            return 0
+        }
+
+        if producedMelFrames(forFinalizationPadding: 0) >= additionalFeatureFramesNeeded {
+            return 0
+        }
+
+        var upperBound = max(config.melStride, config.melWindow)
+        while producedMelFrames(forFinalizationPadding: upperBound) < additionalFeatureFramesNeeded {
+            upperBound *= 2
+        }
+
+        var lowerBound = 0
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if producedMelFrames(forFinalizationPadding: middle) >= additionalFeatureFramesNeeded {
+                upperBound = middle
+            } else {
+                lowerBound = middle + 1
+            }
+        }
+
+        return lowerBound
+    }
+
+    private func producedMelFrames(forFinalizationPadding paddingSamples: Int) -> Int {
+        let paddedAudio: [Float]
+        if paddingSamples > 0 {
+            paddedAudio = audioBuffer + [Float](repeating: 0, count: paddingSamples)
+        } else {
+            paddedAudio = audioBuffer
+        }
+        let (_, melLength, _) = melSpectrogram.computeFlatTransposed(
+            audio: paddedAudio,
+            lastAudioSample: lastAudioSample
+        )
+        return melLength
     }
 
     /// Get next chunk features (for testing)
