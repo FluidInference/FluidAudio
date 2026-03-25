@@ -232,7 +232,7 @@ let finalTimeline = diarizer.timeline
 ```
 
 Notes:
-- `finalizeSession()` pads the tail with silence when needed so the last true frame is emitted as finalized output before the timeline is finalized.
+- `finalizeSession()` flushes the remaining audio by padding the end with silence.
 
 ### Speaker Enrollment
 
