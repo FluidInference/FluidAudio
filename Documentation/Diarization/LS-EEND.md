@@ -226,7 +226,7 @@ if let update = try diarizer.process() {
 // Convenience: add + process in one call
 if let update = try diarizer.process(samples: audioChunk) { ... }
 
-// Flush remaining committed + preview frames at end of stream
+// Flush remaining frames at the end of a stream
 try diarizer.finalizeSession()
 let finalTimeline = diarizer.timeline
 ```
