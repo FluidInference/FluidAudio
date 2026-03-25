@@ -95,6 +95,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[MiniWhisper](https://github.com/andyhtran/MiniWhisper)** | Open-source macOS menu bar for quick local voice-to-text with minimal setup. Pick a shortcut, start talking. Uses Parakeet ASR. |
 | **[Talat](https://talat.app)** | Privacy-focused AI meeting notes app. Records and transcribes meetings locally on your Mac with speaker identification and LLM-powered summaries. Featured in [TechCrunch](https://techcrunch.com/2026/03/24/talats-ai-meeting-notes-stay-on-your-machine-not-in-the-cloud/). Uses Parakeet ASR. |
 | **[Volocal](https://github.com/fikrikarim/volocal)** | Fully local voice AI on iOS. Uses streaming Parakeet EOU ASR and streaming PocketTTS. |
+| **[VivaDicta](https://github.com/n0an/VivaDicta)** | Open-source iOS voice-to-text app with system-wide AI voice keyboard — dictate and AI-process text in any app. 15+ AI providers, 40+ AI presets. Uses Parakeet ASR. |
 
 ## Installation
 
