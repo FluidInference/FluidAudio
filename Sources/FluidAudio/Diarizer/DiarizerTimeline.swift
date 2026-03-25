@@ -688,6 +688,11 @@ public final class DiarizerTimeline {
         queue.sync { _tentativePredictions.count / speakerCapacity }
     }
 
+    /// Total number of frames (finalized + tentative)
+    public var numFrames: Int {
+        queue.sync { _numFinalizedFrames + _tentativePredictions.count / speakerCapacity }
+    }
+
     /// Speakers in the timeline
     public var speakers: [Int: DiarizerSpeaker] {
         get { queue.sync { _speakers } }
@@ -706,6 +711,7 @@ public final class DiarizerTimeline {
         }
     }
 
+    /// Whether the timeline has any segments
     public var hasSegments: Bool {
         speakers.values.contains(where: \.hasSegments)
     }
@@ -713,6 +719,16 @@ public final class DiarizerTimeline {
     /// Duration of finalized predictions in seconds
     public var finalizedDuration: Float {
         Float(numFinalizedFrames) * config.frameDurationSeconds
+    }
+
+    /// Duration of tentative predictions in seconds
+    public var tentativeDuration: Float {
+        Float(numTentativeFrames) * config.frameDurationSeconds
+    }
+
+    /// Duration of all predictions (finalized + tentative) in seconds
+    public var duration: Float {
+        Float(numFrames) * config.frameDurationSeconds
     }
 
     /// Maximum number of speakers
