@@ -327,7 +327,7 @@ public final class LSEENDDiarizer: Diarizer {
                 logger.warning("Failed to enroll speaker \(description) because no speech detected")
                 enrolledSpeaker = nil
             }
-    
+
             _visibleStartFrameOffset = session.snapshot().probabilities.rows
             _numFramesProcessed = 0
             _timeline.reset(keepingSpeakersWhere: { occupiedIndices.contains($0.index) })

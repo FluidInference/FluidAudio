@@ -514,7 +514,7 @@ public final class SortformerDiarizer: Diarizer {
             }
 
             let targetEndFrame = _numFramesProcessed + min(tentativeToFlush, config.chunkLen)
-            let exactPaddingSamples = exactFinalizationPaddingSamples(targetEndFrame: targetEndFrame)
+            let exactPaddingSamples = try exactFinalizationPaddingSamples(targetEndFrame: targetEndFrame)
             if exactPaddingSamples > 0 {
                 audioBuffer.append(contentsOf: [Float](repeating: 0, count: exactPaddingSamples))
             }
@@ -801,52 +801,87 @@ public final class SortformerDiarizer: Diarizer {
             .resample(samples, from: sourceSampleRate)
     }
 
-    private func exactFinalizationPaddingSamples(targetEndFrame: Int) -> Int {
-        let targetFeatureFrames = max(
-            0,
-            startFeat + max(0, targetEndFrame - _numFramesProcessed) * config.subsamplingFactor
-                + config.chunkRightContext * config.subsamplingFactor
+    private func exactFinalizationPaddingSamples(targetEndFrame: Int) throws -> Int {
+        let remainingFrames = max(0, targetEndFrame - _numFramesProcessed)
+        let (remainingFeatureFrames, remainingOverflow) = remainingFrames.multipliedReportingOverflow(
+            by: config.subsamplingFactor
         )
+        guard !remainingOverflow else {
+            throw SortformerError.invalidState(
+                "Finalization remaining-frame expansion overflowed for \(remainingFrames) frames."
+            )
+        }
+
+        let (rightContextFeatureFrames, rightContextOverflow) = config.chunkRightContext.multipliedReportingOverflow(
+            by: config.subsamplingFactor
+        )
+        guard !rightContextOverflow else {
+            throw SortformerError.invalidState(
+                "Finalization right-context expansion overflowed for \(config.chunkRightContext) frames."
+            )
+        }
+
+        let (targetWithoutContext, startOverflow) = startFeat.addingReportingOverflow(remainingFeatureFrames)
+        guard !startOverflow else {
+            throw SortformerError.invalidState(
+                "Finalization target feature frame calculation overflowed at startFeat=\(startFeat)."
+            )
+        }
+
+        let (targetFeatureFrames, contextOverflow) = targetWithoutContext.addingReportingOverflow(
+            rightContextFeatureFrames)
+        guard !contextOverflow else {
+            throw SortformerError.invalidState(
+                "Finalization target feature frame calculation overflowed after adding right context."
+            )
+        }
+
         let currentFeatureFrames = featureBuffer.count / config.melFeatures
         let additionalFeatureFramesNeeded = max(0, targetFeatureFrames - currentFeatureFrames)
         guard additionalFeatureFramesNeeded > 0 else {
             return 0
         }
 
-        if producedMelFrames(forFinalizationPadding: 0) >= additionalFeatureFramesNeeded {
+        let framesAvailableWithoutPadding = producedMelFramesAvailable()
+        guard additionalFeatureFramesNeeded > framesAvailableWithoutPadding else {
             return 0
         }
 
-        var upperBound = max(config.melStride, config.melWindow)
-        while producedMelFrames(forFinalizationPadding: upperBound) < additionalFeatureFramesNeeded {
-            upperBound *= 2
-        }
-
-        var lowerBound = 0
-        while lowerBound < upperBound {
-            let middle = lowerBound + (upperBound - lowerBound) / 2
-            if producedMelFrames(forFinalizationPadding: middle) >= additionalFeatureFramesNeeded {
-                upperBound = middle
-            } else {
-                lowerBound = middle + 1
+        let requiredBufferedSamples: Int
+        if featureBuffer.isEmpty {
+            let (additionalSamples, overflow) = max(0, additionalFeatureFramesNeeded - 1).multipliedReportingOverflow(
+                by: config.melStride
+            )
+            guard !overflow else {
+                throw SortformerError.invalidState(
+                    "Finalization sample requirement overflowed for \(additionalFeatureFramesNeeded) feature frames."
+                )
             }
+            let (samples, windowOverflow) = additionalSamples.addingReportingOverflow(config.melWindow)
+            guard !windowOverflow else {
+                throw SortformerError.invalidState(
+                    "Finalization sample requirement overflowed after adding melWindow."
+                )
+            }
+            requiredBufferedSamples = samples
+        } else {
+            let (samples, overflow) = additionalFeatureFramesNeeded.multipliedReportingOverflow(by: config.melStride)
+            guard !overflow else {
+                throw SortformerError.invalidState(
+                    "Finalization sample requirement overflowed for \(additionalFeatureFramesNeeded) buffered frames."
+                )
+            }
+            requiredBufferedSamples = max(config.melWindow, samples)
         }
 
-        return lowerBound
+        return max(0, requiredBufferedSamples - audioBuffer.count)
     }
 
-    private func producedMelFrames(forFinalizationPadding paddingSamples: Int) -> Int {
-        let paddedAudio: [Float]
-        if paddingSamples > 0 {
-            paddedAudio = audioBuffer + [Float](repeating: 0, count: paddingSamples)
-        } else {
-            paddedAudio = audioBuffer
+    private func producedMelFramesAvailable() -> Int {
+        guard audioBuffer.count >= config.melWindow else {
+            return 0
         }
-        let (_, melLength, _) = melSpectrogram.computeFlatTransposed(
-            audio: paddedAudio,
-            lastAudioSample: lastAudioSample
-        )
-        return melLength
+        return audioBuffer.count / config.melStride
     }
 
     /// Get next chunk features (for testing)

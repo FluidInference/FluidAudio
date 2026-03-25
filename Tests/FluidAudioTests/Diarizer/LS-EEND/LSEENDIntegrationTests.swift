@@ -4,13 +4,14 @@ import XCTest
 
 @testable import FluidAudio
 
+@MainActor
 final class LSEENDIntegrationTests: XCTestCase {
     private struct ErrorStats {
         let maxAbs: Double
         let meanAbs: Double
     }
 
-    nonisolated(unsafe) private static var cachedEngines: [LSEENDVariant: LSEENDInferenceHelper] = [:]
+    private static var cachedEngines: [LSEENDVariant: LSEENDInferenceHelper] = [:]
 
     func testVariantRegistryResolvesAllExportedArtifacts() async throws {
         let expectedColumns: [LSEENDVariant: Int] = [
@@ -109,6 +110,54 @@ final class LSEENDIntegrationTests: XCTestCase {
         assertMatrixClose(snapshot.logits, offline.logits, maxAbs: 1e-5, meanAbs: 1e-6)
         assertMatrixClose(snapshot.probabilities, offline.probabilities, maxAbs: 1e-5, meanAbs: 1e-6)
         assertMatrixClose(snapshot.fullLogits, offline.fullLogits, maxAbs: 1e-5, meanAbs: 1e-6)
+    }
+
+    func testStreamingFinalizationUsesExactPaddingForTailFlush() async throws {
+        let engine = try await makeEngine(variant: .dihard3)
+        let sampleRate = engine.targetSampleRate
+        let stableBlockSize = engine.metadata.resolvedHopLength * engine.metadata.resolvedSubsampling
+        let rawSamples = try DiarizationTestFixtures.fixtureAudio(sampleRate: sampleRate, limitSeconds: 6.0)
+        let sampleCount = stableBlockSize * 2 + stableBlockSize / 2 + 37
+        let samples = Array(rawSamples.prefix(sampleCount))
+        let expected = try engine.infer(samples: samples, sampleRate: sampleRate)
+
+        let targetEndFrame = Int(round(Double(samples.count) / Double(sampleRate) * engine.modelFrameHz))
+        let expectedPaddingSamples = max(0, targetEndFrame * stableBlockSize - samples.count)
+
+        XCTAssertGreaterThan(expectedPaddingSamples, 0)
+        XCTAssertEqual((samples.count + expectedPaddingSamples) % stableBlockSize, 0)
+
+        let session = try engine.createSession(inputSampleRate: sampleRate)
+        _ = try session.pushAudio(samples)
+        let finalUpdate = try session.finalize()
+
+        XCTAssertNotNil(finalUpdate)
+        XCTAssertEqual(finalUpdate?.previewLogits.rows, 0)
+        XCTAssertEqual(finalUpdate?.previewProbabilities.rows, 0)
+        XCTAssertNil(try session.finalize())
+
+        let snapshot = session.snapshot()
+        XCTAssertEqual(snapshot.probabilities.rows, expected.probabilities.rows)
+        XCTAssertEqual(snapshot.logits.rows, expected.logits.rows)
+        assertMatrixClose(snapshot.logits, expected.logits, maxAbs: 1e-5, meanAbs: 1e-6)
+        assertMatrixClose(snapshot.probabilities, expected.probabilities, maxAbs: 1e-5, meanAbs: 1e-6)
+        assertMatrixClose(snapshot.fullLogits, expected.fullLogits, maxAbs: 1e-5, meanAbs: 1e-6)
+        assertMatrixClose(snapshot.fullProbabilities, expected.fullProbabilities, maxAbs: 1e-5, meanAbs: 1e-6)
+    }
+
+    func testEmptyAudioFinalizationProducesNoOutput() async throws {
+        let engine = try await makeEngine(variant: .dihard3)
+        let session = try engine.createSession(inputSampleRate: engine.targetSampleRate)
+
+        XCTAssertNil(try session.finalize())
+        XCTAssertNil(try session.finalize())
+
+        let snapshot = session.snapshot()
+        XCTAssertEqual(snapshot.logits.rows, 0)
+        XCTAssertEqual(snapshot.probabilities.rows, 0)
+        XCTAssertEqual(snapshot.fullLogits.rows, 0)
+        XCTAssertEqual(snapshot.fullProbabilities.rows, 0)
+        XCTAssertEqual(snapshot.durationSeconds, 0)
     }
 
     func testStreamingSimulationMatchesOfflineInferenceAndReportsMonotonicProgress() async throws {
@@ -248,6 +297,49 @@ final class LSEENDIntegrationTests: XCTestCase {
 
         _ = try diarizer.processComplete(complete, keepingEnrolledSpeakers: false)
         XCTAssertFalse(diarizer.hasActiveSession)
+    }
+
+    func testDiarizerTimelineCountAndDurationPropertiesReflectFrames() throws {
+        let frameDurationSeconds: Float = 0.25
+        let timeline = DiarizerTimeline(config: .default(numSpeakers: 3, frameDurationSeconds: frameDurationSeconds))
+
+        XCTAssertEqual(timeline.numFinalizedFrames, 0)
+        XCTAssertEqual(timeline.numTentativeFrames, 0)
+        XCTAssertEqual(timeline.numFrames, 0)
+        XCTAssertEqual(timeline.finalizedDuration, 0)
+        XCTAssertEqual(timeline.tentativeDuration, 0)
+        XCTAssertEqual(timeline.duration, 0)
+
+        let chunk = DiarizerChunkResult(
+            startFrame: 5,
+            finalizedPredictions: [
+                0.10, 0.20, 0.30,
+                0.40, 0.50, 0.60,
+            ],
+            finalizedFrameCount: 2,
+            tentativePredictions: [
+                0.70, 0.80, 0.90,
+            ],
+            tentativeFrameCount: 1
+        )
+
+        try timeline.addChunk(chunk)
+
+        XCTAssertEqual(timeline.numFinalizedFrames, 2)
+        XCTAssertEqual(timeline.numTentativeFrames, 1)
+        XCTAssertEqual(timeline.numFrames, 3)
+        XCTAssertEqual(timeline.finalizedDuration, 0.5, accuracy: 1e-6)
+        XCTAssertEqual(timeline.tentativeDuration, 0.25, accuracy: 1e-6)
+        XCTAssertEqual(timeline.duration, 0.75, accuracy: 1e-6)
+
+        timeline.finalize()
+
+        XCTAssertEqual(timeline.numFinalizedFrames, 3)
+        XCTAssertEqual(timeline.numTentativeFrames, 0)
+        XCTAssertEqual(timeline.numFrames, 3)
+        XCTAssertEqual(timeline.finalizedDuration, 0.75, accuracy: 1e-6)
+        XCTAssertEqual(timeline.tentativeDuration, 0, accuracy: 1e-6)
+        XCTAssertEqual(timeline.duration, 0.75, accuracy: 1e-6)
     }
 
     private func makeEngine(variant: LSEENDVariant) async throws -> LSEENDInferenceHelper {

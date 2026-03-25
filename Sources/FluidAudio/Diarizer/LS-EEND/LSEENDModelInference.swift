@@ -516,7 +516,7 @@ public final class LSEENDStreamingSession {
         var committedFullLogits = LSEENDMatrix.empty(columns: engine.decodeMaxSpeakers)
         let targetEndFrame = Int(
             round(Double(totalInputSamples) / Double(max(inputSampleRate, 1)) * engine.modelFrameHz))
-        let exactPaddingSamples = exactFinalizationPaddingSamples(targetEndFrame: targetEndFrame)
+        let exactPaddingSamples = try exactFinalizationPaddingSamples(targetEndFrame: targetEndFrame)
         if exactPaddingSamples > 0 {
             let features = try featureExtractor.pushAudio([Float](repeating: 0, count: exactPaddingSamples))
             let committed = try ingestFeatures(features)
@@ -539,12 +539,17 @@ public final class LSEENDStreamingSession {
         return try buildUpdate(committedFullLogits: committedFullLogits.appendingRows(tail), includePreview: false)
     }
 
-    private func exactFinalizationPaddingSamples(targetEndFrame: Int) -> Int {
+    private func exactFinalizationPaddingSamples(targetEndFrame: Int) throws -> Int {
         guard targetEndFrame > 0 else {
             return 0
         }
         let stableBlockSize = engine.metadata.resolvedHopLength * engine.metadata.resolvedSubsampling
-        let requiredTotalSamples = targetEndFrame * stableBlockSize
+        let (requiredTotalSamples, overflow) = targetEndFrame.multipliedReportingOverflow(by: stableBlockSize)
+        guard !overflow else {
+            throw LSEENDError.unsupportedAudio(
+                "Finalization padding overflowed for \(targetEndFrame) frames at block size \(stableBlockSize)."
+            )
+        }
         return max(0, requiredTotalSamples - totalInputSamples)
     }
 
