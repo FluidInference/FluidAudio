@@ -174,6 +174,26 @@ GitHub Actions workflows:
 - **diarizer-benchmark.yml**: Diarization benchmarks
 - **vad-benchmark.yml**: VAD validation
 
+## Showcase Section Management
+
+When adding apps to the README.md showcase section:
+
+1. **Date Metadata**: Each entry must include an HTML comment with the date added in YYYY-MM-DD format:
+   ```markdown
+   | **[App Name](https://url.com)** <!-- 2026-03-25 --> | Description text |
+   ```
+
+2. **Chronological Order**: Apps must be ordered chronologically by date added (oldest to newest)
+
+3. **Date Placement**: Place the HTML comment immediately after the app link, before the pipe separator
+
+4. **Format**: Use today's date for new additions. The date is hidden from the UI but tracked in the source for maintenance.
+
+Example:
+```markdown
+| **[MyApp](https://myapp.com)** <!-- 2026-03-25 --> | Local transcription app built with FluidAudio. |
+```
+
 ## Model Sources
 
 - **Diarization**: [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
