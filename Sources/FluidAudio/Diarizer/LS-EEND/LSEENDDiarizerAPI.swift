@@ -156,14 +156,14 @@ public final class LSEENDDiarizer: Diarizer {
         let engine = try LSEENDInferenceHelper(descriptor: descriptor, computeUnits: computeUnits)
         let melSpectrogram = Self.createMelSpectrogram(featureConfig: engine.featureConfig)
 
-        lock.withLock { 
+        lock.withLock {
             updateTimelineConfig(engine: engine)
             _engine = engine
             _melSpectrogram = melSpectrogram
             _timeline = DiarizerTimeline(config: _timelineConfig)
             _session = nil
             resetBuffersLocked()
-    
+
             logger.info(
                 "Initialized LS-EEND \(descriptor.variant.rawValue): "
                     + "\(engine.metadata.realOutputDim) speakers, "
@@ -177,7 +177,7 @@ public final class LSEENDDiarizer: Diarizer {
     public func initialize(engine: LSEENDInferenceHelper) {
         let melSpectrogram = Self.createMelSpectrogram(featureConfig: engine.featureConfig)
 
-        lock.withLock { 
+        lock.withLock {
             updateTimelineConfig(engine: engine)
             _engine = engine
             _melSpectrogram = melSpectrogram
@@ -246,28 +246,28 @@ public final class LSEENDDiarizer: Diarizer {
         named name: String?,
         overwritingAssignedSpeakerName overwriteAssignedSpeakerName: Bool
     ) throws -> DiarizerSpeaker? {
-        try lock.withLock { 
+        try lock.withLock {
             let description: String = name.map { "named '\($0)'" } ?? "(no name)"
             guard let engine = _engine else {
                 throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
             }
-    
+
             let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) ?? samples
             guard !normalized.isEmpty else {
                 logger.warning("Failed to enroll speaker \(description) because no speech detected")
                 return nil
             }
-    
+
             if _timeline.hasSegments {
                 logger.warning("Trying to enroll a speaker while timeline has segments; timeline will be reset")
             }
-    
+
             _timeline.reset(keepingSpeakers: true)
             var occupiedIndices = Set(_timeline.speakers.keys)
             _numFramesProcessed = 0
             _visibleStartFrameOffset = 0
             pendingAudio.removeAll(keepingCapacity: true)
-    
+
             if _session == nil {
                 _session = try engine.createSession(
                     inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
@@ -275,10 +275,10 @@ public final class LSEENDDiarizer: Diarizer {
             guard let session = _session else {
                 return nil
             }
-    
+
             let update = try session.pushAudio(normalized)
             let didProcess = update.map { !$0.probabilities.isEmpty || !$0.previewProbabilities.isEmpty } ?? false
-    
+
             guard didProcess else {
                 let minimumSeconds = engine.streamingLatencySeconds
                 logger.warning(
@@ -287,7 +287,7 @@ public final class LSEENDDiarizer: Diarizer {
                 )
                 return nil
             }
-    
+
             if let update {
                 let numSpeakers = engine.metadata.realOutputDim
                 let result = DiarizerChunkResult(
@@ -300,7 +300,7 @@ public final class LSEENDDiarizer: Diarizer {
                 _numFramesProcessed += result.finalizedFrameCount
                 _ = try _timeline.addChunk(result)
             }
-    
+
             let speaker = _timeline.speakers.values.max { $0.numSpeechFrames < $1.numSpeechFrames }
             let enrolledSpeaker: DiarizerSpeaker?
             if let speaker, speaker.hasSegments {
@@ -332,13 +332,13 @@ public final class LSEENDDiarizer: Diarizer {
             _numFramesProcessed = 0
             _timeline.reset(keepingSpeakersWhere: { occupiedIndices.contains($0.index) })
             pendingAudio.removeAll(keepingCapacity: true)
-    
+
             logger.info(
                 "Enrolled speaker \(description) with \(normalized.count) samples "
                     + "(\(String(format: "%.1f", Float(normalized.count) / Float(engine.targetSampleRate)))s), "
                     + "visible offset=\(_visibleStartFrameOffset)"
             )
-    
+
             return enrolledSpeaker
         }
     }
@@ -363,7 +363,7 @@ public final class LSEENDDiarizer: Diarizer {
         _ samples: C,
         sourceSampleRate: Double? = nil
     ) throws where C.Element == Float {
-        try lock.withLock { 
+        try lock.withLock {
             if let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) {
                 pendingAudio.append(contentsOf: normalized)
             } else {
@@ -388,7 +388,7 @@ public final class LSEENDDiarizer: Diarizer {
         samples: C,
         sourceSampleRate: Double? = nil
     ) throws -> DiarizerTimelineUpdate? where C.Element == Float {
-        try lock.withLock { 
+        try lock.withLock {
             if let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) {
                 pendingAudio.append(contentsOf: normalized)
             } else {
@@ -610,7 +610,7 @@ public final class LSEENDDiarizer: Diarizer {
     ///
     /// Preserves the loaded model. Call `initialize()` again to change models.
     public func reset() {
-        lock.withLock { 
+        lock.withLock {
             _session = nil
             _timeline.reset()
             resetBuffersLocked()
