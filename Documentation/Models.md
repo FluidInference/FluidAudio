@@ -53,7 +53,7 @@ Models we converted and tested but haven't shipped yet — either still in devel
 
 | Model | Status |
 |-------|--------|
-| **Nemotron Speech Streaming 0.6B** ([#254](https://github.com/FluidInference/FluidAudio/pull/254)) | Streaming model with 1.12s chunks. Not significantly faster or more accurate than existing Parakeet models: streaming (EOU) and batch (TDT) modes. |
+| **Nemotron Speech Streaming 0.6B** ([#254](https://github.com/FluidInference/FluidAudio/pull/254), [HF](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml)) | RNNT streaming ASR with 4 chunk size variants (80ms, 160ms, 560ms, 1120ms). English-only (0.6B params). Int8 encoder quantization. Supports ultra-low latency (80ms chunks) to high accuracy (1120ms chunks). Not yet shipped - evaluating real-world performance vs Parakeet EOU streaming and TDT batch models. |
 | **Qwen3-TTS** ([FluidAudio#290](https://github.com/FluidInference/FluidAudio/pull/290), [mobius#20](https://github.com/FluidInference/mobius/pull/20), [HF](https://huggingface.co/alexwengg/qwen3-tts-coreml)) | ~5.9GB CoreML is too large for on-device. Low upstream adoption (Qwen ASR CoreML model downloads). |
 | **Qwen3-ForcedAligner-0.6B** ([FluidAudio#315](https://github.com/FluidInference/FluidAudio/pull/315), [mobius#21](https://github.com/FluidInference/mobius/pull/21), [HF](https://huggingface.co/alexwengg/Qwen3-ForcedAligner-0.6B-Coreml)) | 5-model CoreML pipeline, large footprint. Low upstream adoption (Qwen ASR CoreML model downloads). |
 
@@ -72,3 +72,7 @@ Models we converted and tested but haven't shipped yet — either still in devel
 | Sortformer | [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml) |
 | Kokoro TTS | [FluidInference/kokoro-82m-coreml](https://huggingface.co/FluidInference/kokoro-82m-coreml) |
 | PocketTTS | [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml) |
+| Nemotron Streaming (1120ms) | [FluidInference/nemotron-speech-streaming-en-0.6b-coreml/1120ms](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml/tree/main/1120ms) |
+| Nemotron Streaming (560ms) | [FluidInference/nemotron-speech-streaming-en-0.6b-coreml/560ms](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml/tree/main/560ms) |
+| Nemotron Streaming (160ms) | [FluidInference/nemotron-speech-streaming-en-0.6b-coreml/160ms](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml/tree/main/160ms) |
+| Nemotron Streaming (80ms) | [FluidInference/nemotron-speech-streaming-en-0.6b-coreml/80ms](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml/tree/main/80ms) |
