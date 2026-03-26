@@ -24,6 +24,11 @@ struct TdtDecoderState: Sendable {
     /// - zero: Decoder exactly at the end of encoder frames
     var timeJump: Int?
 
+    /// Initialize decoder state with specified number of LSTM layers.
+    /// - Parameter decoderLayers: Number of decoder LSTM layers (default: 2)
+    ///   - v2 and v3 models: 2 layers (default)
+    ///   - tdtCtc110m model: 1 layer
+    ///   Default of 2 matches the most common Parakeet TDT architecture (v2/v3)
     init(decoderLayers: Int = 2) throws {
         // Use ANE-aligned arrays for optimal performance
         let decoderHiddenSize = ASRConstants.decoderHiddenSize
@@ -41,6 +46,9 @@ struct TdtDecoderState: Sendable {
         cellState.resetData(to: 0)
     }
 
+    /// Create decoder state with specified number of LSTM layers (cannot throw).
+    /// - Parameter decoderLayers: Number of decoder LSTM layers (default: 2)
+    ///   Default of 2 matches v2/v3 models. Use 1 for tdtCtc110m.
     static func make(decoderLayers: Int = 2) -> TdtDecoderState {
         do {
             return try TdtDecoderState(decoderLayers: decoderLayers)

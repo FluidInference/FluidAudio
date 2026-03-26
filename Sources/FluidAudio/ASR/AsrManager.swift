@@ -24,7 +24,8 @@ public actor AsrManager {
 
     internal let progressEmitter = ProgressEmitter()
 
-    /// Get the number of decoder layers for the current model
+    /// Get the number of decoder layers for the current model.
+    /// Returns 2 if models not loaded (v2/v3 default, tdtCtc110m uses 1).
     internal func getDecoderLayers() -> Int {
         return asrModels?.version.decoderLayers ?? 2
     }
@@ -303,6 +304,7 @@ public actor AsrManager {
     }
 
     public func resetState() {
+        // Use model's decoder layer count, or 2 if models not loaded (v2/v3 default)
         let layers = asrModels?.version.decoderLayers ?? 2
         microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
         systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
@@ -310,6 +312,7 @@ public actor AsrManager {
     }
 
     public func cleanup() {
+        // Capture layer count before releasing models, fallback to 2 (v2/v3 default)
         let layers = asrModels?.version.decoderLayers ?? 2
         asrModels = nil
         preprocessorModel = nil
