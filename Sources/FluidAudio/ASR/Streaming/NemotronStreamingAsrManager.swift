@@ -168,7 +168,9 @@ public actor NemotronStreamingAsrManager {
         while self.audioBuffer.count >= config.chunkSamples {
             let chunk = Array(self.audioBuffer.prefix(config.chunkSamples))
             try await processChunk(chunk)
-            self.audioBuffer.removeFirst(config.chunkSamples)
+            // Recheck buffer count after await to handle actor reentrancy
+            let samplesToRemove = min(config.chunkSamples, self.audioBuffer.count)
+            self.audioBuffer.removeFirst(samplesToRemove)
         }
 
         return ""
@@ -177,7 +179,12 @@ public actor NemotronStreamingAsrManager {
     /// Finish processing and return final transcript
     public func finish() async throws -> String {
         // Check if models are loaded
-        guard preprocessor != nil, encoder != nil, decoder != nil, joint != nil, tokenizer != nil else {
+        guard let tokenizer = tokenizer,
+            preprocessor != nil,
+            encoder != nil,
+            decoder != nil,
+            joint != nil
+        else {
             throw ASRError.notInitialized
         }
 
@@ -194,7 +201,7 @@ public actor NemotronStreamingAsrManager {
         }
 
         // Decode accumulated tokens
-        let transcript = tokenizer!.decode(ids: accumulatedTokenIds)
+        let transcript = tokenizer.decode(ids: accumulatedTokenIds)
         accumulatedTokenIds.removeAll()
 
         return transcript
