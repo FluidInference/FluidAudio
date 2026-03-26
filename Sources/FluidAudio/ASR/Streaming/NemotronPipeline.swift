@@ -21,6 +21,9 @@ extension NemotronStreamingAsrManager {
             throw ASRError.notInitialized
         }
 
+        // Track decoder state locally to ensure atomicity
+        var currentToken = lastToken
+
         // 1. Preprocessor: audio -> mel spectrogram
         let audioArray = try createAudioArray(samples)
         let audioLen = try MLMultiArray(shape: [1], dataType: .int32)
@@ -81,7 +84,7 @@ extension NemotronStreamingAsrManager {
             // Greedy decode loop (max 10 symbols per frame)
             for _ in 0..<10 {
                 let tokenInput = try MLMultiArray(shape: [1, 1], dataType: .int32)
-                tokenInput[0] = NSNumber(value: lastToken)
+                tokenInput[0] = NSNumber(value: currentToken)
 
                 let tokenLen = try MLMultiArray(shape: [1], dataType: .int32)
                 tokenLen[0] = 1
@@ -123,18 +126,18 @@ extension NemotronStreamingAsrManager {
                     // Blank token - move to next encoder frame
                     break
                 } else {
-                    // Non-blank token - emit and update state
+                    // Non-blank token - emit and update local state
                     newTokens.append(predToken)
                     accumulatedTokenIds.append(predToken)
-                    lastToken = Int32(predToken)
-                    // Update local variables for next iteration in this chunk
+                    currentToken = Int32(predToken)
                     currentH = hOut
                     currentC = cOut
                 }
             }
         }
 
-        // Save final decoder state back to actor properties for next chunk
+        // Save final decoder state back to actor properties atomically
+        self.lastToken = currentToken
         self.hState = currentH
         self.cState = currentC
 
