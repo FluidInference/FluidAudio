@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 @preconcurrency import CoreML
 import Foundation
 import XCTest
