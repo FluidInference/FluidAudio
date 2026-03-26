@@ -24,6 +24,11 @@ public actor AsrManager {
 
     internal let progressEmitter = ProgressEmitter()
 
+    /// Get the number of decoder layers for the current model
+    internal func getDecoderLayers() -> Int {
+        return asrModels?.version.decoderLayers ?? 2
+    }
+
     /// Token duration optimization model
 
     /// Cached vocabulary loaded once during initialization

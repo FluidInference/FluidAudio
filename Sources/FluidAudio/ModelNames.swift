@@ -222,7 +222,7 @@ public enum ModelNames {
         ]
 
         /// Vocabulary filename for the 110m hybrid TDT-CTC model (JSON array format)
-        public static let vocabularyFileArray = "vocab.json"
+        public static let vocabularyFileArray = "parakeet_vocab.json"
 
         /// Required models for fused frontend (110m hybrid: preprocessor contains encoder)
         public static let requiredModelsFused: Set<String> = [
@@ -640,6 +640,8 @@ public enum ModelNames {
             return ModelNames.LSEEND.requiredModels
         case .qwen3Asr, .qwen3AsrInt8:
             return ModelNames.Qwen3ASR.requiredModelsFull
+        case .multilingualG2p:
+            return ModelNames.MultilingualG2P.requiredModels
         }
     }
 }
