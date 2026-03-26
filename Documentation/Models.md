@@ -56,7 +56,7 @@ Models we converted and tested but are not supported: too large for on-device de
 | Model | Status |
 |-------|--------|
 | **KittenTTS** ([FluidAudio#409](https://github.com/FluidInference/FluidAudio/pull/409), [HF](https://huggingface.co/alexwengg/kittentts-coreml)) | Not supported due to inefficient espeak alternatives. Nano (15M) and Mini (82M) variants. |
-| **Qwen3-TTS** ([FluidAudio#290](https://github.com/FluidInference/FluidAudio/pull/290), [mobius#20](https://github.com/FluidInference/mobius/pull/20), [HF](https://huggingface.co/alexwengg/qwen3-tts-coreml)) | ~5.9GB CoreML is too large for on-device. Low upstream adoption (Qwen ASR CoreML model downloads). |
+| **Qwen3-TTS** ([FluidAudio#290](https://github.com/FluidInference/FluidAudio/pull/290), [mobius#20](https://github.com/FluidInference/mobius/pull/20), [HF](https://huggingface.co/alexwengg/qwen3-tts-coreml)) | Now 1.1GB but too slow. Needs further testing. |
 | **Qwen3-ForcedAligner-0.6B** ([FluidAudio#315](https://github.com/FluidInference/FluidAudio/pull/315), [mobius#21](https://github.com/FluidInference/mobius/pull/21), [HF](https://huggingface.co/alexwengg/Qwen3-ForcedAligner-0.6B-Coreml)) | 5-model CoreML pipeline, large footprint. Low upstream adoption (Qwen ASR CoreML model downloads). |
 
 ## Model Sources
