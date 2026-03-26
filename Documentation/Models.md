@@ -51,7 +51,7 @@ TDT models process audio in chunks (~15s with overlap) as batch operations. Fast
 
 ## Evaluated Models (Not Supported)
 
-Models we converted and tested but are not supported — either too large for on-device deployment or superseded by better approaches.
+Models we converted and tested but are not supported: too large for on-device deployment, limitations or superseded by better approaches.
 
 | Model | Status |
 |-------|--------|
