@@ -204,13 +204,10 @@ public class NemotronTranscribe {
             .appendingPathComponent(".cache/fluidaudio/models")
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
 
-        // Check for encoder in subdirectory (supports both compiled and package formats)
+        // Check for int8 encoder (the only format loaded by NemotronStreamingAsrManager)
         let encoderInt8Path = cacheDir.appendingPathComponent("encoder/encoder_int8.mlmodelc")
-        let encoderStandardPath = cacheDir.appendingPathComponent("encoder/encoder.mlpackage")
 
-        if FileManager.default.fileExists(atPath: encoderInt8Path.path)
-            || FileManager.default.fileExists(atPath: encoderStandardPath.path)
-        {
+        if FileManager.default.fileExists(atPath: encoderInt8Path.path) {
             logger.info("Using cached Nemotron models at \(cacheDir.path)")
             return cacheDir
         }

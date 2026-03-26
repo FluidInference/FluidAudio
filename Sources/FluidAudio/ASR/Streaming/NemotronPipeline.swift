@@ -289,14 +289,15 @@ extension NemotronStreamingAsrManager {
 
     internal func findMaxIndex(_ logits: MLMultiArray) -> Int {
         // logits: [1, 1, 1, vocab_size+1]
-        let vocabSize = config.vocabSize + 1  // includes blank
+        // Use actual logits count to prevent out-of-bounds when config is incorrect
+        let count = logits.count
 
-        let ptr = logits.dataPointer.bindMemory(to: Float.self, capacity: logits.count)
+        let ptr = logits.dataPointer.bindMemory(to: Float.self, capacity: count)
 
         // Use Accelerate framework for vectorized maximum index search
         var maxVal: Float = -Float.infinity
         var maxIdx: vDSP_Length = 0
-        vDSP_maxvi(ptr, 1, &maxVal, &maxIdx, vDSP_Length(vocabSize))
+        vDSP_maxvi(ptr, 1, &maxVal, &maxIdx, vDSP_Length(count))
 
         return Int(maxIdx)
     }
