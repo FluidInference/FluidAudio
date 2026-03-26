@@ -89,9 +89,9 @@ public enum CtcDecodeBenchmark {
             ctcModelPath = defaultCtcModelPath(for: ctcVariant)
         }
 
-        print("=" * 70)
+        print(String(repeating: "=", count: 70))
         print("CTC Decode Benchmark: Greedy vs Beam Search")
-        print("=" * 70)
+        print(String(repeating: "=", count: 70))
         print("Audio:        \(audioFile ?? "not specified")")
         print("CTC model:    \(ctcModelPath ?? "not found")")
         print("ARPA LM:      \(arpaModelPath ?? "none")")
@@ -170,7 +170,7 @@ public enum CtcDecodeBenchmark {
             // Run CTC inference
             print("\n🔬 Running CTC inference...")
             let startInference = Date()
-            let encoder = ctcModels.models.encoder
+            let encoder = ctcModels.encoder
 
             // Prepare input features
             let batchSize = 1
@@ -186,7 +186,7 @@ public enum CtcDecodeBenchmark {
                 "audio_signal": MLFeatureValue(multiArray: featuresArray)
             ])
 
-            let output = try encoder.prediction(from: input)
+            let output = try await encoder.prediction(from: input)
             let inferenceTime = Date().timeIntervalSince(startInference)
 
             guard let logProbs = output.featureValue(for: "logits")?.multiArrayValue else {
@@ -216,9 +216,9 @@ public enum CtcDecodeBenchmark {
             print("   Extracted \(frames.count) frames with \(vocabDim) vocab")
 
             // Decode with different methods
-            print("\n" + "=" * 70)
+            print("\n" + String(repeating: "=", count: 70))
             print("DECODING RESULTS")
-            print("=" * 70)
+            print(String(repeating: "=", count: 70))
 
             // 1. Greedy decode
             print("\n1️⃣  Greedy Decode (baseline)")
@@ -267,9 +267,9 @@ public enum CtcDecodeBenchmark {
 
                 // Compare to reference if provided
                 if let reference = referenceText {
-                    print("\n" + "=" * 70)
+                    print("\n" + String(repeating: "=", count: 70))
                     print("WER COMPARISON (reference provided)")
-                    print("=" * 70)
+                    print(String(repeating: "=", count: 70))
                     print("Reference:      \"\(reference)\"")
 
                     let refNorm = TextNormalizer.normalize(reference)
@@ -299,9 +299,9 @@ public enum CtcDecodeBenchmark {
                 print("\n⚠️  Skipping LM decode (no ARPA model provided)")
             }
 
-            print("\n" + "=" * 70)
+            print("\n" + String(repeating: "=", count: 70))
             print("SUMMARY")
-            print("=" * 70)
+            print(String(repeating: "=", count: 70))
             print("Audio length:       \(String(format: "%.2f", audioLength))s")
             print("Inference time:     \(String(format: "%.3f", inferenceTime))s")
             print("Greedy decode:      \(String(format: "%.3f", greedyTime))s")
@@ -309,7 +309,7 @@ public enum CtcDecodeBenchmark {
             if arpaLM != nil {
                 print("Total RTFx:         \(String(format: "%.2f", audioLength / (inferenceTime + beamNoLMTime)))x")
             }
-            print("=" * 70)
+            print(String(repeating: "=", count: 70))
 
         } catch {
             print("ERROR: Benchmark failed: \(error)")
@@ -400,9 +400,5 @@ public enum CtcDecodeBenchmark {
                 ngram-count -text corpus.txt -order 2 -arpa model.arpa
             """)
     }
-}
-
-private func * (left: String, right: Int) -> String {
-    String(repeating: left, count: right)
 }
 #endif
