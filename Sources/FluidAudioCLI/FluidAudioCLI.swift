@@ -60,10 +60,6 @@ struct FluidAudioCLI {
             await LSEENDCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "lseend-benchmark":
             await LSEENDBenchmark.run(arguments: Array(arguments.dropFirst(2)))
-        case "qwen3-benchmark":
-            await Qwen3AsrBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
-        case "qwen3-transcribe":
-            await Qwen3TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "g2p-benchmark":
             await G2PBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-benchmark":
@@ -102,8 +98,6 @@ struct FluidAudioCLI {
                 sortformer-benchmark    Run Sortformer benchmark on AMI dataset
                 lseend                  Run LS-EEND diarization on a single file
                 lseend-benchmark        Run LS-EEND benchmark on AMI dataset
-                qwen3-benchmark         Run Qwen3 ASR benchmark
-                qwen3-transcribe        Transcribe using Qwen3 ASR
                 g2p-benchmark           Run multilingual G2P benchmark
                 nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
                 nemotron-transcribe     Transcribe custom audio files with Nemotron
