@@ -204,7 +204,11 @@ public actor NemotronStreamingAsrManager {
         audioBuffer.removeAll()
         accumulatedTokenIds.removeAll()
         processedChunks = 0
-        try? resetStates()
+        do {
+            try resetStates()
+        } catch {
+            logger.error("Failed to reset states: \(error.localizedDescription)")
+        }
     }
 
     private func resetStates() throws {

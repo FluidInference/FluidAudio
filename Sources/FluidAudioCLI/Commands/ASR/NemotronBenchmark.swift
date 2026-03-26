@@ -209,10 +209,12 @@ public class NemotronBenchmark {
     ) async throws -> FileResult {
         // Load audio
         let audioFile = try AVAudioFile(forReading: file.audioPath)
-        let buffer = AVAudioPCMBuffer(
+        guard let buffer = AVAudioPCMBuffer(
             pcmFormat: audioFile.processingFormat,
             frameCapacity: AVAudioFrameCount(audioFile.length)
-        )!
+        ) else {
+            throw ASRError.processingFailed("Failed to create audio buffer for \(file.audioPath.lastPathComponent)")
+        }
         try audioFile.read(into: buffer)
 
         let audioDuration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
