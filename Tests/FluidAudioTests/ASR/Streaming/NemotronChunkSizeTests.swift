@@ -36,13 +36,13 @@ final class NemotronChunkSizeTests: XCTestCase {
         XCTAssertEqual(NemotronChunkSize.ms1120.repo, .nemotronStreaming1120)
     }
 
-    // MARK: - P1: Folder Name Generation
+    // MARK: - P1: Subdirectory Generation
 
-    func testFolderNameGeneration() {
-        XCTAssertEqual(NemotronChunkSize.ms80.folderName, "nemotron_coreml_80ms")
-        XCTAssertEqual(NemotronChunkSize.ms160.folderName, "nemotron_coreml_160ms")
-        XCTAssertEqual(NemotronChunkSize.ms560.folderName, "nemotron_coreml_560ms")
-        XCTAssertEqual(NemotronChunkSize.ms1120.folderName, "nemotron_coreml_1120ms")
+    func testSubdirectoryGeneration() {
+        XCTAssertEqual(NemotronChunkSize.ms80.subdirectory, "nemotron_coreml_80ms")
+        XCTAssertEqual(NemotronChunkSize.ms160.subdirectory, "nemotron_coreml_160ms")
+        XCTAssertEqual(NemotronChunkSize.ms560.subdirectory, "nemotron_coreml_560ms")
+        XCTAssertEqual(NemotronChunkSize.ms1120.subdirectory, "nemotron_coreml_1120ms")
     }
 
     // MARK: - P1: CaseIterable

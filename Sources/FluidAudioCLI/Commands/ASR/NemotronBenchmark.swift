@@ -249,6 +249,11 @@ public class NemotronBenchmark {
         let m = refWords.count
         let n = hypWords.count
 
+        // Handle empty cases early to prevent invalid range errors
+        if m == 0 && n == 0 { return (0, 0) }
+        if m == 0 { return (n, 0) }
+        if n == 0 { return (m, m) }
+
         var d = [[Int]](repeating: [Int](repeating: 0, count: n + 1), count: m + 1)
 
         for i in 0...m { d[i][0] = i }

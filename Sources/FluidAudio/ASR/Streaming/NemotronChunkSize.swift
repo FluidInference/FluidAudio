@@ -16,7 +16,8 @@ public enum NemotronChunkSize: Int, Sendable, CaseIterable {
         }
     }
 
-    public var folderName: String {
+    /// HuggingFace remote subdirectory path (matches Repo.subdirectory)
+    public var subdirectory: String {
         "nemotron_coreml_\(rawValue)ms"
     }
 }
