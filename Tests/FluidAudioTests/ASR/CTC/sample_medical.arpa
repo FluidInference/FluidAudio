@@ -1,0 +1,36 @@
+\data\
+ngram 1=15
+ngram 2=12
+
+\1-grams:
+-1.5	patient	-0.3
+-1.8	has	-0.2
+-2.0	high	-0.4
+-1.9	blood	-0.3
+-1.7	pressure	-0.2
+-2.2	diabetes	-0.1
+-2.5	hypertension	-0.1
+-2.3	medication	-0.2
+-2.4	doctor	-0.2
+-2.6	symptoms	-0.3
+-2.1	pain	-0.3
+-2.3	treatment	-0.2
+-2.7	diagnosis	-0.1
+-3.0	cholesterol	-0.1
+-3.5	<unk>	0.0
+
+\2-grams:
+-0.3	patient	has
+-0.4	has	high
+-0.2	high	blood
+-0.1	blood	pressure
+-0.5	has	diabetes
+-0.4	high	cholesterol
+-0.6	patient	symptoms
+-0.5	doctor	treatment
+-0.3	blood	cholesterol
+-0.7	patient	pain
+-0.4	doctor	diagnosis
+-0.6	patient	medication
+
+\end\
