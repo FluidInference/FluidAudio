@@ -1,5 +1,4 @@
 import Foundation
-import os.log
 
 /// ARPA n-gram language model for CTC beam search rescoring.
 ///
@@ -15,6 +14,8 @@ import os.log
 /// - Note: Only plain-text ARPA files are supported (not gzipped or binary KenLM).
 ///   Trigrams and higher-order n-grams are ignored.
 public struct ARPALanguageModel: Sendable {
+
+    private static let logger = AppLogger(category: "ARPALanguageModel")
 
     public struct Entry: Sendable {
         /// Log-probability in natural log (converted from log10)
@@ -52,15 +53,14 @@ public struct ARPALanguageModel: Sendable {
         var section = ""
         while let line = reader.readLine() {
             if line.isEmpty || line.hasPrefix("\\data\\") { continue }
+            if line == "\\end\\" { break }
             if line.hasPrefix("\\") {
-                if line == "\\end\\" { break }
                 section = line
                 continue
             }
             let parts = line.components(separatedBy: "\t")
             guard let log10prob = Float(parts[0]) else {
-                let logger = Logger(subsystem: "com.fluidinference.fluidaudio", category: "ARPALanguageModel")
-                logger.warning("Skipping malformed ARPA line: \(line)")
+                Self.logger.warning("Skipping malformed ARPA line: \(line)")
                 continue
             }
             let prob = log10prob * log10ToNat
@@ -126,12 +126,12 @@ private final class ARPALineReader {
                 let slice = buffer[buffer.startIndex..<nl]
                 buffer = Data(buffer[(nl + 1)...])
                 return String(data: slice, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
             }
             if eof {
                 guard !buffer.isEmpty else { return nil }
                 let result = String(data: buffer, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 buffer = Data()
                 return result
             }
