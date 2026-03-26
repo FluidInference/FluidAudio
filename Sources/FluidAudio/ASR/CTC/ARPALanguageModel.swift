@@ -58,6 +58,9 @@ public struct ARPALanguageModel: Sendable {
                 section = line
                 continue
             }
+            // Skip header lines like "ngram 1=15" that aren't n-gram entries
+            if line.hasPrefix("ngram ") { continue }
+
             let parts = line.components(separatedBy: "\t")
             guard let log10prob = Float(parts[0]) else {
                 Self.logger.warning("Skipping malformed ARPA line: \(line)")
@@ -72,7 +75,9 @@ public struct ARPALanguageModel: Sendable {
                 let ctx = parts[1]
                 let word = parts[2]
                 let backoff = parts.count >= 4 ? (Float(parts[3]) ?? 0.0) * log10ToNat : 0.0
-                lm.bigrams[ctx, default: [:]][word] = Entry(logProb: prob, backoff: backoff)
+                var ctxDict = lm.bigrams[ctx, default: [:]]
+                ctxDict[word] = Entry(logProb: prob, backoff: backoff)
+                lm.bigrams[ctx] = ctxDict
             }
         }
         return lm

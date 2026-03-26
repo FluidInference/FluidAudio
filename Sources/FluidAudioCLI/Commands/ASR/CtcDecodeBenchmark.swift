@@ -139,8 +139,9 @@ public enum CtcDecodeBenchmark {
                     return
                 }
                 print("\n📚 Loading ARPA language model: \(arpaPath)")
-                arpaLM = try ARPALanguageModel.load(from: arpaURL)
-                print("✅ Loaded LM with \(arpaLM!.unigrams.count) unigrams, \(arpaLM!.bigrams.count) bigram contexts")
+                let loadedLM = try ARPALanguageModel.load(from: arpaURL)
+                print("✅ Loaded LM with \(loadedLM.unigrams.count) unigrams, \(loadedLM.bigrams.count) bigram contexts")
+                arpaLM = loadedLM
             } else {
                 arpaLM = nil
                 print("\n⚠️  No ARPA model specified - beam search will use acoustic scores only")
@@ -248,55 +249,75 @@ public enum CtcDecodeBenchmark {
             print("   Time:   \(String(format: "%.3f", beamNoLMTime))s")
 
             // 3. Beam search with LM
-            if let lm = arpaLM {
-                print("\n3️⃣  Beam Search + ARPA LM")
-                let beamLMStart = Date()
-                let beamLMText = ctcBeamSearch(
-                    logProbs: frames,
-                    vocabulary: ctcModels.vocabulary,
-                    lm: lm,
-                    beamWidth: beamWidth,
-                    lmWeight: lmWeight,
-                    wordBonus: wordBonus,
-                    blankId: blankId,
-                    tokenCandidates: tokenCandidates
-                )
-                let beamLMTime = Date().timeIntervalSince(beamLMStart)
-                print("   Result: \"\(beamLMText)\"")
-                print("   Time:   \(String(format: "%.3f", beamLMTime))s")
-
-                // Compare to reference if provided
-                if let reference = referenceText {
-                    print("\n" + String(repeating: "=", count: 70))
-                    print("WER COMPARISON (reference provided)")
-                    print(String(repeating: "=", count: 70))
-                    print("Reference:      \"\(reference)\"")
-
-                    let refNorm = TextNormalizer.normalize(reference)
-                    let greedyNorm = TextNormalizer.normalize(greedyText)
-                    let beamNoLMNorm = TextNormalizer.normalize(beamNoLMText)
-                    let beamLMNorm = TextNormalizer.normalize(beamLMText)
-
-                    let refWords = refNorm.split(separator: " ").map(String.init)
-                    let greedyWords = greedyNorm.split(separator: " ").map(String.init)
-                    let beamNoLMWords = beamNoLMNorm.split(separator: " ").map(String.init)
-                    let beamLMWords = beamLMNorm.split(separator: " ").map(String.init)
-
-                    let greedyWER = calculateWER(reference: refWords, hypothesis: greedyWords)
-                    let beamNoLMWER = calculateWER(reference: refWords, hypothesis: beamNoLMWords)
-                    let beamLMWER = calculateWER(reference: refWords, hypothesis: beamLMWords)
-
-                    print("\nGreedy:         \(String(format: "%.1f", greedyWER * 100))% WER")
-                    print("Beam (no LM):   \(String(format: "%.1f", beamNoLMWER * 100))% WER")
-                    print("Beam + LM:      \(String(format: "%.1f", beamLMWER * 100))% WER ✅")
-
-                    let improvement = ((greedyWER - beamLMWER) / greedyWER) * 100
-                    if improvement > 0 {
-                        print("\n🎯 LM Improvement: \(String(format: "%.1f", improvement))% reduction in WER")
-                    }
-                }
-            } else {
+            guard let lm = arpaLM else {
                 print("\n⚠️  Skipping LM decode (no ARPA model provided)")
+                print("\n" + String(repeating: "=", count: 70))
+                print("SUMMARY")
+                print(String(repeating: "=", count: 70))
+                print("Audio length:       \(String(format: "%.2f", audioLength))s")
+                print("Inference time:     \(String(format: "%.3f", inferenceTime))s")
+                print("Greedy decode:      \(String(format: "%.3f", greedyTime))s")
+                print("Beam decode (no LM):\(String(format: "%.3f", beamNoLMTime))s")
+                print(String(repeating: "=", count: 70))
+                return
+            }
+
+            print("\n3️⃣  Beam Search + ARPA LM")
+            let beamLMStart = Date()
+            let beamLMText = ctcBeamSearch(
+                logProbs: frames,
+                vocabulary: ctcModels.vocabulary,
+                lm: lm,
+                beamWidth: beamWidth,
+                lmWeight: lmWeight,
+                wordBonus: wordBonus,
+                blankId: blankId,
+                tokenCandidates: tokenCandidates
+            )
+            let beamLMTime = Date().timeIntervalSince(beamLMStart)
+            print("   Result: \"\(beamLMText)\"")
+            print("   Time:   \(String(format: "%.3f", beamLMTime))s")
+
+            // Compare to reference if provided
+            guard let reference = referenceText else {
+                print("\n" + String(repeating: "=", count: 70))
+                print("SUMMARY")
+                print(String(repeating: "=", count: 70))
+                print("Audio length:       \(String(format: "%.2f", audioLength))s")
+                print("Inference time:     \(String(format: "%.3f", inferenceTime))s")
+                print("Greedy decode:      \(String(format: "%.3f", greedyTime))s")
+                print("Beam decode (no LM):\(String(format: "%.3f", beamNoLMTime))s")
+                print("Total RTFx:         \(String(format: "%.2f", audioLength / (inferenceTime + beamNoLMTime)))x")
+                print(String(repeating: "=", count: 70))
+                return
+            }
+
+            print("\n" + String(repeating: "=", count: 70))
+            print("WER COMPARISON (reference provided)")
+            print(String(repeating: "=", count: 70))
+            print("Reference:      \"\(reference)\"")
+
+            let refNorm = TextNormalizer.normalize(reference)
+            let greedyNorm = TextNormalizer.normalize(greedyText)
+            let beamNoLMNorm = TextNormalizer.normalize(beamNoLMText)
+            let beamLMNorm = TextNormalizer.normalize(beamLMText)
+
+            let refWords = refNorm.split(separator: " ").map(String.init)
+            let greedyWords = greedyNorm.split(separator: " ").map(String.init)
+            let beamNoLMWords = beamNoLMNorm.split(separator: " ").map(String.init)
+            let beamLMWords = beamLMNorm.split(separator: " ").map(String.init)
+
+            let greedyWER = calculateWER(reference: refWords, hypothesis: greedyWords)
+            let beamNoLMWER = calculateWER(reference: refWords, hypothesis: beamNoLMWords)
+            let beamLMWER = calculateWER(reference: refWords, hypothesis: beamLMWords)
+
+            print("\nGreedy:         \(String(format: "%.1f", greedyWER * 100))% WER")
+            print("Beam (no LM):   \(String(format: "%.1f", beamNoLMWER * 100))% WER")
+            print("Beam + LM:      \(String(format: "%.1f", beamLMWER * 100))% WER ✅")
+
+            let improvement = ((greedyWER - beamLMWER) / greedyWER) * 100
+            if improvement > 0 {
+                print("\n🎯 LM Improvement: \(String(format: "%.1f", improvement))% reduction in WER")
             }
 
             print("\n" + String(repeating: "=", count: 70))

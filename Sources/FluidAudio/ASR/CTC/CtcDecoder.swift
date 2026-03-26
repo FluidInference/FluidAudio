@@ -136,7 +136,7 @@ public func ctcBeamSearch(
     ]
 
     for frame in logProbs {
-        let blankLp = blankId < frame.count ? frame[blankId] : -.infinity
+        let blankLp = (blankId >= 0 && blankId < frame.count) ? frame[blankId] : -.infinity
 
         // Find top token candidates (excluding blank)
         let topTokens = (0..<vocabSize)
