@@ -49,12 +49,13 @@ TDT models process audio in chunks (~15s with overlap) as batch operations. Fast
 | **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Uses CoreML G2P model for phonemization. | First TTS backend added. |
 | **PocketTTS** | Second TTS backend (~155M params). Autoregressive frame-by-frame generation with dynamic audio chunking. No phoneme stage — works directly on text tokens. | Different tradeoffs: streaming-capable, simpler chunking, dynamic inputs & longer token counts |
 
-## Evaluated Models (Not Shipped)
+## Evaluated Models (Not Supported)
 
-Models we converted and tested but haven't shipped yet — either still in development or superseded by better approaches.
+Models we converted and tested but are not supported — either too large for on-device deployment or superseded by better approaches.
 
 | Model | Status |
 |-------|--------|
+| **KittenTTS** ([FluidAudio#409](https://github.com/FluidInference/FluidAudio/pull/409), [HF](https://huggingface.co/alexwengg/kittentts-coreml)) | Not supported. Nano (15M) and Mini (82M) variants. |
 | **Qwen3-TTS** ([FluidAudio#290](https://github.com/FluidInference/FluidAudio/pull/290), [mobius#20](https://github.com/FluidInference/mobius/pull/20), [HF](https://huggingface.co/alexwengg/qwen3-tts-coreml)) | ~5.9GB CoreML is too large for on-device. Low upstream adoption (Qwen ASR CoreML model downloads). |
 | **Qwen3-ForcedAligner-0.6B** ([FluidAudio#315](https://github.com/FluidInference/FluidAudio/pull/315), [mobius#21](https://github.com/FluidInference/mobius/pull/21), [HF](https://huggingface.co/alexwengg/Qwen3-ForcedAligner-0.6B-Coreml)) | 5-model CoreML pipeline, large footprint. Low upstream adoption (Qwen ASR CoreML model downloads). |
 
