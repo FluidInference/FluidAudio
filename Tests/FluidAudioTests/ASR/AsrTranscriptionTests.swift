@@ -11,9 +11,10 @@ final class AsrTranscriptionTests: XCTestCase {
     override func setUp() {
         super.setUp()
         manager = AsrManager()
+    }
 
-        // Set up mock vocabulary for testing
-        #if DEBUG
+    #if DEBUG
+    func setupMockVocabulary() async {
         let mockVocabulary = [
             1: "hello",
             2: "▁world",
@@ -27,9 +28,9 @@ final class AsrTranscriptionTests: XCTestCase {
             200: "▁token",
             300: "!",
         ]
-        manager.setVocabularyForTesting(mockVocabulary)
-        #endif
+        await manager.setVocabularyForTesting(mockVocabulary)
     }
+    #endif
 
     override func tearDown() {
         manager = nil
@@ -79,12 +80,13 @@ final class AsrTranscriptionTests: XCTestCase {
 
     // MARK: - Process Transcription Result Tests
 
-    func testProcessTranscriptionResult() {
+    func testProcessTranscriptionResult() async {
+        await setupMockVocabulary()
         let tokenIds = [1, 2, 3, 4, 5]
         let audioSamples = Array(repeating: Float(0), count: 16_000)  // 1 second
         let processingTime = 0.5
 
-        let result = manager.processTranscriptionResult(
+        let result = await manager.processTranscriptionResult(
             tokenIds: tokenIds,
             confidences: [0.63, 0.63, 0.63, 0.63, 0.63],  // Mean 0.63 (pure model confidence)
             encoderSequenceLength: 100,
@@ -99,7 +101,8 @@ final class AsrTranscriptionTests: XCTestCase {
         XCTAssertTrue(result.tokenTimings?.isEmpty == true)  // No timestamps provided, should be empty array
     }
 
-    func testProcessTranscriptionResultWithTimings() {
+    func testProcessTranscriptionResultWithTimings() async {
+        await setupMockVocabulary()
         let tokenIds = [10, 20, 30]
         let audioSamples = Array(repeating: Float(0), count: 48_000)  // 3 seconds
         let timings = [
@@ -108,7 +111,7 @@ final class AsrTranscriptionTests: XCTestCase {
             TokenTiming(token: "test", tokenId: 30, startTime: 2.0, endTime: 3.0, confidence: 0.95),
         ]
 
-        let result = manager.processTranscriptionResult(
+        let result = await manager.processTranscriptionResult(
             tokenIds: tokenIds,
             encoderSequenceLength: 150,
             audioSamples: audioSamples,
@@ -121,13 +124,14 @@ final class AsrTranscriptionTests: XCTestCase {
         // Note: Actual timing count may differ due to convertTokensWithExistingTimings filtering
     }
 
-    func testProcessTranscriptionResultWithTimestamps() {
+    func testProcessTranscriptionResultWithTimestamps() async {
+        await setupMockVocabulary()
         let tokenIds = [100, 200, 300]
         let timestamps = [10, 20, 30]  // Frame indices
         let audioSamples = Array(repeating: Float(0), count: 32_000)  // 2 seconds
         let processingTime = 0.8
 
-        let result = manager.processTranscriptionResult(
+        let result = await manager.processTranscriptionResult(
             tokenIds: tokenIds,
             timestamps: timestamps,
             confidences: [0.51, 0.51, 0.51],  // Mean 0.51 (pure model confidence)

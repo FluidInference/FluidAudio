@@ -43,7 +43,7 @@ public struct Qwen3AsrModels: Sendable {
     /// Expected directory structure:
     /// ```
     /// qwen3-asr/
-    ///   qwen3_asr_audio_encoder.mlmodelc
+    ///   qwen3_asr_audio_encoder_v2.mlmodelc
     ///   qwen3_asr_decoder_stateful.mlmodelc
     ///   qwen3_asr_embeddings.bin  (float16 embedding weights)
     ///   vocab.json
@@ -60,7 +60,7 @@ public struct Qwen3AsrModels: Sendable {
 
         // Load audio encoder
         let audioEncoder = try await loadModel(
-            named: "qwen3_asr_audio_encoder",
+            named: "qwen3_asr_audio_encoder_v2",
             from: directory,
             configuration: modelConfig
         )

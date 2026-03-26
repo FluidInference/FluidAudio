@@ -381,6 +381,7 @@ internal struct TdtDecoderV3 {
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels + globalFrameOffset)
                 hypothesis.tokenConfidences.append(score)
+                hypothesis.tokenDurations.append(duration)
                 hypothesis.lastToken = label  // Remember for next iteration
 
                 // CRITICAL: Update decoder LSTM with the new token
@@ -502,6 +503,7 @@ internal struct TdtDecoderV3 {
                         min(finalProcessingTimeIndices, effectiveSequenceLength - 1) + globalFrameOffset
                     hypothesis.timestamps.append(finalTimestamp)
                     hypothesis.tokenConfidences.append(score)
+                    hypothesis.tokenDurations.append(duration)
                     hypothesis.lastToken = token
 
                     // Update decoder state
@@ -816,9 +818,7 @@ internal struct TdtDecoderV3 {
         hypothesis.decState = decoderState
         hypothesis.lastToken = token
 
-        if config.tdtConfig.includeTokenDuration {
-            hypothesis.tokenDurations.append(duration)
-        }
+        hypothesis.tokenDurations.append(duration)
     }
 
     // MARK: - Private Helper Methods

@@ -12,7 +12,7 @@ final class SortformerTests: XCTestCase {
         // Create 5 seconds of deterministic random audio
         let sampleRate = 16000
         let audioCount = sampleRate * 5
-        srand48(Int(Date().timeIntervalSince1970 * 1e6))
+        srand48(42)
         let audio = (0..<audioCount).map { _ in Float(drand48() - 0.5) }
 
         // 1. Get chunks from Batch Feature Provider
@@ -36,7 +36,7 @@ final class SortformerTests: XCTestCase {
         // 3. Compare
         XCTAssertEqual(batchChunks.count, streamingChunks.count, "Chunk count mismatch")
 
-        for i in 0..<min(batchChunks.count, streamingChunks.count) {
+        for i in 0..<batchChunks.count {
             let batch = batchChunks[i]
             let stream = streamingChunks[i]
 
@@ -51,7 +51,7 @@ final class SortformerTests: XCTestCase {
     // MARK: - Timeline Tests
 
     func testTimelineEquivalency() throws {
-        let config = SortformerPostProcessingConfig.default
+        let config = DiarizerTimelineConfig.sortformerDefault
         let numSpeakers = config.numSpeakers
 
         // Create random meaningful probabilities for 20 frames
@@ -71,41 +71,50 @@ final class SortformerTests: XCTestCase {
         }
 
         // 1. Batch Timeline (Finalized immediately)
-        let batchTimeline = SortformerTimeline(
+        let batchTimeline = try DiarizerTimeline(
             allPredictions: predictions,
             config: config,
             isComplete: true
         )
 
         // 2. Streaming Timeline (Add chunk by chunk)
-        let streamingTimeline = SortformerTimeline(config: config)
+        let streamingTimeline = DiarizerTimeline(config: config)
 
         // Feed in chunks of 5 frames
         let chunkSize = 5
         for i in stride(from: 0, to: 20, by: chunkSize) {
             let chunkPreds = Array(predictions[i * numSpeakers..<(i + chunkSize) * numSpeakers])
 
-            let chunk = SortformerChunkResult(
+            let chunk = DiarizerChunkResult(
                 startFrame: i,
-                speakerPredictions: chunkPreds,
-                frameCount: chunkSize,
+                finalizedPredictions: chunkPreds,
+                finalizedFrameCount: chunkSize,
                 tentativePredictions: [],  // No tentative for this basic test
                 tentativeFrameCount: 0
             )
 
-            streamingTimeline.addChunk(chunk)
+            try streamingTimeline.addChunk(chunk)
         }
 
         // Finalize streaming timeline
         streamingTimeline.finalize()
 
         // 3. Compare Results
-        XCTAssertEqual(batchTimeline.numFrames, streamingTimeline.numFrames, "Total frames mismatch")
-        XCTAssertEqual(batchTimeline.segments.count, streamingTimeline.segments.count, "Segment count mismatch")
+        XCTAssertEqual(batchTimeline.numFinalizedFrames, streamingTimeline.numFinalizedFrames, "Total frames mismatch")
+        XCTAssertEqual(batchTimeline.speakers.count, streamingTimeline.speakers.count, "Segment count mismatch")
 
-        // Compare segments
-        for (batchSpk, streamSpk) in zip(batchTimeline.segments, streamingTimeline.segments) {
-            for (batchSeg, streamSeg) in zip(batchSpk, streamSpk) {
+        // Compare segments deterministically by speaker slot.
+        let batchSpeakers = batchTimeline.speakers.sorted { $0.key < $1.key }.map(\.value)
+        let streamingSpeakers = streamingTimeline.speakers.sorted { $0.key < $1.key }.map(\.value)
+        XCTAssertEqual(batchSpeakers.count, streamingSpeakers.count, "Speaker count mismatch")
+
+        for (batchSpk, streamSpk) in zip(batchSpeakers, streamingSpeakers) {
+            XCTAssertEqual(
+                batchSpk.finalizedSegments.count,
+                streamSpk.finalizedSegments.count,
+                "Segment count mismatch for speaker \(batchSpk.index)"
+            )
+            for (batchSeg, streamSeg) in zip(batchSpk.finalizedSegments, streamSpk.finalizedSegments) {
                 XCTAssertEqual(batchSeg.speakerIndex, streamSeg.speakerIndex, "Segment speaker mismatch")
                 XCTAssertEqual(batchSeg.startFrame, streamSeg.startFrame, "Segment start mismatch")
                 XCTAssertEqual(batchSeg.endFrame, streamSeg.endFrame, "Segment end mismatch")
@@ -113,10 +122,10 @@ final class SortformerTests: XCTestCase {
         }
 
         // Compare frame predictions
-        for i in 0..<batchTimeline.framePredictions.count {
+        for i in 0..<batchTimeline.finalizedPredictions.count {
             XCTAssertEqual(
-                batchTimeline.framePredictions[i],
-                streamingTimeline.framePredictions[i],
+                batchTimeline.finalizedPredictions[i],
+                streamingTimeline.finalizedPredictions[i],
                 accuracy: 1e-5,
                 "Prediction mismatch at index \(i)"
             )
@@ -129,45 +138,49 @@ final class SortformerTests: XCTestCase {
     // For exact batch-matching results, feed all audio at once via addAudio() before extracting chunks.
 
     func testBufferBounds() throws {
-        var config = SortformerPostProcessingConfig.default
+        var config = DiarizerTimelineConfig.sortformerDefault
         let numSpeakers = config.numSpeakers
-        config.maxStoredFrames = 50
+        let maxFrames = 50
+        config.maxStoredFrames = maxFrames
 
         // Create timeline with maxFrames limit
-        let timeline = SortformerTimeline(
-            config: config,
-        )
+        let timeline = DiarizerTimeline(config: config)
 
         // Feed 200 frames of predictions (way more than maxFrames)
-        let totalFrames = 200
-        for frameOffset in stride(from: 0, to: totalFrames, by: 10) {
-            var chunkPreds: [Float] = []
-            for _ in 0..<10 {
-                chunkPreds.append(contentsOf: [Float](repeating: 0.5, count: numSpeakers))
-            }
+        for frameOffset in stride(from: 0, to: 200, by: 10) {
+            let chunkPreds = [Float](repeating: 0.5, count: 10 * numSpeakers)
 
-            let chunk = SortformerChunkResult(
+            let chunk = DiarizerChunkResult(
                 startFrame: frameOffset,
-                speakerPredictions: chunkPreds,
-                frameCount: 10,
+                finalizedPredictions: chunkPreds,
+                finalizedFrameCount: 10,
                 tentativePredictions: [],
                 tentativeFrameCount: 0
             )
-            timeline.addChunk(chunk)
+            try timeline.addChunk(chunk)
         }
 
         // Verify framePredictions is bounded to maxFrames
         XCTAssertLessThanOrEqual(
-            timeline.framePredictions.count, config.maxStoredFrames! * config.numSpeakers,
+            timeline.finalizedPredictions.count, maxFrames * numSpeakers,
             "framePredictions should be bounded to maxFrames")
 
         // Verify we still have some predictions (not all trimmed)
-        XCTAssertGreaterThan(timeline.numFrames, 0, "Should have some predictions")
+        XCTAssertGreaterThan(timeline.numFinalizedFrames, 0, "Should have some predictions")
 
+        // Verify probability() returns valid values for stored frames and NaN for trimmed frames
+        let storedFrames = timeline.finalizedPredictions.count / numSpeakers
+        let firstStoredFrame = timeline.numFinalizedFrames - storedFrames
+        XCTAssertFalse(
+            timeline.probability(speaker: 0, frame: firstStoredFrame).isNaN,
+            "First stored frame should have a valid probability")
+        XCTAssertTrue(
+            timeline.probability(speaker: 0, frame: firstStoredFrame - 1).isNaN,
+            "Frame before stored range should return NaN")
     }
 
     func testSegmentExtraction() throws {
-        let config = SortformerConfig.default
+        let config = DiarizerTimelineConfig.sortformerDefault
         let numSpeakers = config.numSpeakers
 
         // Create predictions with clear speaker pattern:
@@ -189,18 +202,19 @@ final class SortformerTests: XCTestCase {
             }
         }
 
-        let timeline = SortformerTimeline(
+        let timeline = try DiarizerTimeline(
             allPredictions: predictions,
-            config: .default,
+            config: config,
             isComplete: true
         )
 
-        // Check that we have segments
-        XCTAssertGreaterThan(timeline.segments.count, 0, "Should have extracted segments")
+        // Check that segments were actually extracted (not just that the speakers dict exists)
+        let totalSegments = timeline.speakers.values.reduce(0) { $0 + $1.finalizedSegmentCount }
+        XCTAssertGreaterThan(totalSegments, 0, "Should have extracted at least one segment")
 
         // Verify segment speakers are valid
-        for speaker in timeline.segments {
-            for segment in speaker {
+        for speaker in timeline.speakers.values {
+            for segment in speaker.finalizedSegments {
                 XCTAssertGreaterThanOrEqual(segment.speakerIndex, 0)
                 XCTAssertLessThan(segment.speakerIndex, numSpeakers)
                 XCTAssertLessThanOrEqual(segment.startFrame, segment.endFrame)
@@ -209,31 +223,32 @@ final class SortformerTests: XCTestCase {
     }
 
     func testReset() throws {
-        let config = SortformerConfig.default
+        let config = DiarizerTimelineConfig.sortformerDefault
         let numSpeakers = config.numSpeakers
 
-        let timeline = SortformerTimeline(config: .default)
+        let timeline = DiarizerTimeline(config: config)
 
         // Add some data
-        let chunk = SortformerChunkResult(
+        let chunk = DiarizerChunkResult(
             startFrame: 0,
-            speakerPredictions: [Float](repeating: 0.5, count: 10 * numSpeakers),
-            frameCount: 10,
+            finalizedPredictions: [Float](repeating: 0.5, count: 10 * numSpeakers),
+            finalizedFrameCount: 10,
             tentativePredictions: [],
             tentativeFrameCount: 0
         )
-        timeline.addChunk(chunk)
+        try timeline.addChunk(chunk)
         timeline.finalize()
 
-        XCTAssertGreaterThan(timeline.numFrames, 0, "Should have frames before reset")
+        XCTAssertGreaterThan(timeline.numFinalizedFrames, 0, "Should have frames before reset")
 
         // Reset
         timeline.reset()
 
         // Verify state is cleared
-        XCTAssertEqual(timeline.numFrames, 0, "numFrames should be 0 after reset")
-        XCTAssertEqual(timeline.framePredictions.count, 0, "framePredictions should be empty")
-        XCTAssertEqual(timeline.segments.reduce(0) { $0 + $1.count }, 0, "segments should be empty")
+        XCTAssertEqual(timeline.numFinalizedFrames, 0, "numFrames should be 0 after reset")
+        XCTAssertEqual(timeline.finalizedPredictions.count, 0, "framePredictions should be empty")
+        XCTAssertEqual(
+            timeline.speakers.values.reduce(0) { $0 + $1.finalizedSegmentCount }, 0, "segments should be empty")
         XCTAssertEqual(timeline.tentativePredictions.count, 0, "tentativePredictions should be empty")
     }
 }

@@ -31,6 +31,7 @@ final class ModelNamesTests: XCTestCase {
     func testRepoSubPathForVariants() {
         XCTAssertEqual(Repo.parakeetEou160.subPath, "160ms")
         XCTAssertEqual(Repo.parakeetEou320.subPath, "320ms")
+        XCTAssertEqual(Repo.parakeetEou1280.subPath, "1280ms")
         XCTAssertEqual(Repo.qwen3Asr.subPath, "f32")
         XCTAssertEqual(Repo.qwen3AsrInt8.subPath, "int8")
         XCTAssertNil(Repo.vad.subPath)

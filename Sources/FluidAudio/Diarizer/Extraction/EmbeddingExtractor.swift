@@ -58,8 +58,12 @@ public final class EmbeddingExtractor {
         )
 
         // Calculate number of masks that are actually used
-
-        let numMasksInChunk = (firstMask.count * audio.count + 80_000) / 160_000
+        // Clamp to firstMask.count to prevent heap-buffer-overflow in fillMaskBufferOptimized
+        // when audio.count > 160_000 (the formula can produce values > firstMask.count)
+        let numMasksInChunk = min(
+            (firstMask.count * audio.count + 80_000) / 160_000,
+            firstMask.count
+        )
 
         // Process all speakers but optimize for active ones
         for speakerIdx in 0..<masks.count {

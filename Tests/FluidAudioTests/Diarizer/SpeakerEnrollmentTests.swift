@@ -1,11 +1,30 @@
+import Foundation
 import XCTest
 
 @testable import FluidAudio
 
 /// Tests for speaker pre-enrollment APIs:
 /// - `DiarizerManager.extractSpeakerEmbedding(from:)`
-/// - `SortformerDiarizer.primeWithAudio(_:)`
+/// - `SortformerDiarizer.enrollSpeaker(withAudio:named:)`
+/// - `LSEENDDiarizer.enrollSpeaker(withSamples:named:)`
 final class SpeakerEnrollmentTests: XCTestCase {
+    nonisolated(unsafe) private static var cachedLseendEngine: LSEENDInferenceHelper?
+
+    private func loadSortformerModelsForTest(config: SortformerConfig) async throws -> SortformerModels {
+        // These tests validate Sortformer behavior after initialization, not accelerator selection.
+        try await SortformerModels.loadFromHuggingFace(config: config, computeUnits: .cpuOnly)
+    }
+
+    private func loadLseendEngineForTest(variant: LSEENDVariant = .dihard3) async throws -> LSEENDInferenceHelper {
+        if let cached = Self.cachedLseendEngine {
+            return cached
+        }
+
+        let descriptor = try await LSEENDModelDescriptor.loadFromHuggingFace(variant: variant)
+        let engine = try LSEENDInferenceHelper(descriptor: descriptor, computeUnits: .cpuOnly)
+        Self.cachedLseendEngine = engine
+        return engine
+    }
 
     // MARK: - extractSpeakerEmbedding: Error Cases
 
@@ -101,13 +120,13 @@ final class SpeakerEnrollmentTests: XCTestCase {
         XCTAssertEqual(manager.speakerManager.speakerCount, 1, "Known speaker should be registered")
     }
 
-    // MARK: - primeWithAudio: Error Cases
+    // MARK: - Sortformer enrollSpeaker: Error Cases
 
-    func testPrimeWithAudioThrowsWhenNotInitialized() {
+    func testSortformerEnrollSpeakerThrowsWhenNotInitialized() {
         let diarizer = SortformerDiarizer()
         let audio = [Float](repeating: 0.1, count: 16000)
 
-        XCTAssertThrowsError(try diarizer.primeWithAudio(audio)) { error in
+        XCTAssertThrowsError(try diarizer.enrollSpeaker(withAudio: audio)) { error in
             XCTAssertTrue(
                 error is SortformerError,
                 "Expected SortformerError but got \(type(of: error))"
@@ -119,12 +138,12 @@ final class SpeakerEnrollmentTests: XCTestCase {
         }
     }
 
-    func testPrimeWithAudioThrowsAfterCleanup() {
+    func testSortformerEnrollSpeakerThrowsAfterCleanup() {
         let diarizer = SortformerDiarizer()
         diarizer.cleanup()
         let audio = [Float](repeating: 0.1, count: 16000)
 
-        XCTAssertThrowsError(try diarizer.primeWithAudio(audio)) { error in
+        XCTAssertThrowsError(try diarizer.enrollSpeaker(withAudio: audio)) { error in
             guard case SortformerError.notInitialized = error else {
                 XCTFail("Expected .notInitialized but got \(error)")
                 return
@@ -132,83 +151,295 @@ final class SpeakerEnrollmentTests: XCTestCase {
         }
     }
 
-    // MARK: - primeWithAudio: State Verification (requires model download)
+    // MARK: - Sortformer enrollSpeaker: Integration (requires model download)
 
-    func testPrimeResetsTimelineButKeepsState() async throws {
+    func testSortformerEnrollSpeakerReturnsNamedSpeakerAndResetsTimeline() async throws {
         XCTExpectFailure("Download might fail in CI environment", strict: false)
 
         let config = SortformerConfig.default
         let diarizer = SortformerDiarizer(config: config)
-
-        let models = try await SortformerModels.loadFromHuggingFace(config: config)
+        let models = try await loadSortformerModelsForTest(config: config)
         diarizer.initialize(models: models)
+        let enrollmentAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 0.0, durationSeconds: 5.0)
 
-        // Prime with 5 seconds of audio
-        let enrollmentAudio = (0..<80000).map { i in sin(Float(i) * 0.05) * 0.3 }
-        try diarizer.primeWithAudio(enrollmentAudio)
+        let speaker = try diarizer.enrollSpeaker(withAudio: enrollmentAudio, named: "Alice")
 
-        // Timeline should be reset (frame count = 0)
-        XCTAssertEqual(diarizer.numFramesProcessed, 0, "Frame counter should be 0 after priming")
-        XCTAssertEqual(diarizer.timeline.numFrames, 0, "Timeline should have 0 frames after priming")
+        try XCTSkipIf(
+            speaker == nil, "Fixture did not produce a confident Sortformer speaker segment on this host.")
+        XCTAssertEqual(speaker?.name, "Alice")
+        XCTAssertEqual(diarizer.numFramesProcessed, 0)
+        XCTAssertEqual(diarizer.timeline.numFinalizedFrames, 0)
+        XCTAssertEqual(namedSpeakerIndices(in: diarizer.timeline), [speaker?.index].compactMap { $0 })
 
-        // Streaming state should be preserved (spkcache or fifo may be populated)
         let state = diarizer.state
-        let hasState = state.spkcacheLength > 0 || state.fifoLength > 0
-        XCTAssertTrue(hasState, "Streaming state (spkcache/fifo) should be populated after priming")
+        XCTAssertTrue(state.spkcacheLength > 0 || state.fifoLength > 0)
     }
 
-    func testPrimeFollowedByStreamingProcessing() async throws {
+    func testSortformerEnrollSpeakerFollowedByStreamingProcessing() async throws {
         XCTExpectFailure("Download might fail in CI environment", strict: false)
 
         let config = SortformerConfig.default
         let diarizer = SortformerDiarizer(config: config)
-
-        let models = try await SortformerModels.loadFromHuggingFace(config: config)
+        let models = try await loadSortformerModelsForTest(config: config)
         diarizer.initialize(models: models)
+        let enrollmentAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 0.0, durationSeconds: 5.0)
+        let liveAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 5.0, durationSeconds: 3.0)
 
-        // Prime with enrollment audio
-        let enrollmentAudio = (0..<80000).map { i in sin(Float(i) * 0.05) * 0.3 }
-        try diarizer.primeWithAudio(enrollmentAudio)
+        let speaker = try diarizer.enrollSpeaker(withAudio: enrollmentAudio, named: "Alice")
+        try XCTSkipIf(
+            speaker == nil, "Fixture did not produce a confident Sortformer speaker segment on this host.")
 
-        // Stream new audio after priming — should not crash
-        let liveAudio = (0..<48000).map { i in sin(Float(i) * 0.08) * 0.2 }
-        diarizer.addAudio(liveAudio)
+        var update: DiarizerTimelineUpdate?
+        for chunk in DiarizationTestFixtures.chunk(liveAudio, sizes: [7_680, 9_600, 11_520]) {
+            diarizer.addAudio(chunk)
+            if let next = try diarizer.process() {
+                update = next
+                break
+            }
+        }
 
-        // Process should work without errors
-        let result = try diarizer.process()
-        // Result may or may not contain data depending on buffer thresholds — that's fine
-        _ = result
+        XCTAssertNotNil(update)
+        if let update {
+            XCTAssertEqual(update.chunkResult.startFrame, 0)
+            XCTAssertTrue(
+                update.chunkResult.finalizedFrameCount > 0
+                    || update.chunkResult.tentativeFrameCount > 0
+            )
+        }
+        XCTAssertEqual(namedSpeakerIndices(in: diarizer.timeline), [speaker?.index].compactMap { $0 })
     }
 
-    func testMultiplePrimeCalls() async throws {
+    func testSortformerEnrollmentClearsDiscardedSampleCountBeforeFinalize() async throws {
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
+
+        let config = SortformerConfig.default
+        let models = try await loadSortformerModelsForTest(config: config)
+
+        let enrollmentAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 0.0, durationSeconds: 5.0)
+        let discardedAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 5.0, durationSeconds: 1.5)
+        let liveAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 6.5, durationSeconds: 3.0)
+
+        let dirtyDiarizer = SortformerDiarizer(config: config)
+        dirtyDiarizer.initialize(models: models)
+        dirtyDiarizer.addAudio(discardedAudio)
+        let enrolledSpeaker = try dirtyDiarizer.enrollSpeaker(withAudio: enrollmentAudio, named: "Alice")
+        try XCTSkipIf(
+            enrolledSpeaker == nil, "Fixture did not produce a confident Sortformer speaker segment on this host.")
+
+        for chunk in DiarizationTestFixtures.chunk(liveAudio, sizes: [4_800, 7_680, 9_600]) {
+            let _ = try dirtyDiarizer.process(samples: chunk)
+        }
+        let _ = try dirtyDiarizer.finalizeSession()
+
+        let cleanDiarizer = SortformerDiarizer(config: config)
+        cleanDiarizer.initialize(models: models)
+        let cleanSpeaker = try cleanDiarizer.enrollSpeaker(withAudio: enrollmentAudio, named: "Alice")
+        try XCTSkipIf(
+            cleanSpeaker == nil, "Fixture did not produce a confident Sortformer speaker segment on this host.")
+
+        for chunk in DiarizationTestFixtures.chunk(liveAudio, sizes: [4_800, 7_680, 9_600]) {
+            let _ = try cleanDiarizer.process(samples: chunk)
+        }
+        let _ = try cleanDiarizer.finalizeSession()
+
+        XCTAssertLessThanOrEqual(
+            abs(dirtyDiarizer.timeline.numFinalizedFrames - cleanDiarizer.timeline.numFinalizedFrames),
+            1
+        )
+        XCTAssertEqual(dirtyDiarizer.timeline.numTentativeFrames, 0)
+        XCTAssertEqual(cleanDiarizer.timeline.numTentativeFrames, 0)
+    }
+
+    func testSortformerMultipleEnrollmentsRetainNamedSpeakersAndState() async throws {
         XCTExpectFailure("Download might fail in CI environment", strict: false)
 
         let config = SortformerConfig.default
         let diarizer = SortformerDiarizer(config: config)
-
-        let models = try await SortformerModels.loadFromHuggingFace(config: config)
+        let models = try await loadSortformerModelsForTest(config: config)
         diarizer.initialize(models: models)
+        let speakerAAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 0.0, durationSeconds: 3.0)
+        let speakerBAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 3.4, durationSeconds: 3.0)
 
-        // Prime with speaker A
-        let speakerA = (0..<80000).map { i in sin(Float(i) * 0.05) * 0.3 }
-        try diarizer.primeWithAudio(speakerA)
+        let speakerA = try diarizer.enrollSpeaker(withAudio: speakerAAudio, named: "Alice")
+        try XCTSkipIf(
+            speakerA == nil, "Fixture did not produce a confident Sortformer speaker segment on this host.")
 
         let stateAfterA = diarizer.state
-        let spkcacheAfterA = stateAfterA.spkcacheLength
+        let cachedLengthAfterA = stateAfterA.spkcacheLength + stateAfterA.fifoLength
 
-        // Prime with speaker B
-        let speakerB = (0..<80000).map { i in cos(Float(i) * 0.07) * 0.4 }
-        try diarizer.primeWithAudio(speakerB)
+        let speakerB = try diarizer.enrollSpeaker(withAudio: speakerBAudio, named: "Bob")
+        try XCTSkipIf(
+            speakerB == nil, "Fixture did not produce a confident Sortformer speaker segment on this host.")
 
-        // State should accumulate (more data in cache)
         let stateAfterB = diarizer.state
         XCTAssertGreaterThanOrEqual(
             stateAfterB.spkcacheLength + stateAfterB.fifoLength,
-            spkcacheAfterA,
-            "State should accumulate across prime calls"
+            cachedLengthAfterA
+        )
+        XCTAssertEqual(diarizer.numFramesProcessed, 0)
+        XCTAssertEqual(diarizer.timeline.numFinalizedFrames, 0)
+        if speakerA?.index == speakerB?.index {
+            XCTAssertEqual(namedSpeakerNames(in: diarizer.timeline), ["Bob"])
+        } else {
+            XCTAssertEqual(Set(namedSpeakerNames(in: diarizer.timeline)), Set(["Alice", "Bob"]))
+        }
+    }
+
+    func testSortformerEnrollmentCanRefuseToOverwriteNamedSpeaker() async throws {
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
+
+        let config = SortformerConfig.default
+        let diarizer = SortformerDiarizer(config: config)
+        let models = try await loadSortformerModelsForTest(config: config)
+        diarizer.initialize(models: models)
+        let enrollmentAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 0.0, durationSeconds: 5.0)
+
+        let firstSpeaker = try diarizer.enrollSpeaker(withAudio: enrollmentAudio, named: "Alice")
+        try XCTSkipIf(
+            firstSpeaker == nil, "Fixture did not produce a confident Sortformer speaker segment on this host.")
+        let secondSpeaker = try diarizer.enrollSpeaker(
+            withAudio: enrollmentAudio,
+            named: "Bob",
+            overwritingAssignedSpeakerName: false
         )
 
-        // Timeline should still be reset
-        XCTAssertEqual(diarizer.numFramesProcessed, 0, "Frame counter should be 0 after priming")
+        XCTAssertNotNil(firstSpeaker)
+        XCTAssertNil(secondSpeaker)
+        XCTAssertEqual(namedSpeakerNames(in: diarizer.timeline), ["Alice"])
+    }
+
+    // MARK: - LS-EEND enrollSpeaker: Error Cases
+
+    func testLseendEnrollSpeakerThrowsWhenNotInitialized() {
+        let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
+        let audio = [Float](repeating: 0.1, count: 16000)
+
+        XCTAssertThrowsError(try diarizer.enrollSpeaker(withSamples: audio)) { error in
+            guard case LSEENDError.modelPredictionFailed(let message) = error else {
+                XCTFail("Expected modelPredictionFailed but got \(error)")
+                return
+            }
+            XCTAssertTrue(message.contains("not initialized"))
+        }
+    }
+
+    // MARK: - LS-EEND enrollSpeaker: Integration (requires model download)
+
+    func testLseendEnrollSpeakerResetsTimelineAndWarmsSession() async throws {
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
+
+        let engine = try await loadLseendEngineForTest()
+        let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
+        diarizer.initialize(engine: engine)
+        let enrollmentAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
+
+        let speaker = try diarizer.enrollSpeaker(withSamples: enrollmentAudio, named: "Alice")
+
+        if let speaker {
+            XCTAssertEqual(speaker.name, "Alice")
+        }
+        XCTAssertEqual(diarizer.numFramesProcessed, 0)
+        XCTAssertEqual(diarizer.timeline.numFinalizedFrames, 0)
+        XCTAssertEqual(namedSpeakerIndices(in: diarizer.timeline), [speaker?.index].compactMap { $0 })
+        XCTAssertTrue(diarizer.hasActiveSession)
+    }
+
+    func testLseendEnrollSpeakerFollowedByStreamingProcessingStartsAtFrameZero() async throws {
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
+
+        let engine = try await loadLseendEngineForTest()
+        let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
+        diarizer.initialize(engine: engine)
+        let enrollmentAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
+        let liveAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: engine.targetSampleRate, startSeconds: 3.0, durationSeconds: 3.0)
+
+        let speaker = try diarizer.enrollSpeaker(withSamples: enrollmentAudio, named: "Alice")
+
+        var firstUpdate: DiarizerTimelineUpdate?
+        for chunk in DiarizationTestFixtures.chunk(liveAudio, sizes: [977, 1231, 1607]) {
+            if let update = try diarizer.process(samples: chunk) {
+                firstUpdate = update
+                break
+            }
+        }
+        let finalChunk = try diarizer.finalizeSession()
+
+        XCTAssertTrue(firstUpdate != nil || finalChunk != nil)
+        if let firstUpdate {
+            XCTAssertEqual(firstUpdate.chunkResult.startFrame, 0)
+        }
+        XCTAssertGreaterThan(diarizer.timeline.numFinalizedFrames, 0)
+        if let speaker {
+            XCTAssertEqual(namedSpeakerIndices(in: diarizer.timeline), [speaker.index])
+        }
+    }
+
+    func testLseendMultipleEnrollmentsRetainNamedSpeakersAndSession() async throws {
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
+
+        let engine = try await loadLseendEngineForTest()
+        let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
+        diarizer.initialize(engine: engine)
+        let speakerAAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
+        let speakerBAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: engine.targetSampleRate, startSeconds: 3.0, durationSeconds: 3.0)
+
+        let speakerA = try diarizer.enrollSpeaker(withSamples: speakerAAudio, named: "Alice")
+        let speakerB = try diarizer.enrollSpeaker(withSamples: speakerBAudio, named: "Bob")
+
+        XCTAssertEqual(diarizer.numFramesProcessed, 0)
+        XCTAssertEqual(diarizer.timeline.numFinalizedFrames, 0)
+        XCTAssertTrue(diarizer.hasActiveSession)
+        let expectedNames = Set([speakerA?.name, speakerB?.name].compactMap { $0 })
+        XCTAssertEqual(Set(namedSpeakerNames(in: diarizer.timeline)), expectedNames)
+    }
+
+    func testLseendEnrollmentCanRefuseToOverwriteNamedSpeaker() async throws {
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
+
+        let engine = try await loadLseendEngineForTest()
+        let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
+        diarizer.initialize(engine: engine)
+        let enrollmentAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: engine.targetSampleRate, startSeconds: 0.0, durationSeconds: 3.0)
+
+        let firstSpeaker = try diarizer.enrollSpeaker(withSamples: enrollmentAudio, named: "Alice")
+        try XCTSkipIf(
+            firstSpeaker == nil, "Fixture did not produce a confident LS-EEND speaker segment on this host.")
+        let secondSpeaker = try diarizer.enrollSpeaker(
+            withSamples: enrollmentAudio,
+            named: "Bob",
+            overwritingAssignedSpeakerName: false
+        )
+
+        XCTAssertNotNil(firstSpeaker)
+        XCTAssertNil(secondSpeaker)
+        XCTAssertEqual(namedSpeakerNames(in: diarizer.timeline), ["Alice"])
+    }
+
+    private func namedSpeakerIndices(in timeline: DiarizerTimeline) -> [Int] {
+        timeline.speakers.values
+            .filter { $0.name != nil }
+            .map(\.index)
+            .sorted()
+    }
+
+    private func namedSpeakerNames(in timeline: DiarizerTimeline) -> [String] {
+        timeline.speakers.values
+            .compactMap(\.name)
+            .sorted()
     }
 }

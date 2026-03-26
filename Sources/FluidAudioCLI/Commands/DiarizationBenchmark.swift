@@ -180,9 +180,7 @@ enum StreamDiarizationBenchmark {
                 printUsage()
                 return
             default:
-                if !arguments[i].starts(with: "--") {
-                    logger.warning("Unknown argument: \(arguments[i])")
-                }
+                logger.warning("Unknown argument: \(arguments[i])")
             }
             i += 1
         }

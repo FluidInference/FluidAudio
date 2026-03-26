@@ -383,6 +383,7 @@ public class DownloadUtils {
 
             let tempFileURL: URL
             let httpResponse: HTTPURLResponse
+
             if let handler = progressHandler {
                 let baseBytes = completedBytes
                 let fileCount = filesToDownload.count
@@ -410,6 +411,7 @@ public class DownloadUtils {
                 httpResponse = resp
             }
 
+            // Validate response
             if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
                 throw HuggingFaceDownloadError.rateLimited(
                     statusCode: httpResponse.statusCode,
@@ -423,7 +425,7 @@ public class DownloadUtils {
                 )
             }
 
-            // Remove existing file if present (handles parallel download race conditions)
+            // Move downloaded file to destination
             if FileManager.default.fileExists(atPath: destPath.path) {
                 try? FileManager.default.removeItem(at: destPath)
             }
@@ -435,7 +437,6 @@ public class DownloadUtils {
                 logger.info("Downloaded \(index + 1)/\(filesToDownload.count) files")
             }
 
-            // Report completed-file progress
             progressHandler?(
                 DownloadProgress(
                     fractionCompleted: totalBytes > 0
@@ -460,10 +461,13 @@ public class DownloadUtils {
 
     /// Download a single file using a delegate to get byte-level progress.
     ///
+    /// This is a pure transport helper — the caller is responsible for validating
+    /// the HTTP status and moving the temporary file to its final destination.
+    ///
     /// - Parameters:
     ///   - request: The URLRequest to download.
-    ///   - onProgress: Called with `(bytesWritten, totalBytesExpected)` as data arrives.
-    /// - Returns: `(tempFileURL, HTTPURLResponse)`.
+    ///   - onProgress: Called with `(totalBytesWritten, totalBytesExpected)` as data arrives.
+    /// - Returns: The temporary file URL and HTTP response.
     private static func downloadWithProgress(
         request: URLRequest,
         onProgress: @escaping @Sendable (Int64, Int64) -> Void
@@ -478,10 +482,112 @@ public class DownloadUtils {
         defer { session.finishTasksAndInvalidate() }
 
         let (tempURL, response) = try await session.download(for: request)
+
         guard let httpResponse = response as? HTTPURLResponse else {
             throw HuggingFaceDownloadError.invalidResponse
         }
+
         return (tempURL, httpResponse)
+    }
+
+    /// Download a specific subdirectory from a HuggingFace repository.
+    ///
+    /// Use this for optional model components that aren't part of the required model set
+    /// (e.g., the Mimi encoder for PocketTTS voice cloning).
+    ///
+    /// - Parameters:
+    ///   - repo: The HuggingFace repository.
+    ///   - subdirectory: Path within the repo to download (e.g. `"mimi_encoder.mlmodelc"`).
+    ///   - repoDirectory: Local directory corresponding to the repo root.
+    ///     Files are saved at `repoDirectory/<remote_path>`.
+    public static func downloadSubdirectory(
+        _ repo: Repo,
+        subdirectory: String,
+        to repoDirectory: URL
+    ) async throws {
+        var filesToDownload: [(path: String, size: Int)] = []
+
+        func listFiles(at path: String) async throws {
+            let dirURL = try ModelRegistry.apiModels(repo.remotePath, "tree/main/\(path)")
+            let (dirData, response) = try await fetchWithAuth(from: dirURL)
+            if let httpResponse = response as? HTTPURLResponse,
+                httpResponse.statusCode == 429 || httpResponse.statusCode == 503
+            {
+                throw HuggingFaceDownloadError.rateLimited(
+                    statusCode: httpResponse.statusCode,
+                    message: "Rate limited while listing files in \(path)")
+            }
+            guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
+                return
+            }
+            for item in items {
+                guard let itemPath = item["path"] as? String,
+                    let itemType = item["type"] as? String
+                else { continue }
+
+                if itemType == "directory" {
+                    try await listFiles(at: itemPath)
+                } else if itemType == "file" {
+                    let fileSize = item["size"] as? Int ?? -1
+                    filesToDownload.append((path: itemPath, size: fileSize))
+                }
+            }
+        }
+
+        try await listFiles(at: subdirectory)
+        logger.info("Found \(filesToDownload.count) files in \(subdirectory)")
+
+        for (index, file) in filesToDownload.enumerated() {
+            let destPath = repoDirectory.appendingPathComponent(file.path)
+
+            if FileManager.default.fileExists(atPath: destPath.path) {
+                continue
+            }
+
+            try FileManager.default.createDirectory(
+                at: destPath.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+
+            if file.size == 0 {
+                FileManager.default.createFile(atPath: destPath.path, contents: Data())
+                continue
+            }
+
+            let encodedPath =
+                file.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file.path
+            let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedPath)
+            let request = authorizedRequest(url: fileURL)
+
+            let (tempURL, response) = try await sharedSession.download(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw HuggingFaceDownloadError.invalidResponse
+            }
+
+            if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
+                throw HuggingFaceDownloadError.rateLimited(
+                    statusCode: httpResponse.statusCode,
+                    message: "Rate limited while downloading \(file.path)")
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                throw HuggingFaceDownloadError.downloadFailed(
+                    path: file.path,
+                    underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
+                )
+            }
+
+            if FileManager.default.fileExists(atPath: destPath.path) {
+                try? FileManager.default.removeItem(at: destPath)
+            }
+            try FileManager.default.moveItem(at: tempURL, to: destPath)
+
+            if (index + 1) % 5 == 0 || index == filesToDownload.count - 1 {
+                logger.info("Downloaded \(index + 1)/\(filesToDownload.count) \(subdirectory) files")
+            }
+        }
+
+        logger.info("Downloaded \(subdirectory) from \(repo.folderName)")
     }
 
     /// Fetch a single file from HuggingFace with retry

@@ -1,4 +1,4 @@
-name: TTS Test
+name: Kokoro TTS Test
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-tts:
+  kokoro-tts-test:
     runs-on: macos-15
     env:
       FLUIDAUDIO_ENABLE_TTS: "1"
