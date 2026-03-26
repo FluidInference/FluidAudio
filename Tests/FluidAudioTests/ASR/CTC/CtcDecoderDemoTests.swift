@@ -145,7 +145,8 @@ final class CtcDecoderDemoTests: XCTestCase {
         let tempDir = FileManager.default.temporaryDirectory
         let arpaFile = tempDir.appendingPathComponent("windows_\(UUID().uuidString).arpa")
 
-        let content = "\\data\\\r\nngram 1=2\r\n\r\n\\1-grams:\r\n-1.0\thello\t0.0\r\n-1.0\tworld\t0.0\r\n\r\n\\end\\\r\n"
+        let content =
+            "\\data\\\r\nngram 1=2\r\n\r\n\\1-grams:\r\n-1.0\thello\t0.0\r\n-1.0\tworld\t0.0\r\n\r\n\\end\\\r\n"
         try content.write(to: arpaFile, atomically: true, encoding: .utf8)
         addTeardownBlock { try? FileManager.default.removeItem(at: arpaFile) }
 
