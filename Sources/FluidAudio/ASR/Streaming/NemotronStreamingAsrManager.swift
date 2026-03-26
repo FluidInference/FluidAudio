@@ -81,7 +81,9 @@ public struct NemotronStreamingConfig: Sendable {
     /// Load config from metadata.json
     public init(from metadataURL: URL) throws {
         let data = try Data(contentsOf: metadataURL)
-        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ASRError.processingFailed("Invalid metadata.json format")
+        }
 
         self.sampleRate = json["sample_rate"] as? Int ?? 16000
         self.melFeatures = json["mel_features"] as? Int ?? 128
@@ -456,15 +458,25 @@ public actor NemotronStreamingAsrManager {
         let resultPtr = result.dataPointer.bindMemory(to: Float.self, capacity: result.count)
         let chunkPtr = chunkMel.dataPointer.bindMemory(to: Float.self, capacity: chunkMel.count)
 
+        let resultStride0 = result.strides[0].intValue
+        let resultStride1 = result.strides[1].intValue
+        let resultStride2 = result.strides[2].intValue
+        let chunkStride0 = chunkMel.strides[0].intValue
+        let chunkStride1 = chunkMel.strides[1].intValue
+        let chunkStride2 = chunkMel.strides[2].intValue
+
         // Copy mel cache (or zeros if first chunk)
         if let melCache = melCache {
             let cachePtr = melCache.dataPointer.bindMemory(to: Float.self, capacity: melCache.count)
             let cacheFrames = melCache.shape[2].intValue
+            let cacheStride0 = melCache.strides[0].intValue
+            let cacheStride1 = melCache.strides[1].intValue
+            let cacheStride2 = melCache.strides[2].intValue
 
             for mel in 0..<config.melFeatures {
                 for t in 0..<cacheFrames {
-                    let srcIdx = mel * cacheFrames + t
-                    let dstIdx = mel * totalFrames + t
+                    let srcIdx = 0 * cacheStride0 + mel * cacheStride1 + t * cacheStride2
+                    let dstIdx = 0 * resultStride0 + mel * resultStride1 + t * resultStride2
                     resultPtr[dstIdx] = cachePtr[srcIdx]
                 }
             }
@@ -474,8 +486,8 @@ public actor NemotronStreamingAsrManager {
         let copyFrames = min(chunkFrames, totalFrames - config.preEncodeCache)
         for mel in 0..<config.melFeatures {
             for t in 0..<copyFrames {
-                let srcIdx = mel * chunkFrames + t
-                let dstIdx = mel * totalFrames + (config.preEncodeCache + t)
+                let srcIdx = 0 * chunkStride0 + mel * chunkStride1 + t * chunkStride2
+                let dstIdx = 0 * resultStride0 + mel * resultStride1 + (config.preEncodeCache + t) * resultStride2
                 resultPtr[dstIdx] = chunkPtr[srcIdx]
             }
         }
@@ -496,12 +508,19 @@ public actor NemotronStreamingAsrManager {
         let srcPtr = chunkMel.dataPointer.bindMemory(to: Float.self, capacity: chunkMel.count)
         let dstPtr = cache.dataPointer.bindMemory(to: Float.self, capacity: cache.count)
 
+        let srcStride0 = chunkMel.strides[0].intValue
+        let srcStride1 = chunkMel.strides[1].intValue
+        let srcStride2 = chunkMel.strides[2].intValue
+        let dstStride0 = cache.strides[0].intValue
+        let dstStride1 = cache.strides[1].intValue
+        let dstStride2 = cache.strides[2].intValue
+
         let startT = chunkFrames - cacheFrames
 
         for mel in 0..<config.melFeatures {
             for t in 0..<cacheFrames {
-                let srcIdx = mel * chunkFrames + (startT + t)
-                let dstIdx = mel * cacheFrames + t
+                let srcIdx = 0 * srcStride0 + mel * srcStride1 + (startT + t) * srcStride2
+                let dstIdx = 0 * dstStride0 + mel * dstStride1 + t * dstStride2
                 dstPtr[dstIdx] = srcPtr[srcIdx]
             }
         }
