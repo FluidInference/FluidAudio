@@ -113,4 +113,73 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertFalse(ModelNames.Qwen3ASR.requiredModels.isEmpty)
         XCTAssertFalse(ModelNames.Qwen3ASR.requiredModelsFull.isEmpty)
     }
+
+    // MARK: - TDT-CTC-110M Repo Tests
+
+    func testParakeetTdtCtc110mRepoProperties() {
+        let repo = Repo.parakeetTdtCtc110m
+
+        // Verify remote path (owner/repo)
+        XCTAssertEqual(repo.remotePath, "FluidInference/parakeet-tdt-ctc-110m-coreml")
+
+        // Verify name (repo slug with -coreml suffix)
+        XCTAssertEqual(repo.name, "parakeet-tdt-ctc-110m-coreml")
+
+        // Verify folder name (simplified local folder name)
+        XCTAssertEqual(repo.folderName, "parakeet-tdt-ctc-110m")
+
+        // Should have no subpath (not a variant repo)
+        XCTAssertNil(repo.subPath)
+    }
+
+    func testParakeetTdtCtc110mVocabulary() {
+        // tdtCtc110m uses array-format vocabulary
+        let vocabFile = ModelNames.ASR.vocabulary(for: .parakeetTdtCtc110m)
+        XCTAssertEqual(vocabFile, "parakeet_vocab.json")
+        XCTAssertEqual(vocabFile, ModelNames.ASR.vocabularyFileArray)
+    }
+
+    func testParakeetTdtCtc110mUsesRequiredModelsFused() {
+        // tdtCtc110m has fused preprocessor+encoder, so uses requiredModelsFused
+        let models = ModelNames.getRequiredModelNames(for: .parakeetTdtCtc110m, variant: nil)
+
+        // Should match ASR.requiredModelsFused (3 .mlmodelc files, no vocab in this set)
+        XCTAssertEqual(Set(models), Set(ModelNames.ASR.requiredModelsFused))
+
+        // Should NOT match regular ASR.requiredModels (which includes separate Encoder)
+        XCTAssertNotEqual(Set(models), Set(ModelNames.ASR.requiredModels))
+
+        // Verify it includes Preprocessor (fused with encoder)
+        XCTAssertTrue(models.contains("Preprocessor.mlmodelc"))
+
+        // Verify it does NOT include separate Encoder
+        XCTAssertFalse(models.contains("Encoder.mlmodelc"))
+    }
+
+    func testParakeetTdtCtc110mRequiredModelCount() {
+        let models = ModelNames.getRequiredModelNames(for: .parakeetTdtCtc110m, variant: nil)
+
+        // Fused models have 1 less file than regular (no separate Encoder)
+        // Expected: Preprocessor (fused), Decoder, JointDecision = 3 .mlmodelc files
+        // Note: vocabulary is handled separately, not in requiredModelsFused
+        XCTAssertEqual(models.count, 3, "tdtCtc110m should have 3 .mlmodelc files (fused preprocessor+encoder)")
+    }
+
+    func testASRRequiredModelsFusedStructure() {
+        let fusedModels = ModelNames.ASR.requiredModelsFused
+
+        // Should contain core models
+        XCTAssertTrue(fusedModels.contains("Preprocessor.mlmodelc"))
+        XCTAssertTrue(fusedModels.contains("Decoder.mlmodelc"))
+        XCTAssertTrue(fusedModels.contains("JointDecision.mlmodelc"))
+
+        // Should NOT contain vocabulary (handled separately)
+        XCTAssertFalse(fusedModels.contains("parakeet_vocab.json"))
+
+        // Should NOT contain separate Encoder
+        XCTAssertFalse(fusedModels.contains("Encoder.mlmodelc"))
+
+        // Should be 1 less than regular models (which has 4: Preprocessor, Encoder, Decoder, Joint)
+        XCTAssertEqual(fusedModels.count, ModelNames.ASR.requiredModels.count - 1)
+    }
 }

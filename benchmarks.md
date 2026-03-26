@@ -48,7 +48,7 @@ swift build -c release
 
 - TDT (Token-and-Duration Transducer) decoder with CTC-constrained beam search
 - Fused preprocessor+encoder reduces model load time and memory usage
-- Models available at: [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
+- Models available at: [FluidInference/parakeet-tdt-ctc-110m-coreml](https://huggingface.co/FluidInference/parakeet-tdt-ctc-110m-coreml)
 - iOS test app validates on-device performance with LibriSpeech ground truth
 
 ---

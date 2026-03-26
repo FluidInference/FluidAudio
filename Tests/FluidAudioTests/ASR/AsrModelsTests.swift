@@ -305,4 +305,109 @@ final class AsrModelsTests: XCTestCase {
                 "Model type \(modelType) should use CPU+ANE")
         }
     }
+
+    // MARK: - TDT-CTC-110M Model Version Tests
+
+    func testTdtCtc110mHasFusedEncoder() {
+        // tdtCtc110m has fused preprocessor+encoder
+        XCTAssertTrue(AsrModelVersion.tdtCtc110m.hasFusedEncoder)
+
+        // v2 and v3 have separate encoder
+        XCTAssertFalse(AsrModelVersion.v2.hasFusedEncoder)
+        XCTAssertFalse(AsrModelVersion.v3.hasFusedEncoder)
+    }
+
+    func testTdtCtc110mEncoderHiddenSize() {
+        // tdtCtc110m uses 512-dim encoder output
+        XCTAssertEqual(AsrModelVersion.tdtCtc110m.encoderHiddenSize, 512)
+
+        // v2 and v3 use 1024-dim encoder output
+        XCTAssertEqual(AsrModelVersion.v2.encoderHiddenSize, 1024)
+        XCTAssertEqual(AsrModelVersion.v3.encoderHiddenSize, 1024)
+    }
+
+    func testTdtCtc110mBlankId() {
+        // tdtCtc110m uses blank ID 1024 (same as v2)
+        XCTAssertEqual(AsrModelVersion.tdtCtc110m.blankId, 1024)
+        XCTAssertEqual(AsrModelVersion.v2.blankId, 1024)
+
+        // v3 uses blank ID 8192
+        XCTAssertEqual(AsrModelVersion.v3.blankId, 8192)
+    }
+
+    func testTdtCtc110mDecoderLayers() {
+        // tdtCtc110m uses 1 decoder LSTM layer
+        XCTAssertEqual(AsrModelVersion.tdtCtc110m.decoderLayers, 1)
+
+        // v2 and v3 use 2 decoder LSTM layers
+        XCTAssertEqual(AsrModelVersion.v2.decoderLayers, 2)
+        XCTAssertEqual(AsrModelVersion.v3.decoderLayers, 2)
+    }
+
+    func testTdtCtc110mRepo() {
+        // Verify correct HuggingFace repo
+        XCTAssertEqual(AsrModelVersion.tdtCtc110m.repo, .parakeetTdtCtc110m)
+        XCTAssertEqual(AsrModelVersion.v2.repo, .parakeetV2)
+        XCTAssertEqual(AsrModelVersion.v3.repo, .parakeet)
+    }
+
+    func testTdtCtc110mUsesSplitFrontend() {
+        // Create a mock AsrModels instance for tdtCtc110m
+        // Note: We can't create actual MLModel instances without model files
+        // So we test the version property directly
+
+        // tdtCtc110m has fused frontend (no split)
+        XCTAssertFalse(AsrModelVersion.tdtCtc110m.hasFusedEncoder == false)
+
+        // Test the inverse logic used in usesSplitFrontend
+        let tdtCtc110mUsesSplit = !AsrModelVersion.tdtCtc110m.hasFusedEncoder
+        XCTAssertFalse(tdtCtc110mUsesSplit, "tdtCtc110m should not use split frontend")
+
+        // v2 and v3 use split frontend
+        let v2UsesSplit = !AsrModelVersion.v2.hasFusedEncoder
+        let v3UsesSplit = !AsrModelVersion.v3.hasFusedEncoder
+        XCTAssertTrue(v2UsesSplit, "v2 should use split frontend")
+        XCTAssertTrue(v3UsesSplit, "v3 should use split frontend")
+    }
+
+    func testTdtCtc110mDefaultCacheDirectory() {
+        let cacheDir = AsrModels.defaultCacheDirectory(for: .tdtCtc110m)
+
+        // Verify path contains correct repo folder name
+        XCTAssertTrue(cacheDir.path.contains(Repo.parakeetTdtCtc110m.folderName))
+        XCTAssertTrue(cacheDir.path.contains("FluidAudio"))
+        XCTAssertTrue(cacheDir.path.contains("Models"))
+
+        // Verify it's an absolute path
+        XCTAssertTrue(cacheDir.isFileURL)
+        XCTAssertTrue(cacheDir.path.starts(with: "/"))
+    }
+
+    func testTdtCtc110mVocabularyFilename() {
+        // tdtCtc110m uses parakeet_vocab.json (array format)
+        let vocabFile = ModelNames.ASR.vocabularyFileArray
+        XCTAssertEqual(vocabFile, "parakeet_vocab.json")
+
+        // Verify it has .json extension
+        XCTAssertTrue(vocabFile.hasSuffix(".json"))
+        XCTAssertTrue(vocabFile.contains("vocab"))
+    }
+
+    func testAllModelVersionsHaveRequiredProperties() {
+        let versions: [AsrModelVersion] = [.v2, .v3, .tdtCtc110m]
+
+        for version in versions {
+            // All versions should have valid repo
+            XCTAssertNotNil(version.repo)
+
+            // All versions should have positive encoder hidden size
+            XCTAssertGreaterThan(version.encoderHiddenSize, 0)
+
+            // All versions should have positive blank ID
+            XCTAssertGreaterThan(version.blankId, 0)
+
+            // All versions should have at least 1 decoder layer
+            XCTAssertGreaterThan(version.decoderLayers, 0)
+        }
+    }
 }
