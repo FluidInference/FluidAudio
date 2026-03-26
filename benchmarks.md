@@ -1,3 +1,58 @@
+# Parakeet TDT-CTC-110M Benchmark Results
+
+## LibriSpeech test-clean (Full Dataset)
+
+| Metric | Value |
+|--------|-------|
+| Files processed | 2,620 |
+| **Average WER** | **3.01%** |
+| **Median WER** | **0.0%** |
+| Average CER | 1.09% |
+| Audio duration | 19,452.5s (~5.4 hours) |
+| Processing time | 201.5s (~3.4 minutes) |
+| **Overall RTFx** | **96.5x** |
+| **Median RTFx** | **86.4x** |
+
+## Configuration
+
+- Model: Parakeet TDT-CTC-110M (CoreML)
+- Architecture: Hybrid TDT-CTC with fused preprocessor+encoder
+- Platform: Apple Silicon (M2)
+- Date: March 26, 2026
+
+## Key Features
+
+- **96.5x real-time factor** - 1 hour of audio transcribes in 37 seconds
+- **3.01% WER** - Competitive accuracy on LibriSpeech test-clean
+- **0% median WER** - Most files transcribed perfectly
+- **iOS compatible** - Runs on iPhone with full CoreML optimization
+- **Stateless processing** - No encoder state carryover needed
+
+## Running the Benchmark
+
+```bash
+# Build release
+swift build -c release
+
+# Run full benchmark (auto-downloads dataset and models)
+.build/release/fluidaudiocli asr-benchmark --subset test-clean --model-version tdt-ctc-110m
+
+# Run with limited files
+.build/release/fluidaudiocli asr-benchmark --subset test-clean --model-version tdt-ctc-110m --max-files 100
+
+# Process single file
+.build/release/fluidaudiocli asr-benchmark --single-file 1089-134686-0000 --model-version tdt-ctc-110m
+```
+
+## Notes
+
+- TDT (Token-and-Duration Transducer) decoder with CTC-constrained beam search
+- Fused preprocessor+encoder reduces model load time and memory usage
+- Models available at: [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
+- iOS test app validates on-device performance with LibriSpeech ground truth
+
+---
+
 # Nemotron Speech Streaming 0.6B Benchmark Results
 
 ## LibriSpeech test-clean (Full Dataset)
