@@ -11,9 +11,6 @@ struct FluidAudioCLI {
     static let cliLogger = AppLogger(category: "Main")
 
     static func main() async {
-        // Enable console logging for CLI (visible in release builds)
-        AppLogger.alwaysLogToConsole = true
-
         let arguments = CommandLine.arguments
 
         guard arguments.count > 1 else {
@@ -71,6 +68,8 @@ struct FluidAudioCLI {
             await G2PBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-benchmark":
             await NemotronBenchmark.run(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron-transcribe":
+            await NemotronTranscribe.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -107,6 +106,7 @@ struct FluidAudioCLI {
                 qwen3-transcribe        Transcribe using Qwen3 ASR
                 g2p-benchmark           Run multilingual G2P benchmark
                 nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
+                nemotron-transcribe     Transcribe custom audio files with Nemotron
                 download                Download evaluation datasets
                 help                    Show this help message
 

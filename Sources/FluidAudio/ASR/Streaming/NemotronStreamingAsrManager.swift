@@ -255,6 +255,11 @@ public actor NemotronStreamingAsrManager {
 
     /// Process audio and return partial transcript
     public func process(audioBuffer: AVAudioPCMBuffer) async throws -> String {
+        // Check if models are loaded
+        guard preprocessor != nil, encoder != nil, decoder != nil, joint != nil else {
+            throw ASRError.notInitialized
+        }
+
         let samples = try audioConverter.resampleBuffer(audioBuffer)
         self.audioBuffer.append(contentsOf: samples)
 
@@ -270,6 +275,11 @@ public actor NemotronStreamingAsrManager {
 
     /// Finish processing and return final transcript
     public func finish() async throws -> String {
+        // Check if models are loaded
+        guard preprocessor != nil, encoder != nil, decoder != nil, joint != nil, tokenizer != nil else {
+            throw ASRError.notInitialized
+        }
+
         // Process remaining audio (padded if needed)
         if !audioBuffer.isEmpty {
             let paddingNeeded = config.chunkSamples - audioBuffer.count
@@ -283,8 +293,7 @@ public actor NemotronStreamingAsrManager {
         }
 
         // Decode accumulated tokens
-        guard let tokenizer = tokenizer else { return "" }
-        let transcript = tokenizer.decode(ids: accumulatedTokenIds)
+        let transcript = tokenizer!.decode(ids: accumulatedTokenIds)
         accumulatedTokenIds.removeAll()
 
         return transcript
@@ -327,7 +336,7 @@ public actor NemotronStreamingAsrManager {
         }
 
         // 2. Build encoder input: prepend mel_cache (9 frames) + current chunk mel
-        let inputMel = try buildEncoderMel(chunkMel: chunkMel)
+        let inputMel = try prependMelCache(to: chunkMel)
 
         // 3. Encoder with cache
         let melLen = try MLMultiArray(shape: [1], dataType: .int32)
@@ -406,8 +415,8 @@ public actor NemotronStreamingAsrManager {
                     throw ASRError.processingFailed("Joint failed")
                 }
 
-                // Argmax to get predicted token
-                let predToken = argmax(logits)
+                // Find predicted token (index of maximum logit)
+                let predToken = findMaxIndex(logits)
 
                 if predToken == config.blankIdx {
                     // Blank token - move to next encoder frame
@@ -446,7 +455,8 @@ public actor NemotronStreamingAsrManager {
         return array
     }
 
-    private func buildEncoderMel(chunkMel: MLMultiArray) throws -> MLMultiArray {
+    private func prependMelCache(to chunkMel: MLMultiArray) throws -> MLMultiArray {
+        // Prepend cached mel frames (9) to current chunk mel (112) → [1, 128, 121]
         // Input: chunkMel [1, 128, ~112]
         // Output: [1, 128, 121] = 9 cache + 112 chunk (or padded)
 
@@ -576,13 +586,13 @@ public actor NemotronStreamingAsrManager {
         return result
     }
 
-    private func argmax(_ logits: MLMultiArray) -> Int {
+    private func findMaxIndex(_ logits: MLMultiArray) -> Int {
         // logits: [1, 1, 1, vocab_size+1]
         let vocabSize = config.vocabSize + 1  // includes blank
 
         let ptr = logits.dataPointer.bindMemory(to: Float.self, capacity: logits.count)
 
-        // Use Accelerate framework for vectorized argmax (590x faster than naive loop)
+        // Use Accelerate framework for vectorized maximum index search
         var maxVal: Float = -Float.infinity
         var maxIdx: vDSP_Length = 0
         vDSP_maxvi(ptr, 1, &maxVal, &maxIdx, vDSP_Length(vocabSize))

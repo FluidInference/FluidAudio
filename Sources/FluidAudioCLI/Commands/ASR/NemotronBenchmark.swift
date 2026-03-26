@@ -12,7 +12,6 @@ public class NemotronBenchmark {
         var subset: String = "test-clean"
         var modelDir: URL?
         var chunkSize: NemotronChunkSize = .ms1120
-        var inputFiles: [URL] = []
 
         public init() {}
     }
@@ -62,13 +61,6 @@ public class NemotronBenchmark {
                         logger.warning("Invalid chunk size: \(ms)ms. Using default 1120ms.")
                     }
                 }
-            case "--input", "-i":
-                i += 1
-                if i < arguments.count {
-                    let path = arguments[i]
-                    let url = URL(fileURLWithPath: path)
-                    config.inputFiles.append(url)
-                }
             case "--help", "-h":
                 printUsage()
                 return
@@ -94,7 +86,6 @@ public class NemotronBenchmark {
                 --subset, -s <name>       LibriSpeech subset (default: test-clean)
                 --model-dir, -m <path>    Path to Nemotron CoreML models
                 --chunk, -c <ms>          Chunk size: 1120, 560, 160, or 80 (default: 1120)
-                --input, -i <path>        Custom .wav file to transcribe (can be used multiple times)
                 --help, -h                Show this help
 
             Chunk Sizes:
@@ -104,14 +95,11 @@ public class NemotronBenchmark {
                 80ms    Minimal chunks (0.08s) - ultra-low latency
 
             Examples:
-                # Run benchmark on LibriSpeech
                 fluidaudio nemotron-benchmark --max-files 100
                 fluidaudio nemotron-benchmark --chunk 560 --max-files 50
                 fluidaudio nemotron-benchmark --chunk 160 --subset test-other
 
-                # Transcribe custom audio files for debugging
-                fluidaudio nemotron-benchmark --input audio.wav --chunk 560
-                fluidaudio nemotron-benchmark -i file1.wav -i file2.wav --chunk 160
+            Note: To transcribe custom audio files, use 'nemotron-transcribe' instead.
             """
         )
     }
@@ -131,12 +119,6 @@ public class NemotronBenchmark {
         #endif
 
         do {
-            // Check if custom input files are provided
-            if !config.inputFiles.isEmpty {
-                try await runCustomFiles()
-                return
-            }
-
             // 1. Download LibriSpeech if needed
             logger.info("Checking LibriSpeech \(config.subset)...")
             try await downloadLibriSpeech(subset: config.subset)
@@ -217,74 +199,6 @@ public class NemotronBenchmark {
     }
 
     /// Run transcription on custom input files
-    private func runCustomFiles() async throws {
-        logger.info("Custom file transcription mode")
-        logger.info("")
-
-        // Download Nemotron models if needed
-        let modelDir = try await getOrDownloadModels()
-
-        // Load models
-        logger.info("Loading Nemotron models...")
-        let manager = NemotronStreamingAsrManager()
-        try await manager.loadModels(modelDir: modelDir)
-        logger.info("Models loaded successfully")
-        logger.info("")
-
-        // Process each input file
-        for (index, fileURL) in config.inputFiles.enumerated() {
-            logger.info("[\(index + 1)/\(config.inputFiles.count)] Processing: \(fileURL.lastPathComponent)")
-
-            guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                logger.error("  File not found: \(fileURL.path)")
-                continue
-            }
-
-            do {
-                // Load audio file
-                let audioFile = try AVAudioFile(forReading: fileURL)
-                guard
-                    let buffer = AVAudioPCMBuffer(
-                        pcmFormat: audioFile.processingFormat,
-                        frameCapacity: AVAudioFrameCount(audioFile.length)
-                    )
-                else {
-                    logger.error("  Failed to create audio buffer")
-                    continue
-                }
-                try audioFile.read(into: buffer)
-
-                let audioDuration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
-
-                // Transcribe
-                let startTime = Date()
-                _ = try await manager.process(audioBuffer: buffer)
-                let transcript = try await manager.finish()
-                let processingTime = Date().timeIntervalSince(startTime)
-
-                let rtf = audioDuration > 0 ? processingTime / audioDuration : 0.0
-                let rtfx = rtf > 0 ? 1.0 / rtf : 0.0
-
-                // Output results
-                logger.info("  Duration:    \(String(format: "%.2f", audioDuration))s")
-                logger.info("  Processing:  \(String(format: "%.2f", processingTime))s")
-                logger.info("  RTFx:        \(String(format: "%.1f", rtfx))x")
-                logger.info("  Transcript:  \(transcript)")
-                logger.info("")
-
-                // Reset for next file
-                await manager.reset()
-
-            } catch {
-                logger.error("  Error: \(error.localizedDescription)")
-                logger.info("")
-            }
-        }
-
-        logger.info(String(repeating: "=", count: 70))
-        logger.info("Transcription complete")
-    }
-
     private struct FileResult {
         let hypothesis: String
         let errors: Int
