@@ -315,10 +315,35 @@ public struct KokoroSynthesizer {
                 dataType: .float16,
                 zeroFill: false
             )
-            let noisePointer = noise.dataPointer.bindMemory(to: UInt16.self, capacity: noiseLength * 9)
-            for i in 0..<(noiseLength * 9) {
-                let randomValue = Float.random(in: -1...1)
-                noisePointer[i] = Float16(randomValue).bitPattern
+            // Generate random Float32 values and convert to Float16 using vImage
+            // This avoids direct Float16 usage which isn't available in all build configurations
+            let totalElements = noiseLength * 9
+            let floatBuffer = [Float](unsafeUninitializedCapacity: totalElements) { buffer, initializedCount in
+                for i in 0..<totalElements {
+                    buffer[i] = Float.random(in: -1...1)
+                }
+                initializedCount = totalElements
+            }
+
+            let noisePointer = noise.dataPointer.bindMemory(to: UInt16.self, capacity: totalElements)
+
+            // Convert Float32 to Float16 (UInt16) using vImage
+            floatBuffer.withUnsafeBytes { floatBytes in
+                var sourceBuffer = vImage_Buffer(
+                    data: UnsafeMutableRawPointer(mutating: floatBytes.baseAddress!),
+                    height: 1,
+                    width: vImagePixelCount(totalElements),
+                    rowBytes: totalElements * MemoryLayout<Float>.stride
+                )
+
+                var destBuffer = vImage_Buffer(
+                    data: noisePointer,
+                    height: 1,
+                    width: vImagePixelCount(totalElements),
+                    rowBytes: totalElements * MemoryLayout<UInt16>.stride
+                )
+
+                vImageConvert_PlanarFtoPlanar16F(&sourceBuffer, &destBuffer, 0)
             }
             sourceNoise = noise
         } else {
