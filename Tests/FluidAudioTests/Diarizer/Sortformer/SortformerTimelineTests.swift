@@ -136,6 +136,66 @@ final class SortformerTimelineTests: XCTestCase {
         XCTAssertTrue(timeline.tentativePredictions.isEmpty)
     }
 
+    func testSegmentConfidenceExcludesPaddingFrames() throws {
+        let config = DiarizerTimelineConfig(
+            numSpeakers: 1,
+            frameDurationSeconds: 0.08,
+            onsetThreshold: 0.5,
+            offsetThreshold: 0.5,
+            onsetPadFrames: 1,
+            offsetPadFrames: 2,
+            minFramesOn: 0,
+            minFramesOff: 0
+        )
+        let timeline = DiarizerTimeline(config: config)
+        let predictions: [Float] = [0.0, 0.8, 0.6, 0.0]
+
+        try timeline.addChunk(
+            DiarizerChunkResult(
+                startFrame: 0,
+                finalizedPredictions: predictions,
+                finalizedFrameCount: predictions.count
+            )
+        )
+
+        timeline.finalize()
+
+        let segment = try XCTUnwrap(timeline.speakers[0]?.finalizedSegments.first)
+        XCTAssertEqual(segment.startFrame, 0)
+        XCTAssertEqual(segment.endFrame, 5)
+        XCTAssertEqual(segment.confidence, 0.7, accuracy: 1e-6)
+    }
+
+    func testSegmentConfidenceExcludesBridgedGapFrames() throws {
+        let config = DiarizerTimelineConfig(
+            numSpeakers: 1,
+            frameDurationSeconds: 0.08,
+            onsetThreshold: 0.5,
+            offsetThreshold: 0.5,
+            onsetPadFrames: 0,
+            offsetPadFrames: 0,
+            minFramesOn: 0,
+            minFramesOff: 1
+        )
+        let timeline = DiarizerTimeline(config: config)
+        let predictions: [Float] = [0.9, 0.0, 0.7, 0.7, 0.0]
+
+        try timeline.addChunk(
+            DiarizerChunkResult(
+                startFrame: 0,
+                finalizedPredictions: predictions,
+                finalizedFrameCount: predictions.count
+            )
+        )
+
+        timeline.finalize()
+
+        let segment = try XCTUnwrap(timeline.speakers[0]?.finalizedSegments.first)
+        XCTAssertEqual(segment.startFrame, 0)
+        XCTAssertEqual(segment.endFrame, 4)
+        XCTAssertEqual(segment.confidence, (0.9 + 0.7 + 0.7) / 3.0, accuracy: 1e-6)
+    }
+
     // MARK: - Probability Access
 
     func testProbabilityAccess() throws {

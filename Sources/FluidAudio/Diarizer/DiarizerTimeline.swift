@@ -506,6 +506,9 @@ public struct DiarizerSegment: Sendable, Identifiable, Comparable, Equatable {
     /// Duration of one frame in seconds
     public let frameDurationSeconds: Float
 
+    /// Confidence in this speech segment (average speech probability from the diarizer)
+    public var confidence: Float = 0.0
+
     /// Start time in seconds
     public var startTime: Float { Float(startFrame) * frameDurationSeconds }
 
@@ -523,7 +526,8 @@ public struct DiarizerSegment: Sendable, Identifiable, Comparable, Equatable {
         startFrame: Int,
         endFrame: Int,
         finalized: Bool = true,
-        frameDurationSeconds: Float
+        frameDurationSeconds: Float,
+        confidence: Float = 0
     ) {
         self.id = UUID()
         self.speakerIndex = speakerIndex
@@ -531,6 +535,7 @@ public struct DiarizerSegment: Sendable, Identifiable, Comparable, Equatable {
         self.endFrame = endFrame
         self.isFinalized = finalized
         self.frameDurationSeconds = frameDurationSeconds
+        self.confidence = confidence
     }
 
     public init(
@@ -538,7 +543,8 @@ public struct DiarizerSegment: Sendable, Identifiable, Comparable, Equatable {
         startTime: Float,
         endTime: Float,
         finalized: Bool = true,
-        frameDurationSeconds: Float
+        frameDurationSeconds: Float,
+        confidence: Float = 0
     ) {
         self.id = UUID()
         self.speakerIndex = speakerIndex
@@ -546,6 +552,7 @@ public struct DiarizerSegment: Sendable, Identifiable, Comparable, Equatable {
         self.endFrame = Int(round(endTime / frameDurationSeconds))
         self.isFinalized = finalized
         self.frameDurationSeconds = frameDurationSeconds
+        self.confidence = confidence
     }
 
     /// Check if this overlaps with another segment
@@ -639,6 +646,13 @@ public struct DiarizerChunkResult: Sendable {
 /// Generalizes `SortformerTimeline` for any frame-based diarizer. Works with
 /// both Sortformer (fixed 4 speakers) and LS-EEND (variable speaker count).
 public final class DiarizerTimeline {
+    private struct ClosedSegmentStats {
+        var start: Int
+        var end: Int
+        var activitySum: Float
+        var activeFrameCount: Int
+    }
+
     public enum KeptOnReset {
         case nothing
         case namedSpeakers
@@ -650,15 +664,21 @@ public final class DiarizerTimeline {
     private struct StreamingState {
         var startFrame: Int
         var isSpeaking: Bool
-        var lastSegment: (start: Int, end: Int)
+        var activitySum: Float
+        var activeFrameCount: Int
+        var lastSegment: ClosedSegmentStats?
 
         init(
             startFrame: Int = 0,
             isSpeaking: Bool = false,
-            lastSegment: (start: Int, end: Int) = (-1, -1)
+            activitySum: Float = 0,
+            activeFrameCount: Int = 0,
+            lastSegment: ClosedSegmentStats? = nil
         ) {
             self.startFrame = startFrame
             self.isSpeaking = isSpeaking
+            self.activitySum = activitySum
+            self.activeFrameCount = activeFrameCount
             self.lastSegment = lastSegment
         }
     }
@@ -688,6 +708,11 @@ public final class DiarizerTimeline {
         queue.sync { _tentativePredictions.count / speakerCapacity }
     }
 
+    /// Total number of frames (finalized + tentative)
+    public var numFrames: Int {
+        queue.sync { _numFinalizedFrames + _tentativePredictions.count / speakerCapacity }
+    }
+
     /// Speakers in the timeline
     public var speakers: [Int: DiarizerSpeaker] {
         get { queue.sync { _speakers } }
@@ -706,6 +731,7 @@ public final class DiarizerTimeline {
         }
     }
 
+    /// Whether the timeline has any segments
     public var hasSegments: Bool {
         speakers.values.contains(where: \.hasSegments)
     }
@@ -713,6 +739,16 @@ public final class DiarizerTimeline {
     /// Duration of finalized predictions in seconds
     public var finalizedDuration: Float {
         Float(numFinalizedFrames) * config.frameDurationSeconds
+    }
+
+    /// Duration of tentative predictions in seconds
+    public var tentativeDuration: Float {
+        Float(numTentativeFrames) * config.frameDurationSeconds
+    }
+
+    /// Duration of all predictions (finalized + tentative) in seconds
+    public var duration: Float {
+        Float(numFrames) * config.frameDurationSeconds
     }
 
     /// Maximum number of speakers
@@ -1103,42 +1139,64 @@ public final class DiarizerTimeline {
 
             var start = state.startFrame
             var speaking = state.isSpeaking
+            var activitySum = state.activitySum
+            var activeFrameCount = state.activeFrameCount
             var lastSegment = state.lastSegment
             var wasLastSegmentFinal = isFinalized
 
             for i in 0..<numFrames {
                 let index = speakerIndex + i * numSpeakers
+                let activity = predictions[index]
 
                 if speaking {
-                    if predictions[index] >= offset {
+                    if activity >= offset {
+                        activitySum += activity
+                        activeFrameCount += 1
                         continue
                     }
 
                     speaking = false
                     let end = frameOffset + i + padOffset
 
-                    guard end - start > minFramesOn else { continue }
+                    guard end - start > minFramesOn else {
+                        activitySum = 0
+                        activeFrameCount = 0
+                        continue
+                    }
 
                     wasLastSegmentFinal = isFinalized && (end < tentativeStartFrame)
+                    let confidence = activeFrameCount > 0 ? (activitySum / Float(activeFrameCount)) : 0
 
                     let newSegment = DiarizerSegment(
                         speakerIndex: speakerIndex,
                         startFrame: start,
                         endFrame: end,
                         finalized: wasLastSegmentFinal,
-                        frameDurationSeconds: frameDuration
+                        frameDurationSeconds: frameDuration,
+                        confidence: confidence
                     )
 
                     provideSpeaker(forSlot: speakerIndex).append(newSegment)
 
-                    lastSegment = (start, end)
+                    lastSegment = ClosedSegmentStats(
+                        start: start,
+                        end: end,
+                        activitySum: activitySum,
+                        activeFrameCount: activeFrameCount
+                    )
+                    activitySum = 0
+                    activeFrameCount = 0
 
-                } else if predictions[index] > onset {
+                } else if activity > onset {
                     start = max(0, frameOffset + i - padOnset)
                     speaking = true
+                    activitySum = activity
+                    activeFrameCount = 1
 
-                    if start - lastSegment.end <= minFramesOff {
+                    if let lastSegment, start - lastSegment.end <= minFramesOff {
                         start = lastSegment.start
+                        activitySum += lastSegment.activitySum
+                        activeFrameCount += lastSegment.activeFrameCount
                         _speakers[speakerIndex]?.popLast(fromFinalized: wasLastSegmentFinal)
                     }
                 }
@@ -1147,18 +1205,22 @@ public final class DiarizerTimeline {
             if isFinalized {
                 states[speakerIndex].startFrame = start
                 states[speakerIndex].isSpeaking = speaking
+                states[speakerIndex].activitySum = activitySum
+                states[speakerIndex].activeFrameCount = activeFrameCount
                 states[speakerIndex].lastSegment = lastSegment
             }
 
             if addTrailingTentative {
                 let end = frameOffset + numFrames + padOffset
                 if speaking && (end > start) {
+                    let confidence = activeFrameCount > 0 ? (activitySum / Float(activeFrameCount)) : 0
                     let newSegment = DiarizerSegment(
                         speakerIndex: speakerIndex,
                         startFrame: start,
                         endFrame: end,
                         finalized: false,
-                        frameDurationSeconds: frameDuration
+                        frameDurationSeconds: frameDuration,
+                        confidence: confidence
                     )
                     provideSpeaker(forSlot: speakerIndex).appendTentative(newSegment)
                 }

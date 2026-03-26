@@ -14,44 +14,32 @@ public final class LSEENDDiarizer: Diarizer {
 
     /// Accumulated results
     public var timeline: DiarizerTimeline {
-        lock.lock()
-        defer { lock.unlock() }
-        return _timeline
+        lock.withLock { return _timeline }
     }
 
     /// Whether the processor is ready for processing
     public var isAvailable: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _engine != nil
+        lock.withLock { return _engine != nil }
     }
 
     /// Number of confirmed frames processed so far
     public var numFramesProcessed: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return _numFramesProcessed
+        lock.withLock { return _numFramesProcessed }
     }
 
     /// Model's target sample rate in Hz (e.g., 8000)
     public var targetSampleRate: Int? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _engine?.targetSampleRate
+        lock.withLock { return _engine?.targetSampleRate }
     }
 
     /// Output frame rate in Hz (e.g., 10.0)
     public var modelFrameHz: Double? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _engine?.modelFrameHz
+        lock.withLock { return _engine?.modelFrameHz }
     }
 
     /// Number of real speaker tracks (excluding boundary tracks)
     public var numSpeakers: Int? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _engine?.metadata.realOutputDim
+        lock.withLock { return _engine?.metadata.realOutputDim }
     }
 
     // MARK: - Additional Properties
@@ -61,30 +49,22 @@ public final class LSEENDDiarizer: Diarizer {
 
     /// Post-processing configuration
     public var timelineConfig: DiarizerTimelineConfig {
-        lock.lock()
-        defer { lock.unlock() }
-        return _timeline.config
+        lock.withLock { return _timeline.config }
     }
 
     /// Streaming latency in seconds
     public var streamingLatencySeconds: Double? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _engine?.streamingLatencySeconds
+        lock.withLock { return _engine?.streamingLatencySeconds }
     }
 
     /// Total speaker slots in model output (including boundary tracks)
     public var decodeMaxSpeakers: Int? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _engine?.decodeMaxSpeakers
+        lock.withLock { return _engine?.decodeMaxSpeakers }
     }
 
     /// Whether a streaming session is currently active.
     var hasActiveSession: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _session != nil
+        lock.withLock { return _session != nil }
     }
 
     // MARK: - Private State
@@ -176,39 +156,37 @@ public final class LSEENDDiarizer: Diarizer {
         let engine = try LSEENDInferenceHelper(descriptor: descriptor, computeUnits: computeUnits)
         let melSpectrogram = Self.createMelSpectrogram(featureConfig: engine.featureConfig)
 
-        lock.lock()
-        defer { lock.unlock() }
+        lock.withLock {
+            updateTimelineConfig(engine: engine)
+            _engine = engine
+            _melSpectrogram = melSpectrogram
+            _timeline = DiarizerTimeline(config: _timelineConfig)
+            _session = nil
+            resetBuffersLocked()
 
-        updateTimelineConfig(engine: engine)
-        _engine = engine
-        _melSpectrogram = melSpectrogram
-        _timeline = DiarizerTimeline(config: _timelineConfig)
-        _session = nil
-        resetBuffersLocked()
-
-        logger.info(
-            "Initialized LS-EEND \(descriptor.variant.rawValue): "
-                + "\(engine.metadata.realOutputDim) speakers, "
-                + "\(String(format: "%.1f", engine.modelFrameHz)) Hz, "
-                + "\(String(format: "%.2f", engine.streamingLatencySeconds))s latency"
-        )
+            logger.info(
+                "Initialized LS-EEND \(descriptor.variant.rawValue): "
+                    + "\(engine.metadata.realOutputDim) speakers, "
+                    + "\(String(format: "%.1f", engine.modelFrameHz)) Hz, "
+                    + "\(String(format: "%.2f", engine.streamingLatencySeconds))s latency"
+            )
+        }
     }
 
     /// Initialize with a pre-loaded engine.
     public func initialize(engine: LSEENDInferenceHelper) {
         let melSpectrogram = Self.createMelSpectrogram(featureConfig: engine.featureConfig)
 
-        lock.lock()
-        defer { lock.unlock() }
+        lock.withLock {
+            updateTimelineConfig(engine: engine)
+            _engine = engine
+            _melSpectrogram = melSpectrogram
+            _timeline = DiarizerTimeline(config: _timelineConfig)
+            _session = nil
+            resetBuffersLocked()
 
-        updateTimelineConfig(engine: engine)
-        _engine = engine
-        _melSpectrogram = melSpectrogram
-        _timeline = DiarizerTimeline(config: _timelineConfig)
-        _session = nil
-        resetBuffersLocked()
-
-        logger.info("Initialized LS-EEND with pre-loaded engine")
+            logger.info("Initialized LS-EEND with pre-loaded engine")
+        }
     }
 
     // MARK: - Speaker Priming
@@ -268,103 +246,101 @@ public final class LSEENDDiarizer: Diarizer {
         named name: String?,
         overwritingAssignedSpeakerName overwriteAssignedSpeakerName: Bool
     ) throws -> DiarizerSpeaker? {
-        let description: String = name.map { "named '\($0)'" } ?? "(no name)"
-
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard let engine = _engine else {
-            throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
-        }
-
-        let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) ?? samples
-        guard !normalized.isEmpty else {
-            logger.warning("Failed to enroll speaker \(description) because no speech detected")
-            return nil
-        }
-
-        if _timeline.hasSegments {
-            logger.warning("Trying to enroll a speaker while timeline has segments; timeline will be reset")
-        }
-
-        _timeline.reset(keepingSpeakers: true)
-        var occupiedIndices = Set(_timeline.speakers.keys)
-        _numFramesProcessed = 0
-        _visibleStartFrameOffset = 0
-        pendingAudio.removeAll(keepingCapacity: true)
-
-        if _session == nil {
-            _session = try engine.createSession(
-                inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
-        }
-        guard let session = _session else {
-            return nil
-        }
-
-        let update = try session.pushAudio(normalized)
-        let didProcess = update.map { !$0.probabilities.isEmpty || !$0.previewProbabilities.isEmpty } ?? false
-
-        guard didProcess else {
-            let minimumSeconds = engine.streamingLatencySeconds
-            logger.warning(
-                "Failed to enroll speaker \(description): not enough audio was provided. "
-                    + "Please provide at least \(String(format: "%.2f", minimumSeconds)) seconds of speech."
-            )
-            return nil
-        }
-
-        if let update {
-            let numSpeakers = engine.metadata.realOutputDim
-            let result = DiarizerChunkResult(
-                startFrame: max(0, update.startFrame - _visibleStartFrameOffset),
-                finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
-                finalizedFrameCount: update.probabilities.rows,
-                tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
-                tentativeFrameCount: update.previewProbabilities.rows
-            )
-            _numFramesProcessed += result.finalizedFrameCount
-            _ = try _timeline.addChunk(result)
-        }
-
-        let speaker = _timeline.speakers.values.max { $0.numSpeechFrames < $1.numSpeechFrames }
-        let enrolledSpeaker: DiarizerSpeaker?
-        if let speaker, speaker.hasSegments {
-            if let oldName = speaker.name {
-                guard overwriteAssignedSpeakerName else {
-                    logger.warning(
-                        "Failed to enroll speaker \(description): diarizer matched existing speaker '\(oldName)' "
-                            + "at index \(speaker.index) and overwritingAssignedSpeakerName=false"
-                    )
-                    _visibleStartFrameOffset = session.snapshot().probabilities.rows
-                    _numFramesProcessed = 0
-                    _timeline.reset(keepingSpeakersWhere: { occupiedIndices.contains($0.index) })
-                    pendingAudio.removeAll(keepingCapacity: true)
-                    return nil
-                }
-                logger.warning(
-                    "Newly-enrolled speaker \(description) will overwrite the old one named \(oldName) at index \(speaker.index)"
-                )
+        try lock.withLock {
+            let description: String = name.map { "named '\($0)'" } ?? "(no name)"
+            guard let engine = _engine else {
+                throw LSEENDError.modelPredictionFailed("LS-EEND processor not initialized. Call initialize() first.")
             }
-            speaker.name = name
-            occupiedIndices.insert(speaker.index)
-            enrolledSpeaker = speaker
-        } else {
-            logger.warning("Failed to enroll speaker \(description) because no speech detected")
-            enrolledSpeaker = nil
+
+            let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) ?? samples
+            guard !normalized.isEmpty else {
+                logger.warning("Failed to enroll speaker \(description) because no speech detected")
+                return nil
+            }
+
+            if _timeline.hasSegments {
+                logger.warning("Trying to enroll a speaker while timeline has segments; timeline will be reset")
+            }
+
+            _timeline.reset(keepingSpeakers: true)
+            var occupiedIndices = Set(_timeline.speakers.keys)
+            _numFramesProcessed = 0
+            _visibleStartFrameOffset = 0
+            pendingAudio.removeAll(keepingCapacity: true)
+
+            if _session == nil {
+                _session = try engine.createSession(
+                    inputSampleRate: engine.targetSampleRate, melSpectrogram: _melSpectrogram!)
+            }
+            guard let session = _session else {
+                return nil
+            }
+
+            let update = try session.pushAudio(normalized)
+            let didProcess = update.map { !$0.probabilities.isEmpty || !$0.previewProbabilities.isEmpty } ?? false
+
+            guard didProcess else {
+                let minimumSeconds = engine.streamingLatencySeconds
+                logger.warning(
+                    "Failed to enroll speaker \(description): not enough audio was provided. "
+                        + "Please provide at least \(String(format: "%.2f", minimumSeconds)) seconds of speech."
+                )
+                return nil
+            }
+
+            if let update {
+                let numSpeakers = engine.metadata.realOutputDim
+                let result = DiarizerChunkResult(
+                    startFrame: max(0, update.startFrame - _visibleStartFrameOffset),
+                    finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
+                    finalizedFrameCount: update.probabilities.rows,
+                    tentativePredictions: flattenRowMajor(update.previewProbabilities, numSpeakers: numSpeakers),
+                    tentativeFrameCount: update.previewProbabilities.rows
+                )
+                _numFramesProcessed += result.finalizedFrameCount
+                _ = try _timeline.addChunk(result)
+            }
+
+            let speaker = _timeline.speakers.values.max { $0.numSpeechFrames < $1.numSpeechFrames }
+            let enrolledSpeaker: DiarizerSpeaker?
+            if let speaker, speaker.hasSegments {
+                if let oldName = speaker.name {
+                    guard overwriteAssignedSpeakerName else {
+                        logger.warning(
+                            "Failed to enroll speaker \(description): diarizer matched existing speaker '\(oldName)' "
+                                + "at index \(speaker.index) and overwritingAssignedSpeakerName=false"
+                        )
+                        _visibleStartFrameOffset = session.snapshot().probabilities.rows
+                        _numFramesProcessed = 0
+                        _timeline.reset(keepingSpeakersWhere: { occupiedIndices.contains($0.index) })
+                        pendingAudio.removeAll(keepingCapacity: true)
+                        return nil
+                    }
+                    logger.warning(
+                        "Newly-enrolled speaker \(description) will overwrite the old one named \(oldName) at index \(speaker.index)"
+                    )
+                }
+                speaker.name = name
+                occupiedIndices.insert(speaker.index)
+                enrolledSpeaker = speaker
+            } else {
+                logger.warning("Failed to enroll speaker \(description) because no speech detected")
+                enrolledSpeaker = nil
+            }
+
+            _visibleStartFrameOffset = session.snapshot().probabilities.rows
+            _numFramesProcessed = 0
+            _timeline.reset(keepingSpeakersWhere: { occupiedIndices.contains($0.index) })
+            pendingAudio.removeAll(keepingCapacity: true)
+
+            logger.info(
+                "Enrolled speaker \(description) with \(normalized.count) samples "
+                    + "(\(String(format: "%.1f", Float(normalized.count) / Float(engine.targetSampleRate)))s), "
+                    + "visible offset=\(_visibleStartFrameOffset)"
+            )
+
+            return enrolledSpeaker
         }
-
-        _visibleStartFrameOffset = session.snapshot().probabilities.rows
-        _numFramesProcessed = 0
-        _timeline.reset(keepingSpeakersWhere: { occupiedIndices.contains($0.index) })
-        pendingAudio.removeAll(keepingCapacity: true)
-
-        logger.info(
-            "Enrolled speaker \(description) with \(normalized.count) samples "
-                + "(\(String(format: "%.1f", Float(normalized.count) / Float(engine.targetSampleRate)))s), "
-                + "visible offset=\(_visibleStartFrameOffset)"
-        )
-
-        return enrolledSpeaker
     }
 
     // MARK: - Streaming (Diarizer Protocol)
@@ -387,13 +363,12 @@ public final class LSEENDDiarizer: Diarizer {
         _ samples: C,
         sourceSampleRate: Double? = nil
     ) throws where C.Element == Float {
-        lock.lock()
-        defer { lock.unlock() }
-
-        if let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) {
-            pendingAudio.append(contentsOf: normalized)
-        } else {
-            pendingAudio.append(contentsOf: samples)
+        try lock.withLock {
+            if let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) {
+                pendingAudio.append(contentsOf: normalized)
+            } else {
+                pendingAudio.append(contentsOf: samples)
+            }
         }
     }
 
@@ -401,15 +376,10 @@ public final class LSEENDDiarizer: Diarizer {
     ///
     /// - Returns: New chunk result if inference produced frames, nil otherwise
     public func process() throws -> DiarizerTimelineUpdate? {
-        lock.lock()
-        defer { lock.unlock() }
-        return try processLocked()
+        try lock.withLock { return try processLocked() }
     }
 
-    /// Process a chunk of audio in one call.
-    ///
-    /// Convenience method that combines `addAudio()` and `process()`.
-    ///
+    /// Add and process a chunk of audio in one call.
     /// - Parameters:
     ///   - samples: Audio samples to process.
     ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
@@ -418,16 +388,15 @@ public final class LSEENDDiarizer: Diarizer {
         samples: C,
         sourceSampleRate: Double? = nil
     ) throws -> DiarizerTimelineUpdate? where C.Element == Float {
-        lock.lock()
-        defer { lock.unlock() }
+        try lock.withLock {
+            if let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) {
+                pendingAudio.append(contentsOf: normalized)
+            } else {
+                pendingAudio.append(contentsOf: samples)
+            }
 
-        if let normalized = try normalizeSamplesLocked(samples, sourceSampleRate: sourceSampleRate) {
-            pendingAudio.append(contentsOf: normalized)
-        } else {
-            pendingAudio.append(contentsOf: samples)
+            return try processLocked()
         }
-
-        return try processLocked()
     }
 
     /// Internal process — caller must hold lock.
@@ -641,26 +610,24 @@ public final class LSEENDDiarizer: Diarizer {
     ///
     /// Preserves the loaded model. Call `initialize()` again to change models.
     public func reset() {
-        lock.lock()
-        defer { lock.unlock() }
-
-        _session = nil
-        _timeline.reset()
-        resetBuffersLocked()
-        logger.debug("LS-EEND state reset")
+        lock.withLock {
+            _session = nil
+            _timeline.reset()
+            resetBuffersLocked()
+            logger.debug("LS-EEND state reset")
+        }
     }
 
     /// Clean up all resources including the loaded model.
     public func cleanup() {
-        lock.lock()
-        defer { lock.unlock() }
-
-        _engine = nil
-        _session = nil
-        _melSpectrogram = nil
-        _timeline.reset()
-        resetBuffersLocked()
-        logger.info("LS-EEND resources cleaned up")
+        lock.withLock {
+            _engine = nil
+            _session = nil
+            _melSpectrogram = nil
+            _timeline.reset()
+            resetBuffersLocked()
+            logger.info("LS-EEND resources cleaned up")
+        }
     }
 
     // MARK: - LS-EEND Specific
@@ -678,6 +645,8 @@ public final class LSEENDDiarizer: Diarizer {
         defer { lock.unlock() }
 
         guard let engine = _engine, let session = _session else { return nil }
+        let numSpeakers = engine.metadata.realOutputDim
+        var lastResult: DiarizerChunkResult?
 
         // Flush pending audio first — clear unconditionally so failed audio isn't retained.
         // Using defer + direct pass avoids a CoW copy.
@@ -685,7 +654,6 @@ public final class LSEENDDiarizer: Diarizer {
             defer { pendingAudio.removeAll(keepingCapacity: true) }
             let pushedUpdate = try session.pushAudio(pendingAudio)
             if let update = pushedUpdate {
-                let numSpeakers = engine.metadata.realOutputDim
                 let flushedResult = DiarizerChunkResult(
                     startFrame: _numFramesProcessed,
                     finalizedPredictions: flattenRowMajor(update.probabilities, numSpeakers: numSpeakers),
@@ -695,29 +663,26 @@ public final class LSEENDDiarizer: Diarizer {
                 )
                 _numFramesProcessed += flushedResult.finalizedFrameCount
                 try _timeline.addChunk(flushedResult)
+                lastResult = flushedResult
             }
         }
 
-        guard let finalUpdate = try session.finalize() else {
-            _session = nil
-            _timeline.finalize()
-            return nil
+        if let finalUpdate = try session.finalize() {
+            let finalResult = DiarizerChunkResult(
+                startFrame: _numFramesProcessed,
+                finalizedPredictions: flattenRowMajor(finalUpdate.probabilities, numSpeakers: numSpeakers),
+                finalizedFrameCount: finalUpdate.probabilities.rows,
+                tentativePredictions: [],
+                tentativeFrameCount: 0
+            )
+            _numFramesProcessed += finalResult.finalizedFrameCount
+            try _timeline.addChunk(finalResult)
+            lastResult = finalResult
         }
-
-        let numSpeakers = engine.metadata.realOutputDim
-        let result = DiarizerChunkResult(
-            startFrame: _numFramesProcessed,
-            finalizedPredictions: flattenRowMajor(finalUpdate.probabilities, numSpeakers: numSpeakers),
-            finalizedFrameCount: finalUpdate.probabilities.rows,
-            tentativePredictions: [],
-            tentativeFrameCount: 0
-        )
-        _numFramesProcessed += result.finalizedFrameCount
-        try _timeline.addChunk(result)
         _timeline.finalize()
         _session = nil
 
-        return result
+        return lastResult
     }
 
     // MARK: - Private

@@ -368,6 +368,10 @@ public struct SortformerSegment {
 │         └─→ timeline.addChunk(result)                          │
 │             └─→ Update segments per speaker                    │
 │                                                                │
+│  3. finalizeSession()                                          │
+│     └─→ pad trailing silence until last true frame is emitted  │
+│     └─→ timeline.finalize()                                    │
+│                                                                │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -444,6 +448,8 @@ audioEngine.installTap { buffer in
         updateSpeakerDisplay(diarizer.timeline)
     }
 }
+
+try diarizer.finalizeSession()
 ```
 
 ### Batch Processing
@@ -465,6 +471,8 @@ for (index, speaker) in timeline.speakers {
     }
 }
 ```
+
+`finalizeSession()` is only needed for streaming mode. It pads enough trailing silence to flush Sortformer's right-context preview frames, then finalizes the timeline so `numTentativeFrames == 0`.
 
 ### Speaker Enrollment
 

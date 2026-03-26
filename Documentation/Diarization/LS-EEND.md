@@ -226,10 +226,13 @@ if let update = try diarizer.process() {
 // Convenience: add + process in one call
 if let update = try diarizer.process(samples: audioChunk) { ... }
 
-// Flush remaining frames at end of stream
+// Flush remaining frames at the end of a stream
 try diarizer.finalizeSession()
 let finalTimeline = diarizer.timeline
 ```
+
+Notes:
+- `finalizeSession()` flushes the remaining audio by padding the end with silence.
 
 ### Speaker Enrollment
 
@@ -288,6 +291,7 @@ Real-world integration testing with 4-speaker audio reveals specific enrollment 
 ### Lifecycle
 
 ```swift
+try diarizer.finalizeSession() // Flush trailing context before reading final output
 diarizer.reset()     // Reset streaming state for a new audio stream (keeps model loaded)
 diarizer.cleanup()   // Release all resources including the loaded model
 ```

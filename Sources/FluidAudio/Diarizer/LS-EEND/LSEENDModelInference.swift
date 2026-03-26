@@ -208,17 +208,11 @@ public final class LSEENDInferenceHelper {
     /// - Returns: Complete inference result with logits and probabilities.
     public func infer(samples: [Float], sampleRate: Int) throws -> LSEENDInferenceResult {
         let normalizedAudio = try resampleIfNeeded(samples: samples, sampleRate: sampleRate)
-        let features = try offlineFeatureExtractor.extractFeatures(audio: normalizedAudio)
         let session = try createSession(inputSampleRate: targetSampleRate)
-        session.totalInputSamples = normalizedAudio.count
-        let committed = try session.ingestFeatures(features)
-        let pending = session.totalFeatureFrames - session.emittedFrames
-        let tail =
-            try pending > 0
-            ? session.flushTail(from: session.state, pendingFrames: pending) : .empty(columns: decodeMaxSpeakers)
-        let fullLogits = committed.appendingRows(tail)
-        session.fullLogitChunks = fullLogits.isEmpty ? [] : [fullLogits]
-        session.emittedFrames = fullLogits.rows
+        if !normalizedAudio.isEmpty {
+            _ = try session.pushAudio(normalizedAudio)
+        }
+        _ = try session.finalize()
         return session.snapshot()
     }
 
@@ -518,13 +512,45 @@ public final class LSEENDStreamingSession {
         guard !finalized else {
             return nil
         }
-        let features = try featureExtractor.finalize()
-        let committed = try ingestFeatures(features)
+
+        var committedFullLogits = LSEENDMatrix.empty(columns: engine.decodeMaxSpeakers)
+        let targetEndFrame = Int(
+            round(Double(totalInputSamples) / Double(max(inputSampleRate, 1)) * engine.modelFrameHz))
+        let exactPaddingSamples = try exactFinalizationPaddingSamples(targetEndFrame: targetEndFrame)
+        if exactPaddingSamples > 0 {
+            let features = try featureExtractor.pushAudio([Float](repeating: 0, count: exactPaddingSamples))
+            let committed = try ingestFeatures(features)
+            if committed.rows > 0 {
+                committedFullLogits = committedFullLogits.appendingRows(committed)
+            }
+        }
+
+        let finalFeatures = try featureExtractor.finalize()
+        let finalCommitted = try ingestFeatures(finalFeatures)
+        if finalCommitted.rows > 0 {
+            committedFullLogits = committedFullLogits.appendingRows(finalCommitted)
+        }
+
         let pending = totalFeatureFrames - emittedFrames
         let tail =
             try pending > 0 ? flushTail(from: state, pendingFrames: pending) : .empty(columns: engine.decodeMaxSpeakers)
+        emittedFrames += tail.rows
         finalized = true
-        return try buildUpdate(committedFullLogits: committed.appendingRows(tail), includePreview: false)
+        return try buildUpdate(committedFullLogits: committedFullLogits.appendingRows(tail), includePreview: false)
+    }
+
+    private func exactFinalizationPaddingSamples(targetEndFrame: Int) throws -> Int {
+        guard targetEndFrame > 0 else {
+            return 0
+        }
+        let stableBlockSize = engine.metadata.resolvedHopLength * engine.metadata.resolvedSubsampling
+        let (requiredTotalSamples, overflow) = targetEndFrame.multipliedReportingOverflow(by: stableBlockSize)
+        guard !overflow else {
+            throw LSEENDError.unsupportedAudio(
+                "Finalization padding overflowed for \(targetEndFrame) frames at block size \(stableBlockSize)."
+            )
+        }
+        return max(0, requiredTotalSamples - totalInputSamples)
     }
 
     /// Assembles the full inference result from all committed frames emitted so far.
