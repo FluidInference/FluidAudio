@@ -60,7 +60,7 @@ FluidAudio is a Swift framework for local, low-latency audio processing on Apple
 - **Local formatting**: `swift format --in-place --recursive --configuration .swift-format Sources/ Tests/`
 - **Line length**: 120 characters
 - **Indentation**: 4 spaces
-- **Import order**: Alphabetical (OrderedImports rule)
+- **Import order**: Alphabetical preferred, but OrderedImports rule is disabled due to Swift 6.1 (GitHub Actions CI) vs 6.3 (local) formatter incompatibility. Swift 6.3 is unavailable in GitHub Actions runners.
 - **Naming**: lowerCamelCase for variables/functions, UpperCamelCase for types
 - **Error handling**: Proper Swift error handling, no force unwrapping in production. Per-module error enums conforming to `Error, LocalizedError` (e.g. `ASRError`, `VadError`, `OfflineDiarizationError`, `Qwen3AsrError`)
 - **Logging**: Use `AppLogger(category:)` from `Shared/AppLogger.swift` — not `print()` in production code. One logger per component (e.g. `AppLogger(category: "VadManager")`)
