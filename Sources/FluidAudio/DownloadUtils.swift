@@ -67,7 +67,7 @@ public class DownloadUtils {
             case .downloadFailed(let path, let underlying):
                 return "Failed to download \(path): \(underlying.localizedDescription)"
             case .htmlErrorResponse(let path, let snippet):
-                return "HuggingFace returned HTML error page instead of JSON for \(path). This usually indicates rate limiting or server issues. Response snippet: \(snippet)"
+                return "HuggingFace returned HTML instead of JSON for \(path) (rate limit or server issue): \(snippet)"
             case .modelNotFound(let path):
                 return "Model file not found: \(path)"
             }
