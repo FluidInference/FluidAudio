@@ -39,11 +39,24 @@ public class DownloadUtils {
         return try await sharedSession.data(for: request)
     }
 
+    /// Validate that response data is JSON, not HTML error page
+    /// HuggingFace sometimes returns 200 OK with HTML error pages during rate limiting/timeouts
+    private static func validateJSONResponse(_ data: Data, path: String) throws {
+        // Check if response starts with HTML markers
+        if let responseString = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            if responseString.hasPrefix("<") || responseString.lowercased().contains("<!doctype html") {
+                let snippet = String(responseString.prefix(100))
+                throw HuggingFaceDownloadError.htmlErrorResponse(path: path, snippet: snippet)
+            }
+        }
+    }
+
     public enum HuggingFaceDownloadError: LocalizedError {
         case invalidResponse
         case rateLimited(statusCode: Int, message: String)
         case downloadFailed(path: String, underlying: Error)
         case modelNotFound(path: String)
+        case htmlErrorResponse(path: String, snippet: String)
 
         public var errorDescription: String? {
             switch self {
@@ -53,6 +66,8 @@ public class DownloadUtils {
                 return "Hugging Face rate limit encountered: \(message)"
             case .downloadFailed(let path, let underlying):
                 return "Failed to download \(path): \(underlying.localizedDescription)"
+            case .htmlErrorResponse(let path, let snippet):
+                return "HuggingFace returned HTML error page instead of JSON for \(path). This usually indicates rate limiting or server issues. Response snippet: \(snippet)"
             case .modelNotFound(let path):
                 return "Model file not found: \(path)"
             }
@@ -291,8 +306,11 @@ public class DownloadUtils {
                 }
             }
 
+            // Validate that response is JSON, not HTML error page
+            try validateJSONResponse(dirData, path: path)
+
             guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
-                return
+                throw HuggingFaceDownloadError.invalidResponse
             }
 
             for item in items {
@@ -517,8 +535,12 @@ public class DownloadUtils {
                     statusCode: httpResponse.statusCode,
                     message: "Rate limited while listing files in \(path)")
             }
+
+            // Validate that response is JSON, not HTML error page
+            try validateJSONResponse(dirData, path: path)
+
             guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
-                return
+                throw HuggingFaceDownloadError.invalidResponse
             }
             for item in items {
                 guard let itemPath = item["path"] as? String,
