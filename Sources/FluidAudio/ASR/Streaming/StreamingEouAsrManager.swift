@@ -286,19 +286,16 @@ public actor StreamingEouAsrManager {
         }
 
         let modelsRoot = directory ?? Self.defaultCacheDirectory()
-        let modelDir: URL
         let repo: Repo
         switch chunkSize {
         case .ms160:
-            modelDir = modelsRoot.appendingPathComponent(StreamingChunkSize.ms160.modelSubdirectory, isDirectory: true)
             repo = .parakeetEou160
         case .ms320:
-            modelDir = modelsRoot.appendingPathComponent(StreamingChunkSize.ms320.modelSubdirectory, isDirectory: true)
             repo = .parakeetEou320
         case .ms1280:
-            modelDir = modelsRoot.appendingPathComponent(StreamingChunkSize.ms1280.modelSubdirectory, isDirectory: true)
             repo = .parakeetEou1280
         }
+        let modelDir = modelsRoot.appendingPathComponent(repo.folderName, isDirectory: true)
 
         let requiredModels = ModelNames.ParakeetEOU.requiredModels
         let modelsExist = requiredModels.allSatisfy { modelName in
