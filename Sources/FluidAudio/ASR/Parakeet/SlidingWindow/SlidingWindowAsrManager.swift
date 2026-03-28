@@ -376,7 +376,7 @@ public actor SlidingWindowAsrManager {
             // Start frame offset is now handled by decoder's timeJump mechanism
 
             // Call AsrManager directly with deduplication
-            let (tokens, timestamps, confidences, _) = try await asrManager.transcribeStreamingChunk(
+            let (tokens, timestamps, confidences, _) = try await asrManager.transcribeChunk(
                 windowSamples,
                 source: audioSource,
                 previousTokens: accumulatedTokens,

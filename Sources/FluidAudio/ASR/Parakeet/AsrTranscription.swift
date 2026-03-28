@@ -45,7 +45,7 @@ extension AsrManager {
                 isLastChunk: true  // Single-chunk: always first and last
             )
 
-            var result = processTranscriptionResult(
+            let result = processTranscriptionResult(
                 tokenIds: hypothesis.ySequence,
                 timestamps: hypothesis.timestamps,
                 confidences: hypothesis.tokenConfidences,
@@ -54,11 +54,6 @@ extension AsrManager {
                 audioSamples: audioSamples,
                 processingTime: Date().timeIntervalSince(startTime)
             )
-
-            // Auto-apply vocabulary rescoring when configured
-            if vocabBoostingEnabled {
-                result = await applyVocabularyRescoring(result: result, audioSamples: audioSamples)
-            }
 
             // Store decoder state back
             switch source {
@@ -73,7 +68,7 @@ extension AsrManager {
 
         // ChunkProcessor handles stateless chunked transcription for long audio
         let processor = ChunkProcessor(audioSamples: audioSamples)
-        var result = try await processor.process(
+        let result = try await processor.process(
             using: self,
             startTime: startTime,
             progressHandler: { [weak self] progress in
@@ -81,11 +76,6 @@ extension AsrManager {
                 await self.progressEmitter.report(progress: progress)
             }
         )
-
-        // Auto-apply vocabulary rescoring when configured
-        if vocabBoostingEnabled {
-            result = await applyVocabularyRescoring(result: result, audioSamples: audioSamples)
-        }
 
         // Store decoder state back (ChunkProcessor uses the stored state directly)
         switch source {
@@ -250,9 +240,9 @@ extension AsrManager {
         return try MLDictionaryFeatureProvider(dictionary: features)
     }
 
-    /// Streaming-friendly chunk transcription that preserves decoder state and supports start-frame offset.
-    /// This is used by both sliding window chunking and streaming paths to unify behavior.
-    public func transcribeStreamingChunk(
+    /// Chunk transcription that preserves decoder state between calls.
+    /// Used by SlidingWindowAsrManager for overlapping-window processing with token deduplication.
+    public func transcribeChunk(
         _ chunkSamples: [Float],
         source: AudioSource,
         previousTokens: [Int] = [],
@@ -556,134 +546,6 @@ extension AsrManager {
         // This method is deprecated as frame tracking is now handled by the decoder's timeJump mechanism
         // Kept for test compatibility
         return 0
-    }
-
-    // MARK: - Vocabulary Rescoring
-
-    /// Apply vocabulary rescoring to an ASRResult using CTC-based constrained decoding.
-    ///
-    /// Runs CTC inference on the audio samples and applies vocabulary rescoring to correct
-    /// misrecognized words. Returns an updated ASRResult with rescored text and populated
-    /// `ctcDetectedTerms`/`ctcAppliedTerms` fields.
-    ///
-    /// - Parameters:
-    ///   - result: The original ASRResult from transcription
-    ///   - audioSamples: Audio samples used for CTC inference
-    /// - Returns: An ASRResult with rescored text and CTC metadata, or the original result if rescoring was skipped
-    internal func applyVocabularyRescoring(
-        result: ASRResult, audioSamples: [Float]
-    ) async -> ASRResult {
-        guard let rescorer = vocabularyRescorer,
-            let vocab = customVocabulary,
-            let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty
-        else {
-            return result
-        }
-
-        do {
-            // Try to use cached CTC logits from unified Preprocessor first
-            let logProbs: [[Float]]
-            let frameDuration: Double
-
-            if let cached = cachedCtcLogits, let duration = cachedCtcFrameDuration {
-                // Convert MLMultiArray to [[Float]]
-                logProbs = convertCtcLogitsToArray(cached)
-                frameDuration = duration
-                logger.debug("Using cached CTC logits from Preprocessor (unified model)")
-            } else if let spotter = ctcSpotter {
-                // Fallback: run separate CTC encoder
-                let spotResult = try await spotter.spotKeywordsWithLogProbs(
-                    audioSamples: audioSamples,
-                    customVocabulary: vocab,
-                    minScore: nil
-                )
-                logProbs = spotResult.logProbs
-                frameDuration = spotResult.frameDuration
-                logger.debug("Using separate CTC encoder (legacy dual-model approach)")
-            } else {
-                logger.warning("Vocabulary rescoring skipped: no CTC logits available")
-                return result
-            }
-
-            guard !logProbs.isEmpty else {
-                logger.debug("Vocabulary rescoring skipped: no log probs from CTC")
-                return result
-            }
-
-            let vocabConfig = vocabSizeConfig ?? ContextBiasingConstants.rescorerConfig(forVocabSize: 0)
-            // Use the higher of the size-based default and the caller-specified threshold
-            // so that CustomVocabularyContext.minSimilarity is respected when stricter.
-            let effectiveMinSimilarity = max(vocabConfig.minSimilarity, vocab.minSimilarity)
-
-            let rescoreOutput = rescorer.ctcTokenRescore(
-                transcript: result.text,
-                tokenTimings: tokenTimings,
-                logProbs: logProbs,
-                frameDuration: frameDuration,
-                cbw: vocabConfig.cbw,
-                marginSeconds: 0.5,
-                minSimilarity: effectiveMinSimilarity
-            )
-
-            guard rescoreOutput.wasModified else {
-                return result
-            }
-
-            let detected = rescoreOutput.replacements.compactMap { $0.replacementWord }
-            let applied = rescoreOutput.replacements.filter { $0.shouldReplace }.compactMap {
-                $0.replacementWord
-            }
-
-            logger.info(
-                "Vocabulary rescoring applied \(applied.count) replacement(s)"
-            )
-
-            return result.withRescoring(
-                text: rescoreOutput.text,
-                detected: detected.isEmpty ? nil : detected,
-                applied: applied.isEmpty ? nil : applied
-            )
-        } catch {
-            logger.warning("Vocabulary rescoring failed: \(error.localizedDescription)")
-            return result
-        }
-    }
-
-    /// Convert CTC logits MLMultiArray to log-probabilities [[Float]] for rescoring.
-    /// Applies log-softmax with temperature scaling and blank bias to match
-    /// the processing done in `CtcKeywordSpotter.computeLogProbs`.
-    private func convertCtcLogitsToArray(_ ctcLogits: MLMultiArray) -> [[Float]] {
-        // Expected shape: [1, T, V] where T = frames, V = vocab size
-        let shape = ctcLogits.shape
-        guard shape.count == 3 else {
-            logger.warning("Unexpected CTC logits shape: \(shape)")
-            return []
-        }
-
-        let numFrames = min(shape[1].intValue, cachedCtcValidFrames ?? shape[1].intValue)
-        let vocabSize = shape[2].intValue
-
-        // Extract raw logits
-        var rawLogits: [[Float]] = []
-        rawLogits.reserveCapacity(numFrames)
-
-        for t in 0..<numFrames {
-            var frameLogits: [Float] = []
-            frameLogits.reserveCapacity(vocabSize)
-
-            for v in 0..<vocabSize {
-                let index = [0, t, v] as [NSNumber]
-                frameLogits.append(ctcLogits[index].floatValue)
-            }
-
-            rawLogits.append(frameLogits)
-        }
-
-        // Apply log-softmax + temperature + blank bias (same as CtcKeywordSpotter.makeLogProbs)
-        return CtcKeywordSpotter.applyLogSoftmax(
-            rawLogits: rawLogits,
-            blankId: ContextBiasingConstants.defaultBlankId
-        )
     }
 
 }
