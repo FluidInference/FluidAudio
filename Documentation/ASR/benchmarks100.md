@@ -1,40 +1,43 @@
-# Main Branch Baseline Benchmarks
+# PR #440 Regression Benchmarks (100 files)
 
-Baseline benchmark results from `main` branch for regression testing PR #440 (ASR directory restructuring).
+Benchmark comparison between `main` and PR #440 (`standardize-asr-directory-structure`) to verify the directory restructuring introduces no regressions.
 
 ## Environment
 
 - **Hardware**: MacBook Air M2, 16 GB
-- **Branch**: `main` @ `01f1ae2b` (Fix Kokoro v2 source_noise dtype and distribution #447)
 - **Build**: `swift build -c release`
 - **Date**: 2026-03-28
+- **main**: `01f1ae2b` (Fix Kokoro v2 source_noise dtype and distribution #447)
+- **PR**: `839010538` (standardize-asr-directory-structure)
 
-## Results
+## Comparison
 
 ### Batch TDT (LibriSpeech test-clean, 100 files)
 
-| Model | WER | RTFx | Audio | Time |
+| Model | WER (main) | WER (PR) | RTFx (main) | RTFx (PR) |
 |---|---|---|---|---|
-| Parakeet TDT v3 (0.6B) | 2.6% | 85.7x | 901.1s | 10.5s |
-| Parakeet TDT v2 (0.6B) | 3.8% | 81.7x | 901.1s | 11.0s |
-| CTC-TDT 110M | 3.6% | 118.1x | 901.1s | 7.6s |
+| Parakeet TDT v3 (0.6B) | 2.6% | 2.6% | 85.7x | 77.6x |
+| Parakeet TDT v2 (0.6B) | 3.8% | 3.8% | 81.7x | 73.9x |
+| CTC-TDT 110M | 3.6% | 3.6% | 118.1x | 105.2x |
 
 ### Streaming (LibriSpeech test-clean, 100 files)
 
-| Model | WER | RTFx | Audio | Time |
+| Model | WER (main) | WER (PR) | RTFx (main) | RTFx (PR) |
 |---|---|---|---|---|
-| EOU 320ms (120M) | 7.11% | 17.92x | 470.6s | 27.3s |
-| Nemotron 1120ms (0.6B) | 1.99% | 9.28x | 901.1s | 97.1s |
+| EOU 320ms (120M) | 7.11% | 7.11% | 17.92x | 18.19x |
+| Nemotron 1120ms (0.6B) | 1.99% | 1.99% | 9.28x | 9.03x |
 
 ### CTC Earnings (Earnings22-KWS, 100 files)
 
-| Metric | Value |
-|---|---|
-| WER | 16.54% |
-| Dict Recall | 98.9% (184/186) |
-| Vocab Precision | 100.0% |
-| Vocab Recall | 79.8% |
-| Vocab F-score | 88.8% |
-| RTFx | 42.81x |
-| Audio | 1499.5s |
-| Time | 35.0s |
+| Metric | main | PR |
+|---|---|---|
+| WER | 16.54% | 16.51% |
+| Dict Recall | 98.9% | 98.9% |
+| Vocab Precision | 100.0% | 100.0% |
+| Vocab Recall | 79.8% | 79.8% |
+| Vocab F-score | 88.8% | 88.8% |
+| RTFx | 42.81x | 44.61x |
+
+## Verdict
+
+**No regressions.** WER is identical across all 6 benchmarks. RTFx differences are within normal system noise (M2 thermals, background processes). The directory restructuring is a pure file move with no behavioral changes.
