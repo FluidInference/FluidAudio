@@ -511,10 +511,10 @@ public enum CtcEarningsBenchmark {
         // Use cached CTC logits from unified Preprocessor if available (no separate encoder run needed)
         let logProbs: [[Float]]
         let frameDuration: Double
-        if let cached = await asrManager.getCachedCtcLogProbs() {
+        if let cached = await asrManager.getCachedCtcRawLogits() {
             // Cached values are raw logits - apply log-softmax + temperature + blank bias
             logProbs = CtcKeywordSpotter.applyLogSoftmax(
-                rawLogits: cached.logProbs,
+                rawLogits: cached.rawLogits,
                 blankId: spotter.blankId
             )
             frameDuration = cached.frameDuration
@@ -618,24 +618,13 @@ public enum CtcEarningsBenchmark {
         let checkWordsLowerSet = Set(checkWords.map { $0.lowercased() })
 
         // 1. CTC detections (deduplicate - only count each word once, only if in checkWords)
-        // Use pre-computed logProbs for keyword detection when available (unified Preprocessor path)
-        let spotResult: CtcKeywordSpotter.SpotKeywordsResult
-        if !logProbs.isEmpty, await asrManager.hasCachedCtcLogits {
-            // Unified path: run DP keyword detection on cached logProbs (no CTC inference)
-            spotResult = spotter.spotKeywordsFromLogProbs(
-                logProbs: logProbs,
-                frameDuration: frameDuration,
-                customVocabulary: customVocab,
-                minScore: nil
-            )
-        } else {
-            // Separate CTC path: run full CTC inference + keyword detection
-            spotResult = try await spotter.spotKeywordsWithLogProbs(
-                audioSamples: samples,
-                customVocabulary: customVocab,
-                minScore: nil
-            )
-        }
+        // Reuse pre-computed logProbs for keyword detection (avoids duplicate CTC inference)
+        let spotResult = spotter.spotKeywordsFromLogProbs(
+            logProbs: logProbs,
+            frameDuration: frameDuration,
+            customVocabulary: customVocab,
+            minScore: nil
+        )
 
         for detection in spotResult.detections {
             let detail: [String: Any] = [
@@ -643,7 +632,7 @@ public enum CtcEarningsBenchmark {
                 "score": round(Double(detection.score) * 100) / 100,
                 "startTime": round(detection.startTime * 100) / 100,
                 "endTime": round(detection.endTime * 100) / 100,
-                "source": await asrManager.hasCachedCtcLogits ? "ctc-unified" : "ctc",
+                "source": await asrManager.hasCachedCtcLogits ? "ctc-head" : "ctc",
             ]
             detectionDetails.append(detail)
 

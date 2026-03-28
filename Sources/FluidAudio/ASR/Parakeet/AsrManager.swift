@@ -60,9 +60,11 @@ public actor AsrManager {
     /// Whether the Preprocessor outputs CTC logits (unified custom vocabulary model).
     public var hasCachedCtcLogits: Bool { cachedCtcLogits != nil }
 
-    /// Get cached CTC logits as [[Float]] for external use (e.g. benchmarks).
-    /// Returns nil if the Preprocessor doesn't output CTC logits.
-    public func getCachedCtcLogProbs() -> (logProbs: [[Float]], frameDuration: Double)? {
+    /// Get cached CTC raw logits as [[Float]] for external use (e.g. benchmarks).
+    /// These are raw logits — callers must apply `CtcKeywordSpotter.applyLogSoftmax()`
+    /// to convert to log-probabilities before use in keyword detection.
+    /// Returns nil if the CTC head model is not available or audio was multi-chunk.
+    public func getCachedCtcRawLogits() -> (rawLogits: [[Float]], frameDuration: Double)? {
         guard let logits = cachedCtcLogits, let duration = cachedCtcFrameDuration else { return nil }
         let shape = logits.shape
         guard shape.count == 3 else { return nil }
@@ -78,7 +80,7 @@ public actor AsrManager {
             }
             result.append(frame)
         }
-        return (logProbs: result, frameDuration: duration)
+        return (rawLogits: result, frameDuration: duration)
     }
 
     // Cached prediction options for reuse
@@ -336,6 +338,8 @@ public actor AsrManager {
         let layers = asrModels?.version.decoderLayers ?? 2
         microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
         systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
+        cachedCtcLogits = nil
+        cachedCtcFrameDuration = nil
         Task { await sharedMLArrayCache.clear() }
     }
 
@@ -350,7 +354,9 @@ public actor AsrManager {
         // Reset decoder states using fresh allocations for deterministic behavior
         microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
         systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
-        // Release vocabulary boosting resources
+        // Release vocabulary boosting resources and cached CTC data
+        cachedCtcLogits = nil
+        cachedCtcFrameDuration = nil
         disableVocabularyBoosting()
         Task { await sharedMLArrayCache.clear() }
         logger.info("AsrManager resources cleaned up")
