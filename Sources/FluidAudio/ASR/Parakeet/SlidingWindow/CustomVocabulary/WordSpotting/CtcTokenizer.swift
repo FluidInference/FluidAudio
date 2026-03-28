@@ -1,15 +1,11 @@
 import Foundation
-@preconcurrency import Tokenizers
-
-/// Type alias to disambiguate from local Tokenizer class
-private typealias HFTokenizerProtocol = Tokenizers.Tokenizer
 
 // MARK: - CTC Tokenizer
 
 /// CTC tokenizer using HuggingFace tokenizer.json for accurate BPE tokenization.
 /// This provides tokenization matching the original model training.
 public final class CtcTokenizer: Sendable {
-    private let hfTokenizer: HFTokenizer
+    private let bpeTokenizer: BpeTokenizer
 
     /// Errors that can occur during tokenizer initialization
     public enum Error: Swift.Error, LocalizedError {
@@ -47,8 +43,12 @@ public final class CtcTokenizer: Sendable {
             throw Error.tokenizerNotFound(modelDirectory)
         }
 
-        let hfTokenizer = try await HFTokenizer(modelFolder: modelDirectory)
-        return CtcTokenizer(hfTokenizer: hfTokenizer)
+        do {
+            let bpeTokenizer = try BpeTokenizer.load(from: modelDirectory)
+            return CtcTokenizer(bpeTokenizer: bpeTokenizer)
+        } catch {
+            throw Error.initializationFailed(error)
+        }
     }
 
     /// Load the CTC tokenizer asynchronously using the default 110m model directory.
@@ -62,8 +62,8 @@ public final class CtcTokenizer: Sendable {
     // MARK: - Private Init
 
     /// Private initializer used by async factory method
-    private init(hfTokenizer: HFTokenizer) {
-        self.hfTokenizer = hfTokenizer
+    private init(bpeTokenizer: BpeTokenizer) {
+        self.bpeTokenizer = bpeTokenizer
     }
 
     // MARK: - Encoding/Decoding
@@ -73,7 +73,7 @@ public final class CtcTokenizer: Sendable {
     /// - Parameter text: Text to encode
     /// - Returns: Array of token IDs
     public func encode(_ text: String) -> [Int] {
-        hfTokenizer.encode(text)
+        bpeTokenizer.encode(text, addSpecialTokens: false)
     }
 
     /// Get the CTC model directory path
@@ -91,47 +91,4 @@ public final class CtcTokenizer: Sendable {
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent("parakeet-ctc-110m-coreml", isDirectory: true)
     }
-}
-
-// MARK: - HuggingFace Tokenizer (Private Implementation)
-
-/// HuggingFace tokenizer that loads tokenizer.json directly using swift-transformers.
-/// This provides accurate BPE tokenization matching the original model training.
-/// Marked Sendable because it's immutable after initialization.
-private final class HFTokenizer: Sendable {
-    private let tokenizer: any HFTokenizerProtocol
-
-    /// Load tokenizer from a local model folder containing tokenizer.json
-    ///
-    /// Required files in folder:
-    /// - tokenizer.json (main tokenizer data)
-    /// - tokenizer_config.json (tokenizer settings)
-    ///
-    /// - Parameter modelFolder: URL to folder containing tokenizer files
-    init(modelFolder: URL) async throws {
-        // Verify required files exist
-        let tokenizerJsonPath = modelFolder.appendingPathComponent("tokenizer.json")
-        let tokenizerConfigPath = modelFolder.appendingPathComponent("tokenizer_config.json")
-
-        guard FileManager.default.fileExists(atPath: tokenizerJsonPath.path) else {
-            throw CtcTokenizer.Error.missingFile("tokenizer.json", modelFolder)
-        }
-        guard FileManager.default.fileExists(atPath: tokenizerConfigPath.path) else {
-            throw CtcTokenizer.Error.missingFile("tokenizer_config.json", modelFolder)
-        }
-
-        do {
-            self.tokenizer = try await AutoTokenizer.from(modelFolder: modelFolder)
-        } catch {
-            throw CtcTokenizer.Error.initializationFailed(error)
-        }
-    }
-
-    // MARK: - Encoding
-
-    /// Encode text to token IDs without special tokens.
-    func encode(_ text: String) -> [Int] {
-        tokenizer.encode(text: text, addSpecialTokens: false)
-    }
-
 }
