@@ -60,6 +60,8 @@ public struct AsrModels: Sendable {
     public let preprocessor: MLModel
     public let decoder: MLModel
     public let joint: MLModel
+    /// Optional CTC decoder head for custom vocabulary (encoder features → CTC logits)
+    public let ctcHead: MLModel?
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
     public let version: AsrModelVersion
@@ -71,6 +73,7 @@ public struct AsrModels: Sendable {
         preprocessor: MLModel,
         decoder: MLModel,
         joint: MLModel,
+        ctcHead: MLModel? = nil,
         configuration: MLModelConfiguration,
         vocabulary: [Int: String],
         version: AsrModelVersion
@@ -79,6 +82,7 @@ public struct AsrModels: Sendable {
         self.preprocessor = preprocessor
         self.decoder = decoder
         self.joint = joint
+        self.ctcHead = ctcHead
         self.configuration = configuration
         self.vocabulary = vocabulary
         self.version = version
@@ -207,11 +211,27 @@ extension AsrModels {
             throw AsrModelsError.loadingFailed("Failed to load decoder or joint model")
         }
 
+        // Optionally load CTC head model if present (for custom vocabulary)
+        let repoDir = repoPath(from: directory, version: version)
+        let ctcHeadPath = repoDir.appendingPathComponent(Names.ctcHeadFile)
+        var ctcHeadModel: MLModel?
+        if FileManager.default.fileExists(atPath: ctcHeadPath.path) {
+            let ctcConfig = MLModelConfiguration()
+            ctcConfig.computeUnits = config.computeUnits
+            ctcHeadModel = try? MLModel(contentsOf: ctcHeadPath, configuration: ctcConfig)
+            if ctcHeadModel != nil {
+                logger.info("Loaded optional CTC head model for custom vocabulary")
+            } else {
+                logger.warning("CTC head model found but failed to load: \(ctcHeadPath.path)")
+            }
+        }
+
         let asrModels = AsrModels(
             encoder: encoderModel,
             preprocessor: preprocessorModel,
             decoder: decoderModel,
             joint: jointModel,
+            ctcHead: ctcHeadModel,
             configuration: config,
             vocabulary: try loadVocabulary(from: directory, version: version),
             version: version

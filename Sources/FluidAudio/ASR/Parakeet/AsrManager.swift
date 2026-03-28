@@ -53,6 +53,34 @@ public actor AsrManager {
     internal var vocabSizeConfig: ContextBiasingConstants.VocabSizeConfig?
     internal var vocabBoostingEnabled: Bool { customVocabulary != nil && vocabularyRescorer != nil }
 
+    // Cached CTC logits from fused Preprocessor (unified custom vocabulary)
+    internal var cachedCtcLogits: MLMultiArray?
+    internal var cachedCtcFrameDuration: Double?
+
+    /// Whether the Preprocessor outputs CTC logits (unified custom vocabulary model).
+    public var hasCachedCtcLogits: Bool { cachedCtcLogits != nil }
+
+    /// Get cached CTC logits as [[Float]] for external use (e.g. benchmarks).
+    /// Returns nil if the Preprocessor doesn't output CTC logits.
+    public func getCachedCtcLogProbs() -> (logProbs: [[Float]], frameDuration: Double)? {
+        guard let logits = cachedCtcLogits, let duration = cachedCtcFrameDuration else { return nil }
+        let shape = logits.shape
+        guard shape.count == 3 else { return nil }
+        let numFrames = shape[1].intValue
+        let vocabSize = shape[2].intValue
+        var result: [[Float]] = []
+        result.reserveCapacity(numFrames)
+        for t in 0..<numFrames {
+            var frame: [Float] = []
+            frame.reserveCapacity(vocabSize)
+            for v in 0..<vocabSize {
+                frame.append(logits[[0, t, v] as [NSNumber]].floatValue)
+            }
+            result.append(frame)
+        }
+        return (logProbs: result, frameDuration: duration)
+    }
+
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {
         AsrModels.optimizedPredictionOptions()
