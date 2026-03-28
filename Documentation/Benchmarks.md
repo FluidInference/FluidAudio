@@ -150,6 +150,17 @@ Derived metrics:
 | Recall    | TP / (TP + FN)      | "Of words that should appear, how many did we find?" |
 | F-Score   | 2 × P × R / (P + R) | Harmonic mean of precision and recall                |
 
+### Issue #435: Standalone CTC Head for Custom Vocabulary (Beta)
+
+Benchmark comparing separate CTC encoder vs standalone CTC head extracted from the TDT-CTC-110M hybrid model.
+See [#435](https://github.com/FluidInference/FluidAudio/issues/435) and [PR #450](https://github.com/FluidInference/FluidAudio/pull/450).
+
+| Metric | Separate CTC (v2 TDT) | Separate CTC (110m TDT) | Standalone CTC Head (110m TDT) |
+|---|---|---|---|
+| Dict Recall | 99.3% | 99.4% | 99.4% |
+| RTFx | 43.94x | 25.98x | 70.29x |
+| Additional model size | 97.5 MB | 97.5 MB | 1 MB |
+
 ## Text-to-Speech
 
 We generated the same strings with to generate audio between 1s to ~300s in order to test the speed across a range of varying inputs on Pytorch CPU, MPS, and MLX pipeline, and compared it against the native Swift version with Core ML models.
