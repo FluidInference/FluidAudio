@@ -44,10 +44,10 @@ Benchmark comparison between `main` and PR #440 (`standardize-asr-directory-stru
 
 ---
 
-# Issue #435: Unified CTC Head Export (Full Dataset)
+# Issue #435: Standalone CTC Head for Custom Vocabulary (Beta)
 
-Benchmark comparing separate CTC encoder vs unified CTC head exported from TDT-CTC-110M Preprocessor.
-See [#435](https://github.com/FluidInference/FluidAudio/issues/435).
+Benchmark comparing separate CTC encoder vs standalone CTC head extracted from the TDT-CTC-110M hybrid model.
+See [#435](https://github.com/FluidInference/FluidAudio/issues/435) and [PR #450](https://github.com/FluidInference/FluidAudio/pull/450).
 
 ## Environment
 
@@ -58,25 +58,28 @@ See [#435](https://github.com/FluidInference/FluidAudio/issues/435).
 
 ## CTC Earnings (Earnings22-KWS, 772 files)
 
-| Metric | Separate CTC (v2 TDT) | Separate CTC (110m TDT) | Unified CTC (110m TDT) |
+| Metric | Separate CTC (v2 TDT) | Separate CTC (110m TDT) | Standalone CTC Head (110m TDT) |
 |---|---|---|---|
 | WER | 14.67% | 16.08% | 16.88% |
 | Dict Recall | 99.3% | 99.4% | 99.4% |
 | Vocab Precision | 99.8% | 99.7% | 99.6% |
 | Vocab Recall | 73.7% | 70.0% | 59.6% |
 | Vocab F-score | 84.8% | 82.0% | 74.6% |
-| RTFx | 43.94x | 25.98x | **48.35x** |
+| RTFx | 43.94x | 25.98x | **70.29x** |
+| Additional model size | 97.5 MB | 97.5 MB | **1 MB** |
 
 ## Analysis
 
-- **Dict Recall**: Identical at 99.4% between separate and unified 110m paths. The unified CTC head produces equivalent keyword detection quality.
-- **RTFx**: **48.35x** (unified) vs **25.98x** (separate 110m) = **86% speedup**. Eliminating the separate CTC encoder run nearly doubles throughput.
-- **WER**: Slight increase (16.08% → 16.88%) because the unified CTC head's logits have different characteristics than the separately-trained CTC model, affecting vocabulary rescoring decisions.
+- **Dict Recall**: Identical at 99.4% between separate CTC encoder and standalone CTC head. The CTC head produces equivalent keyword detection quality.
+- **RTFx**: **70.29x** (standalone head) vs **25.98x** (separate encoder) = **2.7x speedup**. The CTC head runs on the existing TDT encoder output with no second encoder pass.
+- **Model size**: 1 MB (standalone head) vs 97.5 MB (separate CTC encoder) = **97x smaller**.
+- **WER**: Slight increase (16.08% → 16.88%) because the CTC head's logits have different characteristics than the separately-trained CTC encoder, affecting vocabulary rescoring decisions.
 - **Vocab Recall**: Lower (70.0% → 59.6%) for the same reason — the CTC head's logit distribution differs from the standalone CTC model, leading to fewer vocabulary replacements being applied. This is a rescoring tuning issue, not a detection issue.
 
 ## Key Takeaways
 
-1. **Unified model eliminates separate CTC encoder** — single Preprocessor outputs both TDT encoder features and CTC logits
-2. **Memory reduction**: ~40MB saved by removing duplicate encoder weights
-3. **Dict Recall preserved**: Keyword detection quality is identical
-4. **RTFx nearly doubled**: No second encoder pass needed for custom vocabulary workloads
+1. **Standalone CTC head eliminates separate CTC encoder** — a 1MB linear projection on the shared TDT encoder output
+2. **97x smaller**: 1 MB vs 97.5 MB additional model weight
+3. **Dict Recall preserved**: Keyword detection quality is identical at 99.4%
+4. **2.7x faster**: No second encoder pass needed for custom vocabulary workloads
+5. **Beta status**: Auto-download from HuggingFace and local file loading both supported

@@ -17,6 +17,58 @@ The paper introduces a dynamic programming algorithm for CTC-based keyword spott
 
 ## Architecture Overview
 
+FluidAudio supports two approaches for CTC-based custom vocabulary boosting:
+
+### Approach 1: Standalone CTC Head (Beta, Recommended for TDT-CTC-110M)
+
+```
+                  ┌─────────────────────────────────────────┐
+                  │            Audio Input                  │
+                  │           (16kHz, mono)                 │
+                  └─────────────────┬───────────────────────┘
+                                    │
+                                    ▼
+                          ┌─────────────────┐
+                          │  TDT-CTC-110M   │
+                          │  Preprocessor   │
+                          │ (fused encoder) │
+                          └────────┬────────┘
+                                   │
+                          encoder output [1, 512, T]
+                                   │
+                    ┌──────────────┴──────────────┐
+                    │                             │
+                    ▼                             ▼
+          ┌─────────────────┐           ┌─────────────────┐
+          │   TDT Decoder   │           │    CTC Head     │
+          │  + Joint Network│           │ (1MB, beta)     │
+          └────────┬────────┘           └────────┬────────┘
+                   │                             │
+                   ▼                    ctc_logits [1, T, 1025]
+          ┌─────────────────┐                    │
+          │   Raw Transcript│                    ▼
+          │  "in video corp"│           ┌─────────────────┐
+          └────────┬────────┘  Custom   │ Keyword Spotter │
+                   │         Vocabulary►│   (DP Algorithm) │
+                   │                    └────────┬────────┘
+                   └──────────────┬──────────────┘
+                                  ▼
+                        ┌─────────────────┐
+                        │   Vocabulary    │
+                        │    Rescorer     │
+                        └────────┬────────┘
+                                 │
+                                 ▼
+                        ┌─────────────────┐
+                        │ Final Transcript│
+                        │   "NVIDIA Corp" │
+                        └─────────────────┘
+```
+
+The standalone CTC head is a single linear projection (512 → 1025) extracted from the hybrid TDT-CTC-110M model. It reuses the TDT encoder output, requiring only ~1MB of additional model weight and no second encoder pass.
+
+### Approach 2: Separate CTC Encoder (Original)
+
 ```
                   ┌─────────────────────────────────────────┐
                   │            Audio Input                  │
@@ -58,23 +110,36 @@ The paper introduces a dynamic programming algorithm for CTC-based keyword spott
                             └─────────────────┘
 ```
 
-## Dual Encoder Alignment
+### Approach Comparison
+
+| | Standalone CTC Head (beta) | Separate CTC Encoder |
+|---|---|---|
+| **Additional model size** | 1 MB | 97.5 MB |
+| **Second encoder pass** | No | Yes |
+| **RTFx (earnings benchmark)** | 70.29x | 25.98x |
+| **Dict Recall** | 99.4% | 99.4% |
+| **TDT model requirement** | TDT-CTC-110M only | Any TDT model |
+| **Status** | Beta | Stable |
+
+The standalone CTC head is available only with the TDT-CTC-110M model because both the TDT and CTC heads share the same encoder in the hybrid architecture. For Parakeet TDT v2/v3 (0.6B), the separate CTC encoder approach is required.
+
+## Encoder Alignment
+
+### Separate CTC Encoder (Approach 2)
 
 The system uses two separate neural network encoders that process the same audio:
 
-### 1. TDT Encoder (Primary Transcription)
+#### TDT Encoder (Primary Transcription)
 - **Model**: Parakeet TDT 0.6B (600M parameters)
 - **Architecture**: Token Duration Transducer with FastConformer
 - **Output**: High-quality transcription with word timestamps
 - **Frame Rate**: ~40ms per frame
 
-### 2. CTC Encoder (Keyword Spotting)
+#### CTC Encoder (Keyword Spotting)
 - **Model**: Parakeet CTC 110M (110M parameters)
 - **Architecture**: FastConformer with CTC head
 - **Output**: Per-frame log-probabilities over 1024 tokens
 - **Frame Rate**: ~40ms per frame (aligned with TDT)
-
-### Frame Alignment
 
 Both encoders use the same audio preprocessing (mel spectrogram with identical parameters), producing frames at the same rate. This enables direct timestamp comparison between:
 - TDT decoder word timestamps
@@ -88,18 +153,20 @@ CTC Frames: [0] [1] [2] ... [374] (375 frames @ 40ms)
             Aligned timestamps
 ```
 
-### Memory Usage
+#### Memory Usage
 
 Running two encoders in parallel increases peak memory consumption:
 
 | Configuration | Peak RAM | Notes |
 |---------------|----------|-------|
 | TDT encoder only | ~66 MB | Standard transcription |
-| TDT + CTC encoders | ~130 MB | With vocabulary boosting |
+| TDT + CTC encoders | ~130 MB | With vocabulary boosting (separate encoder) |
+| TDT + CTC head | ~67 MB | With vocabulary boosting (standalone head, beta) |
 
 *Measured on iPhone 17 Pro. Memory settles after initial model loading.*
 
-The additional ~64 MB overhead comes from the CTC encoder (Parakeet 110M) being loaded alongside the primary TDT encoder. For memory-constrained scenarios, consider:
+The standalone CTC head adds negligible memory (~1MB) since it reuses the existing encoder output. The separate CTC encoder adds ~64MB overhead. For memory-constrained scenarios, consider:
+- Using the standalone CTC head with TDT-CTC-110M (beta)
 - Loading the CTC encoder on-demand rather than at startup
 - Unloading the CTC encoder after transcription completes
 - Using vocabulary boosting only for files where domain terms are expected
