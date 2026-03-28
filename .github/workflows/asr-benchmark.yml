@@ -198,9 +198,38 @@ jobs:
           echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
           echo "FILES_COUNT=$MAX_FILES" >> $GITHUB_OUTPUT
 
+          # Validate RTFx values - 0 indicates benchmark failure
+          if [ "$CLEAN_RTFx" = "0.00" ] || [ "$CLEAN_RTFx" = "0.0" ] || [ "$CLEAN_RTFx" = "0" ] || [ "$CLEAN_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: test-clean RTFx is 0 or N/A - benchmark failed"
+            CLEAN_RTFX_FAILED=1
+          fi
+          if [ "$CLEAN_V2_RTFx" = "0.00" ] || [ "$CLEAN_V2_RTFx" = "0.0" ] || [ "$CLEAN_V2_RTFx" = "0" ] || [ "$CLEAN_V2_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: test-clean (v2) RTFx is 0 or N/A - benchmark failed"
+            CLEAN_V2_RTFX_FAILED=1
+          fi
+          if [ "$OTHER_RTFx" = "0.00" ] || [ "$OTHER_RTFx" = "0.0" ] || [ "$OTHER_RTFx" = "0" ] || [ "$OTHER_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: test-other RTFx is 0 or N/A - benchmark failed"
+            OTHER_RTFX_FAILED=1
+          fi
+          if [ "$OTHER_V2_RTFx" = "0.00" ] || [ "$OTHER_V2_RTFx" = "0.0" ] || [ "$OTHER_V2_RTFx" = "0" ] || [ "$OTHER_V2_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: test-other (v2) RTFx is 0 or N/A - benchmark failed"
+            OTHER_V2_RTFX_FAILED=1
+          fi
+          if [ "$STREAMING_RTFx" = "0.00" ] || [ "$STREAMING_RTFx" = "0.0" ] || [ "$STREAMING_RTFx" = "0" ] || [ "$STREAMING_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: streaming RTFx is 0 or N/A - benchmark failed"
+            STREAMING_RTFX_FAILED=1
+          fi
+          if [ "$STREAMING_V2_RTFx" = "0.00" ] || [ "$STREAMING_V2_RTFx" = "0.0" ] || [ "$STREAMING_V2_RTFx" = "0" ] || [ "$STREAMING_V2_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: streaming (v2) RTFx is 0 or N/A - benchmark failed"
+            STREAMING_V2_RTFX_FAILED=1
+          fi
+
           # Report failures summary
           if [ ! -z "$CLEAN_FAILED" ] || [ ! -z "$OTHER_FAILED" ] || [ ! -z "$STREAMING_FAILED" ] || \
-             [ ! -z "$CLEAN_V2_FAILED" ] || [ ! -z "$OTHER_V2_FAILED" ] || [ ! -z "$STREAMING_V2_FAILED" ]; then
+             [ ! -z "$CLEAN_V2_FAILED" ] || [ ! -z "$OTHER_V2_FAILED" ] || [ ! -z "$STREAMING_V2_FAILED" ] || \
+             [ ! -z "$CLEAN_RTFX_FAILED" ] || [ ! -z "$CLEAN_V2_RTFX_FAILED" ] || \
+             [ ! -z "$OTHER_RTFX_FAILED" ] || [ ! -z "$OTHER_V2_RTFX_FAILED" ] || \
+             [ ! -z "$STREAMING_RTFX_FAILED" ] || [ ! -z "$STREAMING_V2_RTFX_FAILED" ]; then
             echo "BENCHMARK_STATUS=PARTIAL_FAILURE" >> $GITHUB_OUTPUT
             echo "⚠️ Some benchmarks failed:"
             [ ! -z "$CLEAN_FAILED" ] && echo "  - test-clean benchmark failed"
@@ -209,14 +238,20 @@ jobs:
             [ ! -z "$CLEAN_V2_FAILED" ] && echo "  - test-clean (v2) benchmark failed"
             [ ! -z "$OTHER_V2_FAILED" ] && echo "  - test-other (v2) benchmark failed"
             [ ! -z "$STREAMING_V2_FAILED" ] && echo "  - streaming (v2) benchmark failed"
-            # Don't exit with error to allow PR comment to be posted
+            [ ! -z "$CLEAN_RTFX_FAILED" ] && echo "  - test-clean RTFx is 0"
+            [ ! -z "$CLEAN_V2_RTFX_FAILED" ] && echo "  - test-clean (v2) RTFx is 0"
+            [ ! -z "$OTHER_RTFX_FAILED" ] && echo "  - test-other RTFx is 0"
+            [ ! -z "$OTHER_V2_RTFX_FAILED" ] && echo "  - test-other (v2) RTFx is 0"
+            [ ! -z "$STREAMING_RTFX_FAILED" ] && echo "  - streaming RTFx is 0"
+            [ ! -z "$STREAMING_V2_RTFX_FAILED" ] && echo "  - streaming (v2) RTFx is 0"
+            exit 1
           else
             echo "BENCHMARK_STATUS=SUCCESS" >> $GITHUB_OUTPUT
             echo "✅ All benchmarks completed successfully"
           fi
 
       - name: Comment PR
-        if: github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         continue-on-error: true
         uses: actions/github-script@v7
         with:
