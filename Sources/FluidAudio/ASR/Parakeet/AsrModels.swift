@@ -60,6 +60,8 @@ public struct AsrModels: Sendable {
     public let preprocessor: MLModel
     public let decoder: MLModel
     public let joint: MLModel
+    /// Optional CTC decoder head for custom vocabulary (encoder features → CTC logits)
+    public let ctcHead: MLModel?
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
     public let version: AsrModelVersion
@@ -71,6 +73,7 @@ public struct AsrModels: Sendable {
         preprocessor: MLModel,
         decoder: MLModel,
         joint: MLModel,
+        ctcHead: MLModel? = nil,
         configuration: MLModelConfiguration,
         vocabulary: [Int: String],
         version: AsrModelVersion
@@ -79,6 +82,7 @@ public struct AsrModels: Sendable {
         self.preprocessor = preprocessor
         self.decoder = decoder
         self.joint = joint
+        self.ctcHead = ctcHead
         self.configuration = configuration
         self.vocabulary = vocabulary
         self.version = version
@@ -207,11 +211,52 @@ extension AsrModels {
             throw AsrModelsError.loadingFailed("Failed to load decoder or joint model")
         }
 
+        // [Beta] Optionally load CTC head model for custom vocabulary.
+        // Supports two paths:
+        //   v1: CtcHead.mlmodelc placed manually in the TDT model directory
+        //   v2: Auto-download from FluidInference/parakeet-ctc-110m-coreml HF repo
+        var ctcHeadModel: MLModel?
+        if version == .tdtCtc110m {
+            // v1: Check local TDT model directory first
+            let repoDir = repoPath(from: directory, version: version)
+            let ctcHeadPath = repoDir.appendingPathComponent(Names.ctcHeadFile)
+            if FileManager.default.fileExists(atPath: ctcHeadPath.path) {
+                let ctcConfig = MLModelConfiguration()
+                ctcConfig.computeUnits = config.computeUnits
+                ctcHeadModel = try? MLModel(contentsOf: ctcHeadPath, configuration: ctcConfig)
+                if ctcHeadModel != nil {
+                    logger.info("[Beta] Loaded CTC head model from local directory")
+                } else {
+                    logger.warning("CTC head model found but failed to load: \(ctcHeadPath.path)")
+                }
+            }
+
+            // v2: Fall back to downloading from parakeet-ctc-110m HF repo
+            if ctcHeadModel == nil {
+                do {
+                    let ctcModels = try await DownloadUtils.loadModels(
+                        .parakeetCtc110m,
+                        modelNames: [Names.ctcHeadFile],
+                        directory: parentDirectory,
+                        computeUnits: config.computeUnits,
+                        progressHandler: progressHandler
+                    )
+                    ctcHeadModel = ctcModels[Names.ctcHeadFile]
+                    if ctcHeadModel != nil {
+                        logger.info("[Beta] Loaded CTC head model from HF repo")
+                    }
+                } catch {
+                    logger.warning("CTC head model not available: \(error.localizedDescription)")
+                }
+            }
+        }
+
         let asrModels = AsrModels(
             encoder: encoderModel,
             preprocessor: preprocessorModel,
             decoder: decoderModel,
             joint: jointModel,
+            ctcHead: ctcHeadModel,
             configuration: config,
             vocabulary: try loadVocabulary(from: directory, version: version),
             version: version

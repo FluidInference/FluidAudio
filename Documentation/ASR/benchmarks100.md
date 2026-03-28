@@ -41,3 +41,15 @@ Benchmark comparison between `main` and PR #440 (`standardize-asr-directory-stru
 ## Verdict
 
 **No regressions.** WER is identical across all 6 benchmarks. RTFx differences are within normal system noise (M2 thermals, background processes). The directory restructuring is a pure file move with no behavioral changes.
+
+## Issue #435: Standalone CTC Head for Custom Vocabulary (Beta)
+
+Benchmark comparing separate CTC encoder vs standalone CTC head extracted from the TDT-CTC-110M hybrid model.
+See [#435](https://github.com/FluidInference/FluidAudio/issues/435) and [PR #450](https://github.com/FluidInference/FluidAudio/pull/450).
+
+| Metric | Separate CTC (v2 TDT) | Separate CTC (110m TDT) | Standalone CTC Head (110m TDT) |
+|---|---|---|---|
+| Dict Recall | 99.3% | 99.4% | 99.4% |
+| RTFx | 43.94x | 25.98x | 70.29x |
+| Additional model size | 97.5 MB | 97.5 MB | 1 MB |
+

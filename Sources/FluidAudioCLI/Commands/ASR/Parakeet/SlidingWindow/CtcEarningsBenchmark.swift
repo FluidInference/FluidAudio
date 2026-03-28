@@ -90,8 +90,15 @@ public enum CtcEarningsBenchmark {
                 }
             case "--tdt-version":
                 if i + 1 < arguments.count {
-                    if arguments[i + 1] == "v2" || arguments[i + 1] == "2" {
+                    switch arguments[i + 1].lowercased() {
+                    case "v2", "2":
                         tdtVersion = .v2
+                    case "v3", "3":
+                        tdtVersion = .v3
+                    case "110m", "ctc-110m", "tdt-ctc-110m":
+                        tdtVersion = .tdtCtc110m
+                    default:
+                        break
                     }
                     i += 1
                 }
@@ -144,7 +151,7 @@ public enum CtcEarningsBenchmark {
         print("Earnings Benchmark (TDT transcription + CTC keyword spotting)")
         print("  Data directory: \(dataDir ?? "not found")")
         print("  Output file: \(outputFile)")
-        print("  TDT version: \(tdtVersion == .v2 ? "v2" : "v3")")
+        print("  TDT version: \(tdtVersion == .v2 ? "v2" : tdtVersion == .tdtCtc110m ? "110m" : "v3")")
         print("  CTC variant: \(ctcVariant.displayName)")
         print("  CTC model: \(ctcModelPath ?? "not found")")
         print("  Keywords mode: \(keywordsMode.rawValue)")
@@ -171,7 +178,9 @@ public enum CtcEarningsBenchmark {
 
         do {
             // Load TDT models for transcription
-            print("Loading TDT models (\(tdtVersion == .v2 ? "v2" : "v3")) for transcription...")
+            print(
+                "Loading TDT models (\(tdtVersion == .v2 ? "v2" : tdtVersion == .tdtCtc110m ? "110m" : "v3")) for transcription..."
+            )
             let tdtModels = try await AsrModels.downloadAndLoad(version: tdtVersion)
             let asrManager = AsrManager(config: .default)
             try await asrManager.initialize(models: tdtModels)
@@ -499,21 +508,28 @@ public enum CtcEarningsBenchmark {
         let customVocab = CustomVocabularyContext(terms: vocabTerms)
 
         // 3. CTC keyword spotting for high recall dictionary detection
-        let spotResult = try await spotter.spotKeywordsWithLogProbs(
-            audioSamples: samples,
-            customVocabulary: customVocab,
-            minScore: nil
-        )
-
-        // Debug: Show CTC detections with timestamps
-        if debugTimings && !spotResult.detections.isEmpty {
-            print("  CTC Detections:")
-            for detection in spotResult.detections {
-                print(
-                    "    [\(String(format: "%.2f", detection.startTime))-\(String(format: "%.2f", detection.endTime))s] \"\(detection.term.text)\" (score: \(String(format: "%.2f", detection.score)))"
-                )
-            }
+        // Use cached CTC logits from unified Preprocessor if available (no separate encoder run needed)
+        let logProbs: [[Float]]
+        let frameDuration: Double
+        if let cached = await asrManager.getCachedCtcRawLogits() {
+            // Cached values are raw logits - apply log-softmax + temperature + blank bias
+            logProbs = CtcKeywordSpotter.applyLogSoftmax(
+                rawLogits: cached.rawLogits,
+                blankId: spotter.blankId
+            )
+            frameDuration = cached.frameDuration
+        } else {
+            let spotResult = try await spotter.spotKeywordsWithLogProbs(
+                audioSamples: samples,
+                customVocabulary: customVocab,
+                minScore: nil
+            )
+            logProbs = spotResult.logProbs
+            frameDuration = spotResult.frameDuration
         }
+
+        // Debug: Show CTC detections with timestamps (only available with separate spotter path)
+        // When using cached CTC logits, detections are not available
 
         // 4. Post-process: Use VocabularyRescorer with timestamp-based matching (NeMo CTC-WS)
         // Set USE_TIMESTAMP_RESCORING=1 to use timestamp-based matching (default)
@@ -558,8 +574,8 @@ public enum CtcEarningsBenchmark {
                 let rescoreResult = rescorer.ctcTokenRescore(
                     transcript: tdtResult.text,
                     tokenTimings: tokenTimings,
-                    logProbs: spotResult.logProbs,
-                    frameDuration: spotResult.frameDuration,
+                    logProbs: logProbs,
+                    frameDuration: frameDuration,
                     cbw: cbw,
                     marginSeconds: 0.5,
                     minSimilarity: minSimilarity
@@ -602,19 +618,26 @@ public enum CtcEarningsBenchmark {
         let checkWordsLowerSet = Set(checkWords.map { $0.lowercased() })
 
         // 1. CTC detections (deduplicate - only count each word once, only if in checkWords)
+        // Reuse pre-computed logProbs for keyword detection (avoids duplicate CTC inference)
+        let spotResult = spotter.spotKeywordsFromLogProbs(
+            logProbs: logProbs,
+            frameDuration: frameDuration,
+            customVocabulary: customVocab,
+            minScore: nil
+        )
+
         for detection in spotResult.detections {
             let detail: [String: Any] = [
                 "word": detection.term.text,
                 "score": round(Double(detection.score) * 100) / 100,
                 "startTime": round(detection.startTime * 100) / 100,
                 "endTime": round(detection.endTime * 100) / 100,
-                "source": "ctc",
+                "source": await asrManager.hasCachedCtcLogits ? "ctc-head" : "ctc",
             ]
             detectionDetails.append(detail)
 
             if detection.score >= minCtcScore {
                 let wordLower = detection.term.text.lowercased()
-                // Only count if word is in checkWords and not already counted
                 if checkWordsLowerSet.contains(wordLower) && !ctcFoundWords.contains(wordLower) {
                     dictFound += 1
                     ctcFoundWords.insert(wordLower)

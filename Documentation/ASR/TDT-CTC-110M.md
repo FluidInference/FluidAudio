@@ -465,9 +465,78 @@ Tested on iPhone (iOS 17+):
 - Highest accuracy required
 - Extra model size acceptable
 
+## Standalone CTC Head for Custom Vocabulary (Beta)
+
+The TDT-CTC-110M hybrid model shares one FastConformer encoder between its TDT and CTC decoder heads. FluidAudio exploits this by exporting the CTC decoder head as a standalone 1MB CoreML model (`CtcHead.mlmodelc`) that runs on the existing TDT encoder output, enabling custom vocabulary keyword spotting without a second encoder pass.
+
+### How It Works
+
+```
+TDT Preprocessor (fused encoder)
+        │
+        ▼
+encoder output [1, 512, T]
+        │
+   ┌────┴────┐
+   │         │
+   ▼         ▼
+TDT Decoder  CtcHead (1MB, beta)
+   │         │
+   ▼         ▼
+transcript   ctc_logits [1, T, 1025]
+                  │
+                  ▼
+         Keyword Spotter / VocabularyRescorer
+```
+
+The CTC head is a single linear projection (512 → 1025) that maps the 512-dimensional encoder features to log-probabilities over 1024 BPE tokens + 1 blank token.
+
+### Performance
+
+Benchmarked on 772 earnings call files (Earnings22-KWS):
+
+| Approach | Model Size | Dict Recall | RTFx |
+|----------|-----------|-------------|------|
+| Separate CTC encoder | 97.5 MB | 99.4% | 25.98x |
+| **Standalone CTC head** | **1 MB** | **99.4%** | **70.29x** |
+
+The standalone CTC head achieves identical keyword detection quality at 2.7x the speed, using 97x less model weight.
+
+### Loading
+
+The CTC head model auto-downloads from [FluidInference/parakeet-ctc-110m-coreml](https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml) when loading the TDT-CTC-110M model. It also supports manual placement in the TDT model directory.
+
+Two loading paths are supported:
+1. **Local (v1):** Place `CtcHead.mlmodelc` in the TDT model directory (`parakeet-tdt-ctc-110m/`)
+2. **Auto-download (v2):** Automatically downloaded from the `parakeet-ctc-110m-coreml` HuggingFace repo
+
+```swift
+// CTC head loads automatically with TDT-CTC-110M models
+let models = try await AsrModels.downloadAndLoad(version: .tdtCtc110m)
+// models.ctcHead is non-nil when CtcHead.mlmodelc is available
+```
+
+### Conversion
+
+The CTC head is exported using the conversion script in the mobius repo:
+
+```bash
+cd mobius/models/stt/parakeet-tdt-ctc-110m/coreml/
+uv run python export-ctc-head.py --output-dir ./ctc-head-build
+xcrun coremlcompiler compile ctc-head-build/CtcHead.mlpackage ctc-head-build/
+```
+
+See [mobius PR #36](https://github.com/FluidInference/mobius/pull/36) for the conversion script.
+
+### Status
+
+This feature is **beta**. The CTC head produces identical keyword detection results to the separate CTC encoder, but the auto-download pathway and integration are new. See [#435](https://github.com/FluidInference/FluidAudio/issues/435) and [PR #450](https://github.com/FluidInference/FluidAudio/pull/450) for details.
+
 ## Resources
 
 - **Model:** [FluidInference/parakeet-tdt-ctc-110m-coreml](https://huggingface.co/FluidInference/parakeet-tdt-ctc-110m-coreml)
+- **CTC Head model:** [FluidInference/parakeet-ctc-110m-coreml](https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml) (includes CtcHead.mlmodelc)
 - **Benchmark results:** See `benchmarks.md`
 - **PR:** [#433 - Add TDT-CTC-110M support](https://github.com/FluidInference/FluidAudio/pull/433)
+- **CTC Head PR:** [#450 - Add standalone CTC head for custom vocabulary](https://github.com/FluidInference/FluidAudio/pull/450)
 - **Original NVIDIA model:** [nvidia/parakeet-tdt-1.1b](https://huggingface.co/nvidia/parakeet-tdt-1.1b)

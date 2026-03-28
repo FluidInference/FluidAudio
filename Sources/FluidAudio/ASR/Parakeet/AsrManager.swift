@@ -53,6 +53,37 @@ public actor AsrManager {
     internal var vocabSizeConfig: ContextBiasingConstants.VocabSizeConfig?
     internal var vocabBoostingEnabled: Bool { customVocabulary != nil && vocabularyRescorer != nil }
 
+    // Cached CTC logits from fused Preprocessor (unified custom vocabulary)
+    internal var cachedCtcLogits: MLMultiArray?
+    internal var cachedCtcFrameDuration: Double?
+    internal var cachedCtcValidFrames: Int?
+
+    /// Whether the Preprocessor outputs CTC logits (unified custom vocabulary model).
+    public var hasCachedCtcLogits: Bool { cachedCtcLogits != nil }
+
+    /// Get cached CTC raw logits as [[Float]] for external use (e.g. benchmarks).
+    /// These are raw logits — callers must apply `CtcKeywordSpotter.applyLogSoftmax()`
+    /// to convert to log-probabilities before use in keyword detection.
+    /// Returns nil if the CTC head model is not available or audio was multi-chunk.
+    public func getCachedCtcRawLogits() -> (rawLogits: [[Float]], frameDuration: Double)? {
+        guard let logits = cachedCtcLogits, let duration = cachedCtcFrameDuration else { return nil }
+        let shape = logits.shape
+        guard shape.count == 3 else { return nil }
+        let numFrames = min(shape[1].intValue, cachedCtcValidFrames ?? shape[1].intValue)
+        let vocabSize = shape[2].intValue
+        var result: [[Float]] = []
+        result.reserveCapacity(numFrames)
+        for t in 0..<numFrames {
+            var frame: [Float] = []
+            frame.reserveCapacity(vocabSize)
+            for v in 0..<vocabSize {
+                frame.append(logits[[0, t, v] as [NSNumber]].floatValue)
+            }
+            result.append(frame)
+        }
+        return (rawLogits: result, frameDuration: duration)
+    }
+
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {
         AsrModels.optimizedPredictionOptions()
@@ -308,6 +339,9 @@ public actor AsrManager {
         let layers = asrModels?.version.decoderLayers ?? 2
         microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
         systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
+        cachedCtcLogits = nil
+        cachedCtcFrameDuration = nil
+        cachedCtcValidFrames = nil
         Task { await sharedMLArrayCache.clear() }
     }
 
@@ -322,7 +356,10 @@ public actor AsrManager {
         // Reset decoder states using fresh allocations for deterministic behavior
         microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
         systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
-        // Release vocabulary boosting resources
+        // Release vocabulary boosting resources and cached CTC data
+        cachedCtcLogits = nil
+        cachedCtcFrameDuration = nil
+        cachedCtcValidFrames = nil
         disableVocabularyBoosting()
         Task { await sharedMLArrayCache.clear() }
         logger.info("AsrManager resources cleaned up")

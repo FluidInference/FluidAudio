@@ -178,6 +178,133 @@ public struct CtcKeywordSpotter: Sendable {
         )
     }
 
+    /// Spot keywords using pre-computed log-probabilities (no CTC inference).
+    /// Use this when CTC logProbs are already available (e.g. from a unified Preprocessor
+    /// that exports CTC logits alongside encoder features).
+    ///
+    /// - Parameters:
+    ///   - logProbs: Pre-computed CTC log-probabilities [T, V].
+    ///   - frameDuration: Duration of each CTC frame in seconds.
+    ///   - customVocabulary: Vocabulary context with pre-tokenized terms.
+    ///   - minScore: Optional minimum score threshold for detections.
+    /// - Returns: SpotKeywordsResult containing detections and the same log-probs passed in.
+    public func spotKeywordsFromLogProbs(
+        logProbs: [[Float]],
+        frameDuration: Double,
+        customVocabulary: CustomVocabularyContext,
+        minScore: Float? = nil
+    ) -> SpotKeywordsResult {
+        let totalFrames = logProbs.count
+        guard totalFrames > 0 else {
+            return SpotKeywordsResult(detections: [], logProbs: [], frameDuration: 0, totalFrames: 0)
+        }
+
+        var results: [KeywordDetection] = []
+
+        for term in customVocabulary.terms {
+            guard term.text.count >= customVocabulary.minTermLength else {
+                if debugMode {
+                    logger.debug(
+                        "  Skipping '\(term.text)': too short (\(term.text.count) < \(customVocabulary.minTermLength) chars)"
+                    )
+                }
+                continue
+            }
+
+            let ids = term.ctcTokenIds ?? term.tokenIds
+            guard let ids, !ids.isEmpty else { continue }
+
+            let tokenCount = ids.count
+            let adjustedThreshold: Float =
+                minScore.map { base in
+                    let extraTokens = max(0, tokenCount - ContextBiasingConstants.baselineTokenCountForThreshold)
+                    return base - Float(extraTokens) * ContextBiasingConstants.thresholdRelaxationPerToken
+                } ?? ContextBiasingConstants.defaultMinSpotterScore
+
+            let multipleDetections = ctcWordSpotMultiple(
+                logProbs: logProbs,
+                keywordTokens: ids,
+                minScore: adjustedThreshold,
+                mergeOverlap: true
+            )
+
+            for (score, start, end) in multipleDetections {
+                let startTime = TimeInterval(start) * frameDuration
+                let endTime = TimeInterval(end) * frameDuration
+
+                let detection = KeywordDetection(
+                    term: term,
+                    score: score,
+                    totalFrames: totalFrames,
+                    startFrame: start,
+                    endFrame: end,
+                    startTime: startTime,
+                    endTime: endTime
+                )
+                results.append(detection)
+            }
+        }
+
+        return SpotKeywordsResult(
+            detections: results,
+            logProbs: logProbs,
+            frameDuration: frameDuration,
+            totalFrames: totalFrames
+        )
+    }
+
+    // MARK: - Log-Probability Conversion
+
+    /// Convert raw CTC logits to log-probabilities with temperature scaling and blank bias.
+    /// Use this to post-process raw logits from a unified Preprocessor before passing to
+    /// `spotKeywordsFromLogProbs` or `VocabularyRescorer.ctcTokenRescore`.
+    ///
+    /// - Parameters:
+    ///   - rawLogits: Raw CTC logits [T, V] (before softmax).
+    ///   - blankId: Index of the blank token in the vocabulary.
+    ///   - temperature: Temperature for softmax scaling (default from ContextBiasingConstants).
+    ///   - blankBias: Penalty applied to blank token log-probability (default from ContextBiasingConstants).
+    /// - Returns: Log-probabilities [T, V] after log-softmax, temperature, and blank bias.
+    public static func applyLogSoftmax(
+        rawLogits: [[Float]],
+        blankId: Int,
+        temperature: Float = ContextBiasingConstants.ctcTemperature,
+        blankBias: Float = ContextBiasingConstants.blankBias
+    ) -> [[Float]] {
+        var logProbs = [[Float]]()
+        logProbs.reserveCapacity(rawLogits.count)
+
+        for logits in rawLogits {
+            guard !logits.isEmpty else {
+                logProbs.append([])
+                continue
+            }
+
+            // Temperature scaling
+            let scaled = temperature != 1.0 ? logits.map { $0 / temperature } : logits
+
+            // Log-softmax
+            let maxVal = scaled.max() ?? 0
+            var sumExp: Float = 0
+            for v in scaled { sumExp += expf(v - maxVal) }
+            let logSumExp = logf(sumExp)
+
+            var row = [Float](repeating: 0, count: scaled.count)
+            for i in 0..<scaled.count {
+                row[i] = (scaled[i] - maxVal) - logSumExp
+            }
+
+            // Blank bias
+            if blankBias != 0.0 && blankId < row.count {
+                row[blankId] -= blankBias
+            }
+
+            logProbs.append(row)
+        }
+
+        return logProbs
+    }
+
     // MARK: - NeMo-compatible DP (delegated to CtcDPAlgorithm)
 
     func ctcWordSpotConstrained(
