@@ -1,3 +1,4 @@
+import Accelerate
 import CoreML
 import Darwin
 import Foundation
@@ -141,6 +142,41 @@ public enum ANEMemoryUtils {
             strides: strides ?? calculateOptimalStrides(for: shape),
             deallocator: nil  // No deallocation for views
         )
+    }
+
+    /// Convert a float32 MLMultiArray to float16 with ANE-aligned memory.
+    public static func convertToFloat16(_ input: MLMultiArray) throws -> MLMultiArray {
+        guard input.dataType == .float32 else {
+            throw ANEMemoryError.unsupportedDataType
+        }
+
+        let float16Array = try createAlignedArray(
+            shape: input.shape,
+            dataType: .float16,
+            zeroClear: false
+        )
+
+        let sourcePtr = input.dataPointer.bindMemory(to: Float.self, capacity: input.count)
+
+        var sourceBuffer = vImage_Buffer(
+            data: sourcePtr,
+            height: 1,
+            width: vImagePixelCount(input.count),
+            rowBytes: input.count * MemoryLayout<Float>.stride
+        )
+
+        let destPtr = float16Array.dataPointer.bindMemory(to: UInt16.self, capacity: input.count)
+
+        var destBuffer = vImage_Buffer(
+            data: destPtr,
+            height: 1,
+            width: vImagePixelCount(input.count),
+            rowBytes: input.count * MemoryLayout<UInt16>.stride
+        )
+
+        vImageConvert_PlanarFtoPlanar16F(&sourceBuffer, &destBuffer, 0)
+
+        return float16Array
     }
 
     /// Stride-aware copy between two MLMultiArrays that may have different stride layouts.

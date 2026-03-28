@@ -10,7 +10,7 @@ final class ANEOptimizerTests: XCTestCase {
 
     func testCreateANEAlignedArrayFloat32() throws {
         let shape: [NSNumber] = [1, 100]
-        let array = try ANEOptimizer.createANEAlignedArray(
+        let array = try ANEMemoryUtils.createAlignedArray(
             shape: shape,
             dataType: .float32
         )
@@ -22,7 +22,7 @@ final class ANEOptimizerTests: XCTestCase {
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
         if !isCI {
             // Verify memory alignment only in non-CI environment
-            let alignment = ANEOptimizer.aneAlignment
+            let alignment = ANEMemoryUtils.aneAlignment
             let pointerValue = Int(bitPattern: array.dataPointer)
             XCTAssertEqual(pointerValue % alignment, 0, "Array should be \(alignment)-byte aligned")
         }
@@ -30,7 +30,7 @@ final class ANEOptimizerTests: XCTestCase {
 
     func testCreateANEAlignedArrayFloat16() throws {
         let shape: [NSNumber] = [1, 64]  // Smaller shape for CI stability
-        let array = try ANEOptimizer.createANEAlignedArray(
+        let array = try ANEMemoryUtils.createAlignedArray(
             shape: shape,
             dataType: .float16
         )
@@ -46,7 +46,7 @@ final class ANEOptimizerTests: XCTestCase {
 
             // Verify memory alignment only in non-CI environment
             let pointerValue = Int(bitPattern: array.dataPointer)
-            XCTAssertEqual(pointerValue % ANEOptimizer.aneAlignment, 0)
+            XCTAssertEqual(pointerValue % ANEMemoryUtils.aneAlignment, 0)
         }
     }
 
@@ -56,9 +56,8 @@ final class ANEOptimizerTests: XCTestCase {
 
     func testCalculateOptimalStridesBasic() {
         let shape: [NSNumber] = [1, 3, 224, 224]
-        let strides = ANEOptimizer.calculateOptimalStrides(
-            for: shape,
-            dataType: .float32
+        let strides = ANEMemoryUtils.calculateOptimalStrides(
+            for: shape
         )
 
         XCTAssertEqual(strides.count, shape.count)
@@ -71,9 +70,8 @@ final class ANEOptimizerTests: XCTestCase {
     func testCalculateOptimalStridesWithPadding() {
         // Test with dimension that needs padding (not multiple of 16)
         let shape: [NSNumber] = [1, 100]  // 100 is not multiple of 16
-        let strides = ANEOptimizer.calculateOptimalStrides(
-            for: shape,
-            dataType: .float32
+        let strides = ANEMemoryUtils.calculateOptimalStrides(
+            for: shape
         )
 
         // The stride for the first dimension should account for padding
@@ -84,22 +82,10 @@ final class ANEOptimizerTests: XCTestCase {
 
     // MARK: - Compute Unit Selection Tests
 
-    func testOptimalComputeUnits() {
-        // All models use CPU+ANE for optimal performance
-        XCTAssertEqual(
-            ANEOptimizer.optimalComputeUnits(for: .encoder),
-            .cpuAndNeuralEngine
-        )
-
-        XCTAssertEqual(
-            ANEOptimizer.optimalComputeUnits(for: .decoder),
-            .cpuAndNeuralEngine
-        )
-
-        XCTAssertEqual(
-            ANEOptimizer.optimalComputeUnits(for: .joint),
-            .cpuAndNeuralEngine
-        )
+    func testDefaultConfigurationComputeUnits() {
+        // Default configuration uses CPU+ANE
+        let config = MLModelConfigurationUtils.defaultConfiguration()
+        XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
     }
 
     // MARK: - Zero-Copy View Tests (Removed - causes crashes with memory operations)
@@ -115,7 +101,7 @@ final class ANEOptimizerTests: XCTestCase {
             float32Array[i] = NSNumber(value: Float(i) * 0.1)
         }
 
-        let result = try ANEOptimizer.convertToFloat16(float32Array)
+        let result = try ANEMemoryUtils.convertToFloat16(float32Array)
 
         XCTAssertEqual(result.shape, float32Array.shape)
 
@@ -129,7 +115,7 @@ final class ANEOptimizerTests: XCTestCase {
 
             // Verify ANE alignment only in non-CI environment
             let pointerValue = Int(bitPattern: result.dataPointer)
-            XCTAssertEqual(pointerValue % ANEOptimizer.aneAlignment, 0)
+            XCTAssertEqual(pointerValue % ANEMemoryUtils.aneAlignment, 0)
         }
 
         // Verify data conversion accuracy (regardless of CI)
@@ -145,11 +131,9 @@ final class ANEOptimizerTests: XCTestCase {
         let int32Array = try MLMultiArray(shape: [5], dataType: .int32)
 
         XCTAssertThrowsError(
-            try ANEOptimizer.convertToFloat16(int32Array)
+            try ANEMemoryUtils.convertToFloat16(int32Array)
         ) { error in
-            let nsError = error as NSError
-            XCTAssertEqual(nsError.domain, "ANEOptimizer")
-            XCTAssertEqual(nsError.code, -3)
+            XCTAssertTrue(error is ANEMemoryUtils.ANEMemoryError)
         }
     }
 

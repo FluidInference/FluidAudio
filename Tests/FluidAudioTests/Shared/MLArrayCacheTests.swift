@@ -26,7 +26,7 @@ final class MLArrayCacheTests: XCTestCase {
         if !isCI {
             // Verify ANE alignment only in non-CI environment
             let pointerValue = Int(bitPattern: array.dataPointer)
-            XCTAssertEqual(pointerValue % ANEOptimizer.aneAlignment, 0)
+            XCTAssertEqual(pointerValue % ANEMemoryUtils.aneAlignment, 0)
         }
     }
 
@@ -115,7 +115,7 @@ final class MLArrayCacheTests: XCTestCase {
 
             // Verify ANE alignment only in non-CI environment
             let pointerValue = Int(bitPattern: fp16Array.dataPointer)
-            XCTAssertEqual(pointerValue % ANEOptimizer.aneAlignment, 0)
+            XCTAssertEqual(pointerValue % ANEMemoryUtils.aneAlignment, 0)
         }
     }
 

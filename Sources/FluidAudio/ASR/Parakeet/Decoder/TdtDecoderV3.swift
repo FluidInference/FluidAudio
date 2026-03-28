@@ -175,11 +175,11 @@ internal struct TdtDecoderV3 {
         // Preallocate joint input tensors and a reusable provider to avoid per-step allocations.
         let encoderHidden = expectedEncoderHidden
         let decoderHidden = ASRConstants.decoderHiddenSize
-        let reusableEncoderStep = try ANEOptimizer.createANEAlignedArray(
+        let reusableEncoderStep = try ANEMemoryUtils.createAlignedArray(
             shape: [1, NSNumber(value: encoderHidden), 1],
             dataType: .float32
         )
-        let reusableDecoderStep = try ANEOptimizer.createANEAlignedArray(
+        let reusableDecoderStep = try ANEMemoryUtils.createAlignedArray(
             shape: [1, NSNumber(value: decoderHidden), 1],
             dataType: .float32
         )
@@ -617,8 +617,8 @@ internal struct TdtDecoderV3 {
         try encoderFrames.copyFrame(at: timeIndex, into: encoderDestPtr, destinationStride: encoderDestStride)
 
         // Prefetch arrays for ANE
-        ANEOptimizer.prefetchToNeuralEngine(encoderStep)
-        ANEOptimizer.prefetchToNeuralEngine(preparedDecoderStep)
+        encoderStep.prefetchToNeuralEngine()
+        preparedDecoderStep.prefetchToNeuralEngine()
 
         // Reuse tiny output tensors for joint prediction (provide raw MLMultiArray backings)
         predictionOptions.outputBackings = [
@@ -702,7 +702,7 @@ internal struct TdtDecoderV3 {
             }
             out = destination
         } else {
-            out = try ANEOptimizer.createANEAlignedArray(
+            out = try ANEMemoryUtils.createAlignedArray(
                 shape: [1, NSNumber(value: hiddenSize), 1],
                 dataType: .float32
             )
@@ -829,7 +829,7 @@ internal struct TdtDecoderV3 {
             encoderOutput: encoderOutput,
             validLength: encoderOutput.count,
             expectedHiddenSize: config.encoderHiddenSize)
-        let encoderStep = try ANEOptimizer.createANEAlignedArray(
+        let encoderStep = try ANEMemoryUtils.createAlignedArray(
             shape: [1, NSNumber(value: encoderFrames.hiddenSize), 1],
             dataType: .float32)
         let encoderPtr = encoderStep.dataPointer.bindMemory(to: Float.self, capacity: encoderFrames.hiddenSize)

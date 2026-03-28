@@ -32,11 +32,11 @@ struct TdtDecoderState: Sendable {
     init(decoderLayers: Int = 2) throws {
         // Use ANE-aligned arrays for optimal performance
         let decoderHiddenSize = ASRConstants.decoderHiddenSize
-        hiddenState = try ANEOptimizer.createANEAlignedArray(
+        hiddenState = try ANEMemoryUtils.createAlignedArray(
             shape: [NSNumber(value: decoderLayers), 1, NSNumber(value: decoderHiddenSize)],
             dataType: .float32
         )
-        cellState = try ANEOptimizer.createANEAlignedArray(
+        cellState = try ANEMemoryUtils.createAlignedArray(
             shape: [NSNumber(value: decoderLayers), 1, NSNumber(value: decoderHiddenSize)],
             dataType: .float32
         )

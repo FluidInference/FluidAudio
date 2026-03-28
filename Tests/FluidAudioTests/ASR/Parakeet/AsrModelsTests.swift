@@ -209,34 +209,13 @@ final class AsrModelsTests: XCTestCase {
         // In CI environment, all compute units are overridden to .cpuOnly
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
 
-        // Test encoder configuration
-        let melConfig = AsrModels.optimizedConfiguration(for: .encoder)
+        let config = AsrModels.optimizedConfiguration()
         if isCI {
-            XCTAssertEqual(melConfig.computeUnits, .cpuOnly)
+            XCTAssertEqual(config.computeUnits, .cpuOnly)
         } else {
-            XCTAssertEqual(melConfig.computeUnits, .cpuAndNeuralEngine)
+            XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
         }
-        XCTAssertTrue(melConfig.allowLowPrecisionAccumulationOnGPU)
-
-        // Test decoder configuration
-        let decoderConfig = AsrModels.optimizedConfiguration(for: .decoder)
-        if isCI {
-            XCTAssertEqual(decoderConfig.computeUnits, .cpuOnly)
-        } else {
-            XCTAssertEqual(decoderConfig.computeUnits, .cpuAndNeuralEngine)
-        }
-
-        // Test joint configuration
-        let jointConfig = AsrModels.optimizedConfiguration(for: .joint)
-        if isCI {
-            XCTAssertEqual(jointConfig.computeUnits, .cpuOnly)
-        } else {
-            XCTAssertEqual(jointConfig.computeUnits, .cpuAndNeuralEngine)
-        }
-
-        // Test with FP16 disabled
-        let fp32Config = AsrModels.optimizedConfiguration(for: .encoder, enableFP16: false)
-        XCTAssertFalse(fp32Config.allowLowPrecisionAccumulationOnGPU)
+        XCTAssertTrue(config.allowLowPrecisionAccumulationOnGPU)
     }
 
     func testOptimizedConfigurationCIEnvironment() {
@@ -251,7 +230,7 @@ final class AsrModelsTests: XCTestCase {
             }
         }
 
-        let config = AsrModels.optimizedConfiguration(for: .encoder)
+        let config = AsrModels.optimizedConfiguration()
         XCTAssertEqual(config.computeUnits, .cpuOnly)
     }
 
@@ -288,22 +267,10 @@ final class AsrModelsTests: XCTestCase {
         XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
     }
 
-    func testOptimalComputeUnitsRespectsPlatform() {
-        // Test each model type
-        let modelTypes: [ANEOptimizer.ModelType] = [
-            .encoder,
-            .decoder,
-            .joint,
-        ]
-
-        for modelType in modelTypes {
-            let computeUnits = ANEOptimizer.optimalComputeUnits(for: modelType)
-
-            // All models should use CPU+ANE for optimal performance
-            XCTAssertEqual(
-                computeUnits, .cpuAndNeuralEngine,
-                "Model type \(modelType) should use CPU+ANE")
-        }
+    func testOptimalComputeUnitsDefault() {
+        // Default configuration uses CPU+ANE for optimal performance
+        let config = AsrModels.defaultConfiguration()
+        XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
     }
 
     // MARK: - TDT-CTC-110M Model Version Tests

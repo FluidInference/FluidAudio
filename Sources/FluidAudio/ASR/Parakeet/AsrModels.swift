@@ -365,22 +365,14 @@ extension AsrModels {
         MLModelConfigurationUtils.defaultConfiguration(computeUnits: .cpuAndNeuralEngine)
     }
 
-    /// Create optimized configuration for specific model type
+    /// Create optimized configuration for model inference
     public static func optimizedConfiguration(
-        for modelType: ANEOptimizer.ModelType,
         enableFP16: Bool = true
     ) -> MLModelConfiguration {
-        let config = MLModelConfiguration()
-        config.allowLowPrecisionAccumulationOnGPU = enableFP16
-        config.computeUnits = ANEOptimizer.optimalComputeUnits(for: modelType)
-
-        // Enable model-specific optimizations
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        if isCI {
-            config.computeUnits = .cpuOnly
-        }
-
-        return config
+        return MLModelConfigurationUtils.defaultConfiguration(
+            computeUnits: isCI ? .cpuOnly : .cpuAndNeuralEngine
+        )
     }
 
     /// Create optimized prediction options for inference

@@ -33,7 +33,7 @@ actor MLArrayCache {
             return array
         }
 
-        return try ANEOptimizer.createANEAlignedArray(shape: shape, dataType: dataType)
+        return try ANEMemoryUtils.createAlignedArray(shape: shape, dataType: dataType)
     }
 
     /// Return an array to the cache for reuse
@@ -67,7 +67,7 @@ actor MLArrayCache {
                 let prewarmCount = min(5, maxCacheSize / max(shapes.count, 1))
 
                 for _ in 0..<prewarmCount {
-                    let array = try ANEOptimizer.createANEAlignedArray(shape: shape, dataType: dataType)
+                    let array = try ANEMemoryUtils.createAlignedArray(shape: shape, dataType: dataType)
                     arrays.append(array)
                 }
 
@@ -83,7 +83,7 @@ actor MLArrayCache {
     func getFloat16Array(shape: [NSNumber], from float32Array: MLMultiArray? = nil) throws -> MLMultiArray {
         if let float32Array = float32Array {
             // Convert existing array to Float16
-            return try ANEOptimizer.convertToFloat16(float32Array)
+            return try ANEMemoryUtils.convertToFloat16(float32Array)
         } else {
             // Get new Float16 array from cache
             return try getArray(shape: shape, dataType: .float16)
