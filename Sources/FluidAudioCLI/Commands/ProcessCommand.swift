@@ -166,7 +166,7 @@ enum ProcessCommand {
 
                 // Load and process audio file without materializing the full sample buffer.
                 let audioURL = URL(fileURLWithPath: audioFile)
-                let factory = StreamingAudioSourceFactory()
+                let factory = AudioSourceFactory()
                 let targetSampleRate = offlineConfig.segmentation.sampleRate
                 let diskSourceResult = try factory.makeDiskBackedSource(
                     from: audioURL,

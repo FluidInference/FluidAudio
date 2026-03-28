@@ -384,8 +384,8 @@ final class AsrModelsTests: XCTestCase {
     }
 
     func testTdtCtc110mVocabularyFilename() {
-        // tdtCtc110m uses parakeet_vocab.json (array format)
-        let vocabFile = ModelNames.ASR.vocabularyFileArray
+        // tdtCtc110m uses parakeet_vocab.json (array format, same filename as v2/v3)
+        let vocabFile = ModelNames.ASR.vocabularyFile
         XCTAssertEqual(vocabFile, "parakeet_vocab.json")
 
         // Verify it has .json extension

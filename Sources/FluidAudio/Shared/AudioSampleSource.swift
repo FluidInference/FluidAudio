@@ -1,6 +1,6 @@
 import Foundation
 
-public protocol StreamingAudioSampleSource: Sendable {
+public protocol AudioSampleSource: Sendable {
     var sampleCount: Int { get }
     func copySamples(
         into destination: UnsafeMutablePointer<Float>,
@@ -9,7 +9,7 @@ public protocol StreamingAudioSampleSource: Sendable {
     ) throws
 }
 
-public struct ArrayAudioSampleSource: StreamingAudioSampleSource {
+public struct ArrayAudioSampleSource: AudioSampleSource {
     private let samples: [Float]
 
     public init(samples: [Float]) {
@@ -39,7 +39,7 @@ public struct ArrayAudioSampleSource: StreamingAudioSampleSource {
     }
 }
 
-public struct DiskBackedAudioSampleSource: StreamingAudioSampleSource {
+public struct DiskBackedAudioSampleSource: AudioSampleSource {
     private let mappedData: Data
     private let floatStride = MemoryLayout<Float>.stride
     private let fileURL: URL

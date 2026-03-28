@@ -89,7 +89,10 @@ public final class RnntDecoder {
                 let decoderInput = try prepareDecoderInput(lastToken: lastToken, h: hState, c: cState)
                 let decoderOutput = try decoderModel.prediction(from: decoderInput)
 
-                var decoderStep = decoderOutput.featureValue(for: "decoder")!.multiArrayValue!
+                guard let decoderArray = decoderOutput.featureValue(for: "decoder")?.multiArrayValue else {
+                    throw RnntDecoderError.missingOutput("decoder")
+                }
+                var decoderStep = decoderArray
                 // Decoder outputs [1, 640, 2] - NeMo uses the LAST frame
                 if decoderStep.shape.count == 3 && decoderStep.shape[2].intValue > 1 {
                     // Slice to keep only the last frame [1, 640, 1]
@@ -106,7 +109,9 @@ public final class RnntDecoder {
 
                 // 3. Get Token ID
                 // Output "token_id" is [1, 1, 1] (argmax)
-                let tokenIdMultiArray = jointOutput.featureValue(for: "token_id")!.multiArrayValue!
+                guard let tokenIdMultiArray = jointOutput.featureValue(for: "token_id")?.multiArrayValue else {
+                    throw RnntDecoderError.missingOutput("token_id")
+                }
                 let tokenId = tokenIdMultiArray[0].int32Value
 
                 if tokenId == blankId {
@@ -120,8 +125,12 @@ public final class RnntDecoder {
                     lastToken = tokenId
 
                     // Update State
-                    let newH = decoderOutput.featureValue(for: "h_out")!.multiArrayValue!
-                    let newC = decoderOutput.featureValue(for: "c_out")!.multiArrayValue!
+                    guard let newH = decoderOutput.featureValue(for: "h_out")?.multiArrayValue else {
+                        throw RnntDecoderError.missingOutput("h_out")
+                    }
+                    guard let newC = decoderOutput.featureValue(for: "c_out")?.multiArrayValue else {
+                        throw RnntDecoderError.missingOutput("c_out")
+                    }
 
                     hState = newH
                     cState = newC
@@ -221,4 +230,15 @@ public final class RnntDecoder {
         return output
     }
 
+}
+
+enum RnntDecoderError: Error, LocalizedError {
+    case missingOutput(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingOutput(let name):
+            return "RNNT decoder missing expected output: \(name)"
+        }
+    }
 }

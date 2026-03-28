@@ -98,21 +98,12 @@ extension DiarizerModels {
     }
 
     public static func defaultModelsDirectory() -> URL {
-        let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return
-            applicationSupport
-            .appendingPathComponent("FluidAudio", isDirectory: true)
-            .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent(Repo.diarizer.folderName, isDirectory: true)
+        MLModelConfigurationUtils.defaultModelsDirectory(for: .diarizer)
     }
 
     static func defaultConfiguration() -> MLModelConfiguration {
-        let config = MLModelConfiguration()
-        // Enable Float16 optimization for ~2x speedup
-        config.allowLowPrecisionAccumulationOnGPU = true
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        config.computeUnits = isCI ? .cpuAndNeuralEngine : .all
-        return config
+        return MLModelConfigurationUtils.defaultConfiguration(computeUnits: isCI ? .cpuAndNeuralEngine : .all)
     }
 }
 

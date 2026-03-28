@@ -3,7 +3,7 @@ import Foundation
 import OSLog
 
 struct ChunkProcessor {
-    let sampleSource: StreamingAudioSampleSource
+    let sampleSource: AudioSampleSource
     let totalSamples: Int
 
     private let logger = AppLogger(category: "ChunkProcessor")
@@ -46,7 +46,7 @@ struct ChunkProcessor {
     }
 
     /// Initialize with a streaming audio sample source for memory-efficient processing.
-    init(sampleSource: StreamingAudioSampleSource) {
+    init(sampleSource: AudioSampleSource) {
         self.sampleSource = sampleSource
         self.totalSamples = sampleSource.sampleCount
     }

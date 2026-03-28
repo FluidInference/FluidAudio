@@ -42,7 +42,7 @@ struct OfflineSegmentationProcessor {
     }
 
     func process(
-        audioSource: StreamingAudioSampleSource,
+        audioSource: AudioSampleSource,
         segmentationModel: MLModel,
         config: OfflineDiarizerConfig,
         chunkHandler: SegmentationChunkHandler? = nil

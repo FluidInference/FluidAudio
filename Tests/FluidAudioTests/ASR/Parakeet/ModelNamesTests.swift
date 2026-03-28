@@ -133,10 +133,10 @@ final class ModelNamesTests: XCTestCase {
     }
 
     func testParakeetTdtCtc110mVocabulary() {
-        // tdtCtc110m uses array-format vocabulary
+        // tdtCtc110m uses same vocabulary file (array-format JSON, parsed at load time)
         let vocabFile = ModelNames.ASR.vocabulary(for: .parakeetTdtCtc110m)
         XCTAssertEqual(vocabFile, "parakeet_vocab.json")
-        XCTAssertEqual(vocabFile, ModelNames.ASR.vocabularyFileArray)
+        XCTAssertEqual(vocabFile, ModelNames.ASR.vocabularyFile)
     }
 
     func testParakeetTdtCtc110mUsesRequiredModelsFused() {

@@ -129,6 +129,8 @@ public enum Repo: String, CaseIterable {
             return "nemotron-streaming/560ms"
         case .sortformer:
             return "sortformer"
+        case .parakeetTdtCtc110m:
+            return "parakeet-tdt-ctc-110m"
         default:
             return name.replacingOccurrences(of: "-coreml", with: "")
         }
@@ -203,9 +205,6 @@ public enum ModelNames {
             jointFile,
         ]
 
-        /// Vocabulary filename for the 110m hybrid TDT-CTC model (JSON array format)
-        public static let vocabularyFileArray = "parakeet_vocab.json"
-
         /// Required models for fused frontend (110m hybrid: preprocessor contains encoder)
         public static let requiredModelsFused: Set<String> = [
             preprocessorFile,
@@ -215,12 +214,8 @@ public enum ModelNames {
 
         /// Get vocabulary filename for specific model version
         public static func vocabulary(for repo: Repo) -> String {
-            switch repo {
-            case .parakeetTdtCtc110m:
-                return vocabularyFileArray
-            default:
-                return vocabularyFile
-            }
+            // All Parakeet models use the same vocabulary file (format varies: dict for v2/v3, array for 110m)
+            return vocabularyFile
         }
     }
 

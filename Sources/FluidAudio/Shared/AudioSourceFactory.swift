@@ -3,8 +3,8 @@ import Foundation
 import OSLog
 import os
 
-public struct StreamingAudioSourceFactory {
-    private let logger = AppLogger(category: "StreamingAudioSourceFactory")
+public struct AudioSourceFactory {
+    private let logger = AppLogger(category: "AudioSourceFactory")
 
     public init() {}
 
@@ -26,7 +26,7 @@ public struct StreamingAudioSourceFactory {
 
             let tempURL = try makeTemporaryURL()
             guard FileManager.default.createFile(atPath: tempURL.path, contents: nil) else {
-                throw StreamingAudioError.processingFailed("Failed to create temporary audio buffer at \(tempURL.path)")
+                throw AudioSourceError.processingFailed("Failed to create temporary audio buffer at \(tempURL.path)")
             }
 
             let handle = try FileHandle(forWritingTo: tempURL)
@@ -35,7 +35,7 @@ public struct StreamingAudioSourceFactory {
             }
 
             guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-                throw StreamingAudioError.processingFailed(
+                throw AudioSourceError.processingFailed(
                     "Unsupported audio format \(inputFormat); failed to create converter")
             }
 
@@ -75,11 +75,11 @@ public struct StreamingAudioSourceFactory {
 
             let duration = Date().timeIntervalSince(startTime)
             return (source, duration)
-        } catch let streamingError as StreamingAudioError {
+        } catch let streamingError as AudioSourceError {
             throw streamingError
         } catch {
             logger.error("Streaming audio source creation failed: \(error.localizedDescription)")
-            throw StreamingAudioError.processingFailed(
+            throw AudioSourceError.processingFailed(
                 "Streaming audio source creation failed: \(error.localizedDescription)"
             )
         }
@@ -106,7 +106,7 @@ public struct StreamingAudioSourceFactory {
                 frameCapacity: inputCapacity
             )
         else {
-            throw StreamingAudioError.failedToAllocateBuffer("Input", requestedFrames: Int(inputCapacity))
+            throw AudioSourceError.failedToAllocateBuffer("Input", requestedFrames: Int(inputCapacity))
         }
 
         let estimatedOutputFrames = AVAudioFrameCount(
@@ -118,7 +118,7 @@ public struct StreamingAudioSourceFactory {
                 frameCapacity: max(1024, estimatedOutputFrames)
             )
         else {
-            throw StreamingAudioError.failedToAllocateBuffer("Output", requestedFrames: Int(estimatedOutputFrames))
+            throw AudioSourceError.failedToAllocateBuffer("Output", requestedFrames: Int(estimatedOutputFrames))
         }
 
         var totalSamples = 0
@@ -167,13 +167,13 @@ public struct StreamingAudioSourceFactory {
             )
 
             if let conversionError {
-                throw StreamingAudioError.processingFailed(
+                throw AudioSourceError.processingFailed(
                     "Audio conversion failed: \(conversionError.localizedDescription)"
                 )
             }
 
             if let error = readError.withLock({ $0 }) {
-                throw StreamingAudioError.processingFailed(
+                throw AudioSourceError.processingFailed(
                     "Failed while reading audio: \(error.localizedDescription)"
                 )
             }
@@ -181,7 +181,7 @@ public struct StreamingAudioSourceFactory {
             let producedFrames = Int(outputBuffer.frameLength)
             if producedFrames > 0 {
                 guard let channelData = outputBuffer.floatChannelData?.pointee else {
-                    throw StreamingAudioError.processingFailed("Missing channel data during conversion")
+                    throw AudioSourceError.processingFailed("Missing channel data during conversion")
                 }
                 let byteCount = producedFrames * MemoryLayout<Float>.stride
                 let baseAddress = UnsafeRawPointer(channelData)
@@ -199,7 +199,7 @@ public struct StreamingAudioSourceFactory {
     }
 }
 
-public enum StreamingAudioError: Error, LocalizedError {
+public enum AudioSourceError: Error, LocalizedError {
     case processingFailed(String)
 
     public var errorDescription: String? {
@@ -210,8 +210,8 @@ public enum StreamingAudioError: Error, LocalizedError {
     }
 }
 
-extension StreamingAudioError {
-    fileprivate static func failedToAllocateBuffer(_ name: String, requestedFrames: Int) -> StreamingAudioError {
+extension AudioSourceError {
+    fileprivate static func failedToAllocateBuffer(_ name: String, requestedFrames: Int) -> AudioSourceError {
         .processingFailed("Failed to allocate \(name.lowercased()) buffer (\(requestedFrames) frames)")
     }
 }

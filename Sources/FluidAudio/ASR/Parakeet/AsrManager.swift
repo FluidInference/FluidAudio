@@ -41,7 +41,7 @@ public actor AsrManager {
     }
     #endif
 
-    // TODO:: the decoder state should be moved higher up in the API interface
+    // Per-source decoder states are actor-internal; callers reset via resetDecoderState().
     internal var microphoneDecoderState: TdtDecoderState
     internal var systemDecoderState: TdtDecoderState
 
@@ -434,7 +434,7 @@ public actor AsrManager {
         let startTime = Date()
 
         // Create a disk-backed source for memory-efficient access
-        let factory = StreamingAudioSourceFactory()
+        let factory = AudioSourceFactory()
         let (sampleSource, _) = try factory.makeDiskBackedSource(
             from: url,
             targetSampleRate: config.sampleRate

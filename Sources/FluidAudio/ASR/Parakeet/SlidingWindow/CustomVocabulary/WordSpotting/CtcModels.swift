@@ -248,10 +248,7 @@ extension CtcModels {
 
     /// Default CoreML configuration for CTC inference.
     public static func defaultConfiguration() -> MLModelConfiguration {
-        let config = MLModelConfiguration()
-        config.allowLowPrecisionAccumulationOnGPU = true
-        config.computeUnits = .cpuAndNeuralEngine
-        return config
+        MLModelConfigurationUtils.defaultConfiguration(computeUnits: .cpuAndNeuralEngine)
     }
 
     /// Check whether required CTC model bundles and vocabulary exist at a directory.

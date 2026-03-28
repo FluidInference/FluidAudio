@@ -100,7 +100,7 @@ public final class OfflineDiarizerManager {
     /// - Parameter url: Path to the audio file
     /// - Returns: Diarization result with speaker segments
     public func process(_ url: URL) async throws -> DiarizationResult {
-        let factory = StreamingAudioSourceFactory()
+        let factory = AudioSourceFactory()
         let (source, loadDuration) = try factory.makeDiskBackedSource(
             from: url,
             targetSampleRate: config.segmentation.sampleRate
@@ -114,7 +114,7 @@ public final class OfflineDiarizerManager {
     }
 
     public func process(
-        audioSource: StreamingAudioSampleSource,
+        audioSource: AudioSampleSource,
         audioLoadingSeconds: TimeInterval
     ) async throws -> DiarizationResult {
         try config.validate()

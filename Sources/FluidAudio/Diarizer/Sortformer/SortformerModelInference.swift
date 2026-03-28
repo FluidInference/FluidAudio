@@ -91,11 +91,8 @@ extension SortformerModels {
 
     /// Default MLModel configuration
     public static func defaultConfiguration() -> MLModelConfiguration {
-        let config = MLModelConfiguration()
-        config.allowLowPrecisionAccumulationOnGPU = true
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        config.computeUnits = isCI ? .cpuAndNeuralEngine : .all
-        return config
+        return MLModelConfigurationUtils.defaultConfiguration(computeUnits: isCI ? .cpuAndNeuralEngine : .all)
     }
 
     /// Load Sortformer models from HuggingFace.

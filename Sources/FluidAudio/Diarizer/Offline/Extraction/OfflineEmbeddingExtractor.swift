@@ -179,7 +179,7 @@ struct OfflineEmbeddingExtractor {
     }
 
     func extractEmbeddings(
-        audioSource: StreamingAudioSampleSource,
+        audioSource: AudioSampleSource,
         segmentation: SegmentationOutput
     ) async throws -> [TimedEmbedding] {
         let stream = AsyncThrowingStream<SegmentationChunk, Error> { continuation in
@@ -221,7 +221,7 @@ struct OfflineEmbeddingExtractor {
     }
 
     func extractEmbeddings<S: AsyncSequence>(
-        audioSource: StreamingAudioSampleSource,
+        audioSource: AudioSampleSource,
         segmentationStream: S
     ) async throws -> [TimedEmbedding] where S.Element == SegmentationChunk {
         var embeddings: [TimedEmbedding] = []
