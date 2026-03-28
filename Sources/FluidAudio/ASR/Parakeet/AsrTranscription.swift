@@ -154,7 +154,7 @@ extension AsrManager {
             // Run CTC head on encoder output if available (for custom vocabulary).
             // Only cache for single-chunk audio — multi-chunk would overwrite per chunk,
             // leaving only the last chunk's logits which is incorrect for full-audio rescoring.
-            if let ctcHeadModel = asrModels?.ctcHead, isLastChunk {
+            if let ctcHeadModel = asrModels?.ctcHead, isLastChunk, globalFrameOffset == 0 {
                 do {
                     let ctcInput = try MLDictionaryFeatureProvider(
                         dictionary: ["encoder_output": MLFeatureValue(multiArray: rawEncoderOutput)]
@@ -162,10 +162,7 @@ extension AsrManager {
                     let ctcOutput = try await ctcHeadModel.compatPrediction(
                         from: ctcInput, options: predictionOptions
                     )
-                    if let ctcLogits = ctcOutput.featureValue(for: "ctc_logits")?.multiArrayValue,
-                        globalFrameOffset == 0
-                    {
-                        // Only cache when this is both the first and last chunk (single-chunk audio)
+                    if let ctcLogits = ctcOutput.featureValue(for: "ctc_logits")?.multiArrayValue {
                         cachedCtcLogits = ctcLogits
                         cachedCtcFrameDuration = 0.04  // 40ms per frame
                         cachedCtcValidFrames = encoderSequenceLength
