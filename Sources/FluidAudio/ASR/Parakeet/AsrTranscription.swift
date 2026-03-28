@@ -168,18 +168,22 @@ extension AsrManager {
                         // Only cache when this is both the first and last chunk (single-chunk audio)
                         cachedCtcLogits = ctcLogits
                         cachedCtcFrameDuration = 0.04  // 40ms per frame
+                        cachedCtcValidFrames = encoderSequenceLength
                     } else {
                         cachedCtcLogits = nil
                         cachedCtcFrameDuration = nil
+                        cachedCtcValidFrames = nil
                     }
                 } catch {
                     logger.warning("CTC head inference failed: \(error.localizedDescription)")
                     cachedCtcLogits = nil
                     cachedCtcFrameDuration = nil
+                    cachedCtcValidFrames = nil
                 }
             } else {
                 cachedCtcLogits = nil
                 cachedCtcFrameDuration = nil
+                cachedCtcValidFrames = nil
             }
 
             // Calculate actual audio frames if not provided using shared constants
@@ -659,7 +663,7 @@ extension AsrManager {
             return []
         }
 
-        let numFrames = shape[1].intValue
+        let numFrames = min(shape[1].intValue, cachedCtcValidFrames ?? shape[1].intValue)
         let vocabSize = shape[2].intValue
 
         // Extract raw logits

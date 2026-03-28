@@ -56,6 +56,7 @@ public actor AsrManager {
     // Cached CTC logits from fused Preprocessor (unified custom vocabulary)
     internal var cachedCtcLogits: MLMultiArray?
     internal var cachedCtcFrameDuration: Double?
+    internal var cachedCtcValidFrames: Int?
 
     /// Whether the Preprocessor outputs CTC logits (unified custom vocabulary model).
     public var hasCachedCtcLogits: Bool { cachedCtcLogits != nil }
@@ -68,7 +69,7 @@ public actor AsrManager {
         guard let logits = cachedCtcLogits, let duration = cachedCtcFrameDuration else { return nil }
         let shape = logits.shape
         guard shape.count == 3 else { return nil }
-        let numFrames = shape[1].intValue
+        let numFrames = min(shape[1].intValue, cachedCtcValidFrames ?? shape[1].intValue)
         let vocabSize = shape[2].intValue
         var result: [[Float]] = []
         result.reserveCapacity(numFrames)
@@ -340,6 +341,7 @@ public actor AsrManager {
         systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
         cachedCtcLogits = nil
         cachedCtcFrameDuration = nil
+        cachedCtcValidFrames = nil
         Task { await sharedMLArrayCache.clear() }
     }
 
@@ -357,6 +359,7 @@ public actor AsrManager {
         // Release vocabulary boosting resources and cached CTC data
         cachedCtcLogits = nil
         cachedCtcFrameDuration = nil
+        cachedCtcValidFrames = nil
         disableVocabularyBoosting()
         Task { await sharedMLArrayCache.clear() }
         logger.info("AsrManager resources cleaned up")
