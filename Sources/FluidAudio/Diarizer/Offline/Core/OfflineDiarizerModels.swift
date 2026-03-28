@@ -17,6 +17,7 @@ public struct OfflineDiarizerModels: Sendable {
     private static func loadPLDAPsi(from directory: URL) throws -> [Double] {
         let candidatePaths = [
             directory.appendingPathComponent("plda-parameters.json", isDirectory: false),
+            directory.appendingPathComponent("speaker-diarization/plda-parameters.json", isDirectory: false),
             directory.appendingPathComponent("speaker-diarization-coreml/plda-parameters.json", isDirectory: false),
             directory.appendingPathComponent("speaker-diarization-offline/plda-parameters.json", isDirectory: false),
         ]
