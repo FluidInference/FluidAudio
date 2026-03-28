@@ -158,6 +158,7 @@ public enum ModelNames {
         public static let fbank = "FBank"
         public static let embedding = "Embedding"
         public static let pldaRho = "PldaRho"
+        public static let pldaParameters = "plda-parameters.json"
 
         public static let segmentationFile = segmentation + ".mlmodelc"
         public static let fbankFile = fbank + ".mlmodelc"
@@ -174,6 +175,7 @@ public enum ModelNames {
             fbankPath,
             embeddingPath,
             pldaRhoPath,
+            pldaParameters,
         ]
     }
 
