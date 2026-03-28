@@ -41,7 +41,8 @@ extension AsrManager {
                 paddedAudio,
                 originalLength: frameAlignedLength,
                 actualAudioFrames: nil,  // Will be calculated from originalLength
-                decoderState: &decoderState
+                decoderState: &decoderState,
+                isLastChunk: true  // Single-chunk: always first and last
             )
 
             var result = processTranscriptionResult(
