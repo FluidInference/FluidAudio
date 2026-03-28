@@ -411,20 +411,21 @@ public struct KokoroSynthesizer {
             throw TTSError.processingFailed("Failed to extract 'audio' output. Features: \(names)")
         }
 
-        // Optional: trim to audio_length_samples if provided
+        // Compute audio length from pred_dur (model's audio_length_samples output is broken)
         var effectiveCount = audioArrayUnwrapped.count
-        if let lenFV = output.featureValue(for: "audio_length_samples") {
-            var n: Int = 0
-            if let lenArray = lenFV.multiArrayValue, lenArray.count > 0 {
-                n = lenArray[0].intValue
-            } else if lenFV.type == .int64 {
-                n = Int(lenFV.int64Value)
-            } else if lenFV.type == .double {
-                n = Int(lenFV.doubleValue)
+
+        if let predDurArray = output.featureValue(for: "pred_dur")?.multiArrayValue {
+            // Sum pred_dur to get total frames
+            var totalFrames: Float = 0.0
+            let predDurPtr = predDurArray.dataPointer.bindMemory(to: Float.self, capacity: predDurArray.count)
+            for i in 0..<predDurArray.count {
+                totalFrames += predDurPtr[i]
             }
-            n = max(0, n)
-            if n > 0 && n <= audioArrayUnwrapped.count {
-                effectiveCount = n
+
+            // Convert frames to samples: frames * 600 samples/frame
+            let predictedSamples = Int(round(totalFrames * 600.0))
+            if predictedSamples > 0 {
+                effectiveCount = min(predictedSamples, audioArrayUnwrapped.count)
             }
         }
 
