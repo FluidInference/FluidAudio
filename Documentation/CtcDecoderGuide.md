@@ -637,7 +637,7 @@ Audio → Encoder → Features
 
 - [Benchmarks.md](Benchmarks.md) - Performance metrics for all models
 - [Models.md](Models.md) - Complete model catalog
-- [Demo Tests](../Tests/FluidAudioTests/ASR/Parakeet/SlidingWindow/CTC/CtcDecoderDemoTests.swift) - Interactive examples
+- [Demo Tests](../Tests/FluidAudioTests/ASR/CTC/CtcDecoderDemoTests.swift) - Interactive examples
 
 ---
 
