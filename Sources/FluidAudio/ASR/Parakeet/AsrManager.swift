@@ -3,11 +3,6 @@ import AVFoundation
 import Foundation
 import OSLog
 
-public enum AudioSource: Sendable {
-    case microphone
-    case system
-}
-
 public actor AsrManager {
 
     internal let logger = AppLogger(category: "ASR")
@@ -24,13 +19,11 @@ public actor AsrManager {
 
     internal let progressEmitter = ProgressEmitter()
 
-    /// Get the number of decoder layers for the current model.
+    /// Number of decoder layers for the current model.
     /// Returns 2 if models not loaded (v2/v3 default, tdtCtc110m uses 1).
-    internal func getDecoderLayers() -> Int {
-        return asrModels?.version.decoderLayers ?? 2
+    internal var decoderLayerCount: Int {
+        asrModels?.version.decoderLayers ?? 2
     }
-
-    /// Token duration optimization model
 
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
@@ -251,32 +244,6 @@ public actor AsrManager {
         }
     }
 
-    private func loadModel(
-        path: URL,
-        name: String,
-        configuration: MLModelConfiguration
-    ) async throws -> MLModel {
-        do {
-            let model = try MLModel(contentsOf: path, configuration: configuration)
-            return model
-        } catch {
-            logger.error("Failed to load \(name) model: \(error)")
-
-            throw ASRError.modelLoadFailed
-        }
-    }
-    private static func getDefaultModelsDirectory() -> URL {
-        let applicationSupportURL = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
-        let appDirectory = applicationSupportURL.appendingPathComponent(
-            "FluidAudio", isDirectory: true)
-        let directory = appDirectory.appendingPathComponent("Models/Parakeet", isDirectory: true)
-
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.standardizedFileURL
-    }
-
     public func resetState() {
         // Use model's decoder layer count, or 2 if models not loaded (v2/v3 default)
         let layers = asrModels?.version.decoderLayers ?? 2
@@ -409,7 +376,7 @@ public actor AsrManager {
             let estimatedSamples = Int((Double(audioFile.length) * sampleRateRatio).rounded(.up))
 
             if estimatedSamples > config.streamingThreshold {
-                return try await transcribeStreaming(url, source: source)
+                return try await transcribeDiskBacked(url, source: source)
             }
         }
 
@@ -418,17 +385,17 @@ public actor AsrManager {
         return result
     }
 
-    /// Transcribe audio from a file URL using streaming mode.
+    /// Transcribe audio from a file URL using disk-backed chunked processing.
     ///
-    /// Memory-efficient transcription that processes audio in chunks, maintaining constant
-    /// memory usage (~1.2MB) regardless of file size. Ideal for long audio files.
+    /// Memory-efficient transcription that memory-maps the file and processes audio in chunks,
+    /// maintaining constant memory usage (~1.2MB) regardless of file size. Ideal for long audio files.
     ///
     /// - Parameters:
     ///   - url: The URL to the audio file
     ///   - source: The audio source type (defaults to .system)
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails, models are not initialized, or the file cannot be read
-    public func transcribeStreaming(_ url: URL, source: AudioSource = .system) async throws -> ASRResult {
+    public func transcribeDiskBacked(_ url: URL, source: AudioSource = .system) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
 
         let startTime = Date()
@@ -531,7 +498,7 @@ public actor AsrManager {
         try await initializeDecoderState(for: source)
     }
 
-    internal func normalizedTimingToken(_ token: String) -> String {
+    nonisolated internal func normalizedTimingToken(_ token: String) -> String {
         token.replacingOccurrences(of: "▁", with: " ")
     }
 

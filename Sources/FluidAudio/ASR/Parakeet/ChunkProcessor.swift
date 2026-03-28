@@ -66,7 +66,7 @@ struct ChunkProcessor {
         var chunkStart = 0
         var chunkIndex = 0
         var chunkDecoderState = TdtDecoderState.make(
-            decoderLayers: await manager.getDecoderLayers()
+            decoderLayers: await manager.decoderLayerCount
         )
 
         while chunkStart < totalSamples {

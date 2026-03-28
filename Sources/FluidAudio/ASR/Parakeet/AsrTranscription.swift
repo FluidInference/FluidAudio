@@ -346,7 +346,7 @@ extension AsrManager {
     /// Calculate confidence score based purely on TDT model token confidence scores
     /// Returns the average of token-level softmax probabilities from the decoder
     /// Range: 0.1 (empty transcription) to 1.0 (perfect confidence)
-    private func calculateConfidence(
+    nonisolated private func calculateConfidence(
         duration: Double, tokenCount: Int, isEmpty: Bool, tokenConfidences: [Float]
     ) -> Float {
         // Empty transcription gets low confidence
@@ -438,7 +438,7 @@ extension AsrManager {
     }
 
     /// Slice encoder output to remove left context frames (following NeMo approach)
-    private func sliceEncoderOutput(
+    nonisolated private func sliceEncoderOutput(
         _ encoderOutput: MLMultiArray,
         from startFrame: Int,
         newLength: Int
@@ -473,7 +473,7 @@ extension AsrManager {
     /// and the number of removed leading tokens so caller can drop aligned timestamps.
     /// Ideally this is not needed. We need to make some more fixes to the TDT decoding logic,
     /// this should be a temporary workaround.
-    internal func removeDuplicateTokenSequence(
+    nonisolated internal func removeDuplicateTokenSequence(
         previous: [Int], current: [Int], maxOverlap: Int = 12
     ) -> (deduped: [Int], removedCount: Int) {
 
