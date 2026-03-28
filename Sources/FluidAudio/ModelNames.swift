@@ -135,8 +135,6 @@ public enum Repo: String, CaseIterable {
             return "pocket-tts"
         case .multilingualG2p:
             return "charsiu-g2p-byt5"
-        case .parakeetTdtCtc110m:
-            return "parakeet-tdt-ctc-110m"
         default:
             return name
         }
