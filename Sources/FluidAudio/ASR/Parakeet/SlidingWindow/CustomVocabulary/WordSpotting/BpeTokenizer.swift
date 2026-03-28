@@ -111,26 +111,40 @@ public final class BpeTokenizer: Sendable {
         // Apply BPE merges iteratively
         while true {
             // Find the highest priority merge (earliest in merges list)
-            var bestMerge: (index: Int, mergeIndex: Int)? = nil
+            var bestMergeIndex: Int? = nil
+            var bestMergePair: (String, String)? = nil
 
             for i in 0..<word.count - 1 {
                 let pair = (word[i], word[i + 1])
 
                 // Check if this pair has a merge rule
-                if let mergeIndex = merges.firstIndex(where: { $0.0 == pair.0 && $0.1 == pair.1 }) {
-                    if bestMerge == nil || mergeIndex < bestMerge!.mergeIndex {
-                        bestMerge = (i, mergeIndex)
-                    }
+                guard let mergeIndex = merges.firstIndex(where: { $0.0 == pair.0 && $0.1 == pair.1 }) else {
+                    continue
+                }
+
+                // Update best merge if this is higher priority (lower index)
+                if bestMergeIndex.map({ mergeIndex < $0 }) ?? true {
+                    bestMergeIndex = mergeIndex
+                    bestMergePair = pair
                 }
             }
 
             // No more merges possible
-            guard let (index, _) = bestMerge else { break }
+            guard let (first, second) = bestMergePair else { break }
 
-            // Apply the merge
-            let merged = word[index] + word[index + 1]
-            word[index] = merged
-            word.remove(at: index + 1)
+            // Apply the merge to ALL occurrences of the winning pair (standard BPE)
+            var newWord: [String] = []
+            var i = 0
+            while i < word.count {
+                if i < word.count - 1 && word[i] == first && word[i + 1] == second {
+                    newWord.append(first + second)
+                    i += 2  // Skip the next token since we merged it
+                } else {
+                    newWord.append(word[i])
+                    i += 1
+                }
+            }
+            word = newWord
         }
 
         // Convert tokens to IDs
