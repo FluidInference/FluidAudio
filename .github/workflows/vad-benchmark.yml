@@ -74,6 +74,32 @@ jobs:
             --threshold 0.5 \
             --output voices_vad_results.json
 
+      - name: Validate RTFx metrics
+        run: |
+          # Validate MUSAN RTFx
+          if [ -f musan_vad_results.json ]; then
+            MUSAN_RTFx=$(jq -r '.rtfx // 0' musan_vad_results.json)
+            if [ "$MUSAN_RTFx" = "0" ] || [ -z "$MUSAN_RTFx" ]; then
+              echo "❌ CRITICAL: MUSAN RTFx is 0 or empty - benchmark failed"
+              exit 1
+            fi
+          else
+            echo "❌ CRITICAL: musan_vad_results.json not found"
+            exit 1
+          fi
+
+          # Validate VOiCES RTFx
+          if [ -f voices_vad_results.json ]; then
+            VOICES_RTFx=$(jq -r '.rtfx // 0' voices_vad_results.json)
+            if [ "$VOICES_RTFx" = "0" ] || [ -z "$VOICES_RTFx" ]; then
+              echo "❌ CRITICAL: VOiCES RTFx is 0 or empty - benchmark failed"
+              exit 1
+            fi
+          else
+            echo "❌ CRITICAL: voices_vad_results.json not found"
+            exit 1
+          fi
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
