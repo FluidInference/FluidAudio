@@ -76,14 +76,12 @@ public final class BpeTokenizer: Sendable {
 
         // Parse added_tokens (special tokens like <unk>, <pad>)
         var addedTokensDict: [String: Int] = [:]
-        if let addedTokens = json["added_tokens"] as? [[String: Any]] {
-            for token in addedTokens {
-                if let content = token["content"] as? String,
-                    let id = token["id"] as? Int
-                {
-                    addedTokensDict[content] = id
-                }
-            }
+        let addedTokensList = (json["added_tokens"] as? [[String: Any]]) ?? []
+        for token in addedTokensList {
+            guard let content = token["content"] as? String,
+                let id = token["id"] as? Int
+            else { continue }
+            addedTokensDict[content] = id
         }
 
         return BpeTokenizer(
