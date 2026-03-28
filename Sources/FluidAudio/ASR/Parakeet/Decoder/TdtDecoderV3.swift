@@ -259,7 +259,7 @@ internal struct TdtDecoderV3 {
             // Prepare decoder projection once and reuse for inner blank loop
             let decoderProjection = try extractFeatureValue(
                 from: decoderResult.output, key: "decoder", errorMessage: "Invalid decoder output")
-            try populatePreparedDecoderProjection(decoderProjection, into: reusableDecoderStep)
+            try normalizeDecoderProjection(decoderProjection, into: reusableDecoderStep)
 
             // Run joint network with preallocated inputs
             let decision = try runJointPrepared(
@@ -467,7 +467,7 @@ internal struct TdtDecoderV3 {
                 // Prepare decoder projection into reusable buffer (if not already)
                 let finalProjection = try extractFeatureValue(
                     from: decoderResult.output, key: "decoder", errorMessage: "Invalid decoder output")
-                try populatePreparedDecoderProjection(finalProjection, into: reusableDecoderStep)
+                try normalizeDecoderProjection(finalProjection, into: reusableDecoderStep)
 
                 let decision = try runJointPrepared(
                     encoderFrames: encoderFrames,
@@ -657,83 +657,13 @@ internal struct TdtDecoderV3 {
         return JointDecision(token: token, probability: probability, durationBin: durationBin)
     }
 
-    private func prepareDecoderProjection(_ projection: MLMultiArray) throws -> MLMultiArray {
-        let hiddenSize = ASRConstants.decoderHiddenSize
-        let shape = projection.shape.map { $0.intValue }
-
-        guard shape.count == 3 else {
-            throw ASRError.processingFailed("Invalid decoder projection rank: \(shape)")
-        }
-        guard shape[0] == 1 else {
-            throw ASRError.processingFailed("Unsupported decoder batch dimension: \(shape[0])")
-        }
-        guard projection.dataType == .float32 else {
-            throw ASRError.processingFailed("Unsupported decoder projection type: \(projection.dataType)")
-        }
-
-        let hiddenAxis: Int
-        if shape[2] == hiddenSize {
-            hiddenAxis = 2
-        } else if shape[1] == hiddenSize {
-            hiddenAxis = 1
-        } else {
-            throw ASRError.processingFailed("Decoder projection hidden size mismatch: \(shape)")
-        }
-
-        let timeAxis = (0...2).first { $0 != hiddenAxis && $0 != 0 } ?? 1
-        guard shape[timeAxis] == 1 else {
-            throw ASRError.processingFailed("Decoder projection time axis must be 1: \(shape)")
-        }
-
-        let normalized = try ANEOptimizer.createANEAlignedArray(
-            shape: [1, NSNumber(value: hiddenSize), 1],
-            dataType: .float32
-        )
-
-        let destPtr = normalized.dataPointer.bindMemory(to: Float.self, capacity: hiddenSize)
-        let destStrides = normalized.strides.map { $0.intValue }
-        let destHiddenStride = destStrides[1]
-        let destStrideCblas = try makeBlasIndex(destHiddenStride, label: "Decoder destination stride")
-        let sourcePtr = projection.dataPointer.bindMemory(to: Float.self, capacity: projection.count)
-        let strides = projection.strides.map { $0.intValue }
-
-        let hiddenStride = strides[hiddenAxis]
-        let timeStride = strides[timeAxis]
-        let batchStride = strides[0]
-
-        var baseOffset = 0
-        if batchStride < 0 {
-            baseOffset += (shape[0] - 1) * batchStride
-        }
-        if timeStride < 0 {
-            baseOffset += (shape[timeAxis] - 1) * timeStride
-        }
-
-        let minOffset = hiddenStride < 0 ? hiddenStride * (hiddenSize - 1) : 0
-        let maxOffset = hiddenStride > 0 ? hiddenStride * (hiddenSize - 1) : 0
-        let lowerBound = baseOffset + minOffset
-        let upperBound = baseOffset + maxOffset
-        guard lowerBound >= 0 && upperBound < projection.count else {
-            throw ASRError.processingFailed("Decoder projection stride exceeds buffer bounds")
-        }
-
-        let startPtr = sourcePtr.advanced(by: baseOffset)
-        if hiddenStride == 1 && destHiddenStride == 1 {
-            destPtr.update(from: startPtr, count: hiddenSize)
-        } else {
-            let count = try makeBlasIndex(hiddenSize, label: "Decoder projection length")
-            let stride = try makeBlasIndex(hiddenStride, label: "Decoder projection stride")
-            cblas_scopy(count, startPtr, stride, destPtr, destStrideCblas)
-        }
-
-        return normalized
-    }
-
-    /// Populate a preallocated decoder-step array with the normalized projection data.
-    private func populatePreparedDecoderProjection(
+    /// Normalize decoder projection into [1, hiddenSize, 1] layout via BLAS copy.
+    /// If `destination` is provided, writes into it (hot path). Otherwise allocates a new array.
+    @discardableResult
+    private func normalizeDecoderProjection(
         _ projection: MLMultiArray,
-        into out: MLMultiArray
-    ) throws {
+        into destination: MLMultiArray? = nil
+    ) throws -> MLMultiArray {
         let hiddenSize = ASRConstants.decoderHiddenSize
         let shape = projection.shape.map { $0.intValue }
 
@@ -745,14 +675,6 @@ internal struct TdtDecoderV3 {
         }
         guard projection.dataType == .float32 else {
             throw ASRError.processingFailed("Unsupported decoder projection type: \(projection.dataType)")
-        }
-
-        // Validate destination shape
-        let outShape = out.shape.map { $0.intValue }
-        guard out.dataType == .float32, outShape.count == 3, outShape[0] == 1, outShape[2] == 1,
-            outShape[1] == hiddenSize
-        else {
-            throw ASRError.processingFailed("Prepared decoder step shape mismatch: \(out.shapeString)")
         }
 
         let hiddenAxis: Int
@@ -767,6 +689,23 @@ internal struct TdtDecoderV3 {
         let timeAxis = (0...2).first { $0 != hiddenAxis && $0 != 0 } ?? 1
         guard shape[timeAxis] == 1 else {
             throw ASRError.processingFailed("Decoder projection time axis must be 1: \(shape)")
+        }
+
+        let out: MLMultiArray
+        if let destination {
+            let outShape = destination.shape.map { $0.intValue }
+            guard destination.dataType == .float32, outShape.count == 3, outShape[0] == 1,
+                outShape[2] == 1, outShape[1] == hiddenSize
+            else {
+                throw ASRError.processingFailed(
+                    "Prepared decoder step shape mismatch: \(destination.shapeString)")
+            }
+            out = destination
+        } else {
+            out = try ANEOptimizer.createANEAlignedArray(
+                shape: [1, NSNumber(value: hiddenSize), 1],
+                dataType: .float32
+            )
         }
 
         let destPtr = out.dataPointer.bindMemory(to: Float.self, capacity: hiddenSize)
@@ -800,6 +739,8 @@ internal struct TdtDecoderV3 {
             let stride = try makeBlasIndex(hiddenStride, label: "Decoder projection stride")
             cblas_scopy(count, startPtr, stride, destPtr, destStrideCblas)
         }
+
+        return out
     }
 
     /// Update hypothesis with new token
@@ -897,7 +838,7 @@ internal struct TdtDecoderV3 {
 
         let decoderProjection = try extractFeatureValue(
             from: decoderOutput, key: "decoder", errorMessage: "Invalid decoder output")
-        let normalizedDecoder = try prepareDecoderProjection(decoderProjection)
+        let normalizedDecoder = try normalizeDecoderProjection(decoderProjection)
 
         return try MLDictionaryFeatureProvider(dictionary: [
             "encoder_step": MLFeatureValue(multiArray: encoderStep),
