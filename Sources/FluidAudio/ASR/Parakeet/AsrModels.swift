@@ -211,18 +211,24 @@ extension AsrModels {
             throw AsrModelsError.loadingFailed("Failed to load decoder or joint model")
         }
 
-        // Optionally load CTC head model if present (for custom vocabulary)
-        let repoDir = repoPath(from: directory, version: version)
-        let ctcHeadPath = repoDir.appendingPathComponent(Names.ctcHeadFile)
+        // Optionally load CTC head model for custom vocabulary.
+        // The CTC head lives in the parakeetCtc110m HF repo and is downloaded on demand.
         var ctcHeadModel: MLModel?
-        if FileManager.default.fileExists(atPath: ctcHeadPath.path) {
-            let ctcConfig = MLModelConfiguration()
-            ctcConfig.computeUnits = config.computeUnits
-            ctcHeadModel = try? MLModel(contentsOf: ctcHeadPath, configuration: ctcConfig)
-            if ctcHeadModel != nil {
-                logger.info("Loaded optional CTC head model for custom vocabulary")
-            } else {
-                logger.warning("CTC head model found but failed to load: \(ctcHeadPath.path)")
+        if version == .tdtCtc110m {
+            do {
+                let ctcModels = try await DownloadUtils.loadModels(
+                    .parakeetCtc110m,
+                    modelNames: [Names.ctcHeadFile],
+                    directory: parentDirectory,
+                    computeUnits: config.computeUnits,
+                    progressHandler: progressHandler
+                )
+                ctcHeadModel = ctcModels[Names.ctcHeadFile]
+                if ctcHeadModel != nil {
+                    logger.info("Loaded CTC head model for custom vocabulary")
+                }
+            } catch {
+                logger.warning("CTC head model not available: \(error.localizedDescription)")
             }
         }
 
