@@ -3,6 +3,9 @@ import Foundation
 /// BPE tokenizer for CTC vocabulary boosting.
 /// Only implements encoding - no decoding, chat templates, or other features.
 /// Supports the specific tokenizer.json format used by Parakeet models.
+///
+/// Text normalization: Applies lowercasing + NFKC normalization before BPE encoding,
+/// matching the standard NeMo CTC tokenization pipeline.
 public final class BpeTokenizer: Sendable {
     private let vocab: [String: Int]
     private let merges: [(String, String)]
@@ -98,8 +101,11 @@ public final class BpeTokenizer: Sendable {
 
     /// Encode text to token IDs using BPE
     public func encode(_ text: String, addSpecialTokens: Bool = false) -> [Int] {
+        // Normalize: lowercase + NFKC normalization (matches NeMo CTC models)
+        let normalized = text.lowercased().precomposedStringWithCompatibilityMapping
+
         // Pre-tokenize: replace spaces with ▁ (sentencepiece style)
-        let preprocessed = "▁" + text.replacingOccurrences(of: " ", with: "▁")
+        let preprocessed = "▁" + normalized.replacingOccurrences(of: " ", with: "▁")
 
         // Split into characters
         var word = preprocessed.map { String($0) }
