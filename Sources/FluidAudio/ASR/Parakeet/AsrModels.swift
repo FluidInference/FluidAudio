@@ -211,24 +211,43 @@ extension AsrModels {
             throw AsrModelsError.loadingFailed("Failed to load decoder or joint model")
         }
 
-        // Optionally load CTC head model for custom vocabulary.
-        // The CTC head lives in the parakeetCtc110m HF repo and is downloaded on demand.
+        // [Beta] Optionally load CTC head model for custom vocabulary.
+        // Supports two paths:
+        //   v1: CtcHead.mlmodelc placed manually in the TDT model directory
+        //   v2: Auto-download from FluidInference/parakeet-ctc-110m-coreml HF repo
         var ctcHeadModel: MLModel?
         if version == .tdtCtc110m {
-            do {
-                let ctcModels = try await DownloadUtils.loadModels(
-                    .parakeetCtc110m,
-                    modelNames: [Names.ctcHeadFile],
-                    directory: parentDirectory,
-                    computeUnits: config.computeUnits,
-                    progressHandler: progressHandler
-                )
-                ctcHeadModel = ctcModels[Names.ctcHeadFile]
+            // v1: Check local TDT model directory first
+            let repoDir = repoPath(from: directory, version: version)
+            let ctcHeadPath = repoDir.appendingPathComponent(Names.ctcHeadFile)
+            if FileManager.default.fileExists(atPath: ctcHeadPath.path) {
+                let ctcConfig = MLModelConfiguration()
+                ctcConfig.computeUnits = config.computeUnits
+                ctcHeadModel = try? MLModel(contentsOf: ctcHeadPath, configuration: ctcConfig)
                 if ctcHeadModel != nil {
-                    logger.info("Loaded CTC head model for custom vocabulary")
+                    logger.info("[Beta] Loaded CTC head model from local directory")
+                } else {
+                    logger.warning("CTC head model found but failed to load: \(ctcHeadPath.path)")
                 }
-            } catch {
-                logger.warning("CTC head model not available: \(error.localizedDescription)")
+            }
+
+            // v2: Fall back to downloading from parakeet-ctc-110m HF repo
+            if ctcHeadModel == nil {
+                do {
+                    let ctcModels = try await DownloadUtils.loadModels(
+                        .parakeetCtc110m,
+                        modelNames: [Names.ctcHeadFile],
+                        directory: parentDirectory,
+                        computeUnits: config.computeUnits,
+                        progressHandler: progressHandler
+                    )
+                    ctcHeadModel = ctcModels[Names.ctcHeadFile]
+                    if ctcHeadModel != nil {
+                        logger.info("[Beta] Loaded CTC head model from HF repo")
+                    }
+                } catch {
+                    logger.warning("CTC head model not available: \(error.localizedDescription)")
+                }
             }
         }
 
