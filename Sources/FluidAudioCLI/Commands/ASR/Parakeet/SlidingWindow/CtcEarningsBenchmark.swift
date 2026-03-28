@@ -178,7 +178,9 @@ public enum CtcEarningsBenchmark {
 
         do {
             // Load TDT models for transcription
-            print("Loading TDT models (\(tdtVersion == .v2 ? "v2" : tdtVersion == .tdtCtc110m ? "110m" : "v3")) for transcription...")
+            print(
+                "Loading TDT models (\(tdtVersion == .v2 ? "v2" : tdtVersion == .tdtCtc110m ? "110m" : "v3")) for transcription..."
+            )
             let tdtModels = try await AsrModels.downloadAndLoad(version: tdtVersion)
             let asrManager = AsrManager(config: .default)
             try await asrManager.initialize(models: tdtModels)
