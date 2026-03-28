@@ -199,28 +199,28 @@ jobs:
           echo "FILES_COUNT=$MAX_FILES" >> $GITHUB_OUTPUT
 
           # Validate RTFx values - 0 indicates benchmark failure
-          if [ "$CLEAN_RTFx" = "0.00" ] || [ "$CLEAN_RTFx" = "N/A" ]; then
-            echo "⚠️ test-clean RTFx is 0 or N/A - benchmark may have failed"
+          if [ "$CLEAN_RTFx" = "0.00" ] || [ "$CLEAN_RTFx" = "0.0" ] || [ "$CLEAN_RTFx" = "0" ] || [ "$CLEAN_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: test-clean RTFx is 0 or N/A - benchmark failed"
             CLEAN_RTFX_FAILED=1
           fi
-          if [ "$CLEAN_V2_RTFx" = "0.00" ] || [ "$CLEAN_V2_RTFx" = "N/A" ]; then
-            echo "⚠️ test-clean (v2) RTFx is 0 or N/A - benchmark may have failed"
+          if [ "$CLEAN_V2_RTFx" = "0.00" ] || [ "$CLEAN_V2_RTFx" = "0.0" ] || [ "$CLEAN_V2_RTFx" = "0" ] || [ "$CLEAN_V2_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: test-clean (v2) RTFx is 0 or N/A - benchmark failed"
             CLEAN_V2_RTFX_FAILED=1
           fi
-          if [ "$OTHER_RTFx" = "0.00" ] || [ "$OTHER_RTFx" = "N/A" ]; then
-            echo "⚠️ test-other RTFx is 0 or N/A - benchmark may have failed"
+          if [ "$OTHER_RTFx" = "0.00" ] || [ "$OTHER_RTFx" = "0.0" ] || [ "$OTHER_RTFx" = "0" ] || [ "$OTHER_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: test-other RTFx is 0 or N/A - benchmark failed"
             OTHER_RTFX_FAILED=1
           fi
-          if [ "$OTHER_V2_RTFx" = "0.00" ] || [ "$OTHER_V2_RTFx" = "N/A" ]; then
-            echo "⚠️ test-other (v2) RTFx is 0 or N/A - benchmark may have failed"
+          if [ "$OTHER_V2_RTFx" = "0.00" ] || [ "$OTHER_V2_RTFx" = "0.0" ] || [ "$OTHER_V2_RTFx" = "0" ] || [ "$OTHER_V2_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: test-other (v2) RTFx is 0 or N/A - benchmark failed"
             OTHER_V2_RTFX_FAILED=1
           fi
-          if [ "$STREAMING_RTFx" = "0.00" ] || [ "$STREAMING_RTFx" = "N/A" ]; then
-            echo "⚠️ streaming RTFx is 0 or N/A - benchmark may have failed"
+          if [ "$STREAMING_RTFx" = "0.00" ] || [ "$STREAMING_RTFx" = "0.0" ] || [ "$STREAMING_RTFx" = "0" ] || [ "$STREAMING_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: streaming RTFx is 0 or N/A - benchmark failed"
             STREAMING_RTFX_FAILED=1
           fi
-          if [ "$STREAMING_V2_RTFx" = "0.00" ] || [ "$STREAMING_V2_RTFx" = "N/A" ]; then
-            echo "⚠️ streaming (v2) RTFx is 0 or N/A - benchmark may have failed"
+          if [ "$STREAMING_V2_RTFx" = "0.00" ] || [ "$STREAMING_V2_RTFx" = "0.0" ] || [ "$STREAMING_V2_RTFx" = "0" ] || [ "$STREAMING_V2_RTFx" = "N/A" ]; then
+            echo "❌ CRITICAL: streaming (v2) RTFx is 0 or N/A - benchmark failed"
             STREAMING_V2_RTFX_FAILED=1
           fi
 

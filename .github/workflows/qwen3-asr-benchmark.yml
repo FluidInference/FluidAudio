@@ -69,6 +69,10 @@ jobs:
             echo "SMOKE_STATUS=FAILED" >> $GITHUB_OUTPUT
           fi
 
+          # Calculate execution time before validation (needed for PR comment)
+          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+
           # Extract RTFx metrics if results file exists
           if [ -f qwen3_results_int8.json ]; then
             MEDIAN_RTFx=$(jq -r '.summary.medianRTFx // "N/A"' qwen3_results_int8.json 2>/dev/null)
@@ -80,8 +84,9 @@ jobs:
             echo "MEDIAN_RTFx=$MEDIAN_RTFx" >> $GITHUB_OUTPUT
             echo "OVERALL_RTFx=$OVERALL_RTFx" >> $GITHUB_OUTPUT
 
-            # Fail if RTFx is 0 or N/A - indicates benchmark failure
-            if [ "$MEDIAN_RTFx" = "N/A" ] || [ "$MEDIAN_RTFx" = "0.00" ] || [ "$OVERALL_RTFx" = "N/A" ] || [ "$OVERALL_RTFx" = "0.00" ]; then
+            # Validate RTFx - fail if 0 or N/A (indicates benchmark failure)
+            if [ "$MEDIAN_RTFx" = "N/A" ] || [ "$MEDIAN_RTFx" = "0.00" ] || [ "$MEDIAN_RTFx" = "0" ] || [ "$MEDIAN_RTFx" = "0.0" ] || \
+               [ "$OVERALL_RTFx" = "N/A" ] || [ "$OVERALL_RTFx" = "0.00" ] || [ "$OVERALL_RTFx" = "0" ] || [ "$OVERALL_RTFx" = "0.0" ]; then
               echo "❌ CRITICAL: RTFx is 0 or N/A - benchmark failed to produce valid results"
               echo "Median RTFx: $MEDIAN_RTFx"
               echo "Overall RTFx: $OVERALL_RTFx"
@@ -93,9 +98,6 @@ jobs:
             echo "OVERALL_RTFx=N/A" >> $GITHUB_OUTPUT
             exit 1
           fi
-
-          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
-          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
 
       - name: Comment PR
         if: always() && github.event_name == 'pull_request'

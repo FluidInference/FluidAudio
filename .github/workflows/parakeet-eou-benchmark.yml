@@ -105,7 +105,7 @@ jobs:
           echo "BENCHMARK_STATUS=$BENCHMARK_STATUS" >> $GITHUB_OUTPUT
 
           # Validate RTFx - 0 or N/A indicates benchmark failure
-          if [ "$RTFx" = "0.00" ] || [ "$RTFx" = "N/A" ]; then
+          if [ "$RTFx" = "0.00" ] || [ "$RTFx" = "0.0" ] || [ "$RTFx" = "0" ] || [ "$RTFx" = "N/A" ] || [ -z "$RTFx" ]; then
             echo "❌ CRITICAL: RTFx is 0 or N/A - benchmark failed"
             echo "RTFx value: $RTFx"
             exit 1
