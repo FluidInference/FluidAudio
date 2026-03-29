@@ -13,13 +13,15 @@ final class PocketTtsStreamingTests: XCTestCase {
             samples: samples,
             frameIndex: 3,
             chunkIndex: 1,
-            chunkCount: 4
+            chunkCount: 4,
+            utteranceIndex: nil
         )
 
         XCTAssertEqual(frame.samples.count, PocketTtsConstants.samplesPerFrame)
         XCTAssertEqual(frame.frameIndex, 3)
         XCTAssertEqual(frame.chunkIndex, 1)
         XCTAssertEqual(frame.chunkCount, 4)
+        XCTAssertNil(frame.utteranceIndex)
     }
 
     func testAudioFrameIsSendable() {
@@ -28,7 +30,8 @@ final class PocketTtsStreamingTests: XCTestCase {
             samples: [1.0, 2.0, 3.0],
             frameIndex: 0,
             chunkIndex: 0,
-            chunkCount: 1
+            chunkCount: 1,
+            utteranceIndex: nil
         )
 
         let expectation = expectation(description: "Frame sent across tasks")

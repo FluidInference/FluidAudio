@@ -360,8 +360,11 @@ public struct PocketTtsSynthesizer {
         public let frameIndex: Int
         /// Zero-based index of the text chunk being synthesized.
         public let chunkIndex: Int
-        /// Total number of text chunks.
+        /// Total number of text chunks for the current utterance.
         public let chunkCount: Int
+        /// Zero-based index of the enqueued utterance that produced this frame.
+        /// Only set in session mode; `nil` for one-shot and streaming synthesis.
+        public let utteranceIndex: Int?
     }
 
     /// Synthesize audio as a stream of 80ms frames.
@@ -477,6 +480,57 @@ public struct PocketTtsSynthesizer {
         )
 
         return makeStream(generator: generator)
+    }
+
+    // MARK: - Session API
+
+    /// Create a persistent TTS session that keeps the voice KV cache warm.
+    ///
+    /// Performs the expensive voice prefill once (~125 tokens), then returns a
+    /// session where each enqueued utterance only pays the text prefill cost.
+    ///
+    /// Must be called within a `withModelStore` context.
+    static func makeSession(
+        voiceData: PocketTtsVoiceData,
+        temperature: Float = PocketTtsConstants.temperature,
+        seed: UInt64? = nil
+    ) async throws -> PocketTtsSession {
+        let store = try currentModelStore()
+
+        let constants = try await store.constants()
+        let condModel = try await store.condStep()
+        let stepModel = try await store.flowlmStep()
+        let flowModel = try await store.flowDecoder()
+        let mimiModel = try await store.mimiDecoder()
+        let repoDir = try await store.repoDir()
+        let mimiState = try loadMimiInitialState(from: repoDir)
+        let bosEmb = try createBosEmbedding(constants.bosEmbedding)
+        let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
+
+        // One-time voice prefill
+        let emptyState = try emptyKVCacheState()
+        let voiceKVSnapshot = try await prefillKVCacheVoice(
+            state: emptyState, voiceData: voiceData, model: condModel
+        )
+
+        logger.info(
+            "Session voice prefill at position \(Int(voiceKVSnapshot.positions[0][0].floatValue))"
+        )
+
+        let session = PocketTtsSession(
+            voiceKVSnapshot: voiceKVSnapshot,
+            mimiState: mimiState,
+            constants: constants,
+            condModel: condModel,
+            stepModel: stepModel,
+            flowModel: flowModel,
+            mimiModel: mimiModel,
+            bosEmb: bosEmb,
+            temperature: temperature,
+            seed: seedValue
+        )
+        await session.start()
+        return session
     }
 
     // MARK: - Streaming Internals
@@ -633,7 +687,8 @@ public struct PocketTtsSynthesizer {
                                 samples: frameSamples,
                                 frameIndex: step,
                                 chunkIndex: chunkIdx,
-                                chunkCount: chunkCount
+                                chunkCount: chunkCount,
+                                utteranceIndex: nil
                             ))
 
                         sequence = try PocketTtsSynthesizer.createSequenceFromLatent(latent)
@@ -964,14 +1019,14 @@ public struct PocketTtsSynthesizer {
     ///
     /// At 80ms per frame, 12.5 frames ≈ 1 second of audio per word.
     /// The +2 adds margin for pauses and trailing silence.
-    private static func estimateMaxFrames(text: String) -> Int {
+    static func estimateMaxFrames(text: String) -> Int {
         let wordCount = text.split(separator: " ").count
         let genLenSec = Double(wordCount) + 2.0
         return Int(genLenSec * 12.5)
     }
 
     /// Create the BOS embedding as an MLMultiArray [32].
-    private static func createBosEmbedding(_ bos: [Float]) throws -> MLMultiArray {
+    static func createBosEmbedding(_ bos: [Float]) throws -> MLMultiArray {
         let dim = PocketTtsConstants.latentDim
         let array = try MLMultiArray(shape: [NSNumber(value: dim)], dataType: .float32)
         let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: dim)
@@ -986,7 +1041,7 @@ public struct PocketTtsSynthesizer {
     ///
     /// The first generation step has no previous audio latent. NaN values tell
     /// the model to use the BOS embedding instead, triggering the start of speech.
-    private static func createNaNSequence() throws -> MLMultiArray {
+    static func createNaNSequence() throws -> MLMultiArray {
         let dim = PocketTtsConstants.latentDim
         let array = try MLMultiArray(
             shape: [1, 1, NSNumber(value: dim)], dataType: .float32)
@@ -1001,7 +1056,7 @@ public struct PocketTtsSynthesizer {
     ///
     /// Autoregressive feedback: each generated audio latent becomes the input
     /// for the next flowlm_step, so the model conditions on its own output.
-    private static func createSequenceFromLatent(_ latent: [Float]) throws -> MLMultiArray {
+    static func createSequenceFromLatent(_ latent: [Float]) throws -> MLMultiArray {
         let dim = PocketTtsConstants.latentDim
         let array = try MLMultiArray(
             shape: [1, 1, NSNumber(value: dim)], dataType: .float32)

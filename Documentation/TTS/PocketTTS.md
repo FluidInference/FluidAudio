@@ -6,11 +6,12 @@ How the Swift code generates speech from text.
 
 | File | Role |
 |------|------|
-| `PocketTtsManager.swift` | Public API — `initialize()`, `synthesize()`, `synthesizeToFile()`, `cloneVoice()` |
+| `PocketTtsManager.swift` | Public API — `initialize()`, `synthesize()`, `synthesizeToFile()`, `makeSession()`, `cloneVoice()` |
 | `PocketTtsModelStore.swift` | Loads and stores the 4 CoreML models + constants + voice data |
 | `PocketTtsVoiceCloner.swift` | Voice cloning — converts audio to voice conditioning embeddings |
 | `PocketTtsSynthesizer.swift` | Main synthesis loop — chunking, prefill, generation, output |
-| `PocketTtsSynthesizer+KVCache.swift` | KV cache state, `prefillKVCache()`, `runCondStep()`, `runFlowLMStep()` |
+| `PocketTtsSession.swift` | Session actor — persistent voice KV cache, enqueue/finish/cancel API |
+| `PocketTtsSynthesizer+KVCache.swift` | KV cache state, `prefillKVCacheVoice()`, `prefillKVCacheText()`, `cloneKVCacheState()` |
 | `PocketTtsSynthesizer+Flow.swift` | Flow decoder loop, `denormalize()`, `quantize()`, SeededRNG |
 | `PocketTtsSynthesizer+Mimi.swift` | Mimi decoder state, `runMimiDecoder()`, `loadMimiInitialState()` |
 | `PocketTtsConstantsLoader.swift` | Loads binary constants (embeddings, tokenizer, quantizer weights) |
@@ -181,6 +182,45 @@ Text-level preprocessing that runs **before** the SentencePiece tokenizer:
 - **Fine-grained pronunciation control** — the model decides pronunciation from text tokens alone
 
 See [Kokoro.md](Kokoro.md) if you need pronunciation control.
+
+## Session API
+
+For streaming input or long-running low-latency sessions, `makeSession()`
+performs the voice prefill once, then each enqueued utterance only prefills
+text tokens. Mimi state persists across utterances for seamless audio.
+
+```swift
+let session = try await manager.makeSession(voice: "alba")
+
+// Agent turn — enqueue text as it arrives
+session.enqueue("Hello there.")
+session.enqueue("How are you doing today?")
+await session.drain()  // wait until all enqueued text is generated
+// → switch to listening
+
+// Next agent turn — session stays active
+session.enqueue("I understand.")
+await session.drain()
+
+// Done for good
+session.finish()
+```
+
+| Method | Description |
+|--------|-------------|
+| `manager.makeSession(voice:temperature:seed:)` | Create session with named voice |
+| `manager.makeSession(voiceData:temperature:seed:)` | Create session with cloned voice |
+| `session.enqueue(_ text:)` | Add text (non-async, safe from any context) |
+| `session.drain()` | Wait until all enqueued text is generated |
+| `session.finish()` | End the session and complete the frames stream |
+| `session.cancel()` | Stop generation immediately |
+| `session.frames` | `AsyncThrowingStream<AudioFrame, Error>` |
+
+| Scenario | API |
+|----------|-----|
+| One-shot synthesis | `synthesize()` |
+| Streaming playback | `synthesizeStreaming()` |
+| Streaming text or custom chunking | `makeSession()` |
 
 ## Usage
 

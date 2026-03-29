@@ -206,6 +206,85 @@ public actor PocketTtsManager {
         }
     }
 
+    // MARK: - Session API
+
+    /// Create a persistent TTS session that keeps the voice KV cache warm.
+    ///
+    /// The expensive voice prefill (~125 tokens) is performed once during
+    /// session creation. Each subsequent `enqueue()` call only pays the
+    /// text prefill cost. Mimi decoder state persists across utterances
+    /// for seamless audio continuity.
+    ///
+    /// - Parameters:
+    ///   - voice: Voice identifier (default: uses the manager's default voice).
+    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - seed: Random seed for reproducibility (nil for random).
+    /// - Returns: A session ready to accept text via `enqueue()`.
+    ///
+    /// Example:
+    /// ```swift
+    /// let session = try await manager.makeSession(voice: "alba")
+    /// session.enqueue("Hello there.")
+    /// session.enqueue("How are you?")
+    /// session.finish()
+    /// for try await frame in session.frames {
+    ///     audioEngine.schedule(frame.samples)
+    /// }
+    /// ```
+    public func makeSession(
+        voice: String? = nil,
+        temperature: Float = PocketTtsConstants.temperature,
+        seed: UInt64? = nil
+    ) async throws -> PocketTtsSession {
+        guard isInitialized else {
+            throw PocketTTSError.modelNotFound("PocketTTS model not initialized")
+        }
+
+        let selectedVoice = voice ?? defaultVoice
+        let voiceData = try await modelStore.voiceData(for: selectedVoice)
+
+        return try await buildSession(
+            voiceData: voiceData, temperature: temperature, seed: seed
+        )
+    }
+
+    /// Create a persistent TTS session using custom voice data.
+    ///
+    /// Use this for cloned voices without saving to disk first.
+    ///
+    /// - Parameters:
+    ///   - voiceData: Voice conditioning data (e.g., from cloneVoice).
+    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - seed: Random seed for reproducibility (nil for random).
+    /// - Returns: A session ready to accept text via `enqueue()`.
+    public func makeSession(
+        voiceData: PocketTtsVoiceData,
+        temperature: Float = PocketTtsConstants.temperature,
+        seed: UInt64? = nil
+    ) async throws -> PocketTtsSession {
+        guard isInitialized else {
+            throw PocketTTSError.modelNotFound("PocketTTS model not initialized")
+        }
+
+        return try await buildSession(
+            voiceData: voiceData, temperature: temperature, seed: seed
+        )
+    }
+
+    private func buildSession(
+        voiceData: PocketTtsVoiceData,
+        temperature: Float,
+        seed: UInt64?
+    ) async throws -> PocketTtsSession {
+        return try await PocketTtsSynthesizer.withModelStore(modelStore) {
+            try await PocketTtsSynthesizer.makeSession(
+                voiceData: voiceData,
+                temperature: temperature,
+                seed: seed
+            )
+        }
+    }
+
     /// Synthesize text and write the result directly to a file.
     public func synthesizeToFile(
         text: String,
