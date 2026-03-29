@@ -102,6 +102,7 @@ Resources/
 !Sources/FluidAudio/Resources/
 !Sources/FluidAudio/Resources/**
 scripts/
+!Scripts/run_parakeet_benchmarks.sh
 Documentation/parakeet-tdt/
 docs/parakeet-tdt/
 
