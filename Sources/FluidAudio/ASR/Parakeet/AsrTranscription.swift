@@ -1,6 +1,5 @@
 @preconcurrency import CoreML
 import Foundation
-import OSLog
 
 extension AsrManager {
 
@@ -8,34 +7,15 @@ extension AsrManager {
         _ audioSamples: [Float], source: AudioSource
     ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
-        guard audioSamples.count >= 16_000 else { throw ASRError.invalidAudioData }
+        guard audioSamples.count >= config.sampleRate else { throw ASRError.invalidAudioData }
 
         let startTime = Date()
 
-        // Get the appropriate decoder state
-        var decoderState: TdtDecoderState
-        switch source {
-        case .microphone:
-            decoderState = microphoneDecoderState
-        case .system:
-            decoderState = systemDecoderState
-        }
+        var decoderState = decoderState(for: source)
 
         // Route to appropriate processing method based on audio length
         if audioSamples.count <= ASRConstants.maxModelSamples {
-            let originalLength = audioSamples.count
-            let frameAlignedCandidate =
-                ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
-                    / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
-            let frameAlignedLength: Int
-            let alignedSamples: [Float]
-            if frameAlignedCandidate > originalLength && frameAlignedCandidate <= ASRConstants.maxModelSamples {
-                frameAlignedLength = frameAlignedCandidate
-                alignedSamples = audioSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
-            } else {
-                frameAlignedLength = originalLength
-                alignedSamples = audioSamples
-            }
+            let (alignedSamples, frameAlignedLength) = frameAlignedAudio(audioSamples)
             let paddedAudio: [Float] = padAudioIfNeeded(alignedSamples, targetLength: ASRConstants.maxModelSamples)
             let (hypothesis, encoderSequenceLength) = try await executeMLInferenceWithTimings(
                 paddedAudio,
@@ -55,13 +35,7 @@ extension AsrManager {
                 processingTime: Date().timeIntervalSince(startTime)
             )
 
-            // Store decoder state back
-            switch source {
-            case .microphone:
-                microphoneDecoderState = decoderState
-            case .system:
-                systemDecoderState = decoderState
-            }
+            setDecoderState(decoderState, for: source)
 
             return result
         }
@@ -77,13 +51,7 @@ extension AsrManager {
             }
         )
 
-        // Store decoder state back (ChunkProcessor uses the stored state directly)
-        switch source {
-        case .microphone:
-            microphoneDecoderState = decoderState
-        case .system:
-            systemDecoderState = decoderState
-        }
+        setDecoderState(decoderState, for: source)
 
         return result
     }
@@ -157,20 +125,14 @@ extension AsrManager {
                         cachedCtcFrameDuration = 0.04  // 40ms per frame
                         cachedCtcValidFrames = encoderSequenceLength
                     } else {
-                        cachedCtcLogits = nil
-                        cachedCtcFrameDuration = nil
-                        cachedCtcValidFrames = nil
+                        clearCachedCtcData()
                     }
                 } catch {
                     logger.warning("CTC head inference failed: \(error.localizedDescription)")
-                    cachedCtcLogits = nil
-                    cachedCtcFrameDuration = nil
-                    cachedCtcValidFrames = nil
+                    clearCachedCtcData()
                 }
             } else {
-                cachedCtcLogits = nil
-                cachedCtcFrameDuration = nil
-                cachedCtcValidFrames = nil
+                clearCachedCtcData()
             }
 
             // Calculate actual audio frames if not provided using shared constants
@@ -248,25 +210,10 @@ extension AsrManager {
         previousTokens: [Int] = [],
         isLastChunk: Bool = false
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
-        // Select and copy decoder state for the source
-        var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
+        var state = decoderState(for: source)
 
-        let originalLength = chunkSamples.count
-        let frameAlignedCandidate =
-            ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
-                / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
-        let frameAlignedLength: Int
-        let alignedSamples: [Float]
-        if previousTokens.isEmpty
-            && frameAlignedCandidate > originalLength
-            && frameAlignedCandidate <= ASRConstants.maxModelSamples
-        {
-            frameAlignedLength = frameAlignedCandidate
-            alignedSamples = chunkSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
-        } else {
-            frameAlignedLength = originalLength
-            alignedSamples = chunkSamples
-        }
+        let (alignedSamples, frameAlignedLength) = frameAlignedAudio(
+            chunkSamples, allowAlignment: previousTokens.isEmpty)
         let padded = padAudioIfNeeded(alignedSamples, targetLength: ASRConstants.maxModelSamples)
         let (hypothesis, encLen) = try await executeMLInferenceWithTimings(
             padded,
@@ -277,12 +224,7 @@ extension AsrManager {
             isLastChunk: isLastChunk
         )
 
-        // Persist updated state back to the source-specific slot
-        if source == .microphone {
-            microphoneDecoderState = state
-        } else {
-            systemDecoderState = state
-        }
+        setDecoderState(state, for: source)
 
         // Apply token deduplication if previous tokens are provided
         if !previousTokens.isEmpty && hypothesis.hasTokens {
@@ -307,23 +249,16 @@ extension AsrManager {
         tokenDurations: [Int] = [],
         encoderSequenceLength: Int,
         audioSamples: [Float],
-        processingTime: TimeInterval,
-        tokenTimings: [TokenTiming] = []
+        processingTime: TimeInterval
     ) -> ASRResult {
 
-        let (text, finalTimings) = convertTokensWithExistingTimings(tokenIds, timings: tokenTimings)
+        let text = convertTokensToText(tokenIds)
         let duration = TimeInterval(audioSamples.count) / TimeInterval(config.sampleRate)
 
-        // Convert timestamps to TokenTiming objects if provided
-        let timingsFromTimestamps = createTokenTimings(
+        let resultTimings = createTokenTimings(
             from: tokenIds, timestamps: timestamps, confidences: confidences, tokenDurations: tokenDurations)
 
-        // Use existing timings if provided, otherwise use timings from timestamps
-        let resultTimings = tokenTimings.isEmpty ? timingsFromTimestamps : finalTimings
-
-        // Calculate confidence based on actual model confidence scores from TDT decoder
         let confidence = calculateConfidence(
-            duration: duration,
             tokenCount: tokenIds.count,
             isEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             tokenConfidences: confidences
@@ -338,6 +273,27 @@ extension AsrManager {
         )
     }
 
+    /// Align audio samples to encoder frame boundaries by zero-padding to the next frame boundary.
+    /// Returns the aligned samples and the frame-aligned length.
+    /// - Parameters:
+    ///   - audioSamples: Raw audio samples
+    ///   - allowAlignment: When false, skip alignment (e.g. when previous context exists)
+    nonisolated internal func frameAlignedAudio(
+        _ audioSamples: [Float], allowAlignment: Bool = true
+    ) -> (samples: [Float], frameAlignedLength: Int) {
+        let originalLength = audioSamples.count
+        let frameAlignedCandidate =
+            ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
+                / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
+        if allowAlignment && frameAlignedCandidate > originalLength
+            && frameAlignedCandidate <= ASRConstants.maxModelSamples
+        {
+            let aligned = audioSamples + Array(repeating: 0, count: frameAlignedCandidate - originalLength)
+            return (aligned, frameAlignedCandidate)
+        }
+        return (audioSamples, originalLength)
+    }
+
     nonisolated internal func padAudioIfNeeded(_ audioSamples: [Float], targetLength: Int) -> [Float] {
         guard audioSamples.count < targetLength else { return audioSamples }
         return audioSamples + Array(repeating: 0, count: targetLength - audioSamples.count)
@@ -347,7 +303,7 @@ extension AsrManager {
     /// Returns the average of token-level softmax probabilities from the decoder
     /// Range: 0.1 (empty transcription) to 1.0 (perfect confidence)
     nonisolated private func calculateConfidence(
-        duration: Double, tokenCount: Int, isEmpty: Bool, tokenConfidences: [Float]
+        tokenCount: Int, isEmpty: Bool, tokenConfidences: [Float]
     ) -> Float {
         // Empty transcription gets low confidence
         if isEmpty {
@@ -391,27 +347,25 @@ extension AsrManager {
         // Sort by timestamp to ensure chronological order
         let sortedData = combinedData.sorted { $0.timestamp < $1.timestamp }
 
+        let frameDuration = ASRConstants.secondsPerEncoderFrame
+
         for i in 0..<sortedData.count {
             let data = sortedData[i]
             let tokenId = data.tokenId
             let frameIndex = data.timestamp
 
-            // Convert encoder frame index to time (80ms per frame)
-            let startTime = TimeInterval(frameIndex) * 0.08
+            let startTime = TimeInterval(frameIndex) * frameDuration
 
             // Calculate end time using actual token duration if available
             let endTime: TimeInterval
             if !tokenDurations.isEmpty && data.duration > 0 {
-                // Use actual token duration (convert frames to time: duration * 0.08)
-                let durationInSeconds = TimeInterval(data.duration) * 0.08
-                endTime = startTime + max(durationInSeconds, 0.08)  // Minimum 80ms duration
+                let durationInSeconds = TimeInterval(data.duration) * frameDuration
+                endTime = startTime + max(durationInSeconds, frameDuration)
             } else if i < sortedData.count - 1 {
-                // Fallback: Use next token's start time as this token's end time
-                let nextStartTime = TimeInterval(sortedData[i + 1].timestamp) * 0.08
-                endTime = max(nextStartTime, startTime + 0.08)  // Ensure end > start
+                let nextStartTime = TimeInterval(sortedData[i + 1].timestamp) * frameDuration
+                endTime = max(nextStartTime, startTime + frameDuration)
             } else {
-                // Last token: assume minimum duration
-                endTime = startTime + 0.08
+                endTime = startTime + frameDuration
             }
 
             // Validate that end time is after start time
@@ -435,37 +389,6 @@ extension AsrManager {
             timings.append(timing)
         }
         return timings
-    }
-
-    /// Slice encoder output to remove left context frames (following NeMo approach)
-    nonisolated private func sliceEncoderOutput(
-        _ encoderOutput: MLMultiArray,
-        from startFrame: Int,
-        newLength: Int
-    ) throws -> MLMultiArray {
-        let shape = encoderOutput.shape
-        let batchSize = shape[0].intValue
-        let hiddenSize = shape[2].intValue
-
-        // Create new array with sliced dimensions
-        let slicedArray = try MLMultiArray(
-            shape: [batchSize, newLength, hiddenSize] as [NSNumber],
-            dataType: encoderOutput.dataType
-        )
-
-        // Copy data from startFrame onwards
-        let sourcePtr = encoderOutput.dataPointer.bindMemory(to: Float.self, capacity: encoderOutput.count)
-        let destPtr = slicedArray.dataPointer.bindMemory(to: Float.self, capacity: slicedArray.count)
-
-        for t in 0..<newLength {
-            for h in 0..<hiddenSize {
-                let sourceIndex = (startFrame + t) * hiddenSize + h
-                let destIndex = t * hiddenSize + h
-                destPtr[destIndex] = sourcePtr[sourceIndex]
-            }
-        }
-
-        return slicedArray
     }
 
     /// Remove duplicate token sequences at the start of the current list that overlap

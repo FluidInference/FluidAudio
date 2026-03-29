@@ -27,6 +27,9 @@ public enum ASRConstants {
     /// Each encoder frame represents ~80ms of audio at 16kHz
     public static let samplesPerEncoderFrame: Int = melHopSize * encoderSubsampling  // 1280
 
+    /// Duration of one encoder frame in seconds (80ms)
+    public static let secondsPerEncoderFrame: Double = Double(samplesPerEncoderFrame) / Double(sampleRate)  // 0.08
+
     /// WER threshold for detailed error analysis in benchmarks
     public static let highWERThreshold: Double = 0.15
 

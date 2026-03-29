@@ -101,27 +101,25 @@ final class AsrTranscriptionTests: XCTestCase {
         XCTAssertTrue(result.tokenTimings?.isEmpty == true)  // No timestamps provided, should be empty array
     }
 
-    func testProcessTranscriptionResultWithTimings() async {
+    func testProcessTranscriptionResultWithTimestampsAndConfidences() async {
         await setupMockVocabulary()
         let tokenIds = [10, 20, 30]
         let audioSamples = Array(repeating: Float(0), count: 48_000)  // 3 seconds
-        let timings = [
-            TokenTiming(token: "hello", tokenId: 10, startTime: 0.0, endTime: 1.0, confidence: 0.9),
-            TokenTiming(token: "world", tokenId: 20, startTime: 1.0, endTime: 2.0, confidence: 0.85),
-            TokenTiming(token: "test", tokenId: 30, startTime: 2.0, endTime: 3.0, confidence: 0.95),
-        ]
+        let timestamps = [0, 12, 25]
+        let confidences: [Float] = [0.9, 0.85, 0.95]
 
         let result = await manager.processTranscriptionResult(
             tokenIds: tokenIds,
+            timestamps: timestamps,
+            confidences: confidences,
             encoderSequenceLength: 150,
             audioSamples: audioSamples,
-            processingTime: 1.2,
-            tokenTimings: timings
+            processingTime: 1.2
         )
 
         XCTAssertEqual(result.duration, 3.0, accuracy: 0.01)
         XCTAssertNotNil(result.tokenTimings)
-        // Note: Actual timing count may differ due to convertTokensWithExistingTimings filtering
+        XCTAssertEqual(result.tokenTimings?.count, 3)
     }
 
     func testProcessTranscriptionResultWithTimestamps() async {

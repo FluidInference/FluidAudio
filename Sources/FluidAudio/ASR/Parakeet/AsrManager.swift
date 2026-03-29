@@ -38,6 +38,22 @@ public actor AsrManager {
     internal var microphoneDecoderState: TdtDecoderState
     internal var systemDecoderState: TdtDecoderState
 
+    /// Get decoder state for a given audio source.
+    internal func decoderState(for source: AudioSource) -> TdtDecoderState {
+        switch source {
+        case .microphone: return microphoneDecoderState
+        case .system: return systemDecoderState
+        }
+    }
+
+    /// Set decoder state for a given audio source.
+    internal func setDecoderState(_ state: TdtDecoderState, for source: AudioSource) {
+        switch source {
+        case .microphone: microphoneDecoderState = state
+        case .system: systemDecoderState = state
+        }
+    }
+
     // Cached CTC logits from fused Preprocessor (unified custom vocabulary)
     internal var cachedCtcLogits: MLMultiArray?
     internal var cachedCtcFrameDuration: Double?
@@ -45,6 +61,13 @@ public actor AsrManager {
 
     /// Whether the Preprocessor outputs CTC logits (unified custom vocabulary model).
     public var hasCachedCtcLogits: Bool { cachedCtcLogits != nil }
+
+    /// Clear all cached CTC data (logits, frame duration, valid frames).
+    internal func clearCachedCtcData() {
+        cachedCtcLogits = nil
+        cachedCtcFrameDuration = nil
+        cachedCtcValidFrames = nil
+    }
 
     /// Get cached CTC raw logits as [[Float]] for external use (e.g. benchmarks).
     /// These are raw logits — callers must apply `CtcKeywordSpotter.applyLogSoftmax()`
@@ -211,16 +234,7 @@ public actor AsrManager {
             throw ASRError.notInitialized
         }
 
-        // Get the appropriate decoder state
-        var state: TdtDecoderState
-        switch source {
-        case .microphone:
-            state = microphoneDecoderState
-        case .system:
-            state = systemDecoderState
-        }
-
-        // Reset the existing decoder state to clear all cached values including predictorOutput
+        var state = decoderState(for: source)
         state.reset()
 
         let initDecoderInput = try prepareDecoderInput(
@@ -234,14 +248,7 @@ public actor AsrManager {
         )
 
         state.update(from: initDecoderOutput)
-
-        // Store back
-        switch source {
-        case .microphone:
-            microphoneDecoderState = state
-        case .system:
-            systemDecoderState = state
-        }
+        setDecoderState(state, for: source)
     }
 
     public func resetState() {
@@ -249,9 +256,7 @@ public actor AsrManager {
         let layers = asrModels?.version.decoderLayers ?? 2
         microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
         systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
-        cachedCtcLogits = nil
-        cachedCtcFrameDuration = nil
-        cachedCtcValidFrames = nil
+        clearCachedCtcData()
         Task { await sharedMLArrayCache.clear() }
     }
 
@@ -266,10 +271,7 @@ public actor AsrManager {
         // Reset decoder states using fresh allocations for deterministic behavior
         microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
         systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
-        // Release cached CTC data
-        cachedCtcLogits = nil
-        cachedCtcFrameDuration = nil
-        cachedCtcValidFrames = nil
+        clearCachedCtcData()
         Task { await sharedMLArrayCache.clear() }
         logger.info("AsrManager resources cleaned up")
     }
@@ -408,7 +410,7 @@ public actor AsrManager {
         )
 
         let totalSamples = sampleSource.sampleCount
-        guard totalSamples >= 16_000 else {
+        guard totalSamples >= config.sampleRate else {
             sampleSource.cleanup()
             throw ASRError.invalidAudioData
         }
@@ -502,49 +504,14 @@ public actor AsrManager {
         token.replacingOccurrences(of: "▁", with: " ")
     }
 
-    internal func convertTokensWithExistingTimings(
-        _ tokenIds: [Int], timings: [TokenTiming]
-    ) -> (
-        text: String, timings: [TokenTiming]
-    ) {
-        guard !tokenIds.isEmpty else { return ("", []) }
+    /// Decode token IDs to text using SentencePiece conventions.
+    internal func convertTokensToText(_ tokenIds: [Int]) -> String {
+        guard !tokenIds.isEmpty else { return "" }
 
-        // SentencePiece-compatible decoding algorithm:
-        // 1. Convert token IDs to token strings
-        var tokens: [String] = []
-        var tokenInfos: [(token: String, tokenId: Int, timing: TokenTiming?)] = []
-
-        for (index, tokenId) in tokenIds.enumerated() {
-            if let token = vocabulary[tokenId], !token.isEmpty {
-                tokens.append(token)
-                let timing = index < timings.count ? timings[index] : nil
-                tokenInfos.append((token: token, tokenId: tokenId, timing: timing))
-            }
-        }
-
-        // 2. Concatenate all tokens (this is how SentencePiece works)
-        let concatenated = tokens.joined()
-
-        // 3. Replace ▁ with space (SentencePiece standard)
-        let text = concatenated.replacingOccurrences(of: "▁", with: " ")
+        let tokens = tokenIds.compactMap { vocabulary[$0] }.filter { !$0.isEmpty }
+        return tokens.joined()
+            .replacingOccurrences(of: "▁", with: " ")
             .trimmingCharacters(in: .whitespaces)
-
-        // 4. For now, return original timings as-is
-        // Note: Proper timing alignment would require tracking character positions
-        // through the concatenation and replacement process
-        let adjustedTimings = tokenInfos.compactMap { info in
-            info.timing.map { timing in
-                TokenTiming(
-                    token: normalizedTimingToken(info.token),
-                    tokenId: info.tokenId,
-                    startTime: timing.startTime,
-                    endTime: timing.endTime,
-                    confidence: timing.confidence
-                )
-            }
-        }
-
-        return (text, adjustedTimings)
     }
 
     nonisolated internal func extractFeatureValue(
