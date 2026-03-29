@@ -7,7 +7,6 @@
 
 ## ASR
 - [Getting Started](ASR/GettingStarted.md)
-- [Choosing an API](ASR/ChoosingAnAPI.md)
 - [Directory Structure](ASR/DirectoryStructure.md)
 - [Post-Processing (ITN)](ASR/PostProcessing.md)
 - [Custom Vocabulary](ASR/CustomVocabulary.md)
