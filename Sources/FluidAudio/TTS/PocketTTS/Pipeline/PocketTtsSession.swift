@@ -10,14 +10,6 @@ public actor PocketTtsSession {
 
     private static let logger = AppLogger(category: "PocketTtsSession")
 
-    // MARK: - Queue Item
-
-    /// Internal queue item — either text to synthesize or a drain signal.
-    private enum QueueItem: Sendable {
-        case text(String)
-        case drain(CheckedContinuation<Void, Never>)
-    }
-
     // MARK: - Public Interface
 
     /// Stream of generated audio frames (80ms / 1920 samples at 24kHz each).
@@ -33,18 +25,7 @@ public actor PocketTtsSession {
     /// internally if it exceeds the per-chunk token limit. Can be called
     /// multiple times to stream text as it arrives.
     public nonisolated func enqueue(_ text: String) {
-        queueContinuation.yield(.text(text))
-    }
-
-    /// Wait until all previously enqueued text has been fully generated.
-    ///
-    /// The session remains active after draining — more text can be enqueued.
-    /// Use this to detect when an agent turn's audio is complete before
-    /// switching to listening mode.
-    public nonisolated func drain() async {
-        await withCheckedContinuation { continuation in
-            queueContinuation.yield(.drain(continuation))
-        }
+        textContinuation.yield(text)
     }
 
     /// Signal that no more text will be enqueued.
@@ -52,20 +33,21 @@ public actor PocketTtsSession {
     /// The session will finish generating all previously enqueued text,
     /// then complete the `frames` stream.
     public nonisolated func finish() {
-        queueContinuation.finish()
+        textContinuation.finish()
     }
 
     /// Cancel ongoing generation and finish the frames stream.
     public func cancel() {
         generationTask?.cancel()
-        queueContinuation.finish()
+        textContinuation.finish()
     }
 
     // MARK: - Internal State
 
-    private nonisolated let queueContinuation: AsyncStream<QueueItem>.Continuation
-    private let queueStream: AsyncStream<QueueItem>
-    private let frameContinuation: AsyncThrowingStream<PocketTtsSynthesizer.AudioFrame, Error>.Continuation
+    private nonisolated let textContinuation: AsyncStream<String>.Continuation
+    private let textStream: AsyncStream<String>
+    private let frameContinuation:
+        AsyncThrowingStream<PocketTtsSynthesizer.AudioFrame, Error>.Continuation
     private var generationTask: Task<Void, Never>?
 
     // Models
@@ -110,10 +92,10 @@ public actor PocketTtsSession {
         self.temperature = temperature
         self.rng = SeededRNG(seed: seed)
 
-        // Queue channel
-        let (queueStream, queueContinuation) = AsyncStream.makeStream(of: QueueItem.self)
-        self.queueStream = queueStream
-        self.queueContinuation = queueContinuation
+        // Text queue channel
+        let (textStream, textContinuation) = AsyncStream.makeStream(of: String.self)
+        self.textStream = textStream
+        self.textContinuation = textContinuation
 
         // Frame output stream
         let (frames, frameContinuation) = AsyncThrowingStream.makeStream(
@@ -138,42 +120,30 @@ public actor PocketTtsSession {
         var utteranceIndex = 0
 
         do {
-            for await item in queueStream {
-                if Task.isCancelled {
-                    // Resume any drain continuation so callers don't hang
-                    if case .drain(let continuation) = item {
-                        continuation.resume()
-                    }
-                    break
-                }
+            for await text in textStream {
+                if Task.isCancelled { break }
 
-                switch item {
-                case .text(let text):
-                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else { continue }
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
 
-                    let chunks = PocketTtsSynthesizer.chunkText(
-                        trimmed, tokenizer: constants.tokenizer
+                let chunks = PocketTtsSynthesizer.chunkText(
+                    trimmed, tokenizer: constants.tokenizer
+                )
+                Self.logger.info(
+                    "Session enqueued '\(trimmed)', \(chunks.count) chunk(s)")
+
+                for chunkText in chunks {
+                    if Task.isCancelled { break }
+
+                    try await generateChunk(
+                        text: chunkText,
+                        chunkIndex: chunkIndex,
+                        chunkCount: chunks.count,
+                        utteranceIndex: utteranceIndex
                     )
-                    Self.logger.info(
-                        "Session enqueued '\(trimmed)', \(chunks.count) chunk(s)")
-
-                    for chunkText in chunks {
-                        if Task.isCancelled { break }
-
-                        try await generateChunk(
-                            text: chunkText,
-                            chunkIndex: chunkIndex,
-                            chunkCount: chunks.count,
-                            utteranceIndex: utteranceIndex
-                        )
-                        chunkIndex += 1
-                    }
-                    utteranceIndex += 1
-
-                case .drain(let continuation):
-                    continuation.resume()
+                    chunkIndex += 1
                 }
+                utteranceIndex += 1
             }
             frameContinuation.finish()
         } catch {

@@ -191,19 +191,12 @@ text tokens. Mimi state persists across utterances for seamless audio.
 
 ```swift
 let session = try await manager.makeSession(voice: "alba")
-
-// Agent turn — enqueue text as it arrives
 session.enqueue("Hello there.")
 session.enqueue("How are you doing today?")
-await session.drain()  // wait until all enqueued text is generated
-// → switch to listening
-
-// Next agent turn — session stays active
-session.enqueue("I understand.")
-await session.drain()
-
-// Done for good
 session.finish()
+for try await frame in session.frames {
+    playAudio(frame.samples)
+}
 ```
 
 | Method | Description |
@@ -211,7 +204,6 @@ session.finish()
 | `manager.makeSession(voice:temperature:seed:)` | Create session with named voice |
 | `manager.makeSession(voiceData:temperature:seed:)` | Create session with cloned voice |
 | `session.enqueue(_ text:)` | Add text (non-async, safe from any context) |
-| `session.drain()` | Wait until all enqueued text is generated |
 | `session.finish()` | End the session and complete the frames stream |
 | `session.cancel()` | Stop generation immediately |
 | `session.frames` | `AsyncThrowingStream<AudioFrame, Error>` |
