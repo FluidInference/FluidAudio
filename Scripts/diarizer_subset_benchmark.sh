@@ -190,22 +190,6 @@ merge_json_results() {
     shift
     local tmp_files=("$@")
     python3 -c "
-import json, sys, glob
-results = []
-for f in sys.argv[1:]:
-    try:
-        with open(f) as fh:
-            data = json.load(fh)
-            if isinstance(data, list):
-                results.extend(data)
-            else:
-                results.append(data)
-    except: pass
-with open(sys.argv[1].rsplit('_tmp_', 1)[0] + '.json', 'w') as out:
-    json.dump(results, out, indent=2)
-" "$@" 2>/dev/null
-    # Also write to the expected output path
-    python3 -c "
 import json, sys
 results = []
 for f in sys.argv[2:]:
