@@ -128,7 +128,7 @@ public actor AsrManager {
     /// Only one session is supported at a time.
     public var transcriptionProgressStream: AsyncThrowingStream<Double, Error> {
         get async {
-            await progressEmitter.currentStream()
+            await progressEmitter.ensureSession()
         }
     }
 
