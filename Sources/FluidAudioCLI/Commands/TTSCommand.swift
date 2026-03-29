@@ -379,7 +379,7 @@ public struct TTS {
                     // Load ASR models and initialize
                     let models = try await AsrModels.downloadAndLoad()
                     let asr = AsrManager()
-                    try await asr.initialize(models: models)
+                    try await asr.loadModels(models)
 
                     // Transcribe the generated audio file
                     let transcription = try await asr.transcribe(outURL)
@@ -585,7 +585,7 @@ public struct TTS {
                 do {
                     let asrModels = try await AsrModels.downloadAndLoad()
                     let asr = AsrManager()
-                    try await asr.initialize(models: asrModels)
+                    try await asr.loadModels(asrModels)
 
                     let transcription = try await asr.transcribe(outURL)
                     asrHypothesis = transcription.text

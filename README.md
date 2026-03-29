@@ -275,7 +275,7 @@ Task {
     // 1) Initialize ASR manager and load models
     let models = try await AsrModels.downloadAndLoad(version: .v3)  // Switch to .v2 for English-only work
     let asrManager = AsrManager(config: .default)
-    try await asrManager.initialize(models: models)
+    try await asrManager.loadModels(models)
 
     // 3) Transcribe the audio 16hz, already converted
     let result = try await asrManager.transcribe(samples)

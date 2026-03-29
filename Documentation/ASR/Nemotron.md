@@ -31,7 +31,7 @@ Tested on Apple M2 with LibriSpeech test-clean:
 import FluidAudio
 
 // Create manager
-let manager = NemotronStreamingAsrManager()
+let manager = StreamingNemotronAsrManager()
 
 // Load models (defaults to 1120ms chunk size)
 let modelDir = URL(fileURLWithPath: "~/.cache/fluidaudio/models/nemotron-streaming/1120ms")

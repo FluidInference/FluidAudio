@@ -73,7 +73,7 @@ struct ManualLoader {
             )
 
             let asrManager = AsrManager()
-            try await asrManager.initialize(models: models)
+            try await asrManager.loadModels(models)
 
             // ... proceed with transcription workflow
         } catch {

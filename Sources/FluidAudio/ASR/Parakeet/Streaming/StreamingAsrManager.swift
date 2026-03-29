@@ -3,21 +3,21 @@ import Foundation
 
 /// Universal protocol for true streaming ASR engines.
 ///
-/// `StreamingEouAsrManager` and `NemotronStreamingAsrManager` conform to this protocol,
-/// enabling polymorphic usage through `StreamingAsrEngineFactory`.
+/// `StreamingEouAsrManager` and `StreamingNemotronAsrManager` conform to this protocol,
+/// enabling polymorphic usage through `StreamingModelVariant.createManager()`.
 ///
 /// Note: `SlidingWindowAsrManager` (TDT) intentionally does **not** conform — it uses
 /// an offline encoder with overlapping windows, not a cache-aware streaming architecture.
 ///
 /// Usage pattern:
 /// ```swift
-/// let engine = StreamingAsrEngineFactory.create(.parakeetEou160ms)
-/// try await engine.loadModels()
-/// try engine.appendAudio(buffer)
-/// try await engine.processBufferedAudio()
-/// let text = try await engine.finish()
+/// let manager = StreamingModelVariant.parakeetEou160ms.createManager()
+/// try await manager.loadModels()
+/// try manager.appendAudio(buffer)
+/// try await manager.processBufferedAudio()
+/// let text = try await manager.finish()
 /// ```
-public protocol StreamingAsrEngine: Actor {
+public protocol StreamingAsrManager: Actor {
     /// Human-readable display name (e.g., "Parakeet TDT 0.6B v3 Streaming")
     var displayName: String { get }
 
@@ -45,6 +45,10 @@ public protocol StreamingAsrEngine: Actor {
     /// Reset engine state for a new transcription session.
     /// Models remain loaded; only decoding and buffer state is cleared.
     func reset() async throws
+
+    /// Release all loaded models and free memory.
+    /// The manager cannot be used for transcription after this until `loadModels()` is called again.
+    func cleanup() async
 
     /// Set a callback invoked when partial transcript text updates are available.
     /// - Parameter callback: Closure receiving the current partial transcript string.

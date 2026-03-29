@@ -425,6 +425,20 @@ public actor StreamingEouAsrManager {
         processedChunks = 0
     }
 
+    public func cleanup() async {
+        await reset()
+        streamingEncoder = nil
+        decoder = nil
+        joint = nil
+        rnntDecoder = nil
+        tokenizer = nil
+        preCache = nil
+        cacheLastChannel = nil
+        cacheLastTime = nil
+        cacheLastChannelLen = nil
+        logger.info("StreamingEouAsrManager resources cleaned up")
+    }
+
     public func injectSilence(_ seconds: Double) {
         let silenceSamples = Int(seconds * 16000)
         audioBuffer.append(contentsOf: Array(repeating: 0.0, count: silenceSamples))
@@ -556,9 +570,9 @@ public actor StreamingEouAsrManager {
     }
 }
 
-// MARK: - StreamingAsrEngine Conformance
+// MARK: - StreamingAsrManager Conformance
 
-extension StreamingEouAsrManager: StreamingAsrEngine {
+extension StreamingEouAsrManager: StreamingAsrManager {
     public var displayName: String {
         "Parakeet EOU 120M (\(chunkSize.durationMs)ms)"
     }
@@ -586,19 +600,5 @@ extension StreamingEouAsrManager: StreamingAsrEngine {
     public func getPartialTranscript() -> String {
         guard let tokenizer = tokenizer else { return "" }
         return tokenizer.decode(ids: accumulatedTokenIds)
-    }
-}
-
-extension MLMultiArray {
-    func reset(to value: NSNumber) {
-        let count = self.count
-        let ptr = self.dataPointer.bindMemory(to: Float.self, capacity: count)
-        // Assuming Float32 for simplicity, but should check dataType
-        if self.dataType == .float32 {
-            ptr.update(repeating: value.floatValue, count: count)
-        } else if self.dataType == .int32 {
-            let intPtr = self.dataPointer.bindMemory(to: Int32.self, capacity: count)
-            intPtr.update(repeating: value.int32Value, count: count)
-        }
     }
 }

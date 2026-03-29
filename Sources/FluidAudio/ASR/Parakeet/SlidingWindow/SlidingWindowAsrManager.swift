@@ -135,7 +135,7 @@ public actor SlidingWindowAsrManager {
 
         // Initialize ASR manager with provided models
         asrManager = AsrManager(config: config.asrConfig)
-        try await asrManager?.initialize(models: models)
+        try await asrManager?.loadModels(models)
 
         // Reset decoder state for the specific source
         try await asrManager?.resetDecoderState(for: source)
@@ -262,6 +262,15 @@ public actor SlidingWindowAsrManager {
         accumulatedTokens.removeAll()
 
         logger.info("SlidingWindowAsrManager reset for source: \(String(describing: self.audioSource))")
+    }
+
+    /// Release all loaded models and free memory.
+    /// The manager cannot be used for transcription after this until `start()` is called again.
+    public func cleanup() async {
+        await cancel()
+        await asrManager?.cleanup()
+        asrManager = nil
+        logger.info("SlidingWindowAsrManager resources cleaned up")
     }
 
     /// Cancel streaming without getting results
@@ -626,7 +635,7 @@ public actor SlidingWindowAsrManager {
                 do {
                     let models = try await AsrModels.downloadAndLoad()
                     let newAsrManager = AsrManager(config: config.asrConfig)
-                    try await newAsrManager.initialize(models: models)
+                    try await newAsrManager.loadModels(models)
                     self.asrManager = newAsrManager
                     logger.info("Successfully reinitialized ASR manager during error recovery")
                 } catch {

@@ -9,7 +9,7 @@ ASR/
 ├── ANEOptimizer.swift
 ├── AsrManager.swift
 ├── AsrModels.swift
-├── AsrTranscription.swift
+├── AsrManager+Transcription.swift
 ├── AsrTypes.swift
 ├── AudioBuffer.swift
 ├── ChunkProcessor.swift
@@ -33,7 +33,7 @@ ASR/
 │   ├── StreamingAsrManager.swift
 │   ├── StreamingAsrSession.swift
 │   ├── StreamingEouAsrManager.swift
-│   ├── NemotronStreamingAsrManager.swift
+│   ├── StreamingNemotronAsrManager.swift
 │   ├── NemotronChunkSize.swift
 │   ├── NemotronPipeline.swift
 │   ├── NemotronStreamingConfig.swift
@@ -49,7 +49,7 @@ ASR/
 
 1. **Parakeet files at the ASR root.** Files like `AsrManager.swift`, `ChunkProcessor.swift`, and `AudioBuffer.swift` are Parakeet-specific but sit at the `ASR/` root as if they are shared infrastructure. Qwen3 has its own manager and models and shares none of this code.
 
-2. **`Streaming/` conflates two different things.** `StreamingAsrManager` uses an offline encoder with overlapping sliding-window chunks — it is not true streaming. It lived alongside `StreamingEouAsrManager` and `NemotronStreamingAsrManager`, which are actual cache-aware streaming engines. The naming made it unclear which was which.
+2. **`Streaming/` conflates two different things.** `StreamingAsrManager` uses an offline encoder with overlapping sliding-window chunks — it is not true streaming. It lived alongside `StreamingEouAsrManager` and `StreamingNemotronAsrManager`, which are actual cache-aware streaming engines. The naming made it unclear which was which.
 
 3. **`CTC/` and `CustomVocabulary/` at the top level.** These are only used by the sliding-window pipeline, not by true streaming or Qwen3. Their placement suggested they were shared ASR utilities.
 
@@ -62,7 +62,7 @@ ASR/
 ├── Parakeet/
 │   ├── AsrManager.swift
 │   ├── AsrModels.swift
-│   ├── AsrTranscription.swift
+│   ├── AsrManager+Transcription.swift
 │   ├── AsrTypes.swift
 │   ├── AudioBuffer.swift
 │   ├── ChunkProcessor.swift
@@ -88,8 +88,7 @@ ASR/
 │   │       └── WordSpotting/
 │   │
 │   └── Streaming/
-│       ├── StreamingAsrEngine.swift
-│       ├── StreamingAsrEngineFactory.swift
+│       ├── StreamingAsrManager.swift
 │       ├── ParakeetModelVariant.swift
 │       ├── RnntDecoder.swift
 │       ├── Tokenizer.swift
@@ -97,8 +96,8 @@ ASR/
 │       │   └── StreamingEouAsrManager.swift
 │       └── Nemotron/
 │           ├── NemotronChunkSize.swift
-│           ├── NemotronStreamingAsrManager.swift
-│           ├── NemotronStreamingAsrManager+Pipeline.swift
+│           ├── StreamingNemotronAsrManager.swift
+│           ├── StreamingNemotronAsrManager+Pipeline.swift
 │           └── NemotronStreamingConfig.swift
 │
 └── Qwen3/
@@ -133,7 +132,7 @@ The old `Streaming/` directory mixed two architecturally different approaches:
 
 `SlidingWindowAsrManager` (formerly `StreamingAsrManager`) processes audio in large overlapping windows using an offline encoder. The name "streaming" was misleading — it streams audio *in*, but the encoder sees each chunk in isolation.
 
-`StreamingEouAsrManager` and `NemotronStreamingAsrManager` are true streaming engines with cache-aware encoders that maintain state across chunks.
+`StreamingEouAsrManager` and `StreamingNemotronAsrManager` are true streaming engines with cache-aware encoders that maintain state across chunks.
 
 ### Renames
 
@@ -151,9 +150,8 @@ These features are only used by the sliding-window pipeline. CTC decoding runs o
 
 | File | Purpose |
 |---|---|
-| `StreamingAsrEngine.swift` | Actor protocol defining the interface for true streaming engines (`loadModels`, `appendAudio`, `processBufferedAudio`, `finish`, `reset`) |
-| `StreamingAsrEngineFactory.swift` | Factory that creates the right engine from a `StreamingModelVariant` |
-| `ParakeetModelVariant.swift` | Enum cataloguing all available streaming variants (EOU 160ms/320ms/1280ms, Nemotron 560ms/1120ms) with their repos and chunk sizes |
+| `StreamingAsrManager.swift` | Actor protocol defining the interface for true streaming engines (`loadModels`, `appendAudio`, `processBufferedAudio`, `finish`, `reset`) |
+| `ParakeetModelVariant.swift` | Enum cataloguing all available streaming variants (EOU 160ms/320ms/1280ms, Nemotron 560ms/1120ms) with their repos, chunk sizes, and `createManager()` factory method |
 
 ### `Streaming/` subdivided into `EOU/` and `Nemotron/`
 
@@ -191,7 +189,7 @@ Total genuinely identical code: ~4 lines across `appendAudio` and `getPartialTra
 | **Extra features** | EOU detection with debounce timer | None |
 | **State reset** | 6 cache arrays + EOU debounce state + RNNT decoder | 5 cache arrays + LSTM states from config shapes |
 
-A base class would have almost no real implementation to share — just abstract methods everywhere. The `StreamingAsrEngine` protocol is the right tool: it defines the contract without pretending these engines share internals.
+A base class would have almost no real implementation to share — just abstract methods everywhere. The `StreamingAsrManager` protocol is the right tool: it defines the contract without pretending these engines share internals.
 
 ## CLI and Test Mirrors
 

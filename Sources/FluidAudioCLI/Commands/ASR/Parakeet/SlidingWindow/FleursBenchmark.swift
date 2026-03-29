@@ -975,7 +975,7 @@ extension FLEURSBenchmark {
         do {
             cliLogger.info("Initializing ASR system...")
             let models = try await AsrModels.downloadAndLoad()
-            try await asrManager.initialize(models: models)
+            try await asrManager.loadModels(models)
             cliLogger.info("ASR system initialized")
 
             // Run benchmark
@@ -1118,7 +1118,7 @@ extension FLEURSBenchmark {
         do {
             cliLogger.info("Initializing ASR system...")
             let models = try await AsrModels.downloadAndLoad()
-            try await asrManager.initialize(models: models)
+            try await asrManager.loadModels(models)
             cliLogger.info("ASR system initialized")
 
             // Load the single sample directly

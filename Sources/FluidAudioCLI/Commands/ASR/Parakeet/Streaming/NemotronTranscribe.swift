@@ -124,7 +124,7 @@ public class NemotronTranscribe {
 
             // Load models
             logger.info("Loading Nemotron models...")
-            let manager = NemotronStreamingAsrManager()
+            let manager = StreamingNemotronAsrManager()
             try await manager.loadModels(modelDir: modelDir)
             logger.info("Models loaded successfully")
             logger.info("")
@@ -200,7 +200,7 @@ public class NemotronTranscribe {
             .appendingPathComponent(".cache/fluidaudio/models")
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
 
-        // Check for int8 encoder (the only format loaded by NemotronStreamingAsrManager)
+        // Check for int8 encoder (the only format loaded by StreamingNemotronAsrManager)
         let encoderInt8Path = cacheDir.appendingPathComponent("encoder/encoder_int8.mlmodelc")
 
         if FileManager.default.fileExists(atPath: encoderInt8Path.path) {

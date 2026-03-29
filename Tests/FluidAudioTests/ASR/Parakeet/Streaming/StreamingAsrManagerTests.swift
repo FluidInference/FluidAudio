@@ -2,29 +2,29 @@ import XCTest
 
 @testable import FluidAudio
 
-final class StreamingAsrEngineTests: XCTestCase {
+final class StreamingAsrManagerTests: XCTestCase {
 
     // MARK: - Protocol Conformance (compile-time verification)
 
     func testStreamingEouAsrManagerConformsToProtocol() async {
-        let engine: any StreamingAsrEngine = StreamingEouAsrManager()
+        let engine: any StreamingAsrManager = StreamingEouAsrManager()
         let name = await engine.displayName
         XCTAssertFalse(name.isEmpty)
     }
 
-    func testNemotronStreamingAsrManagerConformsToProtocol() async {
-        let engine: any StreamingAsrEngine = NemotronStreamingAsrManager()
+    func testStreamingNemotronAsrManagerConformsToProtocol() async {
+        let engine: any StreamingAsrManager = StreamingNemotronAsrManager()
         let name = await engine.displayName
         XCTAssertFalse(name.isEmpty)
     }
 
     func testSlidingWindowAsrManagerDoesNotConformToProtocol() {
-        // SlidingWindowAsrManager (TDT) is intentionally NOT a StreamingAsrEngine.
+        // SlidingWindowAsrManager (TDT) is intentionally NOT a StreamingAsrManager.
         // TDT uses a sliding-window approach with an offline encoder, not true streaming.
         // This test documents the design decision. If it fails to compile, TDT conformance
         // was accidentally added back.
         let _: SlidingWindowAsrManager = SlidingWindowAsrManager()
-        // Uncomment to verify compile error: let _: any StreamingAsrEngine = SlidingWindowAsrManager()
+        // Uncomment to verify compile error: let _: any StreamingAsrManager = SlidingWindowAsrManager()
     }
 
     // MARK: - StreamingModelVariant Tests
@@ -95,18 +95,18 @@ final class StreamingAsrEngineTests: XCTestCase {
     // MARK: - Factory Tests
 
     func testFactoryCreatesEouEngine() async {
-        let engine = StreamingAsrEngineFactory.create(.parakeetEou160ms)
+        let engine = StreamingModelVariant.parakeetEou160ms.createManager()
         XCTAssertTrue(engine is StreamingEouAsrManager)
     }
 
     func testFactoryCreatesNemotronEngine() async {
-        let engine = StreamingAsrEngineFactory.create(.nemotron1120ms)
-        XCTAssertTrue(engine is NemotronStreamingAsrManager)
+        let engine = StreamingModelVariant.nemotron1120ms.createManager()
+        XCTAssertTrue(engine is StreamingNemotronAsrManager)
     }
 
     func testFactoryCreatesAllVariants() async {
         for variant in StreamingModelVariant.allCases {
-            let engine = StreamingAsrEngineFactory.create(variant)
+            let engine = variant.createManager()
             let name = await engine.displayName
             XCTAssertFalse(name.isEmpty, "Engine for \(variant) has empty displayName")
         }
@@ -115,13 +115,13 @@ final class StreamingAsrEngineTests: XCTestCase {
     // MARK: - Engine Initial State Tests
 
     func testEouEngineInitialState() async {
-        let engine = StreamingAsrEngineFactory.create(.parakeetEou320ms)
+        let engine = StreamingModelVariant.parakeetEou320ms.createManager()
         let partial = await engine.getPartialTranscript()
         XCTAssertEqual(partial, "")
     }
 
     func testNemotronEngineInitialState() async {
-        let engine = StreamingAsrEngineFactory.create(.nemotron560ms)
+        let engine = StreamingModelVariant.nemotron560ms.createManager()
         let partial = await engine.getPartialTranscript()
         XCTAssertEqual(partial, "")
     }
