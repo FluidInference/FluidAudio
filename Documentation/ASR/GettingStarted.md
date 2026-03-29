@@ -10,7 +10,7 @@
 
 ## Streaming ASR (Parakeet EOU)
 
-- Model: `FluidInference/parakeet-eou-1.1b-coreml`
+- Model: `FluidInference/parakeet-realtime-eou-120m-coreml`
 - Chunk Sizes: 160ms (lowest latency), 320ms, 1600ms (highest throughput)
 - End-of-Utterance Detection: Built-in silence detection with configurable debounce
 

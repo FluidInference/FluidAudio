@@ -60,16 +60,12 @@ ASR/
 ```
 ASR/
 ├── Parakeet/
-│   ├── ANEOptimizer.swift
 │   ├── AsrManager.swift
 │   ├── AsrModels.swift
 │   ├── AsrTranscription.swift
 │   ├── AsrTypes.swift
 │   ├── AudioBuffer.swift
 │   ├── ChunkProcessor.swift
-│   ├── MLArrayCache.swift
-│   ├── PerformanceMetrics.swift
-│   ├── ProgressEmitter.swift
 │   │
 │   ├── Decoder/
 │   │   ├── BlasIndex.swift
@@ -101,8 +97,8 @@ ASR/
 │       │   └── StreamingEouAsrManager.swift
 │       └── Nemotron/
 │           ├── NemotronChunkSize.swift
-│           ├── NemotronPipeline.swift
 │           ├── NemotronStreamingAsrManager.swift
+│           ├── NemotronStreamingAsrManager+Pipeline.swift
 │           └── NemotronStreamingConfig.swift
 │
 └── Qwen3/
