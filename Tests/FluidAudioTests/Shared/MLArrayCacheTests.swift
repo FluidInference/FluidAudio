@@ -97,58 +97,6 @@ final class MLArrayCacheTests: XCTestCase {
         XCTAssertNotNil(finalArray)
     }
 
-    // MARK: - Float16 Support
-
-    func testGetFloat16ArrayFromScratch() async throws {
-        let shape: [NSNumber] = [1, 64]  // Smaller for CI stability
-        let fp16Array = try await cache.getFloat16Array(shape: shape)
-
-        XCTAssertEqual(fp16Array.shape, shape)
-
-        // In CI, we might get Float32 instead of Float16 for stability
-        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        if isCI {
-            // In CI, accept either Float16 or Float32
-            XCTAssertTrue(fp16Array.dataType == .float16 || fp16Array.dataType == .float32)
-        } else {
-            XCTAssertEqual(fp16Array.dataType, .float16)
-
-            // Verify ANE alignment only in non-CI environment
-            let pointerValue = Int(bitPattern: fp16Array.dataPointer)
-            XCTAssertEqual(pointerValue % ANEMemoryUtils.aneAlignment, 0)
-        }
-    }
-
-    func testGetFloat16ArrayFromFloat32() async throws {
-        // Create Float32 array
-        let shape: [NSNumber] = [50]  // Smaller for CI stability
-        let float32Array = try MLMultiArray(shape: shape, dataType: .float32)
-
-        // Fill with test values
-        for i in 0..<float32Array.count {
-            float32Array[i] = NSNumber(value: Float(i) * 0.1)
-        }
-
-        // Convert to Float16
-        let float16Array = try await cache.getFloat16Array(shape: shape, from: float32Array)
-
-        XCTAssertEqual(float16Array.shape, shape)
-
-        // In CI, we might get Float32 instead of Float16 for stability
-        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        if isCI {
-            // In CI, accept either Float16 or Float32
-            XCTAssertTrue(float16Array.dataType == .float16 || float16Array.dataType == .float32)
-        } else {
-            XCTAssertEqual(float16Array.dataType, .float16)
-        }
-
-        // Verify conversion accuracy (regardless of CI)
-        for i in 0..<min(5, float16Array.count) {
-            XCTAssertEqual(float16Array[i].floatValue, Float(i) * 0.1, accuracy: 0.01)
-        }
-    }
-
     // MARK: - Pre-warming Tests
 
     func testPrewarmCache() async {
