@@ -8,10 +8,10 @@
 #   4. LS-EEND             — LSEENDDiarizer, AMI variant
 #
 # Usage:
-#   ./Scripts/run_diarizer_benchmarks.sh                    # quick run (4 meetings)
-#   ./Scripts/run_diarizer_benchmarks.sh --all              # full run (all 16 meetings)
-#   ./Scripts/run_diarizer_benchmarks.sh --max-files 8      # custom subset
-#   ./Scripts/run_diarizer_benchmarks.sh --download         # download missing assets, then exit
+#   ./Scripts/run_diarizer_subset.sh                    # quick run (4 meetings)
+#   ./Scripts/run_diarizer_subset.sh --all              # full run (all 16 meetings)
+#   ./Scripts/run_diarizer_subset.sh --max-files 8      # custom subset
+#   ./Scripts/run_diarizer_subset.sh --download         # download missing assets, then exit
 #
 # The script verifies all models and dataset files exist locally before running.
 # If anything is missing it will tell you exactly what and exit (unless --download).
@@ -156,7 +156,7 @@ if ! verify_assets; then
     log ""
     log "ERROR: Missing assets — cannot run offline."
     log "Run with --download first while connected to the internet:"
-    log "  ./Scripts/run_diarizer_benchmarks.sh --download"
+    log "  ./Scripts/run_diarizer_subset.sh --download"
     exit 1
 fi
 log "All assets verified locally."
