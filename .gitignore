@@ -103,6 +103,7 @@ Resources/
 !Sources/FluidAudio/Resources/**
 scripts/
 !Scripts/run_parakeet_benchmarks.sh
+!Scripts/run_diarizer_benchmarks.sh
 Documentation/parakeet-tdt/
 docs/parakeet-tdt/
 
