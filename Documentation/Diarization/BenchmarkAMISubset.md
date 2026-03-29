@@ -22,7 +22,7 @@ Pyannote segmentation + WeSpeaker embeddings + PLDA scoring + VBx clustering.
 Default configuration: step ratio 0.2, minSegmentDurationSeconds 1.0, clustering threshold 0.7.
 
 ```bash
-Scripts/run_diarizer_subset.sh
+Scripts/diarizer_subset_benchmark.sh
 # or manually:
 swift run -c release fluidaudiocli diarization-benchmark --mode offline \
     --dataset ami-sdm --auto-download
@@ -50,7 +50,7 @@ Pyannote segmentation + WeSpeaker embeddings + online SpeakerManager clustering.
 Best streaming configuration: 5s chunks, 0s overlap, 0.8 clustering threshold.
 
 ```bash
-Scripts/run_diarizer_subset.sh
+Scripts/diarizer_subset_benchmark.sh
 # or manually:
 swift run -c release fluidaudiocli diarization-benchmark --mode streaming \
     --dataset ami-sdm --chunk-seconds 5.0 --overlap-seconds 0.0 \
@@ -81,7 +81,7 @@ NVIDIA end-to-end Sortformer model, 30.4s chunk config.
 Model: [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml)
 
 ```bash
-Scripts/run_diarizer_subset.sh
+Scripts/diarizer_subset_benchmark.sh
 # or manually:
 swift run -c release fluidaudiocli sortformer-benchmark \
     --nvidia-high-latency --hf --auto-download
@@ -109,7 +109,7 @@ Linear Streaming End-to-End Neural Diarization from Westlake University.
 Model: [GradientDescent2718/ls-eend-coreml](https://huggingface.co/GradientDescent2718/ls-eend-coreml)
 
 ```bash
-Scripts/run_diarizer_subset.sh
+Scripts/diarizer_subset_benchmark.sh
 # or manually:
 swift run -c release fluidaudiocli lseend-benchmark \
     --variant ami --auto-download
@@ -135,13 +135,13 @@ Full 16-meeting results: 20.7% DER, 74.5x RTFx. See [Benchmarks.md](../Benchmark
 Run all 4 systems on the default 4-meeting subset:
 
 ```bash
-./Scripts/run_diarizer_subset.sh
+./Scripts/diarizer_subset_benchmark.sh
 ```
 
 Run on all 16 AMI meetings:
 
 ```bash
-./Scripts/run_diarizer_subset.sh --all
+./Scripts/diarizer_subset_benchmark.sh --all
 ```
 
 Results are saved to `benchmark_results/` with timestamps. The script uses `caffeinate` to prevent sleep during long runs.

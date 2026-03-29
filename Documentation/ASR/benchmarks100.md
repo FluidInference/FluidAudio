@@ -4,14 +4,14 @@ Benchmark comparison between `main` and PR #440 (`standardize-asr-directory-stru
 
 ## Reproduction
 
-All batch TDT and CTC earnings benchmarks can be reproduced with [`Scripts/run_parakeet_subset.sh`](../../Scripts/run_parakeet_subset.sh):
+All batch TDT and CTC earnings benchmarks can be reproduced with [`Scripts/parakeet_subset_benchmark.sh`](../../Scripts/parakeet_subset_benchmark.sh):
 
 ```bash
 # Download models and datasets (requires internet)
-./Scripts/run_parakeet_subset.sh --download
+./Scripts/parakeet_subset_benchmark.sh --download
 
 # Run all 4 benchmarks offline (100 files each, sleep-prevented)
-./Scripts/run_parakeet_subset.sh
+./Scripts/parakeet_subset_benchmark.sh
 ```
 
 ## Environment

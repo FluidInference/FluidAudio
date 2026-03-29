@@ -10,8 +10,8 @@
 #   6. Nemotron streaming — nemotron 1120ms on LibriSpeech test-clean
 #
 # Usage:
-#   ./Scripts/run_parakeet_subset.sh              # verify + run
-#   ./Scripts/run_parakeet_subset.sh --download    # download missing assets, then exit
+#   ./Scripts/parakeet_subset_benchmark.sh              # verify + run
+#   ./Scripts/parakeet_subset_benchmark.sh --download    # download missing assets, then exit
 #
 # The script verifies all models and dataset files exist locally before running.
 # If anything is missing it will tell you exactly what and exit (unless --download).
@@ -175,7 +175,7 @@ if ! verify_assets; then
     log ""
     log "ERROR: Missing assets — cannot run offline."
     log "Run with --download first while connected to the internet:"
-    log "  ./Scripts/run_parakeet_subset.sh --download"
+    log "  ./Scripts/parakeet_subset_benchmark.sh --download"
     exit 1
 fi
 log "All assets verified locally."
