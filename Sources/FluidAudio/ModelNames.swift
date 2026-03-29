@@ -129,6 +129,10 @@ public enum Repo: String, CaseIterable {
             return "nemotron-streaming/560ms"
         case .sortformer:
             return "sortformer"
+        case .parakeetCtc110m:
+            return "parakeet-ctc-110m-coreml"
+        case .parakeetCtc06b:
+            return "parakeet-ctc-0.6b-coreml"
         case .parakeetTdtCtc110m:
             return "parakeet-tdt-ctc-110m"
         default:
