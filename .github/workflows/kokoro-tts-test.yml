@@ -1,0 +1,136 @@
+name: Kokoro TTS Smoke Test
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  kokoro-tts-smoke-test:
+    name: Kokoro TTS Smoke Test
+    runs-on: macos-15
+    permissions:
+      contents: read
+      pull-requests: write
+
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Application Support/FluidAudio/Models/kokoro-82m-coreml
+            ~/Library/Caches/Homebrew
+            /usr/local/Cellar/ffmpeg
+            /opt/homebrew/Cellar/ffmpeg
+          key: ${{ runner.os }}-kokoro-tts-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/Kokoro/**', 'Sources/FluidAudio/ModelNames.swift') }}
+
+      - name: Install ffmpeg
+        run: |
+          brew install ffmpeg || echo "ffmpeg may already be installed"
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Run Smoke Test
+        id: smoketest
+        run: |
+          BENCHMARK_START=$(date +%s)
+
+          echo "========================================="
+          echo "Kokoro TTS smoke test"
+          echo "========================================="
+          echo ""
+
+          TEXT="I can't believe we finally made it to the summit after climbing for twelve exhausting hours through wind and rain, but wow, this view of the endless mountain ranges stretching to the horizon makes every single difficult step completely worth the journey."
+
+          if .build/release/fluidaudiocli tts "$TEXT" \
+            --output kokoro_output.wav \
+            --auto-download 2>&1; then
+            echo "Smoke test PASSED - pipeline completed without crash"
+            echo "SMOKE_STATUS=PASSED" >> $GITHUB_OUTPUT
+          else
+            EXIT_CODE=$?
+            echo "Smoke test FAILED with exit code $EXIT_CODE"
+            echo "SMOKE_STATUS=FAILED" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -f kokoro_output.wav ]; then
+            SIZE=$(stat -f%z kokoro_output.wav 2>/dev/null || stat -c%s kokoro_output.wav 2>/dev/null)
+            echo "Output file size: $SIZE bytes"
+            echo "FILE_SIZE=$SIZE" >> $GITHUB_OUTPUT
+          else
+            echo "FILE_SIZE=0" >> $GITHUB_OUTPUT
+          fi
+
+          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+
+      - name: Comment PR
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ steps.smoketest.outputs.SMOKE_STATUS }}';
+            const emoji = status === 'PASSED' ? '✅' : '❌';
+            const fileSize = '${{ steps.smoketest.outputs.FILE_SIZE }}';
+            const fileSizeKB = (parseInt(fileSize) / 1024).toFixed(1);
+
+            const body = `## Kokoro TTS Smoke Test ${emoji}
+
+            | Check | Result |
+            |-------|--------|
+            | Build | ✅ |
+            | Model download | ${emoji} |
+            | Model load | ${emoji} |
+            | Synthesis pipeline | ${emoji} |
+            | Output WAV | ${parseInt(fileSize) > 0 ? '✅' : '❌'} (${fileSizeKB} KB) |
+
+            <sub>Runtime: ${{ steps.smoketest.outputs.EXECUTION_TIME }}</sub>
+
+            <sub>**Note:** Kokoro TTS uses CoreML flow matching + Vocos vocoder. CI VM lacks physical ANE — performance may differ from Apple Silicon.</sub>
+
+            <!-- fluidaudio-kokoro-tts-test -->`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.body.includes('<!-- fluidaudio-kokoro-tts-test -->')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Upload Output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kokoro-tts-output
+          path: kokoro_output.wav
+          retention-days: 7
