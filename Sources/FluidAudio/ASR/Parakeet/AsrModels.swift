@@ -1,6 +1,5 @@
 @preconcurrency import CoreML
 import Foundation
-import OSLog
 
 /// ASR model version enum
 public enum AsrModelVersion: Sendable {
@@ -331,8 +330,6 @@ extension AsrModels {
         return try await load(from: targetDir, configuration: configuration, progressHandler: progressHandler)
     }
 
-    /// Load models with ANE-optimized configurations
-
     private static func describeComputeUnits(_ units: MLComputeUnits) -> String {
         switch units {
         case .cpuOnly:
@@ -348,18 +345,6 @@ extension AsrModels {
         }
     }
 
-    public static func loadWithANEOptimization(
-        from directory: URL? = nil,
-        enableFP16: Bool = true
-    ) async throws -> AsrModels {
-        let targetDir = directory ?? defaultCacheDirectory()
-
-        logger.info("Loading ASR models with ANE optimization from: \(targetDir.path)")
-
-        // Use the load method that already applies per-model optimizations
-        return try await load(from: targetDir, configuration: nil)
-    }
-
     public static func defaultConfiguration() -> MLModelConfiguration {
         // Prefer Neural Engine across platforms for ASR inference to avoid GPU dispatch.
         MLModelConfigurationUtils.defaultConfiguration(computeUnits: .cpuAndNeuralEngine)
@@ -370,9 +355,11 @@ extension AsrModels {
         enableFP16: Bool = true
     ) -> MLModelConfiguration {
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        return MLModelConfigurationUtils.defaultConfiguration(
+        let config = MLModelConfigurationUtils.defaultConfiguration(
             computeUnits: isCI ? .cpuOnly : .cpuAndNeuralEngine
         )
+        config.allowLowPrecisionAccumulationOnGPU = enableFP16
+        return config
     }
 
     /// Create optimized prediction options for inference
