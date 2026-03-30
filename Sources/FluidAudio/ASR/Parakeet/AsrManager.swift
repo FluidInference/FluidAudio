@@ -393,7 +393,7 @@ public actor AsrManager {
 
             sampleSource.cleanup()
 
-            try await self.resetDecoderState()
+            try await self.resetDecoderState(for: source)
             if shouldEmitProgress {
                 await progressEmitter.finishSession()
             }
