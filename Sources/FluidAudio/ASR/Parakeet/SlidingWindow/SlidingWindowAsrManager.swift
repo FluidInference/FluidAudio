@@ -220,8 +220,8 @@ public actor SlidingWindowAsrManager {
             if !confirmedTranscript.isEmpty { parts.append(confirmedTranscript) }
             if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
             finalText = parts.joined(separator: " ")
-        } else if let asrManager = asrManager, !accumulatedTokens.isEmpty {
-            let finalResult = await asrManager.processTranscriptionResult(
+        } else if !accumulatedTokens.isEmpty,
+            let finalResult = await asrManager?.processTranscriptionResult(
                 tokenIds: accumulatedTokens,
                 timestamps: [],
                 confidences: [],  // No per-token confidences needed for final text
@@ -229,6 +229,7 @@ public actor SlidingWindowAsrManager {
                 audioSamples: [],  // Not needed for final text conversion
                 processingTime: 0
             )
+        {
             finalText = finalResult.text
         } else {
             var parts: [String] = []
@@ -252,9 +253,7 @@ public actor SlidingWindowAsrManager {
         nextWindowCenterStart = 0
 
         // Reset decoder state for the current audio source
-        if let asrManager = asrManager {
-            try await asrManager.resetDecoderState(for: audioSource)
-        }
+        try await asrManager?.resetDecoderState(for: audioSource)
 
         // Reset sliding window state
         segmentIndex = 0
@@ -375,44 +374,47 @@ public actor SlidingWindowAsrManager {
         windowStartSample: Int,
         isLastChunk: Bool = false
     ) async {
-        guard let asrManager = asrManager else { return }
-
         do {
             let chunkStartTime = Date()
 
             // Start frame offset is now handled by decoder's timeJump mechanism
 
             // Call AsrManager directly with deduplication
-            let (tokens, timestamps, confidences, _) = try await asrManager.transcribeChunk(
-                windowSamples,
-                source: audioSource,
-                previousTokens: accumulatedTokens,
-                isLastChunk: isLastChunk
-            )
+            guard
+                let result = try await asrManager?.transcribeChunk(
+                    windowSamples,
+                    source: audioSource,
+                    previousTokens: accumulatedTokens,
+                    isLastChunk: isLastChunk
+                )
+            else { return }
+            let (tokens, timestamps, confidences, _) = result
 
             let adjustedTimestamps = Self.applyGlobalFrameOffset(
                 to: timestamps,
                 windowStartSample: windowStartSample
             )
 
-            // Update state
-            accumulatedTokens.append(contentsOf: tokens)
-            lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
-            segmentIndex += 1
-
             let processingTime = Date().timeIntervalSince(chunkStartTime)
-            processedChunks += 1
 
             // Convert only the current chunk tokens to text for clean incremental updates
             // The final result will use all accumulated tokens for proper deduplication
-            let interim = await asrManager.processTranscriptionResult(
-                tokenIds: tokens,  // Only current chunk tokens for progress updates
-                timestamps: adjustedTimestamps,
-                confidences: confidences,
-                encoderSequenceLength: 0,
-                audioSamples: windowSamples,
-                processingTime: processingTime
-            )
+            guard
+                let interim = await asrManager?.processTranscriptionResult(
+                    tokenIds: tokens,  // Only current chunk tokens for progress updates
+                    timestamps: adjustedTimestamps,
+                    confidences: confidences,
+                    encoderSequenceLength: 0,
+                    audioSamples: windowSamples,
+                    processingTime: processingTime
+                )
+            else { return }
+
+            // Update state only after all required async calls complete successfully
+            accumulatedTokens.append(contentsOf: tokens)
+            lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
+            segmentIndex += 1
+            processedChunks += 1
 
             logger.debug(
                 "Chunk \(self.processedChunks): '\(interim.text)', time: \(String(format: "%.3f", processingTime))s)"
@@ -425,16 +427,17 @@ public actor SlidingWindowAsrManager {
 
             // Rescore before updating transcript state so finish() returns rescored content
             var displayResult = interim
-            if shouldConfirm && vocabBoostingEnabled {
-                let chunkLocalTimings =
-                    await asrManager.processTranscriptionResult(
-                        tokenIds: tokens,
-                        timestamps: timestamps,  // Original chunk-local timestamps (not adjusted)
-                        confidences: confidences,
-                        encoderSequenceLength: 0,
-                        audioSamples: windowSamples,
-                        processingTime: processingTime
-                    ).tokenTimings ?? []
+            if shouldConfirm && vocabBoostingEnabled,
+                let chunkLocalResult = await asrManager?.processTranscriptionResult(
+                    tokenIds: tokens,
+                    timestamps: timestamps,  // Original chunk-local timestamps (not adjusted)
+                    confidences: confidences,
+                    encoderSequenceLength: 0,
+                    audioSamples: windowSamples,
+                    processingTime: processingTime
+                )
+            {
+                let chunkLocalTimings = chunkLocalResult.tokenTimings ?? []
 
                 if let rescored = await applyVocabularyRescoring(
                     text: interim.text,
@@ -624,23 +627,23 @@ public actor SlidingWindowAsrManager {
 
     /// Reset decoder state for error recovery
     private func resetDecoderForRecovery() async {
-        if let asrManager = asrManager {
-            do {
-                try await asrManager.resetDecoderState(for: audioSource)
-                logger.info("Successfully reset decoder state during error recovery")
-            } catch {
-                logger.error("Failed to reset decoder state during recovery: \(error)")
+        guard asrManager != nil else { return }
 
-                // Last resort: try to reinitialize the ASR manager
-                do {
-                    let models = try await AsrModels.downloadAndLoad()
-                    let newAsrManager = AsrManager(config: config.asrConfig)
-                    try await newAsrManager.loadModels(models)
-                    self.asrManager = newAsrManager
-                    logger.info("Successfully reinitialized ASR manager during error recovery")
-                } catch {
-                    logger.error("Failed to reinitialize ASR manager during recovery: \(error)")
-                }
+        do {
+            try await asrManager?.resetDecoderState(for: audioSource)
+            logger.info("Successfully reset decoder state during error recovery")
+        } catch {
+            logger.error("Failed to reset decoder state during recovery: \(error)")
+
+            // Last resort: try to reinitialize the ASR manager
+            do {
+                let models = try await AsrModels.downloadAndLoad()
+                let newAsrManager = AsrManager(config: config.asrConfig)
+                try await newAsrManager.loadModels(models)
+                self.asrManager = newAsrManager
+                logger.info("Successfully reinitialized ASR manager during error recovery")
+            } catch {
+                logger.error("Failed to reinitialize ASR manager during recovery: \(error)")
             }
         }
     }
