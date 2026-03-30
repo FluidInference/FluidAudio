@@ -56,7 +56,13 @@ extension PocketTtsSynthesizer {
 
         for cache in state.caches {
             let copy = try MLMultiArray(shape: cache.shape, dataType: cache.dataType)
-            let byteSize = cache.count * MemoryLayout<Float>.size
+            let byteSize: Int
+            switch cache.dataType {
+            case .float16:
+                byteSize = cache.count * MemoryLayout<UInt16>.size
+            default:
+                byteSize = cache.count * MemoryLayout<Float>.size
+            }
             if byteSize > 0 {
                 copy.dataPointer.copyMemory(from: cache.dataPointer, byteCount: byteSize)
             }
@@ -65,7 +71,13 @@ extension PocketTtsSynthesizer {
 
         for pos in state.positions {
             let copy = try MLMultiArray(shape: pos.shape, dataType: pos.dataType)
-            let byteSize = pos.count * MemoryLayout<Float>.size
+            let byteSize: Int
+            switch pos.dataType {
+            case .float16:
+                byteSize = pos.count * MemoryLayout<UInt16>.size
+            default:
+                byteSize = pos.count * MemoryLayout<Float>.size
+            }
             if byteSize > 0 {
                 copy.dataPointer.copyMemory(from: pos.dataPointer, byteCount: byteSize)
             }
