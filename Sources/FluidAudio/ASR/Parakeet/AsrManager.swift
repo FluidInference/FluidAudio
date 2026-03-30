@@ -432,9 +432,9 @@ public actor AsrManager {
         do {
             let result = try await transcribeWithState(audioSamples, source: source)
 
-            // Stateless architecture: reset decoder state after each transcription to ensure
-            // independent processing for batch operations without state carryover
-            try await self.resetDecoderState()
+            // Reset only the source we just used — resetting both races with a
+            // concurrent transcription on the other source and frees in-flight MLMultiArrays.
+            try await self.resetDecoderState(for: source)
             if shouldEmitProgress {
                 await progressEmitter.finishSession()
             }
