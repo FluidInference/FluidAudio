@@ -183,7 +183,7 @@ public enum CtcEarningsBenchmark {
             )
             let tdtModels = try await AsrModels.downloadAndLoad(version: tdtVersion)
             let asrManager = AsrManager(config: .default)
-            try await asrManager.initialize(models: tdtModels)
+            try await asrManager.loadModels(tdtModels)
             print("TDT models loaded successfully")
 
             // Load CTC models for keyword spotting
@@ -508,28 +508,13 @@ public enum CtcEarningsBenchmark {
         let customVocab = CustomVocabularyContext(terms: vocabTerms)
 
         // 3. CTC keyword spotting for high recall dictionary detection
-        // Use cached CTC logits from unified Preprocessor if available (no separate encoder run needed)
-        let logProbs: [[Float]]
-        let frameDuration: Double
-        if let cached = await asrManager.getCachedCtcRawLogits() {
-            // Cached values are raw logits - apply log-softmax + temperature + blank bias
-            logProbs = CtcKeywordSpotter.applyLogSoftmax(
-                rawLogits: cached.rawLogits,
-                blankId: spotter.blankId
-            )
-            frameDuration = cached.frameDuration
-        } else {
-            let spotResult = try await spotter.spotKeywordsWithLogProbs(
-                audioSamples: samples,
-                customVocabulary: customVocab,
-                minScore: nil
-            )
-            logProbs = spotResult.logProbs
-            frameDuration = spotResult.frameDuration
-        }
-
-        // Debug: Show CTC detections with timestamps (only available with separate spotter path)
-        // When using cached CTC logits, detections are not available
+        let ctcResult = try await spotter.spotKeywordsWithLogProbs(
+            audioSamples: samples,
+            customVocabulary: customVocab,
+            minScore: nil
+        )
+        let logProbs = ctcResult.logProbs
+        let frameDuration = ctcResult.frameDuration
 
         // 4. Post-process: Use VocabularyRescorer with timestamp-based matching (NeMo CTC-WS)
         // Set USE_TIMESTAMP_RESCORING=1 to use timestamp-based matching (default)
@@ -632,7 +617,7 @@ public enum CtcEarningsBenchmark {
                 "score": round(Double(detection.score) * 100) / 100,
                 "startTime": round(detection.startTime * 100) / 100,
                 "endTime": round(detection.endTime * 100) / 100,
-                "source": await asrManager.hasCachedCtcLogits ? "ctc-head" : "ctc",
+                "source": "ctc",
             ]
             detectionDetails.append(detail)
 

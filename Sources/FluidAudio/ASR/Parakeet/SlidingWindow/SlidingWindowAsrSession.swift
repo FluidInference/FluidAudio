@@ -86,7 +86,7 @@ public actor SlidingWindowAsrSession {
     // MARK: - Generic Engine Support
 
     /// Engines created via the factory (stored separately from TDT-specific streams)
-    private var engines: [AudioSource: any StreamingAsrEngine] = [:]
+    private var engines: [AudioSource: any StreamingAsrManager] = [:]
 
     /// Create a true streaming ASR engine using the factory.
     ///
@@ -100,7 +100,7 @@ public actor SlidingWindowAsrSession {
     public func createEngine(
         variant: StreamingModelVariant,
         source: AudioSource = .microphone
-    ) async throws -> any StreamingAsrEngine {
+    ) async throws -> any StreamingAsrManager {
         if let existing = engines[source] {
             logger.warning(
                 "Engine already exists for source: \(String(describing: source)). Returning existing engine.")
@@ -110,7 +110,7 @@ public actor SlidingWindowAsrSession {
         logger.info(
             "Creating \(variant.displayName) engine for source: \(String(describing: source))")
 
-        let engine = StreamingAsrEngineFactory.create(variant)
+        let engine = variant.createManager()
         try await engine.loadModels()
         engines[source] = engine
 
@@ -118,7 +118,7 @@ public actor SlidingWindowAsrSession {
     }
 
     /// Get an existing engine for a source
-    public func getEngine(for source: AudioSource) -> (any StreamingAsrEngine)? {
+    public func getEngine(for source: AudioSource) -> (any StreamingAsrManager)? {
         return engines[source]
     }
 

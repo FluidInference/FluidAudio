@@ -15,11 +15,31 @@ The paper introduces a dynamic programming algorithm for CTC-based keyword spott
 - Enables "shallow fusion" rescoring without beam search
 - Provides acoustic evidence for vocabulary term matching
 
+## Quick Start: Which Approach Do I Need?
+
+| Your TDT Model | Use This Approach | Speed | Memory |
+|----------------|-------------------|-------|--------|
+| TDT-CTC-110M | Approach 1 (Standalone CTC Head) | 70x real-time | ~67 MB |
+| Parakeet TDT 0.6B v2/v3 | Approach 2 (Separate CTC Encoder) | 26x real-time | ~130 MB |
+
+Both approaches achieve identical 99.4% accuracy. Approach 1 is faster but only works with TDT-CTC-110M because that model has a built-in CTC head. Approach 2 works with any TDT model but loads a separate CTC encoder.
+
+## Model Compatibility
+
+FluidAudio supports two ASR models with different architectures:
+
+| Model | Size | Architecture | Built-in CTC? |
+|-------|------|--------------|---------------|
+| **TDT-CTC-110M** | 110M params | Hybrid: shared encoder + dual heads (TDT + CTC) | ✅ Yes (1MB projection) |
+| **Parakeet TDT 0.6B v2/v3** | 600M params | Pure TDT: encoder + TDT decoder only | ❌ No |
+
+The TDT-CTC-110M model has a single encoder with **two output heads**: a TDT decoder for transcription and a CTC projection for vocabulary boosting. The Parakeet 0.6B models only have TDT decoders.
+
 ## Architecture Overview
 
 FluidAudio supports two approaches for CTC-based custom vocabulary boosting:
 
-### Approach 1: Standalone CTC Head (Beta, Recommended for TDT-CTC-110M)
+### Approach 1: Standalone CTC Head (Beta)
 
 ```
                   ┌─────────────────────────────────────────┐
@@ -65,9 +85,11 @@ FluidAudio supports two approaches for CTC-based custom vocabulary boosting:
                         └─────────────────┘
 ```
 
-The standalone CTC head is a single linear projection (512 → 1025) extracted from the hybrid TDT-CTC-110M model. It reuses the TDT encoder output, requiring only ~1MB of additional model weight and no second encoder pass.
+The standalone CTC head is a single linear projection (512 → 1025) that's built into the hybrid TDT-CTC-110M model. It reuses the TDT encoder output, requiring only ~1MB of additional model weight and no second encoder pass.
 
-### Approach 2: Separate CTC Encoder (Original)
+**Model Requirement:** TDT-CTC-110M only. The 0.6B models don't have a built-in CTC head.
+
+### Approach 2: Separate CTC Encoder (Stable)
 
 ```
                   ┌─────────────────────────────────────────┐
@@ -80,7 +102,7 @@ The standalone CTC head is a single linear projection (512 → 1025) extracted f
               ▼                                               ▼
     ┌─────────────────┐                             ┌─────────────────┐
     │   TDT Encoder   │                             │   CTC Encoder   │
-    │  (Parakeet 0.6B)│                             │ (Parakeet 110M) │
+    │  (Any TDT model)│                             │ (Parakeet 110M) │
     └────────┬────────┘                             └────────┬────────┘
              │                                               │
              ▼                                               ▼
@@ -110,33 +132,48 @@ The standalone CTC head is a single linear projection (512 → 1025) extracted f
                             └─────────────────┘
 ```
 
+**Model Requirement:** Works with any TDT model (TDT-CTC-110M, Parakeet TDT 0.6B v2/v3). Loads a separate 97.5MB Parakeet CTC 110M encoder.
+
 ### Approach Comparison
 
-| | Standalone CTC Head (beta) | Separate CTC Encoder |
+| | Standalone CTC Head (Approach 1) | Separate CTC Encoder (Approach 2) |
 |---|---|---|
+| **Works with TDT-CTC-110M** | ✅ Yes (recommended) | ✅ Yes |
+| **Works with Parakeet 0.6B v2/v3** | ❌ No | ✅ Yes |
 | **Additional model size** | 1 MB | 97.5 MB |
-| **Second encoder pass** | No | Yes |
+| **Second encoder pass** | No (reuses TDT encoder) | Yes (separate CTC encoder) |
 | **RTFx (earnings benchmark)** | 70.29x | 25.98x |
 | **Dict Recall** | 99.4% | 99.4% |
-| **TDT model requirement** | TDT-CTC-110M only | Any TDT model |
+| **Peak Memory** | ~67 MB | ~130 MB |
 | **Status** | Beta | Stable |
 
-The standalone CTC head is available only with the TDT-CTC-110M model because both the TDT and CTC heads share the same encoder in the hybrid architecture. For Parakeet TDT v2/v3 (0.6B), the separate CTC encoder approach is required.
+### Which Approach Should I Use?
+
+**If using TDT-CTC-110M:**
+- Use Approach 1 (standalone head) for maximum speed and minimal memory overhead
+- The CTC head is already built into the model - it's essentially "free"
+
+**If using Parakeet TDT 0.6B v2/v3:**
+- Must use Approach 2 (separate encoder) - the 0.6B models don't have a built-in CTC head
+- Requires loading an additional 97.5MB CTC encoder, but 25.98x RTFx is still fast enough for real-time
+
+**Why the limitation?**
+The standalone CTC head only works with TDT-CTC-110M because that model has a hybrid architecture where the TDT and CTC heads share the same encoder. The 0.6B models use pure TDT architecture with no CTC capability.
 
 ## Encoder Alignment
 
 ### Separate CTC Encoder (Approach 2)
 
-The system uses two separate neural network encoders that process the same audio:
+When using Approach 2, the system uses two independent neural network encoders that process the same audio in parallel:
 
 #### TDT Encoder (Primary Transcription)
-- **Model**: Parakeet TDT 0.6B (600M parameters)
+- **Model**: Any TDT model (TDT-CTC-110M or Parakeet TDT 0.6B v2/v3)
 - **Architecture**: Token Duration Transducer with FastConformer
 - **Output**: High-quality transcription with word timestamps
 - **Frame Rate**: ~40ms per frame
 
 #### CTC Encoder (Keyword Spotting)
-- **Model**: Parakeet CTC 110M (110M parameters)
+- **Model**: Parakeet CTC 110M (110M parameters, loaded separately)
 - **Architecture**: FastConformer with CTC head
 - **Output**: Per-frame log-probabilities over 1024 tokens
 - **Frame Rate**: ~40ms per frame (aligned with TDT)
@@ -155,21 +192,22 @@ CTC Frames: [0] [1] [2] ... [374] (375 frames @ 40ms)
 
 #### Memory Usage
 
-Running two encoders in parallel increases peak memory consumption:
+The memory footprint depends on which approach you use:
 
-| Configuration | Peak RAM | Notes |
-|---------------|----------|-------|
-| TDT encoder only | ~66 MB | Standard transcription |
-| TDT + CTC encoders | ~130 MB | With vocabulary boosting (separate encoder) |
-| TDT + CTC head | ~67 MB | With vocabulary boosting (standalone head, beta) |
+| Configuration | Peak RAM | Approach |
+|---------------|----------|----------|
+| TDT encoder only | ~66 MB | No vocabulary boosting |
+| TDT + CTC head | ~67 MB | Approach 1 (TDT-CTC-110M only) |
+| TDT + CTC encoders | ~130 MB | Approach 2 (any TDT model) |
 
 *Measured on iPhone 17 Pro. Memory settles after initial model loading.*
 
-The standalone CTC head adds negligible memory (~1MB) since it reuses the existing encoder output. The separate CTC encoder adds ~64MB overhead. For memory-constrained scenarios, consider:
-- Using the standalone CTC head with TDT-CTC-110M (beta)
-- Loading the CTC encoder on-demand rather than at startup
-- Unloading the CTC encoder after transcription completes
-- Using vocabulary boosting only for files where domain terms are expected
+**Memory optimization strategies:**
+- **Approach 1 (TDT-CTC-110M)**: Adds negligible memory (~1MB) since it reuses the existing encoder output
+- **Approach 2 (any TDT model)**: Adds ~64MB for the separate CTC encoder. For memory-constrained scenarios:
+  - Load the CTC encoder on-demand rather than at startup
+  - Unload the CTC encoder after transcription completes
+  - Use vocabulary boosting only for files where domain terms are expected
 
 ## Pipeline Components
 

@@ -279,7 +279,7 @@ enum TranscribeCommand {
 
         if let variant = parakeetVariant {
             logger.info(
-                "Using \(variant.displayName) via StreamingAsrEngine protocol.\n"
+                "Using \(variant.displayName) via StreamingAsrManager protocol.\n"
             )
             await runWithEngine(
                 audioFile: audioFile, variant: variant)
@@ -319,7 +319,7 @@ enum TranscribeCommand {
                 encoderHiddenSize: modelVersion.encoderHiddenSize
             )
             let asrManager = AsrManager(config: asrConfig)
-            try await asrManager.initialize(models: models)
+            try await asrManager.loadModels(models)
 
             logger.info("ASR Manager initialized successfully")
 
@@ -769,12 +769,12 @@ enum TranscribeCommand {
             "Token timings: count=\(tokenCount), start=\(startText)s, end=\(endText)s, preview='\(previewText)\(ellipsis)'"
     }
 
-    /// Run transcription using the universal StreamingAsrEngine protocol
+    /// Run transcription using the universal StreamingAsrManager protocol
     private static func runWithEngine(
         audioFile: String, variant: StreamingModelVariant
     ) async {
         do {
-            let engine = StreamingAsrEngineFactory.create(variant)
+            let engine = variant.createManager()
 
             logger.info("Loading \(variant.displayName) models...")
             let loadStart = Date()
@@ -863,7 +863,7 @@ enum TranscribeCommand {
                 --model-version <version>  ASR model version: v2, v3, or tdt-ctc-110m (default: v3)
                 --model-dir <path>     Path to local model directory (skips download)
                 --custom-vocab <file>  Apply vocabulary boosting using terms from file (batch mode only)
-                --parakeet-variant <variant>  Use any Parakeet model via StreamingAsrEngine protocol
+                --parakeet-variant <variant>  Use any Parakeet model via StreamingAsrManager protocol
 
             Streaming variants (for --parakeet-variant):
                 parakeet-eou-160ms, parakeet-eou-320ms, parakeet-eou-1280ms,

@@ -54,44 +54,6 @@ public actor AsrManager {
         }
     }
 
-    // Cached CTC logits from fused Preprocessor (unified custom vocabulary)
-    internal var cachedCtcLogits: MLMultiArray?
-    internal var cachedCtcFrameDuration: Double?
-    internal var cachedCtcValidFrames: Int?
-
-    /// Whether the Preprocessor outputs CTC logits (unified custom vocabulary model).
-    public var hasCachedCtcLogits: Bool { cachedCtcLogits != nil }
-
-    /// Clear all cached CTC data (logits, frame duration, valid frames).
-    internal func clearCachedCtcData() {
-        cachedCtcLogits = nil
-        cachedCtcFrameDuration = nil
-        cachedCtcValidFrames = nil
-    }
-
-    /// Get cached CTC raw logits as [[Float]] for external use (e.g. benchmarks).
-    /// These are raw logits — callers must apply `CtcKeywordSpotter.applyLogSoftmax()`
-    /// to convert to log-probabilities before use in keyword detection.
-    /// Returns nil if the CTC head model is not available or audio was multi-chunk.
-    public func getCachedCtcRawLogits() -> (rawLogits: [[Float]], frameDuration: Double)? {
-        guard let logits = cachedCtcLogits, let duration = cachedCtcFrameDuration else { return nil }
-        let shape = logits.shape
-        guard shape.count == 3 else { return nil }
-        let numFrames = min(shape[1].intValue, cachedCtcValidFrames ?? shape[1].intValue)
-        let vocabSize = shape[2].intValue
-        var result: [[Float]] = []
-        result.reserveCapacity(numFrames)
-        for t in 0..<numFrames {
-            var frame: [Float] = []
-            frame.reserveCapacity(vocabSize)
-            for v in 0..<vocabSize {
-                frame.append(logits[[0, t, v] as [NSNumber]].floatValue)
-            }
-            result.append(frame)
-        }
-        return (rawLogits: result, frameDuration: duration)
-    }
-
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {
         AsrModels.optimizedPredictionOptions()
@@ -145,9 +107,9 @@ public actor AsrManager {
         }
     }
 
-    /// Initialize ASR Manager with pre-loaded models
+    /// Load pre-built ASR models into this manager.
     /// - Parameter models: Pre-loaded ASR models
-    public func initialize(models: AsrModels) async throws {
+    public func loadModels(_ models: AsrModels) async throws {
         logger.info("Initializing AsrManager with provided models")
 
         self.asrModels = models
@@ -251,12 +213,11 @@ public actor AsrManager {
         setDecoderState(state, for: source)
     }
 
-    public func resetState() {
+    public func reset() {
         // Use model's decoder layer count, or 2 if models not loaded (v2/v3 default)
         let layers = asrModels?.version.decoderLayers ?? 2
         microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
         systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
-        clearCachedCtcData()
         Task { await sharedMLArrayCache.clear() }
     }
 
@@ -271,7 +232,6 @@ public actor AsrManager {
         // Reset decoder states using fresh allocations for deterministic behavior
         microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
         systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
-        clearCachedCtcData()
         Task { await sharedMLArrayCache.clear() }
         logger.info("AsrManager resources cleaned up")
     }

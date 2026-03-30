@@ -158,4 +158,4 @@ TdtDecoder.decodeWithTimings(isLastChunk: true)
 - `Sources/FluidAudio/ASR/Parakeet/ChunkProcessor.swift`: Chunk detection logic
 - `Sources/FluidAudio/ASR/Parakeet/Decoder/TdtDecoderV3.swift`: Finalization logic
 - `Sources/FluidAudio/ASR/Parakeet/Decoder/TdtDecoderState.swift`: State management
-- `Sources/FluidAudio/ASR/Parakeet/AsrTranscription.swift`: Pipeline routing
+- `Sources/FluidAudio/ASR/Parakeet/AsrManager+Transcription.swift`: Pipeline routing

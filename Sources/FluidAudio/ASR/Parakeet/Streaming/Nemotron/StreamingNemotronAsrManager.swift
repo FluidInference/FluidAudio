@@ -7,7 +7,7 @@ public typealias NemotronPartialCallback = @Sendable (String) -> Void
 
 /// High-level manager for Nemotron Speech Streaming 0.6B pipeline.
 /// Implements true streaming with encoder cache states.
-public actor NemotronStreamingAsrManager {
+public actor StreamingNemotronAsrManager {
     private let logger = AppLogger(category: "NemotronStreaming")
 
     // Models
@@ -45,7 +45,7 @@ public actor NemotronStreamingAsrManager {
     // Callbacks
     internal var partialCallback: NemotronPartialCallback?
 
-    /// Chunk size for auto-download. Set by `StreamingAsrEngineFactory`
+    /// Chunk size for auto-download. Set by `StreamingModelVariant.createManager()`
     /// to determine which HuggingFace repo to download from in `loadModels()`.
     internal var requestedChunkSize: NemotronChunkSize?
 
@@ -118,6 +118,22 @@ public actor NemotronStreamingAsrManager {
         } catch {
             logger.error("Failed to reset states: \(error.localizedDescription)")
         }
+    }
+
+    public func cleanup() async {
+        await reset()
+        preprocessor = nil
+        encoder = nil
+        decoder = nil
+        joint = nil
+        tokenizer = nil
+        cacheChannel = nil
+        cacheTime = nil
+        cacheLen = nil
+        melCache = nil
+        hState = nil
+        cState = nil
+        logger.info("StreamingNemotronAsrManager resources cleaned up")
     }
 
     private func resetStates() throws {
@@ -222,9 +238,9 @@ public actor NemotronStreamingAsrManager {
     }
 }
 
-// MARK: - StreamingAsrEngine Conformance
+// MARK: - StreamingAsrManager Conformance
 
-extension NemotronStreamingAsrManager: StreamingAsrEngine {
+extension StreamingNemotronAsrManager: StreamingAsrManager {
     public var displayName: String {
         "Nemotron 0.6B (\(config.chunkMs)ms)"
     }

@@ -16,7 +16,7 @@ final class StressTests: XCTestCase {
         // Download/load models
         print("📥 Downloading and loading models...")
         let models = try await AsrModels.downloadAndLoad()
-        try await manager.initialize(models: models)
+        try await manager.loadModels(models)
         print("✅ Models ready")
 
         // Download real audio from LibriSpeech
@@ -98,7 +98,7 @@ final class StressTests: XCTestCase {
 
         print("📥 Loading models...")
         let models = try await AsrModels.downloadAndLoad()
-        try await manager.initialize(models: models)
+        try await manager.loadModels(models)
         print("✅ Models loaded")
 
         // 2 seconds of test audio

@@ -1,3 +1,4 @@
+@preconcurrency import CoreML
 import Foundation
 
 /// Catalogues all available true streaming ASR model variants with cache-aware encoders.
@@ -7,7 +8,7 @@ import Foundation
 /// in a sliding-window pseudo-streaming mode (use `AsrModelVersion` + `SlidingWindowAsrManager`
 /// directly for TDT).
 ///
-/// Use with `StreamingAsrEngineFactory.create(_:)` to instantiate the appropriate engine.
+/// Call `createManager()` to instantiate the appropriate streaming ASR manager.
 ///
 /// Following the `CtcModelVariant` pattern for consistency.
 public enum StreamingModelVariant: String, CaseIterable, Sendable {
@@ -75,6 +76,26 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case .nemotron560ms: return .ms560
         case .nemotron1120ms: return .ms1120
         default: return nil
+        }
+    }
+
+    /// Create a streaming ASR manager for this variant.
+    ///
+    /// The returned manager is not yet loaded — call `loadModels()` before use.
+    ///
+    /// - Parameter configuration: Optional `MLModelConfiguration` override.
+    /// - Returns: A streaming ASR manager conforming to `StreamingAsrManager`.
+    public func createManager(
+        configuration: MLModelConfiguration? = nil
+    ) -> any StreamingAsrManager {
+        let mlConfig = configuration ?? MLModelConfiguration()
+        switch engineFamily {
+        case .parakeetEou:
+            let chunkSize = eouChunkSize ?? .ms160
+            return StreamingEouAsrManager(configuration: mlConfig, chunkSize: chunkSize)
+        case .nemotron:
+            let chunkSize = nemotronChunkSize ?? .ms1120
+            return StreamingNemotronAsrManager(configuration: mlConfig, requestedChunkSize: chunkSize)
         }
     }
 

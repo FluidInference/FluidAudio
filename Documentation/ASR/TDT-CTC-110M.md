@@ -41,7 +41,7 @@ let manager = AsrManager()
 
 // Load models (auto-downloads from HuggingFace if needed)
 let models = try await AsrModels.downloadAndLoad(version: .tdtCtc110m)
-try await manager.initialize(models: models)
+try await manager.loadModels(models)
 
 // Transcribe audio file
 let url = URL(fileURLWithPath: "audio.wav")
@@ -61,7 +61,7 @@ import FluidAudio
 
 let manager = AsrManager()
 let models = try await AsrModels.downloadAndLoad(version: .tdtCtc110m)
-try await manager.initialize(models: models)
+try await manager.loadModels(models)
 
 // Process live microphone audio
 for audioChunk in microphoneStream {
@@ -84,7 +84,7 @@ let models = try await AsrModels.downloadAndLoad(
     to: cacheDir,
     version: .tdtCtc110m
 )
-try await manager.initialize(models: models)
+try await manager.loadModels(models)
 ```
 
 ## Architecture
@@ -181,11 +181,11 @@ Flow:
 5. Return AsrModels struct
 ```
 
-### 2. Manager Initialization (`AsrManager.initialize`)
+### 2. Manager Initialization (`AsrManager.loadModels`)
 
 ```swift
 // Sources/FluidAudio/ASR/Parakeet/AsrManager.swift
-public func initialize(models: AsrModels) async throws
+public func loadModels(_ models: AsrModels) async throws
 
 Flow:
 1. Store models reference
@@ -410,7 +410,7 @@ struct ContentView: View {
 
         // Initialize manager
         let manager = AsrManager()
-        try await manager.initialize(models: models)
+        try await manager.loadModels(models)
 
         // Load test audio
         let audioSamples: [Float] = ... // Load from bundle or record

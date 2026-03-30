@@ -4,7 +4,7 @@ import Foundation
 
 /// Internal processing pipeline for Nemotron streaming ASR
 /// Contains all tensor manipulation and model inference logic
-extension NemotronStreamingAsrManager {
+extension StreamingNemotronAsrManager {
 
     /// Process a single audio chunk through the full pipeline
     internal func processChunk(_ samples: [Float]) async throws {

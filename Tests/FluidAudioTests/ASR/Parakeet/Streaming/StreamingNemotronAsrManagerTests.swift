@@ -5,12 +5,12 @@ import XCTest
 
 @testable import FluidAudio
 
-final class NemotronStreamingAsrManagerTests: XCTestCase {
+final class StreamingNemotronAsrManagerTests: XCTestCase {
 
     // MARK: - P0: Initialization
 
     func testDefaultInitialization() async {
-        let manager = NemotronStreamingAsrManager()
+        let manager = StreamingNemotronAsrManager()
 
         let config = await manager.config
         // Should use default 1120ms config
@@ -23,7 +23,7 @@ final class NemotronStreamingAsrManagerTests: XCTestCase {
         let mlConfig = MLModelConfiguration()
         mlConfig.computeUnits = .cpuOnly
 
-        let manager = NemotronStreamingAsrManager(configuration: mlConfig)
+        let manager = StreamingNemotronAsrManager(configuration: mlConfig)
 
         let storedConfig = await manager.mlConfiguration
         XCTAssertEqual(storedConfig.computeUnits, .cpuOnly)
@@ -32,7 +32,7 @@ final class NemotronStreamingAsrManagerTests: XCTestCase {
     // MARK: - P0: State Reset
 
     func testResetClearsAudioBuffer() async throws {
-        let manager = NemotronStreamingAsrManager()
+        let manager = StreamingNemotronAsrManager()
 
         // Simulate some processing by accessing internal state
         // Note: We can't directly test private properties, but we can test the behavior
@@ -45,7 +45,7 @@ final class NemotronStreamingAsrManagerTests: XCTestCase {
     }
 
     func testResetClearsAccumulatedTokens() async throws {
-        let manager = NemotronStreamingAsrManager()
+        let manager = StreamingNemotronAsrManager()
 
         // Reset should clear any accumulated transcription state
         await manager.reset()
@@ -98,7 +98,7 @@ final class NemotronStreamingAsrManagerTests: XCTestCase {
     // MARK: - P1: Buffer Processing Logic
 
     func testChunkSamplesCalculation() async {
-        let manager = NemotronStreamingAsrManager()
+        let manager = StreamingNemotronAsrManager()
         let config = await manager.config
 
         // chunkSamples = chunkMelFrames * 160
@@ -108,7 +108,7 @@ final class NemotronStreamingAsrManagerTests: XCTestCase {
     }
 
     func testAudioBufferAccumulationWithSingleBuffer() async throws {
-        let manager = NemotronStreamingAsrManager()
+        let manager = StreamingNemotronAsrManager()
 
         // Create a small audio buffer (less than chunk size)
         nonisolated(unsafe) let buffer = try createTestAudioBuffer(frameCount: 1000)
@@ -120,7 +120,7 @@ final class NemotronStreamingAsrManagerTests: XCTestCase {
     }
 
     func testAudioBufferAccumulationWithMultipleBuffers() async throws {
-        let manager = NemotronStreamingAsrManager()
+        let manager = StreamingNemotronAsrManager()
 
         // Append multiple small buffers
         nonisolated(unsafe) let buffer1 = try createTestAudioBuffer(frameCount: 500)
@@ -136,7 +136,7 @@ final class NemotronStreamingAsrManagerTests: XCTestCase {
     // MARK: - P1: Error Handling
 
     func testLoadModelsWithNonExistentDirectoryThrows() async {
-        let manager = NemotronStreamingAsrManager()
+        let manager = StreamingNemotronAsrManager()
         let nonExistentDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("nonexistent_\(UUID().uuidString)")
 
@@ -159,7 +159,7 @@ final class NemotronStreamingAsrManagerTests: XCTestCase {
     }
 
     func testProcessWithoutLoadingModelsThrows() async {
-        let manager = NemotronStreamingAsrManager()
+        let manager = StreamingNemotronAsrManager()
         nonisolated(unsafe) let buffer = try! createTestAudioBuffer(frameCount: 1000)
 
         await XCTAssertThrowsErrorAsync(
@@ -175,7 +175,7 @@ final class NemotronStreamingAsrManagerTests: XCTestCase {
     }
 
     func testFinishWithoutLoadingModelsThrows() async {
-        let manager = NemotronStreamingAsrManager()
+        let manager = StreamingNemotronAsrManager()
 
         await XCTAssertThrowsErrorAsync(
             {
