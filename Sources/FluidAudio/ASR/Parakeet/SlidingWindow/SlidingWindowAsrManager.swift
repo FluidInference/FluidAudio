@@ -410,12 +410,6 @@ public actor SlidingWindowAsrManager {
                 )
             else { return }
 
-            // Update state only after all required async calls complete successfully
-            accumulatedTokens.append(contentsOf: tokens)
-            lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
-            segmentIndex += 1
-            processedChunks += 1
-
             logger.debug(
                 "Chunk \(self.processedChunks): '\(interim.text)', time: \(String(format: "%.3f", processingTime))s)"
             )
