@@ -123,7 +123,6 @@ public actor PocketTtsSession {
     // MARK: - Generation Loop
 
     private func generateLoop() async {
-        var chunkIndex = 0
         var utteranceIndex = 0
 
         do {
@@ -139,7 +138,7 @@ public actor PocketTtsSession {
                 Self.logger.info(
                     "Session enqueued '\(trimmed)', \(chunks.count) chunk(s)")
 
-                for chunkText in chunks {
+                for (chunkIndex, chunkText) in chunks.enumerated() {
                     if Task.isCancelled { break }
 
                     try await generateChunk(
@@ -148,7 +147,6 @@ public actor PocketTtsSession {
                         chunkCount: chunks.count,
                         utteranceIndex: utteranceIndex
                     )
-                    chunkIndex += 1
                 }
                 utteranceIndex += 1
             }
