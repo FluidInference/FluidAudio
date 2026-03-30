@@ -37,17 +37,20 @@ public actor PocketTtsSession {
     }
 
     /// Cancel ongoing generation and finish the frames stream.
-    public func cancel() {
+    ///
+    /// Awaits until the generation task has fully stopped — after this returns,
+    /// no more CoreML predictions are running and the Neural Engine is free.
+    public func cancel() async {
         generationTask?.cancel()
         textContinuation.finish()
+        await generationTask?.value
     }
 
     // MARK: - Internal State
 
     private nonisolated let textContinuation: AsyncStream<String>.Continuation
     private let textStream: AsyncStream<String>
-    private let frameContinuation:
-        AsyncThrowingStream<PocketTtsSynthesizer.AudioFrame, Error>.Continuation
+    private let frameContinuation: AsyncThrowingStream<PocketTtsSynthesizer.AudioFrame, Error>.Continuation
     private var generationTask: Task<Void, Never>?
 
     // Models
@@ -110,6 +113,10 @@ public actor PocketTtsSession {
         generationTask = Task { [weak self] in
             guard let self else { return }
             await self.generateLoop()
+        }
+        frameContinuation.onTermination = { [weak self] _ in
+            guard let self else { return }
+            Task { await self.cancel() }
         }
     }
 
