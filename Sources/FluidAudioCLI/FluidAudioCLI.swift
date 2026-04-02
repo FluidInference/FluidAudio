@@ -70,6 +70,10 @@ struct FluidAudioCLI {
             await NemotronBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-transcribe":
             await NemotronTranscribe.run(arguments: Array(arguments.dropFirst(2)))
+        case "ctc-zh-cn-transcribe":
+            await CtcZhCnTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "ctc-zh-cn-benchmark":
+            await CtcZhCnBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -107,6 +111,8 @@ struct FluidAudioCLI {
                 g2p-benchmark           Run multilingual G2P benchmark
                 nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
                 nemotron-transcribe     Transcribe custom audio files with Nemotron
+                ctc-zh-cn-transcribe    Transcribe Mandarin Chinese audio with Parakeet CTC
+                ctc-zh-cn-benchmark     Run CTC zh-CN benchmark on FLEURS dataset
                 download                Download evaluation datasets
                 help                    Show this help message
 

@@ -842,6 +842,7 @@ extension ASRBenchmark {
         case .v2: versionLabel = "v2"
         case .v3: versionLabel = "v3"
         case .tdtCtc110m: versionLabel = "tdt-ctc-110m"
+        case .ctcZhCn: versionLabel = "ctc-zh-cn"
         }
         logger.info("   Model version: \(versionLabel)")
         logger.info("   Debug mode: \(debugMode ? "enabled" : "disabled")")
