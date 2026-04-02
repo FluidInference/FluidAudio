@@ -11,6 +11,8 @@ enum CtcZhCnBenchmark {
         var useInt8 = true
         var outputFile: String?
         var verbose = false
+        var datasetPath: String?
+        var autoDownload = false
 
         var i = 0
         while i < arguments.count {
@@ -30,6 +32,13 @@ enum CtcZhCnBenchmark {
                     outputFile = arguments[i + 1]
                     i += 1
                 }
+            case "--dataset-path":
+                if i + 1 < arguments.count {
+                    datasetPath = arguments[i + 1]
+                    i += 1
+                }
+            case "--auto-download":
+                autoDownload = true
             case "--verbose", "-v":
                 verbose = true
             case "--help", "-h":
@@ -55,10 +64,14 @@ enum CtcZhCnBenchmark {
             )
             logger.info("Models loaded successfully")
 
-            // Load FLEURS dataset
+            // Load THCHS-30 dataset
             logger.info("")
-            logger.info("Loading FLEURS Mandarin Chinese test set...")
-            let samples = try await loadFleursSamples(maxSamples: numSamples)
+            logger.info("Loading THCHS-30 test set...")
+            let samples = try await loadTHCHS30Samples(
+                maxSamples: numSamples,
+                datasetPath: datasetPath,
+                autoDownload: autoDownload
+            )
             logger.info("Loaded \(samples.count) samples")
 
             // Run benchmark
@@ -102,28 +115,133 @@ enum CtcZhCnBenchmark {
         let rtfx: Double
     }
 
-    private static func loadFleursSamples(maxSamples: Int) async throws -> [BenchmarkSample] {
-        // For now, we'll document that users need to download FLEURS manually
-        // In a production system, this would use HuggingFace datasets API
-        throw NSError(
-            domain: "CtcZhCnBenchmark",
-            code: 1,
-            userInfo: [
-                NSLocalizedDescriptionKey:
+    private struct MetadataEntry: Codable {
+        let file_name: String
+        let text: String
+    }
+
+    private static func loadTHCHS30Samples(
+        maxSamples: Int, datasetPath: String?, autoDownload: Bool
+    ) async throws -> [BenchmarkSample] {
+        let baseDir: URL
+
+        if let path = datasetPath {
+            // Use provided path
+            baseDir = URL(fileURLWithPath: path)
+        } else if autoDownload {
+            // Download from HuggingFace to cache directory
+            #if os(macOS)
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser
+            let cacheDir =
+                homeDir
+                .appendingPathComponent("Library/Application Support/FluidAudio/Datasets/THCHS-30")
+            #else
+            let cacheDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("FluidAudio/Datasets/THCHS-30")
+            #endif
+
+            try FileManager.default.createDirectory(
+                at: cacheDir, withIntermediateDirectories: true)
+
+            logger.info("Downloading THCHS-30 from HuggingFace...")
+            try await downloadTHCHS30Dataset(to: cacheDir)
+            baseDir = cacheDir
+        } else {
+            throw NSError(
+                domain: "CtcZhCnBenchmark",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        """
+                    THCHS-30 dataset not found.
+
+                    Options:
+                    1. Use --auto-download to download from HuggingFace
+                    2. Use --dataset-path <path> to specify local dataset directory
+
+                    Expected directory structure:
+                        <path>/
+                        ├── audio/           # WAV files
+                        └── metadata.jsonl   # Transcripts
                     """
-                FLEURS dataset not yet auto-downloadable in FluidAudio.
+                ]
+            )
+        }
 
-                To run this benchmark:
-                1. Download FLEURS manually from HuggingFace
-                2. Or use the mobius benchmark: cd mobius/models/stt/parakeet-ctc-0.6b-zh-cn/coreml
-                3. Run: uv run python benchmark-full-pipeline.py --num-samples \(maxSamples)
+        // Load metadata.jsonl
+        let metadataPath = baseDir.appendingPathComponent("metadata.jsonl")
+        guard FileManager.default.fileExists(atPath: metadataPath.path) else {
+            throw NSError(
+                domain: "CtcZhCnBenchmark",
+                code: 2,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "metadata.jsonl not found at: \(metadataPath.path)"
+                ]
+            )
+        }
 
-                Expected CER (from mobius benchmarks):
-                - int8 encoder: 10.54% CER (100 samples)
-                - fp32 encoder: 10.45% CER (100 samples)
-                """
-            ]
-        )
+        let metadataContent = try String(contentsOf: metadataPath, encoding: .utf8)
+        var samples: [BenchmarkSample] = []
+
+        for (index, line) in metadataContent.components(separatedBy: .newlines).enumerated() {
+            guard !line.isEmpty else { continue }
+            guard samples.count < maxSamples else { break }
+
+            let decoder = JSONDecoder()
+            guard let data = line.data(using: .utf8),
+                let entry = try? decoder.decode(MetadataEntry.self, from: data)
+            else {
+                logger.warning("Failed to decode line \(index): \(line)")
+                continue
+            }
+
+            let audioPath = baseDir.appendingPathComponent(entry.file_name).path
+            guard FileManager.default.fileExists(atPath: audioPath) else {
+                logger.warning("Audio file not found: \(audioPath)")
+                continue
+            }
+
+            samples.append(
+                BenchmarkSample(
+                    audioPath: audioPath,
+                    reference: entry.text,
+                    sampleId: index
+                ))
+        }
+
+        return samples
+    }
+
+    private static func downloadTHCHS30Dataset(to directory: URL) async throws {
+        // Download using git-lfs or HuggingFace Hub API
+        // For now, use a simple approach: shell out to huggingface-cli
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = [
+            "huggingface-cli",
+            "download",
+            "FluidInference/THCHS-30-tests",
+            "--repo-type", "dataset",
+            "--local-dir", directory.path,
+        ]
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw NSError(
+                domain: "CtcZhCnBenchmark",
+                code: 3,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        """
+                    Failed to download THCHS-30 dataset from HuggingFace.
+                    Make sure huggingface-cli is installed: pip install huggingface_hub
+                    """
+                ]
+            )
+        }
     }
 
     private static func runBenchmark(
@@ -287,8 +405,42 @@ enum CtcZhCnBenchmark {
         }
     }
 
+    private struct BenchmarkOutput: Codable {
+        let summary: Summary
+        let results: [BenchmarkResult]
+
+        struct Summary: Codable {
+            let mean_cer: Double
+            let median_cer: Double
+            let mean_latency_ms: Double
+            let mean_rtfx: Double
+            let total_samples: Int
+            let below_5_pct: Int
+            let below_10_pct: Int
+            let below_20_pct: Int
+        }
+    }
+
     private static func saveResults(results: [BenchmarkResult], outputFile: String) throws {
-        let jsonData = try JSONEncoder().encode(results)
+        let cers = results.map { $0.cer }
+        let latencies = results.map { $0.latencyMs }
+        let rtfxs = results.map { $0.rtfx }
+
+        let summary = BenchmarkOutput.Summary(
+            mean_cer: cers.reduce(0, +) / Double(cers.count),
+            median_cer: median(cers),
+            mean_latency_ms: latencies.reduce(0, +) / Double(latencies.count),
+            mean_rtfx: rtfxs.reduce(0, +) / Double(rtfxs.count),
+            total_samples: results.count,
+            below_5_pct: cers.filter { $0 < 0.05 }.count,
+            below_10_pct: cers.filter { $0 < 0.10 }.count,
+            below_20_pct: cers.filter { $0 < 0.20 }.count
+        )
+
+        let output = BenchmarkOutput(summary: summary, results: results)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        let jsonData = try encoder.encode(output)
         try jsonData.write(to: URL(fileURLWithPath: outputFile))
     }
 
@@ -311,28 +463,36 @@ enum CtcZhCnBenchmark {
     private static func printUsage() {
         logger.info(
             """
-            CTC zh-CN Benchmark - Measure Character Error Rate on FLEURS dataset
+            CTC zh-CN Benchmark - Measure Character Error Rate on THCHS-30 dataset
 
             Usage: fluidaudiocli ctc-zh-cn-benchmark [options]
 
             Options:
-                --samples, -n <num>   Number of samples to test (default: 100)
-                --int8                Use int8 quantized encoder (default)
-                --fp32                Use fp32 encoder
-                --output, -o <file>   Save results to JSON file
-                --verbose, -v         Show download progress
-                --help, -h            Show this help message
+                --samples, -n <num>      Number of samples to test (default: 100)
+                --int8                   Use int8 quantized encoder (default)
+                --fp32                   Use fp32 encoder
+                --output, -o <file>      Save results to JSON file
+                --dataset-path <path>    Path to THCHS-30 dataset directory
+                --auto-download          Download THCHS-30 from HuggingFace (requires huggingface-cli)
+                --verbose, -v            Show download progress
+                --help, -h               Show this help message
 
             Examples:
-                fluidaudiocli ctc-zh-cn-benchmark --samples 100
-                fluidaudiocli ctc-zh-cn-benchmark --fp32 --output results.json
+                # Auto-download from HuggingFace
+                fluidaudiocli ctc-zh-cn-benchmark --auto-download --samples 100
 
-            Expected Results (from mobius benchmarks):
-                Int8 encoder: 10.54% CER (100 samples)
-                FP32 encoder: 10.45% CER (100 samples)
+                # Use local dataset
+                fluidaudiocli ctc-zh-cn-benchmark --dataset-path ./thchs30_test_hf
 
-            Note: FLEURS dataset auto-download not yet implemented.
-                  Use mobius benchmark for full CER evaluation.
+                # Save results to JSON
+                fluidaudiocli ctc-zh-cn-benchmark --auto-download --output results.json
+
+            Expected Results (THCHS-30, 100 samples):
+                Int8 encoder: 8.37% mean CER, 6.67% median CER
+                FP32 encoder: Similar performance
+
+            Dataset: FluidInference/THCHS-30-tests on HuggingFace
+                     2,495 Mandarin Chinese test utterances from THCHS-30 corpus
             """
         )
     }

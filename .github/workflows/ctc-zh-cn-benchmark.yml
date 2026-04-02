@@ -1,0 +1,186 @@
+name: CTC zh-CN Benchmark
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ctc-zh-cn-benchmark:
+    name: CTC zh-CN Benchmark (FLEURS)
+    runs-on: macos-15
+    permissions:
+      contents: read
+      pull-requests: write
+
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Install huggingface-cli
+        run: |
+          pip3 install huggingface_hub
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-0.6b-zh-cn-coreml
+            ~/Library/Application Support/FluidAudio/Datasets/FLEURS
+          key: ${{ runner.os }}-ctc-zh-cn-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/Frameworks/**', 'Sources/FluidAudio/ModelRegistry.swift') }}
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Run CTC zh-CN Benchmark
+        id: benchmark
+        run: |
+          BENCHMARK_START=$(date +%s)
+
+          set -o pipefail
+
+          echo "========================================="
+          echo "CTC zh-CN Benchmark - THCHS-30"
+          echo "========================================="
+          echo ""
+
+          # Run benchmark with 100 samples
+          if swift run -c release fluidaudiocli ctc-zh-cn-benchmark \
+            --auto-download \
+            --samples 100 \
+            --output ctc_zh_cn_results.json 2>&1 | tee benchmark_log.txt; then
+            echo "✅ Benchmark completed successfully"
+            BENCHMARK_STATUS="SUCCESS"
+          else
+            EXIT_CODE=$?
+            echo "❌ Benchmark FAILED with exit code $EXIT_CODE"
+            cat benchmark_log.txt
+            BENCHMARK_STATUS="FAILED"
+          fi
+
+          # Extract metrics from results file
+          if [ -f ctc_zh_cn_results.json ]; then
+            MEAN_CER=$(jq -r '.summary.mean_cer * 100' ctc_zh_cn_results.json 2>/dev/null)
+            MEDIAN_CER=$(jq -r '.summary.median_cer * 100' ctc_zh_cn_results.json 2>/dev/null)
+            MEAN_LATENCY=$(jq -r '.summary.mean_latency_ms' ctc_zh_cn_results.json 2>/dev/null)
+            BELOW_5=$(jq -r '.summary.below_5_pct' ctc_zh_cn_results.json 2>/dev/null)
+            BELOW_10=$(jq -r '.summary.below_10_pct' ctc_zh_cn_results.json 2>/dev/null)
+            BELOW_20=$(jq -r '.summary.below_20_pct' ctc_zh_cn_results.json 2>/dev/null)
+            SAMPLES=$(jq -r '.summary.total_samples' ctc_zh_cn_results.json 2>/dev/null)
+
+            # Format values
+            [ "$MEAN_CER" != "null" ] && [ -n "$MEAN_CER" ] && MEAN_CER=$(printf "%.2f" "$MEAN_CER") || MEAN_CER="N/A"
+            [ "$MEDIAN_CER" != "null" ] && [ -n "$MEDIAN_CER" ] && MEDIAN_CER=$(printf "%.2f" "$MEDIAN_CER") || MEDIAN_CER="N/A"
+            [ "$MEAN_LATENCY" != "null" ] && [ -n "$MEAN_LATENCY" ] && MEAN_LATENCY=$(printf "%.1f" "$MEAN_LATENCY") || MEAN_LATENCY="N/A"
+
+            echo "MEAN_CER=$MEAN_CER" >> $GITHUB_OUTPUT
+            echo "MEDIAN_CER=$MEDIAN_CER" >> $GITHUB_OUTPUT
+            echo "MEAN_LATENCY=$MEAN_LATENCY" >> $GITHUB_OUTPUT
+            echo "BELOW_5=$BELOW_5" >> $GITHUB_OUTPUT
+            echo "BELOW_10=$BELOW_10" >> $GITHUB_OUTPUT
+            echo "BELOW_20=$BELOW_20" >> $GITHUB_OUTPUT
+            echo "SAMPLES=$SAMPLES" >> $GITHUB_OUTPUT
+
+            # Validate CER - fail if above threshold
+            if [ "$MEAN_CER" != "N/A" ] && [ $(echo "$MEAN_CER > 10.0" | bc) -eq 1 ]; then
+              echo "❌ CRITICAL: Mean CER $MEAN_CER% exceeds threshold of 10.0%"
+              BENCHMARK_STATUS="FAILED"
+            fi
+          else
+            echo "❌ CRITICAL: Results file not found"
+            echo "MEAN_CER=N/A" >> $GITHUB_OUTPUT
+            echo "MEDIAN_CER=N/A" >> $GITHUB_OUTPUT
+            echo "MEAN_LATENCY=N/A" >> $GITHUB_OUTPUT
+            echo "SAMPLES=0" >> $GITHUB_OUTPUT
+            BENCHMARK_STATUS="FAILED"
+          fi
+
+          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+          echo "BENCHMARK_STATUS=$BENCHMARK_STATUS" >> $GITHUB_OUTPUT
+
+          # Exit with error if benchmark failed
+          if [ "$BENCHMARK_STATUS" = "FAILED" ]; then
+            exit 1
+          fi
+
+      - name: Comment PR
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const benchmarkStatus = '${{ steps.benchmark.outputs.BENCHMARK_STATUS }}';
+            const statusEmoji = benchmarkStatus === 'SUCCESS' ? '✅' : '❌';
+            const statusText = benchmarkStatus === 'SUCCESS' ? 'Benchmark passed' : 'Benchmark failed (see logs)';
+
+            const meanCER = '${{ steps.benchmark.outputs.MEAN_CER }}';
+            const medianCER = '${{ steps.benchmark.outputs.MEDIAN_CER }}';
+            const cerStatus = parseFloat(meanCER) < 12.0 ? '✅' : meanCER === 'N/A' ? '❌' : '⚠️';
+
+            const body = `## CTC zh-CN Benchmark Results ${statusEmoji}
+
+            **Status:** ${statusText}
+
+            ### THCHS-30 (Mandarin Chinese)
+            | Metric | Value | Target | Status |
+            |--------|-------|--------|--------|
+            | Mean CER | ${meanCER}% | <10% | ${cerStatus} |
+            | Median CER | ${medianCER}% | <7% | ${parseFloat(medianCER) < 7.0 ? '✅' : medianCER === 'N/A' ? '❌' : '⚠️'} |
+            | Mean Latency | ${{ steps.benchmark.outputs.MEAN_LATENCY }} ms | - | - |
+            | Samples | ${{ steps.benchmark.outputs.SAMPLES }} | 100 | ${parseInt('${{ steps.benchmark.outputs.SAMPLES }}') >= 100 ? '✅' : '⚠️'} |
+
+            ### CER Distribution
+            | Range | Count | Percentage |
+            |-------|-------|------------|
+            | <5% | ${{ steps.benchmark.outputs.BELOW_5 }} | ${(parseInt('${{ steps.benchmark.outputs.BELOW_5 }}') / parseInt('${{ steps.benchmark.outputs.SAMPLES }}') * 100).toFixed(1)}% |
+            | <10% | ${{ steps.benchmark.outputs.BELOW_10 }} | ${(parseInt('${{ steps.benchmark.outputs.BELOW_10 }}') / parseInt('${{ steps.benchmark.outputs.SAMPLES }}') * 100).toFixed(1)}% |
+            | <20% | ${{ steps.benchmark.outputs.BELOW_20 }} | ${(parseInt('${{ steps.benchmark.outputs.BELOW_20 }}') / parseInt('${{ steps.benchmark.outputs.SAMPLES }}') * 100).toFixed(1)}% |
+
+            <sub>Model: parakeet-ctc-0.6b-zh-cn (int8, 571 MB) • Dataset: [THCHS-30](https://huggingface.co/datasets/FluidInference/THCHS-30-tests) (Tsinghua University)</sub>
+            <sub>Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
+
+            <sub>**CER** = Character Error Rate • Lower is better • Calculated using Levenshtein distance with normalized text</sub>
+
+            <!-- fluidaudio-benchmark-ctc-zh-cn -->`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.body.includes('<!-- fluidaudio-benchmark-ctc-zh-cn -->')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctc-zh-cn-results
+          path: |
+            ctc_zh_cn_results.json
+            benchmark_log.txt

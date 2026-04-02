@@ -112,7 +112,7 @@ struct FluidAudioCLI {
                 nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
                 nemotron-transcribe     Transcribe custom audio files with Nemotron
                 ctc-zh-cn-transcribe    Transcribe Mandarin Chinese audio with Parakeet CTC
-                ctc-zh-cn-benchmark     Run CTC zh-CN benchmark on FLEURS dataset
+                ctc-zh-cn-benchmark     Run CTC zh-CN benchmark on THCHS-30 dataset
                 download                Download evaluation datasets
                 help                    Show this help message
 
