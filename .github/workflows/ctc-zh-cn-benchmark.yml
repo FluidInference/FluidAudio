@@ -122,7 +122,7 @@ jobs:
 
             const meanCER = '${{ steps.benchmark.outputs.MEAN_CER }}';
             const medianCER = '${{ steps.benchmark.outputs.MEDIAN_CER }}';
-            const cerStatus = parseFloat(meanCER) < 12.0 ? '✅' : meanCER === 'N/A' ? '❌' : '⚠️';
+            const cerStatus = parseFloat(meanCER) < 10.0 ? '✅' : meanCER === 'N/A' ? '❌' : '⚠️';
 
             const body = `## CTC zh-CN Benchmark Results ${statusEmoji}
 

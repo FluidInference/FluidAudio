@@ -447,6 +447,11 @@ enum CtcZhCnBenchmark {
     }
 
     private static func saveResults(results: [BenchmarkResult], outputFile: String) throws {
+        guard !results.isEmpty else {
+            logger.warning("No results to save")
+            return
+        }
+
         let cers = results.map { $0.cer }
         let latencies = results.map { $0.latencyMs }
         let rtfxs = results.map { $0.rtfx }
