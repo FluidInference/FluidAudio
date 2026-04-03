@@ -293,7 +293,7 @@ enum CtcZhCnBenchmark {
         var normalized = text
 
         // Remove Chinese punctuation
-        let chinesePunct = "，。！？、；："
+        let chinesePunct = "，。！？、；：""''"
         for char in chinesePunct {
             normalized = normalized.replacingOccurrences(of: String(char), with: "")
         }
@@ -310,8 +310,33 @@ enum CtcZhCnBenchmark {
             normalized = normalized.replacingOccurrences(of: String(char), with: "")
         }
 
-        // Remove spaces
-        normalized = normalized.replacingOccurrences(of: " ", with: "")
+        // Remove English punctuation
+        let englishPunct = ",.!?;:()[]{}\\<>\"'-"
+        for char in englishPunct {
+            normalized = normalized.replacingOccurrences(of: String(char), with: "")
+        }
+
+        // Convert Arabic digits to Chinese characters
+        let digitMap: [Character: String] = [
+            "0": "零",
+            "1": "一",
+            "2": "二",
+            "3": "三",
+            "4": "四",
+            "5": "五",
+            "6": "六",
+            "7": "七",
+            "8": "八",
+            "9": "九",
+        ]
+        for (digit, chinese) in digitMap {
+            normalized = normalized.replacingOccurrences(of: String(digit), with: chinese)
+        }
+
+        // Normalize whitespace and remove spaces
+        normalized = normalized.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined()
 
         return normalized.lowercased()
     }

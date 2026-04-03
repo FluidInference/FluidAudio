@@ -7,7 +7,7 @@ on:
 
 jobs:
   ctc-zh-cn-benchmark:
-    name: CTC zh-CN Benchmark (FLEURS)
+    name: CTC zh-CN Benchmark (THCHS-30)
     runs-on: macos-15
     permissions:
       contents: read
@@ -31,8 +31,8 @@ jobs:
         with:
           path: |
             .build
-            ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-0.6b-zh-cn-coreml
-            ~/Library/Application Support/FluidAudio/Datasets/FLEURS
+            ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-zh-cn
+            ~/Library/Application Support/FluidAudio/Datasets/THCHS-30
           key: ${{ runner.os }}-ctc-zh-cn-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/Frameworks/**', 'Sources/FluidAudio/ModelRegistry.swift') }}
 
       - name: Build
