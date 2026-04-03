@@ -302,6 +302,9 @@ final class CtcZhCnTests: XCTestCase {
             dp[0][j] = j
         }
 
+        // Skip main loop if either array is empty (ranges 1...0 would be invalid)
+        guard m > 0 && n > 0 else { return dp[m][n] }
+
         for i in 1...m {
             for j in 1...n {
                 if a[i - 1] == b[j - 1] {
