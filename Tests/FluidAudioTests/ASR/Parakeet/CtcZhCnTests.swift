@@ -21,8 +21,8 @@ final class CtcZhCnTests: XCTestCase {
         // For testing purposes, we'll test the logic inline
         var normalized = input
 
-        // Remove Chinese punctuation
-        let chinesePunct = "，。！？、；：""''"
+        // Remove Chinese punctuation (including curly quotes U+201C, U+201D, U+2018, U+2019)
+        let chinesePunct = "，。！？、；：\u{201C}\u{201D}\u{2018}\u{2019}"
         for char in chinesePunct {
             normalized = normalized.replacingOccurrences(of: String(char), with: "")
         }
@@ -98,8 +98,8 @@ final class CtcZhCnTests: XCTestCase {
         let input = "桥下垂直净空15米，该项目于2011年8月完工。"
         var normalized = input
 
-        // Remove Chinese punctuation
-        let chinesePunct = "，。！？、；：""''"
+        // Remove Chinese punctuation (including curly quotes U+201C, U+201D, U+2018, U+2019)
+        let chinesePunct = "，。！？、；：\u{201C}\u{201D}\u{2018}\u{2019}"
         for char in chinesePunct {
             normalized = normalized.replacingOccurrences(of: String(char), with: "")
         }
