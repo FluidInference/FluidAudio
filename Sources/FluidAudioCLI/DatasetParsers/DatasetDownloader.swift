@@ -5,7 +5,7 @@ import FluidAudio
 
 /// Dataset downloading functionality for AMI and VAD datasets
 struct DatasetDownloader {
-    private static let logger = AppLogger(category: "Dataset")
+    internal static let logger = AppLogger(category: "Dataset")
 
     enum AMIVariant: String, CaseIterable {
         case sdm = "sdm"  // Single Distant Microphone (Mix-Headset.wav)

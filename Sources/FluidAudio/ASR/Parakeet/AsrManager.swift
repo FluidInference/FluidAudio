@@ -297,6 +297,10 @@ public actor AsrManager {
             throw ASRError.processingFailed(
                 "CTC-only model .ctcZhCn does not support TDT decoding. Use CtcZhCnManager instead."
             )
+        case .ctcJa:
+            throw ASRError.processingFailed(
+                "CTC-only model .ctcJa does not support TDT decoding. Use CtcJaManager instead."
+            )
         }
     }
 

@@ -8,6 +8,7 @@ public enum Repo: String, CaseIterable {
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
     case parakeetCtcZhCn = "FluidInference/parakeet-ctc-0.6b-zh-cn-coreml"
+    case parakeetCtcJa = "FluidInference/parakeet-ctc-0.6b-ja-coreml"
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case parakeetEou1280 = "FluidInference/parakeet-realtime-eou-120m-coreml/1280ms"
@@ -38,6 +39,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-ctc-0.6b-coreml"
         case .parakeetCtcZhCn:
             return "parakeet-ctc-0.6b-zh-cn-coreml"
+        case .parakeetCtcJa:
+            return "parakeet-ctc-0.6b-ja-coreml"
         case .parakeetEou160:
             return "parakeet-realtime-eou-120m-coreml/160ms"
         case .parakeetEou320:
@@ -138,6 +141,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-ctc-0.6b-coreml"
         case .parakeetCtcZhCn:
             return "parakeet-ctc-zh-cn"
+        case .parakeetCtcJa:
+            return "parakeet-ctc-ja"
         case .parakeetTdtCtc110m:
             return "parakeet-tdt-ctc-110m"
         default:
@@ -265,6 +270,26 @@ public enum ModelNames {
             preprocessorFile,
             encoderFile,  // int8 encoder
             encoderFp32File,  // fp32 encoder
+            decoderFile,
+        ]
+    }
+
+    /// CTC ja (Japanese) model names (full pipeline: Preprocessor + Encoder + CTC Decoder)
+    public enum CTCJa {
+        public static let preprocessor = "Preprocessor"
+        public static let encoder = "Encoder"
+        public static let decoder = "CtcDecoder"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+
+        // Vocabulary JSON path
+        public static let vocabularyFile = "vocab.json"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
             decoderFile,
         ]
     }
@@ -610,6 +635,8 @@ public enum ModelNames {
             return ModelNames.CTC.requiredModels
         case .parakeetCtcZhCn:
             return ModelNames.CTCZhCn.requiredModels
+        case .parakeetCtcJa:
+            return ModelNames.CTCJa.requiredModels
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return ModelNames.ParakeetEOU.requiredModels
         case .nemotronStreaming1120, .nemotronStreaming560:

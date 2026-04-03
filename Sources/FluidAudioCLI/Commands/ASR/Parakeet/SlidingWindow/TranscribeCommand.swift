@@ -431,6 +431,7 @@ enum TranscribeCommand {
                 case .v3: modelVersionLabel = "v3"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
                 case .ctcZhCn: modelVersionLabel = "ctc-zh-cn"
+                case .ctcJa: modelVersionLabel = "ctc-ja"
                 }
                 let output = TranscriptionJSONOutput(
                     audioFile: audioFile,
@@ -686,6 +687,7 @@ enum TranscribeCommand {
                 case .v3: modelVersionLabel = "v3"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
                 case .ctcZhCn: modelVersionLabel = "ctc-zh-cn"
+                case .ctcJa: modelVersionLabel = "ctc-ja"
                 }
                 let output = TranscriptionJSONOutput(
                     audioFile: audioFile,
