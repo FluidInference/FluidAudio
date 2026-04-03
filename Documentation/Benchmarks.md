@@ -735,9 +735,11 @@ Both the English BART G2P and multilingual ByT5 G2P models run fastest on CPU-on
 | all (ANE+GPU+CPU) | 17.3 |
 | cpuAndGPU | 23.4 |
 
-## CTC zh-CN Mandarin ASR
+## CTC zh-CN Mandarin ASR (Experimental)
 
 Parakeet CTC 0.6B zh-CN model converted to CoreML for on-device Mandarin Chinese transcription.
+
+> **⚠️ Experimental Feature**: This is an early preview of Mandarin Chinese ASR support. The API and performance characteristics may change in future releases.
 
 Model: [FluidInference/parakeet-ctc-0.6b-zh-cn-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-zh-cn-coreml)
 
