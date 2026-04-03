@@ -280,7 +280,7 @@ public actor AsrManager {
                 isLastChunk: isLastChunk,
                 globalFrameOffset: globalFrameOffset
             )
-        case .v3:
+        case .v3, .ctcZhCn:
             let decoder = TdtDecoderV3(config: adaptedConfig)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
