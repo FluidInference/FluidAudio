@@ -280,7 +280,7 @@ public actor AsrManager {
                 isLastChunk: isLastChunk,
                 globalFrameOffset: globalFrameOffset
             )
-        case .v3, .ctcZhCn:
+        case .v3:
             let decoder = TdtDecoderV3(config: adaptedConfig)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
@@ -292,6 +292,10 @@ public actor AsrManager {
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,
                 globalFrameOffset: globalFrameOffset
+            )
+        case .ctcZhCn:
+            throw ASRError.processingFailed(
+                "CTC-only model .ctcZhCn does not support TDT decoding. Use CtcZhCnManager instead."
             )
         }
     }

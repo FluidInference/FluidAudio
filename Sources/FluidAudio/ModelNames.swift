@@ -260,15 +260,11 @@ public enum ModelNames {
         // Vocabulary JSON path
         public static let vocabularyFile = "vocab.json"
 
+        // Download both encoder variants (int8 and fp32) so users can choose at runtime
         public static let requiredModels: Set<String> = [
             preprocessorFile,
-            encoderFile,
-            decoderFile,
-        ]
-
-        public static let requiredModelsFp32: Set<String> = [
-            preprocessorFile,
-            encoderFp32File,
+            encoderFile,  // int8 encoder
+            encoderFp32File,  // fp32 encoder
             decoderFile,
         ]
     }
