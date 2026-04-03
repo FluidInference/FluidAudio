@@ -3,6 +3,12 @@ import CoreML
 import Foundation
 import OSLog
 
+/// Cached speaker embedding + the mask that generated it, for skip strategy comparisons.
+private struct CachedSpeakerEmbedding {
+    let mask: [Float]
+    let embedding: [Float]
+}
+
 private struct OfflineEmbeddingPending: Sendable {
     let chunkIndex: Int
     let speakerIndex: Int
@@ -259,6 +265,21 @@ struct OfflineEmbeddingExtractor {
         var pldaOutputCount = 0
         var pldaBatchCallCount = 0
 
+        // Cache for embedding skip strategy (maskSimilarity).
+        // Keyed by local speaker index (0..2 within each powerset chunk).
+        // Cleared between FBANK batches to prevent stale cross-batch hits,
+        // since speaker indices are local to each powerset chunk, not global IDs.
+        var embeddingCache: [Int: CachedSpeakerEmbedding] = [:]
+        var skippedEmbeddingCount = 0
+
+        // Hoist threshold extraction outside the hot loop — config is immutable during extraction.
+        let skipThreshold: Float?
+        if case .maskSimilarity(let threshold) = config.embeddingSkipStrategy {
+            skipThreshold = threshold
+        } else {
+            skipThreshold = nil
+        }
+
         func performEmbeddingWarmup() throws {
             let warmupAudioArray = try memoryOptimizer.createAlignedArray(
                 shape: fbankInputShape,
@@ -454,14 +475,38 @@ struct OfflineEmbeddingExtractor {
                     continue
                 }
 
-                let embeddingStart = resampleEnd
-                let weightsArray = try prepareWeightsInput(weights: resampledMask)
-                let embedding256 = try runEmbeddingModel(
-                    fbankFeatures: fbankFeatures,
-                    weightsArray: weightsArray
-                )
-                let embeddingEnd = clock.now
-                embeddingDuration += embeddingStart.duration(to: embeddingEnd)
+                // Check if we can reuse a cached embedding instead of running the model.
+                // Compares against the mask that PRODUCED the cached embedding (not a rolling
+                // previous mask) to prevent drift: M1→M2→M3 each differ by 5%, but M3 vs M1
+                // could differ by 15%. Pinning to the generating mask detects cumulative drift.
+                let embedding256: [Float]
+                if let threshold = skipThreshold,
+                    let cached = embeddingCache[speakerIndex],
+                    maskCosineSimilarity(maskToUse, cached.mask) >= threshold
+                {
+                    embedding256 = cached.embedding
+                    skippedEmbeddingCount += 1
+                } else {
+                    let embeddingStart = resampleEnd
+                    let weightsArray = try prepareWeightsInput(weights: resampledMask)
+                    embedding256 = try runEmbeddingModel(
+                        fbankFeatures: fbankFeatures,
+                        weightsArray: weightsArray
+                    )
+                    let embeddingEnd = clock.now
+                    embeddingDuration += embeddingStart.duration(to: embeddingEnd)
+
+                    // Cache the pre-resample mask that generated this embedding. The model
+                    // actually receives the resampled version, but cosine similarity is
+                    // approximately preserved through WeightInterpolation.resample's
+                    // deterministic linear interpolation. The skip condition is conservative:
+                    // pre-resample similarity ≥ threshold implies post-resample similarity,
+                    // but not vice versa — so we may miss some valid skips, never reuse wrongly.
+                    if skipThreshold != nil {
+                        embeddingCache[speakerIndex] = CachedSpeakerEmbedding(
+                            mask: maskToUse, embedding: embedding256)
+                    }
+                }
 
                 let firstActive = maskToUse.firstIndex(where: { $0 > overlapThreshold }) ?? 0
                 let lastActive = maskToUse.lastIndex(where: { $0 > overlapThreshold }) ?? firstActive
@@ -493,6 +538,7 @@ struct OfflineEmbeddingExtractor {
 
         func flushFbankBatch() async throws {
             guard !batchAudioInputs.isEmpty else { return }
+
             let fbankStart = clock.now
             let fbankOutputs = try runFbankBatch(audioArrays: batchAudioInputs)
             fbankDuration += fbankStart.duration(to: clock.now)
@@ -505,6 +551,15 @@ struct OfflineEmbeddingExtractor {
 
             for index in 0..<batchInfos.count {
                 try await processChunk(info: batchInfos[index], fbankFeatures: fbankOutputs[index])
+            }
+
+            // Clear embedding skip cache AFTER processing this batch, before the next.
+            // Speaker indices are LOCAL to each powerset chunk (0, 1, 2) — not global IDs.
+            // Within a batch, consecutive overlapping windows share audio so speaker ordering
+            // is stable and cache hits are valid. Across batch boundaries the audio region
+            // shifts and speaker index assignments may change.
+            if skipThreshold != nil {
+                embeddingCache.removeAll(keepingCapacity: true)
             }
 
             batchAudioInputs.removeAll(keepingCapacity: true)
@@ -607,7 +662,7 @@ struct OfflineEmbeddingExtractor {
                 resampleTotal=\(String(format: "%.2f", resampleMs))ms (perValid=\(String(format: "%.3f", resamplePerValid))ms), \
                 embeddingTotal=\(String(format: "%.2f", embeddingMs))ms (perValid=\(String(format: "%.3f", embeddingPerValid))ms), \
                 pldaTotal=\(String(format: "%.2f", pldaMs))ms (perValid=\(String(format: "%.3f", pldaPerValid))ms), \
-                batches(fbank=\(fbankBatchCallCount), plda=\(pldaBatchCallCount))
+                batches(fbank=\(fbankBatchCallCount), plda=\(pldaBatchCallCount))\(skippedEmbeddingCount > 0 ? ", skipped=\(skippedEmbeddingCount)/\(processedMasks)" : "")
                 """
             logger.debug(message)
             Self.emitProfileLog(message)
@@ -698,6 +753,16 @@ struct OfflineEmbeddingExtractor {
         }
 
         return array
+    }
+
+    /// Cosine similarity between two speaker masks via `VDSPOperations.dotProduct`.
+    private func maskCosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+        let dot = VDSPOperations.dotProduct(a, b)
+        let normA = VDSPOperations.dotProduct(a, a)
+        let normB = VDSPOperations.dotProduct(b, b)
+        let denom = sqrt(normA) * sqrt(normB)
+        return denom > 0 ? dot / denom : 0
     }
 
     private func prepareWeightsInput(

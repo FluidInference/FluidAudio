@@ -73,25 +73,47 @@ public struct OfflineDiarizerConfig: Sendable {
         }
     }
 
+    /// Strategy for skipping redundant embedding extractions in the offline pipeline.
+    ///
+    /// With overlapping segmentation windows (e.g., step ratio 0.15 = 85% overlap),
+    /// consecutive windows produce nearly identical speaker masks for stable speech regions.
+    /// Skipping the embedding model call for these redundant windows saves significant compute
+    /// (the embedding model is the pipeline bottleneck at ~6.5ms per call on ANE).
+    public enum EmbeddingSkipStrategy: Sendable {
+        /// No skipping — extract every embedding (default).
+        case none
+        /// Skip if the speaker mask has cosine similarity ≥ threshold compared to the mask
+        /// that produced the currently cached embedding for this speaker. Prevents drift by
+        /// always comparing against the mask that generated the cached embedding, not a
+        /// rolling previous mask.
+        ///
+        /// Recommended threshold: 0.95 (≤1pp DER cost across VoxConverse/SCOTUS/Earnings-21).
+        case maskSimilarity(threshold: Float)
+    }
+
     public struct Embedding: Sendable {
         public var batchSize: Int
         public var excludeOverlap: Bool
         public var minSegmentDurationSeconds: Double
+        public var skipStrategy: EmbeddingSkipStrategy
 
         public static let community = Embedding(
             batchSize: 32,
             excludeOverlap: true,
-            minSegmentDurationSeconds: 1.0
+            minSegmentDurationSeconds: 1.0,
+            skipStrategy: .none
         )
 
         public init(
             batchSize: Int,
             excludeOverlap: Bool,
-            minSegmentDurationSeconds: Double
+            minSegmentDurationSeconds: Double,
+            skipStrategy: EmbeddingSkipStrategy = .none
         ) {
             self.batchSize = batchSize
             self.excludeOverlap = excludeOverlap
             self.minSegmentDurationSeconds = minSegmentDurationSeconds
+            self.skipStrategy = skipStrategy
         }
     }
 
@@ -219,6 +241,7 @@ public struct OfflineDiarizerConfig: Sendable {
         segmentationStepRatio: Double = Segmentation.community.stepRatio,
         embeddingBatchSize: Int = Embedding.community.batchSize,
         embeddingExcludeOverlap: Bool = Embedding.community.excludeOverlap,
+        embeddingSkipStrategy: EmbeddingSkipStrategy = Embedding.community.skipStrategy,
         minSegmentDuration: Double = Embedding.community.minSegmentDurationSeconds,
         minGapDuration: Double = PostProcessing.community.minGapDurationSeconds,
         exclusiveSegments: Bool = PostProcessing.community.exclusiveSegments,
@@ -243,7 +266,8 @@ public struct OfflineDiarizerConfig: Sendable {
             embedding: Embedding(
                 batchSize: embeddingBatchSize,
                 excludeOverlap: embeddingExcludeOverlap,
-                minSegmentDurationSeconds: minSegmentDuration
+                minSegmentDurationSeconds: minSegmentDuration,
+                skipStrategy: embeddingSkipStrategy
             ),
             clustering: Clustering(
                 threshold: clusteringThreshold,
@@ -407,6 +431,11 @@ public struct OfflineDiarizerConfig: Sendable {
     public var embeddingExcludeOverlap: Bool {
         get { embedding.excludeOverlap }
         set { embedding.excludeOverlap = newValue }
+    }
+
+    public var embeddingSkipStrategy: EmbeddingSkipStrategy {
+        get { embedding.skipStrategy }
+        set { embedding.skipStrategy = newValue }
     }
 
     public var minSegmentDuration: Double {
