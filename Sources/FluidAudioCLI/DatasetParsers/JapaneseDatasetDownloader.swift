@@ -44,7 +44,9 @@ extension DatasetDownloader {
             // Download metadata.jsonl
             logger.info("📄 Downloading metadata...")
             let metadataURL = try ModelRegistry.resolveDataset(dataset, "metadata.jsonl")
-            _ = try await downloadAudioFile(from: metadataURL.absoluteString, to: metadataPath)
+            // Download metadata (not audio, so don't validate)
+            let (data, _) = try await DownloadUtils.sharedSession.data(from: metadataURL)
+            try data.write(to: metadataPath)
 
             // Parse metadata to get file list
             let metadataContent = try String(contentsOf: metadataPath, encoding: .utf8)
@@ -150,7 +152,9 @@ extension DatasetDownloader {
             logger.info("📄 Downloading metadata...")
             let metadataURL = try ModelRegistry.resolveDataset(
                 dataset, "\(split.rawValue)/metadata.jsonl")
-            _ = try await downloadAudioFile(from: metadataURL.absoluteString, to: metadataPath)
+            // Download metadata (not audio, so don't validate)
+            let (data, _) = try await DownloadUtils.sharedSession.data(from: metadataURL)
+            try data.write(to: metadataPath)
 
             // Parse metadata to get file list
             let metadataContent = try String(contentsOf: metadataPath, encoding: .utf8)
