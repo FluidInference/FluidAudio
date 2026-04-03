@@ -734,3 +734,66 @@ Both the English BART G2P and multilingual ByT5 G2P models run fastest on CPU-on
 | cpuOnly | **13.0** |
 | all (ANE+GPU+CPU) | 17.3 |
 | cpuAndGPU | 23.4 |
+
+## CTC zh-CN Mandarin ASR
+
+Parakeet CTC 0.6B zh-CN model converted to CoreML for on-device Mandarin Chinese transcription.
+
+Model: [FluidInference/parakeet-ctc-0.6b-zh-cn-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-zh-cn-coreml)
+
+Hardware: Apple M2, 2022, macOS 26
+
+### FLEURS Mandarin Chinese (100 samples)
+
+```bash
+swift run -c release fluidaudiocli ctc-zh-cn-benchmark --auto-download --samples 100
+```
+
+| Metric | FluidAudio (Swift) | Mobius (Python) |
+|---|---|---|
+| **Mean CER** | **10.22%** | 10.45% |
+| **Median CER** | **5.88%** | 6.06% |
+| Samples < 5% CER | 46 (46%) | — |
+| Samples < 10% CER | 65 (65%) | — |
+| Samples < 20% CER | 81 (81%) | — |
+| Mean Latency | 2102 ms | — |
+| Success Rate | 100/100 | 100/100 |
+
+FluidAudio Swift implementation matches the Python/CoreML baseline and is 0.23% better on mean CER.
+
+### THCHS-30 Test Set (100 samples)
+
+```bash
+swift run -c release fluidaudiocli ctc-zh-cn-benchmark --auto-download --samples 100
+```
+
+Dataset: [FluidInference/THCHS-30-tests](https://huggingface.co/datasets/FluidInference/THCHS-30-tests) — 2,495 Mandarin Chinese utterances from the THCHS-30 corpus.
+
+| Metric | int8 encoder (0.55 GB) |
+|---|---|
+| **Mean CER** | **8.37%** |
+| **Median CER** | **6.67%** |
+| Samples < 5% CER | — |
+| Samples < 10% CER | — |
+| Samples < 20% CER | — |
+
+### Error Analysis
+
+The primary source of CER is digit representation mismatch: the model outputs Arabic digits (1, 5, 2011) while FLEURS references use Chinese characters (一五, 二零一一). The benchmark normalizer converts digits before scoring.
+
+Example (FLEURS sample #3):
+```
+Reference:   桥下垂直净空15米该项目于2011年8月完工
+Without fix: 35.14% CER (digits not converted)
+With fix:    matches (digits → 一五, 二零一一)
+```
+
+### Beam Search
+
+Beam search does not improve CER for this model without a language model. Greedy decoding (beam width 1) is recommended.
+
+### Recommendations
+
+- **Greedy decoding** is sufficient for production use at this CER level.
+- For applications requiring <8% CER, a character-level language model would be needed.
+- Int8 encoder (0.55 GB) performs on par with FP32 (1.1 GB).
