@@ -41,42 +41,56 @@ extension DatasetDownloader {
         let dataset = "FluidInference/JSUT-basic5000"
 
         do {
-            // Download metadata.jsonl
-            logger.info("📄 Downloading metadata...")
-            let metadataURL = try ModelRegistry.resolveDataset(dataset, "metadata.jsonl")
-            // Download metadata (not audio, so don't validate)
-            let (data, _) = try await DownloadUtils.sharedSession.data(from: metadataURL)
-            try data.write(to: metadataPath)
+            // Download transcript_utf8.txt (format: "FILENAME:transcription text")
+            logger.info("📄 Downloading transcripts...")
+            let transcriptURL = try ModelRegistry.resolveDataset(dataset, "basic5000/transcript_utf8.txt")
+            let (transcriptData, _) = try await DownloadUtils.sharedSession.data(from: transcriptURL)
+            let transcriptContent = String(data: transcriptData, encoding: .utf8) ?? ""
 
-            // Parse metadata to get file list
-            let metadataContent = try String(contentsOf: metadataPath, encoding: .utf8)
-            var audioFiles: [String] = []
-
-            for line in metadataContent.components(separatedBy: .newlines) {
+            // Parse transcripts and build metadata
+            var entries: [(fileName: String, text: String)] = []
+            for line in transcriptContent.components(separatedBy: .newlines) {
                 guard !line.isEmpty else { continue }
-                if let data = line.data(using: .utf8),
-                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                    let fileName = json["file_name"] as? String
-                {
-                    audioFiles.append(fileName)
-                }
+
+                // Format: "BASIC5000_4501:transcription text"
+                let parts = line.components(separatedBy: ":")
+                guard parts.count >= 2 else { continue }
+
+                let fileName = parts[0].trimmingCharacters(in: .whitespaces) + ".wav"
+                let text = parts[1...].joined(separator: ":").trimmingCharacters(in: .whitespaces)
+
+                entries.append((fileName: fileName, text: text))
+
                 // Respect maxSamples limit
-                if let max = maxSamples, audioFiles.count >= max {
+                if let max = maxSamples, entries.count >= max {
                     break
                 }
             }
 
-            logger.info("📄 Found \(audioFiles.count) audio files in metadata")
+            logger.info("📄 Found \(entries.count) transcripts")
 
-            // Download audio files
+            // Download audio files from wav/ directory
             var downloadedCount = 0
-            for (index, fileName) in audioFiles.enumerated() {
-                let audioURL = try ModelRegistry.resolveDataset(dataset, "audio/\(fileName)")
-                let destination = audioDir.appendingPathComponent(fileName)
+            var metadataLines: [String] = []
+
+            for (index, entry) in entries.enumerated() {
+                let audioURL = try ModelRegistry.resolveDataset(dataset, "basic5000/wav/\(entry.fileName)")
+                let destination = audioDir.appendingPathComponent(entry.fileName)
 
                 // Skip if already exists
                 if !force && FileManager.default.fileExists(atPath: destination.path) {
                     downloadedCount += 1
+
+                    // Add to metadata
+                    let metadataEntry: [String: String] = [
+                        "file_name": entry.fileName,
+                        "text": entry.text,
+                        "speaker_id": "jsut"
+                    ]
+                    if let jsonData = try? JSONSerialization.data(withJSONObject: metadataEntry),
+                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                        metadataLines.append(jsonString)
+                    }
                     continue
                 }
 
@@ -84,15 +98,30 @@ extension DatasetDownloader {
                     _ = try await downloadAudioFile(from: audioURL.absoluteString, to: destination)
                     downloadedCount += 1
 
+                    // Add to metadata after successful download
+                    let metadataEntry: [String: String] = [
+                        "file_name": entry.fileName,
+                        "text": entry.text,
+                        "speaker_id": "jsut"
+                    ]
+                    if let jsonData = try? JSONSerialization.data(withJSONObject: metadataEntry),
+                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                        metadataLines.append(jsonString)
+                    }
+
                     if (index + 1) % 100 == 0 {
-                        logger.info("  Downloaded \(index + 1)/\(audioFiles.count) files...")
+                        logger.info("  Downloaded \(index + 1)/\(entries.count) files...")
                     }
                 } catch {
-                    logger.warning("Failed to download \(fileName): \(error)")
+                    logger.warning("Failed to download \(entry.fileName): \(error)")
                 }
             }
 
-            logger.info("JSUT-basic5000 ready: \(downloadedCount)/\(audioFiles.count) files")
+            // Write metadata.jsonl
+            let metadataContent = metadataLines.joined(separator: "\n")
+            try metadataContent.write(to: metadataPath, atomically: true, encoding: .utf8)
+
+            logger.info("JSUT-basic5000 ready: \(downloadedCount)/\(entries.count) files")
 
         } catch {
             logger.error("Failed to download JSUT-basic5000: \(error)")
