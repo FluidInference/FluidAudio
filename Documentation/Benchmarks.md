@@ -761,32 +761,32 @@ swift run -c release fluidaudiocli ctc-zh-cn-benchmark --auto-download --samples
 
 FluidAudio Swift implementation matches the Python/CoreML baseline and is 0.23% better on mean CER.
 
-### THCHS-30 Test Set (100 samples)
+### THCHS-30 Test Set (2,495 samples)
 
 ```bash
-swift run -c release fluidaudiocli ctc-zh-cn-benchmark --auto-download --samples 100
+swift run -c release fluidaudiocli ctc-zh-cn-benchmark --auto-download
 ```
 
-Dataset: [FluidInference/THCHS-30-tests](https://huggingface.co/datasets/FluidInference/THCHS-30-tests) — 2,495 Mandarin Chinese utterances from the THCHS-30 corpus.
+Dataset: [FluidInference/THCHS-30-tests](https://huggingface.co/datasets/FluidInference/THCHS-30-tests) — 2,495 utterances (250 unique sentences × 10 speakers) from the THCHS-30 corpus.
 
 | Metric | int8 encoder (0.55 GB) |
 |---|---|
-| **Mean CER** | **8.37%** |
-| **Median CER** | **6.67%** |
-| Samples < 5% CER | — |
-| Samples < 10% CER | — |
-| Samples < 20% CER | — |
+| **Mean CER** | **8.23%** |
+| **Median CER** | **6.45%** |
+| CER = 0% (perfect) | 435 (17.4%) |
+| CER < 5% | 947 (38.0%) |
+| CER < 10% | 1,674 (67.1%) |
+| CER < 20% | 2,325 (93.2%) |
+| Mean Latency | 614 ms |
+| Mean RTFx | 14.83x |
 
 ### Error Analysis
 
-The primary source of CER is digit representation mismatch: the model outputs Arabic digits (1, 5, 2011) while FLEURS references use Chinese characters (一五, 二零一一). The benchmark normalizer converts digits before scoring.
+Error analysis from the 100 highest-CER samples (out of the full 2,495) identified 862 substitution errors. The dominant patterns:
 
-Example (FLEURS sample #3):
-```
-Reference:   桥下垂直净空15米该项目于2011年8月完工
-Without fix: 35.14% CER (digits not converted)
-With fix:    matches (digits → 一五, 二零一一)
-```
+- **Homophones / near-homophones**: acoustically similar syllables (e.g. 呢/了, 了/的) account for the majority of substitutions — unavoidable without a language model
+- **Digit representation**: the model may output Arabic digits (1, 5, 2011) when references use Chinese characters (一五, 二零一一); the benchmark normalizer converts digits before scoring to avoid penalizing this
+- **Sentence-final particles**: 了/的/呢/吧 are frequently confused, contributing a disproportionate share of errors given their high occurrence
 
 ### Beam Search
 
