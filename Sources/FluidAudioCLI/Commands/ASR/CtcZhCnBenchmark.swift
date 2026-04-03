@@ -292,8 +292,8 @@ enum CtcZhCnBenchmark {
     private static func normalizeChineseText(_ text: String) -> String {
         var normalized = text
 
-        // Remove Chinese punctuation
-        let chinesePunct = "，。！？、；：""''"
+        // Remove Chinese punctuation (including curly quotes U+201C, U+201D, U+2018, U+2019)
+        let chinesePunct = "，。！？、；：\u{201C}\u{201D}\u{2018}\u{2019}"
         for char in chinesePunct {
             normalized = normalized.replacingOccurrences(of: String(char), with: "")
         }
