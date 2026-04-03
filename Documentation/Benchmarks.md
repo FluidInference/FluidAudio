@@ -743,31 +743,15 @@ Model: [FluidInference/parakeet-ctc-0.6b-zh-cn-coreml](https://huggingface.co/Fl
 
 Hardware: Apple M2, 2022, macOS 26
 
-### FLEURS Mandarin Chinese (100 samples)
+### THCHS-30 Test Set
 
-```bash
-swift run -c release fluidaudiocli ctc-zh-cn-benchmark --auto-download --samples 100
-```
+Full benchmark on the complete THCHS-30 test set — 2,495 utterances (250 unique sentences × 10 speakers) from the THCHS-30 corpus.
 
-| Metric | FluidAudio (Swift) | Mobius (Python) |
-|---|---|---|
-| **Mean CER** | **10.22%** | 10.45% |
-| **Median CER** | **5.88%** | 6.06% |
-| Samples < 5% CER | 46 (46%) | — |
-| Samples < 10% CER | 65 (65%) | — |
-| Samples < 20% CER | 81 (81%) | — |
-| Mean Latency | 2102 ms | — |
-| Success Rate | 100/100 | 100/100 |
-
-FluidAudio Swift implementation matches the Python/CoreML baseline and is 0.23% better on mean CER.
-
-### THCHS-30 Test Set (2,495 samples)
+Dataset: [FluidInference/THCHS-30-tests](https://huggingface.co/datasets/FluidInference/THCHS-30-tests)
 
 ```bash
 swift run -c release fluidaudiocli ctc-zh-cn-benchmark --auto-download
 ```
-
-Dataset: [FluidInference/THCHS-30-tests](https://huggingface.co/datasets/FluidInference/THCHS-30-tests) — 2,495 utterances (250 unique sentences × 10 speakers) from the THCHS-30 corpus.
 
 | Metric | int8 encoder (0.55 GB) |
 |---|---|
