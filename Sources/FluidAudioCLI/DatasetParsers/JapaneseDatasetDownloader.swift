@@ -166,9 +166,9 @@ extension DatasetDownloader {
             let existingFiles =
                 (try? FileManager.default.contentsOfDirectory(
                     at: audioDir, includingPropertiesForKeys: nil)) ?? []
-            let mp3Count = existingFiles.filter { $0.pathExtension == "mp3" }.count
+            let mp3Count = existingFiles.filter { $0.pathExtension == "mp3" || $0.pathExtension == "wav" }.count
             if mp3Count > 0 {
-                logger.info("📂 Common Voice Japanese \(split.displayName) exists (\(mp3Count) MP3 files)")
+                logger.info("📂 Common Voice Japanese \(split.displayName) exists (\(mp3Count) audio files)")
                 return
             }
         }
@@ -177,45 +177,59 @@ extension DatasetDownloader {
         let dataset = "FluidInference/cv-corpus-25.0-ja"
 
         do {
-            // Download metadata.jsonl for the split
-            logger.info("📄 Downloading metadata...")
-            let metadataURL = try ModelRegistry.resolveDataset(
-                dataset, "\(split.rawValue)/metadata.jsonl")
-            // Download metadata (not audio, so don't validate)
-            let (data, _) = try await DownloadUtils.sharedSession.data(from: metadataURL)
-            try data.write(to: metadataPath)
+            // Download TSV metadata (format: client_id\tpath\tsentence_id\tsentence\t...)
+            logger.info("📄 Downloading metadata TSV...")
+            let tsvURL = try ModelRegistry.resolveDataset(dataset, "ja/\(split.rawValue).tsv")
+            let (tsvData, _) = try await DownloadUtils.sharedSession.data(from: tsvURL)
+            let tsvContent = String(data: tsvData, encoding: .utf8) ?? ""
 
-            // Parse metadata to get file list
-            let metadataContent = try String(contentsOf: metadataPath, encoding: .utf8)
-            var audioEntries: [(fileName: String, path: String)] = []
+            // Parse TSV to extract entries
+            var entries: [(fileName: String, text: String, clientId: String)] = []
+            let lines = tsvContent.components(separatedBy: .newlines)
 
-            for line in metadataContent.components(separatedBy: .newlines) {
+            // Skip header line
+            for line in lines.dropFirst() {
                 guard !line.isEmpty else { continue }
-                if let data = line.data(using: .utf8),
-                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                    let path = json["path"] as? String
-                {
-                    let fileName = URL(fileURLWithPath: path).lastPathComponent
-                    audioEntries.append((fileName: fileName, path: path))
-                }
+
+                let columns = line.components(separatedBy: "\t")
+                guard columns.count >= 4 else { continue }
+
+                let clientId = columns[0]
+                let fileName = columns[1]
+                let text = columns[3]
+
+                entries.append((fileName: fileName, text: text, clientId: clientId))
+
                 // Respect maxSamples limit
-                if let max = maxSamples, audioEntries.count >= max {
+                if let max = maxSamples, entries.count >= max {
                     break
                 }
             }
 
-            logger.info("📄 Found \(audioEntries.count) audio files in metadata")
+            logger.info("📄 Found \(entries.count) entries in TSV")
 
-            // Download audio files
+            // Download audio files from ja/clips/
             var downloadedCount = 0
-            for (index, entry) in audioEntries.enumerated() {
-                let audioURL = try ModelRegistry.resolveDataset(
-                    dataset, "\(split.rawValue)/audio/\(entry.path)")
+            var metadataLines: [String] = []
+
+            for (index, entry) in entries.enumerated() {
+                let audioURL = try ModelRegistry.resolveDataset(dataset, "ja/clips/\(entry.fileName)")
                 let destination = audioDir.appendingPathComponent(entry.fileName)
 
                 // Skip if already exists
                 if !force && FileManager.default.fileExists(atPath: destination.path) {
                     downloadedCount += 1
+
+                    // Add to metadata
+                    let metadataEntry: [String: String] = [
+                        "path": entry.fileName,
+                        "sentence": entry.text,
+                        "client_id": entry.clientId
+                    ]
+                    if let jsonData = try? JSONSerialization.data(withJSONObject: metadataEntry),
+                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                        metadataLines.append(jsonString)
+                    }
                     continue
                 }
 
@@ -223,16 +237,31 @@ extension DatasetDownloader {
                     _ = try await downloadAudioFile(from: audioURL.absoluteString, to: destination)
                     downloadedCount += 1
 
+                    // Add to metadata after successful download
+                    let metadataEntry: [String: String] = [
+                        "path": entry.fileName,
+                        "sentence": entry.text,
+                        "client_id": entry.clientId
+                    ]
+                    if let jsonData = try? JSONSerialization.data(withJSONObject: metadataEntry),
+                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                        metadataLines.append(jsonString)
+                    }
+
                     if (index + 1) % 100 == 0 {
-                        logger.info("  Downloaded \(index + 1)/\(audioEntries.count) files...")
+                        logger.info("  Downloaded \(index + 1)/\(entries.count) files...")
                     }
                 } catch {
                     logger.warning("Failed to download \(entry.fileName): \(error)")
                 }
             }
 
+            // Write metadata.jsonl
+            let metadataContent = metadataLines.joined(separator: "\n")
+            try metadataContent.write(to: metadataPath, atomically: true, encoding: .utf8)
+
             logger.info(
-                "Common Voice Japanese \(split.displayName) ready: \(downloadedCount)/\(audioEntries.count) files")
+                "Common Voice Japanese \(split.displayName) ready: \(downloadedCount)/\(entries.count) files")
 
         } catch {
             logger.error("Failed to download Common Voice Japanese: \(error)")
