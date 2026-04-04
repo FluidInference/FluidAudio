@@ -104,7 +104,7 @@ verify_assets() {
 
     # --- Japanese TDT (hybrid: CTC preprocessor/encoder + TDT decoder/joint) ---
     local ja_dir="$MODELS_DIR/parakeet-ctc-0.6b-ja-coreml"
-    for f in Preprocessor.mlmodelc Encoder.mlmodelc Decoder.mlmodelc Decoderv2.mlmodelc Jointerv2.mlmodelc vocab.json; do
+    for f in Preprocessor.mlmodelc Encoder.mlmodelc Decoderv2.mlmodelc Jointerv2.mlmodelc vocab.json; do
         if [[ ! -e "$ja_dir/$f" ]]; then
             log "MISSING  tdt-ja: $ja_dir/$f"
             missing=1
@@ -113,12 +113,17 @@ verify_assets() {
 
     # --- Chinese CTC ---
     local zh_dir="$MODELS_DIR/parakeet-ctc-0.6b-zh-cn-coreml"
-    for f in Preprocessor.mlmodelc Encoder.mlmodelc Decoder.mlmodelc vocab.json; do
+    for f in Preprocessor.mlmodelc Decoder.mlmodelc vocab.json; do
         if [[ ! -e "$zh_dir/$f" ]]; then
             log "MISSING  ctc-zh-cn: $zh_dir/$f"
             missing=1
         fi
     done
+    # Check that at least one encoder variant exists (int8 or fp32)
+    if [[ ! -e "$zh_dir/Encoder-v2-int8.mlmodelc" ]] && [[ ! -e "$zh_dir/Encoder-v1-fp32.mlmodelc" ]]; then
+        log "MISSING  ctc-zh-cn: $zh_dir/Encoder-v2-int8.mlmodelc or Encoder-v1-fp32.mlmodelc"
+        missing=1
+    fi
 
     # --- LibriSpeech test-clean ---
     local ls_dir="$DATASETS_DIR/LibriSpeech/$SUBSET"
@@ -387,8 +392,8 @@ BASELINE_TDT_CTC_WER="3.6"
 BASELINE_EARNINGS_WER="16.54"
 BASELINE_EOU_WER="7.11"
 BASELINE_NEMOTRON_WER="1.99"
-BASELINE_JA_CER="6.85"
-BASELINE_ZH_CER="TBD"
+BASELINE_JA_CER="6.11"
+BASELINE_ZH_CER="8.37"
 
 extract_wer() {
     local json_file="$1"
