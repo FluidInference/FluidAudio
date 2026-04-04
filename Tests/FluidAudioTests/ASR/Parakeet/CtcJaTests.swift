@@ -226,12 +226,12 @@ final class CtcJaTests: XCTestCase {
     }
 
     func testCalculateCER_MultipleErrors() {
-        let reference = "今日は良い天気"  // 6 characters
+        let reference = "今日は良い天気"  // 7 characters (今日は良い天気)
         let hypothesis = "今日は悪い天気"  // 1 substitution (良 -> 悪)
         let cer = calculateCER(reference: reference, hypothesis: hypothesis)
 
-        // Distance = 1, Length = 6, CER = 1/6 ≈ 0.167
-        XCTAssertEqual(cer, 1.0 / 6.0, accuracy: 0.001, "1 error in 6 chars should be ~0.167")
+        // Distance = 1, Length = 7, CER = 1/7 ≈ 0.143
+        XCTAssertEqual(cer, 1.0 / 7.0, accuracy: 0.001, "1 error in 7 chars should be ~0.143")
     }
 
     func testCalculateCER_InsertionErrors() {
