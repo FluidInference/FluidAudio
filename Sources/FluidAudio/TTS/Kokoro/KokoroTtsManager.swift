@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+@preconcurrency import CoreML
 
 /// Manages text-to-speech synthesis using Kokoro CoreML models.
 ///
@@ -12,6 +13,12 @@ import OSLog
 /// try await manager.initialize()
 /// let audioData = try await manager.synthesize(text: "Hello, world!")
 /// ```
+///
+/// On iOS 26+, use `.cpuAndGPU` to work around ANE compiler regressions:
+/// ```swift
+/// let manager = KokoroTtsManager(computeUnits: .cpuAndGPU)
+/// try await manager.initialize()
+/// ```
 public final class KokoroTtsManager {
 
     private let logger = AppLogger(category: "KokoroTtsManager")
@@ -22,6 +29,7 @@ public final class KokoroTtsManager {
     private var isInitialized = false
     private var assetsReady = false
     private let directory: URL?
+    private let computeUnits: MLComputeUnits
     private var defaultVoice: String
     private var defaultSpeakerId: Int
     private var ensuredVoices: Set<String> = []
@@ -36,6 +44,9 @@ public final class KokoroTtsManager {
     ///   - defaultSpeakerId: Default speaker ID for multi-speaker voices.
     ///   - directory: Optional override for the base cache directory.
     ///     When `nil`, uses the default platform cache location.
+    ///   - computeUnits: CoreML compute units for model compilation. Defaults to `.all`.
+    ///     Use `.cpuAndGPU` on iOS 26+ to work around ANE compiler regressions
+    ///     ("Cannot retrieve vector from IRValue format int32").
     ///   - modelCache: Cache for loaded CoreML models.
     ///   - customLexicon: Optional custom pronunciation dictionary. Entries in this dictionary
     ///     take precedence over all built-in dictionaries and grapheme-to-phoneme conversion.
@@ -43,11 +54,13 @@ public final class KokoroTtsManager {
         defaultVoice: String = TtsConstants.recommendedVoice,
         defaultSpeakerId: Int = 0,
         directory: URL? = nil,
+        computeUnits: MLComputeUnits = .all,
         modelCache: KokoroModelCache = KokoroModelCache(),
         customLexicon: TtsCustomLexicon? = nil
     ) {
         self.directory = directory
-        self.modelCache = directory != nil ? KokoroModelCache(directory: directory) : modelCache
+        self.computeUnits = computeUnits
+        self.modelCache = directory != nil ? KokoroModelCache(directory: directory, computeUnits: computeUnits) : modelCache
         self.lexiconAssets = LexiconAssetManager()
         self.defaultVoice = Self.normalizeVoice(defaultVoice)
         self.defaultSpeakerId = defaultSpeakerId
@@ -58,12 +71,14 @@ public final class KokoroTtsManager {
         defaultVoice: String = TtsConstants.recommendedVoice,
         defaultSpeakerId: Int = 0,
         directory: URL? = nil,
+        computeUnits: MLComputeUnits = .all,
         modelCache: KokoroModelCache = KokoroModelCache(),
         lexiconAssets: LexiconAssetManager,
         customLexicon: TtsCustomLexicon? = nil
     ) {
         self.directory = directory
-        self.modelCache = directory != nil ? KokoroModelCache(directory: directory) : modelCache
+        self.computeUnits = computeUnits
+        self.modelCache = directory != nil ? KokoroModelCache(directory: directory, computeUnits: computeUnits) : modelCache
         self.lexiconAssets = lexiconAssets
         self.defaultVoice = Self.normalizeVoice(defaultVoice)
         self.defaultSpeakerId = defaultSpeakerId
@@ -90,7 +105,7 @@ public final class KokoroTtsManager {
     }
 
     public func initialize(preloadVoices: Set<String>? = nil) async throws {
-        let models = try await TtsModels.download(directory: directory)
+        let models = try await TtsModels.download(directory: directory, computeUnits: computeUnits)
         try await initialize(models: models, preloadVoices: preloadVoices)
     }
 

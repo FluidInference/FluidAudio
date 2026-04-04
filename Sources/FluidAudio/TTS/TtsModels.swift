@@ -24,10 +24,20 @@ public struct TtsModels: Sendable {
         kokoroModels[variant]
     }
 
+    /// Downloads and compiles Kokoro CoreML models.
+    ///
+    /// - Parameters:
+    ///   - requestedVariants: Which model variants to download. Pass `nil` for all.
+    ///   - repo: HuggingFace repository to download from.
+    ///   - directory: Optional override for the cache directory.
+    ///   - computeUnits: CoreML compute units for model compilation. Defaults to `.all`.
+    ///     Use `.cpuAndGPU` on iOS 26+ to work around ANE compiler regressions.
+    ///   - progressHandler: Optional download progress callback.
     public static func download(
         variants requestedVariants: Set<ModelNames.TTS.Variant>? = nil,
         from repo: String = TtsConstants.defaultRepository,
         directory: URL? = nil,
+        computeUnits: MLComputeUnits = .all,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> TtsModels {
         let targetDir = try directory ?? getCacheDirectory()
@@ -46,8 +56,7 @@ public struct TtsModels: Sendable {
             .kokoro,
             modelNames: modelNames,
             directory: modelsDirectory,
-            // v2 models converted with fp16 precision schedule BERT + generator ops to ANE (1.67x speedup)
-            computeUnits: .all,
+            computeUnits: computeUnits,
             variant: variantFilter,
             progressHandler: progressHandler
         )
