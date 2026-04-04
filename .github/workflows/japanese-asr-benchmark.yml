@@ -58,9 +58,12 @@ jobs:
       - name: Run TDT Japanese Benchmark
         id: benchmark-tdt
         continue-on-error: true
+        env:
+          INPUT_SAMPLES: ${{ github.event.inputs.samples || '50' }}
+          INPUT_DECODER: ${{ github.event.inputs.decoder || 'ctc' }}
         run: |
-          SAMPLES="${{ github.event.inputs.samples || '50' }}"
-          DECODER="${{ github.event.inputs.decoder || 'ctc' }}"
+          SAMPLES="$INPUT_SAMPLES"
+          DECODER="$INPUT_DECODER"
 
           echo "========================================="
           echo "Running Japanese ASR Benchmark"
@@ -88,8 +91,10 @@ jobs:
       - name: Extract Results
         if: always()
         id: extract-results
+        env:
+          INPUT_DECODER: ${{ github.event.inputs.decoder || 'ctc' }}
         run: |
-          DECODER="${{ github.event.inputs.decoder || 'ctc' }}"
+          DECODER="$INPUT_DECODER"
 
           if [ -f "benchmark-results-ja-$DECODER.json" ]; then
             CER=$(jq -r '.summary.mean_cer // "N/A"' "benchmark-results-ja-$DECODER.json")
