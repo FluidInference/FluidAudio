@@ -47,7 +47,8 @@ public final class KokoroTtsManager {
     ///   - computeUnits: CoreML compute units for model compilation. Defaults to `.all`.
     ///     Use `.cpuAndGPU` on iOS 26+ to work around ANE compiler regressions
     ///     ("Cannot retrieve vector from IRValue format int32").
-    ///   - modelCache: Cache for loaded CoreML models.
+    ///   - modelCache: Cache for loaded CoreML models. When `nil` (default),
+    ///     a cache is created using the provided `directory` and `computeUnits`.
     ///   - customLexicon: Optional custom pronunciation dictionary. Entries in this dictionary
     ///     take precedence over all built-in dictionaries and grapheme-to-phoneme conversion.
     public init(
@@ -55,12 +56,12 @@ public final class KokoroTtsManager {
         defaultSpeakerId: Int = 0,
         directory: URL? = nil,
         computeUnits: MLComputeUnits = .all,
-        modelCache: KokoroModelCache = KokoroModelCache(),
+        modelCache: KokoroModelCache? = nil,
         customLexicon: TtsCustomLexicon? = nil
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
-        self.modelCache = directory != nil ? KokoroModelCache(directory: directory, computeUnits: computeUnits) : modelCache
+        self.modelCache = modelCache ?? KokoroModelCache(directory: directory, computeUnits: computeUnits)
         self.lexiconAssets = LexiconAssetManager()
         self.defaultVoice = Self.normalizeVoice(defaultVoice)
         self.defaultSpeakerId = defaultSpeakerId
@@ -72,13 +73,13 @@ public final class KokoroTtsManager {
         defaultSpeakerId: Int = 0,
         directory: URL? = nil,
         computeUnits: MLComputeUnits = .all,
-        modelCache: KokoroModelCache = KokoroModelCache(),
+        modelCache: KokoroModelCache? = nil,
         lexiconAssets: LexiconAssetManager,
         customLexicon: TtsCustomLexicon? = nil
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
-        self.modelCache = directory != nil ? KokoroModelCache(directory: directory, computeUnits: computeUnits) : modelCache
+        self.modelCache = modelCache ?? KokoroModelCache(directory: directory, computeUnits: computeUnits)
         self.lexiconAssets = lexiconAssets
         self.defaultVoice = Self.normalizeVoice(defaultVoice)
         self.defaultSpeakerId = defaultSpeakerId
