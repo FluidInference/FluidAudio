@@ -6,6 +6,12 @@ import AVFoundation
 final class TdtJaTests: XCTestCase {
 
     func testTdtJaTranscription() async throws {
+        // Skip in CI environment - HuggingFace downloads are unreliable
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["CI"] != nil,
+            "Skipping model download tests in CI environment"
+        )
+
         // Load TDT Japanese manager
         print("Loading TDT Japanese models...")
         let manager = try await TdtJaManager.load()
@@ -29,6 +35,12 @@ final class TdtJaTests: XCTestCase {
     }
 
     func testTdtJaWithRealAudio() async throws {
+        // Skip in CI environment - HuggingFace downloads are unreliable
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["CI"] != nil,
+            "Skipping model download tests in CI environment"
+        )
+
         // This would need actual Japanese audio file
         // For now, just verify the model loads
         let manager = try await TdtJaManager.load()

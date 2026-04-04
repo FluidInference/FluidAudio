@@ -163,7 +163,7 @@ final class NemotronStreamingConfigTests: XCTestCase {
 
         XCTAssertThrowsError(try NemotronStreamingConfig(from: file)) { error in
             // Should throw JSON parsing error
-            XCTAssertTrue(error is NSError || error is DecodingError)
+            XCTAssertTrue(error is DecodingError)
         }
     }
 
