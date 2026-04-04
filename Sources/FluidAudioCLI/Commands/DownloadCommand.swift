@@ -71,20 +71,7 @@ enum DownloadCommand {
             await DatasetDownloader.downloadEarnings22KWS(force: forceDownload)
         case "jsut-basic5000":
             await DatasetDownloader.downloadJSUTBasic5000(force: forceDownload)
-        case "cv-corpus-ja-train":
-            await DatasetDownloader.downloadCommonVoiceJapanese(
-                force: forceDownload, split: .train)
-        case "cv-corpus-ja-validation":
-            await DatasetDownloader.downloadCommonVoiceJapanese(
-                force: forceDownload, split: .validation)
         case "cv-corpus-ja-test":
-            await DatasetDownloader.downloadCommonVoiceJapanese(
-                force: forceDownload, split: .test)
-        case "cv-corpus-ja-all":
-            await DatasetDownloader.downloadCommonVoiceJapanese(
-                force: forceDownload, split: .train)
-            await DatasetDownloader.downloadCommonVoiceJapanese(
-                force: forceDownload, split: .validation)
             await DatasetDownloader.downloadCommonVoiceJapanese(
                 force: forceDownload, split: .test)
         case "all":
@@ -121,10 +108,7 @@ enum DownloadCommand {
                 librispeech-test-other      LibriSpeech test-other subset
                 earnings22-kws              Earnings22 keyword spotting dataset
                 jsut-basic5000              JSUT Japanese speech dataset (5k utts)
-                cv-corpus-ja-train          Common Voice Japanese train split
-                cv-corpus-ja-validation     Common Voice Japanese validation split
                 cv-corpus-ja-test           Common Voice Japanese test split
-                cv-corpus-ja-all            All Common Voice Japanese splits
                 parakeet-models             Parakeet ASR models
                 all                         All diarization datasets
 
