@@ -277,6 +277,9 @@ enum JapaneseAsrBenchmark {
     private static func normalizeJapaneseText(_ text: String) -> String {
         var normalized = text
 
+        // Normalize numbers first (before removing punctuation)
+        normalized = normalizeJapaneseNumbers(normalized)
+
         // Remove Japanese punctuation
         let japanesePunct = "、。！？・…「」『』（）［］｛｝【】"
         for char in japanesePunct {
@@ -298,6 +301,46 @@ enum JapaneseAsrBenchmark {
         normalized = normalized.lowercased()
 
         return normalized
+    }
+
+    /// Normalize number formats (full-width digits, kanji numbers) to half-width Arabic digits
+    /// This matches NVIDIA's evaluation methodology which normalizes numbers
+    private static func normalizeJapaneseNumbers(_ text: String) -> String {
+        var result = text
+
+        // Convert full-width digits to half-width (０-９ → 0-9)
+        let fullWidthDigits = "０１２３４５６７８９"
+        let halfWidthDigits = "0123456789"
+        for (fullWidth, halfWidth) in zip(fullWidthDigits, halfWidthDigits) {
+            result = result.replacingOccurrences(of: String(fullWidth), with: String(halfWidth))
+        }
+
+        // Convert kanji numbers to Arabic digits
+        // Handle common patterns: 一, 二, 三, 四, 五, 六, 七, 八, 九, 十, 百, 千, 万
+        let kanjiToArabic: [(String, String)] = [
+            // Compound numbers (must be replaced before single digits)
+            ("一〇", "10"), ("二〇", "20"), ("三〇", "30"), ("四〇", "40"),
+            ("五〇", "50"), ("六〇", "60"), ("七〇", "70"), ("八〇", "80"), ("九〇", "90"),
+            // Special cases for tens
+            ("十一", "11"), ("十二", "12"), ("十三", "13"), ("十四", "14"),
+            ("十五", "15"), ("十六", "16"), ("十七", "17"), ("十八", "18"), ("十九", "19"),
+            ("二十", "20"), ("三十", "30"), ("四十", "40"), ("五十", "50"),
+            ("六十", "60"), ("七十", "70"), ("八十", "80"), ("九十", "90"),
+            // Hundreds
+            ("百", "100"), ("千", "1000"), ("万", "10000"),
+            // Basic digits (must be last to avoid breaking compounds)
+            ("十", "10"),
+            ("一", "1"), ("二", "2"), ("三", "3"), ("四", "4"),
+            ("五", "5"), ("六", "6"), ("七", "7"), ("八", "8"), ("九", "9"),
+            // Zero
+            ("〇", "0"), ("零", "0"),
+        ]
+
+        for (kanji, arabic) in kanjiToArabic {
+            result = result.replacingOccurrences(of: kanji, with: arabic)
+        }
+
+        return result
     }
 
     // MARK: - CER Calculation
