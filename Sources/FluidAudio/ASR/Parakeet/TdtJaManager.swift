@@ -114,9 +114,10 @@ public actor TdtJaManager {
         let encoderLength = encoderLengthOutput[0].intValue
 
         // Step 3: TDT Decoding (encoder features → tokens)
-        // Extract decoder state to local variable for inout passing
+        // Extract decoder and state to local variables for inout passing
         var localDecoderState = decoderState
-        let hypothesis = try await tdtDecoder.decodeWithTimings(
+        let localTdtDecoder = tdtDecoder
+        let hypothesis = try await localTdtDecoder.decodeWithTimings(
             encoderOutput: encoderFeatures,
             encoderSequenceLength: encoderLength,
             actualAudioFrames: encoderLength,
