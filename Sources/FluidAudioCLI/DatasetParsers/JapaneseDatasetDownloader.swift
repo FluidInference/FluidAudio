@@ -145,7 +145,7 @@ extension DatasetDownloader {
     static func downloadCommonVoiceJapanese(
         force: Bool,
         maxSamples: Int? = nil,
-        split: CVSplit = .train
+        split: CVSplit = .test
     ) async {
         let cacheDir = getCommonVoiceCacheDirectory()
         let splitDir = cacheDir.appendingPathComponent(split.rawValue, isDirectory: true)
@@ -274,16 +274,10 @@ extension DatasetDownloader {
 
     /// Common Voice dataset splits
     enum CVSplit: String, CaseIterable {
-        case train = "train"
-        case validation = "validation"
         case test = "test"
 
         var displayName: String {
-            switch self {
-            case .train: return "Train"
-            case .validation: return "Validation"
-            case .test: return "Test"
-            }
+            return "Test"
         }
     }
 
