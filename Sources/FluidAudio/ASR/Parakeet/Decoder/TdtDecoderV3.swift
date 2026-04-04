@@ -30,7 +30,7 @@ import CoreML
 import Foundation
 import OSLog
 
-internal struct TdtDecoderV3 {
+internal struct TdtDecoderV3: Sendable {
 
     private let logger = AppLogger(category: "TDT")
     private let config: ASRConfig

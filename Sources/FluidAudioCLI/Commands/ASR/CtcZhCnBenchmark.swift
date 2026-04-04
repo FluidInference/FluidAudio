@@ -64,13 +64,17 @@ enum CtcZhCnBenchmark {
             )
             logger.info("Models loaded successfully")
 
+            // Download dataset if needed
+            if autoDownload && datasetPath == nil {
+                await DatasetDownloader.downloadTHCHS30(force: false, maxSamples: numSamples)
+            }
+
             // Load THCHS-30 dataset
             logger.info("")
             logger.info("Loading THCHS-30 test set...")
-            let samples = try await loadTHCHS30Samples(
+            let samples = try await ChineseDatasetLoader.loadTHCHS30Samples(
                 maxSamples: numSamples,
-                datasetPath: datasetPath,
-                autoDownload: autoDownload
+                datasetPath: datasetPath
             )
             logger.info("Loaded \(samples.count) samples")
 
@@ -97,12 +101,6 @@ enum CtcZhCnBenchmark {
         }
     }
 
-    private struct BenchmarkSample {
-        let audioPath: String
-        let reference: String
-        let sampleId: Int
-    }
-
     private struct BenchmarkResult: Codable {
         let sampleId: Int
         let reference: String
@@ -115,161 +113,30 @@ enum CtcZhCnBenchmark {
         let rtfx: Double
     }
 
-    private struct MetadataEntry: Codable {
-        let file_name: String
-        let text: String
-    }
-
-    private static func loadTHCHS30Samples(
-        maxSamples: Int, datasetPath: String?, autoDownload: Bool
-    ) async throws -> [BenchmarkSample] {
-        let baseDir: URL
-
-        if let path = datasetPath {
-            // Use provided path
-            baseDir = URL(fileURLWithPath: path)
-        } else if autoDownload {
-            // Download from HuggingFace to cache directory
-            #if os(macOS)
-            let homeDir = FileManager.default.homeDirectoryForCurrentUser
-            let cacheDir =
-                homeDir
-                .appendingPathComponent("Library/Application Support/FluidAudio/Datasets/THCHS-30")
-            #else
-            let cacheDir = FileManager.default.temporaryDirectory
-                .appendingPathComponent("FluidAudio/Datasets/THCHS-30")
-            #endif
-
-            try FileManager.default.createDirectory(
-                at: cacheDir, withIntermediateDirectories: true)
-
-            logger.info("Downloading THCHS-30 from HuggingFace...")
-            try await downloadTHCHS30Dataset(to: cacheDir)
-            baseDir = cacheDir
-        } else {
-            throw NSError(
-                domain: "CtcZhCnBenchmark",
-                code: 1,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        """
-                    THCHS-30 dataset not found.
-
-                    Options:
-                    1. Use --auto-download to download from HuggingFace
-                    2. Use --dataset-path <path> to specify local dataset directory
-
-                    Expected directory structure:
-                        <path>/
-                        ├── audio/           # WAV files
-                        └── metadata.jsonl   # Transcripts
-                    """
-                ]
-            )
-        }
-
-        // Load metadata.jsonl
-        let metadataPath = baseDir.appendingPathComponent("metadata.jsonl")
-        guard FileManager.default.fileExists(atPath: metadataPath.path) else {
-            throw NSError(
-                domain: "CtcZhCnBenchmark",
-                code: 2,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "metadata.jsonl not found at: \(metadataPath.path)"
-                ]
-            )
-        }
-
-        let metadataContent = try String(contentsOf: metadataPath, encoding: .utf8)
-        var samples: [BenchmarkSample] = []
-
-        for (index, line) in metadataContent.components(separatedBy: .newlines).enumerated() {
-            guard !line.isEmpty else { continue }
-            guard samples.count < maxSamples else { break }
-
-            let decoder = JSONDecoder()
-            guard let data = line.data(using: .utf8),
-                let entry = try? decoder.decode(MetadataEntry.self, from: data)
-            else {
-                logger.warning("Failed to decode line \(index): \(line)")
-                continue
-            }
-
-            let audioPath = baseDir.appendingPathComponent(entry.file_name).path
-            guard FileManager.default.fileExists(atPath: audioPath) else {
-                logger.warning("Audio file not found: \(audioPath)")
-                continue
-            }
-
-            samples.append(
-                BenchmarkSample(
-                    audioPath: audioPath,
-                    reference: entry.text,
-                    sampleId: index
-                ))
-        }
-
-        return samples
-    }
-
-    private static func downloadTHCHS30Dataset(to directory: URL) async throws {
-        // Download using git-lfs or HuggingFace Hub API
-        // For now, use a simple approach: shell out to huggingface-cli
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [
-            "huggingface-cli",
-            "download",
-            "FluidInference/THCHS-30-tests",
-            "--repo-type", "dataset",
-            "--local-dir", directory.path,
-        ]
-
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            throw NSError(
-                domain: "CtcZhCnBenchmark",
-                code: 3,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        """
-                    Failed to download THCHS-30 dataset from HuggingFace.
-                    Make sure huggingface-cli is installed: pip install huggingface_hub
-                    """
-                ]
-            )
-        }
-    }
-
     private static func runBenchmark(
-        manager: CtcZhCnManager, samples: [BenchmarkSample]
+        manager: CtcZhCnManager, samples: [ChineseBenchmarkSample]
     ) async throws -> [BenchmarkResult] {
         var results: [BenchmarkResult] = []
 
         for (index, sample) in samples.enumerated() {
-            let audioURL = URL(fileURLWithPath: sample.audioPath)
-
             let startTime = Date()
-            let hypothesis = try await manager.transcribe(audioURL: audioURL)
+            let hypothesis = try await manager.transcribe(audioURL: sample.audioPath)
             let elapsed = Date().timeIntervalSince(startTime)
 
-            let normalizedRef = normalizeChineseText(sample.reference)
+            let normalizedRef = normalizeChineseText(sample.transcript)
             let normalizedHyp = normalizeChineseText(hypothesis)
 
             let cer = calculateCER(reference: normalizedRef, hypothesis: normalizedHyp)
 
             // Get audio duration
-            let audioFile = try AVAudioFile(forReading: audioURL)
+            let audioFile = try AVAudioFile(forReading: sample.audioPath)
             let duration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
 
             let rtfx = duration / elapsed
 
             let result = BenchmarkResult(
                 sampleId: sample.sampleId,
-                reference: sample.reference,
+                reference: sample.transcript,
                 hypothesis: hypothesis,
                 normalizedRef: normalizedRef,
                 normalizedHyp: normalizedHyp,

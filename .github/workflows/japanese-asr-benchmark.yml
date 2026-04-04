@@ -1,0 +1,186 @@
+name: Japanese ASR Benchmark
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Sources/FluidAudio/ASR/Parakeet/TdtJa*.swift'
+      - 'Sources/FluidAudio/ASR/Parakeet/Decoder/Tdt*.swift'
+      - 'Sources/FluidAudioCLI/Commands/ASR/JapaneseAsrBenchmark.swift'
+      - '.github/workflows/japanese-asr-benchmark.yml'
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: 'Number of samples to test'
+        required: false
+        default: '50'
+      decoder:
+        description: 'Decoder type (ctc or tdt)'
+        required: false
+        default: 'ctc'
+
+jobs:
+  japanese-asr-benchmark:
+    name: Japanese ASR Benchmark (CTC)
+    runs-on: macos-15
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Application Support/FluidAudio/Models/parakeet-tdt-ja
+            ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-ja
+            ~/Library/Application Support/FluidAudio/Datasets/JSUT-basic5000
+            ~/Library/Caches/Homebrew
+            /usr/local/Cellar/ffmpeg
+            /opt/homebrew/Cellar/ffmpeg
+          key: ${{ runner.os }}-ja-asr-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/ASR/Parakeet/TdtJa*.swift', 'Sources/FluidAudio/ModelNames.swift') }}
+
+      - name: Install ffmpeg
+        run: |
+          brew install ffmpeg || echo "ffmpeg may already be installed"
+          ffmpeg -version || echo "ffmpeg not available"
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Run TDT Japanese Benchmark
+        id: benchmark-tdt
+        continue-on-error: true
+        env:
+          INPUT_SAMPLES: ${{ github.event.inputs.samples || '50' }}
+          INPUT_DECODER: ${{ github.event.inputs.decoder || 'ctc' }}
+        run: |
+          SAMPLES="$INPUT_SAMPLES"
+          DECODER="$INPUT_DECODER"
+
+          echo "========================================="
+          echo "Running Japanese ASR Benchmark"
+          echo "Decoder: $DECODER"
+          echo "Samples: $SAMPLES"
+          echo "========================================="
+
+          .build/release/fluidaudiocli ja-benchmark \
+            --decoder "$DECODER" \
+            --dataset jsut \
+            --samples "$SAMPLES" \
+            --auto-download \
+            --output "benchmark-results-ja-$DECODER.json" \
+            2>&1 | tee benchmark-log-ja-$DECODER.txt
+
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✅ Japanese $DECODER benchmark completed successfully"
+          else
+            echo "❌ Japanese $DECODER benchmark FAILED with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
+
+      - name: Extract Results
+        if: always()
+        id: extract-results
+        env:
+          INPUT_DECODER: ${{ github.event.inputs.decoder || 'ctc' }}
+        run: |
+          DECODER="$INPUT_DECODER"
+
+          if [ -f "benchmark-results-ja-$DECODER.json" ]; then
+            CER=$(jq -r '.summary.mean_cer // "N/A"' "benchmark-results-ja-$DECODER.json")
+            SAMPLES=$(jq -r '.summary.total_samples // "N/A"' "benchmark-results-ja-$DECODER.json")
+            AVG_RTF=$(jq -r '.summary.mean_rtfx // "N/A"' "benchmark-results-ja-$DECODER.json")
+
+            # Convert CER from decimal to percentage
+            if [ "$CER" != "N/A" ]; then
+              CER=$(echo "$CER * 100" | bc -l | xargs printf "%.2f")
+            fi
+
+            # Format RTFx to 1 decimal place
+            if [ "$AVG_RTF" != "N/A" ]; then
+              AVG_RTF=$(echo "$AVG_RTF" | xargs printf "%.1f")
+            fi
+
+            echo "cer=$CER" >> $GITHUB_OUTPUT
+            echo "samples=$SAMPLES" >> $GITHUB_OUTPUT
+            echo "avg_rtf=$AVG_RTF" >> $GITHUB_OUTPUT
+            echo "decoder=$DECODER" >> $GITHUB_OUTPUT
+          else
+            echo "cer=N/A" >> $GITHUB_OUTPUT
+            echo "samples=0" >> $GITHUB_OUTPUT
+            echo "avg_rtf=N/A" >> $GITHUB_OUTPUT
+            echo "decoder=$DECODER" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment PR with Results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const cer = '${{ steps.extract-results.outputs.cer }}';
+            const samples = '${{ steps.extract-results.outputs.samples }}';
+            const avgRtf = '${{ steps.extract-results.outputs.avg_rtf }}';
+            const decoder = '${{ steps.extract-results.outputs.decoder }}';
+            const success = '${{ steps.benchmark-tdt.outcome }}' === 'success';
+
+            const statusEmoji = success ? '✅' : '❌';
+            const statusText = success ? 'Passed' : 'Failed';
+
+            const body = `## ${statusEmoji} Japanese ASR Benchmark Results (${decoder.toUpperCase()})
+
+            **Status**: ${statusText}
+
+            | Metric | Value |
+            |--------|-------|
+            | **CER** | ${cer}% |
+            | **Samples** | ${samples} |
+            | **Avg RTFx** | ${avgRtf}x |
+            | **Decoder** | ${decoder.toUpperCase()} |
+
+            ${success ?
+              '✅ Benchmark completed successfully. The TDT Japanese hybrid model (CTC preprocessor/encoder + TDT decoder/joint) is working correctly.' :
+              '❌ Benchmark failed. Please check the logs for details.'
+            }
+
+            <details>
+            <summary>View benchmark log</summary>
+
+            \`\`\`
+            ${require('fs').readFileSync('benchmark-log-ja-' + decoder + '.txt', 'utf8').slice(-4000)}
+            \`\`\`
+
+            </details>
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Upload Benchmark Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: japanese-asr-benchmark-results
+          path: |
+            benchmark-results-ja-*.json
+            benchmark-log-ja-*.txt
+          retention-days: 30
+
+      - name: Fail if benchmark failed
+        if: steps.benchmark-tdt.outcome == 'failure'
+        run: |
+          echo "Japanese ASR benchmark failed"
+          exit 1

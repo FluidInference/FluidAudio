@@ -8,6 +8,8 @@
 #   4. CTC custom vocab  — ctc-earnings-benchmark (v2 TDT + CTC 110m keyword spotting)
 #   5. EOU streaming     — parakeet-eou 320ms on LibriSpeech test-clean
 #   6. Nemotron streaming — nemotron 1120ms on LibriSpeech test-clean
+#   7. TDT Japanese      — parakeet-tdt-ja on JSUT dataset
+#   8. CTC Chinese       — parakeet-ctc-zh-cn on THCHS-30 dataset
 #
 # Usage:
 #   ./Scripts/parakeet_subset_benchmark.sh              # verify + run
@@ -100,6 +102,29 @@ verify_assets() {
     # --- Nemotron models (uses v3 encoder + nemotron-specific models) ---
     # Nemotron reuses the v3 models directory; no separate check needed beyond v3 above.
 
+    # --- Japanese TDT (hybrid: CTC preprocessor/encoder + TDT decoder/joint) ---
+    local ja_dir="$MODELS_DIR/parakeet-tdt-ja"
+    for f in Preprocessor.mlmodelc Encoder.mlmodelc Decoderv2.mlmodelc Jointerv2.mlmodelc vocab.json; do
+        if [[ ! -e "$ja_dir/$f" ]]; then
+            log "MISSING  tdt-ja: $ja_dir/$f"
+            missing=1
+        fi
+    done
+
+    # --- Chinese CTC ---
+    local zh_dir="$MODELS_DIR/parakeet-ctc-zh-cn"
+    for f in Preprocessor.mlmodelc Decoder.mlmodelc vocab.json; do
+        if [[ ! -e "$zh_dir/$f" ]]; then
+            log "MISSING  ctc-zh-cn: $zh_dir/$f"
+            missing=1
+        fi
+    done
+    # Check that at least one encoder variant exists (int8 or fp32)
+    if [[ ! -e "$zh_dir/Encoder-v2-int8.mlmodelc" ]] && [[ ! -e "$zh_dir/Encoder-v1-fp32.mlmodelc" ]]; then
+        log "MISSING  ctc-zh-cn: $zh_dir/Encoder-v2-int8.mlmodelc or Encoder-v1-fp32.mlmodelc"
+        missing=1
+    fi
+
     # --- LibriSpeech test-clean ---
     local ls_dir="$DATASETS_DIR/LibriSpeech/$SUBSET"
     local trans_count
@@ -114,6 +139,20 @@ verify_assets() {
     earnings_wav_count=$(find "$EARNINGS_DIR" -maxdepth 1 -name "*.wav" 2>/dev/null | wc -l | tr -d ' ')
     if [[ "$earnings_wav_count" -lt 10 ]]; then
         log "MISSING  Earnings22 KWS: found $earnings_wav_count wav files (need >= 10)"
+        missing=1
+    fi
+
+    # --- JSUT Japanese dataset ---
+    local jsut_dir="$DATASETS_DIR/JSUT-basic5000"
+    if [[ ! -f "$jsut_dir/metadata.jsonl" ]]; then
+        log "MISSING  JSUT: $jsut_dir/metadata.jsonl"
+        missing=1
+    fi
+
+    # --- THCHS-30 Chinese dataset ---
+    local thchs_dir="$DATASETS_DIR/THCHS-30"
+    if [[ ! -f "$thchs_dir/metadata.jsonl" ]]; then
+        log "MISSING  THCHS-30: $thchs_dir/metadata.jsonl"
         missing=1
     fi
 
@@ -162,6 +201,14 @@ if [[ "${1:-}" == "--download" ]]; then
     log "Pre-loading Nemotron streaming models..."
     "$CLI" nemotron-benchmark --max-files 1 2>&1 | tee -a "$LOG_FILE"
 
+    log "Pre-loading Japanese TDT models and JSUT dataset..."
+    "$CLI" ja-benchmark --decoder tdt --dataset jsut --samples 1 --auto-download \
+        --output "$RESULTS_DIR/warmup_ja.json" 2>&1 | tee -a "$LOG_FILE"
+
+    log "Pre-loading Chinese CTC models and THCHS-30 dataset..."
+    "$CLI" ctc-zh-cn-benchmark --samples 1 --auto-download \
+        --output "$RESULTS_DIR/warmup_zh.json" 2>&1 | tee -a "$LOG_FILE"
+
     rm -f "$RESULTS_DIR"/warmup_*.json /tmp/nemotron_*_benchmark.json
     log "=== Downloads complete ==="
     exit 0
@@ -180,7 +227,7 @@ if ! verify_assets; then
 fi
 log "All assets verified locally."
 
-log "=== Parakeet benchmark suite: $MAX_FILES files x 6 benchmarks ==="
+log "=== Parakeet benchmark suite: $MAX_FILES files x 8 benchmarks ==="
 log "Results directory: $RESULTS_DIR"
 
 cd "$PROJECT_DIR"
@@ -281,6 +328,42 @@ run_nemotron_benchmark() {
     log "--- $label: finished in ${elapsed}s — $output_file ---"
 }
 
+run_ja_benchmark() {
+    local label="parakeet_tdt_ja"
+    local output_file="$RESULTS_DIR/${label}_${TIMESTAMP}.json"
+
+    log "--- $label: starting ($MAX_FILES files, JSUT dataset, TDT decoder) ---"
+    local start_time=$(date +%s)
+
+    "$CLI" ja-benchmark \
+        --decoder tdt \
+        --dataset jsut \
+        --samples "$MAX_FILES" \
+        --output "$output_file" \
+        2>&1 | tee -a "$LOG_FILE"
+
+    local end_time=$(date +%s)
+    local elapsed=$(( end_time - start_time ))
+    log "--- $label: finished in ${elapsed}s — $output_file ---"
+}
+
+run_zh_benchmark() {
+    local label="parakeet_ctc_zh_cn"
+    local output_file="$RESULTS_DIR/${label}_${TIMESTAMP}.json"
+
+    log "--- $label: starting ($MAX_FILES files, THCHS-30 dataset) ---"
+    local start_time=$(date +%s)
+
+    "$CLI" ctc-zh-cn-benchmark \
+        --samples "$MAX_FILES" \
+        --output "$output_file" \
+        2>&1 | tee -a "$LOG_FILE"
+
+    local end_time=$(date +%s)
+    local elapsed=$(( end_time - start_time ))
+    log "--- $label: finished in ${elapsed}s — $output_file ---"
+}
+
 SUITE_START=$(date +%s)
 
 run_asr_benchmark "v3"            "parakeet_v3"
@@ -289,6 +372,8 @@ run_asr_benchmark "tdt-ctc-110m"  "parakeet_tdt_ctc_110m"
 run_ctc_earnings_benchmark
 run_eou_benchmark
 run_nemotron_benchmark
+run_ja_benchmark
+run_zh_benchmark
 
 SUITE_END=$(date +%s)
 SUITE_ELAPSED=$(( SUITE_END - SUITE_START ))
@@ -307,6 +392,8 @@ BASELINE_TDT_CTC_WER="3.6"
 BASELINE_EARNINGS_WER="16.54"
 BASELINE_EOU_WER="7.11"
 BASELINE_NEMOTRON_WER="1.99"
+BASELINE_JA_CER="6.11"
+BASELINE_ZH_CER="8.37"
 
 extract_wer() {
     local json_file="$1"
@@ -340,6 +427,8 @@ TDT_CTC_FILE="$RESULTS_DIR/parakeet_tdt_ctc_110m_${TIMESTAMP}.json"
 EARNINGS_FILE="$RESULTS_DIR/ctc_earnings_vocab_${TIMESTAMP}.json"
 EOU_FILE="$RESULTS_DIR/eou_320ms_${TIMESTAMP}.json"
 NEMOTRON_FILE="$RESULTS_DIR/nemotron_1120ms_${TIMESTAMP}.json"
+JA_FILE="$RESULTS_DIR/parakeet_tdt_ja_${TIMESTAMP}.json"
+ZH_FILE="$RESULTS_DIR/parakeet_ctc_zh_cn_${TIMESTAMP}.json"
 
 V3_WER=$(extract_wer "$V3_FILE" "averageWER")
 V2_WER=$(extract_wer "$V2_FILE" "averageWER")
@@ -347,6 +436,8 @@ TDT_CTC_WER=$(extract_wer "$TDT_CTC_FILE" "averageWER")
 EARNINGS_WER=$(extract_wer_pct "$EARNINGS_FILE" "summary" "avgWer")
 EOU_WER=$(extract_wer "$EOU_FILE" "averageWER")
 NEMOTRON_WER=$(extract_wer_pct "$NEMOTRON_FILE" "" "wer")
+JA_CER=$(extract_wer "$JA_FILE" "mean_cer")
+ZH_CER=$(extract_wer "$ZH_FILE" "mean_cer")
 
 log ""
 log "=== WER Comparison vs benchmarks100.md baselines ==="
@@ -379,10 +470,25 @@ compare_wer "EOU 320ms (120M)"        "$BASELINE_EOU_WER" "$EOU_WER"
 compare_wer "Nemotron 1120ms (0.6B)"  "$BASELINE_NEMOTRON_WER" "$NEMOTRON_WER"
 
 log ""
+log "=== CER Comparison (Character Error Rate for non-English) ==="
+log ""
+printf "%-25s %10s %10s %10s\n" "Model" "Baseline" "Current" "Delta" | tee -a "$LOG_FILE"
+printf "%-25s %10s %10s %10s\n" "-------------------------" "----------" "----------" "----------" | tee -a "$LOG_FILE"
 
-# Check for any regressions (>0.3% WER increase)
+compare_wer "TDT Japanese (0.6B)" "$BASELINE_JA_CER" "$JA_CER"
+if [[ "$BASELINE_ZH_CER" != "TBD" ]]; then
+    compare_wer "CTC Chinese (0.6B)" "$BASELINE_ZH_CER" "$ZH_CER"
+else
+    printf "%-25s %10s %10s %10s\n" "CTC Chinese (0.6B)" "TBD" "$ZH_CER" "—" | tee -a "$LOG_FILE"
+fi
+
+log ""
+
+# Check for any regressions (>0.3% WER/CER increase)
 ANY_REGRESSION=$(python3 -c "
-baselines = [($BASELINE_V3_WER, '$V3_WER'), ($BASELINE_V2_WER, '$V2_WER'), ($BASELINE_TDT_CTC_WER, '$TDT_CTC_WER'), ($BASELINE_EARNINGS_WER, '$EARNINGS_WER'), ($BASELINE_EOU_WER, '$EOU_WER'), ($BASELINE_NEMOTRON_WER, '$NEMOTRON_WER')]
+baselines = [($BASELINE_V3_WER, '$V3_WER'), ($BASELINE_V2_WER, '$V2_WER'), ($BASELINE_TDT_CTC_WER, '$TDT_CTC_WER'), ($BASELINE_EARNINGS_WER, '$EARNINGS_WER'), ($BASELINE_EOU_WER, '$EOU_WER'), ($BASELINE_NEMOTRON_WER, '$NEMOTRON_WER'), ($BASELINE_JA_CER, '$JA_CER')]
+if '$BASELINE_ZH_CER' != 'TBD':
+    baselines.append(($BASELINE_ZH_CER, '$ZH_CER'))
 for b, c in baselines:
     if c != 'N/A' and float(c) > b + 0.3:
         print('YES'); exit()
@@ -390,9 +496,9 @@ print('NO')
 " 2>/dev/null || echo "NO")
 
 if [[ "$ANY_REGRESSION" == "YES" ]]; then
-    log "⚠ WER REGRESSION DETECTED — investigate before merging"
+    log "⚠ WER/CER REGRESSION DETECTED — investigate before merging"
 else
-    log "✓ No WER regressions (all within 0.3% of baseline)"
+    log "✓ No WER/CER regressions (all within 0.3% of baseline)"
 fi
 
 # caffeinate will exit automatically since the parent process ($$) exits

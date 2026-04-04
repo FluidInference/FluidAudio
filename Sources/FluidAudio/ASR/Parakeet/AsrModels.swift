@@ -9,6 +9,10 @@ public enum AsrModelVersion: Sendable {
     case tdtCtc110m
     /// 600M parameter CTC-only model for Mandarin Chinese (zh-CN)
     case ctcZhCn
+    /// 600M parameter CTC-only model for Japanese (ja)
+    case ctcJa
+    /// 600M parameter TDT model for Japanese (ja) - hybrid CTC preprocessor/encoder + TDT decoder/joint v2
+    case tdtJa
 
     var repo: Repo {
         switch self {
@@ -16,6 +20,8 @@ public enum AsrModelVersion: Sendable {
         case .v3: return .parakeet
         case .tdtCtc110m: return .parakeetTdtCtc110m
         case .ctcZhCn: return .parakeetCtcZhCn
+        case .ctcJa: return .parakeetCtcJa
+        case .tdtJa: return .parakeetCtcJa  // TDT v2 models uploaded to CTC repo
         }
     }
 
@@ -30,7 +36,7 @@ public enum AsrModelVersion: Sendable {
     /// Whether this model is CTC-only (no TDT decoder+joint)
     public var isCtcOnly: Bool {
         switch self {
-        case .ctcZhCn: return true
+        case .ctcZhCn, .ctcJa: return true
         default: return false
         }
     }
@@ -39,7 +45,7 @@ public enum AsrModelVersion: Sendable {
     public var encoderHiddenSize: Int {
         switch self {
         case .tdtCtc110m: return 512
-        case .ctcZhCn: return 1024
+        case .ctcZhCn, .ctcJa, .tdtJa: return 1024
         default: return 1024
         }
     }
@@ -50,6 +56,7 @@ public enum AsrModelVersion: Sendable {
         case .v2, .tdtCtc110m: return 1024
         case .v3: return 8192
         case .ctcZhCn: return 7000
+        case .ctcJa, .tdtJa: return 3072
         }
     }
 

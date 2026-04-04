@@ -1,12 +1,12 @@
 import Accelerate
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 
 /// Model inference operations for TDT decoding.
 ///
 /// Encapsulates execution of decoder LSTM, joint network, and decoder projection normalization.
 /// These operations are separated from the main decoding loop to improve testability and clarity.
-internal struct TdtModelInference {
+internal struct TdtModelInference: Sendable {
     private let predictionOptions: MLPredictionOptions
 
     init() {

@@ -74,6 +74,8 @@ struct FluidAudioCLI {
             await CtcZhCnTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "ctc-zh-cn-benchmark":
             await CtcZhCnBenchmark.run(arguments: Array(arguments.dropFirst(2)))
+        case "ja-benchmark":
+            await JapaneseAsrBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -113,6 +115,7 @@ struct FluidAudioCLI {
                 nemotron-transcribe     Transcribe custom audio files with Nemotron
                 ctc-zh-cn-transcribe    Transcribe Mandarin Chinese audio with Parakeet CTC
                 ctc-zh-cn-benchmark     Run CTC zh-CN benchmark on THCHS-30 dataset
+                ja-benchmark            Run Japanese ASR benchmark on JSUT/Common Voice
                 download                Download evaluation datasets
                 help                    Show this help message
 
@@ -136,6 +139,10 @@ struct FluidAudioCLI {
                 fluidaudio vad-analyze audio.wav --streaming
 
                 fluidaudio download --dataset ami-sdm
+
+                fluidaudio ja-benchmark --dataset jsut --samples 100
+
+                fluidaudio ja-benchmark --dataset cv-test --samples 500 --auto-download
             """
         )
     }

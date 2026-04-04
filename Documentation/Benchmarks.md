@@ -783,3 +783,33 @@ Beam search does not improve CER for this model without a language model. Greedy
 - **Greedy decoding** is sufficient for production use at this CER level.
 - For applications requiring <8% CER, a character-level language model would be needed.
 - Int8 encoder (0.55 GB) performs on par with FP32 (1.1 GB).
+
+## TDT Japanese ASR
+
+Parakeet TDT 0.6B Japanese model converted to CoreML for on-device Japanese transcription. Hybrid architecture using CTC preprocessor/encoder with TDT v2 decoder/joint (workaround for CoreML conversion bug).
+
+Model: [FluidInference/parakeet-ctc-0.6b-ja-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-ja-coreml)
+
+Hardware: Apple M2, 2022, macOS 26
+
+### JSUT-basic5000 Test Set
+
+Full benchmark on the complete JSUT-basic5000 dataset — 5,000 utterances from a single Japanese speaker.
+
+Dataset: [JSUT-basic5000](https://sites.google.com/site/shinnosuketakamichi/publication/jsut)
+
+```bash
+swift run -c release fluidaudiocli ja-benchmark --decoder tdt --dataset jsut --samples 5000 --auto-download
+```
+
+| Metric | TDT Decoder |
+|---|---|
+| **Mean CER** | **6.88%** |
+| **Median CER** | **4.08%** |
+| CER < 5% | 2,683 (53.7%) |
+| CER < 10% | 3,549 (71.0%) |
+| CER < 20% | 4,556 (91.1%) |
+| Mean Latency | 208.8 ms |
+| Mean RTFx | 28.9x |
+
+**Note:** CER calculation includes number normalization (full-width digits → half-width, kanji numbers → Arabic) matching NVIDIA's evaluation methodology. NVIDIA reports 6.4% CER for the same model on JSUT-basic5000.

@@ -11,6 +11,9 @@ A guide to each CoreML model pipeline in FluidAudio.
 | **Parakeet TDT v2** | Batch speech-to-text, English only (0.6B params). TDT architecture. | First ASR model added. |
 | **Parakeet TDT v3** | Batch speech-to-text, 25 European languages (0.6B params). Default ASR model. | Released after v2 to add multilingual support. |
 | **Parakeet TDT-CTC-110M** | Hybrid TDT-CTC batch model (110M params). 3.01% WER on LibriSpeech test-clean. 96.5x RTFx on M2 Mac. Fused preprocessor+encoder for reduced memory footprint. iOS compatible. | Smaller, faster alternative to v3 with competitive accuracy. |
+| **Parakeet CTC Japanese** | Batch speech-to-text, Japanese only (0.6B params). CTC architecture. 6.85% CER on JSUT dataset. 10.1x RTFx on M2 Mac. | First Japanese ASR model. Uses CTC greedy decoder. |
+| **Parakeet TDT Japanese** | Batch speech-to-text, Japanese only (0.6B params). TDT architecture. 6.85% CER on JSUT dataset. 10.8x RTFx on M2 Mac. Hybrid model (CTC preprocessor/encoder + TDT decoder/joint). | Alternative Japanese decoder using TDT for potentially better accuracy on complex speech. |
+| **Parakeet CTC Chinese** | Batch speech-to-text, Mandarin Chinese (0.6B params). CTC architecture. 8.37% mean CER on THCHS-30 dataset. Int8 encoder (0.55GB) or FP32 (1.1GB). | First Mandarin Chinese ASR model. Uses CTC greedy decoder. |
 
 TDT models process audio in chunks (~15s with overlap) as batch operations. Fast enough for dictation-style workflows. Not suitable for word-by-word live captions.
 
@@ -66,6 +69,9 @@ Models we converted and tested but are not supported: too large for on-device de
 | Parakeet TDT v3 | [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml) |
 | Parakeet TDT v2 | [FluidInference/parakeet-tdt-0.6b-v2-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml) |
 | Parakeet TDT-CTC-110M | [FluidInference/parakeet-tdt-ctc-110m-coreml](https://huggingface.co/FluidInference/parakeet-tdt-ctc-110m-coreml) |
+| Parakeet CTC Japanese | [FluidInference/parakeet-ctc-0.6b-ja-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-ja-coreml) |
+| Parakeet TDT Japanese | [FluidInference/parakeet-ctc-0.6b-ja-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-ja-coreml) (hybrid: CTC preprocessor/encoder + TDT v2 decoder/joint) |
+| Parakeet CTC Chinese | [FluidInference/parakeet-ctc-0.6b-zh-cn-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-zh-cn-coreml) |
 | Parakeet CTC 110M | [FluidInference/parakeet-ctc-110m-coreml](https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml) |
 | Parakeet CTC 0.6B | [FluidInference/parakeet-ctc-0.6b-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-coreml) |
 | Parakeet EOU | [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml) |
