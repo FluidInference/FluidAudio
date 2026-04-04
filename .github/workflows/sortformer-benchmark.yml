@@ -12,7 +12,6 @@ jobs:
   benchmark:
     name: Sortformer High-Latency ES2004a
     runs-on: macos-15
-    if: github.head_ref != 'feature/cohere-transcribe-asr'
     permissions:
       contents: read
       pull-requests: write

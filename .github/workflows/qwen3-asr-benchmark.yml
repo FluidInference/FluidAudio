@@ -9,7 +9,6 @@ jobs:
   qwen3-asr-smoke-test:
     name: Qwen3-ASR Smoke Test (int8)
     runs-on: macos-15
-    if: github.head_ref != 'feature/cohere-transcribe-asr'
     permissions:
       contents: read
       pull-requests: write

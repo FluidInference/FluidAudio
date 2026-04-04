@@ -12,7 +12,6 @@ jobs:
   build-and-test-macos:
     name: Build and Test Swift Package (macOS)
     runs-on: macos-15
-    if: github.head_ref != 'feature/cohere-transcribe-asr'
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -32,7 +31,6 @@ jobs:
   build-ios:
     name: Build (iOS)
     runs-on: macos-15
-    if: github.head_ref != 'feature/cohere-transcribe-asr'
 
     steps:
       - name: Checkout code

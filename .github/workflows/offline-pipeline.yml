@@ -12,7 +12,6 @@ concurrency:
 jobs:
   benchmark:
     runs-on: macos-15
-    if: github.head_ref != 'feature/cohere-transcribe-asr'
     permissions:
       contents: read
       pull-requests: write

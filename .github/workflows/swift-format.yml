@@ -6,7 +6,6 @@ on:
 jobs:
   swift-format:
     runs-on: macos-15
-    if: github.head_ref != 'feature/cohere-transcribe-asr'
     
     steps:
       - name: Checkout code

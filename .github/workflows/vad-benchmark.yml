@@ -13,7 +13,6 @@ jobs:
   vad-benchmark:
     name: VAD Benchmark
     runs-on: macos-15
-    if: github.head_ref != 'feature/cohere-transcribe-asr'
     timeout-minutes: 30
     permissions:
       contents: read
