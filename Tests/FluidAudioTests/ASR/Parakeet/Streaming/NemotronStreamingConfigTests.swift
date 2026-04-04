@@ -163,8 +163,9 @@ final class NemotronStreamingConfigTests: XCTestCase {
 
         XCTAssertThrowsError(try NemotronStreamingConfig(from: file)) { error in
             // Should throw JSON parsing error (CocoaError from JSONSerialization)
-            XCTAssertTrue(error is CocoaError || error is NSError,
-                         "Expected CocoaError or NSError, got \(type(of: error))")
+            XCTAssertTrue(
+                error is CocoaError || error is NSError,
+                "Expected CocoaError or NSError, got \(type(of: error))")
         }
     }
 
