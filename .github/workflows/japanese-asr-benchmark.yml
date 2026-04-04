@@ -19,11 +19,11 @@ on:
       decoder:
         description: 'Decoder type (ctc or tdt)'
         required: false
-        default: 'tdt'
+        default: 'ctc'
 
 jobs:
   japanese-asr-benchmark:
-    name: Japanese ASR Benchmark (TDT Hybrid)
+    name: Japanese ASR Benchmark (CTC)
     runs-on: macos-15
     permissions:
       contents: read
