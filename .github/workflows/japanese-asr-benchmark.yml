@@ -89,7 +89,7 @@ jobs:
         if: always()
         id: extract-results
         run: |
-          DECODER="${{ github.event.inputs.decoder || 'tdt' }}"
+          DECODER="${{ github.event.inputs.decoder || 'ctc' }}"
 
           if [ -f "benchmark-results-ja-$DECODER.json" ]; then
             CER=$(jq -r '.summary.mean_cer // "N/A"' "benchmark-results-ja-$DECODER.json")
