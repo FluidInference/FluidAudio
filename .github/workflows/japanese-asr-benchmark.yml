@@ -94,9 +94,19 @@ jobs:
           DECODER="${{ github.event.inputs.decoder || 'tdt' }}"
 
           if [ -f "benchmark-results-ja-$DECODER.json" ]; then
-            CER=$(jq -r '.cer // "N/A"' "benchmark-results-ja-$DECODER.json")
-            SAMPLES=$(jq -r '.samples // "N/A"' "benchmark-results-ja-$DECODER.json")
-            AVG_RTF=$(jq -r '.average_rtf // "N/A"' "benchmark-results-ja-$DECODER.json")
+            CER=$(jq -r '.summary.mean_cer // "N/A"' "benchmark-results-ja-$DECODER.json")
+            SAMPLES=$(jq -r '.summary.total_samples // "N/A"' "benchmark-results-ja-$DECODER.json")
+            AVG_RTF=$(jq -r '.summary.mean_rtfx // "N/A"' "benchmark-results-ja-$DECODER.json")
+
+            # Convert CER from decimal to percentage
+            if [ "$CER" != "N/A" ]; then
+              CER=$(echo "$CER * 100" | bc -l | xargs printf "%.2f")
+            fi
+
+            # Format RTFx to 1 decimal place
+            if [ "$AVG_RTF" != "N/A" ]; then
+              AVG_RTF=$(echo "$AVG_RTF" | xargs printf "%.1f")
+            fi
 
             echo "cer=$CER" >> $GITHUB_OUTPUT
             echo "samples=$SAMPLES" >> $GITHUB_OUTPUT
