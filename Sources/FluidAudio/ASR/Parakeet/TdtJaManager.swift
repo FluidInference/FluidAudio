@@ -15,7 +15,7 @@ public actor TdtJaManager {
     private let maxAudioSamples: Int
     private let sampleRate: Int
     private let config: ASRConfig
-    private let tdtDecoder: TdtDecoderV3
+    private nonisolated let tdtDecoder: TdtDecoderV3
 
     // Decoder state for maintaining LSTM context
     private var decoderState: TdtDecoderState
