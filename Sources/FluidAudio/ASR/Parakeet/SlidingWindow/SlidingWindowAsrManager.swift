@@ -159,6 +159,9 @@ public actor SlidingWindowAsrManager {
                     // Append to raw sample buffer and attempt windowed processing
                     await self.appendSamplesAndProcess(samples)
                 } catch {
+                    if error is CancellationError || Task.isCancelled {
+                        return
+                    }
                     let streamingError = SlidingWindowAsrError.audioBufferProcessingFailed(error)
                     logger.error(
                         "Audio buffer processing error: \(streamingError.localizedDescription)")
@@ -470,6 +473,9 @@ public actor SlidingWindowAsrManager {
             updateContinuation?.yield(update)
 
         } catch {
+            if error is CancellationError || Task.isCancelled {
+                return
+            }
             let streamingError = SlidingWindowAsrError.modelProcessingFailed(error)
             logger.error("Model processing error: \(streamingError.localizedDescription)")
 
