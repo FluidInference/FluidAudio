@@ -41,7 +41,7 @@ jobs:
             .build
             ~/Library/Application Support/FluidAudio/Models/parakeet-tdt-ja
             ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-ja
-            ~/Library/Application Support/FluidAudio/Datasets/JSUT
+            ~/Library/Application Support/FluidAudio/Datasets/JSUT-basic5000
             ~/Library/Caches/Homebrew
             /usr/local/Cellar/ffmpeg
             /opt/homebrew/Cellar/ffmpeg
@@ -60,7 +60,7 @@ jobs:
         continue-on-error: true
         run: |
           SAMPLES="${{ github.event.inputs.samples || '50' }}"
-          DECODER="${{ github.event.inputs.decoder || 'tdt' }}"
+          DECODER="${{ github.event.inputs.decoder || 'ctc' }}"
 
           echo "========================================="
           echo "Running Japanese ASR Benchmark"

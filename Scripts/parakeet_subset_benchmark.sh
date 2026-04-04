@@ -103,7 +103,7 @@ verify_assets() {
     # Nemotron reuses the v3 models directory; no separate check needed beyond v3 above.
 
     # --- Japanese TDT (hybrid: CTC preprocessor/encoder + TDT decoder/joint) ---
-    local ja_dir="$MODELS_DIR/parakeet-ctc-0.6b-ja-coreml"
+    local ja_dir="$MODELS_DIR/parakeet-tdt-ja"
     for f in Preprocessor.mlmodelc Encoder.mlmodelc Decoderv2.mlmodelc Jointerv2.mlmodelc vocab.json; do
         if [[ ! -e "$ja_dir/$f" ]]; then
             log "MISSING  tdt-ja: $ja_dir/$f"
@@ -112,7 +112,7 @@ verify_assets() {
     done
 
     # --- Chinese CTC ---
-    local zh_dir="$MODELS_DIR/parakeet-ctc-0.6b-zh-cn-coreml"
+    local zh_dir="$MODELS_DIR/parakeet-ctc-zh-cn"
     for f in Preprocessor.mlmodelc Decoder.mlmodelc vocab.json; do
         if [[ ! -e "$zh_dir/$f" ]]; then
             log "MISSING  ctc-zh-cn: $zh_dir/$f"
