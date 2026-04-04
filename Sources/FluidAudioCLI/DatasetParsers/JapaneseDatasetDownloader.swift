@@ -85,10 +85,11 @@ extension DatasetDownloader {
                     let metadataEntry: [String: String] = [
                         "file_name": entry.fileName,
                         "text": entry.text,
-                        "speaker_id": "jsut"
+                        "speaker_id": "jsut",
                     ]
                     if let jsonData = try? JSONSerialization.data(withJSONObject: metadataEntry),
-                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                        let jsonString = String(data: jsonData, encoding: .utf8)
+                    {
                         metadataLines.append(jsonString)
                     }
                     continue
@@ -102,10 +103,11 @@ extension DatasetDownloader {
                     let metadataEntry: [String: String] = [
                         "file_name": entry.fileName,
                         "text": entry.text,
-                        "speaker_id": "jsut"
+                        "speaker_id": "jsut",
                     ]
                     if let jsonData = try? JSONSerialization.data(withJSONObject: metadataEntry),
-                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                        let jsonString = String(data: jsonData, encoding: .utf8)
+                    {
                         metadataLines.append(jsonString)
                     }
 
@@ -224,10 +226,11 @@ extension DatasetDownloader {
                     let metadataEntry: [String: String] = [
                         "path": entry.fileName,
                         "sentence": entry.text,
-                        "client_id": entry.clientId
+                        "client_id": entry.clientId,
                     ]
                     if let jsonData = try? JSONSerialization.data(withJSONObject: metadataEntry),
-                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                        let jsonString = String(data: jsonData, encoding: .utf8)
+                    {
                         metadataLines.append(jsonString)
                     }
                     continue
@@ -241,10 +244,11 @@ extension DatasetDownloader {
                     let metadataEntry: [String: String] = [
                         "path": entry.fileName,
                         "sentence": entry.text,
-                        "client_id": entry.clientId
+                        "client_id": entry.clientId,
                     ]
                     if let jsonData = try? JSONSerialization.data(withJSONObject: metadataEntry),
-                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                        let jsonString = String(data: jsonData, encoding: .utf8)
+                    {
                         metadataLines.append(jsonString)
                     }
 
