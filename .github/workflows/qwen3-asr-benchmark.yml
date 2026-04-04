@@ -2,6 +2,8 @@ name: Qwen3-ASR Smoke Test
 
 on:
   pull_request:
+    branches-ignore:
+      - feature/cohere-transcribe-asr
     branches: [main]
   workflow_dispatch:
 

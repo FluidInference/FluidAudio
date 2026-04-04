@@ -2,6 +2,8 @@ name: Offline Speaker diarization pipeline
 
 on:
   pull_request:
+    branches-ignore:
+      - feature/cohere-transcribe-asr
     branches: [main]
     types: [opened, synchronize, reopened]
 

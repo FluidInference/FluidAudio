@@ -1,6 +1,8 @@
 name: Build and Test
 on:
   pull_request:
+    branches-ignore:
+      - feature/cohere-transcribe-asr
     branches: [main]
   push:
     branches: [main]

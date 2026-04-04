@@ -2,6 +2,8 @@ name: Japanese ASR Benchmark
 
 on:
   pull_request:
+    branches-ignore:
+      - feature/cohere-transcribe-asr
     branches: [main]
     paths:
       - 'Sources/FluidAudio/ASR/Parakeet/TdtJa*.swift'

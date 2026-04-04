@@ -1,6 +1,8 @@
 name: Sortformer High-Latency Benchmark
 on:
   pull_request:
+    branches-ignore:
+      - feature/cohere-transcribe-asr
     branches: [main]
     types: [opened, synchronize, reopened]
 

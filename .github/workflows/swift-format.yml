@@ -2,6 +2,8 @@ name: Swift Format
 
 on:
   pull_request:
+    branches-ignore:
+      - feature/cohere-transcribe-asr
 
 jobs:
   swift-format:
