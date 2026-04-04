@@ -9,23 +9,17 @@ enum JapaneseAsrBenchmark {
 
     enum Dataset: String, CaseIterable {
         case jsut = "jsut"
-        case cvTrain = "cv-train"
-        case cvValidation = "cv-validation"
         case cvTest = "cv-test"
 
         var displayName: String {
             switch self {
             case .jsut: return "JSUT-basic5000"
-            case .cvTrain: return "Common Voice Japanese (Train)"
-            case .cvValidation: return "Common Voice Japanese (Validation)"
             case .cvTest: return "Common Voice Japanese (Test)"
             }
         }
 
         var cvSplit: DatasetDownloader.CVSplit? {
             switch self {
-            case .cvTrain: return .train
-            case .cvValidation: return .validation
             case .cvTest: return .test
             default: return nil
             }
@@ -180,7 +174,7 @@ enum JapaneseAsrBenchmark {
         switch dataset {
         case .jsut:
             return try await JapaneseDatasetLoader.loadJSUTSamples(maxSamples: maxSamples)
-        case .cvTrain, .cvValidation, .cvTest:
+        case .cvTest:
             guard let split = dataset.cvSplit else {
                 return []
             }
@@ -193,7 +187,7 @@ enum JapaneseAsrBenchmark {
         switch dataset {
         case .jsut:
             await DatasetDownloader.downloadJSUTBasic5000(force: false, maxSamples: maxSamples)
-        case .cvTrain, .cvValidation, .cvTest:
+        case .cvTest:
             guard let split = dataset.cvSplit else { return }
             await DatasetDownloader.downloadCommonVoiceJapanese(
                 force: false, maxSamples: maxSamples, split: split)
@@ -464,7 +458,7 @@ enum JapaneseAsrBenchmark {
             Options:
                 --decoder <type>        Decoder type: ctc or tdt (default: ctc)
                 --dataset, -d <name>    Dataset to use (default: jsut)
-                                        Available: jsut, cv-train, cv-validation, cv-test
+                                        Available: jsut, cv-test
                 --samples, -n <num>     Number of samples to test (default: 100)
                 --output, -o <file>     Save results to JSON file
                 --auto-download         Download dataset if not found
@@ -483,8 +477,6 @@ enum JapaneseAsrBenchmark {
 
             Datasets:
                 jsut            JSUT-basic5000 (5,000 utterances, single speaker)
-                cv-train        Common Voice Japanese train split (~400k utterances)
-                cv-validation   Common Voice Japanese validation split (~9k utterances)
                 cv-test         Common Voice Japanese test split (~9k utterances)
             """
         )
