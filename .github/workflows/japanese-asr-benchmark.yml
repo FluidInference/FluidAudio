@@ -2,8 +2,6 @@ name: Japanese ASR Benchmark
 
 on:
   pull_request:
-    branches-ignore:
-      - feature/cohere-transcribe-asr
     branches: [main]
     paths:
       - 'Sources/FluidAudio/ASR/Parakeet/TdtJa*.swift'
@@ -25,6 +23,7 @@ jobs:
   japanese-asr-benchmark:
     name: Japanese ASR Benchmark (CTC)
     runs-on: macos-15
+    if: github.head_ref != 'feature/cohere-transcribe-asr'
     permissions:
       contents: read
       pull-requests: write

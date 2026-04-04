@@ -61,7 +61,7 @@ extension TdtJaModels {
         ]
 
         let models = try await DownloadUtils.loadModels(
-            .parakeetTdtJa,
+            .parakeetCtcJa,
             modelNames: modelNames,
             directory: parentDirectory,
             computeUnits: config.computeUnits,
@@ -135,7 +135,7 @@ extension TdtJaModels {
         ]
 
         _ = try await DownloadUtils.loadModels(
-            .parakeetTdtJa,
+            .parakeetCtcJa,
             modelNames: modelNames,
             directory: parentDir,
             progressHandler: progressHandler
@@ -198,7 +198,7 @@ extension TdtJaModels {
 
     /// Default cache directory for TDT ja models (within Application Support).
     public static func defaultCacheDirectory() -> URL {
-        MLModelConfigurationUtils.defaultModelsDirectory(for: .parakeetTdtJa)
+        MLModelConfigurationUtils.defaultModelsDirectory(for: .parakeetCtcJa)
     }
 
     /// Load vocabulary from vocab.json in the given directory.

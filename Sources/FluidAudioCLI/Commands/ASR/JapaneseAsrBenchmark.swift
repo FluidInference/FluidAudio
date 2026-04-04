@@ -32,17 +32,34 @@ enum JapaneseAsrBenchmark {
         }
     }
 
+    enum DecoderType: String {
+        case ctc
+        case tdt
+    }
+
     static func run(arguments: [String]) async {
         var dataset: Dataset = .jsut
         var numSamples = 100
         var outputFile: String?
         var verbose = false
         var autoDownload = false
+        var decoder: DecoderType = .ctc
 
         var i = 0
         while i < arguments.count {
             let arg = arguments[i]
             switch arg {
+            case "--decoder":
+                if i + 1 < arguments.count {
+                    if let decoderType = DecoderType(rawValue: arguments[i + 1]) {
+                        decoder = decoderType
+                    } else {
+                        logger.error("Unknown decoder: \(arguments[i + 1])")
+                        logger.info("Available: ctc, tdt")
+                        return
+                    }
+                    i += 1
+                }
             case "--dataset", "-d":
                 if i + 1 < arguments.count {
                     if let ds = Dataset(rawValue: arguments[i + 1]) {
@@ -79,19 +96,12 @@ enum JapaneseAsrBenchmark {
 
         logger.info("=== Japanese ASR Benchmark ===")
         logger.info("Dataset: \(dataset.displayName)")
+        logger.info("Decoder: \(decoder.rawValue.uppercased())")
         logger.info("Samples: \(numSamples)")
         logger.info("")
 
         do {
-            // Load models
-            logger.info("Loading CTC Japanese models...")
-            let manager = try await CtcJaManager.load(
-                progressHandler: verbose ? createProgressHandler() : nil
-            )
-            logger.info("Models loaded successfully")
-
             // Load dataset
-            logger.info("")
             logger.info("Loading \(dataset.displayName)...")
 
             let samples: [JapaneseBenchmarkSample]
@@ -115,11 +125,35 @@ enum JapaneseAsrBenchmark {
             }
 
             logger.info("Loaded \(samples.count) samples")
-
-            // Run benchmark
             logger.info("")
-            logger.info("Running transcription benchmark...")
-            let results = try await runBenchmark(manager: manager, samples: samples)
+
+            // Run benchmark with selected decoder
+            let results: [BenchmarkResult]
+            switch decoder {
+            case .ctc:
+                logger.info("Loading CTC Japanese models...")
+                let ctcManager = try await CtcJaManager.load(
+                    progressHandler: verbose ? createProgressHandler() : nil
+                )
+                logger.info("Models loaded successfully")
+                logger.info("")
+                logger.info("Running transcription benchmark...")
+                results = try await runBenchmark(samples: samples) { audioURL in
+                    try await ctcManager.transcribe(audioURL: audioURL)
+                }
+
+            case .tdt:
+                logger.info("Loading TDT Japanese models...")
+                let tdtManager = try await TdtJaManager.load(
+                    progressHandler: verbose ? createProgressHandler() : nil
+                )
+                logger.info("Models loaded successfully")
+                logger.info("")
+                logger.info("Running transcription benchmark...")
+                results = try await runBenchmark(samples: samples) { audioURL in
+                    try await tdtManager.transcribe(audioURL: audioURL)
+                }
+            }
 
             // Print results
             printResults(results: results, dataset: dataset)
@@ -200,14 +234,14 @@ enum JapaneseAsrBenchmark {
     // MARK: - Benchmark Execution
 
     private static func runBenchmark(
-        manager: CtcJaManager,
-        samples: [JapaneseBenchmarkSample]
+        samples: [JapaneseBenchmarkSample],
+        transcribe: (URL) async throws -> String
     ) async throws -> [BenchmarkResult] {
         var results: [BenchmarkResult] = []
 
         for (index, sample) in samples.enumerated() {
             let startTime = Date()
-            let hypothesis = try await manager.transcribe(audioURL: sample.audioPath)
+            let hypothesis = try await transcribe(sample.audioPath)
             let elapsed = Date().timeIntervalSince(startTime)
 
             let normalizedRef = normalizeJapaneseText(sample.transcript)
@@ -428,6 +462,7 @@ enum JapaneseAsrBenchmark {
             Usage: fluidaudiocli ja-benchmark [options]
 
             Options:
+                --decoder <type>        Decoder type: ctc or tdt (default: ctc)
                 --dataset, -d <name>    Dataset to use (default: jsut)
                                         Available: jsut, cv-train, cv-validation, cv-test
                 --samples, -n <num>     Number of samples to test (default: 100)
@@ -437,11 +472,11 @@ enum JapaneseAsrBenchmark {
                 --help, -h              Show this help message
 
             Examples:
-                # Benchmark on JSUT-basic5000
+                # Benchmark CTC decoder on JSUT-basic5000
                 fluidaudiocli ja-benchmark --dataset jsut --samples 100
 
-                # Benchmark on Common Voice Japanese test set
-                fluidaudiocli ja-benchmark --dataset cv-test --samples 500
+                # Benchmark TDT decoder on Common Voice Japanese test set
+                fluidaudiocli ja-benchmark --decoder tdt --dataset cv-test --samples 500
 
                 # Save results to JSON
                 fluidaudiocli ja-benchmark --dataset jsut --output results.json

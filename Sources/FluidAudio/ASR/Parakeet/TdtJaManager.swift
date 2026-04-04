@@ -1,5 +1,6 @@
 @preconcurrency import CoreML
 import Foundation
+import AVFoundation
 
 /// Manager for Parakeet TDT ja (Japanese) transcription using Token-and-Duration Transducer decoding
 ///
@@ -217,5 +218,14 @@ public actor TdtJaManager {
         normalized = normalized.trimmingCharacters(in: .whitespaces)
 
         return normalized
+    }
+
+    /// Convenience method to transcribe from audio file URL
+    ///
+    /// - Parameter audioURL: URL to audio file (wav, mp3, etc.)
+    /// - Returns: Transcribed Japanese text
+    public func transcribe(audioURL: URL) async throws -> String {
+        let audio = try AudioConverter().resampleAudioFile(audioURL)
+        return try await transcribe(audio: audio)
     }
 }

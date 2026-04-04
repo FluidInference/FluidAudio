@@ -2,8 +2,6 @@ name: PocketTTS Smoke Test
 
 on:
   pull_request:
-    branches-ignore:
-      - feature/cohere-transcribe-asr
     branches: [main]
   workflow_dispatch:
 
@@ -11,6 +9,7 @@ jobs:
   pocket-tts-smoke-test:
     name: PocketTTS Smoke Test
     runs-on: macos-15
+    if: github.head_ref != 'feature/cohere-transcribe-asr'
     permissions:
       contents: read
       pull-requests: write

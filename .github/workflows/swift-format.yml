@@ -2,12 +2,11 @@ name: Swift Format
 
 on:
   pull_request:
-    branches-ignore:
-      - feature/cohere-transcribe-asr
 
 jobs:
   swift-format:
     runs-on: macos-15
+    if: github.head_ref != 'feature/cohere-transcribe-asr'
     
     steps:
       - name: Checkout code

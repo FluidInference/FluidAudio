@@ -2,8 +2,6 @@ name: Kokoro TTS Smoke Test
 
 on:
   pull_request:
-    branches-ignore:
-      - feature/cohere-transcribe-asr
     branches: [main]
   workflow_dispatch:
 
@@ -11,6 +9,7 @@ jobs:
   kokoro-tts-smoke-test:
     name: Kokoro TTS Smoke Test
     runs-on: macos-15
+    if: github.head_ref != 'feature/cohere-transcribe-asr'
     permissions:
       contents: read
       pull-requests: write
