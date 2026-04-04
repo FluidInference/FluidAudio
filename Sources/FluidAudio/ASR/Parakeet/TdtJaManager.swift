@@ -67,11 +67,11 @@ public actor TdtJaManager {
     ) async throws -> String {
         let actualLength = audioLength ?? audio.count
 
-        // Pad or truncate audio to maxAudioSamples
+        // Pad or truncate audio to maxAudioSamples based on actual array size
         var processedAudio = audio
-        if actualLength < maxAudioSamples {
-            processedAudio.append(contentsOf: [Float](repeating: 0, count: maxAudioSamples - actualLength))
-        } else if actualLength > maxAudioSamples {
+        if audio.count < maxAudioSamples {
+            processedAudio.append(contentsOf: [Float](repeating: 0, count: maxAudioSamples - audio.count))
+        } else if audio.count > maxAudioSamples {
             processedAudio = Array(audio.prefix(maxAudioSamples))
         }
 
@@ -187,37 +187,7 @@ public actor TdtJaManager {
         // Remove leading/trailing whitespace
         text = text.trimmingCharacters(in: .whitespaces)
 
-        // Normalize Japanese punctuation and whitespace
-        text = normalizeJapaneseText(text)
-
         return text
-    }
-
-    /// Normalize Japanese text by removing extra punctuation and whitespace
-    private func normalizeJapaneseText(_ text: String) -> String {
-        var normalized = text
-
-        // Remove common Japanese punctuation marks for consistency
-        let japanesePunct = "、。！？・…「」『』（）［］｛｝【】"
-        for char in japanesePunct {
-            normalized = normalized.replacingOccurrences(of: String(char), with: "")
-        }
-
-        // Remove ASCII punctuation
-        let asciiPunct = ".,!?;:'\"-()[]{}/"
-        for char in asciiPunct {
-            normalized = normalized.replacingOccurrences(of: String(char), with: "")
-        }
-
-        // Collapse multiple spaces into one
-        while normalized.contains("  ") {
-            normalized = normalized.replacingOccurrences(of: "  ", with: " ")
-        }
-
-        // Trim whitespace
-        normalized = normalized.trimmingCharacters(in: .whitespaces)
-
-        return normalized
     }
 
     /// Convenience method to transcribe from audio file URL
