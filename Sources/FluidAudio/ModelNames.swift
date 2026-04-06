@@ -24,6 +24,8 @@ public enum Repo: String, CaseIterable {
     case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
     case multilingualG2p = "FluidInference/charsiu-g2p-byt5-coreml"
     case parakeetTdtCtc110m = "FluidInference/parakeet-tdt-ctc-110m-coreml"
+    case cohereTranscribeCoreml = "FluidInference/cohere-transcribe-03-2026-coreml/f16"
+    case cohereTranscribeCoremlInt8 = "FluidInference/cohere-transcribe-03-2026-coreml/q8"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -72,6 +74,10 @@ public enum Repo: String, CaseIterable {
             return "charsiu-g2p-byt5-coreml"
         case .parakeetTdtCtc110m:
             return "parakeet-tdt-ctc-110m-coreml"
+        case .cohereTranscribeCoreml:
+            return "cohere-transcribe-03-2026-coreml/f16"
+        case .cohereTranscribeCoremlInt8:
+            return "cohere-transcribe-03-2026-coreml/q8"
         }
     }
 
@@ -94,6 +100,8 @@ public enum Repo: String, CaseIterable {
             return "FluidInference/qwen3-asr-0.6b-coreml"
         case .parakeetTdtCtc110m:
             return "FluidInference/parakeet-tdt-ctc-110m-coreml"
+        case .cohereTranscribeCoreml, .cohereTranscribeCoremlInt8:
+            return "FluidInference/cohere-transcribe-03-2026-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -116,6 +124,10 @@ public enum Repo: String, CaseIterable {
             return "nemotron_coreml_1120ms"
         case .nemotronStreaming560:
             return "nemotron_coreml_560ms"
+        case .cohereTranscribeCoreml:
+            return "f16"
+        case .cohereTranscribeCoremlInt8:
+            return "q8"
         default:
             return nil
         }
@@ -150,6 +162,10 @@ public enum Repo: String, CaseIterable {
             return "parakeet-tdt-ja"
         case .parakeetTdtCtc110m:
             return "parakeet-tdt-ctc-110m"
+        case .cohereTranscribeCoreml:
+            return "cohere-transcribe/f16"
+        case .cohereTranscribeCoremlInt8:
+            return "cohere-transcribe/q8"
         default:
             return name.replacingOccurrences(of: "-coreml", with: "")
         }
@@ -585,6 +601,30 @@ public enum ModelNames {
         ]
     }
 
+    /// Cohere Transcribe model names
+    /// Encoder-decoder ASR with 14-language support (35-second window architecture)
+    public enum CohereTranscribe {
+        public static let encoder = "cohere_encoder"
+        public static let decoderStateful = "cohere_decoder_stateful"
+        public static let vocab = "vocab.json"
+
+        public static let encoderFile = encoder + ".mlpackage"
+        public static let decoderStatefulFile = decoderStateful + ".mlpackage"
+
+        /// For compatibility - models can be .mlmodelc or .mlpackage
+        public static let encoderCompiledFile = encoder + ".mlmodelc"
+        public static let decoderStatefulCompiledFile = decoderStateful + ".mlmodelc"
+
+        /// Alias for the decoder file (used by CohereAsrModels)
+        public static let decoderFile = decoderStatefulFile
+
+        public static let requiredModels: Set<String> = [
+            encoderFile,
+            decoderStatefulFile,
+            vocab,
+        ]
+    }
+
     /// G2P (grapheme-to-phoneme) model names
     public enum G2P {
         public static let encoder = "G2PEncoder"
@@ -701,6 +741,8 @@ public enum ModelNames {
             return ModelNames.Qwen3ASR.requiredModelsFull
         case .multilingualG2p:
             return ModelNames.MultilingualG2P.requiredModels
+        case .cohereTranscribeCoreml, .cohereTranscribeCoremlInt8:
+            return ModelNames.CohereTranscribe.requiredModels
         }
     }
 }

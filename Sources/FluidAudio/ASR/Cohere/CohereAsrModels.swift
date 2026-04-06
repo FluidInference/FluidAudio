@@ -53,14 +53,14 @@ public struct CohereAsrModels: Sendable {
 
         // Load encoder
         let encoder = try await loadModel(
-            named: "cohere_encoder",
+            named: ModelNames.CohereTranscribe.encoder,
             from: directory,
             configuration: modelConfig
         )
 
-        // Load decoder
+        // Load decoder (stateful - uses CoreML state API)
         let decoder = try await loadModel(
-            named: "cohere_decoder_cached",
+            named: ModelNames.CohereTranscribe.decoderStateful,
             from: directory,
             configuration: modelConfig
         )
