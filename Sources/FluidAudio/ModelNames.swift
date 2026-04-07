@@ -1,7 +1,7 @@
 import Foundation
 
 /// Model repositories on HuggingFace
-public enum Repo: String, CaseIterable {
+public enum Repo: String, CaseIterable, Sendable {
     case vad = "FluidInference/silero-vad-coreml"
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
