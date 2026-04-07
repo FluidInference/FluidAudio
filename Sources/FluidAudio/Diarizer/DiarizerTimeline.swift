@@ -147,7 +147,7 @@ public struct DiarizerTimelineConfig: Sendable {
 
     /// Maximum number of finalized prediction frames to retain (nil = unlimited)
     public var maxStoredFrames: Int?
-    
+
     /// Value used to measure speech activity (sigmoids or logits)
     public var activityType: DiarizerActivityType
 
@@ -654,7 +654,7 @@ public struct DiarizerChunkResult: Sendable {
 public enum DiarizerActivityType: Sendable {
     case sigmoids
     case logits
-    
+
     /// A closure that maps speech probabilities to the desired activity type
     public var evaluationFunction: (Float) -> Float {
         switch self {
@@ -1160,7 +1160,7 @@ public final class DiarizerTimeline {
 
         let tentativeBuffer = padOnset + padOffset + minFramesOff
         let tentativeStartFrame = isFinalized ? (frameOffset + numFrames) - tentativeBuffer : 0
-        
+
         let activityFunc = config.activityType.evaluationFunction
 
         for speakerIndex in 0..<numSpeakers {
