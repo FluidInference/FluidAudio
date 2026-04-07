@@ -102,7 +102,7 @@ final class CohereMelSpectrogramTests: XCTestCase {
         let melExtractor = CohereMelSpectrogram()
         // 440 Hz sine wave (A4 note)
         let frequency: Float = 440.0
-        let duration = 1.0  // 1 second
+        let duration: Float = 1.0  // 1 second
         let sampleRate = Float(CohereAsrConfig.sampleRate)
         let nSamples = Int(duration * sampleRate)
 

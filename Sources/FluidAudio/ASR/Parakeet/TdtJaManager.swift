@@ -28,6 +28,9 @@ public actor TdtJaManager {
         maxAudioSamples: Int = 240_000,
         sampleRate: Int = 16_000
     ) {
+        // TDT models require a joint model
+        precondition(models.joint != nil, "TDT models must include a joint model")
+
         self.models = models
         self.maxAudioSamples = maxAudioSamples
         self.sampleRate = sampleRate
@@ -122,7 +125,7 @@ public actor TdtJaManager {
             encoderSequenceLength: encoderLength,
             actualAudioFrames: encoderLength,
             decoderModel: models.decoder,
-            jointModel: models.joint,
+            jointModel: models.joint!,  // Safe to force unwrap - validated in init
             decoderState: &localDecoderState,
             contextFrameAdjustment: 0,
             isLastChunk: true,
