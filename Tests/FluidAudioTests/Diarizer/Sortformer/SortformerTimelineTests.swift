@@ -163,7 +163,7 @@ final class SortformerTimelineTests: XCTestCase {
         let segment = try XCTUnwrap(timeline.speakers[0]?.finalizedSegments.first)
         XCTAssertEqual(segment.startFrame, 0)
         XCTAssertEqual(segment.endFrame, 5)
-        XCTAssertEqual(segment.confidence, 0.7, accuracy: 1e-6)
+        XCTAssertEqual(segment.activity, 0.7, accuracy: 1e-6)
     }
 
     func testSegmentConfidenceExcludesBridgedGapFrames() throws {
@@ -193,7 +193,7 @@ final class SortformerTimelineTests: XCTestCase {
         let segment = try XCTUnwrap(timeline.speakers[0]?.finalizedSegments.first)
         XCTAssertEqual(segment.startFrame, 0)
         XCTAssertEqual(segment.endFrame, 4)
-        XCTAssertEqual(segment.confidence, (0.9 + 0.7 + 0.7) / 3.0, accuracy: 1e-6)
+        XCTAssertEqual(segment.activity, (0.9 + 0.7 + 0.7) / 3.0, accuracy: 1e-6)
     }
 
     // MARK: - Probability Access
