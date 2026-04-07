@@ -573,7 +573,8 @@ public struct DiarizerSegment: Sendable, Identifiable, Comparable, Equatable {
         let lengthFloat = Float(length)
         let otherLengthFloat = Float(other.length)
         let totalLength = lengthFloat + otherLengthFloat
-        activity = totalLength > 0
+        activity =
+            totalLength > 0
             ? (lengthFloat * activity + otherLengthFloat * other.activity) / totalLength
             : 0
         startFrame = min(startFrame, other.startFrame)
