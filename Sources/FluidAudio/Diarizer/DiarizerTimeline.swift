@@ -570,7 +570,12 @@ public struct DiarizerSegment: Sendable, Identifiable, Comparable, Equatable {
 
     /// Merge another segment into this one
     public mutating func absorb(_ other: DiarizerSegment) {
-        activity = (Float(length) * activity + Float(other.length) * other.activity) / Float(length + other.length)
+        let lengthFloat = Float(length)
+        let otherLengthFloat = Float(other.length)
+        let totalLength = lengthFloat + otherLengthFloat
+        activity = totalLength > 0
+            ? (lengthFloat * activity + otherLengthFloat * other.activity) / totalLength
+            : 0
         startFrame = min(startFrame, other.startFrame)
         endFrame = max(endFrame, other.endFrame)
     }
