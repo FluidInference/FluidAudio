@@ -42,7 +42,7 @@ final class CohereTokenConversionTests: XCTestCase {
             CohereAsrConfig.SpecialTokens.startToken,  // 4 - should be filtered
             5,  // "▁Hello"
             6,  // "▁world"
-            CohereAsrConfig.SpecialTokens.eosToken,    // 3 - should be filtered
+            CohereAsrConfig.SpecialTokens.eosToken,  // 3 - should be filtered
         ]
 
         // Since convertTokensToText is private, we need to test via reflection
