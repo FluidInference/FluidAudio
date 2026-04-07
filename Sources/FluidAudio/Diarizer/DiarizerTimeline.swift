@@ -1202,7 +1202,7 @@ public final class DiarizerTimeline {
                         endFrame: end,
                         finalized: wasLastSegmentFinal,
                         frameDurationSeconds: frameDuration,
-                        confidence: confidence
+                        activity: confidence
                     )
 
                     provideSpeaker(forSlot: speakerIndex).append(newSegment)
@@ -1249,7 +1249,7 @@ public final class DiarizerTimeline {
                         endFrame: end,
                         finalized: false,
                         frameDurationSeconds: frameDuration,
-                        confidence: confidence
+                        activity: confidence
                     )
                     provideSpeaker(forSlot: speakerIndex).appendTentative(newSegment)
                 }
