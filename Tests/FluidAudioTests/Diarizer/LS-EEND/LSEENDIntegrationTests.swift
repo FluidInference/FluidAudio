@@ -342,6 +342,39 @@ final class LSEENDIntegrationTests: XCTestCase {
         XCTAssertEqual(timeline.duration, 0.75, accuracy: 1e-6)
     }
 
+    func testLogitsActivityTypeReportsLogitScaleSegmentActivity() throws {
+        let frameDuration: Float = 0.1
+        let config = DiarizerTimelineConfig(
+            numSpeakers: 1,
+            frameDurationSeconds: frameDuration,
+            onsetThreshold: 0.5,
+            offsetThreshold: 0.5,
+            activityType: .logits
+        )
+        let timeline = DiarizerTimeline(config: config)
+
+        // Three frames all above onset — single contiguous segment with known probabilities.
+        // logit(0.6) = log(0.6/0.4), logit(0.8) = log(0.8/0.2), logit(0.9) = log(0.9/0.1)
+        let probs: [Float] = [0.6, 0.8, 0.9]
+        let chunk = DiarizerChunkResult(
+            startFrame: 0,
+            finalizedPredictions: probs,
+            finalizedFrameCount: probs.count,
+            tentativePredictions: [],
+            tentativeFrameCount: 0
+        )
+        try timeline.addChunk(chunk)
+        timeline.finalize()
+
+        let expectedActivity: Float =
+            (log(0.6 / (1 - 0.6)) + log(0.8 / (1 - 0.8)) + log(0.9 / (1 - 0.9))) / 3
+
+        XCTAssertEqual(timeline.numFinalizedFrames, 3)
+        let segments = timeline.speakers.values.flatMap { $0.finalizedSegments }
+        XCTAssertEqual(segments.count, 1)
+        XCTAssertEqual(segments[0].activity, expectedActivity, accuracy: 1e-6)
+    }
+
     private func makeEngine(variant: LSEENDVariant) async throws -> LSEENDInferenceHelper {
         if let cached = Self.cachedEngines[variant] {
             return cached
