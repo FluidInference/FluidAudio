@@ -171,11 +171,12 @@ public final class CohereMelSpectrogram {
                 var splitComplex = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
 
                 windowedFrame.withUnsafeBufferPointer { framePtr in
-                    let complexBuffer = framePtr.baseAddress!.withMemoryRebound(
+                    framePtr.baseAddress!.withMemoryRebound(
                         to: DSPComplex.self,
                         capacity: halfN
-                    ) { $0 }
-                    vDSP_ctoz(complexBuffer, 2, &splitComplex, 1, vDSP_Length(halfN))
+                    ) { complexBuffer in
+                        vDSP_ctoz(complexBuffer, 2, &splitComplex, 1, vDSP_Length(halfN))
+                    }
                 }
 
                 fftSetup.transform(input: splitComplex, output: &splitComplex, direction: .forward)

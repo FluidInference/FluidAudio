@@ -226,7 +226,7 @@ enum CohereBenchmark {
 
             // Print language-specific summary
             let langWER = calculateWER(from: langResults)
-            let langRTFx = langResults.map(\.rtfx).reduce(0, +) / Double(langResults.count)
+            let langRTFx = langResults.isEmpty ? 0 : langResults.map(\.rtfx).reduce(0, +) / Double(langResults.count)
             logger.info(
                 "  \(langCode): WER = \(String(format: "%.2f", langWER))%, RTFx = \(String(format: "%.2f", langRTFx))x"
             )
@@ -390,8 +390,8 @@ enum CohereBenchmark {
 
     private static func printSummary(_ results: [CohereBenchmarkResult]) {
         let avgWER = calculateWER(from: results)
-        let avgCER = results.map(\.cer).reduce(0, +) / Double(results.count)
-        let avgRTFx = results.map(\.rtfx).reduce(0, +) / Double(results.count)
+        let avgCER = results.isEmpty ? 0 : results.map(\.cer).reduce(0, +) / Double(results.count)
+        let avgRTFx = results.isEmpty ? 0 : results.map(\.rtfx).reduce(0, +) / Double(results.count)
 
         logger.info(String(repeating: "=", count: 50))
         logger.info("BENCHMARK SUMMARY")

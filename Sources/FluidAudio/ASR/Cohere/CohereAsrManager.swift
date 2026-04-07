@@ -194,7 +194,10 @@ public actor CohereAsrManager {
         var tokens = [Int]()
         var currentToken = CohereAsrConfig.SpecialTokens.startToken
 
-        for step in 0..<maxNewTokens {
+        // Bound by KV cache size to prevent out-of-bounds access
+        let effectiveMaxTokens = min(maxNewTokens, CohereAsrConfig.maxSeqLen)
+
+        for step in 0..<effectiveMaxTokens {
             // Create decoder input
             guard let inputId = try? MLMultiArray(shape: [1, 1], dataType: .int32) else {
                 throw CohereAsrError.decodingFailed("Failed to create input_id array")
