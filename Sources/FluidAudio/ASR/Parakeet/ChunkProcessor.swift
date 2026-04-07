@@ -293,9 +293,9 @@ struct ChunkProcessor {
                 frameDuration: frameDuration)
         }
 
-        // Consolidate adjacent single-element matches into contiguous sequences
-        let consolidated = SequenceMatcher<IndexedToken>.consolidateMatches(lcsMatches)
-        let lcsPairs = consolidated.map { ($0.leftStartIndex, $0.rightStartIndex) }
+        // Map LCS matches directly to pairs (no consolidation)
+        // mergeUsingMatches requires one pair per matched element to function correctly
+        let lcsPairs = lcsMatches.map { ($0.leftStartIndex, $0.rightStartIndex) }
 
         return mergeUsingMatches(
             matches: lcsPairs,
