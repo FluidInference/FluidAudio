@@ -28,9 +28,6 @@ public actor TdtJaManager {
         maxAudioSamples: Int = 240_000,
         sampleRate: Int = 16_000
     ) {
-        // TDT models require a joint model
-        precondition(models.joint != nil, "TDT models must include a joint model")
-
         self.models = models
         self.maxAudioSamples = maxAudioSamples
         self.sampleRate = sampleRate
@@ -117,6 +114,11 @@ public actor TdtJaManager {
         let encoderLength = encoderLengthOutput[0].intValue
 
         // Step 3: TDT Decoding (encoder features → tokens)
+        // Validate joint model is present (required for TDT)
+        guard let jointModel = models.joint else {
+            throw ASRError.processingFailed("TDT models require a joint model")
+        }
+
         // Extract decoder and state to local variables for inout passing
         var localDecoderState = decoderState
         let localTdtDecoder = tdtDecoder
@@ -125,7 +127,7 @@ public actor TdtJaManager {
             encoderSequenceLength: encoderLength,
             actualAudioFrames: encoderLength,
             decoderModel: models.decoder,
-            jointModel: models.joint!,  // Safe to force unwrap - validated in init
+            jointModel: jointModel,
             decoderState: &localDecoderState,
             contextFrameAdjustment: 0,
             isLastChunk: true,
