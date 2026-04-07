@@ -661,7 +661,11 @@ public enum DiarizerActivityType: Sendable {
         case .sigmoids:
             return { (p: Float) -> Float in return p }
         case .logits:
-            return { (p: Float) -> Float in return log(p / (1 - p)) }
+            return { (p: Float) -> Float in
+                let eps: Float = 1e-6
+                let clamped = min(max(p, eps), 1 - eps)
+                return log(clamped / (1 - clamped))
+            }
         }
     }
 }
@@ -1194,7 +1198,7 @@ public final class DiarizerTimeline {
                     }
 
                     wasLastSegmentFinal = isFinalized && (end < tentativeStartFrame)
-                    let confidence = activeFrameCount > 0 ? (activitySum / Float(activeFrameCount)) : 0
+                    let meanActivity = activeFrameCount > 0 ? (activitySum / Float(activeFrameCount)) : 0
 
                     let newSegment = DiarizerSegment(
                         speakerIndex: speakerIndex,
@@ -1202,7 +1206,7 @@ public final class DiarizerTimeline {
                         endFrame: end,
                         finalized: wasLastSegmentFinal,
                         frameDurationSeconds: frameDuration,
-                        activity: confidence
+                        activity: meanActivity
                     )
 
                     provideSpeaker(forSlot: speakerIndex).append(newSegment)
@@ -1219,7 +1223,7 @@ public final class DiarizerTimeline {
                 } else if activity > onset {
                     start = max(0, frameOffset + i - padOnset)
                     speaking = true
-                    activitySum = activity
+                    activitySum = activityFunc(activity)
                     activeFrameCount = 1
 
                     if let lastSegment, start - lastSegment.end <= minFramesOff {
@@ -1242,14 +1246,14 @@ public final class DiarizerTimeline {
             if addTrailingTentative {
                 let end = frameOffset + numFrames + padOffset
                 if speaking && (end > start) {
-                    let confidence = activeFrameCount > 0 ? (activitySum / Float(activeFrameCount)) : 0
+                    let meanActivity = activeFrameCount > 0 ? (activitySum / Float(activeFrameCount)) : 0
                     let newSegment = DiarizerSegment(
                         speakerIndex: speakerIndex,
                         startFrame: start,
                         endFrame: end,
                         finalized: false,
                         frameDurationSeconds: frameDuration,
-                        activity: confidence
+                        activity: meanActivity
                     )
                     provideSpeaker(forSlot: speakerIndex).appendTentative(newSegment)
                 }
