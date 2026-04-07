@@ -248,10 +248,10 @@ public struct DiarizerTimelineConfig: Sendable {
         frameDurationSeconds: Float? = nil,
         onsetThreshold: Float = 0.5,
         offsetThreshold: Float = 0.5,
-        onsetPadSeconds: Float = 0,
-        offsetPadSeconds: Float = 0,
-        minDurationOn: Float = 0,
-        minDurationOff: Float = 0,
+        onsetPadSeconds: Float,
+        offsetPadSeconds: Float,
+        minDurationOn: Float,
+        minDurationOff: Float,
         activityType: DiarizerActivityType = .sigmoids,
         maxStoredFrames: Int? = nil
     ) {
@@ -570,9 +570,9 @@ public struct DiarizerSegment: Sendable, Identifiable, Comparable, Equatable {
 
     /// Merge another segment into this one
     public mutating func absorb(_ other: DiarizerSegment) {
+        activity = (Float(length) * activity + Float(other.length) * other.activity) / Float(length + other.length)
         startFrame = min(startFrame, other.startFrame)
         endFrame = max(endFrame, other.endFrame)
-        activity = (Float(length) * activity + Float(other.length) * other.activity) / Float(length + other.length)
     }
 
     /// Extend the end of this segment
