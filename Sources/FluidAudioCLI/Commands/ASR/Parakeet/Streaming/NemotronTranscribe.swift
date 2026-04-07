@@ -51,8 +51,11 @@ public class NemotronTranscribe {
                     switch ms {
                     case 1120: config.chunkSize = .ms1120
                     case 560: config.chunkSize = .ms560
+                    case 160: config.chunkSize = .ms160
+                    case 80: config.chunkSize = .ms80
                     default:
-                        logger.warning("Invalid chunk size: \(ms)ms. Valid options: 1120 or 560. Using default 1120ms.")
+                        logger.warning(
+                            "Invalid chunk size: \(ms)ms. Valid options: 1120, 560, 160, or 80. Using default 1120ms.")
                     }
                 }
             case "--help", "-h":
@@ -84,12 +87,14 @@ public class NemotronTranscribe {
             Options:
                 --input, -i <path>        Audio file to transcribe (.wav) - required, can be used multiple times
                 --model-dir, -m <path>    Path to Nemotron CoreML models (optional, auto-downloads if not provided)
-                --chunk, -c <ms>          Chunk size: 1120 or 560 (default: 1120)
+                --chunk, -c <ms>          Chunk size: 1120, 560, 160, or 80 (default: 1120)
                 --help, -h                Show this help
 
             Chunk Sizes:
-                1120ms  Original chunk size (1.12s) - best accuracy & speed (WER: 0.59%)
-                560ms   Half chunk size (0.56s) - lower latency, same accuracy (WER: 0.59%)
+                1120ms  Original chunk size (1.12s) - best accuracy & speed
+                560ms   Half chunk size (0.56s) - lower latency
+                160ms   Very low latency (0.16s)
+                80ms    Ultra low latency (0.08s)
 
             Examples:
                 # Transcribe a single file
@@ -97,6 +102,9 @@ public class NemotronTranscribe {
 
                 # Transcribe multiple files with 560ms chunks
                 fluidaudio nemotron-transcribe -i file1.wav -i file2.wav --chunk 560
+
+                # Ultra low latency with 160ms chunks
+                fluidaudio nemotron-transcribe --input audio.wav --chunk 160
 
                 # Use custom model directory
                 fluidaudio nemotron-transcribe --input audio.wav --model-dir ~/my-models
