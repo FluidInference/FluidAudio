@@ -552,7 +552,7 @@ public struct DiarizerSegment: Sendable, Identifiable, Comparable, Equatable {
         endTime: Float,
         finalized: Bool = true,
         frameDurationSeconds: Float,
-        activity: Float = 0,
+        activity: Float = 0
     ) {
         self.id = UUID()
         self.speakerIndex = speakerIndex
