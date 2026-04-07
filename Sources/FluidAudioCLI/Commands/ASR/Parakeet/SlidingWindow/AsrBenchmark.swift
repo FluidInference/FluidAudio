@@ -916,7 +916,7 @@ extension ASRBenchmark {
             logger.info("Initializing ASR system...")
             do {
                 let models = try await AsrModels.downloadAndLoad(version: modelVersion)
-                try await asrManager.loadModels(models)
+                try await asrManager.configure(models: models)
                 logger.info("ASR system initialized successfully")
 
             } catch {

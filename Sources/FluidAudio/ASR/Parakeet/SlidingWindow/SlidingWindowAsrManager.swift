@@ -114,28 +114,28 @@ public actor SlidingWindowAsrManager {
     /// Start the sliding-window ASR engine
     /// This will download models if needed and begin processing
     /// - Parameter source: The audio source to use (default: microphone)
-    public func start(source: AudioSource = .microphone) async throws {
+    public func startStreaming(source: AudioSource = .microphone) async throws {
         logger.info("Starting sliding-window ASR engine for source: \(String(describing: source))...")
 
         // Initialize ASR models
         let models = try await AsrModels.downloadAndLoad()
-        try await start(models: models, source: source)
+        try await startStreaming(models: models, source: source)
     }
 
     /// Start the sliding-window ASR engine with pre-loaded models
     /// - Parameters:
     ///   - models: Pre-loaded ASR models to use
     ///   - source: The audio source to use (default: microphone)
-    public func start(models: AsrModels, source: AudioSource = .microphone) async throws {
+    public func startStreaming(models: AsrModels, source: AudioSource = .microphone) async throws {
         logger.info(
             "Starting sliding-window ASR engine with pre-loaded models for source: \(String(describing: source))..."
         )
 
         self.audioSource = source
 
-        // Initialize ASR manager with provided models
+        // Configure ASR manager with provided models
         asrManager = AsrManager(config: config.asrConfig)
-        try await asrManager?.loadModels(models)
+        try await asrManager?.configure(models: models)
 
         // Reset decoder state for the specific source
         try await asrManager?.resetDecoderState(for: source)
@@ -645,7 +645,7 @@ public actor SlidingWindowAsrManager {
             do {
                 let models = try await AsrModels.downloadAndLoad()
                 let newAsrManager = AsrManager(config: config.asrConfig)
-                try await newAsrManager.loadModels(models)
+                try await newAsrManager.configure(models: models)
                 self.asrManager = newAsrManager
                 logger.info("Successfully reinitialized ASR manager during error recovery")
             } catch {

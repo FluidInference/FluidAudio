@@ -319,7 +319,7 @@ enum TranscribeCommand {
                 encoderHiddenSize: modelVersion.encoderHiddenSize
             )
             let asrManager = AsrManager(config: asrConfig)
-            try await asrManager.loadModels(models)
+            try await asrManager.configure(models: models)
 
             logger.info("ASR Manager initialized successfully")
 
@@ -547,7 +547,7 @@ enum TranscribeCommand {
             }
 
             // Start the engine with the models
-            try await streamingAsr.start(models: models)
+            try await streamingAsr.startStreaming(models: models)
 
             // Load audio file
             let audioFileURL = URL(fileURLWithPath: audioFile)

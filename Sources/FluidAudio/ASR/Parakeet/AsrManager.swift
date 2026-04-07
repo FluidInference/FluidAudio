@@ -107,10 +107,10 @@ public actor AsrManager {
         }
     }
 
-    /// Load pre-built ASR models into this manager.
+    /// Configure this manager with pre-loaded ASR models.
     /// - Parameter models: Pre-loaded ASR models
-    public func loadModels(_ models: AsrModels) async throws {
-        logger.info("Initializing AsrManager with provided models")
+    public func configure(models: AsrModels) async throws {
+        logger.info("Configuring AsrManager with provided models")
 
         self.asrModels = models
         self.preprocessorModel = models.preprocessor
@@ -124,7 +124,7 @@ public actor AsrManager {
         self.microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
         self.systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
 
-        logger.info("AsrManager initialized successfully with provided models")
+        logger.info("AsrManager configured successfully with provided models")
     }
 
     private func createFeatureProvider(

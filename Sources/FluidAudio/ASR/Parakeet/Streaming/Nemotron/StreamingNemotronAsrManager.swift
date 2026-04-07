@@ -108,11 +108,19 @@ public actor StreamingNemotronAsrManager {
         logger.info("Nemotron models loaded successfully (\(config.chunkMs)ms chunks).")
     }
 
+    /// Load models from a specific directory
+    /// - Parameter directory: Directory containing the model files
+    public func loadModels(from directory: URL) async throws {
+        try await loadModels(modelDir: directory)
+    }
+
     /// Reset all states for a new transcription session
     public func reset() async {
-        audioBuffer.removeAll()
-        accumulatedTokenIds.removeAll()
-        processedChunks = 0
+        StreamingAsrUtils.resetSharedState(
+            audioBuffer: &audioBuffer,
+            accumulatedTokenIds: &accumulatedTokenIds,
+            processedChunks: &processedChunks
+        )
         do {
             try resetStates()
         } catch {
@@ -137,45 +145,35 @@ public actor StreamingNemotronAsrManager {
     }
 
     private func resetStates() throws {
-        // Encoder cache states
-        cacheChannel = try MLMultiArray(
-            shape: config.cacheChannelShape.map { NSNumber(value: $0) },
-            dataType: .float32
+        // Encoder cache states using EncoderCacheManager
+        let cacheConfig = EncoderCacheManager.CacheConfig(
+            channelShape: config.cacheChannelShape,
+            timeShape: config.cacheTimeShape,
+            lenShape: [1]
         )
-        cacheChannel?.reset(to: 0)
-
-        cacheTime = try MLMultiArray(
-            shape: config.cacheTimeShape.map { NSNumber(value: $0) },
-            dataType: .float32
-        )
-        cacheTime?.reset(to: 0)
-
-        cacheLen = try MLMultiArray(shape: [1], dataType: .int32)
-        cacheLen?[0] = 0
+        let caches = try EncoderCacheManager.createInitialCaches(config: cacheConfig)
+        cacheChannel = caches.channel
+        cacheTime = caches.time
+        cacheLen = caches.len
 
         // Mel cache (will be initialized on first chunk)
         melCache = nil
 
         // Decoder LSTM states
-        hState = try MLMultiArray(
-            shape: [NSNumber(value: config.decoderLayers), 1, NSNumber(value: config.decoderHidden)],
-            dataType: .float32
+        hState = try EncoderCacheManager.createZeroArray(
+            shape: [config.decoderLayers, 1, config.decoderHidden]
         )
-        hState?.reset(to: 0)
 
-        cState = try MLMultiArray(
-            shape: [NSNumber(value: config.decoderLayers), 1, NSNumber(value: config.decoderHidden)],
-            dataType: .float32
+        cState = try EncoderCacheManager.createZeroArray(
+            shape: [config.decoderLayers, 1, config.decoderHidden]
         )
-        cState?.reset(to: 0)
 
         lastToken = Int32(config.blankIdx)
     }
 
     /// Append audio buffer for processing
     public func appendAudio(_ buffer: AVAudioPCMBuffer) throws {
-        let samples = try audioConverter.resampleBuffer(buffer)
-        audioBuffer.append(contentsOf: samples)
+        try StreamingAsrUtils.appendAudio(buffer, using: audioConverter, to: &audioBuffer)
     }
 
     /// Process audio and return partial transcript
