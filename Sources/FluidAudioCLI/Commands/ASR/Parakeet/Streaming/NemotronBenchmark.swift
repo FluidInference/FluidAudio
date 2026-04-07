@@ -66,8 +66,11 @@ public class NemotronBenchmark {
                     switch ms {
                     case 1120: config.chunkSize = .ms1120
                     case 560: config.chunkSize = .ms560
+                    case 160: config.chunkSize = .ms160
+                    case 80: config.chunkSize = .ms80
                     default:
-                        logger.warning("Invalid chunk size: \(ms)ms. Valid options: 1120 or 560. Using default 1120ms.")
+                        logger.warning(
+                            "Invalid chunk size: \(ms)ms. Valid options: 1120, 560, 160, or 80. Using default 1120ms.")
                     }
                 }
             case "--help", "-h":
@@ -94,12 +97,14 @@ public class NemotronBenchmark {
                 --max-files, -n <count>   Maximum files to process (default: all)
                 --subset, -s <name>       LibriSpeech subset (default: test-clean)
                 --model-dir, -m <path>    Path to Nemotron CoreML models
-                --chunk, -c <ms>          Chunk size: 1120 or 560 (default: 1120)
+                --chunk, -c <ms>          Chunk size: 1120, 560, 160, or 80 (default: 1120)
                 --help, -h                Show this help
 
             Chunk Sizes:
-                1120ms  Original chunk size (1.12s) - best accuracy & speed (WER: 0.59%)
-                560ms   Half chunk size (0.56s) - lower latency, same accuracy (WER: 0.59%)
+                1120ms  Original chunk size (1.12s) - best accuracy & speed
+                560ms   Half chunk size (0.56s) - lower latency
+                160ms   Very low latency (0.16s)
+                80ms    Ultra low latency (0.08s)
 
             Examples:
                 fluidaudio nemotron-benchmark --max-files 100
