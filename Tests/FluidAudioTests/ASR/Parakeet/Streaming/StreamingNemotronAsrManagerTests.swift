@@ -141,7 +141,7 @@ final class StreamingNemotronAsrManagerTests: XCTestCase {
             .appendingPathComponent("nonexistent_\(UUID().uuidString)")
 
         await XCTAssertThrowsErrorAsync {
-            try await manager.loadModels(modelDir: nonExistentDir)
+            try await manager.loadModels(from: nonExistentDir)
         }
     }
 
