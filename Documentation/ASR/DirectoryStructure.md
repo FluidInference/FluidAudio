@@ -60,50 +60,66 @@ ASR/
 ```
 ASR/
 ├── Parakeet/
-│   ├── AsrManager.swift
-│   ├── AsrModels.swift
-│   ├── AsrManager+Transcription.swift
+│   ├── ParakeetLanguageModels.swift
 │   ├── AsrTypes.swift
 │   ├── AudioBuffer.swift
-│   ├── ChunkProcessor.swift
-│   │
-│   ├── Decoder/
-│   │   ├── BlasIndex.swift
-│   │   ├── EncoderFrameView.swift
-│   │   ├── TdtConfig.swift
-│   │   ├── TdtDecoderState.swift
-│   │   ├── TdtDecoderV2.swift
-│   │   ├── TdtDecoderV3.swift
-│   │   ├── TdtHypothesis.swift
-│   │   ├── TdtModelInference.swift      (Model inference operations)
-│   │   ├── TdtJointDecision.swift       (Joint network decision structure)
-│   │   ├── TdtJointInputProvider.swift  (Reusable feature provider)
-│   │   ├── TdtDurationMapping.swift     (Duration bin mapping utilities)
-│   │   └── TdtFrameNavigation.swift     (Frame position calculations)
 │   │
 │   ├── SlidingWindow/
 │   │   ├── SlidingWindowAsrManager.swift
 │   │   ├── SlidingWindowAsrSession.swift
-│   │   ├── CTC/
+│   │   │
+│   │   ├── TDT/                         ← All TDT batch processing
+│   │   │   ├── AsrManager.swift         (multilingual, internal engine)
+│   │   │   ├── AsrManager+Pipeline.swift
+│   │   │   ├── AsrManager+TokenProcessing.swift
+│   │   │   ├── AsrManager+Transcription.swift
+│   │   │   ├── AsrModels.swift
+│   │   │   ├── ChunkProcessor.swift
+│   │   │   ├── TdtJaManager.swift       (Japanese)
+│   │   │   ├── TdtJaModels.swift
+│   │   │   └── Decoder/                 (TDT infrastructure)
+│   │   │       ├── BlasIndex.swift
+│   │   │       ├── EncoderFrameView.swift
+│   │   │       ├── TdtConfig.swift
+│   │   │       ├── TdtDecoderState.swift
+│   │   │       ├── TdtDecoderV2.swift
+│   │   │       ├── TdtDecoderV3.swift
+│   │   │       ├── TdtHypothesis.swift
+│   │   │       ├── TdtModelInference.swift
+│   │   │       ├── TdtJointDecision.swift
+│   │   │       ├── TdtJointInputProvider.swift
+│   │   │       ├── TdtDurationMapping.swift
+│   │   │       └── TdtFrameNavigation.swift
+│   │   │
+│   │   ├── CTC/                         ← All CTC batch + language variants
 │   │   │   ├── ARPALanguageModel.swift
-│   │   │   └── CtcDecoder.swift
+│   │   │   ├── CtcDecoder.swift
+│   │   │   ├── CtcJaManager.swift       (Japanese)
+│   │   │   ├── CtcJaModels.swift
+│   │   │   ├── CtcZhCnManager.swift     (Chinese)
+│   │   │   └── CtcZhCnModels.swift
+│   │   │
 │   │   └── CustomVocabulary/
 │   │       ├── BKTree/
 │   │       ├── Rescorer/
 │   │       └── WordSpotting/
 │   │
-│   └── Streaming/
-│       ├── StreamingAsrManager.swift
-│       ├── ParakeetModelVariant.swift
-│       ├── RnntDecoder.swift
-│       ├── Tokenizer.swift
-│       ├── EOU/
-│       │   └── StreamingEouAsrManager.swift
-│       └── Nemotron/
-│           ├── NemotronChunkSize.swift
-│           ├── StreamingNemotronAsrManager.swift
-│           ├── StreamingNemotronAsrManager+Pipeline.swift
-│           └── NemotronStreamingConfig.swift
+│   ├── Streaming/                       (true streaming engines)
+│   │   ├── StreamingAsrManager.swift
+│   │   ├── ParakeetModelVariant.swift
+│   │   ├── RnntDecoder.swift
+│   │   ├── Tokenizer.swift
+│   │   ├── EOU/
+│   │   │   └── StreamingEouAsrManager.swift
+│   │   └── Nemotron/
+│   │       ├── NemotronChunkSize.swift
+│   │       ├── StreamingNemotronAsrManager.swift
+│   │       ├── StreamingNemotronAsrManager+Pipeline.swift
+│   │       └── NemotronStreamingConfig.swift
+│   │
+│   └── TokenDeduplication/
+│       ├── SequenceMatch.swift
+│       └── SequenceMatcher.swift
 │
 └── Qwen3/
     ├── Qwen3AsrConfig.swift
@@ -113,6 +129,23 @@ ASR/
     ├── Qwen3StreamingManager.swift
     └── WhisperMelSpectrogram.swift
 ```
+
+### Algorithm-based organization: TDT/ vs CTC/
+
+Batch processing managers are now grouped by decoding algorithm within `SlidingWindow/`:
+
+**TDT (Token-and-Duration Transducer):**
+- `AsrManager` - Multilingual batch engine (en, es, fr, de, etc.)
+- `TdtJaManager` - Japanese-specific batch processing
+- `Decoder/` - Shared TDT infrastructure (beam search, BLAS indexing, hypothesis management)
+
+**CTC (Connectionist Temporal Classification):**
+- `CtcDecoder` - Greedy CTC decoding with optional LM
+- `CtcJaManager` - Japanese CTC batch processing
+- `CtcZhCnManager` - Chinese CTC batch processing
+- `ARPALanguageModel` - ARPA LM support for CTC decoding
+
+Both algorithm families use the sliding-window approach (large overlapping chunks with offline encoder), distinguishing them from the true streaming engines in `Streaming/`.
 
 ## What Changed and Why
 
@@ -209,8 +242,10 @@ Sources/FluidAudioCLI/Commands/ASR/
 
 Tests/FluidAudioTests/ASR/
 ├── Parakeet/
-│   ├── Decoder/          (TDT decoder unit tests)
-│   ├── SlidingWindow/    (manager, session, CTC, custom vocab tests)
+│   ├── SlidingWindow/
+│   │   ├── TDT/          (AsrManager, ChunkProcessor, TdtJa, Decoder tests)
+│   │   ├── CTC/          (CtcJa, CtcZhCn tests)
+│   │   └── CustomVocabulary/ (BKTree, Rescorer, WordSpotting tests)
 │   └── Streaming/        (EOU, Nemotron, engine protocol tests)
 └── Qwen3/                (config, RoPE tests)
 ```
