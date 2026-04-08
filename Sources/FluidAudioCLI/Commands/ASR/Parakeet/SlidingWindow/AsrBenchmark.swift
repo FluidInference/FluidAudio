@@ -217,8 +217,9 @@ public class ASRBenchmark {
 
         // Measure only inference time for accurate RTFx calculation
         let url = URL(fileURLWithPath: file.audioPath.path)
+        var decoderState = TdtDecoderState.make()
         let inferenceStartTime = Date()
-        let asrResult = try await asrManager.transcribe(url)
+        let asrResult = try await asrManager.transcribe(url, decoderState: &decoderState)
         let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
         let metrics = calculateASRMetrics(hypothesis: asrResult.text, reference: file.transcript)
@@ -281,8 +282,9 @@ public class ASRBenchmark {
             let audioToProcess = Array(audioSamples[0..<totalSamplesToProcess])
 
             // Measure only inference time for this chunk
+            var chunkDecoderState = TdtDecoderState.make()
             let chunkInferenceStartTime = Date()
-            let result = try await asrManager.transcribe(audioToProcess, source: .microphone)
+            let result = try await asrManager.transcribe(audioToProcess, decoderState: &chunkDecoderState)
             let chunkInferenceTime = Date().timeIntervalSince(chunkInferenceStartTime)
 
             // Track first token time

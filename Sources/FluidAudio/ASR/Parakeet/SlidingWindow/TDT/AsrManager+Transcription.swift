@@ -3,14 +3,12 @@ import Foundation
 extension AsrManager {
 
     internal func transcribeWithState(
-        _ audioSamples: [Float], source: AudioSource
+        _ audioSamples: [Float], decoderState: inout TdtDecoderState
     ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
         guard audioSamples.count >= config.sampleRate else { throw ASRError.invalidAudioData }
 
         let startTime = Date()
-
-        var decoderState = decoderState(for: source)
 
         // Route to appropriate processing method based on audio length
         if audioSamples.count <= ASRConstants.maxModelSamples {
@@ -34,8 +32,6 @@ extension AsrManager {
                 processingTime: Date().timeIntervalSince(startTime)
             )
 
-            setDecoderState(decoderState, for: source)
-
             return result
         }
 
@@ -43,14 +39,13 @@ extension AsrManager {
         let processor = ChunkProcessor(audioSamples: audioSamples)
         let result = try await processor.process(
             using: self,
+            decoderState: &decoderState,
             startTime: startTime,
             progressHandler: { [weak self] progress in
                 guard let self else { return }
                 await self.progressEmitter.report(progress: progress)
             }
         )
-
-        setDecoderState(decoderState, for: source)
 
         return result
     }
@@ -59,12 +54,10 @@ extension AsrManager {
     /// Used by SlidingWindowAsrManager for overlapping-window processing with token deduplication.
     func transcribeChunk(
         _ chunkSamples: [Float],
-        source: AudioSource,
+        decoderState: inout TdtDecoderState,
         previousTokens: [Int] = [],
         isLastChunk: Bool = false
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
-        var state = decoderState(for: source)
-
         let (alignedSamples, frameAlignedLength) = frameAlignedAudio(
             chunkSamples, allowAlignment: previousTokens.isEmpty)
         let padded = padAudioIfNeeded(alignedSamples, targetLength: ASRConstants.maxModelSamples)
@@ -72,12 +65,10 @@ extension AsrManager {
             padded,
             originalLength: frameAlignedLength,
             actualAudioFrames: nil,  // Will be calculated from originalLength
-            decoderState: &state,
+            decoderState: &decoderState,
             contextFrameAdjustment: 0,  // Non-streaming chunks don't use adaptive context
             isLastChunk: isLastChunk
         )
-
-        setDecoderState(state, for: source)
 
         // Apply token deduplication if previous tokens are provided
         if !previousTokens.isEmpty && hypothesis.hasTokens {

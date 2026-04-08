@@ -36,7 +36,8 @@ final class StressTests: XCTestCase {
             let startMemory = getMemoryUsage()
 
             do {
-                let result = try await manager.transcribe(testAudio, source: .microphone)
+                var decoderState = TdtDecoderState.make()
+                let result = try await manager.transcribe(testAudio, decoderState: &decoderState)
                 let elapsed = Date().timeIntervalSince(startTime)
                 let endMemory = getMemoryUsage()
 
@@ -109,8 +110,9 @@ final class StressTests: XCTestCase {
         }
 
         print("🎤 Transcribing...")
+        var decoderState = TdtDecoderState.make()
         let start = Date()
-        let result = try await manager.transcribe(testAudio, source: .microphone)
+        let result = try await manager.transcribe(testAudio, decoderState: &decoderState)
         let elapsed = Date().timeIntervalSince(start)
 
         print("✅ Transcription completed in \(String(format: "%.2f", elapsed))s")

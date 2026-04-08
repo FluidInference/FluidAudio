@@ -344,8 +344,9 @@ enum TranscribeCommand {
 
             // Process with ASR Manager
             logger.info("Transcribing file: \(audioFileURL) ...")
+            var decoderState = TdtDecoderState.make()
             let startTime = Date()
-            var result = try await asrManager.transcribe(audioFileURL)
+            var result = try await asrManager.transcribe(audioFileURL, decoderState: &decoderState)
             let processingTime = Date().timeIntervalSince(startTime)
 
             // Apply vocabulary rescoring if custom vocab is provided

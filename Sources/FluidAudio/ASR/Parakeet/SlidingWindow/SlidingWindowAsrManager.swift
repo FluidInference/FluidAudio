@@ -23,6 +23,9 @@ public actor SlidingWindowAsrManager {
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
 
+    // Decoder state for this sliding window session
+    private var decoderState: TdtDecoderState?
+
     // Sliding window state
     private var segmentIndex: Int = 0
     private var lastProcessedFrame: Int = 0
@@ -137,8 +140,10 @@ public actor SlidingWindowAsrManager {
         asrManager = AsrManager(config: config.asrConfig)
         try await asrManager?.configure(models: models)
 
-        // Reset decoder state for the specific source
-        try await asrManager?.resetDecoderState(for: source)
+        // Create decoder state with correct layer count for this model
+        if let mgr = asrManager {
+            self.decoderState = TdtDecoderState.make(decoderLayers: await mgr.decoderLayerCount)
+        }
 
         // Reset sliding window state
         segmentIndex = 0
@@ -255,8 +260,10 @@ public actor SlidingWindowAsrManager {
         bufferStartIndex = 0
         nextWindowCenterStart = 0
 
-        // Reset decoder state for the current audio source
-        try await asrManager?.resetDecoderState(for: audioSource)
+        // Reset decoder state
+        if let mgr = asrManager {
+            self.decoderState = TdtDecoderState.make(decoderLayers: await mgr.decoderLayerCount)
+        }
 
         // Reset sliding window state
         segmentIndex = 0
@@ -383,14 +390,23 @@ public actor SlidingWindowAsrManager {
             // Start frame offset is now handled by decoder's timeJump mechanism
 
             // Call AsrManager directly with deduplication
+            guard var state = decoderState else {
+                logger.error("Decoder state not initialized")
+                return
+            }
+
             guard
                 let result = try await asrManager?.transcribeChunk(
                     windowSamples,
-                    source: audioSource,
+                    decoderState: &state,
                     previousTokens: accumulatedTokens,
                     isLastChunk: isLastChunk
                 )
             else { return }
+
+            // Update stored decoder state
+            self.decoderState = state
+
             let (tokens, timestamps, confidences, _) = result
 
             let adjustedTimestamps = Self.applyGlobalFrameOffset(
@@ -633,25 +649,11 @@ public actor SlidingWindowAsrManager {
 
     /// Reset decoder state for error recovery
     private func resetDecoderForRecovery() async {
-        guard asrManager != nil else { return }
+        guard let mgr = asrManager else { return }
 
-        do {
-            try await asrManager?.resetDecoderState(for: audioSource)
-            logger.info("Successfully reset decoder state during error recovery")
-        } catch {
-            logger.error("Failed to reset decoder state during recovery: \(error)")
-
-            // Last resort: try to reinitialize the ASR manager
-            do {
-                let models = try await AsrModels.downloadAndLoad()
-                let newAsrManager = AsrManager(config: config.asrConfig)
-                try await newAsrManager.configure(models: models)
-                self.asrManager = newAsrManager
-                logger.info("Successfully reinitialized ASR manager during error recovery")
-            } catch {
-                logger.error("Failed to reinitialize ASR manager during recovery: \(error)")
-            }
-        }
+        // Recreate decoder state
+        self.decoderState = TdtDecoderState.make(decoderLayers: await mgr.decoderLayerCount)
+        logger.info("Successfully reset decoder state during error recovery")
     }
 }
 

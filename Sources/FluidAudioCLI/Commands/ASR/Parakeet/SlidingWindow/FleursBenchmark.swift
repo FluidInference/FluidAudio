@@ -571,8 +571,9 @@ public class FLEURSBenchmark {
                 )
                 // Measure only inference time for accurate RTFx calculation
                 let url = URL(fileURLWithPath: sample.audioPath)
+                var decoderState = TdtDecoderState.make()
                 let inferenceStartTime = Date()
-                let result = try await asrManager.transcribe(url)
+                let result = try await asrManager.transcribe(url, decoderState: &decoderState)
                 let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
                 // Calculate metrics if reference transcription is available
@@ -1234,8 +1235,9 @@ extension FLEURSBenchmark {
 
         // Measure only inference time for accurate RTFx calculation
         let url = URL(fileURLWithPath: sample.audioPath)
+        var decoderState = TdtDecoderState.make()
         let inferenceStartTime = Date()
-        let result = try await asrManager.transcribe(url)
+        let result = try await asrManager.transcribe(url, decoderState: &decoderState)
         let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
         logger.info("  Hypothesis: \(result.text)")
