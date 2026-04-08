@@ -11,7 +11,7 @@ import os
 /// - Uses `AVAudioConverter` for all sample-rate, sample-format, and channel-count conversions.
 /// - Avoids any manual resampling; only raw sample extraction occurs after conversion.
 /// - Creates a new converter for each operation (stateless).
-final public class AudioConverter {
+final public class AudioConverter: Sendable {
     private let logger = AppLogger(category: "AudioConverter")
     private let targetFormat: AVAudioFormat
     private let debug: Bool
