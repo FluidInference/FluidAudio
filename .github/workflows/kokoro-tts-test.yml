@@ -88,6 +88,9 @@ jobs:
             echo "RTFx=0.00" >> $GITHUB_OUTPUT
           fi
 
+          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+
           # Validate RTFx - 0 indicates benchmark failure
           RTFx_VAL=$(echo "${RTFx:-0}" | awk '{printf "%.2f", $1}')
           if [ "$RTFx_VAL" = "0.00" ] || [ "$RTFx_VAL" = "0.0" ] || [ "$RTFx_VAL" = "0" ] || [ -z "$RTFx_VAL" ]; then
@@ -96,11 +99,8 @@ jobs:
             exit 1
           fi
 
-          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
-          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
-
       - name: Comment PR
-        if: github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         continue-on-error: true
         uses: actions/github-script@v7
         with:
