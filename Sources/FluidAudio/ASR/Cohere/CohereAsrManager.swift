@@ -55,8 +55,8 @@ public actor CohereAsrManager {
 
         let nFrames = mel[0].count
 
-        // Pad to 3001 frames (max length)
-        let paddedMel = padMelSpectrogram(mel, targetFrames: 3001)
+        // Pad to 3500 frames (max length)
+        let paddedMel = padMelSpectrogram(mel, targetFrames: 3500)
 
         // Step 2: Encode audio
         let encodeStart = CFAbsoluteTimeGetCurrent()
@@ -112,8 +112,8 @@ public actor CohereAsrManager {
         featureLength: Int,
         models: CohereAsrModels
     ) async throws -> MLMultiArray {
-        // Create input MLMultiArray (1, 128, 3001)
-        let inputShape = [1, CohereAsrConfig.numMelBins, 3001] as [NSNumber]
+        // Create input MLMultiArray (1, 128, 3500)
+        let inputShape = [1, CohereAsrConfig.numMelBins, 3500] as [NSNumber]
         guard
             let inputFeatures = try? MLMultiArray(
                 shape: inputShape,
@@ -123,9 +123,9 @@ public actor CohereAsrManager {
             throw CohereAsrError.encodingFailed("Failed to create input MLMultiArray")
         }
 
-        // Fill with mel data (shape: [1, 128, 3001])
+        // Fill with mel data (shape: [1, 128, 3500])
         for m in 0..<CohereAsrConfig.numMelBins {
-            for f in 0..<3001 {
+            for f in 0..<3500 {
                 let index = [0, m, f] as [NSNumber]
                 inputFeatures[index] = NSNumber(value: paddedMel[m][f])
             }
@@ -145,7 +145,7 @@ public actor CohereAsrManager {
 
         let encoderOutput = try await models.encoder.prediction(from: encoderInput)
 
-        guard let hiddenStates = encoderOutput.featureValue(for: "encoder_outputs")?.multiArrayValue else {
+        guard let hiddenStates = encoderOutput.featureValue(for: "hidden_states")?.multiArrayValue else {
             throw CohereAsrError.encodingFailed("Failed to get encoder output")
         }
 

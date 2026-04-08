@@ -63,7 +63,7 @@ public actor CohereStatelessManager {
         }
 
         let nFrames = mel[0].count
-        let paddedMel = padMelSpectrogram(mel, targetFrames: 3001)
+        let paddedMel = padMelSpectrogram(mel, targetFrames: 3500)
 
         // 2. Encode audio
         let encodeStart = CFAbsoluteTimeGetCurrent()
@@ -114,11 +114,11 @@ public actor CohereStatelessManager {
         featureLength: Int,
         encoder: MLModel
     ) async throws -> MLMultiArray {
-        let inputShape = [1, CohereAsrConfig.numMelBins, 3001] as [NSNumber]
+        let inputShape = [1, CohereAsrConfig.numMelBins, 3500] as [NSNumber]
         let inputFeatures = try MLMultiArray(shape: inputShape, dataType: .float32)
 
         for m in 0..<CohereAsrConfig.numMelBins {
-            for f in 0..<3001 {
+            for f in 0..<3500 {
                 inputFeatures[[0, m, f] as [NSNumber]] = NSNumber(value: paddedMel[m][f])
             }
         }
@@ -193,8 +193,8 @@ public actor CohereStatelessManager {
             tokenIds.append(nextToken)
 
             // Safety check
-            if tokenIds.count >= maxSeqLen {
-                logger.warning("Hit max sequence length \(maxSeqLen)")
+            if tokenIds.count >= self.maxSeqLen {
+                logger.warning("Hit max sequence length \(self.maxSeqLen)")
                 break
             }
         }
