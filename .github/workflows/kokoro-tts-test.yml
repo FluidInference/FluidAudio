@@ -35,7 +35,7 @@ jobs:
 
       - name: Install ffmpeg
         run: |
-          brew install ffmpeg || echo "ffmpeg may already be installed"
+          brew install ffmpeg || brew link ffmpeg || echo "ffmpeg installation/linking may have issues"
 
       - name: Build
         run: swift build -c release
@@ -73,14 +73,19 @@ jobs:
 
             # Calculate RTFx: audio_duration / processing_time
             # Get audio duration using ffprobe
-            AUDIO_DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 kokoro_output.wav 2>/dev/null || echo "0")
+            echo "Checking ffprobe availability..."
+            which ffprobe || echo "⚠️  Warning: ffprobe not found in PATH"
+
+            AUDIO_DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 kokoro_output.wav 2>&1 || echo "0")
+            echo "AUDIO_DURATION from ffprobe: '$AUDIO_DURATION'"
+            echo "SYNTH_TIME: $SYNTH_TIME seconds"
 
             if [ "$SYNTH_TIME" -gt 0 ] && [ -n "$AUDIO_DURATION" ] && [ "$AUDIO_DURATION" != "0" ]; then
               RTFx=$(awk "BEGIN {printf \"%.2f\", $AUDIO_DURATION / $SYNTH_TIME}")
               echo "RTFx: ${RTFx}x (${AUDIO_DURATION}s audio / ${SYNTH_TIME}s processing)"
               echo "RTFx=$RTFx" >> $GITHUB_OUTPUT
             else
-              echo "RTFx: N/A (could not calculate)"
+              echo "⚠️  RTFx calculation failed - AUDIO_DURATION='$AUDIO_DURATION', SYNTH_TIME='$SYNTH_TIME'"
               echo "RTFx=0.00" >> $GITHUB_OUTPUT
             fi
           else
