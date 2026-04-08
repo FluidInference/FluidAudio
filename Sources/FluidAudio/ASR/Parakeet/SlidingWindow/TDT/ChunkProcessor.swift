@@ -55,7 +55,6 @@ struct ChunkProcessor {
 
     func process(
         using manager: AsrManager,
-        decoderState: inout TdtDecoderState,
         startTime: Date,
         progressHandler: ((Double) async -> Void)? = nil
     ) async throws -> ASRResult {

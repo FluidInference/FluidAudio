@@ -36,7 +36,7 @@ final class StressTests: XCTestCase {
             let startMemory = getMemoryUsage()
 
             do {
-                var decoderState = TdtDecoderState.make()
+                var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
                 let result = try await manager.transcribe(testAudio, decoderState: &decoderState)
                 let elapsed = Date().timeIntervalSince(startTime)
                 let endMemory = getMemoryUsage()

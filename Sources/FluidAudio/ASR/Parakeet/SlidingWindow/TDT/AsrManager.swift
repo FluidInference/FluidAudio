@@ -21,7 +21,7 @@ public actor AsrManager {
 
     /// Number of decoder layers for the current model.
     /// Returns 2 if models not loaded (v2/v3 default, tdtCtc110m uses 1).
-    internal var decoderLayerCount: Int {
+    public var decoderLayerCount: Int {
         asrModels?.version.decoderLayers ?? 2
     }
 
@@ -254,8 +254,9 @@ public actor AsrManager {
     ///   - decoderState: The TDT decoder state to use and update during transcription
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails or models are not initialized
-    public func transcribe(_ audioBuffer: AVAudioPCMBuffer, decoderState: inout TdtDecoderState) async throws -> ASRResult
-    {
+    public func transcribe(
+        _ audioBuffer: AVAudioPCMBuffer, decoderState: inout TdtDecoderState
+    ) async throws -> ASRResult {
         let audioFloatArray = try audioConverter.resampleBuffer(audioBuffer)
 
         let result = try await transcribe(audioFloatArray, decoderState: &decoderState)
@@ -330,7 +331,6 @@ public actor AsrManager {
             let processor = ChunkProcessor(sampleSource: sampleSource)
             let result = try await processor.process(
                 using: self,
-                decoderState: &decoderState,
                 startTime: startTime,
                 progressHandler: { [weak self] progress in
                     guard let self else { return }

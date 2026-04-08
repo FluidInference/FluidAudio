@@ -39,7 +39,6 @@ extension AsrManager {
         let processor = ChunkProcessor(audioSamples: audioSamples)
         let result = try await processor.process(
             using: self,
-            decoderState: &decoderState,
             startTime: startTime,
             progressHandler: { [weak self] progress in
                 guard let self else { return }
