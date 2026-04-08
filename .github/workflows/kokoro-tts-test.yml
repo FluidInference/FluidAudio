@@ -28,26 +28,13 @@ jobs:
           path: |
             .build
             ~/Library/Application Support/FluidAudio/Models/kokoro-82m-coreml
-            ~/Library/Caches/Homebrew
-            /usr/local/Cellar/ffmpeg
-            /opt/homebrew/Cellar/ffmpeg
           key: ${{ runner.os }}-kokoro-tts-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/Kokoro/**', 'Sources/FluidAudio/ModelNames.swift') }}
-
-      - name: Install ffmpeg
-        run: |
-          brew install ffmpeg || true
-          brew link ffmpeg --force || true
-          echo "Verifying ffprobe installation..."
-          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-          which ffprobe && ffprobe -version | head -1 || echo "⚠️  ffprobe still not available"
 
       - name: Build
         run: swift build -c release
 
       - name: Run Smoke Test
         id: smoketest
-        env:
-          PATH: /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
         run: |
           BENCHMARK_START=$(date +%s)
 
@@ -58,7 +45,6 @@ jobs:
 
           TEXT="I can't believe we finally made it to the summit after climbing for twelve exhausting hours through wind and rain, but wow, this view of the endless mountain ranges stretching to the horizon makes every single difficult step completely worth the journey."
 
-          SYNTH_START=$(date +%s)
           if .build/release/fluidaudiocli tts "$TEXT" \
             --output kokoro_output.wav \
             --auto-download 2>&1; then
@@ -69,41 +55,13 @@ jobs:
             echo "Smoke test FAILED with exit code $EXIT_CODE"
             echo "SMOKE_STATUS=FAILED" >> $GITHUB_OUTPUT
           fi
-          SYNTH_END=$(date +%s)
-          SYNTH_TIME=$((SYNTH_END - SYNTH_START))
 
           if [ -f kokoro_output.wav ]; then
             SIZE=$(stat -f%z kokoro_output.wav 2>/dev/null || stat -c%s kokoro_output.wav 2>/dev/null)
             echo "Output file size: $SIZE bytes"
             echo "FILE_SIZE=$SIZE" >> $GITHUB_OUTPUT
-
-            # Calculate RTFx: audio_duration / processing_time
-            # Get audio duration using ffprobe
-            echo "Checking ffprobe availability..."
-            which ffprobe || echo "⚠️  Warning: ffprobe not found in PATH"
-
-            AUDIO_DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 kokoro_output.wav 2>&1 || echo "0")
-
-            # Validate that ffprobe returned a numeric value
-            if ! echo "$AUDIO_DURATION" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
-              echo "⚠️  ffprobe output is not numeric: '$AUDIO_DURATION'"
-              AUDIO_DURATION="0"
-            fi
-
-            echo "AUDIO_DURATION from ffprobe: '$AUDIO_DURATION'"
-            echo "SYNTH_TIME: $SYNTH_TIME seconds"
-
-            if [ "$SYNTH_TIME" -gt 0 ] && [ "$AUDIO_DURATION" != "0" ] && [ -n "$AUDIO_DURATION" ]; then
-              RTFx=$(awk "BEGIN {printf \"%.2f\", $AUDIO_DURATION / $SYNTH_TIME}")
-              echo "RTFx: ${RTFx}x (${AUDIO_DURATION}s audio / ${SYNTH_TIME}s processing)"
-              echo "RTFx=$RTFx" >> $GITHUB_OUTPUT
-            else
-              echo "⚠️  RTFx calculation failed - AUDIO_DURATION='$AUDIO_DURATION', SYNTH_TIME='$SYNTH_TIME'"
-              echo "RTFx=0.00" >> $GITHUB_OUTPUT
-            fi
           else
             echo "FILE_SIZE=0" >> $GITHUB_OUTPUT
-            echo "RTFx=0.00" >> $GITHUB_OUTPUT
           fi
 
           EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
@@ -119,9 +77,6 @@ jobs:
             const emoji = status === 'PASSED' ? '✅' : '❌';
             const fileSize = '${{ steps.smoketest.outputs.FILE_SIZE }}';
             const fileSizeKB = (parseInt(fileSize) / 1024).toFixed(1);
-            const rtfx = '${{ steps.smoketest.outputs.RTFx }}' || 'N/A';
-            const rtfxFloat = parseFloat(rtfx);
-            const rtfxStatus = rtfxFloat > 0 ? '✅' : '⚠️';
 
             const body = `## Kokoro TTS Smoke Test ${emoji}
 
@@ -132,7 +87,6 @@ jobs:
             | Model load | ${emoji} |
             | Synthesis pipeline | ${emoji} |
             | Output WAV | ${parseInt(fileSize) > 0 ? '✅' : '❌'} (${fileSizeKB} KB) |
-            | RTFx | ${rtfxStatus} ${rtfx}x |
 
             <sub>Runtime: ${{ steps.smoketest.outputs.EXECUTION_TIME }}</sub>
 
