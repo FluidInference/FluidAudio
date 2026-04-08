@@ -35,13 +35,19 @@ jobs:
 
       - name: Install ffmpeg
         run: |
-          brew install ffmpeg || brew link ffmpeg || echo "ffmpeg installation/linking may have issues"
+          brew install ffmpeg || true
+          brew link ffmpeg --force || true
+          echo "Verifying ffprobe installation..."
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          which ffprobe && ffprobe -version | head -1 || echo "⚠️  ffprobe still not available"
 
       - name: Build
         run: swift build -c release
 
       - name: Run Smoke Test
         id: smoketest
+        env:
+          PATH: /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
         run: |
           BENCHMARK_START=$(date +%s)
 
@@ -77,10 +83,17 @@ jobs:
             which ffprobe || echo "⚠️  Warning: ffprobe not found in PATH"
 
             AUDIO_DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 kokoro_output.wav 2>&1 || echo "0")
+
+            # Validate that ffprobe returned a numeric value
+            if ! echo "$AUDIO_DURATION" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
+              echo "⚠️  ffprobe output is not numeric: '$AUDIO_DURATION'"
+              AUDIO_DURATION="0"
+            fi
+
             echo "AUDIO_DURATION from ffprobe: '$AUDIO_DURATION'"
             echo "SYNTH_TIME: $SYNTH_TIME seconds"
 
-            if [ "$SYNTH_TIME" -gt 0 ] && [ -n "$AUDIO_DURATION" ] && [ "$AUDIO_DURATION" != "0" ]; then
+            if [ "$SYNTH_TIME" -gt 0 ] && [ "$AUDIO_DURATION" != "0" ] && [ -n "$AUDIO_DURATION" ]; then
               RTFx=$(awk "BEGIN {printf \"%.2f\", $AUDIO_DURATION / $SYNTH_TIME}")
               echo "RTFx: ${RTFx}x (${AUDIO_DURATION}s audio / ${SYNTH_TIME}s processing)"
               echo "RTFx=$RTFx" >> $GITHUB_OUTPUT
