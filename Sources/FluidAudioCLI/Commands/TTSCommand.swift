@@ -379,7 +379,7 @@ public struct TTS {
                     // Load ASR models and initialize
                     let models = try await AsrModels.downloadAndLoad()
                     let asr = AsrManager()
-                    try await asr.configure(models: models)
+                    try await asr.loadModels(models)
 
                     // Transcribe the generated audio file
                     var decoderState = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
@@ -586,7 +586,7 @@ public struct TTS {
                 do {
                     let asrModels = try await AsrModels.downloadAndLoad()
                     let asr = AsrManager()
-                    try await asr.configure(models: asrModels)
+                    try await asr.loadModels(asrModels)
 
                     var decoderState = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
                     let transcription = try await asr.transcribe(outURL, decoderState: &decoderState)

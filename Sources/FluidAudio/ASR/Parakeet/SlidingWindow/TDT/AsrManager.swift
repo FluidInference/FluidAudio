@@ -84,10 +84,10 @@ public actor AsrManager {
         }
     }
 
-    /// Configure this manager with pre-loaded ASR models.
+    /// Load pre-loaded ASR models into this manager.
     /// - Parameter models: Pre-loaded ASR models
-    public func configure(models: AsrModels) async throws {
-        logger.info("Configuring AsrManager with provided models")
+    public func loadModels(_ models: AsrModels) async throws {
+        logger.info("Loading AsrManager with provided models")
 
         self.asrModels = models
         self.preprocessorModel = models.preprocessor
@@ -96,7 +96,14 @@ public actor AsrManager {
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
 
-        logger.info("AsrManager configured successfully with provided models")
+        logger.info("AsrManager loaded successfully with provided models")
+    }
+
+    /// Configure this manager with pre-loaded ASR models.
+    /// - Parameter models: Pre-loaded ASR models
+    @available(*, deprecated, renamed: "loadModels(_:)", message: "Use loadModels(_:) instead")
+    public func configure(models: AsrModels) async throws {
+        try await loadModels(models)
     }
 
     private func createFeatureProvider(

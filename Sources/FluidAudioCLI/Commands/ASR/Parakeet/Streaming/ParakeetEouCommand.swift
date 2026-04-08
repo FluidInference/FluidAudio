@@ -142,7 +142,7 @@ struct ParakeetEouCommand {
             configuration: config, chunkSize: chunkSize, eouDebounceMs: eouDebounceMs, debugFeatures: debugFeatures)
         do {
             logger.info("Loading models from: \(modelsUrl.path)")
-            try await manager.loadModels(modelDir: modelsUrl)
+            try await manager.loadModels(from: modelsUrl)
             logger.info("Models loaded successfully.")
         } catch {
             logger.error("Failed to load models: \(error)")
