@@ -256,11 +256,19 @@ struct ChunkProcessor {
 
         let minimumPairs = max(overlapLeft.count / 2, 1)
 
-        let contiguousPairs = findBestContiguousPairs(
-            overlapLeft: overlapLeft,
-            overlapRight: overlapRight,
-            tolerance: halfOverlapWindow
+        // EXTRACTED: Contiguous matching using SequenceMatcher
+        let timeTolerantMatcher: (IndexedToken, IndexedToken) -> Bool = { [self] l, r in
+            tokensMatch(l, r, tolerance: halfOverlapWindow)
+        }
+
+        let contiguousMatches = SequenceMatcher.findContiguousMatches(
+            left: overlapLeft,
+            right: overlapRight,
+            matcher: timeTolerantMatcher
         )
+
+        // Convert SequenceMatch results to index pairs
+        let contiguousPairs = contiguousMatches.map { ($0.leftStartIndex, $0.rightStartIndex) }
 
         if contiguousPairs.count >= minimumPairs {
             return mergeUsingMatches(
@@ -272,17 +280,22 @@ struct ChunkProcessor {
             )
         }
 
-        let lcsPairs = findLongestCommonSubsequencePairs(
-            overlapLeft: overlapLeft,
-            overlapRight: overlapRight,
-            tolerance: halfOverlapWindow
+        // EXTRACTED: LCS fallback using SequenceMatcher
+        let lcsMatches = SequenceMatcher.findLongestCommonSubsequence(
+            left: overlapLeft,
+            right: overlapRight,
+            matcher: timeTolerantMatcher
         )
 
-        guard !lcsPairs.isEmpty else {
+        guard !lcsMatches.isEmpty else {
             return mergeByMidpoint(
                 left: left, right: right, leftEndTime: leftEndTime, rightStartTime: rightStartTime,
                 frameDuration: frameDuration)
         }
+
+        // Map LCS matches directly to pairs (no consolidation)
+        // mergeUsingMatches requires one pair per matched element to function correctly
+        let lcsPairs = lcsMatches.map { ($0.leftStartIndex, $0.rightStartIndex) }
 
         return mergeUsingMatches(
             matches: lcsPairs,
@@ -291,85 +304,6 @@ struct ChunkProcessor {
             left: left,
             right: right
         )
-    }
-
-    private func findBestContiguousPairs(
-        overlapLeft: [IndexedToken],
-        overlapRight: [IndexedToken],
-        tolerance: Double
-    ) -> [(Int, Int)] {
-        var best: [(Int, Int)] = []
-
-        for i in 0..<overlapLeft.count {
-            for j in 0..<overlapRight.count {
-                let leftToken = overlapLeft[i]
-                let rightToken = overlapRight[j]
-
-                if tokensMatch(leftToken, rightToken, tolerance: tolerance) {
-                    var current: [(Int, Int)] = []
-                    var k = i
-                    var l = j
-
-                    while k < overlapLeft.count && l < overlapRight.count {
-                        let nextLeft = overlapLeft[k]
-                        let nextRight = overlapRight[l]
-
-                        if tokensMatch(nextLeft, nextRight, tolerance: tolerance) {
-                            current.append((k, l))
-                            k += 1
-                            l += 1
-                        } else {
-                            break
-                        }
-                    }
-
-                    if current.count > best.count {
-                        best = current
-                    }
-                }
-            }
-        }
-
-        return best
-    }
-
-    private func findLongestCommonSubsequencePairs(
-        overlapLeft: [IndexedToken],
-        overlapRight: [IndexedToken],
-        tolerance: Double
-    ) -> [(Int, Int)] {
-        let leftCount = overlapLeft.count
-        let rightCount = overlapRight.count
-
-        var dp = Array(repeating: Array(repeating: 0, count: rightCount + 1), count: leftCount + 1)
-
-        for i in 1...leftCount {
-            for j in 1...rightCount {
-                if tokensMatch(overlapLeft[i - 1], overlapRight[j - 1], tolerance: tolerance) {
-                    dp[i][j] = dp[i - 1][j - 1] + 1
-                } else {
-                    dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
-                }
-            }
-        }
-
-        var pairs: [(Int, Int)] = []
-        var i = leftCount
-        var j = rightCount
-
-        while i > 0 && j > 0 {
-            if tokensMatch(overlapLeft[i - 1], overlapRight[j - 1], tolerance: tolerance) {
-                pairs.append((i - 1, j - 1))
-                i -= 1
-                j -= 1
-            } else if dp[i - 1][j] > dp[i][j - 1] {
-                i -= 1
-            } else {
-                j -= 1
-            }
-        }
-
-        return pairs.reversed()
     }
 
     private func tokensMatch(_ left: IndexedToken, _ right: IndexedToken, tolerance: Double) -> Bool {

@@ -183,7 +183,7 @@ public enum CtcEarningsBenchmark {
             )
             let tdtModels = try await AsrModels.downloadAndLoad(version: tdtVersion)
             let asrManager = AsrManager(config: .default)
-            try await asrManager.loadModels(tdtModels)
+            try await asrManager.configure(models: tdtModels)
             print("TDT models loaded successfully")
 
             // Load CTC models for keyword spotting
@@ -454,7 +454,8 @@ public enum CtcEarningsBenchmark {
         let startTime = Date()
 
         // 1. TDT transcription for low WER
-        let tdtResult = try await asrManager.transcribe(wavFile)
+        var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+        let tdtResult = try await asrManager.transcribe(wavFile, decoderState: &decoderState)
 
         // Skip files where TDT returns empty (some audio files cause model issues)
         if tdtResult.text.isEmpty {

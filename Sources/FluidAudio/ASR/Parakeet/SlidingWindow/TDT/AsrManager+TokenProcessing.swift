@@ -103,65 +103,47 @@ extension AsrManager {
         previous: [Int], current: [Int], maxOverlap: Int = 12
     ) -> (deduped: [Int], removedCount: Int) {
 
-        // Handle single punctuation token duplicates first
-        let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
+        // Handle single punctuation token duplicates first (domain-specific)
+        let punctuationTokens = ASRConstants.punctuationTokens
         var workingCurrent = current
         var removedCount = 0
 
         if !previous.isEmpty && !workingCurrent.isEmpty && previous.last == workingCurrent.first
             && punctuationTokens.contains(workingCurrent.first!)
         {
-            // Remove the duplicate punctuation token from the beginning of current
             workingCurrent = Array(workingCurrent.dropFirst())
             removedCount += 1
         }
 
-        // Check for suffix-prefix overlap: end of previous matches beginning of current
-        let maxSearchLength = min(15, previous.count)  // last 15 tokens of previous
-        let maxMatchLength = min(maxOverlap, workingCurrent.count)  // first 12 tokens of current
-
-        guard maxSearchLength >= 2 && maxMatchLength >= 2 else {
-            return (workingCurrent, removedCount)
+        // STAGE 2: Suffix-prefix overlap using extracted utility
+        let exactMatcher: (Int, Int) -> Bool = { $0 == $1 }
+        if let match = SequenceMatcher.findSuffixPrefixMatch(
+            previous: previous,
+            current: workingCurrent,
+            maxOverlap: maxOverlap,
+            matcher: exactMatcher
+        ) {
+            logger.debug("Found exact suffix-prefix overlap of length \(match.length)")
+            let finalRemoved = removedCount + match.length
+            return (Array(workingCurrent.dropFirst(match.length)), finalRemoved)
         }
 
-        // Search for overlapping sequences from longest to shortest
-        for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
-            // Check if the last `overlapLength` tokens of previous match the first `overlapLength` tokens of current
-            let prevSuffix = Array(previous.suffix(overlapLength))
-            let currPrefix = Array(workingCurrent.prefix(overlapLength))
-
-            if prevSuffix == currPrefix {
-                logger.debug("Found exact suffix-prefix overlap of length \(overlapLength): \(prevSuffix)")
-                let finalRemoved = removedCount + overlapLength
-                return (Array(workingCurrent.dropFirst(overlapLength)), finalRemoved)
-            }
-        }
-
-        // Extended search: look for partial overlaps within the sequences
-        // Use boundary search frames from TDT config for NeMo-compatible alignment
+        // STAGE 3: Extended search using extracted utility
         let boundarySearchFrames = config.tdtConfig.boundarySearchFrames
-        for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
-            let prevStart = max(0, previous.count - maxSearchLength)
-            let prevEnd = previous.count - overlapLength + 1
-            if prevEnd <= prevStart { continue }
+        let maxSearchLength = min(15, previous.count)
 
-            for startIndex in prevStart..<prevEnd {
-                let prevSub = Array(previous[startIndex..<(startIndex + overlapLength)])
-                let currEnd = max(0, workingCurrent.count - overlapLength + 1)
-
-                // Use boundarySearchFrames to limit search window (NeMo tdt_search_boundary pattern)
-                let searchLimit = min(boundarySearchFrames, currEnd)
-                for currentStart in 0..<searchLimit {
-                    let currSub = Array(workingCurrent[currentStart..<(currentStart + overlapLength)])
-                    if prevSub == currSub {
-                        logger.debug(
-                            "Found duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub) (boundarySearch=\(boundarySearchFrames))"
-                        )
-                        let finalRemoved = removedCount + currentStart + overlapLength
-                        return (Array(workingCurrent.dropFirst(currentStart + overlapLength)), finalRemoved)
-                    }
-                }
-            }
+        if let match = SequenceMatcher.findBoundedSubstringMatch(
+            previous: previous,
+            current: workingCurrent,
+            maxSearchLength: maxSearchLength,
+            boundarySearchFrames: boundarySearchFrames,
+            matcher: exactMatcher
+        ) {
+            logger.debug(
+                "Found duplicate sequence length=\(match.length) at currStart=\(match.rightStartIndex) (boundarySearch=\(boundarySearchFrames))"
+            )
+            let finalRemoved = removedCount + match.rightStartIndex + match.length
+            return (Array(workingCurrent.dropFirst(match.rightStartIndex + match.length)), finalRemoved)
         }
 
         return (workingCurrent, removedCount)

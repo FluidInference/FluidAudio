@@ -1,6 +1,13 @@
 # API Reference
 
-This page summarizes the primary public APIs across modules. See inline doc comments and module-specific documentation for complete details.
+Primary public APIs for FluidAudio components. See inline doc comments for complete details.
+
+**Components:**
+- [Common Patterns](#common-patterns)
+- [Diarization](#diarization)
+- [Voice Activity Detection](#voice-activity-detection)
+- [Automatic Speech Recognition](#automatic-speech-recognition)
+- [Text-to-Speech](#text-to-speech)
 
 ## Common Patterns
 
@@ -255,3 +262,176 @@ await manager.reset()
 **Performance:**
 - Real-time factor: ~5x RTF (160ms), ~12x RTF (320ms) on Apple Silicon
 - WER: ~8% (160ms), ~5% (320ms) on LibriSpeech test-clean
+
+### SlidingWindowAsrManager
+Real-time sliding window ASR with overlap and cancellation support.
+
+**Key Methods:**
+- `init(models:config:) async throws`
+  - Initialize with ASR models and configuration
+- `transcribeChunk(_:isLastChunk:) async throws -> ASRResult`
+  - Process audio chunk with sliding window overlap
+  - Returns accumulated transcript with proper handling of chunk boundaries
+- `reset()`
+  - Reset internal state for new session
+
+**Configuration:**
+- Default chunk size: ~14.96 seconds
+- Default overlap: 2.0 seconds
+- Supports cancellation via Task cancellation
+
+**Usage:**
+```swift
+let manager = try await SlidingWindowAsrManager()
+
+for audioChunk in audioStream {
+    let result = try await manager.transcribeChunk(
+        audioChunk,
+        isLastChunk: false
+    )
+    print("Partial: \(result.text)")
+}
+
+// Process final chunk
+let final = try await manager.transcribeChunk(lastChunk, isLastChunk: true)
+print("Final: \(final.text)")
+```
+
+### StreamingNemotronAsrManager
+NVIDIA Nemotron streaming ASR with encoder cache for low-latency processing.
+
+**Key Methods:**
+- `init(chunkSize:configuration:) async throws`
+  - Initialize with chunk size (160ms, 320ms, or 1600ms)
+- `loadModels(modelDir:) async throws`
+  - Load CoreML models from directory
+- `transcribe(_:) async throws -> String`
+  - Process audio and return transcript
+- `reset() async`
+  - Reset encoder cache and decoder state
+
+**Chunk Sizes:**
+- `.ms160` — 160ms chunks, lowest latency
+- `.ms320` — 320ms chunks, balanced
+- `.ms1600` — 1600ms chunks, highest throughput
+
+**Performance:**
+- Real-time factor: ~0.2x on Apple Silicon
+- Maintains encoder cache across chunks for efficiency
+
+### Qwen3AsrManager
+Qwen3-based speech recognition with Whisper mel spectrogram frontend.
+
+**Key Methods:**
+- `init(modelDir:configuration:) async throws`
+  - Initialize with model directory and CoreML configuration
+- `transcribe(_:) async throws -> String`
+  - Transcribe audio samples (16kHz mono Float32)
+- `transcribe(_:) async throws -> String`
+  - Transcribe from audio file URL
+
+**Features:**
+- Whisper-style mel spectrogram processing
+- Multi-language support
+- Experimental high-accuracy model
+
+## Text-to-Speech (TTS)
+
+### KokoroTtsManager
+Text-to-speech synthesis using Kokoro CoreML models.
+
+**Key Methods:**
+- `init(defaultVoice:defaultSpeakerId:directory:computeUnits:customLexicon:)`
+  - Create TTS manager with optional configuration
+  - `computeUnits`: Use `.cpuAndGPU` on iOS 26+ to avoid ANE issues
+- `initialize(preloadVoices:) async throws`
+  - Download and initialize TTS models
+  - Optionally preload specific voices
+- `synthesize(text:voice:speakerId:speed:pitch:) async throws -> [Float]`
+  - Synthesize speech from text
+  - Returns audio samples at 24kHz
+- `synthesizeDetailed(text:voice:speakerId:speed:pitch:) async throws -> (audio: [Float], alignments: [AlignmentInfo])`
+  - Synthesize with phoneme-level timing information
+- `synthesizeToFile(text:outputURL:voice:speakerId:speed:pitch:) async throws`
+  - Synthesize directly to WAV file
+- `setDefaultVoice(_:speakerId:) async throws`
+  - Change default voice for subsequent synthesis
+- `setCustomLexicon(_:)`
+  - Set custom pronunciation dictionary
+- `cleanup()`
+  - Release models and free memory
+
+**Available Voices:**
+- `af` — American Female
+- `af_bella`, `af_nicole`, `af_sarah` — American Female variants
+- `am` — American Male
+- `am_adam`, `am_michael` — American Male variants
+- `bf` — British Female
+- `bm` — British Male
+
+**Configuration:**
+- `defaultVoice`: Voice identifier (default: `"af"`)
+- `defaultSpeakerId`: Speaker ID for multi-speaker voices (default: 0)
+- `speed`: Speech rate multiplier (0.5–2.0, default: 1.0)
+- `pitch`: Pitch shift in semitones (-12 to +12, default: 0)
+- `customLexicon`: Custom pronunciation dictionary
+
+**Usage:**
+```swift
+let manager = KokoroTtsManager(defaultVoice: "af")
+try await manager.initialize()
+
+let audio = try await manager.synthesize(
+    text: "Hello from FluidAudio!",
+    speed: 1.0,
+    pitch: 0
+)
+
+// Save to file
+try await manager.synthesizeToFile(
+    text: "Hello world",
+    outputURL: URL(fileURLWithPath: "output.wav")
+)
+```
+
+**Performance:**
+- Real-time factor: ~5-10x on Apple Silicon
+- Output sample rate: 24kHz
+- Supports SSML for prosody control
+
+### PocketTtsManager
+Lightweight streaming TTS with voice cloning support.
+
+**Key Methods:**
+- `init(directory:computeUnits:) async throws`
+  - Initialize with optional directory and compute units
+- `synthesize(text:voice:speakerId:) async throws -> [Float]`
+  - Synthesize speech from text
+  - Returns audio samples at 24kHz
+- `synthesizeStreaming(text:voice:speakerId:) -> AsyncThrowingStream<[Float], Error>`
+  - Stream audio chunks as they are generated
+- `cloneVoice(from:name:) async throws -> String`
+  - Clone voice from reference audio
+  - Returns voice ID for later use
+- `cleanup()`
+  - Release models and free memory
+
+**Features:**
+- Streaming synthesis for long text
+- Voice cloning from short audio samples
+- Lower memory footprint than Kokoro
+- Faster synthesis for real-time applications
+
+**Usage:**
+```swift
+let manager = try await PocketTtsManager()
+
+// Basic synthesis
+let audio = try await manager.synthesize(text: "Hello world")
+
+// Streaming synthesis
+for try await chunk in manager.synthesizeStreaming(text: longText) {
+    // Play audio chunk immediately
+    playAudio(chunk)
+}
+```

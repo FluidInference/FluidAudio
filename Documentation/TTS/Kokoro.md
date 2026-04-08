@@ -1,8 +1,8 @@
-# Kokoro: High-Quality Text-to-Speech
+# Kokoro Text-to-Speech
 
 ## Overview
 
-Kokoro is a high-quality, English-only TTS backend. It generates the entire audio representation in one pass (all frames at once) using flow matching over mel spectrograms, then converts to audio with the Vocos vocoder.
+Kokoro is a TTS backend that generates the entire audio representation in one pass (all frames at once) using flow matching over mel spectrograms, then converts to audio with the Vocos vocoder.
 
 ## Quick Start
 

@@ -84,19 +84,10 @@ final class AsrManagerTests: XCTestCase {
     // MARK: - Decoder Input Preparation Tests
 
     func testDecoderStateInitialization() async throws {
-        // Since prepareDecoderInput is now private and requires models to be loaded,
-        // we test that the manager correctly handles the not initialized state
-
-        // Test that resetDecoderState throws notInitialized when models aren't loaded
-        do {
-            try await manager.resetDecoderState()
-            XCTFail("Expected notInitialized error")
-        } catch ASRError.notInitialized {
-            // Expected behavior when models aren't loaded
-            XCTAssertTrue(true, "Correctly threw notInitialized error")
-        } catch {
-            XCTFail("Expected notInitialized error, got: \(error)")
-        }
+        // Decoder state is now managed explicitly by callers via TdtDecoderState.make()
+        // No initialization needed from AsrManager
+        let state = TdtDecoderState.make()
+        XCTAssertNotNil(state, "Decoder state should be created successfully")
     }
 
     // MARK: - Feature Extraction Tests

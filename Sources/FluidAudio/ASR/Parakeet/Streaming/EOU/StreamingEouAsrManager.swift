@@ -278,7 +278,7 @@ public actor StreamingEouAsrManager {
     ///   - directory: Root directory that should contain the chunk-specific model folder.
     ///   - configuration: Optional model configuration override applied before loading.
     ///   - progressHandler: Optional callback for download progress updates.
-    public func loadModelsFromHuggingFace(
+    public func loadModels(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
@@ -314,6 +314,12 @@ public actor StreamingEouAsrManager {
         try await loadModels(modelDir: modelDir)
     }
 
+    /// Load models from a specific directory
+    /// - Parameter directory: Directory containing the model files
+    public func loadModels(from directory: URL) async throws {
+        try await loadModels(modelDir: directory)
+    }
+
     private static func defaultCacheDirectory() -> URL {
         let applicationSupportURL = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
@@ -326,30 +332,25 @@ public actor StreamingEouAsrManager {
     }
 
     private func resetStates() throws {
-        // Initialize with Zeros
         // pre_cache: [1, 128, preCacheSize] - size varies by chunk size
         let preCacheSize = chunkSize.preCacheSize
-        self.preCache = try MLMultiArray(
-            shape: [1, 128, NSNumber(value: preCacheSize)], dataType: .float32)
-        self.preCache?.reset(to: 0)
+        self.preCache = try EncoderCacheManager.createZeroArray(shape: [1, 128, preCacheSize])
 
-        // cache_last_channel: [17, 1, 70, 512]
-        self.cacheLastChannel = try MLMultiArray(shape: [17, 1, 70, 512], dataType: .float32)
-        self.cacheLastChannel?.reset(to: 0)
-
-        // cache_last_time: [17, 1, 512, 8]
-        self.cacheLastTime = try MLMultiArray(shape: [17, 1, 512, 8], dataType: .float32)
-        self.cacheLastTime?.reset(to: 0)
-
-        // cache_last_channel_len: [1]
-        self.cacheLastChannelLen = try MLMultiArray(shape: [1], dataType: .int32)
-        self.cacheLastChannelLen?.reset(to: 0)
+        // Encoder caches using EncoderCacheManager
+        let cacheConfig = EncoderCacheManager.CacheConfig(
+            channelShape: [17, 1, 70, 512],
+            timeShape: [17, 1, 512, 8],
+            lenShape: [1]
+        )
+        let caches = try EncoderCacheManager.createInitialCaches(config: cacheConfig)
+        self.cacheLastChannel = caches.channel
+        self.cacheLastTime = caches.time
+        self.cacheLastChannelLen = caches.len
     }
 
     /// Append audio to buffer without processing (for Simulated Streaming and VAD)
     public func appendAudio(_ buffer: AVAudioPCMBuffer) throws {
-        let samples = try audioConverter.resampleBuffer(buffer)
-        self.audioBuffer.append(contentsOf: samples)
+        try StreamingAsrUtils.appendAudio(buffer, using: audioConverter, to: &audioBuffer)
     }
 
     public func process(audioBuffer: AVAudioPCMBuffer) async throws -> String {
@@ -414,15 +415,17 @@ public actor StreamingEouAsrManager {
     }
 
     public func reset() async {
-        audioBuffer.removeAll()
+        StreamingAsrUtils.resetSharedState(
+            audioBuffer: &audioBuffer,
+            accumulatedTokenIds: &accumulatedTokenIds,
+            processedChunks: &processedChunks
+        )
         debugFeatureBuffer.removeAll()
-        accumulatedTokenIds.removeAll()
         eouDetected = false
         eouFirstDetectedAt = nil
         totalSamplesProcessed = 0
         try? resetStates()
         rnntDecoder?.resetState()
-        processedChunks = 0
     }
 
     public func cleanup() async {
@@ -491,14 +494,21 @@ public actor StreamingEouAsrManager {
         if let newPreCache = encoderOutput.featureValue(for: "new_pre_cache")?.multiArrayValue {
             self.preCache = newPreCache
         }
-        if let newChannel = encoderOutput.featureValue(for: "new_cache_last_channel")?.multiArrayValue {
+        // Update encoder cache states using EncoderCacheManager
+        let updatedCaches = EncoderCacheManager.extractCachesFromOutput(
+            encoderOutput,
+            channelKey: "new_cache_last_channel",
+            timeKey: "new_cache_last_time",
+            lenKey: "new_cache_last_channel_len"
+        )
+        if let newChannel = updatedCaches.channel {
             self.cacheLastChannel = newChannel
         }
-        if let newTime = encoderOutput.featureValue(for: "new_cache_last_time")?.multiArrayValue {
+        if let newTime = updatedCaches.time {
             self.cacheLastTime = newTime
         }
-        if let newChannelLen = encoderOutput.featureValue(for: "new_cache_last_channel_len")?.multiArrayValue {
-            self.cacheLastChannelLen = newChannelLen
+        if let newLen = updatedCaches.len {
+            self.cacheLastChannelLen = newLen
         }
 
         // D. Decode this chunk's encoder output incrementally (NeMo-style)
@@ -578,7 +588,7 @@ extension StreamingEouAsrManager: StreamingAsrManager {
     }
 
     public func loadModels() async throws {
-        try await loadModelsFromHuggingFace()
+        try await loadModels(to: nil, configuration: nil, progressHandler: nil)
     }
 
     public func processBufferedAudio() async throws {

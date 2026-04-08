@@ -335,6 +335,8 @@ public actor PunctuationCommitLayer {
 
             // Timeout expired
             if commitOnTimeout {
+                // Check cancellation again before acquiring actor executor
+                guard !Task.isCancelled else { return }
                 await self.commitGhostText(reason: .debounceTimeout)
             }
         }

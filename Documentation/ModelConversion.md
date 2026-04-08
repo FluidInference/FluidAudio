@@ -10,7 +10,7 @@ Adding a new model has three stages across three locations:
 2. **[HuggingFace](https://huggingface.co/FluidInference)** — Upload and host the converted model artifacts (`.mlmodelc`, `.mlpackage`, vocab JSON, embeddings, etc.)
 3. **FluidAudio** — Register the model, write inference code, add CLI command, write tests
 
-Each new model should reference all three:
+Each new model should reference all three in their PRs:
 
 | Item | Example |
 |------|---------|
@@ -43,7 +43,7 @@ mobius/models/
 
 ### 1.2 Write the conversion script
 
-Use `uv` for dependency management. The recommended Python version is 3.10.12 but other versions may work. The script should:
+Use `uv` for dependency management. The recommended Python version is 3.10.12 but other versions may work. Reference other model folders for uv.lock libraries. the coremltool and pytorch modules are sensitive to version dependency issues. The script should:
 
 1. Load the source model (PyTorch checkpoint, NeMo, HuggingFace, etc.)
 2. Wrap into a traceable `nn.Module` if needed (extract stateful components like LSTM states)
@@ -63,6 +63,11 @@ Use `uv` for dependency management. The recommended Python version is 3.10.12 bu
 5. Set metadata (author, version, description)
 6. Save as `.mlpackage`, then compile to `.mlmodelc`
 7. Validate outputs against the original PyTorch model (numerical accuracy check)
+8. Full pipeline inference script
+- ASR CoreML models should compare against their original nemo or pytorch model outputs
+- TTS CoreML models are best with manual inspections, or TTS to STT transcriptions for verifications. spectral embedding or Pyannote embedding model could be used for comparsion between pytorch and coreml embedding outputs
+9. some benchmarking would be useful too such as RTFx or WER or DER for diarization.
+10. Document any failures or errors you have encountered 
 
 ### 1.3 Open a mobius PR
 

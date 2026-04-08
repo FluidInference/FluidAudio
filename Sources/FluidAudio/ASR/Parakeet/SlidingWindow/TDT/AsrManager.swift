@@ -21,7 +21,7 @@ public actor AsrManager {
 
     /// Number of decoder layers for the current model.
     /// Returns 2 if models not loaded (v2/v3 default, tdtCtc110m uses 1).
-    internal var decoderLayerCount: Int {
+    public var decoderLayerCount: Int {
         asrModels?.version.decoderLayers ?? 2
     }
 
@@ -34,26 +34,6 @@ public actor AsrManager {
     }
     #endif
 
-    // Per-source decoder states are actor-internal; callers reset via resetDecoderState().
-    internal var microphoneDecoderState: TdtDecoderState
-    internal var systemDecoderState: TdtDecoderState
-
-    /// Get decoder state for a given audio source.
-    internal func decoderState(for source: AudioSource) -> TdtDecoderState {
-        switch source {
-        case .microphone: return microphoneDecoderState
-        case .system: return systemDecoderState
-        }
-    }
-
-    /// Set decoder state for a given audio source.
-    internal func setDecoderState(_ state: TdtDecoderState, for source: AudioSource) {
-        switch source {
-        case .microphone: microphoneDecoderState = state
-        case .system: systemDecoderState = state
-        }
-    }
-
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {
         AsrModels.optimizedPredictionOptions()
@@ -61,9 +41,6 @@ public actor AsrManager {
 
     public init(config: ASRConfig = .default) {
         self.config = config
-
-        self.microphoneDecoderState = TdtDecoderState.make()
-        self.systemDecoderState = TdtDecoderState.make()
 
         // Pre-warm caches if possible
         Task {
@@ -107,10 +84,10 @@ public actor AsrManager {
         }
     }
 
-    /// Load pre-built ASR models into this manager.
+    /// Configure this manager with pre-loaded ASR models.
     /// - Parameter models: Pre-loaded ASR models
-    public func loadModels(_ models: AsrModels) async throws {
-        logger.info("Initializing AsrManager with provided models")
+    public func configure(models: AsrModels) async throws {
+        logger.info("Configuring AsrManager with provided models")
 
         self.asrModels = models
         self.preprocessorModel = models.preprocessor
@@ -119,12 +96,7 @@ public actor AsrManager {
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
 
-        // Recreate decoder states with the correct layer count for this model version
-        let layers = models.version.decoderLayers
-        self.microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
-        self.systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
-
-        logger.info("AsrManager initialized successfully with provided models")
+        logger.info("AsrManager configured successfully with provided models")
     }
 
     private func createFeatureProvider(
@@ -191,47 +163,16 @@ public actor AsrManager {
         ])
     }
 
-    internal func initializeDecoderState(for source: AudioSource) async throws {
-        guard let decoderModel = decoderModel else {
-            throw ASRError.notInitialized
-        }
-
-        var state = decoderState(for: source)
-        state.reset()
-
-        let initDecoderInput = try prepareDecoderInput(
-            hiddenState: state.hiddenState,
-            cellState: state.cellState
-        )
-
-        let initDecoderOutput = try await decoderModel.compatPrediction(
-            from: initDecoderInput,
-            options: predictionOptions
-        )
-
-        state.update(from: initDecoderOutput)
-        setDecoderState(state, for: source)
-    }
-
     public func reset() {
-        // Use model's decoder layer count, or 2 if models not loaded (v2/v3 default)
-        let layers = asrModels?.version.decoderLayers ?? 2
-        microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
-        systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
         Task { await sharedMLArrayCache.clear() }
     }
 
     public func cleanup() {
-        // Capture layer count before releasing models, fallback to 2 (v2/v3 default)
-        let layers = asrModels?.version.decoderLayers ?? 2
         asrModels = nil
         preprocessorModel = nil
         encoderModel = nil
         decoderModel = nil
         jointModel = nil
-        // Reset decoder states using fresh allocations for deterministic behavior
-        microphoneDecoderState = TdtDecoderState.make(decoderLayers: layers)
-        systemDecoderState = TdtDecoderState.make(decoderLayers: layers)
         Task { await sharedMLArrayCache.clear() }
         logger.info("AsrManager resources cleaned up")
     }
@@ -306,38 +247,36 @@ public actor AsrManager {
 
     /// Transcribe audio from an AVAudioPCMBuffer.
     ///
-    /// Performs speech-to-text transcription on the provided audio buffer. The decoder state is automatically
-    /// reset after transcription completes, ensuring each transcription call is independent. This enables
-    /// efficient batch processing where multiple files are transcribed without state carryover.
+    /// Performs speech-to-text transcription on the provided audio buffer.
     ///
     /// - Parameters:
     ///   - audioBuffer: The audio buffer to transcribe
-    ///   - source: The audio source type (microphone or system audio)
+    ///   - decoderState: The TDT decoder state to use and update during transcription
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails or models are not initialized
-    public func transcribe(_ audioBuffer: AVAudioPCMBuffer, source: AudioSource = .microphone) async throws -> ASRResult
-    {
+    public func transcribe(
+        _ audioBuffer: AVAudioPCMBuffer, decoderState: inout TdtDecoderState
+    ) async throws -> ASRResult {
         let audioFloatArray = try audioConverter.resampleBuffer(audioBuffer)
 
-        let result = try await transcribe(audioFloatArray, source: source)
+        let result = try await transcribe(audioFloatArray, decoderState: &decoderState)
 
         return result
     }
 
     /// Transcribe audio from a file URL.
     ///
-    /// Performs speech-to-text transcription on the audio file at the provided URL. The decoder state is
-    /// automatically reset after transcription completes, ensuring each transcription call is independent.
+    /// Performs speech-to-text transcription on the audio file at the provided URL.
     ///
-    /// For large files (exceeding `config.streamingThreshold`), automatically uses streaming mode
+    /// For large files (exceeding `config.streamingThreshold`), automatically uses disk-backed processing
     /// to maintain constant memory usage regardless of file size.
     ///
     /// - Parameters:
     ///   - url: The URL to the audio file
-    ///   - source: The audio source type (defaults to .system)
+    ///   - decoderState: The TDT decoder state to use and update during transcription
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails, models are not initialized, or the file cannot be read
-    public func transcribe(_ url: URL, source: AudioSource = .system) async throws -> ASRResult {
+    public func transcribe(_ url: URL, decoderState: inout TdtDecoderState) async throws -> ASRResult {
         // Check file size to decide streaming vs memory loading
         if config.streamingEnabled {
             let audioFile = try AVAudioFile(forReading: url)
@@ -346,12 +285,12 @@ public actor AsrManager {
             let estimatedSamples = Int((Double(audioFile.length) * sampleRateRatio).rounded(.up))
 
             if estimatedSamples > config.streamingThreshold {
-                return try await transcribeDiskBacked(url, source: source)
+                return try await transcribeDiskBacked(url, decoderState: &decoderState)
             }
         }
 
         let audioFloatArray = try audioConverter.resampleAudioFile(url)
-        let result = try await transcribe(audioFloatArray, source: source)
+        let result = try await transcribe(audioFloatArray, decoderState: &decoderState)
         return result
     }
 
@@ -362,10 +301,10 @@ public actor AsrManager {
     ///
     /// - Parameters:
     ///   - url: The URL to the audio file
-    ///   - source: The audio source type (defaults to .system)
+    ///   - decoderState: The TDT decoder state to use and update during transcription
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails, models are not initialized, or the file cannot be read
-    public func transcribeDiskBacked(_ url: URL, source: AudioSource = .system) async throws -> ASRResult {
+    public func transcribeDiskBacked(_ url: URL, decoderState: inout TdtDecoderState) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
 
         let startTime = Date()
@@ -401,7 +340,6 @@ public actor AsrManager {
 
             sampleSource.cleanup()
 
-            try await self.resetDecoderState(for: source)
             if shouldEmitProgress {
                 await progressEmitter.finishSession()
             }
@@ -418,31 +356,26 @@ public actor AsrManager {
 
     /// Transcribe audio from raw float samples.
     ///
-    /// Performs speech-to-text transcription on raw audio samples at 16kHz. The decoder state is
-    /// automatically reset after transcription completes, ensuring each transcription call is independent
-    /// and enabling efficient batch processing of multiple audio files.
+    /// Performs speech-to-text transcription on raw audio samples at 16kHz.
     ///
     /// - Parameters:
     ///   - audioSamples: Array of 16-bit audio samples at 16kHz
-    ///   - source: The audio source type (microphone or system audio)
+    ///   - decoderState: The TDT decoder state to use and update during transcription
     /// - Note: Progress stream is emitted only when `audioSamples.count > ASRConstants.maxModelSamples` (~15s).
     ///         Use `transcriptionProgressStream` before calling this method to observe progress.
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails or models are not initialized
     public func transcribe(
         _ audioSamples: [Float],
-        source: AudioSource = .microphone
+        decoderState: inout TdtDecoderState
     ) async throws -> ASRResult {
         let shouldEmitProgress = audioSamples.count > ASRConstants.maxModelSamples
         if shouldEmitProgress {
             _ = await progressEmitter.ensureSession()
         }
         do {
-            let result = try await transcribeWithState(audioSamples, source: source)
+            let result = try await transcribeWithState(audioSamples, decoderState: &decoderState)
 
-            // Reset only the source we just used — resetting both races with a
-            // concurrent transcription on the other source and frees in-flight MLMultiArrays.
-            try await self.resetDecoderState(for: source)
             if shouldEmitProgress {
                 await progressEmitter.finishSession()
             }
@@ -454,18 +387,6 @@ public actor AsrManager {
             }
             throw error
         }
-    }
-
-    // Reset both decoder states
-    public func resetDecoderState() async throws {
-        try await resetDecoderState(for: .microphone)
-        try await resetDecoderState(for: .system)
-    }
-
-    /// Reset the decoder state for a specific audio source
-    /// This should be called when starting a new transcription session or switching between different audio files
-    public func resetDecoderState(for source: AudioSource) async throws {
-        try await initializeDecoderState(for: source)
     }
 
     nonisolated internal func normalizedTimingToken(_ token: String) -> String {

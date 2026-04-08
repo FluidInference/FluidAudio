@@ -15,7 +15,7 @@ public actor SlidingWindowAsrSession {
 
     /// Load ASR models for the session (called automatically if needed)
     /// Models are cached and shared across all streams in this session
-    public func initialize() async throws {
+    public func loadModels() async throws {
         guard loadedModels == nil else {
             logger.info("Models already loaded, skipping initialization")
             return
@@ -44,7 +44,7 @@ public actor SlidingWindowAsrSession {
 
         // Ensure models are loaded
         if loadedModels == nil {
-            try await initialize()
+            try await loadModels()
         }
 
         guard let models = loadedModels else {
@@ -55,7 +55,7 @@ public actor SlidingWindowAsrSession {
 
         // Create new stream with pre-loaded models
         let stream = SlidingWindowAsrManager(config: config)
-        try await stream.start(models: models, source: source)
+        try await stream.startStreaming(models: models, source: source)
 
         // Store reference
         streams[source] = stream

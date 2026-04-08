@@ -102,7 +102,7 @@ enum MultiStreamCommand {
             // Initialize models once
             logger.info("Loading ASR models (shared across streams)...")
             let startTime = Date()
-            try await session.initialize()
+            try await session.loadModels()
             let loadTime = Date().timeIntervalSince(startTime)
             logger.info("Models loaded in \(String(format: "%.2f", loadTime))s\n")
 

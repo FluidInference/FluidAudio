@@ -571,8 +571,9 @@ public class FLEURSBenchmark {
                 )
                 // Measure only inference time for accurate RTFx calculation
                 let url = URL(fileURLWithPath: sample.audioPath)
+                var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
                 let inferenceStartTime = Date()
-                let result = try await asrManager.transcribe(url)
+                let result = try await asrManager.transcribe(url, decoderState: &decoderState)
                 let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
                 // Calculate metrics if reference transcription is available
@@ -975,7 +976,7 @@ extension FLEURSBenchmark {
         do {
             cliLogger.info("Initializing ASR system...")
             let models = try await AsrModels.downloadAndLoad()
-            try await asrManager.loadModels(models)
+            try await asrManager.configure(models: models)
             cliLogger.info("ASR system initialized")
 
             // Run benchmark
@@ -1118,7 +1119,7 @@ extension FLEURSBenchmark {
         do {
             cliLogger.info("Initializing ASR system...")
             let models = try await AsrModels.downloadAndLoad()
-            try await asrManager.loadModels(models)
+            try await asrManager.configure(models: models)
             cliLogger.info("ASR system initialized")
 
             // Load the single sample directly
@@ -1234,8 +1235,9 @@ extension FLEURSBenchmark {
 
         // Measure only inference time for accurate RTFx calculation
         let url = URL(fileURLWithPath: sample.audioPath)
+        var decoderState = TdtDecoderState.make()
         let inferenceStartTime = Date()
-        let result = try await asrManager.transcribe(url)
+        let result = try await asrManager.transcribe(url, decoderState: &decoderState)
         let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
         logger.info("  Hypothesis: \(result.text)")

@@ -93,6 +93,13 @@ jobs:
           echo "CLUSTERING_TIME=${CLUSTERING_TIME}" >> $GITHUB_OUTPUT
           echo "INFERENCE_TIME=${INFERENCE_TIME}" >> $GITHUB_OUTPUT
 
+          # Validate RTFx - 0 indicates benchmark failure
+          if [ "$RTF" = "0" ] || [ -z "$RTF" ]; then
+            echo "❌ CRITICAL: RTFx is 0 or empty - benchmark failed"
+            echo "RTFx value: $RTF"
+            exit 1
+          fi
+
       - name: Comment PR with Offline Pipeline Results
         if: always()
         uses: actions/github-script@v7

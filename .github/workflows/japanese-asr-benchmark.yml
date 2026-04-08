@@ -4,8 +4,8 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'Sources/FluidAudio/ASR/Parakeet/TdtJa*.swift'
-      - 'Sources/FluidAudio/ASR/Parakeet/Decoder/Tdt*.swift'
+      - 'Sources/FluidAudio/ASR/Parakeet/SlidingWindow/TDT/TdtJa*.swift'
+      - 'Sources/FluidAudio/ASR/Parakeet/SlidingWindow/TDT/Decoder/Tdt*.swift'
       - 'Sources/FluidAudioCLI/Commands/ASR/JapaneseAsrBenchmark.swift'
       - '.github/workflows/japanese-asr-benchmark.yml'
   workflow_dispatch:
@@ -45,7 +45,7 @@ jobs:
             ~/Library/Caches/Homebrew
             /usr/local/Cellar/ffmpeg
             /opt/homebrew/Cellar/ffmpeg
-          key: ${{ runner.os }}-ja-asr-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/ASR/Parakeet/TdtJa*.swift', 'Sources/FluidAudio/ModelNames.swift') }}
+          key: ${{ runner.os }}-ja-asr-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/ASR/Parakeet/SlidingWindow/TDT/TdtJa*.swift', 'Sources/FluidAudio/ModelNames.swift') }}
 
       - name: Install ffmpeg
         run: |
@@ -115,6 +115,13 @@ jobs:
             echo "samples=$SAMPLES" >> $GITHUB_OUTPUT
             echo "avg_rtf=$AVG_RTF" >> $GITHUB_OUTPUT
             echo "decoder=$DECODER" >> $GITHUB_OUTPUT
+
+            # Validate RTFx - 0 indicates benchmark failure
+            if [ "$AVG_RTF" = "N/A" ] || [ "$AVG_RTF" = "0.0" ] || [ "$AVG_RTF" = "0" ] || [ -z "$AVG_RTF" ]; then
+              echo "❌ CRITICAL: RTFx is 0 or N/A - benchmark failed"
+              echo "RTFx value: $AVG_RTF"
+              exit 1
+            fi
           else
             echo "cer=N/A" >> $GITHUB_OUTPUT
             echo "samples=0" >> $GITHUB_OUTPUT

@@ -379,10 +379,11 @@ public struct TTS {
                     // Load ASR models and initialize
                     let models = try await AsrModels.downloadAndLoad()
                     let asr = AsrManager()
-                    try await asr.loadModels(models)
+                    try await asr.configure(models: models)
 
                     // Transcribe the generated audio file
-                    let transcription = try await asr.transcribe(outURL)
+                    var decoderState = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
+                    let transcription = try await asr.transcribe(outURL, decoderState: &decoderState)
                     asrHypothesis = transcription.text
 
                     // Calculate WER metrics using shared utility
@@ -585,9 +586,10 @@ public struct TTS {
                 do {
                     let asrModels = try await AsrModels.downloadAndLoad()
                     let asr = AsrManager()
-                    try await asr.loadModels(asrModels)
+                    try await asr.configure(models: asrModels)
 
-                    let transcription = try await asr.transcribe(outURL)
+                    var decoderState = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
+                    let transcription = try await asr.transcribe(outURL, decoderState: &decoderState)
                     asrHypothesis = transcription.text
 
                     let werMetrics = WERCalculator.calculateWERMetrics(
