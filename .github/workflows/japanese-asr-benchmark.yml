@@ -115,6 +115,13 @@ jobs:
             echo "samples=$SAMPLES" >> $GITHUB_OUTPUT
             echo "avg_rtf=$AVG_RTF" >> $GITHUB_OUTPUT
             echo "decoder=$DECODER" >> $GITHUB_OUTPUT
+
+            # Validate RTFx - 0 indicates benchmark failure
+            if [ "$AVG_RTF" = "N/A" ] || [ "$AVG_RTF" = "0.0" ] || [ "$AVG_RTF" = "0" ] || [ -z "$AVG_RTF" ]; then
+              echo "❌ CRITICAL: RTFx is 0 or N/A - benchmark failed"
+              echo "RTFx value: $AVG_RTF"
+              exit 1
+            fi
           else
             echo "cer=N/A" >> $GITHUB_OUTPUT
             echo "samples=0" >> $GITHUB_OUTPUT
