@@ -71,6 +71,19 @@ jobs:
           EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
           echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
 
+          # Validate output file was generated
+          if [ ! -f pocket_tts_output.wav ]; then
+            echo "❌ CRITICAL: Output WAV file not generated"
+            exit 1
+          fi
+
+          # Validate output file is not empty
+          FILE_SIZE=$(stat -f%z pocket_tts_output.wav 2>/dev/null || stat -c%s pocket_tts_output.wav 2>/dev/null)
+          if [ "$FILE_SIZE" -eq 0 ]; then
+            echo "❌ CRITICAL: Output WAV file is empty (0 bytes)"
+            exit 1
+          fi
+
       - name: Comment PR
         if: always() && github.event_name == 'pull_request'
         continue-on-error: true
