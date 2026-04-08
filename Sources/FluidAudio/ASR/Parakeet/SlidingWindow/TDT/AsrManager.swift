@@ -99,13 +99,6 @@ public actor AsrManager {
         logger.info("AsrManager loaded successfully with provided models")
     }
 
-    /// Configure this manager with pre-loaded ASR models.
-    /// - Parameter models: Pre-loaded ASR models
-    @available(*, deprecated, renamed: "loadModels(_:)", message: "Use loadModels(_:) instead")
-    public func configure(models: AsrModels) async throws {
-        try await loadModels(models)
-    }
-
     private func createFeatureProvider(
         features: [(name: String, array: MLMultiArray)]
     ) throws
