@@ -119,7 +119,8 @@ struct ChunkProcessor {
                     var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
                     decoderState.reset()
 
-                    let (windowTokens, windowTimestamps, windowConfidences, windowDurations) = try await Self
+                    let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
+                        try await Self
                         .transcribeChunk(
                             samples: chunkSamplesArray,
                             contextSamples: contextSamples,
@@ -130,8 +131,9 @@ struct ChunkProcessor {
                             maxModelSamples: maxModelSamples
                         )
 
-                    guard windowTokens.count == windowTimestamps.count
-                        && windowTokens.count == windowConfidences.count
+                    guard
+                        windowTokens.count == windowTimestamps.count
+                            && windowTokens.count == windowConfidences.count
                     else {
                         throw ASRError.processingFailed("Token, timestamp, and confidence arrays are misaligned")
                     }
