@@ -9,6 +9,10 @@ public struct ASRConfig: Sendable {
     /// Encoder hidden dimension (1024 for 0.6B, 512 for 110m)
     public let encoderHiddenSize: Int
 
+    /// Number of long-form chunks to transcribe concurrently.
+    /// Applies only to stateless chunked transcription paths.
+    public let parallelChunkConcurrency: Int
+
     /// Enable streaming mode for large files to reduce memory usage.
     /// When enabled, files larger than `streamingThreshold` samples will be processed
     /// using streaming to maintain constant memory usage.
@@ -25,12 +29,14 @@ public struct ASRConfig: Sendable {
         sampleRate: Int = 16000,
         tdtConfig: TdtConfig = .default,
         encoderHiddenSize: Int = ASRConstants.encoderHiddenSize,
+        parallelChunkConcurrency: Int = 4,
         streamingEnabled: Bool = true,
         streamingThreshold: Int = 480_000
     ) {
         self.sampleRate = sampleRate
         self.tdtConfig = tdtConfig
         self.encoderHiddenSize = encoderHiddenSize
+        self.parallelChunkConcurrency = max(1, parallelChunkConcurrency)
         self.streamingEnabled = streamingEnabled
         self.streamingThreshold = streamingThreshold
     }
