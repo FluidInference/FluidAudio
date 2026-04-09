@@ -60,10 +60,24 @@ public enum CohereAsrConfig {
         public static let eosToken: Int = 3
         /// Start of transcript token.
         public static let startToken: Int = 4
+        /// Start of context token.
+        public static let startOfContext: Int = 7
+        /// Emotion undefined token.
+        public static let emoUndefined: Int = 16
+        /// Punctuation token.
+        public static let pnc: Int = 5
+        /// No inverse text normalization.
+        public static let noitn: Int = 9
+        /// No timestamp token.
+        public static let notimestamp: Int = 11
+        /// No diarization token.
+        public static let nodiarize: Int = 13
+        /// Word boundary marker.
+        public static let wordBoundary: Int = 13764
     }
 
     /// Supported languages.
-    public enum Language: String, CaseIterable {
+    public enum Language: String, CaseIterable, Sendable {
         case english = "en"
         case french = "fr"
         case german = "de"
@@ -96,6 +110,54 @@ public enum CohereAsrConfig {
             case .vietnamese: return "Vietnamese"
             case .korean: return "Korean"
             }
+        }
+
+        /// Language token ID (used as start token for conditioned generation).
+        public var tokenId: Int {
+            switch self {
+            case .english: return 62
+            case .french: return 69
+            case .german: return 76
+            case .spanish: return 169
+            case .italian: return 97
+            case .portuguese: return 149
+            case .dutch: return 60
+            case .polish: return 148
+            case .greek: return 77
+            case .arabic: return 28
+            case .japanese: return 98
+            case .chinese: return 50
+            case .vietnamese: return 194
+            case .korean: return 110
+            }
+        }
+
+        /// Build the prompt sequence for this language.
+        ///
+        /// Cohere models expect a specific prompt sequence:
+        /// 1. Word boundary marker
+        /// 2. Start of context
+        /// 3. Start of transcript
+        /// 4. Emotion undefined
+        /// 5-6. Language token (repeated twice)
+        /// 7. Punctuation
+        /// 8. No inverse text normalization
+        /// 9. No timestamp
+        /// 10. No diarization
+        public var promptSequence: [Int] {
+            let langToken = tokenId
+            return [
+                SpecialTokens.wordBoundary,    // ▁
+                SpecialTokens.startOfContext,  // <|startofcontext|>
+                SpecialTokens.startToken,      // <|startoftranscript|>
+                SpecialTokens.emoUndefined,    // <|emo:undefined|>
+                langToken,                      // <|en|> (or other language)
+                langToken,                      // <|en|> (repeated)
+                SpecialTokens.pnc,             // <|pnc|>
+                SpecialTokens.noitn,           // <|noitn|>
+                SpecialTokens.notimestamp,     // <|notimestamp|>
+                SpecialTokens.nodiarize,       // <|nodiarize|>
+            ]
         }
     }
 }

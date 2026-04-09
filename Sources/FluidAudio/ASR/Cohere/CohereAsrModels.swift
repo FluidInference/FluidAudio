@@ -27,11 +27,22 @@ public enum CohereAsrVariant: String, CaseIterable, Sendable {
 /// Components:
 /// - `encoder`: Mel spectrogram -> encoder hidden states (1, 376, 1024)
 /// - `decoder`: Cached decoder with self-attention and cross-attention
+///
+/// **Important**: The cache-external decoder only works reliably for Spanish.
+/// Other languages may hallucinate. For multilingual ASR, use Whisper or Qwen3.
+///
+/// Decoder type (stateful vs cache-external).
+public enum DecoderType: Sendable {
+    case stateful
+    case cacheExternal
+}
+
 @available(macOS 14, iOS 17, *)
 public struct CohereAsrModels: Sendable {
     public let encoder: MLModel
     public let decoder: MLModel
     public let vocabulary: [Int: String]
+    public let decoderType: DecoderType
 
     /// Load Cohere Transcribe models from a directory.
     ///
@@ -58,9 +69,9 @@ public struct CohereAsrModels: Sendable {
             configuration: modelConfig
         )
 
-        // Load decoder (stateful - uses CoreML state API)
+        // Load decoder (cache-external - Parakeet pattern with external KV cache management)
         let decoder = try await loadModel(
-            named: ModelNames.CohereTranscribe.decoderStateful,
+            named: ModelNames.CohereTranscribe.decoderCacheExternal,
             from: directory,
             configuration: modelConfig
         )
@@ -68,13 +79,25 @@ public struct CohereAsrModels: Sendable {
         // Load vocabulary
         let vocabulary = try loadVocabulary(from: directory)
 
+        // Detect decoder type by checking input names
+        let decoderType: DecoderType
+        let inputNames = decoder.modelDescription.inputDescriptionsByName.keys
+        if inputNames.contains("k_cache_0") {
+            decoderType = .cacheExternal
+            logger.info("Detected cache-external decoder")
+        } else {
+            decoderType = .stateful
+            logger.info("Detected stateful decoder")
+        }
+
         let elapsed = CFAbsoluteTimeGetCurrent() - start
         logger.info("Loaded Cohere Transcribe models in \(String(format: "%.2f", elapsed))s")
 
         return CohereAsrModels(
             encoder: encoder,
             decoder: decoder,
-            vocabulary: vocabulary
+            vocabulary: vocabulary,
+            decoderType: decoderType
         )
     }
 

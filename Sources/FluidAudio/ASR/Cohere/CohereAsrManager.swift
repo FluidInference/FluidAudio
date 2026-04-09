@@ -33,16 +33,31 @@ public actor CohereAsrManager {
 
     /// Transcribe raw audio samples.
     ///
+    /// - Important: The cache-external decoder only works reliably for **Spanish** (18-24% WER).
+    ///   Other languages may hallucinate and produce wrong-language output (>50% WER).
+    ///   For multilingual ASR, use Whisper or Qwen3 models instead.
+    ///
     /// - Parameters:
     ///   - audioSamples: 16kHz mono Float32 audio samples.
+    ///   - language: Target language for transcription. Only `.spanish` is reliable.
     ///   - maxNewTokens: Maximum number of tokens to generate.
     /// - Returns: Transcribed text.
     public func transcribe(
         audioSamples: [Float],
+        language: CohereAsrConfig.Language? = .english,
         maxNewTokens: Int = 200
     ) async throws -> String {
         guard let models = models else {
             throw CohereAsrError.generationFailed("Models not loaded")
+        }
+
+        // IMPORTANT: Cache-external decoder only works reliably for Spanish
+        // Other languages may hallucinate (produce wrong-language output)
+        // For multilingual ASR, use Whisper or Qwen3 models instead
+        if let lang = language, lang != .spanish {
+            logger.warning(
+                "Cache-external decoder only supports Spanish reliably. Language '\(lang.rawValue)' may produce incorrect output. Consider using Whisper or Qwen3 for multilingual ASR."
+            )
         }
 
         let start = CFAbsoluteTimeGetCurrent()
@@ -66,8 +81,12 @@ public actor CohereAsrManager {
 
         // Step 3: Decode with KV cache
         let decodeStart = CFAbsoluteTimeGetCurrent()
-        let tokens = try await decode(
+        let tokens: [Int]
+
+        // Use cache-external decoder (stateful not supported on macOS)
+        tokens = try await decodeCacheExternal(
             encoderHidden: encoderHidden,
+            language: language,
             maxNewTokens: maxNewTokens,
             models: models
         )
@@ -152,73 +171,201 @@ public actor CohereAsrManager {
         return hiddenStates
     }
 
-    /// Decode with KV cache.
-    private func decode(
+    /// Decode with stateful decoder (CoreML manages KV cache).
+    /// NOTE: Stateful decoders are iOS-only (newState() unavailable on macOS).
+    @available(iOS 18, *)
+    private func decodeStateful(
         encoderHidden: MLMultiArray,
+        language: CohereAsrConfig.Language?,
         maxNewTokens: Int,
         models: CohereAsrModels
     ) async throws -> [Int] {
-        // Initialize KV cache: (8, 8, 108, 128)
-        let cacheShape =
-            [
-                CohereAsrConfig.numDecoderLayers,
-                CohereAsrConfig.numDecoderHeads,
-                CohereAsrConfig.maxSeqLen,
-                CohereAsrConfig.headDim,
-            ] as [NSNumber]
+        // Build prompt sequence for the language
+        let prompt = language?.promptSequence ?? [CohereAsrConfig.SpecialTokens.startToken]
+        var tokens = [Int]()
 
+        // Cross-attention mask: (1, 1, 1, encoder_seq_len) - all ones
+        let encoderSeqLen = encoderHidden.shape[1].intValue
         guard
-            let cacheK = try? MLMultiArray(shape: cacheShape, dataType: .float16),
-            let cacheV = try? MLMultiArray(shape: cacheShape, dataType: .float16)
-        else {
-            throw CohereAsrError.decodingFailed("Failed to create KV cache arrays")
-        }
-
-        // Initialize with zeros
-        let cacheSize = cacheK.count
-        for i in 0..<cacheSize {
-            cacheK[i] = 0
-            cacheV[i] = 0
-        }
-
-        // Cross-attention mask: (1, 1, 1, 376) - all ones
-        guard
-            let crossAttentionMask = try? MLMultiArray(shape: [1, 1, 1, 376], dataType: .float16)
+            let crossAttentionMask = try? MLMultiArray(
+                shape: [1, 1, 1, NSNumber(value: encoderSeqLen)], dataType: .float32)
         else {
             throw CohereAsrError.decodingFailed("Failed to create cross-attention mask")
         }
-        for i in 0..<376 {
+        for i in 0..<encoderSeqLen {
             crossAttentionMask[[0, 0, 0, i] as [NSNumber]] = 1.0
         }
 
-        var tokens = [Int]()
-        var currentToken = CohereAsrConfig.SpecialTokens.startToken
+        // Initialize stateful decoder
+        let state = models.decoder.newState()
 
-        // Bound by KV cache size to prevent out-of-bounds access
-        let effectiveMaxTokens = min(maxNewTokens, CohereAsrConfig.maxSeqLen)
+        var currentToken = prompt[0]
+        let effectiveMaxTokens = min(maxNewTokens + prompt.count, CohereAsrConfig.maxSeqLen)
 
-        for step in 0..<effectiveMaxTokens {
-            // Create decoder input
+        for totalStep in 0..<effectiveMaxTokens {
+            // Use prompt tokens first, then generated tokens
+            if totalStep < prompt.count {
+                currentToken = prompt[totalStep]
+            }
+
+            // Create decoder inputs
             guard let inputId = try? MLMultiArray(shape: [1, 1], dataType: .int32) else {
                 throw CohereAsrError.decodingFailed("Failed to create input_id array")
             }
             inputId[0] = NSNumber(value: currentToken)
 
-            guard let stepArray = try? MLMultiArray(shape: [1], dataType: .int32) else {
-                throw CohereAsrError.decodingFailed("Failed to create step array")
+            guard let positionId = try? MLMultiArray(shape: [1, 1], dataType: .int32) else {
+                throw CohereAsrError.decodingFailed("Failed to create position_id array")
             }
-            stepArray[0] = NSNumber(value: step)
+            positionId[0] = NSNumber(value: totalStep)
 
-            // Run decoder
-            let decoderInput = try MLDictionaryFeatureProvider(dictionary: [
+            // Attention mask (causal): (1, 1, 1, totalStep+1) - all zeros for stateful
+            guard
+                let attentionMask = try? MLMultiArray(shape: [1, 1, 1, NSNumber(value: totalStep + 1)], dataType: .float32)
+            else {
+                throw CohereAsrError.decodingFailed("Failed to create attention mask")
+            }
+            for i in 0..<(totalStep + 1) {
+                attentionMask[[0, 0, 0, i] as [NSNumber]] = 0
+            }
+
+            // Build decoder input dictionary (no cache inputs - managed by CoreML state)
+            let inputDict: [String: MLFeatureValue] = [
                 "input_id": MLFeatureValue(multiArray: inputId),
+                "position_ids": MLFeatureValue(multiArray: positionId),
                 "encoder_hidden_states": MLFeatureValue(multiArray: encoderHidden),
-                "cache_k": MLFeatureValue(multiArray: cacheK),
-                "cache_v": MLFeatureValue(multiArray: cacheV),
-                "step": MLFeatureValue(multiArray: stepArray),
                 "cross_attention_mask": MLFeatureValue(multiArray: crossAttentionMask),
-            ])
+                "attention_mask": MLFeatureValue(multiArray: attentionMask),
+            ]
 
+            let decoderInput = try MLDictionaryFeatureProvider(dictionary: inputDict)
+            let decoderOutput = try await models.decoder.prediction(from: decoderInput, using: state)
+
+            // Get logits and sample next token
+            guard let logits = decoderOutput.featureValue(for: "logits")?.multiArrayValue else {
+                throw CohereAsrError.decodingFailed("Failed to get logits")
+            }
+
+            let nextToken = argmax(logits)
+
+            // Only collect tokens after the prompt
+            if totalStep >= prompt.count - 1 {
+                // Check for EOS before adding to tokens
+                if nextToken == CohereAsrConfig.SpecialTokens.eosToken {
+                    break
+                }
+
+                tokens.append(nextToken)
+            }
+
+            // Use the predicted next token (unless we're still feeding the prompt)
+            if totalStep < prompt.count - 1 {
+                // Still feeding prompt, nextToken is ignored
+                currentToken = prompt[totalStep + 1]
+            } else {
+                currentToken = nextToken
+            }
+        }
+
+        return tokens
+    }
+
+    /// Decode with cache-external KV cache (Parakeet pattern).
+    private func decodeCacheExternal(
+        encoderHidden: MLMultiArray,
+        language: CohereAsrConfig.Language?,
+        maxNewTokens: Int,
+        models: CohereAsrModels
+    ) async throws -> [Int] {
+        // Initialize 16 separate KV cache arrays (8 layers × 2)
+        // Each cache shape: (1, 8, 108, 128) = [batch, heads, seq_len, head_dim]
+        let cacheShape =
+            [1, CohereAsrConfig.numDecoderHeads, CohereAsrConfig.maxSeqLen, CohereAsrConfig.headDim] as [NSNumber]
+
+        var kCaches: [MLMultiArray] = []
+        var vCaches: [MLMultiArray] = []
+
+        for _ in 0..<CohereAsrConfig.numDecoderLayers {
+            guard
+                let kCache = try? MLMultiArray(shape: cacheShape, dataType: .float32),
+                let vCache = try? MLMultiArray(shape: cacheShape, dataType: .float32)
+            else {
+                throw CohereAsrError.decodingFailed("Failed to create KV cache arrays")
+            }
+
+            // Initialize with zeros
+            for i in 0..<kCache.count {
+                kCache[i] = 0
+                vCache[i] = 0
+            }
+
+            kCaches.append(kCache)
+            vCaches.append(vCache)
+        }
+
+        // Cross-attention mask: (1, 1, 1, encoder_seq_len) - all ones
+        // Get encoder sequence length from hidden states shape (1, seq_len, hidden_dim)
+        let encoderSeqLen = encoderHidden.shape[1].intValue
+        guard
+            let crossAttentionMask = try? MLMultiArray(
+                shape: [1, 1, 1, NSNumber(value: encoderSeqLen)], dataType: .float32)
+        else {
+            throw CohereAsrError.decodingFailed("Failed to create cross-attention mask")
+        }
+        for i in 0..<encoderSeqLen {
+            crossAttentionMask[[0, 0, 0, i] as [NSNumber]] = 1.0
+        }
+
+        // Build prompt sequence for the language
+        let prompt = language?.promptSequence ?? [CohereAsrConfig.SpecialTokens.startToken]
+        var tokens = [Int]()
+        var currentToken = prompt[0]
+
+        // Bound by KV cache size to prevent out-of-bounds access
+        let effectiveMaxTokens = min(maxNewTokens + prompt.count, CohereAsrConfig.maxSeqLen)
+
+        for totalStep in 0..<effectiveMaxTokens {
+            // Use prompt tokens first, then generated tokens
+            if totalStep < prompt.count {
+                currentToken = prompt[totalStep]
+            }
+            // Create decoder inputs
+            guard let inputId = try? MLMultiArray(shape: [1, 1], dataType: .int32) else {
+                throw CohereAsrError.decodingFailed("Failed to create input_id array")
+            }
+            inputId[0] = NSNumber(value: currentToken)
+
+            guard let positionId = try? MLMultiArray(shape: [1, 1], dataType: .int32) else {
+                throw CohereAsrError.decodingFailed("Failed to create position_id array")
+            }
+            positionId[0] = NSNumber(value: totalStep)
+
+            // Attention mask (causal): (1, 1, 1, totalStep+1) - all zeros for cache-external
+            guard
+                let attentionMask = try? MLMultiArray(shape: [1, 1, 1, NSNumber(value: totalStep + 1)], dataType: .float32)
+            else {
+                throw CohereAsrError.decodingFailed("Failed to create attention mask")
+            }
+            for i in 0..<(totalStep + 1) {
+                attentionMask[[0, 0, 0, i] as [NSNumber]] = 0
+            }
+
+            // Build decoder input dictionary
+            var inputDict: [String: MLFeatureValue] = [
+                "input_id": MLFeatureValue(multiArray: inputId),
+                "position_id": MLFeatureValue(multiArray: positionId),
+                "encoder_hidden_states": MLFeatureValue(multiArray: encoderHidden),
+                "cross_attention_mask": MLFeatureValue(multiArray: crossAttentionMask),
+                "attention_mask": MLFeatureValue(multiArray: attentionMask),
+            ]
+
+            // Add all cache inputs
+            for i in 0..<CohereAsrConfig.numDecoderLayers {
+                inputDict["k_cache_\(i)"] = MLFeatureValue(multiArray: kCaches[i])
+                inputDict["v_cache_\(i)"] = MLFeatureValue(multiArray: vCaches[i])
+            }
+
+            let decoderInput = try MLDictionaryFeatureProvider(dictionary: inputDict)
             let decoderOutput = try await models.decoder.prediction(from: decoderInput)
 
             // Get logits and sample next token
@@ -227,28 +374,36 @@ public actor CohereAsrManager {
             }
 
             let nextToken = argmax(logits)
-            tokens.append(nextToken)
 
-            // Update cache
-            guard
-                let newCacheK = decoderOutput.featureValue(for: "new_cache_k")?.multiArrayValue,
-                let newCacheV = decoderOutput.featureValue(for: "new_cache_v")?.multiArrayValue
-            else {
-                throw CohereAsrError.decodingFailed("Failed to get updated cache")
+            // Only collect tokens after the prompt
+            if totalStep >= prompt.count - 1 {
+                // Check for EOS before adding to tokens
+                if nextToken == CohereAsrConfig.SpecialTokens.eosToken {
+                    break
+                }
+
+                tokens.append(nextToken)
             }
 
-            // Copy updated cache
-            for i in 0..<cacheSize {
-                cacheK[i] = newCacheK[i]
-                cacheV[i] = newCacheV[i]
+            // Update caches from outputs
+            for i in 0..<CohereAsrConfig.numDecoderLayers {
+                guard
+                    let kCacheOut = decoderOutput.featureValue(for: "k_cache_\(i)_out")?.multiArrayValue,
+                    let vCacheOut = decoderOutput.featureValue(for: "v_cache_\(i)_out")?.multiArrayValue
+                else {
+                    throw CohereAsrError.decodingFailed("Failed to get updated cache for layer \(i)")
+                }
+                kCaches[i] = kCacheOut
+                vCaches[i] = vCacheOut
             }
 
-            // Check for EOS
-            if nextToken == CohereAsrConfig.SpecialTokens.eosToken {
-                break
+            // Use the predicted next token (unless we're still feeding the prompt)
+            if totalStep < prompt.count - 1 {
+                // Still feeding prompt, nextToken is ignored
+                currentToken = prompt[totalStep + 1]
+            } else {
+                currentToken = nextToken
             }
-
-            currentToken = nextToken
         }
 
         return tokens

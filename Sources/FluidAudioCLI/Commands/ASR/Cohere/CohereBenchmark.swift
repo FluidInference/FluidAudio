@@ -178,6 +178,7 @@ enum CohereBenchmark {
         let results = try await runBenchmarkLoop(
             manager: manager,
             files: files,
+            language: .english,
             maxTokens: maxTokens
         )
 
@@ -216,9 +217,11 @@ enum CohereBenchmark {
             logger.info("  Collected \(files.count) files for \(langCode)")
 
             // Run benchmark for this language
+            let cohereLanguage = fleursToCohereLanguage[langCode]
             let langResults = try await runBenchmarkLoop(
                 manager: manager,
                 files: files,
+                language: cohereLanguage,
                 maxTokens: maxTokens
             )
 
@@ -242,6 +245,7 @@ enum CohereBenchmark {
     private static func runBenchmarkLoop(
         manager: CohereAsrManager,
         files: [BenchmarkAudioFile],
+        language: CohereAsrConfig.Language?,
         maxTokens: Int
     ) async throws -> [CohereBenchmarkResult] {
         var results: [CohereBenchmarkResult] = []
@@ -258,6 +262,7 @@ enum CohereBenchmark {
                 let startTime = CFAbsoluteTimeGetCurrent()
                 let hypothesis = try await manager.transcribe(
                     audioSamples: samples,
+                    language: language,
                     maxNewTokens: maxTokens
                 )
                 let elapsed = CFAbsoluteTimeGetCurrent() - startTime

@@ -620,14 +620,17 @@ public enum ModelNames {
     public enum CohereTranscribe {
         public static let encoder = "cohere_encoder"
         public static let decoderStateful = "cohere_decoder_stateful"
+        public static let decoderCacheExternal = "cohere_decoder_cache_external"
         public static let vocab = "vocab.json"
 
         public static let encoderFile = encoder + ".mlpackage"
         public static let decoderStatefulFile = decoderStateful + ".mlpackage"
+        public static let decoderCacheExternalFile = decoderCacheExternal + ".mlpackage"
 
         /// For compatibility - models can be .mlmodelc or .mlpackage
         public static let encoderCompiledFile = encoder + ".mlmodelc"
         public static let decoderStatefulCompiledFile = decoderStateful + ".mlmodelc"
+        public static let decoderCacheExternalCompiledFile = decoderCacheExternal + ".mlmodelc"
 
         /// Alias for the decoder file (used by CohereAsrModels)
         public static let decoderFile = decoderStatefulFile
