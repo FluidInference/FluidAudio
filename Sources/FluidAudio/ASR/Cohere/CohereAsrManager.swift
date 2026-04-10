@@ -221,7 +221,8 @@ public actor CohereAsrManager {
 
             // Attention mask (causal): (1, 1, 1, totalStep+1) - all zeros for stateful
             guard
-                let attentionMask = try? MLMultiArray(shape: [1, 1, 1, NSNumber(value: totalStep + 1)], dataType: .float32)
+                let attentionMask = try? MLMultiArray(
+                    shape: [1, 1, 1, NSNumber(value: totalStep + 1)], dataType: .float32)
             else {
                 throw CohereAsrError.decodingFailed("Failed to create attention mask")
             }
@@ -342,7 +343,8 @@ public actor CohereAsrManager {
 
             // Attention mask (causal): (1, 1, 1, totalStep+1) - all zeros for cache-external
             guard
-                let attentionMask = try? MLMultiArray(shape: [1, 1, 1, NSNumber(value: totalStep + 1)], dataType: .float32)
+                let attentionMask = try? MLMultiArray(
+                    shape: [1, 1, 1, NSNumber(value: totalStep + 1)], dataType: .float32)
             else {
                 throw CohereAsrError.decodingFailed("Failed to create attention mask")
             }

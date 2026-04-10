@@ -147,16 +147,16 @@ public enum CohereAsrConfig {
         public var promptSequence: [Int] {
             let langToken = tokenId
             return [
-                SpecialTokens.wordBoundary,    // ▁
+                SpecialTokens.wordBoundary,  // ▁
                 SpecialTokens.startOfContext,  // <|startofcontext|>
-                SpecialTokens.startToken,      // <|startoftranscript|>
-                SpecialTokens.emoUndefined,    // <|emo:undefined|>
-                langToken,                      // <|en|> (or other language)
-                langToken,                      // <|en|> (repeated)
-                SpecialTokens.pnc,             // <|pnc|>
-                SpecialTokens.noitn,           // <|noitn|>
-                SpecialTokens.notimestamp,     // <|notimestamp|>
-                SpecialTokens.nodiarize,       // <|nodiarize|>
+                SpecialTokens.startToken,  // <|startoftranscript|>
+                SpecialTokens.emoUndefined,  // <|emo:undefined|>
+                langToken,  // <|en|> (or other language)
+                langToken,  // <|en|> (repeated)
+                SpecialTokens.pnc,  // <|pnc|>
+                SpecialTokens.noitn,  // <|noitn|>
+                SpecialTokens.notimestamp,  // <|notimestamp|>
+                SpecialTokens.nodiarize,  // <|nodiarize|>
             ]
         }
     }
