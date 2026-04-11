@@ -372,7 +372,7 @@ Both LS-EEND and Sortformer emit results into a `DiarizerTimeline` with ultra-lo
 
 ### Streaming/Online Speaker Diarization (Pyannote)
 
-This pipeline uses segmentation plus speaker embeddings and is the third choice behind LS-EEND and Sortformer. It can be useful if you specifically want the classic multi-stage pipeline, but it is much slower than LS-EEND or Sortformer for live diarization.
+Pyannote 3.1 pipeline (segmentation + WeSpeaker embeddings) for online/streaming diarization. This is the third choice behind LS-EEND and Sortformer. It can be useful if you specifically want the classic multi-stage pipeline, but it is much slower than LS-EEND or Sortformer for live diarization.
 
 Why use the WeSpeaker/Pyannote pipeline:
 - More modular pipeline if you want separate segmentation and embedding stages
