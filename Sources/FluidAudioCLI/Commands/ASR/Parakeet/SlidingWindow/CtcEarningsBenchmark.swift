@@ -183,7 +183,7 @@ public enum CtcEarningsBenchmark {
             )
             let tdtModels = try await AsrModels.downloadAndLoad(version: tdtVersion)
             let asrManager = AsrManager(config: .default)
-            try await asrManager.configure(models: tdtModels)
+            try await asrManager.loadModels(tdtModels)
             print("TDT models loaded successfully")
 
             // Load CTC models for keyword spotting

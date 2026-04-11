@@ -141,7 +141,7 @@ public class ASRBenchmark {
             streamingEouManager = StreamingEouAsrManager()
             let modelDir = URL(fileURLWithPath: "/Users/kikow/brandon/FluidAudioSwift/Models/ParakeetEOU/Streaming")
             do {
-                try await streamingEouManager?.loadModels(modelDir: modelDir)
+                try await streamingEouManager?.loadModels(from: modelDir)
                 logger.info("Initialized Streaming EOU Manager")
             } catch {
                 logger.error("Failed to initialize Streaming EOU Manager: \(error)")
@@ -893,7 +893,7 @@ extension ASRBenchmark {
 
                 let streamingEouManager = StreamingEouAsrManager(debugFeatures: true)
                 let modelDir = URL(fileURLWithPath: "/Users/kikow/brandon/FluidAudioSwift/Models/ParakeetEOU/Streaming")
-                try await streamingEouManager.loadModels(modelDir: modelDir)
+                try await streamingEouManager.loadModels(from: modelDir)
 
                 // Process single file
                 let fileUrl = URL(fileURLWithPath: singleFile)
@@ -918,7 +918,7 @@ extension ASRBenchmark {
             logger.info("Initializing ASR system...")
             do {
                 let models = try await AsrModels.downloadAndLoad(version: modelVersion)
-                try await asrManager.configure(models: models)
+                try await asrManager.loadModels(models)
                 logger.info("ASR system initialized successfully")
 
             } catch {

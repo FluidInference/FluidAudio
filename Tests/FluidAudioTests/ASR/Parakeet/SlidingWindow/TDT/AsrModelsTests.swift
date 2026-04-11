@@ -30,7 +30,7 @@ final class AsrModelsTests: XCTestCase {
     // MARK: - Directory Tests
 
     func testDefaultCacheDirectory() {
-        let cacheDir = AsrModels.defaultCacheDirectory()
+        let cacheDir = AsrModels.defaultCacheDirectory(for: .v3)
 
         // Verify path components
         XCTAssertTrue(cacheDir.path.contains("FluidAudio"))

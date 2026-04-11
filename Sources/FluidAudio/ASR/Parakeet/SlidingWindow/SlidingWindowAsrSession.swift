@@ -55,7 +55,8 @@ public actor SlidingWindowAsrSession {
 
         // Create new stream with pre-loaded models
         let stream = SlidingWindowAsrManager(config: config)
-        try await stream.startStreaming(models: models, source: source)
+        try await stream.loadModels(models)
+        try await stream.startStreaming(source: source)
 
         // Store reference
         streams[source] = stream

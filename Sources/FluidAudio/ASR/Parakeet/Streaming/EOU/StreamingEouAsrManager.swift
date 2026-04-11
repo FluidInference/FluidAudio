@@ -246,20 +246,23 @@ public actor StreamingEouAsrManager {
         self.partialCallback = callback
     }
 
-    public func loadModels(modelDir: URL) async throws {
-        logger.info("Loading CoreML models from \(modelDir.path)...")
+    /// Load models from a specific directory
+    /// - Parameter directory: Directory containing the model files
+    public func loadModels(from directory: URL) async throws {
+        logger.info("Loading CoreML models from \(directory.path)...")
 
         // No longer loading preprocessor - using native Swift AudioMelSpectrogram instead
         self.streamingEncoder = try await MLModel.load(
-            contentsOf: modelDir.appendingPathComponent("streaming_encoder.mlmodelc"), configuration: self.configuration
+            contentsOf: directory.appendingPathComponent("streaming_encoder.mlmodelc"),
+            configuration: self.configuration
         )
         self.decoder = try await MLModel.load(
-            contentsOf: modelDir.appendingPathComponent("decoder.mlmodelc"), configuration: self.configuration)
+            contentsOf: directory.appendingPathComponent("decoder.mlmodelc"), configuration: self.configuration)
         self.joint = try await MLModel.load(
-            contentsOf: modelDir.appendingPathComponent("joint_decision.mlmodelc"), configuration: self.configuration)
+            contentsOf: directory.appendingPathComponent("joint_decision.mlmodelc"), configuration: self.configuration)
 
         // Load Tokenizer
-        let vocabUrl = modelDir.appendingPathComponent("vocab.json")
+        let vocabUrl = directory.appendingPathComponent("vocab.json")
         self.tokenizer = try Tokenizer(vocabPath: vocabUrl)
 
         self.rnntDecoder = RnntDecoder(decoderModel: self.decoder!, jointModel: self.joint!)
@@ -311,13 +314,7 @@ public actor StreamingEouAsrManager {
             logger.info("Using cached Parakeet EOU models at \(modelDir.path)")
         }
 
-        try await loadModels(modelDir: modelDir)
-    }
-
-    /// Load models from a specific directory
-    /// - Parameter directory: Directory containing the model files
-    public func loadModels(from directory: URL) async throws {
-        try await loadModels(modelDir: directory)
+        try await loadModels(from: modelDir)
     }
 
     private static func defaultCacheDirectory() -> URL {

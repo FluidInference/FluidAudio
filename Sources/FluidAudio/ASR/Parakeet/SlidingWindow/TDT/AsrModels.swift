@@ -534,11 +534,6 @@ extension AsrModels {
     public static func defaultCacheDirectory(for version: AsrModelVersion = .v3) -> URL {
         MLModelConfigurationUtils.defaultModelsDirectory(for: version.repo)
     }
-
-    // Legacy method for backward compatibility
-    public static func defaultCacheDirectory() -> URL {
-        return defaultCacheDirectory(for: .v3)
-    }
 }
 
 public enum AsrModelsError: LocalizedError, Sendable {

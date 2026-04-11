@@ -140,7 +140,7 @@ public class NemotronBenchmark {
             // 3. Load models
             logger.info("Loading Nemotron models...")
             let manager = StreamingNemotronAsrManager()
-            try await manager.loadModels(modelDir: modelDir)
+            try await manager.loadModels(from: modelDir)
             logger.info("Models loaded successfully")
 
             // 4. Get audio files

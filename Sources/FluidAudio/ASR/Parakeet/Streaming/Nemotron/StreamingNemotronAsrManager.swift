@@ -70,36 +70,35 @@ public actor StreamingNemotronAsrManager {
     }
 
     /// Load models from a directory containing preprocessor, encoder, decoder, joint, and tokenizer
-    /// - Parameters:
-    ///   - modelDir: Directory containing the model files
-    public func loadModels(modelDir: URL) async throws {
-        logger.info("Loading Nemotron CoreML models from \(modelDir.path)...")
+    /// - Parameter directory: Directory containing the model files
+    public func loadModels(from directory: URL) async throws {
+        logger.info("Loading Nemotron CoreML models from \(directory.path)...")
 
         // Load config from metadata.json
-        let metadataPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.metadata)
+        let metadataPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.metadata)
         if FileManager.default.fileExists(atPath: metadataPath.path) {
             self.config = try NemotronStreamingConfig(from: metadataPath)
             logger.info("Loaded config: \(config.chunkMs)ms chunks, \(config.chunkMelFrames) mel frames")
         }
 
         // Load preprocessor
-        let preprocessorPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.preprocessorFile)
+        let preprocessorPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.preprocessorFile)
         self.preprocessor = try await MLModel.load(contentsOf: preprocessorPath, configuration: mlConfiguration)
 
         // Load encoder (int8 quantized)
-        let encoderPath = modelDir.appendingPathComponent("encoder").appendingPathComponent(NemotronEncoder.fileName)
+        let encoderPath = directory.appendingPathComponent("encoder").appendingPathComponent(NemotronEncoder.fileName)
         self.encoder = try await MLModel.load(contentsOf: encoderPath, configuration: mlConfiguration)
 
         // Load decoder
-        let decoderPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.decoderFile)
+        let decoderPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.decoderFile)
         self.decoder = try await MLModel.load(contentsOf: decoderPath, configuration: mlConfiguration)
 
         // Load joint
-        let jointPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.jointFile)
+        let jointPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.jointFile)
         self.joint = try await MLModel.load(contentsOf: jointPath, configuration: mlConfiguration)
 
         // Load tokenizer
-        let tokenizerUrl = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.tokenizer)
+        let tokenizerUrl = directory.appendingPathComponent(ModelNames.NemotronStreaming.tokenizer)
         self.tokenizer = try Tokenizer(vocabPath: tokenizerUrl)
 
         // Initialize states
@@ -108,10 +107,43 @@ public actor StreamingNemotronAsrManager {
         logger.info("Nemotron models loaded successfully (\(config.chunkMs)ms chunks).")
     }
 
-    /// Load models from a specific directory
-    /// - Parameter directory: Directory containing the model files
-    public func loadModels(from directory: URL) async throws {
-        try await loadModels(modelDir: directory)
+    /// Downloads and loads Nemotron streaming models from Hugging Face if not cached locally.
+    ///
+    /// - Parameters:
+    ///   - directory: Root directory for model cache (default: Application Support)
+    ///   - configuration: Optional model configuration override
+    ///   - progressHandler: Optional callback for download progress updates
+    public func loadModels(
+        to directory: URL? = nil,
+        configuration: MLModelConfiguration? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws {
+        if let configuration {
+            self.mlConfiguration = configuration
+        }
+
+        let chunkSize = requestedChunkSize ?? .ms1120
+        let repo = chunkSize.repo
+
+        let modelsBaseDir =
+            directory
+            ?? FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
+            .appendingPathComponent("FluidAudio", isDirectory: true)
+            .appendingPathComponent("Models", isDirectory: true)
+
+        let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
+        let encoderInt8Path = cacheDir.appendingPathComponent("encoder/\(NemotronEncoder.fileName)")
+
+        if !FileManager.default.fileExists(atPath: encoderInt8Path.path) {
+            logger.info("Downloading Nemotron models to \(modelsBaseDir.path)...")
+            try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir, progressHandler: progressHandler)
+        } else {
+            logger.info("Using cached Nemotron models at \(cacheDir.path)")
+        }
+
+        try await loadModels(from: cacheDir)
     }
 
     /// Reset all states for a new transcription session
@@ -244,23 +276,7 @@ extension StreamingNemotronAsrManager: StreamingAsrManager {
     }
 
     public func loadModels() async throws {
-        let chunkSize = requestedChunkSize ?? .ms1120
-        let repo = chunkSize.repo
-
-        let modelsBaseDir = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
-        .appendingPathComponent("FluidAudio", isDirectory: true)
-        .appendingPathComponent("Models", isDirectory: true)
-
-        let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-        let encoderInt8Path = cacheDir.appendingPathComponent("encoder/\(NemotronEncoder.fileName)")
-
-        if !FileManager.default.fileExists(atPath: encoderInt8Path.path) {
-            try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir)
-        }
-
-        try await loadModels(modelDir: cacheDir)
+        try await loadModels(to: nil, configuration: nil, progressHandler: nil)
     }
 
     public func processBufferedAudio() async throws {

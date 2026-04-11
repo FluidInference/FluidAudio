@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 
@@ -114,31 +115,52 @@ public actor SlidingWindowAsrManager {
         )
     }
 
-    /// Start the sliding-window ASR engine
-    /// This will download models if needed and begin processing
-    /// - Parameter source: The audio source to use (default: microphone)
-    public func startStreaming(source: AudioSource = .microphone) async throws {
-        logger.info("Starting sliding-window ASR engine for source: \(String(describing: source))...")
-
-        // Initialize ASR models
-        let models = try await AsrModels.downloadAndLoad()
-        try await startStreaming(models: models, source: source)
+    /// Load ASR models (downloads if needed)
+    ///
+    /// If you need custom MLModelConfiguration, use `AsrModels.downloadAndLoad(configuration:)`
+    /// to pre-load models and then call `loadModels(_:)`.
+    ///
+    /// - Parameters:
+    ///   - to: Optional cache directory (default: system cache)
+    ///   - progressHandler: Optional download progress callback
+    public func loadModels(
+        to directory: URL? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws {
+        logger.info("Loading ASR models...")
+        let models = try await AsrModels.downloadAndLoad(
+            to: directory,
+            progressHandler: progressHandler
+        )
+        try await loadModels(models)
     }
 
-    /// Start the sliding-window ASR engine with pre-loaded models
-    /// - Parameters:
-    ///   - models: Pre-loaded ASR models to use
-    ///   - source: The audio source to use (default: microphone)
-    public func startStreaming(models: AsrModels, source: AudioSource = .microphone) async throws {
-        logger.info(
-            "Starting sliding-window ASR engine with pre-loaded models for source: \(String(describing: source))..."
-        )
-
-        self.audioSource = source
+    /// Load pre-loaded ASR models
+    /// - Parameter models: Pre-loaded ASR models to use
+    public func loadModels(_ models: AsrModels) async throws {
+        logger.info("Loading SlidingWindowAsrManager with provided models")
 
         // Configure ASR manager with provided models
         asrManager = AsrManager(config: config.asrConfig)
-        try await asrManager?.configure(models: models)
+        try await asrManager?.loadModels(models)
+
+        logger.info("SlidingWindowAsrManager loaded successfully")
+    }
+
+    /// Start the sliding-window streaming engine
+    ///
+    /// Models must be loaded first via `loadModels()` or `loadModels(_:)`
+    ///
+    /// - Parameter source: The audio source to use (default: microphone)
+    /// - Throws: ASRError.notInitialized if models are not loaded
+    public func startStreaming(source: AudioSource = .microphone) async throws {
+        guard asrManager != nil else {
+            throw ASRError.notInitialized
+        }
+
+        logger.info("Starting sliding-window ASR engine for source: \(String(describing: source))...")
+
+        self.audioSource = source
 
         // Create decoder state with correct layer count for this model
         if let mgr = asrManager {
