@@ -180,7 +180,7 @@ GitHub Actions workflows:
 
 ## Model Sources
 
-- **Diarization**: [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
+- **Diarization**: [FluidInference/speaker-diarization-coreml](https://huggingface.co/FluidInference/speaker-diarization-coreml) (based on pyannote/speaker-diarization-community-1)
 - **VAD CoreML**: [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml)
 - **ASR Models**: [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
 - **Test Data**: [alexwengg/musan_mini*](https://huggingface.co/datasets/alexwengg) variants

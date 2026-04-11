@@ -460,7 +460,7 @@ swift run -c release fluidaudiocli nemotron-benchmark --chunk 560
 
 ## Speaker Diarization
 
-The offline version uses the community-1 model, the online version uses the legacy speaker-diarization-3.1 model.
+Both offline and online versions use the community-1 model (via FluidInference/speaker-diarization-coreml).
 
 ### Offline diarization pipeline
 
