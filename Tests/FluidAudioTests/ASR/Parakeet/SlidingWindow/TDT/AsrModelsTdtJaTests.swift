@@ -53,5 +53,36 @@ final class AsrModelsTdtJaTests: XCTestCase {
         print("   This allows users to get timing information via AsrManager")
         print("   instead of using TdtJaManager which doesn't provide timing info")
     }
+
+    func testJaModelInputOutputNames() async throws {
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["CI"] != nil,
+            "Skipping model download tests in CI environment"
+        )
+
+        let models = try await AsrModels.load(from: AsrModels.defaultCacheDirectory(for: .tdtJa), version: .tdtJa)
+
+        print("\n=== Preprocessor ===")
+        print("Inputs:")
+        for (name, desc) in models.preprocessor.modelDescription.inputDescriptionsByName {
+            print("  - \(name): \(desc.type)")
+        }
+        print("Outputs:")
+        for (name, desc) in models.preprocessor.modelDescription.outputDescriptionsByName {
+            print("  - \(name): \(desc.type)")
+        }
+
+        if let encoder = models.encoder {
+            print("\n=== Encoder ===")
+            print("Inputs:")
+            for (name, desc) in encoder.modelDescription.inputDescriptionsByName {
+                print("  - \(name): \(desc.type)")
+            }
+            print("Outputs:")
+            for (name, desc) in encoder.modelDescription.outputDescriptionsByName {
+                print("  - \(name): \(desc.type)")
+            }
+        }
+    }
 }
 #endif
