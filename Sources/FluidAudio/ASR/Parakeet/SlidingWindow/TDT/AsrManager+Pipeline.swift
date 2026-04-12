@@ -48,17 +48,8 @@ extension AsrManager {
                 encoderOutputProvider = preprocessorOutput
             }
 
-            // Try both standard TDT and Japanese TDT encoder output names
-            // Standard TDT: "encoder", Japanese TDT: "encoder_output"
-            let rawEncoderOutput: MLMultiArray
-            if let output = encoderOutputProvider.featureValue(for: "encoder")?.multiArrayValue {
-                rawEncoderOutput = output
-            } else if let output = encoderOutputProvider.featureValue(for: "encoder_output")?.multiArrayValue {
-                rawEncoderOutput = output
-            } else {
-                throw ASRError.processingFailed("Invalid encoder output: expected 'encoder' or 'encoder_output'")
-            }
-
+            let rawEncoderOutput = try extractFeatureValue(
+                from: encoderOutputProvider, key: "encoder", errorMessage: "Invalid encoder output")
             let encoderLength = try extractFeatureValue(
                 from: encoderOutputProvider, key: "encoder_length",
                 errorMessage: "Invalid encoder output length")

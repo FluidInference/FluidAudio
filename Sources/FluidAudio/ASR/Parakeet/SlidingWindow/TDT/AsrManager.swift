@@ -160,19 +160,9 @@ public actor AsrManager {
         // Pass the actual audio length, not the padded length
         let lengthArray = try createScalarArray(value: actualAudioLength)
 
-        // Determine the correct length parameter name based on the preprocessor model
-        // Standard TDT models expect "audio_length", Japanese TDT expects "length"
-        let lengthParamName: String
-        if let preprocessor = preprocessorModel {
-            let inputNames = preprocessor.modelDescription.inputDescriptionsByName.keys
-            lengthParamName = inputNames.contains("length") ? "length" : "audio_length"
-        } else {
-            lengthParamName = "audio_length"  // Default for standard TDT models
-        }
-
         return try createFeatureProvider(features: [
             ("audio_signal", audioArray),
-            (lengthParamName, lengthArray),
+            ("audio_length", lengthArray),
         ])
     }
 
