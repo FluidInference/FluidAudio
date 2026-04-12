@@ -161,7 +161,9 @@ extension AsrModels {
     private typealias Names = ModelNames.ASR
 
     /// Get version-specific file names for decoder and joint models
-    private static func getModelFileNames(version: AsrModelVersion) -> (decoder: String, joint: String, vocabulary: String) {
+    private static func getModelFileNames(
+        version: AsrModelVersion
+    ) -> (decoder: String, joint: String, vocabulary: String) {
         switch version {
         case .tdtJa:
             return (
