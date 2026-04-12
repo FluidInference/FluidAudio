@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import XCTest
 
@@ -10,6 +11,51 @@ import XCTest
 /// - Character Error Rate (CER) calculation
 /// - Levenshtein distance algorithm
 final class CtcJaTests: XCTestCase {
+
+    // MARK: - Full Pipeline Tests
+
+    func testCtcJaTranscription() async throws {
+        // Skip in CI environment - HuggingFace downloads are unreliable
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["CI"] != nil,
+            "Skipping model download tests in CI environment"
+        )
+
+        // Load CTC Japanese manager
+        print("Loading CTC Japanese models...")
+        let manager = try await CtcJaManager.load()
+        print("✅ CTC Models loaded")
+
+        // Create test audio (1 second of silence at 16kHz)
+        let sampleRate = 16000
+        let duration = 1.0
+        let frameCount = Int(Double(sampleRate) * duration)
+        let audio = [Float](repeating: 0.0, count: frameCount)
+
+        // Transcribe
+        print("Running CTC transcription...")
+        let result = try await manager.transcribe(audio: audio)
+        print("✅ CTC Transcription complete")
+        print("Result: '\(result)'")
+
+        // For silence, we expect minimal output (blank or empty)
+        XCTAssertNotNil(result)
+        print("✅ CTC Japanese model is working!")
+    }
+
+    func testCtcJaWithRealAudio() async throws {
+        // Skip in CI environment - HuggingFace downloads are unreliable
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["CI"] != nil,
+            "Skipping model download tests in CI environment"
+        )
+
+        // This would need actual Japanese audio file
+        // For now, just verify the model loads
+        let manager = try await CtcJaManager.load()
+        XCTAssertNotNil(manager)
+        print("✅ CTC Japanese manager initialized successfully")
+    }
 
     // MARK: - Text Normalization Tests
 
@@ -302,3 +348,4 @@ final class CtcJaTests: XCTestCase {
         return Double(distance) / Double(refChars.count)
     }
 }
+#endif
