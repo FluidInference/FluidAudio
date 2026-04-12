@@ -673,7 +673,8 @@ public enum ModelNames {
         case .parakeetCtcZhCn:
             return ModelNames.CTCZhCn.requiredModels
         case .parakeetJa:
-            return ModelNames.CTCJa.requiredModels
+            // Repo contains BOTH CTC and TDT models - return union of both sets
+            return ModelNames.CTCJa.requiredModels.union(ModelNames.TDTJa.requiredModels)
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return ModelNames.ParakeetEOU.requiredModels
         case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
