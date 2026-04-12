@@ -380,27 +380,6 @@ final class AsrModelsTests: XCTestCase {
 
     // MARK: - CTC-Only Model Validation Tests
 
-    func testCtcJaModelRejectsAsrModelsLoad() async throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AsrModelsTests-CtcJa-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        do {
-            _ = try await AsrModels.load(from: tempDir, version: .ctcJa)
-            XCTFail("AsrModels.load should reject .ctcJa version")
-        } catch let error as AsrModelsError {
-            // Verify it's the correct error
-            if case .loadingFailed(let message) = error {
-                XCTAssertTrue(
-                    message.contains("CtcJaManager"),
-                    "Error should direct user to CtcJaManager"
-                )
-            } else {
-                XCTFail("Wrong error type: \(error)")
-            }
-        }
-    }
-
     func testCtcZhCnModelRejectsAsrModelsLoad() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("AsrModelsTests-CtcZhCn-\(UUID().uuidString)")
@@ -415,23 +394,6 @@ final class AsrModelsTests: XCTestCase {
                 XCTAssertTrue(
                     message.contains("CtcZhCnManager"),
                     "Error should direct user to CtcZhCnManager"
-                )
-            } else {
-                XCTFail("Wrong error type: \(error)")
-            }
-        }
-    }
-
-    func testCtcJaModelRejectsAsrModelsDownload() async throws {
-        do {
-            _ = try await AsrModels.download(version: .ctcJa)
-            XCTFail("AsrModels.download should reject .ctcJa version")
-        } catch let error as AsrModelsError {
-            // Verify it's the correct error
-            if case .downloadFailed(let message) = error {
-                XCTAssertTrue(
-                    message.contains("CtcJaModels"),
-                    "Error should direct user to CtcJaModels"
                 )
             } else {
                 XCTFail("Wrong error type: \(error)")
@@ -458,7 +420,6 @@ final class AsrModelsTests: XCTestCase {
 
     func testCtcOnlyModelsAreMarkedCorrectly() {
         // Verify CTC-only models are identified correctly
-        XCTAssertTrue(AsrModelVersion.ctcJa.isCtcOnly)
         XCTAssertTrue(AsrModelVersion.ctcZhCn.isCtcOnly)
 
         // Verify TDT models are not marked as CTC-only

@@ -26,34 +26,17 @@ enum JapaneseAsrBenchmark {
         }
     }
 
-    enum DecoderType: String {
-        case ctc
-        case tdt
-    }
-
     static func run(arguments: [String]) async {
         var dataset: Dataset = .jsut
         var numSamples = 100
         var outputFile: String?
         var verbose = false
         var autoDownload = false
-        var decoder: DecoderType = .ctc
 
         var i = 0
         while i < arguments.count {
             let arg = arguments[i]
             switch arg {
-            case "--decoder":
-                if i + 1 < arguments.count {
-                    if let decoderType = DecoderType(rawValue: arguments[i + 1]) {
-                        decoder = decoderType
-                    } else {
-                        logger.error("Unknown decoder: \(arguments[i + 1])")
-                        logger.info("Available: ctc, tdt")
-                        return
-                    }
-                    i += 1
-                }
             case "--dataset", "-d":
                 if i + 1 < arguments.count {
                     if let ds = Dataset(rawValue: arguments[i + 1]) {
@@ -90,7 +73,7 @@ enum JapaneseAsrBenchmark {
 
         logger.info("=== Japanese ASR Benchmark ===")
         logger.info("Dataset: \(dataset.displayName)")
-        logger.info("Decoder: \(decoder.rawValue.uppercased())")
+        logger.info("Decoder: TDT (via AsrModels)")
         logger.info("Samples: \(numSamples)")
         logger.info("")
 
@@ -121,32 +104,25 @@ enum JapaneseAsrBenchmark {
             logger.info("Loaded \(samples.count) samples")
             logger.info("")
 
-            // Run benchmark with selected decoder
-            let results: [BenchmarkResult]
-            switch decoder {
-            case .ctc:
-                logger.info("Loading CTC Japanese models...")
-                let ctcManager = try await CtcJaManager.load(
-                    progressHandler: verbose ? createProgressHandler() : nil
-                )
-                logger.info("Models loaded successfully")
-                logger.info("")
-                logger.info("Running transcription benchmark...")
-                results = try await runBenchmark(samples: samples) { audioURL in
-                    try await ctcManager.transcribe(audioURL: audioURL)
-                }
+            // Load TDT Japanese models via AsrModels
+            logger.info("Loading Japanese TDT models...")
+            let models = try await AsrModels.load(
+                from: AsrModels.defaultCacheDirectory(for: .tdtJa),
+                version: .tdtJa,
+                progressHandler: verbose ? createProgressHandler() : nil
+            )
+            logger.info("Models loaded successfully")
 
-            case .tdt:
-                logger.info("Loading TDT Japanese models...")
-                let tdtManager = try await TdtJaManager.load(
-                    progressHandler: verbose ? createProgressHandler() : nil
-                )
-                logger.info("Models loaded successfully")
-                logger.info("")
-                logger.info("Running transcription benchmark...")
-                results = try await runBenchmark(samples: samples) { audioURL in
-                    try await tdtManager.transcribe(audioURL: audioURL)
-                }
+            // Create AsrManager with Japanese TDT models
+            let asrManager = AsrManager(models: models)
+            logger.info("")
+            logger.info("Running transcription benchmark...")
+
+            // Run benchmark
+            let results = try await runBenchmark(samples: samples) { audioURL in
+                var state = try TdtDecoderState(decoderLayers: 2)
+                let result = try await asrManager.transcribe(audioURL, decoderState: &state)
+                return result.text
             }
 
             // Print results

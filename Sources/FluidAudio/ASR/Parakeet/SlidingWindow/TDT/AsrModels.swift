@@ -9,8 +9,6 @@ public enum AsrModelVersion: Sendable {
     case tdtCtc110m
     /// 600M parameter CTC-only model for Mandarin Chinese (zh-CN)
     case ctcZhCn
-    /// 600M parameter CTC-only model for Japanese (ja)
-    case ctcJa
     /// 600M parameter TDT model for Japanese (ja) - hybrid CTC preprocessor/encoder + TDT decoder/joint v2
     case tdtJa
 
@@ -20,8 +18,7 @@ public enum AsrModelVersion: Sendable {
         case .v3: return .parakeet
         case .tdtCtc110m: return .parakeetTdtCtc110m
         case .ctcZhCn: return .parakeetCtcZhCn
-        case .ctcJa: return .parakeetJa
-        case .tdtJa: return .parakeetJa  // Both CTC and TDT models in same repo
+        case .tdtJa: return .parakeetJa
         }
     }
 
@@ -36,7 +33,7 @@ public enum AsrModelVersion: Sendable {
     /// Whether this model is CTC-only (no TDT decoder+joint)
     public var isCtcOnly: Bool {
         switch self {
-        case .ctcZhCn, .ctcJa: return true
+        case .ctcZhCn: return true
         default: return false
         }
     }
@@ -45,7 +42,7 @@ public enum AsrModelVersion: Sendable {
     public var encoderHiddenSize: Int {
         switch self {
         case .tdtCtc110m: return 512
-        case .ctcZhCn, .ctcJa, .tdtJa: return 1024
+        case .ctcZhCn, .tdtJa: return 1024
         default: return 1024
         }
     }
@@ -56,7 +53,7 @@ public enum AsrModelVersion: Sendable {
         case .v2, .tdtCtc110m: return 1024
         case .v3: return 8192
         case .ctcZhCn: return 7000
-        case .ctcJa, .tdtJa: return 3072
+        case .tdtJa: return 3072
         }
     }
 
@@ -212,20 +209,9 @@ extension AsrModels {
     ) async throws -> AsrModels {
         // Validate that CTC-only models use their dedicated managers
         if version.isCtcOnly {
-            switch version {
-            case .ctcJa:
-                throw AsrModelsError.loadingFailed(
-                    "CTC-only model .ctcJa must be loaded via CtcJaManager, not AsrModels"
-                )
-            case .ctcZhCn:
-                throw AsrModelsError.loadingFailed(
-                    "CTC-only model .ctcZhCn must be loaded via CtcZhCnManager, not AsrModels"
-                )
-            default:
-                throw AsrModelsError.loadingFailed(
-                    "CTC-only models must be loaded via their dedicated manager classes"
-                )
-            }
+            throw AsrModelsError.loadingFailed(
+                "CTC-only model \(version) must be loaded via its dedicated manager class (e.g., CtcZhCnManager)"
+            )
         }
 
         logger.info("Loading ASR models from: \(directory.path)")
@@ -456,20 +442,9 @@ extension AsrModels {
     ) async throws -> URL {
         // Validate that CTC-only models use their dedicated managers
         if version.isCtcOnly {
-            switch version {
-            case .ctcJa:
-                throw AsrModelsError.downloadFailed(
-                    "CTC-only model .ctcJa must be downloaded via CtcJaModels, not AsrModels"
-                )
-            case .ctcZhCn:
-                throw AsrModelsError.downloadFailed(
-                    "CTC-only model .ctcZhCn must be downloaded via CtcZhCnModels, not AsrModels"
-                )
-            default:
-                throw AsrModelsError.downloadFailed(
-                    "CTC-only models must be downloaded via their dedicated model classes"
-                )
-            }
+            throw AsrModelsError.downloadFailed(
+                "CTC-only model \(version) must be downloaded via its dedicated model class (e.g., CtcZhCnModels)"
+            )
         }
 
         let targetDir = directory ?? defaultCacheDirectory(for: version)
