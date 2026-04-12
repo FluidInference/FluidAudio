@@ -160,6 +160,34 @@ extension AsrModels {
     // Use centralized model names
     private typealias Names = ModelNames.ASR
 
+    /// Get version-specific file names for decoder and joint models
+    private static func getModelFileNames(version: AsrModelVersion) -> (decoder: String, joint: String, vocabulary: String) {
+        switch version {
+        case .tdtJa:
+            return (
+                decoder: ModelNames.TDTJa.decoderFile,
+                joint: ModelNames.TDTJa.jointFile,
+                vocabulary: ModelNames.TDTJa.vocabularyFile
+            )
+        default:
+            return (
+                decoder: Names.decoderFile,
+                joint: Names.jointFile,
+                vocabulary: Names.vocabularyFile
+            )
+        }
+    }
+
+    /// Get version-specific required models set
+    private static func getRequiredModels(version: AsrModelVersion) -> Set<String> {
+        switch version {
+        case .tdtJa:
+            return ModelNames.TDTJa.requiredModels
+        default:
+            return version.hasFusedEncoder ? Names.requiredModelsFused : Names.requiredModels
+        }
+    }
+
     /// Load ASR models from a directory
     ///
     /// - Parameters:
@@ -233,17 +261,20 @@ extension AsrModels {
             throw AsrModelsError.loadingFailed("Failed to load encoder model (required for split frontend)")
         }
 
+        // Get version-specific file names
+        let fileNames = getModelFileNames(version: version)
+
         // Load decoder and joint as well
         let decoderAndJoint = try await DownloadUtils.loadModels(
             version.repo,
-            modelNames: [Names.decoderFile, Names.jointFile],
+            modelNames: [fileNames.decoder, fileNames.joint],
             directory: parentDirectory,
             computeUnits: config.computeUnits,
             progressHandler: progressHandler
         )
 
-        guard let decoderModel = decoderAndJoint[Names.decoderFile],
-            let jointModel = decoderAndJoint[Names.jointFile]
+        guard let decoderModel = decoderAndJoint[fileNames.decoder],
+            let jointModel = decoderAndJoint[fileNames.joint]
         else {
             throw AsrModelsError.loadingFailed("Failed to load decoder or joint model")
         }
@@ -303,14 +334,15 @@ extension AsrModels {
     }
 
     private static func loadVocabulary(from directory: URL, version: AsrModelVersion) throws -> [Int: String] {
-        let vocabPath = repoPath(from: directory, version: version).appendingPathComponent(
-            Names.vocabulary(for: version.repo))
+        // Get version-specific vocabulary file name
+        let vocabularyFileName = getModelFileNames(version: version).vocabulary
+        let vocabPath = repoPath(from: directory, version: version).appendingPathComponent(vocabularyFileName)
 
         if !FileManager.default.fileExists(atPath: vocabPath.path) {
             logger.warning(
                 "Vocabulary file not found at \(vocabPath.path). Please ensure the vocab file is downloaded with the models."
             )
-            throw AsrModelsError.modelNotFound(Names.vocabulary(for: version.repo), vocabPath)
+            throw AsrModelsError.modelNotFound(vocabularyFileName, vocabPath)
         }
 
         do {
@@ -512,8 +544,7 @@ extension AsrModels {
 
     public static func modelsExist(at directory: URL, version: AsrModelVersion) -> Bool {
         let fileManager = FileManager.default
-        let requiredFiles =
-            version.hasFusedEncoder ? ModelNames.ASR.requiredModelsFused : ModelNames.ASR.requiredModels
+        let requiredFiles = getRequiredModels(version: version)
 
         // Check in the DownloadUtils repo structure
         let repoPath = repoPath(from: directory, version: version)
@@ -524,7 +555,8 @@ extension AsrModels {
         }
 
         // Also check for vocabulary file associated with the version
-        let vocabPath = repoPath.appendingPathComponent(Names.vocabulary(for: version.repo))
+        let vocabularyFileName = getModelFileNames(version: version).vocabulary
+        let vocabPath = repoPath.appendingPathComponent(vocabularyFileName)
         let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)
 
         return modelsPresent && vocabPresent
