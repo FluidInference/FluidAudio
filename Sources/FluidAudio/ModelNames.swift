@@ -8,7 +8,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
     case parakeetCtcZhCn = "FluidInference/parakeet-ctc-0.6b-zh-cn-coreml"
-    case parakeetJa = "FluidInference/parakeet-ctc-0.6b-ja-coreml"  // Contains both CTC and TDT models
+    case parakeetJa = "FluidInference/parakeet-0.6b-ja-coreml"  // Contains both CTC and TDT models (INT8 quantized encoder)
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case parakeetEou1280 = "FluidInference/parakeet-realtime-eou-120m-coreml/1280ms"
@@ -42,7 +42,7 @@ public enum Repo: String, CaseIterable, Sendable {
         case .parakeetCtcZhCn:
             return "parakeet-ctc-0.6b-zh-cn-coreml"
         case .parakeetJa:
-            return "parakeet-ctc-0.6b-ja-coreml"
+            return "parakeet-0.6b-ja-coreml"
         case .parakeetEou160:
             return "parakeet-realtime-eou-120m-coreml/160ms"
         case .parakeetEou320:
@@ -156,7 +156,7 @@ public enum Repo: String, CaseIterable, Sendable {
         case .parakeetCtcZhCn:
             return "parakeet-ctc-zh-cn"
         case .parakeetJa:
-            return "parakeet-ctc-ja"
+            return "parakeet-ja"
         case .parakeetTdtCtc110m:
             return "parakeet-tdt-ctc-110m"
         default:
