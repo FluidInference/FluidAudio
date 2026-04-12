@@ -39,8 +39,7 @@ jobs:
         with:
           path: |
             .build
-            ~/Library/Application Support/FluidAudio/Models/parakeet-tdt-ja
-            ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-ja
+            ~/Library/Application Support/FluidAudio/Models/parakeet-ja
             ~/Library/Application Support/FluidAudio/Datasets/JSUT-basic5000
             ~/Library/Caches/Homebrew
             /usr/local/Cellar/ffmpeg
