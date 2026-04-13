@@ -231,7 +231,6 @@ public enum ModelNames {
             encoderFile,
             decoderFile,
             jointFile,
-            vocabularyFile,
         ]
 
         /// Required models for fused frontend (110m hybrid: preprocessor contains encoder)
@@ -239,7 +238,6 @@ public enum ModelNames {
             preprocessorFile,
             decoderFile,
             jointFile,
-            vocabularyFile,
         ]
 
         /// Get vocabulary filename for specific model version
@@ -263,7 +261,6 @@ public enum ModelNames {
         public static let requiredModels: Set<String> = [
             melSpectrogramPath,
             audioEncoderPath,
-            vocabularyPath,
         ]
     }
 
@@ -288,7 +285,6 @@ public enum ModelNames {
             encoderFile,  // int8 encoder
             encoderFp32File,  // fp32 encoder
             decoderFile,
-            vocabularyFile,
         ]
     }
 
@@ -312,7 +308,6 @@ public enum ModelNames {
             encoderFile,
             decoderFile,
             jointFile,
-            vocabularyFile,
         ]
     }
 
