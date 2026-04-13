@@ -211,13 +211,9 @@ public actor AsrManager {
         }
 
         // Adapt config to match the loaded model version
-        // (e.g. encoderHiddenSize: default 1024 but tdtCtc110m needs 512)
-        // (e.g. blankId: default 8192 but tdtJa needs 3072)
-        let adaptedConfig: ASRConfig
-        let needsHiddenSizeAdaptation = config.encoderHiddenSize != models.version.encoderHiddenSize
-        let needsBlankIdAdaptation = config.tdtConfig.blankId != models.version.blankId
-
-        if needsHiddenSizeAdaptation || needsBlankIdAdaptation {
+        // Step 1: Adapt blankId if needed (e.g. default 8192 but tdtJa needs 3072)
+        var workingConfig = config
+        if config.tdtConfig.blankId != models.version.blankId {
             let adaptedTdtConfig = TdtConfig(
                 includeTokenDuration: config.tdtConfig.includeTokenDuration,
                 maxSymbolsPerStep: config.tdtConfig.maxSymbolsPerStep,
@@ -228,16 +224,29 @@ public actor AsrManager {
                 consecutiveBlankLimit: config.tdtConfig.consecutiveBlankLimit
             )
 
-            adaptedConfig = ASRConfig(
-                sampleRate: config.sampleRate,
+            workingConfig = ASRConfig(
+                sampleRate: workingConfig.sampleRate,
                 tdtConfig: adaptedTdtConfig,
+                encoderHiddenSize: workingConfig.encoderHiddenSize,
+                parallelChunkConcurrency: workingConfig.parallelChunkConcurrency,
+                streamingEnabled: workingConfig.streamingEnabled,
+                streamingThreshold: workingConfig.streamingThreshold
+            )
+        }
+
+        // Step 2: Adapt encoderHiddenSize if needed (e.g. default 1024 but tdtCtc110m needs 512)
+        let adaptedConfig: ASRConfig
+        if workingConfig.encoderHiddenSize != models.version.encoderHiddenSize {
+            adaptedConfig = ASRConfig(
+                sampleRate: workingConfig.sampleRate,
+                tdtConfig: workingConfig.tdtConfig,
                 encoderHiddenSize: models.version.encoderHiddenSize,
-                parallelChunkConcurrency: config.parallelChunkConcurrency,
-                streamingEnabled: config.streamingEnabled,
-                streamingThreshold: config.streamingThreshold
+                parallelChunkConcurrency: workingConfig.parallelChunkConcurrency,
+                streamingEnabled: workingConfig.streamingEnabled,
+                streamingThreshold: workingConfig.streamingThreshold
             )
         } else {
-            adaptedConfig = config
+            adaptedConfig = workingConfig
         }
 
         switch models.version {
