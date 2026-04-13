@@ -62,13 +62,6 @@ struct OfflineSegmentationProcessor {
         var numFrames = 0
         let speakerCount = 3
 
-        // Pre-compute flat mapping matrix for vectorized speaker activation
-        // Matrix[speaker][class] = 1.0 if speaker in powerset[class], else 0.0
-        let speakerToClassMapping: [[Float]] = (0..<speakerCount).map { speaker in
-            powerset.map { combination in
-                combination.contains(speaker) ? Float(1.0) : Float(0.0)
-            }
-        }
         var classHistogram = Array(repeating: 0, count: powerset.count)
         var classProbabilitySums = Array(repeating: Float.zero, count: powerset.count)
         let chunkCallback = chunkHandler
