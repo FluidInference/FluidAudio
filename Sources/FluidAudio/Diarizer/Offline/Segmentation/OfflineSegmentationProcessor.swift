@@ -397,25 +397,12 @@ struct OfflineSegmentationProcessor {
                         }
                     }
 
-                    // Vectorized speaker activation using matrix-vector multiply
-                    // speakerActivations[speaker] = sum of probabilityBuffer[class] where speaker in powerset[class]
-                    // Handle case where model outputs fewer classes than powerset entries (e.g., 7 vs 8)
-                    let paddedProbabilityBuffer: [Float]
-                    if probabilityBuffer.count < powerset.count {
-                        paddedProbabilityBuffer =
-                            probabilityBuffer
-                            + [Float](
-                                repeating: 0,
-                                count: powerset.count - probabilityBuffer.count
-                            )
-                    } else {
-                        paddedProbabilityBuffer = Array(probabilityBuffer.prefix(powerset.count))
+                    // Binary speaker activation from argmax classification
+                    // Matches pyannote reference: each frame assigns 1.0 to winning speakers, 0.0 to others
+                    var speakerActivations = [Float](repeating: 0, count: speakerCount)
+                    for speaker in winningSpeakers {
+                        speakerActivations[speaker] = 1.0
                     }
-
-                    let speakerActivations = VDSPOperations.matrixVectorMultiply(
-                        matrix: speakerToClassMapping,
-                        vector: paddedProbabilityBuffer
-                    ).map { min(max($0, 0), 1) }
                     chunkSpeakerProbs[frameIndex] = speakerActivations
 
                     let speechProbability = max(0, min(1, 1 - emptyProbability))
