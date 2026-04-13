@@ -555,10 +555,11 @@ extension AsrModels {
         let config = MLModelConfiguration()
         config.computeUnits = .cpuOnly
 
+        let fileNames = getModelFileNames(version: version)
         var modelsToValidate = [
             ("Preprocessor", ModelNames.ASR.preprocessorFile),
-            ("Decoder", ModelNames.ASR.decoderFile),
-            ("Joint", ModelNames.ASR.jointFile),
+            ("Decoder", fileNames.decoder),
+            ("Joint", fileNames.joint),
         ]
         if !version.hasFusedEncoder {
             modelsToValidate.insert(("Encoder", ModelNames.ASR.encoderFile), at: 1)
