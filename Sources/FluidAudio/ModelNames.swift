@@ -288,28 +288,8 @@ public enum ModelNames {
         ]
     }
 
-    /// CTC ja (Japanese) model names (full pipeline: Preprocessor + Encoder + CTC Decoder)
-    public enum CTCJa {
-        public static let preprocessor = "Preprocessor"
-        public static let encoder = "Encoder"
-        public static let decoder = "CtcDecoder"
-
-        public static let preprocessorFile = preprocessor + ".mlmodelc"
-        public static let encoderFile = encoder + ".mlmodelc"
-        public static let decoderFile = decoder + ".mlmodelc"
-
-        // Vocabulary JSON path
-        public static let vocabularyFile = "vocab.json"
-
-        public static let requiredModels: Set<String> = [
-            preprocessorFile,
-            encoderFile,
-            decoderFile,
-        ]
-    }
-
     /// TDT ja (Japanese) model names (hybrid model: CTC preprocessor/encoder + TDT decoder/joint v2)
-    /// NOTE: Uses parakeetCtcJa repo where v2 models are uploaded
+    /// NOTE: Uses parakeetJa repo where v2 models are uploaded
     public enum TDTJa {
         public static let preprocessor = "Preprocessor"
         public static let encoder = "Encoder"
@@ -673,8 +653,7 @@ public enum ModelNames {
         case .parakeetCtcZhCn:
             return ModelNames.CTCZhCn.requiredModels
         case .parakeetJa:
-            // Repo contains BOTH CTC and TDT models - return union of both sets
-            return ModelNames.CTCJa.requiredModels.union(ModelNames.TDTJa.requiredModels)
+            return ModelNames.TDTJa.requiredModels
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return ModelNames.ParakeetEOU.requiredModels
         case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
