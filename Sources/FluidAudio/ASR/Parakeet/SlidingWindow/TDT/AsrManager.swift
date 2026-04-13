@@ -210,13 +210,27 @@ public actor AsrManager {
             throw ASRError.notInitialized
         }
 
-        // Adapt config's encoderHiddenSize to match the loaded model version
-        // (e.g. default config uses 1024 but tdtCtc110m needs 512)
+        // Adapt config to match the loaded model version
+        // (e.g. encoderHiddenSize: default 1024 but tdtCtc110m needs 512)
+        // (e.g. blankId: default 8192 but tdtJa needs 3072)
         let adaptedConfig: ASRConfig
-        if config.encoderHiddenSize != models.version.encoderHiddenSize {
+        let needsHiddenSizeAdaptation = config.encoderHiddenSize != models.version.encoderHiddenSize
+        let needsBlankIdAdaptation = config.tdtConfig.blankId != models.version.blankId
+
+        if needsHiddenSizeAdaptation || needsBlankIdAdaptation {
+            let adaptedTdtConfig = TdtConfig(
+                includeTokenDuration: config.tdtConfig.includeTokenDuration,
+                maxSymbolsPerStep: config.tdtConfig.maxSymbolsPerStep,
+                durationBins: config.tdtConfig.durationBins,
+                blankId: models.version.blankId,
+                boundarySearchFrames: config.tdtConfig.boundarySearchFrames,
+                maxTokensPerChunk: config.tdtConfig.maxTokensPerChunk,
+                consecutiveBlankLimit: config.tdtConfig.consecutiveBlankLimit
+            )
+
             adaptedConfig = ASRConfig(
                 sampleRate: config.sampleRate,
-                tdtConfig: config.tdtConfig,
+                tdtConfig: adaptedTdtConfig,
                 encoderHiddenSize: models.version.encoderHiddenSize,
                 parallelChunkConcurrency: config.parallelChunkConcurrency,
                 streamingEnabled: config.streamingEnabled,
