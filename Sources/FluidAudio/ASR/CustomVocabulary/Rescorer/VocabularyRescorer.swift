@@ -144,6 +144,10 @@ public struct VocabularyRescorer: Sendable {
         public let replacementScore: Float?
         public let shouldReplace: Bool
         public let reason: String
+        /// String similarity between original and replacement (0.0-1.0).
+        public let similarity: Float?
+        /// Minimum TDT decoder confidence across the original word's tokens.
+        public let originalMinConfidence: Float?
     }
 
     /// Output from rescoring operation

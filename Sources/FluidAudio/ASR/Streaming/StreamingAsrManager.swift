@@ -434,14 +434,21 @@ public actor StreamingAsrManager {
                     tokenTimings: chunkLocalTimings,
                     windowSamples: windowSamples
                 ) {
-                    let detected = rescored.replacements.compactMap { $0.replacementWord }
-                    let applied = rescored.replacements.filter { $0.shouldReplace }.compactMap {
-                        $0.replacementWord
+                    let ctcReplacements = rescored.replacements.map { r in
+                        CTCReplacement(
+                            originalWord: r.originalWord,
+                            replacementWord: r.replacementWord ?? r.originalWord,
+                            wasApplied: r.shouldReplace,
+                            similarity: r.similarity ?? 0,
+                            ctcScoreOriginal: r.originalScore,
+                            ctcScoreReplacement: r.replacementScore ?? r.originalScore,
+                            originalMinConfidence: r.originalMinConfidence,
+                            reason: r.reason
+                        )
                     }
                     displayResult = interim.withRescoring(
                         text: rescored.text,
-                        detected: detected.isEmpty ? nil : detected,
-                        applied: applied.isEmpty ? nil : applied
+                        replacements: ctcReplacements.isEmpty ? nil : ctcReplacements
                     )
                 }
             }

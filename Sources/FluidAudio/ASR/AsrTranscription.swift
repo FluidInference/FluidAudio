@@ -497,7 +497,7 @@ extension AsrManager {
     ///
     /// Runs CTC inference on the audio samples and applies vocabulary rescoring to correct
     /// misrecognized words. Returns an updated ASRResult with rescored text and populated
-    /// `ctcDetectedTerms`/`ctcAppliedTerms` fields.
+    /// `ctcReplacements` metadata (with backward-compatible `ctcDetectedTerms`/`ctcAppliedTerms`).
     ///
     /// - Parameters:
     ///   - result: The original ASRResult from transcription
@@ -543,19 +543,27 @@ extension AsrManager {
                 return result
             }
 
-            let detected = rescoreOutput.replacements.compactMap { $0.replacementWord }
-            let applied = rescoreOutput.replacements.filter { $0.shouldReplace }.compactMap {
-                $0.replacementWord
+            let ctcReplacements = rescoreOutput.replacements.map { r in
+                CTCReplacement(
+                    originalWord: r.originalWord,
+                    replacementWord: r.replacementWord ?? r.originalWord,
+                    wasApplied: r.shouldReplace,
+                    similarity: r.similarity ?? 0,
+                    ctcScoreOriginal: r.originalScore,
+                    ctcScoreReplacement: r.replacementScore ?? r.originalScore,
+                    originalMinConfidence: r.originalMinConfidence,
+                    reason: r.reason
+                )
             }
 
+            let appliedCount = ctcReplacements.filter { $0.wasApplied }.count
             logger.info(
-                "Vocabulary rescoring applied \(applied.count) replacement(s)"
+                "Vocabulary rescoring applied \(appliedCount) replacement(s)"
             )
 
             return result.withRescoring(
                 text: rescoreOutput.text,
-                detected: detected.isEmpty ? nil : detected,
-                applied: applied.isEmpty ? nil : applied
+                replacements: ctcReplacements.isEmpty ? nil : ctcReplacements
             )
         } catch {
             logger.warning("Vocabulary rescoring failed: \(error.localizedDescription)")

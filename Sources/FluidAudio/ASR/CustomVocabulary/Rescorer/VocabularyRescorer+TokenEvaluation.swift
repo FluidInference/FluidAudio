@@ -17,7 +17,8 @@ extension VocabularyRescorer {
     /// Evaluate a CTC match candidate and determine if replacement should occur.
     ///
     /// This method encapsulates the core CTC scoring logic shared between word-centric
-    /// and term-centric algorithms.
+    /// and term-centric algorithms. When TDT token timings are provided, applies confidence
+    /// gating to prevent replacing words the decoder is highly confident about.
     ///
     /// - Parameters:
     ///   - candidate: The match candidate to evaluate
@@ -25,13 +26,15 @@ extension VocabularyRescorer {
     ///   - frameDuration: Duration of each CTC frame in seconds
     ///   - cbw: Context-biasing weight
     ///   - marginSeconds: Temporal margin around word for CTC search
+    ///   - tokenTimings: TDT decoder token timings for confidence gating
     /// - Returns: Evaluation result with replacement decision
     func evaluateCTCMatch(
         candidate: CTCMatchCandidate,
         logProbs: [[Float]],
         frameDuration: Double,
         cbw: Float,
-        marginSeconds: Double
+        marginSeconds: Double,
+        tokenTimings: [TokenTiming] = []
     ) -> CTCMatchResult {
         // Calculate frame window
         let marginFrames = Int(marginSeconds / frameDuration)
@@ -57,7 +60,8 @@ extension VocabularyRescorer {
                 originalScore: -Float.infinity,
                 boostedVocabScore: vocabCtcScore,
                 replacement: candidate.vocabTerm,
-                reason: "No tokenizer available"
+                reason: "No tokenizer available",
+                minOriginalConfidence: nil
             )
         }
 
@@ -69,7 +73,8 @@ extension VocabularyRescorer {
                 originalScore: -Float.infinity,
                 boostedVocabScore: vocabCtcScore,
                 replacement: candidate.vocabTerm,
-                reason: "Empty tokens for original phrase"
+                reason: "Empty tokens for original phrase",
+                minOriginalConfidence: nil
             )
         }
 
@@ -83,6 +88,28 @@ extension VocabularyRescorer {
         // Apply adaptive context-biasing weight
         let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: candidate.vocabTokens.count)
         let boostedVocabScore = vocabCtcScore + adaptiveCbwValue
+
+        // TDT Confidence Gating: if the original tokens have very high TDT confidence,
+        // require a larger CTC score advantage to override them.
+        let originalTokenConfidences: [Float] = tokenTimings.compactMap { timing in
+            // Match tokens whose time range overlaps with the candidate span
+            guard timing.endTime > candidate.spanStartTime && timing.startTime < candidate.spanEndTime else {
+                return nil
+            }
+            return timing.confidence
+        }
+        let minOriginalConfidence: Float = originalTokenConfidences.min() ?? 0
+
+        if minOriginalConfidence > 0.85 && boostedVocabScore <= originalCtcScore + 3.0 {
+            return CTCMatchResult(
+                shouldReplace: false,
+                originalScore: originalCtcScore,
+                boostedVocabScore: boostedVocabScore,
+                replacement: candidate.vocabTerm,
+                reason: "TDT confidence gate: original min conf \(String(format: "%.2f", minOriginalConfidence)) > 0.85, CTC advantage \(String(format: "%.1f", boostedVocabScore - originalCtcScore)) insufficient",
+                minOriginalConfidence: minOriginalConfidence
+            )
+        }
 
         // CTC-vs-CTC comparison
         let shouldReplace = boostedVocabScore > originalCtcScore
@@ -124,7 +151,8 @@ extension VocabularyRescorer {
             originalScore: originalCtcScore,
             boostedVocabScore: boostedVocabScore,
             replacement: replacement,
-            reason: reason
+            reason: reason,
+            minOriginalConfidence: minOriginalConfidence
         )
     }
 
@@ -166,7 +194,9 @@ extension VocabularyRescorer {
                 replacementWord: result.replacement,
                 replacementScore: result.boostedVocabScore,
                 shouldReplace: true,
-                reason: result.reason
+                reason: result.reason,
+                similarity: candidate.similarity,
+                originalMinConfidence: result.minOriginalConfidence
             )
         )
     }

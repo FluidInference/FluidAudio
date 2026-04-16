@@ -118,8 +118,8 @@ public final class AsrManager {
     /// Configure vocabulary boosting for batch transcription.
     ///
     /// When configured, vocabulary terms will be automatically rescored after each `transcribe()` call
-    /// using CTC-based constrained decoding. The resulting `ASRResult` will have `ctcDetectedTerms`
-    /// and `ctcAppliedTerms` populated.
+    /// using CTC-based constrained decoding. The resulting `ASRResult` will have `ctcReplacements`
+    /// populated (with backward-compatible `ctcDetectedTerms` and `ctcAppliedTerms` computed properties).
     ///
     /// - Parameters:
     ///   - vocabulary: Custom vocabulary context with terms to detect

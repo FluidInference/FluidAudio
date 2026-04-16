@@ -60,6 +60,8 @@ extension VocabularyRescorer {
         let boostedVocabScore: Float
         let replacement: String
         let reason: String
+        /// Minimum TDT decoder confidence across the original word's tokens.
+        let minOriginalConfidence: Float?
     }
 
     /// Pending replacement candidate for two-pass selection.
@@ -352,7 +354,8 @@ extension VocabularyRescorer {
                     logProbs: logProbs,
                     frameDuration: frameDuration,
                     cbw: cbw,
-                    marginSeconds: marginSeconds
+                    marginSeconds: marginSeconds,
+                    tokenTimings: tokenTimings
                 )
 
                 if result.shouldReplace {
@@ -517,7 +520,8 @@ extension VocabularyRescorer {
                             logProbs: logProbs,
                             frameDuration: frameDuration,
                             cbw: cbw,
-                            marginSeconds: marginSeconds
+                            marginSeconds: marginSeconds,
+                            tokenTimings: tokenTimings
                         )
 
                         if result.shouldReplace {
@@ -683,7 +687,8 @@ extension VocabularyRescorer {
                         logProbs: logProbs,
                         frameDuration: frameDuration,
                         cbw: cbw,
-                        marginSeconds: marginSeconds
+                        marginSeconds: marginSeconds,
+                        tokenTimings: tokenTimings
                     )
 
                     if result.shouldReplace {

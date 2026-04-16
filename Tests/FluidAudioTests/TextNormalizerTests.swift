@@ -368,8 +368,7 @@ final class TextNormalizerTests: XCTestCase {
             duration: 2.0,
             processingTime: 0.1,
             tokenTimings: [],
-            ctcDetectedTerms: [],
-            ctcAppliedTerms: []
+            ctcReplacements: []
         )
         let normalized = normalizer.normalize(result: asrResult)
         // Without native lib, text should be unchanged

@@ -249,8 +249,7 @@ public final class TextNormalizer: Sendable {
             duration: result.duration,
             processingTime: result.processingTime,
             tokenTimings: result.tokenTimings,
-            ctcDetectedTerms: result.ctcDetectedTerms,
-            ctcAppliedTerms: result.ctcAppliedTerms
+            ctcReplacements: result.ctcReplacements
         )
     }
 

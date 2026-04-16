@@ -40,15 +40,25 @@ public struct ASRResult: Codable, Sendable {
     public let processingTime: TimeInterval
     public let tokenTimings: [TokenTiming]?
     public let performanceMetrics: ASRPerformanceMetrics?
-    public let ctcDetectedTerms: [String]?
-    public let ctcAppliedTerms: [String]?
+    /// Detailed CTC replacement metadata. When vocabulary rescoring is active,
+    /// contains per-replacement scores and gating decisions.
+    public let ctcReplacements: [CTCReplacement]?
+
+    /// Convenience: detected term names (backward compatible).
+    public var ctcDetectedTerms: [String]? {
+        ctcReplacements?.map { $0.replacementWord }
+    }
+
+    /// Convenience: applied term names (backward compatible).
+    public var ctcAppliedTerms: [String]? {
+        ctcReplacements?.filter { $0.wasApplied }.map { $0.replacementWord }
+    }
 
     public init(
         text: String, confidence: Float, duration: TimeInterval, processingTime: TimeInterval,
         tokenTimings: [TokenTiming]? = nil,
         performanceMetrics: ASRPerformanceMetrics? = nil,
-        ctcDetectedTerms: [String]? = nil,
-        ctcAppliedTerms: [String]? = nil
+        ctcReplacements: [CTCReplacement]? = nil
     ) {
         self.text = text
         self.confidence = confidence
@@ -56,8 +66,7 @@ public struct ASRResult: Codable, Sendable {
         self.processingTime = processingTime
         self.tokenTimings = tokenTimings
         self.performanceMetrics = performanceMetrics
-        self.ctcDetectedTerms = ctcDetectedTerms
-        self.ctcAppliedTerms = ctcAppliedTerms
+        self.ctcReplacements = ctcReplacements
     }
 
     /// Real-time factor (RTFx) - how many times faster than real-time
@@ -65,14 +74,13 @@ public struct ASRResult: Codable, Sendable {
         Float(duration) / Float(processingTime)
     }
 
-    /// Create a copy of this result with rescored text and CTC metadata from vocabulary boosting.
+    /// Create a copy of this result with rescored text and CTC replacement metadata.
     ///
     /// - Parameters:
     ///   - text: The rescored transcript text
-    ///   - detected: Vocabulary terms detected by CTC (candidates considered for replacement)
-    ///   - applied: Vocabulary terms actually applied as replacements
+    ///   - replacements: Detailed per-replacement metadata from CTC rescoring
     /// - Returns: A new ASRResult with updated text and CTC metadata
-    public func withRescoring(text: String, detected: [String]?, applied: [String]?) -> ASRResult {
+    public func withRescoring(text: String, replacements: [CTCReplacement]?) -> ASRResult {
         ASRResult(
             text: text,
             confidence: confidence,
@@ -80,10 +88,29 @@ public struct ASRResult: Codable, Sendable {
             processingTime: processingTime,
             tokenTimings: tokenTimings,
             performanceMetrics: performanceMetrics,
-            ctcDetectedTerms: detected,
-            ctcAppliedTerms: applied
+            ctcReplacements: replacements
         )
     }
+}
+
+/// Detailed metadata for a single CTC vocabulary replacement.
+public struct CTCReplacement: Codable, Sendable {
+    /// The original word(s) in the transcript before replacement.
+    public let originalWord: String
+    /// The vocabulary term that replaced the original.
+    public let replacementWord: String
+    /// Whether the replacement was actually applied (false = detected but rejected by gating).
+    public let wasApplied: Bool
+    /// String similarity between original and replacement (0.0-1.0).
+    public let similarity: Float
+    /// CTC acoustic score for the original word.
+    public let ctcScoreOriginal: Float
+    /// CTC acoustic score for the replacement (with context biasing weight).
+    public let ctcScoreReplacement: Float
+    /// Minimum TDT decoder confidence across the original word's tokens.
+    public let originalMinConfidence: Float?
+    /// Reason for the replacement decision.
+    public let reason: String
 }
 
 public struct TokenTiming: Codable, Sendable {
