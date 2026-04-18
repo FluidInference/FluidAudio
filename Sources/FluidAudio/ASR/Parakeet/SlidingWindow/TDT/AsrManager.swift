@@ -332,7 +332,8 @@ public actor AsrManager {
         )
 
         let totalSamples = sampleSource.sampleCount
-        guard totalSamples >= config.sampleRate else {
+        let minimumRequiredSamples = ASRConstants.minimumRequiredSamples(forSampleRate: config.sampleRate)
+        guard totalSamples >= minimumRequiredSamples else {
             sampleSource.cleanup()
             throw ASRError.invalidAudioData
         }

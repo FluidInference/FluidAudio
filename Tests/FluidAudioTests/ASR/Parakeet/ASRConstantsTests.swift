@@ -93,6 +93,18 @@ final class ASRConstantsTests: XCTestCase {
         XCTAssertEqual(actualFrameDurationMs, expectedFrameDurationMs, accuracy: 0.1, "Frame duration should be 80ms")
     }
 
+    func testMinimumAudioDurationSeconds() {
+        XCTAssertEqual(
+            ASRConstants.minimumAudioDurationSeconds, 0.3, accuracy: 1e-9,
+            "Minimum accepted audio duration should be 300ms")
+
+        // At 16 kHz, 300 ms = 4,800 samples. Exercises the helper the ASR guards
+        // actually call, so a regression in either the constant or the conversion is caught.
+        XCTAssertEqual(
+            ASRConstants.minimumRequiredSamples(forSampleRate: ASRConstants.sampleRate),
+            4_800)
+    }
+
     func testFrameCalculationConsistencyWithChunkProcessor() {
         // Test that frame calculations are consistent with stateless ChunkProcessor expectations
         let chunkSeconds = 14.96  // New stateless chunks: ~14.96s

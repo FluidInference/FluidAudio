@@ -6,7 +6,8 @@ extension AsrManager {
         _ audioSamples: [Float], decoderState: inout TdtDecoderState
     ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
-        guard audioSamples.count >= config.sampleRate else { throw ASRError.invalidAudioData }
+        let minimumRequiredSamples = ASRConstants.minimumRequiredSamples(forSampleRate: config.sampleRate)
+        guard audioSamples.count >= minimumRequiredSamples else { throw ASRError.invalidAudioData }
 
         let startTime = Date()
 

@@ -133,7 +133,7 @@ public enum ASRError: Error, LocalizedError {
         case .notInitialized:
             return "AsrManager not initialized. Call initialize() first."
         case .invalidAudioData:
-            return "Invalid audio data provided. Must be at least 1 second of 16kHz audio."
+            return "Invalid audio data provided. Must be at least 300ms of 16kHz audio."
         case .modelLoadFailed:
             return "Failed to load Parakeet CoreML models."
         case .processingFailed(let message):
