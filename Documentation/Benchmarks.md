@@ -485,6 +485,40 @@ Step Ratio 1, min duration 0 (edited)
 
 Note that the baseline pytorch version is ~11% DER, we lost some precision dropping down to fp16 precision in order to run most of the embedding model on neural engine. But as a result, we significantly out perform the baseline `mps` backend as well. the pyannote-community-1 on cpu is ~1.5-2 RTFx, on mps, it's ~20-25 RTFx.
 
+Running on the full AMI SDM 16-meeting test set (official NeMo/pyannote evaluation split: EN2002, ES2004, IS1009, TS3003 × a-d):
+
+```bash
+swift run -c release fluidaudiocli diarization-benchmark --mode offline \
+    --dataset ami-sdm --auto-download
+```
+
+```text
+------------------------------------------------------------------------------------------
+Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
+------------------------------------------------------------------------------------------
+IS1009c           5.1      5.9      3.1      1.5      0.6     4/4        94.6
+IS1009b           5.4      6.4      2.8      1.4      1.1     4/4        77.6
+ES2004b           6.0      7.0      2.7      2.2      1.1     4/4        70.4
+ES2004c           6.4      7.3      2.0      3.4      1.0     4/4        70.5
+EN2002c           7.8      9.7      5.1      0.5      2.2     3/3        60.3
+TS3003b           8.0      7.8      3.6      3.7      0.7     4/4        71.4
+TS3003c           9.0      8.7      6.1      1.9      0.9     4/4        70.4
+EN2002b           9.1     12.9      4.0      1.9      3.2     5/4        63.4
+IS1009d           9.2     11.7      4.5      2.6      2.2     4/4        91.6
+IS1009a           9.9     11.9      5.0      2.5      2.4     4/4        60.8
+ES2004a          10.4     13.4      7.5      1.6      1.4     4/4        60.0
+EN2002a          10.6     15.0      5.4      1.2      4.0     4/4        52.2
+ES2004d          11.4     16.4      5.3      2.6      3.5     4/4        62.1
+TS3003a          17.2     64.1     13.1      1.3      2.8     2/4        68.7
+EN2002d          18.3     38.2      4.6      1.5     12.2     3/4        78.6
+TS3003d          26.0     41.6     11.0      2.2     12.8     3/4        64.5
+------------------------------------------------------------------------------------------
+AVERAGE          10.6     17.4      5.4      2.0      3.3      -         69.8
+==========================================================================================
+```
+
+12/16 meetings detect the correct speaker count. Average DER 10.62% matches published pyannote-community-1 offline numbers on this split (~11-12%).
+
 ### Streaming/online Diarization
 
 This is more tricky and honestly a lot more fragile to clustering. Expect +10-15% worse DER for the streaming implementation. Only use this when you critically need realtime streaming speaker diarization. In most cases, offline is more than enough for most applications.

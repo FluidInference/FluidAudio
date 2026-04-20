@@ -10,8 +10,8 @@ All results use collar=0.25s, ignoreOverlap=true.
 
 | System | Avg DER | Avg RTFx | Mode |
 |---|---|---|---|
+| Offline VBx | 12.0% | 60.4x | Offline |
 | LS-EEND (AMI) | 25.7% | 53.9x | Streaming |
-| Offline VBx | 21.8% | 97.5x | Offline |
 | Streaming 5s/0.8 | 29.9% | 96.2x | Streaming |
 | Sortformer (high-lat) | 34.3% | 120.3x | Streaming |
 
@@ -32,16 +32,18 @@ swift run -c release fluidaudiocli diarization-benchmark --mode offline \
 ----------------------------------------------------------------------
 Meeting        DER %    Miss %     FA %     SE %   Speakers     RTFx
 ----------------------------------------------------------------------
-ES2004a          14.5      7.6      1.7      5.2     5/4        98.2
-IS1009a          17.7      3.6      3.0     11.1     6/4        99.1
-TS3003a          21.2     11.7      1.4      8.1     2/4        98.4
-EN2002a          33.9      4.5      1.4     28.0     4/4        94.2
+ES2004a          10.4      7.5      1.6      1.4     4/4        60.0
+IS1009a           9.9      5.0      2.5      2.4     4/4        60.8
+EN2002a          10.6      5.4      1.2      4.0     4/4        52.2
+TS3003a          17.2     13.1      1.3      2.8     2/4        68.7
 ----------------------------------------------------------------------
-AVERAGE          21.8      6.9      1.9     13.1      -         97.5
+AVERAGE          12.0      7.7      1.6      2.7      -         60.4
 ======================================================================
 ```
 
-Full VoxConverse results (232 clips): 15.07% DER, 122x RTFx. See [Benchmarks.md](../Benchmarks.md) for details.
+Full 16-meeting AMI SDM results: 10.62% DER, 69.8x RTFx, 12/16 meetings with correct speaker count. See [Benchmarks.md](../Benchmarks.md) for details.
+
+Full VoxConverse results (232 clips): 15.07% DER, 122x RTFx.
 
 ## Streaming (5s chunks, 0.8 threshold)
 

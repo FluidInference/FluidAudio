@@ -936,6 +936,9 @@ enum StreamDiarizationBenchmark {
     private static func getAMIFiles(dataset: String, maxFiles: Int?) -> [String] {
         // Get list of AMI meeting names
         let allMeetings = [
+            // Official AMI SDM test set (matches DatasetDownloader + NeMo/pyannote eval convention)
+            "EN2002a", "EN2002b", "EN2002c", "EN2002d",
+            "TS3003a", "TS3003b", "TS3003c", "TS3003d",
             "ES2002a", "ES2002b", "ES2002c", "ES2002d",
             "ES2003a", "ES2003b", "ES2003c", "ES2003d",
             "ES2004a", "ES2004b", "ES2004c", "ES2004d",
