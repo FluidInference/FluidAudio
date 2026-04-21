@@ -172,8 +172,7 @@ public actor CohereAsrManager {
     }
 
     /// Decode with stateful decoder (CoreML manages KV cache).
-    /// NOTE: Stateful decoders are iOS-only (newState() unavailable on macOS).
-    @available(iOS 18, *)
+    @available(macOS 15, iOS 18, *)
     private func decodeStateful(
         encoderHidden: MLMultiArray,
         language: CohereAsrConfig.Language?,
@@ -197,7 +196,7 @@ public actor CohereAsrManager {
         }
 
         // Initialize stateful decoder
-        let state = models.decoder.newState()
+        let state = models.decoder.makeState()
 
         var currentToken = prompt[0]
         let effectiveMaxTokens = min(maxNewTokens + prompt.count, CohereAsrConfig.maxSeqLen)

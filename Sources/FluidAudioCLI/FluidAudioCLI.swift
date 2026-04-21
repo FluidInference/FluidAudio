@@ -80,6 +80,10 @@ struct FluidAudioCLI {
             await CohereBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "cohere-transcribe":
             await CohereTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "cohere-mixed":
+            await CohereMixedCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "cohere-mixed-benchmark":
+            await CohereMixedBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
