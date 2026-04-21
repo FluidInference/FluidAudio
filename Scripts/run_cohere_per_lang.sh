@@ -72,7 +72,7 @@ for lang in "${LANGS[@]}"; do
         --model-dir "${MODEL_DIR}" \
         --languages "${lang}" \
         --auto-download \
-        "${MAX_ARGS[@]}" \
+        ${MAX_ARGS[@]+"${MAX_ARGS[@]}"} \
         --output "${OUT}" \
         > "${LOG}" 2>&1
     RC=$?
