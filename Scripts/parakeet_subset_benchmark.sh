@@ -8,7 +8,7 @@
 #   4. CTC custom vocab  — ctc-earnings-benchmark (v2 TDT + CTC 110m keyword spotting)
 #   5. EOU streaming     — parakeet-eou 320ms on LibriSpeech test-clean
 #   6. Nemotron streaming — nemotron 1120ms on LibriSpeech test-clean
-#   7. TDT Japanese      — parakeet-tdt-ja on JSUT dataset
+#   7. TDT Japanese      — parakeet-ja on JSUT dataset
 #   8. CTC Chinese       — parakeet-ctc-zh-cn on THCHS-30 dataset
 #
 # Usage:
@@ -103,7 +103,7 @@ verify_assets() {
     # Nemotron reuses the v3 models directory; no separate check needed beyond v3 above.
 
     # --- Japanese TDT (hybrid: CTC preprocessor/encoder + TDT decoder/joint) ---
-    local ja_dir="$MODELS_DIR/parakeet-tdt-ja"
+    local ja_dir="$MODELS_DIR/parakeet-ja"
     for f in Preprocessor.mlmodelc Encoder.mlmodelc Decoderv2.mlmodelc Jointerv2.mlmodelc vocab.json; do
         if [[ ! -e "$ja_dir/$f" ]]; then
             log "MISSING  tdt-ja: $ja_dir/$f"

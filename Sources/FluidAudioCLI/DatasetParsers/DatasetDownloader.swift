@@ -697,8 +697,9 @@ struct DatasetDownloader {
         let type: String
     }
 
-    /// Download Earnings22 KWS dataset from argmaxinc/earnings22-kws-golden
+    /// Download Earnings22 KWS dataset from argmaxinc/contextual-earnings22
     /// using the HuggingFace Datasets Server REST API (pure Swift, no Python dependency).
+    /// (Previously argmaxinc/earnings22-kws-golden, which was consolidated into contextual-earnings22.)
     static func downloadEarnings22KWS(force: Bool) async {
         let cacheDir = getEarnings22Directory()
         let testDatasetDir = cacheDir.appendingPathComponent("test-dataset")
@@ -729,7 +730,7 @@ struct DatasetDownloader {
 
         // Fetch rows via HuggingFace Datasets Server API (paginated, max 100 per request)
         let baseURL = "https://datasets-server.huggingface.co/rows"
-        let dataset = "argmaxinc/earnings22-kws-golden"
+        let dataset = "argmaxinc/contextual-earnings22"
         let pageSize = 100
         var offset = 0
         var totalExtracted = 0
