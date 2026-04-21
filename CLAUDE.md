@@ -50,9 +50,24 @@ FluidAudio is a Swift framework for local, low-latency audio processing on Apple
 3. **Git Operations**: Never run `git push` unless explicitly requested.
    - **No Co-Author Tags**: Do not add `Co-Authored-By` lines for Claude, Copilot, or any AI assistant in commit messages.
    - **No GitHub comments**: Never post comments, reviews, or reactions on issues or PRs via `gh`. Reading issues, PRs, and comments is fine. Creating PRs and editing PR titles/bodies is fine.
-4. **Code Formatting**: All code must pass swift-format checks before merge
-5. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested
-6. **Performance**: Keep RTFx > 1.0x for real-time capability
+4. **Multi-Agent Workflow**: This repo is worked on by multiple coding agents
+   in parallel. Switching branches in a shared working tree drags unrelated
+   WIP changes (and their build artifacts) into your compile and surfaces
+   "file was modified during the build" errors. Use `git worktree` instead
+   — shared `.git`, isolated working tree + `.build/`, no collisions.
+
+   ```bash
+   # From the primary checkout, create an isolated tree for your branch
+   git worktree add ../FluidAudio-<task> -b <branch> origin/main
+   cd ../FluidAudio-<task>
+   # Independent working tree, independent .build/, shared .git
+   ```
+
+   One worktree per active task. Remove with `git worktree remove <path>` when
+   done. List active worktrees with `git worktree list`.
+5. **Code Formatting**: All code must pass swift-format checks before merge
+6. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested
+7. **Performance**: Keep RTFx > 1.0x for real-time capability
 
 ## Code Style
 
