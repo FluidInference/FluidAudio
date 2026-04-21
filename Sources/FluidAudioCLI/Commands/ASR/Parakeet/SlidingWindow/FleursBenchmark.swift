@@ -43,6 +43,14 @@ public class FLEURSBenchmark {
         "mt_mt": "Maltese (Malta)",  // 20.46% WER
         "lv_lv": "Latvian (Latvia)",  // 22.84% WER
         "sl_si": "Slovenian (Slovenia)",  // 24.03% WER
+
+        // Cohere Transcribe additions (multilingual, non-European)
+        "pt_br": "Portuguese (Brazil)",
+        "ar_eg": "Arabic (Egypt)",
+        "ja_jp": "Japanese (Japan)",
+        "cmn_hans_cn": "Mandarin (China)",
+        "ko_kr": "Korean (South Korea)",
+        "vi_vn": "Vietnamese (Vietnam)",
     ]
 
     public struct FLEURSConfig {

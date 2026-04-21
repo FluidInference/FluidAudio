@@ -104,6 +104,8 @@ Resources/
 scripts/
 !Scripts/parakeet_subset_benchmark.sh
 !Scripts/diarizer_subset_benchmark.sh
+!Scripts/run_cohere_per_lang.sh
+!Scripts/fetch_fleurs_from_google.py
 Documentation/parakeet-tdt/
 docs/parakeet-tdt/
 
