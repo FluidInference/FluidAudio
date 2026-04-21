@@ -7,6 +7,16 @@ import FluidAudio
 struct DatasetDownloader {
     internal static let logger = AppLogger(category: "Dataset")
 
+    /// Official AMI SDM 16-meeting test set (EN2002a-d, ES2004a-d, IS1009a-d, TS3003a-d).
+    /// Matches the evaluation convention used by NeMo, pyannote, and Sortformer papers.
+    /// Single source of truth for both dataset download and benchmark enumeration.
+    static let officialAMITestSet: [String] = [
+        "EN2002a", "EN2002b", "EN2002c", "EN2002d",
+        "ES2004a", "ES2004b", "ES2004c", "ES2004d",
+        "IS1009a", "IS1009b", "IS1009c", "IS1009d",
+        "TS3003a", "TS3003b", "TS3003c", "TS3003d",
+    ]
+
     enum AMIVariant: String, CaseIterable {
         case sdm = "sdm"  // Single Distant Microphone (Mix-Headset.wav)
         case ihm = "ihm"  // Individual Headset Microphones (Headset-0.wav)
@@ -55,13 +65,7 @@ struct DatasetDownloader {
         if let singleFile = singleFile {
             commonMeetings = [singleFile]
         } else {
-            commonMeetings = [
-                // Full 16-meeting AMI SDM test set
-                "EN2002a", "EN2002b", "EN2002c", "EN2002d",
-                "ES2004a", "ES2004b", "ES2004c", "ES2004d",
-                "IS1009a", "IS1009b", "IS1009c", "IS1009d",
-                "TS3003a", "TS3003b", "TS3003c", "TS3003d",
-            ]
+            commonMeetings = Self.officialAMITestSet
             logger.info("📋 Downloading official AMI SDM test set (16 meetings)")
         }
 
