@@ -191,6 +191,14 @@ public final class CohereMelSpectrogram {
 
         // Compute power spectrum: |X[k]|^2 = Re^2 + Im^2
         vDSP.squareAndAdd(realPart, imagPart, result: &powerSpec)
+
+        // vDSP's real FFT returns a packed format where realPart[0] holds DC
+        // and imagPart[0] holds the Nyquist component (not an imaginary part).
+        // The squareAndAdd above conflates them into bin 0 and leaves the true
+        // Nyquist bin at index nFFT/2 as zero. Split them back out.
+        let nyquistPower = imagPart[0] * imagPart[0]
+        powerSpec[0] = realPart[0] * realPart[0]
+        powerSpec[nFFT / 2] = nyquistPower
     }
 
     /// Apply mel filterbank to power spectrum.

@@ -19,6 +19,7 @@ enum CohereTranscribeCommand {
         var variant: CohereAsrVariant = .int8
         var maxTokens = 200
         var cpuOnly = false
+        var language: CohereAsrConfig.Language = .english
 
         // Parse options
         var i = 1
@@ -50,6 +51,17 @@ enum CohereTranscribeCommand {
                 }
             case "--cpu-only":
                 cpuOnly = true
+            case "--language", "-l":
+                if i + 1 < arguments.count,
+                    let lang = CohereAsrConfig.Language(rawValue: arguments[i + 1].lowercased())
+                {
+                    language = lang
+                    i += 1
+                } else {
+                    let raw = i + 1 < arguments.count ? arguments[i + 1] : "<nil>"
+                    logger.error("Unknown language '\(raw)'")
+                    exit(1)
+                }
             default:
                 logger.warning("Unknown option: \(arguments[i])")
             }
@@ -61,7 +73,8 @@ enum CohereTranscribeCommand {
             modelDir: modelDir,
             variant: variant,
             maxTokens: maxTokens,
-            cpuOnly: cpuOnly
+            cpuOnly: cpuOnly,
+            language: language
         )
     }
 
@@ -70,7 +83,8 @@ enum CohereTranscribeCommand {
         modelDir: String?,
         variant: CohereAsrVariant,
         maxTokens: Int,
-        cpuOnly: Bool = false
+        cpuOnly: Bool = false,
+        language: CohereAsrConfig.Language = .english
     ) async {
         guard #available(macOS 14, iOS 17, *) else {
             logger.error("Cohere Transcribe requires macOS 14 or later")
@@ -105,6 +119,7 @@ enum CohereTranscribeCommand {
             let startTime = CFAbsoluteTimeGetCurrent()
             let text = try await manager.transcribe(
                 audioSamples: samples,
+                language: language,
                 maxNewTokens: maxTokens
             )
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -141,6 +156,7 @@ enum CohereTranscribeCommand {
                 --variant <fp16|int8>   Model variant (default: int8). int8 uses 2.6x less disk/RAM.
                 --max-tokens <n>        Maximum tokens to generate (default: 200)
                 --cpu-only              Use CPU+GPU only (skip ANE compilation, faster startup)
+                --language, -l <code>   Language code (default: en). See list below.
 
             Supported languages (14 total):
                 en   English             fr   French              de   German

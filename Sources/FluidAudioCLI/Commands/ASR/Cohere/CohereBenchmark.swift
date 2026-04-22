@@ -274,8 +274,9 @@ enum CohereBenchmark {
                     hypothesis: hypothesis,
                     reference: file.transcript
                 )
-                let wer = metrics.wer
-                let cer = metrics.cer
+                // WERCalculator returns fractions; benchmark output reports percentages.
+                let wer = metrics.wer * 100
+                let cer = metrics.cer * 100
 
                 results.append(
                     CohereBenchmarkResult(
