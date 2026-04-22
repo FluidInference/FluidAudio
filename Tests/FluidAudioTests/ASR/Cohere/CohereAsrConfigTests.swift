@@ -11,14 +11,15 @@ final class CohereAsrConfigTests: XCTestCase {
         XCTAssertEqual(CohereAsrConfig.sampleRate, 16000)
     }
 
-    func testMaxAudioDurationIs30Seconds() {
-        XCTAssertEqual(CohereAsrConfig.maxAudioSeconds, 30.0)
+    func testMaxAudioDurationIs35Seconds() {
+        // Matches the encoder mel input [1, 128, 3500] (3500 * 160 / 16000 = 35s).
+        XCTAssertEqual(CohereAsrConfig.maxAudioSeconds, 35.0)
     }
 
     func testMaxSamplesMatchesDurationAndSampleRate() {
         let expectedSamples = Int(CohereAsrConfig.maxAudioSeconds * Float(CohereAsrConfig.sampleRate))
         XCTAssertEqual(CohereAsrConfig.maxSamples, expectedSamples)
-        XCTAssertEqual(CohereAsrConfig.maxSamples, 480_000)
+        XCTAssertEqual(CohereAsrConfig.maxSamples, 560_000)
     }
 
     func testVocabSizeIs16384() {

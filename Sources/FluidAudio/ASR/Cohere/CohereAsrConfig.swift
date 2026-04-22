@@ -5,11 +5,14 @@ public enum CohereAsrConfig {
     /// Sample rate expected by the model (16kHz).
     public static let sampleRate: Int = 16000
 
-    /// Maximum audio duration in seconds (30s).
-    public static let maxAudioSeconds: Float = 30.0
+    /// Maximum audio duration in seconds (35s).
+    ///
+    /// Matches the encoder mel input `[1, 128, 3500]` (3500 frames * 160 hop
+    /// / 16000 sr = 35s).
+    public static let maxAudioSeconds: Float = 35.0
 
-    /// Maximum number of audio samples (480,000 at 16kHz = 30 seconds).
-    public static let maxSamples: Int = 480_000
+    /// Maximum number of audio samples (560,000 at 16kHz = 35 seconds).
+    public static let maxSamples: Int = 560_000
 
     /// Vocabulary size.
     public static let vocabSize: Int = 16_384

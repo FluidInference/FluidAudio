@@ -88,11 +88,17 @@ public final class CohereMelSpectrogram {
     /// - Parameter audio: Raw audio samples (Float32, 16kHz mono).
     /// - Returns: Mel spectrogram as [nMels, nFrames] (row-major).
     public func compute(audio: [Float]) -> [[Float]] {
+        let padLength = nFFT / 2
+        // Reflection padding indexes `audio[padLength - i]` and
+        // `audio[count - 2 - i]`, which require at least `padLength + 1`
+        // samples. Anything shorter is treated as empty so callers don't
+        // crash on tail chunks or probe inputs.
+        guard audio.count > padLength else { return [] }
+
         // Apply pre-emphasis filter
         let preemphasized = applyPreemphasis(audio)
 
         // Pad audio for reflection padding
-        let padLength = nFFT / 2
         let paddedAudio = reflectionPad(preemphasized, padLength: padLength)
 
         // Calculate number of frames

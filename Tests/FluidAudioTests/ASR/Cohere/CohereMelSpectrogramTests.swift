@@ -62,13 +62,14 @@ final class CohereMelSpectrogramTests: XCTestCase {
     // MARK: - Edge Cases
 
     func testComputeWithVeryShortAudio() {
+        // Reflection padding requires audio.count > nFFT/2 (= 512). Anything
+        // shorter must return empty rather than crash.
         let melExtractor = CohereMelSpectrogram()
-        let audio = [Float](repeating: 0.1, count: 100)  // Less than nFFT
+        let audio = [Float](repeating: 0.1, count: 100)
 
         let mel = melExtractor.compute(audio: audio)
 
-        XCTAssertEqual(mel.count, CohereAsrConfig.numMelBins)
-        XCTAssertGreaterThan(mel.first?.count ?? 0, 0, "Should still produce frames")
+        XCTAssertTrue(mel.isEmpty, "Audio shorter than nFFT/2 should return empty mel")
     }
 
     func testComputeWithSingleSample() {
@@ -77,7 +78,7 @@ final class CohereMelSpectrogramTests: XCTestCase {
 
         let mel = melExtractor.compute(audio: audio)
 
-        XCTAssertEqual(mel.count, CohereAsrConfig.numMelBins)
+        XCTAssertTrue(mel.isEmpty, "Single-sample audio should return empty mel")
     }
 
     func testComputeIsConsistent() {
@@ -102,7 +103,7 @@ final class CohereMelSpectrogramTests: XCTestCase {
         let melExtractor = CohereMelSpectrogram()
         // 440 Hz sine wave (A4 note)
         let frequency: Float = 440.0
-        let duration = 1.0  // 1 second
+        let duration: Float = 1.0  // 1 second
         let sampleRate = Float(CohereAsrConfig.sampleRate)
         let nSamples = Int(duration * sampleRate)
 
@@ -151,14 +152,18 @@ final class CohereMelSpectrogramTests: XCTestCase {
 
     func testPreemphasisIsApplied() {
         let melExtractor = CohereMelSpectrogram()
-        // Create two similar signals - preemphasis should differentiate them
-        let audio1 = [Float](repeating: 1.0, count: 100)
-        let audio2 = Array(stride(from: 0.0, through: 1.0, by: 0.01).map { Float($0) })
+        // Two similar long-enough signals; preemphasis should differentiate them.
+        // Use >= 2 * nFFT samples so we get several frames with room for the
+        // filter to matter.
+        let nSamples = CohereAsrConfig.MelSpec.nFFT * 2
+        let audio1 = [Float](repeating: 1.0, count: nSamples)
+        let audio2 = (0..<nSamples).map { i in Float(i) / Float(nSamples) }
 
         let mel1 = melExtractor.compute(audio: audio1)
         let mel2 = melExtractor.compute(audio: audio2)
 
-        // They should produce different results
+        XCTAssertFalse(mel1.isEmpty)
+        XCTAssertFalse(mel2.isEmpty)
         XCTAssertNotEqual(mel1, mel2, "Preemphasis should affect different input signals differently")
     }
 

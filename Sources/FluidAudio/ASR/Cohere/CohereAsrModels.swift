@@ -1,8 +1,7 @@
 @preconcurrency import CoreML
 import Foundation
-import OSLog
 
-private let logger = Logger(subsystem: "FluidAudio", category: "CohereAsrModels")
+private let logger = AppLogger(category: "CohereAsrModels")
 
 /// Cohere Transcribe model variant (precision).
 public enum CohereAsrVariant: String, CaseIterable, Sendable {
@@ -183,16 +182,26 @@ public struct CohereAsrModels: Sendable {
     }
 
     /// Check if all required model files exist locally.
+    ///
+    /// Matches what `load(from:)` actually consumes: encoder + cache-external
+    /// decoder + `vocab.json`. Each model may be distributed as either
+    /// `.mlmodelc` (compiled, typical HF distribution) or `.mlpackage`, so
+    /// this accepts whichever is present on disk.
     public static func modelsExist(at directory: URL) -> Bool {
         let fm = FileManager.default
-        let requiredFiles = [
-            ModelNames.CohereTranscribe.encoderFile,
-            ModelNames.CohereTranscribe.decoderFile,
-            "vocab.json",
+        let requiredModels = [
+            ModelNames.CohereTranscribe.encoder,
+            ModelNames.CohereTranscribe.decoderCacheExternal,
         ]
-        return requiredFiles.allSatisfy { file in
-            fm.fileExists(atPath: directory.appendingPathComponent(file).path)
+        for name in requiredModels {
+            let compiled = directory.appendingPathComponent("\(name).mlmodelc").path
+            let packaged = directory.appendingPathComponent("\(name).mlpackage").path
+            if !fm.fileExists(atPath: compiled) && !fm.fileExists(atPath: packaged) {
+                return false
+            }
         }
+        let vocab = directory.appendingPathComponent("vocab.json").path
+        return fm.fileExists(atPath: vocab)
     }
 
     /// Root directory for all FluidAudio model caches.

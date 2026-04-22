@@ -1,7 +1,6 @@
 import Accelerate
 @preconcurrency import CoreML
 import Foundation
-import OSLog
 
 // Corrected self-contained Cohere Transcribe pipeline that fixes the three
 // bugs in the original `CohereAsrManager`:
@@ -15,8 +14,7 @@ import OSLog
 // Supports mixed-precision: load the encoder and decoder from different
 // directories (e.g. INT8 encoder for speed, FP16 decoder for quality).
 
-private let fixedPipelineLogger = Logger(
-    subsystem: "FluidAudio", category: "CohereFixedPipeline")
+private let fixedPipelineLogger = AppLogger(category: "CohereFixedPipeline")
 
 // MARK: - Mel spectrogram (FilterbankFeatures-compatible)
 

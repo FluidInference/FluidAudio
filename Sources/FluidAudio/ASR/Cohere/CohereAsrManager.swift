@@ -1,9 +1,7 @@
-import Accelerate
 @preconcurrency import CoreML
 import Foundation
-import OSLog
 
-private let logger = Logger(subsystem: "FluidAudio", category: "CohereAsrManager")
+private let logger = AppLogger(category: "CohereAsrManager")
 
 // MARK: - Cohere Transcribe ASR Manager
 

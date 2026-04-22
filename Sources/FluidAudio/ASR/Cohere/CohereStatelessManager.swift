@@ -1,9 +1,8 @@
 import Accelerate
 @preconcurrency import CoreML
 import Foundation
-import OSLog
 
-private let logger = Logger(subsystem: "FluidAudio", category: "CohereStatelessManager")
+private let logger = AppLogger(category: "CohereStatelessManager")
 
 /// Cohere Transcribe ASR with stateless decoder (O(n²) but simple).
 ///
