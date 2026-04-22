@@ -132,30 +132,43 @@ swift run -c release fluidaudiocli cohere-mixed-benchmark \
 Cohere's [technical report](https://huggingface.co/blog/CohereLabs/cohere-transcribe-03-2026-release)
 Figure 4 reports per-language error rates **averaged across FLEURS, Common
 Voice 17.0, MLS, and Wenet** — not FLEURS-only. Numbers therefore aren't
-directly comparable, but the shape matches: WER for most languages, CER for
-zh/ja/ko.
+directly comparable (the averaging of easier corpora like MLS/CV17 generally
+pulls Cohere's reported numbers below pure FLEURS), but the shape matches:
+WER for most languages, CER for zh/ja/ko.
 
-| Language | FluidAudio FLEURS | Cohere avg (FLEURS+CV+MLS+Wenet) | Metric |
-|---|---:|---:|:---:|
-| de | 5.84% | ~3.8% | WER |
-| fr | 6.22% | ~4.5% | WER |
-| it | 4.03% | ~3.7% | WER |
-| es | 4.53% | ~2.8% | WER |
-| pt | 6.44% | ~5.9% | WER |
-| el | 11.50% | ~8.7% | WER |
-| nl | 8.07% | ~5.8% | WER |
-| pl | 7.49% | ~5.3% | WER |
-| ar | 18.46% | ~16.5% | WER |
-| vi | 9.55% | ~8.7% | WER |
-| zh | 12.01% | ~10.6% | CER |
-| ja | 6.25% | ~8.3% | CER |
-| ko | 6.67% | ~3.8% | CER |
+| Language | Metric | FluidAudio (FLEURS only, INT8+FP16) | Cohere (FLEURS+CV+MLS+Wenet avg, FP16) | Δ |
+|---|:---:|---:|---:|---:|
+| de | WER | 5.84% | ~3.8% | +2.0 |
+| fr | WER | 6.22% | ~4.5% | +1.7 |
+| it | WER | 4.03% | ~3.7% | +0.3 |
+| es | WER | 4.53% | ~2.8% | +1.7 |
+| pt | WER | 6.44% | ~5.9% | +0.5 |
+| el | WER | 11.50% | ~8.7% | +2.8 |
+| nl | WER | 8.07% | ~5.8% | +2.3 |
+| pl | WER | 7.49% | ~5.3% | +2.2 |
+| ar | WER | 18.46% | ~16.5% | +2.0 |
+| vi | WER | 9.55% | ~8.7% | +0.9 |
+| zh | CER | 12.01% | ~10.6% | +1.4 |
+| ja | CER | **6.25%** | ~8.3% | **-2.1** |
+| ko | CER | 6.67% | ~3.8% | +2.9 |
 
 Reference numbers read from Figure 4 (`HF_model_card_per-language-avg-plot.png`)
-and are approximate (chart only). FluidAudio numbers are FLEURS-only, single-
-dataset, so ~1-3% higher error is expected — FLEURS field recordings are
-generally harder than the multi-dataset average. English is not shown in
-Figure 4.
+and are approximate (chart only). English is not shown in Figure 4 (Cohere
+claims a 5.42% average on the HF Open ASR leaderboard; ours is 5.63% on FLEURS
+en_us).
+
+Two sources of the ~1-3% gap on most languages:
+
+1. **Dataset mix**: ours is FLEURS-only, Cohere's is averaged over 4 corpora.
+   FLEURS tends to be the hardest of the four, so a pure-FLEURS run is
+   expected to land above the average.
+2. **Quantization**: FluidAudio ships INT8 encoder + FP16 cache-external
+   decoder; Cohere's reported numbers are full FP16 PyTorch inference.
+
+Japanese CER is ~2 points better than Cohere's chart value — most likely
+because Cohere's ja average includes non-FLEURS corpora harder than FLEURS ja.
+Korean (+2.9 CER) is the largest relative gap and the most plausible
+quantization-sensitive language of the set.
 
 ## Notes and Caveats
 
