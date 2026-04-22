@@ -149,7 +149,7 @@ WER for most languages, CER for zh/ja/ko.
 | ar | WER | 18.46% | ~16.5% | +2.0 |
 | vi | WER | 9.55% | ~8.7% | +0.9 |
 | zh | CER | 12.01% | ~10.6% | +1.4 |
-| ja | CER | **6.25%** | ~8.3% | **-2.1** |
+| ja | CER | 6.25% | ~8.3% | -2.1 |
 | ko | CER | 6.67% | ~3.8% | +2.9 |
 
 Reference numbers read from Figure 4 (`HF_model_card_per-language-avg-plot.png`)
@@ -164,11 +164,6 @@ Two sources of the ~1-3% gap on most languages:
    expected to land above the average.
 2. **Quantization**: FluidAudio ships INT8 encoder + FP16 cache-external
    decoder; Cohere's reported numbers are full FP16 PyTorch inference.
-
-Japanese CER is ~2 points better than Cohere's chart value — most likely
-because Cohere's ja average includes non-FLEURS corpora harder than FLEURS ja.
-Korean (+2.9 CER) is the largest relative gap and the most plausible
-quantization-sensitive language of the set.
 
 ## Notes and Caveats
 
