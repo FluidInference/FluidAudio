@@ -96,19 +96,15 @@ struct ParakeetEouCommand {
             chunkSize = .ms160
         }
 
-        // Determine models path
+        // Determine models path. Default: Application Support cache directory
+        // (matches how every other CoreML model in FluidAudio is stored).
+        // `--use-cache` is retained as a no-op for backward compatibility.
+        _ = useCache
         let modelsUrl: URL
         if let customPath = models {
-            // Use custom path if specified
             modelsUrl = URL(fileURLWithPath: customPath).standardized
-        } else if useCache {
-            // Use standard Application Support cache directory
-            modelsUrl = getModelsDirectory().appendingPathComponent(chunkSize.modelSubdirectory)
         } else {
-            // Legacy behavior: use local Models directory
-            modelsUrl =
-                URL(fileURLWithPath: "Models/\(chunkSize.modelSubdirectory)/\(chunkSize.modelSubdirectory)")
-                .standardized
+            modelsUrl = getModelsDirectory().appendingPathComponent(chunkSize.modelSubdirectory)
         }
 
         logger.info("Using chunk size: \(chunkSize.durationMs)ms")
@@ -142,7 +138,7 @@ struct ParakeetEouCommand {
             configuration: config, chunkSize: chunkSize, eouDebounceMs: eouDebounceMs, debugFeatures: debugFeatures)
         do {
             logger.info("Loading models from: \(modelsUrl.path)")
-            try await manager.loadModels(modelDir: modelsUrl)
+            try await manager.loadModels(from: modelsUrl)
             logger.info("Models loaded successfully.")
         } catch {
             logger.error("Failed to load models: \(error)")

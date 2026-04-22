@@ -30,7 +30,7 @@ final class AsrModelsTests: XCTestCase {
     // MARK: - Directory Tests
 
     func testDefaultCacheDirectory() {
-        let cacheDir = AsrModels.defaultCacheDirectory()
+        let cacheDir = AsrModels.defaultCacheDirectory(for: .v3)
 
         // Verify path components
         XCTAssertTrue(cacheDir.path.contains("FluidAudio"))
@@ -376,5 +376,56 @@ final class AsrModelsTests: XCTestCase {
             // All versions should have at least 1 decoder layer
             XCTAssertGreaterThan(version.decoderLayers, 0)
         }
+    }
+
+    // MARK: - CTC-Only Model Validation Tests
+
+    func testCtcZhCnModelRejectsAsrModelsLoad() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AsrModelsTests-CtcZhCn-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        do {
+            _ = try await AsrModels.load(from: tempDir, version: .ctcZhCn)
+            XCTFail("AsrModels.load should reject .ctcZhCn version")
+        } catch let error as AsrModelsError {
+            // Verify it's the correct error
+            if case .loadingFailed(let message) = error {
+                XCTAssertTrue(
+                    message.contains("CtcZhCnManager"),
+                    "Error should direct user to CtcZhCnManager"
+                )
+            } else {
+                XCTFail("Wrong error type: \(error)")
+            }
+        }
+    }
+
+    func testCtcZhCnModelRejectsAsrModelsDownload() async throws {
+        do {
+            _ = try await AsrModels.download(version: .ctcZhCn)
+            XCTFail("AsrModels.download should reject .ctcZhCn version")
+        } catch let error as AsrModelsError {
+            // Verify it's the correct error
+            if case .downloadFailed(let message) = error {
+                XCTAssertTrue(
+                    message.contains("CtcZhCnModels"),
+                    "Error should direct user to CtcZhCnModels"
+                )
+            } else {
+                XCTFail("Wrong error type: \(error)")
+            }
+        }
+    }
+
+    func testCtcOnlyModelsAreMarkedCorrectly() {
+        // Verify CTC-only models are identified correctly
+        XCTAssertTrue(AsrModelVersion.ctcZhCn.isCtcOnly)
+
+        // Verify TDT models are not marked as CTC-only
+        XCTAssertFalse(AsrModelVersion.v2.isCtcOnly)
+        XCTAssertFalse(AsrModelVersion.v3.isCtcOnly)
+        XCTAssertFalse(AsrModelVersion.tdtCtc110m.isCtcOnly)
+        XCTAssertFalse(AsrModelVersion.tdtJa.isCtcOnly)
     }
 }

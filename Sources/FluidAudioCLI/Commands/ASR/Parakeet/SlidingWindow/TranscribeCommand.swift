@@ -344,8 +344,9 @@ enum TranscribeCommand {
 
             // Process with ASR Manager
             logger.info("Transcribing file: \(audioFileURL) ...")
+            var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
             let startTime = Date()
-            var result = try await asrManager.transcribe(audioFileURL)
+            var result = try await asrManager.transcribe(audioFileURL, decoderState: &decoderState)
             let processingTime = Date().timeIntervalSince(startTime)
 
             // Apply vocabulary rescoring if custom vocab is provided
@@ -431,7 +432,6 @@ enum TranscribeCommand {
                 case .v3: modelVersionLabel = "v3"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
                 case .ctcZhCn: modelVersionLabel = "ctc-zh-cn"
-                case .ctcJa: modelVersionLabel = "ctc-ja"
                 case .tdtJa: modelVersionLabel = "tdt-ja"
                 }
                 let output = TranscriptionJSONOutput(
@@ -546,8 +546,9 @@ enum TranscribeCommand {
                 )
             }
 
-            // Start the engine with the models
-            try await streamingAsr.start(models: models)
+            // Load models and start the engine
+            try await streamingAsr.loadModels(models)
+            try await streamingAsr.startStreaming()
 
             // Load audio file
             let audioFileURL = URL(fileURLWithPath: audioFile)
@@ -688,7 +689,6 @@ enum TranscribeCommand {
                 case .v3: modelVersionLabel = "v3"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
                 case .ctcZhCn: modelVersionLabel = "ctc-zh-cn"
-                case .ctcJa: modelVersionLabel = "ctc-ja"
                 case .tdtJa: modelVersionLabel = "tdt-ja"
                 }
                 let output = TranscriptionJSONOutput(

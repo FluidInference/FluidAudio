@@ -35,7 +35,7 @@ Task {
     // 1) Initialize ASR manager and load models
     let models = try await AsrModels.downloadAndLoad(version: .v3)  // Switch to .v2 for English-only
     let asrManager = AsrManager(config: .default)
-    try await asrManager.loadModels(models)
+    try await asrManager.configure(models: models)
 
     // 2) Prepare 16 kHz mono samples (see: Audio Conversion)
     let samples = try await loadSamples16kMono(path: "path/to/audio.wav")

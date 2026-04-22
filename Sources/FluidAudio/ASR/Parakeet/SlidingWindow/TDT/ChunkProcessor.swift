@@ -6,6 +6,11 @@ struct ChunkProcessor {
 
     private let logger = AppLogger(category: "ChunkProcessor")
     private typealias TokenWindow = (token: Int, timestamp: Int, confidence: Float, duration: Int)
+    private struct TaskResult: Sendable {
+        let index: Int
+        let tokens: [TokenWindow]
+        let workerIndex: Int
+    }
     private struct IndexedToken {
         let index: Int
         let token: TokenWindow
@@ -58,74 +63,121 @@ struct ChunkProcessor {
         startTime: Date,
         progressHandler: ((Double) async -> Void)? = nil
     ) async throws -> ASRResult {
-        var chunkOutputs: [[TokenWindow]] = []
+        let requestedConcurrency = max(1, await manager.parallelChunkConcurrency)
+        let workers = await makeWorkerPool(using: manager, count: requestedConcurrency) ?? [manager]
+        let decoderLayers = await manager.decoderLayerCount
+        let maxModelSamples = self.maxModelSamples
 
+        var chunkOutputs: [[TokenWindow]?] = []
+        var availableWorkers = Array(workers.indices)
+        var inFlight = 0
         var chunkStart = 0
         var chunkIndex = 0
-        var chunkDecoderState = TdtDecoderState.make(
-            decoderLayers: await manager.decoderLayerCount
-        )
 
-        while chunkStart < totalSamples {
-            try Task.checkCancellation()
-            let candidateEnd = chunkStart + chunkSamples
-            let isLastChunk = candidateEnd >= totalSamples
-            let chunkEnd = isLastChunk ? totalSamples : candidateEnd
-
-            if chunkEnd <= chunkStart {
-                break
-            }
-
-            chunkDecoderState.reset()
-
-            // For chunks after the first, prepend context samples from the overlap region.
-            // This provides left context for the mel spectrogram STFT window and encoder convolutions.
-            let contextSamples = chunkIndex > 0 ? melContextSamples : 0
-            let contextStart = chunkStart - contextSamples
-            let chunkLengthWithContext = chunkEnd - contextStart
-            let chunkSamplesArray = try readSamples(offset: contextStart, count: chunkLengthWithContext)
-
-            let (windowTokens, windowTimestamps, windowConfidences, windowDurations) = try await transcribeChunk(
-                samples: chunkSamplesArray,
-                contextSamples: contextSamples,
-                chunkStart: chunkStart,
-                isLastChunk: isLastChunk,
-                using: manager,
-                decoderState: &chunkDecoderState
-            )
-
-            // Combine tokens, timestamps, and confidences into aligned tuples
-            guard windowTokens.count == windowTimestamps.count && windowTokens.count == windowConfidences.count else {
-                throw ASRError.processingFailed("Token, timestamp, and confidence arrays are misaligned")
-            }
-
-            // Default to 0 per token if durations array is misaligned (shouldn't happen in practice)
-            let durations =
-                windowDurations.count == windowTokens.count
-                ? windowDurations : Array(repeating: 0, count: windowTokens.count)
-
-            let windowData: [TokenWindow] = zip(
-                zip(zip(windowTokens, windowTimestamps), windowConfidences), durations
-            ).map {
-                (token: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
-            }
-            chunkOutputs.append(windowData)
-
-            chunkIndex += 1
-
-            if isLastChunk {
-                break
-            }
-
-            if let progressHandler {
-                let progress = min(1.0, max(0.0, Double(chunkEnd) / Double(totalSamples)))
-                await progressHandler(progress)
-            }
-
-            chunkStart += strideSamples
+        func collectNextResult(
+            _ group: inout ThrowingTaskGroup<TaskResult, Error>
+        ) async throws {
+            guard inFlight > 0 else { return }
+            guard let finished = try await group.next() else { return }
+            chunkOutputs[finished.index] = finished.tokens
+            availableWorkers.append(finished.workerIndex)
+            inFlight -= 1
         }
 
-        guard var mergedTokens = chunkOutputs.first else {
+        try await withThrowingTaskGroup(of: TaskResult.self) { group in
+            while chunkStart < totalSamples {
+                try Task.checkCancellation()
+                let candidateEnd = chunkStart + chunkSamples
+                let isLastChunk = candidateEnd >= totalSamples
+                let chunkEnd = isLastChunk ? totalSamples : candidateEnd
+
+                if chunkEnd <= chunkStart {
+                    break
+                }
+
+                // For chunks after the first, prepend context samples from the overlap region.
+                // This provides left context for the mel spectrogram STFT window and encoder convolutions.
+                let contextSamples = chunkIndex > 0 ? melContextSamples : 0
+                let contextStart = chunkStart - contextSamples
+                let chunkLengthWithContext = chunkEnd - contextStart
+                let chunkSamplesArray = try readSamples(offset: contextStart, count: chunkLengthWithContext)
+
+                if availableWorkers.isEmpty {
+                    try await collectNextResult(&group)
+                }
+                if availableWorkers.isEmpty {
+                    availableWorkers.append(0)
+                }
+
+                let workerIndex = availableWorkers.removeFirst()
+                let worker = workers[workerIndex]
+                let index = chunkIndex
+                let chunkStartOffset = chunkStart
+                chunkOutputs.append(nil)
+
+                group.addTask {
+                    var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
+                    decoderState.reset()
+
+                    let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
+                        try await Self
+                        .transcribeChunk(
+                            samples: chunkSamplesArray,
+                            contextSamples: contextSamples,
+                            chunkStart: chunkStartOffset,
+                            isLastChunk: isLastChunk,
+                            using: worker,
+                            decoderState: &decoderState,
+                            maxModelSamples: maxModelSamples
+                        )
+
+                    guard
+                        windowTokens.count == windowTimestamps.count
+                            && windowTokens.count == windowConfidences.count
+                    else {
+                        throw ASRError.processingFailed("Token, timestamp, and confidence arrays are misaligned")
+                    }
+
+                    let durations =
+                        windowDurations.count == windowTokens.count
+                        ? windowDurations : Array(repeating: 0, count: windowTokens.count)
+
+                    let windowData: [TokenWindow] = zip(
+                        zip(zip(windowTokens, windowTimestamps), windowConfidences), durations
+                    ).map {
+                        (token: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
+                    }
+
+                    return TaskResult(index: index, tokens: windowData, workerIndex: workerIndex)
+                }
+                inFlight += 1
+                chunkIndex += 1
+
+                if let progressHandler, !isLastChunk {
+                    let progress = min(1.0, max(0.0, Double(chunkEnd) / Double(totalSamples)))
+                    await progressHandler(progress)
+                }
+
+                if isLastChunk {
+                    break
+                }
+
+                chunkStart += strideSamples
+
+                if availableWorkers.isEmpty && inFlight > 0 {
+                    try await collectNextResult(&group)
+                }
+            }
+
+            while inFlight > 0 {
+                try Task.checkCancellation()
+                try await collectNextResult(&group)
+            }
+        }
+
+        let orderedChunkOutputs = chunkOutputs.compactMap { $0 }
+
+        guard var mergedTokens = orderedChunkOutputs.first else {
             return await manager.processTranscriptionResult(
                 tokenIds: [],
                 timestamps: [],
@@ -136,8 +188,8 @@ struct ChunkProcessor {
             )
         }
 
-        if chunkOutputs.count > 1 {
-            for chunk in chunkOutputs.dropFirst() {
+        if orderedChunkOutputs.count > 1 {
+            for chunk in orderedChunkOutputs.dropFirst() {
                 mergedTokens = mergeChunks(mergedTokens, chunk)
             }
         }
@@ -162,6 +214,22 @@ struct ChunkProcessor {
         )
     }
 
+    private func makeWorkerPool(using manager: AsrManager, count: Int) async -> [AsrManager]? {
+        guard count > 0 else { return nil }
+        var workers: [AsrManager] = [manager]
+        if count == 1 {
+            return workers
+        }
+        for _ in 1..<count {
+            guard let clone = await manager.makeWorkerClone() else {
+                return nil
+            }
+            workers.append(clone)
+        }
+        logger.debug("ChunkProcessor using worker pool of size \(workers.count)")
+        return workers
+    }
+
     private func readSamples(offset: Int, count: Int) throws -> [Float] {
         var buffer = [Float](repeating: 0, count: count)
         try buffer.withUnsafeMutableBufferPointer { pointer in
@@ -170,13 +238,14 @@ struct ChunkProcessor {
         return buffer
     }
 
-    private func transcribeChunk(
+    private static func transcribeChunk(
         samples: [Float],
         contextSamples: Int,
         chunkStart: Int,
         isLastChunk: Bool,
         using manager: AsrManager,
-        decoderState: inout TdtDecoderState
+        decoderState: inout TdtDecoderState,
+        maxModelSamples: Int
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], durations: [Int]) {
         guard !samples.isEmpty else { return ([], [], [], []) }
 
@@ -256,11 +325,19 @@ struct ChunkProcessor {
 
         let minimumPairs = max(overlapLeft.count / 2, 1)
 
-        let contiguousPairs = findBestContiguousPairs(
-            overlapLeft: overlapLeft,
-            overlapRight: overlapRight,
-            tolerance: halfOverlapWindow
+        // EXTRACTED: Contiguous matching using SequenceMatcher
+        let timeTolerantMatcher: (IndexedToken, IndexedToken) -> Bool = { [self] l, r in
+            tokensMatch(l, r, tolerance: halfOverlapWindow)
+        }
+
+        let contiguousMatches = SequenceMatcher.findContiguousMatches(
+            left: overlapLeft,
+            right: overlapRight,
+            matcher: timeTolerantMatcher
         )
+
+        // Convert SequenceMatch results to index pairs
+        let contiguousPairs = contiguousMatches.map { ($0.leftStartIndex, $0.rightStartIndex) }
 
         if contiguousPairs.count >= minimumPairs {
             return mergeUsingMatches(
@@ -272,17 +349,22 @@ struct ChunkProcessor {
             )
         }
 
-        let lcsPairs = findLongestCommonSubsequencePairs(
-            overlapLeft: overlapLeft,
-            overlapRight: overlapRight,
-            tolerance: halfOverlapWindow
+        // EXTRACTED: LCS fallback using SequenceMatcher
+        let lcsMatches = SequenceMatcher.findLongestCommonSubsequence(
+            left: overlapLeft,
+            right: overlapRight,
+            matcher: timeTolerantMatcher
         )
 
-        guard !lcsPairs.isEmpty else {
+        guard !lcsMatches.isEmpty else {
             return mergeByMidpoint(
                 left: left, right: right, leftEndTime: leftEndTime, rightStartTime: rightStartTime,
                 frameDuration: frameDuration)
         }
+
+        // Map LCS matches directly to pairs (no consolidation)
+        // mergeUsingMatches requires one pair per matched element to function correctly
+        let lcsPairs = lcsMatches.map { ($0.leftStartIndex, $0.rightStartIndex) }
 
         return mergeUsingMatches(
             matches: lcsPairs,
@@ -291,85 +373,6 @@ struct ChunkProcessor {
             left: left,
             right: right
         )
-    }
-
-    private func findBestContiguousPairs(
-        overlapLeft: [IndexedToken],
-        overlapRight: [IndexedToken],
-        tolerance: Double
-    ) -> [(Int, Int)] {
-        var best: [(Int, Int)] = []
-
-        for i in 0..<overlapLeft.count {
-            for j in 0..<overlapRight.count {
-                let leftToken = overlapLeft[i]
-                let rightToken = overlapRight[j]
-
-                if tokensMatch(leftToken, rightToken, tolerance: tolerance) {
-                    var current: [(Int, Int)] = []
-                    var k = i
-                    var l = j
-
-                    while k < overlapLeft.count && l < overlapRight.count {
-                        let nextLeft = overlapLeft[k]
-                        let nextRight = overlapRight[l]
-
-                        if tokensMatch(nextLeft, nextRight, tolerance: tolerance) {
-                            current.append((k, l))
-                            k += 1
-                            l += 1
-                        } else {
-                            break
-                        }
-                    }
-
-                    if current.count > best.count {
-                        best = current
-                    }
-                }
-            }
-        }
-
-        return best
-    }
-
-    private func findLongestCommonSubsequencePairs(
-        overlapLeft: [IndexedToken],
-        overlapRight: [IndexedToken],
-        tolerance: Double
-    ) -> [(Int, Int)] {
-        let leftCount = overlapLeft.count
-        let rightCount = overlapRight.count
-
-        var dp = Array(repeating: Array(repeating: 0, count: rightCount + 1), count: leftCount + 1)
-
-        for i in 1...leftCount {
-            for j in 1...rightCount {
-                if tokensMatch(overlapLeft[i - 1], overlapRight[j - 1], tolerance: tolerance) {
-                    dp[i][j] = dp[i - 1][j - 1] + 1
-                } else {
-                    dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
-                }
-            }
-        }
-
-        var pairs: [(Int, Int)] = []
-        var i = leftCount
-        var j = rightCount
-
-        while i > 0 && j > 0 {
-            if tokensMatch(overlapLeft[i - 1], overlapRight[j - 1], tolerance: tolerance) {
-                pairs.append((i - 1, j - 1))
-                i -= 1
-                j -= 1
-            } else if dp[i - 1][j] > dp[i][j - 1] {
-                i -= 1
-            } else {
-                j -= 1
-            }
-        }
-
-        return pairs.reversed()
     }
 
     private func tokensMatch(_ left: IndexedToken, _ right: IndexedToken, tolerance: Double) -> Bool {

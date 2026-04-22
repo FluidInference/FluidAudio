@@ -108,7 +108,10 @@ for (_, speaker) in timeline.speakers {
 A simple struct representing a continuous region of speech for a speaker.
 
 - `startTime` / `endTime`: Real-world timestamps in seconds.
-- `startFrame` / `endFrame`: Model indices representing the segment size.
+- `startFrame` / `endFrame`: Segment frame indices in the model output.
+- `length`: Number of frames in the segment.
+- `duration`: Duration of the segment in seconds.
+- `activity`: Average speech activity (either sigmoids or logits) in the segment.
 - `isFinalized`: Whether the segment falls within the guaranteed immutable region.
 
 ### DiarizerTimelineUpdate
@@ -132,6 +135,8 @@ The logic merging raw probabilities into discrete `DiarizerSegment` ranges is go
 | `minFramesOff` | Merges gaps between segments shorter than this | E.g. `minDurationOff: 0.5` seconds |
 | `onsetPadFrames` | Number of frames to prepend to any speech onset | Useful to prevent cutting off the start of words |
 | `offsetPadFrames` | Number of frames to append to any speech offset | Useful to prevent cutting off trailing syllables |
+| `maxStoredFrames` | Maximum number of finalized predictions to store | Useful for limiting memory usage | 
+| `activityType` | Type of speech activity to report for segment activity | E.g., `.sigmoids` or `.logits` |
 
 **Constructing a Config:**
 
@@ -145,7 +150,9 @@ let config = DiarizerTimelineConfig(
     onsetPadSeconds: 0.1,
     offsetPadSeconds: 0.1,
     minDurationOn: 0.15,
-    minDurationOff: 0.25
+    minDurationOff: 0.25,
+    activityType: .sigmoids,
+    maxStoredFrames: nil          // No storage limit
 )
 ```
 

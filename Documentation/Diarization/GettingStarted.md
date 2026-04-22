@@ -340,7 +340,7 @@ Notes:
 
 ### WeSpeaker/Pyannote Streaming
 
-Use `DiarizerManager` when you need the classic segmentation + embedding + speaker-database pipeline. This is the slowest streaming option and works best with larger chunks.
+Pyannote 3.1 pipeline for online/streaming use. Use `DiarizerManager` when you need the classic segmentation + embedding + speaker-database pipeline. This is the slowest streaming option and works best with larger chunks.
 
 Process audio in chunks for real-time applications:
 

@@ -133,7 +133,7 @@ public class NemotronTranscribe {
             // Load models
             logger.info("Loading Nemotron models...")
             let manager = StreamingNemotronAsrManager()
-            try await manager.loadModels(modelDir: modelDir)
+            try await manager.loadModels(from: modelDir)
             logger.info("Models loaded successfully")
             logger.info("")
 

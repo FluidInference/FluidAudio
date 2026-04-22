@@ -12,30 +12,30 @@ A guide to each CoreML model pipeline in FluidAudio.
 | **Parakeet TDT v3** | Batch speech-to-text, 25 European languages (0.6B params). Default ASR model. | Released after v2 to add multilingual support. |
 | **Parakeet TDT-CTC-110M** | Hybrid TDT-CTC batch model (110M params). 3.01% WER on LibriSpeech test-clean. 96.5x RTFx on M2 Mac. Fused preprocessor+encoder for reduced memory footprint. iOS compatible. | Smaller, faster alternative to v3 with competitive accuracy. |
 | **Parakeet CTC Japanese** | Batch speech-to-text, Japanese only (0.6B params). CTC architecture. 6.85% CER on JSUT dataset. 10.1x RTFx on M2 Mac. | First Japanese ASR model. Uses CTC greedy decoder. |
-| **Parakeet TDT Japanese** | Batch speech-to-text, Japanese only (0.6B params). TDT architecture. 6.85% CER on JSUT dataset. 10.8x RTFx on M2 Mac. Hybrid model (CTC preprocessor/encoder + TDT decoder/joint). | Alternative Japanese decoder using TDT for potentially better accuracy on complex speech. |
+| **Parakeet TDT Japanese** | Batch speech-to-text, Japanese only (0.6B params). TDT architecture. 6.85% CER on JSUT dataset. 10.8x RTFx on M2 Mac. Hybrid model (CTC preprocessor/encoder + TDT decoder/joint). | Alternative Japanese decoder using TDT for same quality but faster |
 | **Parakeet CTC Chinese** | Batch speech-to-text, Mandarin Chinese (0.6B params). CTC architecture. 8.37% mean CER on THCHS-30 dataset. Int8 encoder (0.55GB) or FP32 (1.1GB). | First Mandarin Chinese ASR model. Uses CTC greedy decoder. |
 
-TDT models process audio in chunks (~15s with overlap) as batch operations. Fast enough for dictation-style workflows. Not suitable for word-by-word live captions.
+TDT models process audio in chunks (~15s with overlap) as batch operations.
 
 ### Streaming Transcription (True Real-Time)
 
 | Model | Description | Context |
 |-------|-------------|---------|
-| **Parakeet EOU** | Streaming speech-to-text with end-of-utterance detection (120M params). Processes 160ms/320ms frames for true real-time results as the user speaks. | Added after TDT was released. Smaller model (120M vs 0.6B). |
-| **Nemotron Speech Streaming 0.6B** | RNNT streaming ASR with 4 chunk size variants (80ms, 160ms, 560ms, 1120ms). English-only (0.6B params). Int8 encoder quantization. Supports ultra-low latency (80ms chunks) to high accuracy (1120ms chunks). | Contributed by Muesli app developer. Larger model than EOU (0.6B vs 120M) with flexible latency tradeoffs. |
+| **Parakeet EOU** | Streaming speech-to-text with end-of-utterance detection (120M params). Processes 160ms/320ms frames for true real-time results as the user speaks. | Added after TDT was released & for streaming. Smaller model (120M vs 0.6B). |
+| **Nemotron Speech Streaming 0.6B** | RNNT streaming ASR with 4 chunk size variants (80ms, 160ms, 560ms, 1120ms). English-only (0.6B params). Int8 encoder quantization. Supports ultra-low latency (80ms chunks) to high accuracy (1120ms chunks). | Larger streaming model for better accuracy and quality |
 
 ### Custom Vocabulary / Keyword Spotting
 
 | Model | Description | Context |
 |-------|-------------|---------|
 | **Parakeet CTC 110M** | CTC-based encoder for custom keyword spotting. Runs rescoring alongside TDT to boost domain-specific terms (names, jargon). | |
-| **Parakeet CTC 0.6B** | Larger CTC variant (same role as 110M). |  |
+| **Parakeet CTC 0.6B** | Larger CTC variant (same role as 110M) with better quality |  |
 
 ## VAD Models
 
 | Model | Description | Context |
 |-------|-------------|---------|
-| **Silero VAD** | Voice activity detection — speech vs silence on 256ms windows. Segments audio before ASR or diarization. | Support model that other pipelines build on. |
+| **Silero VAD** | Voice activity detection; speech vs silence on 256ms windows. Segments audio before ASR or diarization. | Support model that other pipelines build on. Converted at the time being the best model out there |
 
 ## Diarization Models
 
@@ -43,14 +43,14 @@ TDT models process audio in chunks (~15s with overlap) as batch operations. Fast
 |-------|-------------|---------|
 | **LS-EEND** | Research prototype end-to-end streaming diarization model from Westlake University. Supports both streaming and complete-buffer inference for up to 10 speakers. Uses frame-in, frame-out processing, requiring 900ms of warmup audio and 100ms per update. | Added after Sortformer to support largers speaker counts. |
 | **Sortformer** | NVIDIA's enterprise-grade end-to-end streaming diarization model. Supports both streaming and complete-buffer inference for up to 4 speakers. More stable than LS-EEND, but sometimes misses speech. Processes audio in chunks, requiring 1040ms of warmup audio and 480ms per update for the low latency versions. | Added after Pyannote to support low-latency streaming diarization. |
-| **Pyannote CoreML Pipeline** | Speaker diarization. Segmentation model + WeSpeaker embeddings for clustering. Best offline diarization pipeline, but poor for online use, since speaker confusion increases with more frequent updates, and at least 5 seconds of warmup is recommended for acceptable results. | First diarizer model added. Converted from Pyannote. |
+| **Pyannote CoreML Pipeline** | Speaker diarization. Segmentation model + WeSpeaker embeddings for clustering. Online/streaming pipeline (DiarizerManager) based on pyannote/speaker-diarization-3.1. Offline batch pipeline (OfflineDiarizerManager) based on pyannote/speaker-diarization-community-1. | First diarizer model added. Converted from Pyannote with custom made batching mode |
 
 ## TTS Models
 
 | Model | Description | Context |
 |-------|-------------|---------|
-| **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Uses CoreML G2P model for phonemization. | First TTS backend added. |
-| **PocketTTS** | Second TTS backend (~155M params). Autoregressive frame-by-frame generation with dynamic audio chunking. No phoneme stage — works directly on text tokens. | Different tradeoffs: streaming-capable, simpler chunking, dynamic inputs & longer token counts |
+| **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Uses CoreML G2P model for phonemization. | First TTS backend added + support custom pronounces |
+| **PocketTTS** | Second TTS backend (~155M params). Autoregressive frame-by-frame generation with dynamic audio chunking. No phoneme stage, works directly on text tokens. | Supports streaming, minimal RAM usage, excellent quality |
 
 ## Evaluated Models (Not Supported)
 

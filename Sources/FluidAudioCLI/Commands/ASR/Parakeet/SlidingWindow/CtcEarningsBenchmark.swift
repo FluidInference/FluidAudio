@@ -454,7 +454,8 @@ public enum CtcEarningsBenchmark {
         let startTime = Date()
 
         // 1. TDT transcription for low WER
-        let tdtResult = try await asrManager.transcribe(wavFile)
+        var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+        let tdtResult = try await asrManager.transcribe(wavFile, decoderState: &decoderState)
 
         // Skip files where TDT returns empty (some audio files cause model issues)
         if tdtResult.text.isEmpty {

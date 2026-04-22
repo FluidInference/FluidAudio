@@ -4,13 +4,14 @@ Benchmark comparison between `main` and PR #440 (`standardize-asr-directory-stru
 
 ## Reproduction
 
-All batch TDT and CTC earnings benchmarks can be reproduced with [`Scripts/parakeet_subset_benchmark.sh`](../../Scripts/parakeet_subset_benchmark.sh):
+All batch TDT, CTC earnings, streaming, and multilingual benchmarks can be reproduced with [`Scripts/parakeet_subset_benchmark.sh`](../../Scripts/parakeet_subset_benchmark.sh):
 
 ```bash
 # Download models and datasets (requires internet)
 ./Scripts/parakeet_subset_benchmark.sh --download
 
-# Run all 4 benchmarks offline (100 files each, sleep-prevented)
+# Run all 8 benchmarks offline (100 files each, sleep-prevented)
+# Includes: v3, v2, tdt-ctc-110m, CTC earnings, EOU, Nemotron, Japanese TDT, Chinese CTC
 ./Scripts/parakeet_subset_benchmark.sh
 ```
 
@@ -18,9 +19,10 @@ All batch TDT and CTC earnings benchmarks can be reproduced with [`Scripts/parak
 
 - **Hardware**: MacBook Air M2, 16 GB
 - **Build**: `swift build -c release`
-- **Date**: 2026-03-28
+- **Date**: 2026-03-28 (English benchmarks), 2026-04-13 (Japanese TDT)
 - **main**: `01f1ae2b` (Fix Kokoro v2 source_noise dtype and distribution #447)
 - **PR**: `839010538` (standardize-asr-directory-structure)
+- **Japanese TDT**: `ed20a3688` (Fix blankId mismatch for Japanese TDT model #522)
 
 ## Comparison
 
@@ -49,6 +51,22 @@ All batch TDT and CTC earnings benchmarks can be reproduced with [`Scripts/parak
 | Vocab Recall | 79.8% | 79.8% |
 | Vocab F-score | 88.8% | 88.8% |
 | RTFx | 42.81x | 44.61x |
+
+### Japanese TDT (JSUT dataset, 100 files)
+
+| Metric | CER | RTFx |
+|---|---|---|
+| Parakeet TDT Japanese (0.6B) | 7.77% | 27.7x |
+
+**Distribution:**
+- 46% of samples below 5% CER
+- 64% of samples below 10% CER
+- 93% of samples below 20% CER
+
+**Notes:**
+- Dataset: JSUT-basic5000 (Japanese speech corpus)
+- Measured as Character Error Rate (CER) instead of Word Error Rate (WER)
+- Result after blankId fix in PR #522 (was 11.31% CER with incorrect blankId=8192)
 
 ## Verdict
 

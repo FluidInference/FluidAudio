@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 
@@ -22,6 +23,9 @@ public actor SlidingWindowAsrManager {
     private var asrManager: AsrManager?
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
+
+    // Decoder state for this sliding window session
+    private var decoderState: TdtDecoderState?
 
     // Sliding window state
     private var segmentIndex: Int = 0
@@ -111,34 +115,57 @@ public actor SlidingWindowAsrManager {
         )
     }
 
-    /// Start the sliding-window ASR engine
-    /// This will download models if needed and begin processing
-    /// - Parameter source: The audio source to use (default: microphone)
-    public func start(source: AudioSource = .microphone) async throws {
-        logger.info("Starting sliding-window ASR engine for source: \(String(describing: source))...")
-
-        // Initialize ASR models
-        let models = try await AsrModels.downloadAndLoad()
-        try await start(models: models, source: source)
+    /// Load ASR models (downloads if needed)
+    ///
+    /// If you need custom MLModelConfiguration, use `AsrModels.downloadAndLoad(configuration:)`
+    /// to pre-load models and then call `loadModels(_:)`.
+    ///
+    /// - Parameters:
+    ///   - to: Optional cache directory (default: system cache)
+    ///   - progressHandler: Optional download progress callback
+    public func loadModels(
+        to directory: URL? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws {
+        logger.info("Loading ASR models...")
+        let models = try await AsrModels.downloadAndLoad(
+            to: directory,
+            progressHandler: progressHandler
+        )
+        try await loadModels(models)
     }
 
-    /// Start the sliding-window ASR engine with pre-loaded models
-    /// - Parameters:
-    ///   - models: Pre-loaded ASR models to use
-    ///   - source: The audio source to use (default: microphone)
-    public func start(models: AsrModels, source: AudioSource = .microphone) async throws {
-        logger.info(
-            "Starting sliding-window ASR engine with pre-loaded models for source: \(String(describing: source))..."
-        )
+    /// Load pre-loaded ASR models
+    /// - Parameter models: Pre-loaded ASR models to use
+    public func loadModels(_ models: AsrModels) async throws {
+        logger.info("Loading SlidingWindowAsrManager with provided models")
 
-        self.audioSource = source
-
-        // Initialize ASR manager with provided models
+        // Configure ASR manager with provided models
         asrManager = AsrManager(config: config.asrConfig)
         try await asrManager?.loadModels(models)
 
-        // Reset decoder state for the specific source
-        try await asrManager?.resetDecoderState(for: source)
+        logger.info("SlidingWindowAsrManager loaded successfully")
+    }
+
+    /// Start the sliding-window streaming engine
+    ///
+    /// Models must be loaded first via `loadModels()` or `loadModels(_:)`
+    ///
+    /// - Parameter source: The audio source to use (default: microphone)
+    /// - Throws: ASRError.notInitialized if models are not loaded
+    public func startStreaming(source: AudioSource = .microphone) async throws {
+        guard asrManager != nil else {
+            throw ASRError.notInitialized
+        }
+
+        logger.info("Starting sliding-window ASR engine for source: \(String(describing: source))...")
+
+        self.audioSource = source
+
+        // Create decoder state with correct layer count for this model
+        if let mgr = asrManager {
+            self.decoderState = TdtDecoderState.make(decoderLayers: await mgr.decoderLayerCount)
+        }
 
         // Reset sliding window state
         segmentIndex = 0
@@ -255,8 +282,10 @@ public actor SlidingWindowAsrManager {
         bufferStartIndex = 0
         nextWindowCenterStart = 0
 
-        // Reset decoder state for the current audio source
-        try await asrManager?.resetDecoderState(for: audioSource)
+        // Reset decoder state
+        if let mgr = asrManager {
+            self.decoderState = TdtDecoderState.make(decoderLayers: await mgr.decoderLayerCount)
+        }
 
         // Reset sliding window state
         segmentIndex = 0
@@ -383,14 +412,23 @@ public actor SlidingWindowAsrManager {
             // Start frame offset is now handled by decoder's timeJump mechanism
 
             // Call AsrManager directly with deduplication
+            guard var state = decoderState else {
+                logger.error("Decoder state not initialized")
+                return
+            }
+
             guard
                 let result = try await asrManager?.transcribeChunk(
                     windowSamples,
-                    source: audioSource,
+                    decoderState: &state,
                     previousTokens: accumulatedTokens,
                     isLastChunk: isLastChunk
                 )
             else { return }
+
+            // Update stored decoder state
+            self.decoderState = state
+
             let (tokens, timestamps, confidences, _) = result
 
             let adjustedTimestamps = Self.applyGlobalFrameOffset(
@@ -633,25 +671,11 @@ public actor SlidingWindowAsrManager {
 
     /// Reset decoder state for error recovery
     private func resetDecoderForRecovery() async {
-        guard asrManager != nil else { return }
+        guard let mgr = asrManager else { return }
 
-        do {
-            try await asrManager?.resetDecoderState(for: audioSource)
-            logger.info("Successfully reset decoder state during error recovery")
-        } catch {
-            logger.error("Failed to reset decoder state during recovery: \(error)")
-
-            // Last resort: try to reinitialize the ASR manager
-            do {
-                let models = try await AsrModels.downloadAndLoad()
-                let newAsrManager = AsrManager(config: config.asrConfig)
-                try await newAsrManager.loadModels(models)
-                self.asrManager = newAsrManager
-                logger.info("Successfully reinitialized ASR manager during error recovery")
-            } catch {
-                logger.error("Failed to reinitialize ASR manager during recovery: \(error)")
-            }
-        }
+        // Recreate decoder state
+        self.decoderState = TdtDecoderState.make(decoderLayers: await mgr.decoderLayerCount)
+        logger.info("Successfully reset decoder state during error recovery")
     }
 }
 

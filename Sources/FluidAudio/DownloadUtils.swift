@@ -133,7 +133,22 @@ public class DownloadUtils {
             logger.warning("First load failed: \(error.localizedDescription)")
             logger.info("Deleting cache and re-downloading…")
             let repoPath = directory.appendingPathComponent(repo.folderName)
-            try? FileManager.default.removeItem(at: repoPath)
+
+            // Try to delete the corrupted cache
+            do {
+                try FileManager.default.removeItem(at: repoPath)
+                logger.info("Successfully deleted corrupted cache at \(repoPath.path)")
+            } catch {
+                // If deletion fails (excluding "file not found"), log the error but continue
+                // Robust directory creation will handle any remaining files
+                let nsError = error as NSError
+                if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileNoSuchFileError {
+                    // File already doesn't exist - this is fine
+                } else {
+                    logger.warning("Failed to delete cache: \(error.localizedDescription)")
+                    logger.info("Will attempt to overwrite during re-download")
+                }
+            }
 
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
@@ -381,11 +396,9 @@ public class DownloadUtils {
                 continue
             }
 
-            // Create parent directory
-            try FileManager.default.createDirectory(
-                at: destPath.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
+            // Create parent directory, removing any conflicting files in the path
+            let parentDir = destPath.deletingLastPathComponent()
+            try createDirectoryRobustly(at: parentDir)
 
             // HuggingFace returns 500 for 0-byte files — create empty file locally
             if file.size == 0 {
@@ -473,6 +486,47 @@ public class DownloadUtils {
         }
 
         logger.info("Downloaded all required models for \(repo.folderName)")
+    }
+
+    // MARK: - Helper Functions
+
+    /// Robustly create a directory, removing any conflicting files in the path.
+    ///
+    /// This handles cases where a file exists where a directory should be, which can happen
+    /// during corrupted cache recovery when partial deletion leaves files in place of directories.
+    ///
+    /// - Parameter url: The directory path to create
+    /// - Throws: Errors from FileManager if directory creation fails after cleanup
+    private static func createDirectoryRobustly(at url: URL) throws {
+        let fm = FileManager.default
+        var pathComponents = url.pathComponents
+
+        // Remove leading "/" if present
+        if pathComponents.first == "/" {
+            pathComponents.removeFirst()
+        }
+
+        // Build path incrementally, checking each component
+        var currentPath = "/"
+        for component in pathComponents {
+            currentPath = (currentPath as NSString).appendingPathComponent(component)
+            let componentURL = URL(fileURLWithPath: currentPath)
+
+            var isDirectory: ObjCBool = false
+            if fm.fileExists(atPath: currentPath, isDirectory: &isDirectory) {
+                if !isDirectory.boolValue {
+                    // A file exists where a directory should be - remove it
+                    logger.warning("Removing file blocking directory creation: \(currentPath)")
+                    try fm.removeItem(at: componentURL)
+                    try fm.createDirectory(at: componentURL, withIntermediateDirectories: false)
+                }
+                // If it's already a directory, continue
+            } else {
+                // Path doesn't exist, create remaining path with intermediate directories
+                try fm.createDirectory(at: url, withIntermediateDirectories: true)
+                return
+            }
+        }
     }
 
     // MARK: - Delegate-based download with per-byte progress

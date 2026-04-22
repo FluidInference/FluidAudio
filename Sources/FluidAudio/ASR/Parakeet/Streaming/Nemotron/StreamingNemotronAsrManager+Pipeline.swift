@@ -56,15 +56,16 @@ extension StreamingNemotronAsrManager {
 
         let encoderOutput = try await encoder.prediction(from: encoderInput)
 
-        // Update encoder cache states
-        if let newCacheChannel = encoderOutput.featureValue(for: "cache_channel_out")?.multiArrayValue {
-            self.cacheChannel = newCacheChannel
+        // Update encoder cache states using EncoderCacheManager
+        let updatedCaches = EncoderCacheManager.extractCachesFromOutput(encoderOutput)
+        if let newChannel = updatedCaches.channel {
+            self.cacheChannel = newChannel
         }
-        if let newCacheTime = encoderOutput.featureValue(for: "cache_time_out")?.multiArrayValue {
-            self.cacheTime = newCacheTime
+        if let newTime = updatedCaches.time {
+            self.cacheTime = newTime
         }
-        if let newCacheLen = encoderOutput.featureValue(for: "cache_len_out")?.multiArrayValue {
-            self.cacheLen = newCacheLen
+        if let newLen = updatedCaches.len {
+            self.cacheLen = newLen
         }
 
         guard let encoded = encoderOutput.featureValue(for: "encoded")?.multiArrayValue else {

@@ -416,8 +416,8 @@ struct OfflineEmbeddingExtractor {
                 1,
                 transposedPointer,
                 1,
-                vDSP_Length(frameCount),
-                vDSP_Length(speakerCount)
+                vDSP_Length(speakerCount),
+                vDSP_Length(frameCount)
             )
 
             for speakerIndex in 0..<speakerCount {
@@ -446,6 +446,12 @@ struct OfflineEmbeddingExtractor {
                 }
 
                 let cleanSum = VDSPOperations.sum(cleanMask)
+                let minActiveRatio: Float = 0.2
+                if cleanSum < Float(frameCount) * minActiveRatio {
+                    maskPreparationDuration += maskStart.duration(to: clock.now)
+                    emptyMaskCount += 1
+                    continue
+                }
                 let maskToUse: [Float]
                 let maskSum: Float
                 if cleanSum >= Float(minFramesForEmbedding) {

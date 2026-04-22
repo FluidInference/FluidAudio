@@ -70,36 +70,35 @@ public actor StreamingNemotronAsrManager {
     }
 
     /// Load models from a directory containing preprocessor, encoder, decoder, joint, and tokenizer
-    /// - Parameters:
-    ///   - modelDir: Directory containing the model files
-    public func loadModels(modelDir: URL) async throws {
-        logger.info("Loading Nemotron CoreML models from \(modelDir.path)...")
+    /// - Parameter directory: Directory containing the model files
+    public func loadModels(from directory: URL) async throws {
+        logger.info("Loading Nemotron CoreML models from \(directory.path)...")
 
         // Load config from metadata.json
-        let metadataPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.metadata)
+        let metadataPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.metadata)
         if FileManager.default.fileExists(atPath: metadataPath.path) {
             self.config = try NemotronStreamingConfig(from: metadataPath)
             logger.info("Loaded config: \(config.chunkMs)ms chunks, \(config.chunkMelFrames) mel frames")
         }
 
         // Load preprocessor
-        let preprocessorPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.preprocessorFile)
+        let preprocessorPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.preprocessorFile)
         self.preprocessor = try await MLModel.load(contentsOf: preprocessorPath, configuration: mlConfiguration)
 
         // Load encoder (int8 quantized)
-        let encoderPath = modelDir.appendingPathComponent("encoder").appendingPathComponent(NemotronEncoder.fileName)
+        let encoderPath = directory.appendingPathComponent("encoder").appendingPathComponent(NemotronEncoder.fileName)
         self.encoder = try await MLModel.load(contentsOf: encoderPath, configuration: mlConfiguration)
 
         // Load decoder
-        let decoderPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.decoderFile)
+        let decoderPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.decoderFile)
         self.decoder = try await MLModel.load(contentsOf: decoderPath, configuration: mlConfiguration)
 
         // Load joint
-        let jointPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.jointFile)
+        let jointPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.jointFile)
         self.joint = try await MLModel.load(contentsOf: jointPath, configuration: mlConfiguration)
 
         // Load tokenizer
-        let tokenizerUrl = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.tokenizer)
+        let tokenizerUrl = directory.appendingPathComponent(ModelNames.NemotronStreaming.tokenizer)
         self.tokenizer = try Tokenizer(vocabPath: tokenizerUrl)
 
         // Initialize states
@@ -108,11 +107,52 @@ public actor StreamingNemotronAsrManager {
         logger.info("Nemotron models loaded successfully (\(config.chunkMs)ms chunks).")
     }
 
+    /// Downloads and loads Nemotron streaming models from Hugging Face if not cached locally.
+    ///
+    /// - Parameters:
+    ///   - directory: Root directory for model cache (default: Application Support)
+    ///   - configuration: Optional model configuration override
+    ///   - progressHandler: Optional callback for download progress updates
+    public func loadModels(
+        to directory: URL? = nil,
+        configuration: MLModelConfiguration? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws {
+        if let configuration {
+            self.mlConfiguration = configuration
+        }
+
+        let chunkSize = requestedChunkSize ?? .ms1120
+        let repo = chunkSize.repo
+
+        let modelsBaseDir =
+            directory
+            ?? FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
+            .appendingPathComponent("FluidAudio", isDirectory: true)
+            .appendingPathComponent("Models", isDirectory: true)
+
+        let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
+        let encoderInt8Path = cacheDir.appendingPathComponent("encoder/\(NemotronEncoder.fileName)")
+
+        if !FileManager.default.fileExists(atPath: encoderInt8Path.path) {
+            logger.info("Downloading Nemotron models to \(modelsBaseDir.path)...")
+            try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir, progressHandler: progressHandler)
+        } else {
+            logger.info("Using cached Nemotron models at \(cacheDir.path)")
+        }
+
+        try await loadModels(from: cacheDir)
+    }
+
     /// Reset all states for a new transcription session
     public func reset() async {
-        audioBuffer.removeAll()
-        accumulatedTokenIds.removeAll()
-        processedChunks = 0
+        StreamingAsrUtils.resetSharedState(
+            audioBuffer: &audioBuffer,
+            accumulatedTokenIds: &accumulatedTokenIds,
+            processedChunks: &processedChunks
+        )
         do {
             try resetStates()
         } catch {
@@ -137,45 +177,35 @@ public actor StreamingNemotronAsrManager {
     }
 
     private func resetStates() throws {
-        // Encoder cache states
-        cacheChannel = try MLMultiArray(
-            shape: config.cacheChannelShape.map { NSNumber(value: $0) },
-            dataType: .float32
+        // Encoder cache states using EncoderCacheManager
+        let cacheConfig = EncoderCacheManager.CacheConfig(
+            channelShape: config.cacheChannelShape,
+            timeShape: config.cacheTimeShape,
+            lenShape: [1]
         )
-        cacheChannel?.reset(to: 0)
-
-        cacheTime = try MLMultiArray(
-            shape: config.cacheTimeShape.map { NSNumber(value: $0) },
-            dataType: .float32
-        )
-        cacheTime?.reset(to: 0)
-
-        cacheLen = try MLMultiArray(shape: [1], dataType: .int32)
-        cacheLen?[0] = 0
+        let caches = try EncoderCacheManager.createInitialCaches(config: cacheConfig)
+        cacheChannel = caches.channel
+        cacheTime = caches.time
+        cacheLen = caches.len
 
         // Mel cache (will be initialized on first chunk)
         melCache = nil
 
         // Decoder LSTM states
-        hState = try MLMultiArray(
-            shape: [NSNumber(value: config.decoderLayers), 1, NSNumber(value: config.decoderHidden)],
-            dataType: .float32
+        hState = try EncoderCacheManager.createZeroArray(
+            shape: [config.decoderLayers, 1, config.decoderHidden]
         )
-        hState?.reset(to: 0)
 
-        cState = try MLMultiArray(
-            shape: [NSNumber(value: config.decoderLayers), 1, NSNumber(value: config.decoderHidden)],
-            dataType: .float32
+        cState = try EncoderCacheManager.createZeroArray(
+            shape: [config.decoderLayers, 1, config.decoderHidden]
         )
-        cState?.reset(to: 0)
 
         lastToken = Int32(config.blankIdx)
     }
 
     /// Append audio buffer for processing
     public func appendAudio(_ buffer: AVAudioPCMBuffer) throws {
-        let samples = try audioConverter.resampleBuffer(buffer)
-        audioBuffer.append(contentsOf: samples)
+        try StreamingAsrUtils.appendAudio(buffer, using: audioConverter, to: &audioBuffer)
     }
 
     /// Process audio and return partial transcript
@@ -246,23 +276,7 @@ extension StreamingNemotronAsrManager: StreamingAsrManager {
     }
 
     public func loadModels() async throws {
-        let chunkSize = requestedChunkSize ?? .ms1120
-        let repo = chunkSize.repo
-
-        let modelsBaseDir = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
-        .appendingPathComponent("FluidAudio", isDirectory: true)
-        .appendingPathComponent("Models", isDirectory: true)
-
-        let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-        let encoderInt8Path = cacheDir.appendingPathComponent("encoder/\(NemotronEncoder.fileName)")
-
-        if !FileManager.default.fileExists(atPath: encoderInt8Path.path) {
-            try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir)
-        }
-
-        try await loadModels(modelDir: cacheDir)
+        try await loadModels(to: nil, configuration: nil, progressHandler: nil)
     }
 
     public func processBufferedAudio() async throws {

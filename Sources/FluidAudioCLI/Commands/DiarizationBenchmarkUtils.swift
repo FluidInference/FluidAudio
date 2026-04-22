@@ -31,15 +31,8 @@ enum DiarizationBenchmarkUtils {
     // MARK: - File Paths
 
     static func getAMIFiles(maxFiles: Int?) -> [String] {
-        let allMeetings = [
-            "EN2002a", "EN2002b", "EN2002c", "EN2002d",
-            "ES2004a", "ES2004b", "ES2004c", "ES2004d",
-            "IS1009a", "IS1009b", "IS1009c", "IS1009d",
-            "TS3003a", "TS3003b", "TS3003c", "TS3003d",
-        ]
-
         var availableMeetings: [String] = []
-        for meeting in allMeetings {
+        for meeting in DatasetDownloader.officialAMITestSet {
             let path = getAudioPath(for: meeting, dataset: .ami)
             if FileManager.default.fileExists(atPath: path) {
                 availableMeetings.append(meeting)

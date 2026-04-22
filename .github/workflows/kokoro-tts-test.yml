@@ -28,14 +28,7 @@ jobs:
           path: |
             .build
             ~/Library/Application Support/FluidAudio/Models/kokoro-82m-coreml
-            ~/Library/Caches/Homebrew
-            /usr/local/Cellar/ffmpeg
-            /opt/homebrew/Cellar/ffmpeg
           key: ${{ runner.os }}-kokoro-tts-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/Kokoro/**', 'Sources/FluidAudio/ModelNames.swift') }}
-
-      - name: Install ffmpeg
-        run: |
-          brew install ffmpeg || echo "ffmpeg may already be installed"
 
       - name: Build
         run: swift build -c release
@@ -74,8 +67,21 @@ jobs:
           EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
           echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
 
+          # Validate output file was generated
+          if [ ! -f kokoro_output.wav ]; then
+            echo "❌ CRITICAL: Output WAV file not generated"
+            exit 1
+          fi
+
+          # Validate output file is not empty
+          FILE_SIZE=$(stat -f%z kokoro_output.wav 2>/dev/null || stat -c%s kokoro_output.wav 2>/dev/null)
+          if [ "$FILE_SIZE" -eq 0 ]; then
+            echo "❌ CRITICAL: Output WAV file is empty (0 bytes)"
+            exit 1
+          fi
+
       - name: Comment PR
-        if: github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         continue-on-error: true
         uses: actions/github-script@v7
         with:
