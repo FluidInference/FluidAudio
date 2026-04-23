@@ -76,10 +76,6 @@ struct FluidAudioCLI {
             await CtcZhCnBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "ja-benchmark":
             await JapaneseAsrBenchmark.run(arguments: Array(arguments.dropFirst(2)))
-        case "cohere-benchmark":
-            await CohereBenchmark.run(arguments: Array(arguments.dropFirst(2)))
-        case "cohere-transcribe":
-            await CohereTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "cohere-mixed":
             await CohereMixedCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "cohere-mixed-benchmark":
@@ -124,10 +120,8 @@ struct FluidAudioCLI {
                 ctc-zh-cn-transcribe    Transcribe Mandarin Chinese audio with Parakeet CTC
                 ctc-zh-cn-benchmark     Run CTC zh-CN benchmark on THCHS-30 dataset
                 ja-benchmark            Run Japanese ASR benchmark on JSUT/Common Voice
-                cohere-benchmark        Run Cohere Transcribe benchmark (LibriSpeech/FLEURS)
-                cohere-transcribe       Transcribe audio using Cohere Transcribe (14 languages)
-                cohere-mixed            Transcribe using mixed-precision Cohere pipeline
-                cohere-mixed-benchmark  Run Cohere mixed-precision FLEURS benchmark
+                cohere-mixed            Transcribe using Cohere Transcribe (cache-external pipeline, 14 languages)
+                cohere-mixed-benchmark  Run Cohere Transcribe FLEURS benchmark
                 download                Download evaluation datasets
                 help                    Show this help message
 
@@ -154,9 +148,9 @@ struct FluidAudioCLI {
 
                 fluidaudio ja-benchmark --dataset jsut --samples 100
 
-                fluidaudio cohere-benchmark --dataset fleurs --languages en_us,ja_jp,fr_fr --max-files 100
+                fluidaudio cohere-mixed audio.wav --language ja
 
-                fluidaudio cohere-transcribe audio.wav --language ja
+                fluidaudio cohere-mixed-benchmark --languages en_us,ja_jp,fr_fr --max-files 100
 
                 fluidaudio ja-benchmark --dataset cv-test --samples 500 --auto-download
             """

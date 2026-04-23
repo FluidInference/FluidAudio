@@ -607,12 +607,9 @@ public enum ModelNames {
         public static let decoderStatefulCompiledFile = decoderStateful + ".mlmodelc"
         public static let decoderCacheExternalCompiledFile = decoderCacheExternal + ".mlmodelc"
 
-        /// Alias for the decoder file (used by CohereAsrModels)
-        public static let decoderFile = decoderStatefulFile
-
         public static let requiredModels: Set<String> = [
-            encoderFile,
-            decoderStatefulFile,
+            encoderCompiledFile,
+            decoderCacheExternalCompiledFile,
             vocab,
         ]
     }

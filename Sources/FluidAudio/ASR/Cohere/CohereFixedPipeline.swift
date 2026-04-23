@@ -2,9 +2,8 @@ import Accelerate
 @preconcurrency import CoreML
 import Foundation
 
-// Corrected self-contained Cohere Transcribe pipeline that fixes the three
-// bugs in the original `CohereAsrManager`:
-//   1. Mel spectrogram port matches FilterbankFeatures (n_fft=512, preemph,
+// Self-contained Cohere Transcribe pipeline (cache-external decoder):
+//   1. Mel spectrogram matches FilterbankFeatures (n_fft=512, preemph,
 //      slaney mel, natural-log + 2^-24 guard, per-feature CMVN ddof=1).
 //   2. Cross-attention mask: additive, -1e4 for padded encoder frames
 //      (valid = ceil(feature_length * 438 / 3500)).
@@ -15,6 +14,26 @@ import Foundation
 // directories (e.g. INT8 encoder for speed, FP16 decoder for quality).
 
 private let fixedPipelineLogger = AppLogger(category: "CohereFixedPipeline")
+
+// MARK: - Error type
+
+public enum CohereAsrError: Error, LocalizedError {
+    case modelNotFound(String)
+    case encodingFailed(String)
+    case decodingFailed(String)
+    case invalidInput(String)
+    case generationFailed(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .modelNotFound(let msg): return "Model not found: \(msg)"
+        case .encodingFailed(let msg): return "Encoding failed: \(msg)"
+        case .decodingFailed(let msg): return "Decoding failed: \(msg)"
+        case .invalidInput(let msg): return "Invalid input: \(msg)"
+        case .generationFailed(let msg): return "Generation failed: \(msg)"
+        }
+    }
+}
 
 // MARK: - Mel spectrogram (FilterbankFeatures-compatible)
 
