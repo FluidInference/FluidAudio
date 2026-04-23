@@ -50,6 +50,7 @@ enum CohereBenchmark {
         var noRepeatNgram = 3
         var computeUnits: MLComputeUnits = .all
         var autoDownload = false
+        var checkpointEvery = 100
 
         var i = 0
         while i < arguments.count {
@@ -128,6 +129,11 @@ enum CohereBenchmark {
                 computeUnits = .cpuAndGPU
             case "--auto-download":
                 autoDownload = true
+            case "--checkpoint-every":
+                if i + 1 < arguments.count, let v = Int(arguments[i + 1]) {
+                    checkpointEvery = max(1, v)
+                    i += 1
+                }
             default:
                 logger.warning("Ignoring unknown option: \(arg)")
             }
@@ -166,6 +172,7 @@ enum CohereBenchmark {
         logger.info("  Rep penalty:      \(repetitionPenalty)")
         logger.info("  No-repeat-ngram:  \(noRepeatNgram)")
         logger.info("  Auto-download:    \(autoDownload)")
+        logger.info("  Checkpoint every: \(checkpointEvery) files")
 
         do {
             // Load models once
@@ -194,7 +201,9 @@ enum CohereBenchmark {
                     autoDownload: autoDownload,
                     maxTokens: maxTokens,
                     repetitionPenalty: repetitionPenalty,
-                    noRepeatNgram: noRepeatNgram
+                    noRepeatNgram: noRepeatNgram,
+                    outputFile: outputFile,
+                    checkpointEvery: checkpointEvery
                 )
             case "fleurs":
                 (allResults, perLanguageSummaries) = try await runFleurs(
@@ -206,7 +215,9 @@ enum CohereBenchmark {
                     autoDownload: autoDownload,
                     maxTokens: maxTokens,
                     repetitionPenalty: repetitionPenalty,
-                    noRepeatNgram: noRepeatNgram
+                    noRepeatNgram: noRepeatNgram,
+                    outputFile: outputFile,
+                    checkpointEvery: checkpointEvery
                 )
             default:
                 logger.error("Unknown --dataset \(dataset). Supported: librispeech, fleurs")
@@ -236,7 +247,9 @@ enum CohereBenchmark {
         autoDownload: Bool,
         maxTokens: Int,
         repetitionPenalty: Float,
-        noRepeatNgram: Int
+        noRepeatNgram: Int,
+        outputFile: String,
+        checkpointEvery: Int
     ) async throws -> ([CohereBenchmarkResult], [LanguageSummary]) {
         let fleursCacheDir =
             fleursDir
@@ -280,6 +293,8 @@ enum CohereBenchmark {
 
             logger.info("  Collected \(files.count) files for \(langCode)")
 
+            let priorResults = allResults
+            let priorSummaries = perLanguageSummaries
             let langResults = await transcribeFiles(
                 files: files,
                 language: cohereLang,
@@ -288,7 +303,25 @@ enum CohereBenchmark {
                 pipeline: pipeline,
                 maxTokens: maxTokens,
                 repetitionPenalty: repetitionPenalty,
-                noRepeatNgram: noRepeatNgram
+                noRepeatNgram: noRepeatNgram,
+                checkpointEvery: checkpointEvery,
+                onCheckpoint: { partial in
+                    let partialSummary = summarize(language: langCode, results: partial)
+                    let combinedResults = priorResults + partial
+                    let combinedSummaries = priorSummaries + [partialSummary]
+                    do {
+                        try saveResults(
+                            allResults: combinedResults,
+                            perLanguage: combinedSummaries,
+                            to: outputFile
+                        )
+                        logger.info(
+                            "  [checkpoint] saved \(combinedResults.count) results → \(outputFile)"
+                        )
+                    } catch {
+                        logger.warning("  [checkpoint] save failed: \(error)")
+                    }
+                }
             )
 
             let summary = summarize(language: langCode, results: langResults)
@@ -317,7 +350,9 @@ enum CohereBenchmark {
         autoDownload: Bool,
         maxTokens: Int,
         repetitionPenalty: Float,
-        noRepeatNgram: Int
+        noRepeatNgram: Int,
+        outputFile: String,
+        checkpointEvery: Int
     ) async throws -> ([CohereBenchmarkResult], [LanguageSummary]) {
         // Reuse Parakeet's LibriSpeech downloader/cache layout.
         let downloader = ASRBenchmark()
@@ -344,15 +379,32 @@ enum CohereBenchmark {
         }
         logger.info("Collected \(files.count) LibriSpeech files (\(subset))")
 
+        let label = "en (\(subset))"
         let langResults = await transcribeFiles(
             files: files,
             language: .english,
-            languageLabel: "en (\(subset))",
+            languageLabel: label,
             models: models,
             pipeline: pipeline,
             maxTokens: maxTokens,
             repetitionPenalty: repetitionPenalty,
-            noRepeatNgram: noRepeatNgram
+            noRepeatNgram: noRepeatNgram,
+            checkpointEvery: checkpointEvery,
+            onCheckpoint: { partial in
+                let partialSummary = summarize(language: label, results: partial)
+                do {
+                    try saveResults(
+                        allResults: partial,
+                        perLanguage: [partialSummary],
+                        to: outputFile
+                    )
+                    logger.info(
+                        "  [checkpoint] saved \(partial.count) results → \(outputFile)"
+                    )
+                } catch {
+                    logger.warning("  [checkpoint] save failed: \(error)")
+                }
+            }
         )
 
         let summary = summarize(language: "en (\(subset))", results: langResults)
@@ -368,6 +420,9 @@ enum CohereBenchmark {
     }
 
     /// Shared per-file inference loop used by both FLEURS and LibriSpeech paths.
+    /// `onCheckpoint` is invoked with the running results array every
+    /// `checkpointEvery` successful transcriptions; callers persist the
+    /// partial run to disk so a crash mid-benchmark loses at most that many.
     private static func transcribeFiles(
         files: [BenchmarkAudioFile],
         language: CohereAsrConfig.Language,
@@ -376,7 +431,9 @@ enum CohereBenchmark {
         pipeline: CoherePipeline,
         maxTokens: Int,
         repetitionPenalty: Float,
-        noRepeatNgram: Int
+        noRepeatNgram: Int,
+        checkpointEvery: Int = Int.max,
+        onCheckpoint: (([CohereBenchmarkResult]) -> Void)? = nil
     ) async -> [CohereBenchmarkResult] {
         var results: [CohereBenchmarkResult] = []
         for (idx, file) in files.enumerated() {
@@ -429,6 +486,10 @@ enum CohereBenchmark {
                         + "CER=\(String(format: "%.2f", cerPct))% "
                         + "RTFx=\(String(format: "%.2f", rtfx))x"
                 )
+
+                if let onCheckpoint, results.count % checkpointEvery == 0 {
+                    onCheckpoint(results)
+                }
             } catch {
                 logger.error("  Failed on \(file.fileName): \(error)")
             }
@@ -657,6 +718,8 @@ enum CohereBenchmark {
             Output:
                 --output <file>                 JSON report path
                                                  (default: cohere_benchmark_results.json)
+                --checkpoint-every <n>          Persist partial results every N files
+                                                 (default: 100)
 
             Supported FLEURS codes (14 total):
                 en_us, fr_fr, de_de, es_419, it_it, pt_br, nl_nl, pl_pl,
