@@ -27,6 +27,23 @@ variants live in different directories.
 - **Vocabulary**: 16,384 SentencePiece tokens
 - **Max audio**: 35 s per call (single chunk)
 
+### Upstream model spec (`cohere-pytorch/config.json`)
+
+The 35 s limit is not arbitrary — it comes straight from the upstream
+config:
+
+| Field | Value | Meaning |
+|---|---|---|
+| `max_audio_clip_s` | **35** | Hard cap on per-call audio length |
+| `overlap_chunk_second` | 5 | Reference Python pipeline uses 5 s overlap when chunking >35 s audio |
+| `pos_emb_max_len` | 5000 | Encoder positional embeddings could in theory handle 50 s, but the official preprocessor enforces 35 s |
+| `preprocessor.window_size` | 0.025 | 25 ms STFT analysis window |
+| `preprocessor.window_stride` | 0.01 | 10 ms hop → 100 fps |
+
+Math chain: `35 s × 100 fps = 3500 mel frames` → CoreML encoder input
+shape `[1, 128, 3500]` is baked at conversion time → Swift port mirrors
+via `CohereAsrConfig.maxAudioSeconds = 35.0`.
+
 ## Supported Languages
 
 14 languages. Cohere Transcribe uses a conditioned prompt that hard-codes the
@@ -168,8 +185,10 @@ Two sources of the ~1-3% gap on most languages:
 - **Cache-external decoder stays FP16**: INT8 decoder quantization regresses
   quality significantly in testing and is not shipped.
 - **Single-chunk only**: the CoreML pipeline processes one 35 s window per
-  call. Longer audio requires external chunking (FluidAudio does not implement
-  a long-form wrapper for Cohere yet).
+  call (matches upstream `max_audio_clip_s: 35`). The reference Python
+  pipeline supports >35 s audio via sliding-window chunking with 5 s overlap
+  (`overlap_chunk_second: 5`); FluidAudio does not implement that wrapper
+  yet — files exceeding 35 s are skipped by the benchmark CLI with a warning.
 - **Language must be specified**: no automatic language ID. Pass
   `CohereAsrConfig.Language` on every call; the wrong language produces
   degenerate output.
