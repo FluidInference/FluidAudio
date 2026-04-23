@@ -43,7 +43,8 @@ public enum CohereAsrConfig {
 
     /// Mel spectrogram parameters.
     public enum MelSpec {
-        public static let nFFT: Int = 1024
+        /// FFT size used by `CohereMelSpectrogram`: `nextPowerOfTwo(winLength=400) = 512`.
+        public static let nFFT: Int = 512
         public static let hopLength: Int = 160
         public static let nMels: Int = 128
         public static let fMin: Float = 0.0

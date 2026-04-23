@@ -77,7 +77,7 @@ final class CohereAsrConfigTests: XCTestCase {
     // MARK: - Mel Spectrogram Parameters
 
     func testMelSpecParametersAreValid() {
-        XCTAssertEqual(CohereAsrConfig.MelSpec.nFFT, 1024)
+        XCTAssertEqual(CohereAsrConfig.MelSpec.nFFT, 512)
         XCTAssertEqual(CohereAsrConfig.MelSpec.hopLength, 160)
         XCTAssertEqual(CohereAsrConfig.MelSpec.nMels, 128)
         XCTAssertEqual(CohereAsrConfig.numMelBins, 128)

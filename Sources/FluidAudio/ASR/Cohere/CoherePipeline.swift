@@ -582,12 +582,16 @@ public actor CoherePipeline {
             Self.applyNoRepeatNgram(&logitBuf, history: allTokens, n: noRepeatNgram)
 
             let nextToken = Self.argmax(logitBuf)
-            // During the prompt-feeding phase the model's prediction is
-            // discarded (next input is forced from the prompt), so record the
-            // token that was actually consumed instead of the phantom
-            // prediction. Otherwise `applyNoRepeatNgram` can suppress valid
-            // output tokens based on never-generated prompt-phase predictions.
-            allTokens.append(step < prompt.count ? currentToken : nextToken)
+            // Record the token that was actually consumed at this step:
+            // a prompt token during prompt-feeding (model prediction discarded,
+            // input is forced) and the previously-generated token afterwards.
+            // Recording the phantom prompt-phase prediction would cause
+            // `applyNoRepeatNgram` to suppress valid output tokens.
+            // Note: at the prompt/output boundary (step == prompt.count - 1),
+            // `currentToken` is still the last prompt token and `nextToken` is
+            // the first real output. The first output is recorded on the next
+            // iteration once it has rotated into `currentToken`.
+            allTokens.append(currentToken)
 
             if step >= prompt.count - 1 {
                 if nextToken == CohereAsrConfig.SpecialTokens.eosToken { break }
