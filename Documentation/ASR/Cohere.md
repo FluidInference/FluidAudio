@@ -5,7 +5,7 @@
 > Encoder-decoder ASR using [Cohere Transcribe 03-2026](https://huggingface.co/CohereLabs/cohere-transcribe-03-2026)
 > converted to CoreML. The FluidAudio integration uses a mixed-precision pipeline
 > (INT8 encoder + FP16 cache-external decoder) exposed through
-> `CohereFixedPipeline`.
+> `CoherePipeline`.
 
 ## Model
 
@@ -14,7 +14,7 @@
 - FP16 reference: [FluidInference/cohere-transcribe-cache-external-coreml](https://huggingface.co/FluidInference/cohere-transcribe-cache-external-coreml) — 3.6 GB encoder, iOS 17+
 
 The integration splits the encoder and decoder across precisions. Pass
-`encoderDir` + `decoderDir` to `CohereFixedPipeline.loadModels` when the two
+`encoderDir` + `decoderDir` to `CoherePipeline.loadModels` when the two
 variants live in different directories.
 
 ## Architecture
@@ -46,12 +46,12 @@ language — pass `language:` explicitly.
 
 ```bash
 # Single-precision (FP16 or INT8 in one dir)
-swift run -c release fluidaudiocli cohere-mixed audio.wav \
+swift run -c release fluidaudiocli cohere-transcribe audio.wav \
     --model-dir /path/to/cohere-fp16 \
     --language en
 
 # Mixed precision (INT8 encoder + FP16 decoder)
-swift run -c release fluidaudiocli cohere-mixed audio.wav \
+swift run -c release fluidaudiocli cohere-transcribe audio.wav \
     --encoder-dir /path/to/q8 \
     --decoder-dir /path/to/f16 \
     --vocab-dir /path/to/f16 \
@@ -67,13 +67,13 @@ import FluidAudio
 let encoderDir = URL(fileURLWithPath: "/path/to/q8")
 let decoderDir = URL(fileURLWithPath: "/path/to/f16")
 
-let models = try await CohereFixedPipeline.loadModels(
+let models = try await CoherePipeline.loadModels(
     encoderDir: encoderDir,
     decoderDir: decoderDir,
     vocabDir: decoderDir
 )
 
-let pipeline = CohereFixedPipeline()
+let pipeline = CoherePipeline()
 let result = try await pipeline.transcribe(
     audio: samples,        // 16 kHz mono Float32, up to 35 s
     models: models,
@@ -90,7 +90,7 @@ print(result.text)
 ### FLEURS (INT8 encoder + FP16 cache-external decoder)
 
 Full FLEURS splits, one sample per file, single-chunk (no long-form stitching).
-Measured on M4 Pro, 48 GB, Tahoe 26.0 via `fluidaudiocli cohere-mixed-benchmark`.
+Measured on M4 Pro, 48 GB, Tahoe 26.0 via `fluidaudiocli cohere-benchmark`.
 
 | FLEURS code | Language | Samples | WER | CER | RTFx |
 |---|---|---:|---:|---:|---:|
@@ -121,7 +121,7 @@ OUT_DIR=./benchmark_results/cohere \
 ./Scripts/run_cohere_per_lang.sh
 
 # Single language
-swift run -c release fluidaudiocli cohere-mixed-benchmark \
+swift run -c release fluidaudiocli cohere-benchmark \
     --encoder-dir /path/to/q8 --decoder-dir /path/to/f16 --vocab-dir /path/to/f16 \
     --languages en_us --auto-download \
     --output cohere_en_us.json

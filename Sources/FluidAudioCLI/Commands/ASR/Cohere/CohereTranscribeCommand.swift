@@ -6,7 +6,7 @@ import Foundation
 /// Transcribe audio using the corrected Cohere cache-external pipeline,
 /// with optional mixed-precision model loading (e.g. INT8 encoder + FP16
 /// decoder).
-enum CohereMixedCommand {
+enum CohereTranscribeCommand {
     private static let logger = AppLogger(category: "CohereMixed")
 
     static func run(arguments: [String]) async {
@@ -142,7 +142,7 @@ enum CohereMixedCommand {
             logger.info("Language:     \(language.englishName) (\(language.rawValue))")
 
             let loadStart = CFAbsoluteTimeGetCurrent()
-            let models = try await CohereFixedPipeline.loadModels(
+            let models = try await CoherePipeline.loadModels(
                 encoderDir: encoderDir,
                 decoderDir: decoderDir,
                 vocabDir: vocabDir,
@@ -150,7 +150,7 @@ enum CohereMixedCommand {
             let loadSecs = CFAbsoluteTimeGetCurrent() - loadStart
             logger.info("Models loaded in \(String(format: "%.2f", loadSecs))s")
 
-            let pipeline = CohereFixedPipeline()
+            let pipeline = CoherePipeline()
             let result = try await pipeline.transcribe(
                 audio: samples,
                 models: models,
@@ -172,7 +172,7 @@ enum CohereMixedCommand {
             logger.info("Total time:    \(String(format: "%.3f", result.totalSeconds))s")
             logger.info("RTFx:          \(String(format: "%.2f", rtfx))x")
         } catch {
-            logger.error("cohere-mixed failed: \(error)")
+            logger.error("cohere-transcribe failed: \(error)")
             exit(1)
         }
     }
@@ -183,7 +183,7 @@ enum CohereMixedCommand {
 
             Cohere Transcribe — fixed cache-external pipeline (mixed precision supported)
 
-            Usage: fluidaudio cohere-mixed <audio_file> [options]
+            Usage: fluidaudio cohere-transcribe <audio_file> [options]
 
             Model locations (choose one pattern):
                 --model-dir <path>              Single dir with encoder + decoder + vocab.json
@@ -209,7 +209,7 @@ enum CohereMixedCommand {
                 (default: all, includes ANE)
 
             Example (INT8 encoder + FP16 decoder):
-                fluidaudio cohere-mixed audio.wav \\
+                fluidaudio cohere-transcribe audio.wav \\
                     --encoder-dir /path/to/q8 \\
                     --decoder-dir /path/to/f16 \\
                     --vocab-dir  /path/to/f16 \\

@@ -6,11 +6,11 @@ import Foundation
 
 /// FLEURS benchmark for the corrected mixed-precision Cohere pipeline
 /// (INT8 encoder + FP16 decoder, or any single-precision combo) using
-/// `CohereFixedPipeline` with the bug fixes applied (filterbank mel, fp16-safe
+/// `CoherePipeline` with the bug fixes applied (filterbank mel, fp16-safe
 /// cross-attention mask, repetition penalty, no-repeat-ngram, byte-fallback
 /// detokenization).
-enum CohereMixedBenchmark {
-    private static let logger = AppLogger(category: "CohereMixedBenchmark")
+enum CohereBenchmark {
+    private static let logger = AppLogger(category: "CohereBenchmark")
 
     private static nonisolated(unsafe) let fleursToCohereLanguage: [String: CohereAsrConfig.Language] = [
         "en_us": .english,
@@ -153,7 +153,7 @@ enum CohereMixedBenchmark {
         do {
             // Load models once
             let loadStart = CFAbsoluteTimeGetCurrent()
-            let models = try await CohereFixedPipeline.loadModels(
+            let models = try await CoherePipeline.loadModels(
                 encoderDir: URL(fileURLWithPath: encDir),
                 decoderDir: URL(fileURLWithPath: decDir),
                 vocabDir: URL(fileURLWithPath: vocDir),
@@ -162,7 +162,7 @@ enum CohereMixedBenchmark {
             logger.info(
                 "Models loaded in \(String(format: "%.2f", CFAbsoluteTimeGetCurrent() - loadStart))s")
 
-            let pipeline = CohereFixedPipeline()
+            let pipeline = CoherePipeline()
 
             // Resolve FLEURS cache directory
             let fleursCacheDir =
@@ -183,7 +183,7 @@ enum CohereMixedBenchmark {
                 try await fleurs.downloadFLEURS(languages: supportedCodes)
             }
 
-            var allResults: [CohereMixedBenchmarkResult] = []
+            var allResults: [CohereBenchmarkResult] = []
             var perLanguageSummaries: [LanguageSummary] = []
 
             for langCode in languages {
@@ -208,7 +208,7 @@ enum CohereMixedBenchmark {
 
                 logger.info("  Collected \(files.count) files for \(langCode)")
 
-                var langResults: [CohereMixedBenchmarkResult] = []
+                var langResults: [CohereBenchmarkResult] = []
                 for (idx, file) in files.enumerated() {
                     do {
                         let samples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
@@ -232,7 +232,7 @@ enum CohereMixedBenchmark {
                         let cerPct = metrics.cer * 100
 
                         langResults.append(
-                            CohereMixedBenchmarkResult(
+                            CohereBenchmarkResult(
                                 language: langCode,
                                 fileName: file.fileName,
                                 reference: file.transcript,
@@ -299,7 +299,7 @@ enum CohereMixedBenchmark {
 
         guard FileManager.default.fileExists(atPath: langDir.path) else {
             throw NSError(
-                domain: "CohereMixedBenchmark",
+                domain: "CohereBenchmark",
                 code: 1,
                 userInfo: [
                     NSLocalizedDescriptionKey:
@@ -337,7 +337,7 @@ enum CohereMixedBenchmark {
 
     private static func summarize(
         language: String,
-        results: [CohereMixedBenchmarkResult]
+        results: [CohereBenchmarkResult]
     ) -> LanguageSummary {
         let n = results.count
         guard n > 0 else {
@@ -368,13 +368,13 @@ enum CohereMixedBenchmark {
     }
 
     private static func saveResults(
-        allResults: [CohereMixedBenchmarkResult],
+        allResults: [CohereBenchmarkResult],
         perLanguage: [LanguageSummary],
         to outputFile: String
     ) throws {
         struct Report: Codable {
             let perLanguage: [LanguageSummary]
-            let results: [CohereMixedBenchmarkResult]
+            let results: [CohereBenchmarkResult]
         }
         let report = Report(perLanguage: perLanguage, results: allResults)
         let encoder = JSONEncoder()
@@ -426,7 +426,7 @@ enum CohereMixedBenchmark {
 
             Cohere Transcribe — mixed-precision FLEURS benchmark
 
-            Usage: fluidaudio cohere-mixed-benchmark [options]
+            Usage: fluidaudio cohere-benchmark [options]
 
             Model locations (choose one pattern):
                 --model-dir <path>              Single dir with encoder + decoder + vocab.json
@@ -461,7 +461,7 @@ enum CohereMixedBenchmark {
 
             Examples:
                 # Mixed INT8 encoder + FP16 decoder across 3 languages, 20 samples each
-                fluidaudio cohere-mixed-benchmark \\
+                fluidaudio cohere-benchmark \\
                     --encoder-dir /path/to/q8 \\
                     --decoder-dir /path/to/f16 \\
                     --vocab-dir  /path/to/f16 \\
@@ -470,7 +470,7 @@ enum CohereMixedBenchmark {
                     --auto-download
 
                 # Single-precision FP16, all English samples, save report
-                fluidaudio cohere-mixed-benchmark \\
+                fluidaudio cohere-benchmark \\
                     --model-dir /path/to/f16 \\
                     --languages en_us \\
                     --output cohere_fp16_en.json
@@ -481,7 +481,7 @@ enum CohereMixedBenchmark {
 
 // MARK: - Supporting Types
 
-struct CohereMixedBenchmarkResult: Codable {
+struct CohereBenchmarkResult: Codable {
     let language: String
     let fileName: String
     let reference: String

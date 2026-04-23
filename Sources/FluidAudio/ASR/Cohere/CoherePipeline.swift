@@ -13,7 +13,7 @@ import Foundation
 // Supports mixed-precision: load the encoder and decoder from different
 // directories (e.g. INT8 encoder for speed, FP16 decoder for quality).
 
-private let fixedPipelineLogger = AppLogger(category: "CohereFixedPipeline")
+private let pipelineLogger = AppLogger(category: "CoherePipeline")
 
 // MARK: - Error type
 
@@ -38,7 +38,7 @@ public enum CohereAsrError: Error, LocalizedError {
 // MARK: - Mel spectrogram (FilterbankFeatures-compatible)
 
 @available(macOS 14, iOS 17, *)
-public final class CohereFixedMelSpectrogram {
+public final class CohereMelSpectrogram {
 
     public struct Config: Sendable {
         public let sampleRate: Int
@@ -326,7 +326,7 @@ public final class CohereFixedMelSpectrogram {
 // MARK: - Pipeline
 
 @available(macOS 14, iOS 17, *)
-public actor CohereFixedPipeline {
+public actor CoherePipeline {
 
     public struct LoadedModels: Sendable {
         public let encoder: MLModel
@@ -334,9 +334,9 @@ public actor CohereFixedPipeline {
         public let vocabulary: [Int: String]
     }
 
-    private let melExtractor: CohereFixedMelSpectrogram
+    private let melExtractor: CohereMelSpectrogram
 
-    public init(mel: CohereFixedMelSpectrogram = CohereFixedMelSpectrogram()) {
+    public init(mel: CohereMelSpectrogram = CohereMelSpectrogram()) {
         self.melExtractor = mel
     }
 
@@ -359,9 +359,9 @@ public actor CohereFixedPipeline {
         let encoderURL = encoderDir.appendingPathComponent("cohere_encoder.mlmodelc")
         let decoderURL = decoderDir.appendingPathComponent("cohere_decoder_cache_external.mlmodelc")
 
-        fixedPipelineLogger.info("Loading encoder from \(encoderURL.path)")
+        pipelineLogger.info("Loading encoder from \(encoderURL.path)")
         let encoder = try await MLModel.load(contentsOf: encoderURL, configuration: config)
-        fixedPipelineLogger.info("Loading decoder from \(decoderURL.path)")
+        pipelineLogger.info("Loading decoder from \(decoderURL.path)")
         let decoder = try await MLModel.load(contentsOf: decoderURL, configuration: config)
 
         // Sanity: decoder must expose k_cache_0 (cache-external variant).
@@ -387,7 +387,7 @@ public actor CohereFixedPipeline {
         for (key, value) in dict {
             if let tokenId = Int(key) { vocab[tokenId] = value }
         }
-        fixedPipelineLogger.info("Loaded vocabulary with \(vocab.count) tokens")
+        pipelineLogger.info("Loaded vocabulary with \(vocab.count) tokens")
         return vocab
     }
 
@@ -413,7 +413,7 @@ public actor CohereFixedPipeline {
 
         // 1) Mel spectrogram + pad to 3500
         let melOut = melExtractor.compute(audio: audio)
-        let (paddedMel, featureLength) = CohereFixedMelSpectrogram.padOrTruncate(
+        let (paddedMel, featureLength) = CohereMelSpectrogram.padOrTruncate(
             mel: melOut.mel, validFrames: melOut.validFrames, fixedFrames: 3_500)
         guard featureLength > 0 else {
             throw CohereAsrError.invalidInput("Audio too short to extract mel features")

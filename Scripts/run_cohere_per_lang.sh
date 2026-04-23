@@ -68,7 +68,7 @@ for lang in "${LANGS[@]}"; do
         MAX_ARGS=(--max-files "${MAX_FILES}")
     fi
 
-    "${BIN}" cohere-mixed-benchmark \
+    "${BIN}" cohere-benchmark \
         --model-dir "${MODEL_DIR}" \
         --languages "${lang}" \
         --auto-download \
