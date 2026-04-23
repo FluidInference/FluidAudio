@@ -107,7 +107,7 @@ print(result.text)
 ### LibriSpeech test-clean (INT8 encoder + FP16 cache-external decoder)
 
 Full split, all 2,620 utterances, single-chunk (longest utterance in
-test-clean is ~35 s so nothing is skipped). Measured on M4 Pro, 48 GB,
+test-clean is ~35 s so nothing is skipped). Measured on Apple M2 (2022),
 Tahoe 26.0 via `fluidaudiocli cohere-benchmark`.
 
 | Subset | Samples | WER | CER | RTFx (per-file mean) | RTFx (total audio/compute) |
