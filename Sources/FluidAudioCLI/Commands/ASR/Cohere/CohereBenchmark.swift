@@ -257,10 +257,13 @@ enum CohereBenchmark {
 
         if autoDownload {
             let supportedCodes = languages.filter { fleursToCohereLanguage.keys.contains($0) }
+            // `samplesPerLanguage: Int.max` is FLEURSBenchmark's sentinel for
+            // "download all available". Passing 100 when --max-files is
+            // omitted (Devin Review finding) would silently cap downloads.
             let fleurs = FLEURSBenchmark(
                 config: FLEURSBenchmark.FLEURSConfig(
                     languages: supportedCodes,
-                    samplesPerLanguage: maxFiles ?? 100,
+                    samplesPerLanguage: maxFiles ?? Int.max,
                     outputFile: "/dev/null",
                     cacheDir: fleursCacheDir,
                     debugMode: false
