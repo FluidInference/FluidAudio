@@ -104,6 +104,27 @@ print(result.text)
 
 ## Benchmarks
 
+### LibriSpeech test-clean (INT8 encoder + FP16 cache-external decoder)
+
+Full split, all 2,620 utterances, single-chunk (longest utterance in
+test-clean is ~35 s so nothing is skipped). Measured on M4 Pro, 48 GB,
+Tahoe 26.0 via `fluidaudiocli cohere-benchmark`.
+
+| Subset | Samples | WER | CER | RTFx (per-file mean) | RTFx (total audio/compute) |
+|---|---:|---:|---:|---:|---:|
+| test-clean | 2,620 | **1.77%** | **0.60%** | 2.04× | 1.72× |
+
+Totals: 5h 24m of audio, 3h 09m of compute, 3h 12m wall time (includes
+one-time ~6 min ANE cold-start compile on file 1).
+
+```bash
+swift run -c release fluidaudiocli cohere-benchmark \
+    --dataset librispeech --subset test-clean \
+    --model-dir /path/to/q8 \
+    --auto-download \
+    --output cohere_testclean.json
+```
+
 ### FLEURS (INT8 encoder + FP16 cache-external decoder)
 
 Full FLEURS splits, one sample per file, single-chunk (no long-form stitching).
