@@ -348,7 +348,7 @@ final class RandomAccessCollectionTests: XCTestCase {
             .lazy.map { $0 * 0.5 }  // Reduce amplitude lazily
 
         // This should work without issues
-        let result = try diarizer.performCompleteDiarization(
+        let result = try await diarizer.performCompleteDiarization(
             complexCollection,
             sampleRate: 16000
         )

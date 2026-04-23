@@ -112,7 +112,7 @@ enum ProcessCommand {
                 logger.info("Loaded audio: \(audioSamples.count) samples")
 
                 let startTime = Date()
-                let result = try manager.performCompleteDiarization(
+                let result = try await manager.performCompleteDiarization(
                     audioSamples, sampleRate: 16000)
                 let processingTime = Date().timeIntervalSince(startTime)
 
