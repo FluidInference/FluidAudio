@@ -159,7 +159,7 @@ enum CohereTranscribeCommand {
                 repetitionPenalty: repetitionPenalty,
                 noRepeatNgram: noRepeatNgram)
 
-            let rtfx = duration / result.totalSeconds
+            let rtfx = duration / max(result.totalSeconds, 1e-9)
 
             logger.info(String(repeating: "=", count: 60))
             logger.info("COHERE TRANSCRIBE (fixed pipeline)")

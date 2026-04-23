@@ -593,8 +593,10 @@ public actor CoherePipeline {
             // iteration once it has rotated into `currentToken`.
             allTokens.append(currentToken)
 
+            if step >= prompt.count - 1, nextToken == CohereAsrConfig.SpecialTokens.eosToken {
+                break
+            }
             if step >= prompt.count - 1 {
-                if nextToken == CohereAsrConfig.SpecialTokens.eosToken { break }
                 outputTokens.append(nextToken)
             }
 
