@@ -574,19 +574,28 @@ enum CohereBenchmark {
     }
 
     private static func printFinalSummary(perLanguage: [LanguageSummary]) {
+        // Avoid `String(format: "%s", swiftString)` — Swift's String maps to %@,
+        // and on macOS 26 the Foundation runtime aborts on the mismatch.
+        func row(_ language: String, _ samples: String, _ wer: String, _ cer: String, _ rtfx: String) -> String {
+            language.padding(toLength: 14, withPad: " ", startingAt: 0)
+                + " " + samples.leftPad(to: 8)
+                + " " + wer.leftPad(to: 8)
+                + " " + cer.leftPad(to: 8)
+                + " " + rtfx.leftPad(to: 8)
+        }
+
         logger.info(String(repeating: "=", count: 60))
         logger.info("COHERE TRANSCRIBE BENCHMARK SUMMARY")
         logger.info(String(repeating: "=", count: 60))
-        logger.info(
-            String(
-                format: "%-14s %8s %8s %8s %8s",
-                "language", "samples", "WER%", "CER%", "RTFx"
-            ))
+        logger.info(row("language", "samples", "WER%", "CER%", "RTFx"))
         for s in perLanguage {
             logger.info(
-                String(
-                    format: "%-14s %8d %8.2f %8.2f %8.2f",
-                    s.language, s.samplesProcessed, s.avgWER, s.avgCER, s.avgRTFx
+                row(
+                    s.language,
+                    "\(s.samplesProcessed)",
+                    String(format: "%.2f", s.avgWER),
+                    String(format: "%.2f", s.avgCER),
+                    String(format: "%.2f", s.avgRTFx)
                 ))
         }
 
@@ -603,9 +612,12 @@ enum CohereBenchmark {
             / Double(totalSamples)
         logger.info(String(repeating: "-", count: 60))
         logger.info(
-            String(
-                format: "%-14s %8d %8.2f %8.2f %8.2f",
-                "OVERALL", totalSamples, avgWER, avgCER, avgRTFx
+            row(
+                "OVERALL",
+                "\(totalSamples)",
+                String(format: "%.2f", avgWER),
+                String(format: "%.2f", avgCER),
+                String(format: "%.2f", avgRTFx)
             ))
     }
 
@@ -689,6 +701,12 @@ struct CohereBenchmarkResult: Codable {
     let decoderSeconds: Double
     let processingTime: Double
     let rtfx: Double
+}
+
+extension String {
+    fileprivate func leftPad(to width: Int) -> String {
+        count >= width ? self : String(repeating: " ", count: width - count) + self
+    }
 }
 
 struct LanguageSummary: Codable {
