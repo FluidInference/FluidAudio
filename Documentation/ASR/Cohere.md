@@ -115,11 +115,6 @@ languages. The 98.52% WER on Mandarin is tokenization artifact, not
 transcription quality (CER is 12.01%).
 
 ```bash
-# Reproduce (all 14 languages, resumable — one JSON per language)
-MODEL_DIR=/path/to/cohere-mixed \
-OUT_DIR=./benchmark_results/cohere \
-./Scripts/run_cohere_per_lang.sh
-
 # Single language
 swift run -c release fluidaudiocli cohere-benchmark \
     --encoder-dir /path/to/q8 --decoder-dir /path/to/f16 --vocab-dir /path/to/f16 \
