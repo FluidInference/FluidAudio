@@ -39,10 +39,12 @@ enum CohereBenchmark {
         var decoderDir: String?
         var vocabDir: String?
         var modelDir: String?
+        var dataset = "fleurs"
+        var subset = "test-clean"
         var languages: [String] = ["en_us"]
         var maxFiles: Int?
         var fleursDir: String?
-        var outputFile = "cohere_mixed_benchmark_results.json"
+        var outputFile = "cohere_benchmark_results.json"
         var maxTokens = 108
         var repetitionPenalty: Float = 1.1
         var noRepeatNgram = 3
@@ -110,6 +112,16 @@ enum CohereBenchmark {
                     noRepeatNgram = v
                     i += 1
                 }
+            case "--dataset":
+                if i + 1 < arguments.count {
+                    dataset = arguments[i + 1].lowercased()
+                    i += 1
+                }
+            case "--subset":
+                if i + 1 < arguments.count {
+                    subset = arguments[i + 1]
+                    i += 1
+                }
             case "--cpu-only":
                 computeUnits = .cpuOnly
             case "--cpu-gpu":
@@ -135,16 +147,21 @@ enum CohereBenchmark {
         }
 
         guard #available(macOS 14, iOS 17, *) else {
-            logger.error("Cohere mixed benchmark requires macOS 14 or later")
+            logger.error("Cohere benchmark requires macOS 14 or later")
             exit(1)
         }
 
-        logger.info("Cohere Mixed-Precision FLEURS Benchmark")
+        logger.info("Cohere Transcribe Benchmark")
+        logger.info("  Dataset:          \(dataset)")
+        if dataset == "librispeech" {
+            logger.info("  Subset:           \(subset)")
+        } else {
+            logger.info("  Languages:        \(languages.joined(separator: ", "))")
+        }
         logger.info("  Encoder dir:      \(encDir)")
         logger.info("  Decoder dir:      \(decDir)")
         logger.info("  Vocab dir:        \(vocDir)")
-        logger.info("  Languages:        \(languages.joined(separator: ", "))")
-        logger.info("  Max files/lang:   \(maxFiles?.description ?? "all")")
+        logger.info("  Max files:        \(maxFiles?.description ?? "all")")
         logger.info("  Max tokens:       \(maxTokens)")
         logger.info("  Rep penalty:      \(repetitionPenalty)")
         logger.info("  No-repeat-ngram:  \(noRepeatNgram)")
@@ -164,110 +181,36 @@ enum CohereBenchmark {
 
             let pipeline = CoherePipeline()
 
-            // Resolve FLEURS cache directory
-            let fleursCacheDir =
-                fleursDir
-                ?? NSHomeDirectory() + "/Library/Application Support/FluidAudio/Datasets/fleurs"
+            let allResults: [CohereBenchmarkResult]
+            let perLanguageSummaries: [LanguageSummary]
 
-            // Optionally auto-download FLEURS splits we need
-            if autoDownload {
-                let supportedCodes = languages.filter { fleursToCohereLanguage.keys.contains($0) }
-                let fleurs = FLEURSBenchmark(
-                    config: FLEURSBenchmark.FLEURSConfig(
-                        languages: supportedCodes,
-                        samplesPerLanguage: maxFiles ?? 100,
-                        outputFile: "/dev/null",
-                        cacheDir: fleursCacheDir,
-                        debugMode: false
-                    ))
-                try await fleurs.downloadFLEURS(languages: supportedCodes)
-            }
-
-            var allResults: [CohereBenchmarkResult] = []
-            var perLanguageSummaries: [LanguageSummary] = []
-
-            for langCode in languages {
-                guard let cohereLang = fleursToCohereLanguage[langCode] else {
-                    logger.warning("Unsupported language for Cohere: \(langCode)")
-                    continue
-                }
-
-                logger.info("Processing language: \(langCode)")
-
-                let files: [BenchmarkAudioFile]
-                do {
-                    files = try collectFleursFiles(
-                        language: langCode,
-                        maxFiles: maxFiles,
-                        fleursDir: fleursCacheDir
-                    )
-                } catch {
-                    logger.error("  Failed to collect files for \(langCode): \(error)")
-                    continue
-                }
-
-                logger.info("  Collected \(files.count) files for \(langCode)")
-
-                var langResults: [CohereBenchmarkResult] = []
-                for (idx, file) in files.enumerated() {
-                    do {
-                        let samples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
-                        let duration = Double(samples.count) / Double(CohereAsrConfig.sampleRate)
-
-                        let result = try await pipeline.transcribe(
-                            audio: samples,
-                            models: models,
-                            language: cohereLang,
-                            maxNewTokens: maxTokens,
-                            repetitionPenalty: repetitionPenalty,
-                            noRepeatNgram: noRepeatNgram
-                        )
-
-                        let rtfx = duration / max(result.totalSeconds, 1e-9)
-                        let metrics = WERCalculator.calculateWERAndCER(
-                            hypothesis: result.text,
-                            reference: file.transcript
-                        )
-                        let werPct = metrics.wer * 100
-                        let cerPct = metrics.cer * 100
-
-                        langResults.append(
-                            CohereBenchmarkResult(
-                                language: langCode,
-                                fileName: file.fileName,
-                                reference: file.transcript,
-                                hypothesis: result.text,
-                                wer: werPct,
-                                cer: cerPct,
-                                duration: duration,
-                                encoderSeconds: result.encoderSeconds,
-                                decoderSeconds: result.decoderSeconds,
-                                processingTime: result.totalSeconds,
-                                rtfx: rtfx
-                            ))
-
-                        logger.info(
-                            "  [\(idx + 1)/\(files.count)] \(file.fileName) "
-                                + "WER=\(String(format: "%.2f", werPct))% "
-                                + "CER=\(String(format: "%.2f", cerPct))% "
-                                + "RTFx=\(String(format: "%.2f", rtfx))x"
-                        )
-                    } catch {
-                        logger.error("  Failed on \(file.fileName): \(error)")
-                    }
-                }
-
-                let summary = summarize(language: langCode, results: langResults)
-                perLanguageSummaries.append(summary)
-                logger.info(
-                    "  \(langCode) summary: "
-                        + "WER=\(String(format: "%.2f", summary.avgWER))% "
-                        + "CER=\(String(format: "%.2f", summary.avgCER))% "
-                        + "RTFx=\(String(format: "%.2f", summary.avgRTFx))x "
-                        + "(\(summary.samplesProcessed) samples)"
+            switch dataset {
+            case "librispeech":
+                (allResults, perLanguageSummaries) = try await runLibriSpeech(
+                    models: models,
+                    pipeline: pipeline,
+                    subset: subset,
+                    maxFiles: maxFiles,
+                    autoDownload: autoDownload,
+                    maxTokens: maxTokens,
+                    repetitionPenalty: repetitionPenalty,
+                    noRepeatNgram: noRepeatNgram
                 )
-
-                allResults.append(contentsOf: langResults)
+            case "fleurs":
+                (allResults, perLanguageSummaries) = try await runFleurs(
+                    models: models,
+                    pipeline: pipeline,
+                    languages: languages,
+                    maxFiles: maxFiles,
+                    fleursDir: fleursDir,
+                    autoDownload: autoDownload,
+                    maxTokens: maxTokens,
+                    repetitionPenalty: repetitionPenalty,
+                    noRepeatNgram: noRepeatNgram
+                )
+            default:
+                logger.error("Unknown --dataset \(dataset). Supported: librispeech, fleurs")
+                exit(1)
             }
 
             try saveResults(
@@ -280,6 +223,217 @@ enum CohereBenchmark {
             logger.error("Benchmark failed: \(error)")
             exit(1)
         }
+    }
+
+    // MARK: - FLEURS
+
+    private static func runFleurs(
+        models: CoherePipeline.LoadedModels,
+        pipeline: CoherePipeline,
+        languages: [String],
+        maxFiles: Int?,
+        fleursDir: String?,
+        autoDownload: Bool,
+        maxTokens: Int,
+        repetitionPenalty: Float,
+        noRepeatNgram: Int
+    ) async throws -> ([CohereBenchmarkResult], [LanguageSummary]) {
+        let fleursCacheDir =
+            fleursDir
+            ?? NSHomeDirectory() + "/Library/Application Support/FluidAudio/Datasets/fleurs"
+
+        if autoDownload {
+            let supportedCodes = languages.filter { fleursToCohereLanguage.keys.contains($0) }
+            let fleurs = FLEURSBenchmark(
+                config: FLEURSBenchmark.FLEURSConfig(
+                    languages: supportedCodes,
+                    samplesPerLanguage: maxFiles ?? 100,
+                    outputFile: "/dev/null",
+                    cacheDir: fleursCacheDir,
+                    debugMode: false
+                ))
+            try await fleurs.downloadFLEURS(languages: supportedCodes)
+        }
+
+        var allResults: [CohereBenchmarkResult] = []
+        var perLanguageSummaries: [LanguageSummary] = []
+
+        for langCode in languages {
+            guard let cohereLang = fleursToCohereLanguage[langCode] else {
+                logger.warning("Unsupported language for Cohere: \(langCode)")
+                continue
+            }
+
+            logger.info("Processing language: \(langCode)")
+
+            let files: [BenchmarkAudioFile]
+            do {
+                files = try collectFleursFiles(
+                    language: langCode,
+                    maxFiles: maxFiles,
+                    fleursDir: fleursCacheDir
+                )
+            } catch {
+                logger.error("  Failed to collect files for \(langCode): \(error)")
+                continue
+            }
+
+            logger.info("  Collected \(files.count) files for \(langCode)")
+
+            let langResults = await transcribeFiles(
+                files: files,
+                language: cohereLang,
+                languageLabel: langCode,
+                models: models,
+                pipeline: pipeline,
+                maxTokens: maxTokens,
+                repetitionPenalty: repetitionPenalty,
+                noRepeatNgram: noRepeatNgram
+            )
+
+            let summary = summarize(language: langCode, results: langResults)
+            perLanguageSummaries.append(summary)
+            logger.info(
+                "  \(langCode) summary: "
+                    + "WER=\(String(format: "%.2f", summary.avgWER))% "
+                    + "CER=\(String(format: "%.2f", summary.avgCER))% "
+                    + "RTFx=\(String(format: "%.2f", summary.avgRTFx))x "
+                    + "(\(summary.samplesProcessed) samples)"
+            )
+
+            allResults.append(contentsOf: langResults)
+        }
+
+        return (allResults, perLanguageSummaries)
+    }
+
+    // MARK: - LibriSpeech
+
+    private static func runLibriSpeech(
+        models: CoherePipeline.LoadedModels,
+        pipeline: CoherePipeline,
+        subset: String,
+        maxFiles: Int?,
+        autoDownload: Bool,
+        maxTokens: Int,
+        repetitionPenalty: Float,
+        noRepeatNgram: Int
+    ) async throws -> ([CohereBenchmarkResult], [LanguageSummary]) {
+        // Reuse Parakeet's LibriSpeech downloader/cache layout.
+        let downloader = ASRBenchmark()
+        if autoDownload {
+            try await downloader.downloadLibriSpeech(subset: subset)
+        }
+        let datasetPath = downloader.getLibriSpeechDirectory().appendingPathComponent(subset)
+
+        guard FileManager.default.fileExists(atPath: datasetPath.path) else {
+            throw NSError(
+                domain: "CohereBenchmark",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "LibriSpeech subset \(subset) not found at \(datasetPath.path). "
+                        + "Pass --auto-download to fetch."
+                ]
+            )
+        }
+
+        var files = try collectLibriSpeechFiles(from: datasetPath)
+        if let cap = maxFiles, files.count > cap {
+            files = Array(files.prefix(cap))
+        }
+        logger.info("Collected \(files.count) LibriSpeech files (\(subset))")
+
+        let langResults = await transcribeFiles(
+            files: files,
+            language: .english,
+            languageLabel: "en (\(subset))",
+            models: models,
+            pipeline: pipeline,
+            maxTokens: maxTokens,
+            repetitionPenalty: repetitionPenalty,
+            noRepeatNgram: noRepeatNgram
+        )
+
+        let summary = summarize(language: "en (\(subset))", results: langResults)
+        logger.info(
+            "  LibriSpeech \(subset) summary: "
+                + "WER=\(String(format: "%.2f", summary.avgWER))% "
+                + "CER=\(String(format: "%.2f", summary.avgCER))% "
+                + "RTFx=\(String(format: "%.2f", summary.avgRTFx))x "
+                + "(\(summary.samplesProcessed) samples)"
+        )
+
+        return (langResults, [summary])
+    }
+
+    /// Shared per-file inference loop used by both FLEURS and LibriSpeech paths.
+    private static func transcribeFiles(
+        files: [BenchmarkAudioFile],
+        language: CohereAsrConfig.Language,
+        languageLabel: String,
+        models: CoherePipeline.LoadedModels,
+        pipeline: CoherePipeline,
+        maxTokens: Int,
+        repetitionPenalty: Float,
+        noRepeatNgram: Int
+    ) async -> [CohereBenchmarkResult] {
+        var results: [CohereBenchmarkResult] = []
+        for (idx, file) in files.enumerated() {
+            do {
+                let samples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
+                let duration = Double(samples.count) / Double(CohereAsrConfig.sampleRate)
+                if duration > Double(CohereAsrConfig.maxAudioSeconds) {
+                    logger.warning(
+                        "  Skipping \(file.fileName) (\(String(format: "%.1f", duration))s > "
+                            + "\(CohereAsrConfig.maxAudioSeconds)s single-chunk limit)"
+                    )
+                    continue
+                }
+
+                let result = try await pipeline.transcribe(
+                    audio: samples,
+                    models: models,
+                    language: language,
+                    maxNewTokens: maxTokens,
+                    repetitionPenalty: repetitionPenalty,
+                    noRepeatNgram: noRepeatNgram
+                )
+
+                let rtfx = duration / max(result.totalSeconds, 1e-9)
+                let metrics = WERCalculator.calculateWERAndCER(
+                    hypothesis: result.text,
+                    reference: file.transcript
+                )
+                let werPct = metrics.wer * 100
+                let cerPct = metrics.cer * 100
+
+                results.append(
+                    CohereBenchmarkResult(
+                        language: languageLabel,
+                        fileName: file.fileName,
+                        reference: file.transcript,
+                        hypothesis: result.text,
+                        wer: werPct,
+                        cer: cerPct,
+                        duration: duration,
+                        encoderSeconds: result.encoderSeconds,
+                        decoderSeconds: result.decoderSeconds,
+                        processingTime: result.totalSeconds,
+                        rtfx: rtfx
+                    ))
+
+                logger.info(
+                    "  [\(idx + 1)/\(files.count)] \(file.fileName) "
+                        + "WER=\(String(format: "%.2f", werPct))% "
+                        + "CER=\(String(format: "%.2f", cerPct))% "
+                        + "RTFx=\(String(format: "%.2f", rtfx))x"
+                )
+            } catch {
+                logger.error("  Failed on \(file.fileName): \(error)")
+            }
+        }
+        return results
     }
 
     // MARK: - Helpers
@@ -335,6 +489,41 @@ enum CohereBenchmark {
         return files
     }
 
+    private static func collectLibriSpeechFiles(from directory: URL) throws -> [BenchmarkAudioFile] {
+        var files: [BenchmarkAudioFile] = []
+        let fm = FileManager.default
+        let enumerator = fm.enumerator(at: directory, includingPropertiesForKeys: nil)
+
+        while let url = enumerator?.nextObject() as? URL {
+            guard url.pathExtension == "txt" && url.lastPathComponent.contains(".trans.") else {
+                continue
+            }
+            let transcriptContent = try String(contentsOf: url)
+            let lines = transcriptContent.components(separatedBy: .newlines).filter { !$0.isEmpty }
+
+            for line in lines {
+                let parts = line.components(separatedBy: " ")
+                guard parts.count >= 2 else { continue }
+
+                let audioId = parts[0]
+                let transcript = parts.dropFirst().joined(separator: " ")
+                let audioFileName = "\(audioId).flac"
+                let audioPath = url.deletingLastPathComponent().appendingPathComponent(audioFileName)
+
+                if fm.fileExists(atPath: audioPath.path) {
+                    files.append(
+                        BenchmarkAudioFile(
+                            fileName: audioFileName,
+                            audioPath: audioPath,
+                            transcript: transcript
+                        ))
+                }
+            }
+        }
+
+        return files.sorted { $0.fileName < $1.fileName }
+    }
+
     private static func summarize(
         language: String,
         results: [CohereBenchmarkResult]
@@ -386,7 +575,7 @@ enum CohereBenchmark {
 
     private static func printFinalSummary(perLanguage: [LanguageSummary]) {
         logger.info(String(repeating: "=", count: 60))
-        logger.info("COHERE MIXED-PRECISION FLEURS SUMMARY")
+        logger.info("COHERE TRANSCRIBE BENCHMARK SUMMARY")
         logger.info(String(repeating: "=", count: 60))
         logger.info(
             String(
@@ -424,22 +613,24 @@ enum CohereBenchmark {
         logger.info(
             """
 
-            Cohere Transcribe — mixed-precision FLEURS benchmark
+            Cohere Transcribe benchmark (FLEURS or LibriSpeech)
 
             Usage: fluidaudio cohere-benchmark [options]
 
             Model locations (choose one pattern):
                 --model-dir <path>              Single dir with encoder + decoder + vocab.json
-                --encoder-dir <path>            (mixed) INT8 or FP16 encoder .mlmodelc dir
-                --decoder-dir <path>            (mixed) INT8 or FP16 decoder .mlmodelc dir
+                --encoder-dir <path>            Encoder .mlmodelc dir (overrides --model-dir)
+                --decoder-dir <path>            Decoder .mlmodelc dir (overrides --model-dir)
                 --vocab-dir <path>              vocab.json dir (defaults to decoder-dir)
 
             Dataset:
-                --languages <codes>             Comma-separated FLEURS codes (default: en_us)
-                --max-files <n>                 Cap per-language samples (default: all)
+                --dataset <name>                fleurs (default) or librispeech
+                --subset <name>                 LibriSpeech subset (default: test-clean)
+                --languages <codes>             FLEURS: comma-separated codes (default: en_us)
+                --max-files <n>                 Cap samples processed (default: all)
                 --fleurs-dir <path>             Local FLEURS cache root
                                                  (default: ~/Library/Application Support/FluidAudio/Datasets/fleurs)
-                --auto-download                 Fetch missing language splits from HuggingFace
+                --auto-download                 Fetch missing dataset splits
 
             Decode:
                 --max-tokens <n>                Max decoded tokens (default: 108)
@@ -453,27 +644,32 @@ enum CohereBenchmark {
 
             Output:
                 --output <file>                 JSON report path
-                                                 (default: cohere_mixed_benchmark_results.json)
+                                                 (default: cohere_benchmark_results.json)
 
             Supported FLEURS codes (14 total):
                 en_us, fr_fr, de_de, es_419, it_it, pt_br, nl_nl, pl_pl,
                 el_gr, ar_eg, ja_jp, cmn_hans_cn, ko_kr, vi_vn
 
+            Note:
+                Cohere Transcribe is single-chunk with a 35s audio limit. Files
+                exceeding that are skipped with a warning.
+
             Examples:
-                # Mixed INT8 encoder + FP16 decoder across 3 languages, 20 samples each
+                # LibriSpeech test-clean, English, 100 utterances
                 fluidaudio cohere-benchmark \\
-                    --encoder-dir /path/to/q8 \\
-                    --decoder-dir /path/to/f16 \\
-                    --vocab-dir  /path/to/f16 \\
+                    --model-dir /path/to/q8 \\
+                    --dataset librispeech \\
+                    --subset test-clean \\
+                    --max-files 100 \\
+                    --auto-download
+
+                # FLEURS, 3 languages, 20 samples each
+                fluidaudio cohere-benchmark \\
+                    --model-dir /path/to/q8 \\
+                    --dataset fleurs \\
                     --languages en_us,fr_fr,ja_jp \\
                     --max-files 20 \\
                     --auto-download
-
-                # Single-precision FP16, all English samples, save report
-                fluidaudio cohere-benchmark \\
-                    --model-dir /path/to/f16 \\
-                    --languages en_us \\
-                    --output cohere_fp16_en.json
             """
         )
     }
