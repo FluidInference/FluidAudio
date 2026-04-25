@@ -14,44 +14,10 @@ extension PocketTtsSynthesizer {
         public let eosStep: Int?
     }
 
-    /// CoreML output key names for the conditioning step model.
-    ///
-    /// These names are auto-generated during CoreML model tracing and must match
-    /// the compiled `.mlmodelc` exactly. They only change when models are re-converted.
-    enum CondStepKeys {
-        static let cacheKeys: [String] = [
-            "new_cache_1_internal_tensor_assign_2",
-            "new_cache_3_internal_tensor_assign_2",
-            "new_cache_5_internal_tensor_assign_2",
-            "new_cache_7_internal_tensor_assign_2",
-            "new_cache_9_internal_tensor_assign_2",
-            "new_cache_internal_tensor_assign_2",
-        ]
-        static let positionKeys: [String] = [
-            "var_445", "var_864", "var_1283", "var_1702", "var_2121", "var_2365",
-        ]
-    }
-
-    /// CoreML output key names for the generation step model.
-    ///
-    /// Auto-generated during CoreML model tracing. Must match the compiled model.
-    enum FlowLMStepKeys {
-        /// CoreML assigned this output the name "input" during model tracing —
-        /// it is the transformer hidden state output, not an input tensor.
-        static let transformerOut = "input"
-        static let eosLogit = "var_2582"
-        static let cacheKeys: [String] = [
-            "new_cache_1_internal_tensor_assign_2",
-            "new_cache_3_internal_tensor_assign_2",
-            "new_cache_5_internal_tensor_assign_2",
-            "new_cache_7_internal_tensor_assign_2",
-            "new_cache_9_internal_tensor_assign_2",
-            "new_cache_internal_tensor_assign_2",
-        ]
-        static let positionKeys: [String] = [
-            "var_458", "var_877", "var_1296", "var_1715", "var_2134", "var_2553",
-        ]
-    }
+    /// CoreML output key names for the conditioning and generation step models
+    /// are discovered at model-load time via `PocketTtsLayerKeys.discover(...)`
+    /// because CoreML auto-generates names that differ between 6L and 24L
+    /// language packs. See `PocketTtsLayerKeys.swift`.
 
     /// CoreML output key names for the Mimi decoder model.
     enum MimiKeys {

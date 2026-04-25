@@ -146,6 +146,7 @@ public struct TTS {
         var cloneVoicePath: String? = nil
         var voiceFilePath: String? = nil
         var saveVoicePath: String? = nil
+        var pocketLanguage: PocketTtsLanguage = .english
 
         var i = 0
         while i < arguments.count {
@@ -229,6 +230,21 @@ public struct TTS {
                     saveVoicePath = arguments[i + 1]
                     i += 1
                 }
+            case "--language":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1]
+                    if let parsed = PocketTtsLanguage(rawValue: raw) {
+                        pocketLanguage = parsed
+                    } else {
+                        let supported = PocketTtsLanguage.allCases
+                            .map { $0.rawValue }
+                            .joined(separator: ", ")
+                        logger.warning(
+                            "Unknown PocketTTS language '\(raw)'. Supported: \(supported). Falling back to english."
+                        )
+                    }
+                    i += 1
+                }
             default:
                 if text == nil {
                     text = argument
@@ -260,7 +276,8 @@ public struct TTS {
             await runPocketTts(
                 text: text, output: output, voice: voice, deEss: deEss,
                 metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
-                voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath)
+                voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath,
+                language: pocketLanguage)
             return
         }
 
@@ -509,14 +526,17 @@ public struct TTS {
     private static func runPocketTts(
         text: String, output: String, voice: String, deEss: Bool,
         metricsPath: String?, cloneVoicePath: String?,
-        voiceFilePath: String?, saveVoicePath: String?
+        voiceFilePath: String?, saveVoicePath: String?,
+        language: PocketTtsLanguage
     ) async {
         do {
             let tStart = Date()
             let pocketVoice =
                 voice == TtsConstants.recommendedVoice
                 ? PocketTtsConstants.defaultVoice : voice
-            let manager = PocketTtsManager(defaultVoice: pocketVoice)
+            let manager = PocketTtsManager(
+                defaultVoice: pocketVoice, language: language)
+            logger.info("PocketTTS language: \(language.rawValue)")
 
             let tLoad0 = Date()
             try await manager.initialize()
@@ -812,6 +832,13 @@ public struct TTS {
               --clone-voice FILE   Clone voice from audio file (WAV, MP3, M4A, etc.)
               --voice-file FILE    Load previously saved voice .bin file
               --save-voice FILE    Save cloned voice to .bin file for later use
+
+            PocketTTS Language Packs:
+              --language ID        Language pack (default: english)
+                                   Supported: english, french_24l,
+                                   german, german_24l, italian, italian_24l,
+                                   portuguese, portuguese_24l, spanish, spanish_24l
+                                   Note: French is 24-layer only (no 6-layer pack upstream)
 
             Lexicon file format:
               # Comments start with #

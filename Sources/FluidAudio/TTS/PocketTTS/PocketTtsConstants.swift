@@ -37,7 +37,8 @@ public enum PocketTtsConstants {
 
     // MARK: - KV cache
 
-    /// Number of transformer layers, each with its own KV cache.
+    /// Default number of transformer layers for the legacy English (6L) pack.
+    /// For multi-language packs, prefer `PocketTtsLanguage.transformerLayers`.
     public static let kvCacheLayers: Int = 6
     /// Max KV cache positions: voice (~125) + text (≤50) + generated frames.
     public static let kvCacheMaxLen: Int = 512
@@ -51,4 +52,40 @@ public enum PocketTtsConstants {
     // MARK: - Repository
 
     public static let defaultModelsSubdirectory: String = "Models"
+}
+
+/// Supported PocketTTS language packs (matches upstream
+/// `kyutai/pocket-tts/languages/<id>/` folder names exactly).
+///
+/// File layout on `FluidInference/pocket-tts-coreml`:
+/// - `english`: legacy root layout (`mimi_decoder_v2.mlmodelc` etc.)
+/// - other languages: `v2/<id>/` subtree with `mimi_decoder.mlmodelc`
+public enum PocketTtsLanguage: String, Sendable, CaseIterable {
+    case english
+    case french24L = "french_24l"
+    case german
+    case german24L = "german_24l"
+    case italian
+    case italian24L = "italian_24l"
+    case portuguese
+    case portuguese24L = "portuguese_24l"
+    case spanish
+    case spanish24L = "spanish_24l"
+
+    /// Number of transformer layers in this language pack (6 or 24).
+    public var transformerLayers: Int {
+        switch self {
+        case .english, .german, .italian, .portuguese, .spanish:
+            return 6
+        case .french24L, .german24L, .italian24L, .portuguese24L, .spanish24L:
+            return 24
+        }
+    }
+
+    /// HF subdirectory under the pocket-tts-coreml repo root.
+    /// English returns `nil` to preserve the legacy root-level layout
+    /// (avoids forcing existing caches to re-download).
+    public var repoSubdirectory: String? {
+        self == .english ? nil : "v2/\(rawValue)"
+    }
 }

@@ -9,20 +9,24 @@ extension PocketTtsSynthesizer {
     /// for every processed token. This avoids recomputing K/V for past tokens —
     /// each new step only computes its own K/V, then reads all cached K/V via attention.
     struct KVCacheState {
-        /// 6 KV cache arrays, each shaped `[2, 1, kvCacheMaxLen, 16, 64]`:
+        /// `N` KV cache arrays (one per transformer layer), each shaped
+        /// `[2, 1, kvCacheMaxLen, 16, 64]`:
         ///  - `2`: K and V tensors (index 0 = keys, index 1 = values)
         ///  - `1`: batch size
         ///  - `kvCacheMaxLen` (512): pre-allocated position slots
         ///  - `16`: attention heads
         ///  - `64`: dims per head (16 × 64 = 1024 total)
+        ///
+        /// `N` is 6 for the legacy English / 6L packs, and 24 for `*_24l`
+        /// packs.
         var caches: [MLMultiArray]
-        /// 6 position counters (one per layer) tracking the next write slot in the cache.
+        /// `N` position counters (one per layer) tracking the next write slot
+        /// in each cache.
         var positions: [MLMultiArray]
     }
 
     /// Create an empty KV cache state (all zeros, positions at 0).
-    static func emptyKVCacheState() throws -> KVCacheState {
-        let layers = PocketTtsConstants.kvCacheLayers
+    static func emptyKVCacheState(layers: Int) throws -> KVCacheState {
         let shape: [NSNumber] = [
             2, 1, NSNumber(value: PocketTtsConstants.kvCacheMaxLen), 16, 64,
         ]
@@ -96,13 +100,15 @@ extension PocketTtsSynthesizer {
     static func runCondStep(
         conditioning: MLMultiArray,
         state: inout KVCacheState,
-        model: MLModel
+        model: MLModel,
+        layerKeys: PocketTtsLayerKeys
     ) async throws {
+        let layers = layerKeys.layerCount
         var inputDict: [String: Any] = [
             "conditioning": conditioning
         ]
 
-        for i in 0..<PocketTtsConstants.kvCacheLayers {
+        for i in 0..<layers {
             inputDict["cache\(i)"] = state.caches[i]
             inputDict["position\(i)"] = state.positions[i]
         }
@@ -110,16 +116,16 @@ extension PocketTtsSynthesizer {
         let input = try MLDictionaryFeatureProvider(dictionary: inputDict)
         let output = try await model.compatPrediction(from: input, options: MLPredictionOptions())
 
-        for i in 0..<PocketTtsConstants.kvCacheLayers {
-            guard let newCache = output.featureValue(for: CondStepKeys.cacheKeys[i])?.multiArrayValue
+        for i in 0..<layers {
+            guard let newCache = output.featureValue(for: layerKeys.cacheKeys[i])?.multiArrayValue
             else {
                 throw PocketTTSError.processingFailed(
-                    "Missing cond_step cache output: \(CondStepKeys.cacheKeys[i])")
+                    "Missing cond_step cache output: \(layerKeys.cacheKeys[i])")
             }
-            guard let newPos = output.featureValue(for: CondStepKeys.positionKeys[i])?.multiArrayValue
+            guard let newPos = output.featureValue(for: layerKeys.positionKeys[i])?.multiArrayValue
             else {
                 throw PocketTTSError.processingFailed(
-                    "Missing cond_step position output: \(CondStepKeys.positionKeys[i])")
+                    "Missing cond_step position output: \(layerKeys.positionKeys[i])")
             }
             state.caches[i] = newCache
             state.positions[i] = newPos
@@ -133,7 +139,8 @@ extension PocketTtsSynthesizer {
     static func prefillKVCacheVoice(
         state: KVCacheState,
         voiceData: PocketTtsVoiceData,
-        model: MLModel
+        model: MLModel,
+        layerKeys: PocketTtsLayerKeys
     ) async throws -> KVCacheState {
         var state = state
         let dim = PocketTtsConstants.embeddingDim
@@ -145,7 +152,8 @@ extension PocketTtsSynthesizer {
                 offset: tokenIdx * dim,
                 dim: dim
             )
-            try await runCondStep(conditioning: token, state: &state, model: model)
+            try await runCondStep(
+                conditioning: token, state: &state, model: model, layerKeys: layerKeys)
         }
 
         return state
@@ -158,14 +166,16 @@ extension PocketTtsSynthesizer {
     static func prefillKVCacheText(
         state: KVCacheState,
         textEmbeddings: [[Float]],
-        model: MLModel
+        model: MLModel,
+        layerKeys: PocketTtsLayerKeys
     ) async throws -> KVCacheState {
         var state = state
         let dim = PocketTtsConstants.embeddingDim
 
         for embedding in textEmbeddings {
             let token = try createConditioningToken(from: embedding, offset: 0, dim: dim)
-            try await runCondStep(conditioning: token, state: &state, model: model)
+            try await runCondStep(
+                conditioning: token, state: &state, model: model, layerKeys: layerKeys)
         }
 
         return state
@@ -180,14 +190,15 @@ extension PocketTtsSynthesizer {
     static func prefillKVCache(
         voiceData: PocketTtsVoiceData,
         textEmbeddings: [[Float]],
-        model: MLModel
+        model: MLModel,
+        layerKeys: PocketTtsLayerKeys
     ) async throws -> KVCacheState {
-        let emptyState = try emptyKVCacheState()
+        let emptyState = try emptyKVCacheState(layers: layerKeys.layerCount)
         var state = try await prefillKVCacheVoice(
-            state: emptyState, voiceData: voiceData, model: model
+            state: emptyState, voiceData: voiceData, model: model, layerKeys: layerKeys
         )
         state = try await prefillKVCacheText(
-            state: state, textEmbeddings: textEmbeddings, model: model
+            state: state, textEmbeddings: textEmbeddings, model: model, layerKeys: layerKeys
         )
 
         let finalPos = state.positions[0][0].floatValue
@@ -223,14 +234,22 @@ extension PocketTtsSynthesizer {
         sequence: MLMultiArray,
         bosEmb: MLMultiArray,
         state: inout KVCacheState,
-        model: MLModel
+        model: MLModel,
+        layerKeys: PocketTtsLayerKeys
     ) async throws -> (transformerOut: MLMultiArray, eosLogit: Float) {
+        guard let transformerKey = layerKeys.transformerOut, let eosKey = layerKeys.eosLogit
+        else {
+            throw PocketTTSError.processingFailed(
+                "flowlm_step layer keys missing transformer/eos outputs")
+        }
+
+        let layers = layerKeys.layerCount
         var inputDict: [String: Any] = [
             "sequence": sequence,
             "bos_emb": bosEmb,
         ]
 
-        for i in 0..<PocketTtsConstants.kvCacheLayers {
+        for i in 0..<layers {
             inputDict["cache\(i)"] = state.caches[i]
             inputDict["position\(i)"] = state.positions[i]
         }
@@ -239,30 +258,30 @@ extension PocketTtsSynthesizer {
         let output = try await model.compatPrediction(from: input, options: MLPredictionOptions())
 
         // Extract transformer output
-        guard let transformerOut = output.featureValue(for: FlowLMStepKeys.transformerOut)?.multiArrayValue
+        guard let transformerOut = output.featureValue(for: transformerKey)?.multiArrayValue
         else {
             throw PocketTTSError.processingFailed("Missing flowlm_step transformer output")
         }
 
         // Extract EOS logit
-        guard let eosArray = output.featureValue(for: FlowLMStepKeys.eosLogit)?.multiArrayValue
+        guard let eosArray = output.featureValue(for: eosKey)?.multiArrayValue
         else {
             throw PocketTTSError.processingFailed("Missing flowlm_step EOS logit")
         }
         let eosLogit = eosArray[0].floatValue
 
         // Update caches and positions
-        for i in 0..<PocketTtsConstants.kvCacheLayers {
+        for i in 0..<layers {
             guard
-                let newCache = output.featureValue(for: FlowLMStepKeys.cacheKeys[i])?.multiArrayValue
+                let newCache = output.featureValue(for: layerKeys.cacheKeys[i])?.multiArrayValue
             else {
                 throw PocketTTSError.processingFailed(
-                    "Missing flowlm_step cache output: \(FlowLMStepKeys.cacheKeys[i])")
+                    "Missing flowlm_step cache output: \(layerKeys.cacheKeys[i])")
             }
-            guard let newPos = output.featureValue(for: FlowLMStepKeys.positionKeys[i])?.multiArrayValue
+            guard let newPos = output.featureValue(for: layerKeys.positionKeys[i])?.multiArrayValue
             else {
                 throw PocketTTSError.processingFailed(
-                    "Missing flowlm_step position output: \(FlowLMStepKeys.positionKeys[i])")
+                    "Missing flowlm_step position output: \(layerKeys.positionKeys[i])")
             }
             state.caches[i] = newCache
             state.positions[i] = newPos

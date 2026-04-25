@@ -36,9 +36,13 @@ public enum PocketTtsConstantsLoader {
             expectedCount: PocketTtsConstants.latentDim,
             name: "bos_emb"
         )
-        let embedTable = try loadFloatArray(
+        // text_embed_table vocab size is language-dependent — English ships
+        // 4001 rows, other languages may differ. Validate only that the file
+        // is a clean multiple of embeddingDim; the synthesizer indexes into
+        // this table by token ID at runtime.
+        let embedTable = try loadFloatArrayMultipleOf(
             from: constantsDir.appendingPathComponent("text_embed_table.bin"),
-            expectedCount: PocketTtsConstants.vocabSize * PocketTtsConstants.embeddingDim,
+            rowSize: PocketTtsConstants.embeddingDim,
             name: "text_embed_table"
         )
 
@@ -130,6 +134,29 @@ public enum PocketTtsConstantsLoader {
 
         guard actualCount == expectedCount else {
             throw LoadError.invalidSize(name, expected: expectedCount, actual: actualCount)
+        }
+
+        return data.withUnsafeBytes { rawBuffer in
+            let floatBuffer = rawBuffer.bindMemory(to: Float.self)
+            return Array(floatBuffer)
+        }
+    }
+
+    /// Load a raw Float32 binary file whose length must be a non-zero multiple
+    /// of `rowSize`. Used for tensors whose leading dimension varies per
+    /// language (e.g. `text_embed_table` vocab size).
+    private static func loadFloatArrayMultipleOf(
+        from url: URL, rowSize: Int, name: String
+    ) throws -> [Float] {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw LoadError.fileNotFound(name)
+        }
+
+        let data = try Data(contentsOf: url)
+        let actualCount = data.count / MemoryLayout<Float>.size
+
+        guard actualCount > 0, actualCount % rowSize == 0 else {
+            throw LoadError.invalidSize(name, expected: rowSize, actual: actualCount)
         }
 
         return data.withUnsafeBytes { rawBuffer in
