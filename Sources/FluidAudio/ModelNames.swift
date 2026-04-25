@@ -587,11 +587,6 @@ public enum ModelNames {
         public static let mimiDecoderV2File = mimiDecoderV2 + ".mlmodelc"
         public static let mimiEncoderFile = mimiEncoder + ".mlmodelc"
 
-        /// Backward-compatible alias used by callers expecting the English
-        /// (legacy root) Mimi decoder filename.
-        public static let mimiDecoder = mimiDecoderLegacy
-        public static let mimiDecoderFile = mimiDecoderLegacyFile
-
         /// Directory containing binary constants, tokenizer, and voice data.
         public static let constantsBinDir = "constants_bin"
 
@@ -614,9 +609,6 @@ public enum ModelNames {
                 constantsBinDir,
             ]
         }
-
-        /// Backward-compatible English-only set (legacy root layout).
-        public static let requiredModels: Set<String> = requiredModels(for: .english)
 
         /// Models required for voice cloning (optional feature).
         public static let voiceCloningModels: Set<String> = [
@@ -809,7 +801,7 @@ public enum ModelNames {
             return ttsModels.union(ModelNames.G2P.requiredModels)
                 .union(ModelNames.MultilingualG2P.requiredModels)
         case .pocketTts:
-            return ModelNames.PocketTTS.requiredModels
+            return ModelNames.PocketTTS.requiredModels(for: .english)
         case .kokoroAne:
             return ModelNames.KokoroAne.requiredModels
         case .sortformer:

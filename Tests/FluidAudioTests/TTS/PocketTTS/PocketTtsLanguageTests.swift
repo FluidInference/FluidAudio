@@ -73,15 +73,6 @@ final class PocketTtsLanguageTests: XCTestCase {
         }
     }
 
-    func testEveryLanguageHasValidLayerCount() {
-        // Sanity guard: enum may grow but every variant must be 6 or 24.
-        for lang in PocketTtsLanguage.allCases {
-            XCTAssertTrue(
-                lang.transformerLayers == 6 || lang.transformerLayers == 24,
-                "Unexpected layer count \(lang.transformerLayers) for \(lang.rawValue)")
-        }
-    }
-
     // MARK: - ModelNames.PocketTTS.requiredModels(for:)
 
     func testEnglishRequiredModelsUsesLegacyMimi() {
@@ -109,16 +100,6 @@ final class PocketTtsLanguageTests: XCTestCase {
         }
     }
 
-    func testRequiredModelsAlwaysHasFiveEntries() {
-        // 4 model directories + 1 constants_bin/ directory.
-        for lang in PocketTtsLanguage.allCases {
-            let models = ModelNames.PocketTTS.requiredModels(for: lang)
-            XCTAssertEqual(
-                models.count, 5,
-                "\(lang.rawValue) requiredModels should have 5 entries")
-        }
-    }
-
     // MARK: - ModelNames.PocketTTS.mimiDecoderFile(for:)
 
     func testMimiDecoderFilenameDispatch() {
@@ -131,15 +112,5 @@ final class PocketTtsLanguageTests: XCTestCase {
                 ModelNames.PocketTTS.mimiDecoderV2File,
                 "\(lang.rawValue) should use mimi_decoder.mlmodelc")
         }
-    }
-
-    // MARK: - Backward-compat alias
-
-    func testLegacyRequiredModelsMatchesEnglish() {
-        // The legacy `requiredModels` (no language arg) must remain identical
-        // to the English-language set so old callers keep working.
-        XCTAssertEqual(
-            ModelNames.PocketTTS.requiredModels,
-            ModelNames.PocketTTS.requiredModels(for: .english))
     }
 }

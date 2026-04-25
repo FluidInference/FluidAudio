@@ -37,9 +37,6 @@ public enum PocketTtsConstants {
 
     // MARK: - KV cache
 
-    /// Default number of transformer layers for the legacy English (6L) pack.
-    /// For multi-language packs, prefer `PocketTtsLanguage.transformerLayers`.
-    public static let kvCacheLayers: Int = 6
     /// Max KV cache positions: voice (~125) + text (≤50) + generated frames.
     public static let kvCacheMaxLen: Int = 512
 
