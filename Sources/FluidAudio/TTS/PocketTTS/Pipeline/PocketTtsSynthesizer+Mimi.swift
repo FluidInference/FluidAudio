@@ -16,11 +16,11 @@ extension PocketTtsSynthesizer {
     /// Create the initial Mimi decoder state from the constants directory.
     ///
     /// Tensor shapes come from the loaded model's input descriptions, not a
-    /// manifest, so legacy English (`attn*_cache: [2,1,8,256,64]`) and v2
-    /// multi-language packs (`attn*_cache: [2,1,256,8,64]`, no
-    /// `attn*_end_offset` inputs) both load through one path. `.bin` files
-    /// must be Float32 with element count matching the model's declared
-    /// shape; missing files mean a zero-initialized tensor.
+    /// manifest, so 6L and 24L packs (which have different `attn*_cache`
+    /// shapes and may differ in the presence of `attn*_end_offset` inputs)
+    /// both load through one path. `.bin` files must be Float32 with
+    /// element count matching the model's declared shape; missing files
+    /// mean a zero-initialized tensor.
     static func loadMimiInitialState(
         from repoDirectory: URL,
         mimiKeys: PocketTtsMimiKeys

@@ -245,7 +245,7 @@ that matches your input text — there is no automatic language detection.
 
 | ID | Layers | HF Path |
 |----|--------|---------|
-| `english` | 6 | repo root (legacy layout) |
+| `english` | 6 | `v2/english/` |
 | `german` | 6 | `v2/german/` |
 | `german_24l` | 24 | `v2/german_24l/` |
 | `italian` | 6 | `v2/italian/` |

@@ -66,7 +66,7 @@ public actor PocketTtsModelStore {
             ModelNames.PocketTTS.condStepFile,
             ModelNames.PocketTTS.flowlmStepFile,
             ModelNames.PocketTTS.flowDecoderFile,
-            ModelNames.PocketTTS.mimiDecoderFile(for: language),
+            ModelNames.PocketTTS.mimiDecoderFile,
         ]
 
         var loadedModels: [MLModel] = []
@@ -98,10 +98,10 @@ public actor PocketTtsModelStore {
             modelName: "flowlm_step"
         )
 
-        // Discover Mimi decoder schema. Legacy English and v2 packs differ in
-        // attention cache layout, presence of `attn*_end_offset` inputs, and
-        // auto-generated `var_NNN` output names. Discovery makes both work
-        // through one runtime path.
+        // Discover Mimi decoder schema. Auto-generated `var_NNN` output
+        // names and per-layer attention cache shapes vary between 6L and
+        // 24L packs, so we read them from the model itself instead of
+        // hardcoding.
         mimiDecoderKeysCache = try PocketTtsMimiKeys.discover(from: loadedModels[3])
 
         let elapsed = Date().timeIntervalSince(loadStart)
@@ -178,9 +178,9 @@ public actor PocketTtsModelStore {
         return keys
     }
 
-    /// The language root directory (legacy repo root for English, or
-    /// `<repoDir>/v2/<lang>` otherwise) — contains the four model files,
-    /// `constants_bin/`, and is the right base for `loadMimiInitialState`.
+    /// The language root directory (`<repoDir>/v2/<lang>`) — contains the
+    /// four model files, `constants_bin/`, and is the right base for
+    /// `loadMimiInitialState`.
     public func repoDir() throws -> URL {
         guard let dir = languageRootDirectory else {
             throw PocketTTSError.modelNotFound("PocketTTS repository not loaded")
@@ -241,16 +241,11 @@ public actor PocketTtsModelStore {
     /// Check if the Mimi encoder model is available.
     public func isMimiEncoderAvailable() -> Bool {
         // The Mimi encoder always lives at the repo root regardless of the
-        // currently selected language pack.
-        let repoRoot: URL
-        if let langRoot = languageRootDirectory {
-            repoRoot =
-                (language.repoSubdirectory == nil)
-                ? langRoot
-                : langRoot.deletingLastPathComponent().deletingLastPathComponent()
-        } else {
-            return false
-        }
+        // currently selected language pack. The language root is at
+        // `<repoRoot>/v2/<lang>`, so two `deletingLastPathComponent()` calls
+        // walk back up to the repo root.
+        guard let langRoot = languageRootDirectory else { return false }
+        let repoRoot = langRoot.deletingLastPathComponent().deletingLastPathComponent()
         let modelURL = repoRoot.appendingPathComponent(ModelNames.PocketTTS.mimiEncoderFile)
         return FileManager.default.fileExists(atPath: modelURL.path)
     }
