@@ -535,10 +535,11 @@ public struct PocketTtsSynthesizer {
         let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
 
         // One-time voice prefill. Two paths matching `prefillKVCache`:
-        //  - Pre-baked snapshot (cacheSnapshot != nil): drop pre-baked K/V
-        //    straight into the cache, skip cond_step entirely.
-        //  - Flat audio prompt (cloned voice): feed every voice token through
-        //    cond_step. Cloned voices never carry a cacheSnapshot.
+        //  - v2 packs (cacheSnapshot != nil): drop pre-baked K/V into cache,
+        //    skip cond_step entirely (`promptLength == 0`, so the loop in
+        //    `prefillKVCacheVoice` would be a no-op anyway).
+        //  - Flat audio prompt (legacy English): feed every voice token
+        //    through cond_step.
         let voiceKVSnapshot: KVCacheState
         if let snapshot = voiceData.cacheSnapshot {
             voiceKVSnapshot = try kvCacheStateFromSnapshot(

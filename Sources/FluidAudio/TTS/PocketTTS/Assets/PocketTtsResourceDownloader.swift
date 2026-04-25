@@ -7,7 +7,7 @@ public enum PocketTtsResourceDownloader {
     private static let logger = AppLogger(category: "PocketTtsResourceDownloader")
 
     /// Ensure all PocketTTS models for the given language are downloaded and
-    /// return the **language root** directory (`<repoDir>/v2/<lang>/`).
+    /// return the **language root** directory.
     ///
     /// - Parameters:
     ///   - language: Which upstream language pack to fetch.
@@ -15,7 +15,9 @@ public enum PocketTtsResourceDownloader {
     ///     When `nil`, uses the default platform cache location.
     ///   - progressHandler: Optional callback for download progress updates.
     /// - Returns: The directory that contains the four `.mlmodelc` packages
-    ///   plus `constants_bin/` for the requested language.
+    ///   plus `constants_bin/` for the requested language. For English this
+    ///   is the legacy repo root; for other languages it's
+    ///   `<repoDir>/v2/<lang>/`.
     public static func ensureModels(
         language: PocketTtsLanguage = .english,
         directory: URL? = nil,
@@ -26,24 +28,36 @@ public enum PocketTtsResourceDownloader {
             PocketTtsConstants.defaultModelsSubdirectory)
 
         let repoDir = modelsDirectory.appendingPathComponent(Repo.pocketTts.folderName)
-        let subdir = language.repoSubdirectory
-        let languageRoot = repoDir.appendingPathComponent(subdir)
 
-        let allPresent = ModelNames.PocketTTS.requiredModels.allSatisfy { model in
+        let languageRoot: URL
+        if let subdir = language.repoSubdirectory {
+            languageRoot = repoDir.appendingPathComponent(subdir)
+        } else {
+            languageRoot = repoDir
+        }
+
+        let requiredModels = ModelNames.PocketTTS.requiredModels(for: language)
+        let allPresent = requiredModels.allSatisfy { model in
             FileManager.default.fileExists(
                 atPath: languageRoot.appendingPathComponent(model).path)
         }
 
         if !allPresent {
-            logger.info(
-                "Downloading PocketTTS \(language.rawValue) language pack from HuggingFace (\(subdir))..."
-            )
-            try await DownloadUtils.downloadSubdirectory(
-                .pocketTts,
-                subdirectory: subdir,
-                to: repoDir,
-                progressHandler: progressHandler
-            )
+            if let subdir = language.repoSubdirectory {
+                logger.info(
+                    "Downloading PocketTTS \(language.rawValue) language pack from HuggingFace (\(subdir))..."
+                )
+                try await DownloadUtils.downloadSubdirectory(
+                    .pocketTts,
+                    subdirectory: subdir,
+                    to: repoDir,
+                    progressHandler: progressHandler
+                )
+            } else {
+                logger.info("Downloading PocketTTS English models from HuggingFace...")
+                try await DownloadUtils.downloadRepo(
+                    .pocketTts, to: modelsDirectory, progressHandler: progressHandler)
+            }
         } else {
             logger.info(
                 "PocketTTS \(language.rawValue) models found in cache")
@@ -125,13 +139,29 @@ public enum PocketTtsResourceDownloader {
         }
         let constantsDir = languageRoot.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
         let safetensorsFile = "\(sanitized).safetensors"
+        let binFile = "\(sanitized)_audio_prompt.bin"
         let safetensorsURL = constantsDir.appendingPathComponent(safetensorsFile)
+        let binURL = constantsDir.appendingPathComponent(binFile)
 
-        if !FileManager.default.fileExists(atPath: safetensorsURL.path) {
-            let remotePath = "\(language.repoSubdirectory)/constants_bin/\(safetensorsFile)"
+        let safetensorsExists = FileManager.default.fileExists(atPath: safetensorsURL.path)
+        let binExists = FileManager.default.fileExists(atPath: binURL.path)
+
+        if !safetensorsExists && !binExists {
+            // For non-English (v2) packs, voices ship as `.safetensors`. For
+            // legacy English (root pack), they ship as flat `.bin`. Pick the
+            // expected format based on language and download just that file.
+            let remotePrefix: String
+            if let subdir = language.repoSubdirectory {
+                remotePrefix = "\(subdir)/"
+            } else {
+                remotePrefix = ""
+            }
+            let preferredFile = (language == .english) ? binFile : safetensorsFile
+            let preferredLocalURL = (language == .english) ? binURL : safetensorsURL
+            let remotePath = "\(remotePrefix)constants_bin/\(preferredFile)"
             let remoteURL = try ModelRegistry.resolveModel(Repo.pocketTts.remotePath, remotePath)
             logger.info(
-                "Downloading voice '\(sanitized)' for \(language.rawValue) from HuggingFace (\(safetensorsFile))..."
+                "Downloading voice '\(sanitized)' for \(language.rawValue) from HuggingFace (\(preferredFile))..."
             )
             let data = try await AssetDownloader.fetchData(
                 from: remoteURL,
@@ -142,7 +172,7 @@ public enum PocketTtsResourceDownloader {
             // language pack that hasn't materialized constants_bin/ yet.
             try FileManager.default.createDirectory(
                 at: constantsDir, withIntermediateDirectories: true)
-            try data.write(to: safetensorsURL, options: [.atomic])
+            try data.write(to: preferredLocalURL, options: [.atomic])
             logger.info("Downloaded voice '\(sanitized)' (\(data.count / 1024) KB)")
         }
 

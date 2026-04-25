@@ -93,9 +93,9 @@ struct PocketTtsMimiKeys: Sendable {
         //    - Pass-through: output name equals input name (e.g. `conv0_first`,
         //      `res*_conv1_prev` zero-shape carry-throughs).
         //    - Semantic-named: outputs containing `end_offset` are reserved
-        //      for inputs containing `end_offset` so they can't be confused
-        //      with similarly-shaped `var_NNN` offset outputs sharing
-        //      shape `[1]`.
+        //      for inputs containing `end_offset` (legacy English mimi has
+        //      `new_end_offset` / `new_end_offset_1` outputs that share shape
+        //      `[1]` with `var_NNN` offset outputs).
         //    - Otherwise: match by shape, then disambiguate within a shape
         //      bucket by sorting outputs by trailing `var_NNN` and inputs
         //      in canonical order.

@@ -54,10 +54,9 @@ public enum PocketTtsConstants {
 /// Supported PocketTTS language packs (matches upstream
 /// `kyutai/pocket-tts/languages/<id>/` folder names exactly).
 ///
-/// File layout on `FluidInference/pocket-tts-coreml`: every language ships
-/// under `v2/<id>/` with the four `.mlmodelc` packages plus
-/// `constants_bin/`. The `mimi_encoder.mlmodelc` (voice cloning) lives at
-/// the repo root and is shared across all languages.
+/// File layout on `FluidInference/pocket-tts-coreml`:
+/// - `english`: legacy root layout (`mimi_decoder_v2.mlmodelc` etc.)
+/// - other languages: `v2/<id>/` subtree with `mimi_decoder.mlmodelc`
 public enum PocketTtsLanguage: String, Sendable, CaseIterable {
     case english
     case french24L = "french_24l"
@@ -80,9 +79,10 @@ public enum PocketTtsLanguage: String, Sendable, CaseIterable {
         }
     }
 
-    /// HF subdirectory under the pocket-tts-coreml repo root
-    /// (`v2/<rawValue>` for every language).
-    public var repoSubdirectory: String {
-        "v2/\(rawValue)"
+    /// HF subdirectory under the pocket-tts-coreml repo root.
+    /// English returns `nil` to preserve the legacy root-level layout
+    /// (avoids forcing existing caches to re-download).
+    public var repoSubdirectory: String? {
+        self == .english ? nil : "v2/\(rawValue)"
     }
 }
