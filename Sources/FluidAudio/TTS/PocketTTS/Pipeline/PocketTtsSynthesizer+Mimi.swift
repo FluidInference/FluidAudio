@@ -15,57 +15,55 @@ extension PocketTtsSynthesizer {
 
     /// Create the initial Mimi decoder state from the constants directory.
     ///
-    /// Loads pre-computed initial state tensors from `.bin` files,
-    /// using `manifest.json` for shape metadata.
-    static func loadMimiInitialState(from repoDirectory: URL) throws -> MimiState {
+    /// Tensor shapes come from the loaded model's input descriptions, not a
+    /// manifest, so legacy English (`attn*_cache: [2,1,8,256,64]`) and v2
+    /// multi-language packs (`attn*_cache: [2,1,256,8,64]`, no
+    /// `attn*_end_offset` inputs) both load through one path. `.bin` files
+    /// must be Float32 with element count matching the model's declared
+    /// shape; missing files mean a zero-initialized tensor.
+    static func loadMimiInitialState(
+        from repoDirectory: URL,
+        mimiKeys: PocketTtsMimiKeys
+    ) throws -> MimiState {
         let constantsDir = repoDirectory.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
         let stateDir = constantsDir.appendingPathComponent("mimi_init_state")
-        let manifestURL = constantsDir.appendingPathComponent("manifest.json")
-
-        // Parse manifest for mimi_init_state shapes
-        let manifestData = try Data(contentsOf: manifestURL)
-        guard let manifest = try JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
-            let mimiManifest = manifest["mimi_init_state"] as? [String: Any]
-        else {
-            throw PocketTTSError.processingFailed("Failed to parse mimi_init_state from manifest.json")
-        }
 
         var tensors: [String: MLMultiArray] = [:]
 
-        for (name, info) in mimiManifest {
-            guard let infoDict = info as? [String: Any],
-                let shapeArray = infoDict["shape"] as? [Int],
-                let byteCount = infoDict["bytes"] as? Int
-            else {
+        for (name, shapeInts) in mimiKeys.stateShapes {
+            let shape = shapeInts.map { NSNumber(value: $0) }
+            let array = try MLMultiArray(shape: shape, dataType: .float32)
+
+            // Zero-length tensors (e.g. `res*_conv1_prev: [1, 128, 0]`) are
+            // empty pass-throughs — nothing to load.
+            if shapeInts.contains(0) {
+                tensors[name] = array
                 continue
             }
 
-            let shape = shapeArray.map { NSNumber(value: $0) }
-            let array = try MLMultiArray(shape: shape, dataType: .float32)
+            let elementCount = shapeInts.reduce(1, *)
+            let dstPtr = array.dataPointer.bindMemory(to: Float.self, capacity: elementCount)
+            // Default to zero in case the .bin file is absent (offset scalars,
+            // attention caches in zero-init packs, etc.).
+            dstPtr.initialize(repeating: 0, count: elementCount)
 
-            // Some tensors (e.g., res{0,1,2}_conv1_prev) have zero-length shapes
-            // and are empty pass-throughs — skip loading binary data for those.
-            if byteCount > 0 && !shapeArray.contains(0) {
-                let binURL = stateDir.appendingPathComponent("\(name).bin")
+            let binURL = stateDir.appendingPathComponent("\(name).bin")
+            if FileManager.default.fileExists(atPath: binURL.path) {
                 let data = try Data(contentsOf: binURL)
-                let floatCount = byteCount / MemoryLayout<Float>.size
-                let dstPtr = array.dataPointer.bindMemory(to: Float.self, capacity: floatCount)
-                data.withUnsafeBytes { rawBuffer in
-                    let srcPtr = rawBuffer.bindMemory(to: Float.self)
-                    dstPtr.update(from: srcPtr.baseAddress!, count: floatCount)
+                let expectedBytes = elementCount * MemoryLayout<Float>.size
+                if data.count == expectedBytes {
+                    data.withUnsafeBytes { rawBuffer in
+                        let srcPtr = rawBuffer.bindMemory(to: Float.self)
+                        dstPtr.update(from: srcPtr.baseAddress!, count: elementCount)
+                    }
                 }
+                // Mismatched bin sizes (e.g. English-packed `attn*_cache.bin`
+                // for a v2 model with the same byte count but different shape)
+                // fall back to zero-init, which is the correct empty-cache
+                // initial value anyway.
             }
 
             tensors[name] = array
-        }
-
-        // Ensure offset scalars exist
-        for key in ["attn0_offset", "attn0_end_offset", "attn1_offset", "attn1_end_offset"] {
-            if tensors[key] == nil {
-                let scalar = try MLMultiArray(shape: [1], dataType: .float32)
-                scalar[0] = NSNumber(value: Float(0))
-                tensors[key] = scalar
-            }
         }
 
         return MimiState(tensors: tensors)
@@ -104,7 +102,8 @@ extension PocketTtsSynthesizer {
     static func runMimiDecoder(
         latent: [Float],
         state: inout MimiState,
-        model: MLModel
+        model: MLModel,
+        mimiKeys: PocketTtsMimiKeys
     ) async throws -> [Float] {
         // Create latent input: [1, 32]
         let latentDim = PocketTtsConstants.latentDim
@@ -116,17 +115,23 @@ extension PocketTtsSynthesizer {
             latentPtr.update(from: base, count: latentDim)
         }
 
-        // Build input dictionary
+        // Build input dictionary — only include keys the model actually accepts
+        // so that legacy-English-only tensors (e.g. `attn*_end_offset`) don't
+        // surface to v2 packs that omit those inputs.
         var inputDict: [String: Any] = ["latent": latentArray]
-        for (key, array) in state.tensors {
-            inputDict[key] = array
+        for (inputName, _) in mimiKeys.stateMapping {
+            guard let array = state.tensors[inputName] else {
+                throw PocketTTSError.processingFailed(
+                    "Mimi state missing tensor '\(inputName)'")
+            }
+            inputDict[inputName] = array
         }
 
         let input = try MLDictionaryFeatureProvider(dictionary: inputDict)
         let output = try await model.compatPrediction(from: input, options: MLPredictionOptions())
 
         // Extract audio output [1, 1, 1920]
-        guard let audioArray = output.featureValue(for: MimiKeys.audioOutput)?.multiArrayValue else {
+        guard let audioArray = output.featureValue(for: mimiKeys.audioOutput)?.multiArrayValue else {
             throw PocketTTSError.processingFailed("Missing Mimi audio output")
         }
 
@@ -134,7 +139,7 @@ extension PocketTtsSynthesizer {
         let samples = readFloatArray(from: audioArray, count: sampleCount)
 
         // Update streaming state
-        for (inputName, outputName) in mimiStateMapping {
+        for (inputName, outputName) in mimiKeys.stateMapping {
             guard let updated = output.featureValue(for: outputName)?.multiArrayValue else {
                 throw PocketTTSError.processingFailed(
                     "Missing Mimi state output: \(outputName) (for \(inputName))")

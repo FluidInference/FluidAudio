@@ -181,22 +181,109 @@ extension PocketTtsSynthesizer {
         return state
     }
 
+    /// Build a `KVCacheState` from a pre-baked v2 voice snapshot.
+    ///
+    /// Each layer's source cache `[2, 1, seqLen, 16, 64]` is copied into the
+    /// first `seqLen` positions of a fresh `[2, 1, kvCacheMaxLen, 16, 64]`
+    /// allocation. The K block (outer dim 0) and V block (outer dim 1) are
+    /// copied independently because the dest seq capacity is larger than
+    /// the source — they don't lie at adjacent offsets in the dest.
+    /// `position{i}` is initialized from the snapshot's per-layer offset
+    /// (typically equal to `seqLen`).
+    static func kvCacheStateFromSnapshot(
+        _ snapshot: PocketTtsVoiceCacheSnapshot,
+        layers: Int
+    ) throws -> KVCacheState {
+        guard snapshot.layers.count == layers else {
+            throw PocketTTSError.processingFailed(
+                "voice snapshot layer count \(snapshot.layers.count) != model layer count \(layers)"
+            )
+        }
+        let destSeq = PocketTtsConstants.kvCacheMaxLen
+        let srcSeq = snapshot.cacheSeqLen
+        guard srcSeq <= destSeq else {
+            throw PocketTTSError.processingFailed(
+                "voice snapshot seqLen \(srcSeq) exceeds model capacity \(destSeq)"
+            )
+        }
+
+        // For shape [2, 1, seq, 16, 64] row-major:
+        //   K block size = 1 * seq * 16 * 64 floats
+        //   V block size = same
+        let perKVFloats = 1 * srcSeq * 16 * 64
+        let destPerKVFloats = 1 * destSeq * 16 * 64
+        let copyBytes = perKVFloats * MemoryLayout<Float>.size
+
+        let shape: [NSNumber] = [
+            2, 1, NSNumber(value: destSeq), 16, 64,
+        ]
+
+        var caches: [MLMultiArray] = []
+        var positions: [MLMultiArray] = []
+        caches.reserveCapacity(layers)
+        positions.reserveCapacity(layers)
+
+        for layerIdx in 0..<layers {
+            let source = snapshot.layers[layerIdx]
+            // Source flat array MUST equal 2 * perKVFloats elements.
+            guard source.cache.count == 2 * perKVFloats else {
+                throw PocketTTSError.processingFailed(
+                    "voice snapshot layer \(layerIdx) has \(source.cache.count) floats, expected \(2 * perKVFloats)"
+                )
+            }
+
+            let cache = try MLMultiArray(shape: shape, dataType: .float32)
+            let cachePtr = cache.dataPointer.bindMemory(to: Float.self, capacity: cache.count)
+            cachePtr.initialize(repeating: 0, count: cache.count)
+
+            // Copy K (source[0..perKVFloats) → dest[0..perKVFloats))
+            // Copy V (source[perKVFloats..2*perKVFloats) → dest[destPerKVFloats..destPerKVFloats+perKVFloats))
+            source.cache.withUnsafeBufferPointer { src in
+                guard let srcBase = src.baseAddress else { return }
+                memcpy(cachePtr, srcBase, copyBytes)
+                memcpy(
+                    cachePtr.advanced(by: destPerKVFloats),
+                    srcBase.advanced(by: perKVFloats),
+                    copyBytes)
+            }
+            caches.append(cache)
+
+            let pos = try MLMultiArray(shape: [1], dataType: .float32)
+            pos[0] = NSNumber(value: Float(source.offset))
+            positions.append(pos)
+        }
+
+        return KVCacheState(caches: caches, positions: positions)
+    }
+
     /// Prefill the KV cache with voice and text conditioning tokens.
     ///
     /// Processes voice tokens first, then text tokens. This ordering is critical —
     /// the model was trained with voice conditioning before text, so reversing it
     /// produces garbage. Each chunk gets a fresh cache because the 512-position
     /// limit can't hold multiple chunks' worth of context.
+    ///
+    /// Two voice paths:
+    ///  - **Snapshot** (v2 packs): drop pre-baked K/V into cache, skip
+    ///    `cond_step` voice prefill entirely.
+    ///  - **Flat audio prompt** (legacy English): feed every voice token
+    ///    through `cond_step`.
+    /// Text prefill runs identically in both cases.
     static func prefillKVCache(
         voiceData: PocketTtsVoiceData,
         textEmbeddings: [[Float]],
         model: MLModel,
         layerKeys: PocketTtsLayerKeys
     ) async throws -> KVCacheState {
-        let emptyState = try emptyKVCacheState(layers: layerKeys.layerCount)
-        var state = try await prefillKVCacheVoice(
-            state: emptyState, voiceData: voiceData, model: model, layerKeys: layerKeys
-        )
+        var state: KVCacheState
+        if let snapshot = voiceData.cacheSnapshot {
+            state = try kvCacheStateFromSnapshot(snapshot, layers: layerKeys.layerCount)
+        } else {
+            let emptyState = try emptyKVCacheState(layers: layerKeys.layerCount)
+            state = try await prefillKVCacheVoice(
+                state: emptyState, voiceData: voiceData, model: model, layerKeys: layerKeys
+            )
+        }
         state = try await prefillKVCacheText(
             state: state, textEmbeddings: textEmbeddings, model: model, layerKeys: layerKeys
         )

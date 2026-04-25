@@ -137,20 +137,31 @@ public enum PocketTtsResourceDownloader {
             throw PocketTTSError.processingFailed("Invalid voice name: \(voice)")
         }
         let constantsDir = languageRoot.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
-        let voiceFile = "\(sanitized)_audio_prompt.bin"
-        let voiceURL = constantsDir.appendingPathComponent(voiceFile)
+        let safetensorsFile = "\(sanitized).safetensors"
+        let binFile = "\(sanitized)_audio_prompt.bin"
+        let safetensorsURL = constantsDir.appendingPathComponent(safetensorsFile)
+        let binURL = constantsDir.appendingPathComponent(binFile)
 
-        if !FileManager.default.fileExists(atPath: voiceURL.path) {
-            logger.info(
-                "Downloading voice '\(sanitized)' for \(language.rawValue) from HuggingFace...")
+        let safetensorsExists = FileManager.default.fileExists(atPath: safetensorsURL.path)
+        let binExists = FileManager.default.fileExists(atPath: binURL.path)
+
+        if !safetensorsExists && !binExists {
+            // For non-English (v2) packs, voices ship as `.safetensors`. For
+            // legacy English (root pack), they ship as flat `.bin`. Pick the
+            // expected format based on language and download just that file.
             let remotePrefix: String
             if let subdir = language.repoSubdirectory {
                 remotePrefix = "\(subdir)/"
             } else {
                 remotePrefix = ""
             }
-            let remotePath = "\(remotePrefix)constants_bin/\(voiceFile)"
+            let preferredFile = (language == .english) ? binFile : safetensorsFile
+            let preferredLocalURL = (language == .english) ? binURL : safetensorsURL
+            let remotePath = "\(remotePrefix)constants_bin/\(preferredFile)"
             let remoteURL = try ModelRegistry.resolveModel(Repo.pocketTts.remotePath, remotePath)
+            logger.info(
+                "Downloading voice '\(sanitized)' for \(language.rawValue) from HuggingFace (\(preferredFile))..."
+            )
             let data = try await AssetDownloader.fetchData(
                 from: remoteURL,
                 description: "\(sanitized) voice prompt (\(language.rawValue))",
@@ -160,7 +171,7 @@ public enum PocketTtsResourceDownloader {
             // language pack that hasn't materialized constants_bin/ yet.
             try FileManager.default.createDirectory(
                 at: constantsDir, withIntermediateDirectories: true)
-            try data.write(to: voiceURL, options: [.atomic])
+            try data.write(to: preferredLocalURL, options: [.atomic])
             logger.info("Downloaded voice '\(sanitized)' (\(data.count / 1024) KB)")
         }
 

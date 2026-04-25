@@ -24,6 +24,7 @@ public actor PocketTtsModelStore {
     private var languageRootDirectory: URL?
     private var condLayerKeys: PocketTtsLayerKeys?
     private var flowlmLayerKeys: PocketTtsLayerKeys?
+    private var mimiDecoderKeysCache: PocketTtsMimiKeys?
     private let directory: URL?
     public let language: PocketTtsLanguage
 
@@ -97,6 +98,12 @@ public actor PocketTtsModelStore {
             modelName: "flowlm_step"
         )
 
+        // Discover Mimi decoder schema. Legacy English and v2 packs differ in
+        // attention cache layout, presence of `attn*_end_offset` inputs, and
+        // auto-generated `var_NNN` output names. Discovery makes both work
+        // through one runtime path.
+        mimiDecoderKeysCache = try PocketTtsMimiKeys.discover(from: loadedModels[3])
+
         let elapsed = Date().timeIntervalSince(loadStart)
         logger.info("All PocketTTS models loaded in \(String(format: "%.2f", elapsed))s")
 
@@ -158,6 +165,15 @@ public actor PocketTtsModelStore {
     func flowLMStepLayerKeys() throws -> PocketTtsLayerKeys {
         guard let keys = flowlmLayerKeys else {
             throw PocketTTSError.modelNotFound("PocketTTS flowlm_step layer keys not discovered")
+        }
+        return keys
+    }
+
+    /// Discovered I/O schema for the Mimi audio decoder model (state mapping,
+    /// audio output name, declared state shapes).
+    func mimiDecoderKeys() throws -> PocketTtsMimiKeys {
+        guard let keys = mimiDecoderKeysCache else {
+            throw PocketTTSError.modelNotFound("PocketTTS mimi_decoder keys not discovered")
         }
         return keys
     }

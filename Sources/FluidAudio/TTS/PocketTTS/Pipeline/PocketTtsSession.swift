@@ -60,6 +60,7 @@ public actor PocketTtsSession {
     private let mimiModel: MLModel
     private let condLayerKeys: PocketTtsLayerKeys
     private let flowlmLayerKeys: PocketTtsLayerKeys
+    private let mimiKeys: PocketTtsMimiKeys
 
     // Persistent state
     private let voiceKVSnapshot: PocketTtsSynthesizer.KVCacheState
@@ -84,6 +85,7 @@ public actor PocketTtsSession {
         mimiModel: MLModel,
         condLayerKeys: PocketTtsLayerKeys,
         flowlmLayerKeys: PocketTtsLayerKeys,
+        mimiKeys: PocketTtsMimiKeys,
         bosEmb: MLMultiArray,
         temperature: Float,
         seed: UInt64
@@ -97,6 +99,7 @@ public actor PocketTtsSession {
         self.mimiModel = mimiModel
         self.condLayerKeys = condLayerKeys
         self.flowlmLayerKeys = flowlmLayerKeys
+        self.mimiKeys = mimiKeys
         self.bosEmb = bosEmb
         self.temperature = temperature
         self.rng = SeededRNG(seed: seed)
@@ -227,7 +230,8 @@ public actor PocketTtsSession {
             let frameSamples = try await PocketTtsSynthesizer.runMimiDecoder(
                 latent: latent,
                 state: &localMimi,
-                model: mimiModel
+                model: mimiModel,
+                mimiKeys: mimiKeys
             )
             mimiState = localMimi
 
