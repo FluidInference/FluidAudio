@@ -50,7 +50,8 @@ public enum PocketTtsResourceDownloader {
                 try await DownloadUtils.downloadSubdirectory(
                     .pocketTts,
                     subdirectory: subdir,
-                    to: repoDir
+                    to: repoDir,
+                    progressHandler: progressHandler
                 )
             } else {
                 logger.info("Downloading PocketTTS English models from HuggingFace...")

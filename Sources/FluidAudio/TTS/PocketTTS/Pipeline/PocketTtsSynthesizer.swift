@@ -534,12 +534,23 @@ public struct PocketTtsSynthesizer {
         let bosEmb = try createBosEmbedding(constants.bosEmbedding)
         let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
 
-        // One-time voice prefill
-        let emptyState = try emptyKVCacheState(layers: condLayerKeys.layerCount)
-        let voiceKVSnapshot = try await prefillKVCacheVoice(
-            state: emptyState, voiceData: voiceData, model: condModel,
-            layerKeys: condLayerKeys
-        )
+        // One-time voice prefill. Two paths matching `prefillKVCache`:
+        //  - v2 packs (cacheSnapshot != nil): drop pre-baked K/V into cache,
+        //    skip cond_step entirely (`promptLength == 0`, so the loop in
+        //    `prefillKVCacheVoice` would be a no-op anyway).
+        //  - Flat audio prompt (legacy English): feed every voice token
+        //    through cond_step.
+        let voiceKVSnapshot: KVCacheState
+        if let snapshot = voiceData.cacheSnapshot {
+            voiceKVSnapshot = try kvCacheStateFromSnapshot(
+                snapshot, layers: condLayerKeys.layerCount)
+        } else {
+            let emptyState = try emptyKVCacheState(layers: condLayerKeys.layerCount)
+            voiceKVSnapshot = try await prefillKVCacheVoice(
+                state: emptyState, voiceData: voiceData, model: condModel,
+                layerKeys: condLayerKeys
+            )
+        }
 
         logger.info(
             "Session voice prefill at position \(Int(voiceKVSnapshot.positions[0][0].floatValue))"
@@ -1039,11 +1050,16 @@ public struct PocketTtsSynthesizer {
     // MARK: - Embedding
 
     /// Look up text token embeddings from the embedding table.
+    ///
+    /// Vocab size is derived from the actual loaded table because v2 language
+    /// packs ship per-language `text_embed_table` with potentially different
+    /// row counts (`PocketTtsConstants.vocabSize` only matches the legacy
+    /// English pack).
     static func embedTokens(
         _ tokenIds: [Int], constants: PocketTtsConstantsBundle
     ) -> [[Float]] {
         let dim = PocketTtsConstants.embeddingDim
-        let vocabSize = PocketTtsConstants.vocabSize
+        let vocabSize = constants.textEmbedTable.count / dim
         return tokenIds.map { id in
             guard id >= 0, id < vocabSize else {
                 logger.warning("Token ID \(id) out of range [0, \(vocabSize)), clamping")
