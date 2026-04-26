@@ -8,6 +8,7 @@ import Foundation
 /// Subcommands:
 ///   - `download`             Fetch models + constants + tokenizer data from HuggingFace.
 ///   - `text`                 Synthesize text → WAV.
+///   - `bench`                Multi-shot in-process synthesis benchmark.
 public enum MagpieCommand {
 
     private static let logger = AppLogger(category: "MagpieCommand")
@@ -23,6 +24,8 @@ public enum MagpieCommand {
             await runDownload(arguments: rest)
         case "text":
             await runText(arguments: rest)
+        case "bench":
+            await runBench(arguments: rest)
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -189,6 +192,189 @@ public enum MagpieCommand {
         }
     }
 
+    // MARK: - bench
+
+    /// Multi-shot in-process synthesis bench. Loads the manager once, then runs
+    /// `--runs N` synthesize() calls back-to-back on the same actor and reports
+    /// per-run + median + min/max RTFx and per-stage statistics. This bypasses
+    /// the launch-to-launch Metal scheduler variance you get from invoking
+    /// `magpie text` in a loop from the shell.
+    private static func runBench(arguments: [String]) async {
+        var text =
+            "Hello world. This is a test of the Magpie text to speech system, "
+            + "running on Apple Silicon with the Swift port."
+        var speakerIdx = MagpieSpeaker.john.rawValue
+        var languageCode = "en"
+        var runs = 5
+        var warmup = 1
+        var seed: UInt64? = 42
+
+        var i = 0
+        while i < arguments.count {
+            let arg = arguments[i]
+            switch arg {
+            case "--text":
+                if i + 1 < arguments.count {
+                    text = arguments[i + 1]
+                    i += 1
+                }
+            case "--runs":
+                if i + 1 < arguments.count, let v = Int(arguments[i + 1]), v > 0 {
+                    runs = v
+                    i += 1
+                }
+            case "--warmup":
+                if i + 1 < arguments.count, let v = Int(arguments[i + 1]), v >= 0 {
+                    warmup = v
+                    i += 1
+                }
+            case "--speaker":
+                if i + 1 < arguments.count, let v = Int(arguments[i + 1]) {
+                    speakerIdx = v
+                    i += 1
+                }
+            case "--language", "-L":
+                if i + 1 < arguments.count {
+                    languageCode = arguments[i + 1]
+                    i += 1
+                }
+            case "--seed":
+                if i + 1 < arguments.count, let v = UInt64(arguments[i + 1]) {
+                    seed = v
+                    i += 1
+                }
+            case "--no-seed":
+                seed = nil
+            default:
+                break
+            }
+            i += 1
+        }
+
+        guard let speaker = MagpieSpeaker(rawValue: speakerIdx) else {
+            logger.error("Invalid speaker index \(speakerIdx)")
+            exit(1)
+        }
+        guard let language = MagpieLanguage(rawValue: languageCode) else {
+            logger.error("Invalid language code '\(languageCode)'")
+            exit(1)
+        }
+
+        do {
+            let loadStart = Date()
+            let manager = try await MagpieTtsManager.downloadAndCreate(languages: [language])
+            let loadElapsed = Date().timeIntervalSince(loadStart)
+
+            let opts = MagpieSynthesisOptions(
+                seed: seed,
+                peakNormalize: true,
+                allowIpaOverride: true)
+
+            var header = [
+                "Magpie bench",
+                "  Text: \"\(text)\" (\(text.count) chars)",
+                "  Speaker: \(speaker.displayName), Language: \(language.rawValue)",
+                "  Seed: \(seed.map { String($0) } ?? "random")",
+                "  Manager load: \(String(format: "%.2f", loadElapsed))s",
+                "  Warmup runs: \(warmup), Measured runs: \(runs)",
+            ]
+            if warmup > 0 { header.append("") }
+            FileHandle.standardError.write(Data((header.joined(separator: "\n") + "\n").utf8))
+
+            for w in 0..<warmup {
+                let r = try await manager.synthesize(
+                    text: text, speaker: speaker, language: language, options: opts)
+                let line =
+                    "  [warmup \(w + 1)/\(warmup)] codes=\(r.codeCount) "
+                    + "decoder=\(String(format: "%.2f", r.timings.decoderStepSeconds))s "
+                    + "nano=\(String(format: "%.2f", r.timings.nanocodecSeconds))s"
+                FileHandle.standardError.write(Data((line + "\n").utf8))
+            }
+
+            // Measured runs.
+            var rtfxs: [Double] = []
+            var totals: [Double] = []
+            var encoders: [Double] = []
+            var prefills: [Double] = []
+            var arLoops: [Double] = []
+            var decoders: [Double] = []
+            var samplers: [Double] = []
+            var nanocodecs: [Double] = []
+            var perStepDecoderMs: [Double] = []
+            var codeCounts: [Int] = []
+
+            FileHandle.standardError.write(Data("\n  per-run results:\n".utf8))
+            for run in 0..<runs {
+                let start = Date()
+                let r = try await manager.synthesize(
+                    text: text, speaker: speaker, language: language, options: opts)
+                let elapsed = Date().timeIntervalSince(start)
+                let audio = r.durationSeconds
+                let rtfx = elapsed > 0 ? audio / elapsed : 0
+                let steps = max(r.codeCount, 1)
+                let perStepMs = r.timings.decoderStepSeconds * 1000.0 / Double(steps)
+
+                rtfxs.append(rtfx)
+                totals.append(elapsed)
+                encoders.append(r.timings.textEncoderSeconds)
+                prefills.append(r.timings.prefillSeconds)
+                arLoops.append(r.timings.arLoopSeconds)
+                decoders.append(r.timings.decoderStepSeconds)
+                samplers.append(r.timings.samplerSeconds)
+                nanocodecs.append(r.timings.nanocodecSeconds)
+                perStepDecoderMs.append(perStepMs)
+                codeCounts.append(r.codeCount)
+
+                let line =
+                    "    [\(run + 1)/\(runs)] "
+                    + "RTFx=\(String(format: "%.2f", rtfx))x "
+                    + "synth=\(String(format: "%.2f", elapsed))s "
+                    + "audio=\(String(format: "%.2f", audio))s "
+                    + "codes=\(r.codeCount) "
+                    + "decoder=\(String(format: "%.2f", r.timings.decoderStepSeconds))s "
+                    + "(\(String(format: "%.1f", perStepMs))ms/step) "
+                    + "nano=\(String(format: "%.2f", r.timings.nanocodecSeconds))s"
+                FileHandle.standardError.write(Data((line + "\n").utf8))
+            }
+
+            // Summary stats.
+            func stats(_ xs: [Double]) -> (median: Double, min: Double, max: Double, mean: Double) {
+                let s = xs.sorted()
+                let median = s.isEmpty ? 0 : s[s.count / 2]
+                let mean = xs.isEmpty ? 0 : xs.reduce(0, +) / Double(xs.count)
+                return (median, s.first ?? 0, s.last ?? 0, mean)
+            }
+            let rs = stats(rtfxs)
+            let ts = stats(totals)
+            let ds = stats(decoders)
+            let ns = stats(nanocodecs)
+            let ps = stats(perStepDecoderMs)
+
+            let summary = [
+                "",
+                "  summary (n=\(runs)):",
+                "    RTFx          median=\(String(format: "%.2f", rs.median))x  "
+                    + "min=\(String(format: "%.2f", rs.min))x  "
+                    + "max=\(String(format: "%.2f", rs.max))x  "
+                    + "mean=\(String(format: "%.2f", rs.mean))x",
+                "    synth         median=\(String(format: "%.2f", ts.median))s  "
+                    + "min=\(String(format: "%.2f", ts.min))s  "
+                    + "max=\(String(format: "%.2f", ts.max))s",
+                "    decoder_step  median=\(String(format: "%.2f", ds.median))s  "
+                    + "min=\(String(format: "%.2f", ds.min))s  "
+                    + "max=\(String(format: "%.2f", ds.max))s  "
+                    + "(\(String(format: "%.1f", ps.median))ms/step median)",
+                "    nanocodec     median=\(String(format: "%.2f", ns.median))s  "
+                    + "min=\(String(format: "%.2f", ns.min))s  "
+                    + "max=\(String(format: "%.2f", ns.max))s",
+            ]
+            FileHandle.standardError.write(Data((summary.joined(separator: "\n") + "\n").utf8))
+        } catch {
+            logger.error("Magpie bench failed: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+
     // MARK: - usage
 
     private static func printUsage() {
@@ -209,6 +395,15 @@ public enum MagpieCommand {
                 --temperature FLOAT     Sampling temperature (default: 0.6)
                 --seed N                Deterministic RNG seed
                 --no-ipa-override       Disable `|…|` IPA pass-through
+
+              bench                   In-process multi-shot synthesis benchmark
+                --runs N                Measured runs (default: 5)
+                --warmup N              Unmeasured warmup runs (default: 1)
+                --text "<text>"         Override the bench text
+                --speaker N             Speaker index (default: 0)
+                --language CODE         Language (default: en)
+                --seed N                Deterministic seed (default: 42)
+                --no-seed               Use a random seed each run
 
             IPA override example:
               fluidaudio magpie text "Hello | ˈ n ɛ m o ʊ | Text." --output demo.wav
