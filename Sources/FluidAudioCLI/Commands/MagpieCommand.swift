@@ -212,7 +212,6 @@ public enum MagpieCommand {
         var cfg: Float = MagpieConstants.defaultCfgScale
         var temperature: Float = MagpieConstants.defaultTemperature
         var topK = MagpieConstants.defaultTopK
-        var useDouble = false
         var i = 0
         while i < arguments.count {
             let arg = arguments[i]
@@ -257,8 +256,6 @@ public enum MagpieCommand {
                     topK = v
                     i += 1
                 }
-            case "--double-precision":
-                useDouble = true
             default:
                 break
             }
@@ -311,8 +308,7 @@ public enum MagpieCommand {
                 cfgScale: cfg,
                 seed: seed,
                 peakNormalize: true,
-                allowIpaOverride: true,
-                useDoublePrecision: useDouble)
+                allowIpaOverride: true)
 
             // Stage 1 — token ids parity (mobius emits `textTokens`, padded version
             // available as `textTokensPadded`).
@@ -325,7 +321,7 @@ public enum MagpieCommand {
             }
 
             // Stage 2 — synthesize and compare audio.
-            logger.info("Running synthesis (useDouble=\(useDouble))…")
+            logger.info("Running synthesis…")
             let start = Date()
             let result = try await manager.synthesize(
                 text: text, speaker: speaker, language: language, options: opts)
@@ -523,7 +519,6 @@ public enum MagpieCommand {
                 For .npz, supply synthesis params:
                   --text "..." --speaker N --language CODE --seed N
                   --cfg X --temperature X --topk N
-                --double-precision      Use fp64 LocalTransformer for full parity
               tokenizer-parity --fixture PATH --language CODE
                                       Verify tokenizer matches a fixture {text, token_ids}
 

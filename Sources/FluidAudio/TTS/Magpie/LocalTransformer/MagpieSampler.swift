@@ -57,12 +57,12 @@ public final class MagpieSamplerRng {
 /// `mobius/models/tts/magpie/coreml/generate_coreml.py` (lines 172–242).
 public struct MagpieLocalSampler: Sendable {
 
-    private let lt: MagpieLtBackend
+    private let lt: MagpieLocalTransformer
     private let audioEmbeddings: [[Float]]
 
     /// - Parameter audioEmbeddings: per-codebook `[numCodesPerCodebook × dModel]` fp32.
     public init(
-        localTransformer: MagpieLtBackend,
+        localTransformer: MagpieLocalTransformer,
         audioEmbeddings: [[Float]]
     ) {
         self.lt = localTransformer

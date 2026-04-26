@@ -49,11 +49,6 @@ public struct MagpieSynthesisOptions: Sendable {
     /// normal language tokenizer / G2P. When `false`, `|` is treated as a literal
     /// character. Always on by default — matches the Magpie model card guidance.
     public var allowIpaOverride: Bool
-    /// When `true`, the LocalTransformer runs in fp64 instead of fp32. Trades
-    /// ~2× LT latency for full numerical parity with the NumPy reference (which
-    /// runs in fp64). The decoder / nanocodec / encoder still run on whatever
-    /// dtype CoreML compiled them to.
-    public var useDoublePrecision: Bool
 
     public init(
         temperature: Float = MagpieConstants.defaultTemperature,
@@ -63,8 +58,7 @@ public struct MagpieSynthesisOptions: Sendable {
         cfgScale: Float = MagpieConstants.defaultCfgScale,
         seed: UInt64? = nil,
         peakNormalize: Bool = true,
-        allowIpaOverride: Bool = true,
-        useDoublePrecision: Bool = false
+        allowIpaOverride: Bool = true
     ) {
         self.temperature = temperature
         self.topK = topK
@@ -74,7 +68,6 @@ public struct MagpieSynthesisOptions: Sendable {
         self.seed = seed
         self.peakNormalize = peakNormalize
         self.allowIpaOverride = allowIpaOverride
-        self.useDoublePrecision = useDoublePrecision
     }
 
     public static let `default` = MagpieSynthesisOptions()

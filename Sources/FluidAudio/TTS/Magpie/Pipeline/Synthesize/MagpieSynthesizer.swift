@@ -147,14 +147,9 @@ public actor MagpieSynthesizer {
                 + "(\(hasPrefill ? "fast batched" : "slow loop"))")
 
         // 4. AR loop.
-        let backend: MagpieLtBackend
-        if options.useDoublePrecision {
-            backend = .fp64(MagpieLocalTransformerDouble(weights: ltWeights))
-        } else {
-            backend = .fp32(MagpieLocalTransformer(weights: ltWeights))
-        }
         let sampler = MagpieLocalSampler(
-            localTransformer: backend, audioEmbeddings: constants.audioEmbeddings)
+            localTransformer: MagpieLocalTransformer(weights: ltWeights),
+            audioEmbeddings: constants.audioEmbeddings)
 
         var currentCodes = Swift.Array<Int32>(repeating: audioBosId, count: numCodebooks)
         var allFrames: [[Int32]] = []

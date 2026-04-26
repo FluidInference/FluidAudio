@@ -1,4 +1,5 @@
 import Compression
+import FluidAudio
 import Foundation
 
 /// Minimal NumPy `.npz` (ZIP-of-`.npy`) loader.
