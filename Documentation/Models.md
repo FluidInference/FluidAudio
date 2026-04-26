@@ -51,6 +51,7 @@ TDT models process audio in chunks (~15s with overlap) as batch operations.
 |-------|-------------|---------|
 | **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Uses CoreML G2P model for phonemization. | First TTS backend added + support custom pronounces |
 | **PocketTTS** | Second TTS backend (~155M params). Autoregressive frame-by-frame generation with dynamic audio chunking. No phoneme stage, works directly on text tokens. | Supports streaming, minimal RAM usage, excellent quality |
+| **Magpie TTS Multilingual** | NVIDIA NeMo Magpie TTS Multilingual 357M, 8 languages (en/es/de/fr/it/vi/zh/hi), 5 built-in speakers. 4-model CoreML pipeline: text_encoder + decoder_prefill + decoder_step + nanocodec_decoder. Custom IPA override via `\|...\|` segments. Local Transformer (8-codebook sampler) implemented in pure Swift via Accelerate + BNNS. | Third TTS backend. Japanese deferred (needs OpenJTalk + MeCab dict). |
 
 ## Evaluated Models (Not Supported)
 
@@ -81,4 +82,5 @@ Models we converted and tested but are not supported: too large for on-device de
 | Sortformer | [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml) |
 | Kokoro TTS | [FluidInference/kokoro-82m-coreml](https://huggingface.co/FluidInference/kokoro-82m-coreml) |
 | PocketTTS | [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml) |
+| Magpie TTS Multilingual | [FluidInference/magpie-tts-multilingual-357m-coreml](https://huggingface.co/FluidInference/magpie-tts-multilingual-357m-coreml) |
 | Nemotron Streaming | [FluidInference/nemotron-speech-streaming-en-0.6b-coreml](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml) |
