@@ -143,10 +143,7 @@ Sources/FluidAudio/TTS/Magpie/
 │   ├── MagpieConstantsStore.swift
 │   └── MagpieLocalTransformerWeights.swift
 ├── LocalTransformer/
-│   ├── MagpieLocalTransformer.swift      # Accelerate (cblas_sgemm) + BNNS (GELU)
-│   ├── MagpieLocalTransformerDouble.swift # fp64 reference for parity
-│   ├── MagpieAttention.swift
-│   ├── MagpieFFN.swift
+│   ├── MagpieLocalTransformer.swift      # 1-layer transformer (attention + FFN) via Accelerate (cblas_sgemm) + BNNS (GELU)
 │   └── MagpieSampler.swift               # top-k + temp + forbidden mask + CFG merge
 ├── Pipeline/
 │   ├── Preprocess/                       # per-language tokenizers + IPA override
@@ -157,11 +154,11 @@ Sources/FluidAudio/TTS/Magpie/
 │       └── MagpieNanocodec.swift
 └── Shared/
     ├── NpyReader.swift                   # .npy v1 (fp32/fp16/int)
-    ├── MagpieNpzReader.swift             # .npz fixture parser for parity
     └── MagpieMT19937.swift               # deterministic RNG matching Python reference
 
 Sources/FluidAudioCLI/Commands/
 ├── MagpieCommand.swift                   # dispatch (download / text / parity / probe / compute-plan)
+├── MagpieNpzReader.swift                 # .npz fixture parser (debug-only, used by parity/probe)
 ├── MagpieProbeCommand.swift              # 3-stage parity probe (encoder / prefill / AR replay)
 └── MagpieComputePlanCommand.swift        # benchmark-based ANE-usage probe
 ```
