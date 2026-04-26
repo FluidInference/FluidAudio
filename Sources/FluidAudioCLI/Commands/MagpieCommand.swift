@@ -29,6 +29,15 @@ public enum MagpieCommand {
             await runParity(arguments: rest)
         case "tokenizer-parity":
             await runTokenizerParity(arguments: rest)
+        case "probe":
+            await MagpieProbeCommand.run(arguments: rest)
+        case "compute-plan":
+            if #available(macOS 14.4, *) {
+                await MagpieComputePlanCommand.run(arguments: rest)
+            } else {
+                logger.error("compute-plan requires macOS 14.4+")
+                exit(1)
+            }
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -178,54 +187,244 @@ public enum MagpieCommand {
         }
     }
 
-    // MARK: - parity (stub)
+    // MARK: - parity
 
+    /// Compare Swift synthesis against a mobius-emitted parity fixture.
+    ///
+    /// Two fixture formats are accepted, matching the two modes of
+    /// `mobius/.../emit_parity_fixture.py`:
+    ///
+    ///   - `.json` — tokenizer-only fixture
+    ///     (delegates to the existing `runTokenizerParity` flow).
+    ///   - `.npz`  — full pipeline fixture with tensors:
+    ///     `textTokens`, `textTokensPadded`, `encoderOutput`, `predictedCodes`,
+    ///     `audioPcm`, plus per-layer prefill caches. Synthesis params (text,
+    ///     speaker, language, seed, …) must be supplied as CLI overrides since
+    ///     the NPZ stores them as numpy unicode scalars that we do not parse.
+    ///
+    /// Reports MAE, max|Δ|, and SNR for each comparable stage.
     private static func runParity(arguments: [String]) async {
-        var fixturePath: String? = nil
+        var fixtureArg: String? = nil
+        var text: String? = nil
+        var speakerIdx = 0
+        var languageCode = "en"
+        var seed: UInt64? = nil
+        var cfg: Float = MagpieConstants.defaultCfgScale
+        var temperature: Float = MagpieConstants.defaultTemperature
+        var topK = MagpieConstants.defaultTopK
+        var useDouble = false
         var i = 0
         while i < arguments.count {
-            if arguments[i] == "--fixture", i + 1 < arguments.count {
-                fixturePath = arguments[i + 1]
-                i += 1
+            let arg = arguments[i]
+            switch arg {
+            case "--fixture":
+                if i + 1 < arguments.count {
+                    fixtureArg = arguments[i + 1]
+                    i += 1
+                }
+            case "--text":
+                if i + 1 < arguments.count {
+                    text = arguments[i + 1]
+                    i += 1
+                }
+            case "--speaker":
+                if i + 1 < arguments.count, let v = Int(arguments[i + 1]) {
+                    speakerIdx = v
+                    i += 1
+                }
+            case "--language", "-L":
+                if i + 1 < arguments.count {
+                    languageCode = arguments[i + 1]
+                    i += 1
+                }
+            case "--seed":
+                if i + 1 < arguments.count, let v = UInt64(arguments[i + 1]) {
+                    seed = v
+                    i += 1
+                }
+            case "--cfg":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    cfg = v
+                    i += 1
+                }
+            case "--temperature":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    temperature = v
+                    i += 1
+                }
+            case "--topk":
+                if i + 1 < arguments.count, let v = Int(arguments[i + 1]) {
+                    topK = v
+                    i += 1
+                }
+            case "--double-precision":
+                useDouble = true
+            default:
+                break
             }
             i += 1
         }
-        guard let fixturePath = fixturePath else {
-            logger.error("--fixture <path> is required for magpie parity")
+        guard let fixtureArg = fixtureArg else {
+            logger.error("--fixture <path.npz|path.json> is required for magpie parity")
             exit(1)
         }
-        let url = URL(fileURLWithPath: fixturePath)
+
+        let url = URL(fileURLWithPath: fixtureArg)
         guard FileManager.default.fileExists(atPath: url.path) else {
             logger.error("Fixture not found at \(url.path)")
             logger.info(
-                "Emit one from mobius using: uv run python generate_coreml.py --emit-fixture <out.json>")
+                "Emit one with: uv run python emit_parity_fixture.py \"<text>\" --speaker N --language <code> --seed N --output <path.npz>"
+            )
+            exit(1)
+        }
+
+        // JSON path — tokenizer-only mode.
+        if fixtureArg.hasSuffix(".json") {
+            await runJsonTokenizerParity(url: url)
+            return
+        }
+
+        // NPZ path — full mode requires CLI synthesis params.
+        guard let text = text, !text.isEmpty else {
+            logger.error("--text \"…\" is required when fixture is .npz")
+            exit(1)
+        }
+        guard let language = MagpieLanguage(rawValue: languageCode) else {
+            logger.error("Invalid language code '\(languageCode)'")
+            exit(1)
+        }
+        guard let speaker = MagpieSpeaker(rawValue: speakerIdx) else {
+            logger.error("Invalid speaker index \(speakerIdx)")
             exit(1)
         }
 
         do {
-            let fixture = try MagpieParityFixture.load(from: url)
-            logger.info(
-                "Loaded fixture: text=\"\(fixture.text)\" speaker=\(fixture.speakerIndex) language=\(fixture.languageCode)"
-            )
+            let npz = try MagpieNpzReader.read(from: url)
+            logger.info("Loaded NPZ keys: \(npz.keys.sorted().joined(separator: ", "))")
 
-            guard let language = MagpieLanguage(rawValue: fixture.languageCode) else {
-                logger.error("Fixture language '\(fixture.languageCode)' not supported in Swift port")
-                exit(1)
+            let manager = try await MagpieTtsManager.downloadAndCreate(languages: [language])
+            let opts = MagpieSynthesisOptions(
+                temperature: temperature,
+                topK: topK,
+                maxSteps: MagpieConstants.maxSteps,
+                minFrames: MagpieConstants.minFrames,
+                cfgScale: cfg,
+                seed: seed,
+                peakNormalize: true,
+                allowIpaOverride: true,
+                useDoublePrecision: useDouble)
+
+            // Stage 1 — token ids parity (mobius emits `textTokens`, padded version
+            // available as `textTokensPadded`).
+            if let arr = npz["textTokens"] {
+                let expected = arr.data.map { Int32($0) }
+                try await runTokenizerStage(
+                    text: text, expected: expected, language: language, options: opts)
+            } else {
+                logger.warning("NPZ missing `textTokens`; skipping tokenizer parity stage")
             }
 
-            // Stage 1 — tokenize and compare token ids.
-            let manager = try await MagpieTtsManager.downloadAndCreate(languages: [language])
-            _ = manager  // parity comparison will grow once mobius emits fixture intermediates.
+            // Stage 2 — synthesize and compare audio.
+            logger.info("Running synthesis (useDouble=\(useDouble))…")
+            let start = Date()
+            let result = try await manager.synthesize(
+                text: text, speaker: speaker, language: language, options: opts)
+            let elapsed = Date().timeIntervalSince(start)
+            let synthLine =
+                "  generated \(result.samples.count) samples (\(String(format: "%.3f", result.durationSeconds))s) in \(String(format: "%.3f", elapsed))s, codes=\(result.codeCount), eos=\(result.finishedOnEos)"
+            logger.warning("\(synthLine)")
+            FileHandle.standardError.write(Data((synthLine + "\n").utf8))
 
-            let expected = fixture.expectedTokenIds
-            logger.info("Fixture contains \(expected.count) expected token ids (parity harness Phase 5 stub)")
-            logger.info(
-                "Full per-stage parity (encoder_output, caches, LT samples, audio) will light up once the mobius exporter emits NPZ intermediates; see plan Phase 5."
-            )
+            if let audio = npz["audioPcm"] {
+                reportAudioParity(actual: result.samples, expected: audio.data)
+            } else {
+                logger.info("Skipping audio parity (no `audioPcm` array in NPZ)")
+            }
         } catch {
             logger.error("Parity harness failed: \(error.localizedDescription)")
             exit(1)
         }
+    }
+
+    private static func runJsonTokenizerParity(url: URL) async {
+        do {
+            let fixture = try MagpieParityFixture.load(from: url)
+            logger.info(
+                "Loaded JSON fixture: text=\"\(fixture.text)\" speaker=\(fixture.speakerIndex) language=\(fixture.languageCode)"
+            )
+            guard let language = MagpieLanguage(rawValue: fixture.languageCode) else {
+                logger.error("Fixture language '\(fixture.languageCode)' not supported")
+                exit(1)
+            }
+            try await runTokenizerStage(
+                text: fixture.text, expected: fixture.expectedTokenIds, language: language,
+                options: MagpieSynthesisOptions())
+        } catch {
+            logger.error("Parity harness failed: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+
+    /// Walk Swift tokenizer + compare token ids against the fixture.
+    private static func runTokenizerStage(
+        text: String, expected: [Int32], language: MagpieLanguage,
+        options: MagpieSynthesisOptions
+    ) async throws {
+        let repoDir = try await MagpieResourceDownloader.ensureAssets(languages: [language])
+        let tokenizerDir = MagpieResourceDownloader.tokenizerDirectory(in: repoDir)
+        let constantsDir = MagpieResourceDownloader.constantsDirectory(in: repoDir)
+        let constants = try MagpieConstantsLoader.load(from: constantsDir)
+        let tok = MagpieTokenizer(tokenizerDir: tokenizerDir, eosId: constants.textEosId)
+        let tokenized = try await tok.tokenize(text, language: language, options: options)
+        let actual = Swift.Array(tokenized.paddedIds.prefix(tokenized.realLength))
+        if actual == expected {
+            logger.info("Tokenizer parity OK (\(actual.count) tokens)")
+        } else {
+            logger.error("Tokenizer parity MISMATCH")
+            logger.error(
+                "  expected (\(expected.count) tokens): \(expected.prefix(32))\(expected.count > 32 ? "…" : "")"
+            )
+            logger.error(
+                "  actual   (\(actual.count) tokens): \(actual.prefix(32))\(actual.count > 32 ? "…" : "")"
+            )
+        }
+    }
+
+    /// Compare two waveforms; print MAE, max|Δ|, and SNR (dB).
+    private static func reportAudioParity(actual: [Float], expected: [Float]) {
+        let n = Swift.min(actual.count, expected.count)
+        if actual.count != expected.count {
+            logger.warning(
+                "Audio length differs: actual=\(actual.count) expected=\(expected.count); comparing first \(n) samples"
+            )
+        }
+        var sumAbs: Double = 0
+        var sumSq: Double = 0
+        var sumRefSq: Double = 0
+        var maxAbs: Float = 0
+        for i in 0..<n {
+            let d = actual[i] - expected[i]
+            let ad = abs(d)
+            sumAbs += Double(ad)
+            sumSq += Double(d) * Double(d)
+            sumRefSq += Double(expected[i]) * Double(expected[i])
+            if ad > maxAbs { maxAbs = ad }
+        }
+        let mae = sumAbs / Double(n)
+        let mse = sumSq / Double(n)
+        let refPower = sumRefSq / Double(n)
+        let snrDb: Double
+        if mse > 0 && refPower > 0 {
+            snrDb = 10 * log10(refPower / mse)
+        } else if mse == 0 {
+            snrDb = .infinity
+        } else {
+            snrDb = -.infinity
+        }
+        let parityLine =
+            "Audio parity: n=\(n) MAE=\(String(format: "%.6e", mae)) max|Δ|=\(String(format: "%.6e", maxAbs)) SNR=\(String(format: "%.2f", snrDb)) dB"
+        logger.warning("\(parityLine)")
+        FileHandle.standardError.write(Data((parityLine + "\n").utf8))
     }
 
     // MARK: - tokenizer-parity (stub)
@@ -317,7 +516,14 @@ public enum MagpieCommand {
                 --seed N                Deterministic RNG seed
                 --no-ipa-override       Disable `|…|` IPA pass-through
 
-              parity --fixture PATH   Run Swift-side parity against a mobius fixture
+              parity --fixture PATH
+                                      Compare Swift synthesis to a mobius fixture.
+                                      .npz: full pipeline parity (audio MAE/SNR);
+                                      .json: tokenizer-only token-id diff.
+                For .npz, supply synthesis params:
+                  --text "..." --speaker N --language CODE --seed N
+                  --cfg X --temperature X --topk N
+                --double-precision      Use fp64 LocalTransformer for full parity
               tokenizer-parity --fixture PATH --language CODE
                                       Verify tokenizer matches a fixture {text, token_ids}
 
@@ -331,21 +537,15 @@ public enum MagpieCommand {
 
 // MARK: - Fixture loader
 
-/// Minimal fixture shape the mobius exporter is expected to emit. Only the stable
-/// fields are declared; additional intermediate tensors will be added in Phase 5 once
-/// the exporter lands on the Python side.
+/// Tokenizer-only fixture emitted by `mobius/.../emit_parity_fixture.py --mode tokenizer`.
+///
+/// Keys mirror the Python emitter's camelCase output:
+///   `{ "text", "speakerIndex", "languageCode", "expectedTokenIds" }`.
 private struct MagpieParityFixture: Decodable {
     let text: String
     let speakerIndex: Int
     let languageCode: String
     let expectedTokenIds: [Int32]
-
-    enum CodingKeys: String, CodingKey {
-        case text
-        case speakerIndex = "speaker_index"
-        case languageCode = "language"
-        case expectedTokenIds = "token_ids"
-    }
 
     static func load(from url: URL) throws -> MagpieParityFixture {
         let data = try Data(contentsOf: url)

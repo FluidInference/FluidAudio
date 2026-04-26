@@ -3,10 +3,11 @@ import Foundation
 
 /// Prefills the decoder KV cache with the 110-token speaker context.
 ///
-/// Currently always runs the step-by-step path (driving `decoder_step` 110 times
-/// per path) so the Swift port works regardless of whether `decoder_prefill.mlmodelc`
-/// shipped in the repo. Using the fast `decoder_prefill` model will come as a
-/// follow-up optimization once its exact I/O signature is documented.
+/// Two paths:
+///   - Fast: `decoder_prefill.mlmodelc` (1 batched call with `audio_embed` shape
+///     `[1, 110, 768]`) → outputs 12 stacked K/V tensors `[2, 1, 512, 12, 64]`.
+///   - Fallback: 110 sequential `decoder_step.mlmodelc` calls when
+///     `decoder_prefill` is unavailable or fails.
 public struct MagpiePrefill {
 
     private let logger = AppLogger(category: "MagpiePrefill")
@@ -14,6 +15,40 @@ public struct MagpiePrefill {
 
     public init(decoderStep: MLModel) {
         self.decoderStep = decoderStep
+    }
+
+    /// Run the batched `decoder_prefill.mlmodelc` once, seed the cache from its
+    /// 12 stacked-K/V outputs, and set every layer's position to
+    /// `speakerContextLength`.
+    public func prefillFast(
+        decoderPrefill: MLModel,
+        speakerEmbedding: [Float],
+        speakerContextLength: Int,
+        dModel: Int,
+        encoderOutput: MLMultiArray,
+        encoderMask: MLMultiArray,
+        cache: MagpieKvCache
+    ) throws {
+        precondition(speakerEmbedding.count == speakerContextLength * dModel)
+
+        let audioEmbed = try MLMultiArray(
+            shape: [
+                1, NSNumber(value: speakerContextLength), NSNumber(value: dModel),
+            ],
+            dataType: .float32)
+        audioEmbed.withUnsafeMutableBytes { ptr, _ in
+            let base = ptr.bindMemory(to: Float.self).baseAddress!
+            for i in 0..<speakerEmbedding.count { base[i] = speakerEmbedding[i] }
+        }
+
+        let inputs: [String: MLFeatureValue] = [
+            "audio_embed": MLFeatureValue(multiArray: audioEmbed),
+            "encoder_output": MLFeatureValue(multiArray: encoderOutput),
+            "encoder_mask": MLFeatureValue(multiArray: encoderMask),
+        ]
+        let provider = try MLDictionaryFeatureProvider(dictionary: inputs)
+        let output = try decoderPrefill.prediction(from: provider)
+        try cache.seedFromPrefillOutputs(output, prefillLength: speakerContextLength)
     }
 
     public func prefill(

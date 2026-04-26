@@ -74,8 +74,9 @@ public enum MagpieConstants {
     public static let defaultTemperature: Float = 0.6
     /// Default top-k truncation.
     public static let defaultTopK: Int = 80
-    /// Default CFG scale (disabled by default).
-    public static let defaultCfgScale: Float = 1.0
+    /// Default CFG scale (matches Python `generate_coreml.py` and constants.json `cfg_scale`).
+    /// Setting this to 1.0 disables the unconditional path entirely.
+    public static let defaultCfgScale: Float = 2.5
 
     // MARK: - Repository
 

@@ -52,7 +52,10 @@ public struct MagpiePhonemeTokenizer: MagpieLanguageTokenizer {
                     // Heteronym: fall back to grapheme-level encoding.
                     appendGraphemes(word, into: &ids)
                 } else if let phones = phonemeDict[key] {
-                    appendSpace(&ids)
+                    // Inter-word spaces come from `.separator(" ")` below; do not
+                    // prepend an extra space here. NeMo's IPATokenizer relies on
+                    // raw whitespace from the input (`pad_with_space=false` for
+                    // english_phoneme) for word boundaries.
                     for p in phones {
                         if let id = token2id[p] { ids.append(id) }
                     }
@@ -81,10 +84,12 @@ public struct MagpiePhonemeTokenizer: MagpieLanguageTokenizer {
 
     // MARK: - Helpers
 
+    /// Match NeMo `tokenizer_metadata.json` `grapheme_case`:
+    ///   english_phoneme: upper, spanish_phoneme: upper, german_phoneme: mixed.
     private func normalize(_ text: String) -> String {
         switch language {
-        case .english, .german:
-            return text.lowercased()
+        case .english, .spanish:
+            return text.uppercased()
         default:
             return text
         }
@@ -92,8 +97,8 @@ public struct MagpiePhonemeTokenizer: MagpieLanguageTokenizer {
 
     private func caseKey(for word: String) -> String {
         switch language {
-        case .english, .german:
-            return word.lowercased()
+        case .english, .spanish:
+            return word.uppercased()
         default:
             return word
         }

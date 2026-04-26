@@ -57,6 +57,17 @@ public actor MagpieModelStore {
         let config = MLModelConfiguration()
         config.computeUnits = computeUnits
 
+        // `decoder_step.mlmodelc` reliably fails ANE compilation
+        // (`MILCompilerForANE error: ANECCompile() FAILED`) due to its rank-4
+        // split-K/V scatter layout, then falls back to CPU at the cost of one
+        // failed ANE compile attempt per call (~hundreds of ms each). Pin it
+        // to `.cpuAndGPU` so CoreML skips the ANE attempt entirely and runs
+        // on Metal MPS — verified end-to-end as the fastest path
+        // (96s warm vs 103s warm on `.cpuAndNeuralEngine`).
+        let stepConfig = MLModelConfiguration()
+        stepConfig.computeUnits =
+            computeUnits == .cpuOnly ? .cpuOnly : .cpuAndGPU
+
         let loadStart = Date()
 
         textEncoderModel = try loadModel(
@@ -68,7 +79,7 @@ public actor MagpieModelStore {
         decoderStepModel = try loadModel(
             repoDir: repoDir,
             fileName: ModelNames.Magpie.decoderStepFile,
-            config: config,
+            config: stepConfig,
             required: true)
 
         nanocodecDecoderModel = try loadModel(
@@ -117,8 +128,15 @@ public actor MagpieModelStore {
         return model
     }
 
-    public func decoderPrefill() -> MLModel? {
-        decoderPrefillModel
+    public func decoderPrefill() throws -> MLModel {
+        guard let model = decoderPrefillModel else {
+            throw MagpieError.notInitialized
+        }
+        return model
+    }
+
+    public func hasDecoderPrefill() -> Bool {
+        decoderPrefillModel != nil
     }
 
     public func constants() throws -> MagpieConstantsBundle {

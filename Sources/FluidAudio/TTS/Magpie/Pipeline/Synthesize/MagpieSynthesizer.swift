@@ -1,3 +1,4 @@
+import Accelerate
 @preconcurrency import CoreML
 import Foundation
 
@@ -94,37 +95,72 @@ public actor MagpieSynthesizer {
                 headDim: constants.config.headDim)
             : nil
 
-        // 3. Prefill.
+        // 3. Prefill (fast batched path when decoder_prefill is available).
         let prefill = MagpiePrefill(decoderStep: decoderStep)
-        try prefill.prefill(
-            speakerEmbedding: constants.speakerEmbeddings[speakerIndex],
-            speakerContextLength: speakerContextLength,
-            dModel: dModel,
-            encoderOutput: encoderOutput,
-            encoderMask: encoderMask,
-            cache: condCache)
-
-        if let uncondTensors = uncond, let uncondCache = uncondCache {
-            let zeroSpeaker = Swift.Array<Float>(repeating: 0, count: speakerContextLength * dModel)
-            try prefill.prefill(
-                speakerEmbedding: zeroSpeaker,
+        let hasPrefill = await store.hasDecoderPrefill()
+        let prefillStart = Date()
+        if hasPrefill {
+            let decoderPrefill = try await store.decoderPrefill()
+            try prefill.prefillFast(
+                decoderPrefill: decoderPrefill,
+                speakerEmbedding: constants.speakerEmbeddings[speakerIndex],
                 speakerContextLength: speakerContextLength,
                 dModel: dModel,
-                encoderOutput: uncondTensors.encoderOutput,
-                encoderMask: uncondTensors.encoderMask,
-                cache: uncondCache)
+                encoderOutput: encoderOutput,
+                encoderMask: encoderMask,
+                cache: condCache)
+            if let uncondTensors = uncond, let uncondCache = uncondCache {
+                let zeroSpeaker = Swift.Array<Float>(
+                    repeating: 0, count: speakerContextLength * dModel)
+                try prefill.prefillFast(
+                    decoderPrefill: decoderPrefill,
+                    speakerEmbedding: zeroSpeaker,
+                    speakerContextLength: speakerContextLength,
+                    dModel: dModel,
+                    encoderOutput: uncondTensors.encoderOutput,
+                    encoderMask: uncondTensors.encoderMask,
+                    cache: uncondCache)
+            }
+        } else {
+            try prefill.prefill(
+                speakerEmbedding: constants.speakerEmbeddings[speakerIndex],
+                speakerContextLength: speakerContextLength,
+                dModel: dModel,
+                encoderOutput: encoderOutput,
+                encoderMask: encoderMask,
+                cache: condCache)
+            if let uncondTensors = uncond, let uncondCache = uncondCache {
+                let zeroSpeaker = Swift.Array<Float>(
+                    repeating: 0, count: speakerContextLength * dModel)
+                try prefill.prefill(
+                    speakerEmbedding: zeroSpeaker,
+                    speakerContextLength: speakerContextLength,
+                    dModel: dModel,
+                    encoderOutput: uncondTensors.encoderOutput,
+                    encoderMask: uncondTensors.encoderMask,
+                    cache: uncondCache)
+            }
         }
+        let prefillElapsed = Date().timeIntervalSince(prefillStart)
+        logger.info(
+            "Prefill done in \(String(format: "%.2f", prefillElapsed))s "
+                + "(\(hasPrefill ? "fast batched" : "slow loop"))")
 
         // 4. AR loop.
-        let lt = MagpieLocalTransformer(weights: ltWeights)
+        let backend: MagpieLtBackend
+        if options.useDoublePrecision {
+            backend = .fp64(MagpieLocalTransformerDouble(weights: ltWeights))
+        } else {
+            backend = .fp32(MagpieLocalTransformer(weights: ltWeights))
+        }
         let sampler = MagpieLocalSampler(
-            localTransformer: lt, audioEmbeddings: constants.audioEmbeddings)
+            localTransformer: backend, audioEmbeddings: constants.audioEmbeddings)
 
         var currentCodes = Swift.Array<Int32>(repeating: audioBosId, count: numCodebooks)
         var allFrames: [[Int32]] = []
         var finishedOnEos = false
 
-        var rng: any RandomNumberGenerator = makeRNG(seed: options.seed)
+        let rng = MagpieSamplerRng(seed: options.seed)
 
         for step in 0..<options.maxSteps {
             let audioEmbed = try embedAudioCodes(
@@ -151,7 +187,7 @@ public actor MagpieSynthesizer {
                 uncondDecoderHidden: uncondHidden,
                 forbidEos: forbidEos,
                 options: options,
-                rng: &rng)
+                rng: rng)
 
             let isEos = next.contains(audioEosId)
             if isEos && step >= options.minFrames {
@@ -254,9 +290,33 @@ public actor MagpieSynthesizer {
         }
         let dim = hidden.count
         var result = Swift.Array<Float>(repeating: 0, count: dim)
-        hidden.withUnsafeBytes { raw in
-            let ptr = raw.bindMemory(to: Float.self)
-            for i in 0..<dim { result[i] = ptr[i] }
+        switch hidden.dataType {
+        case .float16:
+            // Convert fp16 → fp32 via vImage (Accelerate) for speed.
+            hidden.withUnsafeBytes { raw in
+                guard let src = raw.baseAddress else { return }
+                var srcBuffer = vImage_Buffer(
+                    data: UnsafeMutableRawPointer(mutating: src),
+                    height: 1, width: vImagePixelCount(dim), rowBytes: dim * 2)
+                result.withUnsafeMutableBufferPointer { dst in
+                    var dstBuffer = vImage_Buffer(
+                        data: dst.baseAddress, height: 1,
+                        width: vImagePixelCount(dim), rowBytes: dim * 4)
+                    _ = vImageConvert_Planar16FtoPlanarF(&srcBuffer, &dstBuffer, 0)
+                }
+            }
+        case .float32:
+            hidden.withUnsafeBytes { raw in
+                let ptr = raw.bindMemory(to: Float.self)
+                for i in 0..<dim { result[i] = ptr[i] }
+            }
+        case .double:
+            hidden.withUnsafeBytes { raw in
+                let ptr = raw.bindMemory(to: Double.self)
+                for i in 0..<dim { result[i] = Float(ptr[i]) }
+            }
+        default:
+            for i in 0..<dim { result[i] = hidden[i].floatValue }
         }
         return result
     }
@@ -284,21 +344,4 @@ public actor MagpieSynthesizer {
         return arr
     }
 
-    private func makeRNG(seed: UInt64?) -> any RandomNumberGenerator {
-        if let seed = seed {
-            return MagpieSeededRNG(seed: seed)
-        } else {
-            return SystemRandomNumberGenerator()
-        }
-    }
-}
-
-/// Deterministic 64-bit LCG RNG used when `options.seed` is set.
-private struct MagpieSeededRNG: RandomNumberGenerator {
-    private var state: UInt64
-    init(seed: UInt64) { self.state = seed &+ 0x9E37_79B9_7F4A_7C15 }
-    mutating func next() -> UInt64 {
-        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-        return state
-    }
 }

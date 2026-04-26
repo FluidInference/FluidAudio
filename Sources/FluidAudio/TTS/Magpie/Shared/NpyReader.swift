@@ -10,14 +10,14 @@ import Foundation
 /// The NPY format spec is trivial: magic + version + header (Python literal dict)
 /// + raw little-endian data in C-order. We do not support Fortran-order or
 /// structured dtypes — they would be hidden bugs in the exporter, not features.
-enum NpyReader {
+public enum NpyReader {
 
-    enum DType {
+    public enum DType {
         case float16
         case float32
         case int32
 
-        var bytesPerElement: Int {
+        public var bytesPerElement: Int {
             switch self {
             case .float16: return 2
             case .float32: return 4
@@ -26,14 +26,14 @@ enum NpyReader {
         }
     }
 
-    struct Array {
-        let shape: [Int]
-        let dtype: DType
-        let data: [Float]  // always converted to fp32 for ease of consumption
+    public struct Array {
+        public let shape: [Int]
+        public let dtype: DType
+        public let data: [Float]  // always converted to fp32 for ease of consumption
 
-        var count: Int { data.count }
+        public var count: Int { data.count }
 
-        func assertShape(_ expected: [Int], label: String) throws {
+        public func assertShape(_ expected: [Int], label: String) throws {
             if shape != expected {
                 throw MagpieError.invalidNpyFile(
                     path: label,
@@ -43,12 +43,12 @@ enum NpyReader {
         }
     }
 
-    static func read(from url: URL) throws -> Array {
+    public static func read(from url: URL) throws -> Array {
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
         return try parse(data: data, sourceLabel: url.lastPathComponent)
     }
 
-    static func parse(data: Data, sourceLabel: String) throws -> Array {
+    public static func parse(data: Data, sourceLabel: String) throws -> Array {
         guard data.count >= 10 else {
             throw MagpieError.invalidNpyFile(path: sourceLabel, reason: "file too small")
         }

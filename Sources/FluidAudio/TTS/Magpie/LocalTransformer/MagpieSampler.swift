@@ -1,5 +1,55 @@
 import Foundation
 
+/// RNG wrapper for the Magpie sampler. Always backed by `MagpieMT19937` so a
+/// `seed` round-trips bit-identical against `np.random.seed(seed)` in the
+/// Python reference; when no seed is supplied it auto-seeds from
+/// `arc4random_buf` so behavior outside seeded mode is still random.
+///
+/// Not Sendable: holds mutable RNG state. Consumed within `MagpieSynthesizer`
+/// actor isolation so it never crosses concurrency domains.
+public final class MagpieSamplerRng {
+
+    private let mt: MagpieMT19937
+
+    public init(seed: UInt64?) {
+        if let seed = seed {
+            // NumPy raises for seed >= 2^32; clamp by mask to keep behavior stable
+            // while still letting callers pass `UInt64`.
+            self.mt = MagpieMT19937(seed: UInt32(truncatingIfNeeded: seed))
+        } else {
+            var bytes: UInt32 = 0
+            withUnsafeMutableBytes(of: &bytes) { buf in
+                if let base = buf.baseAddress {
+                    arc4random_buf(base, buf.count)
+                }
+            }
+            self.mt = MagpieMT19937(seed: bytes)
+        }
+    }
+
+    /// `np.random.choice(len(probs), p=probs)` — see `MagpieMT19937.numpyChoice`.
+    public func numpyChoice(probs: [Float]) -> Int {
+        // Mirror NumPy: cumsum in fp32 (matches `probs.cumsum()` over fp32),
+        // promote per-element to fp64 only for the final searchsorted compare.
+        var cdf = [Double](repeating: 0, count: probs.count)
+        var totalF: Float = 0
+        for i in 0..<probs.count {
+            let p = probs[i] > 0 ? probs[i] : 0
+            totalF += p
+            cdf[i] = Double(totalF)
+        }
+        if totalF <= 0 { return probs.count - 1 }
+        let u = mt.uniformDouble() * Double(totalF)
+        var lo = 0
+        var hi = cdf.count
+        while lo < hi {
+            let mid = (lo &+ hi) >> 1
+            if cdf[mid] > u { hi = mid } else { lo = mid + 1 }
+        }
+        return Swift.min(lo, probs.count - 1)
+    }
+}
+
 /// Samples the 8 codebook tokens from one decoder hidden state by driving the
 /// Swift Local Transformer auto-regressively.
 ///
@@ -7,12 +57,12 @@ import Foundation
 /// `mobius/models/tts/magpie/coreml/generate_coreml.py` (lines 172–242).
 public struct MagpieLocalSampler: Sendable {
 
-    private let lt: MagpieLocalTransformer
+    private let lt: MagpieLtBackend
     private let audioEmbeddings: [[Float]]
 
     /// - Parameter audioEmbeddings: per-codebook `[numCodesPerCodebook × dModel]` fp32.
     public init(
-        localTransformer: MagpieLocalTransformer,
+        localTransformer: MagpieLtBackend,
         audioEmbeddings: [[Float]]
     ) {
         self.lt = localTransformer
@@ -26,13 +76,13 @@ public struct MagpieLocalSampler: Sendable {
     ///   - uncondDecoderHidden: unconditional path for CFG; `nil` disables CFG.
     ///   - forbidEos: mask `audioEosId` (set `true` while `t < minFrames`).
     ///   - options: temperature / topK / cfgScale.
-    ///   - rng: caller-owned RNG so the whole generation can be seeded.
+    ///   - rng: NumPy-compatible MT19937 RNG.
     public func sample(
         decoderHidden: [Float],
         uncondDecoderHidden: [Float]? = nil,
         forbidEos: Bool,
         options: MagpieSynthesisOptions,
-        rng: inout any RandomNumberGenerator
+        rng: MagpieSamplerRng
     ) -> [Int32] {
         let numCodebooks = lt.weights.numCodebooks
         let D = lt.weights.localDim
@@ -75,9 +125,9 @@ public struct MagpieLocalSampler: Sendable {
                 logits[Int(tok)] = -.infinity
             }
 
-            let sampled = sampleTopK(
+            let sampled = Self.sampleTopK(
                 logits: logits, topK: options.topK, temperature: options.temperature,
-                rng: &rng)
+                rng: rng)
             codes[cb] = Int32(sampled)
 
             // Embed sampled token → next LT input (both cond and uncond paths).
@@ -111,11 +161,17 @@ public struct MagpieLocalSampler: Sendable {
 
     /// Categorical sampling with optional top-k truncation + temperature.
     ///
-    /// Matches the Python reference: select top-k logits (others → -inf), then
-    /// softmax with temperature, then multinomial draw.
-    private func sampleTopK(
+    /// Matches the Python reference (`sample_topk` in `generate_coreml.py`):
+    ///   1. Mask all but the top-k logits (set others to `-inf`).
+    ///   2. Divide by `max(temperature, 1e-8)`.
+    ///   3. Subtract max → softmax in fp32.
+    ///   4. `np.random.choice(n, p=probs)` via `MagpieMT19937.numpyChoice`.
+    ///
+    /// Made `static` so the method is shared by both the instance call site and
+    /// unit tests.
+    static func sampleTopK(
         logits: [Float], topK: Int, temperature: Float,
-        rng: inout any RandomNumberGenerator
+        rng: MagpieSamplerRng
     ) -> Int {
         var truncated = logits
         if topK > 0 && topK < truncated.count {
@@ -144,14 +200,11 @@ public struct MagpieLocalSampler: Sendable {
             // Degenerate — fall back to argmax over original logits.
             return logits.indices.max(by: { logits[$0] < logits[$1] }) ?? 0
         }
-        let u = Float.random(in: 0..<1, using: &rng) * sum
-        var cumulative: Float = 0
+        // Normalize → fp32 probability vector. Mirrors `probs / probs.sum()`.
+        let inv = 1.0 / sum
         for i in 0..<truncated.count {
-            cumulative += truncated[i]
-            if cumulative >= u {
-                return i
-            }
+            truncated[i] *= inv
         }
-        return truncated.count - 1
+        return rng.numpyChoice(probs: truncated)
     }
 }

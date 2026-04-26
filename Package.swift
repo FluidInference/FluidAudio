@@ -43,7 +43,7 @@ let package = Package(
         .executableTarget(
             name: "FluidAudioCLI",
             dependencies: [
-                "FluidAudio",
+                "FluidAudio"
             ],
             path: "Sources/FluidAudioCLI",
             exclude: ["README.md"],
@@ -54,7 +54,7 @@ let package = Package(
         .testTarget(
             name: "FluidAudioTests",
             dependencies: [
-                "FluidAudio",
+                "FluidAudio"
             ]
         ),
     ],
