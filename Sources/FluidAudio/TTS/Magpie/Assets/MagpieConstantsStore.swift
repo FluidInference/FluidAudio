@@ -84,58 +84,10 @@ public struct MagpieModelConfig: Sendable, Decodable {
     }
 }
 
-/// Decoded metadata from `constants/speaker_info.json`.
-public struct MagpieSpeakerInfo: Sendable, Decodable {
-    public let contextLength: Int
-    public let dim: Int
-    public let names: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case contextLength = "context_length"
-        case dim = "dim"
-        case names = "names"
-        case T = "T"
-        case D = "D"
-    }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        contextLength =
-            (try? c.decode(Int.self, forKey: .contextLength))
-            ?? (try? c.decode(Int.self, forKey: .T))
-            ?? MagpieConstants.speakerContextLength
-        dim =
-            (try? c.decode(Int.self, forKey: .dim))
-            ?? (try? c.decode(Int.self, forKey: .D))
-            ?? MagpieConstants.dModel
-        let decodedNames = (try? c.decode([String].self, forKey: .names)) ?? []
-        if decodedNames.isEmpty {
-            names = MagpieSpeakerInfo.defaultNames
-        } else {
-            names = decodedNames
-        }
-    }
-
-    /// Direct initializer used by the fallback path when `speaker_info.json`
-    /// is missing. Keeps us out of synthesizing fake Decoder instances.
-    public init(
-        contextLength: Int = MagpieConstants.speakerContextLength,
-        dim: Int = MagpieConstants.dModel,
-        names: [String] = MagpieSpeakerInfo.defaultNames
-    ) {
-        self.contextLength = contextLength
-        self.dim = dim
-        self.names = names
-    }
-
-    public static let defaultNames: [String] = ["John", "Sofia", "Aria", "Jason", "Leo"]
-}
-
-/// Loaded constants: config, speaker info, per-speaker embeddings (fp32), per-codebook
+/// Loaded constants: config, per-speaker embeddings (fp32), per-codebook
 /// audio embeddings (fp32). All arrays are stored row-major.
 public struct MagpieConstantsBundle: Sendable {
     public let config: MagpieModelConfig
-    public let speakers: MagpieSpeakerInfo
     /// Shape: [numSpeakers][contextLength × dModel]. Row-major.
     public let speakerEmbeddings: [[Float]]
     /// Shape: [numCodebooks][numCodesPerCodebook × dModel]. Row-major.
@@ -151,7 +103,6 @@ public enum MagpieConstantsLoader {
 
     public static func load(from constantsDir: URL) throws -> MagpieConstantsBundle {
         let config = try loadConfig(from: constantsDir)
-        let speakers = try loadSpeakerInfo(from: constantsDir)
 
         var speakerEmbeddings: [[Float]] = []
         speakerEmbeddings.reserveCapacity(MagpieConstants.numSpeakers)
@@ -187,7 +138,6 @@ public enum MagpieConstantsLoader {
 
         return MagpieConstantsBundle(
             config: config,
-            speakers: speakers,
             speakerEmbeddings: speakerEmbeddings,
             audioEmbeddings: audioEmbeddings,
             textEosId: textEosId
@@ -225,17 +175,4 @@ public enum MagpieConstantsLoader {
         }
     }
 
-    private static func loadSpeakerInfo(from dir: URL) throws -> MagpieSpeakerInfo {
-        let url = dir.appendingPathComponent(MagpieConstants.Files.speakerInfoJson)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            logger.warning("speaker_info.json missing; falling back to built-in defaults")
-            return MagpieSpeakerInfo()
-        }
-        do {
-            let data = try Data(contentsOf: url)
-            return try JSONDecoder().decode(MagpieSpeakerInfo.self, from: data)
-        } catch {
-            throw MagpieError.invalidConstants("speaker_info.json: \(error)")
-        }
-    }
 }

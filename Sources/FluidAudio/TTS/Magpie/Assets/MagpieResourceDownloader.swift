@@ -96,17 +96,10 @@ public enum MagpieResourceDownloader {
                 )
                 try data.write(to: localURL, options: [.atomic])
             } catch {
-                // Certain files (e.g. German heteronyms) are optional — if the remote
-                // says 404 we log and move on; callers detect missing files at load time.
                 throw MagpieError.tokenizerDataMissing(
                     language: language.rawValue, file: file)
             }
         }
-    }
-
-    /// Return the directory that holds the compiled `.mlmodelc` bundles (for loading).
-    public static func modelDirectory(in repoDirectory: URL) -> URL {
-        repoDirectory
     }
 
     /// Return the directory that holds constants (JSON + npy + local_transformer/).
