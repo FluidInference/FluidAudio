@@ -49,14 +49,14 @@ final class CoreMLDiarizerTests: XCTestCase {
         XCTAssertFalse(manager.isAvailable, "Manager should not be available before initialization")
     }
 
-    func testNotInitializedErrors() {
+    func testNotInitializedErrors() async {
         let testSamples = Array(repeating: Float(0.5), count: 16000)
         let config = DiarizerConfig()
         let manager = DiarizerManager(config: config)
 
         // Test diarization fails when not initialized
         do {
-            _ = try manager.performCompleteDiarization(testSamples, sampleRate: 16000)
+            _ = try await manager.performCompleteDiarization(testSamples, sampleRate: 16000)
             XCTFail("Should have thrown notInitialized error")
         } catch DiarizerError.notInitialized {
             // Expected error
@@ -400,7 +400,7 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
             // Test that we can perform basic operations
             let testSamples = Array(repeating: Float(0.5), count: 16000)
 
-            let _ = try diarizer.performCompleteDiarization(testSamples, sampleRate: 16000)
+            let _ = try await diarizer.performCompleteDiarization(testSamples, sampleRate: 16000)
 
             diarizer.cleanup()
         } catch {

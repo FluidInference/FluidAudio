@@ -203,7 +203,8 @@ public actor AsrManager {
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
-        globalFrameOffset: Int = 0
+        globalFrameOffset: Int = 0,
+        language: Language? = nil
     ) async throws -> TdtHypothesis {
         // Route to appropriate decoder based on model version
         guard let models = asrModels, let decoder_ = decoderModel, let joint = jointModel else {
@@ -251,6 +252,11 @@ public actor AsrManager {
 
         switch models.version {
         case .v2, .tdtCtc110m:
+            if language != nil {
+                logger.debug(
+                    "Ignoring `language` hint: script filtering requires the v3 joint decoder; loaded model is \(models.version)."
+                )
+            }
             let decoder = TdtDecoderV2(config: adaptedConfig)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
@@ -263,7 +269,35 @@ public actor AsrManager {
                 isLastChunk: isLastChunk,
                 globalFrameOffset: globalFrameOffset
             )
-        case .v3, .tdtJa:
+        case .v3:
+            // Pass `vocabulary` unconditionally. `TdtDecoderV3.tokenLanguageFilter`
+            // short-circuits when `language` is nil, so there's no cost to
+            // forwarding vocab in the default path.
+            let decoder = TdtDecoderV3(config: adaptedConfig)
+            return try await decoder.decodeWithTimings(
+                encoderOutput: encoderOutput,
+                encoderSequenceLength: encoderSequenceLength,
+                actualAudioFrames: actualAudioFrames,
+                decoderModel: decoder_,
+                jointModel: joint,
+                decoderState: &decoderState,
+                contextFrameAdjustment: contextFrameAdjustment,
+                isLastChunk: isLastChunk,
+                globalFrameOffset: globalFrameOffset,
+                language: language,
+                vocabulary: vocabulary
+            )
+        case .tdtJa:
+            // The Japanese model outputs Kanji / Hiragana / Katakana, none of
+            // which are covered by the current Latin/Cyrillic filter.
+            // Propagating `language` here would either be a no-op (if no
+            // right-language top-K candidates exist) or — worse — silently
+            // filter out valid Japanese tokens. Drop the hint and log at debug.
+            if language != nil {
+                logger.debug(
+                    "Ignoring `language` hint for tdtJa: TokenLanguageFilter currently supports Latin/Cyrillic only; Japanese output is always kept."
+                )
+            }
             let decoder = TdtDecoderV3(config: adaptedConfig)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
@@ -290,16 +324,18 @@ public actor AsrManager {
     /// - Parameters:
     ///   - audioBuffer: The audio buffer to transcribe
     ///   - decoderState: The TDT decoder state to use and update during transcription
+    ///   - language: Optional language hint for script-aware token filtering (v3 only).
+    ///     When set, top-K tokens that don't match the language's script are skipped
+    ///     in favor of matching candidates. Silently ignored for v2 / tdtCtc110m / tdtJa.
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails or models are not initialized
     public func transcribe(
-        _ audioBuffer: AVAudioPCMBuffer, decoderState: inout TdtDecoderState
+        _ audioBuffer: AVAudioPCMBuffer,
+        decoderState: inout TdtDecoderState,
+        language: Language? = nil
     ) async throws -> ASRResult {
         let audioFloatArray = try audioConverter.resampleBuffer(audioBuffer)
-
-        let result = try await transcribe(audioFloatArray, decoderState: &decoderState)
-
-        return result
+        return try await transcribe(audioFloatArray, decoderState: &decoderState, language: language)
     }
 
     /// Transcribe audio from a file URL.
@@ -312,9 +348,14 @@ public actor AsrManager {
     /// - Parameters:
     ///   - url: The URL to the audio file
     ///   - decoderState: The TDT decoder state to use and update during transcription
+    ///   - language: Optional language hint for script-aware token filtering (v3 only).
+    ///     When set, top-K tokens that don't match the language's script are skipped
+    ///     in favor of matching candidates. Silently ignored for v2 / tdtCtc110m / tdtJa.
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails, models are not initialized, or the file cannot be read
-    public func transcribe(_ url: URL, decoderState: inout TdtDecoderState) async throws -> ASRResult {
+    public func transcribe(
+        _ url: URL, decoderState: inout TdtDecoderState, language: Language? = nil
+    ) async throws -> ASRResult {
         // Check file size to decide streaming vs memory loading
         if config.streamingEnabled {
             let audioFile = try AVAudioFile(forReading: url)
@@ -323,12 +364,12 @@ public actor AsrManager {
             let estimatedSamples = Int((Double(audioFile.length) * sampleRateRatio).rounded(.up))
 
             if estimatedSamples > config.streamingThreshold {
-                return try await transcribeDiskBacked(url, decoderState: &decoderState)
+                return try await transcribeDiskBacked(url, decoderState: &decoderState, language: language)
             }
         }
 
         let audioFloatArray = try audioConverter.resampleAudioFile(url)
-        let result = try await transcribe(audioFloatArray, decoderState: &decoderState)
+        let result = try await transcribe(audioFloatArray, decoderState: &decoderState, language: language)
         return result
     }
 
@@ -340,9 +381,14 @@ public actor AsrManager {
     /// - Parameters:
     ///   - url: The URL to the audio file
     ///   - decoderState: The TDT decoder state to use and update during transcription
+    ///   - language: Optional language hint for script-aware token filtering (v3 only).
+    ///     When set, top-K tokens that don't match the language's script are skipped
+    ///     in favor of matching candidates. Silently ignored for v2 / tdtCtc110m / tdtJa.
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails, models are not initialized, or the file cannot be read
-    public func transcribeDiskBacked(_ url: URL, decoderState: inout TdtDecoderState) async throws -> ASRResult {
+    public func transcribeDiskBacked(
+        _ url: URL, decoderState: inout TdtDecoderState, language: Language? = nil
+    ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
 
         let startTime = Date()
@@ -374,7 +420,8 @@ public actor AsrManager {
                 progressHandler: { [weak self] progress in
                     guard let self else { return }
                     await self.progressEmitter.report(progress: progress)
-                }
+                },
+                language: language
             )
 
             sampleSource.cleanup()
@@ -400,20 +447,24 @@ public actor AsrManager {
     /// - Parameters:
     ///   - audioSamples: Array of 16-bit audio samples at 16kHz
     ///   - decoderState: The TDT decoder state to use and update during transcription
+    ///   - language: Optional language hint for script-aware token filtering (v3 only).
+    ///     When set, top-K tokens that don't match the language's script are skipped
+    ///     in favor of matching candidates. Silently ignored for v2 / tdtCtc110m / tdtJa.
     /// - Note: Progress stream is emitted only when `audioSamples.count > ASRConstants.maxModelSamples` (~15s).
     ///         Use `transcriptionProgressStream` before calling this method to observe progress.
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails or models are not initialized
     public func transcribe(
         _ audioSamples: [Float],
-        decoderState: inout TdtDecoderState
+        decoderState: inout TdtDecoderState,
+        language: Language? = nil
     ) async throws -> ASRResult {
         let shouldEmitProgress = audioSamples.count > ASRConstants.maxModelSamples
         if shouldEmitProgress {
             _ = await progressEmitter.ensureSession()
         }
         do {
-            let result = try await transcribeWithState(audioSamples, decoderState: &decoderState)
+            let result = try await transcribeWithState(audioSamples, decoderState: &decoderState, language: language)
 
             if shouldEmitProgress {
                 await progressEmitter.finishSession()

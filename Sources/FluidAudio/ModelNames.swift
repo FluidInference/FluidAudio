@@ -3,12 +3,15 @@ import Foundation
 /// Model repositories on HuggingFace
 public enum Repo: String, CaseIterable, Sendable {
     case vad = "FluidInference/silero-vad-coreml"
-    case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
+    case parakeetV3 = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
     case parakeetCtcZhCn = "FluidInference/parakeet-ctc-0.6b-zh-cn-coreml"
-    case parakeetJa = "FluidInference/parakeet-0.6b-ja-coreml"  // Contains both CTC and TDT models (INT8 quantized encoder)
+    // Japanese hybrid TDT: INT8 CTC-trained preprocessor+encoder paired with a
+    // TDT decoder+joint. CTC-only inference for Japanese was removed in
+    // 846924a1d; only the preprocessor+encoder files from this repo are reused.
+    case parakeetJa = "FluidInference/parakeet-0.6b-ja-coreml"
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case parakeetEou1280 = "FluidInference/parakeet-realtime-eou-120m-coreml/1280ms"
@@ -28,13 +31,14 @@ public enum Repo: String, CaseIterable, Sendable {
     case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
     case multilingualG2p = "FluidInference/charsiu-g2p-byt5-coreml"
     case parakeetTdtCtc110m = "FluidInference/parakeet-tdt-ctc-110m-coreml"
+    case cohereTranscribeCoreml = "FluidInference/cohere-transcribe-03-2026-coreml/q8"
 
     /// Repository slug (without owner)
     public var name: String {
         switch self {
         case .vad:
             return "silero-vad-coreml"
-        case .parakeet:
+        case .parakeetV3:
             return "parakeet-tdt-0.6b-v3-coreml"
         case .parakeetV2:
             return "parakeet-tdt-0.6b-v2-coreml"
@@ -84,6 +88,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "charsiu-g2p-byt5-coreml"
         case .parakeetTdtCtc110m:
             return "parakeet-tdt-ctc-110m-coreml"
+        case .cohereTranscribeCoreml:
+            return "cohere-transcribe-03-2026-coreml/q8"
         }
     }
 
@@ -106,6 +112,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/qwen3-asr-0.6b-coreml"
         case .parakeetTdtCtc110m:
             return "FluidInference/parakeet-tdt-ctc-110m-coreml"
+        case .cohereTranscribeCoreml:
+            return "FluidInference/cohere-transcribe-03-2026-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -140,6 +148,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "optimized/dih2"
         case .lseendDihard3:
             return "optimized/dih3"
+        case .cohereTranscribeCoreml:
+            return "q8"
         default:
             return nil
         }
@@ -184,6 +194,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "ls-eend/dih2"
         case .lseendDihard3:
             return "ls-eend/dih3"
+        case .cohereTranscribeCoreml:
+            return "cohere-transcribe/q8"
         default:
             return name.replacingOccurrences(of: "-coreml", with: "")
         }
@@ -249,13 +261,27 @@ public enum ModelNames {
         public static let encoderFile = encoder + ".mlmodelc"
         public static let decoderFile = decoder + ".mlmodelc"
         public static let jointFile = joint + ".mlmodelc"
+        /// Joint decoder variant for v3 that exposes top-K outputs
+        /// (`top_k_ids`, `top_k_logits`) used for language-aware script filtering.
+        public static let jointV3File = "JointDecisionv3.mlmodelc"
         public static let ctcHeadFile = ctcHead + ".mlmodelc"
 
+        /// Required models for v2 / legacy split-frontend loaders.
+        /// v3 uses `requiredModelsV3` (with `jointV3File`).
         public static let requiredModels: Set<String> = [
             preprocessorFile,
             encoderFile,
             decoderFile,
             jointFile,
+        ]
+
+        /// Required models for v3. v3 always uses `JointDecisionv3.mlmodelc`
+        /// (with top-K outputs for language-aware script filtering).
+        public static let requiredModelsV3: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            decoderFile,
+            jointV3File,
         ]
 
         /// Required models for fused frontend (110m hybrid: preprocessor contains encoder)
@@ -313,13 +339,18 @@ public enum ModelNames {
         ]
     }
 
-    /// TDT ja (Japanese) model names (hybrid model: CTC preprocessor/encoder + TDT decoder/joint v2)
-    /// NOTE: Uses parakeetJa repo where v2 models are uploaded
+    /// TDT ja (Japanese) model names.
+    ///
+    /// Hybrid layout: the CTC-trained preprocessor + encoder from the
+    /// `parakeetJa` repo are reused as the acoustic frontend, paired with a TDT
+    /// decoder + joint (filenames `Decoderv2.mlmodelc` / `Jointerv2.mlmodelc`
+    /// from the same repo). CTC-only inference for Japanese was removed in
+    /// 846924a1d.
     public enum TDTJa {
         public static let preprocessor = "Preprocessor"
         public static let encoder = "Encoder"
-        public static let decoder = "Decoderv2"  // v2: newly converted TDT decoder (uploaded to CTC repo)
-        public static let joint = "Jointerv2"  // v2: newly converted TDT joint (uploaded to CTC repo)
+        public static let decoder = "Decoderv2"
+        public static let joint = "Jointerv2"
 
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
@@ -627,6 +658,43 @@ public enum ModelNames {
         ]
     }
 
+    /// Cohere Transcribe model names
+    /// Encoder-decoder ASR with 14-language support (35-second window architecture).
+    ///
+    /// Two decoder variants are published:
+    ///   - `decoderCacheExternal` (v1) — FP16, dynamic `attention_mask`
+    ///     (`RangeDim(1, 108)`). CPU/GPU only — dynamic shapes block ANE.
+    ///   - `decoderCacheExternalV2` — FP32, fixed `attention_mask` shape
+    ///     `[1, 1, 1, 108]`. ANE-resident, ~1.6× faster decoder end-to-end
+    ///     on Apple Silicon. Drop-in replacement; `CoherePipeline`
+    ///     auto-detects the variant by inspecting the `attention_mask`
+    ///     input shape.
+    public enum CohereTranscribe {
+        public static let encoder = "cohere_encoder"
+        public static let decoderCacheExternal = "cohere_decoder_cache_external"
+        public static let decoderCacheExternalV2 = "cohere_decoder_cache_external_v2"
+        public static let vocab = "vocab.json"
+
+        public static let encoderCompiledFile = encoder + ".mlmodelc"
+        public static let decoderCacheExternalCompiledFile = decoderCacheExternal + ".mlmodelc"
+        public static let decoderCacheExternalV2CompiledFile = decoderCacheExternalV2 + ".mlmodelc"
+
+        /// Default required set — ships the ANE-friendly v2 decoder.
+        public static let requiredModels: Set<String> = [
+            encoderCompiledFile,
+            decoderCacheExternalV2CompiledFile,
+            vocab,
+        ]
+
+        /// Legacy set using the FP16 dynamic decoder (pre-v2). Retained so
+        /// callers that want the older decoder can opt in explicitly.
+        public static let requiredModelsLegacy: Set<String> = [
+            encoderCompiledFile,
+            decoderCacheExternalCompiledFile,
+            vocab,
+        ]
+    }
+
     /// G2P (grapheme-to-phoneme) model names
     public enum G2P {
         public static let encoder = "G2PEncoder"
@@ -697,7 +765,9 @@ public enum ModelNames {
         switch repo {
         case .vad:
             return ModelNames.VAD.requiredModels
-        case .parakeet, .parakeetV2:
+        case .parakeetV3:
+            return ModelNames.ASR.requiredModelsV3
+        case .parakeetV2:
             return ModelNames.ASR.requiredModels
         case .parakeetTdtCtc110m:
             return ModelNames.ASR.requiredModelsFused
@@ -741,6 +811,8 @@ public enum ModelNames {
             return ModelNames.Qwen3ASR.requiredModelsFull
         case .multilingualG2p:
             return ModelNames.MultilingualG2P.requiredModels
+        case .cohereTranscribeCoreml:
+            return ModelNames.CohereTranscribe.requiredModels
         }
     }
 }

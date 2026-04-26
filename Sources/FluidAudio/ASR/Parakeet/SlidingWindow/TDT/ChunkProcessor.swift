@@ -61,7 +61,8 @@ struct ChunkProcessor {
     func process(
         using manager: AsrManager,
         startTime: Date,
-        progressHandler: ((Double) async -> Void)? = nil
+        progressHandler: ((Double) async -> Void)? = nil,
+        language: Language? = nil
     ) async throws -> ASRResult {
         let requestedConcurrency = max(1, await manager.parallelChunkConcurrency)
         let workers = await makeWorkerPool(using: manager, count: requestedConcurrency) ?? [manager]
@@ -128,7 +129,8 @@ struct ChunkProcessor {
                             isLastChunk: isLastChunk,
                             using: worker,
                             decoderState: &decoderState,
-                            maxModelSamples: maxModelSamples
+                            maxModelSamples: maxModelSamples,
+                            language: language
                         )
 
                     guard
@@ -245,7 +247,8 @@ struct ChunkProcessor {
         isLastChunk: Bool,
         using manager: AsrManager,
         decoderState: inout TdtDecoderState,
-        maxModelSamples: Int
+        maxModelSamples: Int,
+        language: Language? = nil
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], durations: [Int]) {
         guard !samples.isEmpty else { return ([], [], [], []) }
 
@@ -268,7 +271,8 @@ struct ChunkProcessor {
             decoderState: &decoderState,
             contextFrameAdjustment: contextFrames,  // Skip context frames in decoder
             isLastChunk: isLastChunk,
-            globalFrameOffset: globalFrameOffset
+            globalFrameOffset: globalFrameOffset,
+            language: language
         )
 
         if hypothesis.isEmpty || encoderSequenceLength == 0 {

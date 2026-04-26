@@ -3,7 +3,7 @@ import Foundation
 
 /// Speaker profile representation for tracking speakers across audio
 /// This represents a speaker's identity, not a specific segment
-public final class Speaker: Identifiable, Codable, Equatable, Hashable {
+public struct Speaker: Identifiable, Codable, Equatable, Hashable, Sendable {
     /// Speaker ID
     public let id: String
     /// Speaker name
@@ -65,7 +65,7 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
     ///   - embedding: 256D speaker embedding vector
     ///   - segmentId: The ID of the segment
     ///   - alpha: EMA blending parameter
-    public func updateMainEmbedding(
+    public mutating func updateMainEmbedding(
         duration: Float,
         embedding: [Float],
         segmentId: UUID,
@@ -101,7 +101,7 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
     }
 
     /// Add a raw embedding with FIFO queue management
-    public func addRawEmbedding(_ embedding: RawEmbedding) {
+    public mutating func addRawEmbedding(_ embedding: RawEmbedding) {
         // Validate embedding quality
         var sumSquares: Float = 0
         vDSP_svesq(embedding.embedding, 1, &sumSquares, vDSP_Length(embedding.embedding.count))
@@ -118,7 +118,7 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
 
     /// Remove a raw embedding by segment ID
     @discardableResult
-    public func removeRawEmbedding(segmentId: UUID) -> RawEmbedding? {
+    public mutating func removeRawEmbedding(segmentId: UUID) -> RawEmbedding? {
         guard let index = rawEmbeddings.firstIndex(where: { $0.segmentId == segmentId }) else {
             return nil
         }
@@ -129,7 +129,7 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
     }
 
     /// Recalculate main embedding as average of all raw embeddings
-    public func recalculateMainEmbedding() {
+    public mutating func recalculateMainEmbedding() {
         guard !rawEmbeddings.isEmpty,
             let firstEmbedding = rawEmbeddings.first,
             !firstEmbedding.embedding.isEmpty
@@ -165,7 +165,7 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
     /// - Parameters:
     ///   - other: Other Speaker to merge
     ///   - keepName: The resulting name after the merge
-    public func mergeWith(_ other: Speaker, keepName: String? = nil) {
+    public mutating func mergeWith(_ other: Speaker, keepName: String? = nil) {
         // Merge raw embeddings
         var allEmbeddings = rawEmbeddings + other.rawEmbeddings
 
@@ -270,7 +270,7 @@ public struct SendableSpeaker: Sendable, Identifiable, Hashable {
 }
 
 /// Configuration for handling initializing known speakers
-public enum SpeakerInitializationMode {
+public enum SpeakerInitializationMode: Sendable {
     /// Reset the speaker database and add the new speakers
     case reset
     /// Merge new speakers whose IDs match with existing ones

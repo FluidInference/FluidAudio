@@ -436,8 +436,18 @@ enum TtsTextPreprocessor {
     private static func processCommonAbbreviations(_ text: String) -> String {
         var processed = text
 
-        for (abbreviation, expansion) in commonAbbreviations {
-            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: abbreviation) + "\\b"
+        // Iterate longest keys first so that "etc." / "vs." are matched before
+        // their bare "etc" / "vs" counterparts; otherwise dict iteration order
+        // (undefined in Swift) can leave a stray "." after the shorter match.
+        let orderedAbbreviations = commonAbbreviations.sorted { $0.key.count > $1.key.count }
+
+        for (abbreviation, expansion) in orderedAbbreviations {
+            // Trailing `\b` fails when the abbreviation ends in a non-word char
+            // (e.g. "Dr." followed by a space is non-word→non-word, so no boundary).
+            // Use a lookahead that accepts whitespace, end-of-string, or any non-word/non-dot char.
+            let endsWithNonWord = abbreviation.last.map { !$0.isLetter && !$0.isNumber } ?? false
+            let trailing = endsWithNonWord ? "(?=\\s|$|[^\\w.])" : "\\b"
+            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: abbreviation) + trailing
             let regex = try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
 
             processed = regex.stringByReplacingMatches(

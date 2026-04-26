@@ -69,7 +69,9 @@ internal struct TdtDecoderV3: Sendable {
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
-        globalFrameOffset: Int = 0
+        globalFrameOffset: Int = 0,
+        language: Language? = nil,
+        vocabulary: [Int: String]? = nil
     ) async throws -> TdtHypothesis {
         // Early exit for very short audio (< 160ms)
         guard encoderSequenceLength > 1 else {
@@ -78,6 +80,11 @@ internal struct TdtDecoderV3: Sendable {
 
         // Use encoder hidden size from config (512 for 110m, 1024 for 0.6B)
         let expectedEncoderHidden = config.encoderHiddenSize
+
+        // Script-filtering consumes top-K; skip the extraction when the caller
+        // didn't provide a language (default path), so v3 joint runs don't pay
+        // for K-length array allocations they'll never use.
+        let needsTopK = language != nil
 
         // Build a stride-aware view so we can access encoder frames without extra copies
         let encoderFrames = try EncoderFrameView(
@@ -173,12 +180,10 @@ internal struct TdtDecoderV3: Sendable {
         var emissionsAtThisTimestamp = 0
         let maxSymbolsPerStep = config.tdtConfig.maxSymbolsPerStep  // Usually 5-10
         var tokensProcessedThisChunk = 0  // Track tokens per chunk to prevent runaway decoding
-        var iterCount = 0
 
         // ===== MAIN DECODING LOOP =====
         // Process each encoder frame until we've consumed all audio
         while activeMask {
-            iterCount += 1
             try Task.checkCancellation()
             // Use last emitted token for decoder context, or blank if starting
             var label = hypothesis.lastToken ?? config.tdtConfig.blankId
@@ -222,19 +227,30 @@ internal struct TdtDecoderV3: Sendable {
                 inputProvider: jointInput,
                 tokenIdBacking: tokenIdBacking,
                 tokenProbBacking: tokenProbBacking,
-                durationBacking: durationBacking
+                durationBacking: durationBacking,
+                needsTopK: needsTopK
             )
 
             // Predict token (what to emit) and duration (how many frames to skip)
             label = decision.token
             var score = TdtDurationMapping.clampProbability(decision.probability)
 
+            let blankId = config.tdtConfig.blankId  // 8192 for v3 models
+
+            Self.tokenLanguageFilter(
+                label: &label,
+                score: &score,
+                topKIds: decision.topKIds,
+                topKLogits: decision.topKLogits,
+                language: language,
+                vocabulary: vocabulary,
+                blankId: blankId
+            )
+
             // Map duration bin to actual frame count
             // durationBins typically = [0,1,2,3,4] meaning skip 0-4 frames
             var duration = try TdtDurationMapping.mapDurationBin(
                 decision.durationBin, durationBins: config.tdtConfig.durationBins)
-
-            let blankId = config.tdtConfig.blankId  // 8192 for v3 models
             var blankMask = (label == blankId)  // Is this a blank (silence) token?
 
             let currentTimeIndex = timeIndices
@@ -278,9 +294,7 @@ internal struct TdtDecoderV3: Sendable {
             // - Avoids expensive LSTM computations for silence frames
             // - Maintains linguistic continuity across gaps in speech
             // - Speeds up processing by 2-3x for audio with silence
-            var innerLoopCount = 0
             while advanceMask {
-                innerLoopCount += 1
                 try Task.checkCancellation()
                 timeIndicesCurrentLabels = timeIndices
 
@@ -296,11 +310,23 @@ internal struct TdtDecoderV3: Sendable {
                     inputProvider: jointInput,
                     tokenIdBacking: tokenIdBacking,
                     tokenProbBacking: tokenProbBacking,
-                    durationBacking: durationBacking
+                    durationBacking: durationBacking,
+                    needsTopK: needsTopK
                 )
 
                 label = innerDecision.token
                 score = TdtDurationMapping.clampProbability(innerDecision.probability)
+
+                Self.tokenLanguageFilter(
+                    label: &label,
+                    score: &score,
+                    topKIds: innerDecision.topKIds,
+                    topKLogits: innerDecision.topKLogits,
+                    language: language,
+                    vocabulary: vocabulary,
+                    blankId: blankId
+                )
+
                 duration = try TdtDurationMapping.mapDurationBin(
                     innerDecision.durationBin, durationBins: config.tdtConfig.durationBins)
 
@@ -432,11 +458,12 @@ internal struct TdtDecoderV3: Sendable {
                     inputProvider: jointInput,
                     tokenIdBacking: tokenIdBacking,
                     tokenProbBacking: tokenProbBacking,
-                    durationBacking: durationBacking
+                    durationBacking: durationBacking,
+                    needsTopK: needsTopK
                 )
 
-                let token = decision.token
-                let score = TdtDurationMapping.clampProbability(decision.probability)
+                var token = decision.token
+                var score = TdtDurationMapping.clampProbability(decision.probability)
 
                 // Also get duration for proper timestamp calculation
                 let duration = try TdtDurationMapping.mapDurationBin(
@@ -502,7 +529,10 @@ internal struct TdtDecoderV3: Sendable {
             isLastChunk: isLastChunk
         )
 
-        // No filtering at decoder level - let post-processing handle deduplication
+        // Script filtering runs per step in the main and inner decode loops.
+        // The last-chunk flush loop was empirically blank/punct-dominated on
+        // the issue #512 Polish samples (0 filter swaps across 7 clips), so no
+        // filter call is needed here; post-processing handles deduplication.
         return hypothesis
     }
 
@@ -526,6 +556,42 @@ internal struct TdtDecoderV3: Sendable {
     }
 
     // MARK: - Private Helper Methods
+
+    /// Replace `label`/`score` with the best right-language top-K candidate
+    /// when the joint's top-1 token is in the wrong language for `language`.
+    /// No-op when inputs are missing or the prediction is already right.
+    ///
+    /// Blanks are excluded from replacement — substituting silence via top-K
+    /// would hallucinate speech, and some vocabs map blankId to an empty string
+    /// which would otherwise slip through the `!matches(...)` guard.
+    private static func tokenLanguageFilter(
+        label: inout Int,
+        score: inout Float,
+        topKIds: [Int]?,
+        topKLogits: [Float]?,
+        language: Language?,
+        vocabulary: [Int: String]?,
+        blankId: Int
+    ) {
+        guard label != blankId,
+            let language = language,
+            let vocab = vocabulary,
+            let topKIds = topKIds,
+            let topKLogits = topKLogits,
+            !topKIds.isEmpty,
+            let tokenText = vocab[label],
+            !TokenLanguageFilter.matches(tokenText, script: language.script),
+            let filtered = TokenLanguageFilter.filterTopK(
+                topKIds: topKIds,
+                topKLogits: topKLogits,
+                vocabulary: vocab,
+                preferredScript: language.script
+            )
+        else { return }
+
+        label = filtered.tokenId
+        score = TdtDurationMapping.clampProbability(filtered.probability)
+    }
 
     internal func extractEncoderTimeStep(
         _ encoderOutput: MLMultiArray, timeIndex: Int
@@ -607,27 +673,4 @@ internal struct TdtDecoderV3: Sendable {
         }
         return value
     }
-}
-
-extension MLMultiArray {
-    /// Fast L2 norm (float32 optimized)
-    func l2Normf() -> Float {
-        let n = self.count
-        if self.dataType == .float32 {
-            return self.dataPointer.withMemoryRebound(to: Float.self, capacity: n) { ptr in
-                var ss: Float = 0
-                vDSP_svesq(ptr, 1, &ss, vDSP_Length(n))
-                return sqrtf(ss)
-            }
-        } else {
-            var ss: Float = 0
-            for i in 0..<n {
-                let v = self[i].floatValue
-                ss += v * v
-            }
-            return sqrtf(ss)
-        }
-    }
-    /// "BxTxH" style string
-    var shapeString: String { shape.map { "\($0.intValue)" }.joined(separator: "x") }
 }

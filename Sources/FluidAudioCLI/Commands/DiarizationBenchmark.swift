@@ -438,8 +438,8 @@ enum StreamDiarizationBenchmark {
             diarizerManager.initialize(models: models)
 
             // Configure streaming manager
-            diarizerManager.speakerManager.speakerThreshold = assignmentThreshold
-            diarizerManager.speakerManager.embeddingThreshold = updateThreshold
+            await diarizerManager.speakerManager.setSpeakerThreshold(assignmentThreshold)
+            await diarizerManager.speakerManager.setEmbeddingThreshold(updateThreshold)
 
             // Process in chunks
             let samplesPerChunk = Int(chunkSeconds * 16000)
@@ -472,9 +472,8 @@ enum StreamDiarizationBenchmark {
 
                 // Process chunk and track timing
                 let inferenceStart = Date()
-                let chunkResult = try autoreleasepool {
-                    try diarizerManager.performCompleteDiarization(paddedChunk, atTime: chunkStartTime)
-                }
+                let chunkResult = try await diarizerManager.performCompleteDiarization(
+                    paddedChunk, atTime: chunkStartTime)
                 let inferenceTime = Date().timeIntervalSince(inferenceStart)
 
                 // Track chunk processing latency
@@ -516,11 +515,12 @@ enum StreamDiarizationBenchmark {
                     let processedDuration = Double(position) / 16000.0
                     let rtfx = processedDuration / elapsed
 
+                    let currentSpeakerCount = await diarizerManager.speakerManager.speakerCount
                     logger.info(
                         String(
                             format: "    [Chunk %3d] %.1f%% | RTFx: %.1fx | Speakers: %d | Latency: %.3fs",
                             chunkIndex, progress, rtfx,
-                            diarizerManager.speakerManager.speakerCount,
+                            currentSpeakerCount,
                             chunkLatency))
                 }
 
@@ -565,6 +565,8 @@ enum StreamDiarizationBenchmark {
             // Calculate total inference time
             let totalInferenceTime = totalSegmentationTime + totalEmbeddingTime + totalClusteringTime
 
+            let finalSpeakerCount = await diarizerManager.speakerManager.speakerCount
+
             return BenchmarkResult(
                 meetingName: meetingName,
                 der: metrics.der,
@@ -575,7 +577,7 @@ enum StreamDiarizationBenchmark {
                 rtfx: Float(finalRTFx),
                 processingTime: totalElapsed,
                 chunksProcessed: chunkIndex,
-                detectedSpeakers: diarizerManager.speakerManager.speakerCount,
+                detectedSpeakers: finalSpeakerCount,
                 groundTruthSpeakers: AMIParser.getGroundTruthSpeakerCount(for: meetingName),
                 speakerFragmentation: fragmentation,
                 latency90th: latency90th,

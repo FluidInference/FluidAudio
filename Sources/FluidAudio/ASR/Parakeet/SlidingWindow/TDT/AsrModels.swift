@@ -15,7 +15,7 @@ public enum AsrModelVersion: Sendable {
     var repo: Repo {
         switch self {
         case .v2: return .parakeetV2
-        case .v3: return .parakeet
+        case .v3: return .parakeetV3
         case .tdtCtc110m: return .parakeetTdtCtc110m
         case .ctcZhCn: return .parakeetCtcZhCn
         case .tdtJa: return .parakeetJa
@@ -143,7 +143,10 @@ extension AsrModels {
 
     private static func inferredVersion(from directory: URL) -> AsrModelVersion? {
         let directoryPath = directory.path.lowercased()
-        let knownVersions: [AsrModelVersion] = [.tdtCtc110m, .v2, .v3]
+        // `.ctcZhCn` is intentionally absent: it is rejected at the top of
+        // `load(...)` and has its own dedicated loader (`CtcZhCnManager`), so
+        // inference callers should never hit this path with a ctcZhCn dir.
+        let knownVersions: [AsrModelVersion] = [.tdtCtc110m, .v2, .v3, .tdtJa]
 
         for version in knownVersions {
             if directoryPath.contains(version.repo.folderName.lowercased()) {
@@ -168,6 +171,17 @@ extension AsrModels {
                 joint: ModelNames.TDTJa.jointFile,
                 vocabulary: ModelNames.TDTJa.vocabularyFile
             )
+        case .v3:
+            // v3 uses JointDecisionv3 exclusively. Top-K outputs (`top_k_ids`,
+            // `top_k_logits`) are always computed by the joint graph, but
+            // Swift-side extraction is gated by `needsTopK` in
+            // `TdtModelInference.runJointPrepared` so callers that don't pass
+            // `language:` pay no extra allocations per step.
+            return (
+                decoder: Names.decoderFile,
+                joint: Names.jointV3File,
+                vocabulary: Names.vocabularyFile
+            )
         default:
             return (
                 decoder: Names.decoderFile,
@@ -182,6 +196,8 @@ extension AsrModels {
         switch version {
         case .tdtJa:
             return ModelNames.TDTJa.requiredModels
+        case .v3:
+            return Names.requiredModelsV3
         default:
             return version.hasFusedEncoder ? Names.requiredModelsFused : Names.requiredModels
         }
@@ -252,20 +268,38 @@ extension AsrModels {
         // Get version-specific file names
         let fileNames = getModelFileNames(version: version)
 
-        // Load decoder and joint as well
-        let decoderAndJoint = try await DownloadUtils.loadModels(
+        // Load decoder first
+        let decoderModels = try await DownloadUtils.loadModels(
             version.repo,
-            modelNames: [fileNames.decoder, fileNames.joint],
+            modelNames: [fileNames.decoder],
             directory: parentDirectory,
             computeUnits: config.computeUnits,
             progressHandler: progressHandler
         )
 
-        guard let decoderModel = decoderAndJoint[fileNames.decoder],
-            let jointModel = decoderAndJoint[fileNames.joint]
-        else {
-            throw AsrModelsError.loadingFailed("Failed to load decoder or joint model")
+        guard let decoderModel = decoderModels[fileNames.decoder] else {
+            throw AsrModelsError.loadingFailed("Failed to load decoder model")
         }
+
+        // Load the joint model. For v3 this is JointDecisionv3.mlmodelc (with
+        // top-K outputs); for v2 / 110m / tdtJa it is the version-specific
+        // JointDecision.mlmodelc.
+        let jointModels = try await DownloadUtils.loadModels(
+            version.repo,
+            modelNames: [fileNames.joint],
+            directory: parentDirectory,
+            computeUnits: config.computeUnits,
+            progressHandler: progressHandler
+        )
+
+        guard let jointModel = jointModels[fileNames.joint] else {
+            let hint =
+                version == .v3
+                ? " (required for v3; delete the models directory to force a fresh download)"
+                : ""
+            throw AsrModelsError.loadingFailed("Failed to load joint model \(fileNames.joint)\(hint)")
+        }
+        logger.info("Loaded \(fileNames.joint)")
 
         // [Beta] Optionally load CTC head model for custom vocabulary.
         // Supports two paths:

@@ -35,7 +35,7 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertEqual(Repo.qwen3Asr.subPath, "f32")
         XCTAssertEqual(Repo.qwen3AsrInt8.subPath, "int8")
         XCTAssertNil(Repo.vad.subPath)
-        XCTAssertNil(Repo.parakeet.subPath)
+        XCTAssertNil(Repo.parakeetV3.subPath)
     }
 
     // MARK: - Required Models

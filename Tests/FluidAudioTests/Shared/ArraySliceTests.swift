@@ -119,13 +119,13 @@ final class ArraySliceTests: XCTestCase {
 
         // Test with full array
         let arrayStart = Date()
-        _ = try diarizer.performCompleteDiarization(fullAudio, sampleRate: 16000)
+        _ = try await diarizer.performCompleteDiarization(fullAudio, sampleRate: 16000)
         let arrayTime = Date().timeIntervalSince(arrayStart)
 
         // Test with ArraySlice (no copy needed)
         let slice = fullAudio[80000..<400000]  // 20 seconds from middle
         let sliceStart = Date()
-        _ = try diarizer.performCompleteDiarization(slice, sampleRate: 16000)
+        _ = try await diarizer.performCompleteDiarization(slice, sampleRate: 16000)
         let sliceTime = Date().timeIntervalSince(sliceStart)
 
         print("Array processing time: \(arrayTime)s")
