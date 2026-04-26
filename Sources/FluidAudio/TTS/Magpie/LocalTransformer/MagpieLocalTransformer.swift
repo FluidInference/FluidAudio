@@ -47,16 +47,31 @@ public struct MagpieLocalTransformer: Sendable {
             b: weights.saQkvWeight, bRows: 3 * D, bCols: D,
             out: &qkv)
 
-        // Split QKV into Q, K, V (each T × D)
+        // Split QKV into Q, K, V (each T × D). Direct memcpy from packed (T, 3D)
+        // buffer; no intermediate Swift sub-array allocations per row.
         var q = Swift.Array<Float>(repeating: 0, count: T * D)
         var k = Swift.Array<Float>(repeating: 0, count: T * D)
         var v = Swift.Array<Float>(repeating: 0, count: T * D)
-        for t in 0..<T {
-            let srcOff = t * 3 * D
-            let dstOff = t * D
-            memcpy(&q[dstOff], Swift.Array(qkv[srcOff..<(srcOff + D)]), D * MemoryLayout<Float>.size)
-            memcpy(&k[dstOff], Swift.Array(qkv[(srcOff + D)..<(srcOff + 2 * D)]), D * MemoryLayout<Float>.size)
-            memcpy(&v[dstOff], Swift.Array(qkv[(srcOff + 2 * D)..<(srcOff + 3 * D)]), D * MemoryLayout<Float>.size)
+        let bytesPerRow = D * MemoryLayout<Float>.size
+        qkv.withUnsafeBufferPointer { srcPtr in
+            q.withUnsafeMutableBufferPointer { qPtr in
+                k.withUnsafeMutableBufferPointer { kPtr in
+                    v.withUnsafeMutableBufferPointer { vPtr in
+                        guard let src = srcPtr.baseAddress,
+                            let qb = qPtr.baseAddress,
+                            let kb = kPtr.baseAddress,
+                            let vb = vPtr.baseAddress
+                        else { return }
+                        for t in 0..<T {
+                            let srcRow = src.advanced(by: t * 3 * D)
+                            let dstOff = t * D
+                            memcpy(qb.advanced(by: dstOff), srcRow, bytesPerRow)
+                            memcpy(kb.advanced(by: dstOff), srcRow.advanced(by: D), bytesPerRow)
+                            memcpy(vb.advanced(by: dstOff), srcRow.advanced(by: 2 * D), bytesPerRow)
+                        }
+                    }
+                }
+            }
         }
 
         // attn = Q @ Kᵀ * scale  (T × T)
@@ -190,25 +205,34 @@ public struct MagpieLocalTransformer: Sendable {
         let D = weights.localDim
         var out = Swift.Array<Float>(repeating: 0, count: T * D)
         let eps: Float = 1e-5
-        for t in 0..<T {
-            let row = Swift.Array(x[(t * D)..<(t * D + D)])
-            var mean: Float = 0
-            vDSP_meanv(row, 1, &mean, vDSP_Length(D))
-            // Variance
-            var negMean = -mean
-            var centered = Swift.Array<Float>(repeating: 0, count: D)
-            vDSP_vsadd(row, 1, &negMean, &centered, 1, vDSP_Length(D))
-            var variance: Float = 0
-            var sqr = Swift.Array<Float>(repeating: 0, count: D)
-            vDSP_vsq(centered, 1, &sqr, 1, vDSP_Length(D))
-            vDSP_meanv(sqr, 1, &variance, vDSP_Length(D))
-            let invStd = 1.0 / sqrt(variance + eps)
-            var invStdVar = invStd
-            var normed = Swift.Array<Float>(repeating: 0, count: D)
-            vDSP_vsmul(centered, 1, &invStdVar, &normed, 1, vDSP_Length(D))
-            // Multiply by weight elementwise.
-            vDSP_vmul(normed, 1, weight, 1, &normed, 1, vDSP_Length(D))
-            for i in 0..<D { out[t * D + i] = normed[i] }
+        x.withUnsafeBufferPointer { xPtr in
+            weight.withUnsafeBufferPointer { wPtr in
+                out.withUnsafeMutableBufferPointer { outPtr in
+                    guard let xBase = xPtr.baseAddress,
+                        let wBase = wPtr.baseAddress,
+                        let outBase = outPtr.baseAddress
+                    else { return }
+                    for t in 0..<T {
+                        let row = xBase.advanced(by: t * D)
+                        let outRow = outBase.advanced(by: t * D)
+                        // mean = avg(row)
+                        var mean: Float = 0
+                        vDSP_meanv(row, 1, &mean, vDSP_Length(D))
+                        // outRow = row - mean (in-place via vsadd with -mean)
+                        var negMean = -mean
+                        vDSP_vsadd(row, 1, &negMean, outRow, 1, vDSP_Length(D))
+                        // variance = mean(centered^2). Use vDSP_measqv for fused
+                        // square + mean over the centered buffer (one pass).
+                        var meanSq: Float = 0
+                        vDSP_measqv(outRow, 1, &meanSq, vDSP_Length(D))
+                        var invStd = 1.0 / sqrt(meanSq + eps)
+                        // outRow = centered * invStd
+                        vDSP_vsmul(outRow, 1, &invStd, outRow, 1, vDSP_Length(D))
+                        // outRow *= weight (elementwise).
+                        vDSP_vmul(outRow, 1, wBase, 1, outRow, 1, vDSP_Length(D))
+                    }
+                }
+            }
         }
         return out
     }
@@ -281,16 +305,45 @@ public struct MagpieLocalTransformer: Sendable {
 
     /// Apply tanh-approximation GELU in-place.
     /// `y = 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))`
+    ///
+    /// Vectorized via vDSP for the polynomial inner term and `vvtanhf` for the
+    /// elementwise tanh. Avoids the per-element `tanhf` call from the scalar loop.
     private func applyGeluTanh(into buffer: inout [Float]) {
         let n = buffer.count
-        let sqrt2pi: Float = 0.7978845608
-        let coef: Float = 0.044715
-        for i in 0..<n {
-            let x = buffer[i]
-            let x3 = x * x * x
-            let inner = sqrt2pi * (x + coef * x3)
-            let t = tanhf(inner)
-            buffer[i] = 0.5 * x * (1 + t)
+        guard n > 0 else { return }
+        var sqrt2pi: Float = 0.7978845608
+        var coef: Float = 0.044715
+        var half: Float = 0.5
+        var one: Float = 1.0
+        var inner = Swift.Array<Float>(repeating: 0, count: n)
+        var tanhOut = Swift.Array<Float>(repeating: 0, count: n)
+        buffer.withUnsafeMutableBufferPointer { buf in
+            inner.withUnsafeMutableBufferPointer { innerBuf in
+                tanhOut.withUnsafeMutableBufferPointer { tanhBuf in
+                    guard let xPtr = buf.baseAddress,
+                        let inPtr = innerBuf.baseAddress,
+                        let tPtr = tanhBuf.baseAddress
+                    else { return }
+                    // inner = x * x  (then x^3 = inner * x)
+                    vDSP_vsq(xPtr, 1, inPtr, 1, vDSP_Length(n))
+                    vDSP_vmul(inPtr, 1, xPtr, 1, inPtr, 1, vDSP_Length(n))
+                    // inner = coef * x^3
+                    vDSP_vsmul(inPtr, 1, &coef, inPtr, 1, vDSP_Length(n))
+                    // inner = x + coef*x^3
+                    vDSP_vadd(inPtr, 1, xPtr, 1, inPtr, 1, vDSP_Length(n))
+                    // inner *= sqrt(2/π)
+                    vDSP_vsmul(inPtr, 1, &sqrt2pi, inPtr, 1, vDSP_Length(n))
+                    // tanhOut = tanh(inner)
+                    var nVar = Int32(n)
+                    vvtanhf(tPtr, inPtr, &nVar)
+                    // tanhOut = 1 + tanh(inner)
+                    vDSP_vsadd(tPtr, 1, &one, tPtr, 1, vDSP_Length(n))
+                    // tanhOut *= x
+                    vDSP_vmul(tPtr, 1, xPtr, 1, tPtr, 1, vDSP_Length(n))
+                    // x = 0.5 * tanhOut
+                    vDSP_vsmul(tPtr, 1, &half, xPtr, 1, vDSP_Length(n))
+                }
+            }
         }
     }
 }
