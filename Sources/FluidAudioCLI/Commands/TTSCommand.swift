@@ -146,6 +146,8 @@ public struct TTS {
         var cloneVoicePath: String? = nil
         var voiceFilePath: String? = nil
         var saveVoicePath: String? = nil
+        var pocketLanguage: PocketTtsLanguage = .english
+        var pocketQuantization: PocketTtsQuantization = .allFp16
         // CosyVoice3 Phase 1 parity harness args.
         var cv3FixturePath: String? = nil
         var cv3ModelsDir: String? = nil
@@ -321,6 +323,58 @@ public struct TTS {
                     saveVoicePath = arguments[i + 1]
                     i += 1
                 }
+            case "--language":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1]
+                    if let parsed = PocketTtsLanguage(rawValue: raw) {
+                        pocketLanguage = parsed
+                    } else {
+                        let supported = PocketTtsLanguage.allCases
+                            .map { $0.rawValue }
+                            .joined(separator: ", ")
+                        logger.warning(
+                            "Unknown PocketTTS language '\(raw)'. Supported: \(supported). Falling back to english."
+                        )
+                    }
+                    i += 1
+                }
+            case "--quantize-profile":
+                if i + 1 < arguments.count {
+                    let value = arguments[i + 1].lowercased()
+                    switch value {
+                    case "fp16", "all-fp16", "all_fp16":
+                        pocketQuantization = .allFp16
+                    case "safe-int8", "safe_int8", "safe":
+                        pocketQuantization = .safeInt8
+                    case "aggressive-int8", "aggressive_int8", "aggressive":
+                        pocketQuantization = .aggressiveInt8
+                    default:
+                        logger.warning(
+                            "Unknown --quantize-profile '\(value)'. Supported: fp16, safe-int8, aggressive-int8. Using fp16."
+                        )
+                    }
+                    i += 1
+                }
+            case "--quantize-cond":
+                if i + 1 < arguments.count {
+                    pocketQuantization.condStep = parsePrecision(arguments[i + 1], flag: "--quantize-cond")
+                    i += 1
+                }
+            case "--quantize-flowlm":
+                if i + 1 < arguments.count {
+                    pocketQuantization.flowlmStep = parsePrecision(arguments[i + 1], flag: "--quantize-flowlm")
+                    i += 1
+                }
+            case "--quantize-flow":
+                if i + 1 < arguments.count {
+                    pocketQuantization.flowDecoder = parsePrecision(arguments[i + 1], flag: "--quantize-flow")
+                    i += 1
+                }
+            case "--quantize-mimi":
+                if i + 1 < arguments.count {
+                    pocketQuantization.mimiDecoder = parsePrecision(arguments[i + 1], flag: "--quantize-mimi")
+                    i += 1
+                }
             default:
                 if text == nil {
                     text = argument
@@ -432,10 +486,16 @@ public struct TTS {
         }
 
         if backend == .pocketTts {
+            // `--models-dir` (also used by cosyvoice3) overrides the default
+            // PocketTTS cache location. Useful for smoke-testing locally
+            // converted v2 packs without uploading to HuggingFace first.
+            let pocketDirOverride = cv3ModelsDir.map { URL(fileURLWithPath: $0) }
             await runPocketTts(
                 text: text, output: output, voice: voice, deEss: deEss,
                 metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
-                voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath)
+                voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath,
+                language: pocketLanguage, quantization: pocketQuantization,
+                directory: pocketDirOverride)
             return
         }
 
@@ -675,17 +735,45 @@ public struct TTS {
         }
     }
 
+    private static func parsePrecision(_ raw: String, flag: String) -> PocketTtsModelPrecision {
+        switch raw.lowercased() {
+        case "fp16", "f16", "16":
+            return .fp16
+        case "int8", "i8", "8":
+            return .int8
+        default:
+            logger.warning(
+                "Unknown precision '\(raw)' for \(flag). Supported: fp16, int8. Using fp16."
+            )
+            return .fp16
+        }
+    }
+
     private static func runPocketTts(
         text: String, output: String, voice: String, deEss: Bool,
         metricsPath: String?, cloneVoicePath: String?,
-        voiceFilePath: String?, saveVoicePath: String?
+        voiceFilePath: String?, saveVoicePath: String?,
+        language: PocketTtsLanguage,
+        quantization: PocketTtsQuantization = .allFp16,
+        directory: URL? = nil
     ) async {
         do {
             let tStart = Date()
             let pocketVoice =
                 voice == TtsConstants.recommendedVoice
                 ? PocketTtsConstants.defaultVoice : voice
-            let manager = PocketTtsManager(defaultVoice: pocketVoice)
+            let manager = PocketTtsManager(
+                defaultVoice: pocketVoice,
+                language: language,
+                quantization: quantization,
+                directory: directory)
+            logger.info("PocketTTS language: \(language.rawValue)")
+            logger.info(
+                "PocketTTS quantization: cond=\(quantization.condStep.rawValue), flowlm=\(quantization.flowlmStep.rawValue), flow=\(quantization.flowDecoder.rawValue), mimi=\(quantization.mimiDecoder.rawValue)"
+            )
+            if let dir = directory {
+                logger.info("PocketTTS models dir override: \(dir.path)")
+            }
 
             let tLoad0 = Date()
             try await manager.initialize()
@@ -841,6 +929,27 @@ public struct TTS {
               --clone-voice FILE   Clone voice from audio file (WAV, MP3, M4A, etc.)
               --voice-file FILE    Load previously saved voice .bin file
               --save-voice FILE    Save cloned voice to .bin file for later use
+
+            PocketTTS Language Packs:
+              --language ID        Language pack (default: english)
+                                   Supported: english, french_24l,
+                                   german, german_24l, italian, italian_24l,
+                                   portuguese, portuguese_24l, spanish, spanish_24l
+                                   Note: French is 24-layer only (no 6-layer pack upstream)
+
+            PocketTTS Quantization (per-submodel int8/fp16):
+              --quantize-profile P  Bundle preset (fp16 | safe-int8 | aggressive-int8)
+                                    fp16            : reference quality (default)
+                                    safe-int8       : cond+flowlm+mimi int8, flow fp16
+                                                      (~75% smaller, no audible drift)
+                                    aggressive-int8 : all four int8
+                                                      (~74% smaller, audible drift on flow)
+              --quantize-cond P     Override cond_step precision (fp16 | int8)
+              --quantize-flowlm P   Override flowlm_step precision (fp16 | int8)
+              --quantize-flow P     Override flow_decoder precision (fp16 | int8)
+              --quantize-mimi P     Override mimi_decoder precision (fp16 | int8)
+                                    Per-submodel flags compose with --quantize-profile;
+                                    apply them after the profile to refine.
 
             Lexicon file format:
               # Comments start with #

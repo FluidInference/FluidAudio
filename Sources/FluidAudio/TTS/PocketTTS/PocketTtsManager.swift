@@ -20,18 +20,40 @@ public actor PocketTtsManager {
     private var defaultVoice: String
     private var isInitialized = false
 
+    /// The language pack this manager loads. Immutable for the lifetime of the
+    /// manager — to switch languages, create a new `PocketTtsManager`.
+    public nonisolated let language: PocketTtsLanguage
+
+    /// Per-submodel quantization configuration. Immutable for the lifetime
+    /// of the manager — to change quantization, create a new manager.
+    public nonisolated let quantization: PocketTtsQuantization
+
     /// Creates a new PocketTTS manager.
     ///
     /// - Parameters:
     ///   - defaultVoice: Default voice identifier (default: "alba").
+    ///   - language: Which upstream language pack to load. Defaults to
+    ///     `.english` for backward compatibility.
+    ///   - quantization: Per-submodel precision (fp16/int8). Defaults to
+    ///     all-fp16. Each of the four submodels can be independently
+    ///     swapped — see ``PocketTtsQuantization`` for presets and quality
+    ///     tradeoffs.
     ///   - directory: Optional override for the base cache directory.
     ///     When `nil`, uses the default platform cache location.
     public init(
         defaultVoice: String = PocketTtsConstants.defaultVoice,
+        language: PocketTtsLanguage = .english,
+        quantization: PocketTtsQuantization = .allFp16,
         directory: URL? = nil
     ) {
-        self.modelStore = PocketTtsModelStore(directory: directory)
+        self.modelStore = PocketTtsModelStore(
+            language: language,
+            quantization: quantization,
+            directory: directory
+        )
         self.defaultVoice = defaultVoice
+        self.language = language
+        self.quantization = quantization
     }
 
     public var isAvailable: Bool {

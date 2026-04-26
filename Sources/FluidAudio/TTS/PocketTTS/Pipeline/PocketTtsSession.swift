@@ -58,6 +58,9 @@ public actor PocketTtsSession {
     private let stepModel: MLModel
     private let flowModel: MLModel
     private let mimiModel: MLModel
+    private let mimiSchema: PocketTtsMimiSchema
+    private let condLayerKeys: PocketTtsLayerKeys
+    private let flowlmLayerKeys: PocketTtsLayerKeys
 
     // Persistent state
     private let voiceKVSnapshot: PocketTtsSynthesizer.KVCacheState
@@ -80,6 +83,9 @@ public actor PocketTtsSession {
         stepModel: MLModel,
         flowModel: MLModel,
         mimiModel: MLModel,
+        mimiSchema: PocketTtsMimiSchema,
+        condLayerKeys: PocketTtsLayerKeys,
+        flowlmLayerKeys: PocketTtsLayerKeys,
         bosEmb: MLMultiArray,
         temperature: Float,
         seed: UInt64
@@ -91,6 +97,9 @@ public actor PocketTtsSession {
         self.stepModel = stepModel
         self.flowModel = flowModel
         self.mimiModel = mimiModel
+        self.mimiSchema = mimiSchema
+        self.condLayerKeys = condLayerKeys
+        self.flowlmLayerKeys = flowlmLayerKeys
         self.bosEmb = bosEmb
         self.temperature = temperature
         self.rng = SeededRNG(seed: seed)
@@ -172,7 +181,8 @@ public actor PocketTtsSession {
         // Clone voice KV snapshot and prefill text tokens only
         var kvState = try PocketTtsSynthesizer.cloneKVCacheState(voiceKVSnapshot)
         kvState = try await PocketTtsSynthesizer.prefillKVCacheText(
-            state: kvState, textEmbeddings: textEmbeddings, model: condModel
+            state: kvState, textEmbeddings: textEmbeddings, model: condModel,
+            layerKeys: condLayerKeys
         )
 
         // Generation loop
@@ -190,7 +200,8 @@ public actor PocketTtsSession {
                 sequence: sequence,
                 bosEmb: bosEmb,
                 state: &localKV,
-                model: stepModel
+                model: stepModel,
+                layerKeys: flowlmLayerKeys
             )
             kvState = localKV
 
@@ -219,7 +230,8 @@ public actor PocketTtsSession {
             let frameSamples = try await PocketTtsSynthesizer.runMimiDecoder(
                 latent: latent,
                 state: &localMimi,
-                model: mimiModel
+                model: mimiModel,
+                schema: mimiSchema
             )
             mimiState = localMimi
 
