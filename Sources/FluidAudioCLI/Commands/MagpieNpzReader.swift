@@ -24,7 +24,7 @@ public enum MagpieNpzReader {
         return try parse(archive: data, sourceLabel: url.lastPathComponent)
     }
 
-    public static func parse(archive: Data, sourceLabel: String) throws -> [String: NpyReader.Array] {
+    private static func parse(archive: Data, sourceLabel: String) throws -> [String: NpyReader.Array] {
         let entries = try locateEntries(in: archive, sourceLabel: sourceLabel)
         var out: [String: NpyReader.Array] = [:]
         out.reserveCapacity(entries.count)

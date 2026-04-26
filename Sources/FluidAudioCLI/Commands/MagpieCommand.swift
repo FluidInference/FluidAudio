@@ -464,10 +464,8 @@ public enum MagpieCommand {
                 exit(1)
             }
 
-            let manager = try await MagpieTtsManager.downloadAndCreate(languages: [language])
-            _ = manager
-            // Tokenizer is actor-internal; we construct a second tokenizer view against the
-            // same on-disk tokenizer directory for parity.
+            // Tokenizer is actor-internal; build one against the on-disk tokenizer
+            // directory for parity (no need to load the CoreML graph).
             let repoDir = try await MagpieResourceDownloader.ensureAssets(languages: [language])
             let tokenizerDir = MagpieResourceDownloader.tokenizerDirectory(in: repoDir)
             let tok = MagpieTokenizer(tokenizerDir: tokenizerDir, eosId: 0)
