@@ -95,7 +95,6 @@ public enum MagpieConstants {
         // Constants
         public static let constantsDir = "constants"
         public static let constantsJson = "constants.json"
-        public static let speakerInfoJson = "speaker_info.json"
         public static let tokenizerMetadataJson = "tokenizer_metadata.json"
 
         public static func speakerEmbedding(index: Int) -> String { "speaker_\(index).npy" }

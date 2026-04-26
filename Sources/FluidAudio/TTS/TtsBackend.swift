@@ -6,6 +6,4 @@ public enum TtsBackend: Sendable {
     case kokoro
     /// PocketTTS — flow-matching language model, autoregressive streaming synthesis.
     case pocketTts
-    /// Magpie TTS Multilingual 357M — encoder-decoder transformer + NanoCodec, 22 kHz, 8 languages.
-    case magpie
 }

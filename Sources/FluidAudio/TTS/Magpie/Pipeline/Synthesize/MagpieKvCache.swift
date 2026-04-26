@@ -49,7 +49,6 @@ public final class MagpieKvCache {
     ]
 
     public static let decoderHiddenKey = "input"
-    public static let decoderLogitsKey = "var_2129"
 
     public private(set) var cachesK: [MLMultiArray]
     public private(set) var cachesV: [MLMultiArray]

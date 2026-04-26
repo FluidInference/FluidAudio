@@ -275,15 +275,4 @@ public enum NpyReader {
 
         return Float(bitPattern: result)
     }
-
-    /// Also read int32 arrays as `[Int32]` (used for tokenizer exports).
-    static func readInt32(from url: URL) throws -> (shape: [Int], data: [Int32]) {
-        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-        let parsed = try parse(data: data, sourceLabel: url.lastPathComponent)
-        guard parsed.dtype == .int32 else {
-            throw MagpieError.invalidNpyFile(
-                path: url.lastPathComponent, reason: "expected int32, got \(parsed.dtype)")
-        }
-        return (parsed.shape, parsed.data.map { Int32($0) })
-    }
 }
