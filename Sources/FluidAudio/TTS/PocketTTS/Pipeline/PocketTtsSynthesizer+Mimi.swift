@@ -13,80 +13,62 @@ extension PocketTtsSynthesizer {
         var tensors: [String: MLMultiArray]
     }
 
-    /// Create the initial Mimi decoder state by zero-initialization driven
-    /// purely from the discovered model schema.
+    /// Create the initial Mimi decoder state from the constants directory.
     ///
-    /// Mimi's streaming state is "all-zero past" with two semantic exceptions:
-    /// the `*_first` boolean scalars must be 1.0 on the very first frame so
-    /// the decoder takes the cold-start convolution path. All other state
-    /// tensors (caches, partials, offsets) are zero-initialized.
-    ///
-    /// This replaces the previous manifest-driven `.bin` loader. The shapes
-    /// come from the CoreML model description itself, so v1 and v2 packs
-    /// (which differ in mimi attention cache layout) work uniformly.
-    static func loadMimiInitialState(schema: PocketTtsMimiSchema) throws -> MimiState {
-        var tensors: [String: MLMultiArray] = [:]
-        let dtype = schema.stateInputDataType
-        let elementSize = mimiElementSize(for: dtype)
+    /// Loads pre-computed initial state tensors from `.bin` files,
+    /// using `manifest.json` for shape metadata.
+    static func loadMimiInitialState(from repoDirectory: URL) throws -> MimiState {
+        let constantsDir = repoDirectory.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
+        let stateDir = constantsDir.appendingPathComponent("mimi_init_state")
+        let manifestURL = constantsDir.appendingPathComponent("manifest.json")
 
-        for (inputName, _) in schema.stateMapping {
-            guard let shape = schema.stateInputShapes[inputName], !shape.isEmpty else {
-                throw PocketTTSError.processingFailed(
-                    "Mimi state input `\(inputName)` has no shape in schema")
+        // Parse manifest for mimi_init_state shapes
+        let manifestData = try Data(contentsOf: manifestURL)
+        guard let manifest = try JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
+            let mimiManifest = manifest["mimi_init_state"] as? [String: Any]
+        else {
+            throw PocketTTSError.processingFailed("Failed to parse mimi_init_state from manifest.json")
+        }
+
+        var tensors: [String: MLMultiArray] = [:]
+
+        for (name, info) in mimiManifest {
+            guard let infoDict = info as? [String: Any],
+                let shapeArray = infoDict["shape"] as? [Int],
+                let byteCount = infoDict["bytes"] as? Int
+            else {
+                continue
             }
 
-            let totalCount = shape.reduce(1, *)
-            let nsShape = shape.map { NSNumber(value: $0) }
-            let array: MLMultiArray
-            if totalCount == 0 {
-                // CoreML's MLE5 input binder rejects buffers with NULL data
-                // pointers (which is what MLMultiArray returns for zero-element
-                // shapes like `[1, 128, 0]`). Allocate a 1-byte sentinel buffer
-                // and hand it to MLMultiArray via the dataPointer initializer
-                // so the model gets a valid non-NULL pointer.
-                let sentinel = UnsafeMutableRawPointer.allocate(
-                    byteCount: max(elementSize, 1), alignment: 64)
-                memset(sentinel, 0, max(elementSize, 1))
-                let strides = mimiContiguousStrides(for: shape).map { NSNumber(value: $0) }
-                array = try MLMultiArray(
-                    dataPointer: sentinel,
-                    shape: nsShape,
-                    dataType: dtype,
-                    strides: strides,
-                    deallocator: { ptr in ptr.deallocate() })
-            } else {
-                array = try MLMultiArray(shape: nsShape, dataType: dtype)
-                memset(array.dataPointer, 0, totalCount * elementSize)
-                // `*_first` scalars signal the first-frame cold-start path.
-                if inputName.hasSuffix("_first") {
-                    array[0] = NSNumber(value: Float(1))
+            let shape = shapeArray.map { NSNumber(value: $0) }
+            let array = try MLMultiArray(shape: shape, dataType: .float32)
+
+            // Some tensors (e.g., res{0,1,2}_conv1_prev) have zero-length shapes
+            // and are empty pass-throughs — skip loading binary data for those.
+            if byteCount > 0 && !shapeArray.contains(0) {
+                let binURL = stateDir.appendingPathComponent("\(name).bin")
+                let data = try Data(contentsOf: binURL)
+                let floatCount = byteCount / MemoryLayout<Float>.size
+                let dstPtr = array.dataPointer.bindMemory(to: Float.self, capacity: floatCount)
+                data.withUnsafeBytes { rawBuffer in
+                    let srcPtr = rawBuffer.bindMemory(to: Float.self)
+                    dstPtr.update(from: srcPtr.baseAddress!, count: floatCount)
                 }
             }
 
-            tensors[inputName] = array
+            tensors[name] = array
+        }
+
+        // Ensure offset scalars exist
+        for key in ["attn0_offset", "attn0_end_offset", "attn1_offset", "attn1_end_offset"] {
+            if tensors[key] == nil {
+                let scalar = try MLMultiArray(shape: [1], dataType: .float32)
+                scalar[0] = NSNumber(value: Float(0))
+                tensors[key] = scalar
+            }
         }
 
         return MimiState(tensors: tensors)
-    }
-
-    /// Byte size of one element for the given MLMultiArray dtype.
-    private static func mimiElementSize(for dtype: MLMultiArrayDataType) -> Int {
-        switch dtype {
-        case .float16: return MemoryLayout<UInt16>.size
-        case .float32: return MemoryLayout<Float>.size
-        case .double: return MemoryLayout<Double>.size
-        case .int32: return MemoryLayout<Int32>.size
-        @unknown default: return MemoryLayout<Float>.size
-        }
-    }
-
-    /// Row-major (C-contiguous) strides for the given shape, in elements.
-    private static func mimiContiguousStrides(for shape: [Int]) -> [Int] {
-        var strides = Array(repeating: 1, count: shape.count)
-        for i in stride(from: shape.count - 2, through: 0, by: -1) {
-            strides[i] = strides[i + 1] * max(shape[i + 1], 1)
-        }
-        return strides
     }
 
     /// Clone a Mimi state for independent use.
@@ -116,36 +98,22 @@ extension PocketTtsSynthesizer {
     ///
     /// - Parameters:
     ///   - latent: The raw latent vector, shape [32].
-    ///   - state: The streaming state (24 or 26 tensors depending on
-    ///     conversion vintage), modified in place.
+    ///   - state: The streaming state (26 tensors), modified in place.
     ///   - model: The Mimi CoreML model.
-    ///   - schema: I/O schema discovered at model-load time (audio output
-    ///     name + state input ↔ output mapping).
     /// - Returns: Audio samples for this frame (1920 samples = 80ms at 24kHz).
     static func runMimiDecoder(
         latent: [Float],
         state: inout MimiState,
-        model: MLModel,
-        schema: PocketTtsMimiSchema
+        model: MLModel
     ) async throws -> [Float] {
-        // Create latent input: [1, 32] at the dtype the model expects.
+        // Create latent input: [1, 32]
         let latentDim = PocketTtsConstants.latentDim
         let latentArray = try MLMultiArray(
-            shape: [1, NSNumber(value: latentDim)], dataType: schema.latentDataType)
-        switch schema.latentDataType {
-        case .float32:
-            let dst = latentArray.dataPointer.bindMemory(to: Float.self, capacity: latentDim)
-            latent.withUnsafeBufferPointer { buf in
-                guard let base = buf.baseAddress else { return }
-                dst.update(from: base, count: latentDim)
-            }
-        case .float16:
-            let dst = latentArray.dataPointer.bindMemory(to: Float16.self, capacity: latentDim)
-            for i in 0..<latentDim { dst[i] = Float16(latent[i]) }
-        default:
-            for i in 0..<latentDim {
-                latentArray[i] = NSNumber(value: latent[i])
-            }
+            shape: [1, NSNumber(value: latentDim)], dataType: .float32)
+        let latentPtr = latentArray.dataPointer.bindMemory(to: Float.self, capacity: latentDim)
+        latent.withUnsafeBufferPointer { buffer in
+            guard let base = buffer.baseAddress else { return }
+            latentPtr.update(from: base, count: latentDim)
         }
 
         // Build input dictionary
@@ -158,17 +126,15 @@ extension PocketTtsSynthesizer {
         let output = try await model.compatPrediction(from: input, options: MLPredictionOptions())
 
         // Extract audio output [1, 1, 1920]
-        guard let audioArray = output.featureValue(for: schema.audioOutputName)?.multiArrayValue
-        else {
-            throw PocketTTSError.processingFailed(
-                "Missing Mimi audio output: \(schema.audioOutputName)")
+        guard let audioArray = output.featureValue(for: MimiKeys.audioOutput)?.multiArrayValue else {
+            throw PocketTTSError.processingFailed("Missing Mimi audio output")
         }
 
         let sampleCount = PocketTtsConstants.samplesPerFrame
         let samples = readFloatArray(from: audioArray, count: sampleCount)
 
         // Update streaming state
-        for (inputName, outputName) in schema.stateMapping {
+        for (inputName, outputName) in mimiStateMapping {
             guard let updated = output.featureValue(for: outputName)?.multiArrayValue else {
                 throw PocketTTSError.processingFailed(
                     "Missing Mimi state output: \(outputName) (for \(inputName))")

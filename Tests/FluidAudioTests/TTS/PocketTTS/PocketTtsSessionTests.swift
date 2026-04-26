@@ -45,8 +45,7 @@ final class PocketTtsSessionTests: XCTestCase {
     // MARK: - KV Cache Clone Tests
 
     func testCloneKVCacheStateProducesIndependentCopy() throws {
-        let original = try PocketTtsSynthesizer.emptyKVCacheState(
-            layers: PocketTtsLanguage.english.transformerLayers)
+        let original = try PocketTtsSynthesizer.emptyKVCacheState()
 
         // Write a known value into the original
         let ptr = original.caches[0].dataPointer.bindMemory(to: Float.self, capacity: 1)
@@ -71,8 +70,7 @@ final class PocketTtsSessionTests: XCTestCase {
     }
 
     func testCloneKVCacheStatePreservesShape() throws {
-        let original = try PocketTtsSynthesizer.emptyKVCacheState(
-            layers: PocketTtsLanguage.english.transformerLayers)
+        let original = try PocketTtsSynthesizer.emptyKVCacheState()
         let clone = try PocketTtsSynthesizer.cloneKVCacheState(original)
 
         XCTAssertEqual(clone.caches.count, original.caches.count)
