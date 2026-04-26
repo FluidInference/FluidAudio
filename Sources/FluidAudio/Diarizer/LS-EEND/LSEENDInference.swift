@@ -198,7 +198,7 @@ public class LSEENDInput: MLFeatureProvider {
     @inline(__always)
     private static func load<C: AccelerateBuffer>(
         _ multiArray: MLMultiArray,
-        from buffer: C,
+        from buffer: C
     ) throws {
         guard buffer.count == multiArray.count else {
             throw LSEENDError.invalidInputSize(
