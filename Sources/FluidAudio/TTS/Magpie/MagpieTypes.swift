@@ -90,6 +90,28 @@ public struct MagpiePhonemeTokens: Sendable {
     }
 }
 
+/// Per-stage wallclock timings for a synthesis call (seconds).
+public struct MagpieSynthesisTimings: Sendable {
+    public let textEncoderSeconds: Double
+    public let prefillSeconds: Double
+    public let arLoopSeconds: Double
+    public let decoderStepSeconds: Double
+    public let samplerSeconds: Double
+    public let nanocodecSeconds: Double
+
+    public init(
+        textEncoderSeconds: Double, prefillSeconds: Double, arLoopSeconds: Double,
+        decoderStepSeconds: Double, samplerSeconds: Double, nanocodecSeconds: Double
+    ) {
+        self.textEncoderSeconds = textEncoderSeconds
+        self.prefillSeconds = prefillSeconds
+        self.arLoopSeconds = arLoopSeconds
+        self.decoderStepSeconds = decoderStepSeconds
+        self.samplerSeconds = samplerSeconds
+        self.nanocodecSeconds = nanocodecSeconds
+    }
+}
+
 /// Result of a synthesis call.
 public struct MagpieSynthesisResult: Sendable {
     /// 32-bit float PCM samples in [-1, 1], mono.
@@ -100,16 +122,22 @@ public struct MagpieSynthesisResult: Sendable {
     public let codeCount: Int
     /// Whether generation stopped because an EOS token was emitted (vs hitting `maxSteps`).
     public let finishedOnEos: Bool
+    /// Per-stage timings.
+    public let timings: MagpieSynthesisTimings
 
     public var durationSeconds: Double {
         guard sampleRate > 0 else { return 0 }
         return Double(samples.count) / Double(sampleRate)
     }
 
-    public init(samples: [Float], sampleRate: Int, codeCount: Int, finishedOnEos: Bool) {
+    public init(
+        samples: [Float], sampleRate: Int, codeCount: Int, finishedOnEos: Bool,
+        timings: MagpieSynthesisTimings
+    ) {
         self.samples = samples
         self.sampleRate = sampleRate
         self.codeCount = codeCount
         self.finishedOnEos = finishedOnEos
+        self.timings = timings
     }
 }

@@ -73,9 +73,9 @@ public actor MagpieSynthesizer {
             tokenized: tokenized, maxTextLen: maxTextLen, model: textEncoder)
         let encoderOutput = encResult.encoderOutput
         let encoderMask = encResult.encoderMask
+        let textEncoderSeconds = Date().timeIntervalSince(textEncoderStart)
         logger.info(
-            "text_encoder done in "
-                + "\(String(format: "%.0f", Date().timeIntervalSince(textEncoderStart) * 1000))ms")
+            "text_encoder done in \(String(format: "%.0f", textEncoderSeconds * 1000))ms")
 
         let useCfg = options.cfgScale != 1.0
         let uncond: (encoderOutput: MLMultiArray, encoderMask: MLMultiArray)?
@@ -167,12 +167,15 @@ public actor MagpieSynthesizer {
         let audioEmbed = try MLMultiArray(
             shape: [1, 1, NSNumber(value: dModel)], dataType: .float32)
         let arLoopStart = Date()
+        var decoderStepNanos: UInt64 = 0
+        var samplerNanos: UInt64 = 0
 
         for step in 0..<options.maxSteps {
             try fillAudioEmbed(
                 audioEmbed, codes: currentCodes,
                 tables: constants.audioEmbeddings, dModel: dModel)
 
+            let dsStart = DispatchTime.now()
             let condHidden = try runDecoderStep(
                 audioEmbed: audioEmbed,
                 encoderOutput: encoderOutput, encoderMask: encoderMask,
@@ -188,14 +191,17 @@ public actor MagpieSynthesizer {
             } else {
                 uncondHidden = nil
             }
+            decoderStepNanos &+= DispatchTime.now().uptimeNanoseconds &- dsStart.uptimeNanoseconds
 
             let forbidEos = step < options.minFrames
+            let smpStart = DispatchTime.now()
             let next = sampler.sample(
                 decoderHidden: condHidden,
                 uncondDecoderHidden: uncondHidden,
                 forbidEos: forbidEos,
                 options: options,
                 rng: rng)
+            samplerNanos &+= DispatchTime.now().uptimeNanoseconds &- smpStart.uptimeNanoseconds
 
             let isEos = next.contains(audioEosId)
             if isEos && step >= options.minFrames {
@@ -214,10 +220,16 @@ public actor MagpieSynthesizer {
         }
         let arLoopElapsed = Date().timeIntervalSince(arLoopStart)
         if arLoopElapsed > 0 {
+            let dsMs = Double(decoderStepNanos) / 1_000_000.0
+            let smpMs = Double(samplerNanos) / 1_000_000.0
             logger.info(
                 "AR loop: \(numFrames) frames in "
                     + "\(String(format: "%.2f", arLoopElapsed))s "
-                    + "(\(String(format: "%.1f", Double(numFrames) / arLoopElapsed)) fps)")
+                    + "(\(String(format: "%.1f", Double(numFrames) / arLoopElapsed)) fps) "
+                    + "decoder=\(String(format: "%.0f", dsMs))ms "
+                    + "(\(String(format: "%.1f", dsMs / Double(numFrames)))ms/step) "
+                    + "sampler=\(String(format: "%.0f", smpMs))ms "
+                    + "(\(String(format: "%.1f", smpMs / Double(numFrames)))ms/step)")
         }
 
         // 5. NanoCodec decode: reshape (numFrames × numCodebooks) into
@@ -235,9 +247,9 @@ public actor MagpieSynthesizer {
             model: nanocodecModel, numCodebooks: numCodebooks)
         let nanocodecStart = Date()
         var samples = try nanocodec.decode(frames: codebookRows)
+        let nanocodecSeconds = Date().timeIntervalSince(nanocodecStart)
         logger.info(
-            "nanocodec done in "
-                + "\(String(format: "%.0f", Date().timeIntervalSince(nanocodecStart) * 1000))ms")
+            "nanocodec done in \(String(format: "%.0f", nanocodecSeconds * 1000))ms")
 
         // 6. Peak normalize to 0.9.
         if options.peakNormalize {
@@ -249,11 +261,20 @@ public actor MagpieSynthesizer {
             }
         }
 
+        let timings = MagpieSynthesisTimings(
+            textEncoderSeconds: textEncoderSeconds,
+            prefillSeconds: prefillElapsed,
+            arLoopSeconds: arLoopElapsed,
+            decoderStepSeconds: Double(decoderStepNanos) / 1_000_000_000.0,
+            samplerSeconds: Double(samplerNanos) / 1_000_000_000.0,
+            nanocodecSeconds: nanocodecSeconds)
+
         return MagpieSynthesisResult(
             samples: samples,
             sampleRate: MagpieConstants.audioSampleRate,
             codeCount: numFrames,
-            finishedOnEos: finishedOnEos)
+            finishedOnEos: finishedOnEos,
+            timings: timings)
     }
 
     // MARK: - Model runners

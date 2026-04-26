@@ -64,9 +64,25 @@ public actor MagpieModelStore {
         // to `.cpuAndGPU` so CoreML skips the ANE attempt entirely and runs
         // on Metal MPS — verified end-to-end as the fastest path
         // (96s warm vs 103s warm on `.cpuAndNeuralEngine`).
-        let stepConfig = MLModelConfiguration()
-        stepConfig.computeUnits =
+        let gpuConfig = MLModelConfiguration()
+        gpuConfig.computeUnits =
             computeUnits == .cpuOnly ? .cpuOnly : .cpuAndGPU
+
+        // `nanocodec_decoder.mlmodelc` is fastest on **CPU only**. The model's
+        // upsample stack (5 transposed convs + 96 sin/pow per-frame embedding
+        // ops + 86 LeakyReLU) doesn't map well onto Metal MPS, and ANE compile
+        // fails on its conv stack. Empirically (M-series, single fwd of 256
+        // frames):
+        //   .cpuOnly             ~2.87 s
+        //   .cpuAndGPU           ~3.86 s
+        //   .cpuAndNeuralEngine ~10.12 s   (ANE compile fail → CPU fallback dance)
+        //   .all                 ~2.95 s
+        // Putting it on `.cpuAndGPU` also makes `decoder_step` ~40 ms/step
+        // because both contend for the same Metal queue. Pinning nanocodec to
+        // CPU keeps Metal exclusive for decoder_step (25 ms/step) and saves a
+        // full second on the nanocodec call → ~1.03x RTFx vs ~0.91x before.
+        let cpuConfig = MLModelConfiguration()
+        cpuConfig.computeUnits = .cpuOnly
 
         let loadStart = Date()
 
@@ -79,13 +95,13 @@ public actor MagpieModelStore {
         decoderStepModel = try loadModel(
             repoDir: repoDir,
             fileName: ModelNames.Magpie.decoderStepFile,
-            config: stepConfig,
+            config: gpuConfig,
             required: true)
 
         nanocodecDecoderModel = try loadModel(
             repoDir: repoDir,
             fileName: ModelNames.Magpie.nanocodecDecoderFile,
-            config: config,
+            config: cpuConfig,
             required: true)
 
         decoderPrefillModel = try loadModel(

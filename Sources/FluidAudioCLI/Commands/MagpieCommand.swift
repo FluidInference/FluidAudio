@@ -159,13 +159,30 @@ public enum MagpieCommand {
 
             let audioSecs = result.durationSeconds
             let rtfx = elapsed > 0 ? audioSecs / elapsed : 0
-            logger.info("Magpie synthesis complete")
-            logger.info("  Speaker: \(speaker.displayName), Language: \(language.rawValue)")
-            logger.info("  Codes: \(result.codeCount), EOS: \(result.finishedOnEos)")
-            logger.info(
-                "  Audio: \(String(format: "%.3f", audioSecs))s, Synthesis: \(String(format: "%.3f", elapsed))s, RTFx: \(String(format: "%.2f", rtfx))x"
-            )
-            logger.info("  Output: \(outURL.path)")
+            let t = result.timings
+            let stepCount = result.codeCount > 0 ? result.codeCount : 1
+            let perStepDecoderMs = t.decoderStepSeconds * 1000.0 / Double(stepCount)
+            let perStepSamplerMs = t.samplerSeconds * 1000.0 / Double(stepCount)
+            // Plain stderr writes so OSLog redaction doesn't eat the numbers.
+            let lines = [
+                "Magpie synthesis complete",
+                "  Speaker: \(speaker.displayName), Language: \(language.rawValue)",
+                "  Codes: \(result.codeCount), EOS: \(result.finishedOnEos)",
+                "  Audio: \(String(format: "%.3f", audioSecs))s, "
+                    + "Synthesis: \(String(format: "%.3f", elapsed))s, "
+                    + "RTFx: \(String(format: "%.2f", rtfx))x",
+                "  Stages:",
+                "    text_encoder: \(String(format: "%.0f", t.textEncoderSeconds * 1000))ms",
+                "    prefill:      \(String(format: "%.0f", t.prefillSeconds * 1000))ms",
+                "    AR loop:      \(String(format: "%.2f", t.arLoopSeconds))s "
+                    + "(decoder=\(String(format: "%.2f", t.decoderStepSeconds))s "
+                    + "@ \(String(format: "%.1f", perStepDecoderMs))ms/step, "
+                    + "sampler=\(String(format: "%.2f", t.samplerSeconds))s "
+                    + "@ \(String(format: "%.1f", perStepSamplerMs))ms/step)",
+                "    nanocodec:    \(String(format: "%.0f", t.nanocodecSeconds * 1000))ms",
+                "  Output: \(outURL.path)",
+            ]
+            FileHandle.standardError.write(Data((lines.joined(separator: "\n") + "\n").utf8))
         } catch {
             logger.error("Magpie synthesis failed: \(error.localizedDescription)")
             exit(1)
