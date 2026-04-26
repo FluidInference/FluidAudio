@@ -46,8 +46,6 @@ struct FluidAudioCLI {
             await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "process":
             await ProcessCommand.run(arguments: Array(arguments.dropFirst(2)))
-        case "speaker-similarity":
-            await SpeakerSimilarityCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "download":
             await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "parakeet-eou":
@@ -96,7 +94,6 @@ struct FluidAudioCLI {
 
             Commands:
                 process                 Process a single audio file for diarization
-                speaker-similarity      Compare two audio files via 256-dim speaker embeddings
                 diarization-benchmark   Run diarization benchmark
                 vad-benchmark           Run VAD-specific benchmark
                 vad-analyze             Inspect VAD segmentation and streaming events
