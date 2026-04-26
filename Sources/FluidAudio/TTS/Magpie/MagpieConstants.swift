@@ -74,9 +74,14 @@ public enum MagpieConstants {
     public static let defaultTemperature: Float = 0.6
     /// Default top-k truncation.
     public static let defaultTopK: Int = 80
-    /// Default CFG scale (matches Python `generate_coreml.py` and constants.json `cfg_scale`).
-    /// Setting this to 1.0 disables the unconditional path entirely.
-    public static let defaultCfgScale: Float = 2.5
+    /// Default CFG scale. `1.0` disables the unconditional path entirely.
+    ///
+    /// The Python reference ships `cfg_scale = 2.5` (in `constants.json`) which doubles
+    /// `decoder_step` calls per frame (cond + uncond). Default is now `1.0` so the
+    /// Swift port runs at half the wall time out-of-the-box; opt back in via
+    /// `MagpieSynthesisOptions.cfgScale = 2.5` (or `--cfg 2.5` on the CLI) when guidance
+    /// quality matters more than throughput.
+    public static let defaultCfgScale: Float = 1.0
 
     // MARK: - Repository
 

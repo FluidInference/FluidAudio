@@ -68,10 +68,14 @@ public actor MagpieSynthesizer {
         }
 
         // 1. text_encoder
+        let textEncoderStart = Date()
         let encResult = try runTextEncoder(
             tokenized: tokenized, maxTextLen: maxTextLen, model: textEncoder)
         let encoderOutput = encResult.encoderOutput
         let encoderMask = encResult.encoderMask
+        logger.info(
+            "text_encoder done in "
+                + "\(String(format: "%.0f", Date().timeIntervalSince(textEncoderStart) * 1000))ms")
 
         let useCfg = options.cfgScale != 1.0
         let uncond: (encoderOutput: MLMultiArray, encoderMask: MLMultiArray)?
@@ -159,9 +163,15 @@ public actor MagpieSynthesizer {
 
         let rng = MagpieSamplerRng(seed: options.seed)
 
+        // Allocate audio_embed buffer once; refill in-place each step (vDSP).
+        let audioEmbed = try MLMultiArray(
+            shape: [1, 1, NSNumber(value: dModel)], dataType: .float32)
+        let arLoopStart = Date()
+
         for step in 0..<options.maxSteps {
-            let audioEmbed = try embedAudioCodes(
-                currentCodes, tables: constants.audioEmbeddings, dModel: dModel)
+            try fillAudioEmbed(
+                audioEmbed, codes: currentCodes,
+                tables: constants.audioEmbeddings, dModel: dModel)
 
             let condHidden = try runDecoderStep(
                 audioEmbed: audioEmbed,
@@ -202,6 +212,13 @@ public actor MagpieSynthesizer {
             throw MagpieError.inferenceFailed(
                 stage: "synthesize", underlying: "no audio frames generated")
         }
+        let arLoopElapsed = Date().timeIntervalSince(arLoopStart)
+        if arLoopElapsed > 0 {
+            logger.info(
+                "AR loop: \(numFrames) frames in "
+                    + "\(String(format: "%.2f", arLoopElapsed))s "
+                    + "(\(String(format: "%.1f", Double(numFrames) / arLoopElapsed)) fps)")
+        }
 
         // 5. NanoCodec decode: reshape (numFrames × numCodebooks) into
         //    per-codebook rows.
@@ -216,7 +233,11 @@ public actor MagpieSynthesizer {
         }
         let nanocodec = MagpieNanocodec(
             model: nanocodecModel, numCodebooks: numCodebooks)
+        let nanocodecStart = Date()
         var samples = try nanocodec.decode(frames: codebookRows)
+        logger.info(
+            "nanocodec done in "
+                + "\(String(format: "%.0f", Date().timeIntervalSince(nanocodecStart) * 1000))ms")
 
         // 6. Peak normalize to 0.9.
         if options.peakNormalize {
@@ -319,27 +340,29 @@ public actor MagpieSynthesizer {
         return result
     }
 
-    private func embedAudioCodes(
-        _ codes: [Int32], tables: [[Float]], dModel: Int
-    ) throws -> MLMultiArray {
-        let arr = try MLMultiArray(
-            shape: [1, 1, NSNumber(value: dModel)], dataType: .float32)
+    /// In-place mean-of-codebook-embeddings into a pre-allocated MLMultiArray.
+    /// Replaces the per-step alloc + manual loop with vDSP primitives:
+    ///   - `vDSP_vclr` zeros the buffer.
+    ///   - `vDSP_vadd` accumulates each codebook's embedding row.
+    ///   - `vDSP_vsmul` applies the `1 / numCodebooks` scale.
+    private func fillAudioEmbed(
+        _ arr: MLMultiArray, codes: [Int32], tables: [[Float]], dModel: Int
+    ) throws {
         arr.withUnsafeMutableBytes { ptr, _ in
-            let base = ptr.bindMemory(to: Float.self).baseAddress!
-            for i in 0..<dModel { base[i] = 0 }
+            guard let base = ptr.bindMemory(to: Float.self).baseAddress else { return }
+            vDSP_vclr(base, 1, vDSP_Length(dModel))
             let numCodebooks = codes.count
             for cb in 0..<numCodebooks {
                 let row = Int(codes[cb])
-                let table = tables[cb]
-                let start = row * dModel
-                for i in 0..<dModel {
-                    base[i] += table[start + i]
+                tables[cb].withUnsafeBufferPointer { tablePtr in
+                    guard let tableBase = tablePtr.baseAddress else { return }
+                    let rowPtr = tableBase.advanced(by: row * dModel)
+                    vDSP_vadd(base, 1, rowPtr, 1, base, 1, vDSP_Length(dModel))
                 }
             }
-            let inv = 1.0 / Float(numCodebooks)
-            for i in 0..<dModel { base[i] *= inv }
+            var inv = 1.0 / Float(numCodebooks)
+            vDSP_vsmul(base, 1, &inv, base, 1, vDSP_Length(dModel))
         }
-        return arr
     }
 
 }

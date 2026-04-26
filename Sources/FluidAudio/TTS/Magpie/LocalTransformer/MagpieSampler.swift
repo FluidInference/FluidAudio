@@ -175,10 +175,11 @@ public struct MagpieLocalSampler: Sendable {
     ) -> Int {
         var truncated = logits
         if topK > 0 && topK < truncated.count {
-            // Find kth-largest threshold via partial sort.
-            var indexed = truncated.enumerated().map { ($0.offset, $0.element) }
-            indexed.sort { $0.1 > $1.1 }
-            let threshold = indexed[topK - 1].1
+            // Threshold = K-th largest. Found via a fixed-size min-heap of size K,
+            // O(N + K log K) vs O(N log N) for the prior full-sort path. Tie
+            // behavior matches the prior implementation: values *strictly* below
+            // the threshold are masked, ties at the threshold all survive.
+            let threshold = Self.topKThreshold(values: truncated, k: topK)
             for i in 0..<truncated.count {
                 if truncated[i] < threshold {
                     truncated[i] = -.infinity
@@ -206,5 +207,51 @@ public struct MagpieLocalSampler: Sendable {
             truncated[i] *= inv
         }
         return rng.numpyChoice(probs: truncated)
+    }
+
+    /// Returns the K-th largest value in `values` using a fixed-size min-heap.
+    /// O(N) heap construction (first K elements) + O((N - K) log K) replacements.
+    /// Required: 1 <= k <= values.count.
+    private static func topKThreshold(values: [Float], k: Int) -> Float {
+        var heap = Swift.Array<Float>(repeating: 0, count: k)
+        heap.withUnsafeMutableBufferPointer { buf in
+            // Phase 1: insert first K values, sift each up.
+            for i in 0..<k {
+                buf[i] = values[i]
+                var j = i
+                while j > 0 {
+                    let parent = (j - 1) >> 1
+                    if buf[j] < buf[parent] {
+                        let tmp = buf[j]
+                        buf[j] = buf[parent]
+                        buf[parent] = tmp
+                        j = parent
+                    } else {
+                        break
+                    }
+                }
+            }
+            // Phase 2: for each remaining value, replace the min if it's larger,
+            // then sift down.
+            for i in k..<values.count {
+                let v = values[i]
+                if v <= buf[0] { continue }
+                buf[0] = v
+                var j = 0
+                while true {
+                    let left = 2 * j + 1
+                    let right = left + 1
+                    var smallest = j
+                    if left < k && buf[left] < buf[smallest] { smallest = left }
+                    if right < k && buf[right] < buf[smallest] { smallest = right }
+                    if smallest == j { break }
+                    let tmp = buf[j]
+                    buf[j] = buf[smallest]
+                    buf[smallest] = tmp
+                    j = smallest
+                }
+            }
+        }
+        return heap[0]
     }
 }
