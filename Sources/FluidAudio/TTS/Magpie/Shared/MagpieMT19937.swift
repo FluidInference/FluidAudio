@@ -30,14 +30,6 @@ public final class MagpieMT19937: RandomNumberGenerator {
         initGenrand(seed)
     }
 
-    /// Test-only peek at the post-seed state vector (before any draw).
-    /// Returns the first `count` elements without advancing the generator.
-    /// Marked `internal` so unit tests can verify exact-state parity with
-    /// NumPy's `np.random.get_state()[1]`.
-    internal func _stateForTesting(count: Int) -> [UInt32] {
-        return Array(mt.prefix(count))
-    }
-
     // MARK: - Seeding
 
     /// Mirrors Matsumoto's `init_genrand(s)` and NumPy's `rk_seed(s)`:

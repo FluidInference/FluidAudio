@@ -634,7 +634,7 @@ Parity / probe / compute-plan tooling lives upstream in `mobius` (Python).
 
 Assets (4 CoreML models + `constants/` + per-language tokenizer files) are fetched from [`FluidInference/magpie-tts-multilingual-357m-coreml`](https://huggingface.co/FluidInference/magpie-tts-multilingual-357m-coreml) on first use. The 1-layer local transformer (256d, top-k + temperature sampling, forbidden-token mask) runs on CPU via Accelerate/BNNS; the 12-layer decoder KV cache is rolled stateful across steps.
 
-When `--seed N` is supplied, sampling is driven by a NumPy-compatible MT19937 RNG so the Swift output is bit-reproducible against the Python reference seeded with `np.random.seed(N)`. Pass `useDoublePrecision: true` (or `--double-precision` on the CLI) to run the local transformer in fp64 for a stricter parity check; the decoder, NanoCodec, and encoder still execute in CoreML's compiled precision.
+When `--seed N` is supplied, sampling is driven by a NumPy-compatible MT19937 RNG so the Swift output is bit-reproducible against the Python reference seeded with `np.random.seed(N)`.
 
 ## Continuous Integration
 
