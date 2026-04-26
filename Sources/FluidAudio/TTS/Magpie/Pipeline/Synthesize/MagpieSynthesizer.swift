@@ -166,6 +166,22 @@ public actor MagpieSynthesizer {
         // Allocate audio_embed buffer once; refill in-place each step (vDSP).
         let audioEmbed = try MLMultiArray(
             shape: [1, 1, NSNumber(value: dModel)], dataType: .float32)
+
+        // Pre-allocate the decoder_hidden output backing once. CoreML writes
+        // straight into this array each step; we then read it fp16 → fp32 via
+        // vImage. Shape: [1, 1, dModel] fp16 (per decoder_step.mlmodelc).
+        let condHiddenBacking = try MLMultiArray(
+            shape: [1, 1, NSNumber(value: dModel)], dataType: .float16)
+        condHiddenBacking.zeroFillFloat16()
+        let uncondHiddenBacking: MLMultiArray? =
+            useCfg
+            ? {
+                let arr = try? MLMultiArray(
+                    shape: [1, 1, NSNumber(value: dModel)], dataType: .float16)
+                arr?.zeroFillFloat16()
+                return arr
+            }() : nil
+
         let arLoopStart = Date()
         var decoderStepNanos: UInt64 = 0
         var samplerNanos: UInt64 = 0
@@ -179,15 +195,19 @@ public actor MagpieSynthesizer {
             let condHidden = try runDecoderStep(
                 audioEmbed: audioEmbed,
                 encoderOutput: encoderOutput, encoderMask: encoderMask,
-                cache: condCache, model: decoderStep)
+                cache: condCache, hiddenBacking: condHiddenBacking,
+                dModel: dModel, model: decoderStep)
 
             let uncondHidden: [Float]?
-            if useCfg, let uncondTensors = uncond, let uncondCache = uncondCache {
+            if useCfg, let uncondTensors = uncond, let uncondCache = uncondCache,
+                let uncondBacking = uncondHiddenBacking
+            {
                 uncondHidden = try runDecoderStep(
                     audioEmbed: audioEmbed,
                     encoderOutput: uncondTensors.encoderOutput,
                     encoderMask: uncondTensors.encoderMask,
-                    cache: uncondCache, model: decoderStep)
+                    cache: uncondCache, hiddenBacking: uncondBacking,
+                    dModel: dModel, model: decoderStep)
             } else {
                 uncondHidden = nil
             }
@@ -311,6 +331,8 @@ public actor MagpieSynthesizer {
         encoderOutput: MLMultiArray,
         encoderMask: MLMultiArray,
         cache: MagpieKvCache,
+        hiddenBacking: MLMultiArray,
+        dModel: Int,
         model: MLModel
     ) throws -> [Float] {
         var inputs: [String: MLMultiArray] = [
@@ -321,42 +343,37 @@ public actor MagpieSynthesizer {
         cache.addInputs(to: &inputs)
         let provider = try MLDictionaryFeatureProvider(
             dictionary: inputs.mapValues { MLFeatureValue(multiArray: $0) })
-        let out = try model.prediction(from: provider)
-        try cache.absorbOutputs(out)
-        guard let hidden = out.featureValue(for: MagpieKvCache.decoderHiddenKey)?.multiArrayValue
-        else {
-            throw MagpieError.inferenceFailed(
-                stage: "decoder_step", underlying: "missing hidden key")
-        }
-        let dim = hidden.count
+
+        // Bind every output to a pre-allocated MLMultiArray so CoreML writes
+        // in place instead of allocating ~18.9 MB of fresh fp16 buffers per
+        // step. The cache provides 24 K/V + 12 position back-buffers, the
+        // synthesizer provides the 1 hidden buffer. After the call,
+        // `swapBackings` promotes back→front for the next step's inputs.
+        var backings: [String: Any] = [:]
+        cache.addOutputBackings(to: &backings)
+        backings[MagpieKvCache.decoderHiddenKey] = hiddenBacking
+        let predOpts = MLPredictionOptions()
+        predOpts.outputBackings = backings
+
+        _ = try model.prediction(from: provider, options: predOpts)
+        cache.swapBackings()
+
+        // Hidden state lives in `hiddenBacking` after the call. Convert fp16
+        // → fp32 via vImage into a fresh [Float] result buffer (the sampler
+        // wants `[Float]`).
+        let dim = dModel  // hiddenBacking shape = [1, 1, dModel]
         var result = Swift.Array<Float>(repeating: 0, count: dim)
-        switch hidden.dataType {
-        case .float16:
-            // Convert fp16 → fp32 via vImage (Accelerate) for speed.
-            hidden.withUnsafeBytes { raw in
-                guard let src = raw.baseAddress else { return }
-                var srcBuffer = vImage_Buffer(
-                    data: UnsafeMutableRawPointer(mutating: src),
-                    height: 1, width: vImagePixelCount(dim), rowBytes: dim * 2)
-                result.withUnsafeMutableBufferPointer { dst in
-                    var dstBuffer = vImage_Buffer(
-                        data: dst.baseAddress, height: 1,
-                        width: vImagePixelCount(dim), rowBytes: dim * 4)
-                    _ = vImageConvert_Planar16FtoPlanarF(&srcBuffer, &dstBuffer, 0)
-                }
+        hiddenBacking.withUnsafeBytes { raw in
+            guard let src = raw.baseAddress else { return }
+            var srcBuffer = vImage_Buffer(
+                data: UnsafeMutableRawPointer(mutating: src),
+                height: 1, width: vImagePixelCount(dim), rowBytes: dim * 2)
+            result.withUnsafeMutableBufferPointer { dst in
+                var dstBuffer = vImage_Buffer(
+                    data: dst.baseAddress, height: 1,
+                    width: vImagePixelCount(dim), rowBytes: dim * 4)
+                _ = vImageConvert_Planar16FtoPlanarF(&srcBuffer, &dstBuffer, 0)
             }
-        case .float32:
-            hidden.withUnsafeBytes { raw in
-                let ptr = raw.bindMemory(to: Float.self)
-                for i in 0..<dim { result[i] = ptr[i] }
-            }
-        case .double:
-            hidden.withUnsafeBytes { raw in
-                let ptr = raw.bindMemory(to: Double.self)
-                for i in 0..<dim { result[i] = Float(ptr[i]) }
-            }
-        default:
-            for i in 0..<dim { result[i] = hidden[i].floatValue }
         }
         return result
     }

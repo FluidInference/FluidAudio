@@ -54,6 +54,15 @@ public final class MagpieKvCache {
     public private(set) var cachesV: [MLMultiArray]
     public private(set) var positions: [MLMultiArray]
 
+    /// Back-buffer set for double-buffered AR loop. Used as `outputBackings` so
+    /// CoreML writes new K/V/pos straight into our pre-allocated arrays instead
+    /// of allocating ~18.9 MB of fresh fp16 buffers per step. After each
+    /// `decoder_step` call the synthesizer calls `swapBackings()` to promote
+    /// the back set to the new front (used as the next step's inputs).
+    private var cachesKBack: [MLMultiArray]
+    private var cachesVBack: [MLMultiArray]
+    private var positionsBack: [MLMultiArray]
+
     public let numLayers: Int
     public let maxCacheLength: Int
     public let numHeads: Int
@@ -69,21 +78,22 @@ public final class MagpieKvCache {
             NSNumber(value: numHeads),
             NSNumber(value: headDim),
         ]
-        self.cachesK = try (0..<numLayers).map { _ -> MLMultiArray in
+        func makeCacheArr() throws -> MLMultiArray {
             let arr = try MLMultiArray(shape: cacheShape, dataType: .float16)
             arr.zeroFillFloat16()
             return arr
         }
-        self.cachesV = try (0..<numLayers).map { _ -> MLMultiArray in
-            let arr = try MLMultiArray(shape: cacheShape, dataType: .float16)
-            arr.zeroFillFloat16()
-            return arr
-        }
-        self.positions = try (0..<numLayers).map { _ -> MLMultiArray in
+        func makePosArr() throws -> MLMultiArray {
             let arr = try MLMultiArray(shape: [1], dataType: .float16)
             arr.zeroFillFloat16()
             return arr
         }
+        self.cachesK = try (0..<numLayers).map { _ in try makeCacheArr() }
+        self.cachesV = try (0..<numLayers).map { _ in try makeCacheArr() }
+        self.positions = try (0..<numLayers).map { _ in try makePosArr() }
+        self.cachesKBack = try (0..<numLayers).map { _ in try makeCacheArr() }
+        self.cachesVBack = try (0..<numLayers).map { _ in try makeCacheArr() }
+        self.positionsBack = try (0..<numLayers).map { _ in try makePosArr() }
     }
 
     /// Populate `inputs` with `cache_k{i}` + `cache_v{i}` + `position{i}` keys.
@@ -95,8 +105,29 @@ public final class MagpieKvCache {
         }
     }
 
-    /// Consume the output dictionary of one `decoder_step.predict()` call and
-    /// rotate the cache / position buffers in-place.
+    /// Populate `outputBackings` with the back-buffer arrays under each output
+    /// key. CoreML will write directly into these arrays instead of allocating.
+    public func addOutputBackings(to backings: inout [String: Any]) {
+        for i in 0..<numLayers {
+            backings[Self.cacheKOutputKeys[i]] = cachesKBack[i]
+            backings[Self.cacheVOutputKeys[i]] = cachesVBack[i]
+            backings[Self.positionOutputKeys[i]] = positionsBack[i]
+        }
+    }
+
+    /// Promote the back-buffer set to the new front (which now holds the just-
+    /// written K/V/pos for layer i). The old front becomes the new back and
+    /// will be overwritten on the next prediction call. Cheap pointer-swap;
+    /// no data copy.
+    public func swapBackings() {
+        swap(&cachesK, &cachesKBack)
+        swap(&cachesV, &cachesVBack)
+        swap(&positions, &positionsBack)
+    }
+
+    /// Slow path: pull new K/V/pos out of an output `MLFeatureProvider` and
+    /// replace front pointers. Used when `outputBackings` is unavailable
+    /// (e.g. if a future macOS revision rejects our buffer layout).
     public func absorbOutputs(_ output: MLFeatureProvider) throws {
         for i in 0..<numLayers {
             guard let newK = output.featureValue(for: Self.cacheKOutputKeys[i])?.multiArrayValue
@@ -182,7 +213,7 @@ public final class MagpieKvCache {
 
 extension MLMultiArray {
     /// Zero-fill an fp16 `MLMultiArray` fast (uses `memset`).
-    fileprivate func zeroFillFloat16() {
+    internal func zeroFillFloat16() {
         guard dataType == .float16 else {
             for i in 0..<count { self[i] = NSNumber(value: 0.0) }
             return
