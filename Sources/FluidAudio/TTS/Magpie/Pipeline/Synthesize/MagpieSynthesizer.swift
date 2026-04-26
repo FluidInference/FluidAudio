@@ -68,8 +68,10 @@ public actor MagpieSynthesizer {
         }
 
         // 1. text_encoder
-        let (encoderOutput, encoderMask) = try runTextEncoder(
+        let encResult = try runTextEncoder(
             tokenized: tokenized, maxTextLen: maxTextLen, model: textEncoder)
+        let encoderOutput = encResult.encoderOutput
+        let encoderMask = encResult.encoderMask
 
         let useCfg = options.cfgScale != 1.0
         let uncond: (encoderOutput: MLMultiArray, encoderMask: MLMultiArray)?
@@ -166,14 +168,15 @@ public actor MagpieSynthesizer {
                 encoderOutput: encoderOutput, encoderMask: encoderMask,
                 cache: condCache, model: decoderStep)
 
-            var uncondHidden: [Float]? = nil
+            let uncondHidden: [Float]?
             if useCfg, let uncondTensors = uncond, let uncondCache = uncondCache {
-                let h = try runDecoderStep(
+                uncondHidden = try runDecoderStep(
                     audioEmbed: audioEmbed,
                     encoderOutput: uncondTensors.encoderOutput,
                     encoderMask: uncondTensors.encoderMask,
                     cache: uncondCache, model: decoderStep)
-                uncondHidden = h
+            } else {
+                uncondHidden = nil
             }
 
             let forbidEos = step < options.minFrames
