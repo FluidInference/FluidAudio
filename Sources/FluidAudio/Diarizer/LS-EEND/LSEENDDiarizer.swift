@@ -281,7 +281,7 @@ public final class LSEENDDiarizer: Diarizer {
             throw LSEENDError.notInitialized
         }
 
-        let sessionSnapshot = session.takeSnapshot()
+        let sessionSnapshot = try session.takeSnapshot()
         let timelineSnapshot = timeline.takeSnapshot()
         let isNamed = name != nil
 

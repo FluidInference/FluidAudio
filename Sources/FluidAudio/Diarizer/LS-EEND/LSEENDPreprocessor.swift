@@ -203,11 +203,11 @@ public class LSEENDFeatureProvider {
 
     // MARK: - Snapshot and Rollback
 
-    public func takeSnapshot() -> Snapshot {
+    public func takeSnapshot() throws -> Snapshot {
         lock.lock()
         defer { lock.unlock() }
         let result = Snapshot(
-            state: input.state.copy(),
+            state: try input.state.copy(),
             melQueue: melQueue,
             audioQueue: audioQueue,
             cmnMean: cmnMean,

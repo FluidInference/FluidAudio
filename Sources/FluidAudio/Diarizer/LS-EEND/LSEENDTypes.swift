@@ -109,21 +109,21 @@ public struct LSEENDState: ~Copyable {
         self.reset()
     }
 
-    public func copy() -> LSEENDState {
-        func clone(_ src: MLMultiArray) -> MLMultiArray {
-            let dst = try! ANEMemoryUtils.createAlignedArray(
+    public func copy() throws -> LSEENDState {
+        func clone(_ src: MLMultiArray) throws -> MLMultiArray {
+            let dst = try ANEMemoryUtils.createAlignedArray(
                 shape: src.shape, dataType: src.dataType
             )
             ANEMemoryUtils.strideAwareCopy(from: src, to: dst)
             return dst
         }
         return LSEENDState(
-            encRetKv: clone(encRetKv),
-            encRetScale: clone(encRetScale),
-            encConvCache: clone(encConvCache),
-            cnnWindow: clone(cnnWindow),
-            decRetKv: clone(decRetKv),
-            decRetScale: clone(decRetScale)
+            encRetKv: try clone(encRetKv),
+            encRetScale: try clone(encRetScale),
+            encConvCache: try clone(encConvCache),
+            cnnWindow: try clone(cnnWindow),
+            decRetKv: try clone(decRetKv),
+            decRetScale: try clone(decRetScale)
         )
     }
 
