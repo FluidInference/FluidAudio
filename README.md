@@ -628,13 +628,9 @@ swift run fluidaudiocli magpie text --text "Hello | ˈ n ɛ m o ʊ |." \
 # Classifier-free guidance and sampling controls
 swift run fluidaudiocli magpie text --text "Bonjour." --language fr \
     --cfg 2.5 --temperature 0.6 --topk 80 --seed 42 --output bonjour.wav
-
-# Fixture-driven parity harness (tokenizer / full pipeline)
-swift run fluidaudiocli magpie tokenizer-parity --fixture fixture_en.json
-swift run fluidaudiocli magpie parity --fixture fixture_en.npz \
-    --text "Hello world." --speaker 0 --language en --seed 42 \
-    --double-precision
 ```
+
+Parity / probe / compute-plan tooling lives upstream in `mobius` (Python).
 
 Assets (4 CoreML models + `constants/` + per-language tokenizer files) are fetched from [`FluidInference/magpie-tts-multilingual-357m-coreml`](https://huggingface.co/FluidInference/magpie-tts-multilingual-357m-coreml) on first use. The 1-layer local transformer (256d, top-k + temperature sampling, forbidden-token mask) runs on CPU via Accelerate/BNNS; the 12-layer decoder KV cache is rolled stateful across steps.
 

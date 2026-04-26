@@ -93,41 +93,25 @@ swift run fluidaudiocli magpie download
 
 # Synth
 swift run fluidaudiocli magpie text "Hello world." --speaker 0 --output hello.wav
-
-# Per-model compute-device probe (benchmark-based; MLComputePlan crashes on Magpie graphs)
-swift run fluidaudiocli magpie compute-plan
-
-# Parity vs mobius .npz fixture
-swift run fluidaudiocli magpie parity --fixture path/to/fixture.npz --text "..." --speaker 0
-
-# Tokenizer-only parity
-swift run fluidaudiocli magpie tokenizer-parity --fixture path/to/tokens.json --language en
 ```
+
+Parity, probe, and compute-plan tooling live upstream in `mobius` (Python) —
+they exercise the export pipeline and are out of scope for the Swift runtime.
 
 ## Known issues
 
 1. **spk0 trailing-word drift.** ASR shows a stray word at the end (e.g.
-   "…seashore, and"). Stage-by-stage parity probe localizes it to fp16
-   sampler-trajectory non-determinism between Python+CoreML reference and
-   Swift+CoreML host: prefill SNR degrades L0=64 dB → L11=44 dB through the
-   12-layer cache, then compounds in the AR loop. CoreML itself is consistent
-   between languages; the drift is host-floating-point + RNG/sampler ordering.
-   Not user-perceptible on speakers 1–4.
+   "…seashore, and"). Stage-by-stage parity probe (in `mobius`) localizes it
+   to fp16 sampler-trajectory non-determinism between Python+CoreML reference
+   and Swift+CoreML host: prefill SNR degrades L0=64 dB → L11=44 dB through
+   the 12-layer cache, then compounds in the AR loop. CoreML itself is
+   consistent between languages; the drift is host-floating-point + RNG/sampler
+   ordering. Not user-perceptible on speakers 1–4.
 
-2. **`MLComputePlan.load(...)` crashes (SIGBUS) on every Magpie `.mlmodelc`.**
-   Cannot enumerate per-op compute device assignment via the public API. The
-   `magpie compute-plan` CLI uses a timing-based fallback that loads each
-   model under `.cpuOnly` / `.cpuAndGPU` / `.cpuAndNeuralEngine` and infers ANE
-   usage from the speedup ratio.
-
-3. **`decoder_step` ANE compile failure is real.** Earlier benchmark with
+2. **`decoder_step` ANE compile failure is real.** Earlier benchmark with
    zeroed `position` scalars showed a 3× ANE speedup; that was misleading —
    with real incrementing positions the ANEF compile fails at runtime per
    call. Keep the `.cpuAndGPU` pin.
-
-4. **`nanocodec_decoder` errors under the dummy-input probe.** Real synth
-   path works; the probe uses `[1, 8, 24]` int32 dummy codes which trigger an
-   unrelated ANEF compile error. Probe needs realistic shape/dtype to measure.
 
 ## File map
 
@@ -157,8 +141,5 @@ Sources/FluidAudio/TTS/Magpie/
     └── MagpieMT19937.swift               # deterministic RNG matching Python reference
 
 Sources/FluidAudioCLI/Commands/
-├── MagpieCommand.swift                   # dispatch (download / text / parity / probe / compute-plan)
-├── MagpieNpzReader.swift                 # .npz fixture parser (debug-only, used by parity/probe)
-├── MagpieProbeCommand.swift              # 3-stage parity probe (encoder / prefill / AR replay)
-└── MagpieComputePlanCommand.swift        # benchmark-based ANE-usage probe
+└── MagpieCommand.swift                   # dispatch (download / text)
 ```
