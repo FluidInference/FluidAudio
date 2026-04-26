@@ -109,7 +109,7 @@ public struct MagpieLocalSampler: Sendable {
             let lastHidden = Swift.Array(condOut[lastOffset..<(lastOffset + D)])
             var logits = lt.codebookLogits(lastHidden: lastHidden, codebook: cb)
 
-            if useCfg, let _ = uncondDecoderHidden {
+            if useCfg {
                 let uncondOut = lt.forward(sequence: uncondSeq, length: uncondLen)
                 let uncondLast = Swift.Array(
                     uncondOut[((uncondLen - 1) * D)..<((uncondLen - 1) * D + D)])

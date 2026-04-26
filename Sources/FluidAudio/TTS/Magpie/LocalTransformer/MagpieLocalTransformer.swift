@@ -137,11 +137,9 @@ public struct MagpieLocalTransformer: Sendable {
     /// → (localDim,). Used by the sampler to seed the LT sequence.
     public func projectInput(hidden: [Float]) -> [Float] {
         precondition(hidden.count == weights.dModel)
-        let D = weights.localDim
         var out = weights.inProjBias  // copy bias
         // out += inProjWeight @ hidden  (localDim, dModel) × (dModel,) → (localDim,)
         inProjWeightApply(hidden: hidden, accumulate: &out)
-        _ = D
         return out
     }
 
