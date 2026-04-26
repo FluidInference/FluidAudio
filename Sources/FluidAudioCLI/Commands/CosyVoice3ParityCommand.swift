@@ -48,9 +48,16 @@ enum CosyVoice3ParityCLI {
             let result = try await manager.synthesizeFromFixture(
                 fixtureURL: fixtureURL, options: options)
             let synthElapsed = Date().timeIntervalSince(tSynth)
+            let audioSec = Double(result.samples.count) / Double(result.sampleRate)
+            let rtfx = audioSec / synthElapsed
             logger.info(
-                "Synthesized \(result.samples.count) samples (\(String(format: "%.2fs", Double(result.samples.count) / Double(result.sampleRate)))) in \(String(format: "%.2fs", synthElapsed))"
+                "Synthesized \(result.samples.count) samples (\(String(format: "%.2fs", audioSec))) in \(String(format: "%.2fs", synthElapsed))"
             )
+            print(
+                String(
+                    format:
+                        "RTFX audio=%.3fs synth=%.3fs RTFx=%.3fx tokens=%d",
+                    audioSec, synthElapsed, rtfx, result.generatedTokenCount))
 
             try writeWAV(samples: result.samples, sampleRate: result.sampleRate, to: outputURL)
             logger.info("Wrote WAV: \(outputURL.path)")

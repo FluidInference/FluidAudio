@@ -5,18 +5,24 @@ import Foundation
 /// Shipping config (frozen):
 /// - LLM-Prefill-T256-M768-fp16           (cpuAndNeuralEngine)
 /// - LLM-Decode-M768-fp16-stateful        (cpuAndGPU — see note)
-/// - Flow-N250-fp16                       (cpuAndGPU — pure CPU overflows fused
-///   LayerNorm → NaN; ANE refuses to compile; GPU path uses fp32 accumulators
-///   internally and is stable + ~3× faster than the previous fp32/cpuOnly
-///   shipping config)
+/// - Flow-N250-fp16                       (cpuAndGPU — an ANE-port
+///   BC1S rewrite was attempted and reverted: the converted graph ran
+///   ~3× faster but numerically broken (mel dynamic range collapsed
+///   from [-12.5, +5.2] to [-10.1, -0.8], MAE 2.58 vs fp32 reference,
+///   yielding HiFT audio at ~40× lower peak amplitude → unintelligible
+///   to ASR). See `coreml/TRIALS_AND_ERRORS.md` "Flow ANE port" for
+///   the full journey, including the residual 77-op CPU island in
+///   `input_embed.conv_pos_embed` (`Conv1d(1024,1024,k=31)+Mish`)
+///   that three rewrite attempts couldn't move — ANEF rejects the
+///   conv footprint regardless of group count.)
 /// - HiFT-T500-fp16                       (cpuAndNeuralEngine)
 ///
 /// The stateful decode model uses per-layer `MLState` buffers for the
 /// KV cache (48 tensors, `[1, 2, 768, 64]` fp16 each) instead of
 /// round-tripping 18 MB of kv_k / kv_v MLMultiArrays every step. ANE
 /// refuses to compile the stateful graph (`MILCompilerForANE
-/// ANECCompile() FAILED`), mirroring Flow — decode therefore runs on
-/// `.cpuAndGPU`. Requires macOS 15 / iOS 18.
+/// ANECCompile() FAILED`); decode therefore runs on `.cpuAndGPU`.
+/// Requires macOS 15 / iOS 18.
 public enum CosyVoice3Constants {
 
     // MARK: - LLM shapes

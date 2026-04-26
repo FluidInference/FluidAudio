@@ -78,14 +78,21 @@ public actor CosyVoice3ModelStore {
         let decode = try await compileAndLoad(decodeURL, configuration: decodeConfig)
         logger.info("Loaded \(CosyVoice3Constants.Files.llmDecode)")
 
-        // Flow is fp16 and MUST run on `.cpuAndGPU`:
-        //   - pure CPU overflows the fused LayerNorm and emits all-NaN mel
-        //     (empirically 5/5 NaN across random inputs)
-        //   - ANE refuses to compile the graph (MILCompilerForANE
-        //     `ANECCompile() FAILED`), so `.cpuAndNE` / `.all` deadlock load
-        //   - GPU path uses fp32 accumulators internally and is stable
-        // Ignore the user-supplied `computeUnits` for Flow; apply it to the
-        // LLM + HiFT models only.
+        // Flow runs on `.cpuAndGPU` (fp16). An ANE-port attempt (BC1S
+        // rewrite: Linear→Conv2d(1×1), LayerNorm on axis=1, manual SDPA,
+        // pre-baked rotary sin/cos) produced a Flow that *compiled* and
+        // ran ~3× faster, but numerically broken: on the parity
+        // fixture the ANE graph collapses the mel dynamic range from
+        // [-12.5, +5.2] to [-10.1, -0.8] (MAE 2.58 vs PyTorch fp32;
+        // plan required <1e-3), yielding HiFT audio at ~40× lower peak
+        // amplitude — unintelligible to both CTC-ZH and Qwen3 ASR.
+        // Reverted to the cpuAndGPU fp16 baseline. See
+        // `coreml/TRIALS_AND_ERRORS.md` "Flow ANE port" for the full
+        // journey including the residual 77-op `conv_pos_embed` CPU
+        // island that may have been masking the dynamic-range
+        // compression introduced elsewhere in the BC1S rewrite.
+        // Ignore the user-supplied `computeUnits` for Flow; apply it to
+        // the LLM + HiFT models only.
         let flowConfig = MLModelConfiguration()
         flowConfig.computeUnits = .cpuAndGPU
         let flow = try await compileAndLoad(flowURL, configuration: flowConfig)

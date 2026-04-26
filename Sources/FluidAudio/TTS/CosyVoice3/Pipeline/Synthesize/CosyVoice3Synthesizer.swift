@@ -46,11 +46,15 @@ public final class CosyVoice3Synthesizer: @unchecked Sendable {
         }
 
         // 1) Prefill (non-stateful: returns kv_k / kv_v as outputs)
+        let tPrefill = Date()
         let (prefillLogits, initialKvK, initialKvV) = try await runPrefill(fixture: fixture)
+        let prefillSec = Date().timeIntervalSince(tPrefill)
 
         // Seed decode MLState from prefill kv_k / kv_v.
+        let tSeed = Date()
         let state = models.decode.makeState()
         try seedDecodeState(state: state, kvK: initialKvK, kvV: initialKvV)
+        let seedSec = Date().timeIntervalSince(tSeed)
 
         // Reusable per-step inputs for decode. `curLenArr` is mutated in place
         // each step; `inputsEmbedsArr` is overwritten by memcpy per step.
@@ -74,6 +78,8 @@ public final class CosyVoice3Synthesizer: @unchecked Sendable {
 
         // 2) Decode loop
         var curLen = fixture.tPre
+        var decodeSteps = 0
+        let tDecode = Date()
         for step in 1..<maxNew {
             try embeddings.copyEmbedding(tokenId: topId, into: inputsEmbedsArr)
             curLenArr[0] = NSNumber(value: Int32(curLen))
@@ -83,33 +89,47 @@ public final class CosyVoice3Synthesizer: @unchecked Sendable {
                 state: state)
             topId = sampler.sample(logits: logits, decodedSoFar: decoded)
             curLen += 1
+            decodeSteps += 1
             if CosyVoice3Constants.stopRange.contains(topId) {
                 logger.info("EOS at step \(step) (token=\(topId))")
                 break
             }
             decoded.append(topId)
         }
+        let decodeSec = Date().timeIntervalSince(tDecode)
         guard !decoded.isEmpty else {
             throw CosyVoice3Error.predictionFailed("LLM produced no speech tokens")
         }
 
         // 3) Flow
         let nNew = decoded.count
+        let tFlow = Date()
         let mel = try await runFlow(
             promptSpeechIds: fixture.promptSpeechIds,
             decodedTokens: decoded,
             promptMel: fixture.promptMel,
             promptMelFrames: fixture.promptMelFrames,
             spkEmbedding: fixture.spkEmbedding)
+        let flowSec = Date().timeIntervalSince(tFlow)
 
         // 4) Slice mel to new portion + HiFT
         let numPromptMel = mel.numPromptMel
         let newMelStart = numPromptMel
         let newMelFrames = nNew * CosyVoice3Constants.tokenMelRatio
+        let tHift = Date()
         let audio = try await runHiFT(
             fullMel: mel.mel,
             newMelStart: newMelStart,
             newMelFrames: newMelFrames)
+        let hiftSec = Date().timeIntervalSince(tHift)
+
+        // Emit stage timings to stdout for RTFx benchmarking.
+        let decodeTps = decodeSteps > 0 ? Double(decodeSteps) / decodeSec : 0
+        print(
+            String(
+                format:
+                    "STAGES prefill=%.3fs seed=%.3fs decode=%.3fs(%d steps, %.2f tok/s) flow=%.3fs hift=%.3fs",
+                prefillSec, seedSec, decodeSec, decodeSteps, decodeTps, flowSec, hiftSec))
 
         return CosyVoice3SynthesisResult(
             samples: audio,
@@ -216,7 +236,8 @@ public final class CosyVoice3Synthesizer: @unchecked Sendable {
         // Decode state buffers are fp16. Convert per-element as we copy.
         guard kvK.dataType == .float32 && kvV.dataType == .float32 else {
             throw CosyVoice3Error.predictionFailed(
-                "seedDecodeState: expected fp32 KV from prefill (kv_k=\(kvK.dataType.rawValue) kv_v=\(kvV.dataType.rawValue))")
+                "seedDecodeState: expected fp32 KV from prefill (kv_k=\(kvK.dataType.rawValue) kv_v=\(kvV.dataType.rawValue))"
+            )
         }
 
         let L = CosyVoice3Constants.numLayers
@@ -388,8 +409,11 @@ public final class CosyVoice3Synthesizer: @unchecked Sendable {
         newMelStart: Int,
         newMelFrames: Int
     ) async throws -> [Float] {
-        // fullMel logical shape = [1, 80, 500] fp32. Physical strides may be
+        // fullMel logical shape = [1, 80, 500]. Physical strides may be
         // non-compact (e.g. [40960, 512, 1]) — use logical indexing.
+        // Dtype depends on the Flow variant: the ANE-port Flow emits fp16 to
+        // keep the graph fp16 end-to-end; the prior cpuAndGPU Flow emits fp32.
+        // HiFT's `mel` input is always fp32 at the CoreML I/O boundary.
         let hiftFrames = CosyVoice3Constants.hiftMaxFrames
         let melBins = CosyVoice3Constants.melBins
         let validFrames = min(newMelFrames, hiftFrames)
@@ -405,14 +429,34 @@ public final class CosyVoice3Synthesizer: @unchecked Sendable {
         dstBase.initialize(repeating: 0, count: totalPhysical)
 
         let srcStrides = fullMel.strides.map { $0.intValue }
-        let srcBase = fullMel.dataPointer.bindMemory(to: Float.self, capacity: fullMel.count)
         // fullMel logical: [1, 80, 500]; copy new slice → melInput [1, 80, 500].
-        for b in 0..<melBins {
-            for f in 0..<validFrames {
-                let srcOff = b * srcStrides[1] + (newMelStart + f) * srcStrides[2]
-                let dstOff = b * melInputStrides[1] + f * melInputStrides[2]
-                dstBase[dstOff] = srcBase[srcOff]
+        // Branch on src dtype so the fp16 ANE-port Flow output doesn't get
+        // reinterpreted as fp32 (would read past end of buffer → SIGSEGV).
+        switch fullMel.dataType {
+        case .float16:
+            let srcBase = fullMel.dataPointer.bindMemory(
+                to: Float16.self, capacity: fullMel.count)
+            for b in 0..<melBins {
+                for f in 0..<validFrames {
+                    let srcOff = b * srcStrides[1] + (newMelStart + f) * srcStrides[2]
+                    let dstOff = b * melInputStrides[1] + f * melInputStrides[2]
+                    dstBase[dstOff] = Float(srcBase[srcOff])
+                }
             }
+        case .float32:
+            let srcBase = fullMel.dataPointer.bindMemory(
+                to: Float.self, capacity: fullMel.count)
+            for b in 0..<melBins {
+                for f in 0..<validFrames {
+                    let srcOff = b * srcStrides[1] + (newMelStart + f) * srcStrides[2]
+                    let dstOff = b * melInputStrides[1] + f * melInputStrides[2]
+                    dstBase[dstOff] = srcBase[srcOff]
+                }
+            }
+        default:
+            throw CosyVoice3Error.predictionFailed(
+                "runHiFT: unexpected Flow mel dtype \(fullMel.dataType.rawValue) (expected fp16 or fp32)"
+            )
         }
 
         let numValid = try MLMultiArray(shape: [1], dataType: .int32)
