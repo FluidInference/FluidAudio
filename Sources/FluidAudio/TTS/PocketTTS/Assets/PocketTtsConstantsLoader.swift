@@ -363,7 +363,16 @@ public enum PocketTtsConstantsLoader {
             return UInt64(littleEndian: typed.pointee)
         }
         let headerStart = 8
-        let headerEnd = headerStart + Int(headerLen)
+        // Reject corrupt/malicious files whose header length doesn't fit in
+        // an Int before `Int(_:)` would trap.
+        guard let headerLenInt = Int(exactly: headerLen) else {
+            throw LoadError.invalidSize(
+                "\(fileLabel).safetensors: header length \(headerLen) exceeds Int.max",
+                expected: Int.max,
+                actual: data.count
+            )
+        }
+        let headerEnd = headerStart + headerLenInt
         guard headerEnd <= data.count else {
             throw LoadError.invalidSize(
                 "\(fileLabel).safetensors: header overflow",

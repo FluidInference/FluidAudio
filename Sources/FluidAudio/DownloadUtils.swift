@@ -639,6 +639,14 @@ public class DownloadUtils {
 
             if file.size == 0 {
                 FileManager.default.createFile(atPath: destPath.path, contents: Data())
+                progressHandler?(
+                    DownloadProgress(
+                        fractionCompleted: Double(index + 1) / Double(totalFiles),
+                        phase: .downloading(
+                            completedFiles: index + 1, totalFiles: totalFiles)))
+                if (index + 1) % 5 == 0 || index == totalFiles - 1 {
+                    logger.info("Downloaded \(index + 1)/\(totalFiles) \(subdirectory) files")
+                }
                 continue
             }
 
