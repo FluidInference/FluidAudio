@@ -16,7 +16,7 @@ public enum PocketTtsResourceDownloader {
     /// - Returns: The directory that contains the four `.mlmodelc` packages
     ///   plus `constants_bin/` for the requested language.
     public static func ensureModels(
-        language: PocketTtsLanguage = .english,
+        language: PocketTtsLanguage,
         directory: URL? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
@@ -102,7 +102,7 @@ public enum PocketTtsResourceDownloader {
     ///   - languageRoot: The directory returned by `ensureModels(language:)`.
     public static func ensureVoice(
         _ voice: String,
-        language: PocketTtsLanguage = .english,
+        language: PocketTtsLanguage,
         languageRoot: URL
     ) async throws -> PocketTtsVoiceData {
         let sanitized = voice.filter { $0.isLetter || $0.isNumber || $0 == "_" }
@@ -124,10 +124,6 @@ public enum PocketTtsResourceDownloader {
                 description: "\(sanitized) voice prompt (\(language.rawValue))",
                 logger: logger
             )
-            // Make sure the parent directory exists in case this is a fresh
-            // language pack that hasn't materialized constants_bin/ yet.
-            try FileManager.default.createDirectory(
-                at: constantsDir, withIntermediateDirectories: true)
             try data.write(to: safetensorsURL, options: [.atomic])
             logger.info("Downloaded voice '\(sanitized)' (\(data.count / 1024) KB)")
         }
