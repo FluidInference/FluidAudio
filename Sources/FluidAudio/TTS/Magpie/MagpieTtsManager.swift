@@ -74,7 +74,21 @@ public actor MagpieTtsManager {
             tokenizerDir: tokenizerDir, eosId: bundle.textEosId)
         self.tokenizer = tokenizer
 
-        self.synthesizer = MagpieSynthesizer(store: store, tokenizer: tokenizer)
+        let synthesizer = MagpieSynthesizer(store: store, tokenizer: tokenizer)
+
+        // Warm CoreML graphs so the first user-facing synthesize() call
+        // doesn't pay first-dispatch cost on text_encoder / decoder_step /
+        // nanocodec_decoder. Failures here are non-fatal — log and proceed.
+        let warmupStart = Date()
+        do {
+            try await synthesizer.warmup()
+            let elapsed = Date().timeIntervalSince(warmupStart)
+            logger.info("Magpie warmup took \(String(format: "%.2f", elapsed))s")
+        } catch {
+            logger.warning("Magpie warmup failed (non-fatal): \(error.localizedDescription)")
+        }
+
+        self.synthesizer = synthesizer
         logger.info("Magpie TTS ready (languages: \(preferredLanguages.map { $0.rawValue }.sorted()))")
     }
 
@@ -106,6 +120,33 @@ public actor MagpieTtsManager {
             throw MagpieError.notInitialized
         }
         return try await synthesizer.synthesize(
+            text: text, speaker: speaker, language: language, options: options)
+    }
+
+    /// Streaming variant of `synthesize(text:...)`. Yields one
+    /// `MagpieAudioChunk` per chunk as soon as its NanoCodec decode finishes,
+    /// instead of waiting for the entire utterance to complete.
+    ///
+    /// The chunker reserves the first chunk for a small clause-sized head
+    /// (~50 codec frames ≈ 2.3 s of audio) to minimize time-to-first-audio.
+    /// Subsequent chunks pack at the normal capacity. Each non-final chunk
+    /// already includes any punctuation-aware trailing silence, so callers
+    /// can append `samples` arrays back-to-back for gapless playback.
+    ///
+    /// `peakNormalize` is force-disabled in streaming mode (cannot be applied
+    /// without buffering the full utterance).
+    ///
+    /// Cancelling the consuming task cancels in-flight synthesis cleanly.
+    public func synthesizeStream(
+        text: String,
+        speaker: MagpieSpeaker = .john,
+        language: MagpieLanguage = .english,
+        options: MagpieSynthesisOptions = .default
+    ) async throws -> AsyncThrowingStream<MagpieAudioChunk, Error> {
+        guard let synthesizer = synthesizer else {
+            throw MagpieError.notInitialized
+        }
+        return synthesizer.synthesizeStream(
             text: text, speaker: speaker, language: language, options: options)
     }
 
