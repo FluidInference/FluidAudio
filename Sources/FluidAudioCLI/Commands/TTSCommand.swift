@@ -711,79 +711,78 @@ public struct TTS {
                     + " total=\(String(format: "%.1f", detailed.timings.totalMs))"
             )
 
-            // ASR round-trip evaluation (only when metrics requested)
-            if metricsPath != nil {
-                logger.info("--- Running ASR for TTS→STT evaluation ---")
-                var asrHypothesis: String? = nil
-                var werValue: Double? = nil
+            // ASR round-trip evaluation (only when metrics requested).
+            // Flattened per AGENTS.md: avoid nested ifs — guard out early.
+            guard let metricsPath else { return }
 
-                do {
-                    let asrModels = try await AsrModels.downloadAndLoad()
-                    let asr = AsrManager()
-                    try await asr.loadModels(asrModels)
+            logger.info("--- Running ASR for TTS→STT evaluation ---")
+            var asrHypothesis: String? = nil
+            var werValue: Double? = nil
 
-                    var decoderState = TdtDecoderState.make(
-                        decoderLayers: await asr.decoderLayerCount)
-                    let transcription = try await asr.transcribe(
-                        outURL, decoderState: &decoderState)
-                    asrHypothesis = transcription.text
+            do {
+                let asrModels = try await AsrModels.downloadAndLoad()
+                let asr = AsrManager()
+                try await asr.loadModels(asrModels)
 
-                    let werMetrics = WERCalculator.calculateWERMetrics(
-                        hypothesis: transcription.text, reference: text)
-                    werValue = werMetrics.wer
+                var decoderState = TdtDecoderState.make(
+                    decoderLayers: await asr.decoderLayerCount)
+                let transcription = try await asr.transcribe(
+                    outURL, decoderState: &decoderState)
+                asrHypothesis = transcription.text
 
-                    logger.info("Reference:  \(text)")
-                    logger.info("Hypothesis: \(transcription.text)")
-                    logger.info(String(format: "WER: %.1f%%", werValue! * 100))
+                let werMetrics = WERCalculator.calculateWERMetrics(
+                    hypothesis: transcription.text, reference: text)
+                werValue = werMetrics.wer
 
-                    await asr.cleanup()
-                } catch {
-                    logger.warning("ASR evaluation failed: \(error.localizedDescription)")
-                }
+                logger.info("Reference:  \(text)")
+                logger.info("Hypothesis: \(transcription.text)")
+                logger.info(String(format: "WER: %.1f%%", werValue! * 100))
 
-                if let metricsPath {
-                    var metricsDict: [String: Any] = [
-                        "backend": "kokoro-ane",
-                        "text": text,
-                        "voice": resolvedVoice,
-                        "output": outURL.path,
-                        "model_load_time_s": loadS,
-                        "inference_time_s": synthS,
-                        "audio_duration_s": audioSecs,
-                        "realtime_speed": rtfx,
-                        "total_time_s": totalS,
-                        "encoder_tokens": detailed.encoderTokens,
-                        "acoustic_frames": detailed.acousticFrames,
-                        "stage_timings_ms": [
-                            "albert": detailed.timings.albert,
-                            "post_albert": detailed.timings.postAlbert,
-                            "alignment": detailed.timings.alignment,
-                            "prosody": detailed.timings.prosody,
-                            "noise": detailed.timings.noise,
-                            "vocoder": detailed.timings.vocoder,
-                            "tail": detailed.timings.tail,
-                            "total": detailed.timings.totalMs,
-                        ],
-                    ]
-                    if let asrHypothesis {
-                        metricsDict["asr_hypothesis"] = asrHypothesis
-                    }
-                    if let werValue {
-                        metricsDict["wer"] = werValue
-                    }
-
-                    let artifactsRoot = try ensureArtifactsRoot()
-                    let mURL = resolveOutputURL(
-                        metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
-                    try FileManager.default.createDirectory(
-                        at: mURL.deletingLastPathComponent(),
-                        withIntermediateDirectories: true)
-                    let json = try JSONSerialization.data(
-                        withJSONObject: metricsDict, options: [.prettyPrinted])
-                    try json.write(to: mURL)
-                    logger.info("Metrics saved: \(mURL.path)")
-                }
+                await asr.cleanup()
+            } catch {
+                logger.warning("ASR evaluation failed: \(error.localizedDescription)")
             }
+
+            var metricsDict: [String: Any] = [
+                "backend": "kokoro-ane",
+                "text": text,
+                "voice": resolvedVoice,
+                "output": outURL.path,
+                "model_load_time_s": loadS,
+                "inference_time_s": synthS,
+                "audio_duration_s": audioSecs,
+                "realtime_speed": rtfx,
+                "total_time_s": totalS,
+                "encoder_tokens": detailed.encoderTokens,
+                "acoustic_frames": detailed.acousticFrames,
+                "stage_timings_ms": [
+                    "albert": detailed.timings.albert,
+                    "post_albert": detailed.timings.postAlbert,
+                    "alignment": detailed.timings.alignment,
+                    "prosody": detailed.timings.prosody,
+                    "noise": detailed.timings.noise,
+                    "vocoder": detailed.timings.vocoder,
+                    "tail": detailed.timings.tail,
+                    "total": detailed.timings.totalMs,
+                ],
+            ]
+            if let asrHypothesis {
+                metricsDict["asr_hypothesis"] = asrHypothesis
+            }
+            if let werValue {
+                metricsDict["wer"] = werValue
+            }
+
+            let artifactsRoot = try ensureArtifactsRoot()
+            let mURL = resolveOutputURL(
+                metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+            try FileManager.default.createDirectory(
+                at: mURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            let json = try JSONSerialization.data(
+                withJSONObject: metricsDict, options: [.prettyPrinted])
+            try json.write(to: mURL)
+            logger.info("Metrics saved: \(mURL.path)")
         } catch {
             logger.error("KokoroAne Error: \(error)")
             print("KokoroAne failed: \(error)")
