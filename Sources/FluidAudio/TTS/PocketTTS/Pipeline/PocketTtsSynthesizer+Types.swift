@@ -18,5 +18,5 @@ extension PocketTtsSynthesizer {
     /// are discovered at model-load time via `PocketTtsLayerKeys.discover(...)`.
     /// Mimi decoder I/O is discovered at model-load via `PocketTtsMimiKeys.discover(...)`.
     /// Both use discovery because CoreML auto-generates `var_NNN` names that
-    /// differ between English/v2 packs and 6L/24L variants.
+    /// differ across language packs and 6L/24L variants.
 }

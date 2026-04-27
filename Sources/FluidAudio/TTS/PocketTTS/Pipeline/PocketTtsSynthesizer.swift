@@ -368,10 +368,10 @@ public struct PocketTtsSynthesizer {
         let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
 
         // One-time voice prefill. Two paths matching `prefillKVCache`:
-        //  - v2 packs (cacheSnapshot != nil): drop pre-baked K/V into cache,
-        //    skip cond_step entirely (`promptLength == 0`, so the loop in
-        //    `prefillKVCacheVoice` would be a no-op anyway).
-        //  - Flat audio prompt (legacy English): feed every voice token
+        //  - Shipped voices (cacheSnapshot != nil): drop pre-baked K/V into
+        //    cache, skip cond_step entirely (`promptLength == 0`, so the
+        //    loop in `prefillKVCacheVoice` would be a no-op anyway).
+        //  - Cloned voices (flat audio prompt): feed every voice token
         //    through cond_step.
         let voiceKVSnapshot: KVCacheState
         if let snapshot = voiceData.cacheSnapshot {
@@ -884,10 +884,10 @@ public struct PocketTtsSynthesizer {
 
     /// Look up text token embeddings from the embedding table.
     ///
-    /// Vocab size is derived from the actual loaded table because v2 language
-    /// packs ship per-language `text_embed_table` with potentially different
-    /// row counts (`PocketTtsConstants.vocabSize` only matches the legacy
-    /// English pack).
+    /// Vocab size is derived from the actual loaded table because each
+    /// language pack ships its own `text_embed_table` with potentially
+    /// different row counts (`PocketTtsConstants.vocabSize` is only the
+    /// English row count).
     static func embedTokens(
         _ tokenIds: [Int], constants: PocketTtsConstantsBundle
     ) -> [[Float]] {
