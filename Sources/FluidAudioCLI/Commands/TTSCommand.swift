@@ -200,6 +200,8 @@ public struct TTS {
                         backend = .kokoro
                     case "pocket", "pockettts":
                         backend = .pocketTts
+                    case "kokoro-lai", "kokorolai", "lai":
+                        backend = .kokoroLai
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro")
                     }
@@ -259,6 +261,12 @@ public struct TTS {
                 text: text, output: output, voice: voice, deEss: deEss,
                 metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
                 voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath)
+            return
+        }
+
+        if backend == .kokoroLai {
+            await runKokoroLai(
+                text: text, output: output, voice: voice, metricsPath: metricsPath)
             return
         }
 
@@ -642,6 +650,147 @@ public struct TTS {
         }
     }
 
+    private static func runKokoroLai(
+        text: String, output: String, voice: String, metricsPath: String?
+    ) async {
+        do {
+            let tStart = Date()
+            let resolvedVoice =
+                voice == TtsConstants.recommendedVoice
+                ? KokoroLaiConstants.defaultVoice : voice
+            let manager = KokoroLaiManager(defaultVoice: resolvedVoice)
+
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+
+            let tSynth0 = Date()
+            let detailed = try await manager.synthesizeDetailed(
+                text: text, voice: resolvedVoice, speed: 1.0)
+            let wav = try AudioWAV.data(
+                from: detailed.samples,
+                sampleRate: Double(detailed.sampleRate))
+            let tSynth1 = Date()
+
+            let outURL = {
+                let expanded = (output as NSString).expandingTildeInPath
+                if expanded.hasPrefix("/") {
+                    return URL(fileURLWithPath: expanded)
+                }
+                let cwd = URL(
+                    fileURLWithPath: FileManager.default.currentDirectoryPath,
+                    isDirectory: true)
+                return cwd.appendingPathComponent(expanded)
+            }()
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try wav.write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let totalS = tSynth1.timeIntervalSince(tStart)
+            let audioSecs = Double(detailed.samples.count) / Double(detailed.sampleRate)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+
+            logger.info("KokoroLai synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Total: \(String(format: "%.3f", totalS))s")
+            logger.info("  Output: \(outURL.path)")
+            logger.info(
+                "  Stages (ms): albert=\(String(format: "%.1f", detailed.timings.albert))"
+                    + " postAlbert=\(String(format: "%.1f", detailed.timings.postAlbert))"
+                    + " alignment=\(String(format: "%.1f", detailed.timings.alignment))"
+                    + " prosody=\(String(format: "%.1f", detailed.timings.prosody))"
+                    + " noise=\(String(format: "%.1f", detailed.timings.noise))"
+                    + " vocoder=\(String(format: "%.1f", detailed.timings.vocoder))"
+                    + " tail=\(String(format: "%.1f", detailed.timings.tail))"
+                    + " total=\(String(format: "%.1f", detailed.timings.totalMs))"
+            )
+
+            // ASR round-trip evaluation (only when metrics requested)
+            if metricsPath != nil {
+                logger.info("--- Running ASR for TTS→STT evaluation ---")
+                var asrHypothesis: String? = nil
+                var werValue: Double? = nil
+
+                do {
+                    let asrModels = try await AsrModels.downloadAndLoad()
+                    let asr = AsrManager()
+                    try await asr.loadModels(asrModels)
+
+                    var decoderState = TdtDecoderState.make(
+                        decoderLayers: await asr.decoderLayerCount)
+                    let transcription = try await asr.transcribe(
+                        outURL, decoderState: &decoderState)
+                    asrHypothesis = transcription.text
+
+                    let werMetrics = WERCalculator.calculateWERMetrics(
+                        hypothesis: transcription.text, reference: text)
+                    werValue = werMetrics.wer
+
+                    logger.info("Reference:  \(text)")
+                    logger.info("Hypothesis: \(transcription.text)")
+                    logger.info(String(format: "WER: %.1f%%", werValue! * 100))
+
+                    await asr.cleanup()
+                } catch {
+                    logger.warning("ASR evaluation failed: \(error.localizedDescription)")
+                }
+
+                if let metricsPath {
+                    var metricsDict: [String: Any] = [
+                        "backend": "kokoro-lai",
+                        "text": text,
+                        "voice": resolvedVoice,
+                        "output": outURL.path,
+                        "model_load_time_s": loadS,
+                        "inference_time_s": synthS,
+                        "audio_duration_s": audioSecs,
+                        "realtime_speed": rtfx,
+                        "total_time_s": totalS,
+                        "encoder_tokens": detailed.encoderTokens,
+                        "acoustic_frames": detailed.acousticFrames,
+                        "stage_timings_ms": [
+                            "albert": detailed.timings.albert,
+                            "post_albert": detailed.timings.postAlbert,
+                            "alignment": detailed.timings.alignment,
+                            "prosody": detailed.timings.prosody,
+                            "noise": detailed.timings.noise,
+                            "vocoder": detailed.timings.vocoder,
+                            "tail": detailed.timings.tail,
+                            "total": detailed.timings.totalMs,
+                        ],
+                    ]
+                    if let asrHypothesis {
+                        metricsDict["asr_hypothesis"] = asrHypothesis
+                    }
+                    if let werValue {
+                        metricsDict["wer"] = werValue
+                    }
+
+                    let artifactsRoot = try ensureArtifactsRoot()
+                    let mURL = resolveOutputURL(
+                        metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+                    try FileManager.default.createDirectory(
+                        at: mURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true)
+                    let json = try JSONSerialization.data(
+                        withJSONObject: metricsDict, options: [.prettyPrinted])
+                    try json.write(to: mURL)
+                    logger.info("Metrics saved: \(mURL.path)")
+                }
+            }
+        } catch {
+            logger.error("KokoroLai Error: \(error)")
+            print("KokoroLai failed: \(error)")
+            exit(1)
+        }
+    }
+
     private static func printUsage() {
         print(
             """
@@ -650,7 +799,7 @@ public struct TTS {
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS)
-              --backend            TTS backend: kokoro (default) or pocket
+              --backend            TTS backend: kokoro (default), pocket, or kokoro-lai
               --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)

@@ -21,6 +21,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case nemotronStreaming80 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/80ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
+    case kokoroLai = "FluidInference/kokoro-laishere-coreml"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
     case lseend = "FluidInference/ls-eend-coreml"
     case pocketTts = "FluidInference/pocket-tts-coreml"
@@ -65,6 +66,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "speaker-diarization-coreml"
         case .kokoro:
             return "kokoro-82m-coreml"
+        case .kokoroLai:
+            return "kokoro-laishere-coreml"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
         case .lseend:
@@ -143,6 +146,8 @@ public enum Repo: String, CaseIterable, Sendable {
         switch self {
         case .kokoro:
             return "kokoro"
+        case .kokoroLai:
+            return "kokoro-laishere"
         case .parakeetEou160:
             return "parakeet-eou-streaming/160ms"
         case .parakeetEou320:
@@ -708,6 +713,32 @@ public enum ModelNames {
         }
     }
 
+    /// laishere/kokoro-coreml — 7-stage CoreML chain (fp16+int8pal, ANE-optimized)
+    /// vendored from https://github.com/laishere/kokoro-coreml.
+    public enum KokoroLai {
+        public static let albert = "KokoroAlbert.mlmodelc"
+        public static let postAlbert = "KokoroPostAlbert.mlmodelc"
+        public static let alignment = "KokoroAlignment.mlmodelc"
+        public static let prosody = "KokoroProsody.mlmodelc"
+        public static let noise = "KokoroNoise.mlmodelc"
+        public static let vocoder = "KokoroVocoder.mlmodelc"
+        public static let tail = "KokoroTail.mlmodelc"
+
+        /// Auxiliary (non-CoreML) files that must accompany the mlmodelc bundles.
+        public static let vocab = "vocab.json"
+        public static let defaultVoiceFile = "af_heart.bin"
+
+        /// All seven .mlmodelc bundles.
+        public static let requiredCoreMLModels: Set<String> = [
+            albert, postAlbert, alignment, prosody, noise, vocoder, tail,
+        ]
+
+        /// CoreML bundles + the vocab JSON + the default voice .bin.
+        public static var requiredModels: Set<String> {
+            requiredCoreMLModels.union([vocab, defaultVoiceFile])
+        }
+    }
+
     static func getRequiredModelNames(for repo: Repo, variant: String?) -> Set<String> {
         switch repo {
         case .vad:
@@ -744,6 +775,8 @@ public enum ModelNames {
                 .union(ModelNames.MultilingualG2P.requiredModels)
         case .pocketTts:
             return ModelNames.PocketTTS.requiredModels
+        case .kokoroLai:
+            return ModelNames.KokoroLai.requiredModels
         case .sortformer:
             if let variant = variant {
                 return [variant]
