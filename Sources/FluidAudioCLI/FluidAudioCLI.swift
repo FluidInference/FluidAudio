@@ -2,7 +2,9 @@
 import AVFoundation
 import FluidAudio
 import Foundation
+#if canImport(MachTaskSelfWrapper)
 import MachTaskSelfWrapper
+#endif
 
 // Using @main instead of main.swift for Swift 6 compatibility.
 // This provides an explicit async context and clear isolation semantics.
