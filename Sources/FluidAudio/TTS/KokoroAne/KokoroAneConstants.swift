@@ -10,9 +10,6 @@ public enum KokoroAneConstants {
     /// Default voice id (single voice ships with the HF repo).
     public static let defaultVoice = "af_heart"
 
-    /// Default Kokoro language code for G2P. "a" = American English.
-    public static let defaultLanguage = "a"
-
     /// Output sample rate of the iSTFT in `KokoroTail.mlpackage`.
     public static let sampleRate = 24_000
 
@@ -31,13 +28,11 @@ public enum KokoroAneConstants {
     ///   * cols `[128..<256]` = `style_s`      (→ PostAlbert + Prosody)
     public static let voicePackRows = 510
     public static let voicePackCols = 256
-    public static let voicePackTimbreSlice = 0..<128
-    public static let voicePackStyleSSlice = 128..<256
 
     /// `--max-frames` baked into the converted models. Sentences whose `T_a`
     /// exceeds this must be skipped or chunked.
     public static let maxAcousticFrames = 2_000
 
     /// Default playback speed factor for PostAlbert.
-    public static let defaultSpeed: Float16 = 1.0
+    public static let defaultSpeed: Float = 1.0
 }

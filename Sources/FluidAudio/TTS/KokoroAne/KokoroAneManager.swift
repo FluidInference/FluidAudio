@@ -85,7 +85,7 @@ public actor KokoroAneManager {
     public func synthesize(
         text: String,
         voice: String? = nil,
-        speed: Float = Float(KokoroAneConstants.defaultSpeed)
+        speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> Data {
         let result = try await synthesizeDetailed(text: text, voice: voice, speed: speed)
         return try wavData(from: result)
@@ -95,7 +95,7 @@ public actor KokoroAneManager {
     public func synthesizeDetailed(
         text: String,
         voice: String? = nil,
-        speed: Float = Float(KokoroAneConstants.defaultSpeed)
+        speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> KokoroAneSynthesisResult {
         let phonemes = try await phonemize(text: text)
         return try await runChain(phonemes: phonemes, voice: voice, speed: speed)
@@ -105,7 +105,7 @@ public actor KokoroAneManager {
     public func synthesizeFromPhonemes(
         _ phonemes: String,
         voice: String? = nil,
-        speed: Float = Float(KokoroAneConstants.defaultSpeed)
+        speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> Data {
         let result = try await runChain(phonemes: phonemes, voice: voice, speed: speed)
         return try wavData(from: result)
@@ -115,7 +115,7 @@ public actor KokoroAneManager {
     public func synthesizeFromPhonemesDetailed(
         _ phonemes: String,
         voice: String? = nil,
-        speed: Float = Float(KokoroAneConstants.defaultSpeed)
+        speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> KokoroAneSynthesisResult {
         try await runChain(phonemes: phonemes, voice: voice, speed: speed)
     }

@@ -19,7 +19,7 @@ public struct KokoroAneSynthesizer {
         phonemeCount: Int,
         styleS: [Float],
         styleTimbre: [Float],
-        speed: Float = Float(KokoroAneConstants.defaultSpeed),
+        speed: Float = KokoroAneConstants.defaultSpeed,
         store: KokoroAneModelStore
     ) async throws -> KokoroAneSynthesisResult {
         precondition(styleS.count == 128, "style_s must be length 128, got \(styleS.count)")

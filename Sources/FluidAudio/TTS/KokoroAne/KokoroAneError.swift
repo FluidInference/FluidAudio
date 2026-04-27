@@ -8,7 +8,6 @@ public enum KokoroAneError: Error, LocalizedError {
     case vocabParseFailed(URL, String)
     case voicePackMissing(URL)
     case invalidVoicePack(String)
-    case unsupportedPhoneme(Character)
     case phonemeSequenceTooLong(Int)
     case inputProcessingFailed(String)
     case acousticFramesExceedCap(have: Int, cap: Int)
@@ -30,8 +29,6 @@ public enum KokoroAneError: Error, LocalizedError {
             return "KokoroAne voice pack not found at \(url.path)."
         case .invalidVoicePack(let detail):
             return "KokoroAne voice pack is invalid: \(detail)"
-        case .unsupportedPhoneme(let ch):
-            return "KokoroAne vocab does not contain phoneme '\(ch)'."
         case .phonemeSequenceTooLong(let n):
             return "KokoroAne phoneme sequence has \(n) characters (max \(KokoroAneConstants.maxPhonemeLength))."
         case .inputProcessingFailed(let detail):
