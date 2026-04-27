@@ -16,7 +16,6 @@ public struct KokoroAneSynthesizer {
     /// resolution.
     public static func synthesize(
         inputIds: [Int32],
-        phonemeCount: Int,
         styleS: [Float],
         styleTimbre: [Float],
         speed: Float = KokoroAneConstants.defaultSpeed,

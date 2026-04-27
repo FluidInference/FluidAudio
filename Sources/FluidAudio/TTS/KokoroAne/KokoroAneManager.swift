@@ -152,7 +152,6 @@ public actor KokoroAneManager {
 
         return try await KokoroAneSynthesizer.synthesize(
             inputIds: inputIds,
-            phonemeCount: phonemeCount,
             styleS: styleS,
             styleTimbre: styleTimbre,
             speed: speed,
