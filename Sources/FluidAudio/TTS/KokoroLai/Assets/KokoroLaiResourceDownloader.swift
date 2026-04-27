@@ -60,7 +60,13 @@ public enum KokoroLaiResourceDownloader {
         }
 
         logger.info("Downloading voice pack '\(sanitized)' from HuggingFace...")
-        let remoteURL = try ModelRegistry.resolveModel(Repo.kokoroLai.remotePath, filename)
+        let remoteFilePath: String
+        if let sub = Repo.kokoroLai.subPath {
+            remoteFilePath = "\(sub)/\(filename)"
+        } else {
+            remoteFilePath = filename
+        }
+        let remoteURL = try ModelRegistry.resolveModel(Repo.kokoroLai.remotePath, remoteFilePath)
         let data = try await AssetDownloader.fetchData(
             from: remoteURL,
             description: "\(sanitized) voice pack",

@@ -21,7 +21,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case nemotronStreaming80 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/80ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
-    case kokoroLai = "FluidInference/kokoro-laishere-coreml"
+    case kokoroLai = "FluidInference/kokoro-82m-coreml/ANE"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
     case lseend = "FluidInference/ls-eend-coreml"
     case pocketTts = "FluidInference/pocket-tts-coreml"
@@ -67,7 +67,7 @@ public enum Repo: String, CaseIterable, Sendable {
         case .kokoro:
             return "kokoro-82m-coreml"
         case .kokoroLai:
-            return "kokoro-laishere-coreml"
+            return "kokoro-82m-coreml/ANE"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
         case .lseend:
@@ -96,6 +96,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-ctc-0.6b-coreml"
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
+        case .kokoroLai:
+            return "FluidInference/kokoro-82m-coreml"
         case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
         case .sortformer:
@@ -116,6 +118,8 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Subdirectory within repo (for repos with multiple model variants)
     public var subPath: String? {
         switch self {
+        case .kokoroLai:
+            return "ANE"
         case .parakeetEou160:
             return "160ms"
         case .parakeetEou320:
@@ -147,7 +151,7 @@ public enum Repo: String, CaseIterable, Sendable {
         case .kokoro:
             return "kokoro"
         case .kokoroLai:
-            return "kokoro-laishere"
+            return "kokoro-82m-coreml/ANE"
         case .parakeetEou160:
             return "parakeet-eou-streaming/160ms"
         case .parakeetEou320:
