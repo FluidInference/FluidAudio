@@ -194,16 +194,15 @@ public actor PocketTtsSession {
         for step in 0..<maxGenLen {
             if Task.isCancelled { break }
 
-            // FlowLM step with local KV cache copy-in/copy-out
-            var localKV = kvState
+            // FlowLM step. `kvState` is function-local (not actor-isolated),
+            // so it can be passed `inout` to the async free function directly.
             let (transformerOut, eosLogit) = try await PocketTtsSynthesizer.runFlowLMStep(
                 sequence: sequence,
                 bosEmb: bosEmb,
-                state: &localKV,
+                state: &kvState,
                 model: stepModel,
                 layerKeys: flowlmLayerKeys
             )
-            kvState = localKV
 
             // EOS detection
             if eosLogit > PocketTtsConstants.eosThreshold && eosStep == nil {

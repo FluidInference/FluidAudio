@@ -17,8 +17,7 @@ extension PocketTtsSynthesizer {
         ///  - `16`: attention heads
         ///  - `64`: dims per head (16 × 64 = 1024 total)
         ///
-        /// `N` is 6 for the legacy English / 6L packs, and 24 for `*_24l`
-        /// packs.
+        /// `N` is 6 for 6L packs and 24 for `*_24l` packs.
         var caches: [MLMultiArray]
         /// `N` position counters (one per layer) tracking the next write slot
         /// in each cache.
@@ -264,9 +263,9 @@ extension PocketTtsSynthesizer {
     /// limit can't hold multiple chunks' worth of context.
     ///
     /// Two voice paths:
-    ///  - **Snapshot** (v2 packs): drop pre-baked K/V into cache, skip
+    ///  - **Snapshot** (shipped voices): drop pre-baked K/V into cache, skip
     ///    `cond_step` voice prefill entirely.
-    ///  - **Flat audio prompt** (legacy English): feed every voice token
+    ///  - **Flat audio prompt** (cloned voices): feed every voice token
     ///    through `cond_step`.
     /// Text prefill runs identically in both cases.
     static func prefillKVCache(
