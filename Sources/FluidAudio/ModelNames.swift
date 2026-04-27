@@ -609,11 +609,6 @@ public enum ModelNames {
                 constantsBinDir,
             ]
         }
-
-        /// Models required for voice cloning (optional feature).
-        public static let voiceCloningModels: Set<String> = [
-            mimiEncoderFile
-        ]
     }
 
     /// Multilingual G2P (CharsiuG2P ByT5) model names

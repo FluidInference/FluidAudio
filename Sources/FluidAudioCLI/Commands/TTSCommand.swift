@@ -13,15 +13,6 @@ public struct TTS {
         return formatter.string(fromByteCount: Int64(bytes))
     }
 
-    private static func label(for variant: ModelNames.TTS.Variant) -> String {
-        switch variant {
-        case .fiveSecond:
-            return "5s"
-        case .fifteenSecond:
-            return "15s"
-        }
-    }
-
     private static func ensureArtifactsRoot() throws -> URL {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let root = cwd.appendingPathComponent(artifactsDirectoryName, isDirectory: true)
@@ -210,9 +201,6 @@ public struct TTS {
                     }
                     i += 1
                 }
-            case "--auto-download":
-                // No-op: downloads are always ensured by the CLI
-                ()
             case "--benchmark":
                 benchmarkMode = true
             case "--no-deess":
@@ -326,14 +314,7 @@ public struct TTS {
             let tSynth1 = Date()
 
             // Write WAV
-            let outURL = {
-                let expanded = (output as NSString).expandingTildeInPath
-                if expanded.hasPrefix("/") {
-                    return URL(fileURLWithPath: expanded)
-                }
-                let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-                return cwd.appendingPathComponent(expanded)
-            }()
+            let outURL = resolveInputURL(output)
             try FileManager.default.createDirectory(
                 at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try wav.write(to: outURL)
@@ -348,7 +329,7 @@ public struct TTS {
                     for variant in variants {
                         if let footprint = diagnostics.variantFootprints[variant] {
                             logger.info(
-                                "Model bundle \(label(for: variant)) size: \(formatBytes(footprint)) (\(footprint) bytes)"
+                                "Model bundle \(variantPreferenceLabel(variant)) size: \(formatBytes(footprint)) (\(footprint) bytes)"
                             )
                         }
                     }
@@ -643,16 +624,7 @@ public struct TTS {
             }
             let tSynth1 = Date()
 
-            let outURL = {
-                let expanded = (output as NSString).expandingTildeInPath
-                if expanded.hasPrefix("/") {
-                    return URL(fileURLWithPath: expanded)
-                }
-                let cwd = URL(
-                    fileURLWithPath: FileManager.default.currentDirectoryPath,
-                    isDirectory: true)
-                return cwd.appendingPathComponent(expanded)
-            }()
+            let outURL = resolveInputURL(output)
             try FileManager.default.createDirectory(
                 at: outURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true)

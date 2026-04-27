@@ -1,6 +1,5 @@
 import CoreML
 import Foundation
-import OSLog
 
 /// HuggingFace model downloader using URLSession
 public class DownloadUtils {
@@ -73,8 +72,6 @@ public class DownloadUtils {
             }
         }
     }
-
-    /// Download configuration
 
     /// Phase of a model download operation.
     public enum DownloadPhase: Sendable {

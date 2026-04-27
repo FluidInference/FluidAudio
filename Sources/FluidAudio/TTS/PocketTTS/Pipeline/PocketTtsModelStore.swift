@@ -1,6 +1,5 @@
 @preconcurrency import CoreML
 import Foundation
-import OSLog
 
 /// Actor-based store for PocketTTS CoreML models and constants.
 ///
