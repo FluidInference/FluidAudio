@@ -82,124 +82,26 @@ public struct PocketTtsSynthesizer {
         seed: UInt64? = nil,
         deEss: Bool = true
     ) async throws -> SynthesisResult {
-        let store = try currentModelStore()
-
         logger.info("PocketTTS synthesizing with custom voice: '\(text)'")
-
-        // 1. Load constants (voice provided directly)
-        let constants = try await store.constants()
-
-        // 2. Split text into chunks that fit within KV cache capacity
-        let chunks = chunkText(text, tokenizer: constants.tokenizer)
-        logger.info("Split into \(chunks.count) chunk(s)")
-
-        // 3. Set up random number generator (seeded or system entropy)
-        var rng = SeededRNG(seed: seed ?? UInt64.random(in: 0...UInt64.max))
-
-        // 4. Load models
-        let condModel = try await store.condStep()
-        let stepModel = try await store.flowlmStep()
-        let flowModel = try await store.flowDecoder()
-        let mimiModel = try await store.mimiDecoder()
-        let condLayerKeys = try await store.condStepLayerKeys()
-        let flowlmLayerKeys = try await store.flowLMStepLayerKeys()
-        let mimiKeys = try await store.mimiDecoderKeys()
-
-        // 5. Load Mimi initial state (continuous across chunks)
-        let repoDir = try await store.repoDir()
-        var mimiState = try loadMimiInitialState(from: repoDir, mimiKeys: mimiKeys)
-
-        // 6. Create BOS embedding
-        let bosEmb = try createBosEmbedding(constants.bosEmbedding)
-
-        // 7. Generate audio for each chunk
-        var audioChunks: [[Float]] = []
-        var lastEosStep: Int?
-
         let genStart = Date()
 
-        for (chunkIdx, chunkText) in chunks.enumerated() {
-            let (normalizedChunk, framesAfterEos) = normalizeText(chunkText)
-            logger.info("Chunk \(chunkIdx + 1)/\(chunks.count): '\(normalizedChunk)'")
+        // Buffer the streaming output. Both APIs share one chunk loop now,
+        // so any change to prefill/generation logic only needs to land once.
+        let stream = try await synthesizeStreaming(
+            text: text, voiceData: voiceData, temperature: temperature, seed: seed
+        )
 
-            // Tokenize and embed this chunk
-            let tokenIds = constants.tokenizer.encode(normalizedChunk)
-            let textEmbeddings = embedTokens(tokenIds, constants: constants)
-
-            // Fresh KV cache per chunk
-            let prefillStart = Date()
-            var kvState = try await prefillKVCache(
-                voiceData: voiceData,
-                textEmbeddings: textEmbeddings,
-                model: condModel,
-                layerKeys: condLayerKeys
-            )
-            let prefillElapsed = Date().timeIntervalSince(prefillStart)
-            logger.info(
-                "Chunk \(chunkIdx + 1) prefill: \(String(format: "%.2f", prefillElapsed))s (\(tokenIds.count) tokens)"
-            )
-
-            // Generation loop for this chunk
-            let maxGenLen = estimateMaxFrames(text: chunkText)
-            var eosStep: Int?
-            var sequence = try createNaNSequence()
-            let totalFramesAfterEos =
-                framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
-
-            for step in 0..<maxGenLen {
-                let (transformerOut, eosLogit) = try await runFlowLMStep(
-                    sequence: sequence,
-                    bosEmb: bosEmb,
-                    state: &kvState,
-                    model: stepModel,
-                    layerKeys: flowlmLayerKeys
-                )
-
-                if eosLogit > PocketTtsConstants.eosThreshold && eosStep == nil {
-                    eosStep = step
-                    logger.info("Chunk \(chunkIdx + 1) EOS at step \(step)")
-                }
-
-                if let eos = eosStep, step >= eos + totalFramesAfterEos {
-                    break
-                }
-
-                let latent = try await flowDecode(
-                    transformerOut: transformerOut,
-                    numSteps: PocketTtsConstants.numLsdSteps,
-                    temperature: temperature,
-                    model: flowModel,
-                    rng: &rng
-                )
-
-                // Mimi state is continuous across chunks
-                // (denormalize + quantize baked into mimi_decoder model)
-                let frameSamples = try await runMimiDecoder(
-                    latent: latent,
-                    state: &mimiState,
-                    model: mimiModel,
-                    mimiKeys: mimiKeys
-                )
-                audioChunks.append(frameSamples)
-
-                sequence = try createSequenceFromLatent(latent)
-
-                if step % 20 == 0 {
-                    logger.info("Chunk \(chunkIdx + 1) step \(step)...")
-                }
-            }
-
-            lastEosStep = eosStep
+        var allSamples: [Float] = []
+        var frameCount = 0
+        for try await frame in stream {
+            allSamples.append(contentsOf: frame.samples)
+            frameCount += 1
         }
 
         let genElapsed = Date().timeIntervalSince(genStart)
-        logger.info(
-            "Generated \(audioChunks.count) frames in \(String(format: "%.2f", genElapsed))s")
+        logger.info("Generated \(frameCount) frames in \(String(format: "%.2f", genElapsed))s")
 
-        // 8. Concatenate audio (no peak normalization — preserve natural levels)
-        var allSamples = audioChunks.flatMap { $0 }
-
-        // De-essing
+        // De-essing (no peak normalization — preserve natural levels)
         if deEss {
             AudioPostProcessor.applyTtsPostProcessing(
                 &allSamples,
@@ -209,7 +111,7 @@ public struct PocketTtsSynthesizer {
             )
         }
 
-        // 9. Encode WAV
+        // Encode WAV
         let audioData = try AudioWAV.data(
             from: allSamples,
             sampleRate: Double(PocketTtsConstants.audioSampleRate)
@@ -221,8 +123,8 @@ public struct PocketTtsSynthesizer {
         return SynthesisResult(
             audio: audioData,
             samples: allSamples,
-            frameCount: audioChunks.count,
-            eosStep: lastEosStep
+            frameCount: frameCount,
+            eosStep: nil
         )
     }
 

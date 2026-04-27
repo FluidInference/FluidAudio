@@ -10,7 +10,11 @@ extension PocketTtsSynthesizer {
         public let samples: [Float]
         /// Number of 80ms frames generated.
         public let frameCount: Int
-        /// Generation step at which EOS was detected (nil if max length reached).
+        /// Generation step at which EOS was detected.
+        ///
+        /// Currently always `nil` — buffered synthesis runs on top of the
+        /// streaming pipeline which doesn't surface per-chunk EOS through
+        /// its frame stream. Retained for source-compatibility.
         public let eosStep: Int?
     }
 
