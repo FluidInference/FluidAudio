@@ -372,14 +372,17 @@ public enum PocketTtsConstantsLoader {
                 actual: data.count
             )
         }
-        let headerEnd = headerStart + headerLenInt
-        guard headerEnd <= data.count else {
+        // Bounds-check BEFORE adding `headerStart` to avoid an arithmetic
+        // overflow trap when a corrupt/malicious file encodes a header
+        // length close to `Int.max`.
+        guard headerLenInt <= data.count - headerStart else {
             throw LoadError.invalidSize(
                 "\(fileLabel).safetensors: header overflow",
-                expected: headerEnd,
-                actual: data.count
+                expected: data.count,
+                actual: headerLenInt
             )
         }
+        let headerEnd = headerStart + headerLenInt
         let headerBytes = data.subdata(in: headerStart..<headerEnd)
         let json: Any
         do {
