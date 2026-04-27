@@ -80,15 +80,20 @@ public actor KokoroAneModelStore {
     }
 
     /// Download (if missing), load all 7 mlmodelcs, parse vocab + default voice.
+    ///
+    /// Loads stage models into a local accumulator first and only commits them
+    /// to `self.models` once every stage succeeds. This keeps `loadIfNeeded()`
+    /// retryable: if any stage throws, `self.models` stays empty and the next
+    /// call retries from scratch instead of returning early on a partial state.
     public func loadIfNeeded() async throws {
         guard models.isEmpty else { return }
 
         let repoDir = try await KokoroAneResourceDownloader.ensureModels(directory: directory)
-        self.repoDirectory = repoDir
 
         logger.info("Loading 7 KokoroAne CoreML models from \(repoDir.path)...")
         let loadStart = Date()
 
+        var pendingModels: [KokoroAneStage: MLModel] = [:]
         for stage in KokoroAneStage.allCases {
             let url = repoDir.appendingPathComponent(stage.bundleName)
             guard FileManager.default.fileExists(atPath: url.path) else {
@@ -100,18 +105,26 @@ public actor KokoroAneModelStore {
             let stageStart = Date()
             let model = try MLModel(contentsOf: url, configuration: cfg)
             let stageElapsed = Date().timeIntervalSince(stageStart) * 1000
-            models[stage] = model
+            pendingModels[stage] = model
             logger.info("  loaded \(stage.bundleName) in \(String(format: "%.0f", stageElapsed)) ms")
         }
         let elapsed = Date().timeIntervalSince(loadStart)
         logger.info("All 7 KokoroAne models loaded in \(String(format: "%.2f", elapsed))s")
 
-        // Load vocab.json
+        // Load vocab.json before publishing models so retry semantics stay
+        // consistent: vocab failure also leaves `self.models` empty.
         let vocabURL = repoDir.appendingPathComponent(ModelNames.KokoroAne.vocab)
-        vocab = try KokoroAneVocab.load(from: vocabURL)
-        logger.info("Loaded vocab (\(self.vocab?.map.count ?? 0) entries)")
+        let loadedVocab = try KokoroAneVocab.load(from: vocabURL)
+        logger.info("Loaded vocab (\(loadedVocab.map.count) entries)")
 
-        // Pre-load the default voice
+        // Commit. Past this point a partial-failure retry would re-download
+        // and recompile, which is OK — that's the documented contract.
+        self.models = pendingModels
+        self.vocab = loadedVocab
+        self.repoDirectory = repoDir
+
+        // Pre-load the default voice. Voice-pack failure does not invalidate
+        // the model cache (voices are mutable runtime state).
         try await loadVoicePackIfNeeded(KokoroAneConstants.defaultVoice)
     }
 

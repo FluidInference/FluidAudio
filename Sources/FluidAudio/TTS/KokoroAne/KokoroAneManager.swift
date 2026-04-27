@@ -1,8 +1,24 @@
 import Foundation
 
-/// High-level facade for the laishere/kokoro 7-stage CoreML chain.
+/// High-level facade for the Kokoro 82M 7-stage CoreML chain
+/// (ANE-resident, derived from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml)).
 ///
-/// Mirrors the public surface of `KokoroTtsManager` so callers can swap
+/// Splits the model so ANE-friendly layers (Albert / PostAlbert / Alignment /
+/// Vocoder) stay resident on the Neural Engine while Prosody / Noise / Tail
+/// run on CPU+GPU. Yields **3-11× RTFx** on Apple Silicon vs. the single-graph
+/// ``KokoroTtsManager``.
+///
+/// Trade-offs vs. ``KokoroTtsManager``:
+///
+/// |                  | ``KokoroTtsManager``      | ``KokoroAneManager``         |
+/// |------------------|---------------------------|------------------------------|
+/// | Compute          | CPU + GPU                 | 4 stages on ANE, 3 on GPU    |
+/// | Voices           | Multi (`.json` packs)     | Single (`af_heart.bin`)      |
+/// | Long input       | Built-in chunker          | ≤ 512 IPA tokens             |
+/// | Custom lexicon   | Yes (`TtsCustomLexicon`)  | No                           |
+/// | HF path          | `kokoro-82m-coreml/`      | `kokoro-82m-coreml/ANE/`     |
+///
+/// Mirrors the public surface of ``KokoroTtsManager`` so callers can swap
 /// backends with minimal churn. Internally:
 ///   * Text → IPA via the existing `G2PModel` (per-word, joined with " ")
 ///   * IPA → input ids via `KokoroAneVocab`
