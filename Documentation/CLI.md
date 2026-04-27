@@ -7,7 +7,18 @@ This guide collects commonly used `fluidaudio` CLI commands for ASR, diarization
 TTS is built into the CLI. Run it directly:
 
 ```bash
+# Default Kokoro (CPU+GPU, multi-voice, chunker, custom lexicon)
 swift run fluidaudiocli tts "Hello from FluidAudio" --output out.wav
+
+# Kokoro ANE (7-stage, ANE-resident, 3-11× RTFx, single voice af_heart)
+swift run fluidaudiocli tts "Hello from FluidAudio" \
+  --backend kokoro-ane \
+  --output out-ane.wav
+
+# PocketTTS (streaming, voice cloning)
+swift run fluidaudiocli tts "Hello from FluidAudio" \
+  --backend pocket \
+  --output out-pocket.wav
 
 # Multilingual G2P benchmark
 swift run fluidaudiocli g2p-benchmark
