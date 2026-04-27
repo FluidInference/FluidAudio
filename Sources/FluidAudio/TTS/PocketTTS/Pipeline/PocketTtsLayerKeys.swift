@@ -33,6 +33,7 @@ struct PocketTtsLayerKeys: Sendable {
 
     enum DiscoveryError: Error, LocalizedError {
         case shapeMismatch(modelName: String, expectedLayers: Int, actualCaches: Int)
+        case positionMismatch(modelName: String, cacheCount: Int, positionCount: Int)
         case missingFlowLMOutputs(modelName: String, hasTransformer: Bool, hasEos: Bool)
 
         var errorDescription: String? {
@@ -40,6 +41,9 @@ struct PocketTtsLayerKeys: Sendable {
             case .shapeMismatch(let modelName, let expected, let actual):
                 return
                     "PocketTTS layer-key discovery on \(modelName): expected \(expected) cache outputs, found \(actual)"
+            case .positionMismatch(let modelName, let cacheCount, let positionCount):
+                return
+                    "PocketTTS layer-key discovery on \(modelName): \(cacheCount) cache outputs but \(positionCount) position outputs"
             case .missingFlowLMOutputs(let modelName, let hasTransformer, let hasEos):
                 return
                     "PocketTTS \(modelName) missing flowlm outputs (transformer=\(hasTransformer), eos=\(hasEos))"
@@ -116,10 +120,10 @@ struct PocketTtsLayerKeys: Sendable {
         }
 
         if positionCandidates.count != cacheCandidates.count {
-            throw DiscoveryError.shapeMismatch(
+            throw DiscoveryError.positionMismatch(
                 modelName: modelName,
-                expectedLayers: cacheCandidates.count,
-                actualCaches: positionCandidates.count
+                cacheCount: cacheCandidates.count,
+                positionCount: positionCandidates.count
             )
         }
 
@@ -172,16 +176,10 @@ struct PocketTtsLayerKeys: Sendable {
     }
 
     /// Extract the trailing run of digits from a name like `var_445`.
-    private static func trailingNumber(in name: String) -> Int? {
-        var digits = ""
-        for char in name.reversed() {
-            if char.isNumber {
-                digits.append(char)
-            } else {
-                break
-            }
-        }
-        guard !digits.isEmpty else { return nil }
-        return Int(String(digits.reversed()))
+    /// Shared with `PocketTtsMimiKeys` for `var_NNN` output ordering.
+    static func trailingNumber(in name: String) -> Int? {
+        let suffix = name.reversed().prefix(while: \.isNumber)
+        guard !suffix.isEmpty else { return nil }
+        return Int(String(suffix.reversed()))
     }
 }

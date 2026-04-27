@@ -31,7 +31,6 @@ struct PocketTtsMimiKeys: Sendable {
     enum DiscoveryError: Error, LocalizedError {
         case missingAudioOutput
         case unmatchedStateInput(name: String, shape: [Int])
-        case ambiguousMatch(name: String)
 
         var errorDescription: String? {
             switch self {
@@ -39,8 +38,6 @@ struct PocketTtsMimiKeys: Sendable {
                 return "PocketTTS Mimi decoder is missing a [1, 1, 1920] audio output"
             case .unmatchedStateInput(let name, let shape):
                 return "PocketTTS Mimi decoder: no output of shape \(shape) for state input '\(name)'"
-            case .ambiguousMatch(let name):
-                return "PocketTTS Mimi decoder: could not deterministically pair state input '\(name)'"
             }
         }
     }
@@ -118,8 +115,8 @@ struct PocketTtsMimiKeys: Sendable {
             $0.contains("end_offset") && stateShapes[$0] != nil && passThroughMap[$0] == nil
         }
         var endOffsetOutputs = availableOutputs.keys.filter { $0.contains("end_offset") }.sorted {
-            let li = trailingNumber(in: $0) ?? Int.max
-            let ri = trailingNumber(in: $1) ?? Int.max
+            let li = PocketTtsLayerKeys.trailingNumber(in: $0) ?? Int.max
+            let ri = PocketTtsLayerKeys.trailingNumber(in: $1) ?? Int.max
             if li != ri { return li < ri }
             return $0 < $1
         }
@@ -143,8 +140,8 @@ struct PocketTtsMimiKeys: Sendable {
         }
         for key in outputsByShape.keys {
             outputsByShape[key]?.sort { lhs, rhs in
-                let li = trailingNumber(in: lhs) ?? Int.max
-                let ri = trailingNumber(in: rhs) ?? Int.max
+                let li = PocketTtsLayerKeys.trailingNumber(in: lhs) ?? Int.max
+                let ri = PocketTtsLayerKeys.trailingNumber(in: rhs) ?? Int.max
                 if li != ri { return li < ri }
                 return lhs < rhs
             }
@@ -152,26 +149,17 @@ struct PocketTtsMimiKeys: Sendable {
 
         // Walk canonical order, taking outputs from each shape bucket. Skip
         // inputs already resolved via pass-through or end-offset reservation.
-        var nonPassThroughInputs: [String] = []
-        for name in canonicalStateOrder
-        where stateShapes[name] != nil
-            && passThroughMap[name] == nil
-            && endOffsetMap[name] == nil
-        {
-            nonPassThroughInputs.append(name)
-        }
-        // Any inputs not in canonical list (defensive) appended in name order.
-        for name in stateShapes.keys.sorted()
-        where !canonicalStateOrder.contains(name)
-            && passThroughMap[name] == nil
-            && endOffsetMap[name] == nil
-        {
-            nonPassThroughInputs.append(name)
-        }
-
+        // Inputs outside the canonical list aren't supported — the canonical
+        // list is exhaustive across the legacy English and v2 multi-language
+        // packs, and downstream shape matching would fail for any unknown
+        // schema anyway.
         var resolvedMapping: [String: String] = passThroughMap
         for (k, v) in endOffsetMap { resolvedMapping[k] = v }
-        for inputName in nonPassThroughInputs {
+        for inputName in canonicalStateOrder
+        where stateShapes[inputName] != nil
+            && passThroughMap[inputName] == nil
+            && endOffsetMap[inputName] == nil
+        {
             guard let shape = stateShapes[inputName] else { continue }
             guard var bucket = outputsByShape[shape], !bucket.isEmpty else {
                 throw DiscoveryError.unmatchedStateInput(name: inputName, shape: shape)
@@ -188,12 +176,6 @@ struct PocketTtsMimiKeys: Sendable {
                 orderedMapping.append((input: name, output: out))
             }
         }
-        // Append any non-canonical inputs at the end (defensive).
-        for name in stateShapes.keys.sorted() where !canonicalStateOrder.contains(name) {
-            if let out = resolvedMapping[name] {
-                orderedMapping.append((input: name, output: out))
-            }
-        }
 
         return PocketTtsMimiKeys(
             audioOutput: audio,
@@ -202,17 +184,4 @@ struct PocketTtsMimiKeys: Sendable {
         )
     }
 
-    /// Extract the trailing run of digits from a name like `var_445`.
-    private static func trailingNumber(in name: String) -> Int? {
-        var digits = ""
-        for char in name.reversed() {
-            if char.isNumber {
-                digits.append(char)
-            } else {
-                break
-            }
-        }
-        guard !digits.isEmpty else { return nil }
-        return Int(String(digits.reversed()))
-    }
 }
