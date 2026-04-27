@@ -531,6 +531,58 @@ public struct TTS {
         }
     }
 
+    /// Run PocketTTS in deterministic-seed mode through the session API,
+    /// applying the same de-essing post-processing as the non-seed path.
+    private static func runPocketSeededSynthesis(
+        manager: PocketTtsManager,
+        text: String,
+        voice: String,
+        voiceData: PocketTtsVoiceData?,
+        seed: UInt64,
+        deEss: Bool
+    ) async throws -> Data {
+        logger.info("PocketTTS deterministic mode: seed=\(seed)")
+        let session = try await makePocketSeededSession(
+            manager: manager, voice: voice, voiceData: voiceData, seed: seed)
+        session.enqueue(text)
+        session.finish()
+        var allSamples: [Float] = []
+        for try await frame in session.frames {
+            allSamples.append(contentsOf: frame.samples)
+        }
+        if deEss {
+            AudioPostProcessor.applyTtsPostProcessing(
+                &allSamples,
+                sampleRate: Float(PocketTtsConstants.audioSampleRate),
+                deEssAmount: -3.0,
+                smoothing: false)
+        }
+        return try AudioWAV.data(
+            from: allSamples,
+            sampleRate: Double(PocketTtsConstants.audioSampleRate))
+    }
+
+    /// Pick the right `makeSession` overload based on whether a custom
+    /// `PocketTtsVoiceData` was supplied (cloned/loaded voice) or we should
+    /// fall back to a named voice from the language pack.
+    private static func makePocketSeededSession(
+        manager: PocketTtsManager,
+        voice: String,
+        voiceData: PocketTtsVoiceData?,
+        seed: UInt64
+    ) async throws -> PocketTtsSession {
+        if let voiceData = voiceData {
+            return try await manager.makeSession(
+                voiceData: voiceData,
+                temperature: PocketTtsConstants.temperature,
+                seed: seed)
+        }
+        return try await manager.makeSession(
+            voice: voice,
+            temperature: PocketTtsConstants.temperature,
+            seed: seed)
+    }
+
     private static func runPocketTts(
         text: String, output: String, voice: String, deEss: Bool,
         metricsPath: String?, cloneVoicePath: String?,
@@ -575,28 +627,13 @@ public struct TTS {
             let tSynth0 = Date()
             let wav: Data
             if let seed = seed {
-                logger.info("PocketTTS deterministic mode: seed=\(seed)")
-                let session: PocketTtsSession
-                if let voiceData = voiceData {
-                    session = try await manager.makeSession(
-                        voiceData: voiceData,
-                        temperature: PocketTtsConstants.temperature,
-                        seed: seed)
-                } else {
-                    session = try await manager.makeSession(
-                        voice: pocketVoice,
-                        temperature: PocketTtsConstants.temperature,
-                        seed: seed)
-                }
-                session.enqueue(text)
-                session.finish()
-                var allSamples: [Float] = []
-                for try await frame in session.frames {
-                    allSamples.append(contentsOf: frame.samples)
-                }
-                wav = try AudioWAV.data(
-                    from: allSamples,
-                    sampleRate: Double(PocketTtsConstants.audioSampleRate))
+                wav = try await runPocketSeededSynthesis(
+                    manager: manager,
+                    text: text,
+                    voice: pocketVoice,
+                    voiceData: voiceData,
+                    seed: seed,
+                    deEss: deEss)
             } else if let voiceData = voiceData {
                 wav = try await manager.synthesize(
                     text: text, voiceData: voiceData, deEss: deEss)
