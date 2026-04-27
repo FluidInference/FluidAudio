@@ -20,7 +20,7 @@ public struct KokoroAneVocab: Sendable {
         }
         let data = try Data(contentsOf: url)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw KokoroAneError.vocabMissing(url)
+            throw KokoroAneError.vocabParseFailed(url, "expected top-level JSON object")
         }
         var parsed: [Character: Int32] = [:]
         parsed.reserveCapacity(json.count)
@@ -28,8 +28,6 @@ public struct KokoroAneVocab: Sendable {
             guard let ch = key.first, key.count == 1 else { continue }
             if let intValue = value as? Int {
                 parsed[ch] = Int32(intValue)
-            } else if let nsNum = value as? NSNumber {
-                parsed[ch] = nsNum.int32Value
             }
         }
         return KokoroAneVocab(map: parsed)

@@ -5,6 +5,42 @@ import Foundation
 /// MLMultiArray builders + fp16 ↔ fp32 conversions used by the chain.
 enum KokoroAneArrays {
 
+    // MARK: - vImage helpers
+
+    private static func convertF32toF16(
+        src: UnsafePointer<Float>, dst: UnsafeMutablePointer<UInt16>, count: Int
+    ) {
+        var srcBuf = vImage_Buffer(
+            data: UnsafeMutableRawPointer(mutating: src), height: 1,
+            width: vImagePixelCount(count),
+            rowBytes: count * MemoryLayout<Float>.stride)
+        var dstBuf = vImage_Buffer(
+            data: dst, height: 1, width: vImagePixelCount(count),
+            rowBytes: count * MemoryLayout<UInt16>.stride)
+        vImageConvert_PlanarFtoPlanar16F(&srcBuf, &dstBuf, 0)
+    }
+
+    private static func convertF16toF32(
+        src: UnsafePointer<UInt16>, dst: UnsafeMutablePointer<Float>, count: Int
+    ) {
+        var srcBuf = vImage_Buffer(
+            data: UnsafeMutableRawPointer(mutating: src), height: 1,
+            width: vImagePixelCount(count),
+            rowBytes: count * MemoryLayout<UInt16>.stride)
+        var dstBuf = vImage_Buffer(
+            data: dst, height: 1, width: vImagePixelCount(count),
+            rowBytes: count * MemoryLayout<Float>.stride)
+        vImageConvert_Planar16FtoPlanarF(&srcBuf, &dstBuf, 0)
+    }
+
+    /// Element-wise NSNumber-bridged copy. Slow path — used only when the
+    /// source MLMultiArray has an unexpected dtype (not fp16/fp32).
+    private static func genericCopy(_ source: MLMultiArray, into dst: MLMultiArray, count: Int) {
+        for i in 0..<count {
+            dst[i] = NSNumber(value: source[i].floatValue)
+        }
+    }
+
     // MARK: - Float16 (UInt16-backed) builders
 
     /// Build a Float16 MLMultiArray and fill it from a Float32 source.
@@ -17,14 +53,7 @@ enum KokoroAneArrays {
         let arr = try MLMultiArray(shape: nsShape, dataType: .float16)
         let dst = arr.dataPointer.bindMemory(to: UInt16.self, capacity: total)
         source.withUnsafeBufferPointer { srcBuf in
-            var src = vImage_Buffer(
-                data: UnsafeMutableRawPointer(mutating: srcBuf.baseAddress!),
-                height: 1, width: vImagePixelCount(total),
-                rowBytes: total * MemoryLayout<Float>.stride)
-            var dest = vImage_Buffer(
-                data: dst, height: 1, width: vImagePixelCount(total),
-                rowBytes: total * MemoryLayout<UInt16>.stride)
-            vImageConvert_PlanarFtoPlanar16F(&src, &dest, 0)
+            convertF32toF16(src: srcBuf.baseAddress!, dst: dst, count: total)
         }
         return arr
     }
@@ -45,20 +74,10 @@ enum KokoroAneArrays {
         if source.dataType == .float32 {
             let f32 = source.dataPointer.bindMemory(to: Float.self, capacity: total)
             let dstU16 = dst.dataPointer.bindMemory(to: UInt16.self, capacity: total)
-            var src = vImage_Buffer(
-                data: UnsafeMutableRawPointer(f32), height: 1,
-                width: vImagePixelCount(total),
-                rowBytes: total * MemoryLayout<Float>.stride)
-            var dest = vImage_Buffer(
-                data: dstU16, height: 1, width: vImagePixelCount(total),
-                rowBytes: total * MemoryLayout<UInt16>.stride)
-            vImageConvert_PlanarFtoPlanar16F(&src, &dest, 0)
+            convertF32toF16(src: f32, dst: dstU16, count: total)
             return dst
         }
-        // Fallback: element-wise via doubleValue (slow path; should not hit for our chain).
-        for i in 0..<total {
-            dst[i] = NSNumber(value: source[i].floatValue)
-        }
+        genericCopy(source, into: dst, count: total)
         return dst
     }
 
@@ -93,19 +112,10 @@ enum KokoroAneArrays {
         if source.dataType == .float16 {
             let srcU16 = source.dataPointer.bindMemory(to: UInt16.self, capacity: total)
             let dstF = dst.dataPointer.bindMemory(to: Float.self, capacity: total)
-            var src = vImage_Buffer(
-                data: srcU16, height: 1, width: vImagePixelCount(total),
-                rowBytes: total * MemoryLayout<UInt16>.stride)
-            var dest = vImage_Buffer(
-                data: dstF, height: 1, width: vImagePixelCount(total),
-                rowBytes: total * MemoryLayout<Float>.stride)
-            vImageConvert_Planar16FtoPlanarF(&src, &dest, 0)
+            convertF16toF32(src: srcU16, dst: dstF, count: total)
             return dst
         }
-        // Fallback: element-wise via doubleValue.
-        for i in 0..<total {
-            dst[i] = NSNumber(value: source[i].floatValue)
-        }
+        genericCopy(source, into: dst, count: total)
         return dst
     }
 
@@ -143,13 +153,7 @@ enum KokoroAneArrays {
             let p = arr.dataPointer.bindMemory(to: UInt16.self, capacity: count)
             var out = [Float](repeating: 0, count: count)
             out.withUnsafeMutableBufferPointer { outBuf in
-                var src = vImage_Buffer(
-                    data: p, height: 1, width: vImagePixelCount(count),
-                    rowBytes: count * MemoryLayout<UInt16>.stride)
-                var dest = vImage_Buffer(
-                    data: outBuf.baseAddress!, height: 1, width: vImagePixelCount(count),
-                    rowBytes: count * MemoryLayout<Float>.stride)
-                vImageConvert_Planar16FtoPlanarF(&src, &dest, 0)
+                convertF16toF32(src: p, dst: outBuf.baseAddress!, count: count)
             }
             return out
         }

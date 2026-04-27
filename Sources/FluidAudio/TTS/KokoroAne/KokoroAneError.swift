@@ -5,6 +5,7 @@ public enum KokoroAneError: Error, LocalizedError {
     case modelNotLoaded(String)
     case downloadFailed(String)
     case vocabMissing(URL)
+    case vocabParseFailed(URL, String)
     case voicePackMissing(URL)
     case invalidVoicePack(String)
     case unsupportedPhoneme(Character)
@@ -23,6 +24,8 @@ public enum KokoroAneError: Error, LocalizedError {
             return "KokoroAne download failed: \(detail)"
         case .vocabMissing(let url):
             return "KokoroAne vocab.json not found at \(url.path)."
+        case .vocabParseFailed(let url, let detail):
+            return "KokoroAne vocab.json at \(url.path) is malformed: \(detail)"
         case .voicePackMissing(let url):
             return "KokoroAne voice pack not found at \(url.path)."
         case .invalidVoicePack(let detail):

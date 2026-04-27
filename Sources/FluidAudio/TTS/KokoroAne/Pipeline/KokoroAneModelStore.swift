@@ -125,7 +125,7 @@ public actor KokoroAneModelStore {
 
         // Pre-load the default voice. Voice-pack failure does not invalidate
         // the model cache (voices are mutable runtime state).
-        try await loadVoicePackIfNeeded(KokoroAneConstants.defaultVoice)
+        _ = try await voicePack(KokoroAneConstants.defaultVoice)
     }
 
     public func model(for stage: KokoroAneStage) throws -> MLModel {
@@ -144,10 +144,14 @@ public actor KokoroAneModelStore {
 
     public func voicePack(_ voice: String) async throws -> KokoroAneVoicePack {
         if let cached = voicePacks[voice] { return cached }
-        try await loadVoicePackIfNeeded(voice)
-        guard let pack = voicePacks[voice] else {
-            throw KokoroAneError.voicePackMissing(URL(fileURLWithPath: "\(voice).bin"))
+        guard let repoDir = repoDirectory else {
+            throw KokoroAneError.modelNotLoaded("voice pack (repo not initialized)")
         }
+        let url = try await KokoroAneResourceDownloader.ensureVoicePack(
+            voice, repoDirectory: repoDir)
+        let pack = try KokoroAneVoicePack.load(from: url)
+        voicePacks[voice] = pack
+        logger.info("Loaded voice pack '\(voice)'")
         return pack
     }
 
@@ -160,18 +164,5 @@ public actor KokoroAneModelStore {
         voicePacks.removeAll()
         vocab = nil
         repoDirectory = nil
-    }
-
-    // MARK: - Private
-
-    private func loadVoicePackIfNeeded(_ voice: String) async throws {
-        if voicePacks[voice] != nil { return }
-        guard let repoDir = repoDirectory else {
-            throw KokoroAneError.modelNotLoaded("voice pack (repo not initialized)")
-        }
-        let url = try await KokoroAneResourceDownloader.ensureVoicePack(
-            voice, repoDirectory: repoDir)
-        voicePacks[voice] = try KokoroAneVoicePack.load(from: url)
-        logger.info("Loaded voice pack '\(voice)'")
     }
 }
