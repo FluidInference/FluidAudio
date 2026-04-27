@@ -81,21 +81,16 @@ struct PocketTtsMimiKeys: Sendable {
         //    - Otherwise: match by shape, then disambiguate within a shape
         //      bucket by sorting outputs by trailing `var_NNN` and inputs
         //      in canonical order.
-        var availableOutputs = outputs
-        availableOutputs.removeValue(forKey: audio)
-
-        // Remove pass-throughs first (cheap to identify).
+        //
+        //    Single pass over outputs: identify pass-throughs by name match
+        //    against `stateShapes`, bucket the rest by shape (excluding audio).
         var passThroughMap: [String: String] = [:]
-        for inputName in stateShapes.keys {
-            if availableOutputs[inputName] != nil {
-                passThroughMap[inputName] = inputName
-                availableOutputs.removeValue(forKey: inputName)
-            }
-        }
-
-        // Bucket remaining outputs by shape, sorted by var-number ascending.
         var outputsByShape: [[Int]: [String]] = [:]
-        for (name, desc) in availableOutputs {
+        for (name, desc) in outputs where name != audio {
+            if stateShapes[name] != nil {
+                passThroughMap[name] = name
+                continue
+            }
             guard let constraint = desc.multiArrayConstraint else { continue }
             let shape = constraint.shape.map { $0.intValue }
             outputsByShape[shape, default: []].append(name)
@@ -109,29 +104,24 @@ struct PocketTtsMimiKeys: Sendable {
             }
         }
 
-        // Walk canonical order, taking outputs from each shape bucket. Skip
-        // inputs already resolved via pass-through. Inputs outside the
-        // canonical list aren't supported — the canonical list is exhaustive
-        // across the v2 packs, and downstream shape matching would fail for
-        // any unknown schema anyway.
-        var resolvedMapping: [String: String] = passThroughMap
-        for inputName in canonicalStateOrder
-        where stateShapes[inputName] != nil && passThroughMap[inputName] == nil {
+        // Walk canonical order once: pass-throughs land directly, others draw
+        // from their shape bucket. Inputs outside the canonical list are
+        // silently ignored — the canonical list is exhaustive across the v2
+        // packs, and downstream shape matching would fail for any unknown
+        // schema anyway.
+        var orderedMapping: [(input: String, output: String)] = []
+        for inputName in canonicalStateOrder {
             guard let shape = stateShapes[inputName] else { continue }
+            if let passThrough = passThroughMap[inputName] {
+                orderedMapping.append((input: inputName, output: passThrough))
+                continue
+            }
             guard var bucket = outputsByShape[shape], !bucket.isEmpty else {
                 throw DiscoveryError.unmatchedStateInput(name: inputName, shape: shape)
             }
             let chosen = bucket.removeFirst()
             outputsByShape[shape] = bucket
-            resolvedMapping[inputName] = chosen
-        }
-
-        // Emit mapping in canonical order so iteration is deterministic.
-        var orderedMapping: [(input: String, output: String)] = []
-        for name in canonicalStateOrder {
-            if let out = resolvedMapping[name] {
-                orderedMapping.append((input: name, output: out))
-            }
+            orderedMapping.append((input: inputName, output: chosen))
         }
 
         return PocketTtsMimiKeys(
