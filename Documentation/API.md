@@ -448,9 +448,10 @@ try wav.write(to: URL(fileURLWithPath: "/tmp/demo.wav"))
 // With per-stage timings:
 let detail = try await manager.synthesizeDetailed(text: "Hi.")
 print("samples: \(detail.samples.count) @ \(detail.sampleRate) Hz")
-for (stage, ms) in detail.stageTimingsMs {
-    print("  \(stage): \(ms) ms")
-}
+let t = detail.timings
+print("  albert=\(t.albert) postAlbert=\(t.postAlbert) alignment=\(t.alignment)")
+print("  prosody=\(t.prosody) noise=\(t.noise) vocoder=\(t.vocoder) tail=\(t.tail)")
+print("  total: \(t.totalMs) ms")
 ```
 
 **Performance:**

@@ -58,9 +58,10 @@ try audioData.write(to: URL(fileURLWithPath: "/tmp/demo.wav"))
 ```swift
 let result = try await manager.synthesizeDetailed(text: "...", speed: 1.0)
 print("samples: \(result.samples.count) @ \(result.sampleRate) Hz")
-for (stage, ms) in result.stageTimingsMs {
-    print("  \(stage): \(ms) ms")
-}
+let t = result.timings
+print("  albert=\(t.albert) postAlbert=\(t.postAlbert) alignment=\(t.alignment)")
+print("  prosody=\(t.prosody) noise=\(t.noise) vocoder=\(t.vocoder) tail=\(t.tail)")
+print("  total: \(t.totalMs) ms")
 ```
 
 ### Bypass G2P
