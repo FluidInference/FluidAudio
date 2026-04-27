@@ -29,7 +29,7 @@ public actor PocketTtsModelStore {
 
     /// - Parameters:
     ///   - language: Which upstream language pack to load. Defaults to
-    ///     `.english` for backward compatibility.
+    ///     `.english`.
     ///   - directory: Optional override for the base cache directory. When
     ///     `nil`, uses the default platform cache location.
     public init(language: PocketTtsLanguage = .english, directory: URL? = nil) {
@@ -97,10 +97,9 @@ public actor PocketTtsModelStore {
             modelName: "flowlm_step"
         )
 
-        // Discover Mimi decoder schema. Legacy English and v2 packs differ in
-        // attention cache layout, presence of `attn*_end_offset` inputs, and
-        // auto-generated `var_NNN` output names. Discovery makes both work
-        // through one runtime path.
+        // Discover Mimi decoder schema (per-state input→output mapping +
+        // audio output name). CoreML auto-generates `var_NNN` output names
+        // during conversion so the exact names vary across packs.
         mimiDecoderKeysCache = try PocketTtsMimiKeys.discover(from: loadedModels[3])
 
         let elapsed = Date().timeIntervalSince(loadStart)
@@ -176,9 +175,9 @@ public actor PocketTtsModelStore {
         return keys
     }
 
-    /// The language root directory (legacy repo root for English, or
-    /// `<repoDir>/v2/<lang>` otherwise) — contains the four model files,
-    /// `constants_bin/`, and is the right base for `loadMimiInitialState`.
+    /// The language root directory (`<repoDir>/v2/<lang>`) — contains the
+    /// four model files, `constants_bin/`, and is the right base for
+    /// `loadMimiInitialState`.
     public func repoDir() throws -> URL {
         guard let dir = languageRootDirectory else {
             throw PocketTTSError.modelNotFound("PocketTTS repository not loaded")
@@ -208,8 +207,8 @@ public actor PocketTtsModelStore {
     /// Load the Mimi encoder model for voice cloning (lazy, on-demand).
     ///
     /// Downloads the model from HuggingFace if not already cached. The Mimi
-    /// encoder is shared across all language packs and lives at the legacy
-    /// repo root.
+    /// encoder is language-agnostic and lives at the repo root, shared
+    /// across all language packs.
     public func loadMimiEncoderIfNeeded() async throws {
         guard mimiEncoderModel == nil else { return }
 
