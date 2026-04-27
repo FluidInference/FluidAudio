@@ -52,42 +52,30 @@ extension PocketTtsSynthesizer {
 
     /// Clone a KV cache state for independent use.
     static func cloneKVCacheState(_ state: KVCacheState) throws -> KVCacheState {
-        var newCaches: [MLMultiArray] = []
-        var newPositions: [MLMultiArray] = []
-        newCaches.reserveCapacity(state.caches.count)
-        newPositions.reserveCapacity(state.positions.count)
+        KVCacheState(
+            caches: try state.caches.map(deepCopy),
+            positions: try state.positions.map(deepCopy)
+        )
+    }
 
-        for cache in state.caches {
-            let copy = try MLMultiArray(shape: cache.shape, dataType: cache.dataType)
-            let byteSize: Int
-            switch cache.dataType {
-            case .float16:
-                byteSize = cache.count * MemoryLayout<UInt16>.size
-            default:
-                byteSize = cache.count * MemoryLayout<Float>.size
-            }
-            if byteSize > 0 {
-                copy.dataPointer.copyMemory(from: cache.dataPointer, byteCount: byteSize)
-            }
-            newCaches.append(copy)
+    /// Deep-copy an `MLMultiArray`, preserving shape and dtype.
+    ///
+    /// Handles fp16 (UInt16-sized) and fp32-or-other (Float-sized) data
+    /// types, and gracefully no-ops for zero-element tensors (e.g. Mimi's
+    /// `res*_conv1_prev: [1, 128, 0]`).
+    static func deepCopy(_ array: MLMultiArray) throws -> MLMultiArray {
+        let copy = try MLMultiArray(shape: array.shape, dataType: array.dataType)
+        let byteSize: Int
+        switch array.dataType {
+        case .float16:
+            byteSize = array.count * MemoryLayout<UInt16>.size
+        default:
+            byteSize = array.count * MemoryLayout<Float>.size
         }
-
-        for pos in state.positions {
-            let copy = try MLMultiArray(shape: pos.shape, dataType: pos.dataType)
-            let byteSize: Int
-            switch pos.dataType {
-            case .float16:
-                byteSize = pos.count * MemoryLayout<UInt16>.size
-            default:
-                byteSize = pos.count * MemoryLayout<Float>.size
-            }
-            if byteSize > 0 {
-                copy.dataPointer.copyMemory(from: pos.dataPointer, byteCount: byteSize)
-            }
-            newPositions.append(copy)
+        if byteSize > 0 {
+            copy.dataPointer.copyMemory(from: array.dataPointer, byteCount: byteSize)
         }
-
-        return KVCacheState(caches: newCaches, positions: newPositions)
+        return copy
     }
 
     /// Run the conditioning step model for a single token, updating the KV cache in place.

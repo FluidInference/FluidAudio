@@ -68,19 +68,9 @@ extension PocketTtsSynthesizer {
     /// Clone a Mimi state for independent use.
     static func cloneMimiState(_ state: MimiState) throws -> MimiState {
         var newTensors: [String: MLMultiArray] = [:]
+        newTensors.reserveCapacity(state.tensors.count)
         for (key, array) in state.tensors {
-            let copy = try MLMultiArray(shape: array.shape, dataType: array.dataType)
-            let byteSize: Int
-            switch array.dataType {
-            case .float16:
-                byteSize = array.count * MemoryLayout<UInt16>.size
-            default:
-                byteSize = array.count * MemoryLayout<Float>.size
-            }
-            if byteSize > 0 {
-                copy.dataPointer.copyMemory(from: array.dataPointer, byteCount: byteSize)
-            }
-            newTensors[key] = copy
+            newTensors[key] = try deepCopy(array)
         }
         return MimiState(tensors: newTensors)
     }
