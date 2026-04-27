@@ -33,7 +33,6 @@ public actor KokoroAneManager {
 
     private let logger = AppLogger(category: "KokoroAneManager")
     private let store: KokoroAneModelStore
-    private let directory: URL?
     private var defaultVoice: String
 
     public init(
@@ -43,7 +42,6 @@ public actor KokoroAneManager {
         modelStore: KokoroAneModelStore? = nil
     ) {
         self.defaultVoice = defaultVoice
-        self.directory = directory
         self.store =
             modelStore
             ?? KokoroAneModelStore(
@@ -62,7 +60,14 @@ public actor KokoroAneManager {
         // have never run the regular kokoro backend would otherwise hit a
         // cryptic G2PModelError.vocabLoadFailed. Fetch G2P assets explicitly
         // before warming the in-process G2P model.
-        try await KokoroAneResourceDownloader.ensureG2PAssets(directory: directory)
+        //
+        // NOTE: pass nil (not `directory`) — `G2PModel.shared` is a singleton
+        // that hardcodes the default cache path (TtsModels.cacheDirectoryURL()
+        // /Models/kokoro). If we honoured the caller's custom `directory` here
+        // we'd download to a path G2PModel can't see and still hit
+        // vocabLoadFailed. The KokoroAne mlmodelc chain itself does respect
+        // `directory` (via store), only the shared G2P assets are pinned.
+        try await KokoroAneResourceDownloader.ensureG2PAssets(directory: nil)
         try await G2PModel.shared.ensureModelsAvailable()
         if let voices = preloadVoices {
             for voice in voices {
