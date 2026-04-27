@@ -42,25 +42,26 @@ public enum PocketTtsResourceDownloader {
                 atPath: languageRoot.appendingPathComponent(model).path)
         }
 
-        if !allPresent {
-            if let subdir = language.repoSubdirectory {
-                logger.info(
-                    "Downloading PocketTTS \(language.rawValue) language pack from HuggingFace (\(subdir))..."
-                )
-                try await DownloadUtils.downloadSubdirectory(
-                    .pocketTts,
-                    subdirectory: subdir,
-                    to: repoDir,
-                    progressHandler: progressHandler
-                )
-            } else {
-                logger.info("Downloading PocketTTS English models from HuggingFace...")
-                try await DownloadUtils.downloadRepo(
-                    .pocketTts, to: modelsDirectory, progressHandler: progressHandler)
-            }
-        } else {
+        guard !allPresent else {
             logger.info(
                 "PocketTTS \(language.rawValue) models found in cache")
+            return languageRoot
+        }
+
+        if let subdir = language.repoSubdirectory {
+            logger.info(
+                "Downloading PocketTTS \(language.rawValue) language pack from HuggingFace (\(subdir))..."
+            )
+            try await DownloadUtils.downloadSubdirectory(
+                .pocketTts,
+                subdirectory: subdir,
+                to: repoDir,
+                progressHandler: progressHandler
+            )
+        } else {
+            logger.info("Downloading PocketTTS English models from HuggingFace...")
+            try await DownloadUtils.downloadRepo(
+                .pocketTts, to: modelsDirectory, progressHandler: progressHandler)
         }
 
         return languageRoot

@@ -205,15 +205,14 @@ public enum PocketTtsConstantsLoader {
         for (key, tensor) in parsed.tensors {
             guard key.hasPrefix(cachePrefix) else { continue }
             let stripped = String(key.dropFirst(cachePrefix.count))
-            if let dotRange = stripped.firstIndex(of: ".") {
-                let idxStr = String(stripped[..<dotRange])
-                let rest = stripped[dotRange...]
-                guard let layerIdx = Int(idxStr) else { continue }
-                if rest == Substring(cacheSuffix) {
-                    caches[layerIdx] = tensor
-                } else if rest == Substring(offsetSuffix) {
-                    offsets[layerIdx] = tensor
-                }
+            guard let dotRange = stripped.firstIndex(of: ".") else { continue }
+            let idxStr = String(stripped[..<dotRange])
+            let rest = stripped[dotRange...]
+            guard let layerIdx = Int(idxStr) else { continue }
+            if rest == Substring(cacheSuffix) {
+                caches[layerIdx] = tensor
+            } else if rest == Substring(offsetSuffix) {
+                offsets[layerIdx] = tensor
             }
         }
 
