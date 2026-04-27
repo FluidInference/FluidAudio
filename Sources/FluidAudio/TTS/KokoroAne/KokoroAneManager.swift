@@ -33,6 +33,7 @@ public actor KokoroAneManager {
 
     private let logger = AppLogger(category: "KokoroAneManager")
     private let store: KokoroAneModelStore
+    private let directory: URL?
     private var defaultVoice: String
 
     public init(
@@ -42,6 +43,7 @@ public actor KokoroAneManager {
         modelStore: KokoroAneModelStore? = nil
     ) {
         self.defaultVoice = defaultVoice
+        self.directory = directory
         self.store =
             modelStore
             ?? KokoroAneModelStore(
@@ -54,8 +56,13 @@ public actor KokoroAneManager {
     /// pack. Optionally pre-warm additional voice packs.
     public func initialize(preloadVoices: Set<String>? = nil) async throws {
         try await store.loadIfNeeded()
-        // G2P models are auto-fetched lazily on first use; warm them here so
-        // initialization surfaces failures up-front.
+        // G2P CoreML assets live in the kokoro repo and are loaded from
+        // ~/.cache/fluidaudio/Models/kokoro/. G2PModel.loadIfNeeded only reads
+        // from cache (it never downloads), so first-time KokoroAne users who
+        // have never run the regular kokoro backend would otherwise hit a
+        // cryptic G2PModelError.vocabLoadFailed. Fetch G2P assets explicitly
+        // before warming the in-process G2P model.
+        try await KokoroAneResourceDownloader.ensureG2PAssets(directory: directory)
         try await G2PModel.shared.ensureModelsAvailable()
         if let voices = preloadVoices {
             for voice in voices {

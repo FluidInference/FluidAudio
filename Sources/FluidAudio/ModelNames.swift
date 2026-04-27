@@ -769,6 +769,13 @@ public enum ModelNames {
             }
             return ModelNames.Diarizer.requiredModels
         case .kokoro:
+            // Sentinel variant used by KokoroAne to fetch only the shared G2P
+            // CoreML assets out of the kokoro repo (the KokoroAne backend
+            // reuses the kokoro G2P models for text -> IPA, but doesn't need
+            // the TTS bundles or the multilingual G2P).
+            if variant == "g2p-only" {
+                return ModelNames.G2P.requiredModels
+            }
             let ttsModels: Set<String>
             if let variant = variant {
                 ttsModels = [variant]

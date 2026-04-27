@@ -40,6 +40,33 @@ public enum KokoroAneResourceDownloader {
         return repoDir
     }
 
+    /// Ensure the shared G2P CoreML assets (encoder + decoder + vocab) exist
+    /// in the kokoro cache directory. KokoroAne reuses `G2PModel` for text →
+    /// IPA conversion, and `G2PModel.loadIfNeeded` only reads from cache —
+    /// it never downloads. Without this call, a first-time KokoroAne user
+    /// (who has never run the regular kokoro backend) would fail with
+    /// `G2PModelError.vocabLoadFailed`.
+    public static func ensureG2PAssets(
+        directory: URL? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws {
+        let modelsDirectory = try directory ?? defaultModelsDirectory()
+        let kokoroDir = modelsDirectory.appendingPathComponent(Repo.kokoro.folderName)
+        let allPresent = ModelNames.G2P.requiredModels.allSatisfy { name in
+            FileManager.default.fileExists(atPath: kokoroDir.appendingPathComponent(name).path)
+        }
+        if allPresent {
+            return
+        }
+        logger.info("Downloading shared kokoro G2P assets from HuggingFace...")
+        try await DownloadUtils.downloadRepo(
+            .kokoro,
+            to: modelsDirectory,
+            variant: "g2p-only",
+            progressHandler: progressHandler
+        )
+    }
+
     /// Ensure a specific voice pack `.bin` file exists, downloading if missing.
     /// Default voice (`af_heart.bin`) is included in `requiredModels`; this
     /// helper covers any additional voice that ships separately.
