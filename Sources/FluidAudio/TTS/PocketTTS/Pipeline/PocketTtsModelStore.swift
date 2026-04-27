@@ -65,7 +65,7 @@ public actor PocketTtsModelStore {
             ModelNames.PocketTTS.condStepFile,
             ModelNames.PocketTTS.flowlmStepFile,
             ModelNames.PocketTTS.flowDecoderFile,
-            ModelNames.PocketTTS.mimiDecoderFile(for: language),
+            ModelNames.PocketTTS.mimiDecoderFile,
         ]
 
         var loadedModels: [MLModel] = []
@@ -238,17 +238,10 @@ public actor PocketTtsModelStore {
 
     /// Check if the Mimi encoder model is available.
     public func isMimiEncoderAvailable() -> Bool {
-        // The Mimi encoder always lives at the repo root regardless of the
-        // currently selected language pack.
-        let repoRoot: URL
-        if let langRoot = languageRootDirectory {
-            repoRoot =
-                (language.repoSubdirectory == nil)
-                ? langRoot
-                : langRoot.deletingLastPathComponent().deletingLastPathComponent()
-        } else {
-            return false
-        }
+        // The Mimi encoder lives at the repo root, two levels above any
+        // `v2/<lang>/` language root.
+        guard let langRoot = languageRootDirectory else { return false }
+        let repoRoot = langRoot.deletingLastPathComponent().deletingLastPathComponent()
         let modelURL = repoRoot.appendingPathComponent(ModelNames.PocketTTS.mimiEncoderFile)
         return FileManager.default.fileExists(atPath: modelURL.path)
     }

@@ -6,7 +6,7 @@ public enum PocketTtsResourceDownloader {
     private static let logger = AppLogger(category: "PocketTtsResourceDownloader")
 
     /// Ensure all PocketTTS models for the given language are downloaded and
-    /// return the **language root** directory.
+    /// return the **language root** directory (`<repoDir>/v2/<lang>/`).
     ///
     /// - Parameters:
     ///   - language: Which upstream language pack to fetch.
@@ -14,9 +14,7 @@ public enum PocketTtsResourceDownloader {
     ///     When `nil`, uses the default platform cache location.
     ///   - progressHandler: Optional callback for download progress updates.
     /// - Returns: The directory that contains the four `.mlmodelc` packages
-    ///   plus `constants_bin/` for the requested language. For English this
-    ///   is the legacy repo root; for other languages it's
-    ///   `<repoDir>/v2/<lang>/`.
+    ///   plus `constants_bin/` for the requested language.
     public static func ensureModels(
         language: PocketTtsLanguage = .english,
         directory: URL? = nil,
@@ -27,16 +25,10 @@ public enum PocketTtsResourceDownloader {
             PocketTtsConstants.defaultModelsSubdirectory)
 
         let repoDir = modelsDirectory.appendingPathComponent(Repo.pocketTts.folderName)
+        let subdir = language.repoSubdirectory
+        let languageRoot = repoDir.appendingPathComponent(subdir)
 
-        let languageRoot: URL
-        if let subdir = language.repoSubdirectory {
-            languageRoot = repoDir.appendingPathComponent(subdir)
-        } else {
-            languageRoot = repoDir
-        }
-
-        let requiredModels = ModelNames.PocketTTS.requiredModels(for: language)
-        let allPresent = requiredModels.allSatisfy { model in
+        let allPresent = ModelNames.PocketTTS.requiredModels.allSatisfy { model in
             FileManager.default.fileExists(
                 atPath: languageRoot.appendingPathComponent(model).path)
         }
@@ -47,33 +39,26 @@ public enum PocketTtsResourceDownloader {
             return languageRoot
         }
 
-        if let subdir = language.repoSubdirectory {
-            logger.info(
-                "Downloading PocketTTS \(language.rawValue) language pack from HuggingFace (\(subdir))..."
-            )
-            try await DownloadUtils.downloadSubdirectory(
-                .pocketTts,
-                subdirectory: subdir,
-                to: repoDir,
-                progressHandler: progressHandler
-            )
-        } else {
-            logger.info("Downloading PocketTTS English models from HuggingFace...")
-            try await DownloadUtils.downloadRepo(
-                .pocketTts, to: modelsDirectory, progressHandler: progressHandler)
-        }
+        logger.info(
+            "Downloading PocketTTS \(language.rawValue) language pack from HuggingFace (\(subdir))..."
+        )
+        try await DownloadUtils.downloadSubdirectory(
+            .pocketTts,
+            subdirectory: subdir,
+            to: repoDir,
+            progressHandler: progressHandler
+        )
 
         return languageRoot
     }
 
     /// Ensure the Mimi encoder model is downloaded for voice cloning.
     ///
-    /// This is an optional model that's only needed for voice cloning functionality.
-    /// It's downloaded separately from the main models to reduce initial download size.
-    /// The encoder is shared across all language packs and lives at the legacy
-    /// repo root regardless of which language is currently loaded — so a Spanish
-    /// (or any non-English) user can clone a voice without pulling in the
-    /// English language pack.
+    /// This is an optional model that's only needed for voice cloning
+    /// functionality. It's downloaded separately from the main models to
+    /// reduce initial download size. The encoder is shared across all
+    /// language packs and lives at the repo root, so users on any language
+    /// can clone a voice without pulling in another language pack.
     /// - Parameter directory: Optional override for the base cache directory.
     ///   When `nil`, uses the default platform cache location.
     public static func ensureMimiEncoder(directory: URL? = nil) async throws -> URL {
@@ -126,25 +111,13 @@ public enum PocketTtsResourceDownloader {
         }
         let constantsDir = languageRoot.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
         let safetensorsFile = "\(sanitized).safetensors"
-        let binFile = "\(sanitized)_audio_prompt.bin"
         let safetensorsURL = constantsDir.appendingPathComponent(safetensorsFile)
-        let binURL = constantsDir.appendingPathComponent(binFile)
 
-        let alreadyDownloaded =
-            FileManager.default.fileExists(atPath: safetensorsURL.path)
-            || FileManager.default.fileExists(atPath: binURL.path)
-
-        if !alreadyDownloaded {
-            // For non-English (v2) packs, voices ship as `.safetensors`. For
-            // legacy English (root pack), they ship as flat `.bin`. Pick the
-            // expected format based on language and download just that file.
-            let remotePrefix = language.repoSubdirectory.map { "\($0)/" } ?? ""
-            let preferredFile = (language == .english) ? binFile : safetensorsFile
-            let preferredLocalURL = (language == .english) ? binURL : safetensorsURL
-            let remotePath = "\(remotePrefix)constants_bin/\(preferredFile)"
+        if !FileManager.default.fileExists(atPath: safetensorsURL.path) {
+            let remotePath = "\(language.repoSubdirectory)/constants_bin/\(safetensorsFile)"
             let remoteURL = try ModelRegistry.resolveModel(Repo.pocketTts.remotePath, remotePath)
             logger.info(
-                "Downloading voice '\(sanitized)' for \(language.rawValue) from HuggingFace (\(preferredFile))..."
+                "Downloading voice '\(sanitized)' for \(language.rawValue) from HuggingFace (\(safetensorsFile))..."
             )
             let data = try await AssetDownloader.fetchData(
                 from: remoteURL,
@@ -155,7 +128,7 @@ public enum PocketTtsResourceDownloader {
             // language pack that hasn't materialized constants_bin/ yet.
             try FileManager.default.createDirectory(
                 at: constantsDir, withIntermediateDirectories: true)
-            try data.write(to: preferredLocalURL, options: [.atomic])
+            try data.write(to: safetensorsURL, options: [.atomic])
             logger.info("Downloaded voice '\(sanitized)' (\(data.count / 1024) KB)")
         }
 

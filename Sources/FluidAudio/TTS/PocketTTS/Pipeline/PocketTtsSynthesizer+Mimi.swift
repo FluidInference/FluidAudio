@@ -16,11 +16,9 @@ extension PocketTtsSynthesizer {
     /// Create the initial Mimi decoder state from the constants directory.
     ///
     /// Tensor shapes come from the loaded model's input descriptions, not a
-    /// manifest, so legacy English (`attn*_cache: [2,1,8,256,64]`) and v2
-    /// multi-language packs (`attn*_cache: [2,1,256,8,64]`, no
-    /// `attn*_end_offset` inputs) both load through one path. `.bin` files
-    /// must be Float32 with element count matching the model's declared
-    /// shape; missing files mean a zero-initialized tensor.
+    /// manifest. `.bin` files must be Float32 with element count matching
+    /// the model's declared shape; missing files mean a zero-initialized
+    /// tensor.
     static func loadMimiInitialState(
         from repoDirectory: URL,
         mimiKeys: PocketTtsMimiKeys
@@ -57,10 +55,8 @@ extension PocketTtsSynthesizer {
                         dstPtr.update(from: srcPtr.baseAddress!, count: elementCount)
                     }
                 }
-                // Mismatched bin sizes (e.g. English-packed `attn*_cache.bin`
-                // for a v2 model with the same byte count but different shape)
-                // fall back to zero-init, which is the correct empty-cache
-                // initial value anyway.
+                // Mismatched bin sizes fall back to zero-init, which is
+                // the correct empty-cache initial value anyway.
             }
 
             tensors[name] = array
@@ -115,9 +111,7 @@ extension PocketTtsSynthesizer {
             latentPtr.update(from: base, count: latentDim)
         }
 
-        // Build input dictionary — only include keys the model actually accepts
-        // so that legacy-English-only tensors (e.g. `attn*_end_offset`) don't
-        // surface to v2 packs that omit those inputs.
+        // Build input dictionary from discovered state mapping.
         var inputDict: [String: Any] = ["latent": latentArray]
         for (inputName, _) in mimiKeys.stateMapping {
             guard let array = state.tensors[inputName] else {

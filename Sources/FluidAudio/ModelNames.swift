@@ -574,41 +574,26 @@ public enum ModelNames {
         public static let condStep = "cond_step"
         public static let flowlmStep = "flowlm_step"
         public static let flowDecoder = "flow_decoder"
-        /// Legacy English (root-of-repo) Mimi decoder file basename.
-        public static let mimiDecoderLegacy = "mimi_decoder_v2"
-        /// New per-language `v2/<lang>/` Mimi decoder file basename.
-        public static let mimiDecoderV2 = "mimi_decoder"
+        public static let mimiDecoder = "mimi_decoder"
         public static let mimiEncoder = "mimi_encoder"
 
         public static let condStepFile = condStep + ".mlmodelc"
         public static let flowlmStepFile = flowlmStep + ".mlmodelc"
         public static let flowDecoderFile = flowDecoder + ".mlmodelc"
-        public static let mimiDecoderLegacyFile = mimiDecoderLegacy + ".mlmodelc"
-        public static let mimiDecoderV2File = mimiDecoderV2 + ".mlmodelc"
+        public static let mimiDecoderFile = mimiDecoder + ".mlmodelc"
         public static let mimiEncoderFile = mimiEncoder + ".mlmodelc"
 
         /// Directory containing binary constants, tokenizer, and voice data.
         public static let constantsBinDir = "constants_bin"
 
-        /// Returns the Mimi decoder filename used inside this language's pack.
-        public static func mimiDecoderFile(for language: PocketTtsLanguage) -> String {
-            language == .english ? mimiDecoderLegacyFile : mimiDecoderV2File
-        }
-
-        /// Required models inside the language root for the given language.
-        ///
-        /// English (legacy root) and other languages use different Mimi
-        /// decoder filenames, but all four model directories plus the
-        /// `constants_bin/` directory must be present.
-        public static func requiredModels(for language: PocketTtsLanguage) -> Set<String> {
-            [
-                condStepFile,
-                flowlmStepFile,
-                flowDecoderFile,
-                mimiDecoderFile(for: language),
-                constantsBinDir,
-            ]
-        }
+        /// Required files inside any language's `v2/<lang>/` pack.
+        public static let requiredModels: Set<String> = [
+            condStepFile,
+            flowlmStepFile,
+            flowDecoderFile,
+            mimiDecoderFile,
+            constantsBinDir,
+        ]
     }
 
     /// Multilingual G2P (CharsiuG2P ByT5) model names
@@ -796,7 +781,7 @@ public enum ModelNames {
             return ttsModels.union(ModelNames.G2P.requiredModels)
                 .union(ModelNames.MultilingualG2P.requiredModels)
         case .pocketTts:
-            return ModelNames.PocketTTS.requiredModels(for: .english)
+            return ModelNames.PocketTTS.requiredModels
         case .kokoroAne:
             return ModelNames.KokoroAne.requiredModels
         case .sortformer:

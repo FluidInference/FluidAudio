@@ -9,25 +9,23 @@ public struct PocketTtsConstantsBundle: Sendable {
 
 /// Pre-loaded voice conditioning data.
 ///
-/// Two formats are supported:
-///  - **Flat audio prompt** (legacy English `<voice>_audio_prompt.bin`):
-///    a `[1, promptLength, 1024]` Float32 tensor that the runtime feeds
-///    through `cond_step` token-by-token to populate the LM transformer
-///    KV cache.
-///  - **Pre-baked KV cache snapshot** (v2 packs `<voice>.safetensors`):
-///    per-layer K/V tensors already shaped to drop directly into the
-///    LM transformer's `cache{i}` slots. Skips `cond_step` voice prefill.
+/// Shipped voices (one `<voice>.safetensors` per language pack) carry a
+/// **pre-baked KV cache snapshot** — per-layer K/V tensors already shaped
+/// to drop directly into the LM transformer's `cache{i}` slots, skipping
+/// `cond_step` voice prefill.
 ///
-/// At most one of the two is populated. The synthesizer's `prefillKVCache`
-/// branches on `cacheSnapshot != nil` to choose the path.
+/// `audioPrompt` / `promptLength` are populated only by the voice cloner
+/// (`PocketTtsVoiceCloner`), which produces a flat `[1, promptLength, 1024]`
+/// Float32 prompt that gets fed through `cond_step` at runtime. For shipped
+/// voices these fields are empty / zero.
 public struct PocketTtsVoiceData: Sendable {
-    /// Flattened audio prompt: [1, promptLength, 1024]. Empty when
-    /// `cacheSnapshot` is non-nil.
+    /// Flattened audio prompt: [1, promptLength, 1024]. Set only by the
+    /// voice cloner; empty for shipped voices.
     public let audioPrompt: [Float]
-    /// Number of voice conditioning tokens (typically 125). Zero when
-    /// `cacheSnapshot` is non-nil.
+    /// Number of voice conditioning tokens (typically 125). Set only by
+    /// the voice cloner; zero for shipped voices.
     public let promptLength: Int
-    /// Pre-baked LM transformer KV cache (v2 packs only).
+    /// Pre-baked LM transformer KV cache (shipped voices).
     public let cacheSnapshot: PocketTtsVoiceCacheSnapshot?
 
     public init(
@@ -111,17 +109,12 @@ public enum PocketTtsConstantsLoader {
         )
     }
 
-    /// Load voice conditioning data from the given directory.
+    /// Load voice conditioning data from the given language root.
     ///
-    /// Resolution order:
-    ///  1. `<voice>.safetensors` — v2 packs ship pre-baked LM KV cache snapshots
-    ///     (per-layer `[2,1,seqLen,16,64]` F32 + `[1]` I64 offset).
-    ///  2. `<voice>_audio_prompt.bin` — legacy English flat `[1,promptLen,1024]` F32.
-    ///
-    /// Both legacy English (root-level pack) and v2 language packs are supported
-    /// without code branching at the call site — the loader picks the right
-    /// format and the synthesizer's `prefillKVCache` dispatches on
-    /// `cacheSnapshot`.
+    /// Reads `<voice>.safetensors` from `constants_bin/` — pre-baked LM KV
+    /// cache snapshot (per-layer `[2,1,seqLen,16,64]` F32 + `[1]` I64 offset).
+    /// The synthesizer's `prefillKVCache` consumes the snapshot directly,
+    /// skipping `cond_step` voice prefill.
     public static func loadVoice(
         _ voice: String, from directory: URL
     ) throws -> PocketTtsVoiceData {
@@ -133,52 +126,20 @@ public enum PocketTtsConstantsLoader {
 
         let constantsDir = directory.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
         let safetensorsURL = constantsDir.appendingPathComponent("\(sanitized).safetensors")
-        let binURL = constantsDir.appendingPathComponent("\(sanitized)_audio_prompt.bin")
 
-        if FileManager.default.fileExists(atPath: safetensorsURL.path) {
-            let snapshot = try loadVoiceSnapshot(from: safetensorsURL, voiceName: sanitized)
-            logger.info(
-                "Loaded PocketTTS voice '\(sanitized)' from safetensors (\(snapshot.layers.count) layers, seq=\(snapshot.cacheSeqLen))"
-            )
-            return PocketTtsVoiceData(
-                audioPrompt: [],
-                promptLength: 0,
-                cacheSnapshot: snapshot
-            )
+        guard FileManager.default.fileExists(atPath: safetensorsURL.path) else {
+            throw LoadError.fileNotFound("\(sanitized).safetensors")
         }
 
-        guard FileManager.default.fileExists(atPath: binURL.path) else {
-            throw LoadError.fileNotFound("\(sanitized) (no .safetensors or _audio_prompt.bin)")
-        }
-
-        let data = try Data(contentsOf: binURL)
-        let embDim = PocketTtsConstants.embeddingDim
-        let floatCount = data.count / MemoryLayout<Float>.size
-
-        guard floatCount > 0, floatCount % embDim == 0 else {
-            throw LoadError.invalidSize(
-                "\(sanitized)_audio_prompt",
-                expected: embDim,
-                actual: floatCount
-            )
-        }
-
-        let promptLength = floatCount / embDim
-        guard promptLength <= PocketTtsVoiceCloner.maxVoiceFrames else {
-            throw LoadError.invalidSize(
-                "\(sanitized)_audio_prompt",
-                expected: PocketTtsVoiceCloner.maxVoiceFrames,
-                actual: promptLength
-            )
-        }
-        let audioPrompt = data.withUnsafeBytes { rawBuffer in
-            let floatBuffer = rawBuffer.bindMemory(to: Float.self)
-            return Array(floatBuffer)
-        }
-
-        logger.info("Loaded PocketTTS voice '\(sanitized)' conditioning data")
-
-        return PocketTtsVoiceData(audioPrompt: audioPrompt, promptLength: promptLength)
+        let snapshot = try loadVoiceSnapshot(from: safetensorsURL, voiceName: sanitized)
+        logger.info(
+            "Loaded PocketTTS voice '\(sanitized)' from safetensors (\(snapshot.layers.count) layers, seq=\(snapshot.cacheSeqLen))"
+        )
+        return PocketTtsVoiceData(
+            audioPrompt: [],
+            promptLength: 0,
+            cacheSnapshot: snapshot
+        )
     }
 
     /// Parse a v2 voice safetensors file into a `PocketTtsVoiceCacheSnapshot`.

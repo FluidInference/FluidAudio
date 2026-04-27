@@ -3,25 +3,16 @@ import Foundation
 
 /// Discovered CoreML input/output schema for the Mimi audio decoder.
 ///
-/// The Mimi decoder ships in two upstream variants that differ in attention
-/// cache layout and (auto-generated) output names:
-///  - **Legacy English** — `attn{0,1}_cache` shape `[2, 1, 8, 256, 64]`
-///    (heads-first) plus `attn{0,1}_end_offset` inputs.
-///  - **v2 multi-language packs** — `attn{0,1}_cache` shape
-///    `[2, 1, 256, 8, 64]` (seq-first), no `_end_offset` inputs.
-///
-/// CoreML auto-generates non-passthrough output names (`var_NNN`) at
-/// conversion time so they differ between packs. To keep one Swift runtime
-/// path we discover both the streaming-state mapping and the audio output
-/// name from the loaded model.
+/// `attn{0,1}_cache` ships shape `[2, 1, 256, 8, 64]` (seq-first). CoreML
+/// auto-generates non-passthrough output names (`var_NNN`) at conversion
+/// time, so we discover both the streaming-state mapping and the audio
+/// output name from the loaded model.
 struct PocketTtsMimiKeys: Sendable {
 
     /// Output name for the `[1, 1, 1920]` audio frame.
     let audioOutput: String
 
-    /// Ordered streaming-state input → output mapping. Only contains state
-    /// inputs the loaded model actually accepts (so packs missing
-    /// `attn*_end_offset` simply omit those entries).
+    /// Ordered streaming-state input → output mapping.
     let stateMapping: [(input: String, output: String)]
 
     /// Declared shape per state input (as integers). Used by
@@ -44,12 +35,10 @@ struct PocketTtsMimiKeys: Sendable {
 
     /// Canonical streaming-state input order. Used to disambiguate
     /// shape-bucket pairing (e.g. `attn0_cache` before `attn1_cache`).
-    /// Inputs absent in a given pack (e.g. `attn{0,1}_end_offset` for v2)
-    /// are simply skipped.
     private static let canonicalStateOrder: [String] = [
         "upsample_partial",
-        "attn0_cache", "attn0_offset", "attn0_end_offset",
-        "attn1_cache", "attn1_offset", "attn1_end_offset",
+        "attn0_cache", "attn0_offset",
+        "attn1_cache", "attn1_offset",
         "conv0_prev", "conv0_first",
         "convtr0_partial",
         "res0_conv0_prev", "res0_conv0_first",
@@ -89,10 +78,6 @@ struct PocketTtsMimiKeys: Sendable {
         // 3. Pair inputs to outputs.
         //    - Pass-through: output name equals input name (e.g. `conv0_first`,
         //      `res*_conv1_prev` zero-shape carry-throughs).
-        //    - Semantic-named: outputs containing `end_offset` are reserved
-        //      for inputs containing `end_offset` (legacy English mimi has
-        //      `new_end_offset` / `new_end_offset_1` outputs that share shape
-        //      `[1]` with `var_NNN` offset outputs).
         //    - Otherwise: match by shape, then disambiguate within a shape
         //      bucket by sorting outputs by trailing `var_NNN` and inputs
         //      in canonical order.
@@ -106,29 +91,6 @@ struct PocketTtsMimiKeys: Sendable {
                 passThroughMap[inputName] = inputName
                 availableOutputs.removeValue(forKey: inputName)
             }
-        }
-
-        // Reserve `*end_offset*` outputs exclusively for `*end_offset*` inputs.
-        // Pair them in canonical order, sorted by trailing digits ascending so
-        // `attn0_end_offset → new_end_offset_1`, `attn1_end_offset → new_end_offset`.
-        let endOffsetInputs = canonicalStateOrder.filter {
-            $0.contains("end_offset") && stateShapes[$0] != nil && passThroughMap[$0] == nil
-        }
-        var endOffsetOutputs = availableOutputs.keys.filter { $0.contains("end_offset") }.sorted {
-            let li = PocketTtsLayerKeys.trailingNumber(in: $0) ?? Int.max
-            let ri = PocketTtsLayerKeys.trailingNumber(in: $1) ?? Int.max
-            if li != ri { return li < ri }
-            return $0 < $1
-        }
-        var endOffsetMap: [String: String] = [:]
-        for inputName in endOffsetInputs {
-            guard !endOffsetOutputs.isEmpty else {
-                throw DiscoveryError.unmatchedStateInput(
-                    name: inputName, shape: stateShapes[inputName] ?? [])
-            }
-            let chosen = endOffsetOutputs.removeFirst()
-            endOffsetMap[inputName] = chosen
-            availableOutputs.removeValue(forKey: chosen)
         }
 
         // Bucket remaining outputs by shape, sorted by var-number ascending.
@@ -148,18 +110,13 @@ struct PocketTtsMimiKeys: Sendable {
         }
 
         // Walk canonical order, taking outputs from each shape bucket. Skip
-        // inputs already resolved via pass-through or end-offset reservation.
-        // Inputs outside the canonical list aren't supported — the canonical
-        // list is exhaustive across the legacy English and v2 multi-language
-        // packs, and downstream shape matching would fail for any unknown
-        // schema anyway.
+        // inputs already resolved via pass-through. Inputs outside the
+        // canonical list aren't supported — the canonical list is exhaustive
+        // across the v2 packs, and downstream shape matching would fail for
+        // any unknown schema anyway.
         var resolvedMapping: [String: String] = passThroughMap
-        for (k, v) in endOffsetMap { resolvedMapping[k] = v }
         for inputName in canonicalStateOrder
-        where stateShapes[inputName] != nil
-            && passThroughMap[inputName] == nil
-            && endOffsetMap[inputName] == nil
-        {
+        where stateShapes[inputName] != nil && passThroughMap[inputName] == nil {
             guard let shape = stateShapes[inputName] else { continue }
             guard var bucket = outputsByShape[shape], !bucket.isEmpty else {
                 throw DiscoveryError.unmatchedStateInput(name: inputName, shape: shape)
