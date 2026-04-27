@@ -3,27 +3,27 @@ import XCTest
 
 @testable import FluidAudio
 
-final class KokoroLaiVoicePackTests: XCTestCase {
+final class KokoroAneVoicePackTests: XCTestCase {
 
-    private let rows = KokoroLaiConstants.voicePackRows  // 510
-    private let cols = KokoroLaiConstants.voicePackCols  // 256
+    private let rows = KokoroAneConstants.voicePackRows  // 510
+    private let cols = KokoroAneConstants.voicePackCols  // 256
 
     /// Build a deterministic [510, 256] pack where each cell encodes its
     /// (row, col) so slice() correctness can be verified by inspection.
-    private func makePack() throws -> KokoroLaiVoicePack {
+    private func makePack() throws -> KokoroAneVoicePack {
         var storage = [Float](repeating: 0, count: rows * cols)
         for r in 0..<rows {
             for c in 0..<cols {
                 storage[r * cols + c] = Float(r) * 1000 + Float(c)
             }
         }
-        return try KokoroLaiVoicePack(storage: storage)
+        return try KokoroAneVoicePack(storage: storage)
     }
 
     func testInitRejectsWrongSize() {
-        XCTAssertThrowsError(try KokoroLaiVoicePack(storage: [Float](repeating: 0, count: 10))) {
+        XCTAssertThrowsError(try KokoroAneVoicePack(storage: [Float](repeating: 0, count: 10))) {
             error in
-            guard case KokoroLaiError.invalidVoicePack = error else {
+            guard case KokoroAneError.invalidVoicePack = error else {
                 XCTFail("Expected invalidVoicePack, got \(error)")
                 return
             }
@@ -73,7 +73,7 @@ final class KokoroLaiVoicePackTests: XCTestCase {
         try bytes.write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let loaded = try KokoroLaiVoicePack.load(from: url)
+        let loaded = try KokoroAneVoicePack.load(from: url)
         XCTAssertEqual(loaded.storage.count, rows * cols)
         XCTAssertEqual(loaded.storage[0], 0.0)
         XCTAssertEqual(loaded.storage[cols + 5], 1000.0 + 5)
@@ -87,8 +87,8 @@ final class KokoroLaiVoicePackTests: XCTestCase {
         try Data([0, 1, 2, 3, 4, 5, 6]).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        XCTAssertThrowsError(try KokoroLaiVoicePack.load(from: url)) { error in
-            guard case KokoroLaiError.invalidVoicePack = error else {
+        XCTAssertThrowsError(try KokoroAneVoicePack.load(from: url)) { error in
+            guard case KokoroAneError.invalidVoicePack = error else {
                 XCTFail("Expected invalidVoicePack, got \(error)")
                 return
             }
@@ -97,8 +97,8 @@ final class KokoroLaiVoicePackTests: XCTestCase {
 
     func testLoadRejectsMissingFile() {
         let url = URL(fileURLWithPath: "/nonexistent/kl-pack-missing.bin")
-        XCTAssertThrowsError(try KokoroLaiVoicePack.load(from: url)) { error in
-            guard case KokoroLaiError.voicePackMissing = error else {
+        XCTAssertThrowsError(try KokoroAneVoicePack.load(from: url)) { error in
+            guard case KokoroAneError.voicePackMissing = error else {
                 XCTFail("Expected voicePackMissing, got \(error)")
                 return
             }

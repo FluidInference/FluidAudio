@@ -9,7 +9,7 @@ import Foundation
 /// and aggregate WER, and writes a JSON report.
 ///
 /// Usage:
-///   fluidaudio tts-asr-verify --backend kokoro-lai \
+///   fluidaudio tts-asr-verify --backend kokoro-ane \
 ///       --texts-file phrases.txt \
 ///       --voice af_heart \
 ///       --output-json verify-results.json \
@@ -19,7 +19,7 @@ public enum TTSAsrVerifyCommand {
     private static let logger = AppLogger(category: "TTSAsrVerifyCommand")
 
     public static func run(arguments: [String]) async {
-        var backendName = "kokoro-lai"
+        var backendName = "kokoro-ane"
         var textsFile: String?
         var voice: String = TtsConstants.recommendedVoice
         var outputJson: String?
@@ -83,21 +83,21 @@ public enum TTSAsrVerifyCommand {
         logger.info("Loaded \(phrases.count) phrase(s) from \(textsFile)")
 
         let backend = parseBackend(backendName)
-        guard backend == .kokoroLai else {
+        guard backend == .kokoroAne else {
             logger.error(
-                "tts-asr-verify currently supports --backend kokoro-lai only (got '\(backendName)')")
+                "tts-asr-verify currently supports --backend kokoro-ane only (got '\(backendName)')")
             exit(1)
         }
 
         let resolvedVoice =
             voice == TtsConstants.recommendedVoice
-            ? KokoroLaiConstants.defaultVoice : voice
+            ? KokoroAneConstants.defaultVoice : voice
 
         do {
             // Set up TTS once.
-            let manager = KokoroLaiManager(defaultVoice: resolvedVoice)
+            let manager = KokoroAneManager(defaultVoice: resolvedVoice)
             try await manager.initialize()
-            logger.info("KokoroLai initialized (voice=\(resolvedVoice))")
+            logger.info("KokoroAne initialized (voice=\(resolvedVoice))")
 
             // Set up ASR once.
             let asrModels = try await AsrModels.downloadAndLoad()
@@ -260,8 +260,8 @@ public enum TTSAsrVerifyCommand {
         switch name.lowercased() {
         case "kokoro": return .kokoro
         case "pocket", "pockettts", "pocket-tts": return .pocketTts
-        case "kokoro-lai", "kokorolai", "lai": return .kokoroLai
-        default: return .kokoroLai
+        case "kokoro-ane", "kokoroane", "lai": return .kokoroAne
+        default: return .kokoroAne
         }
     }
 
@@ -293,7 +293,7 @@ public enum TTSAsrVerifyCommand {
             per-phrase + aggregate WER, and writes a JSON report.
 
             Options:
-              --backend <name>      TTS backend: kokoro-lai (default)
+              --backend <name>      TTS backend: kokoro-ane (default)
               --texts-file <path>   Phrases file (required)
               --voice <name>        Voice name (default: af_heart)
               --output-json <path>  Output JSON report path
@@ -302,7 +302,7 @@ public enum TTSAsrVerifyCommand {
 
             Example:
               fluidaudio tts-asr-verify \\
-                  --backend kokoro-lai \\
+                  --backend kokoro-ane \\
                   --texts-file phrases.txt \\
                   --voice af_heart \\
                   --output-json verify-results.json

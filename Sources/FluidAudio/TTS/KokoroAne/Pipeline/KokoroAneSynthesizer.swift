@@ -9,36 +9,36 @@ import Foundation
 ///   * Prosody → Noise   : fp16 → fp32
 ///   * Noise → Vocoder   : fp32 → fp16
 ///   * Vocoder → Tail    : fp16 → fp32 (and `anchor` is discarded)
-public struct KokoroLaiSynthesizer {
+public struct KokoroAneSynthesizer {
 
     /// One-shot synthesis from already-tokenised input ids + style slices.
-    /// Used by `KokoroLaiManager.synthesize(...)` after vocab + voice-pack
+    /// Used by `KokoroAneManager.synthesize(...)` after vocab + voice-pack
     /// resolution.
     public static func synthesize(
         inputIds: [Int32],
         phonemeCount: Int,
         styleS: [Float],
         styleTimbre: [Float],
-        speed: Float = Float(KokoroLaiConstants.defaultSpeed),
-        store: KokoroLaiModelStore
-    ) async throws -> KokoroLaiSynthesisResult {
+        speed: Float = Float(KokoroAneConstants.defaultSpeed),
+        store: KokoroAneModelStore
+    ) async throws -> KokoroAneSynthesisResult {
         precondition(styleS.count == 128, "style_s must be length 128, got \(styleS.count)")
         precondition(
             styleTimbre.count == 128,
             "style_timbre must be length 128, got \(styleTimbre.count)")
 
         let tEnc = inputIds.count
-        var timings = KokoroLaiStageTimings()
+        var timings = KokoroAneStageTimings()
 
         // Build base tensors used by multiple stages.
-        let inputIdsArr = try KokoroLaiArrays.int32Array(shape: [1, tEnc], from: inputIds)
-        let attnMaskArr = try KokoroLaiArrays.attentionMask(length: tEnc)
-        let styleSArr = try KokoroLaiArrays.float16Array(shape: [1, 128], from: styleS)
-        let styleTimbreF32 = try KokoroLaiArrays.float32Array(
+        let inputIdsArr = try KokoroAneArrays.int32Array(shape: [1, tEnc], from: inputIds)
+        let attnMaskArr = try KokoroAneArrays.attentionMask(length: tEnc)
+        let styleSArr = try KokoroAneArrays.float16Array(shape: [1, 128], from: styleS)
+        let styleTimbreF32 = try KokoroAneArrays.float32Array(
             shape: [1, 128], from: styleTimbre)
-        let styleTimbreF16 = try KokoroLaiArrays.float16Array(
+        let styleTimbreF16 = try KokoroAneArrays.float16Array(
             shape: [1, 128], from: styleTimbre)
-        let speedArr = try KokoroLaiArrays.float16Array(shape: [1], from: [speed])
+        let speedArr = try KokoroAneArrays.float16Array(shape: [1], from: [speed])
 
         // ── 1: Albert ────────────────────────────────────────────────
         let albertModel = try await store.model(for: .albert)
@@ -47,7 +47,7 @@ public struct KokoroLaiSynthesizer {
             inputs: ["input_ids": inputIdsArr, "attention_mask": attnMaskArr],
             timing: &timings.albert
         )
-        let bertDur = try KokoroLaiArrays.float16Array(
+        let bertDur = try KokoroAneArrays.float16Array(
             shape: try outputShape(albertOut, key: "bert_dur"),
             from: try outputArray(albertOut, key: "bert_dur"))
 
@@ -67,23 +67,23 @@ public struct KokoroLaiSynthesizer {
 
         // duration → pred_dur (int32, rounded, clamped ≥ 1)
         let duration = try outputArray(postOut, key: "duration")
-        let durFloats = KokoroLaiArrays.readFloats(duration)
+        let durFloats = KokoroAneArrays.readFloats(duration)
         let predDur = durFloats.map { d -> Int32 in
             let r = Int32(Float(d).rounded())
             return max(r, 1)
         }
         let tA = predDur.reduce(0) { $0 + Int($1) }
-        if tA > KokoroLaiConstants.maxAcousticFrames {
-            throw KokoroLaiError.acousticFramesExceedCap(
-                have: tA, cap: KokoroLaiConstants.maxAcousticFrames)
+        if tA > KokoroAneConstants.maxAcousticFrames {
+            throw KokoroAneError.acousticFramesExceedCap(
+                have: tA, cap: KokoroAneConstants.maxAcousticFrames)
         }
 
-        let predDurArr = try KokoroLaiArrays.int32Array(
+        let predDurArr = try KokoroAneArrays.int32Array(
             shape: [1, predDur.count], from: predDur)
-        let dArr = try KokoroLaiArrays.float16Array(
+        let dArr = try KokoroAneArrays.float16Array(
             shape: try outputShape(postOut, key: "d"),
             from: try outputArray(postOut, key: "d"))
-        let tEnArr = try KokoroLaiArrays.float16Array(
+        let tEnArr = try KokoroAneArrays.float16Array(
             shape: try outputShape(postOut, key: "t_en"),
             from: try outputArray(postOut, key: "t_en"))
 
@@ -97,9 +97,9 @@ public struct KokoroLaiSynthesizer {
         let enRaw = try outputArray(alignOut, key: "en")
         let asrRaw = try outputArray(alignOut, key: "asr")
 
-        let enArr = try KokoroLaiArrays.float16Array(
+        let enArr = try KokoroAneArrays.float16Array(
             shape: try outputShape(alignOut, key: "en"), from: enRaw)
-        let asrArr = try KokoroLaiArrays.float16Array(
+        let asrArr = try KokoroAneArrays.float16Array(
             shape: try outputShape(alignOut, key: "asr"), from: asrRaw)
 
         // ── 4: Prosody ───────────────────────────────────────────────
@@ -113,7 +113,7 @@ public struct KokoroLaiSynthesizer {
         let nRaw = try outputArray(prosOut, key: "N")
 
         // ── 5: Noise (fp32 boundary) ─────────────────────────────────
-        let f0F32 = try KokoroLaiArrays.float32Array(
+        let f0F32 = try KokoroAneArrays.float32Array(
             shape: try outputShape(prosOut, key: "F0"), from: f0Raw)
         let noiseModel = try await store.model(for: .noise)
         let noiseOut = try await predict(
@@ -125,13 +125,13 @@ public struct KokoroLaiSynthesizer {
         let xs1Raw = try outputArray(noiseOut, key: "x_source_1")
 
         // ── 6: Vocoder (fp16 boundary) ───────────────────────────────
-        let f0F16 = try KokoroLaiArrays.float16Array(
+        let f0F16 = try KokoroAneArrays.float16Array(
             shape: try outputShape(prosOut, key: "F0"), from: f0Raw)
-        let nF16 = try KokoroLaiArrays.float16Array(
+        let nF16 = try KokoroAneArrays.float16Array(
             shape: try outputShape(prosOut, key: "N"), from: nRaw)
-        let xs0F16 = try KokoroLaiArrays.float16Array(
+        let xs0F16 = try KokoroAneArrays.float16Array(
             shape: try outputShape(noiseOut, key: "x_source_0"), from: xs0Raw)
-        let xs1F16 = try KokoroLaiArrays.float16Array(
+        let xs1F16 = try KokoroAneArrays.float16Array(
             shape: try outputShape(noiseOut, key: "x_source_1"), from: xs1Raw)
         let vocoderModel = try await store.model(for: .vocoder)
         let vocOut = try await predict(
@@ -150,7 +150,7 @@ public struct KokoroLaiSynthesizer {
         let xPreRaw = try outputArray(vocOut, key: "x_pre")
 
         // ── 7: Tail (fp32 iSTFT) ─────────────────────────────────────
-        let xPreF32 = try KokoroLaiArrays.float32Array(
+        let xPreF32 = try KokoroAneArrays.float32Array(
             shape: try outputShape(vocOut, key: "x_pre"), from: xPreRaw)
         let tailModel = try await store.model(for: .tail)
         let tailOut = try await predict(
@@ -159,11 +159,11 @@ public struct KokoroLaiSynthesizer {
             timing: &timings.tail
         )
         let audioArr = try outputArray(tailOut, key: "audio")
-        let samples = KokoroLaiArrays.readFloats(audioArr)
+        let samples = KokoroAneArrays.readFloats(audioArr)
 
-        return KokoroLaiSynthesisResult(
+        return KokoroAneSynthesisResult(
             samples: samples,
-            sampleRate: KokoroLaiConstants.sampleRate,
+            sampleRate: KokoroAneConstants.sampleRate,
             encoderTokens: tEnc,
             acousticFrames: tA,
             timings: timings
@@ -173,7 +173,7 @@ public struct KokoroLaiSynthesizer {
     // MARK: - Helpers
 
     private static func predict(
-        stage: KokoroLaiStage,
+        stage: KokoroAneStage,
         model: MLModel,
         inputs: [String: MLMultiArray],
         timing: inout Double
@@ -186,13 +186,13 @@ public struct KokoroLaiSynthesizer {
             timing = Date().timeIntervalSince(start) * 1000
             return out
         } catch {
-            throw KokoroLaiError.predictionFailed(stage: stage.rawValue, underlying: error)
+            throw KokoroAneError.predictionFailed(stage: stage.rawValue, underlying: error)
         }
     }
 
     private static func outputArray(_ provider: MLFeatureProvider, key: String) throws -> MLMultiArray {
         guard let value = provider.featureValue(for: key)?.multiArrayValue else {
-            throw KokoroLaiError.unexpectedOutputShape(
+            throw KokoroAneError.unexpectedOutputShape(
                 stage: key, expected: "MLMultiArray for '\(key)'", got: "nil")
         }
         return value

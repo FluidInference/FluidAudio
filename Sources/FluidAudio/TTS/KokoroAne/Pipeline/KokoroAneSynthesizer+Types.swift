@@ -1,7 +1,7 @@
 import Foundation
 
 /// Per-stage wall-clock timings (milliseconds) for one synthesis call.
-public struct KokoroLaiStageTimings: Sendable, Equatable {
+public struct KokoroAneStageTimings: Sendable, Equatable {
     public var albert: Double = 0
     public var postAlbert: Double = 0
     public var alignment: Double = 0
@@ -18,8 +18,8 @@ public struct KokoroLaiStageTimings: Sendable, Equatable {
     public init() {}
 }
 
-/// Detailed result of a `KokoroLaiManager.synthesizeDetailed` call.
-public struct KokoroLaiSynthesisResult: Sendable {
+/// Detailed result of a `KokoroAneManager.synthesizeDetailed` call.
+public struct KokoroAneSynthesisResult: Sendable {
     /// 24 kHz mono fp32 PCM samples (raw, not WAV-wrapped).
     public let samples: [Float]
     /// Sample rate (24,000 Hz for the laishere chain).
@@ -29,7 +29,7 @@ public struct KokoroLaiSynthesisResult: Sendable {
     /// `T_a` — acoustic frames produced by PostAlbert / Alignment.
     public let acousticFrames: Int
     /// Per-stage timings.
-    public let timings: KokoroLaiStageTimings
+    public let timings: KokoroAneStageTimings
 
     /// Convenience: audio duration in seconds.
     public var durationSeconds: Double {
@@ -41,7 +41,7 @@ public struct KokoroLaiSynthesisResult: Sendable {
         sampleRate: Int,
         encoderTokens: Int,
         acousticFrames: Int,
-        timings: KokoroLaiStageTimings
+        timings: KokoroAneStageTimings
     ) {
         self.samples = samples
         self.sampleRate = sampleRate
@@ -52,7 +52,7 @@ public struct KokoroLaiSynthesisResult: Sendable {
 }
 
 /// One of the 7 stages in the laishere chain.
-public enum KokoroLaiStage: String, CaseIterable, Sendable {
+public enum KokoroAneStage: String, CaseIterable, Sendable {
     case albert
     case postAlbert
     case alignment

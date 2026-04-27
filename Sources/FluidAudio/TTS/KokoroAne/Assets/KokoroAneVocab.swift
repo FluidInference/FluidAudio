@@ -4,7 +4,7 @@ import Foundation
 /// 7 mlmodelc bundles.
 ///
 /// The file is the `vocab` field of Kokoro's HF config, ~177 entries.
-public struct KokoroLaiVocab: Sendable {
+public struct KokoroAneVocab: Sendable {
 
     public let map: [Character: Int32]
 
@@ -14,13 +14,13 @@ public struct KokoroLaiVocab: Sendable {
 
     /// Load from a JSON file. The expected format is an object whose keys are
     /// single-character IPA strings and whose values are integers.
-    public static func load(from url: URL) throws -> KokoroLaiVocab {
+    public static func load(from url: URL) throws -> KokoroAneVocab {
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw KokoroLaiError.vocabMissing(url)
+            throw KokoroAneError.vocabMissing(url)
         }
         let data = try Data(contentsOf: url)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw KokoroLaiError.vocabMissing(url)
+            throw KokoroAneError.vocabMissing(url)
         }
         var parsed: [Character: Int32] = [:]
         parsed.reserveCapacity(json.count)
@@ -32,25 +32,25 @@ public struct KokoroLaiVocab: Sendable {
                 parsed[ch] = nsNum.int32Value
             }
         }
-        return KokoroLaiVocab(map: parsed)
+        return KokoroAneVocab(map: parsed)
     }
 
     /// Encode an IPA phoneme string into `[BOS, ...ids, EOS]` int32 tokens.
     /// Phonemes not in the vocab are silently dropped (matches the Python
     /// reference: `filter(lambda i: i is not None, map(lambda p: vocab.get(p), ps))`).
     public func encode(_ phonemes: String) throws -> [Int32] {
-        if phonemes.count > KokoroLaiConstants.maxPhonemeLength {
-            throw KokoroLaiError.phonemeSequenceTooLong(phonemes.count)
+        if phonemes.count > KokoroAneConstants.maxPhonemeLength {
+            throw KokoroAneError.phonemeSequenceTooLong(phonemes.count)
         }
         var ids: [Int32] = []
         ids.reserveCapacity(phonemes.count + 2)
-        ids.append(KokoroLaiConstants.bosTokenId)
+        ids.append(KokoroAneConstants.bosTokenId)
         for ch in phonemes {
             if let id = map[ch] {
                 ids.append(id)
             }
         }
-        ids.append(KokoroLaiConstants.eosTokenId)
+        ids.append(KokoroAneConstants.eosTokenId)
         return ids
     }
 }

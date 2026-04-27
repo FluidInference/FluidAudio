@@ -6,29 +6,29 @@ import Foundation
 /// Columns split into:
 ///   * `[0..<128]`   = `style_timbre` (fed into Noise + Vocoder)
 ///   * `[128..<256]` = `style_s`      (fed into PostAlbert + Prosody)
-public struct KokoroLaiVoicePack: Sendable {
+public struct KokoroAneVoicePack: Sendable {
 
     /// Row-major fp32 storage of length 510 * 256.
     public let storage: [Float]
 
     public init(storage: [Float]) throws {
-        let expected = KokoroLaiConstants.voicePackRows * KokoroLaiConstants.voicePackCols
+        let expected = KokoroAneConstants.voicePackRows * KokoroAneConstants.voicePackCols
         guard storage.count == expected else {
-            throw KokoroLaiError.invalidVoicePack(
+            throw KokoroAneError.invalidVoicePack(
                 "expected \(expected) fp32 elements, got \(storage.count)")
         }
         self.storage = storage
     }
 
     /// Load a flat fp32 binary file (`<voice>.bin`).
-    public static func load(from url: URL) throws -> KokoroLaiVoicePack {
+    public static func load(from url: URL) throws -> KokoroAneVoicePack {
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw KokoroLaiError.voicePackMissing(url)
+            throw KokoroAneError.voicePackMissing(url)
         }
         let data = try Data(contentsOf: url)
         let elemSize = MemoryLayout<Float>.size
         guard data.count % elemSize == 0 else {
-            throw KokoroLaiError.invalidVoicePack(
+            throw KokoroAneError.invalidVoicePack(
                 "file size \(data.count) is not a multiple of sizeof(Float)=\(elemSize)")
         }
         let count = data.count / elemSize
@@ -36,14 +36,14 @@ public struct KokoroLaiVoicePack: Sendable {
         _ = storage.withUnsafeMutableBytes { dst in
             data.copyBytes(to: dst)
         }
-        return try KokoroLaiVoicePack(storage: storage)
+        return try KokoroAneVoicePack(storage: storage)
     }
 
     /// Pick the row that matches the phoneme-length bucket.
     /// Returns `(styleS, styleTimbre)` each of length 128.
     public func slice(for phonemeCount: Int) -> (styleS: [Float], styleTimbre: [Float]) {
-        let cols = KokoroLaiConstants.voicePackCols
-        let row = max(min(phonemeCount - 1, KokoroLaiConstants.voicePackRows - 1), 0)
+        let cols = KokoroAneConstants.voicePackCols
+        let row = max(min(phonemeCount - 1, KokoroAneConstants.voicePackRows - 1), 0)
         let base = row * cols
         let timbreRange = base..<(base + 128)
         let styleSRange = (base + 128)..<(base + cols)

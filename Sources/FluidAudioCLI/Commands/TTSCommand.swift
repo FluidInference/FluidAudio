@@ -200,8 +200,8 @@ public struct TTS {
                         backend = .kokoro
                     case "pocket", "pockettts":
                         backend = .pocketTts
-                    case "kokoro-lai", "kokorolai", "lai":
-                        backend = .kokoroLai
+                    case "kokoro-ane", "kokoroane", "lai":
+                        backend = .kokoroAne
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro")
                     }
@@ -264,8 +264,8 @@ public struct TTS {
             return
         }
 
-        if backend == .kokoroLai {
-            await runKokoroLai(
+        if backend == .kokoroAne {
+            await runKokoroAne(
                 text: text, output: output, voice: voice, metricsPath: metricsPath)
             return
         }
@@ -650,15 +650,15 @@ public struct TTS {
         }
     }
 
-    private static func runKokoroLai(
+    private static func runKokoroAne(
         text: String, output: String, voice: String, metricsPath: String?
     ) async {
         do {
             let tStart = Date()
             let resolvedVoice =
                 voice == TtsConstants.recommendedVoice
-                ? KokoroLaiConstants.defaultVoice : voice
-            let manager = KokoroLaiManager(defaultVoice: resolvedVoice)
+                ? KokoroAneConstants.defaultVoice : voice
+            let manager = KokoroAneManager(defaultVoice: resolvedVoice)
 
             let tLoad0 = Date()
             try await manager.initialize()
@@ -693,7 +693,7 @@ public struct TTS {
             let audioSecs = Double(detailed.samples.count) / Double(detailed.sampleRate)
             let rtfx = synthS > 0 ? audioSecs / synthS : 0
 
-            logger.info("KokoroLai synthesis complete")
+            logger.info("KokoroAne synthesis complete")
             logger.info("  Load: \(String(format: "%.3f", loadS))s")
             logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
             logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
@@ -743,7 +743,7 @@ public struct TTS {
 
                 if let metricsPath {
                     var metricsDict: [String: Any] = [
-                        "backend": "kokoro-lai",
+                        "backend": "kokoro-ane",
                         "text": text,
                         "voice": resolvedVoice,
                         "output": outURL.path,
@@ -785,8 +785,8 @@ public struct TTS {
                 }
             }
         } catch {
-            logger.error("KokoroLai Error: \(error)")
-            print("KokoroLai failed: \(error)")
+            logger.error("KokoroAne Error: \(error)")
+            print("KokoroAne failed: \(error)")
             exit(1)
         }
     }
@@ -799,7 +799,7 @@ public struct TTS {
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS)
-              --backend            TTS backend: kokoro (default), pocket, or kokoro-lai
+              --backend            TTS backend: kokoro (default), pocket, or kokoro-ane
               --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)

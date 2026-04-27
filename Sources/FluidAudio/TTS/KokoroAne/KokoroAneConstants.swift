@@ -5,7 +5,7 @@ import Foundation
 /// Source of truth: mobius/models/tts/kokoro/laishere-coreml/convert-coreml.py
 /// (specifically `compute_shape_bounds(max_frames=2000)` and the per-stage
 /// I/O contracts).
-public enum KokoroLaiConstants {
+public enum KokoroAneConstants {
 
     /// Default voice id (single voice ships with the HF repo).
     public static let defaultVoice = "af_heart"

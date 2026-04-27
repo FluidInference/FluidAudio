@@ -5,30 +5,30 @@ import Foundation
 /// Mirrors the public surface of `KokoroTtsManager` so callers can swap
 /// backends with minimal churn. Internally:
 ///   * Text → IPA via the existing `G2PModel` (per-word, joined with " ")
-///   * IPA → input ids via `KokoroLaiVocab`
-///   * Voice pack slice via `KokoroLaiVoicePack`
-///   * 7 stages via `KokoroLaiSynthesizer`
+///   * IPA → input ids via `KokoroAneVocab`
+///   * Voice pack slice via `KokoroAneVoicePack`
+///   * 7 stages via `KokoroAneSynthesizer`
 ///   * Float samples → WAV via `AudioWAV`
 ///
-/// Concurrency: actor-isolated. `KokoroLaiModelStore` is an actor too, so all
+/// Concurrency: actor-isolated. `KokoroAneModelStore` is an actor too, so all
 /// model access flows through an awaited boundary — no shared mutable state
 /// is exposed.
-public actor KokoroLaiManager {
+public actor KokoroAneManager {
 
-    private let logger = AppLogger(category: "KokoroLaiManager")
-    private let store: KokoroLaiModelStore
+    private let logger = AppLogger(category: "KokoroAneManager")
+    private let store: KokoroAneModelStore
     private var defaultVoice: String
 
     public init(
-        defaultVoice: String = KokoroLaiConstants.defaultVoice,
+        defaultVoice: String = KokoroAneConstants.defaultVoice,
         directory: URL? = nil,
-        computeUnits: KokoroLaiComputeUnits = .default,
-        modelStore: KokoroLaiModelStore? = nil
+        computeUnits: KokoroAneComputeUnits = .default,
+        modelStore: KokoroAneModelStore? = nil
     ) {
         self.defaultVoice = defaultVoice
         self.store =
             modelStore
-            ?? KokoroLaiModelStore(
+            ?? KokoroAneModelStore(
                 directory: directory, computeUnits: computeUnits)
     }
 
@@ -69,7 +69,7 @@ public actor KokoroLaiManager {
     public func synthesize(
         text: String,
         voice: String? = nil,
-        speed: Float = Float(KokoroLaiConstants.defaultSpeed)
+        speed: Float = Float(KokoroAneConstants.defaultSpeed)
     ) async throws -> Data {
         let result = try await synthesizeDetailed(text: text, voice: voice, speed: speed)
         return try wavData(from: result)
@@ -79,8 +79,8 @@ public actor KokoroLaiManager {
     public func synthesizeDetailed(
         text: String,
         voice: String? = nil,
-        speed: Float = Float(KokoroLaiConstants.defaultSpeed)
-    ) async throws -> KokoroLaiSynthesisResult {
+        speed: Float = Float(KokoroAneConstants.defaultSpeed)
+    ) async throws -> KokoroAneSynthesisResult {
         let phonemes = try await phonemize(text: text)
         return try await runChain(phonemes: phonemes, voice: voice, speed: speed)
     }
@@ -89,7 +89,7 @@ public actor KokoroLaiManager {
     public func synthesizeFromPhonemes(
         _ phonemes: String,
         voice: String? = nil,
-        speed: Float = Float(KokoroLaiConstants.defaultSpeed)
+        speed: Float = Float(KokoroAneConstants.defaultSpeed)
     ) async throws -> Data {
         let result = try await runChain(phonemes: phonemes, voice: voice, speed: speed)
         return try wavData(from: result)
@@ -99,8 +99,8 @@ public actor KokoroLaiManager {
     public func synthesizeFromPhonemesDetailed(
         _ phonemes: String,
         voice: String? = nil,
-        speed: Float = Float(KokoroLaiConstants.defaultSpeed)
-    ) async throws -> KokoroLaiSynthesisResult {
+        speed: Float = Float(KokoroAneConstants.defaultSpeed)
+    ) async throws -> KokoroAneSynthesisResult {
         try await runChain(phonemes: phonemes, voice: voice, speed: speed)
     }
 
@@ -110,7 +110,7 @@ public actor KokoroLaiManager {
         phonemes: String,
         voice: String?,
         speed: Float
-    ) async throws -> KokoroLaiSynthesisResult {
+    ) async throws -> KokoroAneSynthesisResult {
         try await store.loadIfNeeded()
         let vocab = try await store.vocabulary()
         let voiceName = voice ?? defaultVoice
@@ -122,7 +122,7 @@ public actor KokoroLaiManager {
         let phonemeCount = phonemes.count
         let (styleS, styleTimbre) = pack.slice(for: phonemeCount)
 
-        return try await KokoroLaiSynthesizer.synthesize(
+        return try await KokoroAneSynthesizer.synthesize(
             inputIds: inputIds,
             phonemeCount: phonemeCount,
             styleS: styleS,
@@ -134,11 +134,11 @@ public actor KokoroLaiManager {
 
     /// Whitespace-split, per-word G2P, joined with " ". Punctuation is
     /// stripped because the laishere vocab is IPA-only — punctuation chars
-    /// would just be dropped at `KokoroLaiVocab.encode` anyway.
+    /// would just be dropped at `KokoroAneVocab.encode` anyway.
     private func phonemize(text: String) async throws -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            throw KokoroLaiError.inputProcessingFailed("(empty input)")
+            throw KokoroAneError.inputProcessingFailed("(empty input)")
         }
 
         let words = trimmed.split(whereSeparator: { $0.isWhitespace }).map(String.init)
@@ -163,19 +163,19 @@ public actor KokoroLaiManager {
 
         let joined = parts.joined(separator: " ")
         if joined.isEmpty {
-            throw KokoroLaiError.inputProcessingFailed(
+            throw KokoroAneError.inputProcessingFailed(
                 "G2P produced no phonemes for input '\(trimmed)'")
         }
         return joined
     }
 
-    private func wavData(from result: KokoroLaiSynthesisResult) throws -> Data {
+    private func wavData(from result: KokoroAneSynthesisResult) throws -> Data {
         do {
             return try AudioWAV.data(
                 from: result.samples,
                 sampleRate: Double(result.sampleRate))
         } catch {
-            throw KokoroLaiError.audioConversionFailed(error.localizedDescription)
+            throw KokoroAneError.audioConversionFailed(error.localizedDescription)
         }
     }
 }

@@ -21,7 +21,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case nemotronStreaming80 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/80ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
-    case kokoroLai = "FluidInference/kokoro-82m-coreml/ANE"
+    case kokoroAne = "FluidInference/kokoro-82m-coreml/ANE"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
     case lseend = "FluidInference/ls-eend-coreml"
     case pocketTts = "FluidInference/pocket-tts-coreml"
@@ -66,7 +66,7 @@ public enum Repo: String, CaseIterable, Sendable {
             return "speaker-diarization-coreml"
         case .kokoro:
             return "kokoro-82m-coreml"
-        case .kokoroLai:
+        case .kokoroAne:
             return "kokoro-82m-coreml/ANE"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
@@ -96,7 +96,7 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-ctc-0.6b-coreml"
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
-        case .kokoroLai:
+        case .kokoroAne:
             return "FluidInference/kokoro-82m-coreml"
         case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
@@ -118,7 +118,7 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Subdirectory within repo (for repos with multiple model variants)
     public var subPath: String? {
         switch self {
-        case .kokoroLai:
+        case .kokoroAne:
             return "ANE"
         case .parakeetEou160:
             return "160ms"
@@ -150,7 +150,7 @@ public enum Repo: String, CaseIterable, Sendable {
         switch self {
         case .kokoro:
             return "kokoro"
-        case .kokoroLai:
+        case .kokoroAne:
             return "kokoro-82m-coreml/ANE"
         case .parakeetEou160:
             return "parakeet-eou-streaming/160ms"
@@ -719,7 +719,7 @@ public enum ModelNames {
 
     /// laishere/kokoro-coreml — 7-stage CoreML chain (fp16+int8pal, ANE-optimized)
     /// vendored from https://github.com/laishere/kokoro-coreml.
-    public enum KokoroLai {
+    public enum KokoroAne {
         public static let albert = "KokoroAlbert.mlmodelc"
         public static let postAlbert = "KokoroPostAlbert.mlmodelc"
         public static let alignment = "KokoroAlignment.mlmodelc"
@@ -779,8 +779,8 @@ public enum ModelNames {
                 .union(ModelNames.MultilingualG2P.requiredModels)
         case .pocketTts:
             return ModelNames.PocketTTS.requiredModels
-        case .kokoroLai:
-            return ModelNames.KokoroLai.requiredModels
+        case .kokoroAne:
+            return ModelNames.KokoroAne.requiredModels
         case .sortformer:
             if let variant = variant {
                 return [variant]

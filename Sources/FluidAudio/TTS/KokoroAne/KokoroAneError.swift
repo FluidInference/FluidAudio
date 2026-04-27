@@ -1,7 +1,7 @@
 import Foundation
 
-/// Errors emitted by the KokoroLai TTS chain.
-public enum KokoroLaiError: Error, LocalizedError {
+/// Errors emitted by the KokoroAne TTS chain.
+public enum KokoroAneError: Error, LocalizedError {
     case modelNotLoaded(String)
     case downloadFailed(String)
     case vocabMissing(URL)
@@ -18,29 +18,29 @@ public enum KokoroLaiError: Error, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .modelNotLoaded(let name):
-            return "KokoroLai model '\(name)' not loaded. Call initialize() first."
+            return "KokoroAne model '\(name)' not loaded. Call initialize() first."
         case .downloadFailed(let detail):
-            return "KokoroLai download failed: \(detail)"
+            return "KokoroAne download failed: \(detail)"
         case .vocabMissing(let url):
-            return "KokoroLai vocab.json not found at \(url.path)."
+            return "KokoroAne vocab.json not found at \(url.path)."
         case .voicePackMissing(let url):
-            return "KokoroLai voice pack not found at \(url.path)."
+            return "KokoroAne voice pack not found at \(url.path)."
         case .invalidVoicePack(let detail):
-            return "KokoroLai voice pack is invalid: \(detail)"
+            return "KokoroAne voice pack is invalid: \(detail)"
         case .unsupportedPhoneme(let ch):
-            return "KokoroLai vocab does not contain phoneme '\(ch)'."
+            return "KokoroAne vocab does not contain phoneme '\(ch)'."
         case .phonemeSequenceTooLong(let n):
-            return "KokoroLai phoneme sequence has \(n) characters (max \(KokoroLaiConstants.maxPhonemeLength))."
+            return "KokoroAne phoneme sequence has \(n) characters (max \(KokoroAneConstants.maxPhonemeLength))."
         case .inputProcessingFailed(let detail):
-            return "KokoroLai input processing failed: \(detail)"
+            return "KokoroAne input processing failed: \(detail)"
         case .acousticFramesExceedCap(let have, let cap):
-            return "KokoroLai PostAlbert produced T_a=\(have) frames > MAX_FRAMES=\(cap). Chunk the input."
+            return "KokoroAne PostAlbert produced T_a=\(have) frames > MAX_FRAMES=\(cap). Chunk the input."
         case .predictionFailed(let stage, let err):
-            return "KokoroLai stage '\(stage)' failed: \(err.localizedDescription)"
+            return "KokoroAne stage '\(stage)' failed: \(err.localizedDescription)"
         case .unexpectedOutputShape(let stage, let expected, let got):
-            return "KokoroLai stage '\(stage)' returned unexpected shape (expected \(expected), got \(got))."
+            return "KokoroAne stage '\(stage)' returned unexpected shape (expected \(expected), got \(got))."
         case .audioConversionFailed(let detail):
-            return "KokoroLai audio conversion failed: \(detail)"
+            return "KokoroAne audio conversion failed: \(detail)"
         }
     }
 }

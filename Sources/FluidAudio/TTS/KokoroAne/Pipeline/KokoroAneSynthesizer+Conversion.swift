@@ -3,7 +3,7 @@ import Accelerate
 import Foundation
 
 /// MLMultiArray builders + fp16 ↔ fp32 conversions used by the chain.
-enum KokoroLaiArrays {
+enum KokoroAneArrays {
 
     // MARK: - Float16 (UInt16-backed) builders
 

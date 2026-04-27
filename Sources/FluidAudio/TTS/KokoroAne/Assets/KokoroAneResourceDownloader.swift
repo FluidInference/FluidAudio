@@ -2,9 +2,9 @@ import Foundation
 
 /// Downloads the laishere/kokoro 7-stage CoreML chain + auxiliary files
 /// (`vocab.json`, voice packs) from HuggingFace.
-public enum KokoroLaiResourceDownloader {
+public enum KokoroAneResourceDownloader {
 
-    private static let logger = AppLogger(category: "KokoroLaiResourceDownloader")
+    private static let logger = AppLogger(category: "KokoroAneResourceDownloader")
 
     /// Default cache subdirectory under the platform cache root.
     /// Resolves to `~/.cache/fluidaudio/Models/` on macOS,
@@ -19,9 +19,9 @@ public enum KokoroLaiResourceDownloader {
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
         let modelsDirectory = try directory ?? defaultModelsDirectory()
-        let repoDir = modelsDirectory.appendingPathComponent(Repo.kokoroLai.folderName)
+        let repoDir = modelsDirectory.appendingPathComponent(Repo.kokoroAne.folderName)
 
-        let required = ModelNames.KokoroLai.requiredModels
+        let required = ModelNames.KokoroAne.requiredModels
         let allPresent = required.allSatisfy { name in
             FileManager.default.fileExists(atPath: repoDir.appendingPathComponent(name).path)
         }
@@ -29,7 +29,7 @@ public enum KokoroLaiResourceDownloader {
         if !allPresent {
             logger.info("Downloading laishere Kokoro models from HuggingFace...")
             try await DownloadUtils.downloadRepo(
-                .kokoroLai,
+                .kokoroAne,
                 to: modelsDirectory,
                 progressHandler: progressHandler
             )
@@ -50,7 +50,7 @@ public enum KokoroLaiResourceDownloader {
     ) async throws -> URL {
         let sanitized = voice.filter { $0.isLetter || $0.isNumber || $0 == "_" }
         guard !sanitized.isEmpty else {
-            throw KokoroLaiError.downloadFailed("Invalid voice name: \(voice)")
+            throw KokoroAneError.downloadFailed("Invalid voice name: \(voice)")
         }
         let filename = "\(sanitized).bin"
         let localURL = repoDirectory.appendingPathComponent(filename)
@@ -61,12 +61,12 @@ public enum KokoroLaiResourceDownloader {
 
         logger.info("Downloading voice pack '\(sanitized)' from HuggingFace...")
         let remoteFilePath: String
-        if let sub = Repo.kokoroLai.subPath {
+        if let sub = Repo.kokoroAne.subPath {
             remoteFilePath = "\(sub)/\(filename)"
         } else {
             remoteFilePath = filename
         }
-        let remoteURL = try ModelRegistry.resolveModel(Repo.kokoroLai.remotePath, remoteFilePath)
+        let remoteURL = try ModelRegistry.resolveModel(Repo.kokoroAne.remotePath, remoteFilePath)
         let data = try await AssetDownloader.fetchData(
             from: remoteURL,
             description: "\(sanitized) voice pack",
@@ -90,7 +90,7 @@ public enum KokoroLaiResourceDownloader {
                 for: .cachesDirectory, in: .userDomainMask
             ).first
         else {
-            throw KokoroLaiError.downloadFailed("Failed to locate caches directory")
+            throw KokoroAneError.downloadFailed("Failed to locate caches directory")
         }
         baseDirectory = first
         #endif

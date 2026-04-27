@@ -5,14 +5,14 @@ import XCTest
 
 /// Heavy E2E TTS→ASR roundtrip tests.
 ///
-/// Gated by `FLUIDAUDIO_RUN_KOKOROLAI_E2E=1` because it downloads ~hundreds of
-/// MB of CoreML models (KokoroLai 7-stage chain + Parakeet ASR) and compiles
+/// Gated by `FLUIDAUDIO_RUN_KOKOROANE_E2E=1` because it downloads ~hundreds of
+/// MB of CoreML models (KokoroAne 7-stage chain + Parakeet ASR) and compiles
 /// them on first run. Pass criteria: WER ≤ 0.10 per phrase (matches the
 /// existing kokoro backend bar in TTSCommand).
-final class KokoroLaiAsrRoundtripTests: XCTestCase {
+final class KokoroAneAsrRoundtripTests: XCTestCase {
 
     private var shouldRunHeavy: Bool {
-        ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_KOKOROLAI_E2E"] == "1"
+        ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_KOKOROANE_E2E"] == "1"
     }
 
     /// Phrases mirror the suite in the Phase 3 plan with per-phrase WER bounds.
@@ -46,9 +46,9 @@ final class KokoroLaiAsrRoundtripTests: XCTestCase {
     func testRoundtripWERWithinThresholdForAllPhrases() async throws {
         try XCTSkipUnless(
             shouldRunHeavy,
-            "Set FLUIDAUDIO_RUN_KOKOROLAI_E2E=1 to run TTS→ASR roundtrip tests.")
+            "Set FLUIDAUDIO_RUN_KOKOROANE_E2E=1 to run TTS→ASR roundtrip tests.")
 
-        let tts = KokoroLaiManager()
+        let tts = KokoroAneManager()
         try await tts.initialize()
 
         let asrModels = try await AsrModels.downloadAndLoad()
