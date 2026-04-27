@@ -57,11 +57,11 @@ struct PocketTtsLayerKeys: Sendable {
     ///   - model: The compiled CoreML model.
     ///   - kind: Which model this is — affects whether transformer/eos
     ///     outputs are required.
-    ///   - expectedLayers: Optional sanity check for the layer count.
+    ///   - expectedLayers: Sanity check for the layer count (6 or 24).
     static func discover(
         from model: MLModel,
         kind: ModelKind,
-        expectedLayers: Int? = nil,
+        expectedLayers: Int,
         modelName: String
     ) throws -> PocketTtsLayerKeys {
         let outputs = model.modelDescription.outputDescriptionsByName
@@ -111,10 +111,10 @@ struct PocketTtsLayerKeys: Sendable {
             return lhs < rhs
         }
 
-        if let expected = expectedLayers, cacheCandidates.count != expected {
+        if cacheCandidates.count != expectedLayers {
             throw DiscoveryError.shapeMismatch(
                 modelName: modelName,
-                expectedLayers: expected,
+                expectedLayers: expectedLayers,
                 actualCaches: cacheCandidates.count
             )
         }
