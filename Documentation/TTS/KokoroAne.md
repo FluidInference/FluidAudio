@@ -7,8 +7,9 @@ on CPU+GPU. Yields **3-11× RTFx** on Apple Silicon vs. the single-graph
 [`KokoroTtsManager`](Kokoro.md), at the cost of single-voice / no chunker /
 no custom lexicon.
 
-Derived from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml).
-Conversion lives in [mobius/models/tts/kokoro/laishere-coreml](https://github.com/FluidInference/mobius/tree/main/models/tts/kokoro/laishere-coreml).
+Derived from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml),
+used with the author's permission. Conversion lives in
+[mobius/models/tts/kokoro/laishere-coreml](https://github.com/FluidInference/mobius/tree/main/models/tts/kokoro/laishere-coreml).
 
 ## When To Pick This Over `KokoroTtsManager`
 
