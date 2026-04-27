@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 /// Pre-loaded binary constants for PocketTTS inference.
 public struct PocketTtsConstantsBundle: Sendable {
@@ -68,6 +67,7 @@ public enum PocketTtsConstantsLoader {
     public enum LoadError: Error {
         case fileNotFound(String)
         case invalidSize(String, expected: Int, actual: Int)
+        case malformed(String)
         case tokenizerLoadFailed(String)
     }
 
@@ -193,7 +193,7 @@ public enum PocketTtsConstantsLoader {
         from url: URL, voiceName: String
     ) throws -> PocketTtsVoiceCacheSnapshot {
         let raw = try Data(contentsOf: url)
-        let parsed = try parseSafetensors(raw, fileLabel: voiceName)
+        let tensors = try parseSafetensors(raw, fileLabel: voiceName)
 
         // Collect cache + offset entries by layer index.
         var caches: [Int: SafetensorsTensor] = [:]
@@ -202,7 +202,7 @@ public enum PocketTtsConstantsLoader {
         let cacheSuffix = ".self_attn/cache"
         let offsetSuffix = ".self_attn/offset"
 
-        for (key, tensor) in parsed.tensors {
+        for (key, tensor) in tensors {
             guard key.hasPrefix(cachePrefix) else { continue }
             let stripped = String(key.dropFirst(cachePrefix.count))
             guard let dotRange = stripped.firstIndex(of: ".") else { continue }
@@ -223,12 +223,13 @@ public enum PocketTtsConstantsLoader {
                 actual: 0
             )
         }
-        guard caches.count == offsets.count else {
-            throw LoadError.invalidSize(
-                "\(voiceName).safetensors: cache/offset count mismatch",
-                expected: caches.count,
-                actual: offsets.count
-            )
+        // Cache and offset entries must have the same set of layer indices —
+        // a count match isn't sufficient (different keys would silently drop
+        // layers in the loop below).
+        guard Set(caches.keys) == Set(offsets.keys) else {
+            throw LoadError.malformed(
+                "\(voiceName).safetensors: cache/offset layer indices differ "
+                    + "(caches: \(caches.keys.sorted()), offsets: \(offsets.keys.sorted()))")
         }
 
         let sortedLayers = caches.keys.sorted()
@@ -249,11 +250,8 @@ public enum PocketTtsConstantsLoader {
             firstShape[3] == 16,
             firstShape[4] == 64
         else {
-            throw LoadError.invalidSize(
-                "\(voiceName).safetensors: unexpected cache shape \(firstShape)",
-                expected: 0,
-                actual: 0
-            )
+            throw LoadError.malformed(
+                "\(voiceName).safetensors: unexpected cache shape \(firstShape)")
         }
         let seqLen = firstShape[2]
 
@@ -261,21 +259,19 @@ public enum PocketTtsConstantsLoader {
         layers.reserveCapacity(sortedLayers.count)
 
         for layerIdx in sortedLayers {
-            guard let cacheTensor = caches[layerIdx], let offsetTensor = offsets[layerIdx]
-            else { continue }
+            // Both lookups are guaranteed by the `Set(caches.keys) == Set(offsets.keys)`
+            // check above, so the force-unwraps are safe.
+            let cacheTensor = caches[layerIdx]!
+            let offsetTensor = offsets[layerIdx]!
             guard cacheTensor.shape == firstShape else {
-                throw LoadError.invalidSize(
-                    "\(voiceName).safetensors: cache shape mismatch at layer \(layerIdx)",
-                    expected: 0,
-                    actual: 0
-                )
+                throw LoadError.malformed(
+                    "\(voiceName).safetensors: cache shape mismatch at layer \(layerIdx) "
+                        + "(\(cacheTensor.shape) vs \(firstShape))")
             }
             guard cacheTensor.dtype == "F32" else {
-                throw LoadError.invalidSize(
-                    "\(voiceName).safetensors: layer \(layerIdx) cache dtype \(cacheTensor.dtype) (want F32)",
-                    expected: 0,
-                    actual: 0
-                )
+                throw LoadError.malformed(
+                    "\(voiceName).safetensors: layer \(layerIdx) cache dtype "
+                        + "\(cacheTensor.dtype) (want F32)")
             }
             let floatCount = cacheTensor.byteCount / MemoryLayout<Float>.size
             let cacheFloats: [Float] = raw.withUnsafeBytes { rawBuf -> [Float] in
@@ -286,11 +282,9 @@ public enum PocketTtsConstantsLoader {
 
             // offset is I64 [1]
             guard offsetTensor.dtype == "I64", offsetTensor.shape == [1] else {
-                throw LoadError.invalidSize(
-                    "\(voiceName).safetensors: layer \(layerIdx) offset shape/dtype unexpected",
-                    expected: 0,
-                    actual: 0
-                )
+                throw LoadError.malformed(
+                    "\(voiceName).safetensors: layer \(layerIdx) offset "
+                        + "shape/dtype unexpected (\(offsetTensor.shape), \(offsetTensor.dtype))")
             }
             let offsetVal: Int = raw.withUnsafeBytes { rawBuf -> Int in
                 let base = rawBuf.baseAddress!.advanced(by: offsetTensor.byteOffset)
@@ -339,16 +333,12 @@ public enum PocketTtsConstantsLoader {
         let byteCount: Int
     }
 
-    fileprivate struct SafetensorsParsed {
-        let tensors: [String: SafetensorsTensor]
-    }
-
     /// Minimal safetensors reader: 8-byte LE u64 header length, then JSON
     /// header, then raw tensor bytes. Only used for v2 voice prebakes — no
     /// need to support arbitrary safetensors features.
     fileprivate static func parseSafetensors(
         _ data: Data, fileLabel: String
-    ) throws -> SafetensorsParsed {
+    ) throws -> [String: SafetensorsTensor] {
         guard data.count >= 8 else {
             throw LoadError.invalidSize(
                 "\(fileLabel).safetensors: too small",
@@ -387,18 +377,12 @@ public enum PocketTtsConstantsLoader {
         do {
             json = try JSONSerialization.jsonObject(with: headerBytes, options: [])
         } catch {
-            throw LoadError.invalidSize(
-                "\(fileLabel).safetensors: header JSON parse failed: \(error)",
-                expected: 0,
-                actual: 0
-            )
+            throw LoadError.malformed(
+                "\(fileLabel).safetensors: header JSON parse failed: \(error)")
         }
         guard let dict = json as? [String: Any] else {
-            throw LoadError.invalidSize(
-                "\(fileLabel).safetensors: header is not a JSON object",
-                expected: 0,
-                actual: 0
-            )
+            throw LoadError.malformed(
+                "\(fileLabel).safetensors: header is not a JSON object")
         }
 
         let dataStart = headerEnd
@@ -411,28 +395,19 @@ public enum PocketTtsConstantsLoader {
                 let offsets = entry["data_offsets"] as? [Any],
                 offsets.count == 2
             else {
-                throw LoadError.invalidSize(
-                    "\(fileLabel).safetensors: malformed entry '\(key)'",
-                    expected: 0,
-                    actual: 0
-                )
+                throw LoadError.malformed(
+                    "\(fileLabel).safetensors: malformed entry '\(key)'")
             }
             let shape: [Int] = shapeArr.compactMap { ($0 as? NSNumber)?.intValue }
             guard shape.count == shapeArr.count else {
-                throw LoadError.invalidSize(
-                    "\(fileLabel).safetensors: bad shape for '\(key)'",
-                    expected: 0,
-                    actual: 0
-                )
+                throw LoadError.malformed(
+                    "\(fileLabel).safetensors: bad shape for '\(key)'")
             }
             guard let startNum = offsets[0] as? NSNumber,
                 let endNum = offsets[1] as? NSNumber
             else {
-                throw LoadError.invalidSize(
-                    "\(fileLabel).safetensors: bad offsets for '\(key)'",
-                    expected: 0,
-                    actual: 0
-                )
+                throw LoadError.malformed(
+                    "\(fileLabel).safetensors: bad offsets for '\(key)'")
             }
             let start = startNum.intValue
             let end = endNum.intValue
@@ -459,7 +434,7 @@ public enum PocketTtsConstantsLoader {
                 byteCount: span
             )
         }
-        return SafetensorsParsed(tensors: tensors)
+        return tensors
     }
 
     /// Load a raw Float32 binary file whose length must be a non-zero multiple

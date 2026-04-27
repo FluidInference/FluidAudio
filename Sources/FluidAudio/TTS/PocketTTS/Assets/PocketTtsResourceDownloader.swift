@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 /// Downloads PocketTTS models and constants from HuggingFace.
 public enum PocketTtsResourceDownloader {
@@ -95,30 +94,17 @@ public enum PocketTtsResourceDownloader {
             at: repoDir, withIntermediateDirectories: true)
 
         logger.info("Downloading Mimi encoder for voice cloning...")
-        try await downloadMimiEncoder(to: repoDir)
+        try await DownloadUtils.downloadSubdirectory(
+            .pocketTts,
+            subdirectory: ModelNames.PocketTTS.mimiEncoderFile,
+            to: repoDir
+        )
 
         guard FileManager.default.fileExists(atPath: encoderPath.path) else {
             throw PocketTTSError.downloadFailed("Failed to download Mimi encoder model")
         }
 
         return encoderPath
-    }
-
-    /// Download the Mimi encoder model files from HuggingFace.
-    private static func downloadMimiEncoder(to repoDir: URL) async throws {
-        try await DownloadUtils.downloadSubdirectory(
-            .pocketTts,
-            subdirectory: ModelNames.PocketTTS.mimiEncoderFile,
-            to: repoDir
-        )
-    }
-
-    /// Ensure constants (binary blobs + tokenizer) are available.
-    ///
-    /// - Parameter languageRoot: The directory returned by `ensureModels(...)`,
-    ///   which contains the language-specific `constants_bin/`.
-    public static func ensureConstants(languageRoot: URL) throws -> PocketTtsConstantsBundle {
-        try PocketTtsConstantsLoader.load(from: languageRoot)
     }
 
     /// Ensure voice conditioning data for the given language is available,
@@ -144,19 +130,15 @@ public enum PocketTtsResourceDownloader {
         let safetensorsURL = constantsDir.appendingPathComponent(safetensorsFile)
         let binURL = constantsDir.appendingPathComponent(binFile)
 
-        let safetensorsExists = FileManager.default.fileExists(atPath: safetensorsURL.path)
-        let binExists = FileManager.default.fileExists(atPath: binURL.path)
+        let alreadyDownloaded =
+            FileManager.default.fileExists(atPath: safetensorsURL.path)
+            || FileManager.default.fileExists(atPath: binURL.path)
 
-        if !safetensorsExists && !binExists {
+        if !alreadyDownloaded {
             // For non-English (v2) packs, voices ship as `.safetensors`. For
             // legacy English (root pack), they ship as flat `.bin`. Pick the
             // expected format based on language and download just that file.
-            let remotePrefix: String
-            if let subdir = language.repoSubdirectory {
-                remotePrefix = "\(subdir)/"
-            } else {
-                remotePrefix = ""
-            }
+            let remotePrefix = language.repoSubdirectory.map { "\($0)/" } ?? ""
             let preferredFile = (language == .english) ? binFile : safetensorsFile
             let preferredLocalURL = (language == .english) ? binURL : safetensorsURL
             let remotePath = "\(remotePrefix)constants_bin/\(preferredFile)"

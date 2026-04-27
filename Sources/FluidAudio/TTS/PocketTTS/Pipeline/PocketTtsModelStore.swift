@@ -108,8 +108,7 @@ public actor PocketTtsModelStore {
         logger.info("All PocketTTS models loaded in \(String(format: "%.2f", elapsed))s")
 
         // Load constants
-        constantsBundle = try PocketTtsResourceDownloader.ensureConstants(
-            languageRoot: languageRoot)
+        constantsBundle = try PocketTtsConstantsLoader.load(from: languageRoot)
         logger.info("PocketTTS constants loaded")
     }
 
