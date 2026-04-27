@@ -147,6 +147,8 @@ public struct TTS {
         var voiceFilePath: String? = nil
         var saveVoicePath: String? = nil
         var pocketLanguage: PocketTtsLanguage = .english
+        // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
+        var pocketSeed: UInt64? = nil
 
         var i = 0
         while i < arguments.count {
@@ -232,17 +234,23 @@ public struct TTS {
                 }
             case "--language":
                 if i + 1 < arguments.count {
-                    let raw = arguments[i + 1]
+                    let raw = arguments[i + 1].lowercased()
                     if let parsed = PocketTtsLanguage(rawValue: raw) {
                         pocketLanguage = parsed
                     } else {
                         let supported = PocketTtsLanguage.allCases
                             .map { $0.rawValue }
                             .joined(separator: ", ")
-                        logger.warning(
-                            "Unknown PocketTTS language '\(raw)'. Supported: \(supported). Falling back to english."
+                        logger.error(
+                            "Unknown PocketTTS language '\(arguments[i + 1])'. Supported: \(supported)"
                         )
+                        return
                     }
+                    i += 1
+                }
+            case "--seed":
+                if i + 1 < arguments.count {
+                    pocketSeed = UInt64(arguments[i + 1]) ?? 42
                     i += 1
                 }
             default:
@@ -277,7 +285,7 @@ public struct TTS {
                 text: text, output: output, voice: voice, deEss: deEss,
                 metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
                 voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath,
-                language: pocketLanguage)
+                language: pocketLanguage, seed: pocketSeed)
             return
         }
 
@@ -527,7 +535,8 @@ public struct TTS {
         text: String, output: String, voice: String, deEss: Bool,
         metricsPath: String?, cloneVoicePath: String?,
         voiceFilePath: String?, saveVoicePath: String?,
-        language: PocketTtsLanguage
+        language: PocketTtsLanguage,
+        seed: UInt64? = nil
     ) async {
         do {
             let tStart = Date()
@@ -565,7 +574,30 @@ public struct TTS {
 
             let tSynth0 = Date()
             let wav: Data
-            if let voiceData = voiceData {
+            if let seed = seed {
+                logger.info("PocketTTS deterministic mode: seed=\(seed)")
+                let session: PocketTtsSession
+                if let voiceData = voiceData {
+                    session = try await manager.makeSession(
+                        voiceData: voiceData,
+                        temperature: PocketTtsConstants.temperature,
+                        seed: seed)
+                } else {
+                    session = try await manager.makeSession(
+                        voice: pocketVoice,
+                        temperature: PocketTtsConstants.temperature,
+                        seed: seed)
+                }
+                session.enqueue(text)
+                session.finish()
+                var allSamples: [Float] = []
+                for try await frame in session.frames {
+                    allSamples.append(contentsOf: frame.samples)
+                }
+                wav = try AudioWAV.data(
+                    from: allSamples,
+                    sampleRate: Double(PocketTtsConstants.audioSampleRate))
+            } else if let voiceData = voiceData {
                 wav = try await manager.synthesize(
                     text: text, voiceData: voiceData, deEss: deEss)
             } else {
@@ -839,6 +871,7 @@ public struct TTS {
                                    german, german_24l, italian, italian_24l,
                                    portuguese, portuguese_24l, spanish, spanish_24l
                                    Note: French is 24-layer only (no 6-layer pack upstream)
+              --seed N             Deterministic-mode seed (uses session API for fixed RNG)
 
             Lexicon file format:
               # Comments start with #
