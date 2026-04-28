@@ -251,16 +251,11 @@ public actor SlidingWindowAsrManager {
             if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
             finalText = parts.joined(separator: " ")
         } else if !accumulatedTokens.isEmpty,
-            let finalResult = await asrManager?.processTranscriptionResult(
-                tokenIds: accumulatedTokens,
-                timestamps: [],
-                confidences: [],  // No per-token confidences needed for final text
-                encoderSequenceLength: 0,
-                audioSamples: [],  // Not needed for final text conversion
-                processingTime: 0
-            )
+            let reconstructedText = await asrManager?.convertTokensToText(accumulatedTokens)
         {
-            finalText = finalResult.text
+            // finish() only needs the merged text. Re-entering ASRResult processing here
+            // fabricates a missing-confidence warning even though no confidence score is required.
+            finalText = reconstructedText
         } else {
             var parts: [String] = []
             if !confirmedTranscript.isEmpty { parts.append(confirmedTranscript) }

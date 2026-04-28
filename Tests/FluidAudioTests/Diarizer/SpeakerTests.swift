@@ -49,24 +49,28 @@ final class SpeakerTests: XCTestCase {
 
     // MARK: - Speaker Enrollment Workflow
 
-    func testSpeakerEnrollmentWithName() {
+    func testSpeakerEnrollmentWithName() async {
         // Simulate the "My name is Alice" enrollment scenario
         let manager = SpeakerManager()
         let aliceEmbedding = createDistinctEmbedding(pattern: 10)
 
         // Step 1: User speaks and we get their embedding
-        let speaker = manager.assignSpeaker(aliceEmbedding, speechDuration: 3.0)
+        let speaker = await manager.assignSpeaker(aliceEmbedding, speechDuration: 3.0)
         XCTAssertNotNil(speaker)
 
         // Step 2: Transcription detects "My name is Alice"
-        // Step 3: Update the speaker's name from default to actual name
-        speaker?.name = "Alice"
+        // Step 3: Update the speaker's name from default to actual name (persist via upsert since struct)
+        if var updated = speaker {
+            updated.name = "Alice"
+            await manager.upsertSpeaker(updated)
+        }
 
-        XCTAssertEqual(speaker?.name, "Alice")
-        XCTAssertNotEqual(speaker?.name, speaker?.id)  // Name should be different from ID
+        let stored = await manager.getSpeaker(for: speaker!.id)
+        XCTAssertEqual(stored?.name, "Alice")
+        XCTAssertNotEqual(stored?.name, stored?.id)  // Name should be different from ID
 
         // Step 4: Future audio from same speaker should be identified as "Alice"
-        let futureSpeaker = manager.assignSpeaker(aliceEmbedding, speechDuration: 2.0)
+        let futureSpeaker = await manager.assignSpeaker(aliceEmbedding, speechDuration: 2.0)
         XCTAssertEqual(futureSpeaker?.id, speaker?.id)
         XCTAssertEqual(futureSpeaker?.name, "Alice")
     }
@@ -75,7 +79,7 @@ final class SpeakerTests: XCTestCase {
 
     func testUpdateMainEmbedding() {
         let embedding1 = createDistinctEmbedding(pattern: 1)
-        let speaker = Speaker(id: "test", currentEmbedding: embedding1)
+        var speaker = Speaker(id: "test", currentEmbedding: embedding1)
 
         let embedding2 = createDistinctEmbedding(pattern: 2)
         speaker.updateMainEmbedding(
@@ -97,7 +101,7 @@ final class SpeakerTests: XCTestCase {
 
     func testUpdateMainEmbeddingWithAlpha() {
         let embedding1 = [Float](repeating: 1.0, count: 256)
-        let speaker = Speaker(id: "test", currentEmbedding: embedding1)
+        var speaker = Speaker(id: "test", currentEmbedding: embedding1)
 
         // Use a valid embedding with non-zero magnitude
         let embedding2 = [Float](repeating: 0.5, count: 256)
@@ -122,7 +126,7 @@ final class SpeakerTests: XCTestCase {
 
     func testUpdateMainEmbeddingLowMagnitude() {
         let embedding1 = createDistinctEmbedding(pattern: 1)
-        let speaker = Speaker(id: "test", currentEmbedding: embedding1)
+        var speaker = Speaker(id: "test", currentEmbedding: embedding1)
 
         // Create an embedding with magnitude below 0.1 threshold
         let lowMagnitudeEmbedding = [Float](repeating: 0.001, count: 256)  // Very low magnitude
@@ -148,7 +152,7 @@ final class SpeakerTests: XCTestCase {
     // MARK: - Raw Embedding Management Tests
 
     func testAddRawEmbedding() {
-        let speaker = Speaker(id: "test", currentEmbedding: createDistinctEmbedding(pattern: 1))
+        var speaker = Speaker(id: "test", currentEmbedding: createDistinctEmbedding(pattern: 1))
 
         let rawEmb1 = RawEmbedding(embedding: createDistinctEmbedding(pattern: 2))
         let rawEmb2 = RawEmbedding(embedding: createDistinctEmbedding(pattern: 3))
@@ -160,7 +164,7 @@ final class SpeakerTests: XCTestCase {
     }
 
     func testRawEmbeddingFIFO() {
-        let speaker = Speaker(id: "test", currentEmbedding: createDistinctEmbedding(pattern: 1))
+        var speaker = Speaker(id: "test", currentEmbedding: createDistinctEmbedding(pattern: 1))
 
         // Add 60 raw embeddings (more than the 50 limit)
         for i in 0..<60 {
@@ -180,7 +184,7 @@ final class SpeakerTests: XCTestCase {
     }
 
     func testRemoveRawEmbedding() {
-        let speaker = Speaker(id: "test", currentEmbedding: createDistinctEmbedding(pattern: 1))
+        var speaker = Speaker(id: "test", currentEmbedding: createDistinctEmbedding(pattern: 1))
 
         let rawEmb1 = RawEmbedding(embedding: createDistinctEmbedding(pattern: 2))
         let rawEmb2 = RawEmbedding(embedding: createDistinctEmbedding(pattern: 3))
@@ -204,7 +208,7 @@ final class SpeakerTests: XCTestCase {
     // MARK: - Recalculate Main Embedding Tests
 
     func testRecalculateMainEmbedding() {
-        let speaker = Speaker(id: "test", currentEmbedding: [Float](repeating: 0, count: 256))
+        var speaker = Speaker(id: "test", currentEmbedding: [Float](repeating: 0, count: 256))
 
         // Add some raw embeddings
         let emb1 = [Float](repeating: 1.0, count: 256)
@@ -226,7 +230,7 @@ final class SpeakerTests: XCTestCase {
 
     func testRecalculateMainEmbeddingEmpty() {
         let original = createDistinctEmbedding(pattern: 1)
-        let speaker = Speaker(id: "test", currentEmbedding: original)
+        var speaker = Speaker(id: "test", currentEmbedding: original)
 
         // No raw embeddings
         speaker.recalculateMainEmbedding()
@@ -241,7 +245,7 @@ final class SpeakerTests: XCTestCase {
     // MARK: - Speaker Merging Tests
 
     func testMergeSpeakers() {
-        let speaker1 = Speaker(
+        var speaker1 = Speaker(
             id: "speaker1",
             name: "Alice",
             currentEmbedding: createDistinctEmbedding(pattern: 1),
@@ -249,7 +253,7 @@ final class SpeakerTests: XCTestCase {
         )
         speaker1.updateCount = 5
 
-        let speaker2 = Speaker(
+        var speaker2 = Speaker(
             id: "speaker2",
             name: "Bob",
             currentEmbedding: createDistinctEmbedding(pattern: 2),
@@ -272,7 +276,7 @@ final class SpeakerTests: XCTestCase {
     }
 
     func testMergeSpeakersWithCustomName() {
-        let speaker1 = Speaker(id: "speaker1", name: "Alice", currentEmbedding: createDistinctEmbedding(pattern: 1))
+        var speaker1 = Speaker(id: "speaker1", name: "Alice", currentEmbedding: createDistinctEmbedding(pattern: 1))
         let speaker2 = Speaker(id: "speaker2", name: "Bob", currentEmbedding: createDistinctEmbedding(pattern: 2))
 
         speaker1.mergeWith(speaker2, keepName: "Charlie")
@@ -283,7 +287,7 @@ final class SpeakerTests: XCTestCase {
     // MARK: - SendableSpeaker Tests
 
     func testToSendable() {
-        let speaker = Speaker(
+        var speaker = Speaker(
             id: "test1",
             name: "Alice",
             currentEmbedding: createDistinctEmbedding(pattern: 1),
@@ -327,7 +331,7 @@ final class SpeakerTests: XCTestCase {
     // MARK: - Codable Tests
 
     func testSpeakerCodable() throws {
-        let speaker = Speaker(
+        var speaker = Speaker(
             id: "test1",
             name: "Alice",
             currentEmbedding: createDistinctEmbedding(pattern: 1),

@@ -13,7 +13,7 @@ final class AsrModelsTests: XCTestCase {
         XCTAssertEqual(ModelNames.ASR.encoderFile, "Encoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.decoderFile, "Decoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.jointFile, "JointDecision.mlmodelc")
-        XCTAssertEqual(ModelNames.ASR.vocabulary(for: .parakeet), "parakeet_vocab.json")
+        XCTAssertEqual(ModelNames.ASR.vocabulary(for: .parakeetV3), "parakeet_vocab.json")
         XCTAssertEqual(ModelNames.ASR.vocabulary(for: .parakeetV2), "parakeet_vocab.json")
     }
 
@@ -35,7 +35,7 @@ final class AsrModelsTests: XCTestCase {
         // Verify path components
         XCTAssertTrue(cacheDir.path.contains("FluidAudio"))
         XCTAssertTrue(cacheDir.path.contains("Models"))
-        XCTAssertTrue(cacheDir.path.contains(Repo.parakeet.folderName))
+        XCTAssertTrue(cacheDir.path.contains(Repo.parakeetV3.folderName))
 
         // Verify it's an absolute path
         XCTAssertTrue(cacheDir.isFileURL)
@@ -69,7 +69,7 @@ final class AsrModelsTests: XCTestCase {
             ModelNames.ASR.encoderFile,
             ModelNames.ASR.decoderFile,
             ModelNames.ASR.jointFile,
-            ModelNames.ASR.vocabulary(for: .parakeet),
+            ModelNames.ASR.vocabulary(for: .parakeetV3),
         ]
 
         // Verify all expected model names are defined
@@ -130,10 +130,10 @@ final class AsrModelsTests: XCTestCase {
 
         // Test that download would target correct directory structure
         let expectedRepoPath = customDir.deletingLastPathComponent()
-            .appendingPathComponent(Repo.parakeet.folderName)
+            .appendingPathComponent(Repo.parakeetV3.folderName)
 
         // Verify path components
-        XCTAssertTrue(expectedRepoPath.path.contains(Repo.parakeet.folderName))
+        XCTAssertTrue(expectedRepoPath.path.contains(Repo.parakeetV3.folderName))
     }
 
     // MARK: - Model Loading Configuration Tests
@@ -177,10 +177,10 @@ final class AsrModelsTests: XCTestCase {
     func testRepoPathCalculation() {
         let modelsDir = URL(fileURLWithPath: "/test/Models/parakeet-tdt-0.6b-v3-coreml")
         let repoPath = modelsDir.deletingLastPathComponent()
-            .appendingPathComponent(Repo.parakeet.folderName)
+            .appendingPathComponent(Repo.parakeetV3.folderName)
 
-        XCTAssertTrue(repoPath.path.hasSuffix(Repo.parakeet.folderName))
-        XCTAssertEqual(repoPath.lastPathComponent, Repo.parakeet.folderName)
+        XCTAssertTrue(repoPath.path.hasSuffix(Repo.parakeetV3.folderName))
+        XCTAssertEqual(repoPath.lastPathComponent, Repo.parakeetV3.folderName)
     }
 
     // MARK: - Integration Test Helpers
@@ -315,7 +315,7 @@ final class AsrModelsTests: XCTestCase {
         // Verify correct HuggingFace repo
         XCTAssertEqual(AsrModelVersion.tdtCtc110m.repo, .parakeetTdtCtc110m)
         XCTAssertEqual(AsrModelVersion.v2.repo, .parakeetV2)
-        XCTAssertEqual(AsrModelVersion.v3.repo, .parakeet)
+        XCTAssertEqual(AsrModelVersion.v3.repo, .parakeetV3)
     }
 
     func testTdtCtc110mUsesSplitFrontend() {

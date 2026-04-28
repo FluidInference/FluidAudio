@@ -37,7 +37,7 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 - **Automatic Speech Recognition (ASR)**: [Parakeet TDT v3](Documentation/Models.md#batch-transcription-near-real-time) (0.6b) and other TDT/CTC models for batch transcription supporting 25 European languages, Japanese, and Chinese; [Parakeet EOU](Documentation/Models.md#streaming-transcription-true-real-time) (120m) for streaming ASR with end-of-utterance detection (English only). See all [ASR models](Documentation/Models.md#asr-models).
 - **Inverse Text Normalization (ITN)**: Post-process ASR output to convert spoken-form to written-form ("two hundred" → "200"). See [text-processing-rs](https://github.com/FluidInference/text-processing-rs)
-- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (English only)
+- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (EN, DE, ES, FR, IT, PT — 6L and 24L variants)
 - **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
@@ -556,24 +556,35 @@ FluidAudio ships two TTS backends:
 ### PocketTTS
 
 Streaming-friendly TTS with voice cloning support from short audio samples.
+Available language packs: `english` (default), `german`, `german_24l`,
+`italian`, `italian_24l`, `portuguese`, `portuguese_24l`, `spanish`,
+`spanish_24l`, `french_24l` (24-layer only — no 6-layer French upstream).
 
 ```swift
 import FluidAudio
 
 Task {
-    let manager = try await PocketTtsManager()
-    let audioData = try await manager.synthesize("Hello from FluidAudio.")
+    let manager = PocketTtsManager(language: .spanish)
+    try await manager.initialize()
+    let audioData = try await manager.synthesize(text: "Hola, mundo.")
     try audioData.write(to: URL(fileURLWithPath: "out.wav"))
 }
 ```
 
 ```bash
-# Synthesize with default voice
+# English (default)
 swift run fluidaudiocli tts "Hello from FluidAudio." --output out.wav --backend pocket
 
-# Clone a voice from an audio sample
+# Other languages
+swift run fluidaudiocli tts "Hola mundo" --backend pocket --language spanish --output es.wav
+swift run fluidaudiocli tts "Bonjour" --backend pocket --language french_24l --output fr.wav
+
+# Clone a voice from an audio sample (works with any language pack)
 swift run fluidaudiocli tts "Hello world." --output out.wav --backend pocket --clone-voice speaker.wav
 ```
+
+See [Documentation/TTS/PocketTTS.md](Documentation/TTS/PocketTTS.md#languages)
+for the full language table.
 
 ### Kokoro
 

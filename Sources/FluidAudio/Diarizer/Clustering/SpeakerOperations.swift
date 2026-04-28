@@ -518,38 +518,36 @@ extension SpeakerManager {
         from fromSpeakerId: String,
         to toSpeakerId: String
     ) -> Bool {
-        return queue.sync(flags: .barrier) {
-            // Get speaker info from database
-            guard let fromSpeakerInfo = speakerDatabase[fromSpeakerId],
-                let toSpeakerInfo = speakerDatabase[toSpeakerId]
-            else {
-                logger.warning("One or both speakers not found: from=\(fromSpeakerId), to=\(toSpeakerId)")
-                return false
-            }
-
-            // Find and remove the embedding from source speaker
-            guard let index = fromSpeakerInfo.rawEmbeddings.firstIndex(where: { $0.segmentId == segmentId })
-            else {
-                logger.warning("Segment \(segmentId) not found in speaker \(fromSpeakerId)")
-                return false
-            }
-
-            let embedding = fromSpeakerInfo.rawEmbeddings.remove(at: index)
-
-            // Add to destination speaker
-            toSpeakerInfo.rawEmbeddings.append(embedding)
-
-            // Update both speakers in database
-            speakerDatabase[fromSpeakerId] = fromSpeakerInfo
-            speakerDatabase[toSpeakerId] = toSpeakerInfo
-
-            // Recalculate embeddings for both speakers
-            // Note: This would need to be implemented using the SpeakerInfo structure
-            // For now, just log the successful reassignment
-
-            logger.info("✅ Reassigned segment \(segmentId) from \(fromSpeakerId) to \(toSpeakerId)")
-            return true
+        // Get speaker info from database
+        guard var fromSpeakerInfo = speakerDatabase[fromSpeakerId],
+            var toSpeakerInfo = speakerDatabase[toSpeakerId]
+        else {
+            logger.warning("One or both speakers not found: from=\(fromSpeakerId), to=\(toSpeakerId)")
+            return false
         }
+
+        // Find and remove the embedding from source speaker
+        guard let index = fromSpeakerInfo.rawEmbeddings.firstIndex(where: { $0.segmentId == segmentId })
+        else {
+            logger.warning("Segment \(segmentId) not found in speaker \(fromSpeakerId)")
+            return false
+        }
+
+        let embedding = fromSpeakerInfo.rawEmbeddings.remove(at: index)
+
+        // Add to destination speaker
+        toSpeakerInfo.rawEmbeddings.append(embedding)
+
+        // Update both speakers in database
+        speakerDatabase[fromSpeakerId] = fromSpeakerInfo
+        speakerDatabase[toSpeakerId] = toSpeakerInfo
+
+        // Recalculate embeddings for both speakers
+        // Note: This would need to be implemented using the SpeakerInfo structure
+        // For now, just log the successful reassignment
+
+        logger.info("Reassigned segment \(segmentId) from \(fromSpeakerId) to \(toSpeakerId)")
+        return true
     }
 
     // MARK: - Speaker Query Operations
@@ -561,9 +559,7 @@ extension SpeakerManager {
     ///
     /// - Returns: Array of speaker IDs/names currently in the database
     public func getCurrentSpeakerNames() -> [String] {
-        return queue.sync {
-            return Array(speakerDatabase.keys).sorted()
-        }
+        return Array(speakerDatabase.keys).sorted()
     }
 
     /// Get global speaker statistics from the in-memory database.
@@ -578,23 +574,21 @@ extension SpeakerManager {
         averageConfidence: Float,
         speakersWithHistory: Int
     ) {
-        return queue.sync { () -> (Int, Float, Float, Int) in
-            let speakers = Array(speakerDatabase.values)
+        let speakers = Array(speakerDatabase.values)
 
-            guard !speakers.isEmpty else {
-                return (0, 0, 0, 0)
-            }
-
-            let totalDuration = speakers.reduce(0) { $0 + $1.duration }
-            let totalUpdates = speakers.reduce(0) { $0 + $1.updateCount }
-            let averageConfidence = Float(totalUpdates) / Float(speakers.count) / 10.0  // Normalize
-            let speakersWithHistory = speakers.filter { !$0.rawEmbeddings.isEmpty }.count
-
-            logger.info(
-                "Global stats - Speakers: \(speakers.count), Duration: \(String(format: "%.1f", totalDuration))s, Avg confidence: \(String(format: "%.2f", averageConfidence)), With history: \(speakersWithHistory)"
-            )
-
-            return (speakers.count, totalDuration, min(1.0, averageConfidence), speakersWithHistory)
+        guard !speakers.isEmpty else {
+            return (0, 0, 0, 0)
         }
+
+        let totalDuration = speakers.reduce(0) { $0 + $1.duration }
+        let totalUpdates = speakers.reduce(0) { $0 + $1.updateCount }
+        let averageConfidence = Float(totalUpdates) / Float(speakers.count) / 10.0  // Normalize
+        let speakersWithHistory = speakers.filter { !$0.rawEmbeddings.isEmpty }.count
+
+        logger.info(
+            "Global stats - Speakers: \(speakers.count), Duration: \(String(format: "%.1f", totalDuration))s, Avg confidence: \(String(format: "%.2f", averageConfidence)), With history: \(speakersWithHistory)"
+        )
+
+        return (speakers.count, totalDuration, min(1.0, averageConfidence), speakersWithHistory)
     }
 }

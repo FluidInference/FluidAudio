@@ -43,6 +43,14 @@ public class FLEURSBenchmark {
         "mt_mt": "Maltese (Malta)",  // 20.46% WER
         "lv_lv": "Latvian (Latvia)",  // 22.84% WER
         "sl_si": "Slovenian (Slovenia)",  // 24.03% WER
+
+        // Cohere Transcribe additions (multilingual, non-European)
+        "pt_br": "Portuguese (Brazil)",
+        "ar_eg": "Arabic (Egypt)",
+        "ja_jp": "Japanese (Japan)",
+        "cmn_hans_cn": "Mandarin (China)",
+        "ko_kr": "Korean (South Korea)",
+        "vi_vn": "Vietnamese (Vietnam)",
     ]
 
     public struct FLEURSConfig {
@@ -530,6 +538,40 @@ public class FLEURSBenchmark {
         return (results, allHighWERCases)
     }
 
+    /// Map a FLEURS language code to the Parakeet v3 script-filter `Language` enum.
+    ///
+    /// Scope: this mapping is specific to the **Parakeet v3 TDT** benchmark and the
+    /// script-filtering `Language` enum in `Sources/FluidAudio/Shared/TokenLanguageFilter.swift`.
+    /// That enum exists to suppress Latin↔Cyrillic leakage in v3's multilingual joint
+    /// decoder, so it only enumerates languages where confusables are a concern.
+    ///
+    /// FLEURS ships 102 languages; we intentionally return `nil` for anything outside
+    /// the v3 script-filter enum (either the language isn't covered by v3, or it uses
+    /// a script that doesn't need Latin/Cyrillic disambiguation — e.g. Arabic, CJK).
+    ///
+    /// Other ASR engines have their own language enums and their own FLEURS mappings:
+    /// see `Qwen3AsrBenchmark.fleursToQwen3Language` for the Qwen3 multilingual enum
+    /// (30 languages, including CJK / Arabic / Indic that Parakeet v3 doesn't cover).
+    private func mapToLanguageEnum(_ fleursCode: String) -> Language? {
+        switch fleursCode {
+        case "en_us": return .english
+        case "pl_pl": return .polish
+        case "es_419": return .spanish
+        case "fr_fr": return .french
+        case "de_de": return .german
+        case "it_it": return .italian
+        case "ro_ro": return .romanian
+        case "cs_cz": return .czech
+        case "sk_sk": return .slovak
+        case "hr_hr": return .croatian
+        case "sl_si": return .slovenian
+        case "ru_ru": return .russian
+        case "uk_ua": return .ukrainian
+        case "bg_bg": return .bulgarian
+        default: return nil
+        }
+    }
+
     /// Process samples for a specific language
     private func processLanguageSamples(
         samples: [FLEURSSample],
@@ -573,7 +615,10 @@ public class FLEURSBenchmark {
                 let url = URL(fileURLWithPath: sample.audioPath)
                 var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
                 let inferenceStartTime = Date()
-                let result = try await asrManager.transcribe(url, decoderState: &decoderState)
+
+                // Use script filtering if language is supported
+                let languageParam = mapToLanguageEnum(language)
+                let result = try await asrManager.transcribe(url, decoderState: &decoderState, language: languageParam)
                 let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
                 // Calculate metrics if reference transcription is available
@@ -656,116 +701,6 @@ public class FLEURSBenchmark {
         return (metrics.wer, metrics.cer)
     }
 
-    /// Generate inline diff with full lines and highlighted differences
-    private func generateInlineDiff(reference: [String], hypothesis: [String]) -> (String, String) {
-        let m = reference.count
-        let n = hypothesis.count
-
-        // Handle empty hypothesis or reference
-        if n == 0 {
-            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
-            let redColor = supportsColor ? "\u{001B}[31m" : "["
-            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
-            let refString = reference.map { "\(redColor)\($0)\(resetColor)" }.joined(separator: " ")
-            let hypString = ""
-            return (refString, hypString)
-        }
-        if m == 0 {
-            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
-            let greenColor = supportsColor ? "\u{001B}[32m" : "["
-            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
-            let refString = ""
-            let hypString = hypothesis.map { "\(greenColor)\($0)\(resetColor)" }.joined(separator: " ")
-            return (refString, hypString)
-        }
-
-        // Create DP table for edit distance with backtracking
-        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
-
-        // Initialize base cases
-        for i in 0...m { dp[i][0] = i }
-        for j in 0...n { dp[0][j] = j }
-
-        // Fill DP table
-        for i in 1...m {
-            for j in 1...n {
-                if reference[i - 1] == hypothesis[j - 1] {
-                    dp[i][j] = dp[i - 1][j - 1]
-                } else {
-                    dp[i][j] =
-                        1
-                        + min(
-                            dp[i - 1][j],  // deletion
-                            dp[i][j - 1],  // insertion
-                            dp[i - 1][j - 1]  // substitution
-                        )
-                }
-            }
-        }
-
-        // Check if terminal supports colors
-        let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
-        let redColor = supportsColor ? "\u{001B}[31m" : "["
-        let greenColor = supportsColor ? "\u{001B}[32m" : "["
-        let resetColor = supportsColor ? "\u{001B}[0m" : "]"
-
-        // Backtrack to identify differences
-        var i = m
-        var j = n
-        var refDiffWords: [(String, Bool)] = []  // (word, isDifferent)
-        var hypDiffWords: [(String, Bool)] = []  // (word, isDifferent)
-
-        while i > 0 || j > 0 {
-            if i > 0 && j > 0 && reference[i - 1] == hypothesis[j - 1] {
-                // Match
-                refDiffWords.insert((reference[i - 1], false), at: 0)
-                hypDiffWords.insert((hypothesis[j - 1], false), at: 0)
-                i -= 1
-                j -= 1
-            } else if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + 1 {
-                // Substitution
-                refDiffWords.insert((reference[i - 1], true), at: 0)
-                hypDiffWords.insert((hypothesis[j - 1], true), at: 0)
-                i -= 1
-                j -= 1
-            } else if i > 0 && dp[i][j] == dp[i - 1][j] + 1 {
-                // Deletion (word in reference but not in hypothesis)
-                refDiffWords.insert((reference[i - 1], true), at: 0)
-                i -= 1
-            } else if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {
-                // Insertion (word in hypothesis but not in reference)
-                hypDiffWords.insert((hypothesis[j - 1], true), at: 0)
-                j -= 1
-            } else {
-                break
-            }
-        }
-
-        // Build the formatted strings
-        var refString = ""
-        var hypString = ""
-
-        for (word, isDifferent) in refDiffWords {
-            if !refString.isEmpty { refString += " " }
-            if isDifferent {
-                refString += "\(redColor)\(word)\(resetColor)"
-            } else {
-                refString += word
-            }
-        }
-
-        for (word, isDifferent) in hypDiffWords {
-            if !hypString.isEmpty { hypString += " " }
-            if isDifferent {
-                hypString += "\(greenColor)\(word)\(resetColor)"
-            } else {
-                hypString += word
-            }
-        }
-
-        return (refString, hypString)
-    }
-
     /// Print all high WER cases collected across all languages, sorted by WER descending
     public func printAllHighWERCases(_ allHighWERCases: [HighWERCase]) {
         guard !allHighWERCases.isEmpty else {
@@ -807,7 +742,8 @@ public class FLEURSBenchmark {
             }
 
             // Generate inline diff
-            let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
+            let (referenceDiff, hypothesisDiff) = InlineDiff.generate(
+                reference: refWords, hypothesis: hypWords)
 
             logger.info("Normalized Reference:\t\(referenceDiff)")
             logger.info("Normalized Hypothesis:\t\(hypothesisDiff)")

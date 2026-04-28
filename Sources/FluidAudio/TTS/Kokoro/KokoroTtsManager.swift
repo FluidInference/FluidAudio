@@ -2,7 +2,23 @@ import Foundation
 import OSLog
 @preconcurrency import CoreML
 
-/// Manages text-to-speech synthesis using Kokoro CoreML models.
+/// Manages text-to-speech synthesis using Kokoro 82M as a single CoreML graph
+/// (CPU + GPU). This is the default Kokoro path and ships under
+/// [`FluidInference/kokoro-82m-coreml`](https://huggingface.co/FluidInference/kokoro-82m-coreml)
+/// (repo root).
+///
+/// Use this when you want:
+///   * Multi-voice support (voice packs as `.json`)
+///   * Long-text input via the built-in chunker
+///   * Custom lexicon overrides (`TtsCustomLexicon`)
+///   * Mature, shipping default
+///
+/// For the ANE-resident sibling, see ``KokoroAneManager`` — it splits the model
+/// into 7 stages so the ANE-friendly layers can stay resident on the Neural
+/// Engine (3-11× faster on Apple Silicon), at the cost of a single voice
+/// (`af_heart`), no chunking (≤512 IPA tokens), and no custom lexicon. The
+/// ANE variant lives at `FluidInference/kokoro-82m-coreml/ANE/` (sibling of
+/// the single-graph export).
 ///
 /// - Note: **Beta:** The TTS system is currently in beta and only supports American English.
 ///   Additional language support is planned for future releases.

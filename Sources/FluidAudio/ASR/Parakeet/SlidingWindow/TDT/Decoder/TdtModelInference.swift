@@ -74,6 +74,11 @@ internal struct TdtModelInference: Sendable {
     ///   - tokenIdBacking: Pre-allocated output for token ID
     ///   - tokenProbBacking: Pre-allocated output for probability
     ///   - durationBacking: Pre-allocated output for duration
+    ///   - needsTopK: When `true`, extract `top_k_ids` / `top_k_logits` from
+    ///     the joint output (JointDecisionv3). Callers should pass `true` only
+    ///     when a caller-level feature (e.g. language-aware script filtering)
+    ///     actually consumes the top-K; otherwise the K-length Swift arrays
+    ///     are allocated per step and thrown away.
     ///
     /// - Returns: Joint decision (token, probability, duration bin)
     func runJointPrepared(
@@ -87,7 +92,8 @@ internal struct TdtModelInference: Sendable {
         inputProvider: MLFeatureProvider,
         tokenIdBacking: MLMultiArray,
         tokenProbBacking: MLMultiArray,
-        durationBacking: MLMultiArray
+        durationBacking: MLMultiArray,
+        needsTopK: Bool = false
     ) throws -> TdtJointDecision {
 
         // Fill encoder step with the requested frame
@@ -131,7 +137,40 @@ internal struct TdtModelInference: Sendable {
         let durationPointer = durationArray.dataPointer.bindMemory(to: Int32.self, capacity: durationArray.count)
         let durationBin = Int(durationPointer[0])
 
-        return TdtJointDecision(token: token, probability: probability, durationBin: durationBin)
+        // Extract top-K outputs only when the caller requested them. Skipping
+        // this in the common (non-filtering) path saves K-length Swift array
+        // allocations per decoded step.
+        var topKIds: [Int]? = nil
+        var topKLogits: [Float]? = nil
+        if needsTopK {
+            topKIds = try extractInt32Array(from: output, key: "top_k_ids")
+            topKLogits = try extractFloat32Array(from: output, key: "top_k_logits")
+
+            // Enforce that top-K outputs are present as a pair with matching
+            // lengths. This catches export-schema drift (e.g. only one of the
+            // two keys exposed, or K sizes diverging) before the consumer has
+            // to defend against it.
+            switch (topKIds, topKLogits) {
+            case (nil, nil):
+                break
+            case (let ids?, let logits?):
+                guard ids.count == logits.count else {
+                    throw ASRError.processingFailed(
+                        "Joint decision top-K length mismatch: \(ids.count) vs \(logits.count)")
+                }
+            default:
+                throw ASRError.processingFailed(
+                    "Joint decision top-K outputs must be present as a pair (top_k_ids + top_k_logits)")
+            }
+        }
+
+        return TdtJointDecision(
+            token: token,
+            probability: probability,
+            durationBin: durationBin,
+            topKIds: topKIds,
+            topKLogits: topKLogits
+        )
     }
 
     /// Normalize decoder projection into [1, hiddenSize, 1] layout via BLAS copy.
@@ -184,7 +223,7 @@ internal struct TdtModelInference: Sendable {
                 outShape[2] == 1, outShape[1] == hiddenSize
             else {
                 throw ASRError.processingFailed(
-                    "Prepared decoder step shape mismatch: \(destination.shapeString)")
+                    "Prepared decoder step shape mismatch: \(outShape.map(String.init).joined(separator: "x"))")
             }
             out = destination
         } else {
@@ -222,5 +261,29 @@ internal struct TdtModelInference: Sendable {
             throw ASRError.processingFailed(errorMessage)
         }
         return value
+    }
+
+    /// Read a 1D Int32 feature into an `[Int]`, or `nil` if the feature is absent.
+    /// Validates dtype; the 1D contiguous-layout assumption matches the scalar
+    /// extraction paths above (CoreML 1D outputs are row-major contiguous).
+    private func extractInt32Array(from output: MLFeatureProvider, key: String) throws -> [Int]? {
+        guard let array = output.featureValue(for: key)?.multiArrayValue else { return nil }
+        guard array.dataType == .int32 else {
+            throw ASRError.processingFailed("Expected Int32 for \(key), got \(array.dataType.rawValue)")
+        }
+        let count = array.count
+        let pointer = array.dataPointer.bindMemory(to: Int32.self, capacity: count)
+        return (0..<count).map { Int(pointer[$0]) }
+    }
+
+    /// Read a 1D Float32 feature into a `[Float]`, or `nil` if the feature is absent.
+    private func extractFloat32Array(from output: MLFeatureProvider, key: String) throws -> [Float]? {
+        guard let array = output.featureValue(for: key)?.multiArrayValue else { return nil }
+        guard array.dataType == .float32 else {
+            throw ASRError.processingFailed("Expected Float32 for \(key), got \(array.dataType.rawValue)")
+        }
+        let count = array.count
+        let pointer = array.dataPointer.bindMemory(to: Float.self, capacity: count)
+        return (0..<count).map { pointer[$0] }
     }
 }

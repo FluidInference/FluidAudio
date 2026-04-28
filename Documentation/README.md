@@ -38,6 +38,7 @@
 ## Text-to-Speech (TTS)
 
 - [Kokoro](TTS/Kokoro.md)
+- [Kokoro ANE (7-stage)](TTS/KokoroAne.md)
 - [PocketTTS](TTS/PocketTTS.md)
 - [SSML](TTS/SSML.md)
 - [Voice Quality Comparison](TTS/voice-quality.md)

@@ -50,6 +50,7 @@ TDT models process audio in chunks (~15s with overlap) as batch operations.
 | Model | Description | Context |
 |-------|-------------|---------|
 | **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Uses CoreML G2P model for phonemization. | First TTS backend added + support custom pronounces |
+| **Kokoro ANE (7-stage)** | Same Kokoro 82M weights split into 7 CoreML stages so the ANE-friendly layers (Albert / PostAlbert / Alignment / Vocoder) stay resident on the Neural Engine while Prosody / Noise / Tail run on CPU+GPU. 3-11× RTFx vs. the single-graph Kokoro. Single voice (`af_heart`), ≤510 IPA phonemes per call, no chunker / SSML / custom lexicon. | ANE-optimized variant derived from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml) |
 | **PocketTTS** | Second TTS backend (~155M params). Autoregressive frame-by-frame generation with dynamic audio chunking. No phoneme stage, works directly on text tokens. | Supports streaming, minimal RAM usage, excellent quality |
 
 ## Evaluated Models (Not Supported)
@@ -80,5 +81,6 @@ Models we converted and tested but are not supported: too large for on-device de
 | LS-EEND | [FluidInference/lseend-coreml](https://huggingface.co/FluidInference/lseend-coreml) |
 | Sortformer | [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml) |
 | Kokoro TTS | [FluidInference/kokoro-82m-coreml](https://huggingface.co/FluidInference/kokoro-82m-coreml) |
+| Kokoro ANE (7-stage) | [FluidInference/kokoro-82m-coreml/tree/main/ANE](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE) |
 | PocketTTS | [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml) |
 | Nemotron Streaming | [FluidInference/nemotron-speech-streaming-en-0.6b-coreml](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml) |

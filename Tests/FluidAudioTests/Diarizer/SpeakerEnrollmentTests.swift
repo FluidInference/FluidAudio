@@ -115,9 +115,10 @@ final class SpeakerEnrollmentTests: XCTestCase {
 
         // Verify the embedding can be used with initializeKnownSpeakers
         let speaker = Speaker(id: "test", name: "Test", currentEmbedding: embedding, isPermanent: true)
-        manager.initializeKnownSpeakers([speaker])
+        await manager.initializeKnownSpeakers([speaker])
 
-        XCTAssertEqual(manager.speakerManager.speakerCount, 1, "Known speaker should be registered")
+        let speakerCount = await manager.speakerManager.speakerCount
+        XCTAssertEqual(speakerCount, 1, "Known speaker should be registered")
     }
 
     // MARK: - Sortformer enrollSpeaker: Error Cases

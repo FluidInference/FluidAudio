@@ -8,4 +8,7 @@ public enum TtsBackend: Sendable {
     case pocketTts
     /// CosyVoice3 — Mandarin zero-shot voice cloning via Qwen2 LM + Flow CFM + HiFT.
     case cosyvoice3
+    /// laishere/kokoro 7-stage CoreML chain (ALBERT → PostAlbert → Alignment →
+    /// Prosody → Noise → Vocoder → Tail) with per-stage ANE/GPU assignment.
+    case kokoroAne
 }
