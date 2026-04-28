@@ -43,4 +43,33 @@ final class MagpieConstantsTests: XCTestCase {
                 "Language \(lang.rawValue) must ship a token2id map")
         }
     }
+
+    /// Magpie is the only repo that ships bare directory entries in its
+    /// required-models set (the global `ModelNamesTests.testModelFileExtensions`
+    /// excludes it). Pin the contract here so the experimental backend's
+    /// layout stays valid without loosening assertions on production repos.
+    func testRequiredModelsLayout() {
+        let required = ModelNames.Magpie.requiredModels
+        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin"]
+        let allowedDirectories: Set<String> = [
+            ModelNames.Magpie.constantsDir,
+            ModelNames.Magpie.tokenizerDir,
+        ]
+
+        for entry in required {
+            let hasValidExtension = validExtensions.contains(where: { entry.hasSuffix($0) })
+            let isAllowedDirectory = allowedDirectories.contains(entry)
+            XCTAssertTrue(
+                hasValidExtension || isAllowedDirectory,
+                "Magpie required entry '\(entry)' must have a valid file extension or be an allowed directory"
+            )
+        }
+
+        // Sanity: the three core CoreML models + the constants directory are
+        // the minimum required for English synthesis.
+        XCTAssertTrue(required.contains(ModelNames.Magpie.textEncoderFile))
+        XCTAssertTrue(required.contains(ModelNames.Magpie.decoderStepFile))
+        XCTAssertTrue(required.contains(ModelNames.Magpie.nanocodecDecoderFile))
+        XCTAssertTrue(required.contains(ModelNames.Magpie.constantsDir))
+    }
 }
