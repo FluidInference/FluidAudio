@@ -149,13 +149,9 @@ public actor MagpieSynthesizer {
             // priority while still running nano in parallel.
             let newTask = Task.detached(priority: .utility) {
                 () throws -> NanocodecJobResult in
-                let nano = MagpieNanocodec(model: model, numCodebooks: codebooks)
-                let start = Date()
-                let samples = try nano.decode(frames: rows)
-                return NanocodecJobResult(
-                    chunkIndex: chunkIdx,
-                    samples: samples,
-                    seconds: Date().timeIntervalSince(start))
+                try Self.decodeNanoChunk(
+                    model: model, numCodebooks: codebooks,
+                    rows: rows, chunkIndex: chunkIdx)
             }
 
             // Drain the previous chunk's nanocodec while we set up the next.
@@ -327,8 +323,8 @@ public actor MagpieSynthesizer {
             let rows = produced.frames.codebookRows
             let pauseMs = produced.chunk.pauseAfterMs
             let nanoTask = Task.detached(priority: .utility) { () throws -> [Float] in
-                let nano = MagpieNanocodec(model: nanoModel, numCodebooks: numCodebooks)
-                return try nano.decode(frames: rows)
+                try Self.decodeNanoFrames(
+                    model: nanoModel, numCodebooks: numCodebooks, rows: rows)
             }
             var samples = try await nanoTask.value
             Self.applyEdgeFade(&samples, sampleRate: sampleRate)
@@ -361,6 +357,31 @@ public actor MagpieSynthesizer {
         let index: Int
         let frames: ChunkFrames
         let chunk: MagpieTextChunk
+    }
+
+    /// Nonisolated nanocodec wrapper used by detached tasks in the chunked
+    /// non-streaming path. Returning a `Sendable` `NanocodecJobResult` lets
+    /// the result cross the actor boundary cleanly without tripping Swift 6
+    /// region-based isolation.
+    nonisolated private static func decodeNanoChunk(
+        model: MLModel, numCodebooks: Int, rows: [[Int32]], chunkIndex: Int
+    ) throws -> NanocodecJobResult {
+        let nano = MagpieNanocodec(model: model, numCodebooks: numCodebooks)
+        let start = Date()
+        let samples = try nano.decode(frames: rows)
+        return NanocodecJobResult(
+            chunkIndex: chunkIndex,
+            samples: samples,
+            seconds: Date().timeIntervalSince(start))
+    }
+
+    /// Nonisolated nanocodec wrapper used by detached tasks in the streaming
+    /// path. Returns the raw `[Float]` PCM buffer (Sendable).
+    nonisolated private static func decodeNanoFrames(
+        model: MLModel, numCodebooks: Int, rows: [[Int32]]
+    ) throws -> [Float] {
+        let nano = MagpieNanocodec(model: model, numCodebooks: numCodebooks)
+        return try nano.decode(frames: rows)
     }
 
     /// 5 ms linear fade-in/out at chunk boundaries to mask zero-crossing pops
@@ -676,7 +697,7 @@ public actor MagpieSynthesizer {
 
     // MARK: - Model runners
 
-    private func runTextEncoder(
+    nonisolated private func runTextEncoder(
         tokenized: MagpieTokenizedText, maxTextLen: Int, model: MLModel
     ) throws -> (encoderOutput: MLMultiArray, encoderMask: MLMultiArray) {
         let tokenArr = try MLMultiArray(
@@ -703,7 +724,7 @@ public actor MagpieSynthesizer {
         return (encoderOutput, maskArr)
     }
 
-    private func runDecoderStep(
+    nonisolated private func runDecoderStep(
         audioEmbed: MLMultiArray,
         encoderOutput: MLMultiArray,
         encoderMask: MLMultiArray,

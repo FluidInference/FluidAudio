@@ -49,7 +49,7 @@ final class ModelNamesTests: XCTestCase {
 
     func testModelFileExtensions() {
         let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin"]
-        let validDirectories: Set<String> = ["constants_bin"]
+        let validDirectories: Set<String> = ["constants_bin", "constants", "tokenizer"]
 
         for repo in Repo.allCases {
             let models = ModelNames.getRequiredModelNames(for: repo, variant: nil)
