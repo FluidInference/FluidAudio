@@ -137,6 +137,25 @@ public struct TTS {
         var cloneVoicePath: String? = nil
         var voiceFilePath: String? = nil
         var saveVoicePath: String? = nil
+        // CosyVoice3 Phase 1 parity harness args.
+        var cv3FixturePath: String? = nil
+        var cv3ModelsDir: String? = nil
+        var cv3ReferencePath: String? = nil
+        var cv3Seed: UInt64 = 42
+        var cv3CpuOnly: Bool = false
+        var cv3ReplayTokens: Bool = true
+        // CosyVoice3 Phase 2 tokenizer parity args.
+        var cv3TokenizerDir: String? = nil
+        var cv3TokenizerParityMode: Bool = false
+        // CosyVoice3 Phase 2 frontend parity args.
+        var cv3FrontendParityMode: Bool = false
+        var cv3EmbeddingsFile: String? = nil
+        var cv3TokFixturePath: String? = nil
+        // CosyVoice3 Phase 2 text-driven synthesis args.
+        var cv3TextMode: Bool = false
+        var cv3SpecialTokensFile: String? = nil
+        var cv3PromptAssetsPath: String? = nil
+        var cv3MaxNewTokens: Int? = nil
         var pocketLanguage: PocketTtsLanguage = .english
         // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
         var pocketSeed: UInt64? = nil
@@ -194,11 +213,86 @@ public struct TTS {
                         backend = .kokoro
                     case "pocket", "pockettts":
                         backend = .pocketTts
+                    case "cosyvoice3", "cv3", "cosyvoice3-text", "cv3-text":
+                        // Production text-driven synthesis is the default
+                        // user-facing path. The explicit `*-text` aliases
+                        // are kept for backward compatibility with earlier
+                        // documentation.
+                        backend = .cosyvoice3
+                        cv3TextMode = true
+                    case "cosyvoice3-parity", "cv3-parity":
+                        // Phase 1 fixture parity harness — opt-in dev mode.
+                        backend = .cosyvoice3
+                    case "cosyvoice3-tokenizer-parity", "cv3-tokenizer":
+                        backend = .cosyvoice3
+                        cv3TokenizerParityMode = true
+                    case "cosyvoice3-frontend-parity", "cv3-frontend":
+                        backend = .cosyvoice3
+                        cv3FrontendParityMode = true
                     case "kokoro-ane", "kokoroane", "lai":
                         backend = .kokoroAne
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro")
                     }
+                    i += 1
+                }
+            case "--fixture":
+                if i + 1 < arguments.count {
+                    cv3FixturePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--models-dir":
+                if i + 1 < arguments.count {
+                    cv3ModelsDir = arguments[i + 1]
+                    i += 1
+                }
+            case "--reference":
+                if i + 1 < arguments.count {
+                    cv3ReferencePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--seed":
+                if i + 1 < arguments.count {
+                    cv3Seed = UInt64(arguments[i + 1]) ?? 42
+                    i += 1
+                }
+            case "--cpu-only":
+                cv3CpuOnly = true
+            case "--no-replay":
+                cv3ReplayTokens = false
+            case "--tokenizer-dir":
+                if i + 1 < arguments.count {
+                    cv3TokenizerDir = arguments[i + 1]
+                    i += 1
+                }
+            case "--embeddings-file":
+                if i + 1 < arguments.count {
+                    cv3EmbeddingsFile = arguments[i + 1]
+                    i += 1
+                }
+            case "--tok-fixture":
+                if i + 1 < arguments.count {
+                    cv3TokFixturePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--special-tokens-file":
+                if i + 1 < arguments.count {
+                    cv3SpecialTokensFile = arguments[i + 1]
+                    i += 1
+                }
+            case "--prompt-assets":
+                if i + 1 < arguments.count {
+                    cv3PromptAssetsPath = arguments[i + 1]
+                    i += 1
+                }
+            case "--text":
+                if i + 1 < arguments.count {
+                    text = arguments[i + 1]
+                    i += 1
+                }
+            case "--max-new-tokens":
+                if i + 1 < arguments.count {
+                    cv3MaxNewTokens = Int(arguments[i + 1])
                     i += 1
                 }
             case "--auto-download":
@@ -264,6 +358,101 @@ public struct TTS {
                 chunkDirectory: chunkDirectory,
                 variantPreference: variantPreference
             )
+            return
+        }
+
+        if backend == .cosyvoice3 {
+            logger.warning(
+                "CosyVoice3 backend is experimental / beta — synthesis is "
+                    + "slow (RTFx < 1.0 typical). Performance may improve in "
+                    + "later releases.")
+        }
+
+        if backend == .cosyvoice3 && cv3TokenizerParityMode {
+            guard let tokDir = cv3TokenizerDir, let fixture = cv3FixturePath else {
+                logger.error(
+                    "cosyvoice3-tokenizer-parity requires --tokenizer-dir <.../CosyVoice-BlankEN> and --fixture <tokenizer_fixture.json>"
+                )
+                return
+            }
+            await CosyVoice3TokenizerParityCLI.run(
+                tokenizerDir: tokDir, fixturePath: fixture)
+            return
+        }
+
+        if backend == .cosyvoice3 && cv3FrontendParityMode {
+            guard
+                let tokDir = cv3TokenizerDir,
+                let embFile = cv3EmbeddingsFile,
+                let fixture = cv3FixturePath,
+                let tokFix = cv3TokFixturePath
+            else {
+                logger.error(
+                    "cosyvoice3-frontend-parity requires --tokenizer-dir, --embeddings-file, --fixture <shipping.safetensors>, --tok-fixture"
+                )
+                return
+            }
+            await CosyVoice3FrontendParityCLI.run(
+                tokenizerDir: tokDir,
+                embeddingsFile: embFile,
+                fixturePath: fixture,
+                tokFixturePath: tokFix)
+            return
+        }
+
+        if backend == .cosyvoice3 && cv3TextMode {
+            guard
+                let inputText = text,
+                let modelsDir = cv3ModelsDir,
+                let tokDir = cv3TokenizerDir,
+                let embFile = cv3EmbeddingsFile,
+                let specFile = cv3SpecialTokensFile,
+                let promptAssets = cv3PromptAssetsPath
+            else {
+                logger.error(
+                    "cosyvoice3-text requires --text <text>, --models-dir, --tokenizer-dir, --embeddings-file, --special-tokens-file, --prompt-assets"
+                )
+                return
+            }
+            if #available(macOS 15, iOS 18, *) {
+                await CosyVoice3TextCLI.run(
+                    text: inputText,
+                    modelsDir: modelsDir,
+                    tokenizerDir: tokDir,
+                    embeddingsFile: embFile,
+                    specialTokensFile: specFile,
+                    promptAssetsPath: promptAssets,
+                    outputPath: output,
+                    seed: cv3Seed,
+                    maxNewTokens: cv3MaxNewTokens,
+                    cpuOnly: cv3CpuOnly)
+            } else {
+                logger.error(
+                    "CosyVoice3 requires macOS 15 / iOS 18 (uses CoreML MLState).")
+            }
+            return
+        }
+
+        if backend == .cosyvoice3 {
+            guard let fixture = cv3FixturePath, let modelsDir = cv3ModelsDir else {
+                logger.error(
+                    "cosyvoice3-parity requires --fixture <shipping.safetensors> and --models-dir <build/>"
+                )
+                return
+            }
+            if #available(macOS 15, iOS 18, *) {
+                await CosyVoice3ParityCLI.run(
+                    fixturePath: fixture,
+                    modelsDir: modelsDir,
+                    referencePath: cv3ReferencePath,
+                    outputPath: output,
+                    seed: cv3Seed,
+                    cpuOnly: cv3CpuOnly,
+                    replayTokens: cv3ReplayTokens)
+            } else {
+                logger.error(
+                    "CosyVoice3 requires macOS 15 / iOS 18 (uses CoreML MLState).")
+            }
             return
         }
 
@@ -863,7 +1052,14 @@ public struct TTS {
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS)
-              --backend            TTS backend: kokoro (default), pocket, or kokoro-ane
+              --backend            TTS backend: kokoro (default), pocket, kokoro-ane,
+                                   or cosyvoice3 [BETA — slow, RTFx < 1.0]
+                                   CosyVoice3 dev sub-backends:
+                                     cosyvoice3-parity            Phase 1 fixture parity harness
+                                     cosyvoice3-frontend-parity   lm_input_embeds parity vs Python
+                                     cosyvoice3-tokenizer-parity  Qwen2 BPE round-trip
+                                   (Production cosyvoice3 backend auto-downloads
+                                    assets from HuggingFace on first synthesis.)
               --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)
