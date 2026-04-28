@@ -361,6 +361,13 @@ public struct TTS {
             return
         }
 
+        if backend == .cosyvoice3 {
+            logger.warning(
+                "CosyVoice3 backend is experimental / beta — synthesis is "
+                    + "slow (RTFx < 1.0 typical). Performance may improve in "
+                    + "later releases.")
+        }
+
         if backend == .cosyvoice3 && cv3DownloadMode {
             await CosyVoice3DownloadCLI.run()
             return
@@ -1040,7 +1047,8 @@ public struct TTS {
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS)
-              --backend            TTS backend: kokoro (default), pocket, or kokoro-ane
+              --backend            TTS backend: kokoro (default), pocket, kokoro-ane,
+                                   or cosyvoice3 [BETA — slow, RTFx < 1.0]
               --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)

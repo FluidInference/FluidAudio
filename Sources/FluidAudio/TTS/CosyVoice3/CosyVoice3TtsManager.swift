@@ -3,6 +3,19 @@ import Foundation
 
 /// Public entry point for the CosyVoice3 (Mandarin) TTS pipeline.
 ///
+/// > Important: **Experimental / beta.** This backend ships as an early port
+/// > and end-to-end synthesis is currently **slow** on Apple Silicon —
+/// > expect well below real-time (RTFx < 1.0) on M-series GPUs and several
+/// > seconds of latency for short Mandarin utterances. The slowdown is
+/// > primarily in the Flow CFM stage, which is fp32/CPU-or-GPU only because
+/// > fp16 + ANE produces NaNs through the fused `layer_norm` (CoreMLTools
+/// > limitation; tracked upstream). The HiFT vocoder also has ~12 sinegen /
+/// > windowing ops that fall back to CPU. We do not yet know whether the
+/// > residual cost is fundamental to the model or recoverable through better
+/// > conversion — treat performance numbers as preliminary. The Swift API,
+/// > model layout, and prompt-asset format may change in subsequent
+/// > releases without deprecation aliases.
+///
 /// Two synthesis paths are exposed:
 ///
 /// 1. `synthesizeFromFixture` — Phase 1 parity harness that replays a
@@ -122,6 +135,9 @@ public actor CosyVoice3TtsManager {
     /// Idempotent.
     public func initialize() async throws {
         if synthesizer == nil {
+            logger.warning(
+                "CosyVoice3 is experimental / beta. Synthesis is currently slow "
+                    + "(RTFx < 1.0 typical) — see CosyVoice3TtsManager docs.")
             try await store.loadIfNeeded()
             let models = try await store.models()
             let embeddingsURL = try await store.speechEmbeddingsFileURL()

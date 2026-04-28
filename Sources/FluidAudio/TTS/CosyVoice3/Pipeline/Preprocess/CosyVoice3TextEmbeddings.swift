@@ -8,7 +8,7 @@ import Foundation
 /// The Phase 1 per-step decode embedding path still uses
 /// `CosyVoice3SpeechEmbeddings` (fp16 table) to save memory during long
 /// autoregressive loops; that code remains unchanged.
-public final class CosyVoice3TextEmbeddings: @unchecked Sendable {
+public final class CosyVoice3TextEmbeddings {
 
     private let file: SafetensorsFile
     private let textBytes: Data

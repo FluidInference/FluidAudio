@@ -11,7 +11,7 @@ import Foundation
 /// (`kv_k_0..kv_k_23`, `kv_v_0..kv_v_23`) replace the 18 MB kv_k / kv_v
 /// round-trip per step. Prefill remains non-stateful and its `kv_k` / `kv_v`
 /// outputs seed the decode state once after prefill.
-public final class CosyVoice3Synthesizer: @unchecked Sendable {
+public actor CosyVoice3Synthesizer {
 
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "CosyVoice3Synthesizer")
 
@@ -71,10 +71,14 @@ public final class CosyVoice3Synthesizer: @unchecked Sendable {
             vocab: CosyVoice3Constants.speechVocab)
         var topId = sampler.sample(logits: firstLogits, decodedSoFar: decoded)
         if CosyVoice3Constants.stopRange.contains(topId) {
+            // Prefill emitted EOS at step 0 — the LLM signaled "no speech".
+            // Bail out instead of feeding the stop-token embedding into the
+            // decode loop (which would accumulate semantically meaningless
+            // tokens into `decoded`).
             logger.info("First token \(topId) is a stop token; no speech generated")
-        } else {
-            decoded.append(topId)
+            throw CosyVoice3Error.predictionFailed("LLM produced no speech tokens")
         }
+        decoded.append(topId)
 
         // 2) Decode loop
         var curLen = fixture.tPre
@@ -123,9 +127,9 @@ public final class CosyVoice3Synthesizer: @unchecked Sendable {
             newMelFrames: newMelFrames)
         let hiftSec = Date().timeIntervalSince(tHift)
 
-        // Emit stage timings to stdout for RTFx benchmarking.
+        // Emit stage timings via the shared logger for RTFx benchmarking.
         let decodeTps = decodeSteps > 0 ? Double(decodeSteps) / decodeSec : 0
-        print(
+        logger.info(
             String(
                 format:
                     "STAGES prefill=%.3fs seed=%.3fs decode=%.3fs(%d steps, %.2f tok/s) flow=%.3fs hift=%.3fs",
@@ -416,7 +420,17 @@ public final class CosyVoice3Synthesizer: @unchecked Sendable {
         // HiFT's `mel` input is always fp32 at the CoreML I/O boundary.
         let hiftFrames = CosyVoice3Constants.hiftMaxFrames
         let melBins = CosyVoice3Constants.melBins
-        let validFrames = min(newMelFrames, hiftFrames)
+        // fullMel logical shape = [1, 80, totalMelFrames]. Clamp the valid
+        // window to the remaining frames after `newMelStart` so a slightly
+        // off `num_prompt_mel` from the Flow model can never cause an
+        // out-of-bounds read at `srcBase[newMelStart + f]`.
+        let totalMelFrames = fullMel.shape.count >= 3 ? fullMel.shape[2].intValue : hiftFrames
+        guard newMelStart >= 0 && newMelStart <= totalMelFrames else {
+            throw CosyVoice3Error.invalidShape(
+                "runHiFT: newMelStart=\(newMelStart) out of range [0, \(totalMelFrames)]")
+        }
+        let availableFrames = max(0, totalMelFrames - newMelStart)
+        let validFrames = min(newMelFrames, hiftFrames, availableFrames)
 
         let melInput = try MLMultiArray(
             shape: [1, NSNumber(value: melBins), NSNumber(value: hiftFrames)],

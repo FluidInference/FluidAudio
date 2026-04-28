@@ -8,7 +8,7 @@ import Foundation
 /// - raw tensor payload (referenced by offsets above)
 ///
 /// Used for Phase 1 fixture + speech embedding table mmap.
-public final class SafetensorsFile: @unchecked Sendable {
+public final class SafetensorsFile {
 
     public enum DType: String, Sendable {
         case f16 = "F16"

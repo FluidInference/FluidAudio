@@ -2,7 +2,7 @@
 import Foundation
 
 /// Four CoreML models for the CosyVoice3 inference pipeline.
-public struct CosyVoice3Models: @unchecked Sendable {
+public struct CosyVoice3Models {
     public let prefill: MLModel
     public let decode: MLModel
     public let flow: MLModel

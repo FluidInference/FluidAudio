@@ -16,7 +16,7 @@ import Foundation
 /// pre-recorded Python token stream one id at a time. This is how the parity
 /// harness bit-matches despite the `torch.multinomial` RNG mismatch between
 /// PyTorch and Swift.
-public final class CosyVoice3RasSampler: @unchecked Sendable {
+public final class CosyVoice3RasSampler {
 
     public let topP: Float
     public let topK: Int

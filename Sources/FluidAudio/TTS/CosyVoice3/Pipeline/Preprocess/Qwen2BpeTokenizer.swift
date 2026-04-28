@@ -20,7 +20,7 @@ import Foundation
 /// Special tokens are passed in separately (from a JSON map exported alongside
 /// the CosyVoice3 fixtures — the runtime add_special_tokens list in Python is
 /// not encoded in the HF assets).
-public final class Qwen2BpeTokenizer: @unchecked Sendable {
+public final class Qwen2BpeTokenizer {
 
     public enum Error: Swift.Error, LocalizedError {
         case fileNotFound(URL)

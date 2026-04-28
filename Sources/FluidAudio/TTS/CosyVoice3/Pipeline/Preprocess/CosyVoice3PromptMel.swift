@@ -35,7 +35,7 @@ import Foundation
 /// invariant before passing to Flow (matches the
 /// `speech_feat, speech_feat_len[:] = speech_feat[:, :2 * token_len], 2 * token_len`
 /// clamp in the Python frontend).
-public final class CosyVoice3PromptMel: @unchecked Sendable {
+public final class CosyVoice3PromptMel {
 
     public static let sampleRate = 24_000
     public static let nFFT = 1_920

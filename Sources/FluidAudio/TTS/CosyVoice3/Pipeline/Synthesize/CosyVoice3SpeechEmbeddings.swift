@@ -8,7 +8,7 @@ import Foundation
 /// Swift-side we mmap the exported safetensors and convert one row from fp16
 /// to fp32 per decode step into a freshly allocated `[1, 1, 896]` fp32
 /// MLMultiArray (the decode mlpackage declares fp32 at its I/O boundary).
-public final class CosyVoice3SpeechEmbeddings: @unchecked Sendable {
+public final class CosyVoice3SpeechEmbeddings {
 
     private let file: SafetensorsFile
     private let tableBytes: Data

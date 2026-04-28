@@ -11,7 +11,7 @@ import Foundation
 /// CAMPPlus speaker embedding and SpeechTokenizer prompt ids remain
 /// Python-computed and shipped via `CosyVoice3PromptAssets` (see
 /// `CosyVoice3TtsManager` Phase 2 API).
-public final class CosyVoice3TextFrontend: @unchecked Sendable {
+public final class CosyVoice3TextFrontend {
 
     public struct Assembled: Sendable {
         public let lmInputEmbeds: MLMultiArray  // [1, T_pre, 896] fp32
