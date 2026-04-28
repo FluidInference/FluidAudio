@@ -40,6 +40,7 @@
 - [Kokoro](TTS/Kokoro.md)
 - [Kokoro ANE (7-stage)](TTS/KokoroAne.md)
 - [PocketTTS](TTS/PocketTTS.md)
+- [CosyVoice3 (Mandarin, beta)](TTS/CosyVoice3.md)
 - [SSML](TTS/SSML.md)
 - [Voice Quality Comparison](TTS/voice-quality.md)
 
