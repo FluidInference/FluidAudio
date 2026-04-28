@@ -364,6 +364,7 @@ public actor MagpieSynthesizer {
         model: MLModel, numCodebooks: Int, rows: [[Int32]], chunkIndex: Int
     ) -> Task<NanocodecJobResult, Error> {
         Task.detached(priority: .utility) {
+            [model, numCodebooks, rows, chunkIndex] in
             try Self.decodeNanoChunk(
                 model: model, numCodebooks: numCodebooks,
                 rows: rows, chunkIndex: chunkIndex)
@@ -375,7 +376,7 @@ public actor MagpieSynthesizer {
     nonisolated private static func startNanoFramesTask(
         model: MLModel, numCodebooks: Int, rows: [[Int32]]
     ) -> Task<[Float], Error> {
-        Task.detached(priority: .utility) {
+        Task.detached(priority: .utility) { [model, numCodebooks, rows] in
             try Self.decodeNanoFrames(
                 model: model, numCodebooks: numCodebooks, rows: rows)
         }
