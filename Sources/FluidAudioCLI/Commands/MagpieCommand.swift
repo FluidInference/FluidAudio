@@ -248,7 +248,8 @@ public enum MagpieCommand {
             chunkCount += 1
             totalCodes += chunk.codeCount
             sampleRate = chunk.sampleRate
-            let preview = chunk.text.count > 60
+            let preview =
+                chunk.text.count > 60
                 ? String(chunk.text.prefix(57)) + "..." : chunk.text
             let line =
                 "    [chunk \(chunk.sequenceIndex)] +\(String(format: "%.3f", now))s "
