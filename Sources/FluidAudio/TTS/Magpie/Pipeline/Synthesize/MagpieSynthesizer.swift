@@ -361,10 +361,9 @@ public actor MagpieSynthesizer {
     /// "'self'-isolated value of type ... passed as a strongly transferred
     /// parameter; later accesses could race".
     nonisolated private static func startNanoChunkTask(
-        model: MLModel, numCodebooks: Int, rows: [[Int32]], chunkIndex: Int
+        model: sending MLModel, numCodebooks: Int, rows: sending [[Int32]], chunkIndex: Int
     ) -> Task<NanocodecJobResult, Error> {
         Task.detached(priority: .utility) {
-            [model, numCodebooks, rows, chunkIndex] in
             try Self.decodeNanoChunk(
                 model: model, numCodebooks: numCodebooks,
                 rows: rows, chunkIndex: chunkIndex)
@@ -374,9 +373,9 @@ public actor MagpieSynthesizer {
     /// Nonisolated factory for the streaming-path detached task. See
     /// `startNanoChunkTask` for the rationale.
     nonisolated private static func startNanoFramesTask(
-        model: MLModel, numCodebooks: Int, rows: [[Int32]]
+        model: sending MLModel, numCodebooks: Int, rows: sending [[Int32]]
     ) -> Task<[Float], Error> {
-        Task.detached(priority: .utility) { [model, numCodebooks, rows] in
+        Task.detached(priority: .utility) {
             try Self.decodeNanoFrames(
                 model: model, numCodebooks: numCodebooks, rows: rows)
         }
