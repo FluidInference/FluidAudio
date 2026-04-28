@@ -477,7 +477,7 @@ public enum MagpieCommand {
     // MARK: - usage
 
     private static func printUsage() {
-        print(
+        logger.info(
             """
             Usage: fluidaudio magpie <subcommand> [options]
 
