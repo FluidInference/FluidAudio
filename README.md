@@ -37,7 +37,7 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 - **Automatic Speech Recognition (ASR)**: [Parakeet TDT v3](Documentation/Models.md#batch-transcription-near-real-time) (0.6b) and other TDT/CTC models for batch transcription supporting 25 European languages, Japanese, and Chinese; [Parakeet EOU](Documentation/Models.md#streaming-transcription-true-real-time) (120m) for streaming ASR with end-of-utterance detection (English only). See all [ASR models](Documentation/Models.md#asr-models).
 - **Inverse Text Normalization (ITN)**: Post-process ASR output to convert spoken-form to written-form ("two hundred" → "200"). See [text-processing-rs](https://github.com/FluidInference/text-processing-rs)
-- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (EN, DE, ES, FR, IT, PT — 6L and 24L variants); **Magpie (357m, experimental)** autoregressive multilingual TTS with 5 speakers, `|…|` IPA override, and 8-language coverage (EN, ES, DE, FR, IT, VI, ZH, HI) — note: ~0.4× RTFx on Apple Silicon, see [Magpie docs](Documentation/TTS/Magpie.md) before adopting
+- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (EN, DE, ES, FR, IT, PT — 6L and 24L variants); **Magpie (357m, experimental)** autoregressive multilingual TTS with 5 speakers, `|…|` IPA override, and 8-language coverage (EN, ES, DE, FR, IT, VI, ZH, HI) — note: quite slow (~0.04 RTFx on Apple Silicon, ~25× slower than realtime) and needs further perf work, see [Magpie docs](Documentation/TTS/Magpie.md) before adopting
 - **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
@@ -609,17 +609,19 @@ Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`
 
 ### Magpie (Multilingual) — experimental
 
-> ⚠️ **Slow on Apple Silicon — not for real-time / latency-sensitive use.**
-> Measured RTFx on M-series with ANE warmup: **~0.4×** (5 s of audio takes
-> ~12 s to synthesize; per-step `decoder_step` ~60 ms ANE warm; NanoCodec
-> ~3.5 s per call, CPU-only). Without warmup the first call drops to
-> ~0.14× RTFx because of cold ANE compilation, and on some machines the
-> cold compile fails outright (`MILCompilerForANE: ANECCompile() FAILED`)
-> and falls back to CPU/GPU at <0.05× RTFx. Whether this is a model
-> characteristic, a NanoCodec conversion limitation, or both is still
-> being investigated. **Use Kokoro (~20× RTFx) or PocketTTS (~1.5–2× RTFx)
-> for real-time use.** Magpie ships for multilingual coverage and the 5
-> speaker contexts, not throughput.
+> ⚠️ **Quite slow on Apple Silicon — needs significant perf work; not for
+> real-time / latency-sensitive use.** First synth on a fresh process is
+> dominated by CoreML model load + first-call ANE compile (~30 s). Warm
+> synths run at **~96 s wall for an 8-word English sentence** on M-series
+> (RTFx ≈ **0.04**, i.e. ~25× slower than realtime). Output is
+> perceptually clean / ASR-clean across 4 of the 5 speakers; speaker 0
+> has a single trailing-word artifact attributable to fp16
+> sampler-trajectory drift (not a structural bug). Whether the throughput
+> ceiling is a model characteristic, a CoreML conversion limitation, or
+> both is still being investigated and is expected to improve in
+> subsequent iterations. **Use Kokoro (~20× RTFx) or PocketTTS
+> (~1.5–2× RTFx) for real-time use.** Magpie ships for multilingual
+> coverage and the 5 speaker contexts, not throughput.
 
 Magpie TTS Multilingual (357M) is NVIDIA's autoregressive encoder-decoder TTS with 8-codebook NanoCodec vocoder output at 22.05 kHz. It exposes 5 built-in speakers and supports 8 languages (English, Spanish, German, French, Italian, Vietnamese, Mandarin, Hindi) with a `|…|` IPA override that routes inline phoneme sequences directly to the tokenizer. Japanese is deferred pending OpenJTalk integration.
 

@@ -481,10 +481,12 @@ public enum MagpieCommand {
             """
             Usage: fluidaudio magpie <subcommand> [options]
 
-            ⚠️  EXPERIMENTAL — slow on Apple Silicon (~0.4× RTFx).
-                5 s of audio takes ~12 s to synthesize even with ANE warmup.
-                For real-time use prefer `fluidaudio tts` (Kokoro, ~20× RTFx)
-                or PocketTTS (~1.5–2× RTFx). See Documentation/TTS/Magpie.md.
+            ⚠️  EXPERIMENTAL — quite slow on Apple Silicon, needs further perf work.
+                Cold first synth ~30 s (model load + ANE compile). Warm synth ~96 s
+                wall for an 8-word English sentence on M-series (RTFx ≈ 0.04, i.e.
+                ~25× slower than realtime). For real-time use prefer
+                `fluidaudio tts` (Kokoro, ~20× RTFx) or PocketTTS (~1.5–2× RTFx).
+                See Documentation/TTS/Magpie.md.
 
             Subcommands:
               download                Download Magpie models + constants + tokenizers

@@ -110,7 +110,7 @@ struct FluidAudioCLI {
                 transcribe              Transcribe audio file using streaming ASR
                 multi-stream            Transcribe multiple audio files in parallel
                 tts                     Synthesize speech from text using Kokoro TTS
-                magpie                  Magpie TTS Multilingual 357M (experimental, ~0.4× RTFx)
+                magpie                  Magpie TTS Multilingual 357M (experimental, ~0.04 RTFx — slow, needs perf work)
                 tts-asr-verify          Batch TTS→ASR roundtrip WER verification
                 parakeet-eou            Run Parakeet EOU Streaming ASR on a single file
                 ctc-earnings-benchmark  Run CTC keyword spotting benchmark on Earnings22
