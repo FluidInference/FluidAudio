@@ -5,15 +5,24 @@ Lives under `Sources/FluidAudio/TTS/Magpie/`.
 
 ## Status
 
-Functional. Audio quality is perceptually clean across all 5 speakers; first
-synth on a fresh process is dominated by CoreML model load + first-call ANE
-compile (~30 s), warm synths run at ~96 s wall for an 8-word English sentence
-on M-series (RTFx ~0.04). Quality is ASR-clean (4/5 speakers), spk0 has a
-single trailing-word artifact ("…and") attributable to fp16 sampler-trajectory
-drift, not a structural bug.
+Functional but **quite slow — needs significant perf work, not for real-time
+or latency-sensitive use.** First synth on a fresh process is dominated by
+CoreML model load + first-call ANE compile (~30 s); warm synths run at
+~96 s wall for an 8-word English sentence on M-series, i.e. RTFx ≈ **0.04**
+(~25× slower than realtime). Whether the throughput ceiling is a model
+characteristic, a CoreML conversion limitation, or both is still being
+investigated and is expected to improve in subsequent iterations. For
+real-time use prefer Kokoro (~20× RTFx) or PocketTTS (~1.5–2× RTFx);
+Magpie's value prop is multilingual coverage and the 5 built-in speaker
+contexts, not throughput.
+
+Audio quality is perceptually clean across all 5 speakers and ASR-clean on
+4/5; speaker 0 has a single trailing-word artifact ("…and") attributable
+to fp16 sampler-trajectory drift, not a structural bug.
 
 Not yet covered: Japanese (deferred — needs OpenJTalk XCFramework + MeCab
-dict), CFG performance optimization, MLX-backed LocalTransformer.
+dict), CFG performance optimization, MLX-backed LocalTransformer,
+throughput investigation (the headline gap).
 
 ## Architecture
 
