@@ -119,6 +119,11 @@ public enum MagpieCommand {
                 allowIpa = false
             case "--stream":
                 streaming = true
+            case "--text":
+                if i + 1 < arguments.count {
+                    text = arguments[i + 1]
+                    i += 1
+                }
             default:
                 if text == nil { text = arg }
             }

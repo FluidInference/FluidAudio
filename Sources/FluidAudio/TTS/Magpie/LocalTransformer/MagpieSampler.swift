@@ -176,14 +176,23 @@ public struct MagpieLocalSampler: Sendable {
         var truncated = logits
         if topK > 0 && topK < truncated.count {
             // Threshold = K-th largest. Found via a fixed-size min-heap of size K,
-            // O(N + K log K) vs O(N log N) for the prior full-sort path. Tie
-            // behavior matches the prior implementation: values *strictly* below
-            // the threshold are masked, ties at the threshold all survive.
+            // O(N + K log K) vs O(N log N) for the prior full-sort path. We keep
+            // exactly K survivors to match `torch.topk`: all strictly-above-threshold
+            // values, plus the earliest-index ties at the threshold up to a total
+            // of K. The rest are masked to `-inf`.
             let threshold = Self.topKThreshold(values: truncated, k: topK)
+            var aboveCount = 0
+            for v in truncated where v > threshold { aboveCount += 1 }
+            var tiesNeeded = topK - aboveCount
             for i in 0..<truncated.count {
-                if truncated[i] < threshold {
-                    truncated[i] = -.infinity
+                if truncated[i] > threshold {
+                    continue
                 }
+                if truncated[i] == threshold && tiesNeeded > 0 {
+                    tiesNeeded -= 1
+                    continue
+                }
+                truncated[i] = -.infinity
             }
         }
         let t = max(temperature, 1e-8)
