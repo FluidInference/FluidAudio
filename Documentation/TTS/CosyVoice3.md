@@ -27,8 +27,7 @@ running on CoreML.
 | `Pipeline/Synthesize/CosyVoice3SpeechEmbeddings.swift` | mmap of 6761×896 fp16 speech-embedding table (12 MB) |
 | `Pipeline/Synthesize/CosyVoice3Types.swift` | `CosyVoice3SynthesisOptions`, `CosyVoice3SynthesisResult`, `CosyVoice3ParityOptions` |
 | `Pipeline/Preprocess/CosyVoice3TextFrontend.swift` | Special-token splitting + `lm_input_embeds` assembly |
-| `Pipeline/Preprocess/Qwen2BpeTokenizer.swift` | tiktoken-compatible byte-level BPE, 151 936 vocab |
-| `Pipeline/Preprocess/Qwen2ByteEncoder.swift` | GPT-2 byte→unicode table (the 188-symbol shim) |
+| `Pipeline/Preprocess/Qwen2BpeTokenizer.swift` | tiktoken-compatible byte-level BPE, 151 936 vocab (incl. fileprivate `ByteEncoder` 188-symbol byte→unicode shim) |
 | `Pipeline/Preprocess/CosyVoice3TextEmbeddings.swift` | mmap of 151 936×896 fp16 text embedding table |
 | `Pipeline/Preprocess/CosyVoice3ChineseNormalizer.swift` | Minimal regex-free port of `frontend_utils.py` |
 | `Pipeline/Preprocess/CosyVoice3PromptMel.swift` | 24 kHz 80-bin log-mel matching `matcha audio.py` |

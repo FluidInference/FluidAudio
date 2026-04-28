@@ -1,10 +1,18 @@
 import Foundation
 
-/// Python-produced frontend fixture that feeds the Swift parity harness.
+/// Assembled frontend output fed to `CosyVoice3Synthesizer`.
 ///
-/// Produced by
-/// `mobius/models/tts/cosyvoice3/coreml/verify/export_swift_fixture.py`
-/// and consumed by `CosyVoice3Synthesizer` via safetensors.
+/// This is the intermediate state between the text frontend and the
+/// LLM/Flow/HiFT pipeline — every entry point produces one of these:
+///
+/// - **Phase 2 (production):** `CosyVoice3TtsManager.synthesize(text:promptAssets:)`
+///   builds an in-memory instance from a tokenized + embedded `lm_input_embeds`
+///   plus the caller's `CosyVoice3PromptAssets`.
+/// - **Phase 1 (parity harness):** `load(from:)` reads a `.safetensors` produced
+///   by `mobius/models/tts/cosyvoice3/coreml/verify/export_swift_fixture.py`
+///   so the Swift synthesizer can be diffed against a Python golden run.
+///
+/// Both paths converge on `CosyVoice3Synthesizer.synthesize(fixture:)`.
 public struct CosyVoice3FrontendFixture: Sendable {
     /// LLM prefill `inputs_embeds` — shape `[1, tPre, 896]` fp32.
     public let lmInputEmbeds: [Float]

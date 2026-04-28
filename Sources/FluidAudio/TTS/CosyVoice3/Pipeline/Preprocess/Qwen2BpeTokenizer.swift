@@ -9,7 +9,8 @@ import Foundation
 ///   1. Split input on registered special tokens (longest-match first). Special
 ///      chunks map 1:1 to their fixed ID.
 ///   2. Pretokenize non-special chunks with Qwen2's regex.
-///   3. UTF-8 encode each match and remap bytes via `Qwen2ByteEncoder`.
+///   3. UTF-8 encode each match and remap bytes via the GPT-2 byte→unicode
+///      shim (`ByteEncoder` below).
 ///   4. Apply BPE merges (lowest rank wins, all occurrences merged per pass).
 ///   5. Look up the resulting symbols in `vocab.json` to get token IDs.
 ///
@@ -132,7 +133,7 @@ public final class Qwen2BpeTokenizer {
                 return
             }
             pretokenize(chunk) { piece in
-                let mapped = Qwen2ByteEncoder.encode(piece.utf8)
+                let mapped = ByteEncoder.encode(piece.utf8)
                 let bpeTokens = bpe(mapped)
                 for tok in bpeTokens {
                     if let id = vocab[tok] {
@@ -226,5 +227,51 @@ public final class Qwen2BpeTokenizer {
             if symbols.count < 2 { break }
         }
         return symbols
+    }
+
+    // MARK: - Byte encoder
+
+    /// GPT-2 style reversible byte→unicode mapping used by Qwen2 BPE.
+    ///
+    /// Mirrors `transformers.models.qwen2.tokenization_qwen2.bytes_to_unicode`:
+    /// - Printable ASCII, Latin-1 supplement (¡..¬), and (®..ÿ) map to themselves.
+    /// - The 68 "unprintable" bytes are remapped to code points 256..323.
+    ///
+    /// After mapping, every byte of a UTF-8 string becomes a single-code-point
+    /// unicode character that vocab/merges.txt expect.
+    fileprivate enum ByteEncoder {
+
+        /// byte (0..255) → single Unicode scalar.
+        static let byteToUnicode: [Character] = {
+            var map = [Character](repeating: Character(" "), count: 256)
+            var printable = [Int]()
+            printable.reserveCapacity(188)
+            printable.append(contentsOf: Int(Character("!").asciiValue!)...Int(Character("~").asciiValue!))
+            printable.append(contentsOf: 0xA1...0xAC)
+            printable.append(contentsOf: 0xAE...0xFF)
+
+            for b in printable {
+                map[b] = Character(UnicodeScalar(b)!)
+            }
+
+            var extra = 0
+            for b in 0..<256 {
+                if !printable.contains(b) {
+                    let scalar = UnicodeScalar(256 + extra)!
+                    map[b] = Character(scalar)
+                    extra += 1
+                }
+            }
+            return map
+        }()
+
+        /// Encode a UTF-8 byte sequence as a string of mapped characters.
+        static func encode(_ bytes: some Sequence<UInt8>) -> String {
+            var out = ""
+            for b in bytes {
+                out.append(byteToUnicode[Int(b)])
+            }
+            return out
+        }
     }
 }
