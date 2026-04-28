@@ -201,6 +201,10 @@ public struct TTS {
                     }
                     i += 1
                 }
+            case "--auto-download":
+                // No-op: downloads are always ensured by the CLI. Accepted
+                // for backward compatibility with documented examples.
+                ()
             case "--benchmark":
                 benchmarkMode = true
             case "--no-deess":
