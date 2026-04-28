@@ -194,13 +194,15 @@ fluidaudio tts --backend cosyvoice3-frontend-parity \
 fluidaudio tts --backend cosyvoice3-parity \
     --fixture shipping.safetensors --models-dir build/
 # Phase 1 fixture parity (Synthesizer: prefill → decode → Flow → HiFT)
-
-fluidaudio tts --backend cosyvoice3-download
-# Eager HF pull of all CoreML mlpackages + tokenizer + default voice
 ```
 
 Recommended bisection order when end-to-end output diverges from
 Python: tokenizer-parity → frontend-parity → fixture parity.
+
+The production backend auto-downloads its CoreML mlpackages, tokenizer,
+embeddings, and default voice from HuggingFace on first synthesis (cached
+under `~/.cache/fluidaudio/Models/cosyvoice3/`) — there is no separate
+download CLI mode, matching how Kokoro and PocketTTS work.
 
 ## Models
 

@@ -156,8 +156,6 @@ public struct TTS {
         var cv3SpecialTokensFile: String? = nil
         var cv3PromptAssetsPath: String? = nil
         var cv3MaxNewTokens: Int? = nil
-        // CosyVoice3 eager HF-download mode.
-        var cv3DownloadMode: Bool = false
         var pocketLanguage: PocketTtsLanguage = .english
         // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
         var pocketSeed: UInt64? = nil
@@ -231,9 +229,6 @@ public struct TTS {
                     case "cosyvoice3-frontend-parity", "cv3-frontend":
                         backend = .cosyvoice3
                         cv3FrontendParityMode = true
-                    case "cosyvoice3-download", "cv3-download":
-                        backend = .cosyvoice3
-                        cv3DownloadMode = true
                     case "kokoro-ane", "kokoroane", "lai":
                         backend = .kokoroAne
                     default:
@@ -371,11 +366,6 @@ public struct TTS {
                 "CosyVoice3 backend is experimental / beta — synthesis is "
                     + "slow (RTFx < 1.0 typical). Performance may improve in "
                     + "later releases.")
-        }
-
-        if backend == .cosyvoice3 && cv3DownloadMode {
-            await CosyVoice3DownloadCLI.run()
-            return
         }
 
         if backend == .cosyvoice3 && cv3TokenizerParityMode {
@@ -1058,7 +1048,8 @@ public struct TTS {
                                      cosyvoice3-parity            Phase 1 fixture parity harness
                                      cosyvoice3-frontend-parity   lm_input_embeds parity vs Python
                                      cosyvoice3-tokenizer-parity  Qwen2 BPE round-trip
-                                     cosyvoice3-download          eager HF asset pull
+                                   (Production cosyvoice3 backend auto-downloads
+                                    assets from HuggingFace on first synthesis.)
               --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)
