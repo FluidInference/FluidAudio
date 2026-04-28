@@ -52,7 +52,14 @@ TDT models process audio in chunks (~15s with overlap) as batch operations.
 | **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Uses CoreML G2P model for phonemization. | First TTS backend added + support custom pronounces |
 | **Kokoro ANE (7-stage)** | Same Kokoro 82M weights split into 7 CoreML stages so the ANE-friendly layers (Albert / PostAlbert / Alignment / Vocoder) stay resident on the Neural Engine while Prosody / Noise / Tail run on CPU+GPU. 3-11× RTFx vs. the single-graph Kokoro. Single voice (`af_heart`), ≤510 IPA phonemes per call, no chunker / SSML / custom lexicon. | ANE-optimized variant derived from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml) |
 | **PocketTTS** | Second TTS backend (~155M params). Autoregressive frame-by-frame generation with dynamic audio chunking. No phoneme stage, works directly on text tokens. | Supports streaming, minimal RAM usage, excellent quality |
-| **Magpie TTS Multilingual** | NVIDIA NeMo Magpie TTS Multilingual 357M, 8 languages (en/es/de/fr/it/vi/zh/hi), 5 built-in speakers. 4-model CoreML pipeline: text_encoder + decoder_prefill + decoder_step + nanocodec_decoder. Custom IPA override via `\|...\|` segments. Local Transformer (8-codebook sampler) implemented in pure Swift via Accelerate + BNNS. | Third TTS backend. Japanese deferred (needs OpenJTalk + MeCab dict). |
+
+## Not Production Ready
+
+Models that are functionally complete and shipped, but **not yet recommended for production use** — typically due to performance ceilings, quality edge cases, or pending platform integration. Use behind feature flags / for evaluation only; expect breaking changes and perf improvements in subsequent iterations.
+
+| Model | Status |
+|-------|--------|
+| **Magpie TTS Multilingual** ([FluidAudio#541](https://github.com/FluidInference/FluidAudio/pull/541), [mobius#44](https://github.com/FluidInference/mobius/pull/44), [HF](https://huggingface.co/FluidInference/magpie-tts-multilingual-357m-coreml)) | NVIDIA NeMo Magpie TTS Multilingual 357M, 8 languages (en/es/de/fr/it/vi/zh/hi), 5 built-in speakers. 4-model CoreML pipeline (text_encoder + decoder_prefill + decoder_step + nanocodec_decoder) + pure-Swift Local Transformer (Accelerate + BNNS). Custom IPA override via `\|...\|` segments. **Quite slow on Apple Silicon — RTFx ≈ 0.04 (~25× slower than realtime), ~30 s cold first synth, ~96 s warm for an 8-word English sentence on M-series.** Audio is ASR-clean on 4/5 speakers; spk0 has a single trailing-word artifact attributable to fp16 sampler-trajectory drift. Throughput investigation, MLX-backed LocalTransformer, CFG perf, and Japanese support (OpenJTalk + MeCab) are pending. For real-time TTS use Kokoro or PocketTTS instead. |
 
 ## Evaluated Models (Not Supported)
 
