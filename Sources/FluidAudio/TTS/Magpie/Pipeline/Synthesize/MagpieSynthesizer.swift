@@ -147,12 +147,9 @@ public actor MagpieSynthesizer {
             // bandwidth for its Metal driver thread, and an aggressive nano
             // task throttles it. .utility lets the actor's AR loop keep
             // priority while still running nano in parallel.
-            let newTask = Task.detached(priority: .utility) {
-                () throws -> NanocodecJobResult in
-                try Self.decodeNanoChunk(
-                    model: model, numCodebooks: codebooks,
-                    rows: rows, chunkIndex: chunkIdx)
-            }
+            let newTask = Self.startNanoChunkTask(
+                model: model, numCodebooks: codebooks,
+                rows: rows, chunkIndex: chunkIdx)
 
             // Drain the previous chunk's nanocodec while we set up the next.
             if let prev = pendingNano {
@@ -322,10 +319,8 @@ public actor MagpieSynthesizer {
             let isFinal = (produced.index == totalChunks - 1)
             let rows = produced.frames.codebookRows
             let pauseMs = produced.chunk.pauseAfterMs
-            let nanoTask = Task.detached(priority: .utility) { () throws -> [Float] in
-                try Self.decodeNanoFrames(
-                    model: nanoModel, numCodebooks: numCodebooks, rows: rows)
-            }
+            let nanoTask = Self.startNanoFramesTask(
+                model: nanoModel, numCodebooks: numCodebooks, rows: rows)
             var samples = try await nanoTask.value
             Self.applyEdgeFade(&samples, sampleRate: sampleRate)
             if !isFinal && pauseMs > 0 {
@@ -357,6 +352,33 @@ public actor MagpieSynthesizer {
         let index: Int
         let frames: ChunkFrames
         let chunk: MagpieTextChunk
+    }
+
+    /// Nonisolated factory for the chunked-path detached task. Creating
+    /// `Task.detached` from a nonisolated static context (rather than from
+    /// inside an actor method) keeps the closure itself nonisolated, which
+    /// avoids the Swift 6 region-based isolation error
+    /// "'self'-isolated value of type ... passed as a strongly transferred
+    /// parameter; later accesses could race".
+    nonisolated private static func startNanoChunkTask(
+        model: MLModel, numCodebooks: Int, rows: [[Int32]], chunkIndex: Int
+    ) -> Task<NanocodecJobResult, Error> {
+        Task.detached(priority: .utility) {
+            try Self.decodeNanoChunk(
+                model: model, numCodebooks: numCodebooks,
+                rows: rows, chunkIndex: chunkIndex)
+        }
+    }
+
+    /// Nonisolated factory for the streaming-path detached task. See
+    /// `startNanoChunkTask` for the rationale.
+    nonisolated private static func startNanoFramesTask(
+        model: MLModel, numCodebooks: Int, rows: [[Int32]]
+    ) -> Task<[Float], Error> {
+        Task.detached(priority: .utility) {
+            try Self.decodeNanoFrames(
+                model: model, numCodebooks: numCodebooks, rows: rows)
+        }
     }
 
     /// Nonisolated nanocodec wrapper used by detached tasks in the chunked
