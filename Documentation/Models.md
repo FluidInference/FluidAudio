@@ -14,6 +14,8 @@ A guide to each CoreML model pipeline in FluidAudio.
 | **Parakeet CTC Japanese** | Batch speech-to-text, Japanese only (0.6B params). CTC architecture. 6.85% CER on JSUT dataset. 10.1x RTFx on M2 Mac. | First Japanese ASR model. Uses CTC greedy decoder. |
 | **Parakeet TDT Japanese** | Batch speech-to-text, Japanese only (0.6B params). TDT architecture. 6.85% CER on JSUT dataset. 10.8x RTFx on M2 Mac. Hybrid model (CTC preprocessor/encoder + TDT decoder/joint). | Alternative Japanese decoder using TDT for same quality but faster |
 | **Parakeet CTC Chinese** | Batch speech-to-text, Mandarin Chinese (0.6B params). CTC architecture. 8.37% mean CER on THCHS-30 dataset. Int8 encoder (0.55GB) or FP32 (1.1GB). | First Mandarin Chinese ASR model. Uses CTC greedy decoder. |
+| **Cohere Transcribe** ([FluidAudio#487](https://github.com/FluidInference/FluidAudio/pull/487), [#537](https://github.com/FluidInference/FluidAudio/pull/537)) | Batch encoder-decoder speech-to-text, 14 languages (en/fr/de/es/it/pt/nl/pl/el/ar/ja/zh/ko/vi). 48-layer Conformer encoder + 8-layer transformer decoder with external KV cache. Mixed precision: INT8 encoder (1.8 GB, iOS 18+) + FP32 ANE-resident static-shape decoder (v2, ~1.6× faster on Apple Silicon than the dynamic FP16 v1 decoder). Hard 35 s per-call audio cap (`max_audio_clip_s` from upstream config), 16 384-token SentencePiece vocab. Language must be passed explicitly via the conditioned prompt. | First Cohere Transcribe port; ANE-optimized v2 decoder (#537) lands fixed `[1, 1, 1, 108]` `attention_mask` so the decoder stays on the Neural Engine. |
+| **Qwen3-ASR** ([FluidAudio#281](https://github.com/FluidInference/FluidAudio/pull/281), [#312](https://github.com/FluidInference/FluidAudio/pull/312), [#410](https://github.com/FluidInference/FluidAudio/pull/410)) | Batch encoder-decoder speech-to-text, 30 languages with automatic language detection (zh/en/yue/ja/ko/vi/th/id/ms/hi/ar/tr/ru/de/fr/es/pt/it/nl/pl/sv/da/fi/cs/fil/fa/el/hu/mk/ro). 0.6B params. 2-model pipeline (ANE-optimized audio encoder + 28-layer stateful decoder with fused embedding/lm_head). FP32 (~1.1 GB) and INT8 (~0.6 GB) variants. ~60–80 ms per token, 1 s audio windows (100 mel frames at 10 ms hop). macOS 15 / iOS 18+. | Beta — accuracy may trail PyTorch reference; see Benchmarks for FLEURS results across all 30 languages. |
 
 TDT models process audio in chunks (~15s with overlap) as batch operations.
 
@@ -84,7 +86,9 @@ Models we converted and tested but are not supported: too large for on-device de
 | Parakeet CTC Chinese | [FluidInference/parakeet-ctc-0.6b-zh-cn-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-zh-cn-coreml) |
 | Parakeet CTC 110M | [FluidInference/parakeet-ctc-110m-coreml](https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml) |
 | Parakeet CTC 0.6B | [FluidInference/parakeet-ctc-0.6b-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-coreml) |
-| Parakeet EOU | [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml) |
+| Parakeet EOU | [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml) (subdirs: `/160ms`, `/320ms`, `/1280ms`) |
+| Cohere Transcribe (INT8 hybrid, default) | [FluidInference/cohere-transcribe-03-2026-coreml/q8](https://huggingface.co/FluidInference/cohere-transcribe-03-2026-coreml) |
+| Qwen3-ASR | [FluidInference/qwen3-asr-0.6b-coreml](https://huggingface.co/FluidInference/qwen3-asr-0.6b-coreml) (variants: `/f32`, `/int8`) |
 | Silero VAD | [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml) |
 | Diarization (Pyannote) | [FluidInference/speaker-diarization-coreml](https://huggingface.co/FluidInference/speaker-diarization-coreml) |
 | LS-EEND | [FluidInference/lseend-coreml](https://huggingface.co/FluidInference/lseend-coreml) |
