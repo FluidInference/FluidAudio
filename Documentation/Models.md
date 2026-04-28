@@ -4,7 +4,9 @@ A guide to each CoreML model pipeline in FluidAudio.
 
 ## ASR Models
 
-### Batch Transcription (Near Real-Time)
+### Sliding-Window Transcription (Near Real-Time)
+
+Long-form audio processed via `SlidingWindowAsrManager` — chunked, overlapped, and stitched. Distinct from the **Streaming Transcription** section below, which uses cache-aware encoders that emit partials as audio arrives.
 
 | Model | Description | Context |
 |-------|-------------|---------|
@@ -14,13 +16,13 @@ A guide to each CoreML model pipeline in FluidAudio.
 | **Parakeet TDT Japanese** | Batch speech-to-text, Japanese only (0.6B params). Hybrid model: INT8 CTC-trained preprocessor + encoder paired with a TDT decoder + joint. 6.85% CER on JSUT, 10.8x RTFx on M2. | CTC-only Japanese inference was removed in 846924a1d; only the preprocessor + encoder from the original CTC repo are reused. |
 | **Parakeet CTC Chinese** | Batch speech-to-text, Mandarin Chinese (0.6B params). CTC architecture. 8.37% mean CER on THCHS-30 dataset. Int8 encoder (0.55GB) or FP32 (1.1GB). | First Mandarin Chinese ASR model. Uses CTC greedy decoder. |
 
-TDT models process audio in chunks (~15s with overlap) as batch operations.
+TDT/CTC models above are wrapped by `SlidingWindowAsrManager`, which chunks audio (~15s with overlap) and stitches the per-chunk transcripts.
 
 ### Streaming Transcription (True Real-Time)
 
 | Model | Description | Context |
 |-------|-------------|---------|
-| **Parakeet EOU** | Streaming speech-to-text with end-of-utterance detection (120M params). Processes 160ms/320ms frames for true real-time results as the user speaks. | Added after TDT was released & for streaming. Smaller model (120M vs 0.6B). |
+| **Parakeet EOU** | Streaming speech-to-text with end-of-utterance detection (120M params). Three chunk-size variants — 160ms / 320ms / 1280ms — for ultra-low-latency to higher-accuracy streaming. | Added after TDT was released & for streaming. Smaller model (120M vs 0.6B). |
 | **Nemotron Speech Streaming 0.6B** | RNNT streaming ASR with 4 chunk size variants (80ms, 160ms, 560ms, 1120ms). English-only (0.6B params). Int8 encoder quantization. Supports ultra-low latency (80ms chunks) to high accuracy (1120ms chunks). | Larger streaming model for better accuracy and quality |
 
 ### Custom Vocabulary / Keyword Spotting
@@ -49,7 +51,7 @@ TDT models process audio in chunks (~15s with overlap) as batch operations.
 | Model | Description | Context |
 |-------|-------------|---------|
 | **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Uses CoreML G2P model for phonemization. | First TTS backend added + support custom pronounces |
-| **Kokoro ANE (7-stage)** | Same Kokoro 82M weights split into 7 CoreML stages so the ANE-friendly layers (Albert / PostAlbert / Alignment / Vocoder) stay resident on the Neural Engine while Prosody / Noise / Tail run on CPU+GPU. 3-11× RTFx vs. the single-graph Kokoro. Single voice (`af_heart`), ≤510 IPA phonemes per call, no chunker / SSML / custom lexicon. | ANE-optimized variant derived from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml) |
+| **Kokoro ANE (7-stage)** | Same Kokoro 82M weights split into 7 CoreML stages so the ANE-friendly layers (Albert / PostAlbert / Alignment / Vocoder) stay resident on the Neural Engine while Prosody / Noise / Tail run on CPU+GPU. 3-11× RTFx vs. the single-graph Kokoro. Single voice (`af_heart`), ≤510 IPA phonemes per call, no chunker / SSML / custom lexicon. | ANE-optimized variant derived (with permission) from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml) |
 | **PocketTTS** | Second TTS backend (~155M params). Autoregressive frame-by-frame generation with dynamic audio chunking. No phoneme stage, works directly on text tokens. | Supports streaming, minimal RAM usage, excellent quality |
 
 ## Not Production Ready
