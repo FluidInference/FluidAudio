@@ -37,6 +37,12 @@ import Foundation
 /// - `specialTokensFile`: JSON map `{"<|endofprompt|>": 151646, ...}` covering
 ///   the 281 runtime-added special tokens (CosyVoice3Tokenizer). Same format
 ///   that `tokenizer_fixture.json` dumps under its `special_tokens` key.
+///
+/// > Note: Gated to macOS 15 / iOS 18 because the underlying
+/// > `CosyVoice3Synthesizer` uses CoreML `MLState` for the decode KV cache.
+/// > Other FluidAudio modules (ASR, Diarization, VAD, Kokoro, PocketTTS)
+/// > remain available on macOS 14 / iOS 17.
+@available(macOS 15, iOS 18, *)
 public actor CosyVoice3TtsManager {
 
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "CosyVoice3TtsManager")

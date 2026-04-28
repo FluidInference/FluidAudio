@@ -11,6 +11,7 @@ import Foundation
 /// (`kv_k_0..kv_k_23`, `kv_v_0..kv_v_23`) replace the 18 MB kv_k / kv_v
 /// round-trip per step. Prefill remains non-stateful and its `kv_k` / `kv_v`
 /// outputs seed the decode state once after prefill.
+@available(macOS 15, iOS 18, *)
 public actor CosyVoice3Synthesizer {
 
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "CosyVoice3Synthesizer")
