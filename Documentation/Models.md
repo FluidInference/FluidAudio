@@ -55,7 +55,7 @@ TDT models process audio in chunks (~15s with overlap) as batch operations.
 
 ## Not Production Ready
 
-Models that are functionally complete and shipped, but **not yet recommended for production use** — typically due to performance ceilings, quality edge cases, or pending platform integration. Use behind feature flags / for evaluation only; expect breaking changes and perf improvements in subsequent iterations.
+Models that are functionally complete and shipped, but **not yet recommended for production use** — RTFx or WER limitations that need community assistance to push past. Open to PRs / issue reports / perf investigations.
 
 | Model | Status |
 |-------|--------|
