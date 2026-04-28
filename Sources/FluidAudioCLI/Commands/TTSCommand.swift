@@ -215,7 +215,15 @@ public struct TTS {
                         backend = .kokoro
                     case "pocket", "pockettts":
                         backend = .pocketTts
-                    case "cosyvoice3", "cosyvoice3-parity", "cv3":
+                    case "cosyvoice3", "cv3", "cosyvoice3-text", "cv3-text":
+                        // Production text-driven synthesis is the default
+                        // user-facing path. The explicit `*-text` aliases
+                        // are kept for backward compatibility with earlier
+                        // documentation.
+                        backend = .cosyvoice3
+                        cv3TextMode = true
+                    case "cosyvoice3-parity", "cv3-parity":
+                        // Phase 1 fixture parity harness — opt-in dev mode.
                         backend = .cosyvoice3
                     case "cosyvoice3-tokenizer-parity", "cv3-tokenizer":
                         backend = .cosyvoice3
@@ -223,9 +231,6 @@ public struct TTS {
                     case "cosyvoice3-frontend-parity", "cv3-frontend":
                         backend = .cosyvoice3
                         cv3FrontendParityMode = true
-                    case "cosyvoice3-text", "cv3-text":
-                        backend = .cosyvoice3
-                        cv3TextMode = true
                     case "cosyvoice3-download", "cv3-download":
                         backend = .cosyvoice3
                         cv3DownloadMode = true
@@ -1049,6 +1054,11 @@ public struct TTS {
               --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS)
               --backend            TTS backend: kokoro (default), pocket, kokoro-ane,
                                    or cosyvoice3 [BETA — slow, RTFx < 1.0]
+                                   CosyVoice3 dev sub-backends:
+                                     cosyvoice3-parity            Phase 1 fixture parity harness
+                                     cosyvoice3-frontend-parity   lm_input_embeds parity vs Python
+                                     cosyvoice3-tokenizer-parity  Qwen2 BPE round-trip
+                                     cosyvoice3-download          eager HF asset pull
               --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)

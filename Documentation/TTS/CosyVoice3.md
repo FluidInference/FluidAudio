@@ -166,21 +166,42 @@ or `extract_voice_prompt.py` for arbitrary speakers.
 fluidaudio tts --backend cosyvoice3 \
     --text "希望你以后能够做的比我还好用" \
     --models-dir ~/.cache/fluidaudio/Models/cosyvoice3 \
+    --tokenizer-dir … --embeddings-file … --special-tokens-file … \
     --prompt-assets path/to/voice.safetensors \
     --output out.wav
 ```
 
-`--backend` help text marks `cosyvoice3` as `[BETA — slow, RTFx < 1.0]`,
-and the dispatcher emits a runtime `logger.warning` so the beta status
-shows up without reading docs.
+`--backend cosyvoice3` (and the `cv3` alias) runs the production
+text-driven synthesis path. `--backend` help text flags it as
+`[BETA — slow, RTFx < 1.0]` and the dispatcher emits a runtime
+`logger.warning` so the beta status shows up without reading docs.
 
-Other dev sub-backends:
+### Dev sub-backends (for debugging the Python ↔ Swift contract)
+
+These are the harnesses future contributors use to bisect divergence
+between the Swift port and the upstream Python reference. Each isolates
+a distinct stage of the pipeline:
 
 ```
-fluidaudio tts --backend cosyvoice3-parity     --fixture …    # Phase 1 parity harness
-fluidaudio tts --backend cosyvoice3-tokenizer  --fixture …    # BPE round-trip check
-fluidaudio tts --backend cosyvoice3-frontend   --text …       # dump lm_input_embeds
+fluidaudio tts --backend cosyvoice3-tokenizer-parity \
+    --tokenizer-dir … --fixture tokenizer_fixture.json
+# Qwen2 BPE encode/decode parity vs tiktoken reference
+
+fluidaudio tts --backend cosyvoice3-frontend-parity \
+    --tokenizer-dir … --embeddings-file … \
+    --fixture shipping.safetensors --tok-fixture …
+# lm_input_embeds assembly parity (text+speech embed lookup, SOS/TASK splice)
+
+fluidaudio tts --backend cosyvoice3-parity \
+    --fixture shipping.safetensors --models-dir build/
+# Phase 1 fixture parity (Synthesizer: prefill → decode → Flow → HiFT)
+
+fluidaudio tts --backend cosyvoice3-download
+# Eager HF pull of all CoreML mlpackages + tokenizer + default voice
 ```
+
+Recommended bisection order when end-to-end output diverges from
+Python: tokenizer-parity → frontend-parity → fixture parity.
 
 ## Models
 
