@@ -145,6 +145,29 @@ fluidaudio tts "Hello world" --backend pocket --voice-file my_voice.bin
 - The `mimi_encoder.mlmodelc` model is downloaded automatically on first use
 - Supports any audio format that AVFoundation can read
 
+### Cloning Across Languages
+
+The Mimi encoder is language-agnostic — voice cloning produces a generic
+acoustic embedding that any language pack's `cond_step` model can consume.
+You can:
+
+- Clone a voice once and reuse the same `PocketTtsVoiceData` across managers
+  configured with different languages.
+- Clone a voice with a Spanish-only manager without pulling in the English
+  language pack — only the encoder subtree is downloaded.
+
+```swift
+// Clone with a Spanish manager
+let esManager = PocketTtsManager(language: .spanish)
+try await esManager.initialize()
+let voiceData = try await esManager.cloneVoice(from: speakerAudioURL)
+
+// Use the same cloned voice with a French manager
+let frManager = PocketTtsManager(language: .french24L)
+try await frManager.initialize()
+let frAudio = try await frManager.synthesize(text: "Bonjour", voiceData: voiceData)
+```
+
 ## Pipeline and Pronunciation Control
 
 ```
@@ -213,6 +236,57 @@ for try await frame in session.frames {
 | One-shot synthesis | `synthesize()` |
 | Streaming playback | `synthesizeStreaming()` |
 | Streaming text or custom chunking | `makeSession()` |
+
+## Languages
+
+PocketTTS ships with multiple language packs converted from
+[kyutai/pocket-tts](https://huggingface.co/kyutai/pocket-tts). Pick the one
+that matches your input text — there is no automatic language detection.
+
+| ID | Layers | HF Path |
+|----|--------|---------|
+| `english` | 6 | repo root (legacy layout) |
+| `german` | 6 | `v2/german/` |
+| `german_24l` | 24 | `v2/german_24l/` |
+| `italian` | 6 | `v2/italian/` |
+| `italian_24l` | 24 | `v2/italian_24l/` |
+| `portuguese` | 6 | `v2/portuguese/` |
+| `portuguese_24l` | 24 | `v2/portuguese_24l/` |
+| `spanish` | 6 | `v2/spanish/` |
+| `spanish_24l` | 24 | `v2/spanish_24l/` |
+| `french_24l` | 24 | `v2/french_24l/` |
+
+Notes:
+- French only ships a 24-layer pack upstream (no 6-layer variant).
+- 24-layer packs are higher quality but slower and larger.
+- The 21 voice names (alba, anna, eve, michael, …) are shared across
+  languages, but the underlying acoustic embeddings are per-language.
+- Mimi encoder weights (used for voice cloning) are language-agnostic and
+  always live at the repo root.
+
+### Swift API
+
+```swift
+let manager = PocketTtsManager(language: .spanish)
+try await manager.initialize()
+let audio = try await manager.synthesize(text: "Hola mundo")
+```
+
+`PocketTtsManager.language` is immutable per instance. To support multiple
+languages in one app, instantiate one manager per language.
+
+### CLI Usage
+
+```bash
+# Default (English)
+fluidaudio tts "Hello world" --backend pocket --output en.wav
+
+# Spanish (6L)
+fluidaudio tts "Hola mundo" --backend pocket --language spanish --output es.wav
+
+# French (24L only)
+fluidaudio tts "Bonjour" --backend pocket --language french_24l --output fr.wav
+```
 
 ## Usage
 

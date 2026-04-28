@@ -21,6 +21,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case nemotronStreaming80 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/80ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
+    case kokoroAne = "FluidInference/kokoro-82m-coreml/ANE"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
     case lseend = "FluidInference/ls-eend-coreml"
     case pocketTts = "FluidInference/pocket-tts-coreml"
@@ -66,6 +67,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "speaker-diarization-coreml"
         case .kokoro:
             return "kokoro-82m-coreml"
+        case .kokoroAne:
+            return "kokoro-82m-coreml/ANE"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
         case .lseend:
@@ -96,6 +99,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-ctc-0.6b-coreml"
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
+        case .kokoroAne:
+            return "FluidInference/kokoro-82m-coreml"
         case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
         case .sortformer:
@@ -116,6 +121,8 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Subdirectory within repo (for repos with multiple model variants)
     public var subPath: String? {
         switch self {
+        case .kokoroAne:
+            return "ANE"
         case .parakeetEou160:
             return "160ms"
         case .parakeetEou320:
@@ -146,6 +153,8 @@ public enum Repo: String, CaseIterable, Sendable {
         switch self {
         case .kokoro:
             return "kokoro"
+        case .kokoroAne:
+            return "kokoro-82m-coreml/ANE"
         case .parakeetEou160:
             return "parakeet-eou-streaming/160ms"
         case .parakeetEou320:
@@ -570,7 +579,7 @@ public enum ModelNames {
         public static let condStep = "cond_step"
         public static let flowlmStep = "flowlm_step"
         public static let flowDecoder = "flow_decoder"
-        public static let mimiDecoder = "mimi_decoder_v2"
+        public static let mimiDecoder = "mimi_decoder"
         public static let mimiEncoder = "mimi_encoder"
 
         public static let condStepFile = condStep + ".mlmodelc"
@@ -582,17 +591,13 @@ public enum ModelNames {
         /// Directory containing binary constants, tokenizer, and voice data.
         public static let constantsBinDir = "constants_bin"
 
+        /// Required files inside any language's `v2/<lang>/` pack.
         public static let requiredModels: Set<String> = [
             condStepFile,
             flowlmStepFile,
             flowDecoderFile,
             mimiDecoderFile,
             constantsBinDir,
-        ]
-
-        /// Models required for voice cloning (optional feature).
-        public static let voiceCloningModels: Set<String> = [
-            mimiEncoderFile
         ]
     }
 
@@ -742,6 +747,32 @@ public enum ModelNames {
         }
     }
 
+    /// laishere/kokoro-coreml — 7-stage CoreML chain (fp16+int8pal, ANE-optimized)
+    /// vendored from https://github.com/laishere/kokoro-coreml.
+    public enum KokoroAne {
+        public static let albert = "KokoroAlbert.mlmodelc"
+        public static let postAlbert = "KokoroPostAlbert.mlmodelc"
+        public static let alignment = "KokoroAlignment.mlmodelc"
+        public static let prosody = "KokoroProsody.mlmodelc"
+        public static let noise = "KokoroNoise.mlmodelc"
+        public static let vocoder = "KokoroVocoder.mlmodelc"
+        public static let tail = "KokoroTail.mlmodelc"
+
+        /// Auxiliary (non-CoreML) files that must accompany the mlmodelc bundles.
+        public static let vocab = "vocab.json"
+        public static let defaultVoiceFile = "af_heart.bin"
+
+        /// All seven .mlmodelc bundles.
+        public static let requiredCoreMLModels: Set<String> = [
+            albert, postAlbert, alignment, prosody, noise, vocoder, tail,
+        ]
+
+        /// CoreML bundles + the vocab JSON + the default voice .bin.
+        public static var requiredModels: Set<String> {
+            requiredCoreMLModels.union([vocab, defaultVoiceFile])
+        }
+    }
+
     static func getRequiredModelNames(for repo: Repo, variant: String?) -> Set<String> {
         switch repo {
         case .vad:
@@ -768,6 +799,13 @@ public enum ModelNames {
             }
             return ModelNames.Diarizer.requiredModels
         case .kokoro:
+            // Sentinel variant used by KokoroAne to fetch only the shared G2P
+            // CoreML assets out of the kokoro repo (the KokoroAne backend
+            // reuses the kokoro G2P models for text -> IPA, but doesn't need
+            // the TTS bundles or the multilingual G2P).
+            if variant == "g2p-only" {
+                return ModelNames.G2P.requiredModels
+            }
             let ttsModels: Set<String>
             if let variant = variant {
                 ttsModels = [variant]
@@ -778,6 +816,8 @@ public enum ModelNames {
                 .union(ModelNames.MultilingualG2P.requiredModels)
         case .pocketTts:
             return ModelNames.PocketTTS.requiredModels
+        case .kokoroAne:
+            return ModelNames.KokoroAne.requiredModels
         case .sortformer:
             if let variant = variant {
                 return [variant]

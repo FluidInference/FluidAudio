@@ -3,6 +3,16 @@ import Foundation
 
 /// Manages text-to-speech synthesis with the NVIDIA Magpie TTS Multilingual 357M model.
 ///
+/// > Important: **Experimental — slow on Apple Silicon.** Magpie is an
+/// > autoregressive cross-attention transformer + non-ANE NanoCodec vocoder.
+/// > Measured RTFx is **~0.4×** on M-series hardware (5 s of audio takes ~12 s
+/// > to synthesize, even with the ANE-warm decoder). Whether this is a model
+/// > characteristic or a CoreML conversion limitation is still being
+/// > investigated. **Do not use in latency-sensitive paths.** For real-time
+/// > use, prefer Kokoro (~20× RTFx, parallel) or PocketTTS (~1.5–2× RTFx,
+/// > streaming Mimi). Magpie's value prop is multilingual coverage and the
+/// > 5 built-in speaker contexts, not throughput.
+///
 /// Magpie is an encoder-decoder transformer that emits discrete NanoCodec tokens
 /// autoregressively at 21.5 fps; NanoCodec then decodes them to 22 kHz audio. The
 /// Swift port uses four CoreML models (text_encoder, decoder_prefill, decoder_step,

@@ -1,12 +1,14 @@
 @preconcurrency import CoreML
 import Foundation
-import OSLog
 
 /// Actor-based store for PocketTTS CoreML models and constants.
 ///
 /// Manages loading and storing of the four CoreML models
 /// (cond_step, flowlm_step, flow_decoder, mimi_decoder),
 /// the binary constants bundle, and voice conditioning data.
+///
+/// A store is bound to a single `PocketTtsLanguage` for its lifetime; switch
+/// languages by creating a new store/manager.
 public actor PocketTtsModelStore {
 
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "PocketTtsModelStore")
@@ -18,12 +20,20 @@ public actor PocketTtsModelStore {
     private var mimiEncoderModel: MLModel?
     private var constantsBundle: PocketTtsConstantsBundle?
     private var voiceCache: [String: PocketTtsVoiceData] = [:]
-    private var repoDirectory: URL?
+    private var languageRootDirectory: URL?
+    private var condLayerKeys: PocketTtsLayerKeys?
+    private var flowlmLayerKeys: PocketTtsLayerKeys?
+    private var mimiDecoderKeysCache: PocketTtsMimiKeys?
     private let directory: URL?
+    public let language: PocketTtsLanguage
 
-    /// - Parameter directory: Optional override for the base cache directory.
-    ///   When `nil`, uses the default platform cache location.
-    public init(directory: URL? = nil) {
+    /// - Parameters:
+    ///   - language: Which upstream language pack to load. Defaults to
+    ///     `.english`.
+    ///   - directory: Optional override for the base cache directory. When
+    ///     `nil`, uses the default platform cache location.
+    public init(language: PocketTtsLanguage = .english, directory: URL? = nil) {
+        self.language = language
         self.directory = directory
     }
 
@@ -31,10 +41,15 @@ public actor PocketTtsModelStore {
     public func loadIfNeeded() async throws {
         guard condStepModel == nil else { return }
 
-        let repoDir = try await PocketTtsResourceDownloader.ensureModels(directory: directory)
-        self.repoDirectory = repoDir
+        let languageRoot = try await PocketTtsResourceDownloader.ensureModels(
+            language: language,
+            directory: directory
+        )
+        self.languageRootDirectory = languageRoot
 
-        logger.info("Loading PocketTTS CoreML models...")
+        logger.info(
+            "Loading PocketTTS CoreML models (language=\(self.language.rawValue))..."
+        )
 
         // Use CPU+GPU for all models to avoid ANE float16 precision loss.
         // The ANE processes in native float16, which causes audible artifacts
@@ -46,7 +61,7 @@ public actor PocketTtsModelStore {
 
         let loadStart = Date()
 
-        let modelFiles = [
+        let modelFiles: [String] = [
             ModelNames.PocketTTS.condStepFile,
             ModelNames.PocketTTS.flowlmStepFile,
             ModelNames.PocketTTS.flowDecoderFile,
@@ -55,7 +70,7 @@ public actor PocketTtsModelStore {
 
         var loadedModels: [MLModel] = []
         for file in modelFiles {
-            let modelURL = repoDir.appendingPathComponent(file)
+            let modelURL = languageRoot.appendingPathComponent(file)
             let model = try MLModel(contentsOf: modelURL, configuration: config)
             loadedModels.append(model)
             logger.info("Loaded \(file)")
@@ -66,12 +81,32 @@ public actor PocketTtsModelStore {
         flowDecoderModel = loadedModels[2]
         mimiDecoderModel = loadedModels[3]
 
+        // Discover per-model output names. Names differ between 6L and 24L
+        // packs because CoreML auto-generates them during tracing.
+        let expectedLayers = language.transformerLayers
+        condLayerKeys = try PocketTtsLayerKeys.discover(
+            from: loadedModels[0],
+            kind: .condStep,
+            expectedLayers: expectedLayers,
+            modelName: "cond_step"
+        )
+        flowlmLayerKeys = try PocketTtsLayerKeys.discover(
+            from: loadedModels[1],
+            kind: .flowlmStep,
+            expectedLayers: expectedLayers,
+            modelName: "flowlm_step"
+        )
+
+        // Discover Mimi decoder schema (per-state input→output mapping +
+        // audio output name). CoreML auto-generates `var_NNN` output names
+        // during conversion so the exact names vary across packs.
+        mimiDecoderKeysCache = try PocketTtsMimiKeys.discover(from: loadedModels[3])
+
         let elapsed = Date().timeIntervalSince(loadStart)
         logger.info("All PocketTTS models loaded in \(String(format: "%.2f", elapsed))s")
 
         // Load constants
-        constantsBundle = try PocketTtsResourceDownloader.ensureConstants(
-            repoDirectory: repoDir)
+        constantsBundle = try PocketTtsConstantsLoader.load(from: languageRoot)
         logger.info("PocketTTS constants loaded")
     }
 
@@ -115,9 +150,36 @@ public actor PocketTtsModelStore {
         return bundle
     }
 
-    /// The repository directory containing models and constants.
+    /// Discovered output names for the cond_step transformer model.
+    func condStepLayerKeys() throws -> PocketTtsLayerKeys {
+        guard let keys = condLayerKeys else {
+            throw PocketTTSError.modelNotFound("PocketTTS cond_step layer keys not discovered")
+        }
+        return keys
+    }
+
+    /// Discovered output names for the flowlm_step transformer model.
+    func flowLMStepLayerKeys() throws -> PocketTtsLayerKeys {
+        guard let keys = flowlmLayerKeys else {
+            throw PocketTTSError.modelNotFound("PocketTTS flowlm_step layer keys not discovered")
+        }
+        return keys
+    }
+
+    /// Discovered I/O schema for the Mimi audio decoder model (state mapping,
+    /// audio output name, declared state shapes).
+    func mimiDecoderKeys() throws -> PocketTtsMimiKeys {
+        guard let keys = mimiDecoderKeysCache else {
+            throw PocketTTSError.modelNotFound("PocketTTS mimi_decoder keys not discovered")
+        }
+        return keys
+    }
+
+    /// The language root directory (`<repoDir>/v2/<lang>`) — contains the
+    /// four model files, `constants_bin/`, and is the right base for
+    /// `loadMimiInitialState`.
     public func repoDir() throws -> URL {
-        guard let dir = repoDirectory else {
+        guard let dir = languageRootDirectory else {
             throw PocketTTSError.modelNotFound("PocketTTS repository not loaded")
         }
         return dir
@@ -128,10 +190,14 @@ public actor PocketTtsModelStore {
         if let cached = voiceCache[voice] {
             return cached
         }
-        guard let repoDir = repoDirectory else {
+        guard let languageRoot = languageRootDirectory else {
             throw PocketTTSError.modelNotFound("PocketTTS repository not loaded")
         }
-        let data = try await PocketTtsResourceDownloader.ensureVoice(voice, repoDirectory: repoDir)
+        let data = try await PocketTtsResourceDownloader.ensureVoice(
+            voice,
+            language: language,
+            languageRoot: languageRoot
+        )
         voiceCache[voice] = data
         return data
     }
@@ -140,17 +206,14 @@ public actor PocketTtsModelStore {
 
     /// Load the Mimi encoder model for voice cloning (lazy, on-demand).
     ///
-    /// Downloads the model from HuggingFace if not already cached.
+    /// Downloads the model from HuggingFace if not already cached. The Mimi
+    /// encoder is language-agnostic and lives at the repo root, shared
+    /// across all language packs.
     public func loadMimiEncoderIfNeeded() async throws {
         guard mimiEncoderModel == nil else { return }
 
         // Ensure the mimi_encoder is downloaded (downloads if needed)
         let modelURL = try await PocketTtsResourceDownloader.ensureMimiEncoder(directory: directory)
-
-        // Update repoDirectory if not set
-        if repoDirectory == nil {
-            repoDirectory = modelURL.deletingLastPathComponent()
-        }
 
         let config = MLModelConfiguration()
         config.computeUnits = .cpuAndGPU
@@ -174,8 +237,11 @@ public actor PocketTtsModelStore {
 
     /// Check if the Mimi encoder model is available.
     public func isMimiEncoderAvailable() -> Bool {
-        guard let repoDir = repoDirectory else { return false }
-        let modelURL = repoDir.appendingPathComponent(ModelNames.PocketTTS.mimiEncoderFile)
+        // The Mimi encoder lives at the repo root, two levels above any
+        // `v2/<lang>/` language root.
+        guard let langRoot = languageRootDirectory else { return false }
+        let repoRoot = langRoot.deletingLastPathComponent().deletingLastPathComponent()
+        let modelURL = repoRoot.appendingPathComponent(ModelNames.PocketTTS.mimiEncoderFile)
         return FileManager.default.fileExists(atPath: modelURL.path)
     }
 

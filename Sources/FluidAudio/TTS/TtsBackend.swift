@@ -6,4 +6,7 @@ public enum TtsBackend: Sendable {
     case kokoro
     /// PocketTTS — flow-matching language model, autoregressive streaming synthesis.
     case pocketTts
+    /// laishere/kokoro 7-stage CoreML chain (ALBERT → PostAlbert → Alignment →
+    /// Prosody → Noise → Vocoder → Tail) with per-stage ANE/GPU assignment.
+    case kokoroAne
 }

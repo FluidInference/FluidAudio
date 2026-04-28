@@ -1,5 +1,7 @@
 # Kokoro Text-to-Speech
 
+> **Looking for the ANE-resident variant?** See [KokoroAne](KokoroAne.md) — splits the same model into 7 stages so the ANE-friendly layers stay resident on the Neural Engine (3-11× faster on Apple Silicon), at the cost of a single voice (`af_heart`), no chunker (≤510 IPA phonemes), and no custom lexicon. Use this page for the default multi-voice / long-form / SSML / custom-lexicon path.
+
 ## Overview
 
 Kokoro is a TTS backend that generates the entire audio representation in one pass (all frames at once) using flow matching over mel spectrograms, then converts to audio with the Vocos vocoder.
