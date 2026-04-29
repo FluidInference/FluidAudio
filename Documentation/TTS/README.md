@@ -11,22 +11,22 @@ canonical model registry across the whole library see
 |----------|--------------------|
 | Real-time English TTS, multi-voice, SSML, custom lexicon | **Kokoro** |
 | Lowest latency / Apple Silicon ANE-resident, single voice | **Kokoro ANE (7-stage)** |
-| Streaming frame-by-frame English TTS, no phoneme stage | **PocketTTS** |
+| Streaming frame-by-frame TTS — English + 5 European languages, no phoneme stage | **PocketTTS** |
 | English expressive / studio-quality, voice-style cloning | **StyleTTS2** *(beta)* |
-| Multilingual (en/es/de/fr/it/vi/zh/hi), 5 built-in speakers | **Magpie** *(slow, RTFx ≈ 0.04)* |
+| Multilingual (en/es/de/fr/it/vi/zh/hi), 5 built-in speakers | **Magpie** *(slow)* |
 | Mandarin zero-shot voice cloning | **CosyVoice3** *(slow, RTFx < 1.0)* |
 
 If you want real-time on Apple Silicon today, pick **Kokoro** or
 **PocketTTS**. The other backends are shipped but carry caveats called
-out below.
+out below. The other models were converted base on the request of our community.
 
 ## Status Matrix
 
 | Backend | Status | Languages | Voices | RTFx (M-series) | Memory | Highlights | Caveats | Deep dive |
 |---------|--------|-----------|--------|-----------------|--------|-----------|---------|-----------|
-| **Kokoro** | Production | English (LibriTTS-trained) | 48 | > 1.0× | Low (iOS-friendly) | Flow-matching mel + Vocos vocoder. SSML, custom lexicon, long-form chunker. CoreML G2P. | One-shot synthesis (no streaming). | [Kokoro.md](Kokoro.md) |
-| **Kokoro ANE (7-stage)** | Production | English | 1 (`af_heart`) | 3–11× faster than Kokoro | Low | Same 82M weights split into 7 CoreML stages so ANE-friendly layers stay resident on the Neural Engine. | ≤ 510 IPA phonemes per call. No SSML / chunker / custom lexicon. Single voice. | [KokoroAne.md](KokoroAne.md) |
-| **PocketTTS** | Production | English | Built-in pool (~155M params) | > 1.0× streaming | Low | Autoregressive frame-by-frame with dynamic audio chunking. No phoneme stage — works directly on text tokens. Streams. | English-only. | [PocketTTS.md](PocketTTS.md) |
+| **Kokoro** | Ready | English | 48 | > 1.0× | Low (iOS-friendly) | Flow-matching mel + Vocos vocoder. SSML, custom lexicon, long-form chunker. CoreML G2P. | One-shot synthesis (no streaming). | [Kokoro.md](Kokoro.md) |
+| **Kokoro ANE (7-stage)** | Ready | English | 1 (`af_heart`) | 3–11× faster than Kokoro | Low | Same 82M weights split into 7 CoreML stages so ANE-friendly layers stay resident on the Neural Engine. | ≤ 510 IPA phonemes per call. No SSML / chunker / custom lexicon. Single voice. | [KokoroAne.md](KokoroAne.md) |
+| **PocketTTS** | Ready | English + German / Italian / Portuguese / Spanish / French (v2 packs, 6L and 24L variants; French is 24L only) | 21 built-in voices shared across packs (per-language acoustic embeddings) + voice cloning via Mimi encoder | > 1.0× streaming | Low | Autoregressive frame-by-frame with dynamic audio chunking. No phoneme stage — works directly on text tokens. Streams. Voice cloning is language-agnostic (clone once, reuse across language packs). | One manager per language (no auto language detection); pronunciation is fully model-internal — no IPA / SSML `<phoneme>` / custom-lexicon control. | [PocketTTS.md](PocketTTS.md) |
 | **StyleTTS2** | Beta (English) | English (LibriTTS multi-speaker) | Per-utterance ref-style blob (`ref_s.bin`, 256 fp32) | > 1.0× typical | Medium | 4-stage diffusion pipeline: `text_predictor` (ANE) → `diffusion_step_512` (CPU+GPU, ADPM2 + Karras) → `f0n_energy` (ANE) → `decoder` (CPU+GPU, HiFi-GAN). 178-token espeak-ng IPA vocab. English G2P via in-tree Kokoro BART (misaki → espeak remap). | English-only checkpoint. Style-encoder export pending — voices ship as offline `ref_s.bin` blobs. Multilingual G2P fallback exists but is unvalidated. | *(no per-model doc yet — see this README + [`Sources/FluidAudio/TTS/StyleTTS2/`](../../Sources/FluidAudio/TTS/StyleTTS2/))* |
 | **Magpie TTS Multilingual** | Not production-ready (slow) | en/es/de/fr/it/vi/zh/hi (8) | 5 built-in | ≈ 0.04× (~25× slower than realtime) | Medium-large | NeMo Magpie 357M, 4-model CoreML pipeline + pure-Swift Local Transformer (Accelerate + BNNS). Custom IPA override via `\|...\|`. ASR-clean on 4/5 speakers. | ~30 s cold first synth; ~96 s warm for an 8-word sentence on M-series. Throughput / MLX backend / CFG perf / Japanese support pending. | [Magpie.md](Magpie.md) |
 | **CosyVoice3 (Mandarin)** | Beta (slow) | Mandarin Chinese | Zero-shot from voice prompt | < 1.0× typical | Large | FunAudioLLM CosyVoice3 0.5B zero-shot voice cloning. 4-model CoreML pipeline (Qwen2 LLM prefill + stateful decode + CFM Flow + HiFT vocoder). Swift-native Qwen2 BPE + mmap'd fp16 embedding tables. | Flow stays fp32 / `cpuAndGPU` (fp16 + ANE NaNs through fused `layer_norm`). HiFT sinegen falls back to CPU. Voice prompt assets (speech IDs / mel / spk-emb) precomputed offline. API may change. CLI tags backend `[BETA — slow, RTFx < 1.0]`. | [CosyVoice3.md](CosyVoice3.md) |
@@ -59,10 +59,33 @@ out below.
 
 ### PocketTTS
 
-- **Manager:** `PocketTtsSynthesizer` (`Sources/FluidAudio/TTS/PocketTTS/`)
+- **Manager:** `PocketTtsManager` / `PocketTtsSynthesizer`
+  (`Sources/FluidAudio/TTS/PocketTTS/`)
 - **Architecture:** ~155M autoregressive frame-by-frame model, dynamic
   audio chunking, no phoneme stage (works directly on text tokens).
-- **Streams:** yes — frame-by-frame.
+  4 CoreML models (`cond_step`, flow LM, flow decoder, Mimi decoder).
+- **Streams:** yes — frame-by-frame, with `makeSession()` for persistent
+  voice prefill across multiple utterances.
+- **Languages (v2 packs, converted from
+  [kyutai/pocket-tts](https://huggingface.co/kyutai/pocket-tts)):**
+
+  | Language | Pack IDs | Notes |
+  |----------|----------|-------|
+  | English | `english` | 6-layer, repo root (legacy layout) |
+  | German | `german`, `german_24l` | 6L + 24L |
+  | Italian | `italian`, `italian_24l` | 6L + 24L |
+  | Portuguese | `portuguese`, `portuguese_24l` | 6L + 24L |
+  | Spanish | `spanish`, `spanish_24l` | 6L + 24L |
+  | French | `french_24l` | 24L only (no 6L upstream) |
+
+  24-layer packs are higher quality but slower and larger. There is no
+  automatic language detection — pick the manager that matches your
+  input text. Voice names (`alba`, `anna`, `eve`, `michael`, …) are
+  shared across packs; the underlying acoustic embeddings are
+  per-language.
+- **Voice cloning:** the Mimi encoder is language-agnostic, so you can
+  clone a voice once and reuse the resulting `PocketTtsVoiceData`
+  across managers configured with different language packs.
 - **HF:** [`FluidInference/pocket-tts-coreml`](https://huggingface.co/FluidInference/pocket-tts-coreml)
 - **More:** [PocketTTS.md](PocketTTS.md)
 
