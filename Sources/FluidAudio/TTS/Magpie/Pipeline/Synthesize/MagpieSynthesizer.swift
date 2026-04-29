@@ -775,8 +775,48 @@ public actor MagpieSynthesizer {
         let predOpts = MLPredictionOptions()
         predOpts.outputBackings = backings
 
-        _ = try model.prediction(from: provider, options: predOpts)
-        cache.swapBackings()
+        do {
+            _ = try model.prediction(from: provider, options: predOpts)
+            cache.swapBackings()
+        } catch {
+            // Slow-path fallback. CoreML refused our pre-allocated
+            // outputBackings — typically because `decoder_step.mlmodelc`
+            // was exported without explicit MultiArray shape/dtype
+            // constraints on its KV outputs, so the runtime can't validate
+            // the buffer layout and bails with
+            //   "Output feature (null) doesn't support output backing
+            //    because it doesn't have a MultiArray constraints."
+            // Re-run without `outputBackings`, route the freshly-allocated
+            // K/V/pos through `MagpieKvCache.absorbOutputs` (which replaces
+            // front pointers directly), and copy the hidden state into
+            // `hiddenBacking` so the rest of this function works unchanged.
+            // Costs ~18.9 MB of fresh fp16 allocation per step versus the
+            // fast path; proper fix is to re-export `decoder_step.mlmodelc`
+            // with shape/dtype constraints on `new_k_*`/`new_v_*`/`var_*`.
+            logger.debug(
+                "decoder_step outputBackings rejected "
+                    + "(\(error.localizedDescription)); using fresh-alloc fallback")
+            let output = try model.prediction(from: provider)
+            try cache.absorbOutputs(output)
+            guard
+                let hidden = output.featureValue(for: MagpieKvCache.decoderHiddenKey)?
+                    .multiArrayValue
+            else {
+                throw MagpieError.inferenceFailed(
+                    stage: "decoder_step",
+                    underlying:
+                        "missing hidden output key \(MagpieKvCache.decoderHiddenKey)")
+            }
+            guard hidden.dataType == .float16, hidden.count == hiddenBacking.count else {
+                throw MagpieError.inferenceFailed(
+                    stage: "decoder_step",
+                    underlying:
+                        "decoder hidden mismatch (dtype=\(hidden.dataType.rawValue) "
+                        + "count=\(hidden.count) expected=\(hiddenBacking.count))")
+            }
+            let bytes = hiddenBacking.count * MemoryLayout<UInt16>.size
+            memcpy(hiddenBacking.dataPointer, hidden.dataPointer, bytes)
+        }
 
         // Hidden state lives in `hiddenBacking` after the call. Convert fp16
         // → fp32 via vImage into a fresh [Float] result buffer (the sampler
