@@ -50,6 +50,24 @@ public actor StyleTTS2Manager {
         _ = try await modelStore.ensureAssetsAvailable(progressHandler: progressHandler)
         let config = try await modelStore.bundleConfig()
         try config.validate()
+
+        // The English G2P CoreML assets ship in the kokoro repo and are loaded
+        // from `~/.cache/fluidaudio/Models/kokoro/`. `G2PModel.loadIfNeeded`
+        // only reads from cache (it never downloads), so a first-time
+        // StyleTTS2 user who has never run kokoro/kokoroAne would otherwise
+        // hit a cryptic `G2PModelError.vocabLoadFailed` deep inside
+        // `synthesize`. Mirror `KokoroAneManager.initialize` and fetch the
+        // shared G2P assets explicitly here.
+        //
+        // NOTE: pass nil (not the caller's `directory`) — `G2PModel.shared`
+        // is a singleton that hardcodes the default cache path
+        // (`TtsModels.cacheDirectoryURL()/Models/kokoro`). Honouring a
+        // custom override here would write to a path the singleton can't
+        // read and we'd still hit `vocabLoadFailed`.
+        try await KokoroAneResourceDownloader.ensureG2PAssets(
+            directory: nil, progressHandler: progressHandler)
+        try await G2PModel.shared.ensureModelsAvailable()
+
         isInitialized = true
         logger.notice("StyleTTS2Manager initialized")
     }
