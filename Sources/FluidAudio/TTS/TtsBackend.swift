@@ -18,4 +18,9 @@ public enum TtsBackend: Sendable {
     /// laishere/kokoro 7-stage CoreML chain (ALBERT → PostAlbert → Alignment →
     /// Prosody → Noise → Vocoder → Tail) with per-stage ANE/GPU assignment.
     case kokoroAne
+    /// StyleTTS2 (LibriTTS multi-speaker) — 4-stage diffusion pipeline:
+    /// text_predictor → diffusion_step (×5) → f0n_energy → decoder. fp16
+    /// everywhere except the fp32 HiFi-GAN decoder (SineGen phase
+    /// saturation requires fp32).
+    case styleTts2
 }
