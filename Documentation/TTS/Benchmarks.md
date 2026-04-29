@@ -1,23 +1,18 @@
 # TTS Benchmarks
 
-Quantitative comparison of FluidAudio's TTS backends. Numbers come from
-`fluidaudio tts-benchmark`, which is intended to make the
-*latency-vs-efficiency-vs-quality* tradeoff visible without anyone having
-to re-derive it from RTFx alone.
-
-> Status: numbers below are measured on a **MacBook Air, M2 (2022),
-> 8-core CPU / 8-core GPU / 16-core Neural Engine, 16 GB unified
-> memory, macOS 26** (`Mac14,2`, on AC power) against the
-> **MiniMax Multilingual TTS Test Set** (CC-BY-SA-4.0, 100 phrases /
-> language). MiniMax is the same public corpus used by MiniMax-Speech
-> ([arXiv 2505.07916](https://arxiv.org/abs/2505.07916)),
-> seed-tts-eval, and Gradium, so RTFx / WER numbers here are
-> directly comparable to the published numbers from those papers.
-> Kokoro (CPU+GPU), Kokoro ANE, PocketTTS, and Magpie complete the
-> 100-phrase English run end-to-end. **StyleTTS2** (LibriTTS
-> checkpoint) and **CosyVoice3** (Mandarin) currently fail on
-> MiniMax — see [StyleTTS2 known failure](#styletts2-known-failure)
-> and [CosyVoice3 known failure](#cosyvoice3-known-failure).
+> **Setup:** MacBook Air M2 (2022), 16 GB, macOS 26, on AC.
+> **Corpus:** [MiniMax Multilingual TTS Test Set][minimax] (100
+> phrases / language, CC-BY-SA-4.0) — the same public corpus used
+> by [MiniMax-Speech][mms], seed-tts-eval, and Gradium, so numbers
+> here are directly paper-comparable.
+> **Status:** Kokoro, Kokoro ANE, PocketTTS, Magpie complete the
+> English run; [StyleTTS2](#styletts2-known-failure) still fails on
+> MiniMax; [CosyVoice3](#cosyvoice3-hift-timeout-mitigated-pending-re-verification)
+> HiFT-async-timeout is mitigated in-branch (HiFT pinned to
+> `.cpuAndGPU`), full-corpus re-verification pending.
+>
+> [minimax]: https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
+> [mms]: https://arxiv.org/abs/2505.07916
 
 ## Why not just RTFx?
 
@@ -153,7 +148,7 @@ WER / CER.
 | PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 6.0 s | **1244 / 4749 ms**  | 8757 / 19174 ms     | 0.61×    | 1503 MB  | 0.014   | 0.006   | **streaming**; TTFT is first 80 ms audio frame |
 | StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | n/a (fails)| n/a                  | n/a                 | n/a      | n/a      | n/a     | n/a     | aborts with ANEF compile error on MiniMax — see [known failure](#styletts2-known-failure) |
 | Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 19.1 s     | 19834 / 57508 ms    | 19834 / 57508 ms    | 0.41×    | 1233 MB  | 0.056   | 0.033   | streaming-capable but benchmarked one-shot; split-K/V decoder; outputBackings fast path with latched fallback |
-| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 612.8 s†   | 30374 / 41116 ms†   | 30374 / 41116 ms†   | 0.16×†   | 2927 MB† | n/a     | n/a     | beta; full-corpus run times out, [partial 20-phrase numbers](#cosyvoice3-known-failure) |
+| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 612.8 s†   | 30374 / 41116 ms†   | 30374 / 41116 ms†   | 0.16×†   | 2927 MB† | n/a     | n/a     | beta; HiFT-async-timeout [mitigated](#cosyvoice3-hift-timeout-mitigated-pending-re-verification), full-corpus re-run pending |
 
 \* TTFT = time to first audio frame. PocketTTS streams 80 ms / 1920-sample
 frames at 24 kHz, so TTFT < synth_ms; the gap is the streaming
@@ -164,34 +159,7 @@ advantage. All other backends are benchmarked one-shot, so
 CoreML async timeout on the HiFi-GAN vocoder. The 20-phrase
 short-subset numbers shown are from a tiny side run; cold-start is
 dominated by ANE compile attempts that ultimately fall back to CPU+GPU.
-See [CosyVoice3 known failure](#cosyvoice3-known-failure).
-
-Headline read for MiniMax-English:
-
-- **Kokoro ANE** wins on latency and RTFx (~5.2× real-time, 1.59 s p50
-  warm) but pays a noticeable WER tax (0.108 vs 0.013 on the non-ANE
-  Kokoro graph). The MiniMax corpus stresses long news / story
-  sentences in the second half (phrases 81–100), which drives most of
-  that WER delta.
-- **Kokoro** (CPU+GPU) is the cleanest English backend on this corpus
-  — WER 0.013 / CER 0.005 / 2.0× RTFx — and is the recommended
-  comparison point for paper-relative quality. Cold start is
-  ~92 s on first run because the single-graph encoder hits ANE
-  compilation on the longer prompts.
-- **PocketTTS** matches Kokoro on quality (WER 0.014, CER 0.006) and
-  is the only streaming-first backend in this slice. Full-utterance
-  RTFx is sub-real-time on long news / story sentences (0.61×, synth
-  p50 8.8 s, p95 19.2 s), but **TTFT p50 is 1.24 s** (p95 4.75 s) —
-  i.e. the user hears the first audio frame ~7× sooner than the
-  synth-time p50 would suggest. For conversational use that is the
-  metric that matters; for batch / offline rendering the synth-time
-  numbers are still relevant.
-- **Magpie** is currently the slowest English backend (RTFx 0.41×,
-  p50 19.8 s, p95 57.5 s) because its autoregressive decoder scales
-  super-linearly on the long story sentences. Quality is mid-pack
-  (WER 0.056). The `outputBackings` fast path is back-online for
-  short phrases (see [Magpie outputBackings fast
-  path](#magpie-outputbackings-fast-path)).
+See [CosyVoice3 known failure](#cosyvoice3-hift-timeout-mitigated-pending-re-verification).
 
 ### Kokoro ANE — per-stage breakdown (default preset, MiniMax-English)
 
@@ -269,7 +237,7 @@ Run on a 20-phrase subset of `minimax-chinese` (phrases ≤30 chars) with
 
 The full 100-phrase `minimax-chinese` run aborts with an ANE-compile
 timeout on the HiFi-GAN vocoder partway through. See
-[CosyVoice3 known failure](#cosyvoice3-known-failure).
+[CosyVoice3 known failure](#cosyvoice3-hift-timeout-mitigated-pending-re-verification).
 
 ## StyleTTS2 known failure
 
@@ -296,9 +264,9 @@ prior (now-removed) Harvard-sentences corpus — see git history for
 the Harvard-sentence numbers. Fixing the export and re-running on
 MiniMax is the follow-up.
 
-## CosyVoice3 known failure
+## CosyVoice3 HiFT timeout (mitigated, pending re-verification)
 
-The full `minimax-chinese` (100 phrases) run aborts with:
+The previous `minimax-chinese` runs aborted with:
 
 ```
 E5RT: Submit Async failed for [3:29]: Async task:
@@ -306,14 +274,22 @@ HiFT-T500-fp16_main__Op104_BnnsCpuInference has timed out.
 @ CancelTimedOutAsyncTask_block_invoke
 ```
 
-…on the `HiFT-T500-fp16` HiFi-GAN vocoder. CosyVoice3 is gated behind
-a `[WARN] CosyVoice3 is experimental / beta` banner and falls back to
-CPU+GPU on the AR LLM-Decode graph; the HiFi-GAN async-timeout fires
-on a long phrase mid-corpus. A 20-phrase short subset (≤30 chars)
-completes; numbers are in the [CosyVoice3 partial
-numbers](#cosyvoice3-partial-numbers-20-phrase-short-subset) table
-above. Fixing the timeout (likely a chunked-vocoder + bounded-async
-re-export) is on the CosyVoice3 follow-up list.
+Root cause: HiFT was loaded with `.cpuAndNeuralEngine`, which let the
+CoreML planner place most of the graph on ANE but kept at least one
+op (`HiFT-T500-fp16_main__Op104`) on the BNNS CPU async-dispatch
+path. Long phrases mid-corpus then trip the BNNS async watchdog (the
+same ANE+BNNS mixed-compute pathology that already forced Flow and
+LLM-Decode off ANE in `CosyVoice3ModelStore.loadIfNeeded`).
+
+Mitigation in this branch: HiFT is now pinned to `.cpuAndGPU` (see
+`CosyVoice3ModelStore.swift`), removing the BNNS-async path entirely.
+The model is fixed-shape `[1, 80, 500]`, so GPU placement is
+deterministic. Trade-off: a small per-call latency increase vs. the
+ANE config that didn't actually complete the corpus.
+
+The 20-phrase short-subset numbers below are from the pre-mitigation
+config and remain valid as a lower-bound reference; a full
+`minimax-chinese` re-run with the mitigation is pending.
 
 ## Magpie outputBackings fast path
 
@@ -339,88 +315,3 @@ with explicit `MultiArray` shape + dtype constraints on `new_k_*`,
 `new_v_*`, `var_*` outputs — that would let the fast path stay live
 and avoid the per-step allocation entirely.
 
-## JSON report schema
-
-```jsonc
-{
-  "summary": {
-    "backend": "kokoro-ane",       // or "kokoro" / "pocket-tts" / "styletts2" / "magpie" / "cosyvoice3"
-    "voice": "af_heart",            // backends with a string voice
-    "speaker": "John",              // magpie only
-    "language": "en",               // pocket-tts / magpie
-    "corpus": "minimax-english",
-    "phrase_count": 100,
-    "compute_units": "default",
-    "cold_start_s": 37.9,
-    "first_synth_ms": 1048,
-    "ttft_ms_p50": 1586,
-    "ttft_ms_p95": 2515,
-    "warm_synth_ms_p50": 1586,
-    "warm_synth_ms_p95": 2515,
-    "agg_rtfx": 5.19,
-    "peak_rss_mb": 738,
-    "asr_skipped": false
-  },
-  "categories": [
-    { "category": "minimax-english", "phrase_count": 100,
-      "macro_wer": 0.108, "macro_cer": 0.040,
-      "synth_ms_p50": 1586, "synth_ms_p95": 2515, "rtfx": 5.19 }
-  ],
-  "phrases": [
-    {
-      "index": 1, "category": "minimax-english",
-      "reference": "Life is a choice, and we have to make it.",
-      "hypothesis": "life is a choice and we have to make it",
-      "ttft_ms": 1500, "synth_ms": 1500, "audio_ms": 7800, "rtfx": 5.2,
-      "wer": 0.0, "cer": 0.0, "asr_ms": 142,
-      "stage_ms": {
-        // Kokoro ANE: 7 stages + total
-        "albert": 28, "post_albert": 12, "alignment": 2,
-        "prosody": 49, "noise": 243, "vocoder": 1040, "tail": 25,
-        "total": 1399
-        // Magpie: text_encoder, prefill, ar_loop, decoder_step, sampler, nanocodec
-        // Other backends: empty {}
-      },
-      // Backend-specific extras (any subset):
-      "encoder_tokens": 28, "acoustic_frames": 81,         // kokoro-ane
-      "chunk_count": 1, "wav_bytes": 96108,                // kokoro
-      "frame_count": 25, "eos_step": -1,                   // pocket-tts
-      "code_count": 81, "finished_on_eos": true,           // magpie
-      "generated_token_count": 142, "decoded_token_count": 142, // cosyvoice3
-      "wav_path": ""
-    }
-  ]
-}
-```
-
-## How to add or improve a backend
-
-Each driver is ~70 lines and lives in `Sources/FluidAudioCLI/Commands/TtsBenchmarkCommand.swift`:
-
-1. Implement `runX(...)` that mirrors the existing pattern: build the
-   manager with the requested compute units, time `initialize()`, run
-   a single warm-up synth, then call `runPhraseLoop` with a closure
-   that returns `BackendPhraseSample`.
-2. If the backend has its own per-stage compute-units struct, add an
-   `init(preset: TtsComputeUnitPreset)` mirroring
-   `KokoroAneComputeUnits.init(preset:)`.
-3. Add the backend's case to the `Backend` enum and the `parseBackend`
-   dispatch.
-4. Re-run on the reference machine with the appropriate
-   `--corpus minimax-<lang>` and replace the placeholder row in the
-   **Per-backend top-line** table above.
-
-Streaming-aware TTFT (using `synthesizeStreaming` for PocketTTS and
-`synthesizeStream` for Magpie) is a follow-up — current TTFT == total
-synth time for one-shot drivers.
-
-## See also
-
-- [TTS overview & status matrix](README.md)
-- [Kokoro ANE deep dive](KokoroAne.md)
-- [Kokoro deep dive](Kokoro.md)
-- [PocketTTS deep dive](PocketTTS.md)
-- [Magpie deep dive](Magpie.md)
-- [CosyVoice3 deep dive](CosyVoice3.md)
-- [Voice quality notes](voice-quality.md)
-- [MiniMax corpus attribution](../../Benchmarks/tts/corpus/minimax/README.md)

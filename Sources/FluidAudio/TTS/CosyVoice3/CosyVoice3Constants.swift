@@ -15,7 +15,13 @@ import Foundation
 ///   `input_embed.conv_pos_embed` (`Conv1d(1024,1024,k=31)+Mish`)
 ///   that three rewrite attempts couldn't move — ANEF rejects the
 ///   conv footprint regardless of group count.)
-/// - HiFT-T500-fp16                       (cpuAndNeuralEngine)
+/// - HiFT-T500-fp16                       (cpuAndGPU — pinned off
+///   ANE because the `.cpuAndNeuralEngine` planner left at least one
+///   op on the BNNS CPU path, which tripped a hard async-dispatch
+///   watchdog mid-corpus on long phrases:
+///   `E5RT: Submit Async failed ... HiFT-T500-fp16_main__Op104_BnnsCpuInference
+///   has timed out`. GPU placement is deterministic and avoids the
+///   ANE+BNNS mixed-compute pathology.)
 ///
 /// Decode runs **stateless** with an external KV cache: prefill emits
 /// `kv_k` / `kv_v` of shape `[24, 1, 2, 768, 64]` fp32, and decode
