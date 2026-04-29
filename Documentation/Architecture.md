@@ -158,13 +158,60 @@ Why this shape instead of a stateful streaming encoder:
    same package via the streaming protocol in `ASR/Parakeet/Streaming/`
    when they're available.
 
-### 2.3 Why Chunking is "~14.96s"
+### 2.3 Why Chunking is 14.88 s, Not 15.0 s
 
-The internal chunk length isn't 15.0s — it's whatever rounds cleanly to
-the encoder's frame stride. The 14.96s figure that appears in some docs
-is `ceil(15.0 / encoder_stride) * encoder_stride`. Sliding window keeps
-the user-facing math at 15.0s; the sample-count math accounts for the
-stride mismatch.
+The Parakeet CoreML encoder is traced with a fixed input of `240_000`
+samples (`ASRConstants.maxModelSamples`, 15.0 s at 16 kHz). That's the
+hard cap; the *actual* per-chunk audio length is shorter, because two
+margins have to come out of the 15 s budget before the chunk is rounded
+to the encoder's frame stride.
+
+Walking the math in `ChunkProcessor.chunkSamples`
+(`Sources/FluidAudio/ASR/Parakeet/SlidingWindow/TDT/ChunkProcessor.swift:33`):
+
+```
+maxModelSamples       = 240_000             // encoder hard cap (15.0 s)
+melContextSamples     =   1_280             // 80 ms = 1 encoder frame
+melHopSize            =     160             // 10 ms STFT hop
+samplesPerEncoderFrame=   1_280             // encoder frame stride
+
+maxActualChunk = maxModelSamples - melContextSamples   = 238_720
+raw            = maxActualChunk  - melHopSize          = 238_560
+chunkSamples   = floor(raw / 1_280) * 1_280            = 238_080
+                                                       → 14.88 s
+```
+
+Each subtraction exists for a distinct reason:
+
+1. **`−melContextSamples` (1 280, 80 ms).** Every non-first chunk gets
+   80 ms of left context **prepended** before being passed to the
+   encoder. The mel-spectrogram STFT window and the FastConformer
+   encoder's depthwise convolutions need lookback; without it, the
+   leading frames produce features that cause all-blank predictions
+   (`ChunkProcessor.swift:26-29`). That 80 ms has to fit *inside* the
+   240 000-sample budget, so it's reserved out of `chunkSamples` up
+   front: `chunkSamples + melContextSamples ≤ maxModelSamples`.
+2. **`−melHopSize` (160, 10 ms).** One STFT hop of slack on the right
+   edge so the trailing mel frame doesn't clip a partial window.
+3. **`floor(... / 1280) * 1280`.** Round the result down to a whole
+   encoder frame. The encoder's 8× subsampling means non-frame-aligned
+   inputs would leave a partial trailing frame, complicating decoder
+   bookkeeping for no benefit.
+
+The 2.0 s overlap (`overlapSeconds`) is computed against `chunkSamples`
+and capped at half of it, again rounded down to an encoder frame
+(`ChunkProcessor.swift:40`).
+
+> **Stale figure: 14.96 s.** Several docs and a comment on
+> `ChunkProcessor.swift:22` reference a chunk size of `~14.96 s`
+> (= 187 × 1 280 = 239 360 samples). That was the value *before*
+> `melContextSamples` was reserved out of the 15 s budget: the old
+> formula was `floor((240_000 − 160) / 1280) * 1280 = 239_360`.
+> Today the same formula yields 238 080 (14.88 s) because the
+> 80 ms context reservation now lives inside the 15 s envelope. The
+> stale references are tracked in `CLAUDE.md:175`,
+> `Documentation/API.md:279`, and
+> `Documentation/ASR/TDT-CTC-110M.md:113, 154, 298`.
 
 ### 2.4 Qwen3 Eliminates an Embedding CoreML Graph
 
