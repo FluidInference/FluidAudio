@@ -13,7 +13,6 @@ import Foundation
 ///   --output     .../build/swift_e2e.wav \
 ///   --seed 42
 /// ```
-@available(macOS 15, iOS 18, *)
 enum CosyVoice3ParityCLI {
 
     private static let logger = AppLogger(category: "CosyVoice3ParityCLI")

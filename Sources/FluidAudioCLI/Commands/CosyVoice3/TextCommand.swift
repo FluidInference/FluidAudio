@@ -19,7 +19,6 @@ import Foundation
 ///   --output              .../build/swift_cv3_text.wav \
 ///   --seed 42
 /// ```
-@available(macOS 15, iOS 18, *)
 enum CosyVoice3TextCLI {
 
     private static let logger = AppLogger(category: "CosyVoice3TextCLI")

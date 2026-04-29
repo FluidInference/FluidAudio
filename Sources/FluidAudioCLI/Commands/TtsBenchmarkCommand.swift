@@ -184,15 +184,10 @@ public enum TtsBenchmarkCommand {
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     skipAsr: effectiveSkipAsr)
             case .cosyVoice3:
-                if #available(macOS 15, iOS 18, *) {
-                    try await runCosyVoice3(
-                        phrases: phrases, corpusLabel: corpusLabel,
-                        voice: voice,
-                        preset: preset, outputJson: outputJson, audioDir: audioDir)
-                } else {
-                    logger.error("CosyVoice3 requires macOS 15+ / iOS 18+")
-                    exit(1)
-                }
+                try await runCosyVoice3(
+                    phrases: phrases, corpusLabel: corpusLabel,
+                    voice: voice,
+                    preset: preset, outputJson: outputJson, audioDir: audioDir)
             }
         } catch {
             logger.error("tts-benchmark failed: \(error)")
@@ -459,7 +454,6 @@ public enum TtsBenchmarkCommand {
 
     // MARK: - CosyVoice3 driver
 
-    @available(macOS 15, iOS 18, *)
     private static func runCosyVoice3(
         phrases: [(category: String, text: String)],
         corpusLabel: String,

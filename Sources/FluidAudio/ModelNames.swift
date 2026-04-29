@@ -645,7 +645,7 @@ public enum ModelNames {
     /// expected local directory layout is encoded in `CosyVoice3Constants.Files`.
     public enum CosyVoice3 {
         public static let llmPrefill = "LLM-Prefill-T256-M768-fp16"
-        public static let llmDecode = "LLM-Decode-M768-fp16-stateful"
+        public static let llmDecode = "LLM-Decode-M768-fp16"
         public static let flow = "Flow-N250-fp16"
         public static let hift = "HiFT-T500-fp16"
         public static let speechEmbeddings = "speech_embedding-fp16.safetensors"

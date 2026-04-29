@@ -8,10 +8,11 @@ to re-derive it from RTFx alone.
 > Status: first measurement landed on **MacBook Air, M2 (2022),
 > 8-core CPU / 8-core GPU / 16-core Neural Engine, 16 GB unified
 > memory, macOS 26** (`Mac14,2`, on AC power). The harness wires
-> **Kokoro ANE, Kokoro, PocketTTS, Magpie, and CosyVoice3**, but only
-> Kokoro ANE / Kokoro / PocketTTS produce numbers on this machine
-> today. StyleTTS2, Magpie, and CosyVoice3 are blocked upstream of
-> the benchmark harness — see [Backends not yet measured](#backends-not-yet-measured)
+> **Kokoro ANE, Kokoro, PocketTTS, Magpie, and CosyVoice3**.
+> Kokoro ANE / Kokoro / PocketTTS / CosyVoice3 produce numbers on this
+> machine today; CosyVoice3 is experimental / beta with sub-real-time
+> RTFx. StyleTTS2 and Magpie are blocked upstream of the benchmark
+> harness — see [Backends not yet measured](#backends-not-yet-measured)
 > for the specific blockers and what would unblock each.
 
 ## Why not just RTFx?
@@ -137,7 +138,7 @@ ANE first-compile + on-disk model fetch the first time the cache misses.
 | PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 3.4 s | 2222 / 3281 ms | 0.97× | 1062 MB | 0.000 | 0.000 | streaming-capable; no per-call CU knob |
 | StyleTTS2   | MIT         | en                     | —         | —          | —                    | —        | —        | —         | —         | synthesis stub upstream |
 | Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | —          | —                    | —        | —        | —         | —         | `decoder_step.mlmodelc` rejects `outputBackings` |
-| CosyVoice3  | Apache-2.0  | zh (mandarin)          | —         | —          | —                    | —        | —        | n/a       | n/a       | stateful LLM-Decode variant not on HF |
+| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 160.5 s    | 10251 / 11765 ms     | 0.21×    | 4551 MB  | n/a       | n/a       | beta; ANE rejects decode → CPU+GPU fallback; corpus = `prose-zh` |
 
 Em-dash (`—`) marks backends that did not produce numbers on this run
 (synthesis stub or upstream blocker).
@@ -249,28 +250,6 @@ not a benchmark-harness regression.
    `MultiArray` shape + dtype constraints on `new_k_*`, `new_v_*`,
    `var_*` outputs.
 
-### CosyVoice3
-
-**Blocker:** `CosyVoice3ModelStore` resolves
-`LLM-Decode-M768-fp16-stateful.mlmodelc` (per
-`ModelNames.swift:619` and `CosyVoice3Constants.swift:69`), but
-the public HuggingFace repo
-[`FluidInference/CosyVoice3-0.5B-coreml`](https://huggingface.co/FluidInference/CosyVoice3-0.5B-coreml)
-only ships the non-stateful `LLM-Decode-M768-fp16.mlmodelc`. The
-stateful KV-cache variant has not been uploaded, so
-`CosyVoice3ResourceDownloader.ensureCoreModels()` succeeds but leaves
-the cache without the file the loader actually expects, surfacing as:
-
-```
-modelNotFound(path: "LLM-Decode-M768-fp16-stateful.mlmodelc")
-```
-
-**What unblocks:** publish the stateful LLM-Decode variant to the HF
-repo (the same conversion that introduced the `MLState` /
-macOS 15+ requirement at `CosyVoice3TtsManager.swift:41-45`). No code
-change needed on the benchmark side; the driver in
-`runCosyVoice3(...)` is wired and waiting.
-
 ### Per-category quality
 
 MacBook Air M2 (2022), default compute-units, Parakeet TDT roundtrip. p50 / p95 are
@@ -302,6 +281,20 @@ end-to-end pronunciation quality rather than ASR artefacts.
 | `prose-en`   | 20      | 0.000     | 0.000     | 2222            | 3281            | 0.97×  |
 | `numbers-en` | 10      | 0.363     | 0.130     | 3174            | 5340            | 1.35×  |
 | `names-en`   | 10      | 0.178     | 0.035     | 3537            | 6430            | 1.23×  |
+
+**CosyVoice3 (beta, `--skip-asr` forced)**
+
+| Corpus       | Phrases | Macro WER | Macro CER | Synth p50 (ms) | Synth p95 (ms) | RTFx   |
+|--------------|---------|-----------|-----------|-----------------|-----------------|--------|
+| `prose-zh`   | 8       | n/a       | n/a       | 10251           | 11765           | 0.21×  |
+
+CosyVoice3 is gated behind a `[WARN] CosyVoice3 is experimental / beta`
+banner; the AR LLM-Decode graph is rejected by the ANE compiler
+(`MILCompilerForANE error: failed to compile ANE model using ANEF`) and
+falls back to CPU+GPU, which is what drives the sub-real-time RTFx.
+Cold start (~160 s) is dominated by the first-use ANE compile attempts
+across the 4-graph pipeline. No ASR roundtrip — Mandarin is out of
+scope for the Parakeet harness.
 
 The qualitative pattern: Kokoro ANE pays a noticeable WER tax on prose
 versus the non-ANE Kokoro graph, but stays >4× real-time on the
