@@ -1,15 +1,5 @@
 # FluidAudio Architecture
 
-This document explains **why** the FluidAudio codebase is structured the way
-it is. It is a conceptual companion to the per-module docs in
-`Documentation/ASR/`, `Documentation/TTS/`, `Documentation/VAD/`, and
-`Documentation/Diarization/`, which cover **what** each module does and how
-to use it.
-
-If you're new to the repo, read this first to understand the design
-constraints that shape every module. Each section ends with file pointers so
-you can jump straight to the canonical implementation.
-
 ---
 
 ## 1. Cross-Cutting Patterns
@@ -32,7 +22,7 @@ Every component that owns CoreML models exposes them through an `actor`
 Why actors and not `DispatchQueue` + locks?
 
 1. CoreML's `MLModel` load and prediction APIs are async but **not
-   reentrant** — concurrent calls can corrupt internal scratch buffers.
+   reentrant** concurrent calls can corrupt internal scratch buffers.
    Actor isolation serializes access without manual locking.
 2. We never use `@unchecked Sendable` (see project guidelines). Actors are
    the canonical Swift 6-safe way to share mutable model state.
@@ -47,45 +37,7 @@ for ergonomic reasons but only a slice of state actually mutates. The
 mutating slice goes into an actor (`SpeakerManager`); the immutable models
 sit on the class as `nonisolated(unsafe)` read-only references.
 
-### 1.2 Lazy HuggingFace Downloads
-
-No model ships in the binary. Every CoreML model is fetched lazily from
-`huggingface.co/FluidInference/*` on first use and cached under
-`~/Library/Application Support/FluidAudio/Models/` on macOS.
-
-Entry point: `Sources/FluidAudio/DownloadUtils.swift`. Per-module
-downloaders (e.g. `PocketTtsResourceDownloader`, `AsrModels.downloadAndLoad`,
-`VadManager.downloadModel`) are thin wrappers that compose `DownloadUtils`
-with module-specific repo names and file lists.
-
-Why lazy:
-
-- Models are 50 MB to ~1 GB; bundling them would make the package
-  unusable as a SwiftPM dependency.
-- App startup never blocks on a download — the first call to a manager's
-  `loadIfNeeded()` (or first transcribe) does it.
-- HuggingFace token resolution checks `HF_TOKEN`,
-  `HUGGING_FACE_HUB_TOKEN`, and `HUGGINGFACEHUB_API_TOKEN` env vars for
-  compatibility with the Python ecosystem.
-
-### 1.3 Per-Module Error Enums
-
-Every module owns its own `Error, LocalizedError` enum. There is no
-top-level `FluidAudioError`.
-
-- `ASRError`, `Qwen3AsrError`, `CohereAsrError`,
-  `SlidingWindowAsrError`, `AsrModelsError`
-- `PocketTTSError`, plus per-TTS-model variants
-- `VadError` — `Sources/FluidAudio/VAD/VadTypes.swift:221`
-- `DiarizerError` — `Sources/FluidAudio/Diarizer/Core/DiarizerTypes.swift:190`,
-  `OfflineDiarizationError`
-
-Why per-module: error domains stay isolated, a UI can match exhaustively
-on one enum, and `errorDescription` strings are scoped to terminology the
-caller already understands. We do not try to unify "model not loaded"
-across modules — each model has different recovery paths.
-
-### 1.4 AsyncStream / AsyncThrowingStream for Long-Running Work
+### 1.2 AsyncStream / AsyncThrowingStream for Long-Running Work
 
 Streaming inference uses Swift concurrency streams instead of delegate
 protocols or callbacks.
@@ -105,7 +57,7 @@ Throwing vs non-throwing is a real semantic choice: throwing if a
 mid-stream failure should terminate the whole run, non-throwing if the
 stream represents incremental updates that survive transient errors.
 
-### 1.5 CoreML Compute Unit Selection
+### 1.3 CoreML Compute Unit Selection
 
 `MLComputeUnits` is set per model — never globally. The choice is driven
 by **measured precision**, not preference.
@@ -127,7 +79,7 @@ forces CPU+GPU for precision.
 
 Defaults live in `Sources/FluidAudio/Shared/MLModelConfigurationUtils.swift`.
 
-### 1.6 Pure Swift vs CoreML
+### 1.4 Pure Swift vs CoreML
 
 The dividing line is **per-element vs tensor-throughput**.
 
