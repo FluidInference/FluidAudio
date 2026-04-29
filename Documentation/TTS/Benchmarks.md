@@ -7,15 +7,12 @@ to re-derive it from RTFx alone.
 
 > Status: first measurement landed on **MacBook Air, M2 (2022),
 > 8-core CPU / 8-core GPU / 16-core Neural Engine, 16 GB unified
-> memory, macOS 26** (`Mac14,2`, on AC power). The harness wires **Kokoro ANE, Kokoro,
-> PocketTTS, Magpie, and CosyVoice3**. StyleTTS2 is intentionally absent
-> — its synthesis path throws "not yet implemented" upstream. Magpie
-> failed at warmup with a CoreML output-backing error
-> (`Output feature (null) doesn't support output backing because it
-> doesn't have a MultiArray constraints`); CosyVoice3's
-> `LLM-Decode-M768-fp16-stateful.mlmodelc` was not present on the
-> reference machine. Both rows below are marked with `—` until those
-> upstream issues are resolved.
+> memory, macOS 26** (`Mac14,2`, on AC power). The harness wires
+> **Kokoro ANE, Kokoro, PocketTTS, Magpie, and CosyVoice3**, but only
+> Kokoro ANE / Kokoro / PocketTTS produce numbers on this machine
+> today. StyleTTS2, Magpie, and CosyVoice3 are blocked upstream of
+> the benchmark harness — see [Backends not yet measured](#backends-not-yet-measured)
+> for the specific blockers and what would unblock each.
 
 ## Why not just RTFx?
 
@@ -139,8 +136,8 @@ ANE first-compile + on-disk model fetch the first time the cache misses.
 | Kokoro      | Apache-2.0  | en (af_heart only)     | ~330 MB   | 38.3 s     | 1263 / 1497 ms       | 2.11×    | 907 MB   | 0.018     | 0.007     | single CU; cleaner than ANE on prose |
 | PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 3.4 s | 2222 / 3281 ms | 0.97× | 1062 MB | 0.000 | 0.000 | streaming-capable; no per-call CU knob |
 | StyleTTS2   | MIT         | en                     | —         | —          | —                    | —        | —        | —         | —         | synthesis stub upstream |
-| Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | —          | —                    | —        | —        | —         | —         | upstream CoreML output-backing error on M2 |
-| CosyVoice3  | Apache-2.0  | zh (mandarin)          | —         | —          | —                    | —        | —        | n/a       | n/a       | `LLM-Decode-M768-fp16-stateful.mlmodelc` not on this machine |
+| Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | —          | —                    | —        | —        | —         | —         | `decoder_step.mlmodelc` rejects `outputBackings` |
+| CosyVoice3  | Apache-2.0  | zh (mandarin)          | —         | —          | —                    | —        | —        | n/a       | n/a       | stateful LLM-Decode variant not on HF |
 
 Em-dash (`—`) marks backends that did not produce numbers on this run
 (synthesis stub or upstream blocker).
@@ -186,16 +183,10 @@ for any further per-stage compute-unit re-tuning.
 
 ### Magpie — per-stage breakdown (default preset)
 
-Not measured. Magpie warmup currently fails on M2 / macOS 26 with:
-
-```
-Output feature (null) doesn't support output backing because it
-doesn't have a MultiArray constraints.
-```
-
-This is upstream of `tts-benchmark` (raised inside `MagpieTtsManager`
-during the prediction-options setup). When that's resolved the harness
-will populate this table from `MagpieSynthesisTimings`:
+Not measured (upstream blocker, see
+[Backends not yet measured](#backends-not-yet-measured)). When that's
+resolved the harness will populate this table from
+`MagpieSynthesisTimings`:
 
 | Stage          | Mean ms | % of total |
 |----------------|---------|------------|
@@ -206,6 +197,79 @@ will populate this table from `MagpieSynthesisTimings`:
 | `sampler`      | TBD     | TBD        |
 | `nanocodec`    | TBD     | TBD        |
 | **total**      | TBD     | 100%       |
+
+## Backends not yet measured
+
+Three backends are wired into `tts-benchmark` but didn't produce
+numbers on the M2 reference machine. Each is blocked upstream of the
+benchmark harness — fixing the harness will not change anything.
+
+### StyleTTS2
+
+**Blocker:** synthesis is a stub upstream. `StyleTTS2Synthesizer`
+throws `"not yet implemented"` rather than returning audio. The
+benchmark harness intentionally does not register a driver for it.
+
+**What unblocks:** finishing the StyleTTS2 4-stage pipeline integration
+(see PR #554 / `Documentation/TTS/StyleTTS2.md`). Once `synthesize` returns
+audio, add a `runStyleTts2(...)` driver mirroring the Kokoro / PocketTTS
+pattern in `Sources/FluidAudioCLI/Commands/TtsBenchmarkCommand.swift`.
+
+### Magpie
+
+**Blocker:** the `decoder_step.mlmodelc` model is missing `MultiArray`
+constraints on its KV-output features, so CoreML rejects the
+`MLPredictionOptions.outputBackings` map that
+`MagpieSynthesizer.runDecoderStep` constructs:
+
+```
+Output feature (null) doesn't support output backing because it
+doesn't have a MultiArray constraints.
+```
+
+The first warmup error is logged as non-fatal at
+`MagpieTtsManager.swift:99-104`, but the same error re-raises on the
+first real `synthesize` call. `MagpieCommand` (`fluidaudio magpie text …`)
+shares the same code path and is expected to fail identically — this is
+not a benchmark-harness regression.
+
+**What unblocks (cheapest first):**
+
+1. **Fall back to the slow path on output-backing failure.**
+   `MagpieKvCache.absorbOutputs(_:)` already exists (and is documented
+   as the fallback for "if a future macOS revision rejects our buffer
+   layout"); it's just never called. Wrap the
+   `model.prediction(from:options:)` call in
+   `MagpieSynthesizer.swift:775-778` with a try/catch that retries
+   without `outputBackings` and routes outputs through
+   `absorbOutputs(_:)`. Costs ~18.9 MB of fresh allocation per
+   `decoder_step` call but produces measurable numbers.
+2. **Re-export `decoder_step.mlmodelc`** from the Python conversion
+   pipeline (`mobius/models/tts/magpie/coreml/...`) with explicit
+   `MultiArray` shape + dtype constraints on `new_k_*`, `new_v_*`,
+   `var_*` outputs.
+
+### CosyVoice3
+
+**Blocker:** `CosyVoice3ModelStore` resolves
+`LLM-Decode-M768-fp16-stateful.mlmodelc` (per
+`ModelNames.swift:619` and `CosyVoice3Constants.swift:69`), but
+the public HuggingFace repo
+[`FluidInference/CosyVoice3-0.5B-coreml`](https://huggingface.co/FluidInference/CosyVoice3-0.5B-coreml)
+only ships the non-stateful `LLM-Decode-M768-fp16.mlmodelc`. The
+stateful KV-cache variant has not been uploaded, so
+`CosyVoice3ResourceDownloader.ensureCoreModels()` succeeds but leaves
+the cache without the file the loader actually expects, surfacing as:
+
+```
+modelNotFound(path: "LLM-Decode-M768-fp16-stateful.mlmodelc")
+```
+
+**What unblocks:** publish the stateful LLM-Decode variant to the HF
+repo (the same conversion that introduced the `MLState` /
+macOS 15+ requirement at `CosyVoice3TtsManager.swift:41-45`). No code
+change needed on the benchmark side; the driver in
+`runCosyVoice3(...)` is wired and waiting.
 
 ### Per-category quality
 
