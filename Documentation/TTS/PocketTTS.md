@@ -17,6 +17,53 @@ How the Swift code generates speech from text.
 | `PocketTtsConstantsLoader.swift` | Loads binary constants (embeddings, tokenizer, quantizer weights) |
 | `PocketTtsConstants.swift` | All numeric constants (dimensions, thresholds, etc.) |
 
+## Model Files & Precision
+
+The four CoreML submodels (plus the optional Mimi encoder) and their
+auxiliary asset directories. All paths are relative to
+[`FluidInference/pocket-tts-coreml`](https://huggingface.co/FluidInference/pocket-tts-coreml)
+on HuggingFace; sizes are for the English language pack.
+
+| File | Precision | Size | HF path | Role |
+|------|-----------|------|---------|------|
+| `cond_step.mlmodelc` | fp16 | 254.3 MB | `v2/<lang>/cond_step.mlmodelc` | KV-cache prefill — runs once per chunk over voice + text tokens (~141 calls); writes the 6-layer KV cache that FlowLM consumes during generation |
+| `flowlm_step.mlmodelc` | fp16 | 290.5 MB | `v2/<lang>/flowlm_step.mlmodelc` | Autoregressive transformer — runs **once per audio frame** during generation; outputs a `[1, 1024]` hidden state + EOS logit per step. Loaded when `precision: .fp16` (default) |
+| `flowlm_stepv2.mlmodelc` | int8 attn + FFN linears, fp16 elsewhere | 73.5 MB | `v2/<lang>/flowlm_stepv2.mlmodelc` | Drop-in replacement for `flowlm_step` when `precision: .int8` — same I/O signature, ~4× smaller. Quantization recipe per [kyutai-labs/pocket-tts#147](https://github.com/kyutai-labs/pocket-tts/pull/147) |
+| `flow_decoder.mlmodelc` | fp16 | 37.3 MB | `v2/<lang>/flow_decoder.mlmodelc` | LSD flow-matching decoder — runs an 8-step Euler loop per audio frame (`latent += velocity · dt`); turns transformer output into a 32-dim audio latent |
+| `mimi_decoder.mlmodelc` | fp16 (outputs explicitly fp16) | 40.0 MB | `v2/<lang>/mimi_decoder.mlmodelc` | Mimi VAE audio decoder — runs once per audio frame, takes a 512-dim quantized vector and produces 1920 PCM samples (24 kHz). Maintains 23 streaming-state tensors fed back as next-frame input |
+| `mimi_encoder.mlmodelc` | fp16 | optional | `mimi_encoder.mlmodelc` *(repo root)* | **Voice cloning only.** Language-agnostic; lives at the repo root, not under `v2/<lang>/`. Downloaded separately on first `cloneVoice(...)` call |
+| `constants_bin/` | binary tensors | 144.2 MB | `v2/<lang>/constants_bin/` | Token embedding table, SentencePiece tokenizer, denormalize/quantize mean+std, per-voice prompts (`alba.safetensors`, etc.) |
+| `constants/` | metadata sidecar | 16.7 MB | `v2/<lang>/constants/` | Auxiliary constants referenced by `PocketTtsConstantsLoader` |
+
+`<lang>` is one of: `english`, `french_24l`, `german`, `german_24l`,
+`italian`, `italian_24l`, `portuguese`, `portuguese_24l`, `spanish`,
+`spanish_24l`.
+
+### Totals (English, on disk)
+
+| Configuration | Total |
+|---------------|-------|
+| `precision: .fp16` (default) | 766.3 MB |
+| `precision: .int8` | 549.3 MB |
+| **int8 savings vs fp16** | **−217 MB (28%)** |
+
+The `v2/<lang>/` HF directory ships **both** flowlm variants, so a fresh
+download pulls the unused one too. `PocketTtsResourceDownloader` deletes
+the unused FlowLM `.mlmodelc` and `.mlpackage` directories after download
+completes so only the requested precision occupies disk long-term.
+
+### Why only `flowlm_step` is quantized
+
+The four submodels have different sensitivity to quantization. Only the
+FlowLM transformer is published in an int8 variant upstream:
+
+| Submodel | Quantized? | Why |
+|----------|------------|-----|
+| `cond_step` | No | One-shot prefill; conditioning errors propagate through the entire utterance |
+| `flowlm_step` | **Yes** | Per-frame transformer with causal attention; quantization error stays bounded per frame, doesn't compound. Largest file — best size-to-risk trade |
+| `flow_decoder` | No | 8-step Euler loop where each step's error feeds the next; small file (37 MB) makes savings marginal anyway |
+| `mimi_decoder` | No | Autoregressive feedback loop where 23 streaming-state tensors carry across frames; errors compound frame-over-frame |
+
 ## Call Flow
 
 ```
