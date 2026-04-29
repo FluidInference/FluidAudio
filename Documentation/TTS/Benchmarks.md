@@ -5,11 +5,17 @@ Quantitative comparison of FluidAudio's TTS backends. Numbers come from
 *latency-vs-efficiency-vs-quality* tradeoff visible without anyone having
 to re-derive it from RTFx alone.
 
-> Status: scaffolding. The harness wires **Kokoro ANE, Kokoro,
+> Status: first measurement landed on **MacBook Air, M2 (2022),
+> 8-core CPU / 8-core GPU / 16-core Neural Engine, 16 GB unified
+> memory, macOS 26** (`Mac14,2`, on AC power). The harness wires **Kokoro ANE, Kokoro,
 > PocketTTS, Magpie, and CosyVoice3**. StyleTTS2 is intentionally absent
-> — its synthesis path throws "not yet implemented" upstream. Numeric
-> cells in the result tables are placeholders until the harness is run
-> on a reference M-series machine and committed.
+> — its synthesis path throws "not yet implemented" upstream. Magpie
+> failed at warmup with a CoreML output-backing error
+> (`Output feature (null) doesn't support output backing because it
+> doesn't have a MultiArray constraints`); CosyVoice3's
+> `LLM-Decode-M768-fp16-stateful.mlmodelc` was not present on the
+> reference machine. Both rows below are marked with `—` until those
+> upstream issues are resolved.
 
 ## Why not just RTFx?
 
@@ -119,50 +125,77 @@ roundtrip. CosyVoice3 forces `--skip-asr`.
 
 ### Per-backend top-line
 
-Reference machine TBD (intent: M-series Mac, AC-powered, Quiet thermals).
-Cells below are placeholders until the harness is run and committed.
+Reference machine: **MacBook Air, Apple M2 (2022), 8-core CPU /
+8-core GPU / 16-core Neural Engine, 16 GB unified memory, macOS 26**
+(`Mac14,2`, on AC). All runs use `--compute-units default`,
+voice = backend default
+(`af_heart` for Kokoro, `alba` for PocketTTS), corpus = `prose-en`,
+Parakeet TDT roundtrip for WER / CER. Cold-start figures dominated by
+ANE first-compile + on-disk model fetch the first time the cache misses.
 
 | Backend     | License     | Languages              | Footprint | Cold start | Warm synth p50 / p95 | Agg RTFx | Peak RSS | WER prose | CER prose | Notes |
 |-------------|-------------|------------------------|-----------|------------|----------------------|----------|----------|-----------|-----------|-------|
-| Kokoro ANE  | Apache-2.0  | en (af_heart only)     | ~330 MB   | TBD        | TBD / TBD            | TBD      | TBD      | TBD       | TBD       | per-stage CU sweep |
-| Kokoro      | Apache-2.0  | en (af_heart, others untested) | ~330 MB | TBD | TBD / TBD       | TBD      | TBD      | TBD       | TBD       | single CU |
-| PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | TBD | TBD / TBD | TBD | TBD | TBD       | TBD       | streaming-capable |
-| StyleTTS2   | MIT         | en                     | TBD       | —          | —                    | —        | —        | —         | —         | synthesis stub |
-| Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | TBD        | TBD / TBD            | TBD      | TBD      | TBD       | TBD       | 6-stage timings |
-| CosyVoice3  | Apache-2.0  | zh (mandarin)          | TBD       | TBD        | TBD / TBD            | TBD      | TBD      | n/a       | n/a       | macOS 15+, no WER |
+| Kokoro ANE  | Apache-2.0  | en (af_heart only)     | ~330 MB   | 35.1 s     | 244 / 305 ms         | 10.41×   | 823 MB   | 0.162     | 0.067     | per-stage CU sweep, 7-graph pipeline |
+| Kokoro      | Apache-2.0  | en (af_heart only)     | ~330 MB   | 38.3 s     | 1263 / 1497 ms       | 2.11×    | 907 MB   | 0.018     | 0.007     | single CU; cleaner than ANE on prose |
+| PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 3.4 s | 2222 / 3281 ms | 0.97× | 1062 MB | 0.000 | 0.000 | streaming-capable; no per-call CU knob |
+| StyleTTS2   | MIT         | en                     | —         | —          | —                    | —        | —        | —         | —         | synthesis stub upstream |
+| Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | —          | —                    | —        | —        | —         | —         | upstream CoreML output-backing error on M2 |
+| CosyVoice3  | Apache-2.0  | zh (mandarin)          | —         | —          | —                    | —        | —        | n/a       | n/a       | `LLM-Decode-M768-fp16-stateful.mlmodelc` not on this machine |
 
-Em-dash (`—`) marks backends not wired to `tts-benchmark` (StyleTTS2).
+Em-dash (`—`) marks backends that did not produce numbers on this run
+(synthesis stub or upstream blocker).
+
+Headline read: **Kokoro ANE wins on latency and RTFx** (~10× real-time,
+244 ms p50 warm) at the cost of a noisier ASR roundtrip (WER 0.162 vs.
+0.018 on the non-ANE Kokoro). **PocketTTS wins on quality** (perfect WER
+on prose-en) but is the slowest at 0.97× RTFx and ~2.2 s p50 — i.e.
+roughly real-time. **Plain Kokoro** is the latency-quality middle ground
+(2.1× RTFx, WER 0.018).
 
 ### Kokoro ANE — compute-unit sweep
 
-Placeholder. Re-run after the first reference machine measurement.
+Only the `default` preset has been measured so far on the M2 reference
+machine. The `all-ane` / `cpu-and-gpu` / `cpu-only` rows will be filled
+in by re-running with `--compute-units <preset>`; cold-start should
+dominate the differences because the ANE compile is per-preset.
 
 | Preset         | Cold start (s) | Warm synth p50 (ms) | Warm synth p95 (ms) | Agg RTFx | Peak RSS (MB) |
 |----------------|----------------|---------------------|---------------------|----------|----------------|
-| `default`      | TBD            | TBD                 | TBD                 | TBD      | TBD            |
+| `default`      | 35.1           | 244                 | 305                 | 10.41    | 823            |
 | `all-ane`      | TBD            | TBD                 | TBD                 | TBD      | TBD            |
 | `cpu-and-gpu`  | TBD            | TBD                 | TBD                 | TBD      | TBD            |
 | `cpu-only`     | TBD            | TBD                 | TBD                 | TBD      | TBD            |
 
 ### Kokoro ANE — per-stage breakdown (default preset)
 
-Placeholder. Stages map to the 7-CoreML-graph split documented in
-[KokoroAne.md](KokoroAne.md).
+Means across 20 prose-en phrases on M2. Stages map to the 7-CoreML-graph
+split documented in [KokoroAne.md](KokoroAne.md). Vocoder + noise
+together account for ~80% of synth time, which is the natural target
+for any further per-stage compute-unit re-tuning.
 
 | Stage        | Mean ms | % of total |
 |--------------|---------|------------|
-| `albert`     | TBD     | TBD        |
-| `post_albert`| TBD     | TBD        |
-| `alignment`  | TBD     | TBD        |
-| `prosody`    | TBD     | TBD        |
-| `noise`      | TBD     | TBD        |
-| `vocoder`    | TBD     | TBD        |
-| `tail`       | TBD     | TBD        |
-| **total**    | TBD     | 100%       |
+| `albert`     | 9.0     | 3.7%       |
+| `post_albert`| 4.1     | 1.7%       |
+| `alignment`  | 1.2     | 0.5%       |
+| `prosody`    | 27.1    | 11.3%      |
+| `noise`      | 77.0    | 32.1%      |
+| `vocoder`    | 114.2   | 47.6%      |
+| `tail`       | 7.5     | 3.1%       |
+| **total**    | 240.2   | 100%       |
 
 ### Magpie — per-stage breakdown (default preset)
 
-Placeholder. 6 stages reported in `MagpieSynthesisTimings`.
+Not measured. Magpie warmup currently fails on M2 / macOS 26 with:
+
+```
+Output feature (null) doesn't support output backing because it
+doesn't have a MultiArray constraints.
+```
+
+This is upstream of `tts-benchmark` (raised inside `MagpieTtsManager`
+during the prediction-options setup). When that's resolved the harness
+will populate this table from `MagpieSynthesisTimings`:
 
 | Stage          | Mean ms | % of total |
 |----------------|---------|------------|
@@ -174,15 +207,44 @@ Placeholder. 6 stages reported in `MagpieSynthesisTimings`.
 | `nanocodec`    | TBD     | TBD        |
 | **total**      | TBD     | 100%       |
 
-### Per-category quality (Kokoro ANE, default preset)
+### Per-category quality
 
-Placeholder.
+MacBook Air M2 (2022), default compute-units, Parakeet TDT roundtrip. p50 / p95 are
+warm-synth latency in ms. Numbers + names corpora exercise edge cases
+the ASR roundtrip is genuinely sensitive to (currency normalization,
+acronyms, brand spelling), so the WER spike there reflects real
+end-to-end pronunciation quality rather than ASR artefacts.
 
-| Corpus       | Phrases | Macro WER | Macro CER | Synth p50 (ms) | Synth p95 (ms) | RTFx |
-|--------------|---------|-----------|-----------|-----------------|-----------------|------|
-| `prose-en`   | 20      | TBD       | TBD       | TBD             | TBD             | TBD  |
-| `numbers-en` | 10      | TBD       | TBD       | TBD             | TBD             | TBD  |
-| `names-en`   | 10      | TBD       | TBD       | TBD             | TBD             | TBD  |
+**Kokoro ANE (default preset)**
+
+| Corpus       | Phrases | Macro WER | Macro CER | Synth p50 (ms) | Synth p95 (ms) | RTFx   |
+|--------------|---------|-----------|-----------|-----------------|-----------------|--------|
+| `prose-en`   | 20      | 0.162     | 0.067     | 244             | 305             | 10.41× |
+| `numbers-en` | 10      | 0.402     | 0.243     | 909             | 1333            | 4.62×  |
+| `names-en`   | 10      | 0.394     | 0.136     | 1033            | 1927            | 4.38×  |
+
+**Kokoro (single-CU)**
+
+| Corpus       | Phrases | Macro WER | Macro CER | Synth p50 (ms) | Synth p95 (ms) | RTFx   |
+|--------------|---------|-----------|-----------|-----------------|-----------------|--------|
+| `prose-en`   | 20      | 0.018     | 0.007     | 1263            | 1497            | 2.11×  |
+| `numbers-en` | 10      | 0.173     | 0.091     | 3587            | 3711            | 1.58×  |
+| `names-en`   | 10      | 0.234     | 0.081     | 3934            | 5667            | 1.26×  |
+
+**PocketTTS**
+
+| Corpus       | Phrases | Macro WER | Macro CER | Synth p50 (ms) | Synth p95 (ms) | RTFx   |
+|--------------|---------|-----------|-----------|-----------------|-----------------|--------|
+| `prose-en`   | 20      | 0.000     | 0.000     | 2222            | 3281            | 0.97×  |
+| `numbers-en` | 10      | 0.363     | 0.130     | 3174            | 5340            | 1.35×  |
+| `names-en`   | 10      | 0.178     | 0.035     | 3537            | 6430            | 1.23×  |
+
+The qualitative pattern: Kokoro ANE pays a noticeable WER tax on prose
+versus the non-ANE Kokoro graph, but stays >4× real-time on the
+hard corpora where Kokoro itself drops to 1.3–1.6× and PocketTTS to
+1.2–1.4×. PocketTTS is the only backend that hits 0.000 WER on prose,
+but its `numbers-en` WER is the worst of the three because of how it
+normalises currency / phone numbers.
 
 ## JSON report schema
 
