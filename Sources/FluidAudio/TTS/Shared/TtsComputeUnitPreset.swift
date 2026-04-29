@@ -57,4 +57,16 @@ public enum TtsComputeUnitPreset: String, Sendable, CaseIterable {
         default: return nil
         }
     }
+
+    /// Canonical kebab-case form, matching the CLI flag values the
+    /// `init?(cliValue:)` parser accepts. Use this for log lines and
+    /// JSON reports so values round-trip back through the parser.
+    public var cliValue: String {
+        switch self {
+        case .default: return "default"
+        case .allAne: return "all-ane"
+        case .cpuAndGpu: return "cpu-and-gpu"
+        case .cpuOnly: return "cpu-only"
+        }
+    }
 }

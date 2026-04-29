@@ -118,6 +118,7 @@ struct FluidAudioCLI {
                 tts                     Synthesize speech from text using Kokoro TTS
                 magpie                  Magpie TTS Multilingual 357M (experimental, ~0.04 RTFx — slow, needs perf work)
                 tts-asr-verify          Batch TTS→ASR roundtrip WER verification
+                tts-benchmark           Quantitative TTS benchmark (latency, quality, compute-unit sweep)
                 parakeet-eou            Run Parakeet EOU Streaming ASR on a single file
                 ctc-earnings-benchmark  Run CTC keyword spotting benchmark on Earnings22
                 sortformer              Run Sortformer streaming diarization

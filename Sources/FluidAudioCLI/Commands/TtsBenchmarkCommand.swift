@@ -334,7 +334,7 @@ public enum TtsBenchmarkCommand {
     ) async throws {
         if preset != .default {
             logger.warning(
-                "PocketTTS does not expose per-call compute-unit overrides; --compute-units \(preset.rawValue) ignored."
+                "PocketTTS does not expose per-call compute-unit overrides; --compute-units \(preset.cliValue) ignored."
             )
         }
         let language = parsePocketLanguage(languageName)
@@ -673,7 +673,7 @@ public enum TtsBenchmarkCommand {
         logger.info("  backend:        \(backendId)")
         logger.info("  voice/speaker:  \(voiceLabel)")
         logger.info("  corpus:         \(corpusLabel) (n=\(phrases.count))")
-        logger.info("  compute units:  \(preset.rawValue)")
+        logger.info("  compute units:  \(preset.cliValue)")
         logger.info(String(format: "  cold start:     %.2fs", coldStartS))
         logger.info(String(format: "  first synth:    %.0f ms", firstSynthMs))
         logger.info(String(format: "  TTFT p50/p95:   %.0f / %.0f ms", ttftP50, ttftP95))
@@ -699,7 +699,7 @@ public enum TtsBenchmarkCommand {
                 "backend": backendId,
                 "corpus": corpusLabel,
                 "phrase_count": phrases.count,
-                "compute_units": preset.rawValue,
+                "compute_units": preset.cliValue,
                 "cold_start_s": coldStartS,
                 "first_synth_ms": firstSynthMs,
                 "ttft_ms_p50": ttftP50,
@@ -832,7 +832,7 @@ public enum TtsBenchmarkCommand {
     }
 
     private static func printUsage() {
-        print(
+        logger.info(
             """
             Usage: fluidaudio tts-benchmark [options]
 
