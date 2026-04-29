@@ -12,12 +12,26 @@ public enum PocketTtsResourceDownloader {
     ///   - language: Which upstream language pack to fetch.
     ///   - directory: Optional override for the base cache directory.
     ///     When `nil`, uses the default platform cache location.
+    ///   - precision: Which precision variant to load (default: `.fp16`,
+    ///     matching upstream's on-disk weight format).
+    ///     `.int8` reuses the same upstream `v2/<lang>/` directory but loads
+    ///     `flowlm_stepv2.mlmodelc` (int8 weight quantization on the FlowLM
+    ///     transformer's attention + FFN linears, per kyutai-labs/pocket-tts#147)
+    ///     instead of `flowlm_step.mlmodelc`. The other three models stay
+    ///     at the default fp16 precision.
     ///   - progressHandler: Optional callback for download progress updates.
-    /// - Returns: The directory that contains the four `.mlmodelc` packages
-    ///   plus `constants_bin/` for the requested language.
+    /// - Returns: The directory that contains the requested `.mlmodelc`
+    ///   packages plus `constants_bin/` for the requested language.
+    ///
+    /// Note: the upstream `v2/<lang>/` directory ships both flowlm variants,
+    /// so a fresh download pulls the unused variant too. After download
+    /// completes, the unused FlowLM `.mlmodelc` and `.mlpackage` directories
+    /// are deleted so only the requested precision occupies disk
+    /// (~217 MB savings for `.int8`, ~75 MB savings for `.fp16`).
     public static func ensureModels(
         language: PocketTtsLanguage,
         directory: URL? = nil,
+        precision: PocketTtsPrecision = .fp16,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
         let targetDir = try directory ?? cacheDirectory()
@@ -28,19 +42,20 @@ public enum PocketTtsResourceDownloader {
         let subdir = language.repoSubdirectory
         let languageRoot = repoDir.appendingPathComponent(subdir)
 
-        let allPresent = ModelNames.PocketTTS.requiredModels.allSatisfy { model in
+        let required = ModelNames.PocketTTS.requiredModels(precision: precision)
+        let allPresent = required.allSatisfy { model in
             FileManager.default.fileExists(
                 atPath: languageRoot.appendingPathComponent(model).path)
         }
 
         guard !allPresent else {
             logger.info(
-                "PocketTTS \(language.rawValue) models found in cache")
+                "PocketTTS \(language.rawValue) (\(precision)) models found in cache")
             return languageRoot
         }
 
         logger.info(
-            "Downloading PocketTTS \(language.rawValue) language pack from HuggingFace (\(subdir))..."
+            "Downloading PocketTTS \(language.rawValue) (\(precision)) language pack from HuggingFace (\(subdir))..."
         )
         try await DownloadUtils.downloadSubdirectory(
             .pocketTts,
@@ -49,7 +64,47 @@ public enum PocketTtsResourceDownloader {
             progressHandler: progressHandler
         )
 
+        // The HF subdir contains both FlowLM precisions; delete the one we
+        // don't need so disk usage matches the loaded models.
+        removeUnusedFlowlmVariant(at: languageRoot, keeping: precision)
+
         return languageRoot
+    }
+
+    /// Delete the FlowLM `.mlmodelc` and `.mlpackage` directories that don't
+    /// match the requested precision. Idempotent — silently skips paths that
+    /// don't exist.
+    private static func removeUnusedFlowlmVariant(
+        at languageRoot: URL,
+        keeping precision: PocketTtsPrecision
+    ) {
+        let unusedNames: [String]
+        switch precision {
+        case .fp16:
+            // Loading flowlm_step.mlmodelc; drop the int8 variant.
+            unusedNames = [
+                ModelNames.PocketTTS.flowlmStepV2 + ".mlmodelc",
+                ModelNames.PocketTTS.flowlmStepV2 + ".mlpackage",
+            ]
+        case .int8:
+            // Loading flowlm_stepv2.mlmodelc; drop the default variant.
+            unusedNames = [
+                ModelNames.PocketTTS.flowlmStep + ".mlmodelc",
+                ModelNames.PocketTTS.flowlmStep + ".mlpackage",
+            ]
+        }
+        for name in unusedNames {
+            let url = languageRoot.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            do {
+                try FileManager.default.removeItem(at: url)
+                logger.info("Removed unused PocketTTS variant on disk: \(name)")
+            } catch {
+                logger.warning(
+                    "Failed to remove unused PocketTTS variant \(name): \(error.localizedDescription)"
+                )
+            }
+        }
     }
 
     /// Ensure the Mimi encoder model is downloaded for voice cloning.

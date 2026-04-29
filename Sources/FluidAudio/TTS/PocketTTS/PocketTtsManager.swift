@@ -32,12 +32,21 @@ public actor PocketTtsManager {
     ///     `.english` for backward compatibility.
     ///   - directory: Optional override for the base cache directory.
     ///     When `nil`, uses the default platform cache location.
+    ///   - precision: Which FlowLM precision to load (default: `.fp16`,
+    ///     matching upstream's on-disk weight format). `.int8` swaps
+    ///     `flowlm_step` for the upstream `flowlm_stepv2` int8-quantized
+    ///     variant per kyutai-labs/pocket-tts#147.
     public init(
         defaultVoice: String = PocketTtsConstants.defaultVoice,
         language: PocketTtsLanguage = .english,
-        directory: URL? = nil
+        directory: URL? = nil,
+        precision: PocketTtsPrecision = .fp16
     ) {
-        self.modelStore = PocketTtsModelStore(language: language, directory: directory)
+        self.modelStore = PocketTtsModelStore(
+            language: language,
+            directory: directory,
+            precision: precision
+        )
         self.defaultVoice = defaultVoice
         self.language = language
     }

@@ -26,15 +26,26 @@ public actor PocketTtsModelStore {
     private var mimiDecoderKeysCache: PocketTtsMimiKeys?
     private let directory: URL?
     public let language: PocketTtsLanguage
+    public let precision: PocketTtsPrecision
 
     /// - Parameters:
     ///   - language: Which upstream language pack to load. Defaults to
     ///     `.english`.
     ///   - directory: Optional override for the base cache directory. When
     ///     `nil`, uses the default platform cache location.
-    public init(language: PocketTtsLanguage = .english, directory: URL? = nil) {
+    ///   - precision: Which FlowLM precision to load (default: `.fp16`,
+    ///     matching upstream's on-disk weight format). `.int8` swaps
+    ///     `flowlm_step.mlmodelc` for `flowlm_stepv2.mlmodelc` from the
+    ///     same upstream `v2/<lang>/` directory; the other three submodels
+    ///     stay at fp16.
+    public init(
+        language: PocketTtsLanguage = .english,
+        directory: URL? = nil,
+        precision: PocketTtsPrecision = .fp16
+    ) {
         self.language = language
         self.directory = directory
+        self.precision = precision
     }
 
     /// Load all four CoreML models and the constants bundle.
@@ -43,12 +54,13 @@ public actor PocketTtsModelStore {
 
         let languageRoot = try await PocketTtsResourceDownloader.ensureModels(
             language: language,
-            directory: directory
+            directory: directory,
+            precision: precision
         )
         self.languageRootDirectory = languageRoot
 
         logger.info(
-            "Loading PocketTTS CoreML models (language=\(self.language.rawValue))..."
+            "Loading PocketTTS CoreML models (language=\(self.language.rawValue), precision=\(self.precision))..."
         )
 
         // Use CPU+GPU for all models to avoid ANE float16 precision loss.
@@ -63,7 +75,7 @@ public actor PocketTtsModelStore {
 
         let modelFiles: [String] = [
             ModelNames.PocketTTS.condStepFile,
-            ModelNames.PocketTTS.flowlmStepFile,
+            ModelNames.PocketTTS.flowlmStepFile(precision: precision),
             ModelNames.PocketTTS.flowDecoderFile,
             ModelNames.PocketTTS.mimiDecoderFile,
         ]
