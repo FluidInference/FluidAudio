@@ -55,6 +55,7 @@ TDT/CTC models above are wrapped by `SlidingWindowAsrManager`, which chunks audi
 | **Kokoro TTS** | Text-to-speech synthesis (82M params), 48 voices, minimal RAM usage on iOS. Generates all frames at once via flow matching over mel spectrograms + Vocos vocoder. Uses CoreML G2P model for phonemization. | First TTS backend added + support custom pronounces |
 | **Kokoro ANE (7-stage)** | Same Kokoro 82M weights split into 7 CoreML stages so the ANE-friendly layers (Albert / PostAlbert / Alignment / Vocoder) stay resident on the Neural Engine while Prosody / Noise / Tail run on CPU+GPU. 3-11× RTFx vs. the single-graph Kokoro. Single voice (`af_heart`), ≤510 IPA phonemes per call, no chunker / SSML / custom lexicon. | ANE-optimized variant derived (with permission) from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml) |
 | **PocketTTS** | Second TTS backend (~155M params). Autoregressive frame-by-frame generation with dynamic audio chunking. No phoneme stage, works directly on text tokens. | Supports streaming, minimal RAM usage, excellent quality |
+| **StyleTTS2** ([FluidAudio#554](https://github.com/FluidInference/FluidAudio/pull/554), [mobius#46](https://github.com/FluidInference/mobius/pull/46), [HF](https://huggingface.co/FluidInference/StyleTTS-2-coreml)) | English TTS via 4-stage diffusion pipeline: `text_predictor` (fp16, ANE) → `diffusion_step_512` (fp16, CPU+GPU; ADPM2 + Karras-rho, 5 steps + CFG) → `f0n_energy` (fp16, ANE) → `decoder` (fp32, CPU+GPU; HiFi-GAN @ 24 kHz). 178-token espeak-ng IPA vocab. English G2P routes through the in-tree Kokoro BART (misaki → espeak-ng remap); non-English falls back to `MultilingualG2PModel` but is unvalidated against the LibriTTS checkpoint. Voices ship offline as `ref_s.bin` blobs (256 fp32 LE) until the on-device style encoder lands. | Beta. English-only checkpoint. See [Documentation/TTS/README.md](TTS/README.md) for the full TTS index. |
 
 ## Not Production Ready
 
@@ -96,6 +97,7 @@ Models we converted and tested but are not supported: too large for on-device de
 | Kokoro TTS | [FluidInference/kokoro-82m-coreml](https://huggingface.co/FluidInference/kokoro-82m-coreml) |
 | Kokoro ANE (7-stage) | [FluidInference/kokoro-82m-coreml/tree/main/ANE](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE) |
 | PocketTTS | [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml) |
+| StyleTTS2 | [FluidInference/StyleTTS-2-coreml](https://huggingface.co/FluidInference/StyleTTS-2-coreml) |
 | Magpie TTS Multilingual | [FluidInference/magpie-tts-multilingual-357m-coreml](https://huggingface.co/FluidInference/magpie-tts-multilingual-357m-coreml) |
 | CosyVoice3 (Mandarin) | [FluidInference/CosyVoice3-0.5B-coreml](https://huggingface.co/FluidInference/CosyVoice3-0.5B-coreml) |
 | Nemotron Streaming | [FluidInference/nemotron-speech-streaming-en-0.6b-coreml](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml) |
