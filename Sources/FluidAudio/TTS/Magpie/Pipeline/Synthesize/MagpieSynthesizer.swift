@@ -769,33 +769,52 @@ public actor MagpieSynthesizer {
         // step. The cache provides 24 K/V + 12 position back-buffers, the
         // synthesizer provides the 1 hidden buffer. After the call,
         // `swapBackings` promotes back→front for the next step's inputs.
-        var backings: [String: Any] = [:]
-        cache.addOutputBackings(to: &backings)
-        backings[MagpieKvCache.decoderHiddenKey] = hiddenBacking
-        let predOpts = MLPredictionOptions()
-        predOpts.outputBackings = backings
+        //
+        // If a previous step already proved that this model was exported
+        // without explicit MultiArray shape/dtype constraints on its KV
+        // outputs, `cache.useOutputBackings` is `false` and we skip the
+        // fast path entirely. This avoids the per-step throw/catch overhead
+        // and debug-log spam across the entire AR loop (~500 iterations).
+        var fastPathSucceeded = false
+        if cache.useOutputBackings {
+            var backings: [String: Any] = [:]
+            cache.addOutputBackings(to: &backings)
+            backings[MagpieKvCache.decoderHiddenKey] = hiddenBacking
+            let predOpts = MLPredictionOptions()
+            predOpts.outputBackings = backings
 
-        do {
-            _ = try model.prediction(from: provider, options: predOpts)
-            cache.swapBackings()
-        } catch {
-            // Slow-path fallback. CoreML refused our pre-allocated
-            // outputBackings — typically because `decoder_step.mlmodelc`
-            // was exported without explicit MultiArray shape/dtype
-            // constraints on its KV outputs, so the runtime can't validate
-            // the buffer layout and bails with
-            //   "Output feature (null) doesn't support output backing
-            //    because it doesn't have a MultiArray constraints."
-            // Re-run without `outputBackings`, route the freshly-allocated
-            // K/V/pos through `MagpieKvCache.absorbOutputs` (which replaces
-            // front pointers directly), and copy the hidden state into
-            // `hiddenBacking` so the rest of this function works unchanged.
-            // Costs ~18.9 MB of fresh fp16 allocation per step versus the
-            // fast path; proper fix is to re-export `decoder_step.mlmodelc`
-            // with shape/dtype constraints on `new_k_*`/`new_v_*`/`var_*`.
-            logger.debug(
-                "decoder_step outputBackings rejected "
-                    + "(\(error.localizedDescription)); using fresh-alloc fallback")
+            do {
+                _ = try model.prediction(from: provider, options: predOpts)
+                cache.swapBackings()
+                fastPathSucceeded = true
+            } catch {
+                // CoreML refused our pre-allocated outputBackings — typically
+                // because `decoder_step.mlmodelc` was exported without
+                // explicit MultiArray shape/dtype constraints on its KV
+                // outputs, so the runtime can't validate the buffer layout
+                // and bails with
+                //   "Output feature (null) doesn't support output backing
+                //    because it doesn't have a MultiArray constraints."
+                // The rejection is a static property of the model, so latch
+                // the cache flag off to skip the fast path on every
+                // subsequent step (avoids ~500 throw/catch + log lines per
+                // utterance).
+                cache.useOutputBackings = false
+                logger.debug(
+                    "decoder_step outputBackings rejected "
+                        + "(\(error.localizedDescription)); switching to "
+                        + "fresh-alloc fallback for the rest of the run")
+            }
+        }
+
+        if !fastPathSucceeded {
+            // Slow path: re-run without `outputBackings`, route the
+            // freshly-allocated K/V/pos through `MagpieKvCache.absorbOutputs`
+            // (which replaces front pointers directly), and copy the hidden
+            // state into `hiddenBacking` so the rest of this function works
+            // unchanged. Costs ~18.9 MB of fresh fp16 allocation per step;
+            // proper fix is to re-export `decoder_step.mlmodelc` with
+            // shape/dtype constraints on `new_k_*`/`new_v_*`/`var_*`.
             let output = try model.prediction(from: provider)
             try cache.absorbOutputs(output)
             guard

@@ -14,9 +14,7 @@ import Foundation
 ///   pocket-tts    — streaming flow-matching (no per-stage timings)
 ///   magpie        — encoder-decoder + NanoCodec (6-stage timings, slow)
 ///   cosyvoice3    — Mandarin LLM-based (Mandarin corpus only, no WER)
-///
-/// StyleTTS2 is intentionally absent: synthesis throws "not yet
-/// implemented" upstream.
+///   styletts2     — diffusion + HiFi-GAN (one-shot, requires --voice ref_s.bin)
 ///
 /// Usage:
 ///   fluidaudio tts-benchmark --backend kokoro-ane \
@@ -188,6 +186,12 @@ public enum TtsBenchmarkCommand {
                     phrases: phrases, corpusLabel: corpusLabel,
                     voice: voice,
                     preset: preset, outputJson: outputJson, audioDir: audioDir)
+            case .styleTts2:
+                try await runStyleTts2(
+                    phrases: phrases, corpusLabel: corpusLabel,
+                    voicePath: voice,
+                    preset: preset, outputJson: outputJson, audioDir: audioDir,
+                    skipAsr: effectiveSkipAsr)
             }
         } catch {
             logger.error("tts-benchmark failed: \(error)")
@@ -508,6 +512,69 @@ public enum TtsBenchmarkCommand {
         }
     }
 
+    // MARK: - StyleTTS2 driver
+
+    private static func runStyleTts2(
+        phrases: [(category: String, text: String)],
+        corpusLabel: String,
+        voicePath: String?,
+        preset: TtsComputeUnitPreset,
+        outputJson: String?,
+        audioDir: String?,
+        skipAsr: Bool
+    ) async throws {
+        guard let voicePath, !voicePath.isEmpty else {
+            logger.error(
+                "StyleTTS2 requires --voice <path/to/ref_s.bin> "
+                    + "(256 fp32 LE blob from mobius-styletts2/scripts/06_dump_ref_s.py)")
+            exit(1)
+        }
+        let voiceURL = resolveURL(voicePath, isDirectory: false)
+        let voiceLabel = voiceURL.deletingPathExtension().lastPathComponent
+
+        // StyleTTS2 doesn't expose a compute-units knob today; --compute-units
+        // is accepted for parity with other backends but only labels the run.
+        let manager = StyleTTS2Manager()
+
+        let coldStart = Date()
+        try await manager.initialize()
+        let coldStartS = Date().timeIntervalSince(coldStart)
+        logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
+
+        let firstStart = Date()
+        _ = try await manager.synthesizeSamples(
+            text: "Initialization warm-up.", voiceStyleURL: voiceURL, randomSeed: 42)
+        let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
+        logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
+
+        try await runPhraseLoop(
+            backendId: "styletts2",
+            voiceLabel: voiceLabel,
+            corpusLabel: corpusLabel,
+            phrases: phrases,
+            preset: preset,
+            coldStartS: coldStartS,
+            firstSynthMs: firstSynthMs,
+            outputJson: outputJson,
+            audioDir: audioDir,
+            skipAsr: skipAsr,
+            extraSummary: ["voice": voiceLabel]
+        ) { text in
+            let t0 = Date()
+            let result = try await manager.synthesizeSamples(
+                text: text, voiceStyleURL: voiceURL, randomSeed: 42)
+            let synthMs = Date().timeIntervalSince(t0) * 1000
+            return BackendPhraseSample(
+                synthMs: synthMs,
+                ttftMs: synthMs,
+                samples: result.samples,
+                sampleRate: result.sampleRate,
+                stageMs: [:],
+                extraFields: [:]
+            )
+        }
+    }
+
     // MARK: - Shared per-phrase loop + summary
 
     private static func runPhraseLoop(
@@ -755,6 +822,7 @@ public enum TtsBenchmarkCommand {
         case pocketTts
         case magpie
         case cosyVoice3
+        case styleTts2
 
         var defaultCorpus: String {
             switch self {
@@ -776,6 +844,8 @@ public enum TtsBenchmarkCommand {
             return .magpie
         case "cosyvoice3", "cosyvoice", "cosy":
             return .cosyVoice3
+        case "styletts2", "style-tts2", "styletts", "style":
+            return .styleTts2
         default:
             logger.warning("Unknown backend '\(name)' — defaulting to kokoro-ane")
             return .kokoroAne

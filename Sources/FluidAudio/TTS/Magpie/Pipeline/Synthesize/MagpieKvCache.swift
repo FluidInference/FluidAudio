@@ -54,6 +54,15 @@ public final class MagpieKvCache {
     public private(set) var cachesV: [MLMultiArray]
     public private(set) var positions: [MLMultiArray]
 
+    /// Set to `false` once `decoder_step.mlmodelc` rejects `outputBackings`
+    /// (e.g. when the model was exported without explicit MultiArray
+    /// shape/dtype constraints on its KV outputs). The rejection is a static
+    /// property of the model, so once it fails we permanently skip the fast
+    /// path and go straight to the fresh-alloc fallback to avoid throwing +
+    /// catching an exception on every one of the ~500 AR decode steps per
+    /// utterance.
+    public var useOutputBackings: Bool = true
+
     /// Back-buffer set for double-buffered AR loop. Used as `outputBackings` so
     /// CoreML writes new K/V/pos straight into our pre-allocated arrays instead
     /// of allocating ~18.9 MB of fresh fp16 buffers per step. After each

@@ -15,10 +15,6 @@ import Foundation
 ///   - cumsum-of-durations → one-hot → matmul hard-alignment,
 ///   - bucket selection (round token length → text_predictor; round
 ///     mel frames → decoder).
-///
-/// **Status:** scaffold only. Synthesis is not yet implemented; calls to
-/// `synthesize` throw `processingFailed`. The asset bring-up (download +
-/// model store) is wired up so dependent layers can land incrementally.
 public actor StyleTTS2Manager {
 
     private let logger = AppLogger(category: "StyleTTS2Manager")
@@ -109,6 +105,34 @@ public actor StyleTTS2Manager {
             randomSeed: randomSeed
         )
         return try await synthesizer.synthesize(ids: ids, voice: voice, options: options)
+    }
+
+    /// Same as `synthesize` but returns raw fp32 PCM samples + sample rate.
+    /// Used by callers (e.g. the tts-benchmark harness, ASR pairing) that
+    /// don't want the WAV-encoding round trip.
+    public func synthesizeSamples(
+        text: String,
+        voiceStyleURL: URL,
+        language: MultilingualG2PLanguage = .americanEnglish,
+        diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
+        alpha: Float = 0.3,
+        beta: Float = 0.7,
+        randomSeed: UInt64? = nil
+    ) async throws -> (samples: [Float], sampleRate: Int) {
+        guard isInitialized else {
+            throw StyleTTS2Error.modelNotFound("StyleTTS2 model not initialized")
+        }
+        let voice = try StyleTTS2VoiceStyle.load(from: voiceStyleURL)
+        let (_, ids) = try await tokenize(text: text, language: language)
+        let options = StyleTTS2Synthesizer.Options(
+            diffusionSteps: diffusionSteps,
+            alpha: alpha,
+            beta: beta,
+            randomSeed: randomSeed
+        )
+        let samples = try await synthesizer.synthesizeSamples(
+            ids: ids, voice: voice, options: options)
+        return (samples, StyleTTS2Constants.audioSampleRate)
     }
 
     /// Run the text frontend (preprocess → G2P → vocab encode) end-to-end.

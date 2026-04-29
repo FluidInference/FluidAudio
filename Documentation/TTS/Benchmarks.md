@@ -8,12 +8,12 @@ to re-derive it from RTFx alone.
 > Status: first measurement landed on **MacBook Air, M2 (2022),
 > 8-core CPU / 8-core GPU / 16-core Neural Engine, 16 GB unified
 > memory, macOS 26** (`Mac14,2`, on AC power). The harness wires
-> **Kokoro ANE, Kokoro, PocketTTS, Magpie, and CosyVoice3**.
-> Kokoro ANE / Kokoro / PocketTTS / CosyVoice3 produce numbers on this
-> machine today; CosyVoice3 is experimental / beta with sub-real-time
-> RTFx. StyleTTS2 and Magpie are blocked upstream of the benchmark
-> harness — see [Backends not yet measured](#backends-not-yet-measured)
-> for the specific blockers and what would unblock each.
+> **Kokoro ANE, Kokoro, PocketTTS, StyleTTS2, Magpie, and CosyVoice3**.
+> All six backends now produce numbers on this machine. CosyVoice3 is
+> experimental / beta with sub-real-time RTFx; StyleTTS2 produces audio
+> but the LibriTTS checkpoint + out-of-distribution `ref_s` voice
+> currently land at WER 0.446 on prose-en (voice-quality follow-up — see
+> [StyleTTS2 quality caveat](#styletts2-quality-caveat)).
 
 ## Why not just RTFx?
 
@@ -136,19 +136,28 @@ ANE first-compile + on-disk model fetch the first time the cache misses.
 | Kokoro ANE  | Apache-2.0  | en (af_heart only)     | ~330 MB   | 35.1 s     | 244 / 305 ms         | 10.41×   | 823 MB   | 0.162     | 0.067     | per-stage CU sweep, 7-graph pipeline |
 | Kokoro      | Apache-2.0  | en (af_heart only)     | ~330 MB   | 38.3 s     | 1263 / 1497 ms       | 2.11×    | 907 MB   | 0.018     | 0.007     | single CU; cleaner than ANE on prose |
 | PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 3.4 s | 2222 / 3281 ms | 0.97× | 1062 MB | 0.000 | 0.000 | streaming-capable; no per-call CU knob |
-| StyleTTS2   | MIT         | en                     | —         | —          | —                    | —        | —        | —         | —         | synthesis stub upstream |
-| Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | —          | —                    | —        | —        | —         | —         | `decoder_step.mlmodelc` rejects `outputBackings` |
+| StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | 0.04 s\*   | 1898 / 2054 ms       | 1.46×    | 711 MB   | 0.446†    | 0.276†    | one-shot diffusion + HiFi-GAN; voice = user-supplied `ref_s.bin` |
+| Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 3.3 s      | 3500 / 4339 ms       | 0.95×    | 810 MB   | 0.026     | 0.021     | split-K/V decoder; outputBackings fast path with fresh-alloc fallback |
 | CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 160.5 s    | 10251 / 11765 ms     | 0.21×    | 4551 MB  | n/a       | n/a       | beta; ANE rejects decode → CPU+GPU fallback; corpus = `prose-zh` |
 
-Em-dash (`—`) marks backends that did not produce numbers on this run
-(synthesis stub or upstream blocker).
+\* StyleTTS2 cold start is just `manager.initialize()` (asset checks);
+the four CoreML graphs lazy-load on the first `synthesize` call, which
+is why `first_synth_ms` is 4.4 s while subsequent warm calls are
+~1.9 s p50.
+
+† StyleTTS2 is bottlenecked on voice quality, not synthesis. See
+[StyleTTS2 quality caveat](#styletts2-quality-caveat).
 
 Headline read: **Kokoro ANE wins on latency and RTFx** (~10× real-time,
 244 ms p50 warm) at the cost of a noisier ASR roundtrip (WER 0.162 vs.
 0.018 on the non-ANE Kokoro). **PocketTTS wins on quality** (perfect WER
 on prose-en) but is the slowest at 0.97× RTFx and ~2.2 s p50 — i.e.
 roughly real-time. **Plain Kokoro** is the latency-quality middle ground
-(2.1× RTFx, WER 0.018).
+(2.1× RTFx, WER 0.018). **Magpie** lands at near-real-time (0.95× RTFx,
+3.5 s p50) with strong WER (0.026) on prose. **StyleTTS2** is the
+fastest non-Kokoro one-shot backend (1.46× RTFx, ~1.9 s p50) but its
+WER is dominated by reference-voice fit rather than the synthesis
+pipeline (see caveat below).
 
 ### Kokoro ANE — compute-unit sweep
 
@@ -184,71 +193,98 @@ for any further per-stage compute-unit re-tuning.
 
 ### Magpie — per-stage breakdown (default preset)
 
-Not measured (upstream blocker, see
-[Backends not yet measured](#backends-not-yet-measured)). When that's
-resolved the harness will populate this table from
-`MagpieSynthesisTimings`:
+Means across 20 prose-en phrases on M2 (`John` voice, en, default
+compute units). `ar_loop` is the umbrella for the per-step
+`decoder_step` + `sampler` (so it is not added on top in the total).
+Synth-wall time is ≈ `text_encoder` + `prefill` + `ar_loop` +
+`nanocodec` (~3.5 s, matching `warm_synth_p50`). The AR loop dominates;
+re-exporting `decoder_step.mlmodelc` with explicit MultiArray
+shape/dtype constraints on `new_k_*` / `new_v_*` / `var_*` outputs
+would let the fast `outputBackings` path stay live and skip the
+~18.9 MB-per-step fresh-alloc fallback (see Magpie deep dive).
 
-| Stage          | Mean ms | % of total |
-|----------------|---------|------------|
-| `text_encoder` | TBD     | TBD        |
-| `prefill`      | TBD     | TBD        |
-| `ar_loop`      | TBD     | TBD        |
-| `decoder_step` | TBD     | TBD        |
-| `sampler`      | TBD     | TBD        |
-| `nanocodec`    | TBD     | TBD        |
-| **total**      | TBD     | 100%       |
+| Stage             | Mean ms | % of warm-synth |
+|-------------------|---------|-----------------|
+| `text_encoder`    | 15      | 0.4%            |
+| `prefill`         | 47      | 1.4%            |
+| `ar_loop`         | 2195    | 62.7%           |
+| └── `decoder_step` | 1914   | (54.7%)         |
+| └── `sampler`      | 279    | (8.0%)          |
+| `nanocodec`       | 1295    | 37.0%           |
+| **total**         | ~3552   | 100%            |
 
-## Backends not yet measured
+## StyleTTS2 quality caveat
 
-Three backends are wired into `tts-benchmark` but didn't produce
-numbers on the M2 reference machine. Each is blocked upstream of the
-benchmark harness — fixing the harness will not change anything.
+StyleTTS2 currently lands at **WER 0.446 / CER 0.276** on `prose-en`
+with the LibriTTS multi-speaker checkpoint and an out-of-distribution
+reference voice (`samples/kokoro-english/af_nicole.wav` →
+`ref_s.bin`). The synthesis pipeline itself is healthy:
 
-### StyleTTS2
+- Audio is produced at the expected duration for every phrase
+  (2.5–3.2 s for short Harvard sentences; no truncation).
+- RTFx is 1.46× warm, 1.90 s p50 — competitive with Kokoro on the same
+  hardware.
+- ~25% of phrases hit WER ≤ 0.25 (e.g. *"The box was thrown beside the
+  parked truck."* → *"The box was thrown beside the park truck."*),
+  proving the diffusion sampler + decoder do produce intelligible
+  speech on this voice.
 
-**Blocker:** synthesis is a stub upstream. `StyleTTS2Synthesizer`
-throws `"not yet implemented"` rather than returning audio. The
-benchmark harness intentionally does not register a driver for it.
+What's failing is **prosodic / phonetic execution on phoneme
+combinations far from the LibriTTS training distribution**:
 
-**What unblocks:** finishing the StyleTTS2 4-stage pipeline integration
-(see PR #554 / `Documentation/TTS/StyleTTS2.md`). Once `synthesize` returns
-audio, add a `runStyleTts2(...)` driver mirroring the Kokoro / PocketTTS
-pattern in `Sources/FluidAudioCLI/Commands/TtsBenchmarkCommand.swift`.
+```
+ref: The birch canoe slid on the smooth planks.
+hyp: The burr condu sled one smooth plants.
 
-### Magpie
+ref: The hogs were fed chopped corn and garbage.
+hyp: Hogs wear fedmapped cornangreet.
+```
 
-**Blocker:** the `decoder_step.mlmodelc` model is missing `MultiArray`
-constraints on its KV-output features, so CoreML rejects the
-`MLPredictionOptions.outputBackings` map that
-`MagpieSynthesizer.runDecoderStep` constructs:
+These are phonetic confusions, not silence or truncation. They go away
+when the reference voice matches the LibriTTS speaker distribution. We
+ship StyleTTS2 with the synthesis path wired and these numbers visible
+so the next follow-up is voice-quality (curating known-good `ref_s`
+blobs from the LibriTTS train split, or re-targeting onto a
+Kokoro-style single-speaker checkpoint), not synthesizer plumbing.
+
+The benchmark accepts any `ref_s.bin` produced by
+`mobius-styletts2/scripts/06_dump_ref_s.py`. To regenerate one:
+
+```bash
+python mobius-styletts2/scripts/06_dump_ref_s.py \
+  --reference-wav samples/kokoro-english/af_nicole.wav \
+  --out /tmp/styletts2-ref_s.bin
+
+.build/release/fluidaudiocli tts-benchmark \
+  --backend styletts2 \
+  --voice /tmp/styletts2-ref_s.bin \
+  --corpus prose-en \
+  --output-json bench.json
+```
+
+## Magpie outputBackings fast path
+
+Magpie's `decoder_step.mlmodelc` was previously exported without
+explicit `MultiArray` shape/dtype constraints on its KV outputs, which
+made CoreML reject the `MLPredictionOptions.outputBackings` map that
+`MagpieSynthesizer.runDecoderStep` builds:
 
 ```
 Output feature (null) doesn't support output backing because it
 doesn't have a MultiArray constraints.
 ```
 
-The first warmup error is logged as non-fatal at
-`MagpieTtsManager.swift:99-104`, but the same error re-raises on the
-first real `synthesize` call. `MagpieCommand` (`fluidaudio magpie text …`)
-shares the same code path and is expected to fail identically — this is
-not a benchmark-harness regression.
-
-**What unblocks (cheapest first):**
-
-1. **Fall back to the slow path on output-backing failure.**
-   `MagpieKvCache.absorbOutputs(_:)` already exists (and is documented
-   as the fallback for "if a future macOS revision rejects our buffer
-   layout"); it's just never called. Wrap the
-   `model.prediction(from:options:)` call in
-   `MagpieSynthesizer.swift:775-778` with a try/catch that retries
-   without `outputBackings` and routes outputs through
-   `absorbOutputs(_:)`. Costs ~18.9 MB of fresh allocation per
-   `decoder_step` call but produces measurable numbers.
-2. **Re-export `decoder_step.mlmodelc`** from the Python conversion
-   pipeline (`mobius/models/tts/magpie/coreml/...`) with explicit
-   `MultiArray` shape + dtype constraints on `new_k_*`, `new_v_*`,
-   `var_*` outputs.
+The synthesizer now wraps the fast path in a try/catch that latches a
+`MagpieKvCache.useOutputBackings` flag off on the first rejection, then
+falls back to fresh-alloc decoding routed through
+`MagpieKvCache.absorbOutputs(_:)` for the rest of the run. Cost: a
+single throw/catch on the first AR step + ~18.9 MB of fresh fp16
+allocation per subsequent step (no per-step exception spam). The
+proper fix remains re-exporting `decoder_step.mlmodelc` from the
+Python conversion pipeline (`mobius/models/tts/magpie/coreml/...`)
+with explicit `MultiArray` shape + dtype constraints on `new_k_*`,
+`new_v_*`, `var_*` outputs — that would let the fast path stay live
+and avoid the per-step allocation entirely.
 
 ### Per-category quality
 
@@ -282,6 +318,21 @@ end-to-end pronunciation quality rather than ASR artefacts.
 | `numbers-en` | 10      | 0.363     | 0.130     | 3174            | 5340            | 1.35×  |
 | `names-en`   | 10      | 0.178     | 0.035     | 3537            | 6430            | 1.23×  |
 
+**StyleTTS2 (LibriTTS multi-speaker, `af_nicole`-derived `ref_s`)**
+
+| Corpus       | Phrases | Macro WER | Macro CER | Synth p50 (ms) | Synth p95 (ms) | RTFx   |
+|--------------|---------|-----------|-----------|-----------------|-----------------|--------|
+| `prose-en`   | 20      | 0.446†    | 0.276†    | 1898            | 2054            | 1.46×  |
+
+† Voice-quality bottleneck, not synthesis. See
+[StyleTTS2 quality caveat](#styletts2-quality-caveat).
+
+**Magpie (split-K/V decoder, `John` voice, en)**
+
+| Corpus       | Phrases | Macro WER | Macro CER | Synth p50 (ms) | Synth p95 (ms) | RTFx   |
+|--------------|---------|-----------|-----------|-----------------|-----------------|--------|
+| `prose-en`   | 20      | 0.026     | 0.021     | 3500            | 4339            | 0.95×  |
+
 **CosyVoice3 (beta, `--skip-asr` forced)**
 
 | Corpus       | Phrases | Macro WER | Macro CER | Synth p50 (ms) | Synth p95 (ms) | RTFx   |
@@ -308,7 +359,7 @@ normalises currency / phone numbers.
 ```jsonc
 {
   "summary": {
-    "backend": "kokoro-ane",       // or "kokoro" / "pocket-tts" / "magpie" / "cosyvoice3"
+    "backend": "kokoro-ane",       // or "kokoro" / "pocket-tts" / "styletts2" / "magpie" / "cosyvoice3"
     "voice": "af_heart",            // backends with a string voice
     "speaker": "John",              // magpie only
     "language": "en",               // pocket-tts / magpie
