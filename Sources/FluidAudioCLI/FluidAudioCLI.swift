@@ -50,6 +50,8 @@ struct FluidAudioCLI {
             await MagpieCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "tts-asr-verify":
             await TTSAsrVerifyCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "tts-benchmark":
+            await TtsBenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "diarization-benchmark":
             await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "process":

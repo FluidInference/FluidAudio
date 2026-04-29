@@ -11,6 +11,7 @@ xcuserdata/
 *.hmap
 
 *.txt
+!Benchmarks/**/*.txt
 
 ## App packaging
 *.ipa
