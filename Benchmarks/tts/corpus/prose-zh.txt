@@ -1,0 +1,11 @@
+# Short Mandarin sentences (simplified Chinese, public domain).
+# 8 phrases — used by the cosyvoice3 backend in tts-benchmark.
+# Quality measurement (WER/CER) is skipped — no Mandarin ASR is wired in this slice.
+今天天气真好。
+我想喝一杯热咖啡。
+请把那本书递给我。
+他每天早上六点起床。
+机器学习正在改变这个行业。
+我们计划下个月去北京旅行。
+这家餐厅的菜很好吃。
+图书馆星期天不开门。
