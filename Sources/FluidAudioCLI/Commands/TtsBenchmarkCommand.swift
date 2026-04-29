@@ -349,13 +349,22 @@ public enum TtsBenchmarkCommand {
         logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
 
         let firstStart = Date()
-        let firstResult = try await manager.synthesizeDetailed(
+        var firstFrameMs: Double = 0
+        var firstFrameCount = 0
+        let warmupStream = try await manager.synthesizeStreaming(
             text: "Initialization warm-up.", voice: voice)
+        for try await frame in warmupStream {
+            if firstFrameCount == 0 {
+                firstFrameMs = Date().timeIntervalSince(firstStart) * 1000
+            }
+            firstFrameCount += 1
+            _ = frame.samples
+        }
         let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
         logger.info(
             String(
-                format: "First synth: %.0f ms (frames=%d)",
-                firstSynthMs, firstResult.frameCount))
+                format: "First synth: %.0f ms total, %.0f ms TTFT (frames=%d)",
+                firstSynthMs, firstFrameMs, firstFrameCount))
 
         try await runPhraseLoop(
             backendId: "pocket-tts",
@@ -370,18 +379,33 @@ public enum TtsBenchmarkCommand {
             skipAsr: skipAsr,
             extraSummary: ["voice": voice, "language": language.rawValue]
         ) { text in
+            // PocketTTS is streaming-first: we measure TTFT (time to first
+            // audio frame) separately from total synth time so the benchmark
+            // numbers reflect what a streaming consumer actually experiences.
             let t0 = Date()
-            let result = try await manager.synthesizeDetailed(text: text, voice: voice)
+            let stream = try await manager.synthesizeStreaming(text: text, voice: voice)
+            var aggregated: [Float] = []
+            var ttftMs: Double = 0
+            var frameCount = 0
+            var lastChunkCount = 0
+            for try await frame in stream {
+                if frameCount == 0 {
+                    ttftMs = Date().timeIntervalSince(t0) * 1000
+                }
+                aggregated.append(contentsOf: frame.samples)
+                frameCount += 1
+                lastChunkCount = frame.chunkCount
+            }
             let synthMs = Date().timeIntervalSince(t0) * 1000
             return BackendPhraseSample(
                 synthMs: synthMs,
-                ttftMs: synthMs,
-                samples: result.samples,
+                ttftMs: ttftMs,
+                samples: aggregated,
                 sampleRate: PocketTtsConstants.audioSampleRate,
                 stageMs: [:],
                 extraFields: [
-                    "frame_count": result.frameCount,
-                    "eos_step": result.eosStep ?? -1,
+                    "frame_count": frameCount,
+                    "chunk_count": lastChunkCount,
                 ]
             )
         }

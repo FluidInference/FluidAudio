@@ -31,8 +31,9 @@ feel:
 2. **TTFT (time-to-first-audio)** — for streaming agents the question
    is "how long until the user hears *something*", not "how long until
    the whole utterance is rendered". For one-shot backends in this
-   slice `ttft_ms == synth_ms`; streaming-aware TTFT for PocketTTS /
-   Magpie is a follow-up.
+   slice `ttft_ms == synth_ms`. **PocketTTS** is wired through
+   `synthesizeStreaming`, so its `ttft_ms` is honest first-frame
+   latency. Streaming-aware TTFT for Magpie is a follow-up.
 3. **Per-stage compute units** — Kokoro ANE / Magpie are pipelines of
    6–7 graphs. Sometimes ANE is *slower per call* but more efficient.
    The "right" compute-unit choice differs per stage.
@@ -70,7 +71,10 @@ passed with `--corpus-path <file.txt>`.
 
 Per phrase:
 - `ttft_ms` — time-to-first-audio. For one-shot backends this equals
-  `synth_ms`; streaming-aware TTFT for PocketTTS / Magpie is a follow-up.
+  `synth_ms`. **PocketTTS** is benchmarked through
+  `synthesizeStreaming`, so its `ttft_ms` is the timestamp of the first
+  80 ms audio frame (1920 samples @ 24 kHz). Streaming-aware TTFT for
+  Magpie is a follow-up.
 - `synth_ms` — total synth wall time.
 - `audio_ms` — generated audio duration.
 - `rtfx` — `audio_ms / synth_ms`.
@@ -142,16 +146,21 @@ voice = backend default
 corpus = `minimax-english` (100 phrases), Parakeet TDT roundtrip for
 WER / CER.
 
-| Backend     | License     | Languages              | Footprint | Cold start | Warm synth p50 / p95 | Agg RTFx | Peak RSS | WER     | CER     | Notes |
-|-------------|-------------|------------------------|-----------|------------|----------------------|----------|----------|---------|---------|-------|
-| Kokoro ANE  | Apache-2.0  | en (af_heart only)     | ~330 MB   | 37.9 s     | 1586 / 2515 ms       | 5.19×    | 738 MB   | 0.108   | 0.040   | per-stage CU sweep, 7-graph pipeline |
-| Kokoro      | Apache-2.0  | en (af_heart only)     | ~330 MB   | 92.2 s     | 3113 / 4696 ms       | 2.02×    | 736 MB   | 0.013   | 0.005   | single CU; cleaner ASR roundtrip than ANE |
-| PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 3.6 s | 7950 / 15283 ms | 0.68× | 1572 MB | 0.012 | 0.005 | streaming-capable; no per-call CU knob |
-| StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | n/a (fails)| n/a                   | n/a      | n/a      | n/a     | n/a     | aborts with ANEF compile error on MiniMax — see [known failure](#styletts2-known-failure) |
-| Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 19.1 s     | 19834 / 57508 ms     | 0.41×    | 1233 MB  | 0.056   | 0.033   | split-K/V decoder; outputBackings fast path with latched fallback |
-| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 612.8 s\*  | 30374 / 41116 ms\*   | 0.16×\*  | 2927 MB\*| n/a     | n/a     | beta; full-corpus run times out, [partial 20-phrase numbers](#cosyvoice3-known-failure) |
+| Backend     | License     | Languages              | Footprint | Cold start | TTFT p50 / p95\*   | Synth p50 / p95     | Agg RTFx | Peak RSS | WER     | CER     | Notes |
+|-------------|-------------|------------------------|-----------|------------|---------------------|---------------------|----------|----------|---------|---------|-------|
+| Kokoro ANE  | Apache-2.0  | en (af_heart only)     | ~330 MB   | 37.9 s     | 1586 / 2515 ms      | 1586 / 2515 ms      | 5.19×    | 738 MB   | 0.108   | 0.040   | one-shot; per-stage CU sweep, 7-graph pipeline |
+| Kokoro      | Apache-2.0  | en (af_heart only)     | ~330 MB   | 92.2 s     | 3113 / 4696 ms      | 3113 / 4696 ms      | 2.02×    | 736 MB   | 0.013   | 0.005   | one-shot; cleanest English ASR roundtrip |
+| PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 6.0 s | **1244 / 4749 ms**  | 8757 / 19174 ms     | 0.61×    | 1503 MB  | 0.014   | 0.006   | **streaming**; TTFT is first 80 ms audio frame |
+| StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | n/a (fails)| n/a                  | n/a                 | n/a      | n/a      | n/a     | n/a     | aborts with ANEF compile error on MiniMax — see [known failure](#styletts2-known-failure) |
+| Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 19.1 s     | 19834 / 57508 ms    | 19834 / 57508 ms    | 0.41×    | 1233 MB  | 0.056   | 0.033   | streaming-capable but benchmarked one-shot; split-K/V decoder; outputBackings fast path with latched fallback |
+| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 612.8 s†   | 30374 / 41116 ms†   | 30374 / 41116 ms†   | 0.16×†   | 2927 MB† | n/a     | n/a     | beta; full-corpus run times out, [partial 20-phrase numbers](#cosyvoice3-known-failure) |
 
-\* CosyVoice3: full `minimax-chinese` (100 phrases) run aborts with a
+\* TTFT = time to first audio frame. PocketTTS streams 80 ms / 1920-sample
+frames at 24 kHz, so TTFT < synth_ms; the gap is the streaming
+advantage. All other backends are benchmarked one-shot, so
+`ttft_ms == synth_ms` for them.
+
+† CosyVoice3: full `minimax-chinese` (100 phrases) run aborts with a
 CoreML async timeout on the HiFi-GAN vocoder. The 20-phrase
 short-subset numbers shown are from a tiny side run; cold-start is
 dominated by ANE compile attempts that ultimately fall back to CPU+GPU.
@@ -169,12 +178,14 @@ Headline read for MiniMax-English:
   comparison point for paper-relative quality. Cold start is
   ~92 s on first run because the single-graph encoder hits ANE
   compilation on the longer prompts.
-- **PocketTTS** matches Kokoro on quality (WER 0.012) but is
-  sub-real-time on this corpus (RTFx 0.68×, p50 7.9 s, p95 15.3 s).
-  Long news-style phrases blow up its flow-matching synth time;
-  the streaming `synthesizeStreaming` API produces audio sooner than
-  the one-shot p50 suggests, but streaming-aware TTFT is not yet
-  measured.
+- **PocketTTS** matches Kokoro on quality (WER 0.014, CER 0.006) and
+  is the only streaming-first backend in this slice. Full-utterance
+  RTFx is sub-real-time on long news / story sentences (0.61×, synth
+  p50 8.8 s, p95 19.2 s), but **TTFT p50 is 1.24 s** (p95 4.75 s) —
+  i.e. the user hears the first audio frame ~7× sooner than the
+  synth-time p50 would suggest. For conversational use that is the
+  metric that matters; for batch / offline rendering the synth-time
+  numbers are still relevant.
 - **Magpie** is currently the slowest English backend (RTFx 0.41×,
   p50 19.8 s, p95 57.5 s) because its autoregressive decoder scales
   super-linearly on the long story sentences. Quality is mid-pack
@@ -228,13 +239,13 @@ its cost grows super-linearly with phrase length — most of MiniMax's
 MacBook Air M2 (2022), default compute-units, Parakeet TDT roundtrip.
 p50 / p95 are warm-synth latency in ms.
 
-| Backend       | Macro WER | Macro CER | Synth p50 (ms) | Synth p95 (ms) | RTFx   |
-|---------------|-----------|-----------|-----------------|-----------------|--------|
-| Kokoro ANE    | 0.108     | 0.040     | 1586            | 2515            | 5.19×  |
-| Kokoro        | 0.013     | 0.005     | 3113            | 4696            | 2.02×  |
-| PocketTTS     | 0.012     | 0.005     | 7950            | 15283           | 0.68×  |
-| Magpie        | 0.056     | 0.033     | 19834           | 57508           | 0.41×  |
-| StyleTTS2     | n/a       | n/a       | n/a             | n/a             | n/a    |
+| Backend       | Macro WER | Macro CER | TTFT p50 (ms) | Synth p50 (ms) | Synth p95 (ms) | RTFx   |
+|---------------|-----------|-----------|----------------|-----------------|-----------------|--------|
+| Kokoro ANE    | 0.108     | 0.040     | 1586           | 1586            | 2515            | 5.19×  |
+| Kokoro        | 0.013     | 0.005     | 3113           | 3113            | 4696            | 2.02×  |
+| PocketTTS     | 0.014     | 0.006     | **1244**       | 8757            | 19174           | 0.61×  |
+| Magpie        | 0.056     | 0.033     | 19834          | 19834           | 57508           | 0.41×  |
+| StyleTTS2     | n/a       | n/a       | n/a            | n/a             | n/a             | n/a    |
 
 The MiniMax corpus mixes short conversational phrases (1–11) with
 medium news headlines (81–100) and long narrative paragraphs (101–110
