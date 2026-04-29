@@ -79,10 +79,16 @@ public struct StyleTTS2Vocab: Sendable {
     /// No BOS/EOS wrapping — StyleTTS2's `text_predictor` is fed the raw
     /// id sequence, padded to the bucket length by the caller.
     public func encode(_ phonemes: String) -> [Int32] {
+        // Iterate over Unicode scalars (not Characters) so combining marks
+        // like U+0329 (syllabic) and U+0361 (tie bar) are looked up against
+        // their own vocab entries instead of being grouped into a grapheme
+        // cluster with their base char — which would silently drop both.
+        // Mirrors upstream `text_utils.TextCleaner.__call__`, which iterates
+        // codepoints.
         var ids: [Int32] = []
-        ids.reserveCapacity(phonemes.count)
-        for ch in phonemes {
-            if let id = map[ch] {
+        ids.reserveCapacity(phonemes.unicodeScalars.count)
+        for scalar in phonemes.unicodeScalars {
+            if let id = map[Character(scalar)] {
                 ids.append(id)
             }
         }
