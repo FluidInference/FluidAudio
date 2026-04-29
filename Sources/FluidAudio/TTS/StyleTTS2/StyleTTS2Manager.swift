@@ -23,12 +23,15 @@ public actor StyleTTS2Manager {
 
     private let logger = AppLogger(category: "StyleTTS2Manager")
     private let modelStore: StyleTTS2ModelStore
+    private let synthesizer: StyleTTS2Synthesizer
     private var isInitialized = false
 
     /// - Parameter directory: Optional override for the base cache directory.
     ///   When `nil`, uses the default platform cache location.
     public init(directory: URL? = nil) {
-        self.modelStore = StyleTTS2ModelStore(directory: directory)
+        let store = StyleTTS2ModelStore(directory: directory)
+        self.modelStore = store
+        self.synthesizer = StyleTTS2Synthesizer(modelStore: store)
     }
 
     public var isAvailable: Bool {
@@ -55,31 +58,39 @@ public actor StyleTTS2Manager {
     ///
     /// - Parameters:
     ///   - text: Text to synthesize.
-    ///   - referenceAudioURL: Reference clip used by the diffusion sampler to
-    ///     extract `ref_s` (style + prosody, 256-dim concat). LibriTTS clones
-    ///     are robust to ~5 s of speech.
+    ///   - voiceStyleURL: Path to a precomputed `ref_s.bin` (256 fp32 LE,
+    ///     1024 bytes) produced offline by
+    ///     `mobius-styletts2/scripts/06_dump_ref_s.py`. The on-device style
+    ///     encoder export is a follow-up; until it lands, voices ship as
+    ///     these blobs.
+    ///   - language: G2P language for phonemization.
     ///   - diffusionSteps: Number of ADPM2 sampler iterations (default 5).
-    ///   - cfgScale: Classifier-free guidance scale (default 1.0).
-    /// - Returns: WAV audio data (24 kHz, mono, fp32 PCM).
+    ///   - alpha: Acoustic style mix weight (default 0.3).
+    ///   - beta: Prosody style mix weight (default 0.7).
+    ///   - randomSeed: Seed for the diffusion noise RNG. `nil` → use the
+    ///     system RNG (non-reproducible).
+    /// - Returns: WAV audio data (24 kHz, mono, 16-bit PCM).
     public func synthesize(
         text: String,
-        referenceAudioURL: URL,
+        voiceStyleURL: URL,
+        language: MultilingualG2PLanguage = .americanEnglish,
         diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
-        cfgScale: Float = StyleTTS2Constants.cfgScale
+        alpha: Float = 0.3,
+        beta: Float = 0.7,
+        randomSeed: UInt64? = nil
     ) async throws -> Data {
         guard isInitialized else {
             throw StyleTTS2Error.modelNotFound("StyleTTS2 model not initialized")
         }
-        // Scaffold: synthesizer is not yet implemented. The pieces will land
-        // in follow-up commits — phonemizer wiring, sampler loop, hard-align,
-        // decoder driver. Throwing here is intentional so callers can wire
-        // up the surface today and fill in the implementation incrementally.
-        _ = text
-        _ = referenceAudioURL
-        _ = diffusionSteps
-        _ = cfgScale
-        throw StyleTTS2Error.processingFailed(
-            "StyleTTS2 synthesis is not yet implemented")
+        let voice = try StyleTTS2VoiceStyle.load(from: voiceStyleURL)
+        let (_, ids) = try await tokenize(text: text, language: language)
+        let options = StyleTTS2Synthesizer.Options(
+            diffusionSteps: diffusionSteps,
+            alpha: alpha,
+            beta: beta,
+            randomSeed: randomSeed
+        )
+        return try await synthesizer.synthesize(ids: ids, voice: voice, options: options)
     }
 
     /// Run the text frontend (preprocess → G2P → vocab encode) end-to-end.

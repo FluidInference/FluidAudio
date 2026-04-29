@@ -106,9 +106,13 @@ public actor StyleTTS2ModelStore {
         if let cached = f0nEnergyModel {
             return cached
         }
+        // f0n_energy ships with dynamic shape — the E5RT runtime rejects
+        // MLMultiArrays with known strides on FlexibleShapeInfo models
+        // when run on GPU/ANE, so we pin this stage to CPU. Per-utterance
+        // cost is small (one call), the CPU fallback is acceptable.
         let model = try await loadModel(
             named: ModelNames.StyleTTS2.f0nEnergyFile,
-            computeUnits: .cpuAndNeuralEngine,
+            computeUnits: .cpuOnly,
             label: "f0n_energy"
         )
         f0nEnergyModel = model

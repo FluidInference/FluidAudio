@@ -42,6 +42,8 @@ struct FluidAudioCLI {
             await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "tts":
             await TTS.run(arguments: Array(arguments.dropFirst(2)))
+        case "styletts2":
+            await StyleTTS2Command.run(arguments: Array(arguments.dropFirst(2)))
         case "magpie":
             await MagpieCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "tts-asr-verify":

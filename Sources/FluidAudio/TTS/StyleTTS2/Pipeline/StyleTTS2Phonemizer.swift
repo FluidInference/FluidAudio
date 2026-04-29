@@ -2,9 +2,20 @@ import Foundation
 
 /// Text → IPA phoneme string pipeline for StyleTTS2.
 ///
-/// Wires the existing `MultilingualG2PModel` (CharsiuG2P ByT5) through to the
-/// 178-token espeak-ng IPA vocabulary that ships in
-/// `constants/text_cleaner_vocab.json`.
+/// For English (`.americanEnglish`), uses the in-tree `G2PModel` (BART
+/// encoder-decoder, misaki-style IPA) and remaps the misaki conventions to
+/// the espeak-ng convention that StyleTTS2's LibriTTS checkpoint expects:
+///
+///   misaki → espeak-ng
+///   A → eɪ   I → aɪ   O → oʊ   W → aʊ   Y → ɔɪ
+///   ᵊ → ə   (tiny-schwa offglide; not in StyleTTS2's 178-vocab)
+///
+/// Other glyphs (`ʤ`, `ʧ`, `ˈ`, `ˌ`, `ð`, `θ`, `ɹ`, `ɾ`, etc.) are already in
+/// the 178-token espeak-ng vocabulary and pass through.
+///
+/// Non-English languages fall back to `MultilingualG2PModel` (CharsiuG2P
+/// ByT5). Output quality there is unvalidated — the LibriTTS checkpoint is
+/// English-only.
 ///
 /// The output is a phoneme **string** (not yet token ids) so that callers
 /// can splice in custom IPA, log, or post-process before encoding through
@@ -24,13 +35,23 @@ public enum StyleTTS2Phonemizer {
 
     private static let logger = AppLogger(category: "StyleTTS2Phonemizer")
 
+    /// Misaki single-glyph diphthongs / offglides → espeak-ng IPA.
+    /// Applied per-piece on the output of `G2PModel.phonemize`.
+    private static let misakiToEspeak: [String: String] = [
+        "A": "eɪ",
+        "I": "aɪ",
+        "O": "oʊ",
+        "W": "aʊ",
+        "Y": "ɔɪ",
+        "ᵊ": "ə",
+    ]
+
     /// Convert raw text to an IPA phoneme string for StyleTTS2.
     ///
     /// - Parameters:
     ///   - text: Source text in the natural orthography of `language`.
-    ///   - language: Target language for `MultilingualG2PModel`. The
-    ///     LibriTTS checkpoint shipped on HF is English-only; non-English
-    ///     output will run but is not validated.
+    ///   - language: Target language. English uses the in-tree BART G2P;
+    ///     all others fall back to `MultilingualG2PModel`.
     /// - Returns: A phoneme string. Pass this to `StyleTTS2Vocab.encode(_:)`
     ///   to obtain `[Int32]` token ids.
     public static func phonemize(
@@ -72,9 +93,8 @@ public enum StyleTTS2Phonemizer {
     // MARK: - Private
 
     /// Phonemize one word and append its IPA characters to `output`.
-    /// Drops apostrophes from the G2P input (CharsiuG2P sometimes produces
-    /// noise for `'s`/`'t` enclitics; upstream espeak-ng treats them as
-    /// part of the word, but ByT5's clean handling is to strip).
+    /// Drops apostrophes from the G2P input (`'s`/`'t` enclitics roundtrip
+    /// poorly through ByT5; the BART G2P also handles them best stripped).
     private static func flushWord(
         _ buffer: inout String,
         language: MultilingualG2PLanguage,
@@ -86,17 +106,50 @@ public enum StyleTTS2Phonemizer {
             .replacingOccurrences(of: "'", with: "")
         guard !stripped.isEmpty else { return }
 
+        if language == .americanEnglish {
+            try await flushWordEnglish(stripped, into: &output)
+        } else {
+            try await flushWordMultilingual(stripped, language: language, into: &output)
+        }
+    }
+
+    /// English path: BART G2P (misaki IPA) → espeak-ng IPA via small remap.
+    private static func flushWordEnglish(
+        _ word: String,
+        into output: inout String
+    ) async throws {
+        // Lazy first-call download/load; subsequent calls hit the cache.
+        try await G2PModel.shared.ensureModelsAvailable()
+        let phonemes = try await G2PModel.shared.phonemize(word: word.lowercased())
+        guard let phonemes else {
+            logger.warning(
+                "G2P unavailable for English word \"\(word)\"; passing through verbatim")
+            output.append(word)
+            return
+        }
+        for piece in phonemes {
+            if let mapped = misakiToEspeak[piece] {
+                output.append(mapped)
+            } else {
+                output.append(piece)
+            }
+        }
+    }
+
+    /// Non-English path: CharsiuG2P fallback (unvalidated for StyleTTS2).
+    private static func flushWordMultilingual(
+        _ word: String,
+        language: MultilingualG2PLanguage,
+        into output: inout String
+    ) async throws {
         let phonemes = try await MultilingualG2PModel.shared.phonemize(
-            word: stripped,
+            word: word,
             language: language
         )
         guard let phonemes else {
-            // G2P unavailable (e.g. CI). Fall back to passing the cleaned
-            // word through verbatim — the vocab covers ASCII letters so
-            // it produces an audibly-degraded but non-empty output.
             logger.warning(
-                "G2P unavailable for word \"\(stripped)\"; passing through verbatim")
-            output.append(stripped)
+                "G2P unavailable for word \"\(word)\" (\(language)); passing through verbatim")
+            output.append(word)
             return
         }
         for piece in phonemes {

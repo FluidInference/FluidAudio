@@ -39,8 +39,10 @@ public enum StyleTTS2Constants {
 
     /// Default number of diffusion sampler steps (5× per utterance).
     public static let defaultDiffusionSteps: Int = 5
-    /// Karras schedule rho (controls sigma curvature).
-    public static let karrasRho: Float = 7.0
+    /// Karras schedule rho (controls sigma curvature). Matches the upstream
+    /// e2e reference (`99b_e2e_coreml.py`) which uses rho=9.0 — *not* the
+    /// k-diffusion default of 7.0.
+    public static let karrasRho: Float = 9.0
     public static let karrasSigmaMin: Float = 0.0001
     public static let karrasSigmaMax: Float = 3.0
     /// Classifier-free guidance scale applied during the diffusion step.
