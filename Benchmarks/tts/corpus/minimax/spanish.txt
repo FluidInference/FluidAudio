@@ -1,0 +1,110 @@
+# MiniMax Multilingual TTS Test Set — spanish
+# Source:   https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
+# Revision: cb416f0ac3658da0577e97873065e19fe6488917
+# License:  CC-BY-SA-4.0 (Creative Commons Attribution-ShareAlike 4.0)
+# Phrases:  100
+#
+# Cloning-audio filenames have been stripped — we only need the
+# text for the FluidAudio TTS benchmark harness. Voice selection
+# is per-backend (see Benchmarks/tts/corpus/minimax/README.md).
+
+Nada de móviles. Mente abierta. Sin desconfianza. Sin miedo. O los espíritus pueden molestarse.
+¿Tú crees que es buena idea, presentarse así después de seis meses?
+Mil trescientos millones de chinos en todo el mundo, y me decís que no tenés gente, caradura!
+Cariño, si tú estuvieses vivo, jamás me habría fijado en ti.
+El Gran Hotel es ya el primer hotel de lujo con luz eléctrica de nuestra patria.
+Las labores de búsqueda de las víctimas se centran ahora en las zonas subterráneas.
+Teherán promete responder y Estados Unidos dice que es un ataque proporcional.
+Hasta el 28 de octubre se habían notificado 4.544 casos y 12 muertes relacionadas con ese padecimiento.
+¿Y quiénes son estos electores? Son ciudadanos elegidos por los partidos políticos.
+Una hora más tarde, en el centro del municipio de Jerecuaro, ocurrió otro ataque similar.
+Tienes todo el tiempo del mundo, tú no te preocupes, puedes pensar.
+No, no tiene ninguna. Una pulga no tiene ninguna ala. Cero alas.
+Pues porque tengo una amiga maravillosa que visitar con su hijo. Ven, acompáñame.
+De Castilla-La Mancha no tiene capital. Pues porque es una comunidad autónoma.
+La gente me está mirando, no pasa nada porque ahora yo soy youtuber. ¿Quieres una pregunta?
+Tienes todo el tiempo del mundo, no te apures, todo tranquilo.
+Después del trabajo, vamos por unos tacos y unas chelas, ¿te late, güey?
+Es que tengo una amiga increíble a la que voy a visitar con su hijo. Ándale, ven conmigo.
+Vamos a echarle ganas hoy, compa, que todo va a salir chido, ¿va?
+La banda me está viendo, pero no hay bronca porque ahora soy youtuber. ¿Quieres una pregunta?
+Mi padre suspiró, amparado en aquella sonrisa triste que le perseguía como una sombra por la vida.
+Sólo los espejos de azabache de sus ojos son duros cual dos escarabajos de cristal negro.
+Lo único que delataba el estado de su salud era el cansancio de la piel.
+Jugamos a ser asesinos porque nos morimos de ganas por matar al prójimo.
+Antes que declinara el sol de ese día, yo correría la misma suerte.
+Hemos puesto todo el foco en el Neolítico y hemos olvidado el 99 % de nuestra historia.
+Antes se creía que los chimpancés eran animales tranquilos, eran lindos. ¡Qué bonitos los chimpancés!
+Más tarde, en el siglo XX, por los años 70, se descubren a los otros parientes, los bonobos.
+Una gran diferencia horaria que nos complicaba el hecho de poder coincidir.
+Y pensé: Oye, quizás no es tan raro escuchar en un futuro: "Necesito a la informática" para salvarle la vida a alguien.
+Estoy muy agradecida —de verdad— por lo que he vivido aquí en este tiempo, por todo lo que me ha dado esta ciudad.
+Y este nombre, "Ortega", sólo lo había visto en una marca de salsa picante mexicana.
+Hay muchísimo en juego y el resultado lo decidirán unos cuantos estados.
+Bueno, pues queremos empezar este episodio haciéndote una pregunta.
+Hola a todos queridos amigos oyentes y seguidores de historia en podcast. Muy bienvenidos a un nuevo episodio, episodio 86.
+El exorcista encargado de su tratamiento lo atribuía a la mano de Sin, dios de la luna.
+Buenos días, ¿cómo has dormido anoche? Pareces un poco cansado esta mañana.
+¿Te gustaría ir al cine este fin de semana? Acaban de estrenar una película que creo que te encantaría.
+Hace mucho tiempo que no nos vemos, deberíamos quedar para tomar un café y ponernos al día.
+Mi hermana acaba de tener un bebé, es una niña preciosa con unos ojos grandes y azules como los de su padre.
+¿Has probado el nuevo restaurante italiano que abrieron en el centro? Dicen que la pasta es absolutamente deliciosa.
+Mañana tengo una entrevista de trabajo muy importante, estoy nervioso pero también emocionado por esta oportunidad.
+El tráfico estaba terrible esta mañana, he tardado casi una hora en llegar al trabajo cuando normalmente solo tardo veinte minutos.
+¿Podrías recomendarme un buen libro para leer durante mis vacaciones? Prefiero novelas de misterio o aventuras.
+Mi ordenador está funcionando muy lento últimamente, ¿conoces a alguien que pueda arreglarlo por un precio razonable?
+Este fin de semana voy a visitar a mis padres en el pueblo, hace casi tres meses que no los veo y los echo mucho de menos.
+Barcelona es una ciudad maravillosa, con la Sagrada Familia y el Parque Güell que muestran el genio de Gaudí.
+Durante nuestro viaje a México, quedamos fascinados por las ruinas mayas de Chichén Itzá y sus impresionantes pirámides.
+Las playas de las Islas Canarias son perfectas para descansar, con su arena dorada y aguas cristalinas.
+En mi último viaje a Perú, el Machu Picchu superó todas mis expectativas, es verdaderamente una maravilla del mundo.
+Si visitas Granada, no puedes perderte la Alhambra, un palacio que cuenta la historia de siglos de cultura andaluza.
+¿Sabías que las estrellas que vemos en el cielo nocturno podrían haber desaparecido hace millones de años?
+Los dinosaurios dominaron la Tierra durante más de 160 millones de años antes de extinguirse.
+El cerebro humano contiene aproximadamente 86 mil millones de neuronas, cada una conectada a miles de otras.
+Había una vez un pequeño ratón que vivía en el hueco de un árbol en el bosque más verde del mundo.
+La princesa miró por la ventana del castillo y vio las estrellas brillando como nunca antes.
+Bienvenidos a nuestro podcast de hoy donde hablaremos sobre los misterios del universo.
+En el episodio de hoy analizaremos cómo la tecnología está cambiando nuestra forma de comunicarnos.
+La paella valenciana tradicional lleva pollo, conejo, judías verdes, garrofón y azafrán.
+El secreto de un buen gazpacho andaluz está en la calidad de los tomates y el aceite de oliva.
+Las tapas son una de las tradiciones gastronómicas más populares de España.
+El Camino de Santiago es una ruta de peregrinación con cientos de años de historia.
+La Sagrada Familia de Barcelona lleva en construcción desde 1882 y aún no está terminada.
+Los arrecifes de coral son como las ciudades submarinas, llenas de vida y color.
+El agua cubre más del 70% de la superficie de nuestro planeta, pero solo el 2.5% es agua dulce.
+Cuando un colibrí vuela, sus alas pueden batir hasta 80 veces por segundo.
+La jirafa es el animal terrestre más alto, pudiendo alcanzar hasta 5.8 metros de altura.
+Érase una vez un dragón que, en lugar de escupir fuego, soplaba burbujas de colores.
+El pequeño duende del bosque guardaba un secreto que solo compartía con los niños de corazón puro.
+Hoy en nuestro podcast hablaremos con un experto en astronomía sobre los agujeros negros.
+Gracias por sintonizar este nuevo episodio donde exploraremos las culturas antiguas de Mesoamérica.
+El chocolate mexicano tiene una historia que se remonta a las civilizaciones precolombinas.
+La cocina peruana es considerada una de las más diversas del mundo, con influencias de muchas culturas.
+El asado argentino no es solo una comida, es una tradición social que reúne a familiares y amigos.
+Venecia es una ciudad única en el mundo, construida sobre 118 pequeñas islas conectadas por más de 400 puentes.
+El desierto de Atacama en Chile es uno de los lugares más secos del planeta.
+Los glaciares de la Patagonia son un espectáculo natural que te deja sin palabras.
+La selva amazónica produce aproximadamente el 20% del oxígeno de nuestro planeta.
+Los pingüinos pueden nadar a velocidades de hasta 35 kilómetros por hora.
+Había una vez una niña que podía hablar con las flores de su jardín.
+El caballero prometió a la reina que encontraría el tesoro perdido, sin importar los peligros.
+En el programa de hoy discutiremos cómo la inteligencia artificial está transformando la medicina.
+Bienvenidos a otro episodio de "Historias del Pasado", hoy hablaremos sobre el antiguo Egipto.
+La dieta mediterránea se basa en el consumo de aceite de oliva, cereales, frutas, verduras y pescado.
+El curry es un conjunto de especias que varía según la región de la India de donde provenga.
+La Gran Muralla China es tan larga que podría dar la vuelta a un cuarto del planeta.
+Las auroras boreales son uno de los fenómenos naturales más impresionantes que se pueden observar.
+Los átomos son tan pequeños que podrías alinear millones de ellos en el punto al final de esta frase.
+Las abejas pueden reconocer rostros humanos y recordar a las personas que las han tratado bien o mal.
+El cuento comenzó cuando el reloj de la torre dio las doce campanadas en aquella noche de luna llena.
+La bruja del bosque no era malvada como todos pensaban, solo era incomprendida y solitaria.
+En este episodio especial, entrevistaremos a un explorador que ha recorrido los siete continentes.
+Gracias por acompañarnos en este podcast donde analizamos los últimos avances científicos.
+La pizza napolitana tradicional solo lleva tomate, mozzarella, aceite de oliva y albahaca.
+El sushi japonés es mucho más que pescado crudo; es un arte culinario con siglos de tradición.
+El Taj Mahal en India fue construido como un monumento al amor eterno.
+Las pirámides de Egipto siguen siendo uno de los mayores misterios arquitectónicos de la humanidad.
+Los colibríes son las únicas aves que pueden volar hacia atrás.
+El cuerpo humano contiene suficiente hierro como para fabricar un clavo de unos 7 centímetros.
+Los delfines duermen con un ojo abierto y la mitad de su cerebro permanece despierta para poder respirar.

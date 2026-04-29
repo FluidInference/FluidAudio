@@ -1,0 +1,110 @@
+# MiniMax Multilingual TTS Test Set — turkish
+# Source:   https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
+# Revision: cb416f0ac3658da0577e97873065e19fe6488917
+# License:  CC-BY-SA-4.0 (Creative Commons Attribution-ShareAlike 4.0)
+# Phrases:  100
+#
+# Cloning-audio filenames have been stripped — we only need the
+# text for the FluidAudio TTS benchmark harness. Voice selection
+# is per-backend (see Benchmarks/tts/corpus/minimax/README.md).
+
+Anime, hayatın zorluklarına karşı koymak için gösterilen azmi anlatıyor.
+Bu filmdeki karakterlerin hepsi birbirinden özel ve unutulmaz.
+Her bölümde farklı bir macera, her zaman heyecan verici.
+Anime dizisi, izleyicilerine güç ve umut veriyor.
+Bu animenin konusu, insanın içsel gücünü keşfetmesiyle ilgili.
+Bir konuşma, sadece kelimelerle değil, duygu ve anlamla da yapılmalıdır.
+Bu röportaj bana çok ilham verdi, çok şey öğrendim.
+Konuşma yaparken, izleyicinin ilgisini sürekli canlı tutmak önemlidir.
+Bir konferans, dinleyicilerin bilinçlerini ve fikirlerini genişletmek için bir fırsattır.
+Bir konuşma sırasında hissettiklerimiz, diğer insanlarla daha derin bir bağlantı kurmamızı sağlar.
+Bugün dünyadaki en son gelişmeleri öğrenmek çok önemli.
+Haber bülteni her zaman doğru ve güvenilir olmalıdır.
+Bugün medyada yer alan haberler, çok sayıda insanın hayatını etkileyebilir.
+Toplumdaki gelişmeler hakkında bilgi sahibi olmak, daha bilinçli bir vatandaş olmanıza yardımcı olur.
+Bugün yayımlanan haber, dünyada büyük bir etki yaratacak.
+Bir sesli kitap, hayatın koşturmacasında dinlenmek için mükemmel bir yol olabilir.
+Sesli kitap, en sevdiğiniz hikayeyi başka bir şekilde keşfetmenin harika bir yoludur.
+Bir sesli kitap dinlerken, kendinizi başka bir dünyada hissedebilirsiniz.
+Bu sesli kitap, kelimeleri duymanızı ve hikayeyi daha derinden hissetmenizi sağlar.
+Sesli kitaplar, uzun yolculuklarda zaman geçirmeyi kolaylaştırır.
+Hava bugün gerçekten güzel, dışarıda biraz yürüyüş yapmak istiyorum.
+Bugün biraz sohbet edelim, hayat hakkında ne düşünüyorsun?
+Dün gece çok güzel bir film izledim, sen ne tür filmler seversin?
+Kahve içmeyi seviyorum, senin favori içeceğin nedir?
+Son zamanlarda ne tür kitaplar okuyorsun? Bir önerin var mı?
+Görsel efektler gerçekten harika, her anı izlemeye değer.
+Anime karakterleri, çoğu zaman gerçekte olamayacak kadar ilham verici.
+Bazen bir anime, hayatı farklı bir bakış açısıyla görmek için harika bir yol olabilir.
+Dizi her bölümde farklı bir tema işliyor, izlemek hiç sıkıcı olmuyor.
+İzlerken kendinizi kaybedeceğiniz bir anime dizisi var, kesinlikle öneririm.
+Bu röportajda yer alan bilgiler, toplumda büyük bir fark yaratabilir.
+Duygusal bir konuşma, dinleyicilerin kalbine dokunabilir.
+Konuşma yaparken, izleyicilerle göz teması kurmak çok önemlidir.
+Sohbet etmek, bazen en derin fikirlerin ortaya çıkmasına olanak tanır.
+Bir röportaj, sadece soruları yanıtlamak değil, aynı zamanda hayat hakkında derin düşünceler paylaşmaktır.
+Haberler her zaman hızlı değişiyor, bu yüzden her zaman güncel kalmalıyız.
+Günümüz haberleri, dünya genelinde meydana gelen değişimleri daha yakın bir şekilde yansıtıyor.
+Bugünkü bülten, küresel ekonomi ile ilgili önemli bir haber içeriyor.
+Haber sunucuları, doğruluğu sağlamak için çok dikkatli olmalıdır.
+Önemli haberler, insanların hayatlarını şekillendirebilir, bu yüzden doğru bilgiye sahip olmak kritik önem taşır.
+Sesli kitap dinlerken, zihninizin tamamen hikayeye odaklanması sağlanır.
+Sesli kitaplar, aynı anda öğrenmenin ve eğlenmenin harika bir yoludur.
+Bir sesli kitap, özellikle sessiz bir ortamda, harika bir deneyim sunar.
+Sesli kitaplar, gözleri yormadan hikayelerin tadını çıkarma fırsatı verir.
+Bu sesli kitap, hayat hakkında değerli dersler sunuyor, dinlerken her anı kaçırmamalısınız.
+Bu hafta sonu bir etkinlik var, gelmek ister misin?
+Seninle daha çok vakit geçirmeyi çok isterim, belki bir gün buluşuruz.
+İçinde bulunduğumuz yıl çok hızlı geçiyor, sen ne düşünüyorsun?
+Yaz tatilinde nereye gitmek istersin?
+Bugün işte nasıl gidiyor, her şey yolunda mı?
+Günaydın, bugün nasılsın? Dün gece iyi uyuyabildin mi?
+Hafta sonu için ne planların var? Belki birlikte sinemaya gidebiliriz.
+Bu akşam yemeğe çıkmak ister misin? Yeni açılan İtalyan restoranını denemek istiyorum.
+Hava bugün çok güzel, öğleden sonra sahile gidip biraz yürüyüş yapalım mı?
+Yeni işin nasıl gidiyor? Çalışma arkadaşlarınla iyi anlaşabiliyor musun?
+Doğum günün için ne hediye almamı istersin? Sana özel bir şeyler düşünüyorum.
+Dün akşam izlediğim film gerçekten etkileyiciydi, sana da tavsiye ederim.
+Çocuklar nasıl? Okulda dersleri iyi gidiyor mu?
+Bu hafta çok yoğunum, raporu tamamlamak için geç saatlere kadar çalışmam gerekiyor.
+Annem bu hafta sonu bize gelecek, onun için özel bir yemek hazırlamak istiyorum.
+Tatil için nereye gitmeyi düşünüyorsun? Bence deniz kenarı bu mevsimde harika olur.
+Türkçe öğrenmek sandığımdan daha zor, ama her gün biraz ilerleme kaydediyorum.
+Yeni taşındığın ev nasıl? Çevre güvenli mi ve komşularla tanıştın mı?
+Bugün işe giderken otobüsü kaçırdım ve taksi tutmak zorunda kaldım.
+Son zamanlarda çok stresli görünüyorsun, belki bir hafta sonu kaçamağı yapmalısın.
+Kahve içmek için favori mekanın neresi? Ben genellikle şehir merkezindeki küçük kafeyi tercih ediyorum.
+Akşam yemeği için alışveriş yapmam gerekiyor, markete giderken sana da bir şey alayım mı?
+Spor salonuna ne sıklıkla gidiyorsun? Ben haftada üç kez gitmeye çalışıyorum.
+Yeni aldığım kitabı bitirdim, ödünç almak ister misin? Gerçekten etkileyici bir hikayesi var.
+Yarın hava yağmurlu olacakmış, piknik planımızı ertelesek iyi olur.
+Son dakika: Başkent Ankara'da meydana gelen deprem sonrası herhangi bir can kaybı bildirilmedi, ancak bazı binalarda hafif hasar oluştu.
+Ekonomi Bakanı, enflasyonla mücadele kapsamında yeni ekonomik tedbirleri içeren bir paket açıkladı.
+Milli futbol takımımız, dün akşam oynanan kritik maçta rakibini 3-1 yenerek Dünya Kupası elemelerinde önemli bir avantaj elde etti.
+Meteoroloji Genel Müdürlüğü, ülkenin batı kesimlerinde etkili olacak kuvvetli yağış ve fırtına için sarı alarm verdi.
+Bilim insanları, deniz kirliliğinin azaltılması için yeni bir proje başlattı ve projenin beş yıl içinde somut sonuçlar vermesi bekleniyor.
+Sağlık Bakanlığı, grip salgınına karşı vatandaşları aşı olmaya ve temel hijyen kurallarına uymaya davet etti.
+İstanbul'da düzenlenen Uluslararası Film Festivali'nde, genç yönetmen Ayşe Yılmaz'ın filmi en iyi film ödülünü kazandı.
+Toplum olarak yaşlılarımıza daha fazla destek vermek ve onların yaşam kalitesini artırmak için yeni projeler geliştirilmektedir.
+Ünlü teknoloji şirketi, yapay zeka destekli yeni akıllı telefonunu tanıttı ve ön siparişlerin gelecek hafta başlayacağını açıkladı.
+Trafik kazalarını azaltmak için yeni bir yasa tasarısı meclise sunuldu ve cezaların artırılması planlanıyor.
+Doğu bölgelerindeki köylerde yaşayan insanlar, kış mevsiminde dayanışma ruhuyla birbirlerine destek oluyor ve zorlu hava koşullarına karşı birlikte mücadele ediyorlar.
+Bilim Akademisi, genç araştırmacıları desteklemek için yeni bir burs programı başlattığını duyurdu.
+Üniversite giriş sınavı sonuçları açıklandı ve bu yıl rekor sayıda öğrenci tıp fakültesini tercih etti.
+İstanbul Boğazı'nda yüzme yarışması düzenlendi ve yüzlerce sporcu Asya'dan Avrupa'ya yüzerek geçti.
+Ülkemizin güneydoğusunda bulunan antik kent, UNESCO Dünya Mirası listesine dahil edildi.
+Merkez Bankası, faiz oranlarını değiştirmeme kararı aldı ve ekonomik istikrarın sürdürülmesi için çalışmaların devam edeceğini bildirdi.
+Ünlü ressam Mehmet Aydın'ın eserleri, yarından itibaren Ulusal Sanat Galerisi'nde sergilenmeye başlayacak.
+Hava kirliliğinin azaltılması için elektrikli araçlara geçişi hızlandıracak yeni teşvikler açıklandı.
+Ülkemizin ev sahipliğinde düzenlenen G20 Zirvesi başladı ve dünya liderleri ekonomik işbirliği konularını görüşmek üzere bir araya geldi.
+Yaşlı adam, her sabah olduğu gibi sahildeki bankına oturmuş, ufka bakarak geçmişin anılarında kaybolmuştu.
+Küçük kız, tavan arasında bulduğu eski sandıkta büyükannesinin gençlik günlerinden kalma gizemli bir günlük keşfetti.
+Karanlık ormanın derinliklerinde, yüzlerce yıldır hiç kimsenin görmediği büyülü bir göl gizliydi.
+Genç adam, rüyalarında her gece aynı kadını görüyordu ve bir gün sokakta yürürken onu gerçekten gördüğünde kalbi duracak gibi oldu.
+Uzay gemisi, bilinmeyen bir gezegenin yörüngesine girdiğinde, mürettebat tuhaf bir sinyal almaya başladı.
+Köyün en yaşlı sakini, fırtınalı bir gecede aniden ortadan kayboldu ve ardında sadece gizemli bir not bıraktı.
+Antik tapınağın duvarlarındaki yazıları çözmeye çalışan arkeolog, insanlık tarihini değiştirecek bir sırrı keşfetmek üzereydi.
+Küçük kasabaya yeni taşınan yabancı, geceleri evinin bahçesinde tuhaf deneyler yapıyor ve komşuların merakını uyandırıyordu.
+Saatin yelkovanı gece yarısını gösterdiğinde, eski şatonun bodrumundan gelen sesler tüm köyü uyandırdı.
+Genç ressam, tablolarında henüz gerçekleşmemiş olayları resmediyordu ve bu resimler birer birer gerçeğe dönüşmeye başladı.
+Savaştan sonra harabeye dönen şehre geri dönen adam, evinin bahçesinde diktiği ağacın hala hayatta olduğunu görünce umutla doldu.

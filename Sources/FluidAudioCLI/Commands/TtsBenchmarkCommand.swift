@@ -18,16 +18,18 @@ import Foundation
 ///
 /// Usage:
 ///   fluidaudio tts-benchmark --backend kokoro-ane \
-///       --corpus prose-en \
+///       --corpus minimax-english \
 ///       --voice af_heart \
 ///       --compute-units default \
 ///       --output-json bench.json
 ///
-/// Categories ship in `Benchmarks/tts/corpus/`:
-///   prose-en   — 20 Harvard sentences (clean prose)
-///   numbers-en — 10 phrases with numbers / dates / currencies
-///   names-en   — 10 phrases with proper nouns / acronyms
-///   prose-zh   — 8 short Mandarin sentences (CosyVoice3)
+/// Corpora ship in `Benchmarks/tts/corpus/minimax/<lang>.txt` —
+/// the MiniMax Multilingual TTS Test Set (CC-BY-SA-4.0,
+/// 24 languages × 100 phrases). See
+/// `Benchmarks/tts/corpus/minimax/README.md` for attribution and
+/// the per-backend ↔ language coverage matrix. Reference with
+/// `--corpus minimax-<lang>` (e.g. `minimax-english`,
+/// `minimax-chinese`, `minimax-vietnamese`, …).
 public enum TtsBenchmarkCommand {
 
     private static let logger = AppLogger(category: "TtsBenchmarkCommand")
@@ -797,10 +799,29 @@ public enum TtsBenchmarkCommand {
     ) throws -> [(category: String, text: String)] {
         let cwd = URL(
             fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        let url = cwd.appendingPathComponent(
-            "Benchmarks/tts/corpus/\(name).txt", isDirectory: false)
+        let relativePath = corpusRelativePath(for: name)
+        let url = cwd.appendingPathComponent(relativePath, isDirectory: false)
         let raw = try String(contentsOf: url, encoding: .utf8)
         return parseCorpus(raw, category: name)
+    }
+
+    /// Map a `--corpus` name to its on-disk relative path.
+    ///
+    /// All shipped corpora are MiniMax Multilingual TTS Test Set
+    /// languages — `minimax-<lang>` resolves to
+    /// `Benchmarks/tts/corpus/minimax/<lang>.txt`. The CC-BY-SA-4.0
+    /// attribution lives next to the data in `minimax/README.md`.
+    /// Pass `--corpus-path` for ad-hoc files outside the shipped set.
+    private static func corpusRelativePath(for name: String) -> String {
+        let prefix = "minimax-"
+        if name.hasPrefix(prefix) {
+            let lang = String(name.dropFirst(prefix.count))
+            return "Benchmarks/tts/corpus/minimax/\(lang).txt"
+        }
+        // Back-compat shim — anything else is assumed to live next to
+        // the minimax subdirectory. Prefer `--corpus-path` for non-shipped
+        // corpora.
+        return "Benchmarks/tts/corpus/\(name).txt"
     }
 
     private static func parseCorpus(
@@ -826,8 +847,8 @@ public enum TtsBenchmarkCommand {
 
         var defaultCorpus: String {
             switch self {
-            case .cosyVoice3: return "prose-zh"
-            default: return "prose-en"
+            case .cosyVoice3: return "minimax-chinese"
+            default: return "minimax-english"
             }
         }
     }
@@ -912,8 +933,10 @@ public enum TtsBenchmarkCommand {
 
             Options:
               --backend <name>          See list above (default: kokoro-ane)
-              --corpus <name>           Shipped corpus: prose-en | numbers-en
-                                        | names-en | prose-zh
+              --corpus <name>           MiniMax corpus name: minimax-<lang>
+                                        (e.g. minimax-english, minimax-chinese,
+                                        minimax-vietnamese — 24 languages total;
+                                        see Benchmarks/tts/corpus/minimax/README.md)
               --corpus-path <path>      Custom corpus file (overrides --corpus)
               --voice <name>            Voice id (Kokoro/PocketTTS/CosyVoice3)
               --speaker <name>          Magpie speaker: john|sofia|aria|jason|leo
@@ -926,10 +949,10 @@ public enum TtsBenchmarkCommand {
 
             Examples:
               fluidaudio tts-benchmark --backend kokoro-ane --output-json bench.json
-              fluidaudio tts-benchmark --backend kokoro --corpus numbers-en
-              fluidaudio tts-benchmark --backend pocket-tts --language english
+              fluidaudio tts-benchmark --backend kokoro --corpus minimax-english
+              fluidaudio tts-benchmark --backend pocket-tts --corpus minimax-german --language german
               fluidaudio tts-benchmark --backend magpie --speaker sofia --language en
-              fluidaudio tts-benchmark --backend cosyvoice3 --corpus prose-zh
+              fluidaudio tts-benchmark --backend cosyvoice3 --corpus minimax-chinese
             """
         )
     }

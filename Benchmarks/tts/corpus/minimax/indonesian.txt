@@ -1,0 +1,110 @@
+# MiniMax Multilingual TTS Test Set — indonesian
+# Source:   https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
+# Revision: cb416f0ac3658da0577e97873065e19fe6488917
+# License:  CC-BY-SA-4.0 (Creative Commons Attribution-ShareAlike 4.0)
+# Phrases:  100
+#
+# Cloning-audio filenames have been stripped — we only need the
+# text for the FluidAudio TTS benchmark harness. Voice selection
+# is per-backend (see Benchmarks/tts/corpus/minimax/README.md).
+
+Kehidupan adalah serangkaian pilihan yang harus kita ambil.
+Mimpi adalah hal yang harus dilindungi, jangan biarkan orang lain meremehkannya.
+Setiap orang punya jalan hidupnya masing-masing, kita hanya bisa memilih bagaimana melaluinya.
+Cinta bisa membuat seseorang melakukan hal yang tak terduga.
+Bahkan dalam kegelapan, harapan masih bisa ditemukan.
+Penting untuk selalu berjuang demi impian kita, meskipun banyak halangan.
+Kita harus berani untuk berbicara dan menyuarakan pendapat kita di hadapan banyak orang.
+Perubahan tidak akan terjadi jika kita tidak berani untuk memulai.
+Keberhasilan dimulai dari langkah pertama yang penuh keberanian.
+Saatnya kita bekerja sama untuk menciptakan masa depan yang lebih baik.
+Pemilu tahun ini diharapkan akan membawa perubahan yang signifikan bagi negara.
+Para ahli memperkirakan pertumbuhan ekonomi Indonesia akan meningkat tahun depan.
+Kebijakan baru ini bertujuan untuk meningkatkan kualitas pendidikan di seluruh daerah.
+Pemerintah sedang berupaya untuk mengurangi angka pengangguran di Indonesia.
+Dalam laporan terakhir, sektor pariwisata menunjukkan pemulihan yang stabil.
+Dalam kisah ini, protagonis menemukan dirinya dalam sebuah petualangan tak terduga.
+Setiap halaman mengungkapkan lebih banyak misteri yang harus dipecahkan.
+Cerita ini penuh dengan kejutan yang akan membuat Anda tertegun.
+Saat-saat yang penuh ketegangan membuat setiap bab menjadi semakin menarik.
+Pada akhirnya, semua teka-teki akan terungkap dengan cara yang tak terduga.
+Apa kabar? Semoga hari Anda menyenankan.
+Saya suka sekali dengan cuaca hari ini, sangat cerah!
+Kamu sudah mencoba makanan baru yang ada di kafe itu?
+Minggu ini saya sedang sibuk dengan pekerjaan, tapi saya senang.
+Apakah kamu punya rencana akhir pekan ini?
+Tak ada yang bisa memisahkan kita dari impian kita.
+Jika kamu bisa bermimpi, kamu pasti bisa mencapainya.
+Banyak hal yang tidak kita ketahui, tapi kita tetap harus berusaha.
+Apa yang kita lakukan hari ini akan menentukan masa depan kita.
+Semangat adalah kunci untuk melewati setiap rintangan hidup.
+Keberanian adalah kualitas yang paling penting dalam meraih kesuksesan.
+Setiap tantangan adalah kesempatan untuk tumbuh dan belajar.
+Kami percaya bahwa masa depan akan lebih cerah dengan kolaborasi.
+Apa yang kita lakukan sekarang akan berdampak besar di masa depan.
+Kesuksesan bukan hanya tentang pencapaian, tapi tentang proses yang kita lalui.
+Penyebaran vaksinasi terus dilakukan di seluruh penjuru negeri.
+Pertumbuhan teknologi membawa dampak positif pada industri di Indonesia.
+Proyek infrastruktur baru akan menciptakan lapangan pekerjaan bagi masyarakat.
+Isu lingkungan hidup semakin menjadi perhatian di kalangan masyarakat.
+Dalam beberapa tahun terakhir, sektor kesehatan menunjukkan perbaikan yang signifikan.
+Petualangan ini membawa pembaca ke dunia yang penuh dengan imajinasi.
+Semakin lama, kita semakin dekat dengan penyelesaian misteri yang ada.
+Setiap keputusan yang diambil akan menentukan jalan cerita selanjutnya.
+Cerita ini akan membuat Anda terpaku pada setiap kata yang diucapkan.
+Akhir dari cerita ini penuh dengan emosi dan refleksi yang mendalam.
+Saya baru saja menonton film yang sangat menarik, kamu harus menontonnya.
+Saya sedang mencari tempat baru untuk liburan, ada rekomendasi?
+Mungkin kita bisa bertemu di kafe minggu depan.
+Saya suka ngobrol tentang topik-topik ringan setelah seharian bekerja.
+Bagaimana dengan kamu? Ada cerita menarik minggu ini?
+Selamat pagi, bagaimana kabarmu hari ini? Semoga kamu tidur nyenyak semalam.
+Apakah kamu sudah sarapan? Saya membuat roti panggang dan telur untuk sarapan pagi ini.
+Cuaca hari ini sangat cerah, bagaimana kalau kita pergi ke taman untuk berjalan-jalan sore nanti?
+Terima kasih sudah membantu saya menyelesaikan proyek kemarin, saya sangat menghargai kerja kerasmu.
+Bagaimana kabar keluargamu? Sudah lama saya tidak bertemu dengan mereka sejak pesta tahun lalu.
+Saya baru saja menonton film yang sangat bagus, kamu harus menontonnya juga kapan-kapan.
+Akhir pekan ini kamu ada rencana apa? Mungkin kita bisa pergi ke pantai bersama teman-teman.
+Maaf saya terlambat datang ke pertemuan, tadi jalanan sangat macet karena ada kecelakaan.
+Restoran baru di dekat kantor menyajikan makanan yang lezat, kita harus mencobanya bersama kapan-kapan.
+Bagaimana perkembangan kursus bahasa Mandarinmu? Apakah sudah ada kemajuan yang signifikan?
+Saya sedang mencari apartemen baru yang lebih dekat dengan tempat kerja, apakah kamu punya rekomendasi?
+Selamat ulang tahun! Semoga semua harapan dan impianmu dapat terwujud di tahun ini.
+Apakah kamu sudah membaca buku yang saya rekomendasikan minggu lalu? Menurutku ceritanya sangat menarik.
+Besok saya harus bangun pagi-pagi sekali untuk mengikuti rapat penting dengan klien dari luar negeri.
+Bagaimana menurutmu tentang perubahan kebijakan baru di kantor kita? Apakah itu akan berdampak positif?
+Saya mulai berolahraga secara rutin setiap pagi dan merasa lebih berenergi sepanjang hari.
+Apakah kamu bisa mengajarkan saya cara memasak rendang? Saya ingin membuatnya untuk acara keluarga minggu depan.
+Toko buku favorit saya sedang mengadakan diskon besar-besaran, mungkin kita bisa pergi bersama besok.
+Bagaimana pengalaman pertamamu bekerja dari rumah? Apakah kamu menikmatinya atau lebih suka bekerja di kantor?
+Saya berencana untuk berlibur ke Bali bulan depan, apakah kamu punya rekomendasi tempat yang harus dikunjungi?
+Presiden mengumumkan paket kebijakan ekonomi baru yang bertujuan untuk meningkatkan investasi asing dan menciptakan lebih banyak lapangan kerja.
+Gempa berkekuatan 6,2 skala Richter mengguncang wilayah timur negara ini pagi tadi, namun belum ada laporan korban jiwa.
+Tim nasional sepak bola Indonesia berhasil mengalahkan Malaysia dengan skor 2-1 dalam pertandingan kualifikasi Piala Dunia semalam.
+Menteri Kesehatan menghimbau masyarakat untuk tetap waspada terhadap penyebaran virus dengue yang meningkat selama musim hujan.
+Harga bahan pokok di pasar tradisional mengalami kenaikan signifikan dalam dua minggu terakhir akibat gangguan distribusi.
+Pemerintah meresmikan jembatan terpanjang di Indonesia yang menghubungkan dua pulau besar dan diharapkan dapat meningkatkan konektivitas antar wilayah.
+Konferensi perubahan iklim internasional akan diselenggarakan di Jakarta bulan depan dengan dihadiri perwakilan dari lebih dari 100 negara.
+Perusahaan teknologi terkemuka meluncurkan smartphone terbaru dengan fitur kamera yang revolusioner dan baterai yang tahan hingga dua hari.
+Kebakaran hutan di Kalimantan telah menghanguskan ribuan hektar lahan dan menyebabkan kabut asap yang mengganggu aktivitas warga.
+Bank Indonesia mempertahankan suku bunga acuan pada level 5,75 persen untuk menjaga stabilitas ekonomi di tengah ketidakpastian global.
+Festival film internasional tahunan dibuka secara resmi kemarin malam dengan pemutaran perdana film karya sutradara muda berbakat dari Yogyakarta.
+Peneliti Indonesia berhasil menemukan spesies baru katak di hutan hujan Sumatera yang memiliki karakteristik unik dan belum pernah ditemukan sebelumnya.
+Pemerintah daerah memberlakukan pembatasan kendaraan bermotor di pusat kota untuk mengurangi kemacetan dan polusi udara.
+Atlet para-renang Indonesia menyumbangkan medali emas pertama dalam ajang Paralympic Games yang sedang berlangsung di Paris.
+Badan Meteorologi memperingatkan potensi cuaca ekstrem di beberapa wilayah Indonesia dalam tiga hari ke depan akibat siklon tropis.
+Universitas terkemuka di Indonesia menjalin kerja sama dengan perguruan tinggi Jepang untuk program pertukaran mahasiswa dan penelitian bersama.
+Indeks harga saham gabungan mencatat rekor tertinggi sepanjang masa setelah pengumuman data pertumbuhan ekonomi yang melampaui ekspektasi pasar.
+Vaksin COVID-19 produksi dalam negeri telah mendapatkan izin penggunaan darurat dan akan segera didistribusikan ke seluruh provinsi.
+Pemerintah mengalokasikan anggaran triliunan rupiah untuk pembangunan infrastruktur di daerah terpencil guna mengurangi kesenjangan ekonomi.
+Nenek Mira duduk di beranda rumahnya yang tua sambil menatap langit senja, mengingat masa mudanya ketika ia menjadi penari terkenal di istana kerajaan.
+Setiap malam, penduduk desa itu mendengar suara tangisan misterius dari arah hutan bambu, namun tak seorang pun berani mencari tahu sumbernya.
+Kapal nelayan kecil itu terombang-ambing di tengah badai, sementara kaptennya berdoa agar mereka bisa kembali dengan selamat ke pelabuhan.
+Ketika membuka kotak tua di loteng rumah kakeknya, Andi menemukan sebuah peta harta karun yang mengarah ke gua tersembunyi di kaki gunung.
+Pohon beringin tua di tengah desa itu konon menyimpan rahasia gaib, dan hanya dukun desa yang berani mendekatinya saat bulan purnama.
+Pesawat luar angkasa itu mendarat di planet asing, dan para astronot terkejut menemukan struktur bangunan yang mirip dengan piramida Mesir kuno.
+Setelah lima puluh tahun berpisah, dua sahabat masa kecil itu akhirnya bertemu kembali di bangku taman tempat mereka dulu sering bermain.
+Raja yang bijaksana itu menyamar menjadi rakyat biasa untuk mengetahui kondisi sebenarnya di kerajaannya dan mendengar keluhan rakyatnya.
+Gadis kecil itu memiliki kemampuan istimewa untuk berbicara dengan hewan, sebuah rahasia yang hanya diketahui oleh neneknya yang juga memiliki kemampuan serupa.
+Setiap kali hujan turun, lukisan tua di ruang tamu rumah itu akan berubah pola dan warnanya, menampilkan pemandangan yang berbeda setiap saat.
+Profesor tua itu menghabiskan seluruh hidupnya mencari formula keabadian, dan di hari ulang tahunnya yang keseratus, ia akhirnya menemukannya.

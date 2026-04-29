@@ -105,6 +105,7 @@ Resources/
 scripts/
 !Scripts/parakeet_subset_benchmark.sh
 !Scripts/diarizer_subset_benchmark.sh
+!Scripts/fetch_minimax_tts_corpus.py
 Documentation/parakeet-tdt/
 docs/parakeet-tdt/
 

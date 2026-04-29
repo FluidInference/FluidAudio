@@ -1,0 +1,110 @@
+# MiniMax Multilingual TTS Test Set — dutch
+# Source:   https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
+# Revision: cb416f0ac3658da0577e97873065e19fe6488917
+# License:  CC-BY-SA-4.0 (Creative Commons Attribution-ShareAlike 4.0)
+# Phrases:  100
+#
+# Cloning-audio filenames have been stripped — we only need the
+# text for the FluidAudio TTS benchmark harness. Voice selection
+# is per-backend (see Benchmarks/tts/corpus/minimax/README.md).
+
+De animatie heeft een diepgaande boodschap over vriendschap en moed.
+Deze film heeft zoveel onvergetelijke momenten, ik blijf hem opnieuw bekijken.
+Het is indrukwekkend hoe het anime-personage groeit door de uitdagingen.
+Elke aflevering biedt een nieuw avontuur dat de kijker aan het denken zet.
+De karakters in deze anime zijn zo goed ontwikkeld en complex.
+De presentatie was zeer informatief en inspirerend voor het publiek.
+Het is belangrijk om je boodschap duidelijk over te brengen tijdens een toespraak.
+Tijdens de persconferentie gaf de spreker gedetailleerde antwoorden op de vragen.
+Het interview bood een nieuw perspectief op het onderwerp.
+De toespraak werd geprezen om zijn oprechtheid en diepgang.
+Het laatste nieuws geeft ons een duidelijk beeld van wat er momenteel in de wereld gebeurt.
+De media speelt een grote rol in het informeren van het publiek over belangrijke gebeurtenissen.
+In het nieuws werd het politieke klimaat besproken en hoe dit de toekomst beïnvloedt.
+Vandaag zagen we belangrijke updates over de economie in de nieuwsuitzending.
+Het nieuws heeft de rol van het beïnvloeden van de publieke opinie enorm vergroot.
+Een audioboek kan je helpen om een verhaal tot leven te brengen terwijl je onderweg bent.
+Het luisteren naar een audioboek biedt een nieuwe dimensie aan het lezen van een boek.
+Audioboeken zijn een geweldige manier om te genieten van literatuur tijdens lange reizen.
+Dit audioboek biedt een rijke ervaring die je niet wilt missen.
+Het luisteren naar een audioboek maakt het gemakkelijker om je volledig te concentreren op het verhaal.
+Wat heb je vandaag gedaan?
+Ik kan echt niet wachten om de nieuwe film van volgende week te zien.
+Ben je ooit in Nederland geweest? Het is echt een prachtig land.
+Wat is je favoriete muziekgenre? Ik ben benieuwd!
+Laten we later een koffie gaan drinken en bijpraten.
+Deze film verandert je kijk op het leven met elke scène.
+Anime kan een manier zijn om jezelf in nieuwe werelden te verliezen.
+De dramatiek in de anime was zo intens, het trok me volledig in.
+Het verhaal in de anime heeft echt een unieke benadering van het leven.
+De animatie is een kunstvorm op zich, elke scène is een meesterwerk.
+In een interview kun je de gedachten en gevoelens van iemand echt begrijpen.
+Het is belangrijk om tijdens een interview authentiek te zijn.
+De spreker behandelde het onderwerp met veel kennis en passie.
+De presentatie was dynamisch, wat de boodschap kracht bijzette.
+Het interview werd gevolgd door veel discussie en reflectie.
+De laatste berichten benadrukten de positieve verandering die plaatsvond in de samenleving.
+Het nieuws over de recente natuurverschijnselen heeft veel mensen geraakt.
+In de uitzending werd de impact van de nieuwe wetgeving uitgebreid besproken.
+De nieuwsrapportage van vandaag heeft de nadruk gelegd op de gezondheid van de gemeenschap.
+Een van de belangrijkste thema's in het nieuws van vandaag was wereldvrede.
+De verteller in dit audioboek brengt de personages tot leven.
+Audioboeken zijn ideaal voor multitasken, je kunt luisteren terwijl je andere dingen doet.
+Dit audioboek heeft de kracht om je emoties te raken met elke pagina.
+Audioboeken kunnen je meenemen naar werelden die je zelf niet zou kunnen verkennen.
+Luisteren naar een audioboek kan een ontspannende manier zijn om de dag door te brengen.
+Heb je al de nieuwste aflevering van die serie gezien?
+Wat vind jij van de nieuwste technologieën? Ik vind ze best indrukwekkend.
+Hoe gaat het met je werk? Heb je het druk?
+Heb je plannen voor dit weekend?
+Heb je al je vakantieplannen voor dit jaar gemaakt?
+Goedemorgen, hoe gaat het vandaag met je? Ik hoop dat je goed hebt geslapen en vol energie zit.
+Heb je al ontbeten? Ik dacht eraan om naar die nieuwe bakkerij te gaan die op de hoek is geopend.
+Het weer is vandaag prachtig, zullen we vanmiddag naar het park gaan om van de zon te genieten?
+Hartelijk bedankt voor je hulp bij dat project gisteren, ik had het niet zonder jouw hulp kunnen afmaken.
+Hoe gaat het met je familie? Het is lang geleden dat ik je ouders heb gezien sinds het kerstfeest.
+Ik heb gisteravond een geweldige film gezien, ik denk dat jij hem ook erg zou waarderen.
+Wat zijn je plannen voor het weekend? Ik overweeg om volgende zondag een barbecue te organiseren.
+Sorry dat ik te laat ben, het verkeer was verschrikkelijk vanwege een ongeluk op de hoofdweg.
+Heb je dat nieuwe Italiaanse restaurant in het centrum al geprobeerd? Het eten is heerlijk en de sfeer is erg gezellig.
+Hoe gaan je Spaanse lessen? Kun je al een eenvoudig gesprek voeren?
+Ik ben op zoek naar een nieuw appartement dichter bij mijn werk, ken je beschikbare plekken in die buurt?
+Gefeliciteerd met je verjaardag! Ik wens je dat al je dromen uitkomen in dit nieuwe jaar van je leven.
+Heb je het boek gelezen dat ik je vorige week aanraadde? Het verhaal is fascinerend en het einde is verrassend.
+Morgen heb ik een belangrijke vergadering met internationale klanten, ik ben een beetje nerveus maar goed voorbereid.
+Wat vind je van het nieuwe bedrijfsbeleid? Denk je dat het onze productiviteit zal verbeteren?
+Ik ben begonnen met elke ochtend hardlopen en ik voel me veel beter, met meer energie gedurende de hele dag.
+Zou je me kunnen leren hoe je die lasagne maakt die je vorige week bij het diner hebt geserveerd?
+Mijn favoriete boekhandel heeft een grote uitverkoop, misschien kunnen we er morgen na het werk samen naartoe gaan.
+Hoe was je eerste ervaring met thuiswerken? Werk je liever thuis of ga je liever naar kantoor?
+Ik ben een reis naar Amsterdam aan het plannen voor volgende maand, heb je tips voor plaatsen die ik moet bezoeken?
+De premier heeft vandaag een nieuw pakket economische maatregelen aangekondigd dat gericht is op het verlagen van de inflatie en het stimuleren van de werkgelegenheid in de komende maanden.
+Een aardbeving met een kracht van 5,8 heeft vanochtend de noordkust van het land getroffen, maar tot nu toe zijn er geen slachtoffers of ernstige schade gemeld.
+Het Nederlandse voetbalelftal heeft de beslissende wedstrijd met 3-1 gewonnen en heeft zich daarmee verzekerd van kwalificatie voor de volgende fase van het Wereldkampioenschap.
+Het Ministerie van Volksgezondheid waarschuwt voor een toename van griepgevallen tijdens het winterseizoen en beveelt preventieve maatregelen aan voor de bevolking.
+De prijzen van basisvoedingsmiddelen zijn in de afgelopen twee maanden met ongeveer 12% gestegen, wat vooral gezinnen met een laag inkomen treft.
+De langste brug van de regio werd gisteren geopend, die twee belangrijke economische gebieden verbindt en de reistijd met maximaal twee uur verkort.
+De internationale conferentie over klimaatverandering zal volgende maand in Rotterdam worden gehouden, met deelname van vertegenwoordigers uit meer dan 90 landen.
+Een Nederlands technologiebedrijf heeft een innovatieve smartphone gelanceerd met een batterij die tot drie dagen meegaat en een camera met geavanceerde kunstmatige intelligentie-functies.
+De bosbranden in het zuiden van het land hebben al meer dan 10.000 hectare vegetatie verwoest, en de rook beïnvloedt de luchtkwaliteit in verschillende steden.
+De Centrale Bank heeft besloten de rente op 3,5% te houden om de inflatie te beheersen, in tegenstelling tot de verwachtingen van de financiële markt.
+Het internationale filmfestival werd gisteravond officieel geopend met de wereldpremière van de nieuwe film van de beroemde Nederlandse regisseur.
+Nederlandse wetenschappers hebben een nieuwe plantensoort ontdekt in de duinen met medicinale eigenschappen die kunnen helpen bij de behandeling van kanker.
+De gemeente heeft de implementatie aangekondigd van een nieuw openbaar vervoerssysteem dat belooft de wachttijden te verkorten en de kwaliteit van de dienstverlening te verbeteren.
+De paralympische atleet heeft de gouden medaille gewonnen in het zwemmen en heeft een nieuw wereldrecord in zijn categorie gevestigd.
+De meteorologische dienst heeft een waarschuwing afgegeven voor zware onweersbuien die de komende drie dagen de kustgebieden zullen treffen.
+De Universiteit van Amsterdam heeft een samenwerkingsovereenkomst getekend met Amerikaanse instellingen voor de uitwisseling van studenten en onderzoekers op het gebied van wetenschap en technologie.
+De Amsterdamse beurs heeft zijn sterkste stijging in vijf jaar geregistreerd na de aankondiging van buitenlandse investeringen in de infrastructuursector.
+Het vaccin dat door nationale onderzoekers is ontwikkeld tegen de vogelgriep heeft goedkeuring gekregen voor noodgebruik en zal volgende maand worden gedistribueerd.
+De regering heeft een investering van enkele miljarden euro's aangekondigd voor de bouw van scholen en ziekenhuizen in achtergestelde regio's van het land.
+De oude visser keek naar de woelige zee vanuit het raam van zijn hut, terwijl hij zich de tijden herinnerde dat hij op die wateren voer op zoek naar de legendarische zilveren vis.
+Elke nacht hoorde het meisje een mysterieuze melodie uit de zolder komen, maar wanneer ze ging kijken, stopte de muziek plotseling.
+Het piratenschip verscheen in de dikke mist, zijn zwarte zeilen contrasteerden met de oranje zonsonderganglucht, terwijl de bemanning zich voorbereidde op de aanval.
+Bij het openen van de kist die ze in de kelder van haar grootmoeders huis had gevonden, ontdekte Maria een oud dagboek dat familiegeheimen onthulde die generaties lang bewaard waren gebleven.
+De honderdjarige boom in het midden van het plein vervulde volgens de lokale legende de wensen van degenen die tijdens volle maan een munt tussen zijn wortels legden.
+Het ruimteschip landde op de onbekende planeet, en de astronauten waren verbaasd om structuren te ontdekken die door een geavanceerde beschaving leken te zijn gebouwd.
+Na vijftig jaar gescheiden te zijn door het lot, vonden de twee broers elkaar eindelijk terug in het kleine treinstation waar ze afscheid hadden genomen toen ze kinderen waren.
+De koning vermomde zich als boer en reisde door zijn koninkrijk om de echte problemen van zijn volk te leren kennen en te begrijpen waarom ze ontevreden waren met zijn regering.
+De jonge schilderes had een bijzondere gave: haar schilderijen voorspelden toekomstige gebeurtenissen, maar niemand geloofde haar totdat een van haar schilderijen de grote overstroming toonde die de stad verwoestte.
+Elke keer als het regende, sloeg de klok in de centrale toren dertien keer om middernacht, en de oudere inwoners zeiden dat dit het teken was dat de geesten van de stad wakker waren.
+De wetenschapper had zijn hele leven gewijd aan het creëren van een tijdmachine en op zijn honderdste verjaardag slaagde hij er eindelijk in om naar het verleden te reizen om zijn grootste fout te corrigeren.

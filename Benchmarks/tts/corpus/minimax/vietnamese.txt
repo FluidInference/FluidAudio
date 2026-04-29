@@ -1,0 +1,110 @@
+# MiniMax Multilingual TTS Test Set — vietnamese
+# Source:   https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
+# Revision: cb416f0ac3658da0577e97873065e19fe6488917
+# License:  CC-BY-SA-4.0 (Creative Commons Attribution-ShareAlike 4.0)
+# Phrases:  100
+#
+# Cloning-audio filenames have been stripped — we only need the
+# text for the FluidAudio TTS benchmark harness. Voice selection
+# is per-backend (see Benchmarks/tts/corpus/minimax/README.md).
+
+Phim hoạt hình này mang lại một câu chuyện hấp dẫn về tình bạn và lòng dũng cảm.
+Nhân vật trong anime này rất phong phú và đầy cảm xúc.
+Câu chuyện trong phim này khiến tôi không thể rời mắt khỏi màn hình.
+Mỗi tập anime đều chứa đựng những bài học quý giá về cuộc sống.
+Tình tiết trong bộ phim này khiến người xem cảm thấy hồi hộp và bất ngờ.
+Diễn thuyết là một nghệ thuật cần nhiều kỹ năng và sự chuẩn bị.
+Buổi phỏng vấn này thật thú vị vì tôi được nghe nhiều quan điểm khác nhau.
+Để thành công trong một bài thuyết trình, bạn cần phải tự tin và rõ ràng.
+Những câu chuyện trong bài phát biểu luôn tạo ra những cảm xúc mạnh mẽ trong lòng người nghe.
+Buổi phỏng vấn này đã giúp tôi hiểu rõ hơn về ngành công nghiệp này.
+Các bản tin hôm nay cập nhật về tình hình thời tiết và các sự kiện quan trọng.
+Tôi vừa xem một bản tin về các vấn đề chính trị đang diễn ra ở các quốc gia khác.
+Thông tin trong bản tin này rất hữu ích cho những ai muốn cập nhật tin tức.
+Các phóng viên đã làm việc rất chăm chỉ để mang đến thông tin chính xác.
+Bản tin hôm nay đã đưa tin về các hoạt động từ thiện tại cộng đồng địa phương.
+Cuốn sách này thật tuyệt vời, và người kể chuyện rất truyền cảm.
+Tôi thích nghe sách nói vì nó giúp tôi thư giãn sau một ngày dài.
+Sách nói là một cách tuyệt vời để học hỏi khi bạn không có thời gian đọc.
+Những chi tiết trong cuốn sách này được kể lại rất sinh động qua giọng đọc.
+Tôi đã nghe một cuốn sách nói hấp dẫn về những cuộc phiêu lưu kỳ thú.
+Bạn có thích nghe nhạc không? Tôi rất thích nghe nhạc khi thư giãn.
+Thời tiết hôm nay thật đẹp, có thể đi dạo ngoài trời một chút.
+Bạn có kế hoạch gì cho cuối tuần này không?
+Chúng ta nên đi ăn trưa ở đâu đó, bạn có đề xuất nào không?
+Tôi thích đọc sách vào buổi tối trước khi đi ngủ.
+Nhân vật chính trong anime này thật sự truyền cảm hứng cho tôi.
+Cảnh chiến đấu trong phim này được vẽ rất chi tiết và sống động.
+Bộ phim này không chỉ có những pha hành động mãn nhãn, mà còn mang lại thông điệp sâu sắc.
+Câu chuyện trong anime này làm tôi nhớ đến những kỷ niệm thời thơ ấu.
+Mỗi nhân vật trong phim này đều có một quá khứ đầy bí ẩn và đáng khám phá.
+Một bài phát biểu hay có thể thay đổi cả cách nghĩ của người nghe.
+Phỏng vấn giúp mọi người hiểu rõ hơn về các vấn đề quan trọng trong xã hội.
+Việc thuyết trình trước đám đông là một thử thách lớn đối với nhiều người.
+Phỏng vấn này sẽ khám phá những câu chuyện đằng sau những con người nổi tiếng.
+Diễn giả luôn cố gắng để giữ sự chú ý của khán giả trong suốt buổi thuyết trình.
+Tin tức này sẽ ảnh hưởng đến rất nhiều người trong cộng đồng.
+Các chương trình tin tức thường xuyên cập nhật những sự kiện quan trọng trong ngày.
+Tin tức về môi trường đang trở thành một chủ đề nóng trong cộng đồng.
+Chúng ta cần phải chú ý đến những thay đổi trong xã hội qua các bản tin hàng ngày.
+Bản tin này giúp tôi hiểu rõ hơn về những sự kiện đang diễn ra trên toàn cầu.
+Sách nói mang lại trải nghiệm thú vị cho những ai yêu thích đọc sách nhưng không có thời gian.
+Cuốn sách này có thể nghe trong khi lái xe hoặc làm việc nhà, rất tiện lợi.
+Giọng đọc trong sách nói này khiến câu chuyện trở nên rất hấp dẫn.
+Tôi đã nghe một cuốn sách nói về những chủ đề truyền cảm hứng cho cuộc sống.
+Sách nói là phương tiện tuyệt vời để khám phá những câu chuyện hay trong cuộc sống.
+Dạo này bạn có xem bộ phim nào hay không?
+Hôm nay bạn có thời gian rảnh không? Chúng ta có thể gặp nhau.
+Công việc của bạn gần đây như thế nào?
+Bạn có sở thích gì đặc biệt ngoài công việc không?
+Mùa hè này bạn có kế hoạch gì cho kỳ nghỉ không?
+Chào bạn, hôm nay bạn khỏe không? Tôi hy vọng bạn đã ngủ ngon và tràn đầy năng lượng.
+Bạn đã ăn sáng chưa? Tôi đang nghĩ đến việc ghé qua tiệm bánh mới mở ở góc đường.
+Thời tiết hôm nay thật tuyệt vời, chúng ta có nên đi dạo công viên chiều nay để tận hưởng ánh nắng không?
+Cảm ơn bạn rất nhiều vì đã giúp tôi hoàn thành dự án hôm qua, tôi không thể làm xong nếu không có sự giúp đỡ của bạn.
+Gia đình bạn dạo này thế nào? Đã lâu rồi tôi không gặp bố mẹ bạn kể từ bữa tiệc Giáng sinh.
+Tối qua tôi xem một bộ phim tuyệt vời, tôi nghĩ bạn cũng sẽ rất thích nó đấy.
+Cuối tuần này bạn có kế hoạch gì không? Tôi đang nghĩ đến việc tổ chức một buổi tiệc nướng vào Chủ nhật tới.
+Xin lỗi vì đến muộn, giao thông thật kinh khủng do có tai nạn trên đường chính.
+Bạn đã thử nhà hàng Ý mới ở trung tâm chưa? Thức ăn ở đó rất ngon và không khí cũng rất ấm cúng.
+Lớp học tiếng Tây Ban Nha của bạn tiến triển thế nào? Bạn đã có thể trò chuyện cơ bản được chưa?
+Tôi đang tìm một căn hộ mới gần nơi làm việc hơn, bạn có biết chỗ nào còn trống ở khu vực đó không?
+Chúc mừng sinh nhật bạn! Tôi chúc tất cả những ước mơ của bạn sẽ thành hiện thực trong năm mới của cuộc đời bạn.
+Bạn đã đọc cuốn sách tôi giới thiệu tuần trước chưa? Câu chuyện thật hấp dẫn và cái kết rất bất ngờ.
+Ngày mai tôi có một cuộc họp quan trọng với khách hàng quốc tế, tôi hơi lo lắng nhưng đã chuẩn bị kỹ càng.
+Bạn nghĩ gì về chính sách mới của công ty? Bạn có tin rằng nó sẽ cải thiện năng suất của chúng ta không?
+Tôi đã bắt đầu chạy bộ mỗi sáng và cảm thấy khỏe hơn nhiều, có nhiều năng lượng hơn suốt cả ngày.
+Bạn có thể dạy tôi cách làm món lasagna mà bạn đã phục vụ trong bữa tối tuần trước được không?
+Hiệu sách yêu thích của tôi đang có chương trình khuyến mãi lớn, chúng ta có thể cùng đến đó vào ngày mai sau giờ làm việc.
+Trải nghiệm làm việc tại nhà đầu tiên của bạn như thế nào? Bạn thích làm việc ở nhà hay đến văn phòng hơn?
+Tôi đang lên kế hoạch cho một chuyến đi đến Hà Nội vào tháng tới, bạn có gợi ý nào về những địa điểm nên ghé thăm không?
+Các chuyên gia kinh tế đang nghiên cứu nhiều giải pháp sáng tạo để cải thiện chất lượng cuộc sống và tạo thêm cơ hội việc làm cho người dân.
+Gỏi cuốn tươi mát với bánh tráng, tôm, thịt, bún và rau thơm, chấm cùng nước mắm chua ngọt, là món khai vị hoàn hảo trong những ngày nóng.
+Đội tuyển bóng đá quốc gia đã thắng trận đấu quyết định với tỷ số 3-1, đảm bảo suất tham dự vòng tiếp theo của Cúp Thế giới.
+Bộ Y tế cảnh báo về sự gia tăng các ca bệnh cúm trong mùa đông và khuyến nghị các biện pháp phòng ngừa cho người dân.
+Giá các mặt hàng thực phẩm thiết yếu đã tăng khoảng 12% trong hai tháng qua, ảnh hưởng chủ yếu đến các gia đình có thu nhập thấp.
+Cây cầu dài nhất khu vực đã được khánh thành hôm qua, kết nối hai vùng kinh tế quan trọng và giảm thời gian di chuyển xuống còn hai giờ.
+Hội nghị quốc tế về biến đổi khí hậu sẽ được tổ chức tại Thành phố Hồ Chí Minh vào tháng tới, với sự tham gia của đại diện từ hơn 90 quốc gia.
+Một công ty công nghệ Việt Nam đã ra mắt một chiếc điện thoại thông minh sáng tạo với pin có thể sử dụng đến ba ngày và camera được trang bị các tính năng trí tuệ nhân tạo tiên tiến.
+Các vụ cháy rừng ở miền Nam đất nước đã thiêu rụi hơn 10.000 héc-ta thảm thực vật, và khói đang ảnh hưởng đến chất lượng không khí ở nhiều thành phố.
+Ngân hàng Trung ương đã quyết định giữ lãi suất ở mức 3,5% để kiểm soát lạm phát, trái với kỳ vọng của thị trường tài chính.
+Liên hoan phim quốc tế đã chính thức khai mạc tối qua với buổi công chiếu toàn cầu bộ phim mới của đạo diễn nổi tiếng người Việt.
+Các nhà khoa học Việt Nam đã phát hiện ra một loài thực vật mới ở vùng núi Tây Bắc với đặc tính dược liệu có thể giúp điều trị ung thư.
+Chính quyền thành phố đã công bố việc triển khai hệ thống giao thông công cộng mới hứa hẹn sẽ giảm thời gian chờ đợi và cải thiện chất lượng dịch vụ.
+Vận động viên Paralympic đã giành huy chương vàng trong cuộc thi bơi lội, thiết lập kỷ lục thế giới mới trong hạng mục của mình.
+Cơ quan khí tượng đã đưa ra cảnh báo về các cơn bão mạnh dự kiến sẽ ảnh hưởng đến vùng duyên hải miền Trung trong ba ngày tới.
+Đại học Quốc gia Hà Nội đã ký kết thỏa thuận hợp tác với các tổ chức Hoa Kỳ về trao đổi sinh viên và nhà nghiên cứu trong lĩnh vực khoa học và công nghệ.
+Thị trường chứng khoán Việt Nam đã ghi nhận mức tăng mạnh nhất trong năm năm qua sau thông báo về đầu tư nước ngoài vào lĩnh vực cơ sở hạ tầng.
+Vắc-xin phòng cúm gia cầm do các nhà nghiên cứu trong nước phát triển đã được phê duyệt sử dụng khẩn cấp và sẽ bắt đầu được phân phối vào tháng tới.
+Ẩm thực Việt Nam nổi tiếng với sự hài hòa giữa các hương vị tươi ngon và những nguyên liệu tự nhiên, tạo nên những món ăn vừa đẹp mắt vừa bổ dưỡng.
+Người ngư dân già nhìn ra biển động qua cửa sổ căn chòi của mình, nhớ về những ngày ông từng dong thuyền trên vùng nước ấy để tìm kiếm loài cá bạc huyền thoại.
+Mỗi đêm, cô bé đều nghe thấy một giai điệu bí ẩn phát ra từ gác mái, nhưng khi cô lên kiểm tra, âm nhạc đột nhiên ngừng lại.
+Con tàu cướp biển xuất hiện trong làn sương mù dày đặc, những cánh buồm đen của nó tương phản với bầu trời cam của hoàng hôn, trong khi thủy thủ đoàn chuẩn bị tấn công.
+Khi mở chiếc rương tìm thấy trong tầng hầm nhà bà ngoại, Mai đã phát hiện ra một cuốn nhật ký cổ tiết lộ những bí mật gia đình được giữ kín qua nhiều thế hệ.
+Cây cổ thụ trăm tuổi ở giữa quảng trường, theo truyền thuyết địa phương, sẽ thực hiện ước nguyện của những người đặt một đồng xu giữa rễ cây vào đêm trăng tròn.
+Phi thuyền hạ cánh xuống hành tinh không xác định, và các phi hành gia kinh ngạc khi phát hiện ra những công trình dường như được xây dựng bởi một nền văn minh tiên tiến.
+Sau năm mươi năm bị số phận chia cắt, hai anh em cuối cùng đã gặp lại nhau tại nhà ga nhỏ nơi họ từng nói lời tạm biệt khi còn là những đứa trẻ.
+Nhà vua cải trang thành nông dân và đi khắp vương quốc để tìm hiểu những vấn đề thực sự của người dân và hiểu tại sao họ không hài lòng với triều đình.
+Cô họa sĩ trẻ có một món quà đặc biệt: những bức tranh của cô dự đoán được các sự kiện tương lai, nhưng không ai tin cho đến khi một trong những bức tranh của cô cho thấy trận lũ lụt lớn đã tàn phá thành phố.
+Mỗi khi trời mưa, đồng hồ trên tháp trung tâm sẽ điểm mười ba tiếng vào lúc nửa đêm, và những cư dân lớn tuổi nói rằng đó là dấu hiệu cho thấy các linh hồn của thành phố đang thức giấc.
+Nhà khoa học đã dành cả đời để tạo ra một cỗ máy thời gian và vào ngày sinh nhật thứ một trăm của mình, ông cuối cùng đã thành công trong việc du hành về quá khứ để sửa chữa sai lầm lớn nhất của mình.

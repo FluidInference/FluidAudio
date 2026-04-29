@@ -1,0 +1,110 @@
+# MiniMax Multilingual TTS Test Set — portuguese
+# Source:   https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
+# Revision: cb416f0ac3658da0577e97873065e19fe6488917
+# License:  CC-BY-SA-4.0 (Creative Commons Attribution-ShareAlike 4.0)
+# Phrases:  100
+#
+# Cloning-audio filenames have been stripped — we only need the
+# text for the FluidAudio TTS benchmark harness. Voice selection
+# is per-backend (see Benchmarks/tts/corpus/minimax/README.md).
+
+Faltam 101 dias até a cerimónia de abertura dos Jogos Olimpicos de Paris.
+O IVA ZERO terminou em janeiro e houve alimentos que ficaram muito mais caros.
+Os dados da Pordata indicam que existem em Portugal mais de 2 milhões e meio e pessoas com 65 ou mais anos.
+Um erro no antivírus que corre nos computadores com o sistema operativo Microsoft causou hoje caos um pouco por todo o mundo.
+Quase 9% dos portugueses até aos 29 anos não estuda nem trabalha.
+Mas a violação destas proibições são consideradas meras contra ordenações e já não são comportamento alvo de processo crime.
+Na Europa, ficou claro que o crescimento marca passo - mesmo nas sociedades mais fortes.
+Ao longo destes quase oito anos, em que exerço funções como primeiro-ministro, dediquei-me, de alma e coração a servir Portugal e a servir os portugueses.
+Que a verdade seja dita, isso é o mais perto que eu já cheguei de uma cerimônia de formatura.
+Cem anos atrás, um grande americano, na qual estamos sobsua simbólica sombra, assinou a Proclamação de Emancipação.
+Porque é que é preciso estar-se sempre a falar? Acho que se devia estar mais vezes em silêncio. Quanto mais se fala, menos as palavras significam.
+Minha mãe sempre dizia: a vida é como uma caixa de chocolate. Você nunca sabe o que vai encontrar.
+Primeira regra sobre o Clube da Luta — você não fala sobre o Clube da Luta.
+Esse é o dia que vocês sempre lembrarão como o dia em que vocês quase pegaram o Capitão Jack Sparrow.
+A coisa mais importante que você pode aprender é só amar e ser amado em troca.
+Certo dia, incitou-me a fazer um desenho bem elucidativo, de modo a meter isto na cabeça das crianças do lugar onde vivo.
+Hoje roubei todas as rosas dos jardins e cheguei ao pé de ti de mãos vazias.
+Eu poderia facilmente perdoar seu orgulho, se ele não tivesse mortificado o meu.
+Não posso adiar este abraço que é uma arma de dois gumes, amor e ódio.
+Creio que foi o sorriso, o sorriso foi quem abriu a porta. Era um sorriso com muita luz lá dentro, apetecia entrar nele, tirar a roupa, ficar nu dentro daquele sorriso.
+E eu? Você acha que eu sou do tipo tagarela ou do tipo quieto?
+Antes de começarmos, gostaria de discutir as condições comerciais. Temos algumas propostas em mente e gostaríamos de ouvir o que a sua empresa tem a oferecer.
+Eu diria que sou brincalhão. Faço cosquinha e saio correndo, essas coisas.
+Qual é o seu estilo? Você prefere uma namorada que seja como uma amiga, ou manter a paixão viva pelo maior tempo possível?
+Eu me emociono muito quando falo da minha família. É uma questão que eu guardo muito interna.
+Bem, com a luz cortada o Rowley não pode ligar à polícia e contar tudo sobre o limpa-neves.
+Arquitecto do Universo e Lorde dos Imortais, vou organizar o mais fantástico banquete desde o da terça-feira passada.
+E durante anos, procurei as condições ideais para passar para o papel a minha ilustre e fascinante história de vida.
+Mas, não sei... eu acho que este mundo ficou demasiado crescido.
+Eles são os seres supremos que nos deram vida. Que transpiram e se sacrificam muito para nos dar um teto epôr-nos comida no prato.
+Bom dia, como você está hoje? Espero que tenha dormido bem e esteja com muita energia para o dia.
+Você já tomou café da manhã? Estou pensando em ir àquela padaria nova que abriu na esquina.
+O tempo está maravilhoso hoje, que tal irmos ao parque mais tarde para aproveitar o sol?
+Obrigado por me ajudar com aquele projeto ontem, não teria conseguido terminar sem a sua ajuda.
+Como está a sua família? Faz tempo que não vejo seus pais desde a festa de Natal.
+Assisti a um filme incrível ontem à noite, acho que você também gostaria muito dele.
+Quais são seus planos para o fim de semana? Estou pensando em fazer um churrasco no domingo.
+Desculpe pelo atraso, o trânsito estava terrível por causa de um acidente na avenida principal.
+Você experimentou aquele novo restaurante italiano no centro? A comida é deliciosa e o ambiente é muito acolhedor.
+Como estão indo suas aulas de francês? Já consegue manter uma conversa básica?
+Estou procurando um apartamento novo mais perto do meu trabalho, você conhece algum lugar disponível naquela região?
+Parabéns pelo seu aniversário! Desejo que todos os seus sonhos se realizem neste novo ciclo da sua vida.
+Você já leu o livro que te recomendei na semana passada? A história é fascinante e o final é surpreendente.
+Amanhã tenho uma reunião importante com clientes internacionais, estou um pouco nervoso mas bem preparado.
+O que você acha da nova política da empresa? Acredita que vai melhorar nossa produtividade?
+Comecei a correr todas as manhãs e estou me sentindo muito melhor, com mais disposição durante o dia todo.
+Você poderia me ensinar a fazer aquela receita de lasanha que preparou no jantar da semana passada?
+Minha livraria favorita está com uma promoção incrível, poderíamos ir lá juntos amanhã depois do trabalho.
+Como foi sua primeira experiência trabalhando de casa? Você prefere o home office ou ir ao escritório?
+Estou planejando uma viagem para Lisboa no próximo mês, você tem alguma recomendação de lugares para visitar?
+O presidente anunciou hoje um novo pacote de medidas econômicas que visa reduzir a inflação e estimular a criação de empregos nos próximos meses.
+Um terremoto de magnitude 6,5 atingiu a costa norte do país esta madrugada, mas até o momento não há relatos de vítimas fatais ou danos graves.
+A seleção brasileira de futebol venceu o jogo decisivo por 3 a 1 e garantiu sua classificação para a próxima fase da Copa do Mundo.
+O Ministério da Saúde alerta para o aumento de casos de dengue durante o período de chuvas e recomenda medidas preventivas à população.
+Os preços dos alimentos básicos subiram cerca de 12% nos últimos dois meses, afetando principalmente as famílias de baixa renda.
+Foi inaugurada ontem a maior ponte do estado, que liga duas importantes regiões econômicas e deve reduzir o tempo de viagem em até duas horas.
+A conferência internacional sobre mudanças climáticas será realizada em São Paulo no próximo mês, com a participação de representantes de mais de 90 países.
+Uma empresa de tecnologia nacional lançou um smartphone inovador com bateria que dura até três dias e câmera com recursos avançados de inteligência artificial.
+Os incêndios florestais na região amazônica já consumiram mais de 20 mil hectares de vegetação e a fumaça afeta a qualidade do ar em várias cidades.
+O Banco Central decidiu manter a taxa de juros em 5,25% para controlar a inflação, contrariando as expectativas do mercado financeiro.
+O festival internacional de cinema foi aberto oficialmente ontem com a estreia mundial do novo filme do aclamado diretor português.
+Cientistas brasileiros descobriram uma nova espécie de planta na Mata Atlântica com propriedades medicinais que podem ajudar no tratamento do câncer.
+A prefeitura anunciou a implementação de um novo sistema de transporte público que promete reduzir o tempo de espera e melhorar a qualidade do serviço.
+O atleta paralímpico conquistou a medalha de ouro na prova de natação, estabelecendo um novo recorde mundial na categoria.
+O serviço meteorológico emitiu um alerta para tempestades severas que devem atingir o litoral sul do país nos próximos três dias.
+A universidade federal firmou um acordo de cooperação com instituições europeias para intercâmbio de estudantes e pesquisadores nas áreas de ciência e tecnologia.
+A bolsa de valores registrou a maior alta dos últimos cinco anos após o anúncio de investimentos estrangeiros no setor de infraestrutura.
+A vacina desenvolvida por pesquisadores nacionais contra a dengue recebeu aprovação para uso emergencial e começará a ser distribuída no próximo mês.
+O governo federal anunciou um investimento de bilhões de reais para a construção de escolas e hospitais em regiões carentes do país.
+O velho pescador observava o mar agitado da janela de sua cabana, lembrando-se dos tempos em que navegava por aquelas águas em busca do lendário peixe prateado.
+O velho pescador observava o mar agitado da janela de sua cabana, lembrando-se dos tempos em que navegava por aquelas águas em busca do lendário peixe prateado.
+O cérebro humano contém aproximadamente 86 bilhões de neurônios, cada um formando milhares de conexões com outros neurônios.
+A Amazônia abriga mais de 40.000 espécies de plantas, 1.300 espécies de aves e cerca de 430 espécies de mamíferos, sendo um dos ecossistemas mais biodiversos do planeta.
+No nosso podcast de hoje, vamos explorar a culinária tradicional do nordeste brasileiro, com suas influências africanas, indígenas e portuguesas.
+A luz do Sol leva aproximadamente 8 minutos e 20 segundos para chegar à Terra, viajando a 300.000 quilômetros por segundo.
+As tartarugas marinhas podem viver mais de 100 anos e sempre retornam à mesma praia onde nasceram para depositar seus ovos.
+Neste episódio, nossos ouvintes conhecerão os segredos da fabricação artesanal do queijo da Serra da Estrela, considerado um dos melhores queijos de Portugal.
+O DNA humano, se esticado em linha reta, mediria aproximadamente 2 metros, mas consegue se comprimir dentro do núcleo celular que tem apenas 0,01 milímetros de diâmetro.
+Os recifes de coral ocupam menos de 1% dos oceanos, mas abrigam mais de 25% de todas as espécies marinhas conhecidas.
+Nosso guia de viagem desta semana apresenta os caminhos históricos de Ouro Preto, com suas igrejas barrocas e ruas de paralelepípedos que contam a história do Brasil colonial.
+O café foi introduzido no Brasil no século XVIII e hoje o país é o maior produtor mundial, responsável por aproximadamente um terço de toda a produção global.
+Os buracos negros são regiões do espaço onde a gravidade é tão intensa que nem mesmo a luz consegue escapar, o que os torna invisíveis aos telescópios convencionais.
+No programa de hoje, vamos descobrir os sabores autênticos da culinária alentejana, conhecida por seus pratos à base de pão, ervas aromáticas e azeite de oliva extra virgem.
+As abelhas conseguem comunicar a localização de fontes de alimento às suas companheiras através de uma complexa "dança" que indica direção e distância.
+O Pantanal é a maior planície alagável do mundo e abriga uma concentração de fauna selvagem comparável apenas às savanas africanas.
+Neste episódio do nosso podcast gastronômico, exploramos a história e o processo de fabricação da cachaça artesanal em alambiques de cobre de Minas Gerais.
+O corpo humano contém aproximadamente 37 trilhões de células, cada uma com funções específicas para manter nosso organismo funcionando adequadamente.
+As auroras boreais e austrais são fenômenos luminosos causados pela interação entre partículas solares e o campo magnético terrestre.
+Nossa série sobre destinos históricos continua com um passeio virtual pelas fortificações de Fernando de Noronha, que protegiam o Brasil colonial de invasões estrangeiras.
+A Mata Atlântica brasileira é considerada um dos hotspots de biodiversidade mais importantes do mundo, com milhares de espécies endêmicas que não existem em nenhum outro lugar.
+No episódio desta semana, nossos especialistas em gastronomia discutem as técnicas tradicionais de preparo do bacalhau em Portugal e suas dezenas de receitas diferentes.
+Os manguezais funcionam como berçários naturais para diversas espécies marinhas e são fundamentais para a proteção da costa contra erosão e tempestades.
+Nossa série sobre patrimônios culturais apresenta hoje as festas juninas do nordeste brasileiro, com suas danças, músicas e comidas típicas que celebram a cultura popular.
+O coração humano bate aproximadamente 100.000 vezes por dia, bombeando cerca de 7.500 litros de sangue através de 96.000 quilômetros de vasos sanguíneos.
+As ondas gravitacionais, previstas por Einstein há mais de cem anos, foram finalmente detectadas em 2015, abrindo uma nova janela para a observação do universo.
+No programa de hoje, exploramos a rota dos vinhos do Douro, região que produz o famoso vinho do Porto e possui paisagens classificadas como Patrimônio Mundial pela UNESCO.
+O cerrado brasileiro é considerado a savana mais biodiversa do mundo, abrigando mais de 10.000 espécies de plantas, muitas com propriedades medicinais ainda em estudo.
+Neste episódio especial, nossos chefs convidados revelam os segredos da feijoada perfeita, desde a escolha dos ingredientes até o tempo ideal de cozimento.
+Os oceanos absorvem aproximadamente 30% do dióxido de carbono liberado na atmosfera, ajudando a regular o clima global.
+Nossa série sobre artesanato tradicional apresenta hoje os mestres ceramistas do Vale do Jequitinhonha, que transformam o barro em verdadeiras obras de arte.

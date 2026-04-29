@@ -1,0 +1,110 @@
+# MiniMax Multilingual TTS Test Set — french
+# Source:   https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
+# Revision: cb416f0ac3658da0577e97873065e19fe6488917
+# License:  CC-BY-SA-4.0 (Creative Commons Attribution-ShareAlike 4.0)
+# Phrases:  100
+#
+# Cloning-audio filenames have been stripped — we only need the
+# text for the FluidAudio TTS benchmark harness. Voice selection
+# is per-backend (see Benchmarks/tts/corpus/minimax/README.md).
+
+Voilà j'ai juste besoin de... un peu de coaching pour me faire la main, c'est tout.
+Oui, oui, non mais, je suis pas loin d'être nickel.
+Alors Cécile, j'ai entendu dire que vous aviez apprcohé pour faire un film aux États-Unis.
+Je veux absolument aller voir la pièce de Koltès au théâtre du Rond-Point cette semaine.
+Mais mardi t'as déjà la projection du film de Kechiche.
+Les américains ont bien insisté là-dessus, il faut être nickel à cheval.
+J'ai noyé les poissons, j'ai encore raconté un gros bobard.
+On parle pas de la même chose, vous me parlez de 20 jours de tournage.
+Qu'est-ce que tu viens faire à Paris? T'es en vacances?
+T'étais pas bien à Mandelieu? C'est très beau là-bas.
+Le monde virtuel où je montre mon vrai visage, où je parle avec ma vraie voix et où je dis des choses que je pense vraiment.
+Le monde virtuel qui est presque comme ce monde-là, où vous me voyez, où on respire le même air.
+Derrière chaque grand homme se cache une femme. Beau proverbe. C'est bien de connaître que des femmes ont soutenu et aidé à la carrière des grands hommes.
+Et le monde des sciences en est un des pires exemples. A l'exception notoire de Marie Curie qui s'est vu décerner deux prix Nobel.
+Osez revendiquer votre talent et sortir de l'ombre d'un boss qui se réserve toute la lumière ou d'un époux qui prend toute la place.
+Alors comment dire en sons et en images, la différence entre universel et culturel? Il y a un concept présenté par Nietzsche qui donne à l'humain deux états sociaux.
+En résumé, dans la vie, nous sommes tour à tour appoloniens et dionysiaques.
+Il est crucial de populations face aux chocs et leur permettre de s'en relever.
+Le changement climatique est l'un de ces chocs qui nous concerne tous dont les impacts se manifestent et s'intensifient partout.
+Le concept de déplacé climatique n'est plus théorique. Des femmes et des hommes en situation précaire du fait du sous-développement sont en effet aujourd'hui containts à l'exil.
+Alors, dans votre livre, vous expliquez qu'en ces temps de pandémie, il est absolument nécessaire de revisiter le temps : le passé, le présent et le futur.
+Alors vous proposez une forme de kit de survie, en fait, en réinventant le temps. Alors donnez-nous quelques éléments pour comprendre comment on peut réinventer ce temps aujourd'hui.
+C'est la revanche des rêveurs, parce que finalement, cette rêverie, elle peut être très productive.
+Alors le futur, c'est très difficile de réinvestir le futur aujourd'hui.
+Alors comment penser au futur en ces temps de pandémie? Là aussi, vous donnez quelques pistes.
+Les négociations de paix à Genève : Le régime de Damas et l'opposition syrienne ne se parle toujours pas... des discussions rattrapées par le terrorisme.
+Dans ce joournal nous irons en Asie où le roi Salmane d'Arabie Saoudite cherche de nouveaux investisseurs.
+Bonjour et bienvenu dimanche 19 février, voici les titres impunité 0 pour les consommateurs de drogue au volant une semaine après l'accident impliquant Pierre Palmade Gérald Darmanin annonce vouloir durcir la loi et retirer systématiquement le permis en cas de conduite.
+Visiter rue une usine durant ses vacances et pourquoi pas la formule séduit en tout cas de nombreux français, le tourisme industriel permet aussi aux entreprises de se faire connaître et d'améliorer une image parfois un peu austère.
+Bien sûr. Tout a été complètement troublé.
+Qu'est ce qui ferait que t'arriveras à aimer ton corps?
+Je me dis, j'ai l'impression qu'elle est moins maigre et je me dis je veux être belle comme belle.
+Salut, bienvenu sur Partir, le podcast qui te montre le-dessous de la vie à l'étranger.
+Comme vous pouvez le voir, je ne suis pas seule. Je suis accompagnée d'une star du francais sur Youtube.
+Mais à mon avis, ça veut dire être amoureux ou amoureuse.
+Nous sommes je crois jeudi matin et si vous ne vous en souvenez pas c'est peut-être parce que vous devriez travailler moins.
+Est-ce que t'as limpression que t'es destiné à faire de grandes choses?
+Mais t'as peur de gâcher ton potentiel. On va parler de ça aujourd'hui.
+On va d'abord parler de pourquoi est-ce que tu ressens ça, c'est très important de comprendre pourquoi.
+Et aussi j'èspère t'aider à plus kiffer en le faisant ce qui est très important d'apprécier.
+Eh bien alors, j'ai regardé votre CV et c'est vrai que vous êtes un candidat intéressant.
+Aujourd'hui, nous allons avoir une conversation tout à fait ordinaire parler de la météo.
+Et avant de commencer, on vous rappelle que le 1er avril,notre club de lecture commence sur Discord!
+Je suis allée à Bordeaux pour voir mes parents et ma soeur.
+C'etait très sympa. Il a fait très beau, donc on a même pu aller au bord de la mer.
+"Bonjour c'est Cyprien, aujourd'hui je vais faire une vidéo sur la SNCF sans évoquer le retard des trains."
+Je prends assez souvent le train, j'ai moins de 25 ans.
+J'ai donc une carte 12-25 appelé aussi la carte que tu oublies tout le temps.
+Ca fait des années que je l'ai, je la change tous les ans et je l'oublie à chaque fois.
+Je me la suis greffé sur le corps, voilà comme ça je peux plus l'oublier.
+Je pense à toi le matin, en marchant dans le froid. Je fais exprès de marcher lentement pour pouvoir penser à toi plus longtemps.
+Ce serait toi, c'était toi, l'élue. Je ne voulais pas me marier parce que le mariage c'est pour toute la vie, et que toute la vie pour t'aimer me semblait un peu court.
+On peut donner bien des choses à ceux que l'on aime. Des paroles, un repos, du plaisir.
+Je n'ai jamais imaginé qu'on pût être à ce point hanté par une voix, par un cou, par des épaules, par des mains.
+Nom de Dieu. Tout bouillonne à l’intérieur de moi.  Les mots ne suffisent plus.
+J'ai ainsi vécu seul, sans personne avec qui parler véritablement, jusqu'à une panne dans le désert du Sahara, il y a six ans.
+Le premier soir je me suis donc endormi sur le sable à mille milles de toute terre habitée. J'étais bien plus isolé qu'un naufragé sur un radeau au milieu de l'océan.
+Chaque jour j'apprenais quelque chose sur la planète, sur le départ, sur le voyage. Ça venait tout doucement, au hasard des réflexions.
+Il n'y a pas de tigres sur ma planète, avait objecté le petit prince, et puis les tigres ne mangent pas d'herbe.
+Je ne crains rien des tigres, mais j'ai horreur des courants d'air. Vous n'auriez pas un paravent?
+Bonjour, comment allez-vous aujourd'hui ? J'espère que vous avez bien dormi et que vous êtes en pleine forme.
+Avez-vous déjà pris votre petit-déjeuner ? Je pensais aller à cette nouvelle boulangerie qui vient d'ouvrir au coin de la rue.
+Le temps est magnifique aujourd'hui, que diriez-vous d'aller au parc cet après-midi pour profiter du soleil ?
+Merci beaucoup de m'avoir aidé avec ce projet hier, je n'aurais pas pu le terminer sans votre aide.
+Comment va votre famille ? Cela fait longtemps que je n'ai pas vu vos parents depuis la fête de Noël.
+J'ai regardé un film incroyable hier soir, je pense que vous l'aimeriez beaucoup aussi.
+Quels sont vos projets pour le week-end ? Je pense organiser un barbecue dimanche prochain.
+Excusez-moi pour mon retard, la circulation était terrible à cause d'un accident sur l'avenue principale.
+Avez-vous essayé ce nouveau restaurant italien au centre-ville ? La nourriture est délicieuse et l'ambiance très chaleureuse.
+Comment se passent vos cours d'espagnol ? Pouvez-vous déjà tenir une conversation de base ?
+Je cherche un nouvel appartement plus près de mon travail, connaissez-vous des endroits disponibles dans ce quartier ?
+Joyeux anniversaire ! Je vous souhaite que tous vos rêves se réalisent dans cette nouvelle année de votre vie.
+Avez-vous lu le livre que je vous ai recommandé la semaine dernière ? L'histoire est fascinante et la fin est surprenante.
+J'ai une réunion importante demain avec des clients internationaux, je suis un peu nerveux mais bien préparé.
+Que pensez-vous de la nouvelle politique de l'entreprise ? Croyez-vous qu'elle améliorera notre productivité ?
+J'ai commencé à courir tous les matins et je me sens beaucoup mieux, avec plus d'énergie tout au long de la journée.
+Pourriez-vous m'apprendre à préparer cette recette de lasagnes que vous avez servie lors du dîner la semaine dernière ?
+Ma librairie préférée organise une grande promotion, nous pourrions y aller ensemble demain après le travail.
+Comment s'est passée votre première expérience de télétravail ? Préférez-vous travailler de chez vous ou aller au bureau ?
+Je prévois un voyage à Paris le mois prochain, avez-vous des recommandations d'endroits à visiter ?
+Le président a annoncé aujourd'hui un nouveau plan de mesures économiques visant à réduire l'inflation et à stimuler la création d'emplois dans les mois à venir.
+Un séisme de magnitude 6,2 a frappé la côte nord du pays ce matin, mais aucune victime ni dégât majeur n'a été signalé pour le moment.
+L'équipe nationale de football a remporté le match décisif par 3 buts à 1, assurant ainsi sa qualification pour la prochaine phase de la Coupe du Monde.
+Le Ministère de la Santé alerte sur l'augmentation des cas de dengue pendant la saison des pluies et recommande des mesures préventives à la population.
+Les prix des denrées alimentaires de base ont augmenté d'environ 10% au cours des deux derniers mois, affectant principalement les familles à faible revenu.
+Le plus grand pont de la région a été inauguré hier, reliant deux importantes zones économiques et réduisant le temps de trajet jusqu'à deux heures.
+La conférence internationale sur le changement climatique se tiendra à Lyon le mois prochain, avec la participation de représentants de plus de 90 pays.
+Une entreprise technologique française a lancé un smartphone innovant avec une batterie qui dure jusqu'à trois jours et un appareil photo doté de fonctionnalités avancées d'intelligence artificielle.
+Les incendies de forêt dans le sud du pays ont déjà consumé plus de 15 000 hectares de végétation, et la fumée affecte la qualité de l'air dans plusieurs villes.
+La Banque Centrale a décidé de maintenir le taux d'intérêt à 3,5% pour contrôler l'inflation, contrairement aux attentes du marché financier.
+Le festival international du film s'est officiellement ouvert hier soir avec la première mondiale du nouveau film du célèbre réalisateur français.
+Des scientifiques français ont découvert une nouvelle espèce de plante dans les Alpes avec des propriétés médicinales qui pourraient aider dans le traitement du cancer.
+La mairie a annoncé la mise en place d'un nouveau système de transport public qui promet de réduire les temps d'attente et d'améliorer la qualité du service.
+L'athlète paralympique a remporté la médaille d'or dans l'épreuve de natation, établissant un nouveau record mondial dans sa catégorie.
+Le service météorologique a émis une alerte pour des orages violents qui devraient toucher la côte méditerranéenne dans les trois prochains jours.
+L'université de la Sorbonne a signé un accord de coopération avec des institutions américaines pour l'échange d'étudiants et de chercheurs dans les domaines des sciences et de la technologie.
+La bourse de Paris a enregistré sa plus forte hausse des cinq dernières années suite à l'annonce d'investissements étrangers dans le secteur des infrastructures.
+Le vaccin développé par des chercheurs nationaux contre la grippe aviaire a reçu l'approbation pour une utilisation d'urgence et commencera à être distribué le mois prochain.
+Le gouvernement a annoncé un investissement de plusieurs milliards d'euros pour la construction d'écoles et d'hôpitaux dans les régions défavorisées du pays.
+Le vieux pêcheur observait la mer agitée depuis la fenêtre de sa cabane, se rappelant les temps où il naviguait sur ces eaux à la recherche du légendaire poisson argenté.
