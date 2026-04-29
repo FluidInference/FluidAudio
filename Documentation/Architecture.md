@@ -135,7 +135,7 @@ Reference: `Sources/FluidAudio/ASR/Parakeet/SlidingWindow/TDT/Decoder/TdtDecoder
 
 ### 2.2 Sliding Window, Not Stateful Streaming
 
-Parakeet is a **non-streaming** encoder — it expects bounded chunks.
+Parakeet is a **non-streaming** encoder it expects bounded chunks.
 Real-time use is built on top via overlapping windows
 (`SlidingWindowAsrManager`):
 
@@ -179,7 +179,7 @@ File: `Sources/FluidAudio/ASR/Qwen3/Qwen3AsrManager.swift:8`.
 ## 3. TTS
 
 TTS is structurally **the most diverse** module. There is **no unified
-`TtsBackend` protocol** — each model has its own manager, its own
+`TtsBackend` protocol** each model has its own manager, its own
 pipeline shape, and its own compute-unit profile.
 
 ### 3.1 Why No Unified TTS Backend
