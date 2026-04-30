@@ -43,6 +43,10 @@ public actor StyleTTS2Manager {
     public func initialize(
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws {
+        logger.warning(
+            "StyleTTS2 is experimental / beta. WER on long English phrases is "
+                + "elevated on the MiniMax corpus (~44% vs Kokoro 1.3%) — see "
+                + "Documentation/TTS/Benchmarks.md.")
         _ = try await modelStore.ensureAssetsAvailable(progressHandler: progressHandler)
         let config = try await modelStore.bundleConfig()
         try config.validate()

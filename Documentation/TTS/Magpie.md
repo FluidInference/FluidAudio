@@ -5,16 +5,26 @@ Lives under `Sources/FluidAudio/TTS/Magpie/`.
 
 ## Status
 
-Functional but **quite slow — needs significant perf work, not for real-time
-or latency-sensitive use.** First synth on a fresh process is dominated by
-CoreML model load + first-call ANE compile (~30 s); warm synths run at
-~96 s wall for an 8-word English sentence on M-series, i.e. RTFx ≈ **0.04**
-(~25× slower than realtime). Whether the throughput ceiling is a model
-characteristic, a CoreML conversion limitation, or both is still being
-investigated and is expected to improve in subsequent iterations. For
-real-time use prefer Kokoro (~20× RTFx) or PocketTTS (~1.5–2× RTFx);
-Magpie's value prop is multilingual coverage and the 5 built-in speaker
-contexts, not throughput.
+> ⚠️ **Beta / experimental.** Below real-time on Apple Silicon
+> (agg-RTFx ~0.41× on M2). Not for latency-sensitive use; prefer
+> Kokoro / Kokoro ANE or PocketTTS for real-time. Initializing
+> `MagpieTtsManager` logs a runtime beta warning at `.warning` level.
+
+Functional but **below real-time — not for latency-sensitive use.**
+On the full `minimax-english` 100-phrase corpus (M2, default compute
+units), Magpie posts agg-RTFx **0.41×** with p50 warm synth ~19.8 s
+and p95 ~57.5 s — most of the long tail comes from paragraph-length
+news / story phrases (max 107 s on a single 18 s utterance). Cold
+start ~19 s on warm ANE caches, dominated by first-call decoder_step
+compile. The AR loop (`decoder_step` + sampler) dominates wall clock
+and grows super-linearly with phrase length; the
+[`outputBackings` fast path](Benchmarks.md#magpie-outputbackings-fast-path)
+already eliminated the per-step KV reallocation cost. Further gains
+likely need an MLX-backed LocalTransformer or a smaller-K/V variant.
+For real-time use prefer Kokoro / Kokoro ANE (2–5× RTFx) or PocketTTS
+(streaming, TTFT ~1.2 s); Magpie's value prop is multilingual coverage
+(en/es/de/fr/it/vi/zh/hi) and 5 built-in speaker contexts, not
+throughput.
 
 Audio quality is perceptually clean across all 5 speakers and ASR-clean on
 4/5; speaker 0 has a single trailing-word artifact ("…and") attributable

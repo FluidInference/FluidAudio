@@ -3,16 +3,19 @@
 Mandarin zero-shot voice cloning via Qwen2 LM + CFM Flow + HiFT vocoder,
 running on CoreML.
 
-> ⚠️ **Beta / experimental.** End-to-end synthesis is currently slow on
-> Apple Silicon — RTFx < 1.0 typical, several seconds of latency for
-> short Mandarin utterances. The slowdown is partly the Flow CFM stage
-> (fp32, CPU-or-GPU only because fp16 + ANE produces NaNs through the
-> fused `layer_norm` — CoreMLTools limitation, tracked upstream) and
-> partly HiFT sinegen / windowing ops that fall back to CPU. May be a
-> model issue, may be recoverable through better conversion. Treat
-> performance numbers as preliminary; the Swift API, model layout, and
-> prompt-asset format may change in subsequent releases without
-> deprecation aliases.
+> ⚠️ **Beta / experimental.** End-to-end synthesis is below real-time
+> on Apple Silicon — agg-RTFx **0.357×** and p50 TTFT **~9.6 s** on
+> the full `minimax-chinese` 100-phrase corpus (M2, default compute
+> units), after the
+> [HiFT timeout fix](Benchmarks.md#cosyvoice3-hift-timeout-fix) and
+> [LLM-Decode `outputBackings` double-buffer](Benchmarks.md#cosyvoice3-llm-decode-outputbackings-fix).
+> The slowdown is partly the Flow CFM stage (fp32, CPU-or-GPU only
+> because fp16 + ANE produces NaNs through the fused `layer_norm` —
+> CoreMLTools limitation, tracked upstream) and partly HiFT sinegen
+> / windowing ops that fall back to CPU. May be a model issue, may
+> be recoverable through better conversion. Treat performance numbers
+> as preliminary; the Swift API, model layout, and prompt-asset format
+> may change in subsequent releases without deprecation aliases.
 
 ## Files
 
@@ -119,10 +122,14 @@ let result = try await manager.synthesize(
 
 ## Key State
 
-### KV cache (`kv_cache[24, 1, 2, 768, 64]` fp16)
-- 24 transformer layers × `[K,V]` × heads × dim, packed into one `MLState`-style
-  `MLMultiArray` that the prefill produces and the decode loop both reads
-  and overwrites in-place.
+### KV cache (`kv_k` / `kv_v` each `[24, 1, 2, 768, 64]` fp32)
+- 24 transformer layers × `[K,V]` × heads × dim, split across two
+  `MLMultiArray` outputs (`kv_k`, `kv_v`) that prefill produces and the
+  decode loop carries forward across steps via
+  `MLPredictionOptions.outputBackings` double-buffering.
+- No `MLState` dependency — runs on the package baseline (macOS 14 / iOS 17).
+- ~9 MB per array; pre-allocated front/back/spare buffers rotated each
+  step (see [LLM-Decode `outputBackings` fix](Benchmarks.md#cosyvoice3-llm-decode-outputbackings-fix)).
 - Reset per `synthesize()` call.
 
 ### Prompt assets (`CosyVoice3PromptAssets`)

@@ -148,7 +148,11 @@ timing (5 s of audio, M1):
 | Vocoder    | ~120 ms  |
 | Tail       | ~50 ms   |
 
-Vocoder dominates. Total ≈ 300 ms for 5 s audio (~16× RTFx).
+Vocoder dominates. Total ≈ 300 ms for 5 s audio (~16× RTFx). For
+full-corpus numbers (warm-synth p50 / p95, peak RSS, WER) on the
+MiniMax-English 100-phrase suite — including the longer paragraph
+phrases that pull the per-corpus aggregate down to ~5.2× — see
+[Benchmarks.md](Benchmarks.md).
 
 ## Source
 
