@@ -37,6 +37,12 @@ public struct DiarizerTimelineConfig: Sendable {
     /// Value used to measure speech activity (sigmoids or logits)
     public var activityType: DiarizerActivityType
 
+    /// When false, committed segments are only delivered via the per-chunk
+    /// `DiarizerTimelineUpdate` and are not persisted on `DiarizerSpeaker`,
+    /// nor do they cause entries to be inserted into the speakers map. The
+    /// caller becomes the sole owner of segment history.
+    public var storeSegments: Bool
+
     // MARK: - Seconds Accessors
 
     /// Padding duration added before each speech segment in seconds
@@ -95,6 +101,7 @@ public struct DiarizerTimelineConfig: Sendable {
     ///   - minFramesOn: Minimum segment length in frames (shorter segments are discarded)
     ///   - minFramesOff: Minimum gap length in frames (shorter gaps are closed)
     ///   - maxStoredFrames: Maximum number of finalized prediction frames to retain (nil = unlimited)
+    ///   - storeSegments: When false, segments are only emitted via DiarizerTimelineUpdate and not persisted on speakers
     public init(
         numSpeakers: Int? = nil,
         frameDurationSeconds: Float? = nil,
@@ -105,7 +112,8 @@ public struct DiarizerTimelineConfig: Sendable {
         minFramesOn: Int = 0,
         minFramesOff: Int = 0,
         activityType: DiarizerActivityType = .sigmoids,
-        maxStoredFrames: Int? = nil
+        maxStoredFrames: Int? = nil,
+        storeSegments: Bool = true
     ) {
         self.numSpeakers = numSpeakers ?? 1
         self.frameDurationSeconds = frameDurationSeconds ?? 0.08
@@ -117,6 +125,7 @@ public struct DiarizerTimelineConfig: Sendable {
         self.minFramesOff = minFramesOff
         self.activityType = activityType
         self.maxStoredFrames = maxStoredFrames
+        self.storeSegments = storeSegments
     }
 
     /// - Parameters:
@@ -129,6 +138,7 @@ public struct DiarizerTimelineConfig: Sendable {
     ///   - minDurationOn: Minimum segment length in seconds (shorter segments are discarded)
     ///   - minDurationOff: Minimum gap length in seconds (shorter gaps are closed)
     ///   - maxStoredFrames: Maximum number of finalized raw prediction frames to retain (nil = unlimited)
+    ///   - storeSegments: When false, segments are only emitted via DiarizerTimelineUpdate and not persisted on speakers
     public init(
         numSpeakers: Int? = nil,
         frameDurationSeconds: Float? = nil,
@@ -139,7 +149,8 @@ public struct DiarizerTimelineConfig: Sendable {
         minDurationOn: Float,
         minDurationOff: Float,
         activityType: DiarizerActivityType = .sigmoids,
-        maxStoredFrames: Int? = nil
+        maxStoredFrames: Int? = nil,
+        storeSegments: Bool = true
     ) {
         self.numSpeakers = numSpeakers ?? 1
         self.frameDurationSeconds = frameDurationSeconds ?? 0.08
@@ -151,6 +162,7 @@ public struct DiarizerTimelineConfig: Sendable {
         self.minFramesOff = Int(round(minDurationOff / self.frameDurationSeconds))
         self.maxStoredFrames = maxStoredFrames
         self.activityType = activityType
+        self.storeSegments = storeSegments
     }
 }
 
@@ -854,7 +866,7 @@ public class DiarizerTimeline {
             chunkResult: consume chunk
         )
     }
-    
+
     // MARK: - Finalize Timeline
 
     /// Finalize all tentative data at end of recording
@@ -875,7 +887,7 @@ public class DiarizerTimeline {
     }
 
     // MARK: - Reset Timeline
-    
+
     /// Reset to initial state
     /// - Parameter condition: Condition for when to keep a speaker. All speakers still have their segments reset.
     public func reset(
@@ -918,7 +930,7 @@ public class DiarizerTimeline {
     }
 
     // MARK: - Rebuild Timeline
-    
+
     /// Rebuild the timeline from initial predictions. This is equivalent to reinitializing the timeline.
     /// - Parameters:
     ///   - finalizedPredictions: Finalized prediction matrix `[numFrames, numSpeakers]` flattened
@@ -985,7 +997,7 @@ public class DiarizerTimeline {
             chunkResult: consume chunk
         )
     }
-    
+
     // MARK: - Timeline Snapshots
 
     public func rollback(to snapshot: consuming Snapshot, keepingSpeakers: Bool = false) {
@@ -1268,16 +1280,17 @@ public class DiarizerTimeline {
             activity: aux.activeFrameCount > 0 ? aux.activitySum / Float(aux.activeFrameCount) : 0
         )
 
-        let speaker: DiarizerSpeaker
-        if let spk = _speakers[slot] {
-            speaker = consume spk
-        } else {
-            let spk = DiarizerSpeaker(index: slot)
-            _speakers[slot] = spk
-            speaker = consume spk
+        if config.storeSegments {
+            let speaker: DiarizerSpeaker
+            if let spk = _speakers[slot] {
+                speaker = consume spk
+            } else {
+                let spk = DiarizerSpeaker(index: slot)
+                _speakers[slot] = spk
+                speaker = consume spk
+            }
+            speaker.append(segment)
         }
-
-        speaker.append(segment)
 
         if isFinalized {
             finalizedResult.append(consume segment)
