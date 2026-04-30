@@ -150,18 +150,29 @@ WER / CER.
 | PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 6.0 s | **1244 / 4749 ms**  | 8757 / 19174 ms     | 0.61×    | 1503 MB  | 0.014   | 0.006   | **streaming**; TTFT is first 80 ms audio frame |
 | StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | 955 s§     | 8937 / 17351 ms     | 8937 / 17351 ms     | 2.36×    | 1428 MB  | 0.581§  | 0.476§  | full 100/100 `minimax-english` after [`sliceFirstAxis2D` flex-shape fix](#styletts2-flexible-shape-fix); ref_s dumped via [`06_dump_ref_s.py`](https://github.com/voicelink-ai/mobius-styletts2/blob/main/models/tts/styletts2/scripts/06_dump_ref_s.py) from LibriTTS `696_92939_000016_000006.wav` (StyleTTS2 demo voice) |
 | Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 19.1 s     | 19834 / 57508 ms    | 19834 / 57508 ms    | 0.41×    | 1233 MB  | 0.056   | 0.033   | streaming-capable but benchmarked one-shot; split-K/V decoder; outputBackings fast path with latched fallback |
-| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 302.7 s†   | 20547 / 31556 ms†   | 20547 / 31556 ms†   | 0.269×†  | 2894 MB† | n/a     | n/a     | beta; full `minimax-chinese` (100/100 phrases) after [HiFT fix](#cosyvoice3-hift-timeout-fix) |
-| CosyVoice3  | Apache-2.0  | yue (cantonese)        | ~1.5 GB   | 25.6 s‡    | 20543 / 36133 ms†   | 20543 / 36133 ms†   | 0.270×†  | 3300 MB† | n/a     | n/a     | beta; full `minimax-cantonese` (100/100 phrases); same model as zh, ANE compile cache hot from prior run |
+| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 29.2 s†    | 14091 / 23679 ms†   | 14091 / 23679 ms†   | 0.357×†  | 3302 MB† | n/a     | n/a     | beta; full `minimax-chinese` (100/100 phrases) after [HiFT fix](#cosyvoice3-hift-timeout-fix) + [LLM-Decode outputBackings fix](#cosyvoice3-llm-decode-outputbackings-fix) |
+| CosyVoice3  | Apache-2.0  | yue (cantonese)        | ~1.5 GB   | 25.6 s‡    | 20543 / 36133 ms¶   | 20543 / 36133 ms¶   | 0.270×¶  | 3300 MB¶ | n/a     | n/a     | beta; full `minimax-cantonese` (100/100 phrases); same model as zh, ANE compile cache hot from prior run |
 
 \* TTFT = time to first audio frame. PocketTTS streams 80 ms / 1920-sample
 frames at 24 kHz, so TTFT < synth_ms; the gap is the streaming
 advantage. All other backends are benchmarked one-shot, so
 `ttft_ms == synth_ms` for them.
 
-† CosyVoice3: full `minimax-chinese` and `minimax-cantonese` runs, both
-100 / 100 phrases, 0 errors, after the HiFT `.cpuAndGPU` fix. ASR
-roundtrip skipped (no Mandarin / Cantonese ASR backend). See
-[CosyVoice3 HiFT timeout fix](#cosyvoice3-hift-timeout-fix).
+† CosyVoice3: full `minimax-chinese` run, 100 / 100 phrases, 0 errors,
+after the HiFT `.cpuAndGPU` fix **and** the LLM-Decode
+`outputBackings` double-buffer fix (32.8% agg-RTFx improvement, 31%
+TTFT-p50 improvement, 49% max-synth improvement vs the pre-fix
+baseline — see
+[CosyVoice3 LLM-Decode outputBackings fix](#cosyvoice3-llm-decode-outputbackings-fix)).
+ASR roundtrip skipped (no Mandarin / Cantonese ASR backend).
+Cold-start dropped from 302.7 s to 29.2 s because ANE compile caches
+were warm on the re-run.
+
+¶ CosyVoice3 cantonese: full `minimax-cantonese` run, 100 / 100
+phrases, 0 errors. **These numbers predate the LLM-Decode
+`outputBackings` fix** — they are kept for the historical record. A
+re-run with the new decode loop is expected to show similar ~30%
+improvements as the chinese row.
 
 ‡ Cantonese cold-start is short because the Mandarin run immediately
 beforehand left the ANE compile cache hot. A clean first-time cold
@@ -323,6 +334,60 @@ didn't actually complete the corpus.
 Verified end-to-end on full `minimax-chinese` (100 / 100 phrases) and
 `minimax-cantonese` (100 / 100 phrases), 0 errors on either; the
 watchdog error did not recur on long phrases.
+
+## CosyVoice3 LLM-Decode outputBackings fix
+
+CosyVoice3's autoregressive decode loop (`LLM-Decode-M768-fp16`) runs
+once per speech token — typically ~163 steps per phrase to fill the
+250-token `flowTotalTokens` cap minus prompt. Each step takes the
+previous step's KV cache as `kv_k` / `kv_v` (shape
+`[24, 1, 2, 768, 64]` fp32 = 9 MB each) and produces a fresh
+`kv_k_out` / `kv_v_out` plus a `[1, 1, 6562]` `speech_logits`. With
+the default CoreML `prediction(from:)` API, that's ~36 MB of fresh
+host-side `MLMultiArray` allocation **per step**, per phrase — i.e.
+~5.9 GB of allocator churn for a single 6.5 s utterance, all on the
+critical path of the AR loop.
+
+Fix: bind pre-allocated `MLMultiArray`s as
+`MLPredictionOptions.outputBackings` and rotate them front/back/spare
+across decode steps (front = read this step, back = written by this
+step, spare = next step's write target). Same try/catch fallback
+pattern as
+[Magpie's outputBackings fast path](#magpie-outputbackings-fast-path):
+on the first rejection from a model exported without explicit
+MultiArray shape/dtype output constraints, latch a
+`useOutputBackings` flag off and route the rest of the corpus through
+the fresh-alloc slow path (with explicit `memcpy` into the back
+buffers to keep the rest of the AR loop oblivious to the path
+taken). One-shot info log on first acceptance, one-shot warning on
+first rejection — no per-step log spam.
+
+Measured on full `minimax-chinese` (100 / 100 phrases, MacBook Air
+M2, `--compute-units default`):
+
+| Metric           | Before  | After   | Δ       |
+|------------------|---------|---------|---------|
+| agg RTFx         | 0.269×  | 0.357×  | +32.8%  |
+| TTFT p50         | 20547   | 14091   | −31%    |
+| TTFT p95         | 31556   | 23679   | −25%    |
+| synth_ms mean    | 21243   | 15999   | −25%    |
+| synth_ms median  | 20445   | 14044   | −31%    |
+| synth_ms max     | 56497   | 28833   | −49%    |
+| peak RSS         | 2894 MB | 3302 MB | +14%    |
+
+The +408 MB RSS is the four pre-allocated 9 MB KV back-buffers plus a
+6562-element fp32 logits backing — 36 MB nominal — with the
+remainder coming from CoreML retaining backing-tensor metadata
+across steps. Fair trade for −33% wall-clock latency. Still
+beta-class (RTFx < 1.0) but now 1.33× faster end-to-end. The next
+RTFx lever is `MLState` (macOS 15+, would keep KV GPU-resident
+across steps), which is gated on bumping the library floor from 14.0
+to 15.0.
+
+Implemented in
+`CosyVoice3Synthesizer.synthesize` and
+`CosyVoice3Synthesizer.runDecode`
+(`Sources/FluidAudio/TTS/CosyVoice3/Pipeline/Synthesize/CosyVoice3Synthesizer.swift`).
 
 ## Magpie outputBackings fast path
 
