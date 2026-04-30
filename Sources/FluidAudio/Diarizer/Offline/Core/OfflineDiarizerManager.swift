@@ -117,6 +117,97 @@ public final class OfflineDiarizerManager {
         audioSource: AudioSampleSource,
         audioLoadingSeconds: TimeInterval
     ) async throws -> DiarizationResult {
+        let totalStart = Date()
+        let extraction = try await runExtractEmbeddings(audioSource: audioSource)
+        let clustering = try await runClusterFromEmbeddings(
+            segmentation: extraction.segmentation,
+            embeddings: extraction.embeddings,
+            numSpeakers: nil
+        )
+        let totalProcessing = Date().timeIntervalSince(totalStart)
+        let timings = PipelineTimings(
+            modelCompilationSeconds: extraction.modelCompilationSeconds,
+            audioLoadingSeconds: audioLoadingSeconds,
+            segmentationSeconds: extraction.segmentationSeconds,
+            embeddingExtractionSeconds: extraction.embeddingExtractionSeconds,
+            speakerClusteringSeconds: clustering.speakerClusteringSeconds,
+            postProcessingSeconds: max(
+                0,
+                totalProcessing
+                    - extraction.segmentationSeconds
+                    - extraction.embeddingExtractionSeconds
+                    - clustering.speakerClusteringSeconds
+            )
+        )
+        return DiarizationResult(
+            segments: clustering.segments,
+            speakerDatabase: clustering.speakerDatabase,
+            timings: timings
+        )
+    }
+
+    /// Run segmentation and embedding extraction, returning the intermediate values needed
+    /// to drive clustering. Exposed so callers can run logic between embedding extraction and
+    /// clustering (e.g. eigengap-based speaker count estimation) before invoking
+    /// ``clusterFromEmbeddings(segmentation:embeddings:numSpeakers:)``.
+    public func extractEmbeddings(
+        audioSource: AudioSampleSource,
+        audioLoadingSeconds: TimeInterval = 0
+    ) async throws -> (SegmentationOutput, [TimedEmbedding]) {
+        let extraction = try await runExtractEmbeddings(audioSource: audioSource)
+        return (extraction.segmentation, extraction.embeddings)
+    }
+
+    /// Cluster previously-extracted embeddings into speaker segments. When `numSpeakers`
+    /// is non-nil it overrides any speaker-count constraint set on the manager's config
+    /// for this call only (the underlying config is not mutated).
+    public func clusterFromEmbeddings(
+        segmentation: SegmentationOutput,
+        embeddings: [TimedEmbedding],
+        numSpeakers: Int? = nil
+    ) async throws -> DiarizationResult {
+        let totalStart = Date()
+        let clustering = try await runClusterFromEmbeddings(
+            segmentation: segmentation,
+            embeddings: embeddings,
+            numSpeakers: numSpeakers
+        )
+        let totalProcessing = Date().timeIntervalSince(totalStart)
+        let timings = PipelineTimings(
+            modelCompilationSeconds: 0,
+            audioLoadingSeconds: 0,
+            segmentationSeconds: 0,
+            embeddingExtractionSeconds: 0,
+            speakerClusteringSeconds: clustering.speakerClusteringSeconds,
+            postProcessingSeconds: max(0, totalProcessing - clustering.speakerClusteringSeconds)
+        )
+        return DiarizationResult(
+            segments: clustering.segments,
+            speakerDatabase: clustering.speakerDatabase,
+            timings: timings
+        )
+    }
+
+    /// Internal result of the segmentation + embedding extraction stages, including the
+    /// per-stage wall-clock timings needed to reconstruct ``PipelineTimings`` in `process()`.
+    private struct EmbeddingExtractionResult: Sendable {
+        let segmentation: SegmentationOutput
+        let embeddings: [TimedEmbedding]
+        let segmentationSeconds: TimeInterval
+        let embeddingExtractionSeconds: TimeInterval
+        let modelCompilationSeconds: TimeInterval
+    }
+
+    /// Internal result of the clustering + reconstruction stages.
+    private struct ClusterFromEmbeddingsResult: Sendable {
+        let segments: [TimedSpeakerSegment]
+        let speakerDatabase: [String: [Float]]
+        let speakerClusteringSeconds: TimeInterval
+    }
+
+    private func runExtractEmbeddings(
+        audioSource: AudioSampleSource
+    ) async throws -> EmbeddingExtractionResult {
         try config.validate()
         if models == nil {
             try await prepareModels()
@@ -125,8 +216,6 @@ public final class OfflineDiarizerManager {
         guard let models else {
             throw OfflineDiarizationError.modelNotLoaded("offline-diarizer")
         }
-
-        let totalStart = Date()
 
         let streamPair = AsyncThrowingStream<SegmentationChunk, Error>.makeStream()
         let chunkStream = streamPair.stream
@@ -200,6 +289,28 @@ public final class OfflineDiarizerManager {
         let (timedEmbeddings, embeddingTime) = embeddingResult
         logger.debug("Embedding extraction produced \(timedEmbeddings.count) vectors in \(embeddingTime)s (async)")
 
+        return EmbeddingExtractionResult(
+            segmentation: segmentation,
+            embeddings: timedEmbeddings,
+            segmentationSeconds: segmentationTime,
+            embeddingExtractionSeconds: embeddingTime,
+            modelCompilationSeconds: models.compilationDuration
+        )
+    }
+
+    private func runClusterFromEmbeddings(
+        segmentation: SegmentationOutput,
+        embeddings timedEmbeddings: [TimedEmbedding],
+        numSpeakers: Int?
+    ) async throws -> ClusterFromEmbeddingsResult {
+        if models == nil {
+            try await prepareModels()
+        }
+
+        guard let models else {
+            throw OfflineDiarizationError.modelNotLoaded("offline-diarizer")
+        }
+
         let pldaTransform = PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi)
 
         guard !timedEmbeddings.isEmpty else {
@@ -231,10 +342,12 @@ public final class OfflineDiarizerManager {
             initialClusters = Array(repeating: 0, count: trainingEmbeddings.count)
         }
 
+        let effectiveNumSpeakers = numSpeakers ?? config.clustering.numSpeakers
+
         let vbxOutput: VBxOutput
         if !trainingRho.isEmpty, !initialClusters.isEmpty {
             let hasConstraints =
-                config.clustering.numSpeakers != nil
+                effectiveNumSpeakers != nil
                 || config.clustering.minSpeakers != nil
                 || config.clustering.maxSpeakers != nil
 
@@ -242,7 +355,7 @@ public final class OfflineDiarizerManager {
                 hasConstraints
                 ? SpeakerCountConstraints.resolve(
                     numEmbeddings: trainingEmbeddings.count,
-                    numSpeakers: config.clustering.numSpeakers,
+                    numSpeakers: effectiveNumSpeakers,
                     minSpeakers: config.clustering.minSpeakers,
                     maxSpeakers: config.clustering.maxSpeakers
                 )
@@ -315,20 +428,10 @@ public final class OfflineDiarizerManager {
             )
         }
 
-        let totalProcessing = Date().timeIntervalSince(totalStart)
-        let timings = PipelineTimings(
-            modelCompilationSeconds: models.compilationDuration,
-            audioLoadingSeconds: audioLoadingSeconds,
-            segmentationSeconds: segmentationTime,
-            embeddingExtractionSeconds: embeddingTime,
-            speakerClusteringSeconds: clusteringTime,
-            postProcessingSeconds: max(0, totalProcessing - segmentationTime - embeddingTime - clusteringTime)
-        )
-
-        return DiarizationResult(
+        return ClusterFromEmbeddingsResult(
             segments: segments,
             speakerDatabase: speakerDatabase,
-            timings: timings
+            speakerClusteringSeconds: clusteringTime
         )
     }
 

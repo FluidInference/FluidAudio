@@ -598,16 +598,38 @@ public struct VBxOutput: Sendable {
 
 /// Intermediate representation of an embedding associated with its timeline.
 @available(macOS 13.0, iOS 16.0, *)
-struct TimedEmbedding: Sendable {
-    let chunkIndex: Int
-    let speakerIndex: Int
-    let startFrame: Int
-    let endFrame: Int
-    let frameWeights: [Float]
-    let startTime: Double
-    let endTime: Double
-    let embedding256: [Float]
-    let rho128: [Double]
+public struct TimedEmbedding: Sendable {
+    public let chunkIndex: Int
+    public let speakerIndex: Int
+    public let startFrame: Int
+    public let endFrame: Int
+    public let frameWeights: [Float]
+    public let startTime: Double
+    public let endTime: Double
+    public let embedding256: [Float]
+    public let rho128: [Double]
+
+    public init(
+        chunkIndex: Int,
+        speakerIndex: Int,
+        startFrame: Int,
+        endFrame: Int,
+        frameWeights: [Float],
+        startTime: Double,
+        endTime: Double,
+        embedding256: [Float],
+        rho128: [Double]
+    ) {
+        self.chunkIndex = chunkIndex
+        self.speakerIndex = speakerIndex
+        self.startFrame = startFrame
+        self.endFrame = endFrame
+        self.frameWeights = frameWeights
+        self.startTime = startTime
+        self.endTime = endTime
+        self.embedding256 = embedding256
+        self.rho128 = rho128
+    }
 }
 
 // MARK: - Convenience Methods
