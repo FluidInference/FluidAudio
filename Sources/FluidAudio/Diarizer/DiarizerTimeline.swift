@@ -37,10 +37,11 @@ public struct DiarizerTimelineConfig: Sendable {
     /// Value used to measure speech activity (sigmoids or logits)
     public var activityType: DiarizerActivityType
 
-    /// When false, committed segments are only delivered via the per-chunk
-    /// `DiarizerTimelineUpdate` and are not persisted on `DiarizerSpeaker`,
-    /// nor do they cause entries to be inserted into the speakers map. The
-    /// caller becomes the sole owner of segment history.
+    /// When false, the timeline never creates `DiarizerSpeaker` objects. Committed
+    /// segments are only delivered via the per-chunk `DiarizerTimelineUpdate`;
+    /// `upsertSpeaker(...)` is refused, snapshot inits drop the snapshot's speakers,
+    /// and `timeline.speakers` stays empty for the lifetime of the session. Pair
+    /// with `maxStoredFrames` to also bound prediction memory.
     public var storeSegments: Bool
 
     // MARK: - Seconds Accessors
@@ -778,10 +779,12 @@ public class DiarizerTimeline {
         self.finalizedCursorFrame = snapshot.numFinalizedFrames
         self.scratches = snapshot.scratches
         self._speakers = [:]
-        self._speakers.reserveCapacity(snapshot.speakers.count)
 
-        for (slot, speakerSnapshot) in snapshot.speakers {
-            self._speakers[slot] = DiarizerSpeaker(from: speakerSnapshot)
+        if config.storeSegments {
+            self._speakers.reserveCapacity(snapshot.speakers.count)
+            for (slot, speakerSnapshot) in snapshot.speakers {
+                self._speakers[slot] = DiarizerSpeaker(from: speakerSnapshot)
+            }
         }
     }
 
@@ -1047,6 +1050,7 @@ public class DiarizerTimeline {
     ) -> DiarizerSpeaker? {
         lock.lock()
         defer { lock.unlock() }
+        guard config.storeSegments else { return nil }
         let index = index ?? (0..<speakerCapacity).first { _speakers[$0] == nil }
 
         // Ensure index is within bounds
@@ -1078,6 +1082,7 @@ public class DiarizerTimeline {
     ) -> DiarizerSpeaker? {
         lock.lock()
         defer { lock.unlock() }
+        guard config.storeSegments else { return nil }
         // Ensure index is within bounds
         let index = index ?? (0..<speakerCapacity).first { _speakers[$0] == nil }
 

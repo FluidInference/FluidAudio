@@ -15,7 +15,6 @@ import CoreML
 import Foundation
 
 public final class LSEENDDiarizer: Diarizer {
-
     // MARK: - Dependencies
     private var model: LSEENDModel? = nil
     private var session: LSEENDFeatureProvider? = nil
@@ -25,35 +24,49 @@ public final class LSEENDDiarizer: Diarizer {
     // MARK: - Protocol properties
 
     public private(set) var isAvailable: Bool = false
-    /// Number of finalized output frames emitted to the timeline.
-    /// Tracks `timeline.numFinalizedFrames` (warmup frames stripped by
-    /// the model are excluded), matching the `Diarizer` protocol contract.
     public var numFramesProcessed: Int { timeline.numFinalizedFrames }
+
+    public private(set) var targetSampleRate: Int? = nil
+    public private(set) var modelFrameHz: Double? = nil
+    public private(set) var numSpeakers: Int? = nil
+
     /// Input frames fed to the model (including warmup). Used internally
     /// to drive the per-chunk warmup calculation.
     private var framesFedToModel: Int = 0
-    public private(set) var targetSampleRate: Int?
-    public private(set) var modelFrameHz: Double?
-    public private(set) var numSpeakers: Int?
-
+    private var timelineConfig: DiarizerTimelineConfig
     private var finalized: Bool = false
 
     private let logger = AppLogger(category: "LSEENDDiarizer")
 
     // MARK: - Init
 
-    public init(model: LSEENDModel) throws {
+    public convenience init(
+        variant: LSEENDVariant,
+        stepSize: LSEENDStepSize = .step100ms,
+        timelineConfig: DiarizerTimelineConfig? = nil
+    ) async throws {
+        let model = try await LSEENDModel.loadFromHuggingFace(
+            variant: variant, stepSize: stepSize)
+        try self.init(model: model, timelineConfig: timelineConfig)
+    }
+
+    public init(timelineConfig: DiarizerTimelineConfig? = nil) throws {
+        self.timelineConfig = timelineConfig ?? .default(numSpeakers: 1, frameDurationSeconds: 0.1)
+        self.timeline = DiarizerTimeline(config: self.timelineConfig)
+    }
+
+    public init(
+        model: LSEENDModel,
+        timelineConfig: DiarizerTimelineConfig? = nil
+    ) throws {
+        self.timelineConfig = timelineConfig ?? .default(numSpeakers: 1, frameDurationSeconds: 0.1)
+
         let metadata = model.metadata
         self.model = model
         self.session = try LSEENDFeatureProvider(from: metadata)
-        self.timeline = DiarizerTimeline(
-            config: .default(
-                numSpeakers: metadata.maxSpeakers,
-                frameDurationSeconds: metadata.frameDurationSeconds
-            )
-        )
+        self.timeline = DiarizerTimeline(config: self.timelineConfig)
         self.targetSampleRate = metadata.sampleRate
-        self.modelFrameHz = Double(metadata.sampleRate) / Double(metadata.hopLength * metadata.subsampling)
+        self.modelFrameHz = 1 / Double(metadata.frameDurationSeconds)
         self.numSpeakers = metadata.maxSpeakers
         self.isAvailable = true
     }
@@ -61,24 +74,26 @@ public final class LSEENDDiarizer: Diarizer {
     /// Replace model + timeline + derived metadata. Used by init and hot-swap
     /// paths so every metadata-derived property stays in lockstep with the
     /// currently loaded model.
-    private func adopt(model: LSEENDModel) throws {
+    public func initialize(model: LSEENDModel) throws {
         let metadata = model.metadata
-        self.model = model
         self.session = try LSEENDFeatureProvider(from: metadata)
-        self.timeline = DiarizerTimeline(
-            config: .default(
-                numSpeakers: metadata.maxSpeakers,
-                frameDurationSeconds: metadata.frameDurationSeconds
-            )
-        )
+        self.model = model
+
+        self.timelineConfig.frameDurationSeconds = metadata.frameDurationSeconds
+        self.timelineConfig.numSpeakers = metadata.maxSpeakers
+
+        self.timeline = DiarizerTimeline(config: self.timelineConfig)
         self.targetSampleRate = metadata.sampleRate
-        self.modelFrameHz = Double(metadata.sampleRate) / Double(metadata.hopLength * metadata.subsampling)
+        self.modelFrameHz = 1 / Double(metadata.frameDurationSeconds)
         self.numSpeakers = metadata.maxSpeakers
         self.isAvailable = true
+
+        resetStreamingState()
     }
 
-    public func loadFromHuggingFace(
-        variant: LSEENDVariant = .dihard3,
+    /// Load and initialize model from HuggingFace or local cache
+    public func initialize(
+        variant: LSEENDVariant,
         stepSize: LSEENDStepSize = .step100ms,
         cacheDirectory: URL? = nil,
         computeUnits: MLComputeUnits = .cpuOnly,
@@ -91,42 +106,9 @@ public final class LSEENDDiarizer: Diarizer {
             computeUnits: computeUnits,
             progressHandler: progressHandler
         )
-        // New model may have different convDelay / maxSpeakers / sampleRate,
-        // so rebuild session + timeline + derived metadata and clear any
-        // prior streaming state before the next chunk runs.
-        try adopt(model: model)
-        resetStreamingState()
+
+        try initialize(model: model)
     }
-
-    // MARK: - Debug helpers (parity tests)
-
-    #if DEBUG
-    /// Drive `samples` through session → STFT → log10-mel → CMN →
-    /// subsample+context stack, and return the flat `[N × featDim]`
-    /// stacked features that would be fed to CoreML. Used by
-    /// `testFeat345Parity` to byte-compare against the Python fixture
-    /// without running inference.
-    internal func debugExtractFeatures<C: Collection>(
-        _ samples: C, sourceSampleRate: Double?
-    ) throws -> [Float] where C.Element == Float {
-        guard let session else { throw LSEENDError.notInitialized }
-        session.reset()
-        try session.enqueueAudio(samples, withSampleRate: sourceSampleRate)
-        try session.drainRightContextWithSilence()
-
-        var out: [Float] = []
-        while let input = try session.emitNextChunk() {
-            // `input.melFeatures` is preallocated + reused — copy out each
-            // pass. Caller-allocated input arrays have tight strides, so a
-            // flat read is safe (unlike model *output* arrays, which get
-            // tile-padded strides; see CLAUDE.md gotcha #2).
-            input.melFeatures.withUnsafeBufferPointer(ofType: Float.self) { buf in
-                out.append(contentsOf: buf)
-            }
-        }
-        return out
-    }
-    #endif
 
     // MARK: - Streaming API
 

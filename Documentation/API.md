@@ -98,7 +98,7 @@ Use `OfflineDiarizerManager` when you need offline DER parity or want to run the
 
 `DiarizerTimeline` accumulates per-frame speaker probabilities and derives `DiarizerSpeaker` segments. Each speaker has `finalizedSegments` (confirmed) and `tentativeSegments` (may be revised). Segments expose `startTime`, `endTime`, `duration`, and `isFinalized`.
 
-**`DiarizerTimelineConfig`** controls post-processing (onset/offset thresholds default to 0.5, min segment/gap duration, optional rolling window cap). Both diarizers accept this at init.
+**`DiarizerTimelineConfig`** controls post-processing (onset/offset thresholds default to 0.5, min segment/gap duration, optional rolling window cap, and `storeSegments` for emit-only mode that skips creating `DiarizerSpeaker` objects entirely). Both diarizers accept this at init. See [DiarizerTimeline.md](Diarization/DiarizerTimeline.md#emit-only-mode-storesegments--false) for the emit-only mode contract.
 
 **Speaker Management:**
 - `upsertSpeaker(named:atIndex:) -> DiarizerSpeaker?`

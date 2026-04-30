@@ -135,8 +135,9 @@ The logic merging raw probabilities into discrete `DiarizerSegment` ranges is go
 | `minFramesOff` | Merges gaps between segments shorter than this | E.g. `minDurationOff: 0.5` seconds |
 | `onsetPadFrames` | Number of frames to prepend to any speech onset | Useful to prevent cutting off the start of words |
 | `offsetPadFrames` | Number of frames to append to any speech offset | Useful to prevent cutting off trailing syllables |
-| `maxStoredFrames` | Maximum number of finalized predictions to store | Useful for limiting memory usage | 
+| `maxStoredFrames` | Maximum number of finalized predictions to store | Useful for limiting memory usage |
 | `activityType` | Type of speech activity to report for segment activity | E.g., `.sigmoids` or `.logits` |
+| `storeSegments` | Whether to persist segments and `DiarizerSpeaker` objects on the timeline | Set to `false` for emit-only streaming where the caller consumes segments via `DiarizerTimelineUpdate` and doesn't need accumulated state |
 
 **Constructing a Config:**
 
@@ -165,3 +166,29 @@ When `timeline.addChunk(_:)` is called internally by the diarizer:
 4. Tentative segments are cleared and rebuilt from the trailing `tentativePredictions` array during every streaming tick. 
 
 When the stream naturally finishes, call `Diarizer.finalizeSession()`. The diarizer flushes trailing context first, then invokes `timeline.finalize()`, which promotes any remaining tentative segments to finalized status and applies the `minFramesOn` deletion rules.
+
+## Emit-only Mode (`storeSegments = false`)
+
+For long-running streams where the caller already consumes per-chunk `DiarizerTimelineUpdate` values and has no need for accumulated state, set `DiarizerTimelineConfig.storeSegments = false`. In this mode:
+
+- No `DiarizerSpeaker` objects are ever created — `timeline.speakers` stays empty for the lifetime of the session.
+- Committed segments are still delivered in every `DiarizerTimelineUpdate.finalizedSegments` / `.tentativeSegments` exactly as before.
+- `upsertSpeaker(...)` returns `nil` (refused).
+- Speaker-restoring snapshot inits drop the snapshot's speakers.
+- Segment-related read APIs (`timeline.speakers`, per-speaker `finalizedSegments`, etc.) return empty.
+
+This bounds the per-segment memory cost. To also bound prediction memory, pair with `maxStoredFrames` — `storeSegments` does **not** trim the prediction buffers (`finalizedPredictions` / `tentativePredictions`), since the streaming finalize→tentative promotion logic reads recent predictions within each chunk window.
+
+```swift
+var config = DiarizerTimelineConfig.sortformerDefault
+config.storeSegments = false
+config.maxStoredFrames = 0   // optional: also drop finalized predictions
+let timeline = DiarizerTimeline(config: config)
+
+while let update = try diarizer.process(samples: chunk) {
+    handle(update.finalizedSegments)   // sole owner of segment history
+    handle(update.tentativeSegments)
+}
+```
+
+Speaker enrollment APIs on `LS-EEND` and `Sortformer` rely on the diarizer being able to inspect `timeline.speakers` after a forward pass. Enrollment will fail (return `nil`) under emit-only mode — keep `storeSegments = true` for any session that needs to enroll speakers.
