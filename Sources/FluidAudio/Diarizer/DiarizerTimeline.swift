@@ -1290,7 +1290,7 @@ public class DiarizerTimeline {
 
     private func trimPredictions() {
         guard let maxStoredFrames = config.maxStoredFrames else { return }
-        let numToRemove = finalizedPredictions.count - maxStoredFrames * speakerCapacity
+        let numToRemove = _finalizedPredictions.count - maxStoredFrames * speakerCapacity
         if numToRemove > 0 {
             _finalizedPredictions.removeFirst(numToRemove)
         }
