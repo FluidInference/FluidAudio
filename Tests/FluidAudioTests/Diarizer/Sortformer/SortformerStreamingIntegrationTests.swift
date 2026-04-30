@@ -44,8 +44,8 @@ final class SortformerStreamingIntegrationTests: XCTestCase {
             abs(streamingDiarizer.timeline.numFinalizedFrames - expectedTimeline.numFinalizedFrames),
             1
         )
-        XCTAssertEqual(finalChunk?.tentativeFrameCount, 0)
-        XCTAssertEqual(finalChunk?.tentativePredictions.count, 0)
+        XCTAssertEqual(finalChunk?.chunkResult.tentativeFrameCount, 0)
+        XCTAssertEqual(finalChunk?.chunkResult.tentativePredictions.count, 0)
         XCTAssertEqual(streamingDiarizer.timeline.numTentativeFrames, 0)
     }
 
@@ -72,11 +72,72 @@ final class SortformerStreamingIntegrationTests: XCTestCase {
         let _ = try streamingDiarizer.finalizeSession()
 
         XCTAssertNotNil(bufferedFinalChunk)
-        XCTAssertEqual(bufferedFinalChunk?.tentativeFrameCount, 0)
+        XCTAssertEqual(bufferedFinalChunk?.chunkResult.tentativeFrameCount, 0)
         XCTAssertEqual(bufferedDiarizer.timeline.numTentativeFrames, 0)
         XCTAssertEqual(
             bufferedDiarizer.timeline.numFinalizedFrames,
             streamingDiarizer.timeline.numFinalizedFrames
+        )
+    }
+
+    func testFinalizeSessionIsIdempotent() async throws {
+        let config = SortformerConfig.default
+        let models: SortformerModels
+        do {
+            models = try await loadModelsForTest(config: config)
+        } catch {
+            throw XCTSkip("Sortformer models unavailable in this environment: \(error)")
+        }
+        let samples = try DiarizationTestFixtures.fixtureAudio(sampleRate: config.sampleRate, limitSeconds: 4.0)
+
+        let diarizer = SortformerDiarizer(config: config)
+        diarizer.initialize(models: models)
+        for chunk in DiarizationTestFixtures.chunk(samples, sizes: [4_800, 7_680, 9_600]) {
+            let _ = try diarizer.process(samples: chunk)
+        }
+
+        let firstUpdate = try diarizer.finalizeSession()
+        let frameCountAfterFirst = diarizer.timeline.numFinalizedFrames
+        let secondUpdate = try diarizer.finalizeSession()
+
+        XCTAssertNotNil(firstUpdate)
+        XCTAssertNil(secondUpdate)
+        XCTAssertEqual(diarizer.timeline.numFinalizedFrames, frameCountAfterFirst)
+    }
+
+    func testFinalizeSessionDrainsUnprocessedAudioAndMelFeatures() async throws {
+        let config = SortformerConfig.default
+        let models: SortformerModels
+        do {
+            models = try await loadModelsForTest(config: config)
+        } catch {
+            throw XCTSkip("Sortformer models unavailable in this environment: \(error)")
+        }
+        let samples = try DiarizationTestFixtures.fixtureAudio(sampleRate: config.sampleRate, limitSeconds: 4.0)
+
+        // Feed audio without ever calling process(), so the entire buffer is
+        // unprocessed audio at finalize time. finalizeSession must drain it.
+        let diarizer = SortformerDiarizer(config: config)
+        diarizer.initialize(models: models)
+        try diarizer.addAudio(samples, sourceSampleRate: nil)
+        let update = try diarizer.finalizeSession()
+
+        let reference = SortformerDiarizer(config: config)
+        reference.initialize(models: models)
+        let referenceTimeline = try reference.processComplete(samples)
+
+        XCTAssertNotNil(update)
+        XCTAssertGreaterThan(diarizer.timeline.numFinalizedFrames, 0)
+        XCTAssertEqual(diarizer.timeline.numTentativeFrames, 0)
+        XCTAssertLessThanOrEqual(
+            abs(diarizer.timeline.numFinalizedFrames - referenceTimeline.numFinalizedFrames),
+            1
+        )
+        // Returned update must cover the freshly-finalized frames produced by
+        // the call (drained chunks + absorbed trailing tentative).
+        XCTAssertEqual(
+            update?.chunkResult.finalizedFrameCount,
+            diarizer.timeline.numFinalizedFrames
         )
     }
 }

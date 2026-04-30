@@ -45,6 +45,7 @@ public final class SortformerDiarizer: Diarizer {
     }
     private var _numFramesProcessed: Int = 0
     private var _realSamplesReceived: Int = 0
+    private var _finalized: Bool = false
 
     /// Configuration
     public let config: SortformerConfig
@@ -153,6 +154,7 @@ public final class SortformerDiarizer: Diarizer {
         diarizerChunkIndex = 0
         _numFramesProcessed = 0
         _realSamplesReceived = 0
+        _finalized = false
         _timeline.reset(keepingSpeakers: keepingSpeakers)
 
         featureBuffer.reserveCapacity((config.chunkMelFrames + config.coreFrames) * config.melFeatures)
@@ -486,76 +488,66 @@ public final class SortformerDiarizer: Diarizer {
 
     /// Finalize the current streaming session.
     ///
-    /// Pads the tail with silence until the last true frame has been emitted as
-    /// finalized output, then finalizes the timeline.
+    /// Drains any remaining full-right-context chunks from the audio buffer
+    /// (matching offline mode's `SortformerFeatureLoader` gate), then absorbs
+    /// the trailing tentative predictions into the timeline as finalized —
+    /// equivalent to offline `rebuild(... isComplete: true)`.
     ///
-    /// - Returns: The last finalized chunk emitted during finalization, if any.
+    /// Idempotent: subsequent calls return `nil`.
+    ///
+    /// - Returns: A single `DiarizerTimelineUpdate` covering all new finalized
+    ///   and tentative segments produced by this call, or `nil` if there were
+    ///   no new predictions.
     @discardableResult
-    public func finalizeSession() throws -> DiarizerChunkResult? {
+    public func finalizeSession() throws -> DiarizerTimelineUpdate? {
         return try lock.withLock {
             guard _models != nil else {
                 throw SortformerError.notInitialized
             }
+            guard !_finalized else { return nil }
 
-            var lastResult: DiarizerChunkResult?
-            var tentativeToFlush = _timeline.numTentativeFrames
-            if let chunk = try makeStreamingChunkLocked() {
-                tentativeToFlush = chunk.tentativeFrameCount
-                let finalizedChunk = DiarizerChunkResult(
-                    startFrame: chunk.startFrame,
-                    finalizedPredictions: chunk.finalizedPredictions,
-                    finalizedFrameCount: chunk.finalizedFrameCount,
-                    tentativePredictions: [],
-                    tentativeFrameCount: 0
-                )
-                _numFramesProcessed = finalizedChunk.startFrame + finalizedChunk.finalizedFrameCount
-                try _timeline.addChunk(finalizedChunk)
-                lastResult = finalizedChunk
+            // Drain every remaining full-rc chunk. preprocessAudioToFeaturesLocked
+            // only emits one chunk's worth of mel features per call, so loop:
+            // preprocess audio → drain feature chunks → repeat until the audio
+            // buffer can't yield another full chunk.
+            var aggFinalized: [Float] = []
+            var aggTentative: [Float] = []
+            var didDrain = false
+            preprocessAudioToFeaturesLocked()
+            while let chunk = try makeStreamingChunkLocked() {
+                aggFinalized.append(contentsOf: chunk.finalizedPredictions)
+                aggTentative = chunk.tentativePredictions
+                _numFramesProcessed += chunk.finalizedFrameCount
+                didDrain = true
+                preprocessAudioToFeaturesLocked()
             }
 
-            let targetEndFrame = _numFramesProcessed + min(tentativeToFlush, config.chunkLen)
-            let exactPaddingSamples = try exactFinalizationPaddingSamples(targetEndFrame: targetEndFrame)
-            if exactPaddingSamples > 0 {
-                audioBuffer.append(contentsOf: [Float](repeating: 0, count: exactPaddingSamples))
+            // Absorb trailing tentative as finalized — mirrors offline
+            // rebuild(isComplete: true). If we drained, the last drained chunk's
+            // tentative is the trailing region. If we didn't drain, the
+            // previously-stored tentative on the timeline is the trailing region.
+            let absorbedTentative: [Float]
+            if didDrain {
+                absorbedTentative = aggTentative
+            } else {
+                absorbedTentative = _timeline.tentativePredictions
             }
+            aggFinalized.append(contentsOf: absorbedTentative)
+            _numFramesProcessed += absorbedTentative.count / config.numSpeakers
 
-            while _numFramesProcessed < targetEndFrame {
-                let remainingFrames = targetEndFrame - _numFramesProcessed
-                let targetFeatureFrames =
-                    startFeat
-                    + min(remainingFrames * config.subsamplingFactor, config.coreFrames)
-                    + config.chunkRightContext * config.subsamplingFactor
-                preprocessAudioToFeatureTargetLocked(targetFeatureFrames: targetFeatureFrames)
-                guard let chunk = try makeStreamingChunkLocked(), chunk.finalizedFrameCount > 0 else {
-                    logger.warning(
-                        "Sortformer finalize could not emit enough confirmed frames "
-                            + "(\(_numFramesProcessed) / \(targetEndFrame) frames)"
-                    )
-                    break
-                }
-
-                let finalizedFrameCount = min(remainingFrames, chunk.finalizedFrameCount)
-                guard finalizedFrameCount > 0 else {
-                    break
-                }
-
-                let finalizedPredictions = Array(
-                    chunk.finalizedPredictions.prefix(finalizedFrameCount * config.numSpeakers)
+            let update: DiarizerTimelineUpdate?
+            if !aggFinalized.isEmpty {
+                update = try _timeline.addPredictions(
+                    finalizedPredictions: aggFinalized,
+                    tentativePredictions: []
                 )
-                let finalizedResult = DiarizerChunkResult(
-                    startFrame: _numFramesProcessed,
-                    finalizedPredictions: finalizedPredictions,
-                    finalizedFrameCount: finalizedFrameCount,
-                    tentativePredictions: [],
-                    tentativeFrameCount: 0
-                )
-                _numFramesProcessed += finalizedFrameCount
-                try _timeline.addChunk(finalizedResult)
-                lastResult = finalizedResult
+            } else {
+                update = nil
             }
 
             _timeline.finalize()
-            return lastResult
+            _finalized = true
+            return update
         }
     }
 
@@ -802,91 +794,6 @@ public final class SortformerDiarizer: Diarizer {
 
         return try AudioConverter(sampleRate: Double(config.sampleRate))
             .resample(samples, from: sourceSampleRate)
-    }
-
-    private func exactFinalizationPaddingSamples(targetEndFrame: Int) throws -> Int {
-        let remainingFrames = max(0, targetEndFrame - _numFramesProcessed)
-        let (remainingFeatureFrames, remainingOverflow) = remainingFrames.multipliedReportingOverflow(
-            by: config.subsamplingFactor
-        )
-        guard !remainingOverflow else {
-            throw SortformerError.invalidState(
-                "Finalization remaining-frame expansion overflowed for \(remainingFrames) frames."
-            )
-        }
-
-        let (rightContextFeatureFrames, rightContextOverflow) = config.chunkRightContext.multipliedReportingOverflow(
-            by: config.subsamplingFactor
-        )
-        guard !rightContextOverflow else {
-            throw SortformerError.invalidState(
-                "Finalization right-context expansion overflowed for \(config.chunkRightContext) frames."
-            )
-        }
-
-        let (targetWithoutContext, startOverflow) = startFeat.addingReportingOverflow(remainingFeatureFrames)
-        guard !startOverflow else {
-            throw SortformerError.invalidState(
-                "Finalization target feature frame calculation overflowed at startFeat=\(startFeat)."
-            )
-        }
-
-        let (targetFeatureFrames, contextOverflow) = targetWithoutContext.addingReportingOverflow(
-            rightContextFeatureFrames)
-        guard !contextOverflow else {
-            throw SortformerError.invalidState(
-                "Finalization target feature frame calculation overflowed after adding right context."
-            )
-        }
-
-        let currentFeatureFrames = featureBuffer.count / config.melFeatures
-        let additionalFeatureFramesNeeded = max(0, targetFeatureFrames - currentFeatureFrames)
-        guard additionalFeatureFramesNeeded > 0 else {
-            return 0
-        }
-
-        let framesAvailableWithoutPadding = producedMelFramesAvailable()
-        guard additionalFeatureFramesNeeded > framesAvailableWithoutPadding else {
-            return 0
-        }
-
-        let requiredBufferedSamples: Int
-        if featureBuffer.isEmpty {
-            let (additionalSamples, overflow) = max(0, additionalFeatureFramesNeeded - 1).multipliedReportingOverflow(
-                by: config.melStride
-            )
-            guard !overflow else {
-                throw SortformerError.invalidState(
-                    "Finalization sample requirement overflowed for \(additionalFeatureFramesNeeded) feature frames."
-                )
-            }
-            let (samples, windowOverflow) = additionalSamples.addingReportingOverflow(config.melWindow)
-            guard !windowOverflow else {
-                throw SortformerError.invalidState(
-                    "Finalization sample requirement overflowed after adding melWindow."
-                )
-            }
-            requiredBufferedSamples = samples
-        } else {
-            let (samples, overflow) = additionalFeatureFramesNeeded.multipliedReportingOverflow(by: config.melStride)
-            guard !overflow else {
-                throw SortformerError.invalidState(
-                    "Finalization sample requirement overflowed for \(additionalFeatureFramesNeeded) buffered frames."
-                )
-            }
-            requiredBufferedSamples = max(config.melWindow, samples)
-        }
-
-        return max(0, requiredBufferedSamples - audioBuffer.count)
-    }
-
-    private func producedMelFramesAvailable() -> Int {
-        guard audioBuffer.count >= config.melWindow else {
-            return 0
-        }
-        // Use center-padded frame count formula matching AudioMelSpectrogram.computeFlatTransposed
-        let paddedCount = audioBuffer.count + melSpectrogram.nFFT
-        return 1 + (paddedCount - config.melWindow) / config.melStride
     }
 
     /// Get next chunk features (for testing)

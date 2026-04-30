@@ -395,7 +395,7 @@ final class SpeakerEnrollmentTests: XCTestCase {
                 break
             }
         }
-        let finalChunk = try diarizer.finalize()
+        let finalChunk = try diarizer.finalizeSession()
 
         XCTAssertTrue(firstUpdate != nil || finalChunk != nil)
         if let firstUpdate {
@@ -509,6 +509,7 @@ private final class DummyUnavailableLSEENDDiarizer: Diarizer {
     }
     func reset() {}
     func cleanup() {}
+    func finalizeSession() throws -> DiarizerTimelineUpdate? { nil }
     func enrollSpeaker<C>(
         withAudio samples: C,
         sourceSampleRate: Double?,

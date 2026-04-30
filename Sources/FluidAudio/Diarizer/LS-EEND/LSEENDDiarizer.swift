@@ -350,7 +350,7 @@ public final class LSEENDDiarizer: Diarizer {
     // MARK: - Private: finalize
 
     @discardableResult
-    public func finalize() throws -> DiarizerTimelineUpdate? {
+    public func finalizeSession() throws -> DiarizerTimelineUpdate? {
         guard !finalized else { return nil }
         guard let session else {
             throw LSEENDError.notInitialized

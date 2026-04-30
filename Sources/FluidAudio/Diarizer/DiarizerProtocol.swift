@@ -96,7 +96,7 @@ public protocol Diarizer: AnyObject {
 
     /// Pre-enroll a speaker before running the diarizer.
     ///
-    /// - Paramters:
+    /// - Parameters:
     ///   - samples: Enrollment audio samples.
     ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the target rate.
     ///   - name: The speaker's name.
@@ -109,4 +109,9 @@ public protocol Diarizer: AnyObject {
         named name: String?,
         overwritingAssignedSpeakerName overwriteAssignedSpeakerName: Bool
     ) throws -> DiarizerSpeaker? where C.Element == Float
+
+    /// Finalize the current streaming session and extracts finalized predictions for the tail.
+    /// - Returns: The last finalized chunk emitted during finalization, if any.
+    @discardableResult
+    func finalizeSession() throws -> DiarizerTimelineUpdate?
 }
