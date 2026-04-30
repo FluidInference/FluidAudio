@@ -233,7 +233,9 @@ public final class LSEENDDiarizer: Diarizer {
         let chunkSize = model.metadata.chunkSize
         let numSpeakers = model.metadata.maxSpeakers
         let rightContext = model.metadata.convDelay
+        let samplesPerChunk = model.metadata.hopLength * model.metadata.subsampling * chunkSize
         let totalChunks = session.readyChunks
+        let totalSamples = totalChunks * samplesPerChunk
 
         var processed = 0
         var newPreds: [Float] = []
@@ -246,7 +248,7 @@ public final class LSEENDDiarizer: Diarizer {
             }
             newPreds.append(contentsOf: try model.predict(from: input))
             processed += 1
-            progressCallback?(processed, totalChunks, 1)
+            progressCallback?(processed * samplesPerChunk, totalSamples, processed)
         }
 
         guard !newPreds.isEmpty else { return nil }
