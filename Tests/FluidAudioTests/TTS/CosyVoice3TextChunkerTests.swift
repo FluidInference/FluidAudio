@@ -29,7 +29,7 @@ final class CosyVoice3TextChunkerTests: XCTestCase {
     }
 
     func testChunkShortReturnsSingle() {
-        // 4 CJK ≈ 22 tokens, well under default 130
+        // 4 CJK ≈ 22 tokens, well under default 110
         XCTAssertEqual(
             CosyVoice3TextChunker.chunk("你好世界。"),
             ["你好世界。"])
@@ -44,14 +44,14 @@ final class CosyVoice3TextChunkerTests: XCTestCase {
     // MARK: - chunk: hard sentence enders
 
     func testChunkSplitsOnHardEnders() {
-        // 25 CJK chars × 5.5 = 137.5 tokens > 130 default → must split
+        // 25 CJK chars × 5.5 = 137.5 tokens > 110 default → must split
         let text = "今天天气很好。我们去公园散步。明天可能会下雨。下周打算去看电影。"
         let chunks = CosyVoice3TextChunker.chunk(text)
         XCTAssertGreaterThan(chunks.count, 1)
         // No chunk should exceed budget by more than the soft margin
         for chunk in chunks {
             let est = CosyVoice3TextChunker.estimateSpeechTokens(chunk)
-            XCTAssertLessThanOrEqual(est, 130 + 30, "chunk over force-split margin: \(chunk)")
+            XCTAssertLessThanOrEqual(est, 110 + 30, "chunk over force-split margin: \(chunk)")
         }
         // Concatenating chunks back should reconstruct the input modulo
         // whitespace trimming.

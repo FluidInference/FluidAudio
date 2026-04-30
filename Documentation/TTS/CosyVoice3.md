@@ -139,8 +139,9 @@ sidestep this. Pipeline:
 2. `CosyVoice3TextChunker.chunk(normalized)` greedily splits on hard
    sentence enders (`. ! ? 。 ！ ？`) and falls back to soft clause
    separators (`, ; ， ； 、 ：`) when sentences exceed the budget. The
-   default budget is `defaultMaxSpeechTokens = 130` speech tokens
-   (`~25-token margin under the typical 155 room-for-new`).
+   default budget is `defaultMaxSpeechTokens = 110` speech tokens
+   (`~45-token margin under the typical 155 room-for-new`; the 30-token
+   force-split overshoot may push committed chunks to ~140 estimated).
 3. If the chunker returns one segment, take the fast path — single
    synthesizer call, no concat overhead.
 4. Otherwise loop, calling the synthesizer once per chunk, then merge
@@ -149,7 +150,7 @@ sidestep this. Pipeline:
    `generatedTokenCount`/`decodedTokens` summed/concatenated;
    `finishedOnEos` = AND across all chunks.
 
-Tunables: `CosyVoice3TextChunker.defaultMaxSpeechTokens` (130) is the
+Tunables: `CosyVoice3TextChunker.defaultMaxSpeechTokens` (110) is the
 default budget; pass `disableAutoChunking: true` in
 `CosyVoice3SynthesisOptions` to bypass the chunker entirely and run a
 single call (useful for UI-driven sentence-at-a-time streaming where

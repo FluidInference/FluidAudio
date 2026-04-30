@@ -22,11 +22,13 @@ import Foundation
 /// - ASCII char      ≈ 1.5 speech tokens (BPE compresses; English is faster)
 /// - Other (Latin-1) ≈ 2.5 speech tokens (middle ground for accented Latin)
 ///
-/// Default `maxSpeechTokens = 130` leaves a ~25-token safety margin under
-/// the typical room-for-new of ~155. The estimate is a heuristic — actual
-/// speech-token counts depend on speaking rate and pause insertion. The
-/// synthesizer still emits its `LLM-Decode budget exhausted` warning if a
-/// chunk somehow exceeds the cap, so over-estimates are self-healing.
+/// Default `maxSpeechTokens = 110` leaves a ~45-token safety margin under
+/// the typical room-for-new of ~155. The 30-token force-split overshoot
+/// can push a committed chunk to ~140 estimated, still comfortably under
+/// the cap once the conservative 5.5-tokens/CJK-char heuristic is
+/// reconciled with real generation rates. The synthesizer still emits
+/// its `LLM-Decode budget exhausted` warning if a chunk somehow exceeds
+/// the cap, so over-estimates are self-healing.
 public enum CosyVoice3TextChunker {
 
     /// Sentence-ending punctuation. Always commit the current chunk after
@@ -42,10 +44,12 @@ public enum CosyVoice3TextChunker {
         "，", "、", "；", "：", ";", ",", " ",
     ]
 
-    /// Default speech-token budget per chunk. Keeps a ~25-token margin
+    /// Default speech-token budget per chunk. Keeps a ~45-token margin
     /// under the typical room-for-new of ~155 (= `flowTotalTokens=250`
-    /// minus a typical prompt of ~95 tokens).
-    public static let defaultMaxSpeechTokens: Int = 130
+    /// minus a typical prompt of ~95 tokens). The 30-token force-split
+    /// overshoot may push committed chunks to ~140 estimated, still under
+    /// the structural cap.
+    public static let defaultMaxSpeechTokens: Int = 110
 
     /// Split `text` into chunks each estimated to produce ≤
     /// `maxSpeechTokens` LLM speech tokens. Returns `[text]` (single
