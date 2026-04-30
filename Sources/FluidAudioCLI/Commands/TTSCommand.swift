@@ -13,15 +13,6 @@ public struct TTS {
         return formatter.string(fromByteCount: Int64(bytes))
     }
 
-    private static func label(for variant: ModelNames.TTS.Variant) -> String {
-        switch variant {
-        case .fiveSecond:
-            return "5s"
-        case .fifteenSecond:
-            return "15s"
-        }
-    }
-
     private static func ensureArtifactsRoot() throws -> URL {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let root = cwd.appendingPathComponent(artifactsDirectoryName, isDirectory: true)
@@ -146,6 +137,28 @@ public struct TTS {
         var cloneVoicePath: String? = nil
         var voiceFilePath: String? = nil
         var saveVoicePath: String? = nil
+        // CosyVoice3 Phase 1 parity harness args.
+        var cv3FixturePath: String? = nil
+        var cv3ModelsDir: String? = nil
+        var cv3ReferencePath: String? = nil
+        var cv3Seed: UInt64 = 42
+        var cv3CpuOnly: Bool = false
+        var cv3ReplayTokens: Bool = true
+        // CosyVoice3 Phase 2 tokenizer parity args.
+        var cv3TokenizerDir: String? = nil
+        var cv3TokenizerParityMode: Bool = false
+        // CosyVoice3 Phase 2 frontend parity args.
+        var cv3FrontendParityMode: Bool = false
+        var cv3EmbeddingsFile: String? = nil
+        var cv3TokFixturePath: String? = nil
+        // CosyVoice3 Phase 2 text-driven synthesis args.
+        var cv3TextMode: Bool = false
+        var cv3SpecialTokensFile: String? = nil
+        var cv3PromptAssetsPath: String? = nil
+        var cv3MaxNewTokens: Int? = nil
+        var pocketLanguage: PocketTtsLanguage = .english
+        // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
+        var pocketSeed: UInt64? = nil
 
         var i = 0
         while i < arguments.count {
@@ -200,13 +213,91 @@ public struct TTS {
                         backend = .kokoro
                     case "pocket", "pockettts":
                         backend = .pocketTts
+                    case "cosyvoice3", "cv3", "cosyvoice3-text", "cv3-text":
+                        // Production text-driven synthesis is the default
+                        // user-facing path. The explicit `*-text` aliases
+                        // are kept for backward compatibility with earlier
+                        // documentation.
+                        backend = .cosyvoice3
+                        cv3TextMode = true
+                    case "cosyvoice3-parity", "cv3-parity":
+                        // Phase 1 fixture parity harness — opt-in dev mode.
+                        backend = .cosyvoice3
+                    case "cosyvoice3-tokenizer-parity", "cv3-tokenizer":
+                        backend = .cosyvoice3
+                        cv3TokenizerParityMode = true
+                    case "cosyvoice3-frontend-parity", "cv3-frontend":
+                        backend = .cosyvoice3
+                        cv3FrontendParityMode = true
+                    case "kokoro-ane", "kokoroane", "lai":
+                        backend = .kokoroAne
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro")
                     }
                     i += 1
                 }
+            case "--fixture":
+                if i + 1 < arguments.count {
+                    cv3FixturePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--models-dir":
+                if i + 1 < arguments.count {
+                    cv3ModelsDir = arguments[i + 1]
+                    i += 1
+                }
+            case "--reference":
+                if i + 1 < arguments.count {
+                    cv3ReferencePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--seed":
+                if i + 1 < arguments.count {
+                    cv3Seed = UInt64(arguments[i + 1]) ?? 42
+                    i += 1
+                }
+            case "--cpu-only":
+                cv3CpuOnly = true
+            case "--no-replay":
+                cv3ReplayTokens = false
+            case "--tokenizer-dir":
+                if i + 1 < arguments.count {
+                    cv3TokenizerDir = arguments[i + 1]
+                    i += 1
+                }
+            case "--embeddings-file":
+                if i + 1 < arguments.count {
+                    cv3EmbeddingsFile = arguments[i + 1]
+                    i += 1
+                }
+            case "--tok-fixture":
+                if i + 1 < arguments.count {
+                    cv3TokFixturePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--special-tokens-file":
+                if i + 1 < arguments.count {
+                    cv3SpecialTokensFile = arguments[i + 1]
+                    i += 1
+                }
+            case "--prompt-assets":
+                if i + 1 < arguments.count {
+                    cv3PromptAssetsPath = arguments[i + 1]
+                    i += 1
+                }
+            case "--text":
+                if i + 1 < arguments.count {
+                    text = arguments[i + 1]
+                    i += 1
+                }
+            case "--max-new-tokens":
+                if i + 1 < arguments.count {
+                    cv3MaxNewTokens = Int(arguments[i + 1])
+                    i += 1
+                }
             case "--auto-download":
-                // No-op: downloads are always ensured by the CLI
+                // No-op: downloads are always ensured by the CLI. Accepted
+                // for backward compatibility with documented examples.
                 ()
             case "--benchmark":
                 benchmarkMode = true
@@ -225,6 +316,27 @@ public struct TTS {
             case "--save-voice":
                 if i + 1 < arguments.count {
                     saveVoicePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--language":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1].lowercased()
+                    if let parsed = PocketTtsLanguage(rawValue: raw) {
+                        pocketLanguage = parsed
+                    } else {
+                        let supported = PocketTtsLanguage.allCases
+                            .map { $0.rawValue }
+                            .joined(separator: ", ")
+                        logger.error(
+                            "Unknown PocketTTS language '\(arguments[i + 1])'. Supported: \(supported)"
+                        )
+                        return
+                    }
+                    i += 1
+                }
+            case "--seed":
+                if i + 1 < arguments.count {
+                    pocketSeed = UInt64(arguments[i + 1]) ?? 42
                     i += 1
                 }
             default:
@@ -249,6 +361,101 @@ public struct TTS {
             return
         }
 
+        if backend == .cosyvoice3 {
+            logger.warning(
+                "CosyVoice3 backend is experimental / beta — synthesis is "
+                    + "slow (RTFx < 1.0 typical). Performance may improve in "
+                    + "later releases.")
+        }
+
+        if backend == .cosyvoice3 && cv3TokenizerParityMode {
+            guard let tokDir = cv3TokenizerDir, let fixture = cv3FixturePath else {
+                logger.error(
+                    "cosyvoice3-tokenizer-parity requires --tokenizer-dir <.../CosyVoice-BlankEN> and --fixture <tokenizer_fixture.json>"
+                )
+                return
+            }
+            await CosyVoice3TokenizerParityCLI.run(
+                tokenizerDir: tokDir, fixturePath: fixture)
+            return
+        }
+
+        if backend == .cosyvoice3 && cv3FrontendParityMode {
+            guard
+                let tokDir = cv3TokenizerDir,
+                let embFile = cv3EmbeddingsFile,
+                let fixture = cv3FixturePath,
+                let tokFix = cv3TokFixturePath
+            else {
+                logger.error(
+                    "cosyvoice3-frontend-parity requires --tokenizer-dir, --embeddings-file, --fixture <shipping.safetensors>, --tok-fixture"
+                )
+                return
+            }
+            await CosyVoice3FrontendParityCLI.run(
+                tokenizerDir: tokDir,
+                embeddingsFile: embFile,
+                fixturePath: fixture,
+                tokFixturePath: tokFix)
+            return
+        }
+
+        if backend == .cosyvoice3 && cv3TextMode {
+            guard
+                let inputText = text,
+                let modelsDir = cv3ModelsDir,
+                let tokDir = cv3TokenizerDir,
+                let embFile = cv3EmbeddingsFile,
+                let specFile = cv3SpecialTokensFile,
+                let promptAssets = cv3PromptAssetsPath
+            else {
+                logger.error(
+                    "cosyvoice3-text requires --text <text>, --models-dir, --tokenizer-dir, --embeddings-file, --special-tokens-file, --prompt-assets"
+                )
+                return
+            }
+            if #available(macOS 15, iOS 18, *) {
+                await CosyVoice3TextCLI.run(
+                    text: inputText,
+                    modelsDir: modelsDir,
+                    tokenizerDir: tokDir,
+                    embeddingsFile: embFile,
+                    specialTokensFile: specFile,
+                    promptAssetsPath: promptAssets,
+                    outputPath: output,
+                    seed: cv3Seed,
+                    maxNewTokens: cv3MaxNewTokens,
+                    cpuOnly: cv3CpuOnly)
+            } else {
+                logger.error(
+                    "CosyVoice3 requires macOS 15 / iOS 18 (uses CoreML MLState).")
+            }
+            return
+        }
+
+        if backend == .cosyvoice3 {
+            guard let fixture = cv3FixturePath, let modelsDir = cv3ModelsDir else {
+                logger.error(
+                    "cosyvoice3-parity requires --fixture <shipping.safetensors> and --models-dir <build/>"
+                )
+                return
+            }
+            if #available(macOS 15, iOS 18, *) {
+                await CosyVoice3ParityCLI.run(
+                    fixturePath: fixture,
+                    modelsDir: modelsDir,
+                    referencePath: cv3ReferencePath,
+                    outputPath: output,
+                    seed: cv3Seed,
+                    cpuOnly: cv3CpuOnly,
+                    replayTokens: cv3ReplayTokens)
+            } else {
+                logger.error(
+                    "CosyVoice3 requires macOS 15 / iOS 18 (uses CoreML MLState).")
+            }
+            return
+        }
+
         guard let text = text else {
             printUsage()
             return
@@ -258,7 +465,14 @@ public struct TTS {
             await runPocketTts(
                 text: text, output: output, voice: voice, deEss: deEss,
                 metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
-                voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath)
+                voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath,
+                language: pocketLanguage, seed: pocketSeed)
+            return
+        }
+
+        if backend == .kokoroAne {
+            await runKokoroAne(
+                text: text, output: output, voice: voice, metricsPath: metricsPath)
             return
         }
 
@@ -293,14 +507,7 @@ public struct TTS {
             let tSynth1 = Date()
 
             // Write WAV
-            let outURL = {
-                let expanded = (output as NSString).expandingTildeInPath
-                if expanded.hasPrefix("/") {
-                    return URL(fileURLWithPath: expanded)
-                }
-                let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-                return cwd.appendingPathComponent(expanded)
-            }()
+            let outURL = resolveInputURL(output)
             try FileManager.default.createDirectory(
                 at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try wav.write(to: outURL)
@@ -315,7 +522,7 @@ public struct TTS {
                     for variant in variants {
                         if let footprint = diagnostics.variantFootprints[variant] {
                             logger.info(
-                                "Model bundle \(label(for: variant)) size: \(formatBytes(footprint)) (\(footprint) bytes)"
+                                "Model bundle \(variantPreferenceLabel(variant)) size: \(formatBytes(footprint)) (\(footprint) bytes)"
                             )
                         }
                     }
@@ -498,17 +705,73 @@ public struct TTS {
         }
     }
 
+    /// Run PocketTTS in deterministic-seed mode through the session API,
+    /// applying the same de-essing post-processing as the non-seed path.
+    private static func runPocketSeededSynthesis(
+        manager: PocketTtsManager,
+        text: String,
+        voice: String,
+        voiceData: PocketTtsVoiceData?,
+        seed: UInt64,
+        deEss: Bool
+    ) async throws -> Data {
+        logger.info("PocketTTS deterministic mode: seed=\(seed)")
+        let session = try await makePocketSeededSession(
+            manager: manager, voice: voice, voiceData: voiceData, seed: seed)
+        session.enqueue(text)
+        session.finish()
+        var allSamples: [Float] = []
+        for try await frame in session.frames {
+            allSamples.append(contentsOf: frame.samples)
+        }
+        if deEss {
+            AudioPostProcessor.applyTtsPostProcessing(
+                &allSamples,
+                sampleRate: Float(PocketTtsConstants.audioSampleRate),
+                deEssAmount: -3.0,
+                smoothing: false)
+        }
+        return try AudioWAV.data(
+            from: allSamples,
+            sampleRate: Double(PocketTtsConstants.audioSampleRate))
+    }
+
+    /// Pick the right `makeSession` overload based on whether a custom
+    /// `PocketTtsVoiceData` was supplied (cloned/loaded voice) or we should
+    /// fall back to a named voice from the language pack.
+    private static func makePocketSeededSession(
+        manager: PocketTtsManager,
+        voice: String,
+        voiceData: PocketTtsVoiceData?,
+        seed: UInt64
+    ) async throws -> PocketTtsSession {
+        if let voiceData = voiceData {
+            return try await manager.makeSession(
+                voiceData: voiceData,
+                temperature: PocketTtsConstants.temperature,
+                seed: seed)
+        }
+        return try await manager.makeSession(
+            voice: voice,
+            temperature: PocketTtsConstants.temperature,
+            seed: seed)
+    }
+
     private static func runPocketTts(
         text: String, output: String, voice: String, deEss: Bool,
         metricsPath: String?, cloneVoicePath: String?,
-        voiceFilePath: String?, saveVoicePath: String?
+        voiceFilePath: String?, saveVoicePath: String?,
+        language: PocketTtsLanguage,
+        seed: UInt64? = nil
     ) async {
         do {
             let tStart = Date()
             let pocketVoice =
                 voice == TtsConstants.recommendedVoice
                 ? PocketTtsConstants.defaultVoice : voice
-            let manager = PocketTtsManager(defaultVoice: pocketVoice)
+            let manager = PocketTtsManager(
+                defaultVoice: pocketVoice, language: language)
+            logger.info("PocketTTS language: \(language.rawValue)")
 
             let tLoad0 = Date()
             try await manager.initialize()
@@ -537,7 +800,15 @@ public struct TTS {
 
             let tSynth0 = Date()
             let wav: Data
-            if let voiceData = voiceData {
+            if let seed = seed {
+                wav = try await runPocketSeededSynthesis(
+                    manager: manager,
+                    text: text,
+                    voice: pocketVoice,
+                    voiceData: voiceData,
+                    seed: seed,
+                    deEss: deEss)
+            } else if let voiceData = voiceData {
                 wav = try await manager.synthesize(
                     text: text, voiceData: voiceData, deEss: deEss)
             } else {
@@ -546,16 +817,7 @@ public struct TTS {
             }
             let tSynth1 = Date()
 
-            let outURL = {
-                let expanded = (output as NSString).expandingTildeInPath
-                if expanded.hasPrefix("/") {
-                    return URL(fileURLWithPath: expanded)
-                }
-                let cwd = URL(
-                    fileURLWithPath: FileManager.default.currentDirectoryPath,
-                    isDirectory: true)
-                return cwd.appendingPathComponent(expanded)
-            }()
+            let outURL = resolveInputURL(output)
             try FileManager.default.createDirectory(
                 at: outURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true)
@@ -642,6 +904,146 @@ public struct TTS {
         }
     }
 
+    private static func runKokoroAne(
+        text: String, output: String, voice: String, metricsPath: String?
+    ) async {
+        do {
+            let tStart = Date()
+            let resolvedVoice =
+                voice == TtsConstants.recommendedVoice
+                ? KokoroAneConstants.defaultVoice : voice
+            let manager = KokoroAneManager(defaultVoice: resolvedVoice)
+
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+
+            let tSynth0 = Date()
+            let detailed = try await manager.synthesizeDetailed(
+                text: text, voice: resolvedVoice, speed: 1.0)
+            let wav = try AudioWAV.data(
+                from: detailed.samples,
+                sampleRate: Double(detailed.sampleRate))
+            let tSynth1 = Date()
+
+            let outURL = {
+                let expanded = (output as NSString).expandingTildeInPath
+                if expanded.hasPrefix("/") {
+                    return URL(fileURLWithPath: expanded)
+                }
+                let cwd = URL(
+                    fileURLWithPath: FileManager.default.currentDirectoryPath,
+                    isDirectory: true)
+                return cwd.appendingPathComponent(expanded)
+            }()
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try wav.write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let totalS = tSynth1.timeIntervalSince(tStart)
+            let audioSecs = Double(detailed.samples.count) / Double(detailed.sampleRate)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+
+            logger.info("KokoroAne synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Total: \(String(format: "%.3f", totalS))s")
+            logger.info("  Output: \(outURL.path)")
+            logger.info(
+                "  Stages (ms): albert=\(String(format: "%.1f", detailed.timings.albert))"
+                    + " postAlbert=\(String(format: "%.1f", detailed.timings.postAlbert))"
+                    + " alignment=\(String(format: "%.1f", detailed.timings.alignment))"
+                    + " prosody=\(String(format: "%.1f", detailed.timings.prosody))"
+                    + " noise=\(String(format: "%.1f", detailed.timings.noise))"
+                    + " vocoder=\(String(format: "%.1f", detailed.timings.vocoder))"
+                    + " tail=\(String(format: "%.1f", detailed.timings.tail))"
+                    + " total=\(String(format: "%.1f", detailed.timings.totalMs))"
+            )
+
+            // ASR round-trip evaluation (only when metrics requested).
+            // Flattened per AGENTS.md: avoid nested ifs — guard out early.
+            guard let metricsPath else { return }
+
+            logger.info("--- Running ASR for TTS→STT evaluation ---")
+            var asrHypothesis: String? = nil
+            var werValue: Double? = nil
+
+            do {
+                let asrModels = try await AsrModels.downloadAndLoad()
+                let asr = AsrManager()
+                try await asr.loadModels(asrModels)
+
+                var decoderState = TdtDecoderState.make(
+                    decoderLayers: await asr.decoderLayerCount)
+                let transcription = try await asr.transcribe(
+                    outURL, decoderState: &decoderState)
+                asrHypothesis = transcription.text
+
+                let werMetrics = WERCalculator.calculateWERMetrics(
+                    hypothesis: transcription.text, reference: text)
+                werValue = werMetrics.wer
+
+                logger.info("Reference:  \(text)")
+                logger.info("Hypothesis: \(transcription.text)")
+                logger.info(String(format: "WER: %.1f%%", werValue! * 100))
+
+                await asr.cleanup()
+            } catch {
+                logger.warning("ASR evaluation failed: \(error.localizedDescription)")
+            }
+
+            var metricsDict: [String: Any] = [
+                "backend": "kokoro-ane",
+                "text": text,
+                "voice": resolvedVoice,
+                "output": outURL.path,
+                "model_load_time_s": loadS,
+                "inference_time_s": synthS,
+                "audio_duration_s": audioSecs,
+                "realtime_speed": rtfx,
+                "total_time_s": totalS,
+                "encoder_tokens": detailed.encoderTokens,
+                "acoustic_frames": detailed.acousticFrames,
+                "stage_timings_ms": [
+                    "albert": detailed.timings.albert,
+                    "post_albert": detailed.timings.postAlbert,
+                    "alignment": detailed.timings.alignment,
+                    "prosody": detailed.timings.prosody,
+                    "noise": detailed.timings.noise,
+                    "vocoder": detailed.timings.vocoder,
+                    "tail": detailed.timings.tail,
+                    "total": detailed.timings.totalMs,
+                ],
+            ]
+            if let asrHypothesis {
+                metricsDict["asr_hypothesis"] = asrHypothesis
+            }
+            if let werValue {
+                metricsDict["wer"] = werValue
+            }
+
+            let artifactsRoot = try ensureArtifactsRoot()
+            let mURL = resolveOutputURL(
+                metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+            try FileManager.default.createDirectory(
+                at: mURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            let json = try JSONSerialization.data(
+                withJSONObject: metricsDict, options: [.prettyPrinted])
+            try json.write(to: mURL)
+            logger.info("Metrics saved: \(mURL.path)")
+        } catch {
+            logger.error("KokoroAne Error: \(error)")
+            print("KokoroAne failed: \(error)")
+            exit(1)
+        }
+    }
+
     private static func printUsage() {
         print(
             """
@@ -650,7 +1052,14 @@ public struct TTS {
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS)
-              --backend            TTS backend: kokoro (default) or pocket
+              --backend            TTS backend: kokoro (default), pocket, kokoro-ane,
+                                   or cosyvoice3 [BETA — slow, RTFx < 1.0]
+                                   CosyVoice3 dev sub-backends:
+                                     cosyvoice3-parity            Phase 1 fixture parity harness
+                                     cosyvoice3-frontend-parity   lm_input_embeds parity vs Python
+                                     cosyvoice3-tokenizer-parity  Qwen2 BPE round-trip
+                                   (Production cosyvoice3 backend auto-downloads
+                                    assets from HuggingFace on first synthesis.)
               --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)
@@ -664,6 +1073,14 @@ public struct TTS {
               --clone-voice FILE   Clone voice from audio file (WAV, MP3, M4A, etc.)
               --voice-file FILE    Load previously saved voice .bin file
               --save-voice FILE    Save cloned voice to .bin file for later use
+
+            PocketTTS Language Packs:
+              --language ID        Language pack (default: english)
+                                   Supported: english, french_24l,
+                                   german, german_24l, italian, italian_24l,
+                                   portuguese, portuguese_24l, spanish, spanish_24l
+                                   Note: French is 24-layer only (no 6-layer pack upstream)
+              --seed N             Deterministic-mode seed (uses session API for fixed RNG)
 
             Lexicon file format:
               # Comments start with #

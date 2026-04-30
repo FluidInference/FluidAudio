@@ -1,6 +1,5 @@
 import CoreML
 import Foundation
-import OSLog
 
 /// HuggingFace model downloader using URLSession
 public class DownloadUtils {
@@ -73,8 +72,6 @@ public class DownloadUtils {
             }
         }
     }
-
-    /// Download configuration
 
     /// Phase of a model download operation.
     public enum DownloadPhase: Sendable {
@@ -575,8 +572,10 @@ public class DownloadUtils {
     public static func downloadSubdirectory(
         _ repo: Repo,
         subdirectory: String,
-        to repoDirectory: URL
+        to repoDirectory: URL,
+        progressHandler: ProgressHandler? = nil
     ) async throws {
+        progressHandler?(DownloadProgress(fractionCompleted: 0.0, phase: .listing))
         var filesToDownload: [(path: String, size: Int)] = []
 
         func listFiles(at path: String) async throws {
@@ -611,12 +610,22 @@ public class DownloadUtils {
         }
 
         try await listFiles(at: subdirectory)
-        logger.info("Found \(filesToDownload.count) files in \(subdirectory)")
+        let totalFiles = filesToDownload.count
+        logger.info("Found \(totalFiles) files in \(subdirectory)")
+        progressHandler?(
+            DownloadProgress(
+                fractionCompleted: totalFiles == 0 ? 1.0 : 0.0,
+                phase: .downloading(completedFiles: 0, totalFiles: totalFiles)))
 
         for (index, file) in filesToDownload.enumerated() {
             let destPath = repoDirectory.appendingPathComponent(file.path)
 
             if FileManager.default.fileExists(atPath: destPath.path) {
+                progressHandler?(
+                    DownloadProgress(
+                        fractionCompleted: Double(index + 1) / Double(totalFiles),
+                        phase: .downloading(
+                            completedFiles: index + 1, totalFiles: totalFiles)))
                 continue
             }
 
@@ -627,6 +636,14 @@ public class DownloadUtils {
 
             if file.size == 0 {
                 FileManager.default.createFile(atPath: destPath.path, contents: Data())
+                progressHandler?(
+                    DownloadProgress(
+                        fractionCompleted: Double(index + 1) / Double(totalFiles),
+                        phase: .downloading(
+                            completedFiles: index + 1, totalFiles: totalFiles)))
+                if (index + 1) % 5 == 0 || index == totalFiles - 1 {
+                    logger.info("Downloaded \(index + 1)/\(totalFiles) \(subdirectory) files")
+                }
                 continue
             }
 
@@ -658,8 +675,14 @@ public class DownloadUtils {
             }
             try FileManager.default.moveItem(at: tempURL, to: destPath)
 
-            if (index + 1) % 5 == 0 || index == filesToDownload.count - 1 {
-                logger.info("Downloaded \(index + 1)/\(filesToDownload.count) \(subdirectory) files")
+            progressHandler?(
+                DownloadProgress(
+                    fractionCompleted: Double(index + 1) / Double(totalFiles),
+                    phase: .downloading(
+                        completedFiles: index + 1, totalFiles: totalFiles)))
+
+            if (index + 1) % 5 == 0 || index == totalFiles - 1 {
+                logger.info("Downloaded \(index + 1)/\(totalFiles) \(subdirectory) files")
             }
         }
 
