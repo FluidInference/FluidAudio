@@ -108,8 +108,9 @@ let result = try await manager.synthesize(
 
 | Field | Default | Notes |
 |---|---|---|
-| `maxNewTokens` | `nil` (cap = 1024) | Hard ceiling on speech-token count |
+| `maxNewTokens` | `nil` (= `flowTotalTokens − N_prompt`) | Soft ceiling on the LLM-Decode AR loop. The hard ceiling is the structural 250-token cap below — `maxNewTokens` only lets you generate fewer than that. |
 | `seed` | 42 | Drives the RAS sampler RNG; reproducible runs |
+| `disableAutoChunking` | `false` | When `true`, bypasses `CosyVoice3TextChunker` and runs a single synthesizer call regardless of input length. Use when you've pre-segmented input upstream (UI streaming, paragraph-at-a-time playback, etc.). The structural 250-token cap then applies and long inputs truncate mid-utterance. |
 
 `CosyVoice3SynthesisResult`:
 
@@ -119,6 +120,78 @@ let result = try await manager.synthesize(
 | `sampleRate` | `Int` | always 24000 |
 | `generatedTokenCount` | `Int` | tokens before EOS |
 | `decodedTokens` | `[Int32]` | full speech token sequence (debug) |
+| `finishedOnEos` | `Bool` | `true` = AR loop exited on an EOS token (natural termination); `false` = budget exhausted, audio truncated mid-utterance. See "Decode budget cap" below. |
+
+### Decode budget cap + auto-chunking
+
+The Flow CFM model is exported with a fixed-shape `token_total` input of
+`[1, 250]` (`CosyVoice3Constants.flowTotalTokens = 250`). Each LLM-Decode
+token corresponds to **40 ms of audio** (`tokenMelRatio = 2 × hiftSamplesPerFrame = 480 / sampleRate = 24 000`),
+so the *generated* portion of a single synthesizer call is bounded by
+`(250 − N_prompt) × 40 ms`. With a typical prompt of ~85–95 tokens,
+this leaves ~6.4–6.6 s of generated audio per call — long Mandarin
+phrases would truncate mid-utterance if synthesized in one shot.
+
+**`CosyVoice3TtsManager.synthesize(...)` auto-chunks long input** to
+sidestep this. Pipeline:
+
+1. Run the existing Chinese normalizer (or skip it, per `prenormalized`).
+2. `CosyVoice3TextChunker.chunk(normalized)` greedily splits on hard
+   sentence enders (`. ! ? 。 ！ ？`) and falls back to soft clause
+   separators (`, ; ， ； 、 ：`) when sentences exceed the budget. The
+   default budget is `defaultMaxSpeechTokens = 130` speech tokens
+   (`~25-token margin under the typical 155 room-for-new`).
+3. If the chunker returns one segment, take the fast path — single
+   synthesizer call, no concat overhead.
+4. Otherwise loop, calling the synthesizer once per chunk, then merge
+   results: PCM concatenated with an 8 ms cosine cross-fade at each
+   boundary (masks DC/phase mismatch from independent synth calls);
+   `generatedTokenCount`/`decodedTokens` summed/concatenated;
+   `finishedOnEos` = AND across all chunks.
+
+Tunables: `CosyVoice3TextChunker.defaultMaxSpeechTokens` (130) is the
+default budget; pass `disableAutoChunking: true` in
+`CosyVoice3SynthesisOptions` to bypass the chunker entirely and run a
+single call (useful for UI-driven sentence-at-a-time streaming where
+the caller already controls segmentation).
+
+Token-rate estimate inside the chunker (intentionally conservative):
+
+| Class | Tokens/char | Rationale |
+|---|---|---|
+| CJK | 5.5 | 1 syllable per char × ~5–6 speech tokens per syllable |
+| ASCII | 1.5 | BPE compresses; English speaks faster than Mandarin per char |
+| Other (Latin-1, etc.) | 2.5 | middle ground |
+
+Caveats:
+
+- **Prosody discontinuity at boundaries.** Each chunk re-establishes the
+  pitch contour from the prompt, so concatenated audio has audible breaks
+  at chunk seams. The 8 ms cross-fade hides clicks/DC offsets but cannot
+  reconstruct cross-sentence prosody.
+- **Per-chunk prefill cost.** Each segment pays the prefill cost
+  separately, so total wall-clock for an N-chunk synth is roughly
+  `N × prefill + Σ decode_per_chunk`. Single-chunk inputs are unaffected.
+- **Estimate slack.** The token-per-char heuristic is rough; if a chunk
+  somehow exceeds the model's structural budget at runtime, the
+  synthesizer still emits the `LLM-Decode budget exhausted` warning and
+  returns `finishedOnEos: false` for that chunk.
+
+Behavior of the underlying synthesizer when its budget is hit (still
+applies for `disableAutoChunking: true` or for one-shot mode):
+
+- **AR loop exhausts `maxNew` without observing an EOS** in
+  `CosyVoice3Constants.stopRange` (`6_561…6_760`).
+- `CosyVoice3Synthesizer` emits a `.warning`-level log:
+  `"LLM-Decode budget exhausted: <N> generated tokens / <maxNew> cap (no EOS observed). Output truncated at ~<S>s of audio."`.
+- `result.finishedOnEos` is `false` so callers can detect it
+  programmatically (the `tts-benchmark` harness surfaces this as a
+  per-phrase `finished_on_eos` field in the JSON report).
+
+Lifting the cap structurally (no auto-chunk, no prosody seams) requires
+re-exporting Flow with a larger `token_total` shape (e.g. `[1, 500]` for
+~16 s) — handled upstream in the `mobius-cosyvoice3` conversion pipeline;
+not changeable from the Swift host.
 
 ## Key State
 

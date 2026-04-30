@@ -139,6 +139,7 @@ public actor CosyVoice3Synthesizer {
         // 2) Decode loop (stateless, external cache, double-buffered backings)
         var curLen = fixture.tPre
         var decodeSteps = 0
+        var hitEos = false
         let tDecode = Date()
         for step in 1..<maxNew {
             try embeddings.copyEmbedding(tokenId: topId, into: inputsEmbedsArr)
@@ -157,6 +158,7 @@ public actor CosyVoice3Synthesizer {
             decodeSteps += 1
             if CosyVoice3Constants.stopRange.contains(topId) {
                 logger.info("EOS at step \(step) (token=\(topId))")
+                hitEos = true
                 break
             }
             decoded.append(topId)
@@ -178,6 +180,36 @@ public actor CosyVoice3Synthesizer {
         let decodeSec = Date().timeIntervalSince(tDecode)
         guard !decoded.isEmpty else {
             throw CosyVoice3Error.predictionFailed("LLM produced no speech tokens")
+        }
+
+        // Truncation signal: AR loop exhausted its decode budget without
+        // observing an EOS token in `stopRange` (6_561…6_760). The 250-token
+        // cap is structural — it's the fixed `[1, 250]` shape of the Flow
+        // model's `token_total` input (`CosyVoice3Constants.flowTotalTokens`),
+        // not a synthesizer-side soft limit. With ~40 ms of audio per token
+        // (`tokenMelRatio=2 × hiftSamplesPerFrame=480 / sampleRate=24_000`),
+        // a prompt taking ~`nPrompt` tokens leaves `(250 - nPrompt) × 0.04 s`
+        // of generated audio — i.e. long phrases truncate mid-utterance.
+        //
+        // Surface this as a `.warning` so callers running long input get a
+        // console signal instead of silent truncation. Lifting the cap
+        // requires re-exporting Flow with a larger `token_total` shape; for
+        // now, splitting input at clause boundaries (， / 。) is the
+        // workaround.
+        if !hitEos {
+            let producedSec =
+                Double(decoded.count)
+                * Double(CosyVoice3Constants.tokenMelRatio)
+                * Double(CosyVoice3Constants.hiftSamplesPerFrame)
+                / Double(CosyVoice3Constants.sampleRate)
+            logger.warning(
+                "LLM-Decode budget exhausted: \(decoded.count) generated tokens "
+                    + "/ \(maxNew) cap (no EOS observed). "
+                    + "Output truncated at ~"
+                    + String(format: "%.1f", producedSec)
+                    + "s of audio. The 250-token Flow input is a structural cap; "
+                    + "split long phrases at clause boundaries (， 。) to work around."
+            )
         }
 
         // 3) Flow
@@ -214,7 +246,8 @@ public actor CosyVoice3Synthesizer {
             samples: audio,
             sampleRate: CosyVoice3Constants.sampleRate,
             generatedTokenCount: nNew,
-            decodedTokens: decoded)
+            decodedTokens: decoded,
+            finishedOnEos: hitEos)
     }
 
     // MARK: - Stages
