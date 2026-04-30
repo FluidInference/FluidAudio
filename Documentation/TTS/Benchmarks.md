@@ -6,10 +6,12 @@
 > by [MiniMax-Speech][mms], seed-tts-eval, and Gradium, so numbers
 > here are directly paper-comparable.
 > **Status:** Kokoro, Kokoro ANE, PocketTTS, Magpie complete the
-> English run; [StyleTTS2](#styletts2-known-failure) still fails on
-> MiniMax; [CosyVoice3](#cosyvoice3-hift-timeout-mitigated-pending-re-verification)
-> HiFT-async-timeout is mitigated in-branch (HiFT pinned to
-> `.cpuAndGPU`), full-corpus re-verification pending.
+> English run; CosyVoice3 completes the full Mandarin run after the
+> [HiFT-async-timeout fix](#cosyvoice3-hift-timeout-fix) (HiFT pinned
+> to `.cpuAndGPU`); StyleTTS2 has a [staged
+> fix](#styletts2-flexible-shape-fix-staged) for the
+> flexible-shape-info trip but is unverified (needs a dumped
+> `ref_s.bin`).
 >
 > [minimax]: https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
 > [mms]: https://arxiv.org/abs/2505.07916
@@ -146,20 +148,25 @@ WER / CER.
 | Kokoro ANE  | Apache-2.0  | en (af_heart only)     | ~330 MB   | 37.9 s     | 1586 / 2515 ms      | 1586 / 2515 ms      | 5.19×    | 738 MB   | 0.108   | 0.040   | one-shot; per-stage CU sweep, 7-graph pipeline |
 | Kokoro      | Apache-2.0  | en (af_heart only)     | ~330 MB   | 92.2 s     | 3113 / 4696 ms      | 3113 / 4696 ms      | 2.02×    | 736 MB   | 0.013   | 0.005   | one-shot; cleanest English ASR roundtrip |
 | PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 6.0 s | **1244 / 4749 ms**  | 8757 / 19174 ms     | 0.61×    | 1503 MB  | 0.014   | 0.006   | **streaming**; TTFT is first 80 ms audio frame |
-| StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | n/a (fails)| n/a                  | n/a                 | n/a      | n/a      | n/a     | n/a     | aborts with ANEF compile error on MiniMax — see [known failure](#styletts2-known-failure) |
+| StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | n/a (fix staged)| n/a             | n/a                 | n/a      | n/a      | n/a     | n/a     | flexible-shape trip-wire patched in `sliceFirstAxis2D`; verification blocked on dumping a `ref_s.bin` — see [staged fix](#styletts2-flexible-shape-fix-staged) |
 | Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 19.1 s     | 19834 / 57508 ms    | 19834 / 57508 ms    | 0.41×    | 1233 MB  | 0.056   | 0.033   | streaming-capable but benchmarked one-shot; split-K/V decoder; outputBackings fast path with latched fallback |
-| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 612.8 s†   | 30374 / 41116 ms†   | 30374 / 41116 ms†   | 0.16×†   | 2927 MB† | n/a     | n/a     | beta; HiFT-async-timeout [mitigated](#cosyvoice3-hift-timeout-mitigated-pending-re-verification), full-corpus re-run pending |
+| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 302.7 s†   | 20547 / 31556 ms†   | 20547 / 31556 ms†   | 0.269×†  | 2894 MB† | n/a     | n/a     | beta; full `minimax-chinese` (100/100 phrases) after [HiFT fix](#cosyvoice3-hift-timeout-fix) |
+| CosyVoice3  | Apache-2.0  | yue (cantonese)        | ~1.5 GB   | 25.6 s‡    | 20543 / 36133 ms†   | 20543 / 36133 ms†   | 0.270×†  | 3300 MB† | n/a     | n/a     | beta; full `minimax-cantonese` (100/100 phrases); same model as zh, ANE compile cache hot from prior run |
 
 \* TTFT = time to first audio frame. PocketTTS streams 80 ms / 1920-sample
 frames at 24 kHz, so TTFT < synth_ms; the gap is the streaming
 advantage. All other backends are benchmarked one-shot, so
 `ttft_ms == synth_ms` for them.
 
-† CosyVoice3: full `minimax-chinese` (100 phrases) run aborts with a
-CoreML async timeout on the HiFi-GAN vocoder. The 20-phrase
-short-subset numbers shown are from a tiny side run; cold-start is
-dominated by ANE compile attempts that ultimately fall back to CPU+GPU.
-See [CosyVoice3 known failure](#cosyvoice3-hift-timeout-mitigated-pending-re-verification).
+† CosyVoice3: full `minimax-chinese` and `minimax-cantonese` runs, both
+100 / 100 phrases, 0 errors, after the HiFT `.cpuAndGPU` fix. ASR
+roundtrip skipped (no Mandarin / Cantonese ASR backend). See
+[CosyVoice3 HiFT timeout fix](#cosyvoice3-hift-timeout-fix).
+
+‡ Cantonese cold-start is short because the Mandarin run immediately
+beforehand left the ANE compile cache hot. A clean first-time cold
+start is dominated by the ANE compile attempts for Decode / Flow that
+fall back to `.cpuAndGPU` (~5 min on M2).
 
 ### Kokoro ANE — per-stage breakdown (default preset, MiniMax-English)
 
@@ -226,23 +233,10 @@ absolute WER on this corpus is best read **relatively** (FluidAudio
 backend A vs. backend B on the same corpus + same ASR + same
 normalizer) rather than against the raw paper numbers.
 
-### CosyVoice3 partial numbers (20-phrase short subset)
+## StyleTTS2 flexible-shape fix (staged)
 
-Run on a 20-phrase subset of `minimax-chinese` (phrases ≤30 chars) with
-`--skip-asr` forced (no Mandarin ASR pairing in this slice):
-
-| Subset                  | Phrases | Cold start | Synth p50 / p95 | RTFx   | Peak RSS |
-|-------------------------|---------|------------|------------------|--------|----------|
-| `minimax-chinese-tiny`  | 20      | 612.8 s    | 30374 / 41116 ms | 0.16×  | 2927 MB  |
-
-The full 100-phrase `minimax-chinese` run aborts with an ANE-compile
-timeout on the HiFi-GAN vocoder partway through. See
-[CosyVoice3 known failure](#cosyvoice3-hift-timeout-mitigated-pending-re-verification).
-
-## StyleTTS2 known failure
-
-StyleTTS2's `text_predictor.mlmodelc` aborts on long MiniMax phrases
-with:
+StyleTTS2's `text_predictor.mlmodelc` was aborting on long MiniMax
+phrases with:
 
 ```
 E5RT: tensor_buffer has known strides while the model has
@@ -250,23 +244,28 @@ FlexibleShapeInfo. Strides must be unknown on all dimensions.
 ```
 
 …raised from `MLMultiArray objectAtIndexedSubscript:` inside
-`StyleTTS2Synthesizer.runTextPredictor`. This is a CoreML
-flexible-shape contract violation — the exported `text_predictor`
-graph still has fixed-stride tensor buffers, which trip a runtime
-check when the input token count crosses some boundary. It reproduces
-on the full corpus and on a length-filtered ≤120-char subset, so the
-failure is not just length-driven. Until `text_predictor.mlmodelc` is
-re-exported with unknown strides on all input dims, StyleTTS2 cannot
-be benchmarked on MiniMax.
+`StyleTTS2Synthesizer.runTextPredictor`. The CoreML runtime rejects
+two access patterns on outputs from a model with `FlexibleShapeInfo`:
+`arr.strides` reads, and `arr[idx].floatValue` element subscripts.
+The original `sliceFirstAxis2D` helper used both.
 
-The synthesis path itself is wired and known to produce audio on the
-prior (now-removed) Harvard-sentences corpus — see git history for
-the Harvard-sentence numbers. Fixing the export and re-running on
-MiniMax is the follow-up.
+Fix: `sliceFirstAxis2D` now reads via `arr.dataPointer.bindMemory(...)`
+(handling `.float32`, `.float16`, and `.double`) and computes the flat
+index from the known `(1, leading, trailing)` row-major layout instead
+of querying `arr.strides`. This matches the existing
+`readMLMultiArrayPrefix` pattern used elsewhere in the same file.
 
-## CosyVoice3 HiFT timeout (mitigated, pending re-verification)
+Status: build green; **end-to-end verification blocked** on dumping a
+`ref_s.bin` (256 fp32 LE) reference voice — `StyleTTS2Manager.synthesize`
+requires one and the upstream dumper
+(`mobius-styletts2/scripts/06_dump_ref_s.py`) is not present in either
+mobius checkout on this dev box. The synthesis path is otherwise wired
+and known to produce audio on the prior (now-removed) Harvard-sentences
+corpus.
 
-The previous `minimax-chinese` runs aborted with:
+## CosyVoice3 HiFT timeout fix
+
+Earlier `minimax-chinese` runs aborted mid-corpus with:
 
 ```
 E5RT: Submit Async failed for [3:29]: Async task:
@@ -277,19 +276,20 @@ HiFT-T500-fp16_main__Op104_BnnsCpuInference has timed out.
 Root cause: HiFT was loaded with `.cpuAndNeuralEngine`, which let the
 CoreML planner place most of the graph on ANE but kept at least one
 op (`HiFT-T500-fp16_main__Op104`) on the BNNS CPU async-dispatch
-path. Long phrases mid-corpus then trip the BNNS async watchdog (the
+path. Long phrases mid-corpus tripped the BNNS async watchdog (the
 same ANE+BNNS mixed-compute pathology that already forced Flow and
 LLM-Decode off ANE in `CosyVoice3ModelStore.loadIfNeeded`).
 
-Mitigation in this branch: HiFT is now pinned to `.cpuAndGPU` (see
-`CosyVoice3ModelStore.swift`), removing the BNNS-async path entirely.
-The model is fixed-shape `[1, 80, 500]`, so GPU placement is
-deterministic. Trade-off: a small per-call latency increase vs. the
-ANE config that didn't actually complete the corpus.
+Fix: HiFT is now pinned to `.cpuAndGPU` in
+`CosyVoice3ModelStore.loadIfNeeded` regardless of the user-supplied
+`computeUnits`, removing the BNNS-async path entirely. The model is
+fixed-shape `[1, 80, 500]`, so GPU placement is deterministic.
+Trade-off: a small per-call latency increase vs. the ANE config that
+didn't actually complete the corpus.
 
-The 20-phrase short-subset numbers below are from the pre-mitigation
-config and remain valid as a lower-bound reference; a full
-`minimax-chinese` re-run with the mitigation is pending.
+Verified end-to-end on full `minimax-chinese` (100 / 100 phrases) and
+`minimax-cantonese` (100 / 100 phrases), 0 errors on either; the
+watchdog error did not recur on long phrases.
 
 ## Magpie outputBackings fast path
 
