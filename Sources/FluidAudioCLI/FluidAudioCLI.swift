@@ -2,7 +2,9 @@
 import AVFoundation
 import FluidAudio
 import Foundation
+#if canImport(MachTaskSelfWrapper)
 import MachTaskSelfWrapper
+#endif
 
 // Using @main instead of main.swift for Swift 6 compatibility.
 // This provides an explicit async context and clear isolation semantics.
@@ -42,6 +44,12 @@ struct FluidAudioCLI {
             await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "tts":
             await TTS.run(arguments: Array(arguments.dropFirst(2)))
+        case "styletts2":
+            await StyleTTS2Command.run(arguments: Array(arguments.dropFirst(2)))
+        case "magpie":
+            await MagpieCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "tts-asr-verify":
+            await TTSAsrVerifyCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "diarization-benchmark":
             await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "process":
@@ -106,6 +114,8 @@ struct FluidAudioCLI {
                 transcribe              Transcribe audio file using streaming ASR
                 multi-stream            Transcribe multiple audio files in parallel
                 tts                     Synthesize speech from text using Kokoro TTS
+                magpie                  Magpie TTS Multilingual 357M (experimental, ~0.04 RTFx — slow, needs perf work)
+                tts-asr-verify          Batch TTS→ASR roundtrip WER verification
                 parakeet-eou            Run Parakeet EOU Streaming ASR on a single file
                 ctc-earnings-benchmark  Run CTC keyword spotting benchmark on Earnings22
                 sortformer              Run Sortformer streaming diarization

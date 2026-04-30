@@ -51,7 +51,13 @@ final class ModelNamesTests: XCTestCase {
         let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin"]
         let validDirectories: Set<String> = ["constants_bin"]
 
-        for repo in Repo.allCases {
+        // `magpieTts` is intentionally excluded — it is the only repo that ships
+        // bare directory entries (`constants/`, `tokenizer/`) instead of files.
+        // It's a not-production-ready experimental backend; its directory layout
+        // is asserted in `MagpieConstantsTests` rather than the global whitelist.
+        let reposExcludedFromExtensionCheck: Set<Repo> = [.magpieTts]
+
+        for repo in Repo.allCases where !reposExcludedFromExtensionCheck.contains(repo) {
             let models = ModelNames.getRequiredModelNames(for: repo, variant: nil)
             for model in models {
                 let hasValidExtension = validExtensions.contains(where: { model.hasSuffix($0) })
