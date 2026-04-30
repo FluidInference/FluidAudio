@@ -1,9 +1,14 @@
 # MiniMax Multilingual TTS Test Set
 
-Vendored copies of the per-language text files from the
+This directory holds the per-language text files for the FluidAudio
+TTS-benchmark corpus, sourced on demand from the
 [MiniMaxAI/TTS-Multilingual-Test-Set](https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set)
-Hugging Face dataset, converted to the FluidAudio TTS-benchmark corpus
-format (one phrase per non-empty, non-`#` line).
+Hugging Face dataset and converted to the harness format (one phrase
+per non-empty, non-`#` line).
+
+The `.txt` files are **not vendored** — they're CC-BY-SA-4.0 derivative
+content fetched on demand by `fluidaudio minimax-corpus` (see
+[Fetching](#fetching) below). Only this README is checked in.
 
 | Field    | Value |
 |----------|-------|
@@ -14,8 +19,8 @@ format (one phrase per non-empty, non-`#` line).
 | Languages | 24 (arabic, cantonese, chinese, czech, dutch, english, finnish, french, german, greek, hindi, indonesian, italian, japanese, korean, polish, portuguese, romanian, russian, spanish, thai, turkish, ukrainian, vietnamese) |
 | Phrases   | 100 per language (2400 total) |
 
-The text files in this directory are derivative works of the upstream
-dataset and remain under **CC-BY-SA-4.0**. The rest of the FluidAudio
+The fetched text files are derivative works of the upstream dataset
+and remain under **CC-BY-SA-4.0**. The rest of the FluidAudio
 repository is licensed separately (see top-level `LICENSE`); only the
 contents of `Benchmarks/tts/corpus/minimax/` are share-alike-bound to
 CC-BY-SA-4.0.
@@ -36,25 +41,39 @@ shape because the dataset also ships per-speaker reference audio for
 zero-shot voice cloning. The FluidAudio harness only needs the text —
 voice selection is a per-backend concern (Kokoro / PocketTTS / Magpie /
 StyleTTS2 each have their own voice plumbing). The leading
-`<filename>|` is stripped at vendor time; if you need the cloning audio
+`<filename>|` is stripped at fetch time; if you need the cloning audio
 later, fetch it from the upstream HF repo's `audio/` directory.
 
-## Reproducing
+## Fetching
 
-The vendored files in this directory were produced by running, from
-the package root:
+The `fluidaudio minimax-corpus` CLI subcommand pins the upstream
+revision to the value above so re-runs are deterministic. From the
+package root:
 
 ```bash
-python Scripts/fetch_minimax_tts_corpus.py
+# All 24 languages
+swift run fluidaudio minimax-corpus
+
+# Subset
+swift run fluidaudio minimax-corpus --languages english,spanish,hindi
+
+# Refresh against a newer release
+swift run fluidaudio minimax-corpus --revision <commit-sha>
 ```
 
-That script pins the upstream revision to the value above so re-runs
-are deterministic. Pass `--revision <sha>` to refresh against a newer
-release.
+Output lands in `Benchmarks/tts/corpus/minimax/<lang>.txt` (relative
+to the package root) by default; override with `--out-dir <path>`.
+Auth-gated revisions are honored via the standard `HF_TOKEN` /
+`HUGGING_FACE_HUB_TOKEN` env vars (same as every other HF asset pull
+in the project).
 
 ## Using the corpus
 
+Fetch the language(s) you need first (see [Fetching](#fetching)),
+then run the benchmark:
+
 ```bash
+swift run fluidaudio minimax-corpus --languages english
 swift run fluidaudio tts-benchmark \
   --backend kokoro-ane \
   --corpus minimax-english \
@@ -63,7 +82,10 @@ swift run fluidaudio tts-benchmark \
 
 Available `--corpus` names: `minimax-arabic`, `minimax-cantonese`,
 `minimax-chinese`, …, `minimax-vietnamese` (24 total). The harness
-maps `minimax-<lang>` to `Benchmarks/tts/corpus/minimax/<lang>.txt`.
+maps `minimax-<lang>` to `Benchmarks/tts/corpus/minimax/<lang>.txt`,
+which is written by `minimax-corpus`. Running `tts-benchmark` against
+a language whose `.txt` hasn't been fetched yet will fail with a
+"corpus not found" error — re-run `minimax-corpus` to populate it.
 
 ### Language ↔ backend coverage
 
