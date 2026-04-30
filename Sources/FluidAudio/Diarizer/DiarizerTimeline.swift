@@ -226,13 +226,13 @@ public class DiarizerSpeaker: Identifiable {
 
     /// Diarizer output slot
     public var index: Int
-    
+
     /// Finalized speech segments
     public var finalizedSegments: [DiarizerSegment] {
         get { lock.withLock { _finalizedSegments } }
         set { lock.withLock { _finalizedSegments = newValue } }
     }
-    
+
     /// Preview speech segments
     public var tentativeSegments: [DiarizerSegment] {
         get { lock.withLock { _tentativeSegments } }
@@ -302,7 +302,7 @@ public class DiarizerSpeaker: Identifiable {
     public var numTentativeSpeechFrames: Int {
         lock.withLock { _tentativeSegments.reduce(0) { $0 + $1.length } }
     }
-    
+
     /// Finalized speech segments
     private var _finalizedSegments: [DiarizerSegment] = []
 
@@ -778,7 +778,7 @@ public class DiarizerTimeline {
         self.init(from: snapshot.snapshot, withConfig: snapshot.config)
     }
 
-    // MARK: - Streaming API
+    // MARK: - Add Predictions to Timeline
 
     /// Add new predictions from the diarizer
     @discardableResult
@@ -854,6 +854,8 @@ public class DiarizerTimeline {
             chunkResult: consume chunk
         )
     }
+    
+    // MARK: - Finalize Timeline
 
     /// Finalize all tentative data at end of recording
     public func finalize() {
@@ -872,6 +874,8 @@ public class DiarizerTimeline {
         trimPredictions()
     }
 
+    // MARK: - Reset Timeline
+    
     /// Reset to initial state
     /// - Parameter condition: Condition for when to keep a speaker. All speakers still have their segments reset.
     public func reset(
@@ -913,6 +917,8 @@ public class DiarizerTimeline {
         }
     }
 
+    // MARK: - Rebuild Timeline
+    
     /// Rebuild the timeline from initial predictions. This is equivalent to reinitializing the timeline.
     /// - Parameters:
     ///   - finalizedPredictions: Finalized prediction matrix `[numFrames, numSpeakers]` flattened
@@ -979,6 +985,8 @@ public class DiarizerTimeline {
             chunkResult: consume chunk
         )
     }
+    
+    // MARK: - Timeline Snapshots
 
     public func rollback(to snapshot: consuming Snapshot, keepingSpeakers: Bool = false) {
         lock.lock()
@@ -1013,7 +1021,7 @@ public class DiarizerTimeline {
         )
     }
 
-    // MARK: Speaker Management
+    // MARK: - Timeline Speaker Management
 
     /// Add a speaker to the timeline at a given slot, or update their name if one already exists
     /// - Parameters:
