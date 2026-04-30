@@ -162,6 +162,27 @@ public actor StyleTTS2Manager {
         return (phonemes, ids)
     }
 
+    /// Diagnostic tokenize: same as `tokenize(text:language:)` but also
+    /// returns the per-scalar drop frequency from
+    /// `StyleTTS2Vocab.encodeWithReport`. Used by the CLI to quantify
+    /// how much of the misaki BART G2P output the espeak-ng-trained
+    /// 178-token vocab can actually consume.
+    public func tokenizeWithReport(
+        text: String,
+        language: MultilingualG2PLanguage = .americanEnglish
+    ) async throws -> (
+        phonemes: String, ids: [Int32], dropped: [Unicode.Scalar: Int]
+    ) {
+        guard isInitialized else {
+            throw StyleTTS2Error.modelNotFound("StyleTTS2 model not initialized")
+        }
+        let phonemes = try await StyleTTS2Phonemizer.phonemize(
+            text: text, language: language)
+        let vocab = try await modelStore.vocabulary()
+        let (ids, dropped) = vocab.encodeWithReport(phonemes)
+        return (phonemes, ids, dropped)
+    }
+
     public func cleanup() {
         isInitialized = false
     }

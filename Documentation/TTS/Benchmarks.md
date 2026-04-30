@@ -148,7 +148,7 @@ WER / CER.
 | Kokoro ANE  | Apache-2.0  | en (af_heart only)     | ~330 MB   | 37.9 s     | 1586 / 2515 ms      | 1586 / 2515 ms      | 5.19×    | 738 MB   | 0.108   | 0.040   | one-shot; per-stage CU sweep, 7-graph pipeline |
 | Kokoro      | Apache-2.0  | en (af_heart only)     | ~330 MB   | 92.2 s     | 3113 / 4696 ms      | 3113 / 4696 ms      | 2.02×    | 736 MB   | 0.013   | 0.005   | one-shot; cleanest English ASR roundtrip |
 | PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 6.0 s | **1244 / 4749 ms**  | 8757 / 19174 ms     | 0.61×    | 1503 MB  | 0.014   | 0.006   | **streaming**; TTFT is first 80 ms audio frame |
-| StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | 955 s§     | 8937 / 17351 ms     | 8937 / 17351 ms     | 2.36×    | 1428 MB  | 0.581§  | 0.476§  | full 100/100 `minimax-english` after [`sliceFirstAxis2D` flex-shape fix](#styletts2-flexible-shape-fix); ref_s dumped via [`06_dump_ref_s.py`](https://github.com/voicelink-ai/mobius-styletts2/blob/main/models/tts/styletts2/scripts/06_dump_ref_s.py) from LibriTTS `696_92939_000016_000006.wav` (StyleTTS2 demo voice) |
+| StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | 955 s§     | 6671 / 15990 ms§    | 6671 / 15990 ms§    | 2.72×§   | 963 MB§  | 0.440§  | 0.241§  | full 100/100 `minimax-english` after [`sliceFirstAxis2D` flex-shape fix](#styletts2-flexible-shape-fix) **and** [misaki→espeak post-pass remap](#styletts2-misaki--espeak-post-pass-remap); ref_s dumped via [`06_dump_ref_s.py`](https://github.com/voicelink-ai/mobius-styletts2/blob/main/models/tts/styletts2/scripts/06_dump_ref_s.py) from LibriTTS `696_92939_000016_000006.wav` (StyleTTS2 demo voice) |
 | Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 19.1 s     | 19834 / 57508 ms    | 19834 / 57508 ms    | 0.41×    | 1233 MB  | 0.056   | 0.033   | streaming-capable but benchmarked one-shot; split-K/V decoder; outputBackings fast path with latched fallback |
 | CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 29.2 s†    | 14091 / 23679 ms†   | 14091 / 23679 ms†   | 0.357×†  | 3302 MB† | n/a     | n/a     | beta; full `minimax-chinese` (100/100 phrases) after [HiFT fix](#cosyvoice3-hift-timeout-fix) + [LLM-Decode outputBackings fix](#cosyvoice3-llm-decode-outputbackings-fix) |
 | CosyVoice3  | Apache-2.0  | yue (cantonese)        | ~1.5 GB   | 25.6 s‡    | 20543 / 36133 ms¶   | 20543 / 36133 ms¶   | 0.270×¶  | 3300 MB¶ | n/a     | n/a     | beta; full `minimax-cantonese` (100/100 phrases); same model as zh, ANE compile cache hot from prior run |
@@ -179,7 +179,12 @@ beforehand left the ANE compile cache hot. A clean first-time cold
 start is dominated by the ANE compile attempts for Decode / Flow that
 fall back to `.cpuAndGPU` (~5 min on M2).
 
-§ StyleTTS2: full 100/100 `minimax-english` phrases, 0 errors.
+§ StyleTTS2 (**beta / experimental** — `StyleTTS2Manager.initialize`
+emits a runtime beta warning): full 100/100 `minimax-english`
+phrases, 0 errors, after the
+[misaki→espeak post-pass remap](#styletts2-misaki--espeak-post-pass-remap)
+(WER 0.581 → 0.440, CER 0.476 → 0.241; agg-RTFx 2.36× → 2.72×;
+peak RSS 1428 MB → 963 MB on the re-run with warm ANE caches).
 Cold-start of 0.04 s reflects warm ANE caches from prior runs in
 the same session; first cold compile of the bucketed text_predictor
 / diffusion_step / decoder graphs is multi-second. Reference voice
@@ -188,16 +193,15 @@ is `696_92939_000016_000006.wav` from the upstream
 LibriTTS demo speaker the model was fine-tuned on), dumped to a
 256-fp32 `ref_s.bin` via the
 [`06_dump_ref_s.py`](https://github.com/voicelink-ai/mobius-styletts2/blob/main/models/tts/styletts2/scripts/06_dump_ref_s.py)
-helper. WER (58%) and CER (48%) are notably worse than Kokoro /
+helper. WER (44%) and CER (24%) are still worse than Kokoro /
 PocketTTS / Magpie — the model's own demo notebook
 (`Demo/Inference_LibriTTS.ipynb`) reports artifacts on long
 sentences with the default `alpha=0.3, beta=0.7, diffusion_steps=5`,
-and 8/100 MiniMax phrases here produced audio that Parakeet TDT
-returned an empty hypothesis for (the audio is generated and saved
-but contains glitches / formant breaks Parakeet doesn't decode as
-words). RTFx is competitive (2.36×) but absolute WER is best read
-relatively (per the [WER caveat](#about-the-wer--cer-numbers))
-rather than against the StyleTTS2 paper's clean numbers.
+and a few MiniMax phrases here produce audio with formant breaks
+Parakeet doesn't decode cleanly. RTFx is competitive (2.72×) but
+absolute WER is best read relatively (per the
+[WER caveat](#about-the-wer--cer-numbers)) rather than against the
+StyleTTS2 paper's clean numbers.
 
 ### Kokoro ANE — per-stage breakdown (default preset, MiniMax-English)
 
@@ -251,7 +255,7 @@ p50 / p95 are warm-synth latency in ms.
 | Kokoro        | 0.013     | 0.005     | 3113           | 3113            | 4696            | 2.02×  |
 | PocketTTS     | 0.014     | 0.006     | **1244**       | 8757            | 19174           | 0.61×  |
 | Magpie        | 0.056     | 0.033     | 19834          | 19834           | 57508           | 0.41×  |
-| StyleTTS2§    | 0.581     | 0.476     | 8937           | 8937            | 17351           | 2.36×  |
+| StyleTTS2§    | 0.440     | 0.241     | 6671           | 6671            | 15990           | 2.72×  |
 
 The MiniMax corpus mixes short conversational phrases (1–11) with
 medium news headlines (81–100) and long narrative paragraphs (101–110
@@ -293,11 +297,10 @@ run with a `ref_s.bin` dumped from the upstream LibriTTS demo voice
 [`mobius-styletts2/scripts/06_dump_ref_s.py`](https://github.com/voicelink-ai/mobius-styletts2/blob/main/models/tts/styletts2/scripts/06_dump_ref_s.py)
 helper (which wraps the upstream `style_encoder` /
 `predictor_encoder` recipe from `99_parity_check.py`). All 100
-phrases synthesized successfully (2.36× agg RTFx, 8.9 s p50 synth,
-1.43 GB peak RSS, 58% macro WER / 48% macro CER on Parakeet TDT
-roundtrip; 8/100 phrases produced audio Parakeet returned an empty
-hypothesis for, see the § footnote on the main table for the WER
-caveat).
+phrases synthesized successfully. The flex-shape fix only restored
+the run; quality on this corpus stayed at 58% macro WER / 48% macro
+CER — see [StyleTTS2 misaki → espeak post-pass remap](#styletts2-misaki--espeak-post-pass-remap)
+for the follow-up that pulled WER down to 44% / CER to 24%.
 
 Note: the CoreML runtime still emits a non-fatal `E5RT encountered an
 STL exception. msg = tensor_buffer has known strides while the model
@@ -306,6 +309,72 @@ during the implicit deinit of one of the flex-shape graphs —
 `f0n_energy` or `G2PEncoder`). The process exits 0, all 100 phrases
 write valid WAVs, and the JSON summary is correct. The trip is
 cosmetic noise from CoreML's lifecycle, not a synthesis failure.
+
+## StyleTTS2 misaki → espeak post-pass remap
+
+After the `sliceFirstAxis2D` flex-shape fix unblocked the full-corpus
+run, StyleTTS2 still landed at WER 0.581 / CER 0.476 on
+`minimax-english` — an order of magnitude worse than Kokoro
+(0.013) or PocketTTS (0.014). The first hypothesis (silent vocab
+drops at `StyleTTS2Vocab.encode`) was disproved by instrumenting the
+encoder via `--tokenize-only --corpus`: the full 100-phrase corpus
+dropped only **11 / 12247 scalars (0.09%)**, all of them ASCII
+hyphens. The 178-token espeak-ng vocab covers ~99.9% of the in-tree
+G2P's output.
+
+Real root cause: a **G2P convention mismatch**. Both Kokoro and
+StyleTTS2 share the in-tree misaki-style BART G2P (`G2PModel`), but
+the Kokoro CoreML graph was authored to consume misaki output 1:1,
+while StyleTTS2's LibriTTS checkpoint was trained by yl4579 on
+**espeak-ng-phonemized** LibriTTS — predating misaki by years. The
+178-vocab accepts both forms (e.g. both `ʧ` U+02A7 and `tʃ`
+decomposed are valid encodings), but the acoustic embeddings for
+the misaki ligature glyphs are essentially untrained noise — every
+training utterance saw the espeak form.
+
+Side-by-side comparison against locally-installed `espeak-ng -v en-us
+--ipa -q` flagged four systematic divergences:
+
+| misaki | espeak-ng | example                  |
+|--------|-----------|--------------------------|
+| `ʧ`    | `tʃ`      | choice → `tʃˈɔɪs`        |
+| `ʤ`    | `dʒ`      | jump   → `dʒˈʌmps`       |
+| `ɜɹ`   | `ɝ`       | girl   → `ɡˈɝl`          |
+| `əɹ`   | `ɚ`       | over   → `ˈoʊvɚ`         |
+
+Fix: a 4-rule post-pass remap in `StyleTTS2Phonemizer.phonemize`,
+gated on `.americanEnglish` and applied to the assembled phoneme
+string after every word has been emitted by the BART G2P. Lives
+alongside the existing per-piece misaki diphthong remap (`A→eɪ`,
+`I→aɪ`, etc.); see `StyleTTS2Phonemizer.swift` for both tables and
+the rationale.
+
+Result on the same `minimax-english` 100-phrase run, same voice
+(`libritts_696`), same Parakeet TDT roundtrip:
+
+| Metric              | Pre-fix | Post-fix | Δ        |
+|---------------------|---------|----------|----------|
+| Macro WER           | 0.581   | 0.440    | −24.2%   |
+| Macro CER           | 0.476   | 0.241    | −49.5%   |
+| TTFT p50 (ms)       | 8937    | 6671     | −25.4%   |
+| TTFT p95 (ms)       | 17351   | 15990    | −7.8%    |
+| Agg RTFx            | 2.36×   | 2.72×    | +15.3%   |
+| Peak RSS (MB)       | 1428    | 963      | −32.6%   |
+
+Phrase-level: phrase 1 ("…simple **choice**. Get busy living…") went
+from `simple voice. Busy dying.` (0.40 WER) to a perfect roundtrip
+(0.00 WER). The latency / RSS improvements ride along because the
+re-run hit warm ANE compile caches; the WER / CER deltas are the
+real signal.
+
+WER is still 30× worse than Kokoro on this corpus. Remaining errors
+cluster on word-level mispronunciations the misaki BART itself
+emits non-canonically (e.g. `practical → practicckles`,
+`separation → expiration`) and on long-tail phrases where the
+diffusion sampler produces formant breaks Parakeet doesn't decode
+cleanly. Further gains likely require either a richer remap layer
+covering espeak's length marks / function-word reductions, or
+swapping the BART G2P for libespeak-ng directly. Tracked separately.
 
 ## CosyVoice3 HiFT timeout fix
 

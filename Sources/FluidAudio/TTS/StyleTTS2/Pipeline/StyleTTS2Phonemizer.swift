@@ -4,14 +4,30 @@ import Foundation
 ///
 /// For English (`.americanEnglish`), uses the in-tree `G2PModel` (BART
 /// encoder-decoder, misaki-style IPA) and remaps the misaki conventions to
-/// the espeak-ng convention that StyleTTS2's LibriTTS checkpoint expects:
+/// the espeak-ng convention that StyleTTS2's LibriTTS checkpoint expects.
+///
+/// **Per-piece (single glyph) remap** — applied as misaki emits each piece:
 ///
 ///   misaki → espeak-ng
 ///   A → eɪ   I → aɪ   O → oʊ   W → aʊ   Y → ɔɪ
 ///   ᵊ → ə   (tiny-schwa offglide; not in StyleTTS2's 178-vocab)
 ///
-/// Other glyphs (`ʤ`, `ʧ`, `ˈ`, `ˌ`, `ð`, `θ`, `ɹ`, `ɾ`, etc.) are already in
-/// the 178-token espeak-ng vocabulary and pass through.
+/// **Post-pass (multi-glyph) remap** — applied to the assembled phoneme
+/// string after every word has been emitted. Both the ligature and the
+/// decomposed forms exist as distinct tokens in the 178-vocab, but the
+/// LibriTTS checkpoint was trained against espeak-ng output, so the model's
+/// embeddings for the misaki ligature glyphs (`ʧ`, `ʤ`) are essentially
+/// untrained noise. Same story for the schwa+r digraphs that espeak collapses
+/// into single rhotic vowels (`ɝ`, `ɚ`):
+///
+///   misaki → espeak-ng         word example
+///   ʧ      → tʃ               choice  → tʃˈɔɪs
+///   ʤ      → dʒ               jump    → dʒˈʌmps
+///   ɜɹ     → ɝ  (U+025D)      girl    → ɡˈɝl
+///   əɹ     → ɚ  (U+025A)      over    → ˈoʊvɚ
+///
+/// Other glyphs (`ˈ`, `ˌ`, `ð`, `θ`, `ɹ`, `ɾ`, etc.) are already in the
+/// 178-token espeak-ng vocabulary and pass through unchanged.
 ///
 /// Non-English languages fall back to `MultilingualG2PModel` (CharsiuG2P
 /// ByT5). Output quality there is unvalidated — the LibriTTS checkpoint is
@@ -45,6 +61,30 @@ public enum StyleTTS2Phonemizer {
         "Y": "ɔɪ",
         "ᵊ": "ə",
     ]
+
+    /// Post-pass multi-glyph remap applied to the assembled phoneme string
+    /// after all word pieces have been concatenated. Decomposes misaki's
+    /// affricate ligatures and collapses the schwa+r digraphs into the
+    /// single rhotic vowels espeak-ng emits — see the type-level docs for
+    /// rationale. Order matters only insofar as `əɹ` and `ɜɹ` must be
+    /// applied before any rule that would consume the trailing `ɹ` (none
+    /// exist today; left ordered for future-proofing).
+    private static let misakiToEspeakPostPass: [(String, String)] = [
+        ("ʧ", "tʃ"),
+        ("ʤ", "dʒ"),
+        ("ɜɹ", "ɝ"),
+        ("əɹ", "ɚ"),
+    ]
+
+    /// Apply `misakiToEspeakPostPass` rules to a phoneme string in order.
+    /// Exposed `internal` for unit tests.
+    internal static func applyEspeakPostPass(_ s: String) -> String {
+        var out = s
+        for (from, to) in misakiToEspeakPostPass {
+            out = out.replacingOccurrences(of: from, with: to)
+        }
+        return out
+    }
 
     /// Convert raw text to an IPA phoneme string for StyleTTS2.
     ///
@@ -87,6 +127,13 @@ public enum StyleTTS2Phonemizer {
             try await flushWord(&wordBuffer, language: language, into: &output)
         }
 
+        // Multi-glyph misaki → espeak normalization. Only meaningful for
+        // English (the LibriTTS checkpoint is English-only); skipping for
+        // other languages avoids touching CharsiuG2P output we don't have
+        // a model contract for.
+        if language == .americanEnglish {
+            output = applyEspeakPostPass(output)
+        }
         return output
     }
 
