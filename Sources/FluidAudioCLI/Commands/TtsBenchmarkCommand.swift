@@ -23,13 +23,14 @@ import Foundation
 ///       --compute-units default \
 ///       --output-json bench.json
 ///
-/// Corpora ship in `Benchmarks/tts/corpus/minimax/<lang>.txt` —
+/// Corpora land in `Benchmarks/tts/corpus/minimax/<lang>.txt` —
 /// the MiniMax Multilingual TTS Test Set (CC-BY-SA-4.0,
-/// 24 languages × 100 phrases). See
-/// `Benchmarks/tts/corpus/minimax/README.md` for attribution and
-/// the per-backend ↔ language coverage matrix. Reference with
-/// `--corpus minimax-<lang>` (e.g. `minimax-english`,
-/// `minimax-chinese`, `minimax-vietnamese`, …).
+/// 24 languages × 100 phrases). The `.txt` files are gitignored;
+/// populate them with `swift run fluidaudio minimax-corpus`. See
+/// `Documentation/TTS/MinimaxCorpus.md` for attribution + reproduction
+/// notes and `Documentation/TTS/Benchmarks.md` for the per-backend ↔
+/// language coverage matrix. Reference with `--corpus minimax-<lang>`
+/// (e.g. `minimax-english`, `minimax-chinese`, `minimax-vietnamese`, …).
 public enum TtsBenchmarkCommand {
 
     private static let logger = AppLogger(category: "TtsBenchmarkCommand")
@@ -960,7 +961,7 @@ public enum TtsBenchmarkCommand {
               --corpus <name>           MiniMax corpus name: minimax-<lang>
                                         (e.g. minimax-english, minimax-chinese,
                                         minimax-vietnamese — 24 languages total;
-                                        see Benchmarks/tts/corpus/minimax/README.md)
+                                        see Documentation/TTS/MinimaxCorpus.md)
               --corpus-path <path>      Custom corpus file (overrides --corpus)
               --voice <name>            Voice id (Kokoro/PocketTTS/CosyVoice3)
               --speaker <name>          Magpie speaker: john|sofia|aria|jason|leo

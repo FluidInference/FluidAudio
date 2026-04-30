@@ -1,14 +1,11 @@
 # MiniMax Multilingual TTS Test Set
 
-This directory holds the per-language text files for the FluidAudio
-TTS-benchmark corpus, sourced on demand from the
+The FluidAudio `tts-benchmark` corpus is sourced on demand from the
 [MiniMaxAI/TTS-Multilingual-Test-Set](https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set)
 Hugging Face dataset and converted to the harness format (one phrase
-per non-empty, non-`#` line).
-
-The `.txt` files are **not vendored** — they're CC-BY-SA-4.0 derivative
-content fetched on demand by `fluidaudio minimax-corpus` (see
-[Fetching](#fetching) below). Only this README is checked in.
+per non-empty, non-`#` line). The fetched `.txt` files land under
+`Benchmarks/tts/corpus/minimax/<lang>.txt`; they are gitignored — only
+this document is checked in.
 
 | Field    | Value |
 |----------|-------|
@@ -65,39 +62,11 @@ Output lands in `Benchmarks/tts/corpus/minimax/<lang>.txt` (relative
 to the package root) by default; override with `--out-dir <path>`.
 Auth-gated revisions are honored via the standard `HF_TOKEN` /
 `HUGGING_FACE_HUB_TOKEN` env vars (same as every other HF asset pull
-in the project).
+in the project). Run `fluidaudio minimax-corpus --help` for the full
+flag list.
 
-## Using the corpus
-
-Fetch the language(s) you need first (see [Fetching](#fetching)),
-then run the benchmark:
-
-```bash
-swift run fluidaudio minimax-corpus --languages english
-swift run fluidaudio tts-benchmark \
-  --backend kokoro-ane \
-  --corpus minimax-english \
-  --output-json bench.json
-```
-
-Available `--corpus` names: `minimax-arabic`, `minimax-cantonese`,
-`minimax-chinese`, …, `minimax-vietnamese` (24 total). The harness
-maps `minimax-<lang>` to `Benchmarks/tts/corpus/minimax/<lang>.txt`,
-which is written by `minimax-corpus`. Running `tts-benchmark` against
-a language whose `.txt` hasn't been fetched yet will fail with a
-"corpus not found" error — re-run `minimax-corpus` to populate it.
-
-### Language ↔ backend coverage
-
-Not every backend handles every language. The pragmatic subsets:
-
-| Backend     | Supported MiniMax languages |
-|-------------|-----------------------------|
-| Kokoro / Kokoro ANE | `english` (af_heart only) |
-| PocketTTS   | `english`, `german`, `italian`, `portuguese`, `spanish`, `french` |
-| StyleTTS2   | `english` (LibriTTS multi-speaker) |
-| Magpie      | `english`, `spanish`, `german`, `french`, `italian`, `vietnamese`, `chinese`, `hindi` |
-| CosyVoice3  | `chinese` |
+Per-backend ↔ language coverage and `tts-benchmark --corpus minimax-<lang>`
+usage live in [`Benchmarks.md`](Benchmarks.md#corpus).
 
 ## WER caveats
 

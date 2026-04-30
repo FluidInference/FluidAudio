@@ -170,7 +170,7 @@ public enum MinimaxCorpusCommand {
             "#",
             "# Cloning-audio filenames have been stripped — we only need the",
             "# text for the FluidAudio TTS benchmark harness. Voice selection",
-            "# is per-backend (see Benchmarks/tts/corpus/minimax/README.md).",
+            "# is per-backend (see Documentation/TTS/MinimaxCorpus.md).",
             "",
         ]
         let body = (header + phrases).joined(separator: "\n") + "\n"

@@ -46,10 +46,11 @@ feel:
 
 All shipped corpora come from the **MiniMax Multilingual TTS Test
 Set** (`MiniMaxAI/TTS-Multilingual-Test-Set` on Hugging Face,
-CC-BY-SA-4.0). The vendored copies live under
+CC-BY-SA-4.0). The fetched files land under
 `Benchmarks/tts/corpus/minimax/<lang>.txt` (24 languages × 100 phrases
-= 2400 phrases). Attribution + reproduction notes are colocated in
-`Benchmarks/tts/corpus/minimax/README.md`.
+= 2400 phrases) and are gitignored — populate them on demand with
+`swift run fluidaudio minimax-corpus`. Attribution, revision pin,
+and WER caveats live in [`MinimaxCorpus.md`](MinimaxCorpus.md).
 
 Reference each language as `--corpus minimax-<lang>`:
 
