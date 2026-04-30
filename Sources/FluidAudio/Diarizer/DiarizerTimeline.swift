@@ -226,98 +226,88 @@ public class DiarizerSpeaker: Identifiable {
 
     /// Diarizer output slot
     public var index: Int
-
+    
     /// Finalized speech segments
-    public var finalizedSegments: [DiarizerSegment] = []
-
+    public var finalizedSegments: [DiarizerSegment] {
+        get { lock.withLock { _finalizedSegments } }
+        set { lock.withLock { _finalizedSegments = newValue } }
+    }
+    
     /// Preview speech segments
-    public var tentativeSegments: [DiarizerSegment] = []
+    public var tentativeSegments: [DiarizerSegment] {
+        get { lock.withLock { _tentativeSegments } }
+        set { lock.withLock { _tentativeSegments = newValue } }
+    }
 
     /// Speaker's string representation
     public var description: String {
-        lock.lock()
-        defer { lock.unlock() }
-        return name ?? "Speaker \(index)"
+        lock.withLock { name ?? "Speaker \(index)" }
     }
 
     /// Whether this speaker has any segments
     public var hasSegments: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return !(finalizedSegments.isEmpty && tentativeSegments.isEmpty)
+        lock.withLock { !(_tentativeSegments.isEmpty && _finalizedSegments.isEmpty) }
     }
 
     /// Number of segments (finalized + tentative)
     public var segmentCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return finalizedSegments.count + tentativeSegments.count
+        lock.withLock { _tentativeSegments.count + _finalizedSegments.count }
     }
 
     /// Number of confirmed segments
     public var finalizedSegmentCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return finalizedSegments.count
+        lock.withLock { _finalizedSegments.count }
     }
 
     /// Number of tentative segments
     public var tentativeSegmentCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return tentativeSegments.count
+        lock.withLock { _tentativeSegments.count }
     }
 
     /// Last segment (tentative or finalized). Checks tentative segments first, falls back to finalized if none found.
     public var lastSegment: DiarizerSegment? {
-        lock.lock()
-        defer { lock.unlock() }
-        return tentativeSegments.last ?? finalizedSegments.last
+        lock.withLock { _tentativeSegments.last ?? _finalizedSegments.last }
     }
 
     /// Total duration of segments in seconds (finalized + tentative)
     public var speechDuration: Float {
-        lock.lock()
-        defer { lock.unlock() }
-        return finalizedSegments.reduce(0.0) { $0 + $1.duration }
-            + tentativeSegments.reduce(0.0) { $0 + $1.duration }
+        lock.withLock {
+            _finalizedSegments.reduce(0) { $0 + $1.duration } + _tentativeSegments.reduce(0) { $0 + $1.duration }
+        }
     }
 
     /// Duration of all finalized segments in seconds
     public var finalizedSpeechDuration: Float {
-        lock.lock()
-        defer { lock.unlock() }
-        return finalizedSegments.reduce(0.0) { $0 + $1.duration }
+        lock.withLock { _finalizedSegments.reduce(0) { $0 + $1.duration } }
     }
 
     /// Duration of all tentative segments in seconds
     public var tentativeSpeechDuration: Float {
-        lock.lock()
-        defer { lock.unlock() }
-        return tentativeSegments.reduce(0.0) { $0 + $1.duration }
+        lock.withLock { _tentativeSegments.reduce(0) { $0 + $1.duration } }
     }
 
     /// Total number of frames spanned by all segments (finalized + tentative)
     public var numSpeechFrames: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return finalizedSegments.reduce(0) { $0 + $1.length }
-            + tentativeSegments.reduce(0) { $0 + $1.length }
+        lock.withLock {
+            _finalizedSegments.reduce(0) { $0 + $1.length } + _tentativeSegments.reduce(0) { $0 + $1.length }
+        }
     }
 
     /// Number of frames in all finalized segments
     public var numFinalizedSpeechFrames: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return finalizedSegments.reduce(0) { $0 + $1.length }
+        lock.withLock { _finalizedSegments.reduce(0) { $0 + $1.length } }
     }
 
     /// Number of frames in all tentative segments
     public var numTentativeSpeechFrames: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return tentativeSegments.reduce(0) { $0 + $1.length }
+        lock.withLock { _tentativeSegments.reduce(0) { $0 + $1.length } }
     }
+    
+    /// Finalized speech segments
+    private var _finalizedSegments: [DiarizerSegment] = []
+
+    /// Preview speech segments
+    private var _tentativeSegments: [DiarizerSegment] = []
 
     /// - Parameters:
     ///   - id: Speaker UUID
@@ -338,8 +328,8 @@ public class DiarizerSpeaker: Identifiable {
         self.id = UUID()
         self.index = snapshot.index
         self.name = snapshot.name
-        self.finalizedSegments = snapshot.finalizedSegments
-        self.tentativeSegments = snapshot.tentativeSegments
+        self._finalizedSegments = snapshot.finalizedSegments
+        self._tentativeSegments = snapshot.tentativeSegments
     }
 
     /// Rename the speaker
@@ -361,16 +351,16 @@ public class DiarizerSpeaker: Identifiable {
     public func finalize() {
         lock.lock()
         defer { lock.unlock() }
-        finalizedSegments.append(contentsOf: tentativeSegments)
-        tentativeSegments.removeAll()
+        _finalizedSegments.append(contentsOf: _tentativeSegments)
+        _tentativeSegments.removeAll()
     }
 
     /// Clear segments
     public func reset() {
         lock.lock()
         defer { lock.unlock() }
-        tentativeSegments.removeAll()
-        finalizedSegments.removeAll()
+        _tentativeSegments.removeAll()
+        _finalizedSegments.removeAll()
     }
 
     public func rollback(to snapshot: consuming Snapshot, keepingName: Bool = false) {
@@ -378,8 +368,8 @@ public class DiarizerSpeaker: Identifiable {
         defer { lock.unlock() }
         if !keepingName { self.name = snapshot.name }
         self.index = snapshot.index
-        self.finalizedSegments = snapshot.finalizedSegments
-        self.tentativeSegments = snapshot.tentativeSegments
+        self._finalizedSegments = snapshot.finalizedSegments
+        self._tentativeSegments = snapshot.tentativeSegments
     }
 
     public func takeSnapshot() -> Snapshot {
@@ -388,8 +378,8 @@ public class DiarizerSpeaker: Identifiable {
         return Snapshot(
             name: name,
             index: index,
-            finalizedSegments: finalizedSegments,
-            tentativeSegments: tentativeSegments
+            finalizedSegments: _finalizedSegments,
+            tentativeSegments: _tentativeSegments
         )
     }
 
@@ -398,7 +388,7 @@ public class DiarizerSpeaker: Identifiable {
     public func clearTentative(keepingCapacity: Bool = false) {
         lock.lock()
         defer { lock.unlock() }
-        tentativeSegments.removeAll(keepingCapacity: keepingCapacity)
+        _tentativeSegments.removeAll(keepingCapacity: keepingCapacity)
     }
 
     /// Append a tentative segment
@@ -406,7 +396,7 @@ public class DiarizerSpeaker: Identifiable {
     public func appendTentative(_ segment: DiarizerSegment) {
         lock.lock()
         defer { lock.unlock() }
-        tentativeSegments.append(segment)
+        _tentativeSegments.append(segment)
     }
 
     /// Append a finalized segment
@@ -414,7 +404,7 @@ public class DiarizerSpeaker: Identifiable {
     public func appendFinalized(_ segment: DiarizerSegment) {
         lock.lock()
         defer { lock.unlock() }
-        finalizedSegments.append(segment)
+        _finalizedSegments.append(segment)
     }
 
     /// Append a segment, automatically detecting if it's finalized or tentative
@@ -423,9 +413,9 @@ public class DiarizerSpeaker: Identifiable {
         lock.lock()
         defer { lock.unlock() }
         if segment.isFinalized {
-            finalizedSegments.append(segment)
+            _finalizedSegments.append(segment)
         } else {
-            tentativeSegments.append(segment)
+            _tentativeSegments.append(segment)
         }
     }
 
@@ -435,7 +425,7 @@ public class DiarizerSpeaker: Identifiable {
     public func popLastTentative() -> DiarizerSegment? {
         lock.lock()
         defer { lock.unlock() }
-        return tentativeSegments.popLast()
+        return _tentativeSegments.popLast()
     }
 
     /// Pop last finalized segment
@@ -444,7 +434,7 @@ public class DiarizerSpeaker: Identifiable {
     public func popLastFinalized() -> DiarizerSegment? {
         lock.lock()
         defer { lock.unlock() }
-        return finalizedSegments.popLast()
+        return _finalizedSegments.popLast()
     }
 
     /// Pop last tentative or finalized segment
@@ -456,8 +446,8 @@ public class DiarizerSpeaker: Identifiable {
         defer { lock.unlock() }
         return
             (fromFinalized
-            ? finalizedSegments.popLast()
-            : tentativeSegments.popLast())
+            ? _finalizedSegments.popLast()
+            : _tentativeSegments.popLast())
     }
 
     /// Pop last segment. Pops the last tentative segment first. Falls back to the last finalized segment if no
@@ -467,7 +457,7 @@ public class DiarizerSpeaker: Identifiable {
     public func popLast() -> DiarizerSegment? {
         lock.lock()
         defer { lock.unlock() }
-        return tentativeSegments.popLast() ?? finalizedSegments.popLast()
+        return _tentativeSegments.popLast() ?? _finalizedSegments.popLast()
     }
 
     /// Pop last segment. Pops the last tentative segment first. Falls back to the last finalized segment if no
@@ -479,11 +469,11 @@ public class DiarizerSpeaker: Identifiable {
     ) rethrows -> DiarizerSegment? {
         lock.lock()
         defer { lock.unlock() }
-        let last = tentativeSegments.last ?? finalizedSegments.last
+        let last = _tentativeSegments.last ?? _finalizedSegments.last
         guard let last, try predicate(last) else {
             return nil
         }
-        return tentativeSegments.popLast() ?? finalizedSegments.popLast()
+        return _tentativeSegments.popLast() ?? _finalizedSegments.popLast()
     }
 }
 
