@@ -37,11 +37,7 @@ public struct DiarizerTimelineConfig: Sendable {
     /// Value used to measure speech activity (sigmoids or logits)
     public var activityType: DiarizerActivityType
 
-    /// When false, the timeline never creates `DiarizerSpeaker` objects. Committed
-    /// segments are only delivered via the per-chunk `DiarizerTimelineUpdate`;
-    /// `upsertSpeaker(...)` is refused, snapshot inits drop the snapshot's speakers,
-    /// and `timeline.speakers` stays empty for the lifetime of the session. Pair
-    /// with `maxStoredFrames` to also bound prediction memory.
+    /// Whether to store segments in to timeline.
     public var storeSegments: Bool
 
     // MARK: - Seconds Accessors
