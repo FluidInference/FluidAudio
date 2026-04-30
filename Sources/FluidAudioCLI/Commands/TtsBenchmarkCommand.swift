@@ -458,26 +458,56 @@ public enum TtsBenchmarkCommand {
                 "speaker": speaker.displayName, "language": language.rawValue,
             ]
         ) { text in
+            // Drive Magpie through `synthesizeStream` so TTFT measures
+            // time-to-first-chunk-yield rather than full-utterance wall.
+            // The chunker carves a small first chunk
+            // (`MagpieChunker.streamingFirstChunkCap` = 50 codec frames ≈
+            // 2.3 s of audio) when the first sentence is long enough; for
+            // short phrases the stream degrades to one chunk == whole
+            // utterance and TTFT == synthMs (no streaming benefit, no
+            // measurement penalty).
+            //
+            // Trade-off vs. the prior `synthesize()` path: per-stage
+            // timings (`text_encoder`/`prefill`/`ar_loop`/…) are only
+            // surfaced on `MagpieSynthesisResult`, not per
+            // `MagpieAudioChunk`, so `stageMs` is empty here. That matches
+            // PocketTTS streaming which also publishes empty `stageMs`.
             let t0 = Date()
-            let result = try await manager.synthesize(
+            let stream = try await manager.synthesizeStream(
                 text: text, speaker: speaker, language: language)
+            var aggregated: [Float] = []
+            var ttftMs: Double = 0
+            var chunkCount = 0
+            var codeCount = 0
+            var finishedOnEos = false
+            var sampleRate = MagpieConstants.audioSampleRate
+            for try await chunk in stream {
+                if chunkCount == 0 {
+                    ttftMs = Date().timeIntervalSince(t0) * 1000
+                }
+                aggregated.append(contentsOf: chunk.samples)
+                chunkCount += 1
+                codeCount += chunk.codeCount
+                sampleRate = chunk.sampleRate
+                if chunk.isFinal {
+                    finishedOnEos = chunk.finishedOnEos
+                }
+            }
             let synthMs = Date().timeIntervalSince(t0) * 1000
+            // Empty-stream guard (synthesizeStream returns immediately on
+            // zero-length input). Fall back to synthMs so downstream
+            // percentile math doesn't see ttftMs == 0.
+            if chunkCount == 0 { ttftMs = synthMs }
             return BackendPhraseSample(
                 synthMs: synthMs,
-                ttftMs: synthMs,
-                samples: result.samples,
-                sampleRate: result.sampleRate,
-                stageMs: [
-                    "text_encoder": result.timings.textEncoderSeconds * 1000,
-                    "prefill": result.timings.prefillSeconds * 1000,
-                    "ar_loop": result.timings.arLoopSeconds * 1000,
-                    "decoder_step": result.timings.decoderStepSeconds * 1000,
-                    "sampler": result.timings.samplerSeconds * 1000,
-                    "nanocodec": result.timings.nanocodecSeconds * 1000,
-                ],
+                ttftMs: ttftMs,
+                samples: aggregated,
+                sampleRate: sampleRate,
+                stageMs: [:],
                 extraFields: [
-                    "code_count": result.codeCount,
-                    "finished_on_eos": result.finishedOnEos,
+                    "code_count": codeCount,
+                    "finished_on_eos": finishedOnEos,
+                    "chunk_count": chunkCount,
                 ]
             )
         }
@@ -534,6 +564,10 @@ public enum TtsBenchmarkCommand {
                 extraFields: [
                     "generated_token_count": result.generatedTokenCount,
                     "decoded_token_count": result.decodedTokens.count,
+                    // Surface the structural 250-token Flow-input cap as a
+                    // per-phrase boolean so corpus reports can tally how many
+                    // long phrases hit silent truncation.
+                    "finished_on_eos": result.finishedOnEos,
                 ]
             )
         }
