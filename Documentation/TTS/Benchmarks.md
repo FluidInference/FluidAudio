@@ -152,7 +152,7 @@ WER / CER.
 | StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | 955 s§     | 6671 / 15990 ms§    | 6671 / 15990 ms§    | 2.72×§   | 963 MB§  | 0.440§  | 0.241§  | full 100/100 `minimax-english` after [`sliceFirstAxis2D` flex-shape fix](#styletts2-flexible-shape-fix) **and** [misaki→espeak post-pass remap](#styletts2-misaki--espeak-post-pass-remap); ref_s dumped via [`06_dump_ref_s.py`](https://github.com/voicelink-ai/mobius-styletts2/blob/main/models/tts/styletts2/scripts/06_dump_ref_s.py) from LibriTTS `696_92939_000016_000006.wav` (StyleTTS2 demo voice) |
 | Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 19.1 s     | 19834 / 57508 ms    | 19834 / 57508 ms    | 0.41×    | 1233 MB  | 0.056   | 0.033   | streaming-capable but benchmarked one-shot; split-K/V decoder; outputBackings fast path with latched fallback |
 | CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 29.2 s†    | 14091 / 23679 ms†   | 14091 / 23679 ms†   | 0.357×†  | 3302 MB† | n/a     | n/a     | beta; full `minimax-chinese` (100/100 phrases) after [HiFT fix](#cosyvoice3-hift-timeout-fix) + [LLM-Decode outputBackings fix](#cosyvoice3-llm-decode-outputbackings-fix) |
-| CosyVoice3  | Apache-2.0  | yue (cantonese)        | ~1.5 GB   | 25.6 s‡    | 20543 / 36133 ms¶   | 20543 / 36133 ms¶   | 0.270×¶  | 3300 MB¶ | n/a     | n/a     | beta; full `minimax-cantonese` (100/100 phrases); same model as zh, ANE compile cache hot from prior run |
+| CosyVoice3  | Apache-2.0  | yue (cantonese)        | ~1.5 GB   | 88.0 s‡    | 23955 / 41178 ms¶   | 23955 / 41178 ms¶   | 0.245×¶  | 2016 MB¶ | n/a     | n/a     | beta; full `minimax-cantonese` (100/100 phrases) post LLM-Decode `outputBackings` fix; **80/100 phrases hit the 250-token Flow input cap** (`finished_on_eos=false`, ~6.5 s audio truncation), see [Decode budget cap](#cosyvoice3-decode-budget-cap) |
 
 \* TTFT = time to first audio frame. PocketTTS streams 80 ms / 1920-sample
 frames at 24 kHz, so TTFT < synth_ms; the gap is the streaming
@@ -170,15 +170,20 @@ Cold-start dropped from 302.7 s to 29.2 s because ANE compile caches
 were warm on the re-run.
 
 ¶ CosyVoice3 cantonese: full `minimax-cantonese` run, 100 / 100
-phrases, 0 errors. **These numbers predate the LLM-Decode
-`outputBackings` fix** — they are kept for the historical record. A
-re-run with the new decode loop is expected to show similar ~30%
-improvements as the chinese row.
+phrases, 0 errors, post LLM-Decode `outputBackings` fix. Throughput
+is *worse* than the chinese row (0.245× vs 0.357×) because **80 /
+100 cantonese phrases exhausted the 250-token Flow decode budget**
+(see `finished_on_eos` field on each phrase in the JSON report) —
+each truncated phrase forces the AR loop to run the full ~163-token
+budget, producing exactly ~6.5 s of audio regardless of intended
+duration. Peak RSS dropped (3300 → 2016 MB) thanks to the
+`outputBackings` double-buffer. Lifting the 250-token cap requires
+re-exporting the Flow CFM with a larger fixed input shape — see
+[Decode budget cap](#cosyvoice3-decode-budget-cap).
 
-‡ Cantonese cold-start is short because the Mandarin run immediately
-beforehand left the ANE compile cache hot. A clean first-time cold
-start is dominated by the ANE compile attempts for Decode / Flow that
-fall back to `.cpuAndGPU` (~5 min on M2).
+‡ Cantonese cold-start of 88.0 s is the first-phrase synth time and
+includes a fresh ANE compile pass for Decode / Flow. The chinese row
+above had a hot cache from a previous run.
 
 § StyleTTS2 (**beta / experimental** — `StyleTTS2Manager.initialize`
 emits a runtime beta warning): full 100/100 `minimax-english`
@@ -458,6 +463,49 @@ Implemented in
 `CosyVoice3Synthesizer.synthesize` and
 `CosyVoice3Synthesizer.runDecode`
 (`Sources/FluidAudio/TTS/CosyVoice3/Pipeline/Synthesize/CosyVoice3Synthesizer.swift`).
+
+## CosyVoice3 Decode budget cap
+
+CosyVoice3's Flow CFM was exported with a fixed input shape of
+`[1, 250]` speech tokens (`flowTotalTokens` in
+`CosyVoice3Constants.swift:45`). The LLM-Decode AR loop is allowed to
+emit up to `flowTotalTokens − N_prompt` tokens before being cut off
+(typically ~163 generated tokens after the speech-prompt portion).
+At `tokenMelRatio=2 × hiftSamplesPerFrame=480 / sampleRate=24000`
+that's **40 ms of audio per generated token**, so the loop produces
+**at most ~6.5 s of speech per phrase**, regardless of how long the
+input text is.
+
+When the AR loop exits because it ran out of budget (i.e. no EOS
+token in `stopRange = 6_561…6_760`) instead of natural termination,
+`CosyVoice3Synthesizer` now:
+
+1. Logs a `.warning` (one-shot per phrase) naming the
+   `decoded.count / maxNew` budget and the produced audio duration.
+2. Sets `CosyVoice3SynthesisResult.finishedOnEos = false`, which the
+   benchmark harness surfaces as the `finished_on_eos` field on each
+   phrase in the JSON report.
+
+Footprint on the cantonese corpus (`minimax-cantonese`,
+100 phrases): **80 / 100 phrases hit the cap**, all producing
+exactly 163 generated tokens / ~6.5 s of audio. The mandarin corpus
+sees a much lower truncation rate because MiniMax-zh phrases are
+shorter on average.
+
+Lifting the cap requires re-exporting the Flow CFM from
+[`mobius-cosyvoice3`](https://github.com/voicelink-ai/mobius-cosyvoice3)
+with a larger fixed input shape (e.g. `[1, 500]`) — bumping the
+constant in Swift alone would make the Flow input/output shapes
+mismatch at predict time. Workaround at the call site: split long
+phrases at clause boundaries (CJK `，`, `、`, `。`) and concatenate
+the per-clause synthesis results.
+
+Surfaced in
+`CosyVoice3Synthesizer.synthesize`
+(`Sources/FluidAudio/TTS/CosyVoice3/Pipeline/Synthesize/CosyVoice3Synthesizer.swift`)
+and
+`CosyVoice3SynthesisResult.finishedOnEos`
+(`Sources/FluidAudio/TTS/CosyVoice3/Pipeline/Synthesize/CosyVoice3Types.swift`).
 
 ## Magpie outputBackings fast path
 
