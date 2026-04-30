@@ -156,11 +156,13 @@ default budget; pass `disableAutoChunking: true` in
 single call (useful for UI-driven sentence-at-a-time streaming where
 the caller already controls segmentation).
 
-Token-rate estimate inside the chunker (intentionally conservative):
+Token-rate estimate inside the chunker (calibrated against minimax-zh
+corpus runs — initial 5.5 figure was too optimistic and let ~16% of
+phrases hit the cap; 7.5 covers the worst-case observed real rate):
 
 | Class | Tokens/char | Rationale |
 |---|---|---|
-| CJK | 5.5 | 1 syllable per char × ~5–6 speech tokens per syllable |
+| CJK | 7.5 | worst-case observed in real generation; varies 5.5–9 per char |
 | ASCII | 1.5 | BPE compresses; English speaks faster than Mandarin per char |
 | Other (Latin-1, etc.) | 2.5 | middle ground |
 

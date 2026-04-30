@@ -7,8 +7,8 @@ final class CosyVoice3TextChunkerTests: XCTestCase {
     // MARK: - estimateSpeechTokens
 
     func testEstimateSpeechTokensCJK() {
-        // 4 CJK chars × 5.5 = 22 tokens
-        XCTAssertEqual(CosyVoice3TextChunker.estimateSpeechTokens("你好世界"), 22)
+        // 4 CJK chars × 7.5 = 30 tokens
+        XCTAssertEqual(CosyVoice3TextChunker.estimateSpeechTokens("你好世界"), 30)
     }
 
     func testEstimateSpeechTokensASCII() {
@@ -29,7 +29,7 @@ final class CosyVoice3TextChunkerTests: XCTestCase {
     }
 
     func testChunkShortReturnsSingle() {
-        // 4 CJK ≈ 22 tokens, well under default 110
+        // 5 chars (4 CJK + 「。」) ≈ 33 tokens, well under default 110
         XCTAssertEqual(
             CosyVoice3TextChunker.chunk("你好世界。"),
             ["你好世界。"])
@@ -44,14 +44,14 @@ final class CosyVoice3TextChunkerTests: XCTestCase {
     // MARK: - chunk: hard sentence enders
 
     func testChunkSplitsOnHardEnders() {
-        // 25 CJK chars × 5.5 = 137.5 tokens > 110 default → must split
+        // 25 CJK chars × 7.5 = 187.5 tokens > 110 default → must split
         let text = "今天天气很好。我们去公园散步。明天可能会下雨。下周打算去看电影。"
         let chunks = CosyVoice3TextChunker.chunk(text)
         XCTAssertGreaterThan(chunks.count, 1)
         // No chunk should exceed budget by more than the soft margin
         for chunk in chunks {
             let est = CosyVoice3TextChunker.estimateSpeechTokens(chunk)
-            XCTAssertLessThanOrEqual(est, 110 + 30, "chunk over force-split margin: \(chunk)")
+            XCTAssertLessThanOrEqual(est, 110 + 30 + 8, "chunk over force-split margin: \(chunk)")
         }
         // Concatenating chunks back should reconstruct the input modulo
         // whitespace trimming.
@@ -82,22 +82,24 @@ final class CosyVoice3TextChunkerTests: XCTestCase {
         XCTAssertGreaterThan(chunks.count, 1)
         for chunk in chunks {
             let est = CosyVoice3TextChunker.estimateSpeechTokens(chunk)
-            XCTAssertLessThanOrEqual(est, 50 + 30)
+            // Force-split allows one CJK char of overshoot past the +30 margin
+            // because the budget check runs AFTER appending the current char.
+            XCTAssertLessThanOrEqual(est, 50 + 30 + 8)
         }
     }
 
     // MARK: - chunk: force-split fallback
 
     func testChunkForceSplitsOnContinuousCJKWithoutPunctuation() {
-        // 30 CJK chars, no punctuation: ≈ 165 tokens, must force-split
+        // 30 CJK chars, no punctuation: ≈ 225 tokens, must force-split
         // somewhere even without natural boundaries.
         let text = "今天天气很好我们去公园散步明天可能会下雨下周打算看电影然后回家"
         let chunks = CosyVoice3TextChunker.chunk(text, maxSpeechTokens: 50)
         XCTAssertGreaterThan(chunks.count, 1)
         for chunk in chunks {
             let est = CosyVoice3TextChunker.estimateSpeechTokens(chunk)
-            // Force-split has a 30-token overshoot allowance
-            XCTAssertLessThanOrEqual(est, 50 + 30 + 6, "chunk overflow on force-split: \(chunk)")
+            // Force-split has a 30-token overshoot allowance + one CJK char (7.5)
+            XCTAssertLessThanOrEqual(est, 50 + 30 + 8, "chunk overflow on force-split: \(chunk)")
         }
         // No content lost
         XCTAssertEqual(chunks.joined(), text)

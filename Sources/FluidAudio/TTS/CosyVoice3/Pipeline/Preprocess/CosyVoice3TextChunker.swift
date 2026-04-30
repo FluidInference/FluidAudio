@@ -17,8 +17,10 @@ import Foundation
 /// per-chunk and audio is concatenated with a small cosine cross-fade at
 /// boundaries (handled by the caller, not here).
 ///
-/// **Token-rate estimate** (very rough, intentionally conservative):
-/// - CJK char        ≈ 5.5 speech tokens (1 syllable × ~5–6 tokens/syllable)
+/// **Token-rate estimate** (calibrated against minimax-zh corpus runs):
+/// - CJK char        ≈ 7.5 speech tokens (worst-case observed real rate;
+///                                          5.5 was empirically too low and
+///                                          let ~16% of phrases hit cap)
 /// - ASCII char      ≈ 1.5 speech tokens (BPE compresses; English is faster)
 /// - Other (Latin-1) ≈ 2.5 speech tokens (middle ground for accented Latin)
 ///
@@ -116,7 +118,7 @@ public enum CosyVoice3TextChunker {
         var total = 0.0
         for scalar in s.unicodeScalars {
             if isCJK(scalar) {
-                total += 5.5
+                total += 7.5
             } else if scalar.isASCII {
                 total += 1.5
             } else {
