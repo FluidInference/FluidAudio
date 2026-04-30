@@ -126,12 +126,13 @@ extension AsrModels {
                 ModelSpec(fileName: Names.preprocessorFile, computeUnits: config.computeUnits)
             ]
         }
+        let fileNames = getModelFileNames(version: version)
         return [
             // Preprocessor ops map to CPU-only across all platforms. XCode profiling shows
             // that 100% of the the operations map to the CPU anyways.
             ModelSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
 
-            ModelSpec(fileName: Names.encoderFile, computeUnits: config.computeUnits),
+            ModelSpec(fileName: fileNames.encoder, computeUnits: config.computeUnits),
         ]
     }
 
@@ -160,13 +161,20 @@ extension AsrModels {
     // Use centralized model names
     private typealias Names = ModelNames.ASR
 
-    /// Get version-specific file names for decoder and joint models
+    /// Get version-specific file names for encoder, decoder and joint models.
+    ///
+    /// `encoder` is the on-disk filename for the conformer encoder. v3 ships
+    /// the int4-per-channel encoder (`Names.encoderInt4File`) by default; v2
+    /// and tdtJa keep their original `Encoder.mlmodelc`. For fused-frontend
+    /// versions (110m hybrid) the encoder lives inside the preprocessor and
+    /// the value of `encoder` is unused by `createModelSpecs`.
     private static func getModelFileNames(
         version: AsrModelVersion
-    ) -> (decoder: String, joint: String, vocabulary: String) {
+    ) -> (encoder: String, decoder: String, joint: String, vocabulary: String) {
         switch version {
         case .tdtJa:
             return (
+                encoder: ModelNames.TDTJa.encoderFile,
                 decoder: ModelNames.TDTJa.decoderFile,
                 joint: ModelNames.TDTJa.jointFile,
                 vocabulary: ModelNames.TDTJa.vocabularyFile
@@ -177,13 +185,20 @@ extension AsrModels {
             // Swift-side extraction is gated by `needsTopK` in
             // `TdtModelInference.runJointPrepared` so callers that don't pass
             // `language:` pay no extra allocations per step.
+            //
+            // The int4-per-channel encoder is the v3 default (~285 MB on disk
+            // vs ~426 MB for the prior 6-bit palettized encoder, ~49× RTFx
+            // steady-state). LibriSpeech test-clean WER regresses from ~2.6%
+            // to ~5.2%; opt out by overriding `encoderInt4File` upstream.
             return (
+                encoder: Names.encoderInt4File,
                 decoder: Names.decoderFile,
                 joint: Names.jointV3File,
                 vocabulary: Names.vocabularyFile
             )
         default:
             return (
+                encoder: Names.encoderFile,
                 decoder: Names.decoderFile,
                 joint: Names.jointFile,
                 vocabulary: Names.vocabularyFile
@@ -259,14 +274,15 @@ extension AsrModels {
         guard let preprocessorModel = loadedModels[Names.preprocessorFile] else {
             throw AsrModelsError.loadingFailed("Failed to load preprocessor model")
         }
-        let encoderModel = loadedModels[Names.encoderFile]  // nil for fused models
+
+        // Get version-specific file names (encoder filename varies by version:
+        // v3 uses the int4-per-channel encoder, v2/tdtJa keep `Encoder.mlmodelc`).
+        let fileNames = getModelFileNames(version: version)
+        let encoderModel = loadedModels[fileNames.encoder]  // nil for fused models
 
         if !version.hasFusedEncoder && encoderModel == nil {
             throw AsrModelsError.loadingFailed("Failed to load encoder model (required for split frontend)")
         }
-
-        // Get version-specific file names
-        let fileNames = getModelFileNames(version: version)
 
         // Load decoder first
         let decoderModels = try await DownloadUtils.loadModels(
@@ -517,7 +533,7 @@ extension AsrModels {
             specs = [
                 // Preprocessor ops map to CPU-only across all platforms.
                 DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
-                DownloadSpec(fileName: Names.encoderFile, computeUnits: defaultUnits),
+                DownloadSpec(fileName: fileNames.encoder, computeUnits: defaultUnits),
                 DownloadSpec(fileName: fileNames.decoder, computeUnits: defaultUnits),
                 DownloadSpec(fileName: fileNames.joint, computeUnits: defaultUnits),
             ]
@@ -596,7 +612,7 @@ extension AsrModels {
             ("Joint", fileNames.joint),
         ]
         if !version.hasFusedEncoder {
-            modelsToValidate.insert(("Encoder", ModelNames.ASR.encoderFile), at: 1)
+            modelsToValidate.insert(("Encoder", fileNames.encoder), at: 1)
         }
 
         for (name, fileName) in modelsToValidate {

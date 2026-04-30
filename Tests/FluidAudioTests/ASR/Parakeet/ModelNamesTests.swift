@@ -188,4 +188,34 @@ final class ModelNamesTests: XCTestCase {
         // Should be 1 less than regular models (which has 4: Preprocessor, Encoder, Decoder, Joint)
         XCTAssertEqual(fusedModels.count, ModelNames.ASR.requiredModels.count - 1)
     }
+
+    // MARK: - v3 int4 Encoder Tests
+
+    func testV3UsesInt4EncoderAsDefault() {
+        // v3 ships the int4-per-channel encoder by default; the legacy
+        // `Encoder.mlmodelc` is still defined (used by v2 / legacy split
+        // frontends) but is NOT part of the v3 required set.
+        let v3Models = ModelNames.getRequiredModelNames(for: .parakeetV3, variant: nil)
+
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.encoderInt4File))
+        XCTAssertEqual(ModelNames.ASR.encoderInt4File, "EncoderInt4.mlmodelc")
+        XCTAssertFalse(v3Models.contains(ModelNames.ASR.encoderFile))
+
+        // v3 still uses the v3 joint and the shared preprocessor + decoder.
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.preprocessorFile))
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.decoderFile))
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.jointV3File))
+        XCTAssertEqual(v3Models.count, 4)
+    }
+
+    func testV2KeepsLegacyEncoder() {
+        // v2 must keep the original `Encoder.mlmodelc`; the int4 default is
+        // v3-only.
+        let v2Models = ModelNames.getRequiredModelNames(for: .parakeetV2, variant: nil)
+
+        XCTAssertTrue(v2Models.contains(ModelNames.ASR.encoderFile))
+        XCTAssertFalse(v2Models.contains(ModelNames.ASR.encoderInt4File))
+        XCTAssertTrue(v2Models.contains(ModelNames.ASR.jointFile))
+        XCTAssertFalse(v2Models.contains(ModelNames.ASR.jointV3File))
+    }
 }

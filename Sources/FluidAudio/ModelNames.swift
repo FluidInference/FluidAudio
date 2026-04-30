@@ -288,6 +288,12 @@ public enum ModelNames {
         /// Joint decoder variant for v3 that exposes top-K outputs
         /// (`top_k_ids`, `top_k_logits`) used for language-aware script filtering.
         public static let jointV3File = "JointDecisionv3.mlmodelc"
+        /// Int4-per-channel quantized encoder used as the v3 default. Trades
+        /// ~2.6× -> ~5.2× LibriSpeech test-clean WER for a ~33% disk reduction
+        /// (285 MB vs 426 MB for the prior 6-bit palettized encoder) and
+        /// ~49× RTFx steady-state on M-series.
+        public static let encoderInt4 = "EncoderInt4"
+        public static let encoderInt4File = encoderInt4 + ".mlmodelc"
         public static let ctcHeadFile = ctcHead + ".mlmodelc"
 
         /// Required models for v2 / legacy split-frontend loaders.
@@ -299,11 +305,13 @@ public enum ModelNames {
             jointFile,
         ]
 
-        /// Required models for v3. v3 always uses `JointDecisionv3.mlmodelc`
-        /// (with top-K outputs for language-aware script filtering).
+        /// Required models for v3. v3 ships:
+        ///   - the int4-per-channel encoder (`encoderInt4File`) by default
+        ///   - `JointDecisionv3.mlmodelc` (top-K outputs for language-aware
+        ///     script filtering)
         public static let requiredModelsV3: Set<String> = [
             preprocessorFile,
-            encoderFile,
+            encoderInt4File,
             decoderFile,
             jointV3File,
         ]
