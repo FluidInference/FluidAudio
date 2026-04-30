@@ -575,7 +575,9 @@ enum LSEENDBenchmark {
     ) -> DiarizerTimelineConfig {
         var config = base
         config.numSpeakers = diarizer.numSpeakers ?? config.numSpeakers
-        config.frameDurationSeconds = Float(1.0 / (diarizer.modelFrameHz ?? Double(config.frameDurationSeconds)))
+        if let frameHz = diarizer.modelFrameHz {
+            config.frameDurationSeconds = Float(1.0 / frameHz)
+        }
         return config
     }
 
