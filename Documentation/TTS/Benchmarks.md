@@ -8,10 +8,10 @@
 > **Status:** Kokoro, Kokoro ANE, PocketTTS, Magpie complete the
 > English run; CosyVoice3 completes the full Mandarin run after the
 > [HiFT-async-timeout fix](#cosyvoice3-hift-timeout-fix) (HiFT pinned
-> to `.cpuAndGPU`); StyleTTS2 has a [staged
-> fix](#styletts2-flexible-shape-fix-staged) for the
-> flexible-shape-info trip but is unverified (needs a dumped
-> `ref_s.bin`).
+> to `.cpuAndGPU`); StyleTTS2 verified end-to-end on a 5/5 English
+> smoke slice after the
+> [`sliceFirstAxis2D` flex-shape fix](#styletts2-flexible-shape-fix)
+> (full 100-phrase run pending).
 >
 > [minimax]: https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
 > [mms]: https://arxiv.org/abs/2505.07916
@@ -148,7 +148,7 @@ WER / CER.
 | Kokoro ANE  | Apache-2.0  | en (af_heart only)     | ~330 MB   | 37.9 s     | 1586 / 2515 ms      | 1586 / 2515 ms      | 5.19×    | 738 MB   | 0.108   | 0.040   | one-shot; per-stage CU sweep, 7-graph pipeline |
 | Kokoro      | Apache-2.0  | en (af_heart only)     | ~330 MB   | 92.2 s     | 3113 / 4696 ms      | 3113 / 4696 ms      | 2.02×    | 736 MB   | 0.013   | 0.005   | one-shot; cleanest English ASR roundtrip |
 | PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 6.0 s | **1244 / 4749 ms**  | 8757 / 19174 ms     | 0.61×    | 1503 MB  | 0.014   | 0.006   | **streaming**; TTFT is first 80 ms audio frame |
-| StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | n/a (fix staged)| n/a             | n/a                 | n/a      | n/a      | n/a     | n/a     | flexible-shape trip-wire patched in `sliceFirstAxis2D`; verification blocked on dumping a `ref_s.bin` — see [staged fix](#styletts2-flexible-shape-fix-staged) |
+| StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | 76.1 s§    | 11653 / 22701 ms§   | 11653 / 22701 ms§   | 1.35×§   | 1430 MB§ | 0.420§  | 0.262§  | smoke run only (5/5 MiniMax-en phrases) after [`sliceFirstAxis2D` flex-shape fix](#styletts2-flexible-shape-fix); ref_s dumped via [`06_dump_ref_s.py`](https://github.com/voicelink-ai/mobius-styletts2/blob/main/models/tts/styletts2/scripts/06_dump_ref_s.py) from `af_nicole.wav` — full 100-phrase run pending |
 | Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 19.1 s     | 19834 / 57508 ms    | 19834 / 57508 ms    | 0.41×    | 1233 MB  | 0.056   | 0.033   | streaming-capable but benchmarked one-shot; split-K/V decoder; outputBackings fast path with latched fallback |
 | CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 302.7 s†   | 20547 / 31556 ms†   | 20547 / 31556 ms†   | 0.269×†  | 2894 MB† | n/a     | n/a     | beta; full `minimax-chinese` (100/100 phrases) after [HiFT fix](#cosyvoice3-hift-timeout-fix) |
 | CosyVoice3  | Apache-2.0  | yue (cantonese)        | ~1.5 GB   | 25.6 s‡    | 20543 / 36133 ms†   | 20543 / 36133 ms†   | 0.270×†  | 3300 MB† | n/a     | n/a     | beta; full `minimax-cantonese` (100/100 phrases); same model as zh, ANE compile cache hot from prior run |
@@ -167,6 +167,15 @@ roundtrip skipped (no Mandarin / Cantonese ASR backend). See
 beforehand left the ANE compile cache hot. A clean first-time cold
 start is dominated by the ANE compile attempts for Decode / Flow that
 fall back to `.cpuAndGPU` (~5 min on M2).
+
+§ StyleTTS2: 5/5 `minimax-english` phrases, smoke run only. Cold-start
+of 0.06 s reflects warm ANE caches from a prior run in the same
+session; first cold compile of the bucketed text_predictor /
+diffusion_step / decoder graphs is multi-second. Reference voice
+`af_nicole` is a Kokoro voice sample passed through the upstream
+`style_encoder` + `predictor_encoder`; WER is high because the voice
+isn't in StyleTTS2's training distribution (it's a Kokoro asset
+re-purposed as a style ref). The full 100-phrase run is pending.
 
 ### Kokoro ANE — per-stage breakdown (default preset, MiniMax-English)
 
@@ -220,7 +229,7 @@ p50 / p95 are warm-synth latency in ms.
 | Kokoro        | 0.013     | 0.005     | 3113           | 3113            | 4696            | 2.02×  |
 | PocketTTS     | 0.014     | 0.006     | **1244**       | 8757            | 19174           | 0.61×  |
 | Magpie        | 0.056     | 0.033     | 19834          | 19834           | 57508           | 0.41×  |
-| StyleTTS2     | n/a       | n/a       | n/a            | n/a             | n/a             | n/a    |
+| StyleTTS2§    | 0.420     | 0.262     | 11653          | 11653           | 22701           | 1.35×  |
 
 The MiniMax corpus mixes short conversational phrases (1–11) with
 medium news headlines (81–100) and long narrative paragraphs (101–110
@@ -233,7 +242,7 @@ absolute WER on this corpus is best read **relatively** (FluidAudio
 backend A vs. backend B on the same corpus + same ASR + same
 normalizer) rather than against the raw paper numbers.
 
-## StyleTTS2 flexible-shape fix (staged)
+## StyleTTS2 flexible-shape fix
 
 StyleTTS2's `text_predictor.mlmodelc` was aborting on long MiniMax
 phrases with:
@@ -255,13 +264,22 @@ index from the known `(1, leading, trailing)` row-major layout instead
 of querying `arr.strides`. This matches the existing
 `readMLMultiArrayPrefix` pattern used elsewhere in the same file.
 
-Status: build green; **end-to-end verification blocked** on dumping a
-`ref_s.bin` (256 fp32 LE) reference voice — `StyleTTS2Manager.synthesize`
-requires one and the upstream dumper
-(`mobius-styletts2/scripts/06_dump_ref_s.py`) is not present in either
-mobius checkout on this dev box. The synthesis path is otherwise wired
-and known to produce audio on the prior (now-removed) Harvard-sentences
-corpus.
+Status: **verified end-to-end** on a 5/5 `minimax-english` smoke slice
+with a `ref_s.bin` dumped from `samples/kokoro-english/af_nicole.wav`
+via the new
+[`mobius-styletts2/scripts/06_dump_ref_s.py`](https://github.com/voicelink-ai/mobius-styletts2/blob/main/models/tts/styletts2/scripts/06_dump_ref_s.py)
+helper (which wraps the upstream `style_encoder` /
+`predictor_encoder` recipe from `99_parity_check.py`). All 5 phrases
+synthesized successfully (1.35× agg RTFx, 11.7 s p50 synth, 1.43 GB
+peak RSS, 42% macro WER / 26% macro CER on Parakeet TDT roundtrip).
+
+Note: the CoreML runtime still emits a non-fatal `E5RT encountered an
+STL exception. msg = tensor_buffer has known strides while the model
+has FlexibleShapeInfo` line on stdout at process exit (it's printed
+during the implicit deinit of one of the flex-shape graphs —
+`f0n_energy` or `G2PEncoder`). The process exits 0, all phrases
+write valid WAVs, and the JSON summary is correct. The trip is
+cosmetic noise from CoreML's lifecycle, not a synthesis failure.
 
 ## CosyVoice3 HiFT timeout fix
 
