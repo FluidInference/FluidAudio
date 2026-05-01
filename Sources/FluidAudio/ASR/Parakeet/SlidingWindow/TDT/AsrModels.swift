@@ -163,17 +163,6 @@ extension AsrModels {
     // Use centralized model names
     private typealias Names = ModelNames.ASR
 
-    /// Get version-specific file names for encoder, decoder and joint models.
-    ///
-    /// `encoder` is the on-disk filename for the conformer encoder.
-    /// - v3 honours `encoderPrecision` and selects between the 8-bit
-    ///   palettized `Encoder.mlmodelc` (`.int8`, default) and the
-    ///   int4-per-channel `EncoderInt4.mlmodelc` (`.int4`).
-    /// - v2 and tdtJa ship a single encoder file each and ignore
-    ///   `encoderPrecision`.
-    /// - For fused-frontend versions (110m hybrid) the encoder lives inside
-    ///   the preprocessor and the value of `encoder` is unused by
-    ///   `createModelSpecs`.
     private static func getModelFileNames(
         version: AsrModelVersion,
         encoderPrecision: ParakeetEncoderPrecision
@@ -187,17 +176,6 @@ extension AsrModels {
                 vocabulary: ModelNames.TDTJa.vocabularyFile
             )
         case .v3:
-            // v3 uses JointDecisionv3 exclusively. Top-K outputs (`top_k_ids`,
-            // `top_k_logits`) are always computed by the joint graph, but
-            // Swift-side extraction is gated by `needsTopK` in
-            // `TdtModelInference.runJointPrepared` so callers that don't pass
-            // `language:` pay no extra allocations per step.
-            //
-            // Encoder file selection follows `encoderPrecision`:
-            //   - .int8 (default): 8-bit palettized `Encoder.mlmodelc`
-            //     (~426 MB, ~2.64% WER on LibriSpeech test-clean)
-            //   - .int4: int4-per-channel `EncoderInt4.mlmodelc`
-            //     (~285 MB, ~3.76% WER, ~33% disk reduction)
             return (
                 encoder: encoderPrecision.encoderFileName,
                 decoder: Names.decoderFile,
@@ -214,7 +192,6 @@ extension AsrModels {
         }
     }
 
-    /// Get version-specific required models set
     private static func getRequiredModels(
         version: AsrModelVersion,
         encoderPrecision: ParakeetEncoderPrecision
@@ -237,11 +214,6 @@ extension AsrModels {
     ///                   computeUnits will be respected. When nil, platform-optimized defaults
     ///                   are used (per-model optimization based on model type).
     ///   - version: ASR model version to load (defaults to v3)
-    ///   - encoderPrecision: For v3, selects the on-disk encoder variant.
-    ///                   `.int8` (default) loads the 8-bit palettized
-    ///                   `Encoder.mlmodelc`; `.int4` loads
-    ///                   `EncoderInt4.mlmodelc` (smaller, slightly worse WER).
-    ///                   Ignored for non-v3 versions.
     ///
     /// - Returns: Loaded ASR models
     ///
@@ -267,11 +239,7 @@ extension AsrModels {
         let config = configuration ?? defaultConfiguration()
 
         let parentDirectory = directory.deletingLastPathComponent()
-        // The download/cache layer keys its required-set lookup off the
-        // `variant` string. Pass it for v3 (so the existence check picks the
-        // right encoder file) and nil otherwise.
         let downloadVariant: String? = (version == .v3) ? encoderPrecision.rawValue : nil
-        // Load preprocessor and encoder first; decoder and joint are loaded below as well.
         let specs = createModelSpecs(using: config, version: version, encoderPrecision: encoderPrecision)
 
         var loadedModels: [String: MLModel] = [:]
@@ -297,8 +265,6 @@ extension AsrModels {
             throw AsrModelsError.loadingFailed("Failed to load preprocessor model")
         }
 
-        // Get version-specific file names (encoder filename varies by version
-        // and, for v3, by `encoderPrecision`).
         let fileNames = getModelFileNames(version: version, encoderPrecision: encoderPrecision)
         let encoderModel = loadedModels[fileNames.encoder]  // nil for fused models
 
@@ -396,8 +362,6 @@ extension AsrModels {
     }
 
     private static func loadVocabulary(from directory: URL, version: AsrModelVersion) throws -> [Int: String] {
-        // Get version-specific vocabulary file name. The vocab filename is
-        // independent of `encoderPrecision`, so we pass the default here.
         let vocabularyFileName = getModelFileNames(version: version, encoderPrecision: .int8).vocabulary
         let vocabPath = repoPath(from: directory, version: version).appendingPathComponent(vocabularyFileName)
 

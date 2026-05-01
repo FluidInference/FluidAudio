@@ -227,23 +227,10 @@ public enum Repo: String, CaseIterable, Sendable {
 }
 
 /// Encoder precision for the v3 Parakeet TDT 0.6B encoder.
-///
-/// v3 ships two on-disk variants of the conformer encoder:
-///   - `.int8`: `Encoder.mlmodelc` — 8-bit palettized (per-tensor LUT, fp16
-///     codebook). ~426 MB, ~2.64% WER on LibriSpeech test-clean, ~47× RTFx
-///     steady-state on M2 with `.cpuAndNeuralEngine`. This is the default.
-///   - `.int4`: `EncoderInt4.mlmodelc` — int4 linear-per-channel weight
-///     quantization with fp16 activations. ~285 MB (–33% disk), ~3.76% WER,
-///     ~43× RTFx. Opt in for memory/disk savings at a small accuracy cost.
-///
-/// The decoder, joint, and preprocessor are fp16 in both variants. Only the
-/// v3 loader honours this flag; other versions (v2, tdtJa, 110m hybrid) ship
-/// a single encoder file and ignore `encoderPrecision`.
 public enum ParakeetEncoderPrecision: String, Sendable, CaseIterable {
     case int8
     case int4
 
-    /// On-disk encoder filename for this precision (within the v3 repo).
     public var encoderFileName: String {
         switch self {
         case .int8:
@@ -316,12 +303,6 @@ public enum ModelNames {
         /// Joint decoder variant for v3 that exposes top-K outputs
         /// (`top_k_ids`, `top_k_logits`) used for language-aware script filtering.
         public static let jointV3File = "JointDecisionv3.mlmodelc"
-        /// Int4-per-channel quantized encoder offered as an opt-in for v3.
-        /// Trades ~2.64% -> ~3.76% LibriSpeech test-clean WER for a ~33% disk
-        /// reduction (285 MB vs 426 MB for the default 8-bit palettized
-        /// encoder) and ~49× vs ~47× RTFx steady-state on M-series. The v3
-        /// default remains the 8-bit palettized `Encoder.mlmodelc`; pass
-        /// `encoderPrecision: .int4` to opt in.
         public static let encoderInt4File = "EncoderInt4.mlmodelc"
         public static let ctcHeadFile = ctcHead + ".mlmodelc"
 
@@ -334,18 +315,6 @@ public enum ModelNames {
             jointFile,
         ]
 
-        /// Required models for v3, parameterized on encoder precision.
-        ///
-        /// v3 always ships:
-        ///   - the v3 joint (`JointDecisionv3.mlmodelc`, top-K outputs for
-        ///     language-aware script filtering)
-        ///   - the shared preprocessor and decoder
-        ///
-        /// The encoder file is selected by `precision`:
-        ///   - `.int8` (default): `Encoder.mlmodelc` — 8-bit palettized,
-        ///     ~2.64% WER, ~426 MB on disk
-        ///   - `.int4`: `EncoderInt4.mlmodelc` — int4-per-channel, ~3.76%
-        ///     WER, ~285 MB on disk
         public static func requiredModelsV3(
             precision: ParakeetEncoderPrecision = .int8
         ) -> Set<String> {
@@ -1039,10 +1008,6 @@ public enum ModelNames {
         case .vad:
             return ModelNames.VAD.requiredModels
         case .parakeetV3:
-            // `variant` carries the encoder precision ("int8"/"int4") for v3.
-            // Anything unrecognised falls back to the default (.int8) so old
-            // callers that pass `variant: nil` still resolve to the shipped
-            // 8-bit palettized encoder.
             let precision = ParakeetEncoderPrecision(rawValue: variant ?? "") ?? .int8
             return ModelNames.ASR.requiredModelsV3(precision: precision)
         case .parakeetV2:
