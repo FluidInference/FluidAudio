@@ -188,8 +188,9 @@ extension AsrModels {
             //
             // The int4-per-channel encoder is the v3 default (~285 MB on disk
             // vs ~426 MB for the prior 6-bit palettized encoder, ~49× RTFx
-            // steady-state). LibriSpeech test-clean WER regresses from ~2.6%
-            // to ~5.2%; opt out by overriding `encoderInt4File` upstream.
+            // steady-state). LibriSpeech test-clean Avg WER regresses from
+            // ~2.64% to ~3.76%; opt out by overriding `encoderInt4File`
+            // upstream.
             return (
                 encoder: Names.encoderInt4File,
                 decoder: Names.decoderFile,

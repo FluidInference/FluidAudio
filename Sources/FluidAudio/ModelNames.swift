@@ -289,7 +289,7 @@ public enum ModelNames {
         /// (`top_k_ids`, `top_k_logits`) used for language-aware script filtering.
         public static let jointV3File = "JointDecisionv3.mlmodelc"
         /// Int4-per-channel quantized encoder used as the v3 default. Trades
-        /// ~2.6× -> ~5.2× LibriSpeech test-clean WER for a ~33% disk reduction
+        /// ~2.64% -> ~3.76% LibriSpeech test-clean WER for a ~33% disk reduction
         /// (285 MB vs 426 MB for the prior 6-bit palettized encoder) and
         /// ~49× RTFx steady-state on M-series.
         public static let encoderInt4 = "EncoderInt4"
