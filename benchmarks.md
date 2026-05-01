@@ -108,4 +108,4 @@ swift build -c release
 | 8-bit palettized  | 425 MB  | 2.64%   | 1.03%   | 47.1×        | 153 MB   |
 | int4 linear/ch    | 285 MB  | 3.76%   | 1.59%   | 43.1×        | 139 MB   |
 
-Apple M2, `.cpuAndNeuralEngine`. Decoder/joint/preprocessor fp16 in both. The "fp16" encoder we ship at `Encoder.mlmodelc` is actually 8-bit palettized (per-tensor LUT, fp16 codebook values, 294 `constexpr_lut_to_dense` ops) — a true uncompressed fp16 encoder is ~1.13 GB. Peak RAM = `maximum resident set size` from `/usr/bin/time -l` over a 100-file slice (process working set is steady-state, doesn't scale with corpus size). Models: [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml).
+Apple M2, `.cpuAndNeuralEngine`. Decoder/joint/preprocessor fp16 in both. Models: [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml).
