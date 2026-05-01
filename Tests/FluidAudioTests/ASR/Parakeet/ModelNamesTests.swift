@@ -189,17 +189,16 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertEqual(fusedModels.count, ModelNames.ASR.requiredModels.count - 1)
     }
 
-    // MARK: - v3 int4 Encoder Tests
+    // MARK: - v3 Encoder Precision Tests
 
-    func testV3UsesInt4EncoderAsDefault() {
-        // v3 ships the int4-per-channel encoder by default; the legacy
-        // `Encoder.mlmodelc` is still defined (used by v2 / legacy split
-        // frontends) but is NOT part of the v3 required set.
+    func testV3DefaultsToInt8Encoder() {
+        // v3 default: 8-bit palettized `Encoder.mlmodelc`. `variant: nil`
+        // is treated the same as `variant: "int8"` for back-compat with
+        // callers that don't know about precision selection.
         let v3Models = ModelNames.getRequiredModelNames(for: .parakeetV3, variant: nil)
 
-        XCTAssertTrue(v3Models.contains(ModelNames.ASR.encoderInt4File))
-        XCTAssertEqual(ModelNames.ASR.encoderInt4File, "EncoderInt4.mlmodelc")
-        XCTAssertFalse(v3Models.contains(ModelNames.ASR.encoderFile))
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.encoderFile))
+        XCTAssertFalse(v3Models.contains(ModelNames.ASR.encoderInt4File))
 
         // v3 still uses the v3 joint and the shared preprocessor + decoder.
         XCTAssertTrue(v3Models.contains(ModelNames.ASR.preprocessorFile))
@@ -208,8 +207,62 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertEqual(v3Models.count, 4)
     }
 
+    func testV3Int8VariantMatchesDefault() {
+        let nilVariant = ModelNames.getRequiredModelNames(for: .parakeetV3, variant: nil)
+        let int8Variant = ModelNames.getRequiredModelNames(for: .parakeetV3, variant: "int8")
+        XCTAssertEqual(nilVariant, int8Variant)
+    }
+
+    func testV3Int4VariantSelectsInt4Encoder() {
+        // Opt in to the int4-per-channel encoder via variant string.
+        let v3Models = ModelNames.getRequiredModelNames(for: .parakeetV3, variant: "int4")
+
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.encoderInt4File))
+        XCTAssertEqual(ModelNames.ASR.encoderInt4File, "EncoderInt4.mlmodelc")
+        XCTAssertFalse(v3Models.contains(ModelNames.ASR.encoderFile))
+
+        // Joint, preprocessor, and decoder are unchanged.
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.preprocessorFile))
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.decoderFile))
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.jointV3File))
+        XCTAssertEqual(v3Models.count, 4)
+    }
+
+    func testV3UnknownVariantFallsBackToInt8() {
+        // Defensive: anything other than "int8"/"int4" should resolve to the
+        // shipped default rather than throw or return an empty set.
+        let v3Models = ModelNames.getRequiredModelNames(for: .parakeetV3, variant: "fp32")
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.encoderFile))
+        XCTAssertFalse(v3Models.contains(ModelNames.ASR.encoderInt4File))
+    }
+
+    func testParakeetEncoderPrecisionEncoderFileNames() {
+        XCTAssertEqual(ParakeetEncoderPrecision.int8.encoderFileName, ModelNames.ASR.encoderFile)
+        XCTAssertEqual(ParakeetEncoderPrecision.int4.encoderFileName, ModelNames.ASR.encoderInt4File)
+    }
+
+    func testRequiredModelsV3ForBothPrecisions() {
+        let int8Set = ModelNames.ASR.requiredModelsV3(precision: .int8)
+        XCTAssertTrue(int8Set.contains(ModelNames.ASR.encoderFile))
+        XCTAssertFalse(int8Set.contains(ModelNames.ASR.encoderInt4File))
+
+        let int4Set = ModelNames.ASR.requiredModelsV3(precision: .int4)
+        XCTAssertTrue(int4Set.contains(ModelNames.ASR.encoderInt4File))
+        XCTAssertFalse(int4Set.contains(ModelNames.ASR.encoderFile))
+
+        // Both sets share preprocessor / decoder / joint v3.
+        for shared in [
+            ModelNames.ASR.preprocessorFile,
+            ModelNames.ASR.decoderFile,
+            ModelNames.ASR.jointV3File,
+        ] {
+            XCTAssertTrue(int8Set.contains(shared))
+            XCTAssertTrue(int4Set.contains(shared))
+        }
+    }
+
     func testV2KeepsLegacyEncoder() {
-        // v2 must keep the original `Encoder.mlmodelc`; the int4 default is
+        // v2 must keep the original `Encoder.mlmodelc`; the int4 toggle is
         // v3-only.
         let v2Models = ModelNames.getRequiredModelNames(for: .parakeetV2, variant: nil)
 
