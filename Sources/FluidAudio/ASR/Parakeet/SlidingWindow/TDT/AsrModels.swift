@@ -176,6 +176,11 @@ extension AsrModels {
                 vocabulary: ModelNames.TDTJa.vocabularyFile
             )
         case .v3:
+            // v3 uses JointDecisionv3 exclusively. Top-K outputs (`top_k_ids`,
+            // `top_k_logits`) are always computed by the joint graph, but
+            // Swift-side extraction is gated by `needsTopK` in
+            // `TdtModelInference.runJointPrepared` so callers that don't pass
+            // `language:` pay no extra allocations per step.
             return (
                 encoder: encoderPrecision.encoderFileName,
                 decoder: Names.decoderFile,
