@@ -71,6 +71,8 @@ public final class LSEENDDiarizer: Diarizer {
         self.isAvailable = true
     }
 
+    // MARK: - Initialize Model
+
     /// Replace model + timeline + derived metadata. Used by init and hot-swap
     /// paths so every metadata-derived property stays in lockstep with the
     /// currently loaded model.
@@ -112,7 +114,10 @@ public final class LSEENDDiarizer: Diarizer {
 
     // MARK: - Streaming API
 
-    public func addAudio<C: Collection>(_ samples: C, sourceSampleRate: Double?) throws
+    public func addAudio<C: Collection>(
+        _ samples: C,
+        sourceSampleRate: Double? = nil
+    ) throws
     where C.Element == Float {
         guard !samples.isEmpty else { return }
         guard let session else {
@@ -126,20 +131,37 @@ public final class LSEENDDiarizer: Diarizer {
     }
 
     public func process<C: Collection>(
-        samples: C, sourceSampleRate: Double?
+        samples: C,
+        sourceSampleRate: Double? = nil
     ) throws -> DiarizerTimelineUpdate? where C.Element == Float {
         try addAudio(samples, sourceSampleRate: sourceSampleRate)
         return try process()
+    }
+
+    @discardableResult
+    public func finalizeSession() throws -> DiarizerTimelineUpdate? {
+        guard !finalized else { return nil }
+        guard let session else {
+            throw LSEENDError.notInitialized
+        }
+
+        // Drain pending real audio, capture real-frame target.
+        try session.drainRightContextWithSilence()
+        let update = try process()
+
+        timeline.finalize()
+        finalized = true
+        return update
     }
 
     // MARK: - Offline API
 
     public func processComplete<C: Collection>(
         _ samples: C,
-        sourceSampleRate: Double?,
-        keepingEnrolledSpeakers keepSpeakers: Bool?,
-        finalizeOnCompletion: Bool,
-        progressCallback: ((Int, Int, Int) -> Void)?
+        sourceSampleRate: Double? = nil,
+        keepingEnrolledSpeakers keepSpeakers: Bool? = nil,
+        finalizeOnCompletion: Bool = true,
+        progressCallback: ((Int, Int, Int) -> Void)? = nil
     ) throws -> DiarizerTimeline where C.Element == Float {
         guard session != nil, model != nil else {
             throw LSEENDError.notInitialized
@@ -158,9 +180,9 @@ public final class LSEENDDiarizer: Diarizer {
 
     public func processComplete(
         audioFileURL: URL,
-        keepingEnrolledSpeakers keepSpeakers: Bool?,
-        finalizeOnCompletion: Bool,
-        progressCallback: ((Int, Int, Int) -> Void)?
+        keepingEnrolledSpeakers keepSpeakers: Bool? = nil,
+        finalizeOnCompletion: Bool = true,
+        progressCallback: ((Int, Int, Int) -> Void)? = nil
     ) throws -> DiarizerTimeline {
         guard let session, model != nil else {
             throw LSEENDError.notInitialized
@@ -176,6 +198,8 @@ public final class LSEENDDiarizer: Diarizer {
         )
         return timeline
     }
+
+    // MARK: - Flush Queued Samples
 
     /// Shared drain path for both `processComplete` overloads. Runs
     /// session → model → timeline, optionally finalizing the stream.
@@ -252,14 +276,19 @@ public final class LSEENDDiarizer: Diarizer {
         resetStreamingState()
         self.model = nil
         self.session = nil
+        self.modelFrameHz = nil
+        self.numSpeakers = nil
+        self.targetSampleRate = nil
         isAvailable = false
     }
 
+    // MARK: - Enroll Speakers
+
     public func enrollSpeaker<C: Collection>(
         withAudio samples: C,
-        sourceSampleRate: Double?,
-        named name: String?,
-        overwritingAssignedSpeakerName overwriteAssignedSpeakerName: Bool
+        sourceSampleRate: Double? = nil,
+        named name: String? = nil,
+        overwritingAssignedSpeakerName overwriteAssignedSpeakerName: Bool = true
     ) throws -> DiarizerSpeaker? where C.Element == Float {
         guard let session else {
             throw LSEENDError.notInitialized
@@ -345,23 +374,5 @@ public final class LSEENDDiarizer: Diarizer {
         session?.reset()
         framesFedToModel = 0
         finalized = false
-    }
-
-    // MARK: - Private: finalize
-
-    @discardableResult
-    public func finalizeSession() throws -> DiarizerTimelineUpdate? {
-        guard !finalized else { return nil }
-        guard let session else {
-            throw LSEENDError.notInitialized
-        }
-
-        // Drain pending real audio, capture real-frame target.
-        try session.drainRightContextWithSilence()
-        let update = try process()
-
-        timeline.finalize()
-        finalized = true
-        return update
     }
 }
