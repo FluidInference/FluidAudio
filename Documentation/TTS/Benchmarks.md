@@ -63,7 +63,7 @@ Reference each language as `--corpus minimax-<lang>`:
 | PocketTTS   | `minimax-english`  | `english`, `german`, `italian`, `portuguese`, `spanish`, `french` |
 | StyleTTS2   | `minimax-english`  | `english` only (LibriTTS multi-speaker)        |
 | Magpie      | `minimax-english`  | `english`, `spanish`, `german`, `french`, `italian`, `vietnamese`, `chinese`, `hindi` |
-| CosyVoice3  | `minimax-chinese`  | `chinese` only                                 |
+| CosyVoice3  | `minimax-chinese`  | `chinese`, `cantonese`                         |
 
 Lines beginning with `#` are comments. Custom corpora can still be
 passed with `--corpus-path <file.txt>`.
@@ -82,8 +82,9 @@ Per phrase:
 - `audio_ms` — generated audio duration.
 - `rtfx` — `audio_ms / synth_ms`.
 - `wer`, `cer` — via Parakeet ASR roundtrip on the rendered WAV.
-- `stage_ms` — per-stage breakdown (backend-specific keys; empty for
-  Kokoro / PocketTTS / CosyVoice3).
+- `stage_ms` — per-stage breakdown (backend-specific keys; populated
+  for Kokoro ANE + Magpie; empty for Kokoro / PocketTTS /
+  StyleTTS2 / CosyVoice3).
 - Backend-specific extras: `encoder_tokens`, `acoustic_frames`,
   `chunk_count`, `frame_count`, `code_count`, `finished_on_eos`,
   `generated_token_count`, etc.
@@ -159,9 +160,11 @@ WER / CER.
 | CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 29.2 s†    | 14091 / 23679 ms†   | 14091 / 23679 ms†   | 0.357×†  | 3302 MB† | n/a     | n/a     | beta; full `minimax-chinese` (100/100 phrases) after [HiFT fix](#cosyvoice3-hift-timeout-fix) + [LLM-Decode outputBackings fix](#cosyvoice3-llm-decode-outputbackings-fix) |
 | CosyVoice3  | Apache-2.0  | yue (cantonese)        | ~1.5 GB   | 219.8 s‡   | 35681 / 60523 ms¶   | 35681 / 60523 ms¶   | 0.249×¶  | 3264 MB¶ | n/a     | n/a     | beta; full `minimax-cantonese` (100/100 phrases) post [auto-chunker](#cosyvoice3-auto-chunker); **truncation 80/100 → 5/100** (`finished_on_eos=false`); longest output 16.1 s (was capped at ~6.5 s) |
 
-\* TTFT = time to first audio frame. PocketTTS streams 80 ms / 1920-sample
-frames at 24 kHz, so TTFT < synth_ms; the gap is the streaming
-advantage. All other backends are benchmarked one-shot, so
+\* TTFT = time to first audio frame. **PocketTTS** streams 80 ms /
+1920-sample frames at 24 kHz; **Magpie** streams variable-size codec
+chunks at 22.05 kHz via `synthesizeStream`. For both, TTFT < synth_ms
+and the gap is the streaming advantage. **Kokoro / Kokoro ANE /
+StyleTTS2 / CosyVoice3** are benchmarked one-shot, so
 `ttft_ms == synth_ms` for them.
 
 † CosyVoice3: full `minimax-chinese` run, 100 / 100 phrases, 0 errors,
@@ -248,14 +251,14 @@ because phrases 81–100 are paragraph-length news / story sentences.
 ### Magpie — per-stage breakdown (default preset, MiniMax-English)
 
 Means across 100 `minimax-english` phrases on M2 (`John` voice, en,
-default compute units). `ar_loop` is the umbrella for the per-step
+default compute units), captured during the original one-shot
+profiling run. `ar_loop` is the umbrella for the per-step
 `decoder_step` + `sampler` (so it is not added on top in the total).
 `nanocodec` runs concurrently with the AR loop in chunked-streaming
-mode, which is why the per-stage means do not sum to total
-warm-synth-mean (24.8 s). The AR loop dominates the wall clock, and
-its cost grows super-linearly with phrase length — most of MiniMax's
-57.5 s p95 latency comes from the long news / story phrases (max
-107 s on a single 18 s utterance).
+mode, which is why the per-stage means do not sum to total warm-synth
+mean. The AR loop dominates the wall clock, and its cost grows
+super-linearly with phrase length — long news / story phrases drive
+the long-tail p95.
 
 | Stage              | Mean ms |
 |--------------------|---------|
@@ -503,18 +506,19 @@ token in `stopRange = 6_561…6_760`) instead of natural termination,
    phrase in the JSON report.
 
 Footprint on the cantonese corpus (`minimax-cantonese`,
-100 phrases): **80 / 100 phrases hit the cap**, all producing
-exactly 163 generated tokens / ~6.5 s of audio. The mandarin corpus
-sees a much lower truncation rate because MiniMax-zh phrases are
-shorter on average.
+100 phrases) **without the chunker**: 80 / 100 phrases would hit the
+cap, all producing exactly 163 generated tokens / ~6.5 s of audio.
+The mandarin corpus sees a much lower truncation rate because
+MiniMax-zh phrases are shorter on average.
 
-Lifting the cap requires re-exporting the Flow CFM from
+The structural fix — re-exporting the Flow CFM from
 [`mobius-cosyvoice3`](https://github.com/voicelink-ai/mobius-cosyvoice3)
-with a larger fixed input shape (e.g. `[1, 500]`) — bumping the
-constant in Swift alone would make the Flow input/output shapes
-mismatch at predict time. Workaround at the call site: split long
-phrases at clause boundaries (CJK `，`, `、`, `。`) and concatenate
-the per-clause synthesis results.
+with a larger fixed input shape (e.g. `[1, 500]`) — is upstream
+work; bumping the constant in Swift alone would make the Flow
+input/output shapes mismatch at predict time. The shipped workaround
+is the call-site [auto-chunker](#cosyvoice3-auto-chunker), which
+drops cantonese truncation from 80/100 → 5/100 by splitting long
+inputs at clause boundaries and crossfading the results.
 
 Surfaced in
 `CosyVoice3Synthesizer.synthesize`
