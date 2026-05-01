@@ -1,4 +1,5 @@
 #if os(macOS)
+import CoreML
 import FluidAudio
 import Foundation
 
@@ -45,6 +46,51 @@ public enum TtsBenchmarkCommand {
         let extraFields: [String: Any]  // encoder_tokens, finished_on_eos, etc.
     }
 
+    // MARK: - ASR backend selection
+    //
+    // The harness supports two ASR backends for the TTS→ASR roundtrip:
+    //   .parakeet — Parakeet TDT (English-only, auto-downloaded).
+    //   .cohere   — Cohere Transcribe cache-external (14 languages incl. zh).
+    // CosyVoice3's Mandarin output requires `.cohere` for a meaningful CER
+    // — Parakeet's English-only output collapses to ~100% on zh.
+    fileprivate enum AsrChoice {
+        case skip
+        case parakeet
+        case cohere(modelDir: URL, language: CohereAsrConfig.Language, computeUnits: MLComputeUnits)
+
+        var label: String {
+            switch self {
+            case .skip: return "skip"
+            case .parakeet: return "parakeet-tdt"
+            case .cohere(_, let lang, let cu):
+                return "cohere-transcribe-\(lang.rawValue)/\(Self.computeLabel(cu))"
+            }
+        }
+
+        private static func computeLabel(_ cu: MLComputeUnits) -> String {
+            switch cu {
+            case .all: return "all"
+            case .cpuAndNeuralEngine: return "cpu+ane"
+            case .cpuAndGPU: return "cpu+gpu"
+            case .cpuOnly: return "cpu"
+            @unknown default: return "unknown"
+            }
+        }
+
+        var skipped: Bool {
+            if case .skip = self { return true } else { return false }
+        }
+    }
+
+    /// Closure-based ASR adapter so `runPhraseLoop` doesn't have to know
+    /// which backend it's driving. Built once before the per-phrase loop,
+    /// torn down after.
+    fileprivate struct AsrLoop {
+        let label: String
+        let transcribeOne: (URL) async throws -> String
+        let cleanup: () async -> Void
+    }
+
     public static func run(arguments: [String]) async {
         var backendName = "kokoro-ane"
         var corpusName: String?
@@ -56,6 +102,10 @@ public enum TtsBenchmarkCommand {
         var outputJson: String?
         var audioDir: String?
         var skipAsr = false
+        var asrBackendName: String?
+        var cohereModelDirArg: String?
+        var asrLanguageArg: String?
+        var cohereComputeUnitsArg: String?
 
         var i = 0
         while i < arguments.count {
@@ -108,6 +158,26 @@ public enum TtsBenchmarkCommand {
                 }
             case "--skip-asr":
                 skipAsr = true
+            case "--asr-backend":
+                if i + 1 < arguments.count {
+                    asrBackendName = arguments[i + 1]
+                    i += 1
+                }
+            case "--cohere-model-dir":
+                if i + 1 < arguments.count {
+                    cohereModelDirArg = arguments[i + 1]
+                    i += 1
+                }
+            case "--asr-language":
+                if i + 1 < arguments.count {
+                    asrLanguageArg = arguments[i + 1]
+                    i += 1
+                }
+            case "--cohere-compute-units":
+                if i + 1 < arguments.count {
+                    cohereComputeUnitsArg = arguments[i + 1]
+                    i += 1
+                }
             case "--help", "-h":
                 printUsage()
                 return
@@ -150,12 +220,28 @@ public enum TtsBenchmarkCommand {
             exit(1)
         }
 
-        // CosyVoice3 has no English ASR pairing in this slice — force --skip-asr.
-        var effectiveSkipAsr = skipAsr
-        if backend == .cosyVoice3 && !skipAsr {
-            logger.info("CosyVoice3: forcing --skip-asr (no Mandarin ASR wired in this slice)")
-            effectiveSkipAsr = true
+        // Resolve ASR backend choice. Precedence:
+        //   --skip-asr or --asr-backend none → .skip
+        //   --asr-backend cohere             → .cohere(modelDir, language)
+        //   --asr-backend parakeet           → .parakeet
+        //   no flag, backend == cosyvoice3   → .skip (Parakeet is English-only;
+        //                                       Mandarin output collapses to ~100% WER)
+        //   no flag, otherwise               → .parakeet
+        let asrChoice: AsrChoice
+        do {
+            asrChoice = try resolveAsrChoice(
+                skipAsrFlag: skipAsr,
+                backendName: asrBackendName,
+                cohereModelDir: cohereModelDirArg,
+                asrLanguage: asrLanguageArg,
+                cohereComputeUnits: cohereComputeUnitsArg,
+                corpusLabel: corpusLabel,
+                ttsBackend: backend)
+        } catch {
+            logger.error("Failed to resolve ASR backend: \(error.localizedDescription)")
+            exit(1)
         }
+        logger.info("ASR backend: \(asrChoice.label)")
 
         do {
             switch backend {
@@ -164,37 +250,38 @@ public enum TtsBenchmarkCommand {
                     phrases: phrases, corpusLabel: corpusLabel,
                     voice: voice ?? KokoroAneConstants.defaultVoice,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
-                    skipAsr: effectiveSkipAsr)
+                    asrChoice: asrChoice)
             case .kokoro:
                 try await runKokoro(
                     phrases: phrases, corpusLabel: corpusLabel,
                     voice: voice ?? TtsConstants.recommendedVoice,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
-                    skipAsr: effectiveSkipAsr)
+                    asrChoice: asrChoice)
             case .pocketTts:
                 try await runPocketTts(
                     phrases: phrases, corpusLabel: corpusLabel,
                     voice: voice ?? PocketTtsConstants.defaultVoice,
                     languageName: languageName,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
-                    skipAsr: effectiveSkipAsr)
+                    asrChoice: asrChoice)
             case .magpie:
                 try await runMagpie(
                     phrases: phrases, corpusLabel: corpusLabel,
                     speakerName: speakerName, languageName: languageName,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
-                    skipAsr: effectiveSkipAsr)
+                    asrChoice: asrChoice)
             case .cosyVoice3:
                 try await runCosyVoice3(
                     phrases: phrases, corpusLabel: corpusLabel,
                     voice: voice,
-                    preset: preset, outputJson: outputJson, audioDir: audioDir)
+                    preset: preset, outputJson: outputJson, audioDir: audioDir,
+                    asrChoice: asrChoice)
             case .styleTts2:
                 try await runStyleTts2(
                     phrases: phrases, corpusLabel: corpusLabel,
                     voicePath: voice,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
-                    skipAsr: effectiveSkipAsr)
+                    asrChoice: asrChoice)
             }
         } catch {
             logger.error("tts-benchmark failed: \(error)")
@@ -211,7 +298,7 @@ public enum TtsBenchmarkCommand {
         preset: TtsComputeUnitPreset,
         outputJson: String?,
         audioDir: String?,
-        skipAsr: Bool
+        asrChoice: AsrChoice
     ) async throws {
         let units = KokoroAneComputeUnits(preset: preset)
         let manager = KokoroAneManager(defaultVoice: voice, computeUnits: units)
@@ -237,7 +324,7 @@ public enum TtsBenchmarkCommand {
             firstSynthMs: firstSynthMs,
             outputJson: outputJson,
             audioDir: audioDir,
-            skipAsr: skipAsr,
+            asrChoice: asrChoice,
             extraSummary: ["voice": voice]
         ) { text in
             let t0 = Date()
@@ -276,7 +363,7 @@ public enum TtsBenchmarkCommand {
         preset: TtsComputeUnitPreset,
         outputJson: String?,
         audioDir: String?,
-        skipAsr: Bool
+        asrChoice: AsrChoice
     ) async throws {
         let units = preset.uniformUnits ?? .all
         let manager = KokoroTtsManager(defaultVoice: voice, computeUnits: units)
@@ -301,7 +388,7 @@ public enum TtsBenchmarkCommand {
             firstSynthMs: firstSynthMs,
             outputJson: outputJson,
             audioDir: audioDir,
-            skipAsr: skipAsr,
+            asrChoice: asrChoice,
             extraSummary: ["voice": voice]
         ) { text in
             let t0 = Date()
@@ -332,7 +419,7 @@ public enum TtsBenchmarkCommand {
         preset: TtsComputeUnitPreset,
         outputJson: String?,
         audioDir: String?,
-        skipAsr: Bool
+        asrChoice: AsrChoice
     ) async throws {
         if preset != .default {
             logger.warning(
@@ -377,7 +464,7 @@ public enum TtsBenchmarkCommand {
             firstSynthMs: firstSynthMs,
             outputJson: outputJson,
             audioDir: audioDir,
-            skipAsr: skipAsr,
+            asrChoice: asrChoice,
             extraSummary: ["voice": voice, "language": language.rawValue]
         ) { text in
             // PocketTTS is streaming-first: we measure TTFT (time to first
@@ -422,7 +509,7 @@ public enum TtsBenchmarkCommand {
         preset: TtsComputeUnitPreset,
         outputJson: String?,
         audioDir: String?,
-        skipAsr: Bool
+        asrChoice: AsrChoice
     ) async throws {
         let units = preset.uniformUnits ?? .cpuAndNeuralEngine
         let language = parseMagpieLanguage(languageName)
@@ -453,7 +540,7 @@ public enum TtsBenchmarkCommand {
             firstSynthMs: firstSynthMs,
             outputJson: outputJson,
             audioDir: audioDir,
-            skipAsr: skipAsr,
+            asrChoice: asrChoice,
             extraSummary: [
                 "speaker": speaker.displayName, "language": language.rawValue,
             ]
@@ -521,7 +608,8 @@ public enum TtsBenchmarkCommand {
         voice: String?,
         preset: TtsComputeUnitPreset,
         outputJson: String?,
-        audioDir: String?
+        audioDir: String?,
+        asrChoice: AsrChoice
     ) async throws {
         let units = preset.uniformUnits ?? .cpuAndNeuralEngine
         let voiceId = voice ?? "cosyvoice3-default-zh"
@@ -549,7 +637,7 @@ public enum TtsBenchmarkCommand {
             firstSynthMs: firstSynthMs,
             outputJson: outputJson,
             audioDir: audioDir,
-            skipAsr: true,  // forced upstream
+            asrChoice: asrChoice,
             extraSummary: ["voice": voiceId]
         ) { text in
             let t0 = Date()
@@ -582,7 +670,7 @@ public enum TtsBenchmarkCommand {
         preset: TtsComputeUnitPreset,
         outputJson: String?,
         audioDir: String?,
-        skipAsr: Bool
+        asrChoice: AsrChoice
     ) async throws {
         guard let voicePath, !voicePath.isEmpty else {
             logger.error(
@@ -618,7 +706,7 @@ public enum TtsBenchmarkCommand {
             firstSynthMs: firstSynthMs,
             outputJson: outputJson,
             audioDir: audioDir,
-            skipAsr: skipAsr,
+            asrChoice: asrChoice,
             extraSummary: ["voice": voiceLabel]
         ) { text in
             let t0 = Date()
@@ -648,7 +736,7 @@ public enum TtsBenchmarkCommand {
         firstSynthMs: Double,
         outputJson: String?,
         audioDir: String?,
-        skipAsr: Bool,
+        asrChoice: AsrChoice,
         extraSummary: [String: Any],
         synthOne: (String) async throws -> BackendPhraseSample
     ) async throws {
@@ -661,16 +749,8 @@ public enum TtsBenchmarkCommand {
             audioDirURL = url
         }
 
-        // Optional ASR.
-        var asr: AsrManager? = nil
-        var decoderLayers = 0
-        if !skipAsr {
-            let asrModels = try await AsrModels.downloadAndLoad()
-            let asrInstance = AsrManager()
-            try await asrInstance.loadModels(asrModels)
-            decoderLayers = await asrInstance.decoderLayerCount
-            asr = asrInstance
-        }
+        // Build optional ASR backend (Parakeet, Cohere, or none).
+        let asrLoop = try await buildAsrLoop(asrChoice)
 
         var perPhrase: [[String: Any]] = []
         var byCategory: [String: [Int]] = [:]
@@ -701,13 +781,10 @@ public enum TtsBenchmarkCommand {
             var cerValue = Double.nan
             var hypothesis = ""
             var asrMs = 0.0
-            if let asr {
+            if let asrLoop {
                 let asr0 = Date()
-                var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-                let transcription = try await asr.transcribe(
-                    wavURL, decoderState: &decoderState)
+                hypothesis = try await asrLoop.transcribeOne(wavURL)
                 asrMs = Date().timeIntervalSince(asr0) * 1000
-                hypothesis = transcription.text
                 let m = WERCalculator.calculateWERAndCER(
                     hypothesis: hypothesis, reference: item.text)
                 werValue = m.wer
@@ -748,8 +825,8 @@ public enum TtsBenchmarkCommand {
             perPhrase.append(phraseDict)
         }
 
-        if let asr {
-            await asr.cleanup()
+        if let asrLoop {
+            await asrLoop.cleanup()
         }
 
         // Aggregate.
@@ -803,15 +880,24 @@ public enum TtsBenchmarkCommand {
         logger.info(String(format: "  warm synth p95: %.0f ms", p95))
         logger.info(String(format: "  agg RTFx:       %.2fx", aggRtfx))
         logger.info(String(format: "  peak RSS:       %.0f MB", peakRssMb))
-        if !skipAsr {
+        if !asrChoice.skipped {
             let werVals = perPhrase.compactMap { $0["wer"] as? Double }
             let cerVals = perPhrase.compactMap { $0["cer"] as? Double }
             let macroWer =
                 werVals.isEmpty ? 0 : werVals.reduce(0, +) / Double(werVals.count)
             let macroCer =
                 cerVals.isEmpty ? 0 : cerVals.reduce(0, +) / Double(cerVals.count)
+            logger.info("  ASR backend:    \(asrChoice.label)")
             logger.info(String(format: "  macro WER:      %.2f%%", macroWer * 100))
             logger.info(String(format: "  macro CER:      %.2f%%", macroCer * 100))
+            // Word-level WER is meaningless on whitespace-free scripts (zh, ja).
+            // Surface that explicitly so readers don't trust ~100% WER for zh.
+            if case .cohere(_, let lang, _) = asrChoice,
+                lang == .chinese || lang == .japanese
+            {
+                logger.info(
+                    "  note:           WER is whitespace-tokenized; trust CER for \(lang.rawValue).")
+            }
         } else {
             logger.info("  WER/CER:        skipped")
         }
@@ -830,7 +916,8 @@ public enum TtsBenchmarkCommand {
                 "warm_synth_ms_p95": p95,
                 "agg_rtfx": aggRtfx,
                 "peak_rss_mb": peakRssMb,
-                "asr_skipped": skipAsr,
+                "asr_skipped": asrChoice.skipped,
+                "asr_backend": asrChoice.label,
             ]
             for (k, v) in extraSummary {
                 summary[k] = v
@@ -975,6 +1062,230 @@ public enum TtsBenchmarkCommand {
         return cwd.appendingPathComponent(expanded, isDirectory: isDirectory)
     }
 
+    // MARK: - ASR backend resolution & adapter construction
+
+    /// Map CLI flags + TTS backend defaults to a concrete `AsrChoice`.
+    ///
+    /// Precedence: `--skip-asr` and `--asr-backend none` always win. With
+    /// no flag, English-friendly TTS backends default to Parakeet TDT and
+    /// CosyVoice3 defaults to `.skip` (Parakeet is English-only — its WER
+    /// on Mandarin output reads ~100% and is meaningless).
+    private static func resolveAsrChoice(
+        skipAsrFlag: Bool,
+        backendName: String?,
+        cohereModelDir: String?,
+        asrLanguage: String?,
+        cohereComputeUnits: String?,
+        corpusLabel: String,
+        ttsBackend: Backend
+    ) throws -> AsrChoice {
+        let normalized = backendName?.lowercased()
+        if skipAsrFlag || normalized == "none" {
+            return .skip
+        }
+        switch normalized {
+        case "cohere":
+            let dir = try resolveCohereModelDir(cohereModelDir)
+            let language = inferCohereLanguage(
+                explicit: asrLanguage, corpus: corpusLabel)
+            let units = try resolveCohereComputeUnits(cohereComputeUnits)
+            return .cohere(modelDir: dir, language: language, computeUnits: units)
+        case "parakeet":
+            return .parakeet
+        case nil:
+            // Implicit defaults: skip for CosyVoice3 (no English ASR pairing),
+            // Parakeet otherwise.
+            if ttsBackend == .cosyVoice3 {
+                logger.info(
+                    "CosyVoice3: no --asr-backend selected; skipping ASR. "
+                        + "Pass `--asr-backend cohere --cohere-model-dir <dir>` for CER.")
+                return .skip
+            }
+            return .parakeet
+        default:
+            logger.warning(
+                "Unknown --asr-backend value '\(normalized ?? "")', falling back to parakeet.")
+            return .parakeet
+        }
+    }
+
+    /// Resolve a Cohere Transcribe model directory (must contain
+    /// `cohere_encoder.mlmodelc`, `cohere_decoder_cache_external_v2.mlmodelc`,
+    /// and `vocab.json`).
+    ///
+    /// Order of resolution:
+    ///   1. Explicit `--cohere-model-dir <path>`.
+    ///   2. The default cache location at
+    ///      `~/Library/Application Support/FluidAudio/Models/cohere-transcribe/q8`,
+    ///      matching `Repo.cohereTranscribeCoreml.folderName`.
+    ///
+    /// Auto-download is intentionally not wired here: the upstream
+    /// `Repo.cohereTranscribeCoreml` registration ships `vocab.json` in
+    /// `requiredModels`, but the file lives at the repo root rather than
+    /// under the `q8/` subPath, so `DownloadUtils.downloadRepo` would fail
+    /// the post-download verify. Fix this when the registry learns about
+    /// repo-root files; until then, callers must pre-populate the cache
+    /// (e.g. via `fluidaudio cohere-transcribe ... --model-dir <dir>`).
+    private static func resolveCohereModelDir(_ override: String?) throws -> URL {
+        if let override {
+            return resolveURL(override, isDirectory: true)
+        }
+        let appSupport = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask, appropriateFor: nil, create: true)
+        let target =
+            appSupport
+            .appendingPathComponent("FluidAudio/Models/cohere-transcribe/q8")
+        let needed = [
+            ModelNames.CohereTranscribe.encoderCompiledFile,
+            ModelNames.CohereTranscribe.decoderCacheExternalV2CompiledFile,
+            "vocab.json",
+        ]
+        let missing = needed.filter { name in
+            !FileManager.default.fileExists(
+                atPath: target.appendingPathComponent(name).path)
+        }
+        guard missing.isEmpty else {
+            throw NSError(
+                domain: "TtsBenchmark", code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Cohere model dir incomplete at \(target.path). "
+                        + "Missing: \(missing.joined(separator: ", ")). "
+                        + "Pass --cohere-model-dir <dir> with the required files, or "
+                        + "pre-populate the cache via `fluidaudio cohere-transcribe`."
+                ])
+        }
+        return target
+    }
+
+    /// Pick a `CohereAsrConfig.Language` from an explicit flag value or by
+    /// scanning the corpus label (covers the shipped `minimax-<lang>` set).
+    private static func inferCohereLanguage(
+        explicit: String?, corpus: String
+    ) -> CohereAsrConfig.Language {
+        if let explicit,
+            let lang = CohereAsrConfig.Language(rawValue: explicit.lowercased())
+        {
+            return lang
+        }
+        let lower = corpus.lowercased()
+        if lower.contains("chinese") || lower.contains("mandarin") || lower.hasSuffix("-zh") {
+            return .chinese
+        }
+        if lower.contains("japanese") || lower.contains("-ja") { return .japanese }
+        if lower.contains("korean") || lower.contains("-ko") { return .korean }
+        if lower.contains("vietnamese") || lower.contains("-vi") { return .vietnamese }
+        if lower.contains("french") || lower.contains("-fr") { return .french }
+        if lower.contains("german") || lower.contains("-de") { return .german }
+        if lower.contains("spanish") || lower.contains("-es") { return .spanish }
+        if lower.contains("italian") || lower.contains("-it") { return .italian }
+        if lower.contains("portuguese") || lower.contains("-pt") { return .portuguese }
+        if lower.contains("dutch") || lower.contains("-nl") { return .dutch }
+        if lower.contains("polish") || lower.contains("-pl") { return .polish }
+        if lower.contains("greek") || lower.contains("-el") { return .greek }
+        if lower.contains("arabic") || lower.contains("-ar") { return .arabic }
+        return .english
+    }
+
+    /// Parse `--cohere-compute-units` into `MLComputeUnits`. Defaults to
+    /// `.all` (CoreML decides). Use `cpu-and-gpu` to skip the ANE compile
+    /// attempt when the q8 encoder fails ANE compilation (observed:
+    /// `MILCompilerForANE error: failed to compile ANE model using ANEF`,
+    /// CoreML falls back to CPU+GPU but pays a multi-minute compile cost
+    /// on the first call).
+    private static func resolveCohereComputeUnits(
+        _ flag: String?
+    ) throws
+        -> MLComputeUnits
+    {
+        guard let raw = flag?.lowercased(), !raw.isEmpty else { return .all }
+        switch raw {
+        case "all", "default": return .all
+        case "all-ane", "ane", "neural-engine", "cpu-and-ane":
+            return .cpuAndNeuralEngine
+        case "cpu-and-gpu", "cpuandgpu", "gpu": return .cpuAndGPU
+        case "cpu-only", "cpu", "cpuonly": return .cpuOnly
+        default:
+            throw NSError(
+                domain: "TtsBenchmark", code: 3,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Unknown --cohere-compute-units value '\(raw)'. "
+                        + "Expected: all | cpu-and-gpu | cpu-only | all-ane."
+                ])
+        }
+    }
+
+    /// Human-readable label for log lines.
+    private static func describeComputeUnits(_ cu: MLComputeUnits) -> String {
+        switch cu {
+        case .all: return "all (CPU+GPU+ANE)"
+        case .cpuAndNeuralEngine: return "cpu-and-ane"
+        case .cpuAndGPU: return "cpu-and-gpu"
+        case .cpuOnly: return "cpu-only"
+        @unknown default: return "unknown"
+        }
+    }
+
+    /// Build the per-phrase ASR adapter for a resolved choice. Returns
+    /// `nil` for `.skip` so the loop can short-circuit.
+    private static func buildAsrLoop(_ choice: AsrChoice) async throws -> AsrLoop? {
+        switch choice {
+        case .skip:
+            return nil
+        case .parakeet:
+            let asrModels = try await AsrModels.downloadAndLoad()
+            let asr = AsrManager()
+            try await asr.loadModels(asrModels)
+            let layers = await asr.decoderLayerCount
+            return AsrLoop(
+                label: "parakeet-tdt",
+                transcribeOne: { url in
+                    var state = TdtDecoderState.make(decoderLayers: layers)
+                    let r = try await asr.transcribe(url, decoderState: &state)
+                    return r.text
+                },
+                cleanup: { await asr.cleanup() }
+            )
+        case .cohere(let modelDir, let language, let computeUnits):
+            guard #available(macOS 14, iOS 17, *) else {
+                throw NSError(
+                    domain: "TtsBenchmark", code: 2,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Cohere ASR backend requires macOS 14+ / iOS 17+."
+                    ])
+            }
+            logger.info(
+                "Loading Cohere Transcribe (lang=\(language.englishName), "
+                    + "compute=\(describeComputeUnits(computeUnits))) from \(modelDir.path)")
+            let models = try await CoherePipeline.loadModels(
+                encoderDir: modelDir,
+                decoderDir: modelDir,
+                vocabDir: modelDir,
+                decoderVariant: .v2,
+                computeUnits: computeUnits)
+            let pipeline = CoherePipeline()
+            let converter = AudioConverter()
+            return AsrLoop(
+                label: "cohere-transcribe-\(language.rawValue)",
+                transcribeOne: { url in
+                    let samples = try converter.resampleAudioFile(path: url.path)
+                    let r = try await pipeline.transcribe(
+                        audio: samples,
+                        models: models,
+                        language: language,
+                        maxNewTokens: 108,
+                        repetitionPenalty: 1.1,
+                        noRepeatNgram: 3)
+                    return r.text
+                },
+                cleanup: {}
+            )
+        }
+    }
+
     private static func printUsage() {
         logger.info(
             """
@@ -988,7 +1299,7 @@ public enum TtsBenchmarkCommand {
               kokoro        Single-graph CPU+GPU
               pocket-tts    Streaming flow-matching (multilingual)
               magpie        Encoder-decoder + NanoCodec (per-stage, slow)
-              cosyvoice3    Mandarin LLM-based (forces --skip-asr)
+              cosyvoice3    Mandarin LLM-based (auto-picks Cohere ASR for zh)
 
             Options:
               --backend <name>          See list above (default: kokoro-ane)
@@ -1003,7 +1314,30 @@ public enum TtsBenchmarkCommand {
               --compute-units <preset>  default | all-ane | cpu-and-gpu | cpu-only
               --output-json <path>      Write JSON report
               --audio-dir <path>        Keep generated WAVs under this dir
-              --skip-asr                Skip Parakeet roundtrip (no WER/CER)
+              --skip-asr                Skip ASR roundtrip (no WER/CER)
+              --asr-backend <name>      ASR engine for the WER/CER pass:
+                                          parakeet  English-only (default for en)
+                                          cohere    Multilingual (default for non-en)
+                                          none      Same as --skip-asr
+              --cohere-model-dir <path> Path to a directory containing Cohere
+                                        Transcribe encoder/decoder/vocab.json.
+                                        Required when --asr-backend cohere is
+                                        active (auto-download is not wired —
+                                        vocab.json lives at the repo root, not
+                                        under /q8). Default: cache at
+                                        ~/Library/Application Support/FluidAudio/
+                                        Models/cohere-transcribe/q8
+              --asr-language <code>     Override Cohere language code (default:
+                                        inferred from corpus name). One of:
+                                        en, zh, ja, ko, vi, fr, de, es, it, pt,
+                                        nl, pl, el, ar
+              --cohere-compute-units <p>  Cohere ASR compute mapping:
+                                        all (default; CoreML decides) |
+                                        cpu-and-gpu | cpu-only | all-ane.
+                                        Use cpu-and-gpu when q8 ANE compile
+                                        fails (`MILCompilerForANE error: …`)
+                                        — avoids the multi-minute fallback
+                                        compile on first call.
               --help, -h                Show this help
 
             Examples:
@@ -1011,7 +1345,13 @@ public enum TtsBenchmarkCommand {
               fluidaudio tts-benchmark --backend kokoro --corpus minimax-english
               fluidaudio tts-benchmark --backend pocket-tts --corpus minimax-german --language german
               fluidaudio tts-benchmark --backend magpie --speaker sofia --language en
-              fluidaudio tts-benchmark --backend cosyvoice3 --corpus minimax-chinese
+              fluidaudio tts-benchmark --backend cosyvoice3 --corpus minimax-chinese \\
+                  --asr-backend cohere --cohere-model-dir ~/.fluidaudio/cohere/q8
+
+            Notes:
+              For Chinese (zh) and Japanese (ja), WER is meaningless because
+              WERCalculator splits on whitespace; trust the CER column instead.
+              The summary banner prints an explicit reminder for these langs.
             """
         )
     }
