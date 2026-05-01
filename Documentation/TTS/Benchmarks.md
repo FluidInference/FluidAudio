@@ -95,27 +95,6 @@ Aggregates:
   `task_vm_info_data_t.resident_size_peak`.
 - Per-category macro WER / CER.
 
-### Compute-unit sweep
-
-`--compute-units` selects how each stage is mapped to silicon:
-
-| Preset         | Mapping                                              |
-|----------------|------------------------------------------------------|
-| `default`      | Backend's empirically-tuned per-stage layout         |
-| `all-ane`      | Force every stage to `.cpuAndNeuralEngine`           |
-| `cpu-and-gpu`  | Force every stage to `.cpuAndGPU`                    |
-| `cpu-only`     | Force every stage to `.cpuOnly`                      |
-
-Reporting all four for each backend exposes the latency-vs-efficiency
-tradeoff. Caveats:
-
-- **Kokoro ANE** has a per-stage compute-unit struct
-  (`KokoroAneComputeUnits`) and honors all four presets natively.
-- **Kokoro / Magpie / CosyVoice3** take a single `MLComputeUnits`; the
-  preset maps via `TtsComputeUnitPreset.uniformUnits`.
-- **PocketTTS** does not expose per-call compute-unit overrides — the
-  preset is logged and ignored.
-
 ### Reproducibility
 
 ```bash
