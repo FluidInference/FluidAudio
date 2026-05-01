@@ -220,23 +220,55 @@ public struct PocketTtsSynthesizer {
         let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
         let chunkCount = chunks.count
 
-        let generator = StreamingGenerator(
-            constants: constants,
-            voiceData: voiceData,
-            chunks: chunks,
-            condModel: condModel,
-            stepModel: stepModel,
-            flowModel: flowModel,
-            mimiModel: mimiModel,
-            condLayerKeys: condLayerKeys,
-            flowlmLayerKeys: flowlmLayerKeys,
-            mimiKeys: mimiKeys,
-            mimiInitialState: mimiInitialState,
-            bosEmb: bosEmb,
-            seedValue: seedValue,
-            chunkCount: chunkCount,
-            temperature: temperature
-        )
+        // Resolve chunked cond_step resources only when the store was
+        // opened in `.chunked` mode. Calling the throwing accessors
+        // unconditionally would surface as an error in legacy mode; the
+        // chunkSize gate keeps the Sendable surface to non-optional types
+        // (MLModel and PocketTtsLayerKeys, both Sendable via
+        // `@preconcurrency import CoreML`).
+        let generator: StreamingGenerator
+        if let cs = await store.condStepChunkSize() {
+            let chunkCondModel = try await store.condStepChunkModel()
+            let chunkCondLayerKeys = try await store.condStepChunkLayerKeys()
+            generator = StreamingGenerator(
+                constants: constants,
+                voiceData: voiceData,
+                chunks: chunks,
+                condModel: condModel,
+                stepModel: stepModel,
+                flowModel: flowModel,
+                mimiModel: mimiModel,
+                condLayerKeys: condLayerKeys,
+                flowlmLayerKeys: flowlmLayerKeys,
+                mimiKeys: mimiKeys,
+                mimiInitialState: mimiInitialState,
+                bosEmb: bosEmb,
+                seedValue: seedValue,
+                chunkCount: chunkCount,
+                temperature: temperature,
+                chunkCondModel: chunkCondModel,
+                chunkCondLayerKeys: chunkCondLayerKeys,
+                chunkSize: cs
+            )
+        } else {
+            generator = StreamingGenerator(
+                constants: constants,
+                voiceData: voiceData,
+                chunks: chunks,
+                condModel: condModel,
+                stepModel: stepModel,
+                flowModel: flowModel,
+                mimiModel: mimiModel,
+                condLayerKeys: condLayerKeys,
+                flowlmLayerKeys: flowlmLayerKeys,
+                mimiKeys: mimiKeys,
+                mimiInitialState: mimiInitialState,
+                bosEmb: bosEmb,
+                seedValue: seedValue,
+                chunkCount: chunkCount,
+                temperature: temperature
+            )
+        }
 
         return makeStream(generator: generator)
     }
@@ -274,38 +306,78 @@ public struct PocketTtsSynthesizer {
         //    cache, skip cond_step entirely (`promptLength == 0`, so the
         //    loop in `prefillKVCacheVoice` would be a no-op anyway).
         //  - Cloned voices (flat audio prompt): feed every voice token
-        //    through cond_step.
+        //    through cond_step. Uses hybrid chunk-N + chunk-1 dispatch
+        //    when the store was opened in `.chunked` mode.
+        let chunkSize: Int? = await store.condStepChunkSize()
         let voiceKVSnapshot: KVCacheState
         if let snapshot = voiceData.cacheSnapshot {
             voiceKVSnapshot = try kvCacheStateFromSnapshot(
                 snapshot, layers: condLayerKeys.layerCount)
         } else {
             let emptyState = try emptyKVCacheState(layers: condLayerKeys.layerCount)
-            voiceKVSnapshot = try await prefillKVCacheVoice(
-                state: emptyState, voiceData: voiceData, model: condModel,
-                layerKeys: condLayerKeys
-            )
+            if let cs = chunkSize, cs > 1 {
+                let cm = try await store.condStepChunkModel()
+                let ck = try await store.condStepChunkLayerKeys()
+                voiceKVSnapshot = try await prefillKVCacheVoiceHybrid(
+                    state: emptyState,
+                    voiceData: voiceData,
+                    chunkModel: cm,
+                    chunkLayerKeys: ck,
+                    chunkSize: cs,
+                    perTokenModel: condModel,
+                    perTokenLayerKeys: condLayerKeys
+                )
+            } else {
+                voiceKVSnapshot = try await prefillKVCacheVoice(
+                    state: emptyState, voiceData: voiceData, model: condModel,
+                    layerKeys: condLayerKeys
+                )
+            }
         }
 
         logger.info(
             "Session voice prefill at position \(Int(voiceKVSnapshot.positions[0][0].floatValue))"
         )
 
-        let session = PocketTtsSession(
-            voiceKVSnapshot: voiceKVSnapshot,
-            mimiState: mimiState,
-            constants: constants,
-            condModel: condModel,
-            stepModel: stepModel,
-            flowModel: flowModel,
-            mimiModel: mimiModel,
-            condLayerKeys: condLayerKeys,
-            flowlmLayerKeys: flowlmLayerKeys,
-            mimiKeys: mimiKeys,
-            bosEmb: bosEmb,
-            temperature: temperature,
-            seed: seedValue
-        )
+        let session: PocketTtsSession
+        if let cs = chunkSize {
+            let cm = try await store.condStepChunkModel()
+            let ck = try await store.condStepChunkLayerKeys()
+            session = PocketTtsSession(
+                voiceKVSnapshot: voiceKVSnapshot,
+                mimiState: mimiState,
+                constants: constants,
+                condModel: condModel,
+                stepModel: stepModel,
+                flowModel: flowModel,
+                mimiModel: mimiModel,
+                condLayerKeys: condLayerKeys,
+                flowlmLayerKeys: flowlmLayerKeys,
+                mimiKeys: mimiKeys,
+                bosEmb: bosEmb,
+                temperature: temperature,
+                seed: seedValue,
+                chunkCondModel: cm,
+                chunkCondLayerKeys: ck,
+                chunkSize: cs
+            )
+        } else {
+            session = PocketTtsSession(
+                voiceKVSnapshot: voiceKVSnapshot,
+                mimiState: mimiState,
+                constants: constants,
+                condModel: condModel,
+                stepModel: stepModel,
+                flowModel: flowModel,
+                mimiModel: mimiModel,
+                condLayerKeys: condLayerKeys,
+                flowlmLayerKeys: flowlmLayerKeys,
+                mimiKeys: mimiKeys,
+                bosEmb: bosEmb,
+                temperature: temperature,
+                seed: seedValue
+            )
+        }
         await session.start()
         return session
     }
@@ -333,6 +405,9 @@ public struct PocketTtsSynthesizer {
         var rng: SeededRNG
         let chunkCount: Int
         let temperature: Float
+        let chunkCondModel: MLModel?
+        let chunkCondLayerKeys: PocketTtsLayerKeys?
+        let chunkSize: Int?
 
         init(
             constants: PocketTtsConstantsBundle,
@@ -349,7 +424,10 @@ public struct PocketTtsSynthesizer {
             bosEmb: MLMultiArray,
             seedValue: UInt64,
             chunkCount: Int,
-            temperature: Float
+            temperature: Float,
+            chunkCondModel: MLModel? = nil,
+            chunkCondLayerKeys: PocketTtsLayerKeys? = nil,
+            chunkSize: Int? = nil
         ) {
             self.constants = constants
             self.voiceData = voiceData
@@ -366,6 +444,9 @@ public struct PocketTtsSynthesizer {
             self.rng = SeededRNG(seed: seedValue)
             self.chunkCount = chunkCount
             self.temperature = temperature
+            self.chunkCondModel = chunkCondModel
+            self.chunkCondLayerKeys = chunkCondLayerKeys
+            self.chunkSize = chunkSize
         }
 
         /// Flow decode using actor-isolated RNG state.
@@ -435,12 +516,25 @@ public struct PocketTtsSynthesizer {
                     let textEmbeddings = PocketTtsSynthesizer.embedTokens(
                         tokenIds, constants: constants)
 
-                    var kvState = try await PocketTtsSynthesizer.prefillKVCache(
-                        voiceData: voiceData,
-                        textEmbeddings: textEmbeddings,
-                        model: condModel,
-                        layerKeys: condLayerKeys
-                    )
+                    var kvState: KVCacheState
+                    if let cm = chunkCondModel, let ck = chunkCondLayerKeys, let cs = chunkSize {
+                        kvState = try await PocketTtsSynthesizer.prefillKVCache(
+                            voiceData: voiceData,
+                            textEmbeddings: textEmbeddings,
+                            model: condModel,
+                            layerKeys: condLayerKeys,
+                            chunkModel: cm,
+                            chunkLayerKeys: ck,
+                            chunkSize: cs
+                        )
+                    } else {
+                        kvState = try await PocketTtsSynthesizer.prefillKVCache(
+                            voiceData: voiceData,
+                            textEmbeddings: textEmbeddings,
+                            model: condModel,
+                            layerKeys: condLayerKeys
+                        )
+                    }
 
                     let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: chunkText)
                     var eosStep: Int?

@@ -40,12 +40,14 @@ public actor PocketTtsManager {
         defaultVoice: String = PocketTtsConstants.defaultVoice,
         language: PocketTtsLanguage = .english,
         directory: URL? = nil,
-        precision: PocketTtsPrecision = .fp16
+        precision: PocketTtsPrecision = .fp16,
+        condStepMode: PocketTtsCondStepMode = .legacy
     ) {
         self.modelStore = PocketTtsModelStore(
             language: language,
             directory: directory,
-            precision: precision
+            precision: precision,
+            condStepMode: condStepMode
         )
         self.defaultVoice = defaultVoice
         self.language = language
@@ -332,6 +334,57 @@ public actor PocketTtsManager {
 
     public func cleanup() {
         isInitialized = false
+    }
+
+    // MARK: - Benchmarks
+
+    /// Result of a single `cond_step` prefill benchmark configuration.
+    public struct CondStepPrefillBenchmarkResult: Sendable {
+        /// Number of text tokens fed through `cond_step` (does not include voice prefill).
+        public let textTokens: Int
+        /// Number of voice tokens (only > 0 when the voice has no pre-baked snapshot).
+        public let voiceTokens: Int
+        /// Per-iteration wall-clock prefill durations in seconds. Excludes warmup.
+        public let durations: [TimeInterval]
+        /// Whether the chunked-N + chunk-1 hybrid dispatch was used.
+        public let usingChunked: Bool
+        /// Chunk size when `usingChunked == true`, else `nil`.
+        public let chunkSize: Int?
+    }
+
+    /// Benchmark `cond_step` prefill for a single text on the given voice.
+    ///
+    /// Times only the `prefillKVCache` call — no flowlm_step, flow_decoder,
+    /// or mimi_decoder invocations. The first `warmup` iterations run but
+    /// are not recorded; the next `iters` iterations are timed and returned
+    /// in `durations`.
+    ///
+    /// Pipeline path:
+    ///  - `.legacy` store mode: per-token chunk-1 dispatch (matches upstream behaviour).
+    ///  - `.chunked(chunk: N)` store mode: hybrid (`T / N` chunk-N calls + `T % N`
+    ///    chunk-1 tail calls).
+    ///
+    /// Use the same `text` and `voice` across two managers (one in each
+    /// mode) to A/B compare prefill latency end-to-end.
+    public func benchmarkCondStepPrefill(
+        text: String,
+        voice: String? = nil,
+        warmup: Int = 3,
+        iters: Int = 30
+    ) async throws -> CondStepPrefillBenchmarkResult {
+        guard isInitialized else {
+            throw PocketTTSError.modelNotFound("PocketTTS model not initialized")
+        }
+        guard iters > 0 else {
+            throw PocketTTSError.processingFailed("benchmarkCondStepPrefill: iters must be > 0")
+        }
+
+        let selectedVoice = voice ?? defaultVoice
+        return try await PocketTtsSynthesizer.withModelStore(modelStore) {
+            try await PocketTtsSynthesizer.benchmarkCondStepPrefill(
+                text: text, voice: selectedVoice, warmup: warmup, iters: iters
+            )
+        }
     }
 
     // MARK: - Voice Cloning

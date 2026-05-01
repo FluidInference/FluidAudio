@@ -135,3 +135,34 @@ public enum PocketTtsPrecision: Sendable, Hashable {
     case fp16
     case int8
 }
+
+/// Selects which `cond_step` dispatch strategy the PocketTTS pipeline uses
+/// for prefilling the KV cache from voice tokens and text embeddings.
+///
+/// `cond_step` is invoked once per token in the prompt during prefill — for
+/// the default English voice (~125 frames) plus a typical sentence (~17–80
+/// text tokens) that is 140–200 CoreML calls before the first audio frame
+/// is generated. Each call has a fixed overhead (Python/Swift interop, MIL
+/// dispatch, kernel launch) that dominates wall time at small T.
+///
+/// - `legacy`: dispatch the chunk-1 model once per token. This matches the
+///   reference Python implementation and the upstream FluidAudio behaviour
+///   prior to chunked prefill landing. Always works with the published
+///   `cond_step.mlmodelc` artifact.
+///
+/// - `chunked(chunk: N)`: hybrid dispatch — `T / N` calls to a chunk-N
+///   variant of `cond_step` plus `T % N` chunk-1 tail calls. Same KV cache
+///   schema as legacy (the chunk-N graph reuses the cond_step output names;
+///   only the input sequence dim differs). Empirically 3–14× faster prefill
+///   on Apple Silicon depending on T.
+///
+///   Only `chunked(chunk: 16)` is supported initially. The chunk-16 model
+///   file (`cond_step_chunk16.mlmodelc`) is **not yet published on
+///   HuggingFace** — callers must place it manually under
+///   `<cacheDir>/v2/<lang>/cond_step_chunk16.mlmodelc`. Loading the model
+///   store in this mode without the file present throws
+///   `PocketTTSError.modelNotFound` with the expected path.
+public enum PocketTtsCondStepMode: Sendable, Equatable {
+    case legacy
+    case chunked(chunk: Int)
+}

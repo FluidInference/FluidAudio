@@ -52,6 +52,8 @@ struct FluidAudioCLI {
             await TTSAsrVerifyCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "tts-benchmark":
             await TtsBenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "pocket-tts-cond-bench":
+            await PocketTtsCondBenchCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "minimax-corpus":
             await MinimaxCorpusCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "diarization-benchmark":
@@ -121,6 +123,7 @@ struct FluidAudioCLI {
                 magpie                  Magpie TTS Multilingual 357M (experimental, ~0.04 RTFx — slow, needs perf work)
                 tts-asr-verify          Batch TTS→ASR roundtrip WER verification
                 tts-benchmark           Quantitative TTS benchmark (latency, quality, compute-unit sweep)
+                pocket-tts-cond-bench   Benchmark PocketTTS cond_step prefill: legacy chunk-1 vs hybrid chunk-16
                 minimax-corpus          Fetch MiniMax TTS Multilingual Test Set into Benchmarks/tts/corpus/minimax
                 parakeet-eou            Run Parakeet EOU Streaming ASR on a single file
                 ctc-earnings-benchmark  Run CTC keyword spotting benchmark on Earnings22

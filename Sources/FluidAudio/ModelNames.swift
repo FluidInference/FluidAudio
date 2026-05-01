@@ -667,7 +667,14 @@ public enum ModelNames {
         public static let mimiDecoder = "mimi_decoder"
         public static let mimiEncoder = "mimi_encoder"
 
+        /// Chunk-16 variant of `cond_step`. Same I/O schema as the chunk-1
+        /// model except the conditioning input has sequence dim 16 instead
+        /// of 1. Used by the chunked prefill pipeline to amortize CoreML
+        /// dispatch overhead across longer text/voice prompts.
+        public static let condStepChunk16 = "cond_step_chunk16"
+
         public static let condStepFile = condStep + ".mlmodelc"
+        public static let condStepChunk16File = condStepChunk16 + ".mlmodelc"
         public static let flowlmStepFile = flowlmStep + ".mlmodelc"
         public static let flowlmStepV2File = flowlmStepV2 + ".mlmodelc"
         public static let flowDecoderFile = flowDecoder + ".mlmodelc"

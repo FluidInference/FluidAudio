@@ -119,6 +119,48 @@ extension PocketTtsSynthesizer {
         }
     }
 
+    /// Run the chunked conditioning step model on a `[1, chunkSize, 1024]`
+    /// conditioning tensor, updating the KV cache in place.
+    ///
+    /// Same I/O contract as `runCondStep` — the chunk-N CoreML graph reuses
+    /// the cond_step output names (cache + position per layer); only the
+    /// input sequence dim differs (1 → chunkSize). The model returns the
+    /// post-chunk K/V cache and the position counter advanced by `chunkSize`.
+    static func runCondStepChunk(
+        conditioning: MLMultiArray,
+        state: inout KVCacheState,
+        model: MLModel,
+        layerKeys: PocketTtsLayerKeys
+    ) async throws {
+        let layers = layerKeys.layerCount
+        var inputDict: [String: Any] = [
+            "conditioning": conditioning
+        ]
+
+        for i in 0..<layers {
+            inputDict["cache\(i)"] = state.caches[i]
+            inputDict["position\(i)"] = state.positions[i]
+        }
+
+        let input = try MLDictionaryFeatureProvider(dictionary: inputDict)
+        let output = try await model.compatPrediction(from: input, options: MLPredictionOptions())
+
+        for i in 0..<layers {
+            guard let newCache = output.featureValue(for: layerKeys.cacheKeys[i])?.multiArrayValue
+            else {
+                throw PocketTTSError.processingFailed(
+                    "Missing cond_step_chunk cache output: \(layerKeys.cacheKeys[i])")
+            }
+            guard let newPos = output.featureValue(for: layerKeys.positionKeys[i])?.multiArrayValue
+            else {
+                throw PocketTTSError.processingFailed(
+                    "Missing cond_step_chunk position output: \(layerKeys.positionKeys[i])")
+            }
+            state.caches[i] = newCache
+            state.positions[i] = newPos
+        }
+    }
+
     /// Prefill a KV cache state with voice conditioning tokens.
     ///
     /// Processes all voice tokens from the voice data, writing K/V projections
@@ -243,6 +285,109 @@ extension PocketTtsSynthesizer {
         return KVCacheState(caches: caches, positions: positions)
     }
 
+    /// Prefill a KV cache with voice tokens using hybrid chunk-N + chunk-1 dispatch.
+    ///
+    /// For T voice tokens, runs `T / chunkSize` chunk-N calls then
+    /// `T % chunkSize` chunk-1 tail calls. The chunk model amortizes
+    /// per-call CoreML dispatch overhead across multiple tokens; the chunk-1
+    /// tail handles the remainder so any token count works.
+    static func prefillKVCacheVoiceHybrid(
+        state: KVCacheState,
+        voiceData: PocketTtsVoiceData,
+        chunkModel: MLModel,
+        chunkLayerKeys: PocketTtsLayerKeys,
+        chunkSize: Int,
+        perTokenModel: MLModel,
+        perTokenLayerKeys: PocketTtsLayerKeys
+    ) async throws -> KVCacheState {
+        var state = state
+        let dim = PocketTtsConstants.embeddingDim
+        let total = voiceData.promptLength
+        let nBig = total / chunkSize
+        let nOne = total % chunkSize
+
+        var idx = 0
+        for _ in 0..<nBig {
+            let chunk = try createConditioningChunkFromFlat(
+                source: voiceData.audioPrompt,
+                startToken: idx,
+                count: chunkSize,
+                dim: dim
+            )
+            try await runCondStepChunk(
+                conditioning: chunk,
+                state: &state,
+                model: chunkModel,
+                layerKeys: chunkLayerKeys
+            )
+            idx += chunkSize
+        }
+        for _ in 0..<nOne {
+            let token = try createConditioningToken(
+                from: voiceData.audioPrompt,
+                offset: idx * dim,
+                dim: dim
+            )
+            try await runCondStep(
+                conditioning: token,
+                state: &state,
+                model: perTokenModel,
+                layerKeys: perTokenLayerKeys
+            )
+            idx += 1
+        }
+        return state
+    }
+
+    /// Prefill a KV cache with text embeddings using hybrid chunk-N + chunk-1 dispatch.
+    static func prefillKVCacheTextHybrid(
+        state: KVCacheState,
+        textEmbeddings: [[Float]],
+        chunkModel: MLModel,
+        chunkLayerKeys: PocketTtsLayerKeys,
+        chunkSize: Int,
+        perTokenModel: MLModel,
+        perTokenLayerKeys: PocketTtsLayerKeys
+    ) async throws -> KVCacheState {
+        var state = state
+        let dim = PocketTtsConstants.embeddingDim
+        let total = textEmbeddings.count
+        let nBig = total / chunkSize
+        let nOne = total % chunkSize
+
+        var idx = 0
+        for _ in 0..<nBig {
+            let chunk = try createConditioningChunkFromEmbeddings(
+                source: textEmbeddings,
+                startToken: idx,
+                count: chunkSize,
+                dim: dim
+            )
+            try await runCondStepChunk(
+                conditioning: chunk,
+                state: &state,
+                model: chunkModel,
+                layerKeys: chunkLayerKeys
+            )
+            idx += chunkSize
+        }
+        for _ in 0..<nOne {
+            let token = try createConditioningToken(
+                from: textEmbeddings[idx],
+                offset: 0,
+                dim: dim
+            )
+            try await runCondStep(
+                conditioning: token,
+                state: &state,
+                model: perTokenModel,
+                layerKeys: perTokenLayerKeys
+            )
+            idx += 1
+        }
+        return state
+    }
+
     /// Prefill the KV cache with voice and text conditioning tokens.
     ///
     /// Processes voice tokens first, then text tokens. This ordering is critical —
@@ -256,24 +401,63 @@ extension PocketTtsSynthesizer {
     ///  - **Flat audio prompt** (cloned voices): feed every voice token
     ///    through `cond_step`.
     /// Text prefill runs identically in both cases.
+    ///
+    /// Optional chunked dispatch: when `chunkModel`, `chunkLayerKeys`, and
+    /// `chunkSize` are all non-nil, voice + text prefill use the hybrid
+    /// chunk-N + chunk-1 path, dispatching the bulk of the prompt through
+    /// the chunked CoreML graph and falling back to per-token dispatch for
+    /// the remainder. When any of them is nil, the legacy per-token path
+    /// runs (preserves existing behaviour for callers that don't opt in).
     static func prefillKVCache(
         voiceData: PocketTtsVoiceData,
         textEmbeddings: [[Float]],
         model: MLModel,
-        layerKeys: PocketTtsLayerKeys
+        layerKeys: PocketTtsLayerKeys,
+        chunkModel: MLModel? = nil,
+        chunkLayerKeys: PocketTtsLayerKeys? = nil,
+        chunkSize: Int? = nil
     ) async throws -> KVCacheState {
+        let useHybrid =
+            chunkModel != nil && chunkLayerKeys != nil && chunkSize != nil
+            && (chunkSize ?? 0) > 1
+
         var state: KVCacheState
         if let snapshot = voiceData.cacheSnapshot {
             state = try kvCacheStateFromSnapshot(snapshot, layers: layerKeys.layerCount)
         } else {
             let emptyState = try emptyKVCacheState(layers: layerKeys.layerCount)
-            state = try await prefillKVCacheVoice(
-                state: emptyState, voiceData: voiceData, model: model, layerKeys: layerKeys
+            if useHybrid, let cm = chunkModel, let ck = chunkLayerKeys, let cs = chunkSize {
+                state = try await prefillKVCacheVoiceHybrid(
+                    state: emptyState,
+                    voiceData: voiceData,
+                    chunkModel: cm,
+                    chunkLayerKeys: ck,
+                    chunkSize: cs,
+                    perTokenModel: model,
+                    perTokenLayerKeys: layerKeys
+                )
+            } else {
+                state = try await prefillKVCacheVoice(
+                    state: emptyState, voiceData: voiceData, model: model, layerKeys: layerKeys
+                )
+            }
+        }
+
+        if useHybrid, let cm = chunkModel, let ck = chunkLayerKeys, let cs = chunkSize {
+            state = try await prefillKVCacheTextHybrid(
+                state: state,
+                textEmbeddings: textEmbeddings,
+                chunkModel: cm,
+                chunkLayerKeys: ck,
+                chunkSize: cs,
+                perTokenModel: model,
+                perTokenLayerKeys: layerKeys
+            )
+        } else {
+            state = try await prefillKVCacheText(
+                state: state, textEmbeddings: textEmbeddings, model: model, layerKeys: layerKeys
             )
         }
-        state = try await prefillKVCacheText(
-            state: state, textEmbeddings: textEmbeddings, model: model, layerKeys: layerKeys
-        )
 
         let finalPos = state.positions[0][0].floatValue
         logger.info("KV cache prefilled to position \(Int(finalPos))")
@@ -293,6 +477,46 @@ extension PocketTtsSynthesizer {
         source.withUnsafeBufferPointer { buffer in
             guard let base = buffer.baseAddress else { return }
             ptr.update(from: base.advanced(by: offset), count: dim)
+        }
+        return array
+    }
+
+    /// Create a `[1, count, 1024]` MLMultiArray from a flat audio-prompt
+    /// buffer laid out as `[token0_dim0..token0_dimN-1, token1_dim0..., ...]`.
+    private static func createConditioningChunkFromFlat(
+        source: [Float], startToken: Int, count: Int, dim: Int
+    ) throws -> MLMultiArray {
+        let array = try MLMultiArray(
+            shape: [1, NSNumber(value: count), NSNumber(value: dim)],
+            dataType: .float32
+        )
+        let total = count * dim
+        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: total)
+        source.withUnsafeBufferPointer { buffer in
+            guard let base = buffer.baseAddress else { return }
+            ptr.update(from: base.advanced(by: startToken * dim), count: total)
+        }
+        return array
+    }
+
+    /// Create a `[1, count, 1024]` MLMultiArray by concatenating
+    /// `count` token embeddings starting at `startToken` from a `[[Float]]`
+    /// embedding source.
+    private static func createConditioningChunkFromEmbeddings(
+        source: [[Float]], startToken: Int, count: Int, dim: Int
+    ) throws -> MLMultiArray {
+        let array = try MLMultiArray(
+            shape: [1, NSNumber(value: count), NSNumber(value: dim)],
+            dataType: .float32
+        )
+        let total = count * dim
+        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: total)
+        for i in 0..<count {
+            let embedding = source[startToken + i]
+            embedding.withUnsafeBufferPointer { buffer in
+                guard let base = buffer.baseAddress else { return }
+                ptr.advanced(by: i * dim).update(from: base, count: dim)
+            }
         }
         return array
     }

@@ -14,6 +14,7 @@ public actor PocketTtsModelStore {
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "PocketTtsModelStore")
 
     private var condStepModel: MLModel?
+    private var condStepChunkModelStorage: MLModel?
     private var flowlmStepModel: MLModel?
     private var flowDecoderModel: MLModel?
     private var mimiDecoderModel: MLModel?
@@ -22,11 +23,13 @@ public actor PocketTtsModelStore {
     private var voiceCache: [String: PocketTtsVoiceData] = [:]
     private var languageRootDirectory: URL?
     private var condLayerKeys: PocketTtsLayerKeys?
+    private var condStepChunkLayerKeysCache: PocketTtsLayerKeys?
     private var flowlmLayerKeys: PocketTtsLayerKeys?
     private var mimiDecoderKeysCache: PocketTtsMimiKeys?
     private let directory: URL?
     public let language: PocketTtsLanguage
     public let precision: PocketTtsPrecision
+    public let condStepMode: PocketTtsCondStepMode
 
     /// - Parameters:
     ///   - language: Which upstream language pack to load. Defaults to
@@ -38,14 +41,24 @@ public actor PocketTtsModelStore {
     ///     `flowlm_step.mlmodelc` for `flowlm_stepv2.mlmodelc` from the
     ///     same upstream `v2/<lang>/` directory; the other three submodels
     ///     stay at fp16.
+    ///   - condStepMode: Which `cond_step` dispatch strategy the synthesizer
+    ///     should use for KV cache prefill. Defaults to `.legacy` (per-token
+    ///     dispatch — preserves the upstream behaviour). `.chunked(chunk:
+    ///     16)` additionally loads `cond_step_chunk16.mlmodelc` from the
+    ///     same `v2/<lang>/` directory and lets the synthesizer dispatch
+    ///     prompt prefill in 16-token chunks plus a per-token tail. The
+    ///     chunk-16 file is **not yet published on HuggingFace** — see
+    ///     `PocketTtsCondStepMode.chunked` for placement details.
     public init(
         language: PocketTtsLanguage = .english,
         directory: URL? = nil,
-        precision: PocketTtsPrecision = .fp16
+        precision: PocketTtsPrecision = .fp16,
+        condStepMode: PocketTtsCondStepMode = .legacy
     ) {
         self.language = language
         self.directory = directory
         self.precision = precision
+        self.condStepMode = condStepMode
     }
 
     /// Load all four CoreML models and the constants bundle.
@@ -117,9 +130,61 @@ public actor PocketTtsModelStore {
         let elapsed = Date().timeIntervalSince(loadStart)
         logger.info("All PocketTTS models loaded in \(String(format: "%.2f", elapsed))s")
 
+        // Optionally load the chunked cond_step variant. The chunk-N model
+        // shares the K/V cache + position output schema of chunk-1, so the
+        // existing `.condStep` discovery kind applies — only the input
+        // sequence dim differs (1 → N).
+        if case .chunked(let chunk) = condStepMode {
+            try await loadCondStepChunkModel(
+                chunk: chunk,
+                languageRoot: languageRoot,
+                config: config,
+                expectedLayers: expectedLayers
+            )
+        }
+
         // Load constants
         constantsBundle = try PocketTtsConstantsLoader.load(from: languageRoot)
         logger.info("PocketTTS constants loaded")
+    }
+
+    private func loadCondStepChunkModel(
+        chunk: Int,
+        languageRoot: URL,
+        config: MLModelConfiguration,
+        expectedLayers: Int
+    ) async throws {
+        // Only chunk-16 is supported initially. Reject other sizes loudly so
+        // callers don't silently fall back to a missing artifact.
+        guard chunk == 16 else {
+            throw PocketTTSError.modelNotFound(
+                "PocketTTS chunked cond_step only supports chunk=16 today (requested \(chunk))"
+            )
+        }
+
+        let file = ModelNames.PocketTTS.condStepChunk16File
+        let modelURL = languageRoot.appendingPathComponent(file)
+        guard FileManager.default.fileExists(atPath: modelURL.path) else {
+            throw PocketTTSError.modelNotFound(
+                "PocketTTS \(file) not found at \(modelURL.path). "
+                    + "The chunked cond_step variant is not yet published on HuggingFace; "
+                    + "place the compiled mlmodelc at this path manually to enable .chunked(chunk: 16)."
+            )
+        }
+
+        let chunkLoadStart = Date()
+        let model = try MLModel(contentsOf: modelURL, configuration: config)
+        condStepChunkModelStorage = model
+        condStepChunkLayerKeysCache = try PocketTtsLayerKeys.discover(
+            from: model,
+            kind: .condStep,
+            expectedLayers: expectedLayers,
+            modelName: ModelNames.PocketTTS.condStepChunk16
+        )
+        let chunkElapsed = Date().timeIntervalSince(chunkLoadStart)
+        logger.info(
+            "Loaded \(file) (chunk=\(chunk)) in \(String(format: "%.2f", chunkElapsed))s"
+        )
     }
 
     /// The conditioning step model (KV cache prefill).
@@ -168,6 +233,44 @@ public actor PocketTtsModelStore {
             throw PocketTTSError.modelNotFound("PocketTTS cond_step layer keys not discovered")
         }
         return keys
+    }
+
+    /// The chunked cond_step model. Throws when the store was initialized
+    /// in `.legacy` mode (or when the chunk model file failed to load) —
+    /// callers should gate on `condStepChunkSize() != nil` first.
+    ///
+    /// Returns a non-optional `MLModel` to match the Sendable behaviour of
+    /// `condStep()`; `Optional<MLModel>` would require `MLModel` itself to
+    /// satisfy strict-mode Sendable (the `@preconcurrency import CoreML`
+    /// trick only covers the bare `MLModel`).
+    public func condStepChunkModel() throws -> MLModel {
+        guard let model = condStepChunkModelStorage else {
+            throw PocketTTSError.modelNotFound(
+                "PocketTTS chunked cond_step model not loaded (mode = \(condStepMode))"
+            )
+        }
+        return model
+    }
+
+    /// Discovered output names for the chunked cond_step model. Same
+    /// throwing semantics as `condStepChunkModel()`.
+    func condStepChunkLayerKeys() throws -> PocketTtsLayerKeys {
+        guard let keys = condStepChunkLayerKeysCache else {
+            throw PocketTTSError.modelNotFound(
+                "PocketTTS chunked cond_step layer keys not discovered (mode = \(condStepMode))"
+            )
+        }
+        return keys
+    }
+
+    /// The chunk size if the store was initialized in `.chunked` mode,
+    /// otherwise `nil`. Use this as the cheap gate before calling the
+    /// throwing chunk-model accessors.
+    public func condStepChunkSize() -> Int? {
+        if case .chunked(let chunk) = condStepMode {
+            return chunk
+        }
+        return nil
     }
 
     /// Discovered output names for the flowlm_step transformer model.

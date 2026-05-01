@@ -61,6 +61,9 @@ public actor PocketTtsSession {
     private let condLayerKeys: PocketTtsLayerKeys
     private let flowlmLayerKeys: PocketTtsLayerKeys
     private let mimiKeys: PocketTtsMimiKeys
+    private let chunkCondModel: MLModel?
+    private let chunkCondLayerKeys: PocketTtsLayerKeys?
+    private let chunkSize: Int?
 
     // Persistent state
     private let voiceKVSnapshot: PocketTtsSynthesizer.KVCacheState
@@ -88,7 +91,10 @@ public actor PocketTtsSession {
         mimiKeys: PocketTtsMimiKeys,
         bosEmb: MLMultiArray,
         temperature: Float,
-        seed: UInt64
+        seed: UInt64,
+        chunkCondModel: MLModel? = nil,
+        chunkCondLayerKeys: PocketTtsLayerKeys? = nil,
+        chunkSize: Int? = nil
     ) {
         self.voiceKVSnapshot = voiceKVSnapshot
         self.mimiState = mimiState
@@ -103,6 +109,9 @@ public actor PocketTtsSession {
         self.bosEmb = bosEmb
         self.temperature = temperature
         self.rng = SeededRNG(seed: seed)
+        self.chunkCondModel = chunkCondModel
+        self.chunkCondLayerKeys = chunkCondLayerKeys
+        self.chunkSize = chunkSize
 
         // Text queue channel
         let (textStream, textContinuation) = AsyncStream.makeStream(of: String.self)
@@ -178,12 +187,26 @@ public actor PocketTtsSession {
         let tokenIds = constants.tokenizer.encode(normalizedChunk)
         let textEmbeddings = PocketTtsSynthesizer.embedTokens(tokenIds, constants: constants)
 
-        // Clone voice KV snapshot and prefill text tokens only
+        // Clone voice KV snapshot and prefill text tokens only.
+        // Uses hybrid chunk-N + chunk-1 dispatch when the session was
+        // created from a store opened in `.chunked` mode.
         var kvState = try PocketTtsSynthesizer.cloneKVCacheState(voiceKVSnapshot)
-        kvState = try await PocketTtsSynthesizer.prefillKVCacheText(
-            state: kvState, textEmbeddings: textEmbeddings, model: condModel,
-            layerKeys: condLayerKeys
-        )
+        if let cm = chunkCondModel, let ck = chunkCondLayerKeys, let cs = chunkSize, cs > 1 {
+            kvState = try await PocketTtsSynthesizer.prefillKVCacheTextHybrid(
+                state: kvState,
+                textEmbeddings: textEmbeddings,
+                chunkModel: cm,
+                chunkLayerKeys: ck,
+                chunkSize: cs,
+                perTokenModel: condModel,
+                perTokenLayerKeys: condLayerKeys
+            )
+        } else {
+            kvState = try await PocketTtsSynthesizer.prefillKVCacheText(
+                state: kvState, textEmbeddings: textEmbeddings, model: condModel,
+                layerKeys: condLayerKeys
+            )
+        }
 
         // Generation loop
         let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: text)
