@@ -6,12 +6,10 @@
 > by [MiniMax-Speech][mms], seed-tts-eval, and Gradium, so numbers
 > here are directly paper-comparable.
 > **Status:** Kokoro, Kokoro ANE, PocketTTS, Magpie, StyleTTS2 all
-> complete the English run; CosyVoice3 completes the full Mandarin
-> + Cantonese runs after the
-> [HiFT-async-timeout fix](#cosyvoice3-hift-timeout-fix) (HiFT pinned
-> to `.cpuAndGPU`) **and** the
-> [auto-chunker](#cosyvoice3-auto-chunker) drops cantonese long-phrase
-> truncation from 80/100 → 5/100. StyleTTS2 needs the
+> complete the English run; CosyVoice3 completes the full Mandarin +
+> Cantonese runs, with the [auto-chunker](#cosyvoice3-auto-chunker)
+> dropping cantonese long-phrase truncation from 80/100 → 5/100.
+> StyleTTS2 needs the
 > [`sliceFirstAxis2D` flex-shape fix](#styletts2-flexible-shape-fix)
 > to clear long-phrase synthesis.
 >
@@ -157,7 +155,7 @@ WER / CER.
 | PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 6.0 s | **1244 / 4749 ms**  | 8757 / 19174 ms     | 0.61×    | 1503 MB  | 0.014   | 0.006   | **streaming**; TTFT is first 80 ms audio frame |
 | StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | 955 s§     | 6671 / 15990 ms§    | 6671 / 15990 ms§    | 2.72×§   | 963 MB§  | 0.440§  | 0.241§  | full 100/100 `minimax-english` after [`sliceFirstAxis2D` flex-shape fix](#styletts2-flexible-shape-fix) **and** [misaki→espeak post-pass remap](#styletts2-misaki--espeak-post-pass-remap); ref_s dumped via [`06_dump_ref_s.py`](https://github.com/voicelink-ai/mobius-styletts2/blob/main/models/tts/styletts2/scripts/06_dump_ref_s.py) from LibriTTS `696_92939_000016_000006.wav` (StyleTTS2 demo voice) |
 | Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 38.5 s∥    | **9580 / 23796 ms**∥ | 15080 / 29895 ms∥   | 0.64×∥   | 762 MB∥  | 0.056   | 0.033   | **streaming TTFT**: first audio chunk at 9.6 s p50 on M2 (full synth 15.1 s); split-K/V decoder; outputBackings fast path with latched fallback |
-| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 29.2 s†    | 14091 / 23679 ms†   | 14091 / 23679 ms†   | 0.357×†  | 3302 MB† | n/a     | n/a     | beta; full `minimax-chinese` (100/100 phrases) after [HiFT fix](#cosyvoice3-hift-timeout-fix) + [LLM-Decode outputBackings fix](#cosyvoice3-llm-decode-outputbackings-fix) |
+| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 29.2 s†    | 14091 / 23679 ms†   | 14091 / 23679 ms†   | 0.357×†  | 3302 MB† | n/a     | n/a     | beta; full `minimax-chinese` (100/100 phrases) |
 | CosyVoice3  | Apache-2.0  | yue (cantonese)        | ~1.5 GB   | 219.8 s‡   | 35681 / 60523 ms¶   | 35681 / 60523 ms¶   | 0.249×¶  | 3264 MB¶ | n/a     | n/a     | beta; full `minimax-cantonese` (100/100 phrases) post [auto-chunker](#cosyvoice3-auto-chunker); **truncation 80/100 → 5/100** (`finished_on_eos=false`); longest output 16.1 s (was capped at ~6.5 s) |
 
 \* TTFT = time to first audio frame. **PocketTTS** streams 80 ms /
@@ -167,12 +165,7 @@ and the gap is the streaming advantage. **Kokoro / Kokoro ANE /
 StyleTTS2 / CosyVoice3** are benchmarked one-shot, so
 `ttft_ms == synth_ms` for them.
 
-† CosyVoice3: full `minimax-chinese` run, 100 / 100 phrases, 0 errors,
-after the HiFT `.cpuAndGPU` fix **and** the LLM-Decode
-`outputBackings` double-buffer fix (32.8% agg-RTFx improvement, 31%
-TTFT-p50 improvement, 49% max-synth improvement vs the pre-fix
-baseline — see
-[CosyVoice3 LLM-Decode outputBackings fix](#cosyvoice3-llm-decode-outputbackings-fix)).
+† CosyVoice3: full `minimax-chinese` run, 100 / 100 phrases, 0 errors.
 ASR roundtrip skipped (no Mandarin / Cantonese ASR backend).
 Cold-start dropped from 302.7 s to 29.2 s because ANE compile caches
 were warm on the re-run.
@@ -400,88 +393,6 @@ diffusion sampler produces formant breaks Parakeet doesn't decode
 cleanly. Further gains likely require either a richer remap layer
 covering espeak's length marks / function-word reductions, or
 swapping the BART G2P for libespeak-ng directly. Tracked separately.
-
-## CosyVoice3 HiFT timeout fix
-
-Earlier `minimax-chinese` runs aborted mid-corpus with:
-
-```
-E5RT: Submit Async failed for [3:29]: Async task:
-HiFT-T500-fp16_main__Op104_BnnsCpuInference has timed out.
-@ CancelTimedOutAsyncTask_block_invoke
-```
-
-Root cause: HiFT was loaded with `.cpuAndNeuralEngine`, which let the
-CoreML planner place most of the graph on ANE but kept at least one
-op (`HiFT-T500-fp16_main__Op104`) on the BNNS CPU async-dispatch
-path. Long phrases mid-corpus tripped the BNNS async watchdog (the
-same ANE+BNNS mixed-compute pathology that already forced Flow and
-LLM-Decode off ANE in `CosyVoice3ModelStore.loadIfNeeded`).
-
-Fix: HiFT is now pinned to `.cpuAndGPU` in
-`CosyVoice3ModelStore.loadIfNeeded` regardless of the user-supplied
-`computeUnits`, removing the BNNS-async path entirely. The model is
-fixed-shape `[1, 80, 500]`, so GPU placement is deterministic.
-Trade-off: a small per-call latency increase vs. the ANE config that
-didn't actually complete the corpus.
-
-Verified end-to-end on full `minimax-chinese` (100 / 100 phrases) and
-`minimax-cantonese` (100 / 100 phrases), 0 errors on either; the
-watchdog error did not recur on long phrases.
-
-## CosyVoice3 LLM-Decode outputBackings fix
-
-CosyVoice3's autoregressive decode loop (`LLM-Decode-M768-fp16`) runs
-once per speech token — typically ~163 steps per phrase to fill the
-250-token `flowTotalTokens` cap minus prompt. Each step takes the
-previous step's KV cache as `kv_k` / `kv_v` (shape
-`[24, 1, 2, 768, 64]` fp32 = 9 MB each) and produces a fresh
-`kv_k_out` / `kv_v_out` plus a `[1, 1, 6562]` `speech_logits`. With
-the default CoreML `prediction(from:)` API, that's ~36 MB of fresh
-host-side `MLMultiArray` allocation **per step**, per phrase — i.e.
-~5.9 GB of allocator churn for a single 6.5 s utterance, all on the
-critical path of the AR loop.
-
-Fix: bind pre-allocated `MLMultiArray`s as
-`MLPredictionOptions.outputBackings` and rotate them front/back/spare
-across decode steps (front = read this step, back = written by this
-step, spare = next step's write target). Same try/catch fallback
-pattern as
-[Magpie's outputBackings fast path](#magpie-outputbackings-fast-path):
-on the first rejection from a model exported without explicit
-MultiArray shape/dtype output constraints, latch a
-`useOutputBackings` flag off and route the rest of the corpus through
-the fresh-alloc slow path (with explicit `memcpy` into the back
-buffers to keep the rest of the AR loop oblivious to the path
-taken). One-shot info log on first acceptance, one-shot warning on
-first rejection — no per-step log spam.
-
-Measured on full `minimax-chinese` (100 / 100 phrases, MacBook Air
-M2, `--compute-units default`):
-
-| Metric           | Before  | After   | Δ       |
-|------------------|---------|---------|---------|
-| agg RTFx         | 0.269×  | 0.357×  | +32.8%  |
-| TTFT p50         | 20547   | 14091   | −31%    |
-| TTFT p95         | 31556   | 23679   | −25%    |
-| synth_ms mean    | 21243   | 15999   | −25%    |
-| synth_ms median  | 20445   | 14044   | −31%    |
-| synth_ms max     | 56497   | 28833   | −49%    |
-| peak RSS         | 2894 MB | 3302 MB | +14%    |
-
-The +408 MB RSS is the four pre-allocated 9 MB KV back-buffers plus a
-6562-element fp32 logits backing — 36 MB nominal — with the
-remainder coming from CoreML retaining backing-tensor metadata
-across steps. Fair trade for −33% wall-clock latency. Still
-beta-class (RTFx < 1.0) but now 1.33× faster end-to-end. The next
-RTFx lever is `MLState` (macOS 15+, would keep KV GPU-resident
-across steps), which is gated on bumping the library floor from 14.0
-to 15.0.
-
-Implemented in
-`CosyVoice3Synthesizer.synthesize` and
-`CosyVoice3Synthesizer.runDecode`
-(`Sources/FluidAudio/TTS/CosyVoice3/Pipeline/Synthesize/CosyVoice3Synthesizer.swift`).
 
 ## CosyVoice3 Decode budget cap
 
