@@ -108,8 +108,11 @@ swift run fluidaudio tts-benchmark \
 ```
 
 The harness writes a JSON report to `--output-json` and (optionally)
-keeps WAVs under `--audio-dir`. Pass `--skip-asr` to drop the Parakeet
-roundtrip. CosyVoice3 forces `--skip-asr`.
+keeps WAVs under `--audio-dir`. Pass `--skip-asr` to drop the ASR
+roundtrip. The default ASR backend is `parakeet` for English-only
+runs and is skipped for CosyVoice3; pass `--asr-backend cohere
+--cohere-model-dir <dir>` to score Mandarin (or any of the 14
+Cohere languages) against [Cohere Transcribe](../../Sources/FluidAudio/ASR/Cohere/).
 
 ## Results
 
@@ -130,13 +133,27 @@ WER / CER.
 | PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 6.0 s | **1244 / 4749 ms**  | 8757 / 19174 ms     | 0.61×    | 1503 MB  | 0.014   | 0.006   | **streaming**; TTFT is first 80 ms audio frame |
 | StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | 955 s§     | 6671 / 15990 ms§    | 6671 / 15990 ms§    | 2.72×§   | 963 MB§  | 0.440§  | 0.241§  | full 100/100 `minimax-english` via [misaki→espeak post-pass remap](#styletts2-misaki--espeak-post-pass-remap); ref_s = LibriTTS `696_92939_000016_000006.wav` (StyleTTS2 demo voice) |
 | Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 38.5 s∥    | **9580 / 23796 ms**∥ | 15080 / 29895 ms∥   | 0.64×∥   | 762 MB∥  | 0.056   | 0.033   | **streaming TTFT**: first audio chunk at 9.6 s p50 on M2 (full synth 15.1 s); split-K/V decoder; outputBackings fast path with latched fallback |
-| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 29.2 s†    | 14091 / 23679 ms†   | 14091 / 23679 ms†   | 0.357×†  | 3302 MB† | n/a     | n/a     | beta; full `minimax-chinese` (100/100 phrases); cantonese supported via [auto-chunker](#cosyvoice3-auto-chunker) but not benchmarked here (no zh / yue ASR for WER) |
+| CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 29.2 s†    | 14091 / 23679 ms†   | 14091 / 23679 ms†   | 0.357×†  | 3302 MB† | n/a‡    | 0.017‡  | beta; full `minimax-chinese` (100/100 phrases) for latency / RSS and whisper-large-v3 CER‡; cantonese supported via [auto-chunker](#cosyvoice3-auto-chunker) but not benchmarked (no yue ASR) |
 
 \* TTFT for **PocketTTS / Magpie** is first-frame emit through the
 streaming API; the others are one-shot, so `ttft_ms == synth_ms`.
 
 † CosyVoice3 chinese: 100/100, 0 errors, ASR skipped. Cold-start
 dropped from 302.7 s to 29.2 s on the warm re-run.
+
+‡ CosyVoice3 CER measured on the **full 100-phrase**
+`minimax-chinese` corpus via `whisper-large-v3` (Python CPU FP32,
+[`Scripts/whisper_zh_cer.py`](../../Scripts/whisper_zh_cer.py)) on
+the WAVs rendered by `tts-benchmark --backend cosyvoice3 --corpus
+minimax-chinese --skip-asr --audio-dir <dir>`: **macro CER 1.68%
+(0.0168)**, **micro CER 1.84% (0.0184)** across 100 phrases.
+Whisper is the source of truth here because Cohere Transcribe q8
+hit a `MILCompilerForANE` cache failure on this M2 host and ran on
+the CPU+GPU fallback path at RTFx ~0.13× (would have taken multiple
+hours for the full 100-phrase set vs. ~70 min for whisper). WER is
+omitted because Mandarin has no word boundaries and `WERCalculator`
+splits on whitespace, so word-level WER reads near 100% and is
+meaningless.
 
 ∥ Magpie: streamed via `synthesizeStream`. TTFT (9.6 s p50) is
 first-chunk emit; synth (15.1 s p50) is full-utterance wall time —
