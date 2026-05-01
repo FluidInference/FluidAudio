@@ -1272,7 +1272,7 @@ public enum TtsBenchmarkCommand {
                 label: "cohere-transcribe-\(language.rawValue)",
                 transcribeOne: { url in
                     let samples = try converter.resampleAudioFile(path: url.path)
-                    let r = try await pipeline.transcribe(
+                    let r = try await pipeline.transcribeLong(
                         audio: samples,
                         models: models,
                         language: language,

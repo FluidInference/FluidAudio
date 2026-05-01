@@ -227,10 +227,13 @@ Takeaways:
   fixed 3,500-frame mel (35 s @ 10 ms hop). Short audio does not finish the
   encoder faster — warm encoder cost stays in a 1.5–3.3 s band regardless of
   input length.
-- **Audio > 35 s is silently truncated** to the first 35 s by
-  `padOrTruncate(... fixedFrames: 3_500)` in
-  `Sources/FluidAudio/ASR/Cohere/CoherePipeline.swift:250`. Split long audio
-  at clause boundaries upstream if you need full coverage.
+- **Audio > 35 s is auto-chunked** by `transcribeLong` with a 30 s hop and 5 s
+  overlap (matches upstream `overlap_chunk_second: 5`); adjacent chunk token
+  streams are stitched via token-level longest-common-substring merge. The
+  raw `transcribe` call still uses the strict 35 s window with
+  `padOrTruncate(... fixedFrames: 3_500)` at
+  `Sources/FluidAudio/ASR/Cohere/CoherePipeline.swift:250`, so picking
+  `transcribeLong` is the right default for unknown-length audio.
 - **Process reuse is what unlocks the documented RTFx.** The LibriSpeech
   test-clean run above (5h 24m audio, RTFx 1.72× total) absorbs the cold
   compile across 2,620 utterances; per-call warm path is closer to RTFx
@@ -244,11 +247,14 @@ Takeaways:
   are within ±0.5%, so the INT8 hybrid is the recommended default.
 - **Cache-external decoder stays FP16**: INT8 decoder quantization regresses
   quality significantly in testing and is not shipped.
-- **Single-chunk only**: the CoreML pipeline processes one 35 s window per
-  call (matches upstream `max_audio_clip_s: 35`). The reference Python
-  pipeline supports >35 s audio via sliding-window chunking with 5 s overlap
-  (`overlap_chunk_second: 5`); FluidAudio does not implement that wrapper
-  yet — files exceeding 35 s are skipped by the benchmark CLI with a warning.
+- **Long-form audio**: the encoder always sees a fixed 35 s window
+  (`max_audio_clip_s: 35`). Use `CoherePipeline.transcribeLong` for audio of
+  unknown / arbitrary length — it slides a 35 s window with 5 s overlap
+  (matching upstream `overlap_chunk_second: 5`) and stitches adjacent chunks
+  via token-level longest-common-substring merge. The raw `transcribe` API is
+  the single-chunk path and silently truncates input > 35 s. The CLI commands
+  (`cohere-transcribe`, `cohere-benchmark`, `tts-benchmark`) all use
+  `transcribeLong` and no longer skip > 35 s files.
 - **Language must be specified**: no automatic language ID. Pass
   `CohereAsrConfig.Language` on every call; the wrong language produces
   degenerate output.
