@@ -239,6 +239,13 @@ public actor StyleTTS2Synthesizer {
     /// Slice an MLMultiArray of shape `(1, leading, trailing)` to the first
     /// `take` entries along either the leading or trailing axis. Returns a
     /// flat row-major `[Float]`.
+    ///
+    /// Reads via `dataPointer` instead of `arr[idx].floatValue` and avoids
+    /// `arr.strides` entirely — both trigger
+    /// `E5RT: tensor_buffer has known strides while the model has
+    /// FlexibleShapeInfo` on `text_predictor`'s flex-shape outputs. CoreML
+    /// emits dense row-major buffers, so for shape `(1, leading, trailing)`
+    /// the flat index is simply `r * trailing + c`.
     private func sliceFirstAxis2D(
         arr: MLMultiArray,
         leading: Int,
@@ -246,29 +253,50 @@ public actor StyleTTS2Synthesizer {
         take: Int,
         sliceDim: SliceDim
     ) -> [Float] {
-        let strides = arr.strides.map { $0.intValue }
+        let outCount: Int
         switch sliceDim {
-        case .leading:
-            // Result shape: (take, trailing).
-            var out = [Float](repeating: 0, count: take * trailing)
-            for r in 0..<take {
-                for c in 0..<trailing {
-                    let idx = r * strides[1] + c * strides[2]
-                    out[r * trailing + c] = arr[idx].floatValue
-                }
-            }
-            return out
-        case .trailing:
-            // Result shape: (leading, take).
-            var out = [Float](repeating: 0, count: leading * take)
-            for r in 0..<leading {
-                for c in 0..<take {
-                    let idx = r * strides[1] + c * strides[2]
-                    out[r * take + c] = arr[idx].floatValue
-                }
-            }
-            return out
+        case .leading: outCount = take * trailing
+        case .trailing: outCount = leading * take
         }
+        var out = [Float](repeating: 0, count: outCount)
+
+        func fill(_ get: (Int) -> Float) {
+            switch sliceDim {
+            case .leading:
+                // Result shape: (take, trailing).
+                for r in 0..<take {
+                    for c in 0..<trailing {
+                        out[r * trailing + c] = get(r * trailing + c)
+                    }
+                }
+            case .trailing:
+                // Result shape: (leading, take).
+                for r in 0..<leading {
+                    for c in 0..<take {
+                        out[r * take + c] = get(r * trailing + c)
+                    }
+                }
+            }
+        }
+
+        let count = arr.count
+        switch arr.dataType {
+        case .float32:
+            let p = arr.dataPointer.bindMemory(to: Float.self, capacity: count)
+            fill { p[$0] }
+        case .float16:
+            let p = arr.dataPointer.bindMemory(to: Float16.self, capacity: count)
+            fill { Float(p[$0]) }
+        case .double:
+            let p = arr.dataPointer.bindMemory(to: Double.self, capacity: count)
+            fill { Float(p[$0]) }
+        default:
+            // Fallback re-introduces the FlexibleShapeInfo trip wire, but
+            // we don't expect text_predictor to emit anything other than
+            // fp16/fp32.
+            fill { arr[$0].floatValue }
+        }
+        return out
     }
 
     // MARK: - Durations

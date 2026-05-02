@@ -28,11 +28,12 @@ public actor CosyVoice3ModelStore {
 
     /// - Parameters:
     ///   - directory: Base build directory that contains
-    ///     `llm-fp16/`, `llm-fp16-stateful/`, `flow-fp16-n250/`,
+    ///     `llm-fp16/`, `llm-fp16-decode/`, `flow-fp16-n250/`,
     ///     `hift-fp16-t500/`, `embeddings/`.
     ///   - computeUnits: Defaults to `.cpuAndNeuralEngine`. Applied to
-    ///     LLM-Prefill + HiFT models only. LLM-Decode (stateful) and Flow
-    ///     both force `.cpuAndGPU` regardless (see `loadIfNeeded()`).
+    ///     LLM-Prefill only. LLM-Decode (stateless external cache),
+    ///     Flow, and HiFT all pin `.cpuAndGPU` regardless (see
+    ///     `loadIfNeeded()`).
     public init(directory: URL, computeUnits: MLComputeUnits = .cpuAndNeuralEngine) {
         self.directory = directory
         self.computeUnits = computeUnits
@@ -67,10 +68,10 @@ public actor CosyVoice3ModelStore {
         let prefill = try await compileAndLoad(prefillURL, configuration: config)
         logger.info("Loaded \(CosyVoice3Constants.Files.llmPrefill)")
 
-        // Stateful decode MUST run on `.cpuAndGPU`:
-        //   - ANE refuses to compile the stateful graph (same failure mode
-        //     as Flow: `MILCompilerForANE ANECCompile() FAILED`), so
-        //     `.cpuAndNE` / `.all` deadlock load
+        // Stateless decode MUST run on `.cpuAndGPU`:
+        //   - ANE refuses to compile the rotary + sliced SDPA decode graph
+        //     (same failure mode as Flow: `MILCompilerForANE ANECCompile()
+        //     FAILED`), so `.cpuAndNE` / `.all` deadlock load
         //   - CPU-only works but is ~2× slower than the GPU path
         // Ignore the user-supplied `computeUnits` for decode.
         let decodeConfig = MLModelConfiguration()
@@ -98,7 +99,25 @@ public actor CosyVoice3ModelStore {
         let flow = try await compileAndLoad(flowURL, configuration: flowConfig)
         logger.info("Loaded \(CosyVoice3Constants.Files.flow)")
 
-        let hift = try await compileAndLoad(hiftURL, configuration: config)
+        // HiFT runs on `.cpuAndGPU` (fp16). With `.cpuAndNeuralEngine`
+        // CoreML's planner placed most of HiFT on ANE but kept at least
+        // one op (`HiFT-T500-fp16_main__Op104`) on the BNNS CPU path,
+        // which trips a hard async-dispatch watchdog mid-corpus on
+        // long phrases:
+        //
+        //   E5RT: Submit Async failed for [3:29]: Async task:
+        //   HiFT-T500-fp16_main__Op104_BnnsCpuInference has timed out.
+        //   @ CancelTimedOutAsyncTask_block_invoke
+        //
+        // Pinning HiFT to `.cpuAndGPU` removes the ANE+BNNS mixed-compute
+        // pathology (the same family of issue that already forced Flow
+        // and Decode off ANE above). The model is fixed-shape
+        // [1, 80, 500] so GPU placement is predictable. Trade-off: a
+        // small per-call latency increase vs. ANE — acceptable, since
+        // the prior ANE config didn't actually complete the corpus.
+        let hiftConfig = MLModelConfiguration()
+        hiftConfig.computeUnits = .cpuAndGPU
+        let hift = try await compileAndLoad(hiftURL, configuration: hiftConfig)
         logger.info("Loaded \(CosyVoice3Constants.Files.hift)")
 
         loadedModels = CosyVoice3Models(prefill: prefill, decode: decode, flow: flow, hift: hift)

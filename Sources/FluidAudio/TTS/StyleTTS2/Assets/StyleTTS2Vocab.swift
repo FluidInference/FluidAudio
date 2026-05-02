@@ -94,4 +94,25 @@ public struct StyleTTS2Vocab: Sendable {
         }
         return ids
     }
+
+    /// Diagnostic encode: same logic as `encode(_:)` but also returns a
+    /// frequency map of every scalar that fell off the floor because no
+    /// vocab entry exists for it. Used by the StyleTTS2 CLI's
+    /// `--tokenize-only` mode to quantify the misaki ↔ espeak inventory
+    /// gap without actually invoking the diffusion pipeline.
+    public func encodeWithReport(
+        _ phonemes: String
+    ) -> (ids: [Int32], dropped: [Unicode.Scalar: Int]) {
+        var ids: [Int32] = []
+        ids.reserveCapacity(phonemes.unicodeScalars.count)
+        var dropped: [Unicode.Scalar: Int] = [:]
+        for scalar in phonemes.unicodeScalars {
+            if let id = map[Character(scalar)] {
+                ids.append(id)
+            } else {
+                dropped[scalar, default: 0] += 1
+            }
+        }
+        return (ids, dropped)
+    }
 }

@@ -15,10 +15,6 @@ import Foundation
 ///   - cumsum-of-durations → one-hot → matmul hard-alignment,
 ///   - bucket selection (round token length → text_predictor; round
 ///     mel frames → decoder).
-///
-/// **Status:** scaffold only. Synthesis is not yet implemented; calls to
-/// `synthesize` throw `processingFailed`. The asset bring-up (download +
-/// model store) is wired up so dependent layers can land incrementally.
 public actor StyleTTS2Manager {
 
     private let logger = AppLogger(category: "StyleTTS2Manager")
@@ -47,6 +43,10 @@ public actor StyleTTS2Manager {
     public func initialize(
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws {
+        logger.warning(
+            "StyleTTS2 is experimental / beta. WER on long English phrases is "
+                + "elevated on the MiniMax corpus (~44% vs Kokoro 1.3%) — see "
+                + "Documentation/TTS/Benchmarks.md.")
         _ = try await modelStore.ensureAssetsAvailable(progressHandler: progressHandler)
         let config = try await modelStore.bundleConfig()
         try config.validate()
@@ -111,6 +111,34 @@ public actor StyleTTS2Manager {
         return try await synthesizer.synthesize(ids: ids, voice: voice, options: options)
     }
 
+    /// Same as `synthesize` but returns raw fp32 PCM samples + sample rate.
+    /// Used by callers (e.g. the tts-benchmark harness, ASR pairing) that
+    /// don't want the WAV-encoding round trip.
+    public func synthesizeSamples(
+        text: String,
+        voiceStyleURL: URL,
+        language: MultilingualG2PLanguage = .americanEnglish,
+        diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
+        alpha: Float = 0.3,
+        beta: Float = 0.7,
+        randomSeed: UInt64? = nil
+    ) async throws -> (samples: [Float], sampleRate: Int) {
+        guard isInitialized else {
+            throw StyleTTS2Error.modelNotFound("StyleTTS2 model not initialized")
+        }
+        let voice = try StyleTTS2VoiceStyle.load(from: voiceStyleURL)
+        let (_, ids) = try await tokenize(text: text, language: language)
+        let options = StyleTTS2Synthesizer.Options(
+            diffusionSteps: diffusionSteps,
+            alpha: alpha,
+            beta: beta,
+            randomSeed: randomSeed
+        )
+        let samples = try await synthesizer.synthesizeSamples(
+            ids: ids, voice: voice, options: options)
+        return (samples, StyleTTS2Constants.audioSampleRate)
+    }
+
     /// Run the text frontend (preprocess → G2P → vocab encode) end-to-end.
     ///
     /// Available before the diffusion synthesizer is wired so callers can
@@ -136,6 +164,27 @@ public actor StyleTTS2Manager {
         let vocab = try await modelStore.vocabulary()
         let ids = vocab.encode(phonemes)
         return (phonemes, ids)
+    }
+
+    /// Diagnostic tokenize: same as `tokenize(text:language:)` but also
+    /// returns the per-scalar drop frequency from
+    /// `StyleTTS2Vocab.encodeWithReport`. Used by the CLI to quantify
+    /// how much of the misaki BART G2P output the espeak-ng-trained
+    /// 178-token vocab can actually consume.
+    public func tokenizeWithReport(
+        text: String,
+        language: MultilingualG2PLanguage = .americanEnglish
+    ) async throws -> (
+        phonemes: String, ids: [Int32], dropped: [Unicode.Scalar: Int]
+    ) {
+        guard isInitialized else {
+            throw StyleTTS2Error.modelNotFound("StyleTTS2 model not initialized")
+        }
+        let phonemes = try await StyleTTS2Phonemizer.phonemize(
+            text: text, language: language)
+        let vocab = try await modelStore.vocabulary()
+        let (ids, dropped) = vocab.encodeWithReport(phonemes)
+        return (phonemes, ids, dropped)
     }
 
     public func cleanup() {

@@ -7,17 +7,30 @@ import Foundation
 /// implemented as a method on this type, keeping the state (KV cache, running
 /// decoded list) local to a single synthesis call.
 ///
-/// Decode uses CoreML `MLState` (macOS 15 / iOS 18): 48 per-layer buffers
-/// (`kv_k_0..kv_k_23`, `kv_v_0..kv_v_23`) replace the 18 MB kv_k / kv_v
-/// round-trip per step. Prefill remains non-stateful and its `kv_k` / `kv_v`
-/// outputs seed the decode state once after prefill.
-@available(macOS 15, iOS 18, *)
+/// Decode is **stateless** with an external KV cache. Prefill emits
+/// `kv_k` / `kv_v` of shape `[24, 1, 2, 768, 64]` fp32; decode accepts those
+/// same tensors as inputs and returns updated `kv_k_out` / `kv_v_out` at
+/// the same shape/dtype. We round-trip the cache once per step (≈18 MB
+/// total) and bind the previous step's outputs as the next step's inputs.
+/// No `MLState` dependency — runs on macOS 14 / iOS 17.
 public actor CosyVoice3Synthesizer {
 
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "CosyVoice3Synthesizer")
 
     private let models: CosyVoice3Models
     private let embeddings: CosyVoice3SpeechEmbeddings
+
+    /// Set to `false` once `LLM-Decode-M768-fp16` rejects pre-allocated
+    /// `outputBackings` (model exported without explicit MultiArray
+    /// shape/dtype constraints on its `kv_k_out` / `kv_v_out` /
+    /// `speech_logits` outputs). Latched off so we don't throw + catch on
+    /// every one of ~163 AR decode steps per phrase. Same pattern as
+    /// `MagpieKvCache.useOutputBackings`.
+    private var useOutputBackings: Bool = true
+
+    /// One-shot flag for "fast path engaged" log message; only emitted on
+    /// the first successful `outputBackings` prediction so we don't spam.
+    private var loggedFastPath: Bool = false
 
     public init(models: CosyVoice3Models, embeddings: CosyVoice3SpeechEmbeddings) {
         self.models = models
@@ -46,16 +59,52 @@ public actor CosyVoice3Synthesizer {
             sampler.seedTokens(fixture.decodedTokens)
         }
 
-        // 1) Prefill (non-stateful: returns kv_k / kv_v as outputs)
+        // 1) Prefill (returns kv_k / kv_v as fp32 outputs)
         let tPrefill = Date()
         let (prefillLogits, initialKvK, initialKvV) = try await runPrefill(fixture: fixture)
         let prefillSec = Date().timeIntervalSince(tPrefill)
 
-        // Seed decode MLState from prefill kv_k / kv_v.
-        let tSeed = Date()
-        let state = models.decode.makeState()
-        try seedDecodeState(state: state, kvK: initialKvK, kvV: initialKvV)
-        let seedSec = Date().timeIntervalSince(tSeed)
+        // External KV cache with **double-buffered outputBackings**: prefill's
+        // `kv_k` / `kv_v` (shape `[24, 1, 2, 768, 64]` fp32, ~9 MB each) feed
+        // the first decode step. Subsequent steps rotate between two
+        // pre-allocated buffer pairs (A/B) bound as the model's
+        // `kv_k_out` / `kv_v_out` outputs. Same pattern as
+        // `MagpieKvCache.swapBackings()` — eliminates ~36 MB of host
+        // alloc/dealloc per decode step (×163 steps ≈ 5.9 GB churn per
+        // phrase). `speech_logits` is also pre-bound so we avoid a fresh
+        // 27 KB allocation each step. CoreML rejects this when the model
+        // was exported without explicit MultiArray shape/dtype constraints
+        // on its outputs; in that case we latch `useOutputBackings = false`
+        // and fall back to per-step allocation for the rest of the run.
+        let kvShape: [NSNumber] = [
+            NSNumber(value: CosyVoice3Constants.numLayers),
+            1,
+            NSNumber(value: CosyVoice3Constants.kvHeads),
+            NSNumber(value: CosyVoice3Constants.kvMaxLength),
+            NSNumber(value: CosyVoice3Constants.headDim),
+        ]
+        let kvKBackA = try MLMultiArray(shape: kvShape, dataType: .float32)
+        let kvVBackA = try MLMultiArray(shape: kvShape, dataType: .float32)
+        let kvKBackB = try MLMultiArray(shape: kvShape, dataType: .float32)
+        let kvVBackB = try MLMultiArray(shape: kvShape, dataType: .float32)
+        let logitsBacking = try MLMultiArray(
+            shape: [1, 1, NSNumber(value: CosyVoice3Constants.speechVocab)],
+            dataType: .float32)
+
+        // Pointer-rotation triple. `frontKvK/V` are read by the next step;
+        // `backKvK/V` receive the next step's writes; `spareKvK/V` are the
+        // pre-allocated set ready to become `back` after rotation. Initial
+        // `front` is the prefill output; we don't reuse those buffers as
+        // `spare`/`back` — once decode step 1 finishes, `front` becomes A
+        // (just-written), `back` becomes B (next write target), `spare`
+        // becomes A's previous contents (which we drop, since prefill
+        // output is single-use).
+        var frontKvK: MLMultiArray = initialKvK
+        var frontKvV: MLMultiArray = initialKvV
+        var backKvK: MLMultiArray = kvKBackA
+        var backKvV: MLMultiArray = kvVBackA
+        var spareKvK: MLMultiArray = kvKBackB
+        var spareKvV: MLMultiArray = kvVBackB
 
         // Reusable per-step inputs for decode. `curLenArr` is mutated in place
         // each step; `inputsEmbedsArr` is overwritten by memcpy per step.
@@ -63,6 +112,12 @@ public actor CosyVoice3Synthesizer {
         let inputsEmbedsArr = try MLMultiArray(
             shape: [1, 1, NSNumber(value: CosyVoice3Constants.embedDim)],
             dataType: .float32)
+
+        // Logits scratch reused across all decode steps. The hot loop
+        // memcpy's into this from `logitsBacking` (or strided-gathers from a
+        // freshly-allocated array on the slow path).
+        var logitsScratch = [Float](
+            repeating: 0, count: CosyVoice3Constants.speechVocab)
 
         // First token from prefill tail logits.
         var decoded: [Int32] = []
@@ -81,29 +136,80 @@ public actor CosyVoice3Synthesizer {
         }
         decoded.append(topId)
 
-        // 2) Decode loop
+        // 2) Decode loop (stateless, external cache, double-buffered backings)
         var curLen = fixture.tPre
         var decodeSteps = 0
+        var hitEos = false
         let tDecode = Date()
         for step in 1..<maxNew {
             try embeddings.copyEmbedding(tokenId: topId, into: inputsEmbedsArr)
             curLenArr[0] = NSNumber(value: Int32(curLen))
-            let logits = try runDecodeStateful(
+            try runDecode(
                 inputsEmbeds: inputsEmbedsArr,
                 curLen: curLenArr,
-                state: state)
-            topId = sampler.sample(logits: logits, decodedSoFar: decoded)
+                frontKvK: frontKvK,
+                frontKvV: frontKvV,
+                backKvK: backKvK,
+                backKvV: backKvV,
+                logitsBacking: logitsBacking,
+                logits: &logitsScratch)
+            topId = sampler.sample(logits: logitsScratch, decodedSoFar: decoded)
             curLen += 1
             decodeSteps += 1
             if CosyVoice3Constants.stopRange.contains(topId) {
                 logger.info("EOS at step \(step) (token=\(topId))")
+                hitEos = true
                 break
             }
             decoded.append(topId)
+
+            // Rotate buffers: `back` (just-written) becomes new `front`;
+            // `spare` becomes new `back`; old `front` becomes new `spare`
+            // (will be overwritten next step). On step 1 the old `front` is
+            // the prefill output — drops to `spare` and gets overwritten on
+            // step 3, which is harmless (we never read it again).
+            let prevFrontK = frontKvK
+            let prevFrontV = frontKvV
+            frontKvK = backKvK
+            frontKvV = backKvV
+            backKvK = spareKvK
+            backKvV = spareKvV
+            spareKvK = prevFrontK
+            spareKvV = prevFrontV
         }
         let decodeSec = Date().timeIntervalSince(tDecode)
         guard !decoded.isEmpty else {
             throw CosyVoice3Error.predictionFailed("LLM produced no speech tokens")
+        }
+
+        // Truncation signal: AR loop exhausted its decode budget without
+        // observing an EOS token in `stopRange` (6_561…6_760). The 250-token
+        // cap is structural — it's the fixed `[1, 250]` shape of the Flow
+        // model's `token_total` input (`CosyVoice3Constants.flowTotalTokens`),
+        // not a synthesizer-side soft limit. With ~40 ms of audio per token
+        // (`tokenMelRatio=2 × hiftSamplesPerFrame=480 / sampleRate=24_000`),
+        // a prompt taking ~`nPrompt` tokens leaves `(250 - nPrompt) × 0.04 s`
+        // of generated audio — i.e. long phrases truncate mid-utterance.
+        //
+        // Surface this as a `.warning` so callers running long input get a
+        // console signal instead of silent truncation. Lifting the cap
+        // requires re-exporting Flow with a larger `token_total` shape; for
+        // now, splitting input at clause boundaries (， / 。) is the
+        // workaround.
+        if !hitEos {
+            let producedSec =
+                Double(decoded.count)
+                * Double(CosyVoice3Constants.tokenMelRatio)
+                * Double(CosyVoice3Constants.hiftSamplesPerFrame)
+                / Double(CosyVoice3Constants.sampleRate)
+            logger.warning(
+                "LLM-Decode budget exhausted: \(decoded.count) generated tokens "
+                    + "/ \(maxNew) cap (no EOS observed). "
+                    + "Output truncated at ~"
+                    + String(format: "%.1f", producedSec)
+                    + "s of audio. The 250-token Flow input is a structural cap; "
+                    + "split long phrases at clause boundaries (， 。) to work around."
+            )
         }
 
         // 3) Flow
@@ -133,14 +239,15 @@ public actor CosyVoice3Synthesizer {
         logger.info(
             String(
                 format:
-                    "STAGES prefill=%.3fs seed=%.3fs decode=%.3fs(%d steps, %.2f tok/s) flow=%.3fs hift=%.3fs",
-                prefillSec, seedSec, decodeSec, decodeSteps, decodeTps, flowSec, hiftSec))
+                    "STAGES prefill=%.3fs decode=%.3fs(%d steps, %.2f tok/s) flow=%.3fs hift=%.3fs",
+                prefillSec, decodeSec, decodeSteps, decodeTps, flowSec, hiftSec))
 
         return CosyVoice3SynthesisResult(
             samples: audio,
             sampleRate: CosyVoice3Constants.sampleRate,
             generatedTokenCount: nNew,
-            decodedTokens: decoded)
+            decodedTokens: decoded,
+            finishedOnEos: hitEos)
     }
 
     // MARK: - Stages
@@ -193,140 +300,134 @@ public actor CosyVoice3Synthesizer {
         return (logits, kvK, kvV)
     }
 
-    /// Run one stateful decode step. `state` is mutated in place via the
-    /// 48 per-layer `kv_k_i` / `kv_v_i` state buffers registered in the
-    /// converted model.
-    private func runDecodeStateful(
+    /// Run one stateless decode step with an external KV cache.
+    ///
+    /// Inputs match the converted CoreML graph signature:
+    /// - `inputs_embeds: fp32 [1, 1, 896]`
+    /// - `cur_len: int32 [1]`
+    /// - `kv_k: fp32 [24, 1, 2, 768, 64]` (previous step's `kv_k_out`, or
+    ///   prefill's `kv_k` for the first decode step)
+    /// - `kv_v: fp32 [24, 1, 2, 768, 64]`
+    ///
+    /// Outputs (when `outputBackings` is accepted, written into the pre-
+    /// allocated `backKvK` / `backKvV` / `logitsBacking` buffers in place):
+    /// - `speech_logits: fp32 [1, 1, 6761]`
+    /// - `kv_k_out: fp32 [24, 1, 2, 768, 64]`
+    /// - `kv_v_out: fp32 [24, 1, 2, 768, 64]`
+    ///
+    /// Falls back to per-step CoreML allocation + memcpy into the pre-
+    /// allocated backings if the model rejects `outputBackings` (latches
+    /// `useOutputBackings = false` so we don't retry on every step).
+    private func runDecode(
         inputsEmbeds: MLMultiArray,
         curLen: MLMultiArray,
-        state: MLState
-    ) throws -> [Float] {
+        frontKvK: MLMultiArray,
+        frontKvV: MLMultiArray,
+        backKvK: MLMultiArray,
+        backKvV: MLMultiArray,
+        logitsBacking: MLMultiArray,
+        logits: inout [Float]
+    ) throws {
         let features: [String: Any] = [
             "inputs_embeds": inputsEmbeds,
             "cur_len": curLen,
+            "kv_k": frontKvK,
+            "kv_v": frontKvV,
         ]
         let provider = try MLDictionaryFeatureProvider(dictionary: features)
-        let output = try models.decode.prediction(from: provider, using: state)
 
-        guard
-            let logitsArr = output.featureValue(for: "speech_logits")?.multiArrayValue
-        else {
-            throw CosyVoice3Error.predictionFailed("decode: missing speech_logits")
+        var fastPathSucceeded = false
+        if useOutputBackings {
+            let opts = MLPredictionOptions()
+            opts.outputBackings = [
+                "kv_k_out": backKvK,
+                "kv_v_out": backKvV,
+                "speech_logits": logitsBacking,
+            ]
+            do {
+                _ = try models.decode.prediction(from: provider, options: opts)
+                Self.readLogits(from: logitsBacking, into: &logits)
+                if !loggedFastPath {
+                    logger.info(
+                        "LLM-Decode outputBackings accepted; double-buffered "
+                            + "AR loop active")
+                    loggedFastPath = true
+                }
+                fastPathSucceeded = true
+            } catch {
+                // CoreML refused our pre-allocated backings — typically
+                // because `LLM-Decode-M768-fp16.mlpackage` was exported
+                // without explicit MultiArray shape/dtype constraints on
+                // its outputs. Latch the flag off so we don't throw + catch
+                // on every one of ~163 steps for the rest of the corpus.
+                // Warning level so it shows in release builds — this is a
+                // perf regression worth surfacing to anyone running with a
+                // re-exported model.
+                useOutputBackings = false
+                logger.warning(
+                    "LLM-Decode outputBackings rejected "
+                        + "(\(error.localizedDescription)); switching to "
+                        + "fresh-alloc fallback for the rest of the run")
+            }
         }
-        // logits shape = [1, 1, 6761] fp32; strides may be non-compact.
+
+        if !fastPathSucceeded {
+            // Slow path: per-step CoreML allocation, then memcpy outputs
+            // into the pre-allocated backings so the front/back rotation
+            // protocol still works after this call.
+            let output = try models.decode.prediction(from: provider)
+            guard
+                let logitsArr = output.featureValue(for: "speech_logits")?.multiArrayValue,
+                let kvKOutArr = output.featureValue(for: "kv_k_out")?.multiArrayValue,
+                let kvVOutArr = output.featureValue(for: "kv_v_out")?.multiArrayValue
+            else {
+                throw CosyVoice3Error.predictionFailed(
+                    "decode: missing speech_logits / kv_k_out / kv_v_out")
+            }
+            try Self.copyKvOutput(kvKOutArr, into: backKvK, name: "kv_k_out")
+            try Self.copyKvOutput(kvVOutArr, into: backKvV, name: "kv_v_out")
+            Self.readLogits(from: logitsArr, into: &logits)
+        }
+    }
+
+    /// Read a `[1, 1, 6761]` fp32 logits MLMultiArray into `dst`. Honors the
+    /// last-dim stride (CoreML may emit non-compact strides on aligned
+    /// allocations) — uses `memcpy` when stride==1, strided gather otherwise.
+    private static func readLogits(from arr: MLMultiArray, into dst: inout [Float]) {
         let count = CosyVoice3Constants.speechVocab
-        var logits = [Float](repeating: 0, count: count)
-        let strides = logitsArr.strides.map { $0.intValue }
+        let strides = arr.strides.map { $0.intValue }
         let vocabStride = strides.last ?? 1
-        let base = logitsArr.dataPointer.bindMemory(to: Float.self, capacity: logitsArr.count)
-        for i in 0..<count { logits[i] = base[i * vocabStride] }
-        return logits
+        let base = arr.dataPointer.bindMemory(to: Float.self, capacity: arr.count)
+        if vocabStride == 1 {
+            dst.withUnsafeMutableBytes { rawDst in
+                guard let dstPtr = rawDst.baseAddress else { return }
+                memcpy(dstPtr, base, count * MemoryLayout<Float>.size)
+            }
+        } else {
+            for i in 0..<count { dst[i] = base[i * vocabStride] }
+        }
     }
 
-    /// Seed the 48 decode state buffers (`kv_k_0..kv_k_23`, `kv_v_0..kv_v_23`)
-    /// from prefill's `kv_k` / `kv_v` outputs.
-    ///
-    /// Prefill logical shape per cache is `[L=24, 1, Hkv=2, M=768, D=64]`
-    /// fp16; each per-layer state buffer is `[1, 2, 768, 64]` fp16. Copy
-    /// layer-by-layer using stride-aware indexing (prefill strides may not
-    /// be compact), letting CoreML's state writer convert to the underlying
-    /// fp16 storage.
-    private func seedDecodeState(
-        state: MLState,
-        kvK: MLMultiArray,
-        kvV: MLMultiArray
+    /// Copy a CoreML-allocated `kv_k_out` / `kv_v_out` MLMultiArray into our
+    /// pre-allocated backing array. Used on the `outputBackings`-rejected
+    /// fallback path so the front/back rotation protocol stays consistent.
+    private static func copyKvOutput(
+        _ src: MLMultiArray,
+        into dst: MLMultiArray,
+        name: String
     ) throws {
-        // Prefill declares fp32 KV outputs at its CoreML I/O boundary
-        // (even though the weights / activations internally are fp16).
-        // Decode state buffers are fp16. Convert per-element as we copy.
-        guard kvK.dataType == .float32 && kvV.dataType == .float32 else {
+        guard src.dataType == dst.dataType else {
             throw CosyVoice3Error.predictionFailed(
-                "seedDecodeState: expected fp32 KV from prefill (kv_k=\(kvK.dataType.rawValue) kv_v=\(kvV.dataType.rawValue))"
-            )
+                "decode \(name): dtype mismatch \(src.dataType.rawValue) vs \(dst.dataType.rawValue)")
         }
-
-        let L = CosyVoice3Constants.numLayers
-        let H = CosyVoice3Constants.kvHeads
-        let M = CosyVoice3Constants.kvMaxLength
-        let D = CosyVoice3Constants.headDim
-
-        // Prefill output strides for shape [L, 1, H, M, D].
-        let kStrides = kvK.strides.map { $0.intValue }
-        let vStrides = kvV.strides.map { $0.intValue }
-        let kLayerStride = kStrides[0]
-        let kHStride = kStrides[2]
-        let kMStride = kStrides[3]
-        let kDStride = kStrides[4]
-        let vLayerStride = vStrides[0]
-        let vHStride = vStrides[2]
-        let vMStride = vStrides[3]
-        let vDStride = vStrides[4]
-
-        let kSrcPtr = kvK.dataPointer.bindMemory(to: Float.self, capacity: kvK.count)
-        let vSrcPtr = kvV.dataPointer.bindMemory(to: Float.self, capacity: kvV.count)
-
-        // Collect dtype-mismatch errors from inside the non-throwing closures.
-        var stateDtypeError: String?
-
-        for i in 0..<L {
-            state.withMultiArray(for: "kv_k_\(i)") { buf in
-                guard buf.dataType == .float16 else {
-                    if stateDtypeError == nil {
-                        stateDtypeError = "kv_k_\(i) expected fp16 state, got \(buf.dataType.rawValue)"
-                    }
-                    return
-                }
-                let b = buf.strides.map { $0.intValue }
-                let dPtr = buf.dataPointer.bindMemory(to: Float16.self, capacity: buf.count)
-                Self.copyLayerF32ToF16(
-                    src: kSrcPtr, srcLayerBase: i * kLayerStride,
-                    srcHStride: kHStride, srcMStride: kMStride, srcDStride: kDStride,
-                    dst: dPtr,
-                    dstHStride: b[1], dstMStride: b[2], dstDStride: b[3],
-                    H: H, M: M, D: D)
-            }
-            state.withMultiArray(for: "kv_v_\(i)") { buf in
-                guard buf.dataType == .float16 else {
-                    if stateDtypeError == nil {
-                        stateDtypeError = "kv_v_\(i) expected fp16 state, got \(buf.dataType.rawValue)"
-                    }
-                    return
-                }
-                let b = buf.strides.map { $0.intValue }
-                let dPtr = buf.dataPointer.bindMemory(to: Float16.self, capacity: buf.count)
-                Self.copyLayerF32ToF16(
-                    src: vSrcPtr, srcLayerBase: i * vLayerStride,
-                    srcHStride: vHStride, srcMStride: vMStride, srcDStride: vDStride,
-                    dst: dPtr,
-                    dstHStride: b[1], dstMStride: b[2], dstDStride: b[3],
-                    H: H, M: M, D: D)
-            }
+        guard src.count == dst.count else {
+            throw CosyVoice3Error.predictionFailed(
+                "decode \(name): count mismatch \(src.count) vs \(dst.count)")
         }
-
-        if let msg = stateDtypeError {
-            throw CosyVoice3Error.predictionFailed("seedDecodeState: \(msg)")
-        }
-    }
-
-    /// Copy one `[H, M, D]` KV slab from a fp32 prefill output into a fp16
-    /// decode state buffer. Strides may be non-compact on either side.
-    private static func copyLayerF32ToF16(
-        src: UnsafeMutablePointer<Float>,
-        srcLayerBase: Int,
-        srcHStride: Int, srcMStride: Int, srcDStride: Int,
-        dst: UnsafeMutablePointer<Float16>,
-        dstHStride: Int, dstMStride: Int, dstDStride: Int,
-        H: Int, M: Int, D: Int
-    ) {
-        for h in 0..<H {
-            for m in 0..<M {
-                for d in 0..<D {
-                    let sOff = srcLayerBase + h * srcHStride + m * srcMStride + d * srcDStride
-                    let dOff = h * dstHStride + m * dstMStride + d * dstDStride
-                    dst[dOff] = Float16(src[sOff])
-                }
-            }
-        }
+        // KV outputs are fp32. With contiguous strides (the default for
+        // freshly-allocated CoreML outputs in this graph) memcpy is safe.
+        let bytes = src.count * MemoryLayout<Float>.size
+        memcpy(dst.dataPointer, src.dataPointer, bytes)
     }
 
     private func runFlow(

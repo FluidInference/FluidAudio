@@ -168,7 +168,7 @@ enum CohereTranscribeCommand {
             logger.info("Models loaded in \(String(format: "%.2f", loadSecs))s")
 
             let pipeline = CoherePipeline()
-            let result = try await pipeline.transcribe(
+            let result = try await pipeline.transcribeLong(
                 audio: samples,
                 models: models,
                 language: language,

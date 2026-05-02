@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Shipping config (frozen):
 /// - LLM-Prefill-T256-M768-fp16           (cpuAndNeuralEngine)
-/// - LLM-Decode-M768-fp16-stateful        (cpuAndGPU — see note)
+/// - LLM-Decode-M768-fp16                 (cpuAndGPU — see note)
 /// - Flow-N250-fp16                       (cpuAndGPU — an ANE-port
 ///   BC1S rewrite was attempted and reverted: the converted graph ran
 ///   ~3× faster but numerically broken (mel dynamic range collapsed
@@ -15,14 +15,22 @@ import Foundation
 ///   `input_embed.conv_pos_embed` (`Conv1d(1024,1024,k=31)+Mish`)
 ///   that three rewrite attempts couldn't move — ANEF rejects the
 ///   conv footprint regardless of group count.)
-/// - HiFT-T500-fp16                       (cpuAndNeuralEngine)
+/// - HiFT-T500-fp16                       (cpuAndGPU — pinned off
+///   ANE because the `.cpuAndNeuralEngine` planner left at least one
+///   op on the BNNS CPU path, which tripped a hard async-dispatch
+///   watchdog mid-corpus on long phrases:
+///   `E5RT: Submit Async failed ... HiFT-T500-fp16_main__Op104_BnnsCpuInference
+///   has timed out`. GPU placement is deterministic and avoids the
+///   ANE+BNNS mixed-compute pathology.)
 ///
-/// The stateful decode model uses per-layer `MLState` buffers for the
-/// KV cache (48 tensors, `[1, 2, 768, 64]` fp16 each) instead of
-/// round-tripping 18 MB of kv_k / kv_v MLMultiArrays every step. ANE
-/// refuses to compile the stateful graph (`MILCompilerForANE
-/// ANECCompile() FAILED`); decode therefore runs on `.cpuAndGPU`.
-/// Requires macOS 15 / iOS 18.
+/// Decode runs **stateless** with an external KV cache: prefill emits
+/// `kv_k` / `kv_v` of shape `[24, 1, 2, 768, 64]` fp32, and decode
+/// accepts the same tensors as inputs and returns `kv_k_out` / `kv_v_out`
+/// at the same shape/dtype. The cache is round-tripped once per step
+/// (≈18 MB total). ANE still rejects this graph (`MILCompilerForANE
+/// ANECCompile() FAILED` on the rotary + sliced SDPA), so decode is
+/// pinned to `.cpuAndGPU`. The library floor is macOS 14 / iOS 17 — no
+/// MLState dependency.
 public enum CosyVoice3Constants {
 
     // MARK: - LLM shapes
@@ -66,8 +74,8 @@ public enum CosyVoice3Constants {
     public enum Files {
         public static let llmPrefill = "LLM-Prefill-T256-M768-fp16.mlpackage"
         public static let llmPrefillSubdir = "llm-fp16"
-        public static let llmDecode = "LLM-Decode-M768-fp16-stateful.mlpackage"
-        public static let llmDecodeSubdir = "llm-fp16-stateful"
+        public static let llmDecode = "LLM-Decode-M768-fp16.mlpackage"
+        public static let llmDecodeSubdir = "llm-fp16-decode"
         public static let flow = "Flow-N250-fp16.mlpackage"
         public static let flowSubdir = "flow-fp16-n250"
         public static let hift = "HiFT-T500-fp16.mlpackage"
