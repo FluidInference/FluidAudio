@@ -216,13 +216,20 @@ public struct OfflineDiarizerConfig: Sendable {
     public var postProcessing: PostProcessing
     public var export: Export
 
+    /// When true, populate `DiarizationResult.chunkEmbeddings` with per-chunk
+    /// speaker embeddings + cluster assignments. Off by default to avoid the
+    /// extra memory footprint (~1–2 MB per hour of audio for the embedding +
+    /// PLDA payload) for callers that don't need them.
+    public var exposeChunkEmbeddings: Bool
+
     public init(
         segmentation: Segmentation = .community,
         embedding: Embedding = .community,
         clustering: Clustering = .community,
         vbx: VBx = .community,
         postProcessing: PostProcessing = .community,
-        export: Export = .none
+        export: Export = .none,
+        exposeChunkEmbeddings: Bool = false
     ) {
         self.segmentation = segmentation
         self.embedding = embedding
@@ -230,6 +237,7 @@ public struct OfflineDiarizerConfig: Sendable {
         self.vbx = vbx
         self.postProcessing = postProcessing
         self.export = export
+        self.exposeChunkEmbeddings = exposeChunkEmbeddings
     }
 
     public init(

@@ -118,11 +118,56 @@ public struct PipelineTimings: Sendable, Codable {
     }
 }
 
+/// Per-chunk speaker embedding produced during offline diarization, surfaced for
+/// downstream consumers that need finer-grained data than `TimedSpeakerSegment`
+/// (e.g. cluster-level contamination correction). One entry per (segmentation
+/// chunk, powerset speaker slot) emitted by the embedding extraction step.
+///
+/// The `embedding256` field carries the L2-normalized speaker embedding;
+/// `rho128` carries the PLDA-whitened representation when a PLDA model is
+/// loaded (un-normalized; magnitude carries confidence). `rho128` is empty
+/// when no PLDA model is available.
+public struct ChunkEmbedding: Sendable, Codable {
+    /// Cluster identifier matching `DiarizationResult.segments[*].speakerId`
+    /// (formatted as "S1", "S2", ...). Use this to align chunks back to their
+    /// assigned cluster.
+    public let speakerId: String
+    public let chunkIndex: Int
+    public let speakerIndex: Int
+    public let startTimeSeconds: Double
+    public let endTimeSeconds: Double
+    public let embedding256: [Float]
+    public let rho128: [Double]
+
+    public init(
+        speakerId: String,
+        chunkIndex: Int,
+        speakerIndex: Int,
+        startTimeSeconds: Double,
+        endTimeSeconds: Double,
+        embedding256: [Float],
+        rho128: [Double] = []
+    ) {
+        self.speakerId = speakerId
+        self.chunkIndex = chunkIndex
+        self.speakerIndex = speakerIndex
+        self.startTimeSeconds = startTimeSeconds
+        self.endTimeSeconds = endTimeSeconds
+        self.embedding256 = embedding256
+        self.rho128 = rho128
+    }
+}
+
 public struct DiarizationResult: Sendable {
     public let segments: [TimedSpeakerSegment]
 
     /// Speaker database with embeddings (populated by offline pipelines for downstream use)
     public let speakerDatabase: [String: [Float]]?
+
+    /// Per-chunk speaker embeddings with cluster assignments. Populated by
+    /// offline pipelines when `OfflineDiarizerConfig.exposeChunkEmbeddings`
+    /// is enabled; nil otherwise. See `ChunkEmbedding` for field semantics.
+    public let chunkEmbeddings: [ChunkEmbedding]?
 
     /// Performance timings collected during diarization
     public let timings: PipelineTimings?
@@ -130,10 +175,12 @@ public struct DiarizationResult: Sendable {
     public init(
         segments: [TimedSpeakerSegment],
         speakerDatabase: [String: [Float]]? = nil,
+        chunkEmbeddings: [ChunkEmbedding]? = nil,
         timings: PipelineTimings? = nil
     ) {
         self.segments = segments
         self.speakerDatabase = speakerDatabase
+        self.chunkEmbeddings = chunkEmbeddings
         self.timings = timings
     }
 }
