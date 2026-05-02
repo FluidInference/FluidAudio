@@ -1263,11 +1263,13 @@ public class DiarizerTimeline {
 
             // Add trailing segment (tentative-path only)
             guard addTrailingTentative, aux.speaking else { continue }
-            aux.endFrame = endFrame + padOffset
-            guard aux.endFrame - aux.startFrame >= minSegmentLength else { continue }
+
+            let paddedEnd = endFrame + padOffset
+            guard paddedEnd - aux.startFrame >= minSegmentLength else { continue }
 
             aux.hasSegment = true
-            if aux.endFrame - aux.unmergedStartFrame >= minSegmentLength {
+            if paddedEnd - aux.unmergedStartFrame >= minSegmentLength {
+                aux.endFrame = paddedEnd
                 aux.activitySum += aux.unmergedActivitySum
                 aux.activeFrameCount += aux.unmergedActiveFrameCount
             }
