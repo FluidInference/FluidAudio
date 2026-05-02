@@ -497,6 +497,142 @@ public actor CoherePipeline {
             totalSeconds: CFAbsoluteTimeGetCurrent() - total0)
     }
 
+    // MARK: Long-form (sliding-window over the 35 s single-chunk encoder)
+
+    /// Transcribe arbitrary-length audio by sliding the existing 35 s encoder
+    /// window with a 5 s overlap and merging adjacent chunks via token-level
+    /// longest-common-substring.
+    ///
+    /// Audio ≤ `CohereAsrConfig.maxAudioSeconds` short-circuits to the
+    /// single-chunk `transcribe()` path and is byte-identical to it. Longer
+    /// audio is split at `chunkHopSeconds = maxAudioSeconds − chunkOverlapSeconds`
+    /// hops; chunk windows of `maxAudioSeconds` are decoded independently and
+    /// stitched. Encoder/decoder/total seconds are summed across chunks.
+    ///
+    /// Mirrors the upstream Python pipeline's `overlap_chunk_second: 5`. No
+    /// model changes — the encoder still sees a fixed `[1, 128, 3500]` mel and
+    /// the decoder cache is reset per chunk.
+    public func transcribeLong(
+        audio: [Float],
+        models: LoadedModels,
+        language: CohereAsrConfig.Language = .english,
+        maxNewTokens: Int = 108,
+        repetitionPenalty: Float = 1.1,
+        noRepeatNgram: Int = 3
+    ) async throws -> TranscriptionResult {
+        let total0 = CFAbsoluteTimeGetCurrent()
+
+        let sr = CohereAsrConfig.sampleRate
+        let chunkSamples = Int(CohereAsrConfig.maxAudioSeconds) * sr
+        let hopSamples = Int(CohereAsrConfig.chunkHopSeconds) * sr
+
+        // Short audio: pass through unchanged.
+        if audio.count <= chunkSamples {
+            return try await transcribe(
+                audio: audio,
+                models: models,
+                language: language,
+                maxNewTokens: maxNewTokens,
+                repetitionPenalty: repetitionPenalty,
+                noRepeatNgram: noRepeatNgram)
+        }
+
+        var mergedTokens: [Int] = []
+        var encoderSecs: Double = 0
+        var decoderSecs: Double = 0
+        var start = 0
+        var chunkIndex = 0
+
+        while start < audio.count {
+            let end = min(start + chunkSamples, audio.count)
+            let chunk = Array(audio[start..<end])
+
+            // Don't bother decoding a final tail of pure overlap — the previous
+            // chunk already covered it.
+            if chunkIndex > 0, (end - start) <= (chunkSamples - hopSamples) {
+                break
+            }
+
+            let result = try await transcribe(
+                audio: chunk,
+                models: models,
+                language: language,
+                maxNewTokens: maxNewTokens,
+                repetitionPenalty: repetitionPenalty,
+                noRepeatNgram: noRepeatNgram)
+
+            encoderSecs += result.encoderSeconds
+            decoderSecs += result.decoderSeconds
+
+            mergedTokens = Self.mergeTokenStreams(prefix: mergedTokens, suffix: result.tokenIds)
+
+            chunkIndex += 1
+            if end >= audio.count { break }
+            start += hopSamples
+        }
+
+        let text = Self.convertTokensToText(mergedTokens, vocabulary: models.vocabulary)
+        return TranscriptionResult(
+            text: text,
+            tokenIds: mergedTokens,
+            encoderSeconds: encoderSecs,
+            decoderSeconds: decoderSecs,
+            totalSeconds: CFAbsoluteTimeGetCurrent() - total0)
+    }
+
+    /// Merge two adjacent chunk token streams using longest-common-substring.
+    ///
+    /// Both chunks transcribe ~5 s of identical audio at their seam, so their
+    /// token IDs share a common subsequence near the prefix's tail / the
+    /// suffix's head. We search a bounded window (`windowTokens` tokens at the
+    /// boundary) for the longest common substring of length ≥ `minMatch`. On a
+    /// hit we drop the prefix's matched suffix and concatenate the suffix
+    /// verbatim. On a miss we concatenate plainly — better to duplicate a few
+    /// tokens than to lose content.
+    static func mergeTokenStreams(
+        prefix: [Int],
+        suffix: [Int],
+        windowTokens: Int = 32,
+        minMatch: Int = 4
+    ) -> [Int] {
+        if prefix.isEmpty { return suffix }
+        if suffix.isEmpty { return prefix }
+
+        let pTail = Array(prefix.suffix(windowTokens))
+        let sHead = Array(suffix.prefix(windowTokens))
+        let m = pTail.count
+        let n = sHead.count
+        if m == 0 || n == 0 { return prefix + suffix }
+
+        // Classic LCS-substring DP (O(m·n), m,n ≤ windowTokens).
+        var dp = [Int](repeating: 0, count: n + 1)
+        var bestLen = 0
+        var bestSEnd = 0  // index in sHead (exclusive) where the match ends
+        for i in 1...m {
+            var prev = 0
+            for j in 1...n {
+                let temp = dp[j]
+                if pTail[i - 1] == sHead[j - 1] {
+                    dp[j] = prev + 1
+                    if dp[j] > bestLen {
+                        bestLen = dp[j]
+                        bestSEnd = j
+                    }
+                } else {
+                    dp[j] = 0
+                }
+                prev = temp
+            }
+        }
+
+        guard bestLen >= minMatch else { return prefix + suffix }
+
+        // Keep the prefix as-is (it already contains one copy of the overlap
+        // tokens) and drop the suffix's matched head so the seam is not
+        // duplicated.
+        return prefix + Array(suffix.dropFirst(bestSEnd))
+    }
+
     // MARK: Encoder
 
     private func runEncoder(

@@ -42,6 +42,39 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
         prosody: .cpuAndGPU, noise: .cpuAndGPU, vocoder: .cpuAndGPU, tail: .cpuAndGPU
     )
 
+    /// Force every stage onto `.cpuAndNeuralEngine`. Stages that hit
+    /// ANE-incompatible ops will fall back to CPU silently — included
+    /// for the benchmark sweep (efficiency vs. latency comparison).
+    public static let allAne = KokoroAneComputeUnits(
+        albert: .cpuAndNeuralEngine, postAlbert: .cpuAndNeuralEngine,
+        alignment: .cpuAndNeuralEngine, prosody: .cpuAndNeuralEngine,
+        noise: .cpuAndNeuralEngine, vocoder: .cpuAndNeuralEngine,
+        tail: .cpuAndNeuralEngine
+    )
+
+    /// CPU-only (no ANE, no GPU). Slowest but most predictable; useful
+    /// as a debugging / fallback baseline.
+    public static let cpuOnly = KokoroAneComputeUnits(
+        albert: .cpuOnly, postAlbert: .cpuOnly, alignment: .cpuOnly,
+        prosody: .cpuOnly, noise: .cpuOnly, vocoder: .cpuOnly, tail: .cpuOnly
+    )
+
+    /// Build a configuration from a generic preset (used by the
+    /// `tts-benchmark` CLI so a single flag maps cleanly across
+    /// backends).
+    public init(preset: TtsComputeUnitPreset) {
+        switch preset {
+        case .default:
+            self = .default
+        case .allAne:
+            self = .allAne
+        case .cpuAndGpu:
+            self = .cpuAndGpu
+        case .cpuOnly:
+            self = .cpuOnly
+        }
+    }
+
     func units(for stage: KokoroAneStage) -> MLComputeUnits {
         switch stage {
         case .albert: return albert

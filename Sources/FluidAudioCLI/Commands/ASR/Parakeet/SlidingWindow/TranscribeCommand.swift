@@ -215,6 +215,7 @@ enum TranscribeCommand {
         var modelDir: String?
         var parakeetVariant: StreamingModelVariant?
         var language: Language?
+        var encoderPrecision: ParakeetEncoderPrecision = .int8
 
         // Parse options
         var i = 1
@@ -282,6 +283,16 @@ enum TranscribeCommand {
                     language = lang
                     i += 1
                 }
+            case "--encoder-precision":
+                if i + 1 < arguments.count {
+                    guard let precision = ParakeetEncoderPrecision(rawValue: arguments[i + 1].lowercased()) else {
+                        let valid = ParakeetEncoderPrecision.allCases.map(\.rawValue).joined(separator: ", ")
+                        logger.error("Unknown encoder precision: \(arguments[i + 1]). Valid: \(valid)")
+                        exit(1)
+                    }
+                    encoderPrecision = precision
+                    i += 1
+                }
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
@@ -306,7 +317,7 @@ enum TranscribeCommand {
             await testBatchTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
                 outputJsonPath: outputJsonPath, modelVersion: modelVersion, customVocabPath: customVocabPath,
-                modelDir: modelDir, language: language)
+                modelDir: modelDir, language: language, encoderPrecision: encoderPrecision)
         }
     }
 
@@ -314,16 +325,17 @@ enum TranscribeCommand {
     private static func testBatchTranscription(
         audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
         modelVersion: AsrModelVersion, customVocabPath: String?, modelDir: String? = nil,
-        language: Language? = nil
+        language: Language? = nil, encoderPrecision: ParakeetEncoderPrecision = .int8
     ) async {
         do {
             // Initialize ASR models
             let models: AsrModels
             if let modelDir = modelDir {
                 let dir = URL(fileURLWithPath: modelDir)
-                models = try await AsrModels.load(from: dir, version: modelVersion)
+                models = try await AsrModels.load(from: dir, version: modelVersion, encoderPrecision: encoderPrecision)
             } else {
-                models = try await AsrModels.downloadAndLoad(version: modelVersion)
+                models = try await AsrModels.downloadAndLoad(
+                    version: modelVersion, encoderPrecision: encoderPrecision)
             }
             let tdtConfig = TdtConfig(blankId: modelVersion.blankId)
             let asrConfig = ASRConfig(

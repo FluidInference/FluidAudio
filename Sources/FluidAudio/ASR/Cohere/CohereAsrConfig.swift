@@ -14,6 +14,14 @@ public enum CohereAsrConfig {
     /// Maximum number of audio samples (560,000 at 16kHz = 35 seconds).
     public static let maxSamples: Int = 560_000
 
+    /// Sliding-window overlap (seconds) when chunking audio > `maxAudioSeconds`.
+    ///
+    /// Matches upstream `cohere-pytorch/config.json` `overlap_chunk_second: 5`.
+    public static let chunkOverlapSeconds: Float = 5.0
+
+    /// Sliding-window hop (seconds) for long-form audio: 35 − 5 = 30 s.
+    public static var chunkHopSeconds: Float { maxAudioSeconds - chunkOverlapSeconds }
+
     /// Vocabulary size.
     public static let vocabSize: Int = 16_384
 
