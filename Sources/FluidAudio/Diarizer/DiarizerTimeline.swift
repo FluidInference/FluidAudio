@@ -1242,8 +1242,6 @@ public class DiarizerTimeline {
 
                     // Activity will be merged from the unmerged accumulators
                     aux.startFrame = start
-                    aux.activitySum = 0
-                    aux.activeFrameCount = 0
                 }
             }
 
@@ -1322,6 +1320,8 @@ public class DiarizerTimeline {
         }
 
         aux.hasSegment = false
+        aux.activitySum = 0
+        aux.activeFrameCount = 0
     }
 
     private func trimPredictions() {
