@@ -59,9 +59,11 @@ public final class LSEENDDiarizer: Diarizer {
         model: LSEENDModel,
         timelineConfig: DiarizerTimelineConfig? = nil
     ) throws {
-        self.timelineConfig = timelineConfig ?? .default(numSpeakers: 1, frameDurationSeconds: 0.1)
-
         let metadata = model.metadata
+        self.timelineConfig = timelineConfig ?? .default(numSpeakers: 1, frameDurationSeconds: 0.1)
+        self.timelineConfig.frameDurationSeconds = metadata.frameDurationSeconds
+        self.timelineConfig.numSpeakers = metadata.maxSpeakers
+
         self.model = model
         self.session = try LSEENDFeatureProvider(from: metadata)
         self.timeline = DiarizerTimeline(config: self.timelineConfig)
