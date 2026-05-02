@@ -50,7 +50,7 @@ public final class LSEENDDiarizer: Diarizer {
         try self.init(model: model, timelineConfig: timelineConfig)
     }
 
-    public init(timelineConfig: DiarizerTimelineConfig? = nil) throws {
+    public init(timelineConfig: DiarizerTimelineConfig? = nil) {
         self.timelineConfig = timelineConfig ?? .default(numSpeakers: 1, frameDurationSeconds: 0.1)
         self.timeline = DiarizerTimeline(config: self.timelineConfig)
     }
