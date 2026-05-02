@@ -651,8 +651,13 @@ public class DiarizerTimeline {
         var hasSegment: Bool = false
         var startFrame: Int = .min
         var endFrame: Int = .min
+
         var activitySum: Float = 0
         var activeFrameCount: Int = 0
+
+        var unmergedStartFrame: Int = .min
+        var unmergedActivitySum: Float = 0
+        var unmergedActiveFrameCount: Int = 0
     }
 
     /// Serializes mutation of `speakers`, `scratches`, prediction buffers, and
@@ -1193,27 +1198,36 @@ public class DiarizerTimeline {
 
                 if aux.speaking {
                     if activity >= offset {
-                        aux.activitySum += activityFunc(activity)
-                        aux.activeFrameCount += 1
+                        // Continue speaking
+                        aux.unmergedActivitySum += activityFunc(activity)
+                        aux.unmergedActiveFrameCount += 1
                         continue
                     }
 
+                    // Transition from speaking -> not speaking
                     aux.speaking = false
                     let end = frame + padOffset
 
-                    guard end - aux.startFrame >= minSegmentLength else {
+                    guard end - aux.unmergedStartFrame >= minSegmentLength else {
+                        aux.hasSegment = aux.endFrame >= minSegmentLength + aux.startFrame
                         continue
                     }
 
+                    // Close and merge the segment
                     aux.endFrame = end
+                    aux.activitySum += aux.unmergedActivitySum
+                    aux.activeFrameCount += aux.unmergedActiveFrameCount
                     aux.hasSegment = true
                 } else if activity > onset {
                     let start = frame - padOnset
                     aux.speaking = true
 
+                    // New local segment (will be merged when closed)
+                    aux.unmergedStartFrame = start
+                    aux.unmergedActivitySum = activityFunc(activity)
+                    aux.unmergedActiveFrameCount = 1
+
                     guard !aux.hasSegment || start - aux.endFrame > minFramesOff else {
-                        aux.activitySum += activityFunc(activity)
-                        aux.activeFrameCount += 1
                         aux.hasSegment = false
                         continue
                     }
@@ -1226,9 +1240,10 @@ public class DiarizerTimeline {
                         emittingIfTentativeTo: &tentativeResult
                     )
 
+                    // Activity will be merged from the unmerged accumulators
                     aux.startFrame = start
-                    aux.activitySum = activityFunc(activity)
-                    aux.activeFrameCount = 1
+                    aux.activitySum = 0
+                    aux.activeFrameCount = 0
                 }
             }
 
@@ -1250,7 +1265,12 @@ public class DiarizerTimeline {
             guard addTrailingTentative, aux.speaking else { continue }
             aux.endFrame = endFrame + padOffset
             guard aux.endFrame - aux.startFrame >= minSegmentLength else { continue }
+
             aux.hasSegment = true
+            if aux.endFrame - aux.unmergedStartFrame >= minSegmentLength {
+                aux.activitySum += aux.unmergedActivitySum
+                aux.activeFrameCount += aux.unmergedActiveFrameCount
+            }
 
             commitSegment(
                 from: &aux,
@@ -1281,18 +1301,18 @@ public class DiarizerTimeline {
             activity: aux.activeFrameCount > 0 ? aux.activitySum / Float(aux.activeFrameCount) : 0
         )
 
+        // Write segment to speaker
         if config.storeSegments {
-            let speaker: DiarizerSpeaker
-            if let spk = _speakers[slot] {
-                speaker = consume spk
+            if let speaker = _speakers[slot] {
+                speaker.append(segment)
             } else {
-                let spk = DiarizerSpeaker(index: slot)
-                _speakers[slot] = spk
-                speaker = consume spk
+                let speaker = DiarizerSpeaker(index: slot)
+                speaker.append(segment)
+                _speakers[slot] = consume speaker
             }
-            speaker.append(segment)
         }
 
+        // Write segment to results
         if isFinalized {
             finalizedResult.append(consume segment)
         } else {
