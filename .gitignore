@@ -11,6 +11,7 @@ xcuserdata/
 *.hmap
 
 *.txt
+!Benchmarks/**/*.txt
 
 ## App packaging
 *.ipa
@@ -104,6 +105,10 @@ Resources/
 scripts/
 !Scripts/parakeet_subset_benchmark.sh
 !Scripts/diarizer_subset_benchmark.sh
+
+# MiniMax TTS corpus is CC-BY-SA-4.0 derivative content fetched on demand
+# via `fluidaudio minimax-corpus`; only the README is checked in.
+Benchmarks/tts/corpus/minimax/*.txt
 Documentation/parakeet-tdt/
 docs/parakeet-tdt/
 

@@ -226,6 +226,21 @@ public enum Repo: String, CaseIterable, Sendable {
     }
 }
 
+/// Encoder precision for the v3 Parakeet TDT 0.6B encoder.
+public enum ParakeetEncoderPrecision: String, Sendable, CaseIterable {
+    case int8
+    case int4
+
+    public var encoderFileName: String {
+        switch self {
+        case .int8:
+            return ModelNames.ASR.encoderFile
+        case .int4:
+            return ModelNames.ASR.encoderInt4File
+        }
+    }
+}
+
 /// Centralized model names for all FluidAudio components
 public enum ModelNames {
 
@@ -288,10 +303,11 @@ public enum ModelNames {
         /// Joint decoder variant for v3 that exposes top-K outputs
         /// (`top_k_ids`, `top_k_logits`) used for language-aware script filtering.
         public static let jointV3File = "JointDecisionv3.mlmodelc"
+        public static let encoderInt4File = "EncoderInt4.mlmodelc"
         public static let ctcHeadFile = ctcHead + ".mlmodelc"
 
         /// Required models for v2 / legacy split-frontend loaders.
-        /// v3 uses `requiredModelsV3` (with `jointV3File`).
+        /// v3 uses `requiredModelsV3(precision:)` (with `jointV3File`).
         public static let requiredModels: Set<String> = [
             preprocessorFile,
             encoderFile,
@@ -299,14 +315,16 @@ public enum ModelNames {
             jointFile,
         ]
 
-        /// Required models for v3. v3 always uses `JointDecisionv3.mlmodelc`
-        /// (with top-K outputs for language-aware script filtering).
-        public static let requiredModelsV3: Set<String> = [
-            preprocessorFile,
-            encoderFile,
-            decoderFile,
-            jointV3File,
-        ]
+        public static func requiredModelsV3(
+            precision: ParakeetEncoderPrecision = .int8
+        ) -> Set<String> {
+            [
+                preprocessorFile,
+                precision.encoderFileName,
+                decoderFile,
+                jointV3File,
+            ]
+        }
 
         /// Required models for fused frontend (110m hybrid: preprocessor contains encoder)
         public static let requiredModelsFused: Set<String> = [
@@ -698,7 +716,7 @@ public enum ModelNames {
     /// expected local directory layout is encoded in `CosyVoice3Constants.Files`.
     public enum CosyVoice3 {
         public static let llmPrefill = "LLM-Prefill-T256-M768-fp16"
-        public static let llmDecode = "LLM-Decode-M768-fp16-stateful"
+        public static let llmDecode = "LLM-Decode-M768-fp16"
         public static let flow = "Flow-N250-fp16"
         public static let hift = "HiFT-T500-fp16"
         public static let speechEmbeddings = "speech_embedding-fp16.safetensors"
@@ -990,7 +1008,8 @@ public enum ModelNames {
         case .vad:
             return ModelNames.VAD.requiredModels
         case .parakeetV3:
-            return ModelNames.ASR.requiredModelsV3
+            let precision = ParakeetEncoderPrecision(rawValue: variant ?? "") ?? .int8
+            return ModelNames.ASR.requiredModelsV3(precision: precision)
         case .parakeetV2:
             return ModelNames.ASR.requiredModels
         case .parakeetTdtCtc110m:

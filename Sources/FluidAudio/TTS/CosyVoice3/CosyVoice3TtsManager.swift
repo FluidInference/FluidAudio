@@ -38,11 +38,9 @@ import Foundation
 ///   the 281 runtime-added special tokens (CosyVoice3Tokenizer). Same format
 ///   that `tokenizer_fixture.json` dumps under its `special_tokens` key.
 ///
-/// > Note: Gated to macOS 15 / iOS 18 because the underlying
-/// > `CosyVoice3Synthesizer` uses CoreML `MLState` for the decode KV cache.
-/// > Other FluidAudio modules (ASR, Diarization, VAD, Kokoro, PocketTTS)
-/// > remain available on macOS 14 / iOS 17.
-@available(macOS 15, iOS 18, *)
+/// > Available on the same floor as the rest of FluidAudio (macOS 14 /
+/// > iOS 17). Decode runs stateless with an external KV cache rather than
+/// > `MLState`, so no extra OS gate is required.
 public actor CosyVoice3TtsManager {
 
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "CosyVoice3TtsManager")
@@ -216,9 +214,60 @@ public actor CosyVoice3TtsManager {
             normalized = CosyVoice3ChineseNormalizer.normalize(text)
         }
 
+        // Auto-chunk long input under the structural 250-token Flow cap.
+        // The chunker greedily splits on hard sentence enders + soft clause
+        // separators when the running speech-token estimate exceeds budget;
+        // short inputs return a single chunk and take the fast path. Caller
+        // can opt out via `options.disableAutoChunking` for pre-segmented
+        // input (e.g. UI-driven streaming).
+        let chunks: [String]
+        if options.disableAutoChunking {
+            chunks = [normalized]
+        } else {
+            let split = CosyVoice3TextChunker.chunk(normalized)
+            chunks = split.isEmpty ? [normalized] : split
+        }
+
+        if chunks.count == 1 {
+            return try await synthesizeChunk(
+                text: chunks[0], promptAssets: promptAssets,
+                options: options, frontend: frontend, synthesizer: synthesizer)
+        }
+
+        logger.info(
+            "Auto-chunking long input into \(chunks.count) segments to fit "
+                + "the 250-token Flow cap (estimated speech tokens: "
+                + "\(CosyVoice3TextChunker.estimateSpeechTokens(normalized))).")
+        var results: [CosyVoice3SynthesisResult] = []
+        results.reserveCapacity(chunks.count)
+        for (i, chunk) in chunks.enumerated() {
+            logger.info(
+                "  chunk \(i + 1)/\(chunks.count): "
+                    + "\(chunk.count) chars, ~"
+                    + "\(CosyVoice3TextChunker.estimateSpeechTokens(chunk)) speech tokens")
+            let r = try await synthesizeChunk(
+                text: chunk, promptAssets: promptAssets,
+                options: options, frontend: frontend, synthesizer: synthesizer)
+            results.append(r)
+        }
+        return Self.mergeChunkedResults(results)
+    }
+
+    // MARK: - Chunked synthesis helpers
+
+    /// Single-call synthesis path: tokenize/normalize-aware text → fixture
+    /// adapter → synthesizer. Shared between the fast (1-chunk) and chunked
+    /// (N-chunk) paths in `synthesize(...)`.
+    private func synthesizeChunk(
+        text: String,
+        promptAssets: CosyVoice3PromptAssets,
+        options: CosyVoice3SynthesisOptions,
+        frontend: CosyVoice3TextFrontend,
+        synthesizer: CosyVoice3Synthesizer
+    ) async throws -> CosyVoice3SynthesisResult {
         let assembled = try frontend.assemble(
             promptText: promptAssets.promptText,
-            ttsText: normalized,
+            ttsText: text,
             promptSpeechIds: promptAssets.promptSpeechIds)
 
         let lmInputEmbedsFlat = try Self.flattenLmEmbeds(
@@ -244,6 +293,72 @@ public actor CosyVoice3TtsManager {
             replayDecodedTokens: false)
 
         return try await synthesizer.synthesize(fixture: fixture, options: parityOptions)
+    }
+
+    /// Concatenate per-chunk results into a single `CosyVoice3SynthesisResult`.
+    /// Audio is stitched with a short cosine cross-fade (`crossfadeMs`) at
+    /// each boundary to mask DC/phase mismatch from independent synth calls.
+    /// `finishedOnEos` is `true` only when every chunk ended naturally
+    /// (so callers can still detect mid-segment truncation downstream).
+    private static func mergeChunkedResults(
+        _ results: [CosyVoice3SynthesisResult],
+        crossfadeMs: Double = 8
+    ) -> CosyVoice3SynthesisResult {
+        precondition(!results.isEmpty, "mergeChunkedResults requires ≥1 result")
+        let sampleRate = results[0].sampleRate
+        let samples = concatWithCrossfade(
+            results.map { $0.samples },
+            sampleRate: sampleRate,
+            fadeMs: crossfadeMs)
+        let totalGenerated = results.reduce(0) { $0 + $1.generatedTokenCount }
+        var allDecoded: [Int32] = []
+        allDecoded.reserveCapacity(totalGenerated)
+        for r in results { allDecoded.append(contentsOf: r.decodedTokens) }
+        let allEos = results.allSatisfy { $0.finishedOnEos }
+        return CosyVoice3SynthesisResult(
+            samples: samples,
+            sampleRate: sampleRate,
+            generatedTokenCount: totalGenerated,
+            decodedTokens: allDecoded,
+            finishedOnEos: allEos)
+    }
+
+    /// Concatenate PCM chunks with a cosine cross-fade at each boundary.
+    /// Fade window is the shorter of `fadeMs` and `min(prev.tail, next.head)
+    /// / 2`, so very short chunks degrade gracefully (no overlap consuming
+    /// the entire chunk).
+    static func concatWithCrossfade(
+        _ chunks: [[Float]],
+        sampleRate: Int,
+        fadeMs: Double
+    ) -> [Float] {
+        guard !chunks.isEmpty else { return [] }
+        let nominalFade = max(0, Int((Double(sampleRate) * fadeMs / 1000).rounded()))
+        var out: [Float] = chunks[0]
+        for i in 1..<chunks.count {
+            let next = chunks[i]
+            if nominalFade == 0 || out.isEmpty || next.isEmpty {
+                out.append(contentsOf: next)
+                continue
+            }
+            let fade = min(nominalFade, out.count / 2, next.count / 2)
+            if fade <= 0 {
+                out.append(contentsOf: next)
+                continue
+            }
+            // Cosine equal-power crossfade: out tail fades down, next head
+            // fades up; samples are summed in the overlap region. Length of
+            // `out` after splice = old_len - fade + next.count.
+            let outStart = out.count - fade
+            for j in 0..<fade {
+                let t = Float(j) / Float(fade)
+                let down = 0.5 * (1 + cos(Float.pi * t))  // 1 → 0
+                let up = 0.5 * (1 - cos(Float.pi * t))  // 0 → 1
+                out[outStart + j] = out[outStart + j] * down + next[j] * up
+            }
+            out.append(contentsOf: next[fade..<next.count])
+        }
+        return out
     }
 
     // MARK: - Helpers

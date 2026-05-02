@@ -443,15 +443,8 @@ enum CohereBenchmark {
             do {
                 let samples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
                 let duration = Double(samples.count) / Double(CohereAsrConfig.sampleRate)
-                if duration > Double(CohereAsrConfig.maxAudioSeconds) {
-                    logger.warning(
-                        "  Skipping \(file.fileName) (\(String(format: "%.1f", duration))s > "
-                            + "\(CohereAsrConfig.maxAudioSeconds)s single-chunk limit)"
-                    )
-                    continue
-                }
 
-                let result = try await pipeline.transcribe(
+                let result = try await pipeline.transcribeLong(
                     audio: samples,
                     models: models,
                     language: language,
@@ -729,8 +722,10 @@ enum CohereBenchmark {
                 el_gr, ar_eg, ja_jp, cmn_hans_cn, ko_kr, vi_vn
 
             Note:
-                Cohere Transcribe is single-chunk with a 35s audio limit. Files
-                exceeding that are skipped with a warning.
+                The Cohere encoder accepts a 35s window. Audio longer than 35s is
+                automatically chunked with 5s overlap (matching upstream
+                `overlap_chunk_second: 5`) and adjacent chunks are stitched via
+                token-level longest-common-substring merge.
 
             Examples:
                 # LibriSpeech test-clean, English, 100 utterances

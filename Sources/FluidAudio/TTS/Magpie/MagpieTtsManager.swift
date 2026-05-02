@@ -75,6 +75,11 @@ public actor MagpieTtsManager {
     public func initialize() async throws {
         if synthesizer != nil { return }
 
+        logger.warning(
+            "Magpie TTS is experimental / beta. Synthesis is below real-time "
+                + "(agg-RTFx ~0.41× on M2 for the MiniMax-English corpus) — "
+                + "see Documentation/TTS/Magpie.md.")
+
         let store = MagpieModelStore(
             directory: directory,
             computeUnits: computeUnits,

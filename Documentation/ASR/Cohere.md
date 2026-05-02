@@ -198,6 +198,48 @@ Two sources of the ~1-3% gap on most languages:
 2. **Quantization**: FluidAudio ships INT8 encoder + FP16 cache-external
    decoder; Cohere's reported numbers are full FP16 PyTorch inference.
 
+### Cold-start vs warm inference (isolated, single process)
+
+The headline RTFx numbers above assume the encoder/decoder are loaded **once**
+and reused across many transcribes. Spawning a fresh process per WAV pays the
+ANE compile cost on every call and looks dramatically slower.
+
+Isolated single-process bench, M2 (2022) Tahoe 26.0, INT8 encoder + FP16
+cache-external decoder, `cohere-transcribe` invoked once with five WAVs sharing
+one model load:
+
+| # | Duration | Encoder | Decoder | Total | RTFx | Notes |
+|--:|---:|---:|---:|---:|---:|---|
+| 0 |  3.32 s | 186.33 s | 1.46 s | 187.81 s | 0.02× | **cold ANE compile** |
+| 1 |  6.87 s |   2.47 s | 0.90 s |   3.41 s | 2.02× | warm |
+| 2 |  8.94 s |   3.31 s | 1.21 s |   4.57 s | 1.96× | warm |
+| 3 | 37.15 s |   1.51 s | 2.54 s |   4.26 s | 8.73× | warm, full 35 s window |
+
+Takeaways:
+
+- **Cold compile is one-time per process**, not per call. `anecompilerservice`
+  re-emits the encoder MIL graph for ANE the first time a fresh process loads
+  the model. ~3 min on M2 Tahoe; longer on first-ever compiles for some
+  language splits (the cmn_hans_cn FLEURS run logged a ~6 min cold-start).
+  Wiping `~/Library/Caches/.../com.apple.e5rt.e5bundlecache/` does not avoid
+  it; a clean process always pays it.
+- **Warm encoder is shape-bound, not duration-bound.** Every call processes a
+  fixed 3,500-frame mel (35 s @ 10 ms hop). Short audio does not finish the
+  encoder faster — warm encoder cost stays in a 1.5–3.3 s band regardless of
+  input length.
+- **Audio > 35 s is auto-chunked** by `transcribeLong` with a 30 s hop and 5 s
+  overlap (matches upstream `overlap_chunk_second: 5`); adjacent chunk token
+  streams are stitched via token-level longest-common-substring merge. The
+  raw `transcribe` call still uses the strict 35 s window with
+  `padOrTruncate(... fixedFrames: 3_500)` at
+  `Sources/FluidAudio/ASR/Cohere/CoherePipeline.swift:250`, so picking
+  `transcribeLong` is the right default for unknown-length audio.
+- **Process reuse is what unlocks the documented RTFx.** The LibriSpeech
+  test-clean run above (5h 24m audio, RTFx 1.72× total) absorbs the cold
+  compile across 2,620 utterances; per-call warm path is closer to RTFx
+  2–9× depending on how much of the 35 s window is filled. Re-spawning per
+  WAV would push effective RTFx well below 0.1×.
+
 ## Notes and Caveats
 
 - **INT8 encoder quality parity**: encoder hidden states match FP16 within
@@ -205,11 +247,14 @@ Two sources of the ~1-3% gap on most languages:
   are within ±0.5%, so the INT8 hybrid is the recommended default.
 - **Cache-external decoder stays FP16**: INT8 decoder quantization regresses
   quality significantly in testing and is not shipped.
-- **Single-chunk only**: the CoreML pipeline processes one 35 s window per
-  call (matches upstream `max_audio_clip_s: 35`). The reference Python
-  pipeline supports >35 s audio via sliding-window chunking with 5 s overlap
-  (`overlap_chunk_second: 5`); FluidAudio does not implement that wrapper
-  yet — files exceeding 35 s are skipped by the benchmark CLI with a warning.
+- **Long-form audio**: the encoder always sees a fixed 35 s window
+  (`max_audio_clip_s: 35`). Use `CoherePipeline.transcribeLong` for audio of
+  unknown / arbitrary length — it slides a 35 s window with 5 s overlap
+  (matching upstream `overlap_chunk_second: 5`) and stitches adjacent chunks
+  via token-level longest-common-substring merge. The raw `transcribe` API is
+  the single-chunk path and silently truncates input > 35 s. The CLI commands
+  (`cohere-transcribe`, `cohere-benchmark`, `tts-benchmark`) all use
+  `transcribeLong` and no longer skip > 35 s files.
 - **Language must be specified**: no automatic language ID. Pass
   `CohereAsrConfig.Language` on every call; the wrong language produces
   degenerate output.

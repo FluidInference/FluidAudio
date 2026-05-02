@@ -414,22 +414,17 @@ public struct TTS {
                 )
                 return
             }
-            if #available(macOS 15, iOS 18, *) {
-                await CosyVoice3TextCLI.run(
-                    text: inputText,
-                    modelsDir: modelsDir,
-                    tokenizerDir: tokDir,
-                    embeddingsFile: embFile,
-                    specialTokensFile: specFile,
-                    promptAssetsPath: promptAssets,
-                    outputPath: output,
-                    seed: cv3Seed,
-                    maxNewTokens: cv3MaxNewTokens,
-                    cpuOnly: cv3CpuOnly)
-            } else {
-                logger.error(
-                    "CosyVoice3 requires macOS 15 / iOS 18 (uses CoreML MLState).")
-            }
+            await CosyVoice3TextCLI.run(
+                text: inputText,
+                modelsDir: modelsDir,
+                tokenizerDir: tokDir,
+                embeddingsFile: embFile,
+                specialTokensFile: specFile,
+                promptAssetsPath: promptAssets,
+                outputPath: output,
+                seed: cv3Seed,
+                maxNewTokens: cv3MaxNewTokens,
+                cpuOnly: cv3CpuOnly)
             return
         }
 
@@ -440,19 +435,14 @@ public struct TTS {
                 )
                 return
             }
-            if #available(macOS 15, iOS 18, *) {
-                await CosyVoice3ParityCLI.run(
-                    fixturePath: fixture,
-                    modelsDir: modelsDir,
-                    referencePath: cv3ReferencePath,
-                    outputPath: output,
-                    seed: cv3Seed,
-                    cpuOnly: cv3CpuOnly,
-                    replayTokens: cv3ReplayTokens)
-            } else {
-                logger.error(
-                    "CosyVoice3 requires macOS 15 / iOS 18 (uses CoreML MLState).")
-            }
+            await CosyVoice3ParityCLI.run(
+                fixturePath: fixture,
+                modelsDir: modelsDir,
+                referencePath: cv3ReferencePath,
+                outputPath: output,
+                seed: cv3Seed,
+                cpuOnly: cv3CpuOnly,
+                replayTokens: cv3ReplayTokens)
             return
         }
 
