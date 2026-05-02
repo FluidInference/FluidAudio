@@ -1266,6 +1266,8 @@ public class DiarizerTimeline {
             guard paddedEnd - aux.startFrame >= minSegmentLength else { continue }
 
             aux.hasSegment = true
+
+            // If the trailing segment is too short, don't merge it
             if paddedEnd - aux.unmergedStartFrame >= minSegmentLength {
                 aux.endFrame = paddedEnd
                 aux.activitySum += aux.unmergedActivitySum
