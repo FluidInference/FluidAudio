@@ -1209,7 +1209,7 @@ public class DiarizerTimeline {
                     let end = frame + padOffset
 
                     guard end - aux.unmergedStartFrame >= minSegmentLength else {
-                        aux.hasSegment = aux.endFrame >= minSegmentLength + aux.startFrame
+                        aux.hasSegment = aux.endFrame >= aux.startFrame + minSegmentLength
                         continue
                     }
 
@@ -1227,7 +1227,7 @@ public class DiarizerTimeline {
                     aux.unmergedActivitySum = activityFunc(activity)
                     aux.unmergedActiveFrameCount = 1
 
-                    guard !aux.hasSegment || start - aux.endFrame > minFramesOff else {
+                    guard !aux.hasSegment || start > aux.endFrame + minFramesOff else {
                         aux.hasSegment = false
                         continue
                     }
@@ -1263,12 +1263,12 @@ public class DiarizerTimeline {
             guard addTrailingTentative, aux.speaking else { continue }
 
             let paddedEnd = endFrame + padOffset
-            guard paddedEnd - aux.startFrame >= minSegmentLength else { continue }
+            guard paddedEnd >= aux.startFrame + minSegmentLength else { continue }
 
             aux.hasSegment = true
 
             // If the trailing segment is too short, don't merge it
-            if paddedEnd - aux.unmergedStartFrame >= minSegmentLength {
+            if paddedEnd >= aux.unmergedStartFrame + minSegmentLength {
                 aux.endFrame = paddedEnd
                 aux.activitySum += aux.unmergedActivitySum
                 aux.activeFrameCount += aux.unmergedActiveFrameCount
