@@ -33,19 +33,22 @@ public actor KokoroAneManager {
 
     private let logger = AppLogger(category: "KokoroAneManager")
     private let store: KokoroAneModelStore
+    private let variant: KokoroAneVariant
     private var defaultVoice: String
 
     public init(
-        defaultVoice: String = KokoroAneConstants.defaultVoice,
+        variant: KokoroAneVariant = .english,
+        defaultVoice: String? = nil,
         directory: URL? = nil,
         computeUnits: KokoroAneComputeUnits = .default,
         modelStore: KokoroAneModelStore? = nil
     ) {
-        self.defaultVoice = defaultVoice
+        self.variant = variant
+        self.defaultVoice = defaultVoice ?? variant.defaultVoice
         self.store =
             modelStore
             ?? KokoroAneModelStore(
-                directory: directory, computeUnits: computeUnits)
+                directory: directory, computeUnits: computeUnits, variant: variant)
     }
 
     // MARK: - Lifecycle
@@ -104,16 +107,29 @@ public actor KokoroAneManager {
     }
 
     /// Text → samples + per-stage timings.
+    ///
+    /// For ``KokoroAneVariant/mandarin`` this throws — Mandarin G2P is not yet
+    /// implemented in Swift. Callers must supply pre-computed Bopomofo via
+    /// ``synthesizeFromPhonemes(_:voice:speed:)`` instead.
     public func synthesizeDetailed(
         text: String,
         voice: String? = nil,
         speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> KokoroAneSynthesisResult {
+        if variant == .mandarin {
+            throw KokoroAneError.inputProcessingFailed(
+                "Mandarin text-to-IPA G2P is not implemented yet; "
+                    + "use synthesizeFromPhonemes() with pre-computed Bopomofo.")
+        }
         let phonemes = try await phonemize(text: text)
         return try await runChain(phonemes: phonemes, voice: voice, speed: speed)
     }
 
     /// Bypass G2P; feed an already-IPA phoneme string directly.
+    ///
+    /// For the ``KokoroAneVariant/mandarin`` variant the `phonemes` argument
+    /// must be Bopomofo + tone digits + IPA punctuation matching the
+    /// `kokoro-82m-coreml/ANE-zh/vocab.json` token set.
     public func synthesizeFromPhonemes(
         _ phonemes: String,
         voice: String? = nil,
