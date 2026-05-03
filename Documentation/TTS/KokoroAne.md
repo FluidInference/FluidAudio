@@ -154,6 +154,35 @@ MiniMax-English 100-phrase suite — including the longer paragraph
 phrases that pull the per-corpus aggregate down to ~5.2× — see
 [Benchmarks.md](Benchmarks.md).
 
+## Model Updates
+
+### atan2 phase correction (Kokoro zh noise fix)
+
+`KokoroNoise.mlmodelc` on HuggingFace was regenerated from
+[mobius PR #50](https://github.com/FluidInference/mobius/pull/50) with an
+atan2 phase correction in the `CoreMLForwardSTFT` block of
+`convert-coreml.py`. The previous conversion produced audible
+high-frequency background noise that was most noticeable on Mandarin
+(zh) synthesis. The fix is purely a model artifact change — inputs,
+outputs, dtypes, shapes, and `KokoroNoise.mlmodelc` filename are all
+unchanged, so no Swift code update is required to consume it.
+
+**Cache invalidation for existing users.** The downloader in
+[`KokoroAneResourceDownloader.ensureModels`](../../Sources/FluidAudio/TTS/KokoroAne/Assets/KokoroAneResourceDownloader.swift)
+checks file existence only — it will not re-fetch a stale
+`KokoroNoise.mlmodelc` once it's on disk. If you ran KokoroAne before
+the fix landed, delete the cached bundle so the next `initialize()`
+pulls the corrected one:
+
+```bash
+# macOS
+rm -rf ~/.cache/fluidaudio/Models/kokoro-82m-coreml/ANE/KokoroNoise.mlmodelc
+
+# iOS — under <App caches>/fluidaudio/Models/kokoro-82m-coreml/ANE/
+```
+
+Fresh installs are unaffected.
+
 ## Source
 
 - HuggingFace: [`FluidInference/kokoro-82m-coreml/ANE/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE)
