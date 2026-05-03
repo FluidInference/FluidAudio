@@ -103,6 +103,46 @@ final class DiarizerTimelineMergeTests: XCTestCase {
         XCTAssertEqual(segments.first?.activity ?? 0, 0.9, accuracy: 1e-5)
     }
 
+    /// Regression: a segment closing inside the chunk-end buffer zone must
+    /// survive across a subsequent addChunk that wipes tentative storage.
+    /// Before the fix, such segments were emitted as tentative + cleared from
+    /// scratches by the finalized call, then wiped by the next chunk's
+    /// clearTentative — silently dropped.
+    func testSegmentInBufferZoneSurvivesNextChunk() throws {
+        let timeline = DiarizerTimeline(config: Self.mergeConfig)
+
+        // Chunk 1: A active frames 5..14, padded [3, 17]. Chunk ends at frame
+        // 22; finalizedEndFrame = 22 - minFramesOff(3) - pad(4) = 15.
+        // A.endFrame=17 > 15 → A is still mutable (a future-chunk small-gap
+        // onset could extend it), so it must be held in scratches.
+        var chunk1Predictions = [Float](repeating: 0.0, count: 22)
+        for i in 5...14 { chunk1Predictions[i] = 0.9 }
+        _ = try timeline.addChunk(
+            DiarizerChunkResult(
+                startFrame: 0,
+                finalizedPredictions: chunk1Predictions,
+                finalizedFrameCount: 22
+            )
+        )
+
+        // Chunk 2: all silent. clearTentative would have dropped A under the
+        // old behavior. With the fix, A is still held, ages past chunk 2's
+        // finalizedEndFrame, and emits as finalized.
+        _ = try timeline.addChunk(
+            DiarizerChunkResult(
+                startFrame: 22,
+                finalizedPredictions: [Float](repeating: 0.0, count: 22),
+                finalizedFrameCount: 22
+            )
+        )
+        timeline.finalize()
+
+        let segments = timeline.speakers[0]?.finalizedSegments ?? []
+        XCTAssertEqual(segments.count, 1)
+        XCTAssertEqual(segments.first?.startFrame, 3)
+        XCTAssertEqual(segments.first?.endFrame, 17)
+    }
+
     /// Tentative emission: A long, small-gap merge intent, tail already long enough.
     /// Tentative should emit the merged span with combined activity.
     func testTrailingTentativeLongTailEmitsMergedSpan() throws {
