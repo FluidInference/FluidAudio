@@ -43,17 +43,31 @@ public struct TTS {
 
     private static func loadCustomLexicon(from path: String?) throws -> TtsCustomLexicon? {
         guard let path = path else { return nil }
-        let expanded = (path as NSString).expandingTildeInPath
-        let url: URL
-        if expanded.hasPrefix("/") {
-            url = URL(fileURLWithPath: expanded)
-        } else {
-            let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            url = cwd.appendingPathComponent(expanded)
-        }
+        let url = resolveLexiconURL(path)
         let lexicon = try TtsCustomLexicon.load(from: url)
         logger.info("Loaded custom lexicon with \(lexicon.count) entries from \(url.path)")
         return lexicon
+    }
+
+    /// Mandarin lexicon loader sibling — same path-resolution rules,
+    /// different file format. See ``MandarinCustomLexicon/parse(_:)`` for
+    /// the line spec.
+    private static func loadMandarinLexicon(from path: String?) throws -> MandarinCustomLexicon? {
+        guard let path = path else { return nil }
+        let url = resolveLexiconURL(path)
+        let lexicon = try MandarinCustomLexicon.load(from: url)
+        logger.info(
+            "Loaded Mandarin custom lexicon with \(lexicon.count) entries from \(url.path)")
+        return lexicon
+    }
+
+    private static func resolveLexiconURL(_ path: String) -> URL {
+        let expanded = (path as NSString).expandingTildeInPath
+        if expanded.hasPrefix("/") {
+            return URL(fileURLWithPath: expanded)
+        }
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        return cwd.appendingPathComponent(expanded)
     }
 
     private static let longFormBenchmark: String = """
@@ -470,7 +484,7 @@ public struct TTS {
         if backend == .kokoroAne {
             await runKokoroAne(
                 text: text, output: output, voice: voice, metricsPath: metricsPath,
-                variant: kokoroAneVariant)
+                variant: kokoroAneVariant, lexiconPath: lexiconPath)
             return
         }
 
@@ -904,7 +918,7 @@ public struct TTS {
 
     private static func runKokoroAne(
         text: String, output: String, voice: String, metricsPath: String?,
-        variant: KokoroAneVariant
+        variant: KokoroAneVariant, lexiconPath: String?
     ) async {
         do {
             let tStart = Date()
@@ -917,6 +931,25 @@ public struct TTS {
                 ? variant.defaultVoice : voice
             let manager = KokoroAneManager(
                 variant: variant, defaultVoice: resolvedVoice)
+
+            // --lexicon is dual-format. For Mandarin, parse + install the
+            // user override before initialize() so it's live on the first
+            // synthesize() call. For English, the Mandarin format wouldn't
+            // parse anyway — log + ignore so users aren't silently
+            // surprised by a flag with no effect.
+            if let lexiconPath {
+                switch variant {
+                case .mandarin:
+                    if let lex = try loadMandarinLexicon(from: lexiconPath) {
+                        await manager.setMandarinCustomLexicon(lex)
+                    }
+                case .english:
+                    logger.warning(
+                        "--lexicon ignored: KokoroAne English variant has "
+                            + "no custom lexicon support yet (only Mandarin does). "
+                            + "Pass --backend kokoro to use the English lexicon.")
+                }
+            }
 
             let tLoad0 = Date()
             try await manager.initialize()
@@ -1067,7 +1100,14 @@ public struct TTS {
                                      cosyvoice3-tokenizer-parity  Qwen2 BPE round-trip
                                    (Production cosyvoice3 backend auto-downloads
                                     assets from HuggingFace on first synthesis.)
-              --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
+              --lexicon, -l        Custom pronunciation lexicon file. Format depends on backend:
+                                     Kokoro (default backend):
+                                       word=phon1phon2 phon3   (IPA, grapheme-split)
+                                     KokoroAne --variant zh:
+                                       word  pinyin1 pinyin2   (e.g. zi4 jie2)
+                                       word  @bopomofo1        (escape: @-prefixed,
+                                                                bypasses tone sandhi)
+                                   Ignored for KokoroAne English (no lexicon support yet).
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s/15s model (values: 5s,15s) OR
                                pick KokoroAne language (values: en,zh).

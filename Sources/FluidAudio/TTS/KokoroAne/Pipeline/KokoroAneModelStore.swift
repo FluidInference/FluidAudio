@@ -101,6 +101,7 @@ public actor KokoroAneModelStore {
     private var voicePacks: [String: KokoroAneVoicePack] = [:]
     private var repoDirectory: URL?
     private var mandarinG2P: MandarinG2P?
+    private var mandarinCustomLexicon: MandarinCustomLexicon = .empty
 
     private let directory: URL?
     private let computeUnits: KokoroAneComputeUnits
@@ -218,12 +219,26 @@ public actor KokoroAneModelStore {
             KokoroAneConstants.g2pPinyinSingleFile)
         let dict = try MandarinPinyinDict.load(
             singlesURL: singlesURL, phrasesURL: phrasesURL)
-        let pipeline = MandarinG2P(dict: dict)
+        var pipeline = MandarinG2P(dict: dict)
+        pipeline.customLexicon = mandarinCustomLexicon
         mandarinG2P = pipeline
         logger.info(
             "Loaded Mandarin G2P (phrases=\(dict.phrases.count), singles=\(dict.singles.count))"
         )
         return pipeline
+    }
+
+    /// Install (or clear) the user-supplied Mandarin pronunciation
+    /// override. The lexicon is cached on the store so it survives a
+    /// pipeline rebuild, and is pushed into the live ``MandarinG2P``
+    /// instance immediately if one is already loaded. Calling on a
+    /// non-mandarin store stores the value but has no synthesis effect
+    /// (the pipeline is never instantiated for English).
+    public func setMandarinCustomLexicon(_ lexicon: MandarinCustomLexicon) {
+        mandarinCustomLexicon = lexicon
+        if mandarinG2P != nil {
+            mandarinG2P?.customLexicon = lexicon
+        }
     }
 
     public func cleanup() {

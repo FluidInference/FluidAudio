@@ -34,8 +34,19 @@ public struct MandarinG2P: Sendable {
     private let dict: MandarinPinyinDict
     private static let logger = AppLogger(category: "MandarinG2P")
 
+    /// User-supplied pronunciation overrides. When non-empty, slots in
+    /// at the front of the segmentation cascade — longest match wins,
+    /// user beats dict at equal length. Default ``MandarinCustomLexicon/empty``
+    /// is a no-op.
+    public var customLexicon: MandarinCustomLexicon = .empty
+
     public init(dict: MandarinPinyinDict) {
         self.dict = dict
+    }
+
+    public init(dict: MandarinPinyinDict, customLexicon: MandarinCustomLexicon) {
+        self.dict = dict
+        self.customLexicon = customLexicon
     }
 
     /// Convert text to a Bopomofo + tone-digit string ready for
@@ -70,6 +81,13 @@ public struct MandarinG2P: Sendable {
                 for py in list {
                     pendingSyllables.append(MandarinPinyinNormalizer.normalize(py))
                 }
+            case .syllables(let list):
+                // User-lexicon pinyin tokens — already in
+                // (base, tone) form. They join the same syllable buffer
+                // so sandhi runs across user/dict boundaries naturally
+                // (e.g. user word ending in tone-3 followed by dict
+                // word starting with tone-3 → 3+3 promotion).
+                pendingSyllables.append(contentsOf: list)
             case .punctuation(let s):
                 // Sandhi never crosses punctuation; emit accumulated
                 // syllables first.
@@ -112,6 +130,8 @@ public struct MandarinG2P: Sendable {
 
     enum Segment {
         case pinyin([String])  // Diacritic-form pinyin syllables.
+        case syllables([MandarinPinyinNormalizer.Syllable])
+        // Pre-parsed syllables (user-lexicon source).
         case punctuation(String)  // ASCII punctuation passthrough.
         case literal(String)  // Anything else (ASCII letters, digits,
         // already-phonemised bopomofo, etc.)
@@ -149,9 +169,19 @@ public struct MandarinG2P: Sendable {
                 continue
             }
 
+            // User lexicon takes priority over dict (longest match
+            // wins, user beats dict at equal length). Allows
+            // single-char overrides too (`maxKeyCharCount` may be 1).
+            var matched = false
+            if let hit = customLexicon.longestMatch(in: chars, from: i) {
+                flushLiteral()
+                emitLexiconHit(hit.tokens, into: &segments)
+                i += hit.length
+                continue
+            }
+
             // Forward-max-match against phrases (only worth trying when
             // ≥ 2 hanzi remain).
-            var matched = false
             let remaining = chars.count - i
             if remaining > 1 {
                 let maxLen = min(upperBound, remaining)
@@ -185,6 +215,44 @@ public struct MandarinG2P: Sendable {
         }
         flushLiteral()
         return segments
+    }
+
+    /// Emit a user-lexicon hit as a single segment when possible
+    /// (consecutive run of one token kind), or as separate segments
+    /// when the hit mixes pinyin + bopomofo tokens. Preserving order
+    /// matters because sandhi accumulates across `.syllables` segments
+    /// but resets at `.literal` segments (matching the existing
+    /// punctuation/dict contract).
+    private func emitLexiconHit(
+        _ tokens: [MandarinCustomLexicon.Token],
+        into segments: inout [Segment]
+    ) {
+        var pendingSyls: [MandarinPinyinNormalizer.Syllable] = []
+        var pendingBopo = ""
+        func flushSyls() {
+            if !pendingSyls.isEmpty {
+                segments.append(.syllables(pendingSyls))
+                pendingSyls.removeAll(keepingCapacity: true)
+            }
+        }
+        func flushBopo() {
+            if !pendingBopo.isEmpty {
+                segments.append(.literal(pendingBopo))
+                pendingBopo.removeAll(keepingCapacity: true)
+            }
+        }
+        for tok in tokens {
+            switch tok {
+            case .syllable(let s):
+                flushBopo()
+                pendingSyls.append(s)
+            case .bopomofo(let s):
+                flushSyls()
+                pendingBopo.append(s)
+            }
+        }
+        flushSyls()
+        flushBopo()
     }
 
     // MARK: - Text normalization

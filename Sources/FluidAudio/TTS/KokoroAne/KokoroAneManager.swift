@@ -96,6 +96,22 @@ public actor KokoroAneManager {
         self.defaultVoice = voice
     }
 
+    /// Install (or clear) a user-supplied Mandarin pronunciation override.
+    ///
+    /// Slots in **at the front** of ``MandarinG2P``'s segmentation cascade:
+    /// longest-prefix match against the user lexicon runs before the
+    /// bundled `pinyin_phrases.bin` / `pinyin_single.bin` lookup. User
+    /// entries of equal length to a dict entry win. Pinyin-form tokens
+    /// (`zi4`) participate in tone sandhi with surrounding context;
+    /// `@`-bopomofo tokens (`@ㄈㄨ4`) bypass sandhi.
+    ///
+    /// Pass ``MandarinCustomLexicon/empty`` to clear. Only meaningful
+    /// for ``KokoroAneVariant/mandarin`` — calling on the English variant
+    /// stores the value but has no synthesis effect.
+    public func setMandarinCustomLexicon(_ lexicon: MandarinCustomLexicon) async {
+        await store.setMandarinCustomLexicon(lexicon)
+    }
+
     /// Drop loaded mlmodelcs + voice packs. The store reloads on next call.
     public func cleanup() async {
         await store.cleanup()
