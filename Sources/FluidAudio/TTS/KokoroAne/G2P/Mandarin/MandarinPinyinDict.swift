@@ -1,7 +1,7 @@
 import Foundation
 
 /// Hanzi → pinyin lookup, loaded from the binary `.bin` files shipped at
-/// `FluidInference/kokoro-82m-v1.1-zh-mlx/g2p/`.
+/// `FluidInference/kokoro-82m-coreml/ANE-zh/assets/`.
 ///
 /// Two artefacts are consumed:
 ///

@@ -45,26 +45,26 @@ public enum KokoroAneConstants {
     /// the Mandarin G2P binary dictionaries.
     public static let g2pSubdir = "g2p"
 
-    /// Inflated single-Hanzi pinyin dict, written by
-    /// `KokoroAneResourceDownloader.ensureMandarinG2P` after gunzipping
-    /// the `.bin.gz` shipped in the MLX repo.
+    /// Single-Hanzi pinyin dict, fetched by
+    /// `KokoroAneResourceDownloader.ensureMandarinG2P` and cached at
+    /// `<repoDir>/g2p/pinyin_single.bin`.
     public static let g2pPinyinSingleFile = "pinyin_single.bin"
 
-    /// Inflated Hanzi-phrase pinyin dict.
+    /// Hanzi-phrase pinyin dict.
     public static let g2pPinyinPhrasesFile = "pinyin_phrases.bin"
 
-    /// HuggingFace repo that hosts the Mandarin G2P binary fixtures
-    /// (originally produced for the Phase-2 MLX backend; reused here so
-    /// the CoreML bundle stays focused on weights + vocab).
-    public static let g2pRemoteRepo = "FluidInference/kokoro-82m-v1.1-zh-mlx"
+    /// HuggingFace repo that hosts the Mandarin G2P binary fixtures.
+    /// Co-located with the CoreML weights so the Mandarin variant has a
+    /// single HF dependency.
+    public static let g2pRemoteRepo = "FluidInference/kokoro-82m-coreml"
 
-    /// Subdirectory inside `g2pRemoteRepo` containing the `.bin.gz`
-    /// payloads.
-    public static let g2pRemoteSubdir = "g2p"
+    /// Subdirectory inside `g2pRemoteRepo` containing the `.bin` payloads.
+    public static let g2pRemoteSubdir = "ANE-zh/assets"
 
-    /// Remote (gzip-wrapped) artefact names. Inflated on download.
-    public static let g2pPinyinSingleRemoteFile = "pinyin_single.bin.gz"
-    public static let g2pPinyinPhrasesRemoteFile = "pinyin_phrases.bin.gz"
+    /// Remote artefact names (uncompressed — ~10 MB total, dwarfed by the
+    /// 7 mlmodelc bundles already in this repo).
+    public static let g2pPinyinSingleRemoteFile = "pinyin_single.bin"
+    public static let g2pPinyinPhrasesRemoteFile = "pinyin_phrases.bin"
 }
 
 /// Language variant of the laishere/kokoro 7-stage CoreML chain.

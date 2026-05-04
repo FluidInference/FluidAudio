@@ -49,12 +49,11 @@ public enum KokoroAneResourceDownloader {
     }
 
     /// Ensure the Mandarin G2P binary dictionaries (`pinyin_phrases.bin`,
-    /// `pinyin_single.bin`) are resident under
-    /// `<repoDir>/g2p/`. The compressed `.bin.gz` artefacts are pulled
-    /// from `FluidInference/kokoro-82m-v1.1-zh-mlx/g2p/` (the MLX repo
-    /// already hosts them — sharing avoids duplicating ~3.6 MB across
-    /// HuggingFace bundles), then inflated once on download so runtime
-    /// loads stay zero-copy.
+    /// `pinyin_single.bin`) are resident under `<repoDir>/g2p/`. The
+    /// uncompressed `.bin` artefacts are pulled from
+    /// `FluidInference/kokoro-82m-coreml/ANE-zh/assets/` (co-located with
+    /// the CoreML weights so the Mandarin variant has a single HF
+    /// dependency).
     ///
     /// Returns `<repoDir>/g2p/`. Idempotent.
     @discardableResult
@@ -89,23 +88,13 @@ public enum KokoroAneResourceDownloader {
             let remotePath = "\(KokoroAneConstants.g2pRemoteSubdir)/\(entry.remote)"
             let remoteURL = try ModelRegistry.resolveModel(
                 KokoroAneConstants.g2pRemoteRepo, remotePath)
-            let compressed = try await AssetDownloader.fetchData(
+            let data = try await AssetDownloader.fetchData(
                 from: remoteURL,
                 description: "Mandarin G2P asset \(entry.remote)",
                 logger: logger
             )
-            let inflated: Data
-            do {
-                inflated = try GzipDecompressor.decompress(compressed)
-            } catch {
-                throw KokoroAneError.downloadFailed(
-                    "Failed to gunzip Mandarin G2P asset \(entry.remote): "
-                        + error.localizedDescription)
-            }
-            try inflated.write(to: localURL, options: [.atomic])
-            logger.info(
-                "Cached \(entry.local) (\(inflated.count / 1024) KB inflated, "
-                    + "\(compressed.count / 1024) KB on the wire)")
+            try data.write(to: localURL, options: [.atomic])
+            logger.info("Cached \(entry.local) (\(data.count / 1024) KB)")
         }
 
         return g2pDir
