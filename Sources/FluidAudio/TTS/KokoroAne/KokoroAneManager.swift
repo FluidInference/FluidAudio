@@ -33,19 +33,22 @@ public actor KokoroAneManager {
 
     private let logger = AppLogger(category: "KokoroAneManager")
     private let store: KokoroAneModelStore
+    private let variant: KokoroAneVariant
     private var defaultVoice: String
 
     public init(
-        defaultVoice: String = KokoroAneConstants.defaultVoice,
+        variant: KokoroAneVariant = .english,
+        defaultVoice: String? = nil,
         directory: URL? = nil,
         computeUnits: KokoroAneComputeUnits = .default,
         modelStore: KokoroAneModelStore? = nil
     ) {
-        self.defaultVoice = defaultVoice
+        self.variant = variant
+        self.defaultVoice = defaultVoice ?? variant.defaultVoice
         self.store =
             modelStore
             ?? KokoroAneModelStore(
-                directory: directory, computeUnits: computeUnits)
+                directory: directory, computeUnits: computeUnits, variant: variant)
     }
 
     // MARK: - Lifecycle
@@ -54,11 +57,16 @@ public actor KokoroAneManager {
     /// pack. Optionally pre-warm additional voice packs.
     public func initialize(preloadVoices: Set<String>? = nil) async throws {
         try await store.loadIfNeeded()
-        // G2P CoreML assets live in the kokoro repo and are loaded from
-        // ~/.cache/fluidaudio/Models/kokoro/. G2PModel.loadIfNeeded only reads
-        // from cache (it never downloads), so first-time KokoroAne users who
-        // have never run the regular kokoro backend would otherwise hit a
-        // cryptic G2PModelError.vocabLoadFailed. Fetch G2P assets explicitly
+        // English G2P CoreML assets live in the kokoro repo and are loaded
+        // from ~/.cache/fluidaudio/Models/kokoro/. The Mandarin variant
+        // routes through the in-process MandarinG2P pipeline (loaded by
+        // store.loadIfNeeded()) and never calls G2PModel.shared, so the
+        // English G2P bundle would just be wasted bandwidth + memory.
+        //
+        // For English: G2PModel.loadIfNeeded only reads from cache (it
+        // never downloads), so first-time KokoroAne users who have never
+        // run the regular kokoro backend would otherwise hit a cryptic
+        // G2PModelError.vocabLoadFailed. Fetch G2P assets explicitly
         // before warming the in-process G2P model.
         //
         // NOTE: pass nil (not `directory`) — `G2PModel.shared` is a singleton
@@ -67,8 +75,10 @@ public actor KokoroAneManager {
         // we'd download to a path G2PModel can't see and still hit
         // vocabLoadFailed. The KokoroAne mlmodelc chain itself does respect
         // `directory` (via store), only the shared G2P assets are pinned.
-        try await KokoroAneResourceDownloader.ensureG2PAssets(directory: nil)
-        try await G2PModel.shared.ensureModelsAvailable()
+        if variant == .english {
+            try await KokoroAneResourceDownloader.ensureG2PAssets(directory: nil)
+            try await G2PModel.shared.ensureModelsAvailable()
+        }
         if let voices = preloadVoices {
             for voice in voices {
                 _ = try await store.voicePack(voice)
@@ -104,16 +114,44 @@ public actor KokoroAneManager {
     }
 
     /// Text → samples + per-stage timings.
+    ///
+    /// For ``KokoroAneVariant/mandarin`` the input is routed through
+    /// ``MandarinG2P``: Hanzi → forward-max-match segmentation
+    /// (`pinyin_phrases.bin` + `pinyin_single.bin`) → diacritic
+    /// → tone-digit normalization → 3+3 / 不 / 一 sandhi → bopomofo +
+    /// tone-digit string. Strings that already look like phonemes
+    /// (no Hanzi) bypass the pipeline and are forwarded as-is, so
+    /// callers can still feed pre-computed bopomofo when they want
+    /// to override the bundled lexicon.
     public func synthesizeDetailed(
         text: String,
         voice: String? = nil,
         speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> KokoroAneSynthesisResult {
-        let phonemes = try await phonemize(text: text)
+        let phonemes: String
+        switch variant {
+        case .english:
+            phonemes = try await phonemize(text: text)
+        case .mandarin:
+            try await store.loadIfNeeded()
+            if MandarinG2P.looksLikeHanzi(text) {
+                let g2p = try await store.mandarinG2PPipeline()
+                phonemes = try g2p.phonemize(text)
+            } else {
+                // No Hanzi present → caller already supplied bopomofo /
+                // ASCII punctuation. Pass through so power users can
+                // still override pronunciation manually.
+                phonemes = text
+            }
+        }
         return try await runChain(phonemes: phonemes, voice: voice, speed: speed)
     }
 
     /// Bypass G2P; feed an already-IPA phoneme string directly.
+    ///
+    /// For the ``KokoroAneVariant/mandarin`` variant the `phonemes` argument
+    /// must be Bopomofo + tone digits + IPA punctuation matching the
+    /// `kokoro-82m-coreml/ANE-zh/vocab.json` token set.
     public func synthesizeFromPhonemes(
         _ phonemes: String,
         voice: String? = nil,

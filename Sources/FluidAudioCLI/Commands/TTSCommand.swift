@@ -129,6 +129,9 @@ public struct TTS {
         var metricsPath: String? = nil
         var chunkDirectory: String? = nil
         var variantPreference: ModelNames.TTS.Variant? = nil
+        // KokoroAne language variant — only consulted when backend == .kokoroAne.
+        // Parsed from the same `--variant` flag (en/english/zh/mandarin).
+        var kokoroAneVariant: KokoroAneVariant = .english
         var lexiconPath: String? = nil
         var text: String? = nil
         var benchmarkMode = false
@@ -195,6 +198,10 @@ public struct TTS {
                         variantPreference = .fiveSecond
                     case "15", "15s", "long":
                         variantPreference = .fifteenSecond
+                    case "en", "english":
+                        kokoroAneVariant = .english
+                    case "zh", "mandarin", "zh-cn", "zh_cn":
+                        kokoroAneVariant = .mandarin
                     default:
                         logger.warning("Unknown variant preference '\(arguments[i + 1])'; ignoring")
                     }
@@ -462,7 +469,8 @@ public struct TTS {
 
         if backend == .kokoroAne {
             await runKokoroAne(
-                text: text, output: output, voice: voice, metricsPath: metricsPath)
+                text: text, output: output, voice: voice, metricsPath: metricsPath,
+                variant: kokoroAneVariant)
             return
         }
 
@@ -895,20 +903,29 @@ public struct TTS {
     }
 
     private static func runKokoroAne(
-        text: String, output: String, voice: String, metricsPath: String?
+        text: String, output: String, voice: String, metricsPath: String?,
+        variant: KokoroAneVariant
     ) async {
         do {
             let tStart = Date()
+            // When the caller didn't pass `--voice`, pick the variant default
+            // (af_heart for English, zf_001 for Mandarin) instead of the
+            // shared TtsConstants.recommendedVoice (which is af_heart and
+            // wouldn't exist in the Mandarin bundle).
             let resolvedVoice =
                 voice == TtsConstants.recommendedVoice
-                ? KokoroAneConstants.defaultVoice : voice
-            let manager = KokoroAneManager(defaultVoice: resolvedVoice)
+                ? variant.defaultVoice : voice
+            let manager = KokoroAneManager(
+                variant: variant, defaultVoice: resolvedVoice)
 
             let tLoad0 = Date()
             try await manager.initialize()
             let tLoad1 = Date()
 
             let tSynth0 = Date()
+            // synthesizeDetailed handles both variants: English routes
+            // through G2PModel, Mandarin routes Hanzi through MandarinG2P
+            // (and passes through pre-computed Bopomofo verbatim).
             let detailed = try await manager.synthesizeDetailed(
                 text: text, voice: resolvedVoice, speed: 1.0)
             let wav = try AudioWAV.data(
@@ -1052,7 +1069,15 @@ public struct TTS {
                                     assets from HuggingFace on first synthesis.)
               --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format, Kokoro only)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
-              --variant            Force Kokoro 5s or 15s model (values: 5s,15s)
+              --variant            Force Kokoro 5s/15s model (values: 5s,15s) OR
+                               pick KokoroAne language (values: en,zh).
+                               For --backend kokoro-ane --variant zh, Hanzi
+                               input is auto-phonemized through the bundled
+                               Mandarin G2P pipeline (FMM segmentation +
+                               diacritic→digit + 3+3 / 不 / 一 sandhi +
+                               bopomofo encoding). Pre-computed bopomofo
+                               (no Hanzi present) is also accepted and
+                               passes through unchanged.
               --metrics            Write timing metrics to a JSON file (also runs ASR for evaluation)
               --chunk-dir          Directory where individual chunk WAVs will be written
               --no-deess           Disable de-essing (sibilance reduction, enabled by default)
