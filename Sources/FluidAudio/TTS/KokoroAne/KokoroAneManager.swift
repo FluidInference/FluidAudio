@@ -108,20 +108,35 @@ public actor KokoroAneManager {
 
     /// Text → samples + per-stage timings.
     ///
-    /// For ``KokoroAneVariant/mandarin`` this throws — Mandarin G2P is not yet
-    /// implemented in Swift. Callers must supply pre-computed Bopomofo via
-    /// ``synthesizeFromPhonemes(_:voice:speed:)`` instead.
+    /// For ``KokoroAneVariant/mandarin`` the input is routed through
+    /// ``MandarinG2P``: Hanzi → forward-max-match segmentation
+    /// (`pinyin_phrases.bin` + `pinyin_single.bin`) → diacritic
+    /// → tone-digit normalization → 3+3 / 不 / 一 sandhi → bopomofo +
+    /// tone-digit string. Strings that already look like phonemes
+    /// (no Hanzi) bypass the pipeline and are forwarded as-is, so
+    /// callers can still feed pre-computed bopomofo when they want
+    /// to override the bundled lexicon.
     public func synthesizeDetailed(
         text: String,
         voice: String? = nil,
         speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> KokoroAneSynthesisResult {
-        if variant == .mandarin {
-            throw KokoroAneError.inputProcessingFailed(
-                "Mandarin text-to-IPA G2P is not implemented yet; "
-                    + "use synthesizeFromPhonemes() with pre-computed Bopomofo.")
+        let phonemes: String
+        switch variant {
+        case .english:
+            phonemes = try await phonemize(text: text)
+        case .mandarin:
+            try await store.loadIfNeeded()
+            if MandarinG2P.looksLikeHanzi(text) {
+                let g2p = try await store.mandarinG2PPipeline()
+                phonemes = try g2p.phonemize(text)
+            } else {
+                // No Hanzi present → caller already supplied bopomofo /
+                // ASCII punctuation. Pass through so power users can
+                // still override pronunciation manually.
+                phonemes = text
+            }
         }
-        let phonemes = try await phonemize(text: text)
         return try await runChain(phonemes: phonemes, voice: voice, speed: speed)
     }
 

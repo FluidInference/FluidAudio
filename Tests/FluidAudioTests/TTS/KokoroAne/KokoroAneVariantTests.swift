@@ -98,46 +98,9 @@ final class KokoroAneVariantTests: XCTestCase {
         XCTAssertFalse(available)
     }
 
-    // MARK: - Mandarin text-path rejection
-
-    func testMandarinSynthesizeRejectsTextPath() async {
-        // The variant guard fires before runChain → no model load required.
-        let manager = KokoroAneManager(variant: .mandarin)
-        do {
-            _ = try await manager.synthesize(text: "你好世界")
-            XCTFail("Mandarin .synthesize(text:) should throw")
-        } catch let error as KokoroAneError {
-            switch error {
-            case .inputProcessingFailed(let message):
-                XCTAssertTrue(
-                    message.contains("synthesizeFromPhonemes"),
-                    "Error must direct caller to the bypass entry point. Got: \(message)"
-                )
-                XCTAssertTrue(
-                    message.contains("Mandarin"),
-                    "Error must mention Mandarin. Got: \(message)"
-                )
-            default:
-                XCTFail("Expected .inputProcessingFailed, got: \(error)")
-            }
-        } catch {
-            XCTFail("Expected KokoroAneError, got: \(error)")
-        }
-    }
-
-    func testMandarinSynthesizeDetailedRejectsTextPath() async {
-        let manager = KokoroAneManager(variant: .mandarin)
-        do {
-            _ = try await manager.synthesizeDetailed(text: "你好")
-            XCTFail("Mandarin .synthesizeDetailed(text:) should throw")
-        } catch let error as KokoroAneError {
-            if case .inputProcessingFailed = error {
-                // Expected.
-            } else {
-                XCTFail("Expected .inputProcessingFailed, got: \(error)")
-            }
-        } catch {
-            XCTFail("Expected KokoroAneError, got: \(error)")
-        }
-    }
+    // Note: Phase-1 used to assert that `synthesize(text:)` on a Mandarin
+    // manager throws (G2P deferred). Phase 2 replaced that with a real
+    // MandarinG2P pipeline, so the rejection path no longer exists. The
+    // G2P rules themselves are covered network-free by
+    // `MandarinG2PTests`.
 }

@@ -923,18 +923,11 @@ public struct TTS {
             let tLoad1 = Date()
 
             let tSynth0 = Date()
-            let detailed: KokoroAneSynthesisResult
-            switch variant {
-            case .english:
-                detailed = try await manager.synthesizeDetailed(
-                    text: text, voice: resolvedVoice, speed: 1.0)
-            case .mandarin:
-                // Mandarin G2P is not implemented yet (Phase 2). Treat the
-                // CLI text as pre-computed Bopomofo phonemes and feed them
-                // through the phonemes-bypass entry point.
-                detailed = try await manager.synthesizeFromPhonemesDetailed(
-                    text, voice: resolvedVoice, speed: 1.0)
-            }
+            // synthesizeDetailed handles both variants: English routes
+            // through G2PModel, Mandarin routes Hanzi through MandarinG2P
+            // (and passes through pre-computed Bopomofo verbatim).
+            let detailed = try await manager.synthesizeDetailed(
+                text: text, voice: resolvedVoice, speed: 1.0)
             let wav = try AudioWAV.data(
                 from: detailed.samples,
                 sampleRate: Double(detailed.sampleRate))

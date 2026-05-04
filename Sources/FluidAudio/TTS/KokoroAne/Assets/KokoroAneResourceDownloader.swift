@@ -48,6 +48,69 @@ public enum KokoroAneResourceDownloader {
         return repoDir
     }
 
+    /// Ensure the Mandarin G2P binary dictionaries (`pinyin_phrases.bin`,
+    /// `pinyin_single.bin`) are resident under
+    /// `<repoDir>/g2p/`. The compressed `.bin.gz` artefacts are pulled
+    /// from `FluidInference/kokoro-82m-v1.1-zh-mlx/g2p/` (the MLX repo
+    /// already hosts them — sharing avoids duplicating ~3.6 MB across
+    /// HuggingFace bundles), then inflated once on download so runtime
+    /// loads stay zero-copy.
+    ///
+    /// Returns `<repoDir>/g2p/`. Idempotent.
+    @discardableResult
+    public static func ensureMandarinG2P(
+        repoDirectory: URL,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws -> URL {
+        let g2pDir = repoDirectory.appendingPathComponent(KokoroAneConstants.g2pSubdir)
+        if !FileManager.default.fileExists(atPath: g2pDir.path) {
+            try FileManager.default.createDirectory(
+                at: g2pDir, withIntermediateDirectories: true)
+        }
+
+        let needed = [
+            (
+                local: KokoroAneConstants.g2pPinyinPhrasesFile,
+                remote: KokoroAneConstants.g2pPinyinPhrasesRemoteFile
+            ),
+            (
+                local: KokoroAneConstants.g2pPinyinSingleFile,
+                remote: KokoroAneConstants.g2pPinyinSingleRemoteFile
+            ),
+        ]
+
+        for entry in needed {
+            let localURL = g2pDir.appendingPathComponent(entry.local)
+            if FileManager.default.fileExists(atPath: localURL.path) { continue }
+
+            logger.info(
+                "Downloading Mandarin G2P asset '\(entry.remote)' from "
+                    + "\(KokoroAneConstants.g2pRemoteRepo)/\(KokoroAneConstants.g2pRemoteSubdir)/...")
+            let remotePath = "\(KokoroAneConstants.g2pRemoteSubdir)/\(entry.remote)"
+            let remoteURL = try ModelRegistry.resolveModel(
+                KokoroAneConstants.g2pRemoteRepo, remotePath)
+            let compressed = try await AssetDownloader.fetchData(
+                from: remoteURL,
+                description: "Mandarin G2P asset \(entry.remote)",
+                logger: logger
+            )
+            let inflated: Data
+            do {
+                inflated = try GzipDecompressor.decompress(compressed)
+            } catch {
+                throw KokoroAneError.downloadFailed(
+                    "Failed to gunzip Mandarin G2P asset \(entry.remote): "
+                        + error.localizedDescription)
+            }
+            try inflated.write(to: localURL, options: [.atomic])
+            logger.info(
+                "Cached \(entry.local) (\(inflated.count / 1024) KB inflated, "
+                    + "\(compressed.count / 1024) KB on the wire)")
+        }
+
+        return g2pDir
+    }
+
     /// Ensure the shared G2P CoreML assets (encoder + decoder + vocab) exist
     /// in the kokoro cache directory. KokoroAne reuses `G2PModel` for text →
     /// IPA conversion, and `G2PModel.loadIfNeeded` only reads from cache —
