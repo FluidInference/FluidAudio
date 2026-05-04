@@ -135,21 +135,11 @@ public struct MandarinPinyinDict: Sendable {
         return result
     }
 
-    /// Convenience loader: decompresses gzip-wrapped `.bin.gz` payloads if
-    /// the file's magic header is gzip, otherwise treats the bytes as
-    /// already-decompressed `.bin`.
+    /// Convenience loader for the uncompressed `.bin` payloads shipped at
+    /// `FluidInference/kokoro-82m-coreml/ANE-zh/assets/`.
     public static func load(singlesURL: URL, phrasesURL: URL) throws -> MandarinPinyinDict {
-        let singlesRaw = try unwrap(try Data(contentsOf: singlesURL))
-        let phrasesRaw = try unwrap(try Data(contentsOf: phrasesURL))
-        let singles = try parseSingles(singlesRaw)
-        let phrases = try parsePhrases(phrasesRaw)
+        let singles = try parseSingles(try Data(contentsOf: singlesURL))
+        let phrases = try parsePhrases(try Data(contentsOf: phrasesURL))
         return MandarinPinyinDict(phrases: phrases, singles: singles)
-    }
-
-    private static func unwrap(_ data: Data) throws -> Data {
-        if data.count >= 2 && data[0] == 0x1f && data[1] == 0x8b {
-            return try GzipDecompressor.decompress(data)
-        }
-        return data
     }
 }
