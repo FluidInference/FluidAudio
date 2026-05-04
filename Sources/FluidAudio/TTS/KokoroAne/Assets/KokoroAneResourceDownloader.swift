@@ -100,6 +100,73 @@ public enum KokoroAneResourceDownloader {
         return g2pDir
     }
 
+    /// Best-effort fetch of the jieba HMM tables (start / trans / emit)
+    /// into the same `<repoDir>/g2p/` cache.
+    ///
+    /// Returns the cache directory when all three artefacts are
+    /// resident locally (either pre-cached or freshly downloaded).
+    /// Returns `nil` when any artefact is missing both locally and
+    /// remotely — the caller is expected to fall back to the
+    /// FMM/single-char-only segmentation path. The Mandarin variant
+    /// stays usable in that case; HMM is a quality booster, not a
+    /// hard dependency.
+    public static func ensureMandarinJiebaHmm(
+        repoDirectory: URL
+    ) async -> URL? {
+        let g2pDir = repoDirectory.appendingPathComponent(KokoroAneConstants.g2pSubdir)
+        if !FileManager.default.fileExists(atPath: g2pDir.path) {
+            do {
+                try FileManager.default.createDirectory(
+                    at: g2pDir, withIntermediateDirectories: true)
+            } catch {
+                logger.warning(
+                    "Could not create jieba HMM cache dir: \(error.localizedDescription)")
+                return nil
+            }
+        }
+
+        let needed = [
+            (
+                local: KokoroAneConstants.jiebaHmmStartFile,
+                remote: KokoroAneConstants.jiebaHmmStartRemoteFile
+            ),
+            (
+                local: KokoroAneConstants.jiebaHmmTransFile,
+                remote: KokoroAneConstants.jiebaHmmTransRemoteFile
+            ),
+            (
+                local: KokoroAneConstants.jiebaHmmEmitFile,
+                remote: KokoroAneConstants.jiebaHmmEmitRemoteFile
+            ),
+        ]
+
+        for entry in needed {
+            let localURL = g2pDir.appendingPathComponent(entry.local)
+            if FileManager.default.fileExists(atPath: localURL.path) { continue }
+            do {
+                logger.info(
+                    "Downloading jieba HMM asset '\(entry.remote)' from "
+                        + "\(KokoroAneConstants.g2pRemoteRepo)/\(KokoroAneConstants.g2pRemoteSubdir)/...")
+                let remotePath = "\(KokoroAneConstants.g2pRemoteSubdir)/\(entry.remote)"
+                let remoteURL = try ModelRegistry.resolveModel(
+                    KokoroAneConstants.g2pRemoteRepo, remotePath)
+                let data = try await AssetDownloader.fetchData(
+                    from: remoteURL,
+                    description: "jieba HMM asset \(entry.remote)",
+                    logger: logger
+                )
+                try data.write(to: localURL, options: [.atomic])
+                logger.info("Cached \(entry.local) (\(data.count / 1024) KB)")
+            } catch {
+                logger.warning(
+                    "Jieba HMM asset '\(entry.remote)' unavailable "
+                        + "(\(error.localizedDescription)); HMM segmentation disabled.")
+                return nil
+            }
+        }
+        return g2pDir
+    }
+
     /// Ensure the shared G2P CoreML assets (encoder + decoder + vocab) exist
     /// in the kokoro cache directory. KokoroAne reuses `G2PModel` for text →
     /// IPA conversion, and `G2PModel.loadIfNeeded` only reads from cache —
