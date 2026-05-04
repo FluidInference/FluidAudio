@@ -18,18 +18,20 @@ import Foundation
 ///      strategy — full jieba HMM is not ported.
 ///   4. **Diacritic → digit** — each pinyin syllable is normalized to
 ///      `(base, tone)` via `MandarinPinyinNormalizer`.
-///   5. **Tone sandhi** — 3+3 → 2+3, 不 / 一 contextual rules
+///   5. **Erhua merge** — `MandarinErhua.merge` folds trailing `儿`
+///      into the previous syllable so `小孩儿` emits a single
+///      r-coloured token (`ㄒㄧㄠ3ㄏㄞㄦ2`).
+///   6. **Tone sandhi** — 3+3 → 2+3, 不 / 一 contextual rules
 ///      (`MandarinToneSandhi`).
-///   6. **Pinyin → Bopomofo** — `MandarinBopomofoMap.encode` produces
+///   7. **Pinyin → Bopomofo** — `MandarinBopomofoMap.encode` produces
 ///      the final `<initial><final><digit>` string per syllable.
-///   7. **Concatenation** — syllables joined with no separator,
+///   8. **Concatenation** — syllables joined with no separator,
 ///      punctuation interleaved verbatim. The output is fed straight
 ///      into `KokoroAneVocab.encode`.
 ///
 /// Out of scope (deferred — a future PR can extend this without
 /// breaking callers):
 ///
-///   * Erhua merging (`儿` suffix collapse).
 ///   * POS-conditioned sandhi from `tone_sandhi.py`.
 ///   * English-letter normalization (`misaki.zh_normalization`).
 public struct MandarinG2P: Sendable {
@@ -56,9 +58,15 @@ public struct MandarinG2P: Sendable {
 
         func flushPending() {
             guard !pendingSyllables.isEmpty else { return }
+            // Order: erhua first (it shrinks the buffer), then sandhi
+            // operates on the merged result so 3+3 promotion sees the
+            // r-coloured syllable as a single tonal unit.
+            MandarinErhua.merge(&pendingSyllables)
             MandarinToneSandhi.apply(&pendingSyllables)
             for syl in pendingSyllables {
-                if let bo = MandarinBopomofoMap.encode(syllable: syl.base, tone: syl.tone) {
+                if let bo = MandarinBopomofoMap.encode(
+                    syllable: syl.base, tone: syl.tone, erhua: syl.erhua)
+                {
                     output.append(bo)
                 } else {
                     Self.logger.warning(

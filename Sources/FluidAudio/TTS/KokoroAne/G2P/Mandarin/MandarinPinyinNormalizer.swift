@@ -18,10 +18,15 @@ public enum MandarinPinyinNormalizer {
     public struct Syllable: Equatable, Sendable {
         public var base: String  // ASCII letters only, with `ü` → `v`.
         public var tone: Int  // 1…4 = explicit, 5 = neutral / unmarked.
+        /// Whether this syllable has absorbed a trailing `儿` (erhua).
+        /// Set by `MandarinErhua.merge`; consumed by
+        /// `MandarinBopomofoMap.encode` to append the `ㄦ` suffix.
+        public var erhua: Bool
 
-        public init(base: String, tone: Int) {
+        public init(base: String, tone: Int, erhua: Bool = false) {
             self.base = base
             self.tone = tone
+            self.erhua = erhua
         }
     }
 
