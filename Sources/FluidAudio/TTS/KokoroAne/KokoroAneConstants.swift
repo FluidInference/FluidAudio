@@ -65,6 +65,45 @@ public enum KokoroAneConstants {
     /// 7 mlmodelc bundles already in this repo).
     public static let g2pPinyinSingleRemoteFile = "pinyin_single.bin"
     public static let g2pPinyinPhrasesRemoteFile = "pinyin_phrases.bin"
+
+    // MARK: - Jieba HMM tables
+
+    /// Local filenames for the three jieba HMM tables (start /
+    /// transition / emission), cached alongside the pinyin dicts under
+    /// `<repoDir>/g2p/`. Format documented on
+    /// `MandarinJiebaHmmTables`.
+    public static let jiebaHmmStartFile = "jieba_hmm_start.bin"
+    public static let jiebaHmmTransFile = "jieba_hmm_trans.bin"
+    public static let jiebaHmmEmitFile = "jieba_hmm_emit.bin"
+
+    /// Remote artefact names — uploaded to the same `ANE-zh/assets/`
+    /// folder as the pinyin dicts. Combined size is ≈ 3 MB (emit table
+    /// dominates; ~7 800 codepoints × 16 bytes plus headers).
+    public static let jiebaHmmStartRemoteFile = "jieba_hmm_start.bin"
+    public static let jiebaHmmTransRemoteFile = "jieba_hmm_trans.bin"
+    public static let jiebaHmmEmitRemoteFile = "jieba_hmm_emit.bin"
+
+    // MARK: - Mandarin g2pW polyphone disambiguator
+
+    /// Local subdirectory (relative to the cached `ANE-zh/` repo dir) for
+    /// the g2pW BERT classifier + its tokenizer / catalog assets.
+    public static let g2pwSubdir = "g2pw"
+
+    /// Compiled CoreML bundle name. Matches the upstream HF folder.
+    public static let g2pwModelBundle = "g2pw.mlmodelc"
+
+    /// `bert-base-chinese` vocab co-located with the model.
+    public static let g2pwVocabFile = "vocab.txt"
+
+    /// Per-character allowed-phoneme map shipped alongside the model.
+    public static let g2pwPolyphonicCharsFile = "POLYPHONIC_CHARS.txt"
+
+    /// Subdirectory inside `g2pRemoteRepo` containing the g2pW assets.
+    public static let g2pwRemoteSubdir = "ANE-zh/g2pw"
+
+    /// Remote artefact filenames (mirrors the local names — no rename).
+    public static let g2pwVocabRemoteFile = "vocab.txt"
+    public static let g2pwPolyphonicCharsRemoteFile = "POLYPHONIC_CHARS.txt"
 }
 
 /// Language variant of the laishere/kokoro 7-stage CoreML chain.

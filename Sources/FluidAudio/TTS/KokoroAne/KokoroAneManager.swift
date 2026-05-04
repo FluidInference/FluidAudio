@@ -152,7 +152,7 @@ public actor KokoroAneManager {
             try await store.loadIfNeeded()
             if MandarinG2P.looksLikeHanzi(text) {
                 let g2p = try await store.mandarinG2PPipeline()
-                phonemes = try g2p.phonemize(text)
+                phonemes = try await g2p.phonemize(text)
             } else {
                 // No Hanzi present → caller already supplied bopomofo /
                 // ASCII punctuation. Pass through so power users can

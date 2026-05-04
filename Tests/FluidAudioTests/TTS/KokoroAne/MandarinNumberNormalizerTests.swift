@@ -197,19 +197,20 @@ final class MandarinNumberNormalizerTests: XCTestCase {
 
     // MARK: - Round-trip via MandarinG2P (regression check)
 
-    func testBaselineHanziStillWorks() throws {
+    func testBaselineHanziStillWorks() async throws {
         // Sanity: number normalization MUST NOT corrupt pure-Hanzi input
         // that has no numerals.
         let dict = Self.miniDict()
         let g2p = MandarinG2P(dict: dict)
-        XCTAssertNoThrow(try g2p.phonemize("你好"))
+        let phon = try await g2p.phonemize("你好")
+        XCTAssertFalse(phon.isEmpty)
     }
 
-    func testInlineNumberFlowsThroughG2P() throws {
+    func testInlineNumberFlowsThroughG2P() async throws {
         // 5 normalises to 五 → already in dict → emits a syllable.
         let dict = Self.miniDict()
         let g2p = MandarinG2P(dict: dict)
-        let phon = try g2p.phonemize("有5个")
+        let phon = try await g2p.phonemize("有5个")
         XCTAssertFalse(phon.isEmpty)
     }
 

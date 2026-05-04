@@ -1006,6 +1006,17 @@ public enum ModelNames {
         /// `<repoDir>/voices/zf_001.bin`.
         public static let defaultVoiceFileZh = "voices/zf_001.bin"
 
+        /// Mandarin g2pW polyphone-disambiguator CoreML bundle. Lives under
+        /// `<repoDir>/g2pw/` — included in `requiredModelsZh` so the bulk
+        /// `ensureModels(.mandarin)` grab pulls it without an extra round
+        /// trip. The two auxiliary text files (`vocab.txt`,
+        /// `POLYPHONIC_CHARS.txt`) ship via the lazy
+        /// `KokoroAneResourceDownloader.ensureMandarinG2pw` helper because
+        /// `DownloadUtils.downloadRepo` does not whitelist `.txt` for
+        /// subPath repos and a manual fetch keeps the bulk-grab matcher
+        /// idempotent.
+        public static let g2pwModelZh = "g2pw/g2pw.mlmodelc"
+
         /// All seven .mlmodelc bundles.
         public static let requiredCoreMLModels: Set<String> = [
             albert, postAlbert, alignment, prosody, noise, vocoder, tail,
@@ -1017,9 +1028,11 @@ public enum ModelNames {
         }
 
         /// CoreML bundles + the vocab JSON + the Mandarin default voice .bin
-        /// (which lives under `voices/`).
+        /// (under `voices/`) + the g2pW CoreML bundle (under `g2pw/`).
         public static var requiredModelsZh: Set<String> {
-            requiredCoreMLModels.union([vocab, defaultVoiceFileZh])
+            requiredCoreMLModels.union([
+                vocab, defaultVoiceFileZh, g2pwModelZh,
+            ])
         }
     }
 

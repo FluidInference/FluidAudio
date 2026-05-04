@@ -209,7 +209,7 @@ final class MandarinCustomLexiconTests: XCTestCase {
         return MandarinPinyinDict(phrases: phrases, singles: singles)
     }
 
-    func testPhonemizeUsesUserLexiconForCustomWord() throws {
+    func testPhonemizeUsesUserLexiconForCustomWord() async throws {
         // 字节跳动 isn't in our tiny dict, so without a lexicon the
         // single-char fallback would also miss and produce nothing.
         // With the lexicon installed, the user reading wins.
@@ -218,14 +218,14 @@ final class MandarinCustomLexiconTests: XCTestCase {
         ])
         var g2p = MandarinG2P(dict: Self.smallDict())
         g2p.customLexicon = lex
-        let out = try g2p.phonemize("字节跳动")
+        let out = try await g2p.phonemize("字节跳动")
         // Each pinyin runs through the standard bopomofo encoder.
         XCTAssertFalse(out.isEmpty)
         // Spot-check that the first syllable's tone digit landed.
         XCTAssertTrue(out.contains("4"))
     }
 
-    func testPhonemizeUserBeatsDictAtEqualLength() throws {
+    func testPhonemizeUserBeatsDictAtEqualLength() async throws {
         // Dict says 你好 → ni3 hao3 (→ sandhi → ni2 hao3).
         // Override forces ni4 hao4 (no sandhi promotion since neither
         // is tone-3).
@@ -234,11 +234,11 @@ final class MandarinCustomLexiconTests: XCTestCase {
         ])
         var g2p = MandarinG2P(dict: Self.smallDict())
         g2p.customLexicon = lex
-        let out = try g2p.phonemize("你好")
+        let out = try await g2p.phonemize("你好")
         XCTAssertEqual(out, "ㄋㄧ4ㄏㄠ4")
     }
 
-    func testPhonemizeSandhiRunsAcrossUserDictBoundary() throws {
+    func testPhonemizeSandhiRunsAcrossUserDictBoundary() async throws {
         // User word ends in tone-3, dict word starts with tone-3 → 3+3
         // sandhi must promote the user's tone-3 to tone-2 across the
         // boundary (validates that .syllables segments append to the
@@ -248,12 +248,12 @@ final class MandarinCustomLexiconTests: XCTestCase {
         ])
         var g2p = MandarinG2P(dict: Self.smallDict())
         g2p.customLexicon = lex
-        let out = try g2p.phonemize("我你好")
+        let out = try await g2p.phonemize("我你好")
         // "我" wo3 + "你" ni3 + "好" hao3 → 3+3+3 → right-to-left → 2+2+3
         XCTAssertEqual(out, "我2ㄋㄧ2ㄏㄠ3")
     }
 
-    func testPhonemizeAtBopomofoBypassesSandhi() throws {
+    func testPhonemizeAtBopomofoBypassesSandhi() async throws {
         // @-bopomofo tokens are emitted verbatim and do not enter the
         // syllable buffer, so they don't participate in sandhi.
         let lex = try MandarinCustomLexicon(entries: [
@@ -261,15 +261,15 @@ final class MandarinCustomLexiconTests: XCTestCase {
         ])
         var g2p = MandarinG2P(dict: Self.smallDict())
         g2p.customLexicon = lex
-        let out = try g2p.phonemize("我你好")
+        let out = try await g2p.phonemize("我你好")
         // 我 → ㄨㄛ3 verbatim (no sandhi promotion). Then 你好 alone
         // → ni3 hao3 → sandhi → ni2 hao3.
         XCTAssertEqual(out, "ㄨㄛ3ㄋㄧ2ㄏㄠ3")
     }
 
-    func testPhonemizeWithEmptyLexiconMatchesDictOnlyPath() throws {
+    func testPhonemizeWithEmptyLexiconMatchesDictOnlyPath() async throws {
         let g2p = MandarinG2P(dict: Self.smallDict())
-        let out = try g2p.phonemize("你好")
+        let out = try await g2p.phonemize("你好")
         XCTAssertEqual(out, "ㄋㄧ2ㄏㄠ3")
     }
 }

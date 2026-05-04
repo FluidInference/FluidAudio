@@ -199,9 +199,17 @@ public actor KokoroAneModelStore {
     }
 
     /// Lazy-load and cache the Mandarin G2P pipeline (binary dicts +
-    /// bopomofo mapper). Only used by ``KokoroAneVariant/mandarin``.
-    /// Idempotent within a single store lifetime; the dict is held by
-    /// value so cleanup() drops it cleanly.
+    /// bopomofo mapper, optional jieba HMM). Only used by
+    /// ``KokoroAneVariant/mandarin``. Idempotent within a single store
+    /// lifetime; cached values are held by value so cleanup() drops
+    /// them cleanly.
+    ///
+    /// The jieba HMM tables are best-effort: if their HuggingFace
+    /// artefacts are unavailable (404 / network error) the pipeline
+    /// silently falls back to the FMM + per-char-singles path. The
+    /// Mandarin variant stays fully functional in that mode — HMM is
+    /// a quality booster for OOV proper-noun boundaries, not a hard
+    /// dependency.
     public func mandarinG2PPipeline() async throws -> MandarinG2P {
         if let g2p = mandarinG2P { return g2p }
         guard variant == .mandarin else {
@@ -219,13 +227,68 @@ public actor KokoroAneModelStore {
             KokoroAneConstants.g2pPinyinSingleFile)
         let dict = try MandarinPinyinDict.load(
             singlesURL: singlesURL, phrasesURL: phrasesURL)
-        var pipeline = MandarinG2P(dict: dict)
+
+        // Best-effort jieba HMM. ensureMandarinJiebaHmm returns nil
+        // when any artefact is missing (no throw); table-loader
+        // failures are also caught here so a corrupt cache doesn't
+        // break the pipeline outright.
+        var jiebaHmm: MandarinJiebaHmm? = nil
+        if let hmmDir = await KokoroAneResourceDownloader.ensureMandarinJiebaHmm(
+            repoDirectory: repoDir)
+        {
+            do {
+                let tables = try MandarinJiebaHmmTables.load(directory: hmmDir)
+                jiebaHmm = MandarinJiebaHmm(tables: tables)
+                logger.info(
+                    "Loaded jieba HMM tables (emit chars=\(tables.emit.count))")
+            } catch {
+                logger.warning(
+                    "Jieba HMM tables failed to parse "
+                        + "(\(error.localizedDescription)); HMM segmentation disabled.")
+            }
+        }
+
+        let g2pw = await loadG2pwIfAvailable(repoDirectory: repoDir)
+        var pipeline = MandarinG2P(dict: dict, jiebaHmm: jiebaHmm, g2pw: g2pw)
         pipeline.customLexicon = mandarinCustomLexicon
         mandarinG2P = pipeline
         logger.info(
-            "Loaded Mandarin G2P (phrases=\(dict.phrases.count), singles=\(dict.singles.count))"
+            "Loaded Mandarin G2P (phrases=\(dict.phrases.count), "
+                + "singles=\(dict.singles.count), "
+                + "jieba=\(jiebaHmm != nil), g2pw=\(g2pw == nil ? "off" : "on"))"
         )
         return pipeline
+    }
+
+    /// Best-effort load of the g2pW polyphone disambiguator. Returns
+    /// `nil` (and logs) when the assets are missing or fail to load,
+    /// so the Mandarin G2P pipeline can keep running on the dict
+    /// alone.
+    private func loadG2pwIfAvailable(repoDirectory: URL) async -> MandarinG2pwModel? {
+        guard
+            let g2pwDir = await KokoroAneResourceDownloader.ensureMandarinG2pw(
+                repoDirectory: repoDirectory)
+        else { return nil }
+
+        let vocabURL = g2pwDir.appendingPathComponent(KokoroAneConstants.g2pwVocabFile)
+        let polyURL = g2pwDir.appendingPathComponent(
+            KokoroAneConstants.g2pwPolyphonicCharsFile)
+        let modelURL = g2pwDir.appendingPathComponent(KokoroAneConstants.g2pwModelBundle)
+
+        do {
+            let tokenizer = try MandarinBertTokenizer.load(vocabURL: vocabURL)
+            let catalog = try MandarinPolyphoneCatalog.load(fileURL: polyURL)
+            let config = MLModelConfiguration()
+            config.computeUnits = .cpuAndNeuralEngine
+            let model = try MLModel(contentsOf: modelURL, configuration: config)
+            return MandarinG2pwModel(
+                model: model, tokenizer: tokenizer, catalog: catalog)
+        } catch {
+            logger.info(
+                "g2pW load failed (\(error.localizedDescription)) — "
+                    + "Mandarin G2P will run dict-only")
+            return nil
+        }
     }
 
     /// Install (or clear) the user-supplied Mandarin pronunciation
