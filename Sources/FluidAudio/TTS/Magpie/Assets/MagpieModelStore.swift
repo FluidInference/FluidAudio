@@ -14,6 +14,9 @@ public actor MagpieModelStore {
     private var textEncoderModel: MLModel?
     private var decoderPrefillModel: MLModel?  // optional fast path
     private var decoderStepModel: MLModel?
+    /// Either the chunked T_in=24 build (preferred, ANE) or the monolithic
+    /// T=256 build (legacy, CPU-only). `MagpieNanocodec` reads the input
+    /// shape and chunks accordingly.
     private var nanocodecDecoderModel: MLModel?
 
     private var constantsBundle: MagpieConstantsBundle?
@@ -79,21 +82,32 @@ public actor MagpieModelStore {
         aneConfig.computeUnits =
             computeUnits == .cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
 
-        // `nanocodec_decoder.mlmodelc` is fastest on **CPU only**. The model's
-        // upsample stack (5 transposed convs + 96 sin/pow per-frame embedding
-        // ops + 86 LeakyReLU) doesn't map well onto Metal MPS, and ANE compile
-        // fails on its conv stack. Empirically (M-series, single fwd of 256
-        // frames):
-        //   .cpuOnly             ~2.87 s
-        //   .cpuAndGPU           ~3.86 s
-        //   .cpuAndNeuralEngine ~10.12 s   (ANE compile fail → CPU fallback dance)
-        //   .all                 ~2.95 s
-        // Putting it on `.cpuAndGPU` also makes `decoder_step` ~40 ms/step
-        // because both contend for the same Metal queue. Pinning nanocodec to
-        // CPU keeps Metal exclusive for decoder_step (25 ms/step) and saves a
-        // full second on the nanocodec call → ~1.03x RTFx vs ~0.91x before.
-        let cpuConfig = MLModelConfiguration()
-        cpuConfig.computeUnits = .cpuOnly
+        // Nanocodec is pinned to CPU regardless of `computeUnits`.
+        //
+        // The monolithic T=256 build can't use ANE anyway: its activation
+        // tensor exceeds the W ≤ 16384 limit on space-to-batch lowering of
+        // the dilated convs and ANECCompile() fails whole-graph.
+        //
+        // The chunked T_in=24 build *can* run ~43 %-resident on ANE, but
+        // we ship it as fp32 weights (`compute_precision=FLOAT32` in
+        // `convert_nanocodec.py`) because fp16 weight quantization
+        // produces audible speech-correlated noise during voiced segments
+        // — the silence-RMS metrics hide it, but A/B listening against
+        // a PyTorch sin² reference makes it obvious. fp32 weights force
+        // the CoreML runtime onto CPU (ANE is fp16-only), and the noise
+        // floor matches the PyTorch reference within ~3.5 dB.
+        //
+        // Noise floor (quietest 0.3 s window, post-norm):
+        //   PyTorch sin² (gold)              -77.4 dBFS
+        //   T=24 chunked, fp32 weights, CPU  -73.6 dBFS  ← current
+        //   T=24 chunked, fp16 weights, CPU  -73.9 dBFS  (audibly noisy)
+        //   T=24 chunked, fp16 weights, ANE  -66.8 dBFS  (audibly noisy)
+        //
+        // fp32 trades throughput for fidelity: nanocodec wall is ~4×
+        // slower than fp16 (8.5–9.7 s vs 2.2 s on a 12 s utterance, M2),
+        // but the pipeline stays real-time at RTFx ~1.3× median.
+        let nanocodecConfig = MLModelConfiguration()
+        nanocodecConfig.computeUnits = .cpuOnly
 
         let loadStart = Date()
 
@@ -109,11 +123,24 @@ public actor MagpieModelStore {
             config: aneConfig,
             required: true)
 
+        // Prefer the chunked T_in=24 build (loads on ANE). Fall back to the
+        // monolithic T=256 build if t24 isn't present in the repo. Exactly
+        // one of the two must exist for synthesis to work.
         nanocodecDecoderModel = try loadModel(
             repoDir: repoDir,
-            fileName: ModelNames.Magpie.nanocodecDecoderFile,
-            config: cpuConfig,
-            required: true)
+            fileName: ModelNames.Magpie.nanocodecDecoderT24File,
+            config: nanocodecConfig,
+            required: false)
+        if nanocodecDecoderModel == nil {
+            logger.notice(
+                "T_in=24 nanocodec absent; falling back to monolithic CPU-only nanocodec_decoder.mlmodelc"
+            )
+            nanocodecDecoderModel = try loadModel(
+                repoDir: repoDir,
+                fileName: ModelNames.Magpie.nanocodecDecoderFile,
+                config: nanocodecConfig,
+                required: true)
+        }
 
         decoderPrefillModel = try loadModel(
             repoDir: repoDir,

@@ -769,11 +769,19 @@ public enum ModelNames {
         public static let decoderPrefill = "decoder_prefill"
         public static let decoderStep = "decoder_step"
         public static let nanocodecDecoder = "nanocodec_decoder"
+        /// Chunked T_in=24-frame nanocodec build. Output 24576 audio samples
+        /// per call; runtime slides this with stride 8 / overlap 16 frames.
+        /// Lands ~43 % ANE-resident at 38.4 ms/call vs the monolithic
+        /// T=256 model that can only run on CPU at ~8.76 s/utterance.
+        /// Optional: when this file is absent we fall back to the monolithic
+        /// `nanocodec_decoder.mlmodelc` and the `.cpuOnly` pin.
+        public static let nanocodecDecoderT24 = "nanocodec_decoder_t24"
 
         public static let textEncoderFile = textEncoder + ".mlmodelc"
         public static let decoderPrefillFile = decoderPrefill + ".mlmodelc"
         public static let decoderStepFile = decoderStep + ".mlmodelc"
         public static let nanocodecDecoderFile = nanocodecDecoder + ".mlmodelc"
+        public static let nanocodecDecoderT24File = nanocodecDecoderT24 + ".mlmodelc"
 
         public static let constantsDir = "constants"
         public static let tokenizerDir = "tokenizer"
