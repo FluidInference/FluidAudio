@@ -57,16 +57,27 @@ public actor MagpieModelStore {
         let config = MLModelConfiguration()
         config.computeUnits = computeUnits
 
-        // `decoder_step.mlmodelc` reliably fails ANE compilation
-        // (`MILCompilerForANE error: ANECCompile() FAILED`) due to its rank-4
-        // split-K/V scatter layout, then falls back to CPU at the cost of one
-        // failed ANE compile attempt per call (~hundreds of ms each). Pin it
-        // to `.cpuAndGPU` so CoreML skips the ANE attempt entirely and runs
-        // on Metal MPS — verified end-to-end as the fastest path
-        // (96s warm vs 103s warm on `.cpuAndNeuralEngine`).
-        let gpuConfig = MLModelConfiguration()
-        gpuConfig.computeUnits =
-            computeUnits == .cpuOnly ? .cpuOnly : .cpuAndGPU
+        // `decoder_step.mlmodelc` runs cleanly on ANE: coreml-cli static
+        // analysis reports 97.3 % ANE residency (765 / 773 ops; the 8 CPU
+        // ops are trivial int32 casts / a `select` with ~0.14 ms total cost).
+        // Single-call median predict is 15.2 ms on `.cpuAndNeuralEngine`
+        // vs 22.5 ms on `.cpuAndGPU` (Apple M2). End-to-end on the ~110-char
+        // bench sentence (seed=42, John, en):
+        //   .cpuAndGPU             36.1 ms/step, 30.98 s synth, RTFx 0.62×,
+        //                          and the AR loop never reaches EOS
+        //                          (`EOS: false`, hits maxSteps with tail
+        //                          garbage) — 651 codes / 19.23 s audio.
+        //   .cpuAndNeuralEngine    23.9 ms/step bench / 14.3 ms/step
+        //                          standalone, 9.25 s synth, RTFx 1.21×,
+        //                          terminates correctly (`EOS: true`,
+        //                          234 codes / 11.20 s audio).
+        // ANE is both ~2× faster and produces correctly-terminated audio,
+        // so pin to `.cpuAndNeuralEngine`. (Older comment claiming
+        // `MILCompilerForANE error: ANECCompile() FAILED` no longer holds —
+        // the rank-4 split-K/V scatter compiles cleanly.)
+        let aneConfig = MLModelConfiguration()
+        aneConfig.computeUnits =
+            computeUnits == .cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
 
         // `nanocodec_decoder.mlmodelc` is fastest on **CPU only**. The model's
         // upsample stack (5 transposed convs + 96 sin/pow per-frame embedding
@@ -95,7 +106,7 @@ public actor MagpieModelStore {
         decoderStepModel = try loadModel(
             repoDir: repoDir,
             fileName: ModelNames.Magpie.decoderStepFile,
-            config: gpuConfig,
+            config: aneConfig,
             required: true)
 
         nanocodecDecoderModel = try loadModel(
