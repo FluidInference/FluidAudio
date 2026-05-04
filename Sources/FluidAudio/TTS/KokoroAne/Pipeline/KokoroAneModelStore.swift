@@ -100,16 +100,20 @@ public actor KokoroAneModelStore {
     private var vocab: KokoroAneVocab?
     private var voicePacks: [String: KokoroAneVoicePack] = [:]
     private var repoDirectory: URL?
+    private var mandarinG2P: MandarinG2P?
 
     private let directory: URL?
     private let computeUnits: KokoroAneComputeUnits
+    private let variant: KokoroAneVariant
 
     public init(
         directory: URL? = nil,
-        computeUnits: KokoroAneComputeUnits = .default
+        computeUnits: KokoroAneComputeUnits = .default,
+        variant: KokoroAneVariant = .english
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
+        self.variant = variant
     }
 
     /// Download (if missing), load all 7 mlmodelcs, parse vocab + default voice.
@@ -121,7 +125,8 @@ public actor KokoroAneModelStore {
     public func loadIfNeeded() async throws {
         guard models.isEmpty else { return }
 
-        let repoDir = try await KokoroAneResourceDownloader.ensureModels(directory: directory)
+        let repoDir = try await KokoroAneResourceDownloader.ensureModels(
+            variant: variant, directory: directory)
 
         logger.info("Loading 7 KokoroAne CoreML models from \(repoDir.path)...")
         let loadStart = Date()
@@ -158,7 +163,7 @@ public actor KokoroAneModelStore {
 
         // Pre-load the default voice. Voice-pack failure does not invalidate
         // the model cache (voices are mutable runtime state).
-        _ = try await voicePack(KokoroAneConstants.defaultVoice)
+        _ = try await voicePack(variant.defaultVoice)
     }
 
     public func model(for stage: KokoroAneStage) throws -> MLModel {
@@ -181,7 +186,7 @@ public actor KokoroAneModelStore {
             throw KokoroAneError.modelNotLoaded("voice pack (repo not initialized)")
         }
         let url = try await KokoroAneResourceDownloader.ensureVoicePack(
-            voice, repoDirectory: repoDir)
+            voice, repoDirectory: repoDir, variant: variant)
         let pack = try KokoroAneVoicePack.load(from: url)
         voicePacks[voice] = pack
         logger.info("Loaded voice pack '\(voice)'")
@@ -192,10 +197,40 @@ public actor KokoroAneModelStore {
         models.count == KokoroAneStage.allCases.count && vocab != nil
     }
 
+    /// Lazy-load and cache the Mandarin G2P pipeline (binary dicts +
+    /// bopomofo mapper). Only used by ``KokoroAneVariant/mandarin``.
+    /// Idempotent within a single store lifetime; the dict is held by
+    /// value so cleanup() drops it cleanly.
+    public func mandarinG2PPipeline() async throws -> MandarinG2P {
+        if let g2p = mandarinG2P { return g2p }
+        guard variant == .mandarin else {
+            throw KokoroAneError.inputProcessingFailed(
+                "Mandarin G2P requested on a non-mandarin store")
+        }
+        guard let repoDir = repoDirectory else {
+            throw KokoroAneError.modelNotLoaded("Mandarin G2P (repo not initialized)")
+        }
+        let g2pDir = try await KokoroAneResourceDownloader.ensureMandarinG2P(
+            repoDirectory: repoDir)
+        let phrasesURL = g2pDir.appendingPathComponent(
+            KokoroAneConstants.g2pPinyinPhrasesFile)
+        let singlesURL = g2pDir.appendingPathComponent(
+            KokoroAneConstants.g2pPinyinSingleFile)
+        let dict = try MandarinPinyinDict.load(
+            singlesURL: singlesURL, phrasesURL: phrasesURL)
+        let pipeline = MandarinG2P(dict: dict)
+        mandarinG2P = pipeline
+        logger.info(
+            "Loaded Mandarin G2P (phrases=\(dict.phrases.count), singles=\(dict.singles.count))"
+        )
+        return pipeline
+    }
+
     public func cleanup() {
         models.removeAll()
         voicePacks.removeAll()
         vocab = nil
         repoDirectory = nil
+        mandarinG2P = nil
     }
 }

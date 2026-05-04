@@ -22,6 +22,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case kokoroAne = "FluidInference/kokoro-82m-coreml/ANE"
+    case kokoroAneZh = "FluidInference/kokoro-82m-coreml/ANE-zh"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
     case lseendAmi = "FluidInference/ls-eend-coreml/optimized/ami"
     case lseendCallHome = "FluidInference/ls-eend-coreml/optimized/ch"
@@ -74,6 +75,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "kokoro-82m-coreml"
         case .kokoroAne:
             return "kokoro-82m-coreml/ANE"
+        case .kokoroAneZh:
+            return "kokoro-82m-coreml/ANE-zh"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
         case .lseendAmi:
@@ -114,7 +117,7 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-ctc-0.6b-coreml"
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
-        case .kokoroAne:
+        case .kokoroAne, .kokoroAneZh:
             return "FluidInference/kokoro-82m-coreml"
         case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
@@ -138,6 +141,8 @@ public enum Repo: String, CaseIterable, Sendable {
         switch self {
         case .kokoroAne:
             return "ANE"
+        case .kokoroAneZh:
+            return "ANE-zh"
         case .parakeetEou160:
             return "160ms"
         case .parakeetEou320:
@@ -178,6 +183,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "kokoro"
         case .kokoroAne:
             return "kokoro-82m-coreml/ANE"
+        case .kokoroAneZh:
+            return "kokoro-82m-coreml/ANE-zh"
         case .parakeetEou160:
             return "parakeet-eou-streaming/160ms"
         case .parakeetEou320:
@@ -992,14 +999,27 @@ public enum ModelNames {
         public static let vocab = "vocab.json"
         public static let defaultVoiceFile = "af_heart.bin"
 
+        /// Mandarin (`ANE-zh/`) default voice. Voice packs in the Mandarin
+        /// bundle live under a `voices/` subdirectory; the path is kept in
+        /// the constant so the existing "all-required-files-present" check
+        /// still resolves correctly when the file lands at
+        /// `<repoDir>/voices/zf_001.bin`.
+        public static let defaultVoiceFileZh = "voices/zf_001.bin"
+
         /// All seven .mlmodelc bundles.
         public static let requiredCoreMLModels: Set<String> = [
             albert, postAlbert, alignment, prosody, noise, vocoder, tail,
         ]
 
-        /// CoreML bundles + the vocab JSON + the default voice .bin.
+        /// CoreML bundles + the vocab JSON + the English default voice .bin.
         public static var requiredModels: Set<String> {
             requiredCoreMLModels.union([vocab, defaultVoiceFile])
+        }
+
+        /// CoreML bundles + the vocab JSON + the Mandarin default voice .bin
+        /// (which lives under `voices/`).
+        public static var requiredModelsZh: Set<String> {
+            requiredCoreMLModels.union([vocab, defaultVoiceFileZh])
         }
     }
 
@@ -1051,6 +1071,8 @@ public enum ModelNames {
             return ModelNames.StyleTTS2.requiredModels
         case .kokoroAne:
             return ModelNames.KokoroAne.requiredModels
+        case .kokoroAneZh:
+            return ModelNames.KokoroAne.requiredModelsZh
         case .sortformer:
             if let variant = variant {
                 return [variant]
