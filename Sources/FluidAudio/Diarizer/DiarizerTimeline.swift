@@ -1204,11 +1204,11 @@ public class DiarizerTimeline {
                         continue
                     }
 
-                    // Transition from speaking -> not speaking
+                    // Speaking -> not speaking transition
                     aux.speaking = false
                     let end = frame + padOffset
 
-                    guard end - aux.unmergedStartFrame >= minSegmentLength else {
+                    guard end >= aux.unmergedStartFrame + minSegmentLength else {
                         aux.hasSegment = aux.endFrame >= aux.startFrame + minSegmentLength
                         continue
                     }
@@ -1219,6 +1219,7 @@ public class DiarizerTimeline {
                     aux.activeFrameCount += aux.unmergedActiveFrameCount
                     aux.hasSegment = true
                 } else if activity > onset {
+                    // Not speaking -> speaking transition
                     let start = frame - padOnset
                     aux.speaking = true
 
@@ -1232,10 +1233,13 @@ public class DiarizerTimeline {
                         continue
                     }
 
+                    // Large-gap onset: the held segment is truly done because
+                    // any future onset has an even larger gap. Emit it with the
+                    // outer call's finalized status.
                     commitSegment(
                         from: &aux,
                         toSlot: speakerIndex,
-                        isFinalized: aux.endFrame < finalizedEndFrame,
+                        isFinalized: isFinalized,
                         emittingIfFinalizedTo: &finalizedResult,
                         emittingIfTentativeTo: &tentativeResult
                     )
@@ -1245,14 +1249,16 @@ public class DiarizerTimeline {
                 }
             }
 
-            // Commit final pending segment
-            commitSegment(
-                from: &aux,
-                toSlot: speakerIndex,
-                isFinalized: aux.endFrame < finalizedEndFrame,
-                emittingIfFinalizedTo: &finalizedResult,
-                emittingIfTentativeTo: &tentativeResult
-            )
+            // Commit last pending segment. Don't commit tentative segments in the finalized call.
+            if aux.hasSegment, !isFinalized || aux.endFrame < finalizedEndFrame {
+                commitSegment(
+                    from: &aux,
+                    toSlot: speakerIndex,
+                    isFinalized: isFinalized && aux.endFrame < finalizedEndFrame,
+                    emittingIfFinalizedTo: &finalizedResult,
+                    emittingIfTentativeTo: &tentativeResult
+                )
+            }
 
             if isFinalized {
                 scratches[speakerIndex] = aux
