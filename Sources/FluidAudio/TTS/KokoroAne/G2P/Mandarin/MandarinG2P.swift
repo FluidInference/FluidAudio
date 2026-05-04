@@ -5,20 +5,24 @@ import Foundation
 ///
 /// Pipeline (mirrors `misaki/zh_frontend.py`):
 ///
-///   1. **Punctuation normalization** — fullwidth → ASCII for the
+///   1. **Number normalization** — `MandarinNumberNormalizer` verbalizes
+///      Arabic numerals, dates, times, percentages, fractions, and
+///      currency expressions into Hanzi the rest of the pipeline can
+///      speak directly (`2025年5月3日` → `二零二五年五月三日`).
+///   2. **Punctuation normalization** — fullwidth → ASCII for the
 ///      characters the v1.1-zh vocab actually carries (`，` → `,`,
 ///      `。` → `.`, …).
-///   2. **Segmentation** — forward maximum-matching against
+///   3. **Segmentation** — forward maximum-matching against
 ///      `MandarinPinyinDict.phrases`, falling back to single-char
 ///      lookups in `singles`. Matches `MagpieMandarinTokenizer`'s
 ///      strategy — full jieba HMM is not ported.
-///   3. **Diacritic → digit** — each pinyin syllable is normalized to
+///   4. **Diacritic → digit** — each pinyin syllable is normalized to
 ///      `(base, tone)` via `MandarinPinyinNormalizer`.
-///   4. **Tone sandhi** — 3+3 → 2+3, 不 / 一 contextual rules
+///   5. **Tone sandhi** — 3+3 → 2+3, 不 / 一 contextual rules
 ///      (`MandarinToneSandhi`).
-///   5. **Pinyin → Bopomofo** — `MandarinBopomofoMap.encode` produces
+///   6. **Pinyin → Bopomofo** — `MandarinBopomofoMap.encode` produces
 ///      the final `<initial><final><digit>` string per syllable.
-///   6. **Concatenation** — syllables joined with no separator,
+///   7. **Concatenation** — syllables joined with no separator,
 ///      punctuation interleaved verbatim. The output is fed straight
 ///      into `KokoroAneVocab.encode`.
 ///
@@ -27,8 +31,7 @@ import Foundation
 ///
 ///   * Erhua merging (`儿` suffix collapse).
 ///   * POS-conditioned sandhi from `tone_sandhi.py`.
-///   * Number / datetime / English-letter normalization
-///     (`misaki.zh_normalization`).
+///   * English-letter normalization (`misaki.zh_normalization`).
 public struct MandarinG2P: Sendable {
 
     private let dict: MandarinPinyinDict
@@ -42,7 +45,8 @@ public struct MandarinG2P: Sendable {
     /// `KokoroAneVocab.encode`. Empty input is rejected with `throws`
     /// to match the existing English path's behaviour.
     public func phonemize(_ text: String) throws -> String {
-        let normalized = Self.normalizeText(text)
+        let verbalized = MandarinNumberNormalizer.normalize(text)
+        let normalized = Self.normalizeText(verbalized)
         guard !normalized.isEmpty else {
             throw KokoroAneError.inputProcessingFailed("(empty input)")
         }
