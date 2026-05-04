@@ -14,8 +14,11 @@ import Foundation
 ///      `。` → `.`, …).
 ///   3. **Segmentation** — forward maximum-matching against
 ///      `MandarinPinyinDict.phrases`, falling back to single-char
-///      lookups in `singles`. Matches `MagpieMandarinTokenizer`'s
-///      strategy — full jieba HMM is not ported.
+///      lookups in `singles`. When a `MandarinJiebaHmm` is wired in,
+///      runs of consecutive single-char fallbacks are first re-segmented
+///      via the jieba B/M/E/S Viterbi to recover OOV proper-noun
+///      boundaries (`特朗普`, `比特币`), and each recovered word is
+///      retried against the phrase dict before falling back to per-char.
 ///   4. **Diacritic → digit** — each pinyin syllable is normalized to
 ///      `(base, tone)` via `MandarinPinyinNormalizer`.
 ///   5. **Erhua merge** — `MandarinErhua.merge` folds trailing `儿`
@@ -37,10 +40,12 @@ import Foundation
 public struct MandarinG2P: Sendable {
 
     private let dict: MandarinPinyinDict
+    private let jiebaHmm: MandarinJiebaHmm?
     private static let logger = AppLogger(category: "MandarinG2P")
 
-    public init(dict: MandarinPinyinDict) {
+    public init(dict: MandarinPinyinDict, jiebaHmm: MandarinJiebaHmm? = nil) {
         self.dict = dict
+        self.jiebaHmm = jiebaHmm
     }
 
     /// Convert text to a Bopomofo + tone-digit string ready for
@@ -135,11 +140,51 @@ public struct MandarinG2P: Sendable {
         var i = 0
         let upperBound = max(2, dict.maxPhraseCharCount)
         var literalBuffer = ""
+        var hanziFallbackRun: [Character] = []
 
         func flushLiteral() {
             if !literalBuffer.isEmpty {
                 segments.append(.literal(literalBuffer))
                 literalBuffer.removeAll(keepingCapacity: true)
+            }
+        }
+
+        // Drain a buffered run of consecutive single-char hanzi (chars
+        // the FMM phrase loop missed). When the jieba HMM is available
+        // we ask it to re-segment the run first; each resulting word is
+        // tried against the phrase dict before falling back to a
+        // per-char lookup. This recovers boundaries on OOV proper nouns
+        // like `特朗普` / `比特币` whose constituent chars individually
+        // exist in the singles dict but whose compound only resolves as
+        // a phrase.
+        func flushHanziRun() {
+            if hanziFallbackRun.isEmpty { return }
+            defer { hanziFallbackRun.removeAll(keepingCapacity: true) }
+            flushLiteral()
+            let words =
+                jiebaHmm?.segment(String(hanziFallbackRun))
+                ?? hanziFallbackRun.map { String($0) }
+            for word in words {
+                if word.count >= 2, let pinyin = dict.phrases[word] {
+                    segments.append(.pinyin(pinyin))
+                    continue
+                }
+                // Per-char fallback for either truly OOV words or single
+                // chars from a `S` state. Mirrors the original loop's
+                // single-char branch.
+                for ch in word {
+                    if let scalar = ch.unicodeScalars.first,
+                        let pinyin = dict.singles[scalar.value],
+                        !pinyin.isEmpty
+                    {
+                        segments.append(.pinyin([pinyin[0]]))
+                    } else {
+                        // Unknown char — fall through as literal so
+                        // KokoroAneVocab can have a shot at it.
+                        literalBuffer.append(ch)
+                        flushLiteral()
+                    }
+                }
             }
         }
 
@@ -149,6 +194,7 @@ public struct MandarinG2P: Sendable {
             if let scalar = ch.unicodeScalars.first,
                 MandarinBopomofoMap.allowedPunctuation.contains(ch) || scalar.value < 0x80
             {
+                flushHanziRun()
                 if MandarinBopomofoMap.allowedPunctuation.contains(ch) {
                     flushLiteral()
                     segments.append(.punctuation(String(ch)))
@@ -171,6 +217,7 @@ public struct MandarinG2P: Sendable {
                     for len in stride(from: maxLen, through: 2, by: -1) {
                         let candidate = String(chars[i..<(i + len)])
                         if let pinyin = dict.phrases[candidate] {
+                            flushHanziRun()
                             flushLiteral()
                             segments.append(.pinyin(pinyin))
                             i += len
@@ -182,19 +229,14 @@ public struct MandarinG2P: Sendable {
             }
             if matched { continue }
 
-            // Single-char lookup.
-            let scalar = ch.unicodeScalars.first
-            if let scalar, let pinyin = dict.singles[scalar.value], !pinyin.isEmpty {
-                flushLiteral()
-                segments.append(.pinyin([pinyin[0]]))
-            } else {
-                // Unknown char (likely Bopomofo, fullwidth latin, an
-                // emoji, etc.). Pass through verbatim — KokoroAneVocab
-                // will tokenise what it recognises.
-                literalBuffer.append(ch)
-            }
+            // Buffer the char into the hanzi-fallback run. Whether the
+            // singles dict knows it or not, we let `flushHanziRun`
+            // decide — that keeps the HMM input contiguous, which is
+            // what jieba expects (a "run" of unsegmented characters).
+            hanziFallbackRun.append(ch)
             i += 1
         }
+        flushHanziRun()
         flushLiteral()
         return segments
     }

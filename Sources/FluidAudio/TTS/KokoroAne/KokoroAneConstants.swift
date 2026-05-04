@@ -65,6 +65,23 @@ public enum KokoroAneConstants {
     /// 7 mlmodelc bundles already in this repo).
     public static let g2pPinyinSingleRemoteFile = "pinyin_single.bin"
     public static let g2pPinyinPhrasesRemoteFile = "pinyin_phrases.bin"
+
+    // MARK: - Jieba HMM tables
+
+    /// Local filenames for the three jieba HMM tables (start /
+    /// transition / emission), cached alongside the pinyin dicts under
+    /// `<repoDir>/g2p/`. Format documented on
+    /// `MandarinJiebaHmmTables`.
+    public static let jiebaHmmStartFile = "jieba_hmm_start.bin"
+    public static let jiebaHmmTransFile = "jieba_hmm_trans.bin"
+    public static let jiebaHmmEmitFile = "jieba_hmm_emit.bin"
+
+    /// Remote artefact names — uploaded to the same `ANE-zh/assets/`
+    /// folder as the pinyin dicts. Combined size is ≈ 3 MB (emit table
+    /// dominates; ~7 800 codepoints × 16 bytes plus headers).
+    public static let jiebaHmmStartRemoteFile = "jieba_hmm_start.bin"
+    public static let jiebaHmmTransRemoteFile = "jieba_hmm_trans.bin"
+    public static let jiebaHmmEmitRemoteFile = "jieba_hmm_emit.bin"
 }
 
 /// Language variant of the laishere/kokoro 7-stage CoreML chain.
