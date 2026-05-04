@@ -66,4 +66,35 @@ public enum MandarinPinyinNormalizer {
         }
         return Syllable(base: base, tone: tone)
     }
+
+    /// Parse a digit-form pinyin token (`"zi4"`, `"jie2"`, `"de5"`) into
+    /// the same `Syllable` shape ``normalize(_:)`` produces. Returns
+    /// `nil` when the input is missing the trailing tone digit, has an
+    /// empty base, or contains characters outside `[a-z]` (after
+    /// lowercasing). Used by the custom-lexicon loader so user entries
+    /// flow through the standard post-segmentation pipeline (sandhi +
+    /// bopomofo encoding) without going through the diacritic
+    /// round-trip.
+    ///
+    /// `ü` and `Ü` are also accepted in the base and collapse to `v`
+    /// (matching ``normalize(_:)``'s pypinyin TONE3 convention).
+    public static func parseDigitForm(_ token: String) -> Syllable? {
+        guard let last = token.last, let tone = Int(String(last)),
+            (1...5).contains(tone)
+        else {
+            return nil
+        }
+        let raw = token.dropLast().lowercased()
+        guard !raw.isEmpty else { return nil }
+        var base = ""
+        base.reserveCapacity(raw.count)
+        for ch in raw {
+            switch ch {
+            case "ü": base.append("v")
+            case "a"..."z": base.append(ch)
+            default: return nil
+            }
+        }
+        return Syllable(base: base, tone: tone)
+    }
 }
