@@ -65,6 +65,28 @@ public enum KokoroAneConstants {
     /// 7 mlmodelc bundles already in this repo).
     public static let g2pPinyinSingleRemoteFile = "pinyin_single.bin"
     public static let g2pPinyinPhrasesRemoteFile = "pinyin_phrases.bin"
+
+    // MARK: - Mandarin g2pW polyphone disambiguator
+
+    /// Local subdirectory (relative to the cached `ANE-zh/` repo dir) for
+    /// the g2pW BERT classifier + its tokenizer / catalog assets.
+    public static let g2pwSubdir = "g2pw"
+
+    /// Compiled CoreML bundle name. Matches the upstream HF folder.
+    public static let g2pwModelBundle = "g2pw.mlmodelc"
+
+    /// `bert-base-chinese` vocab co-located with the model.
+    public static let g2pwVocabFile = "vocab.txt"
+
+    /// Per-character allowed-phoneme map shipped alongside the model.
+    public static let g2pwPolyphonicCharsFile = "POLYPHONIC_CHARS.txt"
+
+    /// Subdirectory inside `g2pRemoteRepo` containing the g2pW assets.
+    public static let g2pwRemoteSubdir = "ANE-zh/g2pw"
+
+    /// Remote artefact filenames (mirrors the local names — no rename).
+    public static let g2pwVocabRemoteFile = "vocab.txt"
+    public static let g2pwPolyphonicCharsRemoteFile = "POLYPHONIC_CHARS.txt"
 }
 
 /// Language variant of the laishere/kokoro 7-stage CoreML chain.

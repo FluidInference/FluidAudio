@@ -224,51 +224,57 @@ final class MandarinG2PTests: XCTestCase {
         XCTAssertEqual(MandarinG2P.normalizeText("！？；："), "!?;:")
     }
 
-    func testPhonemizeRejectsEmpty() throws {
+    func testPhonemizeRejectsEmpty() async throws {
         let g2p = MandarinG2P(dict: Self.smallDict())
-        XCTAssertThrowsError(try g2p.phonemize("")) { err in
-            guard let e = err as? KokoroAneError,
-                case .inputProcessingFailed = e
-            else {
-                XCTFail("Expected inputProcessingFailed, got \(err)")
+        do {
+            _ = try await g2p.phonemize("")
+            XCTFail("Expected throw on empty input")
+        } catch let e as KokoroAneError {
+            guard case .inputProcessingFailed = e else {
+                XCTFail("Expected inputProcessingFailed, got \(e)")
                 return
             }
         }
-        XCTAssertThrowsError(try g2p.phonemize("   "))
+        do {
+            _ = try await g2p.phonemize("   ")
+            XCTFail("Expected throw on whitespace-only input")
+        } catch {
+            // expected
+        }
     }
 
-    func testPhonemizePhraseLookupBeatsSingles() throws {
+    func testPhonemizePhraseLookupBeatsSingles() async throws {
         // "你好" should resolve via the phrases dict (FMM), not by
         // single-char fallback. Both produce the same syllables here so
         // we instead assert the phrase-level sandhi runs (3+3 → 2+3 →
         // bopomofo "ㄋㄧ2ㄏㄠ3").
         let g2p = MandarinG2P(dict: Self.smallDict())
-        let out = try g2p.phonemize("你好")
+        let out = try await g2p.phonemize("你好")
         XCTAssertEqual(out, "ㄋㄧ2ㄏㄠ3")
     }
 
-    func testPhonemizeAppliesBuSandhi() throws {
+    func testPhonemizeAppliesBuSandhi() async throws {
         let g2p = MandarinG2P(dict: Self.smallDict())
-        let out = try g2p.phonemize("我不去")
+        let out = try await g2p.phonemize("我不去")
         // 我 wǒ → "uo" final tokenises as the vocab Hanzi token "我".
         // bu4-before-qu4 → bu2. qu4 → q + ü(ㄩ) + 4.
         XCTAssertEqual(out, "我3ㄅㄨ2ㄑㄩ4")
     }
 
-    func testPhonemizeKeepsPunctuation() throws {
+    func testPhonemizeKeepsPunctuation() async throws {
         let g2p = MandarinG2P(dict: Self.smallDict())
-        let out = try g2p.phonemize("你好,世界。")
+        let out = try await g2p.phonemize("你好,世界。")
         // Sandhi never crosses punctuation, so 你好 → 2+3 and 世界 →
         // 4+4 (no sandhi between them). 世 shi4 → ㄕ + 十; 界 jie4 →
         // ㄐ + ㄝ (ㄧ glide is implicit in the v1.1-zh vocab).
         XCTAssertEqual(out, "ㄋㄧ2ㄏㄠ3,ㄕ十4ㄐㄝ4.")
     }
 
-    func testPhonemizeSandhiResetsAtPunctuation() throws {
+    func testPhonemizeSandhiResetsAtPunctuation() async throws {
         // Two adjacent third tones across a comma must NOT trigger
         // 3+3 sandhi.
         let g2p = MandarinG2P(dict: Self.smallDict())
-        let out = try g2p.phonemize("你好,你好")
+        let out = try await g2p.phonemize("你好,你好")
         XCTAssertEqual(out, "ㄋㄧ2ㄏㄠ3,ㄋㄧ2ㄏㄠ3")
     }
 
