@@ -769,19 +769,30 @@ public enum ModelNames {
         public static let decoderPrefill = "decoder_prefill"
         public static let decoderStep = "decoder_step"
         public static let nanocodecDecoder = "nanocodec_decoder"
-        /// Chunked T_in=24-frame nanocodec build. Output 24576 audio samples
-        /// per call; runtime slides this with stride 8 / overlap 16 frames.
-        /// Lands ~43 % ANE-resident at 38.4 ms/call vs the monolithic
-        /// T=256 model that can only run on CPU at ~8.76 s/utterance.
-        /// Optional: when this file is absent we fall back to the monolithic
-        /// `nanocodec_decoder.mlmodelc` and the `.cpuOnly` pin.
+        /// Chunked T_in=24-frame nanocodec, fp16 weights. Output 24576 audio
+        /// samples per call; runtime slides this with stride 8 / overlap 16
+        /// frames. Lands ~43 % ANE-resident at 38.4 ms/call (M2). Audibly
+        /// noisy on voiced speech: fp16 weight quantization adds 27 dB SNR
+        /// of speech-correlated noise vs PyTorch reference. Use only when
+        /// throughput matters more than quality. The fp32 v2 build below
+        /// is the recommended default.
         public static let nanocodecDecoderT24 = "nanocodec_decoder_t24"
+        /// Chunked T_in=24-frame nanocodec, fp32 weights (Phase F result).
+        /// Same I/O contract as the fp16 build but pinned to CPU at ~142.5
+        /// ms/call (M2). Audibly clean — matches PyTorch reference within
+        /// the Snake-approximation noise floor. Phase F (per-op + per-
+        /// location mixed-precision sweep, see
+        /// `mobius/.../per_module/results/STATUS.md`) confirmed no
+        /// mixed-precision island recovers cleanliness, so the production
+        /// trade-off is full fp32 / CPU-only / RTFx ~1.3× end-to-end.
+        public static let nanocodecDecoderT24V2 = "nanocodec_decoder_t24_v2"
 
         public static let textEncoderFile = textEncoder + ".mlmodelc"
         public static let decoderPrefillFile = decoderPrefill + ".mlmodelc"
         public static let decoderStepFile = decoderStep + ".mlmodelc"
         public static let nanocodecDecoderFile = nanocodecDecoder + ".mlmodelc"
         public static let nanocodecDecoderT24File = nanocodecDecoderT24 + ".mlmodelc"
+        public static let nanocodecDecoderT24V2File = nanocodecDecoderT24V2 + ".mlmodelc"
 
         public static let constantsDir = "constants"
         public static let tokenizerDir = "tokenizer"

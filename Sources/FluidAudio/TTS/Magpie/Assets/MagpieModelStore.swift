@@ -1,6 +1,21 @@
 @preconcurrency import CoreML
 import Foundation
 
+/// Selects which T_in=24 nanocodec build the store loads.
+///
+/// - `.fp32`: `nanocodec_decoder_t24_v2.mlmodelc` — full fp32 weights, pinned
+///   to CPU (~142.5 ms / 24-frame call on M2). Audibly clean, matches the
+///   PyTorch sin² reference within the Snake-approximation noise floor.
+///   Pipeline stays real-time at RTFx ~1.3× median.
+/// - `.fp16`: `nanocodec_decoder_t24.mlmodelc` — fp16 weights, runs
+///   ~43 % ANE-resident at ~38.4 ms / 24-frame call. Faster but audibly
+///   noisy on voiced speech (~27 dB SNR vs PyTorch reference, hidden by
+///   silence-RMS metrics). Use only when throughput dominates quality.
+public enum MagpieNanocodecPrecision: String, Sendable {
+    case fp16
+    case fp32
+}
+
 /// Actor-based store for Magpie CoreML models + constants + LocalTransformer weights.
 ///
 /// Manages loading of 3 required models (text_encoder, decoder_step, nanocodec_decoder)
@@ -14,9 +29,14 @@ public actor MagpieModelStore {
     private var textEncoderModel: MLModel?
     private var decoderPrefillModel: MLModel?  // optional fast path
     private var decoderStepModel: MLModel?
-    /// Either the chunked T_in=24 build (preferred, ANE) or the monolithic
-    /// T=256 build (legacy, CPU-only). `MagpieNanocodec` reads the input
-    /// shape and chunks accordingly.
+    /// One of:
+    ///   - chunked T_in=24 fp32 build (`nanocodec_decoder_t24_v2`, default,
+    ///     CPU-only, audibly clean)
+    ///   - chunked T_in=24 fp16 build (`nanocodec_decoder_t24`, fast/ANE,
+    ///     audibly noisy)
+    ///   - monolithic T=256 build (`nanocodec_decoder`, legacy fallback,
+    ///     CPU-only)
+    /// `MagpieNanocodec` reads the input shape and chunks accordingly.
     private var nanocodecDecoderModel: MLModel?
 
     private var constantsBundle: MagpieConstantsBundle?
@@ -27,19 +47,28 @@ public actor MagpieModelStore {
     private let directory: URL?
     private let computeUnits: MLComputeUnits
     private let preferredLanguages: Set<MagpieLanguage>
+    private let nanocodecPrecision: MagpieNanocodecPrecision
 
     /// - Parameters:
     ///   - directory: Optional override for the base cache directory.
     ///   - computeUnits: CoreML compute preference for all models.
     ///   - preferredLanguages: Set of languages whose tokenizer data should be fetched.
+    ///   - nanocodecPrecision: Which T_in=24 nanocodec build to load.
+    ///     `.fp32` (default) is audibly clean but pinned to CPU
+    ///     (~142.5 ms/call on M2). `.fp16` runs ~43 % ANE-resident
+    ///     (~38.4 ms/call) but is audibly noisy on voiced speech due to
+    ///     fp16 weight quantization. See Phase F write-up in
+    ///     `mobius/.../per_module/results/STATUS.md`.
     public init(
         directory: URL? = nil,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        preferredLanguages: Set<MagpieLanguage> = [.english]
+        preferredLanguages: Set<MagpieLanguage> = [.english],
+        nanocodecPrecision: MagpieNanocodecPrecision = .fp32
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
         self.preferredLanguages = preferredLanguages
+        self.nanocodecPrecision = nanocodecPrecision
     }
 
     /// Download (if missing) and load all Magpie CoreML models + constants.
@@ -82,32 +111,38 @@ public actor MagpieModelStore {
         aneConfig.computeUnits =
             computeUnits == .cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
 
-        // Nanocodec is pinned to CPU regardless of `computeUnits`.
+        // Nanocodec compute units are dictated by precision, not by the
+        // caller's `computeUnits` setting:
         //
-        // The monolithic T=256 build can't use ANE anyway: its activation
-        // tensor exceeds the W ≤ 16384 limit on space-to-batch lowering of
-        // the dilated convs and ANECCompile() fails whole-graph.
+        //   .fp32  → `.cpuOnly`. fp32 weights force the CoreML runtime
+        //            off ANE (ANE is fp16-only). Audibly clean.
+        //   .fp16  → `.cpuAndNeuralEngine` (or `.cpuOnly` if the caller
+        //            explicitly requested CPU-only). Runs ~43 %-resident
+        //            on ANE at ~38.4 ms / 24-frame call but is audibly
+        //            noisy on voiced speech.
         //
-        // The chunked T_in=24 build *can* run ~43 %-resident on ANE, but
-        // we ship it as fp32 weights (`compute_precision=FLOAT32` in
-        // `convert_nanocodec.py`) because fp16 weight quantization
-        // produces audible speech-correlated noise during voiced segments
-        // — the silence-RMS metrics hide it, but A/B listening against
-        // a PyTorch sin² reference makes it obvious. fp32 weights force
-        // the CoreML runtime onto CPU (ANE is fp16-only), and the noise
-        // floor matches the PyTorch reference within ~3.5 dB.
+        // The monolithic T=256 fallback build can't use ANE anyway: its
+        // activation tensor exceeds the W ≤ 16384 limit on space-to-batch
+        // lowering of the dilated convs and ANECCompile() fails
+        // whole-graph.
         //
         // Noise floor (quietest 0.3 s window, post-norm):
         //   PyTorch sin² (gold)              -77.4 dBFS
-        //   T=24 chunked, fp32 weights, CPU  -73.6 dBFS  ← current
+        //   T=24 chunked, fp32 weights, CPU  -73.6 dBFS  (clean, default)
         //   T=24 chunked, fp16 weights, CPU  -73.9 dBFS  (audibly noisy)
         //   T=24 chunked, fp16 weights, ANE  -66.8 dBFS  (audibly noisy)
         //
-        // fp32 trades throughput for fidelity: nanocodec wall is ~4×
-        // slower than fp16 (8.5–9.7 s vs 2.2 s on a 12 s utterance, M2),
-        // but the pipeline stays real-time at RTFx ~1.3× median.
+        // See Phase F in `mobius/.../per_module/results/STATUS.md` for
+        // the full mixed-precision sweep that closed off any per-stage
+        // or per-op-type fp16/fp32 island.
         let nanocodecConfig = MLModelConfiguration()
-        nanocodecConfig.computeUnits = .cpuOnly
+        switch nanocodecPrecision {
+        case .fp32:
+            nanocodecConfig.computeUnits = .cpuOnly
+        case .fp16:
+            nanocodecConfig.computeUnits =
+                computeUnits == .cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
+        }
 
         let loadStart = Date()
 
@@ -123,22 +158,49 @@ public actor MagpieModelStore {
             config: aneConfig,
             required: true)
 
-        // Prefer the chunked T_in=24 build (loads on ANE). Fall back to the
-        // monolithic T=256 build if t24 isn't present in the repo. Exactly
-        // one of the two must exist for synthesis to work.
+        // Pick the requested precision's t24 build first. If it isn't in
+        // the repo, fall back to the other precision's t24 build (with a
+        // warning), and finally to the monolithic T=256 build. Exactly
+        // one of the three must exist for synthesis to work.
+        let primaryT24Name: String
+        let secondaryT24Name: String
+        switch nanocodecPrecision {
+        case .fp32:
+            primaryT24Name = ModelNames.Magpie.nanocodecDecoderT24V2File
+            secondaryT24Name = ModelNames.Magpie.nanocodecDecoderT24File
+        case .fp16:
+            primaryT24Name = ModelNames.Magpie.nanocodecDecoderT24File
+            secondaryT24Name = ModelNames.Magpie.nanocodecDecoderT24V2File
+        }
+
         nanocodecDecoderModel = try loadModel(
             repoDir: repoDir,
-            fileName: ModelNames.Magpie.nanocodecDecoderT24File,
+            fileName: primaryT24Name,
             config: nanocodecConfig,
             required: false)
         if nanocodecDecoderModel == nil {
-            logger.notice(
-                "T_in=24 nanocodec absent; falling back to monolithic CPU-only nanocodec_decoder.mlmodelc"
+            logger.warning(
+                "Requested \(nanocodecPrecision.rawValue) nanocodec (\(primaryT24Name)) absent; trying alternate precision \(secondaryT24Name)"
             )
+            // Loading the alternate-precision build under the requested
+            // compute config is fine: fp32 weights will force CPU at
+            // runtime regardless, fp16 weights honour the chosen units.
+            nanocodecDecoderModel = try loadModel(
+                repoDir: repoDir,
+                fileName: secondaryT24Name,
+                config: nanocodecConfig,
+                required: false)
+        }
+        if nanocodecDecoderModel == nil {
+            logger.notice(
+                "No T_in=24 nanocodec present; falling back to monolithic CPU-only nanocodec_decoder.mlmodelc"
+            )
+            let monolithicConfig = MLModelConfiguration()
+            monolithicConfig.computeUnits = .cpuOnly
             nanocodecDecoderModel = try loadModel(
                 repoDir: repoDir,
                 fileName: ModelNames.Magpie.nanocodecDecoderFile,
-                config: nanocodecConfig,
+                config: monolithicConfig,
                 required: true)
         }
 
