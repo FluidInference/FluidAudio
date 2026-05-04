@@ -167,6 +167,85 @@ public enum KokoroAneResourceDownloader {
         return g2pDir
     }
 
+    /// Ensure the Mandarin g2pW polyphone disambiguator assets are
+    /// resident under `<repoDir>/g2pw/`. Returns the directory URL on
+    /// success, or `nil` if any required artefact is unavailable
+    /// (network failure, asset not yet published, …) so callers can
+    /// fall back to the dict-only Mandarin pipeline without throwing.
+    ///
+    /// The CoreML bundle (`g2pw.mlmodelc/`) is a directory and is
+    /// expected to land via the bulk `ensureModels` repo grab once the
+    /// asset is added to the `requiredModelsZh` set. This helper only
+    /// fetches the two auxiliary text files (`vocab.txt`,
+    /// `POLYPHONIC_CHARS.txt`) that ship alongside the model and then
+    /// validates the bundle is on disk.
+    @discardableResult
+    public static func ensureMandarinG2pw(
+        repoDirectory: URL
+    ) async -> URL? {
+        let g2pwDir = repoDirectory.appendingPathComponent(KokoroAneConstants.g2pwSubdir)
+        if !FileManager.default.fileExists(atPath: g2pwDir.path) {
+            do {
+                try FileManager.default.createDirectory(
+                    at: g2pwDir, withIntermediateDirectories: true)
+            } catch {
+                logger.info(
+                    "g2pW assets unavailable (could not create cache dir: \(error.localizedDescription))"
+                )
+                return nil
+            }
+        }
+
+        let needed = [
+            (
+                local: KokoroAneConstants.g2pwVocabFile,
+                remote: KokoroAneConstants.g2pwVocabRemoteFile
+            ),
+            (
+                local: KokoroAneConstants.g2pwPolyphonicCharsFile,
+                remote: KokoroAneConstants.g2pwPolyphonicCharsRemoteFile
+            ),
+        ]
+
+        for entry in needed {
+            let localURL = g2pwDir.appendingPathComponent(entry.local)
+            if FileManager.default.fileExists(atPath: localURL.path) { continue }
+
+            do {
+                let remotePath = "\(KokoroAneConstants.g2pwRemoteSubdir)/\(entry.remote)"
+                let remoteURL = try ModelRegistry.resolveModel(
+                    KokoroAneConstants.g2pRemoteRepo, remotePath)
+                let data = try await AssetDownloader.fetchData(
+                    from: remoteURL,
+                    description: "Mandarin g2pW asset \(entry.remote)",
+                    logger: logger
+                )
+                try data.write(to: localURL, options: [.atomic])
+                logger.info("Cached \(entry.local) (\(data.count / 1024) KB)")
+            } catch {
+                logger.info(
+                    "g2pW asset '\(entry.local)' unavailable (\(error.localizedDescription))"
+                        + " — Mandarin G2P will run dict-only"
+                )
+                return nil
+            }
+        }
+
+        // The CoreML bundle is required for the model to actually run.
+        // Without it, return nil and let the caller skip g2pW entirely.
+        let modelURL =
+            repoDirectory
+            .appendingPathComponent(KokoroAneConstants.g2pwSubdir)
+            .appendingPathComponent(KokoroAneConstants.g2pwModelBundle)
+        if !FileManager.default.fileExists(atPath: modelURL.path) {
+            logger.info(
+                "g2pW CoreML bundle missing at \(modelURL.path) — Mandarin G2P will run dict-only"
+            )
+            return nil
+        }
+        return g2pwDir
+    }
+
     /// Ensure the shared G2P CoreML assets (encoder + decoder + vocab) exist
     /// in the kokoro cache directory. KokoroAne reuses `G2PModel` for text →
     /// IPA conversion, and `G2PModel.loadIfNeeded` only reads from cache —

@@ -197,19 +197,19 @@ final class MandarinJiebaHmmTests: XCTestCase {
 
     // MARK: - Integration with MandarinG2P.segment
 
-    func testMandarinG2PWithoutHmmKeepsPerCharFallback() throws {
+    func testMandarinG2PWithoutHmmKeepsPerCharFallback() async throws {
         // No HMM: 特朗普 (not in the toy phrase dict) should each char
         // get a per-singles lookup. Sanity check that wiring HMM as
         // optional preserves the baseline behaviour.
         let dict = Self.miniDict()
         let g2p = MandarinG2P(dict: dict)
-        let phon = try g2p.phonemize("特朗普")
+        let phon = try await g2p.phonemize("特朗普")
         XCTAssertFalse(phon.isEmpty)
         // Each char emits at least an initial+final+tone fragment.
         XCTAssertGreaterThanOrEqual(phon.count, 3)
     }
 
-    func testMandarinG2PWithHmmRetriesPhraseDict() throws {
+    func testMandarinG2PWithHmmRetriesPhraseDict() async throws {
         // With HMM + a phrase entry for 特朗普, the per-char fallback
         // should be replaced by the phrase pinyin.
         var phrases: [String: [String]] = [:]
@@ -228,12 +228,12 @@ final class MandarinJiebaHmmTests: XCTestCase {
         // The HMM-recovered word `特朗普` hits the phrase dict; the
         // result should equal what a pure-phrase lookup would produce.
         let g2pPhraseOnly = MandarinG2P(dict: dict)
-        let withHmm = try g2p.phonemize("特朗普")
-        let withoutHmmButCached = try g2pPhraseOnly.phonemize("特朗普")
+        let withHmm = try await g2p.phonemize("特朗普")
+        let withoutHmmButCached = try await g2pPhraseOnly.phonemize("特朗普")
         XCTAssertEqual(withHmm, withoutHmmButCached)
     }
 
-    func testIntegrationFlushesHanziRunOnPunctuation() throws {
+    func testIntegrationFlushesHanziRunOnPunctuation() async throws {
         // 他特朗普,你好 — punctuation between hanzi-runs must split the
         // HMM input, otherwise the comma would end up inside the
         // segmenter's character buffer.
@@ -250,7 +250,7 @@ final class MandarinJiebaHmmTests: XCTestCase {
             tables: Self.buildToyTables(
                 groupChars: ["特", "朗", "普"], singletonChars: ["他"]))
         let g2p = MandarinG2P(dict: dict, jiebaHmm: hmm)
-        let phon = try g2p.phonemize("他特朗普,你好")
+        let phon = try await g2p.phonemize("他特朗普,你好")
         // The comma should appear in the bopomofo string (passthrough).
         XCTAssertTrue(phon.contains(","), "expected ',' in '\(phon)'")
     }

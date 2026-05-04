@@ -140,11 +140,11 @@ final class MandarinErhuaTests: XCTestCase {
 
     // MARK: - End-to-end through MandarinG2P
 
-    func testG2PEndToEndZher() throws {
+    func testG2PEndToEndZher() async throws {
         // 这儿 in single-char dict → zhe + er → erhua-merged.
         let dict = Self.miniDict()
         let g2p = MandarinG2P(dict: dict)
-        let phon = try g2p.phonemize("这儿")
+        let phon = try await g2p.phonemize("这儿")
         XCTAssertTrue(
             phon.contains("ㄦ"),
             "expected erhua suffix in '\(phon)'")
@@ -154,11 +154,11 @@ final class MandarinErhuaTests: XCTestCase {
             "erhua should be attached, not a standalone er5; got '\(phon)'")
     }
 
-    func testG2PEndToEndStandaloneErzi() throws {
+    func testG2PEndToEndStandaloneErzi() async throws {
         // 儿子 → er + zi → leading er, must NOT merge.
         let dict = Self.miniDict()
         let g2p = MandarinG2P(dict: dict)
-        let phon = try g2p.phonemize("儿子")
+        let phon = try await g2p.phonemize("儿子")
         // Both syllables are emitted independently. We confirm by
         // checking the leading er token survives with its own tone.
         XCTAssertTrue(
