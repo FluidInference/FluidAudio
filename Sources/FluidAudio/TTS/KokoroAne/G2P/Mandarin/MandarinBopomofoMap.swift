@@ -131,7 +131,12 @@ public enum MandarinBopomofoMap {
     /// + digit string the v1.1-zh vocab expects (`"ㄏㄠ3"`). Returns
     /// `nil` when the syllable cannot be parsed (the caller logs and
     /// drops it — kokoro's own behaviour for OOV tokens is identical).
-    public static func encode(syllable base: String, tone: Int) -> String? {
+    ///
+    /// Pass `erhua: true` to append a trailing `ㄦ` between the final
+    /// and the tone digit (`小孩儿` → `ㄒㄧㄠ3ㄏㄞㄦ2`). Only the
+    /// `儿` suffix is encoded — phonetic compaction (`-n`/`-ng` drop)
+    /// is left to the acoustic model, matching misaki's style.
+    public static func encode(syllable base: String, tone: Int, erhua: Bool = false) -> String? {
         guard !base.isEmpty else { return nil }
         let normalized = normalizePinyinForLookup(base)
         guard let (initial, finalRaw) = splitInitialFinal(normalized) else {
@@ -171,6 +176,12 @@ public enum MandarinBopomofoMap {
         }
         if !final.isEmpty {
             guard let bo = finalMap[final] else { return nil }
+            out.append(bo)
+        }
+        // Erhua suffix sits between the final and the tone digit so the
+        // model sees `ㄒㄧㄠㄦ3` (a single toned r-coloured syllable)
+        // rather than `ㄒㄧㄠ3ㄦ` (two tokens).
+        if erhua, let bo = finalMap["er"] {
             out.append(bo)
         }
         // Tone digit — the v1.1-zh vocab carries 1…5 verbatim.
