@@ -92,6 +92,26 @@ final class MandarinG2PTests: XCTestCase {
         XCTAssertEqual(MandarinBopomofoMap.encode(syllable: "que", tone: 4), "ㄑ月4")
     }
 
+    func testEncodePinyinContractionExpansion() {
+        // Standard pinyin orthography contracts uei → ui, uen → un,
+        // iou → iu after a consonant initial. The finalMap only carries
+        // the full forms, so without expansion these syllables silently
+        // drop. Hits common Hanzi like 贵/对/回/水/六/九/牛/顿/论.
+        // ui → uei → finalMap["uei"] = "为"
+        XCTAssertEqual(MandarinBopomofoMap.encode(syllable: "gui", tone: 4), "ㄍ为4")
+        XCTAssertEqual(MandarinBopomofoMap.encode(syllable: "dui", tone: 4), "ㄉ为4")
+        XCTAssertEqual(MandarinBopomofoMap.encode(syllable: "hui", tone: 2), "ㄏ为2")
+        XCTAssertEqual(MandarinBopomofoMap.encode(syllable: "shui", tone: 3), "ㄕ为3")
+        // iu → iou → finalMap["iou"] = "又"
+        XCTAssertEqual(MandarinBopomofoMap.encode(syllable: "liu", tone: 4), "ㄌ又4")
+        XCTAssertEqual(MandarinBopomofoMap.encode(syllable: "jiu", tone: 3), "ㄐ又3")
+        XCTAssertEqual(MandarinBopomofoMap.encode(syllable: "niu", tone: 2), "ㄋ又2")
+        // un → uen → finalMap["uen"] = "文"
+        XCTAssertEqual(MandarinBopomofoMap.encode(syllable: "dun", tone: 4), "ㄉ文4")
+        XCTAssertEqual(MandarinBopomofoMap.encode(syllable: "lun", tone: 4), "ㄌ文4")
+        XCTAssertEqual(MandarinBopomofoMap.encode(syllable: "chun", tone: 1), "ㄔ文1")
+    }
+
     func testEncodeRejectsUnknownSyllable() {
         // No defined initial / final → drop.
         XCTAssertNil(MandarinBopomofoMap.encode(syllable: "xyzq", tone: 1))

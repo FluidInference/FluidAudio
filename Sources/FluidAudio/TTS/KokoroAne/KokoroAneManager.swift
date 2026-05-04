@@ -57,11 +57,16 @@ public actor KokoroAneManager {
     /// pack. Optionally pre-warm additional voice packs.
     public func initialize(preloadVoices: Set<String>? = nil) async throws {
         try await store.loadIfNeeded()
-        // G2P CoreML assets live in the kokoro repo and are loaded from
-        // ~/.cache/fluidaudio/Models/kokoro/. G2PModel.loadIfNeeded only reads
-        // from cache (it never downloads), so first-time KokoroAne users who
-        // have never run the regular kokoro backend would otherwise hit a
-        // cryptic G2PModelError.vocabLoadFailed. Fetch G2P assets explicitly
+        // English G2P CoreML assets live in the kokoro repo and are loaded
+        // from ~/.cache/fluidaudio/Models/kokoro/. The Mandarin variant
+        // routes through the in-process MandarinG2P pipeline (loaded by
+        // store.loadIfNeeded()) and never calls G2PModel.shared, so the
+        // English G2P bundle would just be wasted bandwidth + memory.
+        //
+        // For English: G2PModel.loadIfNeeded only reads from cache (it
+        // never downloads), so first-time KokoroAne users who have never
+        // run the regular kokoro backend would otherwise hit a cryptic
+        // G2PModelError.vocabLoadFailed. Fetch G2P assets explicitly
         // before warming the in-process G2P model.
         //
         // NOTE: pass nil (not `directory`) — `G2PModel.shared` is a singleton
@@ -70,8 +75,10 @@ public actor KokoroAneManager {
         // we'd download to a path G2PModel can't see and still hit
         // vocabLoadFailed. The KokoroAne mlmodelc chain itself does respect
         // `directory` (via store), only the shared G2P assets are pinned.
-        try await KokoroAneResourceDownloader.ensureG2PAssets(directory: nil)
-        try await G2PModel.shared.ensureModelsAvailable()
+        if variant == .english {
+            try await KokoroAneResourceDownloader.ensureG2PAssets(directory: nil)
+            try await G2PModel.shared.ensureModelsAvailable()
+        }
         if let voices = preloadVoices {
             for voice in voices {
                 _ = try await store.voicePack(voice)

@@ -1071,10 +1071,13 @@ public struct TTS {
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s/15s model (values: 5s,15s) OR
                                pick KokoroAne language (values: en,zh).
-                               For --backend kokoro-ane --variant zh, the
-                               input text is interpreted as pre-computed
-                               Bopomofo phonemes (Mandarin G2P is not
-                               implemented yet — Phase 2).
+                               For --backend kokoro-ane --variant zh, Hanzi
+                               input is auto-phonemized through the bundled
+                               Mandarin G2P pipeline (FMM segmentation +
+                               diacritic→digit + 3+3 / 不 / 一 sandhi +
+                               bopomofo encoding). Pre-computed bopomofo
+                               (no Hanzi present) is also accepted and
+                               passes through unchanged.
               --metrics            Write timing metrics to a JSON file (also runs ASR for evaluation)
               --chunk-dir          Directory where individual chunk WAVs will be written
               --no-deess           Disable de-essing (sibilance reduction, enabled by default)

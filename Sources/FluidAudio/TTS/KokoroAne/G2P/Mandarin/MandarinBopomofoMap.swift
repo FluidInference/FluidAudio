@@ -149,6 +149,21 @@ public enum MandarinBopomofoMap {
             final = "v" + final.dropFirst()
         }
 
+        // Expand standard pinyin orthographic contractions. In written
+        // pinyin "ui"/"un"/"iu" are shorthands for "uei"/"uen"/"iou"
+        // when preceded by a consonant initial. The finalMap only carries
+        // the full forms (matching misaki's _get_initials_finals), so
+        // syllables like gui/dui/hui/liu/jiu/dun would silently drop
+        // without this expansion.
+        if !initial.isEmpty {
+            switch final {
+            case "ui": final = "uei"
+            case "un": final = "uen"
+            case "iu": final = "iou"
+            default: break
+            }
+        }
+
         var out = ""
         if !initial.isEmpty {
             guard let bo = initialMap[initial] else { return nil }
