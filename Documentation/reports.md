@@ -366,20 +366,29 @@ app. The figures above cover the GitHub-visible inline comments only.
 ### Mobius changes (commits `cec7d1f` + `f72ab69`)
 
 - `STATUS.md` updated with the v2 / v3 naming.
-- Phase E HF upload list expanded to include both the `.mlpackage` and
-  `.mlmodelc` for each version.
+- Phase E HF upload list updated to ship the compiled `.mlmodelc`
+  bundles for each version. The `.mlpackage` source bundles stay local
+  only.
 
 ### HuggingFace upload (completed)
 
-- `nanocodec_decoder_v2.mlpackage` + `nanocodec_decoder_v2.mlmodelc` (fp16)
-- `nanocodec_decoder_v3.mlpackage` + `nanocodec_decoder_v3.mlmodelc` (fp32)
-- Legacy `nanocodec_decoder.mlmodelc` + `.mlpackage` retained for
-  backward compatibility.
+FluidAudio loads compiled CoreML bundles only, so only `.mlmodelc` is
+shipped. The `.mlpackage` source format stays in the mobius working
+tree for recompilation.
+
+- `nanocodec_decoder_v2.mlmodelc` (fp16)
+- `nanocodec_decoder_v3.mlmodelc` (fp32)
+- Legacy `nanocodec_decoder.mlmodelc` retained for backward
+  compatibility.
 
 ### Build artifacts on disk
 
-- `build/nanocodec_decoder_v2.mlpackage` (fp16) + `compiled/build/nanocodec_decoder_v2.mlmodelc`
-- `build/nanocodec_decoder_v3.mlpackage` (fp32) + `compiled/build/nanocodec_decoder_v3.mlmodelc`
+`.mlpackage` is the uncompiled source (kept locally for recompilation
+or re-export); `.mlmodelc` is the compiled artifact that gets uploaded
+and consumed by the Swift app.
+
+- `build/nanocodec_decoder_v2.mlpackage` (fp16, local source) → `compiled/build/nanocodec_decoder_v2.mlmodelc` (uploaded)
+- `build/nanocodec_decoder_v3.mlpackage` (fp32, local source) → `compiled/build/nanocodec_decoder_v3.mlmodelc` (uploaded)
 
 ### Remaining
 
