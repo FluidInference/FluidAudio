@@ -233,31 +233,25 @@ MiniMax-English 100-phrase suite — including the longer paragraph
 phrases that pull the per-corpus aggregate down to ~5.2× — see
 [Benchmarks.md](Benchmarks.md).
 
-## Model Updates
+## KokoroNoise — atan2 phase fix
 
-### atan2 phase correction (Kokoro zh noise fix)
+`KokoroNoise.mlmodelc` was regenerated in
+[mobius PR #50](https://github.com/FluidInference/mobius/pull/50) with
+an atan2 phase correction in `CoreMLForwardSTFT`. The prior conversion
+produced audible high-frequency background noise (most noticeable on
+Mandarin). Model I/O is unchanged, so no Swift update is needed to
+consume it.
 
-`KokoroNoise.mlmodelc` on HuggingFace was regenerated from
-[mobius PR #50](https://github.com/FluidInference/mobius/pull/50) with an
-atan2 phase correction in the `CoreMLForwardSTFT` block of
-`convert-coreml.py`. The previous conversion produced audible
-high-frequency background noise that was most noticeable on Mandarin
-(zh) synthesis. The fix is purely a model artifact change — inputs,
-outputs, dtypes, shapes, and `KokoroNoise.mlmodelc` filename are all
-unchanged, so no Swift code update is required to consume it.
-
-**Cache invalidation for existing users.** The downloader in
-[`KokoroAneResourceDownloader.ensureModels`](../../Sources/FluidAudio/TTS/KokoroAne/Assets/KokoroAneResourceDownloader.swift)
-checks file existence only — it will not re-fetch a stale
-`KokoroNoise.mlmodelc` once it's on disk. If you ran KokoroAne before
-the fix landed, delete the cached bundle so the next `initialize()`
-pulls the corrected one:
+**Cache invalidation for existing users.** The downloader checks file
+existence only — a stale local `KokoroNoise.mlmodelc` won't be
+re-fetched. Delete it manually:
 
 ```bash
-# macOS
+# macOS — also delete the ANE-zh path if you've used the Mandarin variant
 rm -rf ~/.cache/fluidaudio/Models/kokoro-82m-coreml/ANE/KokoroNoise.mlmodelc
+rm -rf ~/.cache/fluidaudio/Models/kokoro-82m-coreml/ANE-zh/KokoroNoise.mlmodelc
 
-# iOS — under <App caches>/fluidaudio/Models/kokoro-82m-coreml/ANE/
+# iOS — same paths under <App caches>/fluidaudio/Models/
 ```
 
 Fresh installs are unaffected.
