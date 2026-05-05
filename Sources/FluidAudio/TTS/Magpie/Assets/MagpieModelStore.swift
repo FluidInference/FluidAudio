@@ -3,10 +3,13 @@ import Foundation
 
 /// Which chunked nanocodec build to load.
 /// `.fp32` (v3) is the audibly-clean default; `.fp16` (v2) is faster
-/// (~4×, partial ANE) but noisy on voiced speech.
+/// (~4×, partial ANE) but noisy on voiced speech. `.fp32Pal` (v4) is
+/// fp32 compute with 8-bit kmeans palettized weights — acoustically
+/// transparent vs v3 at ~4× smaller on disk and ~11 % lower peak RSS.
 public enum MagpieNanocodecPrecision: String, Sendable {
     case fp16
     case fp32
+    case fp32Pal
 }
 
 /// Actor-based store for Magpie CoreML models + constants + LocalTransformer weights.
@@ -77,18 +80,29 @@ public actor MagpieModelStore {
         aneConfig.computeUnits =
             computeUnits == .cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
 
-        // Nanocodec compute units track precision: fp32 → CPU-only (ANE is
-        // fp16-only); fp16 → ANE unless caller explicitly pinned CPU.
+        // Nanocodec compute units track precision: fp32 / fp32Pal → CPU-only
+        // (ANE is fp16-only; palettized weights dequantize to fp32 at runtime
+        // so compute is still fp32); fp16 → ANE unless caller explicitly
+        // pinned CPU.
         func nanocodecConfig(for precision: MagpieNanocodecPrecision) -> MLModelConfiguration {
             let cfg = MLModelConfiguration()
             switch precision {
-            case .fp32:
+            case .fp32, .fp32Pal:
                 cfg.computeUnits = .cpuOnly
             case .fp16:
                 cfg.computeUnits =
                     computeUnits == .cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
             }
             return cfg
+        }
+
+        // Filename for a chunked nanocodec build.
+        func nanocodecFile(for precision: MagpieNanocodecPrecision) -> String {
+            switch precision {
+            case .fp16: return ModelNames.Magpie.nanocodecDecoderV2File
+            case .fp32: return ModelNames.Magpie.nanocodecDecoderV3File
+            case .fp32Pal: return ModelNames.Magpie.nanocodecDecoderV4File
+            }
         }
 
         let loadStart = Date()
@@ -105,40 +119,39 @@ public actor MagpieModelStore {
             config: aneConfig,
             required: true)
 
-        // Try the requested precision, then the other chunked build, then
-        // the legacy monolithic v1. Each candidate carries its own config so
-        // the fallback doesn't inherit the primary's compute-unit selection.
-        let secondaryPrecision: MagpieNanocodecPrecision =
-            nanocodecPrecision == .fp32 ? .fp16 : .fp32
-        let primaryName: String
-        let secondaryName: String
+        // Try the requested precision, then the other chunked builds in a
+        // sensible audibility-preserving order, then the legacy monolithic
+        // v1. Each candidate carries its own config so the fallback doesn't
+        // inherit the primary's compute-unit selection. fp16 (v2) is only
+        // reached when explicitly requested or when no other candidate is
+        // present, since it's audibly noisy on voiced speech.
+        let fallbackOrder: [MagpieNanocodecPrecision]
         switch nanocodecPrecision {
+        case .fp32Pal:
+            fallbackOrder = [.fp32Pal, .fp32, .fp16]
         case .fp32:
-            primaryName = ModelNames.Magpie.nanocodecDecoderV3File
-            secondaryName = ModelNames.Magpie.nanocodecDecoderV2File
+            fallbackOrder = [.fp32, .fp32Pal, .fp16]
         case .fp16:
-            primaryName = ModelNames.Magpie.nanocodecDecoderV2File
-            secondaryName = ModelNames.Magpie.nanocodecDecoderV3File
+            fallbackOrder = [.fp16, .fp32Pal, .fp32]
         }
 
-        nanocodecDecoderModel = try loadModel(
-            repoDir: repoDir,
-            fileName: primaryName,
-            config: nanocodecConfig(for: nanocodecPrecision),
-            required: false)
-        if nanocodecDecoderModel == nil {
-            logger.warning(
-                "Requested \(nanocodecPrecision.rawValue) nanocodec (\(primaryName)) absent; trying \(secondaryName)"
-            )
+        for (index, candidate) in fallbackOrder.enumerated() {
+            let candidateName = nanocodecFile(for: candidate)
+            if index > 0 {
+                logger.warning(
+                    "Requested \(fallbackOrder[0].rawValue) nanocodec absent; trying \(candidate.rawValue) (\(candidateName))"
+                )
+            }
             nanocodecDecoderModel = try loadModel(
                 repoDir: repoDir,
-                fileName: secondaryName,
-                config: nanocodecConfig(for: secondaryPrecision),
+                fileName: candidateName,
+                config: nanocodecConfig(for: candidate),
                 required: false)
+            if nanocodecDecoderModel != nil { break }
         }
         if nanocodecDecoderModel == nil {
             logger.notice(
-                "No chunked nanocodec (v2/v3) present; falling back to legacy monolithic CPU-only nanocodec_decoder.mlmodelc (audibly noisy)"
+                "No chunked nanocodec (v2/v3/v4) present; falling back to legacy monolithic CPU-only nanocodec_decoder.mlmodelc (audibly noisy)"
             )
             let monolithicConfig = MLModelConfiguration()
             monolithicConfig.computeUnits = .cpuOnly
