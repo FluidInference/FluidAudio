@@ -284,9 +284,11 @@ public actor StyleTTS2Synthesizer {
         case .float32:
             let p = arr.dataPointer.bindMemory(to: Float.self, capacity: count)
             fill { p[$0] }
+        #if arch(arm64)
         case .float16:
             let p = arr.dataPointer.bindMemory(to: Float16.self, capacity: count)
             fill { Float(p[$0]) }
+        #endif
         case .double:
             let p = arr.dataPointer.bindMemory(to: Double.self, capacity: count)
             fill { Float(p[$0]) }
@@ -537,11 +539,13 @@ public actor StyleTTS2Synthesizer {
             for i in 0..<n {
                 out[i] = p[i]
             }
+        #if arch(arm64)
         case .float16:
             let p = arr.dataPointer.bindMemory(to: Float16.self, capacity: arr.count)
             for i in 0..<n {
                 out[i] = Float(p[i])
             }
+        #endif
         case .double:
             let p = arr.dataPointer.bindMemory(to: Double.self, capacity: arr.count)
             for i in 0..<n {
