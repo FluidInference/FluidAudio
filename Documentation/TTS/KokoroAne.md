@@ -233,29 +233,6 @@ MiniMax-English 100-phrase suite — including the longer paragraph
 phrases that pull the per-corpus aggregate down to ~5.2× — see
 [Benchmarks.md](Benchmarks.md).
 
-## KokoroNoise — atan2 phase fix
-
-`KokoroNoise.mlmodelc` was regenerated in
-[mobius PR #50](https://github.com/FluidInference/mobius/pull/50) with
-an atan2 phase correction in `CoreMLForwardSTFT`. The prior conversion
-produced audible high-frequency background noise (most noticeable on
-Mandarin). Model I/O is unchanged, so no Swift update is needed to
-consume it.
-
-**Cache invalidation for existing users.** The downloader checks file
-existence only — a stale local `KokoroNoise.mlmodelc` won't be
-re-fetched. Delete it manually:
-
-```bash
-# macOS — also delete the ANE-zh path if you've used the Mandarin variant
-rm -rf ~/.cache/fluidaudio/Models/kokoro-82m-coreml/ANE/KokoroNoise.mlmodelc
-rm -rf ~/.cache/fluidaudio/Models/kokoro-82m-coreml/ANE-zh/KokoroNoise.mlmodelc
-
-# iOS — same paths under <App caches>/fluidaudio/Models/
-```
-
-Fresh installs are unaffected.
-
 ## Source
 
 - HuggingFace (English): [`FluidInference/kokoro-82m-coreml/ANE/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE)
