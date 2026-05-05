@@ -344,6 +344,50 @@ app. The figures above cover the GitHub-visible inline comments only.
 
 ---
 
+## 13. Magpie TTS — Nanocodec v1/v2/v3 Versioning
+
+### What was done
+
+- Renamed the on-disk nanocodec decoder models to a v2/v3 scheme.
+- **v2** = fp16 (fast / ANE, opt-in, audibly noisy).
+- **v3** = fp32 (default, audibly clean).
+- **v1** = legacy monolithic `nanocodec_decoder.mlmodelc`, retained on HF
+  as a fallback.
+
+### Swift changes (FluidAudio commit `4bd31469f`)
+
+- `MagpieNanocodecPrecision` enum: `.fp16` selects v2, `.fp32` selects v3.
+- `MagpieModelStore` updated to download v2 / v3 by precision and fall
+  back to the legacy v1 bundle.
+- `ModelNames` updated with the v2 / v3 filenames.
+- `MagpieNanocodec.swift` docstrings updated for v1 / v2 / v3.
+- `MagpieTtsManager.swift` updated for the new selection path.
+
+### Mobius changes (commits `cec7d1f` + `f72ab69`)
+
+- `STATUS.md` updated with the v2 / v3 naming.
+- Phase E HF upload list expanded to include both the `.mlpackage` and
+  `.mlmodelc` for each version.
+
+### HuggingFace upload (completed)
+
+- `nanocodec_decoder_v2.mlpackage` + `nanocodec_decoder_v2.mlmodelc` (fp16)
+- `nanocodec_decoder_v3.mlpackage` + `nanocodec_decoder_v3.mlmodelc` (fp32)
+- Legacy `nanocodec_decoder.mlmodelc` + `.mlpackage` retained for
+  backward compatibility.
+
+### Build artifacts on disk
+
+- `build/nanocodec_decoder_v2.mlpackage` (fp16) + `compiled/build/nanocodec_decoder_v2.mlmodelc`
+- `build/nanocodec_decoder_v3.mlpackage` (fp32) + `compiled/build/nanocodec_decoder_v3.mlmodelc`
+
+### Remaining
+
+- Phase D fusion — deferred.
+- Phase E HF upload — completed by user.
+
+---
+
 ## Open follow-ups
 
 - Verify `CtcZhCnBenchmark.saveResults` empty-guard fix on PR #476.
