@@ -140,6 +140,59 @@ enum KokoroAneArrays {
         return try int32Array(shape: [1, length], from: [Int32](repeating: 1, count: length))
     }
 
+    // MARK: - Slicing
+
+    /// Slice a Float16 MLMultiArray with shape `[1, T, ...rest]` to the first
+    /// `newT` frames along the second dim. Since the leading batch dim is 1
+    /// and the time dim is the second axis, the per-frame trailing block is
+    /// contiguous in row-major memory, so this is a simple prefix copy.
+    /// Use this for shapes like `[1, T]` (F0/N curves) and `[1, T, H]`
+    /// (sine_waves).
+    static func sliceLeadingTimeFp16(
+        _ arr: MLMultiArray, newShape: [Int]
+    ) throws -> MLMultiArray {
+        precondition(arr.dataType == .float16, "sliceLeadingTimeFp16 requires fp16 source")
+        let total = newShape.reduce(1, *)
+        let nsShape = newShape.map { NSNumber(value: $0) }
+        let dst = try MLMultiArray(shape: nsShape, dataType: .float16)
+        memcpy(dst.dataPointer, arr.dataPointer, total * MemoryLayout<UInt16>.size)
+        return dst
+    }
+
+    /// Slice a Float32 MLMultiArray with shape `[1, T, ...rest]` to the first
+    /// `newT` frames. Used for the fp32 F0_curve hand-off into the Vocoder.
+    static func sliceLeadingTimeFp32(
+        _ arr: MLMultiArray, newShape: [Int]
+    ) throws -> MLMultiArray {
+        precondition(arr.dataType == .float32, "sliceLeadingTimeFp32 requires fp32 source")
+        let total = newShape.reduce(1, *)
+        let nsShape = newShape.map { NSNumber(value: $0) }
+        let dst = try MLMultiArray(shape: nsShape, dataType: .float32)
+        memcpy(dst.dataPointer, arr.dataPointer, total * MemoryLayout<Float>.size)
+        return dst
+    }
+
+    /// Slice a Float16 MLMultiArray with shape `[1, C, T]` to `[1, C, newT]`,
+    /// where T is the trailing dim. C runs of `newT` elements each, source
+    /// stride T. Used for the asr hand-off into the Vocoder.
+    static func sliceTrailingTimeFp16(
+        _ arr: MLMultiArray, channels: Int, oldT: Int, newT: Int
+    ) throws -> MLMultiArray {
+        precondition(arr.dataType == .float16, "sliceTrailingTimeFp16 requires fp16 source")
+        precondition(
+            arr.count == channels * oldT,
+            "shape mismatch: arr.count \(arr.count) ≠ \(channels)*\(oldT)")
+        precondition(newT <= oldT, "newT \(newT) > oldT \(oldT)")
+        let nsShape = [NSNumber(value: 1), NSNumber(value: channels), NSNumber(value: newT)]
+        let dst = try MLMultiArray(shape: nsShape, dataType: .float16)
+        let srcPtr = arr.dataPointer.bindMemory(to: UInt16.self, capacity: arr.count)
+        let dstPtr = dst.dataPointer.bindMemory(to: UInt16.self, capacity: channels * newT)
+        for c in 0..<channels {
+            (dstPtr + c * newT).update(from: srcPtr + c * oldT, count: newT)
+        }
+        return dst
+    }
+
     // MARK: - Output extraction
 
     /// Read a Float32 MLMultiArray output into a Swift `[Float]` (flat).

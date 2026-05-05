@@ -37,6 +37,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case cohereTranscribeCoreml = "FluidInference/cohere-transcribe-03-2026-coreml/q8"
     case magpieTts = "FluidInference/magpie-tts-multilingual-357m-coreml"
     case styleTts2 = "FluidInference/StyleTTS-2-coreml"
+    case styleTts2Ane = "FluidInference/StyleTTS-2-coreml/ANE"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -105,6 +106,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "magpie-tts-multilingual-357m-coreml"
         case .styleTts2:
             return "StyleTTS-2-coreml"
+        case .styleTts2Ane:
+            return "StyleTTS-2-coreml/ANE"
         }
     }
 
@@ -119,6 +122,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .kokoroAne, .kokoroAneZh:
             return "FluidInference/kokoro-82m-coreml"
+        case .styleTts2Ane:
+            return "FluidInference/StyleTTS-2-coreml"
         case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
         case .sortformer:
@@ -143,6 +148,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "ANE"
         case .kokoroAneZh:
             return "ANE-zh"
+        case .styleTts2Ane:
+            return "ANE"
         case .parakeetEou160:
             return "160ms"
         case .parakeetEou320:
@@ -227,6 +234,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "magpie-tts"
         case .styleTts2:
             return "styletts2"
+        case .styleTts2Ane:
+            return "styletts2/ANE"
         default:
             return name.replacingOccurrences(of: "-coreml", with: "")
         }
@@ -887,6 +896,45 @@ public enum ModelNames {
         ]
     }
 
+    /// StyleTTS2-ANE 7-graph re-cut. Mirrors the Kokoro-ANE layout: each
+    /// stage is its own `.mlmodelc` so we can pin compute units per-stage
+    /// and so disk-resident size after int8 palettization is ~330 MB
+    /// (vs. ~2 GB for the legacy 4-graph 12-bucket layout).
+    ///
+    /// Stage shapes (source: `mobius/.../scripts/ane/_styletts2_ane_lib.py`):
+    /// 1. plbert         — RangeDim(2..512), fp16, ANE
+    /// 2. postbert       — RangeDim(2..512), fp16, ANE  (BiLSTM-unrolled)
+    /// 3. alignment      — RangeDim(T_tok, T_a≤2000), fp16, ANE
+    /// 4. diffusion_step — STATIC shapes, fp16, ANE  (StyleTTS2-only;
+    ///                     Swift-side ADPM2 sampler invokes 11×)
+    /// 5. prosody        — STATIC T_a=2000, fp16, ANE
+    /// 6. noise          — STATIC T_a=2000, fp32, ALL  (SineGen phase precision)
+    /// 7. vocoder        — STATIC T_a=2000, fp16, ANE  (cos-Snake patched HiFi-GAN)
+    public enum StyleTTS2Ane {
+        public static let plBertFile = "styletts2_ane_plbert.mlmodelc"
+        public static let postBertFile = "styletts2_ane_postbert.mlmodelc"
+        public static let alignmentFile = "styletts2_ane_alignment.mlmodelc"
+        public static let diffusionStepFile = "styletts2_ane_diffusion_step.mlmodelc"
+        public static let prosodyFile = "styletts2_ane_prosody.mlmodelc"
+        public static let noiseFile = "styletts2_ane_noise.mlmodelc"
+        public static let vocoderFile = "styletts2_ane_vocoder.mlmodelc"
+
+        /// The 7 `.mlmodelc` bundles required for synthesis.
+        ///
+        /// Vocab / config are reused from the legacy `StyleTTS2` namespace —
+        /// the espeak-ng IPA tokenizer is identical across both checkpoints,
+        /// and duplicating the JSONs in the ANE/ subdir is wasteful.
+        public static let requiredCoreMLModels: Set<String> = [
+            plBertFile,
+            postBertFile,
+            alignmentFile,
+            diffusionStepFile,
+            prosodyFile,
+            noiseFile,
+            vocoderFile,
+        ]
+    }
+
     /// Multilingual G2P (CharsiuG2P ByT5) model names
     public enum MultilingualG2P {
         public static let encoder = "MultilingualG2PEncoder"
@@ -1102,6 +1150,8 @@ public enum ModelNames {
             return ModelNames.PocketTTS.requiredModels
         case .styleTts2:
             return ModelNames.StyleTTS2.requiredModels
+        case .styleTts2Ane:
+            return ModelNames.StyleTTS2Ane.requiredCoreMLModels
         case .kokoroAne:
             return ModelNames.KokoroAne.requiredModels
         case .kokoroAneZh:

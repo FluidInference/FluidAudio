@@ -16,6 +16,7 @@ import Foundation
 ///   magpie        — encoder-decoder + NanoCodec (6-stage timings, slow)
 ///   cosyvoice3    — Mandarin LLM-based (Mandarin corpus only, no WER)
 ///   styletts2     — diffusion + HiFi-GAN (one-shot, requires --voice ref_s.bin)
+///   styletts2-ane — 7-graph ANE re-cut of StyleTTS2 (per-stage timings, per-stage CU)
 ///
 /// Usage:
 ///   fluidaudio tts-benchmark --backend kokoro-ane \
@@ -278,6 +279,12 @@ public enum TtsBenchmarkCommand {
                     asrChoice: asrChoice)
             case .styleTts2:
                 try await runStyleTts2(
+                    phrases: phrases, corpusLabel: corpusLabel,
+                    voicePath: voice,
+                    preset: preset, outputJson: outputJson, audioDir: audioDir,
+                    asrChoice: asrChoice)
+            case .styleTts2Ane:
+                try await runStyleTts2Ane(
                     phrases: phrases, corpusLabel: corpusLabel,
                     voicePath: voice,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
@@ -724,6 +731,80 @@ public enum TtsBenchmarkCommand {
         }
     }
 
+    // MARK: - StyleTTS2-ANE driver (7-graph re-cut)
+
+    private static func runStyleTts2Ane(
+        phrases: [(category: String, text: String)],
+        corpusLabel: String,
+        voicePath: String?,
+        preset: TtsComputeUnitPreset,
+        outputJson: String?,
+        audioDir: String?,
+        asrChoice: AsrChoice
+    ) async throws {
+        guard let voicePath, !voicePath.isEmpty else {
+            logger.error(
+                "StyleTTS2-ANE requires --voice <path/to/ref_s.bin> "
+                    + "(256 fp32 LE blob from mobius-styletts2/scripts/06_dump_ref_s.py)")
+            exit(1)
+        }
+        let voiceURL = resolveURL(voicePath, isDirectory: false)
+        let voiceLabel = voiceURL.deletingPathExtension().lastPathComponent
+
+        let units = StyleTTS2AneComputeUnits(preset: preset)
+        let manager = StyleTTS2AneManager(computeUnits: units)
+
+        let coldStart = Date()
+        try await manager.initialize()
+        let coldStartS = Date().timeIntervalSince(coldStart)
+        logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
+
+        let firstStart = Date()
+        _ = try await manager.synthesizeDetailed(
+            text: "Initialization warm-up.", voiceStyleURL: voiceURL, randomSeed: 42)
+        let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
+        logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
+
+        try await runPhraseLoop(
+            backendId: "styletts2-ane",
+            voiceLabel: voiceLabel,
+            corpusLabel: corpusLabel,
+            phrases: phrases,
+            preset: preset,
+            coldStartS: coldStartS,
+            firstSynthMs: firstSynthMs,
+            outputJson: outputJson,
+            audioDir: audioDir,
+            asrChoice: asrChoice,
+            extraSummary: ["voice": voiceLabel]
+        ) { text in
+            let t0 = Date()
+            let result = try await manager.synthesizeDetailed(
+                text: text, voiceStyleURL: voiceURL, randomSeed: 42)
+            let synthMs = Date().timeIntervalSince(t0) * 1000
+            return BackendPhraseSample(
+                synthMs: synthMs,
+                ttftMs: synthMs,
+                samples: result.samples,
+                sampleRate: result.sampleRate,
+                stageMs: [
+                    "plbert": result.timings.plBert,
+                    "postbert": result.timings.postBert,
+                    "alignment": result.timings.alignment,
+                    "diffusion_step": result.timings.diffusionStep,
+                    "prosody": result.timings.prosody,
+                    "noise": result.timings.noise,
+                    "vocoder": result.timings.vocoder,
+                    "total": result.timings.totalMs,
+                ],
+                extraFields: [
+                    "encoder_tokens": result.encoderTokens,
+                    "acoustic_frames": result.acousticFrames,
+                ]
+            )
+        }
+    }
+
     // MARK: - Shared per-phrase loop + summary
 
     private static func runPhraseLoop(
@@ -990,6 +1071,7 @@ public enum TtsBenchmarkCommand {
         case magpie
         case cosyVoice3
         case styleTts2
+        case styleTts2Ane
 
         var defaultCorpus: String {
             switch self {
@@ -1011,6 +1093,8 @@ public enum TtsBenchmarkCommand {
             return .magpie
         case "cosyvoice3", "cosyvoice", "cosy":
             return .cosyVoice3
+        case "styletts2-ane", "styletts2ane", "styletts2_ane", "style-ane", "s2-ane":
+            return .styleTts2Ane
         case "styletts2", "style-tts2", "styletts", "style":
             return .styleTts2
         default:
@@ -1300,6 +1384,8 @@ public enum TtsBenchmarkCommand {
               pocket-tts    Streaming flow-matching (multilingual)
               magpie        Encoder-decoder + NanoCodec (per-stage, slow)
               cosyvoice3    Mandarin LLM-based (auto-picks Cohere ASR for zh)
+              styletts2     4-graph diffusion (LibriTTS, requires --voice ref_s.bin)
+              styletts2-ane 7-graph ANE re-cut (LibriTTS, --voice ref_s.bin, per-stage timings)
 
             Options:
               --backend <name>          See list above (default: kokoro-ane)

@@ -23,4 +23,9 @@ public enum TtsBackend: Sendable {
     /// everywhere except the fp32 HiFi-GAN decoder (SineGen phase
     /// saturation requires fp32).
     case styleTts2
+    /// StyleTTS2-ANE — 7-stage CoreML chain (PLBert → PostBert → Alignment →
+    /// DiffusionStep → Prosody → Noise → Vocoder) re-cut to mirror Kokoro-ANE
+    /// with per-stage ANE residency. Same LibriTTS checkpoint as `.styleTts2`
+    /// but ~6× smaller after int8 palettization.
+    case styleTts2Ane
 }
