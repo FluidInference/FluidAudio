@@ -774,6 +774,11 @@ public enum ModelNames {
         public static let nanocodecDecoderV2 = "nanocodec_decoder_v2"
         /// v3: T_in=24 chunked, fp32, CPU. Audibly clean (default).
         public static let nanocodecDecoderV3 = "nanocodec_decoder_v3"
+        /// v4: T_in=24 chunked, fp32 compute + 8-bit kmeans palettized weights, CPU.
+        /// Acoustically transparent vs v3 (33.6 dB SNR on AR speech, identical
+        /// quiet floor) at ~4× smaller on disk (31 MB vs 121 MB) and ~11 %
+        /// lower peak RSS. Same recipe Kokoro Noise uses (`fp32 + int8pal`).
+        public static let nanocodecDecoderV4 = "nanocodec_decoder_v4"
 
         public static let textEncoderFile = textEncoder + ".mlmodelc"
         public static let decoderPrefillFile = decoderPrefill + ".mlmodelc"
@@ -781,6 +786,7 @@ public enum ModelNames {
         public static let nanocodecDecoderFile = nanocodecDecoder + ".mlmodelc"
         public static let nanocodecDecoderV2File = nanocodecDecoderV2 + ".mlmodelc"
         public static let nanocodecDecoderV3File = nanocodecDecoderV3 + ".mlmodelc"
+        public static let nanocodecDecoderV4File = nanocodecDecoderV4 + ".mlmodelc"
 
         public static let constantsDir = "constants"
         public static let tokenizerDir = "tokenizer"
