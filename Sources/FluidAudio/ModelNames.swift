@@ -768,22 +768,31 @@ public enum ModelNames {
         public static let textEncoder = "text_encoder"
         public static let decoderPrefill = "decoder_prefill"
         public static let decoderStep = "decoder_step"
+        /// v1: T=256 monolithic, fp16, CPU. Legacy fallback (noisy + slow).
         public static let nanocodecDecoder = "nanocodec_decoder"
+        /// v2: T_in=24 chunked, fp16. Fast (~43% ANE) but noisy on voiced speech.
+        public static let nanocodecDecoderV2 = "nanocodec_decoder_v2"
+        /// v3: T_in=24 chunked, fp32, CPU. Audibly clean (default).
+        public static let nanocodecDecoderV3 = "nanocodec_decoder_v3"
 
         public static let textEncoderFile = textEncoder + ".mlmodelc"
         public static let decoderPrefillFile = decoderPrefill + ".mlmodelc"
         public static let decoderStepFile = decoderStep + ".mlmodelc"
         public static let nanocodecDecoderFile = nanocodecDecoder + ".mlmodelc"
+        public static let nanocodecDecoderV2File = nanocodecDecoderV2 + ".mlmodelc"
+        public static let nanocodecDecoderV3File = nanocodecDecoderV3 + ".mlmodelc"
 
         public static let constantsDir = "constants"
         public static let tokenizerDir = "tokenizer"
 
         /// Files required for English synthesis. Other languages append their own
-        /// lookup files on top (see `MagpieResourceDownloader`).
+        /// lookup files on top (see `MagpieResourceDownloader`). Listing
+        /// `nanocodecDecoderV3File` ensures legacy v1-only caches get
+        /// re-downloaded and upgraded to the clean v3.
         public static let requiredModels: Set<String> = [
             textEncoderFile,
             decoderStepFile,
-            nanocodecDecoderFile,
+            nanocodecDecoderV3File,
             constantsDir,
         ]
     }
