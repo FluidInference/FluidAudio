@@ -79,13 +79,16 @@ public actor MagpieModelStore {
 
         // Nanocodec compute units track precision: fp32 → CPU-only (ANE is
         // fp16-only); fp16 → ANE unless caller explicitly pinned CPU.
-        let nanocodecConfig = MLModelConfiguration()
-        switch nanocodecPrecision {
-        case .fp32:
-            nanocodecConfig.computeUnits = .cpuOnly
-        case .fp16:
-            nanocodecConfig.computeUnits =
-                computeUnits == .cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
+        func nanocodecConfig(for precision: MagpieNanocodecPrecision) -> MLModelConfiguration {
+            let cfg = MLModelConfiguration()
+            switch precision {
+            case .fp32:
+                cfg.computeUnits = .cpuOnly
+            case .fp16:
+                cfg.computeUnits =
+                    computeUnits == .cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
+            }
+            return cfg
         }
 
         let loadStart = Date()
@@ -103,7 +106,10 @@ public actor MagpieModelStore {
             required: true)
 
         // Try the requested precision, then the other chunked build, then
-        // the legacy monolithic v1.
+        // the legacy monolithic v1. Each candidate carries its own config so
+        // the fallback doesn't inherit the primary's compute-unit selection.
+        let secondaryPrecision: MagpieNanocodecPrecision =
+            nanocodecPrecision == .fp32 ? .fp16 : .fp32
         let primaryName: String
         let secondaryName: String
         switch nanocodecPrecision {
@@ -118,7 +124,7 @@ public actor MagpieModelStore {
         nanocodecDecoderModel = try loadModel(
             repoDir: repoDir,
             fileName: primaryName,
-            config: nanocodecConfig,
+            config: nanocodecConfig(for: nanocodecPrecision),
             required: false)
         if nanocodecDecoderModel == nil {
             logger.warning(
@@ -127,7 +133,7 @@ public actor MagpieModelStore {
             nanocodecDecoderModel = try loadModel(
                 repoDir: repoDir,
                 fileName: secondaryName,
-                config: nanocodecConfig,
+                config: nanocodecConfig(for: secondaryPrecision),
                 required: false)
         }
         if nanocodecDecoderModel == nil {
