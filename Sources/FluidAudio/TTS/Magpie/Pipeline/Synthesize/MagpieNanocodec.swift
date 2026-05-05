@@ -3,30 +3,30 @@ import Foundation
 
 /// Wraps `nanocodec_decoder*.mlmodelc`. Three builds are supported,
 /// dispatched automatically from the model's input shape (the precision
-/// of a t24 build is opaque to this wrapper — `MagpieModelStore` decides
-/// which file to load):
+/// of a chunked build is opaque to this wrapper — `MagpieModelStore`
+/// decides which file to load):
 ///
-/// - **Monolithic T=256** (`nanocodec_decoder.mlmodelc`): single call, the
-///   input row count = 256 codec frames, output = 262144 audio samples.
-///   Runs on CPU only because the activation tensor exceeds the ANE's
-///   `W ≤ 16384` limit on the space-to-batch lowering of dilated convs.
-///   Legacy fallback only.
+/// - **v1 — monolithic T=256** (`nanocodec_decoder.mlmodelc`): single
+///   call, input row count = 256 codec frames, output = 262144 audio
+///   samples. fp16 weights, CPU only because the activation tensor
+///   exceeds the ANE's `W ≤ 16384` limit on the space-to-batch lowering
+///   of dilated convs. Both slow and audibly noisy. Legacy fallback only.
 ///
-/// - **Chunked T_in=24, fp32** (`nanocodec_decoder_t24_v2.mlmodelc`,
+/// - **v3 — chunked T_in=24, fp32** (`nanocodec_decoder_v3.mlmodelc`,
 ///   default): 24-frame input, 24576 audio samples per call. fp32
 ///   weights — pinned to CPU because ANE is fp16-only. Audibly clean,
 ///   matches the PyTorch sin² reference within the Snake-approximation
 ///   noise floor. Nanocodec wall ~8.5–9.7 s on a ~11 s utterance (M2),
 ///   still real-time at RTFx ~1.3× end-to-end.
 ///
-/// - **Chunked T_in=24, fp16** (`nanocodec_decoder_t24.mlmodelc`): same
-///   shape contract as the fp32 build. Runs ~43 % ANE-resident at
-///   ~38.4 ms / 24-frame call, so ~4× faster than fp32, but fp16 weight
-///   quantization adds ~27 dB of speech-correlated noise that silence-
-///   RMS metrics hide. Phase F (per-op + per-location mixed-precision
-///   sweep, see `mobius/.../per_module/results/STATUS.md`) confirmed
-///   no mixed-precision island recovers cleanliness. Use only when
-///   throughput dominates quality.
+/// - **v2 — chunked T_in=24, fp16** (`nanocodec_decoder_v2.mlmodelc`):
+///   same shape contract as v3. Runs ~43 % ANE-resident at ~38.4 ms /
+///   24-frame call, so ~4× faster than v3, but fp16 weight quantization
+///   adds ~27 dB of speech-correlated noise that silence-RMS metrics
+///   hide. Phase F (per-op + per-location mixed-precision sweep, see
+///   `mobius/.../per_module/results/STATUS.md`) confirmed no mixed-
+///   precision island recovers cleanliness. Use only when throughput
+///   dominates quality.
 ///
 /// In both chunked builds, the runtime slides the 24-frame window with
 /// stride 8 and overlap 16 frames over the codec sequence and

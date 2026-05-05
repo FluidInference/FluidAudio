@@ -768,41 +768,52 @@ public enum ModelNames {
         public static let textEncoder = "text_encoder"
         public static let decoderPrefill = "decoder_prefill"
         public static let decoderStep = "decoder_step"
+        /// Implicit v1: original monolithic T=256 nanocodec, fp16 weights,
+        /// CPU only (~8.76 s wall on M2). Audibly noisy on voiced speech —
+        /// the same fp16 weight-quantization noise that v2 has, plus 4×
+        /// slower because the activation tensor exceeds the ANE
+        /// `W ≤ 16384` limit so it can't go on the Neural Engine.
+        /// Retained as a legacy fallback only; v2 / v3 supersede it.
         public static let nanocodecDecoder = "nanocodec_decoder"
-        /// Chunked T_in=24-frame nanocodec, fp16 weights. Output 24576 audio
-        /// samples per call; runtime slides this with stride 8 / overlap 16
-        /// frames. Lands ~43 % ANE-resident at 38.4 ms/call (M2). Audibly
-        /// noisy on voiced speech: fp16 weight quantization adds 27 dB SNR
-        /// of speech-correlated noise vs PyTorch reference. Use only when
-        /// throughput matters more than quality. The fp32 v2 build below
-        /// is the recommended default.
-        public static let nanocodecDecoderT24 = "nanocodec_decoder_t24"
-        /// Chunked T_in=24-frame nanocodec, fp32 weights (Phase F result).
-        /// Same I/O contract as the fp16 build but pinned to CPU at ~142.5
+        /// v2: chunked T_in=24-frame nanocodec, fp16 weights. Output 24576
+        /// audio samples per call; runtime slides this with stride 8 /
+        /// overlap 16 frames. Lands ~43 % ANE-resident at 38.4 ms/call
+        /// (M2). Audibly noisy on voiced speech: fp16 weight quantization
+        /// adds 27 dB SNR of speech-correlated noise vs PyTorch reference.
+        /// Use only when throughput matters more than quality. v3 is the
+        /// recommended default.
+        public static let nanocodecDecoderV2 = "nanocodec_decoder_v2"
+        /// v3: chunked T_in=24-frame nanocodec, fp32 weights (Phase F
+        /// result). Same I/O contract as v2 but pinned to CPU at ~142.5
         /// ms/call (M2). Audibly clean — matches PyTorch reference within
         /// the Snake-approximation noise floor. Phase F (per-op + per-
         /// location mixed-precision sweep, see
         /// `mobius/.../per_module/results/STATUS.md`) confirmed no
         /// mixed-precision island recovers cleanliness, so the production
         /// trade-off is full fp32 / CPU-only / RTFx ~1.3× end-to-end.
-        public static let nanocodecDecoderT24V2 = "nanocodec_decoder_t24_v2"
+        public static let nanocodecDecoderV3 = "nanocodec_decoder_v3"
 
         public static let textEncoderFile = textEncoder + ".mlmodelc"
         public static let decoderPrefillFile = decoderPrefill + ".mlmodelc"
         public static let decoderStepFile = decoderStep + ".mlmodelc"
         public static let nanocodecDecoderFile = nanocodecDecoder + ".mlmodelc"
-        public static let nanocodecDecoderT24File = nanocodecDecoderT24 + ".mlmodelc"
-        public static let nanocodecDecoderT24V2File = nanocodecDecoderT24V2 + ".mlmodelc"
+        public static let nanocodecDecoderV2File = nanocodecDecoderV2 + ".mlmodelc"
+        public static let nanocodecDecoderV3File = nanocodecDecoderV3 + ".mlmodelc"
 
         public static let constantsDir = "constants"
         public static let tokenizerDir = "tokenizer"
 
         /// Files required for English synthesis. Other languages append their own
         /// lookup files on top (see `MagpieResourceDownloader`).
+        ///
+        /// Lists `nanocodecDecoderV3File` (fp32 default) — bulk download
+        /// re-fires for users who only have the legacy fp16 monolithic
+        /// (`nanocodecDecoderFile`) cached, so they upgrade to a clean
+        /// nanocodec automatically on next launch.
         public static let requiredModels: Set<String> = [
             textEncoderFile,
             decoderStepFile,
-            nanocodecDecoderFile,
+            nanocodecDecoderV3File,
             constantsDir,
         ]
     }

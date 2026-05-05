@@ -1,13 +1,13 @@
 @preconcurrency import CoreML
 import Foundation
 
-/// Selects which T_in=24 nanocodec build the store loads.
+/// Selects which chunked nanocodec build the store loads.
 ///
-/// - `.fp32`: `nanocodec_decoder_t24_v2.mlmodelc` — full fp32 weights, pinned
-///   to CPU (~142.5 ms / 24-frame call on M2). Audibly clean, matches the
-///   PyTorch sin² reference within the Snake-approximation noise floor.
-///   Pipeline stays real-time at RTFx ~1.3× median.
-/// - `.fp16`: `nanocodec_decoder_t24.mlmodelc` — fp16 weights, runs
+/// - `.fp32` (v3): `nanocodec_decoder_v3.mlmodelc` — full fp32 weights,
+///   pinned to CPU (~142.5 ms / 24-frame call on M2). Audibly clean,
+///   matches the PyTorch sin² reference within the Snake-approximation
+///   noise floor. Pipeline stays real-time at RTFx ~1.3× median.
+/// - `.fp16` (v2): `nanocodec_decoder_v2.mlmodelc` — fp16 weights, runs
 ///   ~43 % ANE-resident at ~38.4 ms / 24-frame call. Faster but audibly
 ///   noisy on voiced speech (~27 dB SNR vs PyTorch reference, hidden by
 ///   silence-RMS metrics). Use only when throughput dominates quality.
@@ -30,12 +30,12 @@ public actor MagpieModelStore {
     private var decoderPrefillModel: MLModel?  // optional fast path
     private var decoderStepModel: MLModel?
     /// One of:
-    ///   - chunked T_in=24 fp32 build (`nanocodec_decoder_t24_v2`, default,
+    ///   - v3: chunked T_in=24 fp32 build (`nanocodec_decoder_v3`, default,
     ///     CPU-only, audibly clean)
-    ///   - chunked T_in=24 fp16 build (`nanocodec_decoder_t24`, fast/ANE,
+    ///   - v2: chunked T_in=24 fp16 build (`nanocodec_decoder_v2`, fast/ANE,
     ///     audibly noisy)
-    ///   - monolithic T=256 build (`nanocodec_decoder`, legacy fallback,
-    ///     CPU-only)
+    ///   - v1: monolithic T=256 fp16 build (`nanocodec_decoder`, legacy
+    ///     fallback, CPU-only, audibly noisy)
     /// `MagpieNanocodec` reads the input shape and chunks accordingly.
     private var nanocodecDecoderModel: MLModel?
 
@@ -158,42 +158,48 @@ public actor MagpieModelStore {
             config: aneConfig,
             required: true)
 
-        // Pick the requested precision's t24 build first. If it isn't in
-        // the repo, fall back to the other precision's t24 build (with a
-        // warning), and finally to the monolithic T=256 build. Exactly
-        // one of the three must exist for synthesis to work.
-        let primaryT24Name: String
-        let secondaryT24Name: String
+        // Pick the requested precision's chunked build first. If it isn't
+        // in the repo, fall back to the other precision's chunked build
+        // (with a warning), and finally to the legacy monolithic v1
+        // (`nanocodec_decoder.mlmodelc`). Exactly one of the three must
+        // exist for synthesis to work.
+        //
+        // Naming:
+        //   v1 → `nanocodec_decoder.mlmodelc`     (legacy mono, fp16, noisy)
+        //   v2 → `nanocodec_decoder_v2.mlmodelc`  (chunked, fp16, noisy)
+        //   v3 → `nanocodec_decoder_v3.mlmodelc`  (chunked, fp32, clean — default)
+        let primaryName: String
+        let secondaryName: String
         switch nanocodecPrecision {
         case .fp32:
-            primaryT24Name = ModelNames.Magpie.nanocodecDecoderT24V2File
-            secondaryT24Name = ModelNames.Magpie.nanocodecDecoderT24File
+            primaryName = ModelNames.Magpie.nanocodecDecoderV3File
+            secondaryName = ModelNames.Magpie.nanocodecDecoderV2File
         case .fp16:
-            primaryT24Name = ModelNames.Magpie.nanocodecDecoderT24File
-            secondaryT24Name = ModelNames.Magpie.nanocodecDecoderT24V2File
+            primaryName = ModelNames.Magpie.nanocodecDecoderV2File
+            secondaryName = ModelNames.Magpie.nanocodecDecoderV3File
         }
 
         nanocodecDecoderModel = try loadModel(
             repoDir: repoDir,
-            fileName: primaryT24Name,
+            fileName: primaryName,
             config: nanocodecConfig,
             required: false)
         if nanocodecDecoderModel == nil {
             logger.warning(
-                "Requested \(nanocodecPrecision.rawValue) nanocodec (\(primaryT24Name)) absent; trying alternate precision \(secondaryT24Name)"
+                "Requested \(nanocodecPrecision.rawValue) nanocodec (\(primaryName)) absent; trying alternate precision \(secondaryName)"
             )
             // Loading the alternate-precision build under the requested
             // compute config is fine: fp32 weights will force CPU at
             // runtime regardless, fp16 weights honour the chosen units.
             nanocodecDecoderModel = try loadModel(
                 repoDir: repoDir,
-                fileName: secondaryT24Name,
+                fileName: secondaryName,
                 config: nanocodecConfig,
                 required: false)
         }
         if nanocodecDecoderModel == nil {
             logger.notice(
-                "No T_in=24 nanocodec present; falling back to monolithic CPU-only nanocodec_decoder.mlmodelc"
+                "No chunked nanocodec (v2/v3) present; falling back to legacy monolithic CPU-only nanocodec_decoder.mlmodelc (audibly noisy)"
             )
             let monolithicConfig = MLModelConfiguration()
             monolithicConfig.computeUnits = .cpuOnly
