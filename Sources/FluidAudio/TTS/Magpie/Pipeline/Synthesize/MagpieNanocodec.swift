@@ -1,57 +1,25 @@
 @preconcurrency import CoreML
 import Foundation
 
-/// Wraps `nanocodec_decoder*.mlmodelc`. Three builds are supported,
-/// dispatched automatically from the model's input shape (the precision
-/// of a chunked build is opaque to this wrapper — `MagpieModelStore`
-/// decides which file to load):
+/// Wraps `nanocodec_decoder*.mlmodelc`. Dispatches by input shape:
 ///
-/// - **v1 — monolithic T=256** (`nanocodec_decoder.mlmodelc`): single
-///   call, input row count = 256 codec frames, output = 262144 audio
-///   samples. fp16 weights, CPU only because the activation tensor
-///   exceeds the ANE's `W ≤ 16384` limit on the space-to-batch lowering
-///   of dilated convs. Both slow and audibly noisy. Legacy fallback only.
+/// - v1 (`nanocodec_decoder`): T=256 mono, fp16, CPU. Legacy fallback.
+/// - v2 (`nanocodec_decoder_v2`): T_in=24 chunked, fp16. Fast, noisy.
+/// - v3 (`nanocodec_decoder_v3`, default): T_in=24 chunked, fp32, CPU. Clean.
 ///
-/// - **v3 — chunked T_in=24, fp32** (`nanocodec_decoder_v3.mlmodelc`,
-///   default): 24-frame input, 24576 audio samples per call. fp32
-///   weights — pinned to CPU because ANE is fp16-only. Audibly clean,
-///   matches the PyTorch sin² reference within the Snake-approximation
-///   noise floor. Nanocodec wall ~8.5–9.7 s on a ~11 s utterance (M2),
-///   still real-time at RTFx ~1.3× end-to-end.
-///
-/// - **v2 — chunked T_in=24, fp16** (`nanocodec_decoder_v2.mlmodelc`):
-///   same shape contract as v3. Runs ~43 % ANE-resident at ~38.4 ms /
-///   24-frame call, so ~4× faster than v3, but fp16 weight quantization
-///   adds ~27 dB of speech-correlated noise that silence-RMS metrics
-///   hide. Phase F (per-op + per-location mixed-precision sweep, see
-///   `mobius/.../per_module/results/STATUS.md`) confirmed no mixed-
-///   precision island recovers cleanliness. Use only when throughput
-///   dominates quality.
-///
-/// In both chunked builds, the runtime slides the 24-frame window with
-/// stride 8 and overlap 16 frames over the codec sequence and
-/// concatenates the trailing 8192 audio samples of each call.
-///
-/// The 16-frame overlap is the dilated-conv stack's input-side receptive
-/// field; below 16 frames of left context, [`per_module/chunked_parity.py`]
-/// in `mobius` measures < 6 dB SNR vs the single-call reference, which is
-/// audibly broken at boundaries. At 16 frames overlap SNR matches the
-/// Taylor5Clipped Snake noise floor (~11.5 dB).
+/// Chunked builds slide a 24-frame window with stride 8 / overlap 16
+/// (= dilated-conv input receptive field).
 public struct MagpieNanocodec {
 
     public let model: MLModel
     public let numCodebooks: Int
-    /// Input frames per `model.prediction(...)` call. 256 for the monolithic
-    /// build, 24 for the chunked build. Detected from the model's input
-    /// description at init time.
+    /// Input frames per call (256 mono, 24 chunked). Detected from input shape.
     public let tIn: Int
-    /// Fresh frames produced per call. Equals `tIn` for the monolithic
-    /// build (no chunking) and `tIn - overlap` for the chunked build.
+    /// Fresh frames produced per call (= `tIn - overlap`, or `tIn` for mono).
     public let stride: Int
     public let samplesPerFrame: Int
 
-    /// Receptive field of the dilated-conv stack at the codec input level,
-    /// measured empirically in `mobius/.../per_module/chunked_parity.py`.
+    /// Dilated-conv input receptive field. Empirical floor for clean seams.
     private static let receptiveFieldFrames: Int = 16
 
     public init(
@@ -65,10 +33,8 @@ public struct MagpieNanocodec {
         let detected = Self.detectTIn(
             model: model, fallback: MagpieConstants.maxNanocodecFrames)
         self.tIn = detected
-        // Monolithic single-call build (tIn = full sequence): no chunking.
-        // Chunked build: stride = tIn - 16 receptive-field overlap.
         if detected >= MagpieConstants.maxNanocodecFrames {
-            self.stride = detected
+            self.stride = detected  // mono: no chunking
         } else {
             self.stride = max(1, detected - Self.receptiveFieldFrames)
         }
@@ -92,16 +58,9 @@ public struct MagpieNanocodec {
             shape: [1, NSNumber(value: numCodebooks), NSNumber(value: tIn)],
             dataType: .int32)
 
-        // Slide a tIn-frame window with `stride` fresh frames per call.
-        // Out-of-range indices use **edge replication** rather than zero
-        // padding: the first call's left context replays `row[0]`, the
-        // last call's right context replays `row[tTotal - 1]`. Code 0 is
-        // a real codebook entry the codec was never trained to see in
-        // sequence, so zero-padding produces a sharp pop in the first
-        // ~30 ms of the rendered audio (measured at peak 0.64 vs mono's
-        // 0.001). Edge replication makes the dilated convs see a
-        // stationary signal that matches the AR loop's near-silent first
-        // frame, killing the transient.
+        // Slide a tIn-frame window. Out-of-range indices use edge
+        // replication; zero-padding produces an audible pop because
+        // code 0 is a real, untrained-in-sequence codebook entry.
         var outFrame = 0
         let overlap = self.overlap
         let lastIdx = tTotal - 1
@@ -129,11 +88,7 @@ public struct MagpieNanocodec {
                     stage: "nanocodec", underlying: "missing 'audio' output key")
             }
 
-            // Audio buffer is (1, tIn * samplesPerFrame) fp32. Discard the
-            // first `overlap * samplesPerFrame` samples (dilated convs'
-            // warmup region) and copy the next `stride * samplesPerFrame`
-            // samples into the output, clamped to the audio buffer length
-            // and to the requested totalSamples.
+            // Drop the overlap warmup, copy the next `stride` frames of audio.
             let writeStart = outFrame * samplesPerFrame
             let keepStart = overlap * samplesPerFrame
             let writeCount = min(
@@ -153,9 +108,7 @@ public struct MagpieNanocodec {
         return output
     }
 
-    /// Read the `tokens` input shape from the model description and return
-    /// the third dimension (frame count). Falls back to `fallback` if the
-    /// description is missing or malformed.
+    /// Read frame count from the `tokens` input shape's third dimension.
     private static func detectTIn(model: MLModel, fallback: Int) -> Int {
         guard let description = model.modelDescription.inputDescriptionsByName["tokens"],
             let constraint = description.multiArrayConstraint

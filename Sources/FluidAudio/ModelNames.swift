@@ -768,29 +768,11 @@ public enum ModelNames {
         public static let textEncoder = "text_encoder"
         public static let decoderPrefill = "decoder_prefill"
         public static let decoderStep = "decoder_step"
-        /// Implicit v1: original monolithic T=256 nanocodec, fp16 weights,
-        /// CPU only (~8.76 s wall on M2). Audibly noisy on voiced speech —
-        /// the same fp16 weight-quantization noise that v2 has, plus 4×
-        /// slower because the activation tensor exceeds the ANE
-        /// `W ≤ 16384` limit so it can't go on the Neural Engine.
-        /// Retained as a legacy fallback only; v2 / v3 supersede it.
+        /// v1: T=256 monolithic, fp16, CPU. Legacy fallback (noisy + slow).
         public static let nanocodecDecoder = "nanocodec_decoder"
-        /// v2: chunked T_in=24-frame nanocodec, fp16 weights. Output 24576
-        /// audio samples per call; runtime slides this with stride 8 /
-        /// overlap 16 frames. Lands ~43 % ANE-resident at 38.4 ms/call
-        /// (M2). Audibly noisy on voiced speech: fp16 weight quantization
-        /// adds 27 dB SNR of speech-correlated noise vs PyTorch reference.
-        /// Use only when throughput matters more than quality. v3 is the
-        /// recommended default.
+        /// v2: T_in=24 chunked, fp16. Fast (~43% ANE) but noisy on voiced speech.
         public static let nanocodecDecoderV2 = "nanocodec_decoder_v2"
-        /// v3: chunked T_in=24-frame nanocodec, fp32 weights (Phase F
-        /// result). Same I/O contract as v2 but pinned to CPU at ~142.5
-        /// ms/call (M2). Audibly clean — matches PyTorch reference within
-        /// the Snake-approximation noise floor. Phase F (per-op + per-
-        /// location mixed-precision sweep, see
-        /// `mobius/.../per_module/results/STATUS.md`) confirmed no
-        /// mixed-precision island recovers cleanliness, so the production
-        /// trade-off is full fp32 / CPU-only / RTFx ~1.3× end-to-end.
+        /// v3: T_in=24 chunked, fp32, CPU. Audibly clean (default).
         public static let nanocodecDecoderV3 = "nanocodec_decoder_v3"
 
         public static let textEncoderFile = textEncoder + ".mlmodelc"
@@ -804,12 +786,9 @@ public enum ModelNames {
         public static let tokenizerDir = "tokenizer"
 
         /// Files required for English synthesis. Other languages append their own
-        /// lookup files on top (see `MagpieResourceDownloader`).
-        ///
-        /// Lists `nanocodecDecoderV3File` (fp32 default) — bulk download
-        /// re-fires for users who only have the legacy fp16 monolithic
-        /// (`nanocodecDecoderFile`) cached, so they upgrade to a clean
-        /// nanocodec automatically on next launch.
+        /// lookup files on top (see `MagpieResourceDownloader`). Listing
+        /// `nanocodecDecoderV3File` ensures legacy v1-only caches get
+        /// re-downloaded and upgraded to the clean v3.
         public static let requiredModels: Set<String> = [
             textEncoderFile,
             decoderStepFile,
