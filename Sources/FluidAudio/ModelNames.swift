@@ -22,6 +22,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case kokoroAne = "FluidInference/kokoro-82m-coreml/ANE"
+    case kokoroAneZh = "FluidInference/kokoro-82m-coreml/ANE-zh"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
     case lseendAmi = "FluidInference/ls-eend-coreml/optimized/ami"
     case lseendCallHome = "FluidInference/ls-eend-coreml/optimized/ch"
@@ -74,6 +75,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "kokoro-82m-coreml"
         case .kokoroAne:
             return "kokoro-82m-coreml/ANE"
+        case .kokoroAneZh:
+            return "kokoro-82m-coreml/ANE-zh"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
         case .lseendAmi:
@@ -114,7 +117,7 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-ctc-0.6b-coreml"
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
-        case .kokoroAne:
+        case .kokoroAne, .kokoroAneZh:
             return "FluidInference/kokoro-82m-coreml"
         case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
@@ -138,6 +141,8 @@ public enum Repo: String, CaseIterable, Sendable {
         switch self {
         case .kokoroAne:
             return "ANE"
+        case .kokoroAneZh:
+            return "ANE-zh"
         case .parakeetEou160:
             return "160ms"
         case .parakeetEou320:
@@ -178,6 +183,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "kokoro"
         case .kokoroAne:
             return "kokoro-82m-coreml/ANE"
+        case .kokoroAneZh:
+            return "kokoro-82m-coreml/ANE-zh"
         case .parakeetEou160:
             return "parakeet-eou-streaming/160ms"
         case .parakeetEou320:
@@ -761,22 +768,52 @@ public enum ModelNames {
         public static let textEncoder = "text_encoder"
         public static let decoderPrefill = "decoder_prefill"
         public static let decoderStep = "decoder_step"
+        /// Implicit v1: original monolithic T=256 nanocodec, fp16 weights,
+        /// CPU only (~8.76 s wall on M2). Audibly noisy on voiced speech —
+        /// the same fp16 weight-quantization noise that v2 has, plus 4×
+        /// slower because the activation tensor exceeds the ANE
+        /// `W ≤ 16384` limit so it can't go on the Neural Engine.
+        /// Retained as a legacy fallback only; v2 / v3 supersede it.
         public static let nanocodecDecoder = "nanocodec_decoder"
+        /// v2: chunked T_in=24-frame nanocodec, fp16 weights. Output 24576
+        /// audio samples per call; runtime slides this with stride 8 /
+        /// overlap 16 frames. Lands ~43 % ANE-resident at 38.4 ms/call
+        /// (M2). Audibly noisy on voiced speech: fp16 weight quantization
+        /// adds 27 dB SNR of speech-correlated noise vs PyTorch reference.
+        /// Use only when throughput matters more than quality. v3 is the
+        /// recommended default.
+        public static let nanocodecDecoderV2 = "nanocodec_decoder_v2"
+        /// v3: chunked T_in=24-frame nanocodec, fp32 weights (Phase F
+        /// result). Same I/O contract as v2 but pinned to CPU at ~142.5
+        /// ms/call (M2). Audibly clean — matches PyTorch reference within
+        /// the Snake-approximation noise floor. Phase F (per-op + per-
+        /// location mixed-precision sweep, see
+        /// `mobius/.../per_module/results/STATUS.md`) confirmed no
+        /// mixed-precision island recovers cleanliness, so the production
+        /// trade-off is full fp32 / CPU-only / RTFx ~1.3× end-to-end.
+        public static let nanocodecDecoderV3 = "nanocodec_decoder_v3"
 
         public static let textEncoderFile = textEncoder + ".mlmodelc"
         public static let decoderPrefillFile = decoderPrefill + ".mlmodelc"
         public static let decoderStepFile = decoderStep + ".mlmodelc"
         public static let nanocodecDecoderFile = nanocodecDecoder + ".mlmodelc"
+        public static let nanocodecDecoderV2File = nanocodecDecoderV2 + ".mlmodelc"
+        public static let nanocodecDecoderV3File = nanocodecDecoderV3 + ".mlmodelc"
 
         public static let constantsDir = "constants"
         public static let tokenizerDir = "tokenizer"
 
         /// Files required for English synthesis. Other languages append their own
         /// lookup files on top (see `MagpieResourceDownloader`).
+        ///
+        /// Lists `nanocodecDecoderV3File` (fp32 default) — bulk download
+        /// re-fires for users who only have the legacy fp16 monolithic
+        /// (`nanocodecDecoderFile`) cached, so they upgrade to a clean
+        /// nanocodec automatically on next launch.
         public static let requiredModels: Set<String> = [
             textEncoderFile,
             decoderStepFile,
-            nanocodecDecoderFile,
+            nanocodecDecoderV3File,
             constantsDir,
         ]
     }
@@ -992,14 +1029,40 @@ public enum ModelNames {
         public static let vocab = "vocab.json"
         public static let defaultVoiceFile = "af_heart.bin"
 
+        /// Mandarin (`ANE-zh/`) default voice. Voice packs in the Mandarin
+        /// bundle live under a `voices/` subdirectory; the path is kept in
+        /// the constant so the existing "all-required-files-present" check
+        /// still resolves correctly when the file lands at
+        /// `<repoDir>/voices/zf_001.bin`.
+        public static let defaultVoiceFileZh = "voices/zf_001.bin"
+
+        /// Mandarin g2pW polyphone-disambiguator CoreML bundle. Lives under
+        /// `<repoDir>/g2pw/` — included in `requiredModelsZh` so the bulk
+        /// `ensureModels(.mandarin)` grab pulls it without an extra round
+        /// trip. The two auxiliary text files (`vocab.txt`,
+        /// `POLYPHONIC_CHARS.txt`) ship via the lazy
+        /// `KokoroAneResourceDownloader.ensureMandarinG2pw` helper because
+        /// `DownloadUtils.downloadRepo` does not whitelist `.txt` for
+        /// subPath repos and a manual fetch keeps the bulk-grab matcher
+        /// idempotent.
+        public static let g2pwModelZh = "g2pw/g2pw.mlmodelc"
+
         /// All seven .mlmodelc bundles.
         public static let requiredCoreMLModels: Set<String> = [
             albert, postAlbert, alignment, prosody, noise, vocoder, tail,
         ]
 
-        /// CoreML bundles + the vocab JSON + the default voice .bin.
+        /// CoreML bundles + the vocab JSON + the English default voice .bin.
         public static var requiredModels: Set<String> {
             requiredCoreMLModels.union([vocab, defaultVoiceFile])
+        }
+
+        /// CoreML bundles + the vocab JSON + the Mandarin default voice .bin
+        /// (under `voices/`) + the g2pW CoreML bundle (under `g2pw/`).
+        public static var requiredModelsZh: Set<String> {
+            requiredCoreMLModels.union([
+                vocab, defaultVoiceFileZh, g2pwModelZh,
+            ])
         }
     }
 
@@ -1051,6 +1114,8 @@ public enum ModelNames {
             return ModelNames.StyleTTS2.requiredModels
         case .kokoroAne:
             return ModelNames.KokoroAne.requiredModels
+        case .kokoroAneZh:
+            return ModelNames.KokoroAne.requiredModelsZh
         case .sortformer:
             if let variant = variant {
                 return [variant]

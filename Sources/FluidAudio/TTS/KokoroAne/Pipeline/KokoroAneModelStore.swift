@@ -100,16 +100,21 @@ public actor KokoroAneModelStore {
     private var vocab: KokoroAneVocab?
     private var voicePacks: [String: KokoroAneVoicePack] = [:]
     private var repoDirectory: URL?
+    private var mandarinG2P: MandarinG2P?
+    private var mandarinCustomLexicon: MandarinCustomLexicon = .empty
 
     private let directory: URL?
     private let computeUnits: KokoroAneComputeUnits
+    private let variant: KokoroAneVariant
 
     public init(
         directory: URL? = nil,
-        computeUnits: KokoroAneComputeUnits = .default
+        computeUnits: KokoroAneComputeUnits = .default,
+        variant: KokoroAneVariant = .english
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
+        self.variant = variant
     }
 
     /// Download (if missing), load all 7 mlmodelcs, parse vocab + default voice.
@@ -121,7 +126,8 @@ public actor KokoroAneModelStore {
     public func loadIfNeeded() async throws {
         guard models.isEmpty else { return }
 
-        let repoDir = try await KokoroAneResourceDownloader.ensureModels(directory: directory)
+        let repoDir = try await KokoroAneResourceDownloader.ensureModels(
+            variant: variant, directory: directory)
 
         logger.info("Loading 7 KokoroAne CoreML models from \(repoDir.path)...")
         let loadStart = Date()
@@ -158,7 +164,7 @@ public actor KokoroAneModelStore {
 
         // Pre-load the default voice. Voice-pack failure does not invalidate
         // the model cache (voices are mutable runtime state).
-        _ = try await voicePack(KokoroAneConstants.defaultVoice)
+        _ = try await voicePack(variant.defaultVoice)
     }
 
     public func model(for stage: KokoroAneStage) throws -> MLModel {
@@ -181,7 +187,7 @@ public actor KokoroAneModelStore {
             throw KokoroAneError.modelNotLoaded("voice pack (repo not initialized)")
         }
         let url = try await KokoroAneResourceDownloader.ensureVoicePack(
-            voice, repoDirectory: repoDir)
+            voice, repoDirectory: repoDir, variant: variant)
         let pack = try KokoroAneVoicePack.load(from: url)
         voicePacks[voice] = pack
         logger.info("Loaded voice pack '\(voice)'")
@@ -192,10 +198,117 @@ public actor KokoroAneModelStore {
         models.count == KokoroAneStage.allCases.count && vocab != nil
     }
 
+    /// Lazy-load and cache the Mandarin G2P pipeline (binary dicts +
+    /// bopomofo mapper, optional jieba HMM). Only used by
+    /// ``KokoroAneVariant/mandarin``. Idempotent within a single store
+    /// lifetime; cached values are held by value so cleanup() drops
+    /// them cleanly.
+    ///
+    /// The jieba HMM tables are best-effort: if their HuggingFace
+    /// artefacts are unavailable (404 / network error) the pipeline
+    /// silently falls back to the FMM + per-char-singles path. The
+    /// Mandarin variant stays fully functional in that mode — HMM is
+    /// a quality booster for OOV proper-noun boundaries, not a hard
+    /// dependency.
+    public func mandarinG2PPipeline() async throws -> MandarinG2P {
+        if let g2p = mandarinG2P { return g2p }
+        guard variant == .mandarin else {
+            throw KokoroAneError.inputProcessingFailed(
+                "Mandarin G2P requested on a non-mandarin store")
+        }
+        guard let repoDir = repoDirectory else {
+            throw KokoroAneError.modelNotLoaded("Mandarin G2P (repo not initialized)")
+        }
+        let g2pDir = try await KokoroAneResourceDownloader.ensureMandarinG2P(
+            repoDirectory: repoDir)
+        let phrasesURL = g2pDir.appendingPathComponent(
+            KokoroAneConstants.g2pPinyinPhrasesFile)
+        let singlesURL = g2pDir.appendingPathComponent(
+            KokoroAneConstants.g2pPinyinSingleFile)
+        let dict = try MandarinPinyinDict.load(
+            singlesURL: singlesURL, phrasesURL: phrasesURL)
+
+        // Best-effort jieba HMM. ensureMandarinJiebaHmm returns nil
+        // when any artefact is missing (no throw); table-loader
+        // failures are also caught here so a corrupt cache doesn't
+        // break the pipeline outright.
+        var jiebaHmm: MandarinJiebaHmm? = nil
+        if let hmmDir = await KokoroAneResourceDownloader.ensureMandarinJiebaHmm(
+            repoDirectory: repoDir)
+        {
+            do {
+                let tables = try MandarinJiebaHmmTables.load(directory: hmmDir)
+                jiebaHmm = MandarinJiebaHmm(tables: tables)
+                logger.info(
+                    "Loaded jieba HMM tables (emit chars=\(tables.emit.count))")
+            } catch {
+                logger.warning(
+                    "Jieba HMM tables failed to parse "
+                        + "(\(error.localizedDescription)); HMM segmentation disabled.")
+            }
+        }
+
+        let g2pw = await loadG2pwIfAvailable(repoDirectory: repoDir)
+        var pipeline = MandarinG2P(dict: dict, jiebaHmm: jiebaHmm, g2pw: g2pw)
+        pipeline.customLexicon = mandarinCustomLexicon
+        mandarinG2P = pipeline
+        logger.info(
+            "Loaded Mandarin G2P (phrases=\(dict.phrases.count), "
+                + "singles=\(dict.singles.count), "
+                + "jieba=\(jiebaHmm != nil), g2pw=\(g2pw == nil ? "off" : "on"))"
+        )
+        return pipeline
+    }
+
+    /// Best-effort load of the g2pW polyphone disambiguator. Returns
+    /// `nil` (and logs) when the assets are missing or fail to load,
+    /// so the Mandarin G2P pipeline can keep running on the dict
+    /// alone.
+    private func loadG2pwIfAvailable(repoDirectory: URL) async -> MandarinG2pwModel? {
+        guard
+            let g2pwDir = await KokoroAneResourceDownloader.ensureMandarinG2pw(
+                repoDirectory: repoDirectory)
+        else { return nil }
+
+        let vocabURL = g2pwDir.appendingPathComponent(KokoroAneConstants.g2pwVocabFile)
+        let polyURL = g2pwDir.appendingPathComponent(
+            KokoroAneConstants.g2pwPolyphonicCharsFile)
+        let modelURL = g2pwDir.appendingPathComponent(KokoroAneConstants.g2pwModelBundle)
+
+        do {
+            let tokenizer = try MandarinBertTokenizer.load(vocabURL: vocabURL)
+            let catalog = try MandarinPolyphoneCatalog.load(fileURL: polyURL)
+            let config = MLModelConfiguration()
+            config.computeUnits = .cpuAndNeuralEngine
+            let model = try MLModel(contentsOf: modelURL, configuration: config)
+            return MandarinG2pwModel(
+                model: model, tokenizer: tokenizer, catalog: catalog)
+        } catch {
+            logger.info(
+                "g2pW load failed (\(error.localizedDescription)) — "
+                    + "Mandarin G2P will run dict-only")
+            return nil
+        }
+    }
+
+    /// Install (or clear) the user-supplied Mandarin pronunciation
+    /// override. The lexicon is cached on the store so it survives a
+    /// pipeline rebuild, and is pushed into the live ``MandarinG2P``
+    /// instance immediately if one is already loaded. Calling on a
+    /// non-mandarin store stores the value but has no synthesis effect
+    /// (the pipeline is never instantiated for English).
+    public func setMandarinCustomLexicon(_ lexicon: MandarinCustomLexicon) {
+        mandarinCustomLexicon = lexicon
+        if mandarinG2P != nil {
+            mandarinG2P?.customLexicon = lexicon
+        }
+    }
+
     public func cleanup() {
         models.removeAll()
         voicePacks.removeAll()
         vocab = nil
         repoDirectory = nil
+        mandarinG2P = nil
     }
 }

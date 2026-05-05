@@ -38,6 +38,7 @@ public actor MagpieTtsManager {
     private let directory: URL?
     private let computeUnits: MLComputeUnits
     private let preferredLanguages: Set<MagpieLanguage>
+    private let nanocodecPrecision: MagpieNanocodecPrecision
 
     private var store: MagpieModelStore?
     private var tokenizer: MagpieTokenizer?
@@ -46,11 +47,13 @@ public actor MagpieTtsManager {
     public init(
         directory: URL? = nil,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        preferredLanguages: Set<MagpieLanguage> = [.english]
+        preferredLanguages: Set<MagpieLanguage> = [.english],
+        nanocodecPrecision: MagpieNanocodecPrecision = .fp32
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
         self.preferredLanguages = preferredLanguages
+        self.nanocodecPrecision = nanocodecPrecision
     }
 
     public var isAvailable: Bool {
@@ -61,12 +64,14 @@ public actor MagpieTtsManager {
     public static func downloadAndCreate(
         languages: Set<MagpieLanguage> = [.english],
         cacheDirectory: URL? = nil,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
+        nanocodecPrecision: MagpieNanocodecPrecision = .fp32
     ) async throws -> MagpieTtsManager {
         let manager = MagpieTtsManager(
             directory: cacheDirectory,
             computeUnits: computeUnits,
-            preferredLanguages: languages)
+            preferredLanguages: languages,
+            nanocodecPrecision: nanocodecPrecision)
         try await manager.initialize()
         return manager
     }
@@ -83,7 +88,8 @@ public actor MagpieTtsManager {
         let store = MagpieModelStore(
             directory: directory,
             computeUnits: computeUnits,
-            preferredLanguages: preferredLanguages)
+            preferredLanguages: preferredLanguages,
+            nanocodecPrecision: nanocodecPrecision)
         try await store.loadIfNeeded()
         self.store = store
 

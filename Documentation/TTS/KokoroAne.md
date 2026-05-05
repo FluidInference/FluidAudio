@@ -13,44 +13,80 @@ used with the author's permission. Conversion lives in
 
 ## When To Pick This Over `KokoroTtsManager`
 
-|                  | `KokoroTtsManager`        | `KokoroAneManager`           |
-|------------------|---------------------------|------------------------------|
-| Compute          | CPU + GPU (single graph)  | 4 stages on ANE, 3 on GPU    |
-| Voices           | Multi (`.json` packs)     | Single (`af_heart.bin`)      |
-| Long input       | Built-in chunker          | ≤ 510 IPA phonemes / utt.    |
-| Custom lexicon   | Yes (`TtsCustomLexicon`)  | No                           |
-| SSML             | Yes                       | No                           |
-| HF path          | `kokoro-82m-coreml/`      | `kokoro-82m-coreml/ANE/`     |
+|                  | `KokoroTtsManager`        | `KokoroAneManager`                              |
+|------------------|---------------------------|-------------------------------------------------|
+| Compute          | CPU + GPU (single graph)  | 4 stages on ANE, 3 on GPU                       |
+| Voices           | Multi (`.json` packs)     | Single per variant (`af_heart` / `zf_001`)      |
+| Long input       | Built-in chunker          | ≤ 510 IPA / Bopomofo phonemes / utt.            |
+| Custom lexicon   | Yes (`TtsCustomLexicon`)  | No                                              |
+| SSML             | Yes                       | No                                              |
+| Languages        | English only              | English (`ANE/`) + Mandarin (`ANE-zh/`)         |
 
 Use `KokoroAneManager` when you want the lowest latency on Apple Silicon and
-can live with `af_heart` only and short inputs. Use `KokoroTtsManager` when
-you need any of: multi-voice, custom pronunciations, SSML, long-form text.
+can live with the variant's single voice and short inputs. Use
+`KokoroTtsManager` when you need any of: multi-voice, custom pronunciations,
+SSML, long-form text.
+
+## Variants
+
+The 7-stage chain is language-agnostic by construction (input ids, voice
+slices, and per-stage I/O contracts are identical across variants). Only the
+embedding vocab, HF subdirectory, voice-file layout, default voice, and the
+text-to-phoneme frontend differ.
+
+| Variant       | HF subdir   | Vocab | Default voice | Voice layout                | Frontend                                   |
+|---------------|-------------|-------|---------------|-----------------------------|--------------------------------------------|
+| `.english`    | `ANE/`      | 177   | `af_heart`    | flat (`<voice>.bin`)        | G2P CoreML (BART seq2seq) → IPA            |
+| `.mandarin`   | `ANE-zh/`   | 171   | `zf_001`      | nested (`voices/<voice>.bin`) | Rule-based dict lookup → Bopomofo + tones |
+
+Pick the variant on construction:
+
+```swift
+let english  = KokoroAneManager(variant: .english)   // default
+let mandarin = KokoroAneManager(variant: .mandarin)
+```
 
 ## Quick Start
 
 ### CLI
 
 ```bash
+# English (default)
 swift run fluidaudiocli tts "Welcome to FluidAudio" \
   --backend kokoro-ane \
   --output ~/Desktop/demo.wav
+
+# Mandarin
+swift run fluidaudiocli tts "你好世界，今天天气真好。" \
+  --backend kokoro-ane --variant zh \
+  --output ~/Desktop/demo_zh.wav
 ```
 
 First invocation downloads the 7 `.mlmodelc` bundles + `vocab.json` +
-`af_heart.bin` from
-[`FluidInference/kokoro-82m-coreml/ANE/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE);
-later runs reuse the cached assets.
+default voice from
+[`FluidInference/kokoro-82m-coreml/ANE/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE)
+(English) or
+[`ANE-zh/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE-zh)
+(Mandarin); later runs reuse the cached assets. The Mandarin variant
+additionally fetches the G2P pinyin dictionaries from
+[`ANE-zh/assets/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE-zh/assets)
+on first synthesis (~10 MB, cached at `<repoDir>/g2p/`).
 
 ### Swift
 
 ```swift
 import FluidAudio
 
-let manager = KokoroAneManager()
-try await manager.initialize()
+// English
+let english = KokoroAneManager()
+try await english.initialize()
+let enWav = try await english.synthesize(text: "Hello from FluidAudio!")
 
-let audioData = try await manager.synthesize(text: "Hello from FluidAudio!")
-try audioData.write(to: URL(fileURLWithPath: "/tmp/demo.wav"))
+// Mandarin — give it Hanzi, the built-in G2P handles segmentation,
+// pinyin lookup, tone sandhi, and Bopomofo encoding.
+let mandarin = KokoroAneManager(variant: .mandarin)
+try await mandarin.initialize()
+let zhWav = try await mandarin.synthesize(text: "你好世界")
 ```
 
 ### Per-stage timings
@@ -67,18 +103,23 @@ print("  total: \(t.totalMs) ms")
 ### Bypass G2P
 
 ```swift
-let wav = try await manager.synthesizeFromPhonemes("həˈloʊ wɝld")
+// English: pre-computed IPA
+let enWav = try await english.synthesizeFromPhonemes("həˈloʊ wɝld")
+
+// Mandarin: pre-computed Bopomofo + tone digits matching the
+// `ANE-zh/vocab.json` token set.
+let zhWav = try await mandarin.synthesizeFromPhonemes("ㄋㄧ2ㄏㄠ3")
 ```
 
-Useful when you've already phonemized upstream (e.g. you're streaming IPA
-from a different G2P).
+Useful when you've already phonemized upstream.
 
 ## Pipeline
 
 ```
-text → G2P (CoreML BART) → IPA → vocab.json → token ids
-                                                  │
-        ┌─────────────────────────────────────────┘
+English:   text → G2P (CoreML BART) → IPA → vocab.json → token ids
+Mandarin:  text → MandarinG2P (dict + sandhi) → Bopomofo → vocab.json → token ids
+                                                                          │
+        ┌─────────────────────────────────────────────────────────────────┘
         ▼
   ┌──────────┐  ┌────────────┐  ┌───────────┐
   │  Albert  │→ │ PostAlbert │→ │ Alignment │      ANE
@@ -112,22 +153,60 @@ let manager = KokoroAneManager(
 
 ## Voice Pack
 
-The single shipping voice (`af_heart.bin`) is a flat `[510, 256]` fp32
-matrix. Row index = `min(max(phonemeCount - 1, 0), 509)` (utterance-length
-bucket); columns split as `[0..<128]` = `style_timbre` (→ Noise + Vocoder),
-`[128..<256]` = `style_s` (→ PostAlbert + Prosody).
+Each shipping voice (`af_heart.bin` for English, `zf_001.bin` for Mandarin)
+is a flat `[510, 256]` fp32 matrix. Row index = `min(max(phonemeCount - 1,
+0), 509)` (utterance-length bucket); columns split as `[0..<128]` =
+`style_timbre` (→ Noise + Vocoder), `[128..<256]` = `style_s` (→ PostAlbert
++ Prosody).
 
-This single-voice constraint is intrinsic to the upstream conversion — adding
-voices requires re-converting `KokoroPostAlbert` / `KokoroProsody` /
-`KokoroNoise` / `KokoroVocoder` against the new style embeddings.
+The English bundle stores voice packs flat at the bundle root
+(`<voice>.bin`); the Mandarin bundle nests them under `voices/<voice>.bin`.
+This single-voice-per-variant constraint is intrinsic to the upstream
+conversion — adding voices requires re-converting `KokoroPostAlbert` /
+`KokoroProsody` / `KokoroNoise` / `KokoroVocoder` against the new style
+embeddings.
+
+## Mandarin G2P
+
+The Mandarin variant ships a self-contained, network-free Hanzi → Bopomofo
+pipeline modelled on
+[`misaki[zh]`](https://github.com/hexgrad/misaki/blob/main/misaki/zh_frontend.py):
+
+1. **Punctuation normalization** — fullwidth `，。！？；：` collapse to ASCII.
+2. **Forward maximum match segmentation** — greedy phrase lookup against
+   ~411k phrase entries, falls back to per-character single lookup
+   (~42k Hanzi).
+3. **Pinyin normalization** — diacritic tone marks (`níhǎo`) → digit form
+   (`ni2hao3`); ü-row collapses to `v`.
+4. **Tone sandhi** — three high-impact, POS-independent rules from
+   `misaki/tone_sandhi.py`: 3+3 chain (`3 3 3 → 2 2 3`), 不-promotion
+   before tone 4, 一-promotion based on the next syllable's tone.
+5. **Bopomofo + tone-digit encoding** — initials/finals split, sibilant
+   `i`-fix (`zi/ci/si → ㄭ`, `zhi/chi/shi/ri → 十`), j/q/x + u → ü, then
+   one bopomofo character per part + the tone digit.
+
+Asset footprint (downloaded on first synthesis, cached at
+`<repoDir>/g2p/`):
+
+| File                  | Size   | Source                                  |
+|-----------------------|--------|-----------------------------------------|
+| `pinyin_phrases.bin`  | 9.5 MB | `kokoro-82m-coreml/ANE-zh/assets/`      |
+| `pinyin_single.bin`   | 480 KB | same                                    |
+
+What the Mandarin G2P intentionally does **not** ship: jieba HMM
+fallback, POS-aware tone sandhi, neural polyphone disambiguation
+(g2pW-style), erhua handling, number/date verbalization. These are all
+viable upgrades — the current pipeline trades them for a zero-network
+~10 MB footprint that handles short conversational text well.
 
 ## Limits
 
-- **Phonemes:** ≤ 510 IPA chars per call (ALBERT context = 512 incl. BOS/EOS).
-  No built-in chunker — split upstream if you need longer inputs.
-- **Voices:** `af_heart` only.
+- **Phonemes:** ≤ 510 IPA / Bopomofo chars per call (ALBERT context = 512
+  incl. BOS/EOS). No built-in chunker — split upstream if you need longer
+  inputs.
+- **Voices:** `af_heart` only (English) / `zf_001` only (Mandarin).
 - **Custom lexicon / SSML / Markdown overrides:** not supported. The pipeline
-  goes `text → G2P → IPA → token ids` with no interception point.
+  goes `text → G2P → phonemes → token ids` with no interception point.
 - **Acoustic frames:** `T_a ≤ 2000` (compile-time `--max-frames` baked into
   the converted models).
 
@@ -185,7 +264,10 @@ Fresh installs are unaffected.
 
 ## Source
 
-- HuggingFace: [`FluidInference/kokoro-82m-coreml/ANE/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE)
-- Upstream PyTorch: [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
+- HuggingFace (English): [`FluidInference/kokoro-82m-coreml/ANE/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE)
+- HuggingFace (Mandarin): [`FluidInference/kokoro-82m-coreml/ANE-zh/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE-zh)
+- Upstream PyTorch (English): [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
+- Upstream PyTorch (Mandarin): [hexgrad/Kokoro-82M-v1.1-zh](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh)
+- Mandarin G2P reference: [hexgrad/misaki](https://github.com/hexgrad/misaki) (`zh_frontend.py`, `tone_sandhi.py`)
 - Conversion script: [mobius/models/tts/kokoro/laishere-coreml](https://github.com/FluidInference/mobius/tree/main/models/tts/kokoro/laishere-coreml)
 - Original CoreML fork: [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml)
