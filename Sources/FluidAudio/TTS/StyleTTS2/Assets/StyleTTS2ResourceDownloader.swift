@@ -66,6 +66,19 @@ public enum StyleTTS2ResourceDownloader {
             }
         }
 
+        // The `voices/` directory existence check above is necessary but not
+        // sufficient — the directory walker may have created the parent
+        // without populating its contents. Verify each preset blob lands.
+        let voicesDir = repoDir.appendingPathComponent(
+            StyleTTS2VoicePresets.directoryName, isDirectory: true)
+        for filename in StyleTTS2VoicePresets.requiredFilenames {
+            let path = voicesDir.appendingPathComponent(filename).path
+            guard FileManager.default.fileExists(atPath: path) else {
+                throw StyleTTS2Error.downloadFailed(
+                    "Missing voice preset after download: \(filename)")
+            }
+        }
+
         return repoDir
     }
 

@@ -861,6 +861,10 @@ public enum ModelNames {
         /// Top-level bundle config (audio params, bucket sizes, sampler config).
         public static let configFile = "config.json"
 
+        /// Directory of preset `ref_s_<voice>.bin` voice references shipped
+        /// alongside the CoreML bundles (see `StyleTTS2VoicePresets`).
+        public static let voicesDir = "voices"
+
         public static let textPredictorBuckets: [Int] = [32, 64, 128, 256, 512]
         public static let decoderBuckets: [Int] = [256, 512, 1024, 2048, 4096]
 
@@ -879,6 +883,7 @@ public enum ModelNames {
             decoder4096File,
             vocabularyFile,
             configFile,
+            voicesDir,
         ]
     }
 

@@ -1,11 +1,18 @@
 import FluidAudio
 import Foundation
 
-/// `fluidaudio styletts2 "text" --voice ref_s.bin --output out.wav`
+/// `fluidaudio styletts2 "text" [--voice ref_s.bin | --voice-name <id>] --output out.wav`
 ///
 /// Drives the StyleTTS2 4-stage diffusion synthesizer end-to-end and writes
-/// a 24 kHz mono 16-bit WAV. The `--voice` flag points at a precomputed
-/// `ref_s.bin` style+prosody blob (see `mobius-styletts2/scripts/06_dump_ref_s.py`).
+/// a 24 kHz mono 16-bit WAV. Voice selection:
+///   * `--voice <path>` — explicit `ref_s.bin` (256 fp32 LE) on disk.
+///   * `--voice-name <id>` — preset id from `StyleTTS2VoicePresets`
+///     (e.g. `vinay`, `gavin`, `lj_696`). Resolves to a blob inside the
+///     downloaded `voices/` directory of the StyleTTS2 bundle.
+/// If neither flag is supplied, the default preset (`vinay`) is used.
+///
+/// To produce your own `ref_s.bin` from a custom WAV, see
+/// `mobius/models/tts/styletts2/scripts/06_dump_ref_s.py`.
 public enum StyleTTS2Command {
 
     private static let logger = AppLogger(category: "StyleTTS2Command")
@@ -18,6 +25,8 @@ public enum StyleTTS2Command {
 
         var text: String?
         var voicePath: String?
+        var voiceName: String?
+        var listVoices = false
         var outputPath = "styletts2.wav"
         var diffusionSteps = 5
         var alpha: Float = 0.3
@@ -37,6 +46,16 @@ public enum StyleTTS2Command {
                 }
                 voicePath = arguments[i + 1]
                 i += 2
+            case "--voice-name":
+                guard i + 1 < arguments.count else {
+                    fputs("--voice-name requires an id (see --list-voices)\n", stderr)
+                    exit(2)
+                }
+                voiceName = arguments[i + 1]
+                i += 2
+            case "--list-voices":
+                listVoices = true
+                i += 1
             case "--output", "-o":
                 guard i + 1 < arguments.count else {
                     fputs("--output requires a path\n", stderr)
@@ -100,6 +119,11 @@ public enum StyleTTS2Command {
             }
         }
 
+        if listVoices {
+            printVoiceCatalog()
+            return
+        }
+
         if tokenizeOnly {
             await runTokenizeOnly(text: text, corpusPath: corpusPath)
             return
@@ -110,13 +134,12 @@ public enum StyleTTS2Command {
             printUsage()
             exit(2)
         }
-        guard let voicePath else {
-            fputs("Missing --voice <path/to/ref_s.bin>\n", stderr)
-            printUsage()
+
+        if voicePath != nil && voiceName != nil {
+            fputs("--voice and --voice-name are mutually exclusive\n", stderr)
             exit(2)
         }
 
-        let voiceURL = expand(voicePath)
         let outputURL = expand(outputPath)
 
         do {
@@ -126,6 +149,28 @@ public enum StyleTTS2Command {
                 logger.debug(
                     "Download \(progress.phase): "
                         + "\(Int(progress.fractionCompleted * 100))%")
+            }
+
+            // Resolve the voice URL: explicit --voice path > --voice-name preset
+            // > default preset id from StyleTTS2VoicePresets.
+            let voiceURL: URL
+            if let voicePath {
+                voiceURL = expand(voicePath)
+            } else {
+                let id = voiceName ?? StyleTTS2VoicePresets.defaultVoiceID
+                let store = await manager.underlyingModelStore()
+                let repoRoot = try await store.repoRoot()
+                guard
+                    let resolved = StyleTTS2VoiceStyle.voiceURL(
+                        forID: id, in: repoRoot)
+                else {
+                    fputs(
+                        "Unknown voice id '\(id)'. Run --list-voices for the catalog.\n",
+                        stderr)
+                    exit(2)
+                }
+                voiceURL = resolved
+                logger.notice("Using voice preset: \(id) → \(resolved.lastPathComponent)")
             }
 
             logger.notice("Synthesizing text (\(text.count) chars, steps=\(diffusionSteps))...")
@@ -265,10 +310,15 @@ public enum StyleTTS2Command {
     private static func printUsage() {
         let msg = """
             Usage:
-              fluidaudio styletts2 "<text>" --voice <ref_s.bin> [options]
+              fluidaudio styletts2 "<text>" [--voice <ref_s.bin> | --voice-name <id>] [options]
+
+            Voice selection (default: --voice-name \(StyleTTS2VoicePresets.defaultVoiceID)):
+              --voice <path>       Path to a custom ref_s.bin (256 fp32 LE, 1024 bytes).
+              --voice-name <id>    Preset id from the bundled voices/ catalog.
+                                   Run --list-voices for the full list.
+              --list-voices        Print the bundled voice catalog and exit.
 
             Options:
-              --voice <path>    Required for synthesis. Path to precomputed ref_s.bin (256 fp32 LE).
               --output <path>   Output WAV path (default: styletts2.wav).
               --steps <int>     ADPM2 sampler steps (default: 5).
               --alpha <float>   Acoustic style mix weight (default: 0.3).
@@ -278,11 +328,29 @@ public enum StyleTTS2Command {
                                 No --voice needed. Use with text or --corpus.
               --corpus <path>   Phrase-per-line corpus file (with --tokenize-only).
 
-            Example:
+            Examples:
+              fluidaudio styletts2 "Hello world" --voice-name vinay
               fluidaudio styletts2 "Hello world" \\
                   --voice /tmp/styletts2-ref_s.bin \\
                   --output /tmp/styletts2-hello.wav
             """
         print(msg)
+    }
+
+    /// `--list-voices`: dump the catalog without downloading anything.
+    private static func printVoiceCatalog() {
+        let cohorts = StyleTTS2VoicePresets.Cohort.allCases
+        print("StyleTTS2 voice catalog (default: \(StyleTTS2VoicePresets.defaultVoiceID)):")
+        for cohort in cohorts {
+            let voicesInCohort = StyleTTS2VoicePresets.all
+                .filter { $0.cohort == cohort }
+                .sorted { $0.id < $1.id }
+            guard !voicesInCohort.isEmpty else { continue }
+            print("")
+            print("  [\(cohort.rawValue)]")
+            for v in voicesInCohort {
+                print("    \(v.id.padding(toLength: 20, withPad: " ", startingAt: 0)) \(v.description)")
+            }
+        }
     }
 }
