@@ -10,9 +10,19 @@ import Foundation
 ///      this path. Apostrophes are preserved on the lookup key.
 ///   2. Acronym fallback: if the word is 2..6 ASCII uppercase letters
 ///      (e.g. `ANE`, `IBM`, `USA`), spell it letter-by-letter through the
-///      lexicon's case-sensitive single-letter entries.
-///   3. In-tree `G2PModel` BART encoder-decoder (misaki-style IPA) for
+///      lexicon's case-sensitive single-letter entries (which carry stress
+///      markers — better than the unstressed `letterPronunciations` table).
+///   3. Morphological stemming via `EnglishG2PHelpers.stemInflected` —
+///      strip `-s`/`-ed`/`-ing`, look up the stem in the lexicon, reapply
+///      the suffix phonetically (handles `jumped`, `running`, `buses`).
+///   4. In-tree `G2PModel` BART encoder-decoder (misaki-style IPA) for
 ///      OOV words, with the same misaki→espeak remap as before.
+///   5. Numeric spell-out via `EnglishG2PHelpers.spelledOutTokens` —
+///      `"2025"` → `["two","thousand","twenty","five"]`, each component
+///      then resolved through the lexicon (no recursion into BART here;
+///      the lexicon covers basic number words).
+///   6. Single-letter fallback via `EnglishG2PHelpers.letterPronunciations`
+///      for unmappable single graphs.
 ///
 /// **Per-piece (single glyph) remap** — applied to every emitted phoneme
 /// piece, regardless of source (lexicon, acronym, or BART):
@@ -141,6 +151,12 @@ public enum StyleTTS2Phonemizer {
             }
             return result
         }
+
+        /// Snapshot of the lower-cased lexicon, used by
+        /// `EnglishG2PHelpers.stemInflected` to look up stems. Returns an
+        /// empty dictionary if the lexicon hasn't loaded — `stemInflected`
+        /// degrades to nil on empty input.
+        func lowerSnapshot() -> [String: [String]] { lower }
     }
 
     private static let lexicon = LexiconHolder()
@@ -239,12 +255,14 @@ public enum StyleTTS2Phonemizer {
         }
     }
 
-    /// English path: lexicon → acronym fallback → BART G2P.
+    /// English path: lexicon → acronym → stem → BART → spell-out → letter.
     private static func flushWordEnglish(
         original: String,
         stripped: String,
         into output: inout String
     ) async throws {
+        let lowercased = stripped.lowercased()
+
         // 1. Lexicon (apostrophes preserved).
         if let pieces = await lexicon.lookup(original) {
             emitPieces(pieces, into: &output)
@@ -252,22 +270,62 @@ public enum StyleTTS2Phonemizer {
         }
 
         // 2. Acronym fallback (apostrophe-stripped — apostrophes don't
-        //    appear in acronyms).
+        //    appear in acronyms). Uses the lexicon's case-sensitive
+        //    single-letter entries which carry stress markers, so it's
+        //    preferred over the unstressed `letterPronunciations` table.
         if let pieces = await lexicon.lookupAcronym(stripped) {
             emitPieces(pieces, into: &output)
             return
         }
 
-        // 3. BART G2P.
-        try await G2PModel.shared.ensureModelsAvailable()
-        let phonemes = try await G2PModel.shared.phonemize(word: stripped.lowercased())
-        guard let phonemes else {
-            logger.warning(
-                "G2P unavailable for English word \"\(stripped)\"; passing through verbatim")
-            output.append(stripped)
+        // 3. Morphological stemming (handles "jumped", "running", "buses").
+        let lowerLex = await lexicon.lowerSnapshot()
+        if let pieces = EnglishG2PHelpers.stemInflected(lowercased, lexicon: lowerLex) {
+            emitPieces(pieces, into: &output)
             return
         }
-        emitPieces(phonemes, into: &output)
+
+        // 4. BART G2P.
+        try await G2PModel.shared.ensureModelsAvailable()
+        if let phonemes = try await G2PModel.shared.phonemize(word: lowercased) {
+            emitPieces(phonemes, into: &output)
+            return
+        }
+
+        // 5. Numeric spell-out ("2025" → "two thousand twenty five"),
+        //    each component resolved through the lexicon. Dropped if any
+        //    component is missing.
+        if let spelled = EnglishG2PHelpers.spelledOutTokens(for: lowercased),
+            !spelled.isEmpty
+        {
+            var assembled: [String] = []
+            var first = true
+            var ok = true
+            for token in spelled {
+                guard let pieces = await lexicon.lookup(token) else {
+                    ok = false
+                    break
+                }
+                if !first { assembled.append(" ") }
+                assembled.append(contentsOf: pieces)
+                first = false
+            }
+            if ok, !assembled.isEmpty {
+                emitPieces(assembled, into: &output)
+                return
+            }
+        }
+
+        // 6. Single-letter fallback table.
+        if let pieces = EnglishG2PHelpers.letterPronunciations[lowercased] {
+            emitPieces(pieces, into: &output)
+            return
+        }
+
+        // Last resort: pass the orthography through and warn.
+        logger.warning(
+            "G2P unavailable for English word \"\(stripped)\"; passing through verbatim")
+        output.append(stripped)
     }
 
     /// Non-English path: CharsiuG2P fallback (unvalidated for StyleTTS2).
