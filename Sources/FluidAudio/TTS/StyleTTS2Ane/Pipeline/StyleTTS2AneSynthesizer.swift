@@ -135,24 +135,26 @@ public struct StyleTTS2AneSynthesizer {
         )
 
         // ── 4: Style mix ──────────────────────────────────────────────
-        // On-disk ref_s.bin layout (per `mobius/.../scripts/06_dump_ref_s.py`):
-        //   [0:128]   = predictor_encoder(mel)  →  s_pros   (Prosody, PostBert)
-        //   [128:256] = style_encoder(mel)      →  s_acou   (Vocoder)
+        // On-disk ref_s.bin layout (yl4579 convention, per
+        // `mobius/.../scripts/06_dump_ref_s.py`):
+        //   [0:128]   = style_encoder(mel)      →  s_acou   (Vocoder)
+        //   [128:256] = predictor_encoder(mel)  →  s_pros   (Prosody, PostBert)
         //
-        // FluidAudio's `StyleTTS2VoiceStyle` accessors are historically named
-        // backwards: `voice.acoustic = .prefix(128)` is actually the prosody
-        // branch, and `voice.prosody = .suffix(128)` is actually the acoustic
-        // branch. We keep the accessor names for API compatibility with the
-        // legacy 4-graph backend; locals below use the on-disk semantics.
-        let prosodyOriginal = Array(voice.acoustic)  // [0:128] = s_pros
-        let acousticOriginal = Array(voice.prosody)  // [128:256] = s_acou
-        let prosodyPred = Array(sPred[0..<StyleTTS2AneConstants.styleDim])
-        let acousticPred = Array(
+        // FluidAudio's `StyleTTS2VoiceStyle.acoustic = .prefix(128)` and
+        // `.prosody = .suffix(128)` accessors line up directly with the disk
+        // layout. The diffusion sampler outputs in the same layout, so the
+        // first half of `sPred` is the acoustic prediction and the second
+        // half is the prosody prediction — matches the legacy 4-graph
+        // backend exactly.
+        let acousticOriginal = Array(voice.acoustic)  // [0:128] = s_acou
+        let prosodyOriginal = Array(voice.prosody)  // [128:256] = s_pros
+        let acousticPred = Array(sPred[0..<StyleTTS2AneConstants.styleDim])
+        let prosodyPred = Array(
             sPred[StyleTTS2AneConstants.styleDim..<StyleTTS2AneConstants.refStyleDim])
-        // alpha governs the first-half (s_pros) blend, beta the second-half
-        // (s_acou) blend — same weight assignment as the legacy backend.
-        let prosodyMix = mix(a: prosodyPred, b: prosodyOriginal, alpha: options.alpha)
-        let acousticMix = mix(a: acousticPred, b: acousticOriginal, alpha: options.beta)
+        // alpha governs the acoustic blend, beta the prosody blend — same
+        // weight assignment as the legacy backend.
+        let acousticMix = mix(a: acousticPred, b: acousticOriginal, alpha: options.alpha)
+        let prosodyMix = mix(a: prosodyPred, b: prosodyOriginal, alpha: options.beta)
 
         let prosodyMixFp16 = try KokoroAneArrays.float16Array(
             shape: [1, StyleTTS2AneConstants.styleDim], from: prosodyMix)
@@ -181,7 +183,7 @@ public struct StyleTTS2AneSynthesizer {
             model: prosodyModel,
             inputs: [
                 "en": enArr,
-                "s": prosodyMixFp16,  // [1, 128] = s_pros (first half of ref_s)
+                "s": prosodyMixFp16,  // [1, 128] = s_pros (second half of ref_s)
             ],
             timing: &timings.prosody
         )
@@ -239,7 +241,7 @@ public struct StyleTTS2AneSynthesizer {
                 "asr": asrSliced,
                 "F0_curve": f0F16,
                 "N": nF16,
-                "s": acousticMixFp16,  // [1, 128] = s_acou (second half of ref_s)
+                "s": acousticMixFp16,  // [1, 128] = s_acou (first half of ref_s)
                 "sine_waves": sineWavesF16,
             ],
             timing: &timings.vocoder

@@ -49,7 +49,7 @@ final class ModelNamesTests: XCTestCase {
 
     func testModelFileExtensions() {
         let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin"]
-        let validDirectories: Set<String> = ["constants_bin"]
+        let validDirectories: Set<String> = ["constants_bin", "voices"]
 
         // `magpieTts` is intentionally excluded — it is the only repo that ships
         // bare directory entries (`constants/`, `tokenizer/`) instead of files.
