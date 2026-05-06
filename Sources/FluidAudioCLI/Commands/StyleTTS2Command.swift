@@ -190,8 +190,21 @@ public enum StyleTTS2Command {
         )
         let elapsed = Date().timeIntervalSince(start)
 
+        // Match Python CoreML reference loudness (-7 dBFS peak / ~-27 dB
+        // RMS). Without scaling, the raw HiFi-GAN output exceeds ±1.0 and
+        // the WAV writer either clips at 0 dBFS or normalizes back up to
+        // 0 dBFS — both ~7 dB hotter than the reference.
+        let targetPeak: Float = 0.4467  // 10^(-7.0 / 20)
+        let maxAbs = result.samples.reduce(Float(0)) { Swift.max($0, abs($1)) }
+        let scaledSamples: [Float] =
+            maxAbs > 0
+            ? result.samples.map { $0 * (targetPeak / maxAbs) }
+            : result.samples
         let wav = try AudioWAV.data(
-            from: result.samples, sampleRate: Double(result.sampleRate))
+            from: scaledSamples,
+            sampleRate: Double(result.sampleRate),
+            peakNormalize: false
+        )
         try wav.write(to: outputURL)
 
         let t = result.timings

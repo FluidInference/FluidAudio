@@ -197,12 +197,28 @@ public struct StyleTTS2Synthesizer {
         let nShape = nRaw.shape.map(\.intValue)
 
         // ── 7: Noise (fp32 boundary) ──────────────────────────────────
+        // Stage 6 takes a runtime broadband Gaussian noise tensor — the
+        // exported graph drops the upstream `randn_like(sine_waves)` so the
+        // trace stays deterministic. We supply real noise here per
+        // utterance. Shape mirrors SineGen-internal `randn_like(sine_waves)`
+        // exactly: `[1, MAX_T_A * 2 * UPSAMPLE_SCALE, harm+1]` fp32.
+        // See `mobius/.../scripts/_styletts2_lib.py` `_forward_deterministic`
+        // and `mobius/.../scripts/ane/_styletts2_ane_lib.py` `NoiseTraceable`.
         let f0F32 = try KokoroAneArrays.float32Array(shape: f0Shape, from: f0Raw)
+        let noiseAudio = StyleTTS2Constants.maxAcousticFrames * 2 * StyleTTS2Constants.upsampleScale
+        let noiseSamples = generateGaussianNoise(
+            count: noiseAudio * StyleTTS2Constants.harmonicChannels,
+            seed: options.randomSeed
+        )
+        let noiseInput = try KokoroAneArrays.float32Array(
+            shape: [1, noiseAudio, StyleTTS2Constants.harmonicChannels],
+            from: noiseSamples
+        )
         let noiseModel = try await store.model(for: .noise)
         let noiseOut = try await predict(
             stage: .noise,
             model: noiseModel,
-            inputs: ["F0_curve": f0F32],
+            inputs: ["F0_curve": f0F32, "noise": noiseInput],
             timing: &timings.noise
         )
 

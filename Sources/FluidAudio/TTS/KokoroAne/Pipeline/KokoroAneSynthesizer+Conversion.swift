@@ -68,6 +68,13 @@ enum KokoroAneArrays {
     }
 
     /// Build a Float16 MLMultiArray, copying from a Float16-backed source array.
+    ///
+    /// Handles non-contiguous (stride-padded) sources. CoreML's ANE backend
+    /// pads the fastest dim of small-feature outputs (e.g. shape `[1, 512, 14]`
+    /// with strides `[16384, 32, 1]` — last dim 14 padded to 32). A naive
+    /// memcpy of `total * 2` bytes would interleave valid rows with the
+    /// padding gaps, scrambling the output. Detect non-contiguous storage and
+    /// fall back to a stride-aware element walk in that case.
     static func float16Array(shape: [Int], from source: MLMultiArray) throws -> MLMultiArray {
         // Same shape + same dtype → just copy bytes.
         let total = shape.reduce(1, *)
@@ -76,18 +83,84 @@ enum KokoroAneArrays {
             "float16Array(from MLMultiArray): source has \(source.count) elements, shape implies \(total)")
         let nsShape = shape.map { NSNumber(value: $0) }
         let dst = try MLMultiArray(shape: nsShape, dataType: .float16)
+        let isContig = isRowMajorContiguous(source)
         if source.dataType == .float16 {
-            memcpy(dst.dataPointer, source.dataPointer, total * MemoryLayout<UInt16>.size)
+            if isContig {
+                memcpy(dst.dataPointer, source.dataPointer, total * MemoryLayout<UInt16>.size)
+            } else {
+                stridedCopyU16(source: source, dst: dst, total: total)
+            }
             return dst
         }
         if source.dataType == .float32 {
-            let f32 = source.dataPointer.bindMemory(to: Float.self, capacity: total)
             let dstU16 = dst.dataPointer.bindMemory(to: UInt16.self, capacity: total)
-            convertF32toF16(src: f32, dst: dstU16, count: total)
+            if isContig {
+                let f32 = source.dataPointer.bindMemory(to: Float.self, capacity: total)
+                convertF32toF16(src: f32, dst: dstU16, count: total)
+            } else {
+                // Walk source f32 strides into a packed temp, then convert.
+                var tmp = [Float](repeating: 0, count: total)
+                stridedReadF32(source: source, into: &tmp)
+                tmp.withUnsafeBufferPointer { buf in
+                    convertF32toF16(src: buf.baseAddress!, dst: dstU16, count: total)
+                }
+            }
             return dst
         }
         genericCopy(source, into: dst, count: total)
         return dst
+    }
+
+    /// Returns true when `arr.strides` is densely row-major over `arr.shape`.
+    private static func isRowMajorContiguous(_ arr: MLMultiArray) -> Bool {
+        let shape = arr.shape.map { $0.intValue }
+        let strides = arr.strides.map { $0.intValue }
+        guard shape.count == strides.count, !shape.isEmpty else { return true }
+        var expected = 1
+        for axis in stride(from: shape.count - 1, through: 0, by: -1) {
+            if strides[axis] != expected { return false }
+            expected *= shape[axis]
+        }
+        return true
+    }
+
+    /// Stride-aware copy from an fp16 MLMultiArray to a packed fp16 destination.
+    private static func stridedCopyU16(
+        source: MLMultiArray, dst: MLMultiArray, total: Int
+    ) {
+        let shape = source.shape.map { $0.intValue }
+        let strides = source.strides.map { $0.intValue }
+        let srcPtr = source.dataPointer.bindMemory(to: UInt16.self, capacity: 1)
+        let dstPtr = dst.dataPointer.bindMemory(to: UInt16.self, capacity: total)
+        var coord = [Int](repeating: 0, count: shape.count)
+        for i in 0..<total {
+            var off = 0
+            for d in 0..<shape.count { off += coord[d] * strides[d] }
+            dstPtr[i] = srcPtr[off]
+            for d in stride(from: shape.count - 1, through: 0, by: -1) {
+                coord[d] += 1
+                if coord[d] < shape[d] { break }
+                coord[d] = 0
+            }
+        }
+    }
+
+    /// Stride-aware read from an fp32 MLMultiArray into a packed fp32 buffer.
+    private static func stridedReadF32(source: MLMultiArray, into dst: inout [Float]) {
+        let shape = source.shape.map { $0.intValue }
+        let strides = source.strides.map { $0.intValue }
+        let srcPtr = source.dataPointer.bindMemory(to: Float.self, capacity: 1)
+        var coord = [Int](repeating: 0, count: shape.count)
+        for i in 0..<dst.count {
+            var off = 0
+            for d in 0..<shape.count { off += coord[d] * strides[d] }
+            dst[i] = srcPtr[off]
+            for d in stride(from: shape.count - 1, through: 0, by: -1) {
+                coord[d] += 1
+                if coord[d] < shape[d] { break }
+                coord[d] = 0
+            }
+        }
     }
 
     // MARK: - Float32 builders
@@ -107,6 +180,7 @@ enum KokoroAneArrays {
     }
 
     /// Build a Float32 MLMultiArray from a Float16-backed source.
+    /// Stride-aware: see `float16Array(shape:from:)` for the rationale.
     static func float32Array(shape: [Int], from source: MLMultiArray) throws -> MLMultiArray {
         let total = shape.reduce(1, *)
         precondition(
@@ -114,18 +188,52 @@ enum KokoroAneArrays {
             "float32Array(from MLMultiArray): source has \(source.count) elements, shape implies \(total)")
         let nsShape = shape.map { NSNumber(value: $0) }
         let dst = try MLMultiArray(shape: nsShape, dataType: .float32)
+        let isContig = isRowMajorContiguous(source)
         if source.dataType == .float32 {
-            memcpy(dst.dataPointer, source.dataPointer, total * MemoryLayout<Float>.size)
+            if isContig {
+                memcpy(dst.dataPointer, source.dataPointer, total * MemoryLayout<Float>.size)
+            } else {
+                let dstF = dst.dataPointer.bindMemory(to: Float.self, capacity: total)
+                var tmp = [Float](repeating: 0, count: total)
+                stridedReadF32(source: source, into: &tmp)
+                tmp.withUnsafeBufferPointer { buf in
+                    dstF.update(from: buf.baseAddress!, count: total)
+                }
+            }
             return dst
         }
         if source.dataType == .float16 {
-            let srcU16 = source.dataPointer.bindMemory(to: UInt16.self, capacity: total)
             let dstF = dst.dataPointer.bindMemory(to: Float.self, capacity: total)
-            convertF16toF32(src: srcU16, dst: dstF, count: total)
+            if isContig {
+                let srcU16 = source.dataPointer.bindMemory(to: UInt16.self, capacity: total)
+                convertF16toF32(src: srcU16, dst: dstF, count: total)
+            } else {
+                stridedReadF16ToF32(source: source, dst: dstF, total: total)
+            }
             return dst
         }
         genericCopy(source, into: dst, count: total)
         return dst
+    }
+
+    /// Stride-aware read from an fp16 MLMultiArray into a packed fp32 buffer.
+    private static func stridedReadF16ToF32(
+        source: MLMultiArray, dst: UnsafeMutablePointer<Float>, total: Int
+    ) {
+        let shape = source.shape.map { $0.intValue }
+        let strides = source.strides.map { $0.intValue }
+        let srcPtr = source.dataPointer.bindMemory(to: UInt16.self, capacity: 1)
+        var coord = [Int](repeating: 0, count: shape.count)
+        for i in 0..<total {
+            var off = 0
+            for d in 0..<shape.count { off += coord[d] * strides[d] }
+            dst[i] = Float(Float16(bitPattern: srcPtr[off]))
+            for d in stride(from: shape.count - 1, through: 0, by: -1) {
+                coord[d] += 1
+                if coord[d] < shape[d] { break }
+                coord[d] = 0
+            }
+        }
     }
 
     // MARK: - Int32 builders
@@ -250,17 +358,36 @@ enum KokoroAneArrays {
     // MARK: - Output extraction
 
     /// Read a Float32 MLMultiArray output into a Swift `[Float]` (flat).
+    /// Stride-aware: ANE outputs may pad the fastest dim (e.g.
+    /// `pred_dur_log` shape `[1, 14, 50]` with strides `[896, 64, 1]`,
+    /// padding 50→64). A naive contiguous read interleaves valid rows with
+    /// padding gaps and silently scrambles the result.
     static func readFloats(_ arr: MLMultiArray) -> [Float] {
         let count = arr.count
+        let isContig = isRowMajorContiguous(arr)
         if arr.dataType == .float32 {
-            let p = arr.dataPointer.bindMemory(to: Float.self, capacity: count)
-            return Array(UnsafeBufferPointer(start: p, count: count))
+            var out = [Float](repeating: 0, count: count)
+            if isContig {
+                let p = arr.dataPointer.bindMemory(to: Float.self, capacity: count)
+                out.withUnsafeMutableBufferPointer { buf in
+                    buf.baseAddress!.update(from: p, count: count)
+                }
+            } else {
+                stridedReadF32(source: arr, into: &out)
+            }
+            return out
         }
         if arr.dataType == .float16 {
-            let p = arr.dataPointer.bindMemory(to: UInt16.self, capacity: count)
             var out = [Float](repeating: 0, count: count)
-            out.withUnsafeMutableBufferPointer { outBuf in
-                convertF16toF32(src: p, dst: outBuf.baseAddress!, count: count)
+            if isContig {
+                let p = arr.dataPointer.bindMemory(to: UInt16.self, capacity: count)
+                out.withUnsafeMutableBufferPointer { outBuf in
+                    convertF16toF32(src: p, dst: outBuf.baseAddress!, count: count)
+                }
+            } else {
+                out.withUnsafeMutableBufferPointer { buf in
+                    stridedReadF16ToF32(source: arr, dst: buf.baseAddress!, total: count)
+                }
             }
             return out
         }

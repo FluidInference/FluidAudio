@@ -173,9 +173,22 @@ public actor StyleTTS2Manager {
             beta: beta,
             randomSeed: randomSeed
         ).samples
+        // Scale to a target peak of -7 dBFS to match the upstream PyTorch
+        // and Python CoreML reference loudness. Without this, the raw
+        // HiFi-GAN output regularly exceeds ±1.0 and AudioWAV.data either
+        // clips at 0 dBFS (peakNormalize:false) or normalizes back up to
+        // 0 dBFS (peakNormalize:true) — both ~7 dB hotter than the
+        // reference (-7 dBFS peak / ~-27 dB RMS).
+        let targetPeak: Float = 0.4467  // 10^(-7.0 / 20)
+        let maxAbs = samples.reduce(Float(0)) { Swift.max($0, abs($1)) }
+        let scaledSamples: [Float] =
+            maxAbs > 0
+            ? samples.map { $0 * (targetPeak / maxAbs) }
+            : samples
         return try AudioWAV.data(
-            from: samples,
-            sampleRate: Double(StyleTTS2Constants.sampleRate)
+            from: scaledSamples,
+            sampleRate: Double(StyleTTS2Constants.sampleRate),
+            peakNormalize: false
         )
     }
 

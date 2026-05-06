@@ -457,15 +457,31 @@ final public class AudioConverter: Sendable {
 // MARK: - WAV Utilities (shared by TTS/ASR)
 public enum AudioWAV {
     /// Convert float samples to 16-bit PCM mono WAV at the given sample rate.
-    public static func data(from samples: [Float], sampleRate: Double) throws -> Data {
-        // Normalize to [-1, 1]
-        let maxVal = samples.map { abs($0) }.max() ?? 1.0
-        let norm = maxVal > 0 ? samples.map { $0 / maxVal } : samples
+    /// - Parameters:
+    ///   - samples: fp32 PCM in `[-1, 1]` (or arbitrary range if `peakNormalize`).
+    ///   - sampleRate: Output sample rate in Hz.
+    ///   - peakNormalize: When true (default), divides by `max(|samples|)`
+    ///     so the output peaks at 0 dBFS. When false, samples are clipped
+    ///     to `[-1, 1]` without scaling — matching Python's `np.clip(...)`
+    ///     `_write_wav` convention so Swift TTS output reproduces upstream
+    ///     reference dB levels.
+    public static func data(
+        from samples: [Float],
+        sampleRate: Double,
+        peakNormalize: Bool = true
+    ) throws -> Data {
+        let processed: [Float]
+        if peakNormalize {
+            let maxVal = samples.map { abs($0) }.max() ?? 1.0
+            processed = maxVal > 0 ? samples.map { $0 / maxVal } : samples
+        } else {
+            processed = samples
+        }
 
         // Convert to 16-bit PCM
         var pcm = Data()
-        pcm.reserveCapacity(norm.count * MemoryLayout<Int16>.size)
-        for s in norm {
+        pcm.reserveCapacity(processed.count * MemoryLayout<Int16>.size)
+        for s in processed {
             let clipped = max(-1.0, min(1.0, s))
             let v = Int16(clipped * 32767)
             var le = v.littleEndian

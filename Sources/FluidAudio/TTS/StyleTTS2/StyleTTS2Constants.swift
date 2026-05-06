@@ -57,6 +57,12 @@ public enum StyleTTS2Constants {
     public static let refStyleDim: Int = 256
     /// BERT/text predictor hidden size.
     public static let hiddenDim: Int = 512
+    /// SineGen harmonic count + 1 (= `harmonic_num + 1`). Stage 6 emits
+    /// `sine_waves[1, T_audio, harmonicChannels]` and consumes a runtime
+    /// broadband noise tensor of the same shape. `harmonic_num=8` per the
+    /// upstream LibriTTS HiFi-GAN config (`Modules/hifigan.py`
+    /// `SourceModuleHnNSF(harmonic_num=8)`).
+    public static let harmonicChannels: Int = 9
 
     // MARK: - Sampler (ADPM2 + Karras schedule + CFG)
 
