@@ -37,12 +37,16 @@ public enum StyleTTS2AssetDownloader {
             StyleTTS2Constants.defaultModelsSubdirectory)
         let repoDir = modelsDirectory.appendingPathComponent(Repo.styleTts2Assets.folderName)
 
-        // `requiredModels` includes the `voices/` directory entry, but
-        // `FileManager.fileExists` returns true for an empty directory — so
-        // we additionally verify each voice preset blob is present before
-        // claiming a cache hit. Otherwise a partial / interrupted download
-        // would skip the post-download verification and surface as a
-        // confusing `modelNotFound` from `StyleTTS2VoiceStyle.named(...)`.
+        // `ModelNames.StyleTTS2.requiredModels` lists files plus the `voices/`
+        // *directory*; that list is the allowlist passed to `downloadRepo`, not
+        // a sufficient cache check on its own (an empty `voices/` dir would
+        // make `fileExists` return true). We separately enumerate
+        // `StyleTTS2VoicePresets.requiredFilenames` to validate the actual
+        // preset blobs.
+        //
+        // Atomic rename in `DownloadUtils` rules out 0-byte stragglers from
+        // interrupted writes, so `fileExists` is sufficient — every file that
+        // exists at this path was fully written.
         let voicesDir = repoDir.appendingPathComponent(
             StyleTTS2VoicePresets.directoryName, isDirectory: true)
         let sharedPresent = ModelNames.StyleTTS2.requiredModels.allSatisfy { model in
@@ -54,7 +58,7 @@ public enum StyleTTS2AssetDownloader {
                 atPath: voicesDir.appendingPathComponent(filename).path)
         }
 
-        guard !(sharedPresent && voicesPresent) else {
+        if sharedPresent && voicesPresent {
             logger.info("StyleTTS2 shared assets found in cache")
             return repoDir
         }
@@ -69,9 +73,10 @@ public enum StyleTTS2AssetDownloader {
             progressHandler: progressHandler
         )
 
-        // Verify after download — `downloadRepo` checks each pattern but the
-        // explicit re-check surfaces clearer errors when the network ack races
-        // ahead of disk visibility (seen on slow filesystems).
+        // Defense-in-depth verification. `downloadRepo` already checks its own
+        // glob/allowlist, but if that allowlist ever drifts from the
+        // `requiredModels` list this loop pinpoints the missing path with a
+        // clearer error than the consumer would otherwise see.
         for model in ModelNames.StyleTTS2.requiredModels {
             let path = repoDir.appendingPathComponent(model).path
             guard FileManager.default.fileExists(atPath: path) else {
@@ -80,9 +85,8 @@ public enum StyleTTS2AssetDownloader {
             }
         }
 
-        // The `voices/` directory existence check above is necessary but not
-        // sufficient — the directory walker may have created the parent
-        // without populating its contents. Verify each preset blob lands.
+        // Same defense-in-depth for voice presets — the `voices/` allowlist
+        // entry only covers the directory, not its contents.
         for filename in StyleTTS2VoicePresets.requiredFilenames {
             let path = voicesDir.appendingPathComponent(filename).path
             guard FileManager.default.fileExists(atPath: path) else {
@@ -96,6 +100,10 @@ public enum StyleTTS2AssetDownloader {
 
     // MARK: - Private
 
+    /// Resolve the FluidAudio cache root. macOS uses `~/.cache/fluidaudio`
+    /// (Linux/XDG-style — matches HuggingFace's default and is the
+    /// project-wide convention used by every other downloader). iOS falls
+    /// back to the platform Caches directory.
     private static func cacheDirectory() throws -> URL {
         let baseDirectory: URL
         #if os(macOS)
@@ -107,16 +115,14 @@ public enum StyleTTS2AssetDownloader {
                 for: .cachesDirectory, in: .userDomainMask
             ).first
         else {
-            throw StyleTTS2Error.processingFailed("Failed to locate caches directory")
+            throw StyleTTS2Error.downloadFailed("Failed to locate caches directory")
         }
         baseDirectory = first
         #endif
 
         let cacheDirectory = baseDirectory.appendingPathComponent("fluidaudio")
-        if !FileManager.default.fileExists(atPath: cacheDirectory.path) {
-            try FileManager.default.createDirectory(
-                at: cacheDirectory, withIntermediateDirectories: true)
-        }
+        try FileManager.default.createDirectory(
+            at: cacheDirectory, withIntermediateDirectories: true)
         return cacheDirectory
     }
 }
