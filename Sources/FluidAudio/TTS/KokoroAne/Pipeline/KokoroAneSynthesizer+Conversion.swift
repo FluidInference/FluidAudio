@@ -153,6 +153,9 @@ enum KokoroAneArrays {
     ) throws -> MLMultiArray {
         precondition(arr.dataType == .float16, "sliceLeadingTimeFp16 requires fp16 source")
         let total = newShape.reduce(1, *)
+        precondition(
+            total <= arr.count,
+            "sliceLeadingTimeFp16: requested \(total) elements but source has \(arr.count)")
         let nsShape = newShape.map { NSNumber(value: $0) }
         let dst = try MLMultiArray(shape: nsShape, dataType: .float16)
         memcpy(dst.dataPointer, arr.dataPointer, total * MemoryLayout<UInt16>.size)
@@ -166,6 +169,9 @@ enum KokoroAneArrays {
     ) throws -> MLMultiArray {
         precondition(arr.dataType == .float32, "sliceLeadingTimeFp32 requires fp32 source")
         let total = newShape.reduce(1, *)
+        precondition(
+            total <= arr.count,
+            "sliceLeadingTimeFp32: requested \(total) elements but source has \(arr.count)")
         let nsShape = newShape.map { NSNumber(value: $0) }
         let dst = try MLMultiArray(shape: nsShape, dataType: .float32)
         memcpy(dst.dataPointer, arr.dataPointer, total * MemoryLayout<Float>.size)

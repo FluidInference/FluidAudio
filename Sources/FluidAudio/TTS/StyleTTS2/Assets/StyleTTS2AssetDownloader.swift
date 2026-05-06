@@ -37,12 +37,24 @@ public enum StyleTTS2AssetDownloader {
             StyleTTS2Constants.defaultModelsSubdirectory)
         let repoDir = modelsDirectory.appendingPathComponent(Repo.styleTts2Assets.folderName)
 
-        let allPresent = ModelNames.StyleTTS2.requiredModels.allSatisfy { model in
+        // `requiredModels` includes the `voices/` directory entry, but
+        // `FileManager.fileExists` returns true for an empty directory — so
+        // we additionally verify each voice preset blob is present before
+        // claiming a cache hit. Otherwise a partial / interrupted download
+        // would skip the post-download verification and surface as a
+        // confusing `modelNotFound` from `StyleTTS2VoiceStyle.named(...)`.
+        let voicesDir = repoDir.appendingPathComponent(
+            StyleTTS2VoicePresets.directoryName, isDirectory: true)
+        let sharedPresent = ModelNames.StyleTTS2.requiredModels.allSatisfy { model in
             FileManager.default.fileExists(
                 atPath: repoDir.appendingPathComponent(model).path)
         }
+        let voicesPresent = StyleTTS2VoicePresets.requiredFilenames.allSatisfy { filename in
+            FileManager.default.fileExists(
+                atPath: voicesDir.appendingPathComponent(filename).path)
+        }
 
-        guard !allPresent else {
+        guard !(sharedPresent && voicesPresent) else {
             logger.info("StyleTTS2 shared assets found in cache")
             return repoDir
         }
@@ -71,8 +83,6 @@ public enum StyleTTS2AssetDownloader {
         // The `voices/` directory existence check above is necessary but not
         // sufficient — the directory walker may have created the parent
         // without populating its contents. Verify each preset blob lands.
-        let voicesDir = repoDir.appendingPathComponent(
-            StyleTTS2VoicePresets.directoryName, isDirectory: true)
         for filename in StyleTTS2VoicePresets.requiredFilenames {
             let path = voicesDir.appendingPathComponent(filename).path
             guard FileManager.default.fileExists(atPath: path) else {
