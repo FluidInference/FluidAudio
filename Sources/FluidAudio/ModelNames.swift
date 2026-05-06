@@ -860,12 +860,12 @@ public enum ModelNames {
         // MARK: - 7 CoreML stages (under ANE/ subdirectory)
 
         public static let plBertFile = "styletts2_ane_plbert.mlmodelc"
-        public static let postBertFile = "styletts2_ane_postbert_v2.mlmodelc"
+        public static let postBertFile = "styletts2_ane_postbert.mlmodelc"
         public static let alignmentFile = "styletts2_ane_alignment.mlmodelc"
         public static let diffusionStepFile = "styletts2_ane_diffusion_step.mlmodelc"
         public static let prosodyFile = "styletts2_ane_prosody.mlmodelc"
         public static let noiseFile = "styletts2_ane_noise.mlmodelc"
-        public static let vocoderFile = "styletts2_ane_vocoder_v2.mlmodelc"
+        public static let vocoderFile = "styletts2_ane_vocoder.mlmodelc"
 
         /// The 7 `.mlmodelc` bundles required for synthesis. Downloaded by
         /// `StyleTTS2CoreMLDownloader`.

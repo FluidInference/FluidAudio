@@ -142,25 +142,65 @@ public actor StyleTTS2ModelStore {
     private func loadAllStages(
         progressHandler: DownloadUtils.ProgressHandler?
     ) async throws {
+        // Drop any stragglers from a previous failed bring-up so the state
+        // machine is "fully loaded or empty" rather than "fully loaded,
+        // empty, or some-arbitrary-subset". Without this guard a mid-load
+        // failure would leave `models` populated with whatever succeeded;
+        // subsequent `model(for:)` calls would happily hand those entries
+        // back and only fail on the missing stages, masking the original
+        // error and producing confusing partial-pipeline runs.
+        models.removeAll()
+        loaded = false
+
         let bundleRoot =
             try await StyleTTS2CoreMLDownloader
             .ensureAssets(directory: directory, progressHandler: progressHandler)
 
-        for stage in StyleTTS2Stage.allCases {
-            let url = bundleRoot.appendingPathComponent(stage.bundleName)
-            guard FileManager.default.fileExists(atPath: url.path) else {
-                throw StyleTTS2Error.modelNotLoaded(stage.bundleName)
+        // Load each stage concurrently. ANE compilation funnels through
+        // `anecompilerservice` (a system singleton), so the speedup is
+        // bounded by what that service can pipeline; the CPU-side
+        // `.mlmodelc` unpack does parallelize cleanly. The first stage
+        // throw cancels the rest via TaskGroup teardown.
+        //
+        // Accumulator pattern (mirrors
+        // `KokoroAneModelStore.loadIfNeeded`): stage models land in
+        // `pending` first; we only commit to `self.models` after the
+        // cancellation check below passes — a partial failure or a
+        // racing `cleanup()` therefore can never leave the store
+        // half-loaded.
+        let units = computeUnits
+        var pending: [StyleTTS2Stage: MLModel] = [:]
+        try await withThrowingTaskGroup(
+            of: (StyleTTS2Stage, MLModel).self
+        ) { group in
+            for stage in StyleTTS2Stage.allCases {
+                group.addTask {
+                    let url = bundleRoot.appendingPathComponent(stage.bundleName)
+                    guard FileManager.default.fileExists(atPath: url.path) else {
+                        throw StyleTTS2Error.modelNotLoaded(stage.bundleName)
+                    }
+                    let config = MLModelConfiguration()
+                    config.computeUnits = units.units(for: stage)
+                    do {
+                        let model = try MLModel(contentsOf: url, configuration: config)
+                        return (stage, model)
+                    } catch {
+                        throw StyleTTS2Error.loadFailed(
+                            stage: stage.rawValue, underlying: error)
+                    }
+                }
             }
-            let config = MLModelConfiguration()
-            config.computeUnits = computeUnits.units(for: stage)
-            do {
-                let model = try MLModel(contentsOf: url, configuration: config)
-                models[stage] = model
-            } catch {
-                throw StyleTTS2Error.predictionFailed(
-                    stage: stage.rawValue, underlying: error)
+            for try await (stage, model) in group {
+                pending[stage] = model
             }
         }
+
+        // `cleanup()` cancels this task. Honour that here so a cleanup
+        // call that races a successful bring-up doesn't have its state
+        // wipe immediately overwritten by the late commit below.
+        try Task.checkCancellation()
+
+        models = pending
         loaded = true
         logger.notice("StyleTTS2-ANE: 7 mlmodelcs loaded.")
     }
@@ -173,6 +213,12 @@ public actor StyleTTS2ModelStore {
     }
 
     public func cleanup() {
+        // Cancel any in-flight bring-up. The load body calls
+        // `Task.checkCancellation()` before committing the loaded
+        // models dict, so cleanup() winning the actor turn keeps the
+        // store empty without needing to await the task's settlement.
+        loadTask?.cancel()
+        loadTask = nil
         models.removeAll()
         loaded = false
     }

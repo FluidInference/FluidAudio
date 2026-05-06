@@ -5,12 +5,12 @@ import Foundation
 /// Repo layout (`FluidInference/StyleTTS-2-coreml/ANE/`):
 /// ```
 /// /styletts2_ane_plbert.mlmodelc/
-/// /styletts2_ane_postbert_v2.mlmodelc/
+/// /styletts2_ane_postbert.mlmodelc/
 /// /styletts2_ane_alignment.mlmodelc/
 /// /styletts2_ane_diffusion_step.mlmodelc/
 /// /styletts2_ane_prosody.mlmodelc/
 /// /styletts2_ane_noise.mlmodelc/
-/// /styletts2_ane_vocoder_v2.mlmodelc/
+/// /styletts2_ane_vocoder.mlmodelc/
 /// ```
 ///
 /// `ref_s.bin` voice blobs are *not* fetched here — they ship per-voice and

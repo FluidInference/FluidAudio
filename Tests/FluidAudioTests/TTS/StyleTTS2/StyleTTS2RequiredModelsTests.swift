@@ -24,12 +24,12 @@ final class StyleTTS2RequiredModelsTests: XCTestCase {
     func testRequiredCoreMLModelsContainsAllSevenStages() {
         let expected: Set<String> = [
             "styletts2_ane_plbert.mlmodelc",
-            "styletts2_ane_postbert_v2.mlmodelc",
+            "styletts2_ane_postbert.mlmodelc",
             "styletts2_ane_alignment.mlmodelc",
             "styletts2_ane_diffusion_step.mlmodelc",
             "styletts2_ane_prosody.mlmodelc",
             "styletts2_ane_noise.mlmodelc",
-            "styletts2_ane_vocoder_v2.mlmodelc",
+            "styletts2_ane_vocoder.mlmodelc",
         ]
         XCTAssertEqual(ModelNames.StyleTTS2.requiredCoreMLModels, expected)
     }
@@ -52,7 +52,7 @@ final class StyleTTS2RequiredModelsTests: XCTestCase {
         XCTAssertEqual(
             ModelNames.StyleTTS2.plBertFile, "styletts2_ane_plbert.mlmodelc")
         XCTAssertEqual(
-            ModelNames.StyleTTS2.postBertFile, "styletts2_ane_postbert_v2.mlmodelc")
+            ModelNames.StyleTTS2.postBertFile, "styletts2_ane_postbert.mlmodelc")
         XCTAssertEqual(
             ModelNames.StyleTTS2.alignmentFile, "styletts2_ane_alignment.mlmodelc")
         XCTAssertEqual(
@@ -63,7 +63,7 @@ final class StyleTTS2RequiredModelsTests: XCTestCase {
         XCTAssertEqual(
             ModelNames.StyleTTS2.noiseFile, "styletts2_ane_noise.mlmodelc")
         XCTAssertEqual(
-            ModelNames.StyleTTS2.vocoderFile, "styletts2_ane_vocoder_v2.mlmodelc")
+            ModelNames.StyleTTS2.vocoderFile, "styletts2_ane_vocoder.mlmodelc")
     }
 
     // MARK: - Repo wiring
