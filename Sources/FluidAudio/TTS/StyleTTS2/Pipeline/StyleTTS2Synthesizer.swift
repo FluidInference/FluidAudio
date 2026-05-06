@@ -41,8 +41,8 @@ public struct StyleTTS2Synthesizer {
 
         public init(
             diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
-            alpha: Float = 0.3,
-            beta: Float = 0.7,
+            alpha: Float = StyleTTS2Constants.defaultAlpha,
+            beta: Float = StyleTTS2Constants.defaultBeta,
             randomSeed: UInt64? = nil
         ) {
             self.diffusionSteps = diffusionSteps
@@ -105,7 +105,7 @@ public struct StyleTTS2Synthesizer {
 
         // Compute durations + T_a from pred_dur_log
         // (= round(sigmoid(logit).sum(-1)).clamp(min=1)).
-        let durations = computeDurations(arr: predDurLog, tTok: tTok)
+        let durations = try computeDurations(arr: predDurLog, tTok: tTok)
         let tA = durations.reduce(0, +)
         guard tA >= 1 else {
             throw StyleTTS2Error.inputProcessingFailed("predicted T_a was 0")
@@ -220,16 +220,33 @@ public struct StyleTTS2Synthesizer {
             newT: tA
         )
 
-        let f0F16Full = try KokoroAneArrays.float16Array(shape: f0Shape, from: f0Raw)
-        let nF16Full = try KokoroAneArrays.float16Array(shape: nShape, from: nRaw)
+        // Skip the redundant fp16→fp16 memcpy when Prosody already
+        // emitted fp16 (the common case). Slicing reads from the source
+        // directly, so reusing `f0Raw`/`nRaw` is safe and saves one
+        // MAX_T_A-sized allocation per call.
+        let f0F16Source: MLMultiArray =
+            f0Raw.dataType == .float16
+            ? f0Raw : try KokoroAneArrays.float16Array(shape: f0Shape, from: f0Raw)
+        let nF16Source: MLMultiArray =
+            nRaw.dataType == .float16
+            ? nRaw : try KokoroAneArrays.float16Array(shape: nShape, from: nRaw)
         let f0F16 = try KokoroAneArrays.sliceLeadingTimeFp16(
-            f0F16Full, newShape: [1, tAFrames])
+            f0F16Source, newShape: [1, tAFrames])
         let nF16 = try KokoroAneArrays.sliceLeadingTimeFp16(
-            nF16Full, newShape: [1, tAFrames])
+            nF16Source, newShape: [1, tAFrames])
 
         let sineWavesF16Full = try rebuild16(noiseOut, key: "sine_waves", stage: .noise)
         let sineShapeFull = sineWavesF16Full.shape.map(\.intValue)
-        let harmPlus1 = sineShapeFull.last ?? 1
+        // The downstream slice expects 3D `[1, T_audio, harm+1]`; reject
+        // anything else loudly instead of falling through with a wrong
+        // `harm+1` from the `?? 1` fallback.
+        guard sineShapeFull.count == 3, let harmPlus1 = sineShapeFull.last else {
+            throw StyleTTS2Error.unexpectedOutputShape(
+                stage: StyleTTS2Stage.noise.rawValue,
+                expected: "[1, T_audio, harm+1]",
+                got: "\(sineShapeFull)"
+            )
+        }
         let sineWavesF16 = try KokoroAneArrays.sliceLeadingTimeFp16(
             sineWavesF16Full, newShape: [1, tAudio, harmPlus1])
 
@@ -271,9 +288,13 @@ public struct StyleTTS2Synthesizer {
         let model = try await store.model(for: .diffusionStep)
 
         // Cumulative wall-clock across all 11 (5×2+1) invocations.
-        let t0 = Date()
+        let t0 = DispatchTime.now()
 
         let denoise: StyleTTS2Sampler.DenoiseStep = { x, sigma in
+            // Each step is a full ANE round-trip; check cancellation
+            // at the top so the 11-call loop doesn't keep grinding
+            // after the caller has bailed.
+            try Task.checkCancellation()
             let xArr = try KokoroAneArrays.float16Array(
                 shape: [1, 1, StyleTTS2Constants.refStyleDim], from: x)
             let sigmaArr = try KokoroAneArrays.float16Array(
@@ -307,7 +328,9 @@ public struct StyleTTS2Synthesizer {
         let result = try await StyleTTS2Sampler.adpm2Sample(
             steps: steps, noise: noise, denoise: denoise)
 
-        timing = Date().timeIntervalSince(t0) * 1000
+        timing =
+            Double(DispatchTime.now().uptimeNanoseconds - t0.uptimeNanoseconds)
+            / 1_000_000.0
         return result
     }
 
@@ -321,6 +344,17 @@ public struct StyleTTS2Synthesizer {
     ) throws -> MLMultiArray {
         let bertDim = 768
         let tEmbMax = StyleTTS2Constants.maxInputTokens  // 512
+        // Validate the source layout before computing memcpy offsets — a
+        // shape drift in PLBert would otherwise produce silently garbled
+        // output rather than a localised failure.
+        let srcShape = bertDur.shape.map(\.intValue)
+        guard srcShape == [1, tTok, bertDim] else {
+            throw StyleTTS2Error.unexpectedOutputShape(
+                stage: StyleTTS2Stage.plBert.rawValue,
+                expected: "[1, \(tTok), \(bertDim)]",
+                got: "\(srcShape)"
+            )
+        }
         let dst = try MLMultiArray(
             shape: [1, NSNumber(value: tEmbMax), NSNumber(value: bertDim)],
             dataType: .float16)
@@ -372,14 +406,23 @@ public struct StyleTTS2Synthesizer {
 
     /// Compute per-token durations from `pred_dur_log[1, T_tok, 50]`.
     /// `pred_dur = round(sigmoid(logit).sum(-1)).clamp(min=1)`.
-    private static func computeDurations(arr: MLMultiArray, tTok: Int) -> [Int] {
+    private static func computeDurations(arr: MLMultiArray, tTok: Int) throws -> [Int] {
         let dimDur = 50
-        var out = [Int](repeating: 0, count: tTok)
         let count = arr.count
         let total = tTok * dimDur
-        guard count >= total else { return out }
+        // Throw at the source on shape mismatch instead of returning all
+        // zeros and surfacing the failure later as a confusing
+        // "predicted T_a was 0" — the real cause is a PostBert shape drift.
+        guard count >= total else {
+            throw StyleTTS2Error.unexpectedOutputShape(
+                stage: StyleTTS2Stage.postBert.rawValue,
+                expected: "pred_dur_log [1, \(tTok), \(dimDur)] (\(total) elements)",
+                got: "count=\(count)"
+            )
+        }
 
         // Read logits as Float regardless of fp16/fp32 storage.
+        var out = [Int](repeating: 0, count: tTok)
         let floats = KokoroAneArrays.readFloats(arr)
         for i in 0..<tTok {
             var sum: Float = 0
@@ -392,8 +435,16 @@ public struct StyleTTS2Synthesizer {
         return out
     }
 
+    /// Numerically stable sigmoid. The naive `1 / (1 + exp(-x))` form
+    /// underflows to zero and loses precision for very negative `x`
+    /// (`expf` overflows around `-88`). Splitting the branch keeps both
+    /// tails exact even if the model emits saturated logits.
     private static func sigmoid(_ x: Float) -> Float {
-        return 1.0 / (1.0 + exp(-x))
+        if x >= 0 {
+            return 1.0 / (1.0 + exp(-x))
+        }
+        let ex = exp(x)
+        return ex / (1.0 + ex)
     }
 
     private static func mix(a: [Float], b: [Float], alpha: Float) -> [Float] {
@@ -441,12 +492,20 @@ public struct StyleTTS2Synthesizer {
         inputs: [String: MLMultiArray],
         timing: inout Double
     ) async throws -> MLFeatureProvider {
+        // Cooperatively cancel between stages — long syntheses (large
+        // T_a, many diffusion calls) can't preempt CoreML's
+        // `prediction(from:)` itself, but checking at the stage
+        // boundary makes the orchestrator drop out promptly when an
+        // interactive caller cancels.
+        try Task.checkCancellation()
         let provider = try MLDictionaryFeatureProvider(
             dictionary: inputs.mapValues { MLFeatureValue(multiArray: $0) })
-        let start = Date()
+        let start = DispatchTime.now()
         do {
             let out = try await model.prediction(from: provider)
-            timing = Date().timeIntervalSince(start) * 1000
+            timing =
+                Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds)
+                / 1_000_000.0
             return out
         } catch {
             throw StyleTTS2Error.predictionFailed(

@@ -62,6 +62,13 @@ public enum StyleTTS2Constants {
 
     /// Default number of diffusion sampler steps (5× per utterance).
     public static let defaultDiffusionSteps: Int = 5
+    /// Default acoustic style mix weight (alpha) — 30 % diffusion-predicted,
+    /// 70 % reference. Matches the upstream Python e2e reference
+    /// (`99b_e2e_coreml.py`).
+    public static let defaultAlpha: Float = 0.3
+    /// Default prosody style mix weight (beta) — 70 % diffusion-predicted,
+    /// 30 % reference. Matches the upstream Python e2e reference.
+    public static let defaultBeta: Float = 0.7
     /// Karras schedule rho (controls sigma curvature). Matches the upstream
     /// e2e reference (`99b_e2e_coreml.py`) which uses rho=9.0 — *not* the
     /// k-diffusion default of 7.0.

@@ -36,6 +36,7 @@ public actor StyleTTS2Manager {
     private let legacyAssetStore: StyleTTS2AssetStore
 
     private var isInitialized = false
+    private var initializeTask: Task<Void, Error>?
 
     /// - Parameters:
     ///   - directory: Optional override for the base cache directory.
@@ -53,15 +54,44 @@ public actor StyleTTS2Manager {
         self.legacyAssetStore = StyleTTS2AssetStore(directory: directory)
     }
 
+    /// Public-API alias for `isInitialized`. Both names exist intentionally:
+    /// `isAvailable` reads naturally at call sites that gate UI / feature
+    /// availability (`if await manager.isAvailable { ... }`), while the
+    /// internal `isInitialized` flag mirrors the verb in `initialize()`
+    /// and reads more naturally inside the implementation. They are always
+    /// the same value — `isAvailable` is just a thin alias and intentionally
+    /// not stored separately so they can never drift.
     public var isAvailable: Bool { isInitialized }
 
     /// Download the 7 mlmodelcs, eagerly compile them onto the requested
     /// compute units, and bootstrap the G2P + vocab assets. Idempotent.
+    /// Concurrent first-callers join a shared `Task` so the multi-second
+    /// download + ANE compile is paid exactly once. Only the first call's
+    /// `progressHandler` fires; later joiners just await the same result.
     public func initialize(
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws {
         if isInitialized { return }
+        if let task = initializeTask {
+            try await task.value
+            return
+        }
+        let task = Task<Void, Error> { [self] in
+            try await runInitialize(progressHandler: progressHandler)
+        }
+        initializeTask = task
+        do {
+            try await task.value
+            initializeTask = nil
+        } catch {
+            initializeTask = nil
+            throw error
+        }
+    }
 
+    private func runInitialize(
+        progressHandler: DownloadUtils.ProgressHandler?
+    ) async throws {
         // 1. Fetch + compile the 7 ANE mlmodelcs.
         try await modelStore.loadIfNeeded(progressHandler: progressHandler)
 
@@ -91,6 +121,24 @@ public actor StyleTTS2Manager {
         logger.notice("StyleTTS2Manager initialized")
     }
 
+    /// The shipped LibriTTS checkpoint is English-only. Other
+    /// `MultilingualG2PLanguage` cases would route through misaki/espeak-ng
+    /// for phonemization but produce gibberish acoustically because the
+    /// acoustic model has never seen those phoneme distributions. Reject
+    /// them at the API boundary instead of silently producing wrong-language
+    /// audio.
+    private static func validateLanguage(_ language: MultilingualG2PLanguage) throws {
+        switch language {
+        case .americanEnglish, .britishEnglish:
+            return
+        default:
+            throw StyleTTS2Error.invalidConfiguration(
+                "StyleTTS2-ANE checkpoint is English-only; got \(language). "
+                    + "Pass `.americanEnglish` or `.britishEnglish`."
+            )
+        }
+    }
+
     /// Synthesize text to a WAV blob at 24 kHz.
     ///
     /// - Parameters:
@@ -112,8 +160,8 @@ public actor StyleTTS2Manager {
         voiceStyleURL: URL,
         language: MultilingualG2PLanguage = .americanEnglish,
         diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
-        alpha: Float = 0.3,
-        beta: Float = 0.7,
+        alpha: Float = StyleTTS2Constants.defaultAlpha,
+        beta: Float = StyleTTS2Constants.defaultBeta,
         randomSeed: UInt64? = nil
     ) async throws -> Data {
         let samples = try await synthesizeSamples(
@@ -139,8 +187,8 @@ public actor StyleTTS2Manager {
         voiceStyleURL: URL,
         language: MultilingualG2PLanguage = .americanEnglish,
         diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
-        alpha: Float = 0.3,
-        beta: Float = 0.7,
+        alpha: Float = StyleTTS2Constants.defaultAlpha,
+        beta: Float = StyleTTS2Constants.defaultBeta,
         randomSeed: UInt64? = nil
     ) async throws -> (samples: [Float], sampleRate: Int) {
         let result = try await synthesizeDetailed(
@@ -162,13 +210,14 @@ public actor StyleTTS2Manager {
         voiceStyleURL: URL,
         language: MultilingualG2PLanguage = .americanEnglish,
         diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
-        alpha: Float = 0.3,
-        beta: Float = 0.7,
+        alpha: Float = StyleTTS2Constants.defaultAlpha,
+        beta: Float = StyleTTS2Constants.defaultBeta,
         randomSeed: UInt64? = nil
     ) async throws -> StyleTTS2SynthesisResult {
         guard isInitialized else {
             throw StyleTTS2Error.modelNotLoaded("StyleTTS2Manager.initialize() not called")
         }
+        try Self.validateLanguage(language)
         let voice = try StyleTTS2VoiceStyle.load(from: voiceStyleURL)
         let (_, ids) = try await tokenize(text: text, language: language)
         let options = StyleTTS2Synthesizer.Options(
@@ -191,6 +240,7 @@ public actor StyleTTS2Manager {
         guard isInitialized else {
             throw StyleTTS2Error.modelNotLoaded("StyleTTS2Manager.initialize() not called")
         }
+        try Self.validateLanguage(language)
         let phonemes = try await StyleTTS2Phonemizer.phonemize(
             text: text, language: language)
         let vocab = try await legacyAssetStore.vocabulary()
@@ -212,6 +262,7 @@ public actor StyleTTS2Manager {
         guard isInitialized else {
             throw StyleTTS2Error.modelNotLoaded("StyleTTS2Manager.initialize() not called")
         }
+        try Self.validateLanguage(language)
         let phonemes = try await StyleTTS2Phonemizer.phonemize(
             text: text, language: language)
         let vocab = try await legacyAssetStore.vocabulary()
@@ -231,8 +282,12 @@ public actor StyleTTS2Manager {
 
     /// Drop strong references to the loaded models. Call this when the app
     /// is going to background or under memory pressure. Re-call
-    /// `initialize()` to reload.
+    /// `initialize()` to reload. Cancels any in-flight `initialize()` so a
+    /// late-arriving success can't flip `isInitialized` back to true after
+    /// the cleanup has already run.
     public func cleanup() async {
+        initializeTask?.cancel()
+        initializeTask = nil
         await modelStore.cleanup()
         isInitialized = false
     }
