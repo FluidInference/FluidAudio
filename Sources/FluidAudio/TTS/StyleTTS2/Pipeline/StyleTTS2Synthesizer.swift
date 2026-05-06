@@ -15,8 +15,12 @@ import Foundation
 ///                    embedding[1,512,768], features[1,256] → denoised[1,1,256]
 ///                    Looped 11× by the ADPM2 sampler in Swift
 ///                    (5 midpoint × 2 + 1 final).
-///   5. Prosody       en[1,640,MAX_T_A], s_pros[1,128] → F0[1,MAX_T_A], N[1,MAX_T_A]
-///   6. Noise (fp32)  F0[1,MAX_T_A] → sine_waves[1,T_audio,harm+1], uv[1,MAX_T_A,1]
+///   5. Prosody       en[1,640,MAX_T_A], s_pros[1,128] →
+///                    F0[1,2*MAX_T_A], N[1,2*MAX_T_A]
+///                    (F0/N are emitted at 2× temporal resolution; matches
+///                    the legacy `f0n_energy` head's `[1, 2*B_mel]` output.)
+///   6. Noise (fp32)  F0[1,2*MAX_T_A] →
+///                    sine_waves[1,T_audio,harm+1], uv[1,2*MAX_T_A,1]
 ///   7. Vocoder       asr, F0, N, ref_s_mixed[1,256], sine_waves → audio[1,T_audio]
 ///
 /// Stages 4-7 are *fixed* shape (T_a padded to MAX_T_A=2000); stages 1-3 are

@@ -22,13 +22,26 @@ public enum StyleTTS2CoreMLDownloader {
     private static let logger = AppLogger(category: "StyleTTS2CoreMLDownloader")
 
     /// Ensure the 7 mlmodelcs are present locally; download if any is missing.
+    ///
+    /// - Parameters:
+    ///   - directory: Optional override for the *base* cache directory
+    ///     (e.g. `~/.cache/fluidaudio`). The `Models/` subdirectory is
+    ///     appended internally so the resolved layout matches
+    ///     `StyleTTS2AssetDownloader.ensureModels(directory:)`. Pass `nil`
+    ///     to use the default platform cache location.
     /// - Returns: The directory containing all 7 `.mlmodelc` bundles.
     @discardableResult
     public static func ensureAssets(
         directory: URL? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
-        let modelsDirectory = try directory ?? defaultModelsDirectory()
+        let modelsDirectory: URL
+        if let directory {
+            modelsDirectory = directory.appendingPathComponent(
+                StyleTTS2Constants.defaultModelsSubdirectory)
+        } else {
+            modelsDirectory = try defaultModelsDirectory()
+        }
         let repo = Repo.styleTts2
         let repoDir = modelsDirectory.appendingPathComponent(repo.folderName)
 
@@ -71,15 +84,13 @@ public enum StyleTTS2CoreMLDownloader {
     /// Resolve the FluidAudio cache root and append the StyleTTS2 models
     /// subdirectory.
     ///
-    /// Returns the *fully qualified* models path (`~/.cache/fluidaudio/<sub>`),
-    /// while `StyleTTS2AssetDownloader.cacheDirectory()` returns just the base
-    /// (`~/.cache/fluidaudio`) and lets its caller append the subdir. Both
-    /// shapes coexist intentionally — the asset downloader owns multiple
-    /// repos under the same base, while this downloader maps 1:1 to a single
-    /// model bundle. Pulling these two helpers (plus the analogous ones in
-    /// every other downloader under `Sources/FluidAudio/TTS/`) into a single
-    /// shared cache-path utility is a worthwhile project-wide refactor but
-    /// out of scope here.
+    /// Returns the *fully qualified* models path
+    /// (`~/.cache/fluidaudio/Models`), matching the layout produced when a
+    /// caller-supplied `directory` is passed to `ensureAssets(directory:)`
+    /// (which appends the same `Models/` segment internally). This keeps
+    /// the ANE downloader and `StyleTTS2AssetDownloader.ensureModels` in
+    /// agreement: both treat the input `directory` as the base cache root
+    /// and own the `Models/` segment themselves.
     private static func defaultModelsDirectory() throws -> URL {
         let baseDirectory: URL
         #if os(macOS)
