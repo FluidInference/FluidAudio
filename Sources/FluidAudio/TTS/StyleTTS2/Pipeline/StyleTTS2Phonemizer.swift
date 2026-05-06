@@ -2,11 +2,20 @@ import Foundation
 
 /// Text → IPA phoneme string pipeline for StyleTTS2.
 ///
-/// For English (`.americanEnglish`), uses the in-tree `G2PModel` (BART
-/// encoder-decoder, misaki-style IPA) and remaps the misaki conventions to
-/// the espeak-ng convention that StyleTTS2's LibriTTS checkpoint expects.
+/// English (`.americanEnglish`) resolution order, per word:
+///   1. Kokoro `us_lexicon_cache.json` lookup (case-sensitive form first,
+///      then lowercase). This is misaki's gold dictionary flattened into a
+///      JSON map; common words and contractions (`this`, `is`, `the`,
+///      `of`, `don't`, `won't`, `i'm`, …) only resolve correctly through
+///      this path. Apostrophes are preserved on the lookup key.
+///   2. Acronym fallback: if the word is 2..6 ASCII uppercase letters
+///      (e.g. `ANE`, `IBM`, `USA`), spell it letter-by-letter through the
+///      lexicon's case-sensitive single-letter entries.
+///   3. In-tree `G2PModel` BART encoder-decoder (misaki-style IPA) for
+///      OOV words, with the same misaki→espeak remap as before.
 ///
-/// **Per-piece (single glyph) remap** — applied as misaki emits each piece:
+/// **Per-piece (single glyph) remap** — applied to every emitted phoneme
+/// piece, regardless of source (lexicon, acronym, or BART):
 ///
 ///   misaki → espeak-ng
 ///   A → eɪ   I → aɪ   O → oʊ   W → aʊ   Y → ɔɪ
@@ -36,23 +45,12 @@ import Foundation
 /// The output is a phoneme **string** (not yet token ids) so that callers
 /// can splice in custom IPA, log, or post-process before encoding through
 /// `StyleTTS2Vocab.encode(_:)`.
-///
-/// Pipeline:
-///  1. `TtsTextPreprocessor.preprocess` — number/currency/time/unit expansion
-///     and smart-quote normalization (shared with the Kokoro frontend).
-///  2. Walk the cleaned text character-by-character. Letter runs are
-///     accumulated as words and flushed through G2P. Non-letter characters
-///     (punctuation, whitespace) are passed through verbatim — the
-///     178-vocab includes `.,;:!?…—""«»¡¿"` and `' '` so this round-trips
-///     cleanly.
-///  3. Returned string is one IPA grapheme per character, ready to be fed
-///     to `StyleTTS2Vocab.encode(_:)`.
 public enum StyleTTS2Phonemizer {
 
     private static let logger = AppLogger(category: "StyleTTS2Phonemizer")
 
     /// Misaki single-glyph diphthongs / offglides → espeak-ng IPA.
-    /// Applied per-piece on the output of `G2PModel.phonemize`.
+    /// Applied per-piece on every phoneme source (lexicon, acronym, BART).
     private static let misakiToEspeak: [String: String] = [
         "A": "eɪ",
         "I": "aɪ",
@@ -86,12 +84,74 @@ public enum StyleTTS2Phonemizer {
         return out
     }
 
+    /// Lazily-loaded shared Kokoro lexicon (`us_lexicon_cache.json`).
+    /// Phoneme tokens are stored in misaki convention; pieces are remapped
+    /// to espeak-ng on emit via `emitPieces`.
+    private actor LexiconHolder {
+        private var lower: [String: [String]] = [:]
+        private var caseSensitive: [String: [String]] = [:]
+        private var loaded = false
+
+        private struct Payload: Decodable {
+            let lower: [String: [String]]
+            let caseSensitive: [String: [String]]
+        }
+
+        /// Download the lexicon if needed and parse it once. Subsequent
+        /// calls are no-ops. Errors are surfaced; callers may swallow.
+        func ensureLoaded() async throws {
+            if loaded { return }
+            let url = try await TtsResourceDownloader.ensureLexiconFile(
+                named: "us_lexicon_cache.json")
+            let data = try Data(contentsOf: url)
+            let payload = try JSONDecoder().decode(Payload.self, from: data)
+            self.lower = payload.lower
+            self.caseSensitive = payload.caseSensitive
+            self.loaded = true
+        }
+
+        /// Look up `word` in the lexicon. Tries the case-sensitive map
+        /// first (catches NASA/IBM/etc. and capital-aware variants),
+        /// falls back to the lowercase map. Returns nil if missing or
+        /// the lexicon failed to load.
+        func lookup(_ word: String) -> [String]? {
+            if let v = caseSensitive[word] { return v }
+            return lower[word.lowercased()]
+        }
+
+        /// If `word` is an acronym (2..6 ASCII uppercase letters), return
+        /// per-letter pronunciations concatenated. Letters are resolved
+        /// case-sensitive first (e.g. `A` → `ˈeɪ`, `N` → `ˈɛn`), with the
+        /// lowercase map as fallback. Returns nil if the pattern doesn't
+        /// match or any letter is missing from the lexicon.
+        func lookupAcronym(_ word: String) -> [String]? {
+            let chars = Array(word)
+            guard chars.count >= 2 && chars.count <= 6 else { return nil }
+            for ch in chars {
+                guard ch.isASCII, ch.isLetter, ch.isUppercase else { return nil }
+            }
+            var result: [String] = []
+            result.reserveCapacity(chars.count * 4)
+            for ch in chars {
+                let s = String(ch)
+                guard let pieces = caseSensitive[s] ?? lower[s.lowercased()] else {
+                    return nil
+                }
+                result.append(contentsOf: pieces)
+            }
+            return result
+        }
+    }
+
+    private static let lexicon = LexiconHolder()
+
     /// Convert raw text to an IPA phoneme string for StyleTTS2.
     ///
     /// - Parameters:
     ///   - text: Source text in the natural orthography of `language`.
-    ///   - language: Target language. English uses the in-tree BART G2P;
-    ///     all others fall back to `MultilingualG2PModel`.
+    ///   - language: Target language. English consults the Kokoro lexicon
+    ///     first, then falls back to the in-tree BART G2P. All other
+    ///     languages route through `MultilingualG2PModel`.
     /// - Returns: A phoneme string. Pass this to `StyleTTS2Vocab.encode(_:)`
     ///   to obtain `[Int32]` token ids.
     public static func phonemize(
@@ -100,6 +160,19 @@ public enum StyleTTS2Phonemizer {
     ) async throws -> String {
         let cleaned = TtsTextPreprocessor.preprocess(text)
 
+        // Best-effort lexicon load for English. If this fails (offline,
+        // missing asset), lookups return nil and we degrade gracefully
+        // to BART G2P — the original behavior.
+        if language == .americanEnglish {
+            do {
+                try await lexicon.ensureLoaded()
+            } catch {
+                logger.warning(
+                    "Lexicon unavailable (\(error.localizedDescription)); "
+                        + "falling through to BART G2P only")
+            }
+        }
+
         var output = ""
         output.reserveCapacity(cleaned.count * 2)
 
@@ -107,10 +180,10 @@ public enum StyleTTS2Phonemizer {
         wordBuffer.reserveCapacity(64)
 
         for ch in cleaned {
-            if ch.isLetter || ch == "'" || ch == "'" {
+            if ch.isLetter || ch == "'" || ch == "\u{2019}" {
                 // Treat ASCII apostrophe + typographic apostrophe as part
-                // of words (don't, won't, they're) — they're stripped before
-                // G2P input but kept as word boundaries.
+                // of words (don't, won't, they're) — preserved on the
+                // lexicon lookup key, stripped only for the BART fallback.
                 wordBuffer.append(ch)
                 continue
             }
@@ -140,8 +213,9 @@ public enum StyleTTS2Phonemizer {
     // MARK: - Private
 
     /// Phonemize one word and append its IPA characters to `output`.
-    /// Drops apostrophes from the G2P input (`'s`/`'t` enclitics roundtrip
-    /// poorly through ByT5; the BART G2P also handles them best stripped).
+    /// Keeps the original (with apostrophes) for lexicon lookup; the
+    /// BART G2P fallback receives the apostrophe-stripped form because
+    /// `'s`/`'t` enclitics roundtrip poorly through that encoder.
     private static func flushWord(
         _ buffer: inout String,
         language: MultilingualG2PLanguage,
@@ -149,38 +223,51 @@ public enum StyleTTS2Phonemizer {
     ) async throws {
         defer { buffer.removeAll(keepingCapacity: true) }
 
-        let stripped = buffer.replacingOccurrences(of: "'", with: "")
+        let original = buffer
+        let stripped =
+            original
             .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "\u{2019}", with: "")
         guard !stripped.isEmpty else { return }
 
         if language == .americanEnglish {
-            try await flushWordEnglish(stripped, into: &output)
+            try await flushWordEnglish(
+                original: original, stripped: stripped, into: &output)
         } else {
-            try await flushWordMultilingual(stripped, language: language, into: &output)
+            try await flushWordMultilingual(
+                stripped, language: language, into: &output)
         }
     }
 
-    /// English path: BART G2P (misaki IPA) → espeak-ng IPA via small remap.
+    /// English path: lexicon → acronym fallback → BART G2P.
     private static func flushWordEnglish(
-        _ word: String,
+        original: String,
+        stripped: String,
         into output: inout String
     ) async throws {
-        // Lazy first-call download/load; subsequent calls hit the cache.
-        try await G2PModel.shared.ensureModelsAvailable()
-        let phonemes = try await G2PModel.shared.phonemize(word: word.lowercased())
-        guard let phonemes else {
-            logger.warning(
-                "G2P unavailable for English word \"\(word)\"; passing through verbatim")
-            output.append(word)
+        // 1. Lexicon (apostrophes preserved).
+        if let pieces = await lexicon.lookup(original) {
+            emitPieces(pieces, into: &output)
             return
         }
-        for piece in phonemes {
-            if let mapped = misakiToEspeak[piece] {
-                output.append(mapped)
-            } else {
-                output.append(piece)
-            }
+
+        // 2. Acronym fallback (apostrophe-stripped — apostrophes don't
+        //    appear in acronyms).
+        if let pieces = await lexicon.lookupAcronym(stripped) {
+            emitPieces(pieces, into: &output)
+            return
         }
+
+        // 3. BART G2P.
+        try await G2PModel.shared.ensureModelsAvailable()
+        let phonemes = try await G2PModel.shared.phonemize(word: stripped.lowercased())
+        guard let phonemes else {
+            logger.warning(
+                "G2P unavailable for English word \"\(stripped)\"; passing through verbatim")
+            output.append(stripped)
+            return
+        }
+        emitPieces(phonemes, into: &output)
     }
 
     /// Non-English path: CharsiuG2P fallback (unvalidated for StyleTTS2).
@@ -207,6 +294,19 @@ public enum StyleTTS2Phonemizer {
         }
         for piece in phonemes {
             output.append(piece)
+        }
+    }
+
+    /// Append phoneme pieces to `output`, applying the per-piece misaki →
+    /// espeak-ng remap. Used for lexicon, acronym, and BART results — they
+    /// all live in misaki convention before this point.
+    private static func emitPieces(_ pieces: [String], into output: inout String) {
+        for piece in pieces {
+            if let mapped = misakiToEspeak[piece] {
+                output.append(mapped)
+            } else {
+                output.append(piece)
+            }
         }
     }
 }
