@@ -162,31 +162,6 @@ helper from any LibriTTS speaker WAV.
 - **Streaming:** not yet — the diffusion loop renders the whole
   utterance before the vocoder can emit. Streaming is a follow-up.
 
-## Re-cut Rationale
-
-Five blockers in the legacy 4-graph backend, each fixed by a Kokoro
-pattern carried over to this re-cut:
-
-1. **EnumeratedShapes triggers `E5RT: tensor_buffer has known strides
-   while the model has FlexibleShapeInfo`** (currently pinning
-   `f0n_energy` to CPU; documented at
-   `StyleTTS2AssetStore.swift:109-112`) → Replace EnumeratedShapes with
-   a single fixed shape at `T_a=2000`. Pad the input on the Swift side.
-2. **BiLSTM not ANE-native** → Use the LSTM-unroll trick from
-   `mobius/.../convert-coreml.py:272-301` (`CoreMLDurationEncoder`) on
-   PostBert.
-3. **Diffusion attention einsum** with leading ellipsis → Patched in
-   `_styletts2_lib.py:235-256`. Carries over.
-4. **SineGen phase saturation in fp16** → Keep SineGen in its own fp32
-   graph (Noise), exactly like Kokoro. Vocoder consumes the
-   downconverted fp16 output.
-5. **Snake activation not ANE-native** → Apply the cos-identity patch
-   from `mobius/.../convert-coreml.py:40-52`
-   (`AdaINResBlock1.forward = _cos_resblock1_forward`).
-
-End-to-end log-mel cosine vs. the legacy 4-graph reference must hit
-≥ 0.99 in `99_e2e_validate.py` before a bundle ships.
-
 ## Source
 
 - HuggingFace: [`FluidInference/StyleTTS-2-coreml/ANE/`](https://huggingface.co/FluidInference/StyleTTS-2-coreml/tree/main/ANE)
