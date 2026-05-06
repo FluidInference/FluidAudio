@@ -52,8 +52,10 @@ public enum StyleTTS2CoreMLDownloader {
             progressHandler: progressHandler
         )
 
-        // Re-check after download surfaces clearer errors when the network ack
-        // races ahead of disk visibility (seen on slow filesystems).
+        // Defense-in-depth verification. `downloadRepo` already enforces its
+        // own glob/allowlist, but if that allowlist ever drifts from
+        // `requiredCoreMLModels` this loop pinpoints the missing bundle with
+        // a clearer error than the consumer would otherwise see.
         for name in required {
             let path = repoDir.appendingPathComponent(name).path
             guard FileManager.default.fileExists(atPath: path) else {
@@ -66,6 +68,18 @@ public enum StyleTTS2CoreMLDownloader {
 
     // MARK: - Private
 
+    /// Resolve the FluidAudio cache root and append the StyleTTS2 models
+    /// subdirectory.
+    ///
+    /// Returns the *fully qualified* models path (`~/.cache/fluidaudio/<sub>`),
+    /// while `StyleTTS2AssetDownloader.cacheDirectory()` returns just the base
+    /// (`~/.cache/fluidaudio`) and lets its caller append the subdir. Both
+    /// shapes coexist intentionally — the asset downloader owns multiple
+    /// repos under the same base, while this downloader maps 1:1 to a single
+    /// model bundle. Pulling these two helpers (plus the analogous ones in
+    /// every other downloader under `Sources/FluidAudio/TTS/`) into a single
+    /// shared cache-path utility is a worthwhile project-wide refactor but
+    /// out of scope here.
     private static func defaultModelsDirectory() throws -> URL {
         let baseDirectory: URL
         #if os(macOS)
@@ -83,10 +97,8 @@ public enum StyleTTS2CoreMLDownloader {
         #endif
 
         let cacheDirectory = baseDirectory.appendingPathComponent("fluidaudio")
-        if !FileManager.default.fileExists(atPath: cacheDirectory.path) {
-            try FileManager.default.createDirectory(
-                at: cacheDirectory, withIntermediateDirectories: true)
-        }
+        try FileManager.default.createDirectory(
+            at: cacheDirectory, withIntermediateDirectories: true)
         return cacheDirectory.appendingPathComponent(
             StyleTTS2Constants.defaultModelsSubdirectory)
     }

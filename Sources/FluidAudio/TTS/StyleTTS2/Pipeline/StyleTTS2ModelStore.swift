@@ -102,6 +102,7 @@ public actor StyleTTS2ModelStore {
 
     private var models: [StyleTTS2Stage: MLModel] = [:]
     private var loaded: Bool = false
+    private var loadTask: Task<Void, Error>?
 
     public init(
         directory: URL? = nil,
@@ -114,12 +115,33 @@ public actor StyleTTS2ModelStore {
     public var isLoaded: Bool { loaded }
 
     /// Resolve or download the bundle, then load every `.mlmodelc`.
-    /// Idempotent: subsequent calls are no-ops.
+    /// Idempotent: subsequent calls are no-ops. Concurrent first-callers
+    /// join a shared `Task` so the download + multi-second ANE compile is
+    /// paid exactly once. Only the first call's `progressHandler` fires.
     public func loadIfNeeded(
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws {
         if loaded { return }
+        if let task = loadTask {
+            try await task.value
+            return
+        }
+        let task = Task<Void, Error> { [self] in
+            try await loadAllStages(progressHandler: progressHandler)
+        }
+        loadTask = task
+        do {
+            try await task.value
+            loadTask = nil
+        } catch {
+            loadTask = nil
+            throw error
+        }
+    }
 
+    private func loadAllStages(
+        progressHandler: DownloadUtils.ProgressHandler?
+    ) async throws {
         let bundleRoot =
             try await StyleTTS2CoreMLDownloader
             .ensureAssets(directory: directory, progressHandler: progressHandler)
