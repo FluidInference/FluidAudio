@@ -1,12 +1,11 @@
 # StyleTTS2 ANE (7-Stage)
 
-ANE-resident sibling of the legacy 4-graph StyleTTS2 backend. Splits the
-`StyleTTS-2-coreml` checkpoint into 7 small CoreML stages so that 6 of
-them stay resident on the Neural Engine; only `noise.mlmodelc` runs on
-`.all` (fp32 SineGen phase precision). Mirrors
-[KokoroAne.md](KokoroAne.md) 1:1 in shape — same per-stage split, same
-`StyleTTS2AneComputeUnits` preset surface, same `synthesizeDetailed`
-timing report.
+ANE-resident StyleTTS2 backend. Splits the `StyleTTS-2-coreml`
+checkpoint into 7 small CoreML stages so that 6 of them stay resident on
+the Neural Engine; only `noise.mlmodelc` runs on `.all` (fp32 SineGen
+phase precision). Mirrors [KokoroAne.md](KokoroAne.md) 1:1 in shape —
+same per-stage split, same `StyleTTS2AneComputeUnits` preset surface,
+same `synthesizeDetailed` timing report.
 
 The diffusion sampler is preserved — it is StyleTTS2's defining feature
 and has no Kokoro analog. The 5-step ADPM2 Karras loop runs in Swift;
@@ -16,21 +15,19 @@ invoked **11×** per utterance (5 midpoint × 2 + 1 final).
 Conversion lives in
 [`mobius/models/tts/styletts2/scripts/ane`](https://github.com/FluidInference/mobius/tree/main/models/tts/styletts2/scripts/ane).
 
-## When To Pick This Over `StyleTTS2Manager`
+## Pipeline Shape
 
-|                        | `StyleTTS2Manager` (legacy)        | `StyleTTS2AneManager` (this)                           |
-|------------------------|------------------------------------|--------------------------------------------------------|
-| Compute                | CPU+GPU, 12 bucketed `.mlmodelc`s  | 6 stages on ANE, 1 on `.all` (Noise), 7 graphs total   |
-| Disk footprint         | ~2 GB                              | ~330 MB (int8 palettization, kmeans nbits=8)           |
-| Voices                 | LibriTTS multi-speaker via `ref_s` | Same `ref_s.bin` blobs, unchanged on disk              |
-| Bucketing              | Fixed-shape buckets (text/dur)     | RangeDim(2..512) for stages 1-3; static T_a=2000 for stages 4-7 |
-| Custom lexicon / SSML  | No                                 | No                                                     |
-| Languages              | English (LibriTTS espeak-ng IPA)   | English (same checkpoint)                              |
+| Property               | `StyleTTS2AneManager`                                              |
+|------------------------|--------------------------------------------------------------------|
+| Compute                | 6 stages on ANE, 1 on `.all` (Noise), 7 graphs total               |
+| Disk footprint         | ~330 MB (int8 palettization, kmeans nbits=8)                       |
+| Voices                 | LibriTTS multi-speaker via `ref_s.bin` blobs                       |
+| Bucketing              | RangeDim(2..512) for stages 1-3; static T_a=2000 for stages 4-7    |
+| Custom lexicon / SSML  | No                                                                 |
+| Languages              | English (LibriTTS espeak-ng IPA)                                   |
 
-Use `StyleTTS2AneManager` when you want the lower-latency / smaller
-footprint sibling on Apple Silicon and can ship the 7-graph bundle. Use
-the legacy `StyleTTS2Manager` if you need the original published
-graphs for reference / parity testing.
+`StyleTTS2AneManager` is the only StyleTTS2 backend shipped by
+FluidAudio. The legacy 4-graph CoreML pipeline has been retired.
 
 ## Quick Start
 
@@ -39,7 +36,6 @@ graphs for reference / parity testing.
 ```bash
 # Synthesize through the 7-graph ANE backend
 swift run fluidaudiocli styletts2 "Welcome to FluidAudio." \
-  --variant ane \
   --voice ~/voices/ref_s.bin \
   --output ~/Desktop/demo.wav
 
@@ -89,7 +85,7 @@ print("  noise=\(t.noise) vocoder=\(t.vocoder)")
 print("  total: \(t.totalMs) ms")
 ```
 
-The CLI's `--variant ane` path prints the same breakdown after each
+The CLI's `styletts2` command prints the same breakdown after each
 synthesis.
 
 ## Pipeline

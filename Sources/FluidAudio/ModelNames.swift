@@ -812,84 +812,25 @@ public enum ModelNames {
         ]
     }
 
-    /// StyleTTS2 model names (4-stage diffusion TTS, LibriTTS multi-speaker checkpoint).
-    ///
-    /// Pipeline (per utterance, all stages combined run at ~4.32× RTFx warm on M-series):
-    /// 1. `text_predictor` — fp16 ANE, 5 token-length buckets (32/64/128/256/512). 1× call.
-    /// 2. `diffusion_step_512` — fp16 CPU+GPU, single bert_dur=512 bucket. 5× calls (ADPM2).
-    /// 3. `f0n_energy` — fp16 ANE, dynamic shape. 1× call.
-    /// 4. `decoder` — fp32 CPU+GPU, 5 mel-length buckets (256/512/1024/2048/4096). 1× call.
-    ///
-    /// Decoder must be fp32 (SineGen phase-saturation in fp16 produces robotic audio).
-    /// On disk the HF repo ships precompiled `.mlmodelc` bundles under `compiled/`;
-    /// the `.mlpackage` doubles at the repo root are portability artifacts and are
-    /// not fetched by `requiredModels`.
+    /// StyleTTS2 *shared assets* (vocab, bundle config, voice presets) for
+    /// the LibriTTS multi-speaker checkpoint. The legacy 4-graph CoreML
+    /// pipeline has been retired — synthesis goes through
+    /// `ModelNames.StyleTTS2Ane` (7 `.mlmodelc` bundles). The vocab + config
+    /// + voices live in the same upstream HuggingFace repo because they are
+    /// reused unchanged by the ANE checkpoint (same espeak-ng tokenizer,
+    /// same `ref_s.bin` style blobs).
     public enum StyleTTS2 {
-        // Text predictor buckets (token-length axis).
-        public static let textPredictor32 = "styletts2_text_predictor_32"
-        public static let textPredictor64 = "styletts2_text_predictor_64"
-        public static let textPredictor128 = "styletts2_text_predictor_128"
-        public static let textPredictor256 = "styletts2_text_predictor_256"
-        public static let textPredictor512 = "styletts2_text_predictor_512"
-
-        // Diffusion step (single B=512 bucket; smaller buckets pruned upstream).
-        public static let diffusionStep512 = "styletts2_diffusion_step_512"
-
-        // F0/N energy regressor (dynamic input shape).
-        public static let f0nEnergy = "styletts2_f0n_energy"
-
-        // Decoder buckets (mel-frame axis).
-        public static let decoder256 = "styletts2_decoder_256"
-        public static let decoder512 = "styletts2_decoder_512"
-        public static let decoder1024 = "styletts2_decoder_1024"
-        public static let decoder2048 = "styletts2_decoder_2048"
-        public static let decoder4096 = "styletts2_decoder_4096"
-
-        // Precompiled `.mlmodelc` filenames (live under `compiled/` on the HF
-        // repo). We load the precompiled artifacts to skip the cold-start
-        // `anecompilerservice` hit; the `.mlpackage` doubles at the repo root
-        // are kept for portability/debugging only and are not fetched.
-        public static let textPredictor32File = "compiled/" + textPredictor32 + ".mlmodelc"
-        public static let textPredictor64File = "compiled/" + textPredictor64 + ".mlmodelc"
-        public static let textPredictor128File = "compiled/" + textPredictor128 + ".mlmodelc"
-        public static let textPredictor256File = "compiled/" + textPredictor256 + ".mlmodelc"
-        public static let textPredictor512File = "compiled/" + textPredictor512 + ".mlmodelc"
-
-        public static let diffusionStep512File = "compiled/" + diffusionStep512 + ".mlmodelc"
-        public static let f0nEnergyFile = "compiled/" + f0nEnergy + ".mlmodelc"
-
-        public static let decoder256File = "compiled/" + decoder256 + ".mlmodelc"
-        public static let decoder512File = "compiled/" + decoder512 + ".mlmodelc"
-        public static let decoder1024File = "compiled/" + decoder1024 + ".mlmodelc"
-        public static let decoder2048File = "compiled/" + decoder2048 + ".mlmodelc"
-        public static let decoder4096File = "compiled/" + decoder4096 + ".mlmodelc"
-
         /// Phoneme→id table mirrored from upstream `text_utils.TextCleaner` (178 tokens).
         public static let vocabularyFile = "constants/text_cleaner_vocab.json"
 
-        /// Top-level bundle config (audio params, bucket sizes, sampler config).
+        /// Top-level bundle config (audio params, sampler config).
         public static let configFile = "config.json"
 
         /// Directory of preset `ref_s_<voice>.bin` voice references shipped
         /// alongside the CoreML bundles (see `StyleTTS2VoicePresets`).
         public static let voicesDir = "voices"
 
-        public static let textPredictorBuckets: [Int] = [32, 64, 128, 256, 512]
-        public static let decoderBuckets: [Int] = [256, 512, 1024, 2048, 4096]
-
         public static let requiredModels: Set<String> = [
-            textPredictor32File,
-            textPredictor64File,
-            textPredictor128File,
-            textPredictor256File,
-            textPredictor512File,
-            diffusionStep512File,
-            f0nEnergyFile,
-            decoder256File,
-            decoder512File,
-            decoder1024File,
-            decoder2048File,
-            decoder4096File,
             vocabularyFile,
             configFile,
             voicesDir,

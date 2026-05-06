@@ -1,6 +1,6 @@
 import Foundation
 
-/// Constants for the StyleTTS2 4-stage diffusion TTS backend.
+/// Shared constants for the StyleTTS2 ANE diffusion TTS backend.
 ///
 /// Reference: `FluidInference/StyleTTS-2-coreml` (LibriTTS multi-speaker
 /// checkpoint). The companion `config.json` shipped with the repo carries
@@ -47,15 +47,6 @@ public enum StyleTTS2Constants {
     public static let karrasSigmaMax: Float = 3.0
     /// Classifier-free guidance scale applied during the diffusion step.
     public static let cfgScale: Float = 1.0
-    /// Diffusion step model is shipped only at this `bert_dur` bucket.
-    public static let diffusionBucket: Int = 512
-
-    // MARK: - Bucket selection
-
-    /// Token-length buckets shipped for `text_predictor`.
-    public static let textPredictorBuckets: [Int] = [32, 64, 128, 256, 512]
-    /// Mel-frame buckets shipped for the HiFi-GAN decoder.
-    public static let decoderBuckets: [Int] = [256, 512, 1024, 2048, 4096]
 
     // MARK: - Repository
 

@@ -331,7 +331,7 @@ public enum StyleTTS2Phonemizer {
     /// Non-English path: CharsiuG2P fallback (unvalidated for StyleTTS2).
     /// The shipped LibriTTS checkpoint is English-only, so this branch is
     /// best-effort. `MultilingualG2PModel.loadIfNeeded` only reads from
-    /// cache — `StyleTTS2Manager.initialize` does not pre-fetch this repo,
+    /// cache — `StyleTTS2AneManager.initialize` does not pre-fetch this repo,
     /// so callers who hit this path must have downloaded the kokoro
     /// multilingual G2P some other way (e.g. via Kokoro init).
     private static func flushWordMultilingual(

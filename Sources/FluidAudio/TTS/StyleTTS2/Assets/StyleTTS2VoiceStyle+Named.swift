@@ -2,8 +2,8 @@ import Foundation
 
 /// Named-voice resolution for `StyleTTS2VoiceStyle`.
 ///
-/// Once `StyleTTS2Manager.initialize` has staged the bundle (and the new
-/// `voices/` subdirectory), `named(_:in:)` resolves a preset id from
+/// Once `StyleTTS2AneManager.initialize` has staged the shared assets (and
+/// the `voices/` subdirectory), `named(_:in:)` resolves a preset id from
 /// `StyleTTS2VoicePresets` to its `ref_s_<voice>.bin` file inside the cached
 /// repo root and loads the 256-fp32 blob.
 ///

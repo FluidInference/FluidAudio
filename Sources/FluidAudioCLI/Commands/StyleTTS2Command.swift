@@ -3,8 +3,8 @@ import Foundation
 
 /// `fluidaudio styletts2 "text" [--voice ref_s.bin | --voice-name <id>] --output out.wav`
 ///
-/// Drives a StyleTTS2 diffusion synthesizer end-to-end and writes a 24 kHz
-/// mono 16-bit WAV.
+/// Drives the StyleTTS2-ANE 7-graph diffusion synthesizer end-to-end and
+/// writes a 24 kHz mono 16-bit WAV.
 ///
 /// Voice selection:
 ///   * `--voice <path>` — explicit `ref_s.bin` (256 fp32 LE) on disk.
@@ -13,19 +13,9 @@ import Foundation
 ///     downloaded `voices/` directory of the StyleTTS2 bundle.
 /// If neither flag is supplied, the default preset (`vinay`) is used.
 ///
-/// Backend selection (`--variant`):
-///   * `legacy` (default) — original 4-graph CPU+GPU pipeline.
-///   * `ane`              — new 7-graph ANE-pinned pipeline (StyleTTS2-ANE).
-/// Both consume the same `ref_s.bin` voice blob.
-///
 /// To produce your own `ref_s.bin` from a custom WAV, see
 /// `mobius/models/tts/styletts2/scripts/06_dump_ref_s.py`.
 public enum StyleTTS2Command {
-
-    private enum Variant: String {
-        case legacy
-        case ane
-    }
 
     private static let logger = AppLogger(category: "StyleTTS2Command")
 
@@ -46,7 +36,6 @@ public enum StyleTTS2Command {
         var seed: UInt64?
         var tokenizeOnly = false
         var corpusPath: String?
-        var variant: Variant = .legacy
 
         var i = 0
         while i < arguments.count {
@@ -118,15 +107,6 @@ public enum StyleTTS2Command {
                 }
                 corpusPath = arguments[i + 1]
                 i += 2
-            case "--variant":
-                guard i + 1 < arguments.count,
-                    let v = Variant(rawValue: arguments[i + 1])
-                else {
-                    fputs("--variant requires 'ane' or 'legacy'\n", stderr)
-                    exit(2)
-                }
-                variant = v
-                i += 2
             case "--help", "-h":
                 printUsage()
                 return
@@ -165,67 +145,20 @@ public enum StyleTTS2Command {
         let outputURL = expand(outputPath)
 
         do {
-            switch variant {
-            case .legacy:
-                try await runLegacy(
-                    text: text,
-                    voicePath: voicePath,
-                    voiceName: voiceName,
-                    outputURL: outputURL,
-                    diffusionSteps: diffusionSteps,
-                    alpha: alpha, beta: beta, seed: seed)
-            case .ane:
-                try await runAne(
-                    text: text,
-                    voicePath: voicePath,
-                    voiceName: voiceName,
-                    outputURL: outputURL,
-                    diffusionSteps: diffusionSteps,
-                    alpha: alpha, beta: beta, seed: seed)
-            }
+            try await runAne(
+                text: text,
+                voicePath: voicePath,
+                voiceName: voiceName,
+                outputURL: outputURL,
+                diffusionSteps: diffusionSteps,
+                alpha: alpha, beta: beta, seed: seed)
         } catch {
             logger.error("StyleTTS2 synthesis failed: \(error)")
             exit(1)
         }
     }
 
-    // MARK: - Backends
-
-    private static func runLegacy(
-        text: String, voicePath: String?, voiceName: String?, outputURL: URL,
-        diffusionSteps: Int, alpha: Float, beta: Float, seed: UInt64?
-    ) async throws {
-        logger.notice("Initializing StyleTTS2 legacy (4-graph) backend...")
-        let manager = StyleTTS2Manager()
-        try await manager.initialize { progress in
-            logger.debug(
-                "Download \(progress.phase): "
-                    + "\(Int(progress.fractionCompleted * 100))%")
-        }
-
-        let voiceURL = try await resolveVoiceURL(
-            voicePath: voicePath, voiceName: voiceName, manager: manager)
-
-        logger.notice("Synthesizing text (\(text.count) chars, steps=\(diffusionSteps))...")
-        let (phonemes, ids) = try await manager.tokenize(text: text)
-        print("PHONEMES: \(phonemes)")
-        print("TOKEN_IDS (\(ids.count)): \(ids)")
-        let start = Date()
-        let wav = try await manager.synthesize(
-            text: text,
-            voiceStyleURL: voiceURL,
-            diffusionSteps: diffusionSteps,
-            alpha: alpha,
-            beta: beta,
-            randomSeed: seed
-        )
-        let elapsed = Date().timeIntervalSince(start)
-
-        try wav.write(to: outputURL)
-        logger.notice(
-            "Wrote \(outputURL.path) (\(wav.count) bytes) in "
-                + "\(String(format: "%.2f", elapsed))s")
-    }
+    // MARK: - Backend
 
     private static func runAne(
         text: String, voicePath: String?, voiceName: String?, outputURL: URL,
@@ -239,19 +172,8 @@ public enum StyleTTS2Command {
                     + "\(Int(progress.fractionCompleted * 100))%")
         }
 
-        // Voices ship under the legacy `StyleTTS-2-coreml/voices/` directory,
-        // not under `StyleTTS-2-coreml/ANE/`. Resolve via the legacy manager
-        // (which fetches the `voices/` subdir) when the caller asks for a
-        // preset id; explicit `--voice <path>` skips this step.
-        let voiceURL: URL
-        if let voicePath {
-            voiceURL = expand(voicePath)
-        } else {
-            let legacyManager = StyleTTS2Manager()
-            try await legacyManager.initialize { _ in }
-            voiceURL = try await resolveVoiceURL(
-                voicePath: nil, voiceName: voiceName, manager: legacyManager)
-        }
+        let voiceURL = try await resolveVoiceURL(
+            voicePath: voicePath, voiceName: voiceName, manager: manager)
 
         logger.notice("Synthesizing text (\(text.count) chars, steps=\(diffusionSteps))...")
         let (phonemes, ids) = try await manager.tokenize(text: text)
@@ -291,14 +213,13 @@ public enum StyleTTS2Command {
     /// Resolve `--voice <path>` > `--voice-name <id>` > default preset id.
     /// Returns a fully-qualified URL pointing at a `ref_s.bin` blob on disk.
     private static func resolveVoiceURL(
-        voicePath: String?, voiceName: String?, manager: StyleTTS2Manager
+        voicePath: String?, voiceName: String?, manager: StyleTTS2AneManager
     ) async throws -> URL {
         if let voicePath {
             return expand(voicePath)
         }
         let id = voiceName ?? StyleTTS2VoicePresets.defaultVoiceID
-        let store = await manager.underlyingModelStore()
-        let repoRoot = try await store.repoRoot()
+        let repoRoot = try await manager.voicesRepoRoot()
         guard
             let resolved = StyleTTS2VoiceStyle.voiceURL(forID: id, in: repoRoot)
         else {
@@ -318,7 +239,7 @@ public enum StyleTTS2Command {
     /// dropped scalars for the whole corpus.
     private static func runTokenizeOnly(text: String?, corpusPath: String?) async {
         do {
-            let manager = StyleTTS2Manager()
+            let manager = StyleTTS2AneManager()
             try await manager.initialize { _ in }
 
             var totalScalars = 0
@@ -440,11 +361,9 @@ public enum StyleTTS2Command {
               --tokenize-only   Run G2P + vocab encode only; report dropped scalars.
                                 No --voice needed. Use with text or --corpus.
               --corpus <path>   Phrase-per-line corpus file (with --tokenize-only).
-              --variant <name>  Backend: 'legacy' (4-graph, default) or 'ane' (7-graph).
 
             Examples:
               fluidaudio styletts2 "Hello world" --voice-name vinay
-              fluidaudio styletts2 "Hello from ANE" --voice-name vinay --variant ane
               fluidaudio styletts2 "Hello world" \\
                   --voice /tmp/styletts2-ref_s.bin \\
                   --output /tmp/styletts2-hello.wav

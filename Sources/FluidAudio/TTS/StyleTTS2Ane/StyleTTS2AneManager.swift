@@ -198,6 +198,37 @@ public actor StyleTTS2AneManager {
         return (phonemes, ids)
     }
 
+    /// Diagnostic tokenize: same as `tokenize(text:language:)` but also
+    /// returns the per-scalar drop frequency from
+    /// `StyleTTS2Vocab.encodeWithReport`. Used by the CLI to quantify
+    /// how much of the misaki BART G2P output the espeak-ng-trained
+    /// 178-token vocab can actually consume.
+    public func tokenizeWithReport(
+        text: String,
+        language: MultilingualG2PLanguage = .americanEnglish
+    ) async throws -> (
+        phonemes: String, ids: [Int32], dropped: [Unicode.Scalar: Int]
+    ) {
+        guard isInitialized else {
+            throw StyleTTS2AneError.modelNotLoaded("StyleTTS2AneManager.initialize() not called")
+        }
+        let phonemes = try await StyleTTS2Phonemizer.phonemize(
+            text: text, language: language)
+        let vocab = try await legacyAssetStore.vocabulary()
+        let (ids, dropped) = vocab.encodeWithReport(phonemes)
+        return (phonemes, ids, dropped)
+    }
+
+    /// Resolve the repo root for the bundled `voices/` directory. Used by
+    /// the CLI to map `--voice-name <id>` → `voices/ref_s_<id>.bin`.
+    /// Requires `initialize()` to have completed.
+    public func voicesRepoRoot() async throws -> URL {
+        guard isInitialized else {
+            throw StyleTTS2AneError.modelNotLoaded("StyleTTS2AneManager.initialize() not called")
+        }
+        return try await legacyAssetStore.repoRoot()
+    }
+
     /// Drop strong references to the loaded models. Call this when the app
     /// is going to background or under memory pressure. Re-call
     /// `initialize()` to reload.

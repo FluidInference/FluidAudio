@@ -1,31 +1,33 @@
 import Foundation
 
-/// Downloads StyleTTS2 CoreML models, vocab, and bundle config from HuggingFace.
+/// Downloads the StyleTTS2 *shared assets* (vocab, bundle config, and
+/// `voices/*.bin` reference blobs) from the legacy HuggingFace repo.
 ///
 /// Repo layout (`FluidInference/StyleTTS-2-coreml`):
 /// ```
-/// /compiled/styletts2_text_predictor_{32,64,128,256,512}.mlmodelc/
-/// /compiled/styletts2_diffusion_step_512.mlmodelc/
-/// /compiled/styletts2_f0n_energy.mlmodelc/
-/// /compiled/styletts2_decoder_{256,512,1024,2048,4096}.mlmodelc/
 /// /constants/text_cleaner_vocab.json
 /// /config.json
-/// /styletts2_*.mlpackage/      (portability/debugging artifacts; not fetched here)
+/// /voices/ref_s_<id>.bin
 /// ```
-/// We grab only the precompiled `compiled/*.mlmodelc` bundles to avoid the
-/// cold-start `anecompilerservice` hit on first synthesis.
+///
+/// The legacy 4-graph CoreML bundles (`compiled/styletts2_*.mlmodelc`) are
+/// no longer fetched — the StyleTTS2-ANE 7-graph re-cut is the sole shipping
+/// backend. The vocab + config + voices live in the same repo because they
+/// are shared with the ANE checkpoint (same LibriTTS espeak-ng tokenizer,
+/// same `ref_s.bin` style blobs).
 public enum StyleTTS2ResourceDownloader {
 
     private static let logger = AppLogger(category: "StyleTTS2ResourceDownloader")
 
-    /// Ensure all StyleTTS2 models, vocab, and config are downloaded.
+    /// Ensure the shared StyleTTS2 vocab, config, and voice presets are
+    /// downloaded.
     ///
     /// - Parameters:
     ///   - directory: Optional override for the base cache directory.
     ///     When `nil`, uses the default platform cache location.
     ///   - progressHandler: Optional callback for download progress updates.
-    /// - Returns: The repo root directory containing all `.mlpackage` bundles
-    ///   plus `config.json` and `constants/text_cleaner_vocab.json`.
+    /// - Returns: The repo root directory containing `config.json`,
+    ///   `constants/text_cleaner_vocab.json`, and the `voices/` directory.
     public static func ensureModels(
         directory: URL? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
@@ -41,14 +43,14 @@ public enum StyleTTS2ResourceDownloader {
         }
 
         guard !allPresent else {
-            logger.info("StyleTTS2 models found in cache")
+            logger.info("StyleTTS2 shared assets found in cache")
             return repoDir
         }
 
         try FileManager.default.createDirectory(
             at: modelsDirectory, withIntermediateDirectories: true)
 
-        logger.info("Downloading StyleTTS2 bundle from HuggingFace...")
+        logger.info("Downloading StyleTTS2 shared assets from HuggingFace...")
         try await DownloadUtils.downloadRepo(
             .styleTts2,
             to: modelsDirectory,

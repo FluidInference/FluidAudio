@@ -477,7 +477,7 @@ points:
 | TTS (PocketTTS) | `PocketTtsModelStore`, `PocketTtsSynthesizer` | `TTS/PocketTTS/Pipeline/PocketTtsModelStore.swift:12` |
 | TTS (CosyVoice3) | `CosyVoice3TtsManager` | `TTS/CosyVoice3/CosyVoice3TtsManager.swift:1` |
 | TTS (Magpie) | `MagpieTtsManager` | `TTS/Magpie/MagpieTtsManager.swift:1` |
-| TTS (StyleTTS2) | `StyleTTS2Manager` | `TTS/StyleTTS2/StyleTTS2Manager.swift:1` |
+| TTS (StyleTTS2-ANE) | `StyleTTS2AneManager` | `TTS/StyleTTS2Ane/StyleTTS2AneManager.swift:1` |
 | TTS (G2P) | `MultilingualG2PModel.shared` | `TTS/G2P/MultilingualG2PModel.swift:11` |
 | VAD | `VadManager` | `VAD/VadManager.swift:14` |
 | Diarization (online) | `DiarizerManager` | `Diarizer/Core/DiarizerManager.swift:6` |

@@ -163,10 +163,9 @@ meaningless.
 first-chunk emit; synth (15.1 s p50) is full-utterance wall time —
 the 5.5 s gap is the streaming win.
 
-§ StyleTTS2 (**beta** — `StyleTTS2Manager.initialize` emits a
+§ StyleTTS2 (**beta** — `StyleTTS2AneManager.initialize` emits a
 runtime warning): warm-cache run; first cold compile of the
-bucketed text_predictor / diffusion_step / decoder graphs is
-multi-second. ref_s dumped via
+7 ANE-pinned stages is multi-second. ref_s dumped via
 [`06_dump_ref_s.py`](https://github.com/voicelink-ai/mobius-styletts2/blob/main/models/tts/styletts2/scripts/06_dump_ref_s.py).
 Read WER **relatively** per the
 [WER caveat](#about-the-wer--cer-numbers); StyleTTS2's own demo

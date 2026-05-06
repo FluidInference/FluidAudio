@@ -477,9 +477,8 @@ public struct StyleTTS2AneSynthesizer {
 
 // MARK: - Tiny SplitMix64 (deterministic noise)
 
-/// Tiny SplitMix64 PRNG — used only to seed Gaussian noise. Mirrors the one
-/// in `StyleTTS2Synthesizer.swift` so the legacy and ANE backends produce
-/// identical samples for a given seed.
+/// Tiny SplitMix64 PRNG — used only to seed Gaussian noise. Deterministic
+/// for a given seed so synthesis is reproducible.
 private struct StyleTTS2AneSplitMix64 {
     private var state: UInt64
 
