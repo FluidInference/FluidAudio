@@ -5,12 +5,11 @@
 > phrases / language, CC-BY-SA-4.0) — the same public corpus used
 > by [MiniMax-Speech][mms], seed-tts-eval, and Gradium, so numbers
 > here are directly paper-comparable.
-> **Status:** Kokoro, Kokoro ANE, PocketTTS, Magpie, StyleTTS2 all
-> complete the English run; CosyVoice3 completes the full Mandarin
-> run. **StyleTTS2 ANE** (7-graph re-cut, see
-> [StyleTTS2.md](StyleTTS2.md)) is wired end-to-end but the
-> measured row below is gated on the HF bundle upload — see the
-> footnote on its row.
+> **Status:** Kokoro, Kokoro ANE, PocketTTS, Magpie all complete the
+> English run; CosyVoice3 completes the full Mandarin run.
+> **StyleTTS2** (7-graph ANE re-cut, see [StyleTTS2.md](StyleTTS2.md))
+> is wired end-to-end; empirical numbers are pending re-measurement on
+> the new bundle.
 >
 > [minimax]: https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
 > [mms]: https://arxiv.org/abs/2505.07916
@@ -80,8 +79,8 @@ Per phrase:
 - `rtfx` — `audio_ms / synth_ms`.
 - `wer`, `cer` — via Parakeet ASR roundtrip on the rendered WAV.
 - `stage_ms` — per-stage breakdown (backend-specific keys; populated
-  for Kokoro ANE + Magpie; empty for Kokoro / PocketTTS /
-  StyleTTS2 / CosyVoice3).
+  for Kokoro ANE + StyleTTS2 + Magpie; empty for Kokoro / PocketTTS /
+  CosyVoice3).
 - Backend-specific extras: `encoder_tokens`, `acoustic_frames`,
   `chunk_count`, `frame_count`, `code_count`, `finished_on_eos`,
   `generated_token_count`, etc.
@@ -134,8 +133,7 @@ WER / CER.
 | Kokoro ANE  | Apache-2.0  | en (af_heart only)     | ~330 MB   | 37.9 s     | 1586 / 2515 ms      | 1586 / 2515 ms      | 5.19×    | 738 MB   | 0.108   | 0.040   | one-shot; per-stage CU sweep, 7-graph pipeline |
 | Kokoro      | Apache-2.0  | en (af_heart only)     | ~330 MB   | 92.2 s     | 3113 / 4696 ms      | 3113 / 4696 ms      | 2.02×    | 736 MB   | 0.013   | 0.005   | one-shot; cleanest English ASR roundtrip |
 | PocketTTS   | research    | en + de + it + pt + es + fr (6L / 24L) | ~140 / ~520 MB | 6.0 s | **1244 / 4749 ms**  | 8757 / 19174 ms     | 0.61×    | 1503 MB  | 0.014   | 0.006   | **streaming**; TTFT is first 80 ms audio frame |
-| StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~280 MB  | 955 s§     | 6671 / 15990 ms§    | 6671 / 15990 ms§    | 2.72×§   | 963 MB§  | 0.440§  | 0.241§  | full 100/100 `minimax-english` via [misaki→espeak post-pass remap](#styletts2-misaki--espeak-post-pass-remap); ref_s = LibriTTS `696_92939_000016_000006.wav` (StyleTTS2 demo voice) |
-| StyleTTS2 ANE | MIT       | en (LibriTTS multi-spk) | ~330 MB¶ | TBD¶       | TBD¶                | TBD¶                | TBD¶     | TBD¶     | TBD¶    | TBD¶    | 7-graph re-cut, mirrors Kokoro-ANE; same `ref_s.bin` voice format as legacy; measurement gated on HF bundle upload — see [StyleTTS2.md](StyleTTS2.md) |
+| StyleTTS2   | MIT         | en (LibriTTS multi-spk) | ~330 MB§ | TBD§       | TBD§                | TBD§                | TBD§     | TBD§     | TBD§    | TBD§    | 7-graph ANE re-cut, mirrors Kokoro-ANE; `ref_s.bin` voice format; pending re-measurement — see [StyleTTS2.md](StyleTTS2.md) |
 | Magpie      | research    | en/es/de/fr/it/vi/zh/hi | ~1.3 GB   | 38.5 s∥    | **9580 / 23796 ms**∥ | 15080 / 29895 ms∥   | 0.64×∥   | 762 MB∥  | 0.056   | 0.033   | **streaming TTFT**: first audio chunk at 9.6 s p50 on M2 (full synth 15.1 s); split-K/V decoder; outputBackings fast path with latched fallback |
 | CosyVoice3  | Apache-2.0  | zh (mandarin)          | ~1.5 GB   | 29.2 s†    | 14091 / 23679 ms†   | 14091 / 23679 ms†   | 0.357×†  | 3302 MB† | n/a‡    | 0.017‡  | beta; full `minimax-chinese` (100/100 phrases) for latency / RSS and whisper-large-v3 CER‡; cantonese supported via [auto-chunker](#cosyvoice3-auto-chunker) but not benchmarked (no yue ASR) |
 
@@ -163,25 +161,12 @@ meaningless.
 first-chunk emit; synth (15.1 s p50) is full-utterance wall time —
 the 5.5 s gap is the streaming win.
 
-§ StyleTTS2 (**beta** — `StyleTTS2Manager.initialize` emits a
-runtime warning): warm-cache run; first cold compile of the
-7 ANE-pinned stages is multi-second. ref_s dumped via
-[`06_dump_ref_s.py`](https://github.com/voicelink-ai/mobius-styletts2/blob/main/models/tts/styletts2/scripts/06_dump_ref_s.py).
-Read WER **relatively** per the
-[WER caveat](#about-the-wer--cer-numbers); StyleTTS2's own demo
-notebook reports artifacts on long sentences at default
-`alpha/beta/diffusion_steps`.
-
-¶ StyleTTS2 ANE: 7-graph re-cut wired into
-`StyleTTS2Manager` and `tts-benchmark --backend styletts2-ane`,
-but the empirical row is intentionally left as **TBD** until the
-`FluidInference/StyleTTS-2-coreml/ANE/` HF bundle is uploaded
-(Phase D of the re-cut plan, user-managed). Targets per the plan:
-TTFT p50 ≤ 2400 ms (≤ 1.5× Kokoro-ANE's 1586 ms), agg-RTFx ≥ 3×
-(vs the legacy 4-graph 2.72×), peak RSS comparable to Kokoro-ANE's
-738 MB. Footprint ~330 MB matches Kokoro-ANE after kmeans nbits=8
-palettization; see [StyleTTS2.md](StyleTTS2.md) for the
-per-stage breakdown.
+§ StyleTTS2: 7-graph ANE re-cut wired into `StyleTTS2Manager` and
+`tts-benchmark --backend styletts2-ane`, but the empirical row is
+intentionally left as **TBD** pending re-measurement on the new
+bundle. Footprint ~330 MB matches Kokoro-ANE after kmeans nbits=8
+palettization. See [StyleTTS2.md](StyleTTS2.md) for the per-stage
+breakdown.
 
 ### Kokoro ANE — per-stage breakdown (default preset, MiniMax-English)
 
@@ -254,13 +239,9 @@ Four systematic divergences vs. `espeak-ng -v en-us --ipa -q`:
 | `əɹ`   | `ɚ`       | over   → `ˈoʊvɚ`         |
 
 Fix: 4-rule post-pass remap in `StyleTTS2Phonemizer.phonemize`, gated
-on `.americanEnglish`. Result on `minimax-english`: WER 0.581 →
-0.440, CER 0.476 → 0.241, agg-RTFx 2.36× → 2.72× (warm-cache
-re-run, so latency / RSS deltas are noise — WER / CER are the real
-signal). WER is still 30× worse than Kokoro; remaining errors cluster
-on word-level BART mispronunciations and long-tail diffusion artifacts.
-Further gains likely need a richer remap layer or swapping BART for
-libespeak-ng directly.
+on `.americanEnglish`. The remap meaningfully cut WER on the legacy
+4-graph backend; the 7-graph ANE re-cut inherits the same fix and is
+pending re-measurement.
 
 ## CosyVoice3 Decode budget cap
 
