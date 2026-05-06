@@ -20,12 +20,12 @@ public enum StyleTTS2AneStage: String, CaseIterable, Sendable {
     public var bundleName: String {
         switch self {
         case .plBert: return "styletts2_ane_plbert.mlmodelc"
-        case .postBert: return "styletts2_ane_postbert.mlmodelc"
+        case .postBert: return "styletts2_ane_postbert_v2.mlmodelc"
         case .alignment: return "styletts2_ane_alignment.mlmodelc"
         case .diffusionStep: return "styletts2_ane_diffusion_step.mlmodelc"
         case .prosody: return "styletts2_ane_prosody.mlmodelc"
         case .noise: return "styletts2_ane_noise.mlmodelc"
-        case .vocoder: return "styletts2_ane_vocoder.mlmodelc"
+        case .vocoder: return "styletts2_ane_vocoder_v2.mlmodelc"
         }
     }
 }
