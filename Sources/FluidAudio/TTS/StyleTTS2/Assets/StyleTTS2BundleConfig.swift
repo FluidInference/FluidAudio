@@ -112,7 +112,7 @@ public struct StyleTTS2BundleConfig: Sendable, Codable {
                 "model_type=\"\(modelType)\", expected \"styletts2\"")
         }
         try expect(
-            audio.sampleRate, equals: StyleTTS2Constants.audioSampleRate,
+            audio.sampleRate, equals: StyleTTS2Constants.sampleRate,
             field: "audio.sample_rate")
         try expect(
             audio.hopLength, equals: StyleTTS2Constants.hopSize,

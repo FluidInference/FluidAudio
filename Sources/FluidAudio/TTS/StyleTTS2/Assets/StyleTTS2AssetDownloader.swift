@@ -15,9 +15,9 @@ import Foundation
 /// backend. The vocab + config + voices live in the same repo because they
 /// are shared with the ANE checkpoint (same LibriTTS espeak-ng tokenizer,
 /// same `ref_s.bin` style blobs).
-public enum StyleTTS2ResourceDownloader {
+public enum StyleTTS2AssetDownloader {
 
-    private static let logger = AppLogger(category: "StyleTTS2ResourceDownloader")
+    private static let logger = AppLogger(category: "StyleTTS2AssetDownloader")
 
     /// Ensure the shared StyleTTS2 vocab, config, and voice presets are
     /// downloaded.
@@ -35,7 +35,7 @@ public enum StyleTTS2ResourceDownloader {
         let targetDir = try directory ?? cacheDirectory()
         let modelsDirectory = targetDir.appendingPathComponent(
             StyleTTS2Constants.defaultModelsSubdirectory)
-        let repoDir = modelsDirectory.appendingPathComponent(Repo.styleTts2.folderName)
+        let repoDir = modelsDirectory.appendingPathComponent(Repo.styleTts2Assets.folderName)
 
         let allPresent = ModelNames.StyleTTS2.requiredModels.allSatisfy { model in
             FileManager.default.fileExists(
@@ -52,7 +52,7 @@ public enum StyleTTS2ResourceDownloader {
 
         logger.info("Downloading StyleTTS2 shared assets from HuggingFace...")
         try await DownloadUtils.downloadRepo(
-            .styleTts2,
+            .styleTts2Assets,
             to: modelsDirectory,
             progressHandler: progressHandler
         )

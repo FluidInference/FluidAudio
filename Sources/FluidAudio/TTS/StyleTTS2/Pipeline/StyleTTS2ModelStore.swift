@@ -1,86 +1,157 @@
+@preconcurrency import CoreML
 import Foundation
 
-/// Actor-based store for the StyleTTS2 *shared assets* (vocab, bundle
-/// config, voice presets). The legacy 4-graph CoreML pipeline has been
-/// retired — synthesis now goes through `StyleTTS2AneManager` →
-/// `StyleTTS2AneModelStore`, which owns its own 7 `.mlmodelc` bundles.
+/// Per-stage compute-unit assignment for the StyleTTS2-ANE 7-stage chain.
 ///
-/// This store survives because vocab + config + voices are reused by the
-/// ANE backend and live in the same upstream HuggingFace repo
-/// (`FluidInference/StyleTTS-2-coreml`).
+/// Mirrors `KokoroAneComputeUnits` exactly except `.tail` is folded into
+/// `.vocoder` (StyleTTS2's HiFi-GAN is iSTFT-free) and a new
+/// `.diffusionStep` is added for the StyleTTS2-only diffusion sampler.
+///
+/// Empirical defaults match the conversion script's compute-unit hints:
+///   - PLBert / PostBert / Alignment / DiffusionStep / Prosody / Vocoder
+///     → `.cpuAndNeuralEngine`
+///   - Noise → `.all` (fp32 phase precision; ANE may decline silently)
+public struct StyleTTS2ComputeUnits: Sendable, Equatable {
+    public var plBert: MLComputeUnits
+    public var postBert: MLComputeUnits
+    public var alignment: MLComputeUnits
+    public var diffusionStep: MLComputeUnits
+    public var prosody: MLComputeUnits
+    public var noise: MLComputeUnits
+    public var vocoder: MLComputeUnits
+
+    public init(
+        plBert: MLComputeUnits = .cpuAndNeuralEngine,
+        postBert: MLComputeUnits = .cpuAndNeuralEngine,
+        alignment: MLComputeUnits = .cpuAndNeuralEngine,
+        diffusionStep: MLComputeUnits = .cpuAndNeuralEngine,
+        prosody: MLComputeUnits = .cpuAndNeuralEngine,
+        noise: MLComputeUnits = .all,
+        vocoder: MLComputeUnits = .cpuAndNeuralEngine
+    ) {
+        self.plBert = plBert
+        self.postBert = postBert
+        self.alignment = alignment
+        self.diffusionStep = diffusionStep
+        self.prosody = prosody
+        self.noise = noise
+        self.vocoder = vocoder
+    }
+
+    /// Empirical default — see file header for rationale.
+    public static let `default` = StyleTTS2ComputeUnits()
+
+    /// CPU+GPU only (skip ANE entirely). Useful for a baseline.
+    public static let cpuAndGpu = StyleTTS2ComputeUnits(
+        plBert: .cpuAndGPU, postBert: .cpuAndGPU, alignment: .cpuAndGPU,
+        diffusionStep: .cpuAndGPU, prosody: .cpuAndGPU,
+        noise: .cpuAndGPU, vocoder: .cpuAndGPU
+    )
+
+    /// Force every stage onto `.cpuAndNeuralEngine`. Used by the
+    /// `tts-benchmark` ANE-vs-CPU sweep.
+    public static let allAne = StyleTTS2ComputeUnits(
+        plBert: .cpuAndNeuralEngine, postBert: .cpuAndNeuralEngine,
+        alignment: .cpuAndNeuralEngine, diffusionStep: .cpuAndNeuralEngine,
+        prosody: .cpuAndNeuralEngine, noise: .cpuAndNeuralEngine,
+        vocoder: .cpuAndNeuralEngine
+    )
+
+    /// CPU-only — slowest but most predictable; debugging baseline.
+    public static let cpuOnly = StyleTTS2ComputeUnits(
+        plBert: .cpuOnly, postBert: .cpuOnly, alignment: .cpuOnly,
+        diffusionStep: .cpuOnly, prosody: .cpuOnly,
+        noise: .cpuOnly, vocoder: .cpuOnly
+    )
+
+    public init(preset: TtsComputeUnitPreset) {
+        switch preset {
+        case .default: self = .default
+        case .allAne: self = .allAne
+        case .cpuAndGpu: self = .cpuAndGpu
+        case .cpuOnly: self = .cpuOnly
+        }
+    }
+
+    func units(for stage: StyleTTS2Stage) -> MLComputeUnits {
+        switch stage {
+        case .plBert: return plBert
+        case .postBert: return postBert
+        case .alignment: return alignment
+        case .diffusionStep: return diffusionStep
+        case .prosody: return prosody
+        case .noise: return noise
+        case .vocoder: return vocoder
+        }
+    }
+}
+
+/// Resident store for the 7 StyleTTS2-ANE `.mlmodelc` bundles.
+///
+/// Lazily loads each model on first call; afterwards keeps strong refs
+/// so the actor-isolated synthesizer can issue back-to-back predictions
+/// without re-paying the (multi-second) ANE compile cost.
+///
+/// Mirrors `KokoroAneModelStore` 1:1 except for the seven stages it
+/// holds.
 public actor StyleTTS2ModelStore {
 
-    private var repoRootDirectory: URL?
-    private var cachedVocab: StyleTTS2Vocab?
-    private var cachedBundleConfig: StyleTTS2BundleConfig?
+    private let logger = AppLogger(category: "StyleTTS2ModelStore")
     private let directory: URL?
+    private let computeUnits: StyleTTS2ComputeUnits
 
-    public init(directory: URL? = nil) {
+    private var models: [StyleTTS2Stage: MLModel] = [:]
+    private var loaded: Bool = false
+
+    public init(
+        directory: URL? = nil,
+        computeUnits: StyleTTS2ComputeUnits = .default
+    ) {
         self.directory = directory
+        self.computeUnits = computeUnits
     }
 
-    // MARK: - Bring-up
+    public var isLoaded: Bool { loaded }
 
-    /// Ensure the shared assets are downloaded and resolve the repo root.
-    public func ensureAssetsAvailable(
+    /// Resolve or download the bundle, then load every `.mlmodelc`.
+    /// Idempotent: subsequent calls are no-ops.
+    public func loadIfNeeded(
         progressHandler: DownloadUtils.ProgressHandler? = nil
-    ) async throws -> URL {
-        if let dir = repoRootDirectory {
-            return dir
+    ) async throws {
+        if loaded { return }
+
+        let bundleRoot =
+            try await StyleTTS2CoreMLDownloader
+            .ensureAssets(directory: directory, progressHandler: progressHandler)
+
+        for stage in StyleTTS2Stage.allCases {
+            let url = bundleRoot.appendingPathComponent(stage.bundleName)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw StyleTTS2Error.modelNotLoaded(stage.bundleName)
+            }
+            let config = MLModelConfiguration()
+            config.computeUnits = computeUnits.units(for: stage)
+            do {
+                let model = try MLModel(contentsOf: url, configuration: config)
+                models[stage] = model
+            } catch {
+                throw StyleTTS2Error.predictionFailed(
+                    stage: stage.rawValue, underlying: error)
+            }
         }
-        let dir = try await StyleTTS2ResourceDownloader.ensureModels(
-            directory: directory,
-            progressHandler: progressHandler
-        )
-        repoRootDirectory = dir
-        return dir
+        loaded = true
+        logger.notice("StyleTTS2-ANE: 7 mlmodelcs loaded.")
     }
 
-    // MARK: - Bundle paths
-
-    /// Path to the espeak-ng IPA vocabulary JSON.
-    public func vocabularyURL() throws -> URL {
-        guard let root = repoRootDirectory else {
-            throw StyleTTS2Error.modelNotFound("StyleTTS2 repo not loaded")
+    public func model(for stage: StyleTTS2Stage) throws -> MLModel {
+        guard let model = models[stage] else {
+            throw StyleTTS2Error.modelNotLoaded(stage.bundleName)
         }
-        return root.appendingPathComponent(ModelNames.StyleTTS2.vocabularyFile)
+        return model
     }
 
-    /// Path to the bundle `config.json`.
-    public func configURL() throws -> URL {
-        guard let root = repoRootDirectory else {
-            throw StyleTTS2Error.modelNotFound("StyleTTS2 repo not loaded")
-        }
-        return root.appendingPathComponent(ModelNames.StyleTTS2.configFile)
-    }
-
-    /// Lazily-loaded 178-token IPA vocabulary.
-    public func vocabulary() throws -> StyleTTS2Vocab {
-        if let cached = cachedVocab {
-            return cached
-        }
-        let url = try vocabularyURL()
-        let vocab = try StyleTTS2Vocab.load(from: url)
-        cachedVocab = vocab
-        return vocab
-    }
-
-    /// Lazily-loaded `config.json`. Decoded once and cached for the lifetime
-    /// of the store.
-    public func bundleConfig() throws -> StyleTTS2BundleConfig {
-        if let cached = cachedBundleConfig {
-            return cached
-        }
-        let url = try configURL()
-        let config = try StyleTTS2BundleConfig.load(from: url)
-        cachedBundleConfig = config
-        return config
-    }
-
-    public func repoRoot() throws -> URL {
-        guard let root = repoRootDirectory else {
-            throw StyleTTS2Error.modelNotFound("StyleTTS2 repo not loaded")
-        }
-        return root
+    public func cleanup() {
+        models.removeAll()
+        loaded = false
     }
 }

@@ -30,7 +30,7 @@ import Foundation
 ///
 /// The ADPM2 + Karras sampler is reused verbatim from `StyleTTS2Sampler` —
 /// it's model-agnostic and takes a closure for the actual denoise call.
-public struct StyleTTS2AneSynthesizer {
+public struct StyleTTS2Synthesizer {
 
     /// Synthesis options. Defaults match the upstream Python reference.
     public struct Options: Sendable {
@@ -40,7 +40,7 @@ public struct StyleTTS2AneSynthesizer {
         public var randomSeed: UInt64?
 
         public init(
-            diffusionSteps: Int = StyleTTS2AneConstants.defaultDiffusionSteps,
+            diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
             alpha: Float = 0.3,
             beta: Float = 0.7,
             randomSeed: UInt64? = nil
@@ -57,23 +57,23 @@ public struct StyleTTS2AneSynthesizer {
         ids: [Int32],
         voice: StyleTTS2VoiceStyle,
         options: Options,
-        store: StyleTTS2AneModelStore
-    ) async throws -> StyleTTS2AneSynthesisResult {
+        store: StyleTTS2ModelStore
+    ) async throws -> StyleTTS2SynthesisResult {
 
         // Prepend pad token (id 0) per upstream contract.
-        var paddedIds: [Int32] = [Int32(StyleTTS2AneConstants.padTokenId)]
+        var paddedIds: [Int32] = [Int32(StyleTTS2Constants.padTokenId)]
         paddedIds.append(contentsOf: ids)
         let tTok = paddedIds.count
-        guard tTok >= 2, tTok <= StyleTTS2AneConstants.maxInputTokens else {
-            throw StyleTTS2AneError.phonemeSequenceTooLong(tTok)
+        guard tTok >= 2, tTok <= StyleTTS2Constants.maxInputTokens else {
+            throw StyleTTS2Error.phonemeSequenceTooLong(tTok)
         }
 
-        var timings = StyleTTS2AneStageTimings()
+        var timings = StyleTTS2StageTimings()
 
         // Build base tensors (tokens + style) reused by multiple stages.
         let tokensArr = try KokoroAneArrays.int32Array(shape: [1, tTok], from: paddedIds)
         let styleFullArr = try KokoroAneArrays.float16Array(
-            shape: [1, StyleTTS2AneConstants.refStyleDim],
+            shape: [1, StyleTTS2Constants.refStyleDim],
             from: voice.concatenated
         )
 
@@ -108,11 +108,11 @@ public struct StyleTTS2AneSynthesizer {
         let durations = computeDurations(arr: predDurLog, tTok: tTok)
         let tA = durations.reduce(0, +)
         guard tA >= 1 else {
-            throw StyleTTS2AneError.inputProcessingFailed("predicted T_a was 0")
+            throw StyleTTS2Error.inputProcessingFailed("predicted T_a was 0")
         }
-        if tA > StyleTTS2AneConstants.maxAcousticFrames {
-            throw StyleTTS2AneError.acousticFramesExceedCap(
-                have: tA, cap: StyleTTS2AneConstants.maxAcousticFrames)
+        if tA > StyleTTS2Constants.maxAcousticFrames {
+            throw StyleTTS2Error.acousticFramesExceedCap(
+                have: tA, cap: StyleTTS2Constants.maxAcousticFrames)
         }
         let predDurArr = try KokoroAneArrays.int32Array(
             shape: [1, tTok], from: durations.map(Int32.init))
@@ -124,7 +124,7 @@ public struct StyleTTS2AneSynthesizer {
         let featuresFp16 = styleFullArr  // [1, 256] — full ref_s
 
         let noise = generateGaussianNoise(
-            count: StyleTTS2AneConstants.refStyleDim, seed: options.randomSeed)
+            count: StyleTTS2Constants.refStyleDim, seed: options.randomSeed)
         let sPred = try await runDiffusionSampler(
             noise: noise,
             embedding: embeddingPadded,
@@ -148,18 +148,18 @@ public struct StyleTTS2AneSynthesizer {
         // backend exactly.
         let acousticOriginal = Array(voice.acoustic)  // [0:128] = s_acou
         let prosodyOriginal = Array(voice.prosody)  // [128:256] = s_pros
-        let acousticPred = Array(sPred[0..<StyleTTS2AneConstants.styleDim])
+        let acousticPred = Array(sPred[0..<StyleTTS2Constants.styleDim])
         let prosodyPred = Array(
-            sPred[StyleTTS2AneConstants.styleDim..<StyleTTS2AneConstants.refStyleDim])
+            sPred[StyleTTS2Constants.styleDim..<StyleTTS2Constants.refStyleDim])
         // alpha governs the acoustic blend, beta the prosody blend — same
         // weight assignment as the legacy backend.
         let acousticMix = mix(a: acousticPred, b: acousticOriginal, alpha: options.alpha)
         let prosodyMix = mix(a: prosodyPred, b: prosodyOriginal, alpha: options.beta)
 
         let prosodyMixFp16 = try KokoroAneArrays.float16Array(
-            shape: [1, StyleTTS2AneConstants.styleDim], from: prosodyMix)
+            shape: [1, StyleTTS2Constants.styleDim], from: prosodyMix)
         let acousticMixFp16 = try KokoroAneArrays.float16Array(
-            shape: [1, StyleTTS2AneConstants.styleDim], from: acousticMix)
+            shape: [1, StyleTTS2Constants.styleDim], from: acousticMix)
 
         // ── 5: Alignment ──────────────────────────────────────────────
         let alignModel = try await store.model(for: .alignment)
@@ -211,12 +211,12 @@ public struct StyleTTS2AneSynthesizer {
         // ~0.74 vs the PyTorch reference). Mirrors the Python
         // 99_e2e_validate.py active-T_a slicing exactly.
         let tAFrames = tA * 2  // F0/N are at MAX_T_A * 2
-        let tAudio = tA * 2 * StyleTTS2AneConstants.upsampleScale  // sine_waves frames
+        let tAudio = tA * 2 * StyleTTS2Constants.upsampleScale  // sine_waves frames
 
         let asrSliced = try KokoroAneArrays.sliceTrailingTimeFp16(
             asrArr,
-            channels: StyleTTS2AneConstants.hiddenDim,
-            oldT: StyleTTS2AneConstants.maxAcousticFrames,
+            channels: StyleTTS2Constants.hiddenDim,
+            oldT: StyleTTS2Constants.maxAcousticFrames,
             newT: tA
         )
 
@@ -249,9 +249,9 @@ public struct StyleTTS2AneSynthesizer {
         let audioArr = try outputArray(vocOut, key: "audio", stage: .vocoder)
         let samples = KokoroAneArrays.readFloats(audioArr)
 
-        return StyleTTS2AneSynthesisResult(
+        return StyleTTS2SynthesisResult(
             samples: samples,
-            sampleRate: StyleTTS2AneConstants.sampleRate,
+            sampleRate: StyleTTS2Constants.sampleRate,
             encoderTokens: tTok,
             acousticFrames: tA,
             timings: timings
@@ -265,7 +265,7 @@ public struct StyleTTS2AneSynthesizer {
         embedding: MLMultiArray,
         features: MLMultiArray,
         steps: Int,
-        store: StyleTTS2AneModelStore,
+        store: StyleTTS2ModelStore,
         timing: inout Double
     ) async throws -> [Float] {
         let model = try await store.model(for: .diffusionStep)
@@ -275,7 +275,7 @@ public struct StyleTTS2AneSynthesizer {
 
         let denoise: StyleTTS2Sampler.DenoiseStep = { x, sigma in
             let xArr = try KokoroAneArrays.float16Array(
-                shape: [1, 1, StyleTTS2AneConstants.refStyleDim], from: x)
+                shape: [1, 1, StyleTTS2Constants.refStyleDim], from: x)
             let sigmaArr = try KokoroAneArrays.float16Array(
                 shape: [1], from: [sigma])
             let provider = try MLDictionaryFeatureProvider(dictionary: [
@@ -288,20 +288,20 @@ public struct StyleTTS2AneSynthesizer {
             do {
                 prediction = try await model.prediction(from: provider)
             } catch {
-                throw StyleTTS2AneError.predictionFailed(
-                    stage: StyleTTS2AneStage.diffusionStep.rawValue, underlying: error)
+                throw StyleTTS2Error.predictionFailed(
+                    stage: StyleTTS2Stage.diffusionStep.rawValue, underlying: error)
             }
             guard let denoisedArr = prediction.featureValue(for: "denoised")?.multiArrayValue
             else {
-                throw StyleTTS2AneError.unexpectedOutputShape(
-                    stage: StyleTTS2AneStage.diffusionStep.rawValue,
+                throw StyleTTS2Error.unexpectedOutputShape(
+                    stage: StyleTTS2Stage.diffusionStep.rawValue,
                     expected: "MLMultiArray for 'denoised'",
                     got: "nil"
                 )
             }
             return Array(
                 KokoroAneArrays.readFloats(denoisedArr).prefix(
-                    StyleTTS2AneConstants.refStyleDim))
+                    StyleTTS2Constants.refStyleDim))
         }
 
         let result = try await StyleTTS2Sampler.adpm2Sample(
@@ -320,7 +320,7 @@ public struct StyleTTS2AneSynthesizer {
         bertDur: MLMultiArray, tTok: Int
     ) throws -> MLMultiArray {
         let bertDim = 768
-        let tEmbMax = StyleTTS2AneConstants.maxInputTokens  // 512
+        let tEmbMax = StyleTTS2Constants.maxInputTokens  // 512
         let dst = try MLMultiArray(
             shape: [1, NSNumber(value: tEmbMax), NSNumber(value: bertDim)],
             dataType: .float16)
@@ -361,8 +361,8 @@ public struct StyleTTS2AneSynthesizer {
                     bytesPerRow)
             }
         } else {
-            throw StyleTTS2AneError.unexpectedOutputShape(
-                stage: StyleTTS2AneStage.plBert.rawValue,
+            throw StyleTTS2Error.unexpectedOutputShape(
+                stage: StyleTTS2Stage.plBert.rawValue,
                 expected: "float16 or float32 bert_dur",
                 got: "\(bertDur.dataType)"
             )
@@ -408,7 +408,7 @@ public struct StyleTTS2AneSynthesizer {
     /// Box-Muller Gaussian noise, deterministic when `seed` is non-nil.
     private static func generateGaussianNoise(count: Int, seed: UInt64?) -> [Float] {
         var values = [Float](repeating: 0, count: count)
-        if var rng = seed.map({ StyleTTS2AneSplitMix64(seed: $0) }) {
+        if var rng = seed.map({ StyleTTS2SplitMix64(seed: $0) }) {
             fillBoxMuller(into: &values) { rng.nextUnitFloat() }
         } else {
             var sys = SystemRandomNumberGenerator()
@@ -436,7 +436,7 @@ public struct StyleTTS2AneSynthesizer {
     // MARK: - CoreML plumbing
 
     private static func predict(
-        stage: StyleTTS2AneStage,
+        stage: StyleTTS2Stage,
         model: MLModel,
         inputs: [String: MLMultiArray],
         timing: inout Double
@@ -449,16 +449,16 @@ public struct StyleTTS2AneSynthesizer {
             timing = Date().timeIntervalSince(start) * 1000
             return out
         } catch {
-            throw StyleTTS2AneError.predictionFailed(
+            throw StyleTTS2Error.predictionFailed(
                 stage: stage.rawValue, underlying: error)
         }
     }
 
     private static func outputArray(
-        _ provider: MLFeatureProvider, key: String, stage: StyleTTS2AneStage
+        _ provider: MLFeatureProvider, key: String, stage: StyleTTS2Stage
     ) throws -> MLMultiArray {
         guard let value = provider.featureValue(for: key)?.multiArrayValue else {
-            throw StyleTTS2AneError.unexpectedOutputShape(
+            throw StyleTTS2Error.unexpectedOutputShape(
                 stage: stage.rawValue,
                 expected: "MLMultiArray for '\(key)'",
                 got: "nil"
@@ -468,7 +468,7 @@ public struct StyleTTS2AneSynthesizer {
     }
 
     private static func rebuild16(
-        _ provider: MLFeatureProvider, key: String, stage: StyleTTS2AneStage
+        _ provider: MLFeatureProvider, key: String, stage: StyleTTS2Stage
     ) throws -> MLMultiArray {
         let arr = try outputArray(provider, key: key, stage: stage)
         return try KokoroAneArrays.float16Array(shape: arr.shape.map(\.intValue), from: arr)
@@ -479,7 +479,7 @@ public struct StyleTTS2AneSynthesizer {
 
 /// Tiny SplitMix64 PRNG — used only to seed Gaussian noise. Deterministic
 /// for a given seed so synthesis is reproducible.
-private struct StyleTTS2AneSplitMix64 {
+private struct StyleTTS2SplitMix64 {
     private var state: UInt64
 
     init(seed: UInt64) {

@@ -3,14 +3,14 @@ import XCTest
 
 @testable import FluidAudio
 
-/// Network-free structural tests for the `StyleTTS2AneStage` enum and the
-/// `StyleTTS2AneStageTimings` aggregate. Pins the 7-stage order so that
+/// Network-free structural tests for the `StyleTTS2Stage` enum and the
+/// `StyleTTS2StageTimings` aggregate. Pins the 7-stage order so that
 /// future re-cuts can't silently shuffle the chain.
-final class StyleTTS2AneStageOrderTests: XCTestCase {
+final class StyleTTS2StageOrderTests: XCTestCase {
 
     func testAllStagesEnumerated() {
         XCTAssertEqual(
-            StyleTTS2AneStage.allCases.count, 7,
+            StyleTTS2Stage.allCases.count, 7,
             "Pipeline must expose exactly 7 stages")
     }
 
@@ -19,7 +19,7 @@ final class StyleTTS2AneStageOrderTests: XCTestCase {
     /// rewire the model dispatch.
     func testStagesAreInExecutionOrder() {
         XCTAssertEqual(
-            StyleTTS2AneStage.allCases,
+            StyleTTS2Stage.allCases,
             [
                 .plBert,
                 .postBert,
@@ -34,24 +34,24 @@ final class StyleTTS2AneStageOrderTests: XCTestCase {
     func testStageRawValuesAreStableForLogging() {
         // Per-stage timings are reported by raw value in error paths and
         // benchmark JSON. Lock these strings.
-        XCTAssertEqual(StyleTTS2AneStage.plBert.rawValue, "plBert")
-        XCTAssertEqual(StyleTTS2AneStage.postBert.rawValue, "postBert")
-        XCTAssertEqual(StyleTTS2AneStage.alignment.rawValue, "alignment")
-        XCTAssertEqual(StyleTTS2AneStage.diffusionStep.rawValue, "diffusionStep")
-        XCTAssertEqual(StyleTTS2AneStage.prosody.rawValue, "prosody")
-        XCTAssertEqual(StyleTTS2AneStage.noise.rawValue, "noise")
-        XCTAssertEqual(StyleTTS2AneStage.vocoder.rawValue, "vocoder")
+        XCTAssertEqual(StyleTTS2Stage.plBert.rawValue, "plBert")
+        XCTAssertEqual(StyleTTS2Stage.postBert.rawValue, "postBert")
+        XCTAssertEqual(StyleTTS2Stage.alignment.rawValue, "alignment")
+        XCTAssertEqual(StyleTTS2Stage.diffusionStep.rawValue, "diffusionStep")
+        XCTAssertEqual(StyleTTS2Stage.prosody.rawValue, "prosody")
+        XCTAssertEqual(StyleTTS2Stage.noise.rawValue, "noise")
+        XCTAssertEqual(StyleTTS2Stage.vocoder.rawValue, "vocoder")
     }
 
     func testBundleNamesAreUnique() {
-        let names = Set(StyleTTS2AneStage.allCases.map(\.bundleName))
+        let names = Set(StyleTTS2Stage.allCases.map(\.bundleName))
         XCTAssertEqual(
-            names.count, StyleTTS2AneStage.allCases.count,
+            names.count, StyleTTS2Stage.allCases.count,
             "Each stage must have a unique mlmodelc filename")
     }
 
     func testStageTimingsTotalIsLinearSum() {
-        var t = StyleTTS2AneStageTimings()
+        var t = StyleTTS2StageTimings()
         t.plBert = 1
         t.postBert = 2
         t.alignment = 4
@@ -63,7 +63,7 @@ final class StyleTTS2AneStageOrderTests: XCTestCase {
     }
 
     func testStageTimingsZeroByDefault() {
-        let t = StyleTTS2AneStageTimings()
+        let t = StyleTTS2StageTimings()
         XCTAssertEqual(t.totalMs, 0)
     }
 
@@ -72,7 +72,7 @@ final class StyleTTS2AneStageOrderTests: XCTestCase {
     func testDefaultComputeUnitsPinAllStagesToANEExceptNoise() {
         // Empirical defaults from the conversion script: every stage on
         // .cpuAndNeuralEngine except Noise (fp32 phase precision -> .all).
-        let cu = StyleTTS2AneComputeUnits.default
+        let cu = StyleTTS2ComputeUnits.default
         XCTAssertEqual(cu.units(for: .plBert), .cpuAndNeuralEngine)
         XCTAssertEqual(cu.units(for: .postBert), .cpuAndNeuralEngine)
         XCTAssertEqual(cu.units(for: .alignment), .cpuAndNeuralEngine)
@@ -83,8 +83,8 @@ final class StyleTTS2AneStageOrderTests: XCTestCase {
     }
 
     func testCpuOnlyPresetSetsAllStagesCpuOnly() {
-        let cu = StyleTTS2AneComputeUnits.cpuOnly
-        for stage in StyleTTS2AneStage.allCases {
+        let cu = StyleTTS2ComputeUnits.cpuOnly
+        for stage in StyleTTS2Stage.allCases {
             XCTAssertEqual(
                 cu.units(for: stage), .cpuOnly,
                 "cpuOnly preset must pin \(stage) to .cpuOnly")
@@ -92,8 +92,8 @@ final class StyleTTS2AneStageOrderTests: XCTestCase {
     }
 
     func testAllAnePresetSetsAllStagesAne() {
-        let cu = StyleTTS2AneComputeUnits.allAne
-        for stage in StyleTTS2AneStage.allCases {
+        let cu = StyleTTS2ComputeUnits.allAne
+        for stage in StyleTTS2Stage.allCases {
             XCTAssertEqual(
                 cu.units(for: stage), .cpuAndNeuralEngine,
                 "allAne preset must pin \(stage) to .cpuAndNeuralEngine")
@@ -102,12 +102,12 @@ final class StyleTTS2AneStageOrderTests: XCTestCase {
 
     func testTtsPresetEnumMappingMatchesDirectInits() {
         XCTAssertEqual(
-            StyleTTS2AneComputeUnits(preset: .default), .default)
+            StyleTTS2ComputeUnits(preset: .default), .default)
         XCTAssertEqual(
-            StyleTTS2AneComputeUnits(preset: .allAne), .allAne)
+            StyleTTS2ComputeUnits(preset: .allAne), .allAne)
         XCTAssertEqual(
-            StyleTTS2AneComputeUnits(preset: .cpuAndGpu), .cpuAndGpu)
+            StyleTTS2ComputeUnits(preset: .cpuAndGpu), .cpuAndGpu)
         XCTAssertEqual(
-            StyleTTS2AneComputeUnits(preset: .cpuOnly), .cpuOnly)
+            StyleTTS2ComputeUnits(preset: .cpuOnly), .cpuOnly)
     }
 }

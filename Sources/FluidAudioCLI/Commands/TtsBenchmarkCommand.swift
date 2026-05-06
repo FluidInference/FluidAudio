@@ -277,8 +277,8 @@ public enum TtsBenchmarkCommand {
                     voice: voice,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
-            case .styleTts2Ane:
-                try await runStyleTts2Ane(
+            case .styleTts2:
+                try await runStyleTts2(
                     phrases: phrases, corpusLabel: corpusLabel,
                     voicePath: voice,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
@@ -664,7 +664,7 @@ public enum TtsBenchmarkCommand {
 
     // MARK: - StyleTTS2-ANE driver (7-graph re-cut)
 
-    private static func runStyleTts2Ane(
+    private static func runStyleTts2(
         phrases: [(category: String, text: String)],
         corpusLabel: String,
         voicePath: String?,
@@ -682,8 +682,8 @@ public enum TtsBenchmarkCommand {
         let voiceURL = resolveURL(voicePath, isDirectory: false)
         let voiceLabel = voiceURL.deletingPathExtension().lastPathComponent
 
-        let units = StyleTTS2AneComputeUnits(preset: preset)
-        let manager = StyleTTS2AneManager(computeUnits: units)
+        let units = StyleTTS2ComputeUnits(preset: preset)
+        let manager = StyleTTS2Manager(computeUnits: units)
 
         let coldStart = Date()
         try await manager.initialize()
@@ -1001,7 +1001,7 @@ public enum TtsBenchmarkCommand {
         case pocketTts
         case magpie
         case cosyVoice3
-        case styleTts2Ane
+        case styleTts2
 
         var defaultCorpus: String {
             switch self {
@@ -1025,7 +1025,7 @@ public enum TtsBenchmarkCommand {
             return .cosyVoice3
         case "styletts2-ane", "styletts2ane", "styletts2_ane", "style-ane", "s2-ane",
             "styletts2", "style-tts2", "styletts", "style":
-            return .styleTts2Ane
+            return .styleTts2
         default:
             logger.warning("Unknown backend '\(name)' — defaulting to kokoro-ane")
             return .kokoroAne

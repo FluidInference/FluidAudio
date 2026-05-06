@@ -1,10 +1,10 @@
-# StyleTTS2 ANE (7-Stage)
+# StyleTTS2 (7-Stage ANE)
 
 ANE-resident StyleTTS2 backend. Splits the `StyleTTS-2-coreml`
 checkpoint into 7 small CoreML stages so that 6 of them stay resident on
 the Neural Engine; only `noise.mlmodelc` runs on `.all` (fp32 SineGen
 phase precision). Mirrors [KokoroAne.md](KokoroAne.md) 1:1 in shape —
-same per-stage split, same `StyleTTS2AneComputeUnits` preset surface,
+same per-stage split, same `StyleTTS2ComputeUnits` preset surface,
 same `synthesizeDetailed` timing report.
 
 The diffusion sampler is preserved — it is StyleTTS2's defining feature
@@ -17,7 +17,7 @@ Conversion lives in
 
 ## Pipeline Shape
 
-| Property               | `StyleTTS2AneManager`                                              |
+| Property               | `StyleTTS2Manager`                                              |
 |------------------------|--------------------------------------------------------------------|
 | Compute                | 6 stages on ANE, 1 on `.all` (Noise), 7 graphs total               |
 | Disk footprint         | ~330 MB (int8 palettization, kmeans nbits=8)                       |
@@ -26,7 +26,7 @@ Conversion lives in
 | Custom lexicon / SSML  | No                                                                 |
 | Languages              | English (LibriTTS espeak-ng IPA)                                   |
 
-`StyleTTS2AneManager` is the only StyleTTS2 backend shipped by
+`StyleTTS2Manager` is the only StyleTTS2 backend shipped by
 FluidAudio. The legacy 4-graph CoreML pipeline has been retired.
 
 ## Quick Start
@@ -60,7 +60,7 @@ run any kokoro backend.
 ```swift
 import FluidAudio
 
-let manager = StyleTTS2AneManager()
+let manager = StyleTTS2Manager()
 try await manager.initialize()
 
 let voiceURL = URL(fileURLWithPath: "/path/to/ref_s.bin")
@@ -123,11 +123,11 @@ text → G2P (CoreML BART) → IPA → espeak-remap → vocab → token ids
 | `vocoder`       | en + har + noise + style           | 24 kHz waveform              | `cpuAndNeuralEngine`     | fp16+int8 |
 
 Override the per-stage assignment with one of the four shipped presets
-(`StyleTTS2AneComputeUnits.default` / `.allAne` / `.cpuAndGpu` /
+(`StyleTTS2ComputeUnits.default` / `.allAne` / `.cpuAndGpu` /
 `.cpuOnly`):
 
 ```swift
-let manager = StyleTTS2AneManager(
+let manager = StyleTTS2Manager(
     computeUnits: .cpuAndGpu  // skip ANE entirely (debugging baseline)
 )
 ```
@@ -170,7 +170,7 @@ pattern carried over to this re-cut:
 1. **EnumeratedShapes triggers `E5RT: tensor_buffer has known strides
    while the model has FlexibleShapeInfo`** (currently pinning
    `f0n_energy` to CPU; documented at
-   `StyleTTS2ModelStore.swift:109-112`) → Replace EnumeratedShapes with
+   `StyleTTS2AssetStore.swift:109-112`) → Replace EnumeratedShapes with
    a single fixed shape at `T_a=2000`. Pad the input on the Swift side.
 2. **BiLSTM not ANE-native** → Use the LSTM-unroll trick from
    `mobius/.../convert-coreml.py:272-301` (`CoreMLDurationEncoder`) on

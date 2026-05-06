@@ -9,7 +9,7 @@ import Foundation
 ///
 /// On HuggingFace they live alongside the CoreML bundles at
 /// `FluidInference/StyleTTS-2-coreml/voices/ref_s_<name>.bin`. The downloader
-/// (`StyleTTS2ResourceDownloader`) fetches the whole `voices/` directory.
+/// (`StyleTTS2AssetDownloader`) fetches the whole `voices/` directory.
 public enum StyleTTS2VoicePresets {
 
     /// Subdirectory (relative to the resolved bundle root) where `ref_s_*.bin`

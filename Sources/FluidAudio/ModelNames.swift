@@ -36,8 +36,8 @@ public enum Repo: String, CaseIterable, Sendable {
     case cosyvoice3 = "FluidInference/CosyVoice3-0.5B-coreml"
     case cohereTranscribeCoreml = "FluidInference/cohere-transcribe-03-2026-coreml/q8"
     case magpieTts = "FluidInference/magpie-tts-multilingual-357m-coreml"
-    case styleTts2 = "FluidInference/StyleTTS-2-coreml"
-    case styleTts2Ane = "FluidInference/StyleTTS-2-coreml/ANE"
+    case styleTts2Assets = "FluidInference/StyleTTS-2-coreml"
+    case styleTts2 = "FluidInference/StyleTTS-2-coreml/ANE"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -104,9 +104,9 @@ public enum Repo: String, CaseIterable, Sendable {
             return "cohere-transcribe-03-2026-coreml/q8"
         case .magpieTts:
             return "magpie-tts-multilingual-357m-coreml"
-        case .styleTts2:
+        case .styleTts2Assets:
             return "StyleTTS-2-coreml"
-        case .styleTts2Ane:
+        case .styleTts2:
             return "StyleTTS-2-coreml/ANE"
         }
     }
@@ -122,7 +122,7 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .kokoroAne, .kokoroAneZh:
             return "FluidInference/kokoro-82m-coreml"
-        case .styleTts2Ane:
+        case .styleTts2:
             return "FluidInference/StyleTTS-2-coreml"
         case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
@@ -148,7 +148,7 @@ public enum Repo: String, CaseIterable, Sendable {
             return "ANE"
         case .kokoroAneZh:
             return "ANE-zh"
-        case .styleTts2Ane:
+        case .styleTts2:
             return "ANE"
         case .parakeetEou160:
             return "160ms"
@@ -232,9 +232,9 @@ public enum Repo: String, CaseIterable, Sendable {
             return "cohere-transcribe/q8"
         case .magpieTts:
             return "magpie-tts"
-        case .styleTts2:
+        case .styleTts2Assets:
             return "styletts2"
-        case .styleTts2Ane:
+        case .styleTts2:
             return "styletts2/ANE"
         default:
             return name.replacingOccurrences(of: "-coreml", with: "")
@@ -815,32 +815,13 @@ public enum ModelNames {
     /// StyleTTS2 *shared assets* (vocab, bundle config, voice presets) for
     /// the LibriTTS multi-speaker checkpoint. The legacy 4-graph CoreML
     /// pipeline has been retired — synthesis goes through
-    /// `ModelNames.StyleTTS2Ane` (7 `.mlmodelc` bundles). The vocab + config
+    /// `ModelNames.StyleTTS2` (7 `.mlmodelc` bundles). The vocab + config
     /// + voices live in the same upstream HuggingFace repo because they are
     /// reused unchanged by the ANE checkpoint (same espeak-ng tokenizer,
     /// same `ref_s.bin` style blobs).
-    public enum StyleTTS2 {
-        /// Phoneme→id table mirrored from upstream `text_utils.TextCleaner` (178 tokens).
-        public static let vocabularyFile = "constants/text_cleaner_vocab.json"
-
-        /// Top-level bundle config (audio params, sampler config).
-        public static let configFile = "config.json"
-
-        /// Directory of preset `ref_s_<voice>.bin` voice references shipped
-        /// alongside the CoreML bundles (see `StyleTTS2VoicePresets`).
-        public static let voicesDir = "voices"
-
-        public static let requiredModels: Set<String> = [
-            vocabularyFile,
-            configFile,
-            voicesDir,
-        ]
-    }
-
-    /// StyleTTS2-ANE 7-graph re-cut. Mirrors the Kokoro-ANE layout: each
-    /// stage is its own `.mlmodelc` so we can pin compute units per-stage
-    /// and so disk-resident size after int8 palettization is ~330 MB
-    /// (vs. ~2 GB for the legacy 4-graph 12-bucket layout).
+    /// StyleTTS2 7-graph ANE pipeline. Each stage is its own `.mlmodelc`
+    /// so we can pin compute units per-stage and so disk-resident size
+    /// after int8 palettization is ~330 MB.
     ///
     /// Stage shapes (source: `mobius/.../scripts/ane/_styletts2_ane_lib.py`):
     /// 1. plbert         — RangeDim(2..512), fp16, ANE
@@ -851,7 +832,33 @@ public enum ModelNames {
     /// 5. prosody        — STATIC T_a=2000, fp16, ANE
     /// 6. noise          — STATIC T_a=2000, fp32, ALL  (SineGen phase precision)
     /// 7. vocoder        — STATIC T_a=2000, fp16, ANE  (cos-Snake patched HiFi-GAN)
-    public enum StyleTTS2Ane {
+    ///
+    /// Vocab / config / voices live at the root of the upstream HF repo
+    /// and are downloaded alongside the CoreML bundles via
+    /// `StyleTTS2AssetDownloader` / `StyleTTS2CoreMLDownloader`.
+    public enum StyleTTS2 {
+        // MARK: - Shared assets (root of the HF repo)
+
+        /// Phoneme→id table mirrored from upstream `text_utils.TextCleaner` (178 tokens).
+        public static let vocabularyFile = "constants/text_cleaner_vocab.json"
+
+        /// Top-level bundle config (audio params, sampler config).
+        public static let configFile = "config.json"
+
+        /// Directory of preset `ref_s_<voice>.bin` voice references shipped
+        /// alongside the CoreML bundles (see `StyleTTS2VoicePresets`).
+        public static let voicesDir = "voices"
+
+        /// The shared assets that live at the repo root (vocab, config,
+        /// voice presets). Downloaded by `StyleTTS2AssetDownloader`.
+        public static let requiredModels: Set<String> = [
+            vocabularyFile,
+            configFile,
+            voicesDir,
+        ]
+
+        // MARK: - 7 CoreML stages (under ANE/ subdirectory)
+
         public static let plBertFile = "styletts2_ane_plbert.mlmodelc"
         public static let postBertFile = "styletts2_ane_postbert_v2.mlmodelc"
         public static let alignmentFile = "styletts2_ane_alignment.mlmodelc"
@@ -860,11 +867,8 @@ public enum ModelNames {
         public static let noiseFile = "styletts2_ane_noise.mlmodelc"
         public static let vocoderFile = "styletts2_ane_vocoder_v2.mlmodelc"
 
-        /// The 7 `.mlmodelc` bundles required for synthesis.
-        ///
-        /// Vocab / config are reused from the legacy `StyleTTS2` namespace —
-        /// the espeak-ng IPA tokenizer is identical across both checkpoints,
-        /// and duplicating the JSONs in the ANE/ subdir is wasteful.
+        /// The 7 `.mlmodelc` bundles required for synthesis. Downloaded by
+        /// `StyleTTS2CoreMLDownloader`.
         public static let requiredCoreMLModels: Set<String> = [
             plBertFile,
             postBertFile,
@@ -1089,10 +1093,10 @@ public enum ModelNames {
                 .union(ModelNames.MultilingualG2P.requiredModels)
         case .pocketTts:
             return ModelNames.PocketTTS.requiredModels
-        case .styleTts2:
+        case .styleTts2Assets:
             return ModelNames.StyleTTS2.requiredModels
-        case .styleTts2Ane:
-            return ModelNames.StyleTTS2Ane.requiredCoreMLModels
+        case .styleTts2:
+            return ModelNames.StyleTTS2.requiredCoreMLModels
         case .kokoroAne:
             return ModelNames.KokoroAne.requiredModels
         case .kokoroAneZh:

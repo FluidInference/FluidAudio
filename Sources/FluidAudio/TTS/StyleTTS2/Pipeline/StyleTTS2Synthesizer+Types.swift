@@ -6,7 +6,7 @@ import Foundation
 /// replaces Kokoro's single-shot prosody graph (StyleTTS2's defining
 /// feature is the diffusion sampler) and `.tail` is folded into
 /// `.vocoder` because StyleTTS2's HiFi-GAN is iSTFT-free.
-public enum StyleTTS2AneStage: String, CaseIterable, Sendable {
+public enum StyleTTS2Stage: String, CaseIterable, Sendable {
     case plBert
     case postBert
     case alignment
@@ -34,7 +34,7 @@ public enum StyleTTS2AneStage: String, CaseIterable, Sendable {
 ///
 /// `diffusionStep` is the cumulative wall-clock across all 11 invocations
 /// (5 ADPM2 midpoint steps × 2 + 1 final).
-public struct StyleTTS2AneStageTimings: Sendable, Equatable {
+public struct StyleTTS2StageTimings: Sendable, Equatable {
     public var plBert: Double = 0
     public var postBert: Double = 0
     public var alignment: Double = 0
@@ -51,8 +51,8 @@ public struct StyleTTS2AneStageTimings: Sendable, Equatable {
     public init() {}
 }
 
-/// Detailed result of a `StyleTTS2AneManager.synthesizeDetailed` call.
-public struct StyleTTS2AneSynthesisResult: Sendable {
+/// Detailed result of a `StyleTTS2Manager.synthesizeDetailed` call.
+public struct StyleTTS2SynthesisResult: Sendable {
     /// 24 kHz mono fp32 PCM samples (raw, not WAV-wrapped).
     public let samples: [Float]
     /// Sample rate (24,000 Hz for the LibriTTS HiFi-GAN).
@@ -62,7 +62,7 @@ public struct StyleTTS2AneSynthesisResult: Sendable {
     /// `T_a` — acoustic frames (= sum of predicted durations).
     public let acousticFrames: Int
     /// Per-stage wall-clock timings.
-    public let timings: StyleTTS2AneStageTimings
+    public let timings: StyleTTS2StageTimings
 
     public var durationSeconds: Double {
         Double(samples.count) / Double(sampleRate)
@@ -73,7 +73,7 @@ public struct StyleTTS2AneSynthesisResult: Sendable {
         sampleRate: Int,
         encoderTokens: Int,
         acousticFrames: Int,
-        timings: StyleTTS2AneStageTimings
+        timings: StyleTTS2StageTimings
     ) {
         self.samples = samples
         self.sampleRate = sampleRate

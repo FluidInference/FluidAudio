@@ -16,10 +16,10 @@ import Foundation
 /// `ref_s.bin` voice blobs are *not* fetched here — they ship per-voice and
 /// are loaded via `StyleTTS2VoiceStyle.load(from:)` from a caller-supplied
 /// URL. The text-cleaner vocab + tokenizer state are reused from the legacy
-/// 4-graph repo (already downloaded by `StyleTTS2ResourceDownloader`).
-public enum StyleTTS2AneResourceDownloader {
+/// 4-graph repo (already downloaded by `StyleTTS2AssetDownloader`).
+public enum StyleTTS2CoreMLDownloader {
 
-    private static let logger = AppLogger(category: "StyleTTS2AneResourceDownloader")
+    private static let logger = AppLogger(category: "StyleTTS2CoreMLDownloader")
 
     /// Ensure the 7 mlmodelcs are present locally; download if any is missing.
     /// - Returns: The directory containing all 7 `.mlmodelc` bundles.
@@ -29,10 +29,10 @@ public enum StyleTTS2AneResourceDownloader {
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
         let modelsDirectory = try directory ?? defaultModelsDirectory()
-        let repo = Repo.styleTts2Ane
+        let repo = Repo.styleTts2
         let repoDir = modelsDirectory.appendingPathComponent(repo.folderName)
 
-        let required = ModelNames.StyleTTS2Ane.requiredCoreMLModels
+        let required = ModelNames.StyleTTS2.requiredCoreMLModels
         let allPresent = required.allSatisfy { name in
             FileManager.default.fileExists(atPath: repoDir.appendingPathComponent(name).path)
         }
@@ -57,7 +57,7 @@ public enum StyleTTS2AneResourceDownloader {
         for name in required {
             let path = repoDir.appendingPathComponent(name).path
             guard FileManager.default.fileExists(atPath: path) else {
-                throw StyleTTS2AneError.downloadFailed(
+                throw StyleTTS2Error.downloadFailed(
                     "Missing required asset after download: \(name)")
             }
         }
@@ -77,7 +77,7 @@ public enum StyleTTS2AneResourceDownloader {
                 for: .cachesDirectory, in: .userDomainMask
             ).first
         else {
-            throw StyleTTS2AneError.downloadFailed("Failed to locate caches directory")
+            throw StyleTTS2Error.downloadFailed("Failed to locate caches directory")
         }
         baseDirectory = first
         #endif
@@ -88,6 +88,6 @@ public enum StyleTTS2AneResourceDownloader {
                 at: cacheDirectory, withIntermediateDirectories: true)
         }
         return cacheDirectory.appendingPathComponent(
-            StyleTTS2AneConstants.defaultModelsSubdirectory)
+            StyleTTS2Constants.defaultModelsSubdirectory)
     }
 }

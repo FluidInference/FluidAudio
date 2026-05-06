@@ -18,10 +18,10 @@ public enum TtsBackend: Sendable {
     /// laishere/kokoro 7-stage CoreML chain (ALBERT → PostAlbert → Alignment →
     /// Prosody → Noise → Vocoder → Tail) with per-stage ANE/GPU assignment.
     case kokoroAne
-    /// StyleTTS2-ANE — 7-stage CoreML chain (PLBert → PostBert → Alignment →
+    /// StyleTTS2 — 7-stage CoreML chain (PLBert → PostBert → Alignment →
     /// DiffusionStep → Prosody → Noise → Vocoder) on the LibriTTS multi-speaker
     /// checkpoint. fp16 + int8 palettization with per-stage ANE residency,
     /// except the SineGen noise stage which stays fp32 to avoid phase
     /// saturation.
-    case styleTts2Ane
+    case styleTts2
 }

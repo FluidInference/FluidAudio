@@ -20,12 +20,12 @@ import Foundation
 ///     the legacy `StyleTTS2/` module — same 178-token vocab),
 ///   - the ADPM2 + Karras sampler loop around `diffusion_step` (also reused
 ///     from the legacy module via `StyleTTS2Sampler`).
-public actor StyleTTS2AneManager {
+public actor StyleTTS2Manager {
 
-    private let logger = AppLogger(category: "StyleTTS2AneManager")
-    private let modelStore: StyleTTS2AneModelStore
+    private let logger = AppLogger(category: "StyleTTS2Manager")
+    private let modelStore: StyleTTS2ModelStore
     private let directory: URL?
-    private let computeUnits: StyleTTS2AneComputeUnits
+    private let computeUnits: StyleTTS2ComputeUnits
 
     /// Lazily-loaded shared vocab + bundle config from the legacy 4-graph
     /// repo. The ANE re-cut deliberately reuses these instead of duplicating
@@ -33,7 +33,7 @@ public actor StyleTTS2AneManager {
     /// LibriTTS espeak-ng IPA). Reusing also means an existing user who
     /// has already downloaded `StyleTTS-2-coreml/` doesn't pay the asset
     /// cost again.
-    private let legacyAssetStore: StyleTTS2ModelStore
+    private let legacyAssetStore: StyleTTS2AssetStore
 
     private var isInitialized = false
 
@@ -41,16 +41,16 @@ public actor StyleTTS2AneManager {
     ///   - directory: Optional override for the base cache directory.
     ///     When `nil`, uses the default platform cache location.
     ///   - computeUnits: Per-stage compute-unit assignment. Defaults match
-    ///     the empirical sweep documented in `StyleTTS2AneComputeUnits`.
+    ///     the empirical sweep documented in `StyleTTS2ComputeUnits`.
     public init(
         directory: URL? = nil,
-        computeUnits: StyleTTS2AneComputeUnits = .default
+        computeUnits: StyleTTS2ComputeUnits = .default
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
-        self.modelStore = StyleTTS2AneModelStore(
+        self.modelStore = StyleTTS2ModelStore(
             directory: directory, computeUnits: computeUnits)
-        self.legacyAssetStore = StyleTTS2ModelStore(directory: directory)
+        self.legacyAssetStore = StyleTTS2AssetStore(directory: directory)
     }
 
     public var isAvailable: Bool { isInitialized }
@@ -88,7 +88,7 @@ public actor StyleTTS2AneManager {
         try await G2PModel.shared.ensureModelsAvailable()
 
         isInitialized = true
-        logger.notice("StyleTTS2AneManager initialized")
+        logger.notice("StyleTTS2Manager initialized")
     }
 
     /// Synthesize text to a WAV blob at 24 kHz.
@@ -111,7 +111,7 @@ public actor StyleTTS2AneManager {
         text: String,
         voiceStyleURL: URL,
         language: MultilingualG2PLanguage = .americanEnglish,
-        diffusionSteps: Int = StyleTTS2AneConstants.defaultDiffusionSteps,
+        diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
         alpha: Float = 0.3,
         beta: Float = 0.7,
         randomSeed: UInt64? = nil
@@ -127,7 +127,7 @@ public actor StyleTTS2AneManager {
         ).samples
         return try AudioWAV.data(
             from: samples,
-            sampleRate: Double(StyleTTS2AneConstants.sampleRate)
+            sampleRate: Double(StyleTTS2Constants.sampleRate)
         )
     }
 
@@ -138,7 +138,7 @@ public actor StyleTTS2AneManager {
         text: String,
         voiceStyleURL: URL,
         language: MultilingualG2PLanguage = .americanEnglish,
-        diffusionSteps: Int = StyleTTS2AneConstants.defaultDiffusionSteps,
+        diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
         alpha: Float = 0.3,
         beta: Float = 0.7,
         randomSeed: UInt64? = nil
@@ -161,23 +161,23 @@ public actor StyleTTS2AneManager {
         text: String,
         voiceStyleURL: URL,
         language: MultilingualG2PLanguage = .americanEnglish,
-        diffusionSteps: Int = StyleTTS2AneConstants.defaultDiffusionSteps,
+        diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
         alpha: Float = 0.3,
         beta: Float = 0.7,
         randomSeed: UInt64? = nil
-    ) async throws -> StyleTTS2AneSynthesisResult {
+    ) async throws -> StyleTTS2SynthesisResult {
         guard isInitialized else {
-            throw StyleTTS2AneError.modelNotLoaded("StyleTTS2AneManager.initialize() not called")
+            throw StyleTTS2Error.modelNotLoaded("StyleTTS2Manager.initialize() not called")
         }
         let voice = try StyleTTS2VoiceStyle.load(from: voiceStyleURL)
         let (_, ids) = try await tokenize(text: text, language: language)
-        let options = StyleTTS2AneSynthesizer.Options(
+        let options = StyleTTS2Synthesizer.Options(
             diffusionSteps: diffusionSteps,
             alpha: alpha,
             beta: beta,
             randomSeed: randomSeed
         )
-        return try await StyleTTS2AneSynthesizer.synthesize(
+        return try await StyleTTS2Synthesizer.synthesize(
             ids: ids, voice: voice, options: options, store: modelStore)
     }
 
@@ -189,7 +189,7 @@ public actor StyleTTS2AneManager {
         language: MultilingualG2PLanguage = .americanEnglish
     ) async throws -> (phonemes: String, ids: [Int32]) {
         guard isInitialized else {
-            throw StyleTTS2AneError.modelNotLoaded("StyleTTS2AneManager.initialize() not called")
+            throw StyleTTS2Error.modelNotLoaded("StyleTTS2Manager.initialize() not called")
         }
         let phonemes = try await StyleTTS2Phonemizer.phonemize(
             text: text, language: language)
@@ -210,7 +210,7 @@ public actor StyleTTS2AneManager {
         phonemes: String, ids: [Int32], dropped: [Unicode.Scalar: Int]
     ) {
         guard isInitialized else {
-            throw StyleTTS2AneError.modelNotLoaded("StyleTTS2AneManager.initialize() not called")
+            throw StyleTTS2Error.modelNotLoaded("StyleTTS2Manager.initialize() not called")
         }
         let phonemes = try await StyleTTS2Phonemizer.phonemize(
             text: text, language: language)
@@ -224,7 +224,7 @@ public actor StyleTTS2AneManager {
     /// Requires `initialize()` to have completed.
     public func voicesRepoRoot() async throws -> URL {
         guard isInitialized else {
-            throw StyleTTS2AneError.modelNotLoaded("StyleTTS2AneManager.initialize() not called")
+            throw StyleTTS2Error.modelNotLoaded("StyleTTS2Manager.initialize() not called")
         }
         return try await legacyAssetStore.repoRoot()
     }

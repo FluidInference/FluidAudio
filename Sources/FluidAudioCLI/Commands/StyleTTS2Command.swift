@@ -145,7 +145,7 @@ public enum StyleTTS2Command {
         let outputURL = expand(outputPath)
 
         do {
-            try await runAne(
+            try await run(
                 text: text,
                 voicePath: voicePath,
                 voiceName: voiceName,
@@ -160,12 +160,12 @@ public enum StyleTTS2Command {
 
     // MARK: - Backend
 
-    private static func runAne(
+    private static func run(
         text: String, voicePath: String?, voiceName: String?, outputURL: URL,
         diffusionSteps: Int, alpha: Float, beta: Float, seed: UInt64?
     ) async throws {
         logger.notice("Initializing StyleTTS2-ANE (7-graph) backend...")
-        let manager = StyleTTS2AneManager()
+        let manager = StyleTTS2Manager()
         try await manager.initialize { progress in
             logger.debug(
                 "Download \(progress.phase): "
@@ -213,7 +213,7 @@ public enum StyleTTS2Command {
     /// Resolve `--voice <path>` > `--voice-name <id>` > default preset id.
     /// Returns a fully-qualified URL pointing at a `ref_s.bin` blob on disk.
     private static func resolveVoiceURL(
-        voicePath: String?, voiceName: String?, manager: StyleTTS2AneManager
+        voicePath: String?, voiceName: String?, manager: StyleTTS2Manager
     ) async throws -> URL {
         if let voicePath {
             return expand(voicePath)
@@ -239,7 +239,7 @@ public enum StyleTTS2Command {
     /// dropped scalars for the whole corpus.
     private static func runTokenizeOnly(text: String?, corpusPath: String?) async {
         do {
-            let manager = StyleTTS2AneManager()
+            let manager = StyleTTS2Manager()
             try await manager.initialize { _ in }
 
             var totalScalars = 0

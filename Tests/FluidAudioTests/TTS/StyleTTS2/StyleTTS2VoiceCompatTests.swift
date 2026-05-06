@@ -10,7 +10,7 @@ import XCTest
 /// module — the style encoders are PyTorch-only and were not re-exported as
 /// part of this PR. If the ANE pipeline ever introduces a divergent voice
 /// blob format, this test will fail.
-final class StyleTTS2AneVoiceCompatTests: XCTestCase {
+final class StyleTTS2VoiceCompatTests: XCTestCase {
 
     private func writeBlob(_ floats: [Float]) throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -34,9 +34,9 @@ final class StyleTTS2AneVoiceCompatTests: XCTestCase {
 
         // Same loader, same dimensions — the ANE backend doesn't introduce a
         // new voice format.
-        XCTAssertEqual(voice.concatenated.count, StyleTTS2AneConstants.refStyleDim)
-        XCTAssertEqual(voice.acoustic.count, StyleTTS2AneConstants.styleDim)
-        XCTAssertEqual(voice.prosody.count, StyleTTS2AneConstants.styleDim)
+        XCTAssertEqual(voice.concatenated.count, StyleTTS2Constants.refStyleDim)
+        XCTAssertEqual(voice.acoustic.count, StyleTTS2Constants.styleDim)
+        XCTAssertEqual(voice.prosody.count, StyleTTS2Constants.styleDim)
         XCTAssertEqual(
             voice.acoustic.count + voice.prosody.count,
             voice.concatenated.count)
@@ -46,15 +46,15 @@ final class StyleTTS2AneVoiceCompatTests: XCTestCase {
         // refStyleDim == 2 * styleDim is a layout invariant relied on by
         // both the synthesizer (style mix split) and the voice loader.
         XCTAssertEqual(
-            StyleTTS2AneConstants.refStyleDim,
-            2 * StyleTTS2AneConstants.styleDim)
+            StyleTTS2Constants.refStyleDim,
+            2 * StyleTTS2Constants.styleDim)
     }
 
     func testAneSynthesizerOptionsAcceptDefaultMixWeights() {
         // Defaults must match the upstream Python reference (alpha=0.3,
         // beta=0.7, 5 ADPM2 steps). Documented in `Options.init`.
-        let opts = StyleTTS2AneSynthesizer.Options()
-        XCTAssertEqual(opts.diffusionSteps, StyleTTS2AneConstants.defaultDiffusionSteps)
+        let opts = StyleTTS2Synthesizer.Options()
+        XCTAssertEqual(opts.diffusionSteps, StyleTTS2Constants.defaultDiffusionSteps)
         XCTAssertEqual(opts.alpha, 0.3, accuracy: 1e-6)
         XCTAssertEqual(opts.beta, 0.7, accuracy: 1e-6)
         XCTAssertNil(opts.randomSeed)
@@ -64,7 +64,7 @@ final class StyleTTS2AneVoiceCompatTests: XCTestCase {
         // Constructing the manager must not touch the network. Only verifies
         // that the API surface compiles + the actor reports `isAvailable == false`
         // before `initialize()` is called.
-        let manager = StyleTTS2AneManager()
+        let manager = StyleTTS2Manager()
         let available = await manager.isAvailable
         XCTAssertFalse(available, "Fresh manager must not yet be loaded")
     }
