@@ -3,6 +3,11 @@ import Accelerate
 import Foundation
 
 /// MLMultiArray builders + fp16 ↔ fp32 conversions used by the chain.
+///
+/// All slicing helpers assume row-major contiguous storage with a leading
+/// batch dim of 1. CoreML outputs from our exported pipelines satisfy this
+/// invariant; the shape preconditions enforce it at runtime so a wiring bug
+/// fails loudly instead of corrupting the next stage's input.
 enum KokoroAneArrays {
 
     // MARK: - vImage helpers
@@ -34,8 +39,12 @@ enum KokoroAneArrays {
     }
 
     /// Element-wise NSNumber-bridged copy. Slow path — used only when the
-    /// source MLMultiArray has an unexpected dtype (not fp16/fp32).
+    /// source MLMultiArray has an unexpected dtype (not fp16/fp32). Trips
+    /// an assert in debug builds so we notice if a stage starts emitting an
+    /// unexpected dtype instead of silently taking the ~100× slower path.
     private static func genericCopy(_ source: MLMultiArray, into dst: MLMultiArray, count: Int) {
+        assertionFailure(
+            "KokoroAneArrays: unexpected source dtype \(source.dataType.rawValue); using slow NSNumber copy")
         for i in 0..<count {
             dst[i] = NSNumber(value: source[i].floatValue)
         }
@@ -62,11 +71,11 @@ enum KokoroAneArrays {
     static func float16Array(shape: [Int], from source: MLMultiArray) throws -> MLMultiArray {
         // Same shape + same dtype → just copy bytes.
         let total = shape.reduce(1, *)
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let dst = try MLMultiArray(shape: nsShape, dataType: .float16)
         precondition(
             source.count == total,
             "float16Array(from MLMultiArray): source has \(source.count) elements, shape implies \(total)")
+        let nsShape = shape.map { NSNumber(value: $0) }
+        let dst = try MLMultiArray(shape: nsShape, dataType: .float16)
         if source.dataType == .float16 {
             memcpy(dst.dataPointer, source.dataPointer, total * MemoryLayout<UInt16>.size)
             return dst
@@ -100,11 +109,11 @@ enum KokoroAneArrays {
     /// Build a Float32 MLMultiArray from a Float16-backed source.
     static func float32Array(shape: [Int], from source: MLMultiArray) throws -> MLMultiArray {
         let total = shape.reduce(1, *)
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let dst = try MLMultiArray(shape: nsShape, dataType: .float32)
         precondition(
             source.count == total,
             "float32Array(from MLMultiArray): source has \(source.count) elements, shape implies \(total)")
+        let nsShape = shape.map { NSNumber(value: $0) }
+        let dst = try MLMultiArray(shape: nsShape, dataType: .float32)
         if source.dataType == .float32 {
             memcpy(dst.dataPointer, source.dataPointer, total * MemoryLayout<Float>.size)
             return dst
@@ -142,6 +151,23 @@ enum KokoroAneArrays {
 
     // MARK: - Slicing
 
+    /// Assert that `arr` is row-major contiguous (densely packed). MLMultiArray
+    /// can in principle expose strided views; our pipeline never produces them,
+    /// but a strided source would silently corrupt the memcpy-based slices.
+    private static func assertDenseContiguous(
+        _ arr: MLMultiArray, _ context: @autoclosure () -> String
+    ) {
+        let shape = arr.shape.map { $0.intValue }
+        let strides = arr.strides.map { $0.intValue }
+        var expected = 1
+        for axis in stride(from: shape.count - 1, through: 0, by: -1) {
+            precondition(
+                strides[axis] == expected,
+                "\(context()): non-contiguous source (shape \(shape), strides \(strides))")
+            expected *= shape[axis]
+        }
+    }
+
     /// Slice a Float16 MLMultiArray with shape `[1, T, ...rest]` to the first
     /// `newT` frames along the second dim. Since the leading batch dim is 1
     /// and the time dim is the second axis, the per-frame trailing block is
@@ -152,7 +178,15 @@ enum KokoroAneArrays {
         _ arr: MLMultiArray, newShape: [Int]
     ) throws -> MLMultiArray {
         precondition(arr.dataType == .float16, "sliceLeadingTimeFp16 requires fp16 source")
+        precondition(
+            arr.shape.first?.intValue == 1,
+            "sliceLeadingTimeFp16 requires leading batch dim == 1, got shape \(arr.shape)")
+        precondition(
+            newShape.first == 1,
+            "sliceLeadingTimeFp16 requires newShape leading dim == 1, got \(newShape)")
+        assertDenseContiguous(arr, "sliceLeadingTimeFp16")
         let total = newShape.reduce(1, *)
+        precondition(total > 0, "sliceLeadingTimeFp16: empty newShape \(newShape)")
         precondition(
             total <= arr.count,
             "sliceLeadingTimeFp16: requested \(total) elements but source has \(arr.count)")
@@ -168,7 +202,15 @@ enum KokoroAneArrays {
         _ arr: MLMultiArray, newShape: [Int]
     ) throws -> MLMultiArray {
         precondition(arr.dataType == .float32, "sliceLeadingTimeFp32 requires fp32 source")
+        precondition(
+            arr.shape.first?.intValue == 1,
+            "sliceLeadingTimeFp32 requires leading batch dim == 1, got shape \(arr.shape)")
+        precondition(
+            newShape.first == 1,
+            "sliceLeadingTimeFp32 requires newShape leading dim == 1, got \(newShape)")
+        assertDenseContiguous(arr, "sliceLeadingTimeFp32")
         let total = newShape.reduce(1, *)
+        precondition(total > 0, "sliceLeadingTimeFp32: empty newShape \(newShape)")
         precondition(
             total <= arr.count,
             "sliceLeadingTimeFp32: requested \(total) elements but source has \(arr.count)")
@@ -186,8 +228,14 @@ enum KokoroAneArrays {
     ) throws -> MLMultiArray {
         precondition(arr.dataType == .float16, "sliceTrailingTimeFp16 requires fp16 source")
         precondition(
+            arr.shape.first?.intValue == 1,
+            "sliceTrailingTimeFp16 requires leading batch dim == 1, got shape \(arr.shape)")
+        assertDenseContiguous(arr, "sliceTrailingTimeFp16")
+        precondition(
             arr.count == channels * oldT,
             "shape mismatch: arr.count \(arr.count) ≠ \(channels)*\(oldT)")
+        precondition(newT > 0, "sliceTrailingTimeFp16: newT must be positive, got \(newT)")
+        precondition(channels > 0, "sliceTrailingTimeFp16: channels must be positive, got \(channels)")
         precondition(newT <= oldT, "newT \(newT) > oldT \(oldT)")
         let nsShape = [NSNumber(value: 1), NSNumber(value: channels), NSNumber(value: newT)]
         let dst = try MLMultiArray(shape: nsShape, dataType: .float16)
@@ -217,6 +265,8 @@ enum KokoroAneArrays {
             return out
         }
         // Generic fallback.
+        assertionFailure(
+            "KokoroAneArrays.readFloats: unexpected source dtype \(arr.dataType.rawValue); using slow NSNumber read")
         return (0..<count).map { Float(truncating: arr[$0]) }
     }
 }
