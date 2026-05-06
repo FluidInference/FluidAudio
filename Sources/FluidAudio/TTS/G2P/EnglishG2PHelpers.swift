@@ -119,7 +119,10 @@ public enum EnglishG2PHelpers {
                 let secondLastChar = base[secondLastIdx]
                 let doublingConsonants: Set<Character> = Set("bcdgklmnprstvxz")
                 if (lastChar == secondLastChar && doublingConsonants.contains(lastChar))
-                    || (lastChar == "k" && secondLastChar == "c")  // "cking" → stem without k
+                    // "Xcking" → stem ends in c (e.g. "trafficking" → "traffic",
+                    // "panicking" → "panic"). The k is an orthographic insert
+                    // to preserve the /k/ sound, not part of the lexical stem.
+                    || (lastChar == "k" && secondLastChar == "c")
                 {
                     let stemCandidate = String(base.dropLast(1))
                     if lexicon[stemCandidate] != nil {
@@ -137,17 +140,36 @@ public enum EnglishG2PHelpers {
 
     // MARK: - Phonetic suffix rules (US English)
 
-    /// Vowels that trigger `t→ɾ` flapping in American English (before `-ed`/`-ing`).
-    private static let usTaus: Set<Character> = Set("AIOWYiuæɑəɛɪɹʊʌ")
+    /// Vowel phoneme tokens that trigger `t→ɾ` flapping in American English
+    /// (before `-ed`/`-ing`). Includes misaki single-codepoint diphthong
+    /// shortcuts (`A=eɪ`, `I=aɪ`, `O=oʊ`, `W=aʊ`, `Y=ɔɪ`) and the
+    /// corresponding espeak two-codepoint forms.
+    private static let usTaus: Set<String> = [
+        "A", "I", "O", "W", "Y",
+        "i", "u", "æ", "ɑ", "ə", "ɛ", "ɪ", "ɹ", "ʊ", "ʌ",
+        "eɪ", "aɪ", "oʊ", "aʊ", "ɔɪ",
+    ]
+
+    /// Voiceless consonant phoneme tokens that take the `-s` suffix.
+    private static let voicelessSTokens: Set<String> = ["p", "t", "k", "f", "θ"]
+
+    /// Sibilant phoneme tokens that take the `-ᵻz` suffix. Covers misaki
+    /// (`ʧ`, `ʤ`) and espeak (`tʃ`, `dʒ`) affricate spellings.
+    private static let sibilantSTokens: Set<String> = [
+        "s", "z", "ʃ", "ʒ", "ʧ", "ʤ", "tʃ", "dʒ",
+    ]
+
+    /// Voiceless consonant phoneme tokens that take the `-t` past-tense suffix.
+    private static let voicelessEdTokens: Set<String> = [
+        "p", "k", "f", "θ", "ʃ", "s", "ʧ", "tʃ",
+    ]
 
     /// Append `-s`/`-z`/`-ᵻz` based on the final phoneme of the stem.
     private static func appendSSuffix(to stem: [String]) -> [String] {
-        guard let last = stem.last?.first else { return stem }
-        let voiceless: Set<Character> = Set("ptkfθ")
-        let sibilants: Set<Character> = Set("szʃʒʧʤ")
-        if voiceless.contains(last) {
+        guard let last = stem.last else { return stem }
+        if voicelessSTokens.contains(last) {
             return stem + ["s"]
-        } else if sibilants.contains(last) {
+        } else if sibilantSTokens.contains(last) {
             return stem + ["ᵻ", "z"]
         }
         return stem + ["z"]
@@ -156,9 +178,8 @@ public enum EnglishG2PHelpers {
     /// Append `-t`/`-d`/`-ᵻd` based on the final phoneme of the stem, with
     /// `t→ɾ` flapping before `-ᵻd`.
     private static func appendEdSuffix(to stem: [String]) -> [String] {
-        guard let last = stem.last?.first else { return stem }
-        let voicelessStops: Set<Character> = Set("pkfθʃsʧ")
-        if voicelessStops.contains(last) {
+        guard let last = stem.last else { return stem }
+        if voicelessEdTokens.contains(last) {
             return stem + ["t"]
         } else if last == "d" {
             return stem + ["ᵻ", "d"]
@@ -168,7 +189,7 @@ public enum EnglishG2PHelpers {
         // Ends in "t": check for flapping (t → ɾ before ᵻd).
         if stem.count >= 2 {
             let secondLast = stem[stem.count - 2]
-            if let ch = secondLast.first, usTaus.contains(ch) {
+            if usTaus.contains(secondLast) {
                 var result = Array(stem.dropLast())
                 result.append("ɾ")
                 result.append("ᵻ")
@@ -181,11 +202,11 @@ public enum EnglishG2PHelpers {
 
     /// Append `-ɪŋ` with `t→ɾ` flapping when applicable.
     private static func appendIngSuffix(to stem: [String]) -> [String] {
-        guard let last = stem.last?.first else { return stem }
+        guard let last = stem.last else { return stem }
         // Flapping: vowel + t → vowel + ɾɪŋ
         if last == "t", stem.count >= 2 {
             let secondLast = stem[stem.count - 2]
-            if let ch = secondLast.first, usTaus.contains(ch) {
+            if usTaus.contains(secondLast) {
                 var result = Array(stem.dropLast())
                 result.append("ɾ")
                 result.append("ɪ")
@@ -249,7 +270,7 @@ public enum EnglishG2PHelpers {
         "o": ["o"],
         "p": ["p", "i"],
         "q": ["k", "j", "u"],
-        "r": ["ɑ", "r"],
+        "r": ["ɑ", "ɹ"],
         "s": ["ɛ", "s"],
         "t": ["t", "i"],
         "u": ["j", "u"],
