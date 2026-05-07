@@ -108,19 +108,13 @@ extension CtcKeywordSpotter {
                 let overlapCount = min(overlapFrames, concatenatedLogProbs.count, logProbs.count)
 
                 if overlapCount > 0 {
-                    // Average the overlapping frames
                     let existingStart = concatenatedLogProbs.count - overlapCount
                     for i in 0..<overlapCount {
                         let existingIdx = existingStart + i
-                        let newFrame = logProbs[i]
-                        let existingFrame = concatenatedLogProbs[existingIdx]
-
-                        // Element-wise average of log-probs
-                        var averaged = [Float](repeating: 0, count: existingFrame.count)
-                        for v in 0..<existingFrame.count {
-                            averaged[v] = (existingFrame[v] + newFrame[v]) / 2.0
-                        }
-                        concatenatedLogProbs[existingIdx] = averaged
+                        concatenatedLogProbs[existingIdx] = Self.mergeOverlapFrame(
+                            existing: concatenatedLogProbs[existingIdx],
+                            incoming: logProbs[i]
+                        )
                     }
                 }
 
@@ -318,6 +312,37 @@ extension CtcKeywordSpotter {
         }
 
         return try MLDictionaryFeatureProvider(dictionary: dict)
+    }
+
+    // MARK: - Overlap Merging
+
+    /// Merge two overlapping CTC log-prob frames by taking the mean in
+    /// probability space (numerically-stable logmeanexp).
+    ///
+    /// `logmeanexp(a, b) = max(a, b) + log(exp(a-m) + exp(b-m)) - log(2)`
+    ///
+    /// The previous implementation took the arithmetic mean of log-probs,
+    /// which is `log(sqrt(p_a * p_b))` — a geometric mean that does not
+    /// produce a valid probability distribution and that systematically
+    /// underweights frames where the two chunks' predictions disagree.
+    /// Both inputs `-inf` propagates to `-inf`.
+    static func mergeOverlapFrame(existing: [Float], incoming: [Float]) -> [Float] {
+        let v = min(existing.count, incoming.count)
+        if v == 0 { return existing }
+
+        let log2: Float = 0.69314718  // logf(2)
+        var averaged = [Float](repeating: 0, count: v)
+        for j in 0..<v {
+            let a = existing[j]
+            let b = incoming[j]
+            let m = max(a, b)
+            if m == -Float.infinity {
+                averaged[j] = -Float.infinity
+            } else {
+                averaged[j] = m + logf(expf(a - m) + expf(b - m)) - log2
+            }
+        }
+        return averaged
     }
 
     // MARK: - Log Probability Processing
