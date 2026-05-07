@@ -97,19 +97,35 @@ public final class BpeTokenizer: Sendable {
         self.addedTokens = addedTokens
     }
 
-    /// Encode text to token IDs using BPE
-    public func encode(_ text: String, addSpecialTokens: Bool = false) -> [Int] {
+    /// Encode text to token IDs using BPE.
+    ///
+    /// - Parameters:
+    ///   - text: Input text.
+    ///   - addSpecialTokens: Currently unused; kept for API compatibility.
+    ///   - prependWordBoundary: If `true` (default), prepend a SentencePiece
+    ///     `▁` word-boundary marker before encoding, matching standard NeMo
+    ///     CTC tokenization. Set to `false` to produce a "mid-utterance"
+    ///     tokenization that omits the leading boundary, which is useful
+    ///     for keyword-spotting against audio where the keyword does not
+    ///     start at a word boundary (e.g. compound matches like
+    ///     `Liv` + `marli` → `Livmarli`).
+    public func encode(
+        _ text: String,
+        addSpecialTokens: Bool = false,
+        prependWordBoundary: Bool = true
+    ) -> [Int] {
         // Normalize: lowercase + NFKC normalization (matches NeMo CTC models)
         let normalized = text.lowercased().precomposedStringWithCompatibilityMapping
 
         // Pre-tokenize: replace spaces with ▁ (sentencepiece style)
-        let preprocessed = "▁" + normalized.replacingOccurrences(of: " ", with: "▁")
+        let leading = prependWordBoundary ? "▁" : ""
+        let preprocessed = leading + normalized.replacingOccurrences(of: " ", with: "▁")
 
         // Split into characters
         var word = preprocessed.map { String($0) }
 
         // Apply BPE merges iteratively
-        while true {
+        while word.count >= 2 {
             // Find the highest priority merge (earliest in merges list)
             var bestMergeIndex: Int? = nil
             var bestMergePair: (String, String)? = nil

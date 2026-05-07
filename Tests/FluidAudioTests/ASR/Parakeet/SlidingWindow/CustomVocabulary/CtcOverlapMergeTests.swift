@@ -54,8 +54,8 @@ final class CtcOverlapMergeTests: XCTestCase {
     /// `log(sqrt(p_a * p_b))` — the geometric mean. A correct probability-
     /// space mean must be **strictly larger** whenever `a ≠ b` (AM ≥ GM).
     func testProbabilitySpaceMeanExceedsLogSpaceMean() {
-        let a: Float = -0.1   // p ≈ 0.905
-        let b: Float = -3.0   // p ≈ 0.050
+        let a: Float = -0.1  // p ≈ 0.905
+        let b: Float = -3.0  // p ≈ 0.050
         let logSpaceMean = (a + b) / 2.0  // old behavior
         let merged = CtcKeywordSpotter.mergeOverlapFrame(
             existing: [a], incoming: [b]

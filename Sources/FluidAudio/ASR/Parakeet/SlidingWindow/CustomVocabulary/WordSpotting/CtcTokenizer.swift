@@ -68,12 +68,43 @@ public final class CtcTokenizer: Sendable {
 
     // MARK: - Encoding/Decoding
 
-    /// Tokenize text into CTC token IDs.
+    /// Tokenize text into CTC token IDs (with leading word boundary).
     ///
     /// - Parameter text: Text to encode
     /// - Returns: Array of token IDs
     public func encode(_ text: String) -> [Int] {
         bpeTokenizer.encode(text, addSpecialTokens: false)
+    }
+
+    /// Tokenize text into CTC token IDs without prepending the SentencePiece
+    /// `▁` word-boundary marker. Useful for spotting keywords that occur
+    /// mid-utterance, where the leading boundary token has no acoustic
+    /// counterpart in the CTC frames (e.g. compound matches).
+    ///
+    /// - Parameter text: Text to encode
+    /// - Returns: Array of token IDs (may differ in count from `encode`)
+    public func encodeWithoutBoundary(_ text: String) -> [Int] {
+        bpeTokenizer.encode(text, addSpecialTokens: false, prependWordBoundary: false)
+    }
+
+    /// Return both tokenizations (with and without leading word boundary),
+    /// deduplicated. The first entry is always the standard tokenization
+    /// (leading `▁`); the second is the mid-utterance variant if it differs.
+    ///
+    /// Callers performing CTC keyword spotting should score against all
+    /// returned variants and take the best, since the appropriate variant
+    /// depends on whether the keyword aligns to a word boundary in the
+    /// audio — which is not knowable a priori.
+    ///
+    /// - Parameter text: Text to encode
+    /// - Returns: 1 or 2 distinct token-ID sequences
+    public func encodeVariants(_ text: String) -> [[Int]] {
+        let withBoundary = encode(text)
+        let withoutBoundary = encodeWithoutBoundary(text)
+        if withBoundary == withoutBoundary {
+            return [withBoundary]
+        }
+        return [withBoundary, withoutBoundary]
     }
 
     /// Get the CTC model directory path

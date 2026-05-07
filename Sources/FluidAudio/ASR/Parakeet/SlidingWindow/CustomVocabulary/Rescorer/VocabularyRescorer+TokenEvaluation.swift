@@ -41,13 +41,38 @@ extension VocabularyRescorer {
         let searchStart = max(0, spanStartFrame - marginFrames)
         let searchEnd = min(logProbs.count, spanEndFrame + marginFrames)
 
-        // Score vocabulary term using constrained CTC
-        let (vocabCtcScore, _, _) = spotter.ctcWordSpotConstrained(
-            logProbs: logProbs,
-            keywordTokens: candidate.vocabTokens,
-            searchStartFrame: searchStart,
-            searchEndFrame: searchEnd
-        )
+        // Score vocabulary term against the constrained window. We try the
+        // standard `▁`-prefixed tokenization AND the mid-utterance variant
+        // (no leading boundary), keeping whichever scores higher. Compound
+        // matches like "Liv" + "marli" → "Livmarli" do not begin at a CTC
+        // word boundary, so the leading `▁` token has no acoustic
+        // counterpart and penalizes the DP unfairly.
+        var vocabTokensUsed = candidate.vocabTokens
+        var vocabCtcScore: Float = -.infinity
+        do {
+            let (score, _, _) = spotter.ctcWordSpotConstrained(
+                logProbs: logProbs,
+                keywordTokens: candidate.vocabTokens,
+                searchStartFrame: searchStart,
+                searchEndFrame: searchEnd
+            )
+            vocabCtcScore = score
+        }
+        if let tokenizer = ctcTokenizer {
+            let altTokens = tokenizer.encodeWithoutBoundary(candidate.vocabTerm)
+            if !altTokens.isEmpty && altTokens != candidate.vocabTokens {
+                let (altScore, _, _) = spotter.ctcWordSpotConstrained(
+                    logProbs: logProbs,
+                    keywordTokens: altTokens,
+                    searchStartFrame: searchStart,
+                    searchEndFrame: searchEnd
+                )
+                if altScore > vocabCtcScore {
+                    vocabCtcScore = altScore
+                    vocabTokensUsed = altTokens
+                }
+            }
+        }
 
         // Score original phrase using constrained CTC
         guard let tokenizer = ctcTokenizer else {
@@ -80,8 +105,9 @@ extension VocabularyRescorer {
             searchEndFrame: searchEnd
         )
 
-        // Apply adaptive context-biasing weight
-        let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: candidate.vocabTokens.count)
+        // Apply adaptive context-biasing weight, scaled to the variant
+        // tokenization that actually scored best.
+        let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: vocabTokensUsed.count)
         let boostedVocabScore = vocabCtcScore + adaptiveCbwValue
 
         // CTC-vs-CTC comparison
@@ -98,12 +124,13 @@ extension VocabularyRescorer {
                 + "\(String(format: "%.2f", candidate.spanEndTime))s]"
         )
         debugLog("    CTC('\(candidate.originalPhrase)'): \(String(format: "%.2f", originalCtcScore))")
+        let variantLabel = vocabTokensUsed == candidate.vocabTokens ? "boundary" : "no-boundary"
         let cbwInfo =
             config.useAdaptiveThresholds
-            ? "adaptive=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(candidate.vocabTokens.count))"
+            ? "adaptive=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(vocabTokensUsed.count))"
             : String(format: "%.2f", cbw)
         debugLog(
-            "    CTC('\(candidate.vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) "
+            "    CTC('\(candidate.vocabTerm)' [\(variantLabel)]): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) "
                 + "= \(String(format: "%.2f", boostedVocabScore))"
         )
         debugLog("    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(shouldReplace ? ">" : "<=") original)")
