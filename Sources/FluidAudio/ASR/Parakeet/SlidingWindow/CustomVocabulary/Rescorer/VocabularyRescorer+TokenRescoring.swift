@@ -81,13 +81,31 @@ extension VocabularyRescorer {
         replacedIndices: inout Set<Int>,
         replacements: inout [RescoringResult]
     ) -> RescoreOutput {
-        // PASS 2: Sort by span length (ascending) then by similarity (descending)
-        // This ensures shorter spans are preferred when multiple matches overlap
+        // PASS 2: Sort by similarity (descending), with span length used
+        // only as a tiebreak.
+        //
+        // Rationale: when a longer multi-word span has substantially higher
+        // similarity than a shorter overlapping span, the longer match
+        // should win. This handles the FDA-extended failure pattern where
+        // TDT splits an unfamiliar drug like `Romvimza` into `Rom vimza`,
+        // and the rescorer finds:
+        //   - 2-word: `rom vimza` → `Romvimza` (sim 0.89, real drug)
+        //   - 1-word: `vimza` → `Cimzia` (sim 0.67, distractor)
+        // The previous "shortest span wins" rule picked the 1-word
+        // distractor purely because it was shorter, ignoring that the
+        // 2-word match has 22pp better similarity.
+        //
+        // Span length still tiebreaks at near-equal similarity to keep the
+        // existing preference for compact replacements when both candidates
+        // are equally plausible.
         let sortedReplacements = pendingReplacements.sorted { a, b in
-            if a.candidate.spanLength != b.candidate.spanLength {
-                return a.candidate.spanLength < b.candidate.spanLength  // Prefer shorter spans
+            let simDiff = a.similarity - b.similarity
+            if abs(simDiff) > 0.05 {
+                return simDiff > 0  // Prefer higher similarity
             }
-            // For same span length, prefer higher similarity
+            if a.candidate.spanLength != b.candidate.spanLength {
+                return a.candidate.spanLength < b.candidate.spanLength  // Prefer shorter spans on near-tie
+            }
             return a.similarity > b.similarity
         }
 
