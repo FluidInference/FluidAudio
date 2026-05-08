@@ -65,8 +65,8 @@ final class ContextBiasingConstantsTests: XCTestCase {
 
     func testLargeVocabConfig() {
         let config = ContextBiasingConstants.rescorerConfig(forVocabSize: 15)
-        XCTAssertEqual(config.minSimilarity, 0.60, accuracy: 0.01)
-        XCTAssertEqual(config.cbw, 5.0, accuracy: 0.01)
+        XCTAssertEqual(config.minSimilarity, 0.55, accuracy: 0.01)
+        XCTAssertEqual(config.cbw, 4.5, accuracy: 0.01)
     }
 
     func testBoundaryVocabConfig() {
@@ -101,10 +101,10 @@ final class ContextBiasingConstantsTests: XCTestCase {
         // When the size-based config is stricter than the caller's threshold,
         // the size-based config should win.
         let largeVocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: 15)
-        XCTAssertEqual(largeVocabConfig.minSimilarity, 0.60, accuracy: 0.01)
+        XCTAssertEqual(largeVocabConfig.minSimilarity, 0.55, accuracy: 0.01)
 
         let callerThreshold: Float = 0.52
         let effective = max(largeVocabConfig.minSimilarity, callerThreshold)
-        XCTAssertEqual(effective, 0.60, accuracy: 0.01, "Size-based stricter threshold should win")
+        XCTAssertEqual(effective, 0.55, accuracy: 0.01, "Size-based stricter threshold should win")
     }
 }

@@ -194,27 +194,35 @@ public enum ContextBiasingConstants {
 
     /// Returns rescorer configuration tuned for the given vocabulary size.
     ///
-    /// CBW values were re-swept on the earnings22 KWS benchmark after the
-    /// blank-aware DP fix. The earnings22 dataset has at most 9 vocab
-    /// terms per file (all below `largeVocabThreshold`), so the sweep
-    /// directly measured the **small-vocab** path: F-score plateaus at
-    /// cbw ≈ 4.5 (TP=1075/1253, FP unchanged at 8 across cbw ∈ [3.5, 6.0]).
-    /// Below 3.5 each step costs ~1-5 TPs; above 4.5 the curve is flat.
-    /// The change recovers two more true positives over the prior cbw=3.0
-    /// default with no precision cost.
+    /// Tuning was performed on two benchmarks after the blank-aware DP fix:
     ///
-    /// Large-vocab cbw is set to a slightly higher value than small-vocab
-    /// to compensate for the per-file `minSimilarity` bump (0.50 → 0.60),
-    /// which raises the gate that vocab terms must clear. Re-sweep on a
-    /// large-vocab benchmark before relying on this value.
+    /// **Small-vocab path (earnings22 KWS, ≤9 terms/file):**
+    /// CBW sweep showed F-score plateaus at cbw ≈ 4.5 (TP=1075/1253,
+    /// FP unchanged at 8 across cbw ∈ [3.5, 6.0]). Below 3.5 each step
+    /// costs 1-5 TPs; above 4.5 the curve is flat.
+    ///
+    /// **Large-vocab path (FDA-approved-drugs KWS, 37-55 terms/file):**
+    /// minSimilarity sweep showed F-score peaks at 0.50 (TP=223/236,
+    /// FP=0, F-score 97.2%). The previous 0.60 default was leaving
+    /// 10 TPs on the table (TP=213, F-score 94.9%). CBW had no
+    /// measurable effect on this benchmark across cbw ∈ [3.0, 12.0]
+    /// — at 0 false positives, the score-vs-baseline comparison was
+    /// not the binding constraint; the string-similarity gate was.
+    ///
+    /// Large-vocab `minSimilarity` was therefore lowered to 0.55 — a
+    /// conservative point between the FDA-optimal 0.50 and the prior
+    /// 0.60. This recovers most of the FDA TPs without going to a
+    /// permissive value that may introduce FPs on benchmarks not yet
+    /// in the test set. Both vocab sizes converge on cbw=4.5 since
+    /// the spread on cbw is minimal in measured ranges.
     ///
     /// - Parameter size: Number of vocabulary terms.
     /// - Returns: `VocabSizeConfig` with appropriate thresholds.
     public static func rescorerConfig(forVocabSize size: Int) -> VocabSizeConfig {
         let isLarge = size > largeVocabThreshold
         return VocabSizeConfig(
-            minSimilarity: isLarge ? 0.60 : 0.50,
-            cbw: isLarge ? 5.0 : 4.5
+            minSimilarity: isLarge ? 0.55 : 0.50,
+            cbw: 4.5
         )
     }
 
