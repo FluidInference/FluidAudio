@@ -120,6 +120,44 @@ extension VocabularyRescorer {
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // MARK: - Phonetic Fallback Gate
+
+    /// Decide whether a candidate that fell below the Levenshtein
+    /// `minSimilarity` gate should be rescued via phonetic matching.
+    ///
+    /// The fallback fires only when:
+    ///   1. A `phoneticEncoder` is configured on the rescorer,
+    ///   2. `bestSimilarity` is at least
+    ///      `ContextBiasingConstants.phoneticSimilarityFloor` — protects
+    ///      against random short-string collisions in the encoder's
+    ///      output space (e.g., `Alhemo` vs `Ilumya` both encode to
+    ///      `ALAMA` despite being unrelated drugs at similarity 0.17),
+    ///   3. The TDT phrase shares a phonetic code with at least one of
+    ///      the vocabulary term's normalized forms (canonical or alias).
+    ///
+    /// - Parameters:
+    ///   - normalizedPhrase: Already-normalized TDT phrase to test.
+    ///   - forms: All normalized forms (canonical + aliases) of the
+    ///     vocabulary term being considered.
+    ///   - bestSimilarity: The highest Levenshtein similarity found
+    ///     between `normalizedPhrase` and any form.
+    /// - Returns: True iff the candidate should be accepted via the
+    ///   phonetic fallback.
+    func passesPhoneticFallback(
+        normalizedPhrase: String,
+        forms: [NormalizedForm],
+        bestSimilarity: Float
+    ) -> Bool {
+        guard let encoder = phoneticEncoder else { return false }
+        guard bestSimilarity >= ContextBiasingConstants.phoneticSimilarityFloor else { return false }
+        for form in forms {
+            if encoder.soundsAlike(normalizedPhrase, form.normalized) {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Build set of normalized vocabulary terms for guard checks
     func buildVocabularyNormalizedSet() -> Set<String> {
         var normalizedSet = Set<String>()

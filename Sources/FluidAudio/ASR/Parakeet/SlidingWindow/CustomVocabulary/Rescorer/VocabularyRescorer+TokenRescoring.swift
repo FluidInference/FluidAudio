@@ -511,7 +511,22 @@ extension VocabularyRescorer {
                             minSimilarity: minSimilarity,
                             spanLength: spanLength
                         )
-                        guard bestSimilarity >= minSimilarityForSpan else { continue }
+                        // Either Levenshtein clears the gate, OR the
+                        // phonetic fallback rescues it (when an encoder
+                        // is configured).
+                        if bestSimilarity < minSimilarityForSpan {
+                            guard
+                                passesPhoneticFallback(
+                                    normalizedPhrase: normalizedPhrase,
+                                    forms: multiWordForms,
+                                    bestSimilarity: bestSimilarity
+                                )
+                            else { continue }
+                            debugLog(
+                                "  [PHONETIC] '\(tdtPhrase)' ↔ '\(vocabTerm)' "
+                                    + "rescued (sim=\(String(format: "%.2f", bestSimilarity)) < \(String(format: "%.2f", minSimilarityForSpan)))"
+                            )
+                        }
 
                         // Get temporal window for the entire span
                         guard let firstIdx = spanIndices.first, let lastIdx = spanIndices.last else { continue }
@@ -671,7 +686,36 @@ extension VocabularyRescorer {
                     if shouldSkipStopword { continue }
                     minSimilarityForSpan = adjustedSimilarity
 
-                    guard bestSimilarity >= minSimilarityForSpan else { continue }
+                    if bestSimilarity < minSimilarityForSpan {
+                        // Reconstruct the phrase that produced
+                        // `bestSimilarity` so the phonetic fallback can
+                        // hash it. The single-word path tries the bare
+                        // word OR a concatenation of adjacent words; for
+                        // phonetic encoding both forms are acceptable
+                        // since the encoder is whitespace-agnostic for
+                        // SentencePiece-style outputs.
+                        let phoneticPhrase: String
+                        if matchedSpanLength == 1 {
+                            phoneticPhrase = normalizedWord
+                        } else if matchedSpanLength == 2, let norm2 = normalized2 {
+                            phoneticPhrase = normalizedWord + norm2
+                        } else if matchedSpanLength == 3, let norm2 = normalized2, let norm3 = normalized3 {
+                            phoneticPhrase = normalizedWord + norm2 + norm3
+                        } else {
+                            phoneticPhrase = normalizedWord
+                        }
+                        guard
+                            passesPhoneticFallback(
+                                normalizedPhrase: phoneticPhrase,
+                                forms: singleWordForms,
+                                bestSimilarity: bestSimilarity
+                            )
+                        else { continue }
+                        debugLog(
+                            "  [PHONETIC] '\(phoneticPhrase)' ↔ '\(vocabTerm)' "
+                                + "rescued (sim=\(String(format: "%.2f", bestSimilarity)) < \(String(format: "%.2f", minSimilarityForSpan)))"
+                        )
+                    }
 
                     // Build the original phrase (single word or concatenated span)
                     let spanIndices = Array(wordIdx..<(wordIdx + matchedSpanLength))

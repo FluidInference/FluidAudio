@@ -25,6 +25,18 @@ public struct VocabularyRescorer: Sendable {
     let bkTree: BKTree?
     let bkTreeMaxDistance: Int
 
+    /// Optional phonetic encoder used as a fallback gate for candidates
+    /// whose Levenshtein similarity falls below `minSimilarity` but that
+    /// sound alike (e.g., TDT decoded `chronicity` for the drug
+    /// `Crenessity` — Levenshtein 0.40, phonetically identical). When
+    /// `nil`, the rescorer behaves exactly as before — no phonetic
+    /// fallback is applied.
+    ///
+    /// FluidAudio core does not ship a phonetic encoder; callers who
+    /// have a license for one (e.g., Metaphone3) inject it at create
+    /// time.
+    let phoneticEncoder: PhoneticEncoder?
+
     /// Configuration for rescoring behavior
     public struct Config: Sendable {
         /// Enable adaptive thresholds based on token count
@@ -87,7 +99,8 @@ public struct VocabularyRescorer: Sendable {
         spotter: CtcKeywordSpotter,
         vocabulary: CustomVocabularyContext,
         config: Config = .default,
-        ctcModelDirectory: URL? = nil
+        ctcModelDirectory: URL? = nil,
+        phoneticEncoder: PhoneticEncoder? = nil
     ) async throws -> VocabularyRescorer {
         let tokenizer: CtcTokenizer
         if let modelDir = ctcModelDirectory {
@@ -106,7 +119,8 @@ public struct VocabularyRescorer: Sendable {
             ctcTokenizer: tokenizer,
             useBKTree: useBKTree,
             bkTree: bkTree,
-            bkTreeMaxDistance: ContextBiasingConstants.bkTreeMaxDistance
+            bkTreeMaxDistance: ContextBiasingConstants.bkTreeMaxDistance,
+            phoneticEncoder: phoneticEncoder
         )
     }
 
@@ -118,7 +132,8 @@ public struct VocabularyRescorer: Sendable {
         ctcTokenizer: CtcTokenizer,
         useBKTree: Bool,
         bkTree: BKTree?,
-        bkTreeMaxDistance: Int
+        bkTreeMaxDistance: Int,
+        phoneticEncoder: PhoneticEncoder?
     ) {
         self.spotter = spotter
         self.vocabulary = vocabulary
@@ -127,6 +142,7 @@ public struct VocabularyRescorer: Sendable {
         self.useBKTree = useBKTree
         self.bkTree = bkTree
         self.bkTreeMaxDistance = bkTreeMaxDistance
+        self.phoneticEncoder = phoneticEncoder
         #if DEBUG
         self.debugMode = true  // Verbose logging in DEBUG builds
         #else
