@@ -192,9 +192,24 @@ public enum ContextBiasingConstants {
         public let cbw: Float
     }
 
+    /// Threshold for classifying vocabulary as "extra-large".
+    ///
+    /// Vocabularies above this size require even tighter similarity
+    /// thresholds because the dictionary contains many real drug/brand
+    /// names that *don't* appear in the audio (distractors). At V=670
+    /// with `minSimilarity=0.55`, FDA-extended produced 33 false
+    /// positives (precision 86.2%); raising to 0.60 cut that to 8
+    /// (precision 96.3%) at the cost of 1 TP. Above V=100 the
+    /// distractor density becomes large enough that the looser large-
+    /// vocab threshold becomes harmful.
+    ///
+    /// - Value: `100` terms
+    /// - Used in: `rescorerConfig(forVocabSize:)`
+    public static let extraLargeVocabThreshold: Int = 100
+
     /// Returns rescorer configuration tuned for the given vocabulary size.
     ///
-    /// Tuning was performed on two benchmarks after the blank-aware DP fix:
+    /// Tuning was performed on three benchmarks after the blank-aware DP fix:
     ///
     /// **Small-vocab path (earnings22 KWS, ≤9 terms/file):**
     /// CBW sweep showed F-score plateaus at cbw ≈ 4.5 (TP=1075/1253,
@@ -202,28 +217,37 @@ public enum ContextBiasingConstants {
     /// costs 1-5 TPs; above 4.5 the curve is flat.
     ///
     /// **Large-vocab path (FDA-approved-drugs KWS, 37-55 terms/file):**
-    /// minSimilarity sweep showed F-score peaks at 0.50 (TP=223/236,
-    /// FP=0, F-score 97.2%). The previous 0.60 default was leaving
-    /// 10 TPs on the table (TP=213, F-score 94.9%). CBW had no
-    /// measurable effect on this benchmark across cbw ∈ [3.0, 12.0]
-    /// — at 0 false positives, the score-vs-baseline comparison was
-    /// not the binding constraint; the string-similarity gate was.
+    /// minSimilarity sweep showed F-score peaks at 0.50-0.55 (TP=218,
+    /// FP=0, F-score 96.0%). The prior 0.60 default left 5 TPs on the
+    /// table.
     ///
-    /// Large-vocab `minSimilarity` was therefore lowered to 0.55 — a
-    /// conservative point between the FDA-optimal 0.50 and the prior
-    /// 0.60. This recovers most of the FDA TPs without going to a
-    /// permissive value that may introduce FPs on benchmarks not yet
-    /// in the test set. Both vocab sizes converge on cbw=4.5 since
-    /// the spread on cbw is minimal in measured ranges.
+    /// **Extra-large-vocab path (FDA-extended, ~670 terms/file with
+    /// 600+ Purple Book biologic distractors that never appear in
+    /// audio):**
+    /// minSimilarity 0.55 → 33 FPs, F=86.8%. Raising to 0.60 collapses
+    /// FPs to 8 (precision 86.2 → 96.3%) for only -1 TP, F=91.4%.
+    /// At V≥100 the distractor pool becomes large enough that the
+    /// 0.55 gate is too permissive.
+    ///
+    /// CBW had no measurable effect on either large-vocab benchmark
+    /// (precision was already high or the gate was the binding
+    /// constraint, not the score-vs-baseline comparison). All sizes
+    /// converge on cbw=4.5.
     ///
     /// - Parameter size: Number of vocabulary terms.
     /// - Returns: `VocabSizeConfig` with appropriate thresholds.
     public static func rescorerConfig(forVocabSize size: Int) -> VocabSizeConfig {
+        let isExtraLarge = size > extraLargeVocabThreshold
         let isLarge = size > largeVocabThreshold
-        return VocabSizeConfig(
-            minSimilarity: isLarge ? 0.55 : 0.50,
-            cbw: 4.5
-        )
+        let minSimilarity: Float
+        if isExtraLarge {
+            minSimilarity = 0.60
+        } else if isLarge {
+            minSimilarity = 0.55
+        } else {
+            minSimilarity = 0.50
+        }
+        return VocabSizeConfig(minSimilarity: minSimilarity, cbw: 4.5)
     }
 
     /// Baseline token count for multi-token phrase threshold adjustment.
