@@ -12,10 +12,13 @@ final class BpeTokenizerVariantsTests: XCTestCase {
 
     /// Path to the CTC tokenizer that ships with the parakeet-ctc-110m model.
     private var tokenizerDir: URL? {
-        guard let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first else { return nil }
-        let dir = appSupport
+        guard
+            let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first
+        else { return nil }
+        let dir =
+            appSupport
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent("parakeet-ctc-110m-coreml", isDirectory: true)

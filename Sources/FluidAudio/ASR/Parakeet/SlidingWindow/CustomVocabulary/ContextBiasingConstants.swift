@@ -194,13 +194,27 @@ public enum ContextBiasingConstants {
 
     /// Returns rescorer configuration tuned for the given vocabulary size.
     ///
+    /// CBW values were re-swept on the earnings22 KWS benchmark after the
+    /// blank-aware DP fix. The earnings22 dataset has at most 9 vocab
+    /// terms per file (all below `largeVocabThreshold`), so the sweep
+    /// directly measured the **small-vocab** path: F-score plateaus at
+    /// cbw ≈ 4.5 (TP=1075/1253, FP unchanged at 8 across cbw ∈ [3.5, 6.0]).
+    /// Below 3.5 each step costs ~1-5 TPs; above 4.5 the curve is flat.
+    /// The change recovers two more true positives over the prior cbw=3.0
+    /// default with no precision cost.
+    ///
+    /// Large-vocab cbw is set to a slightly higher value than small-vocab
+    /// to compensate for the per-file `minSimilarity` bump (0.50 → 0.60),
+    /// which raises the gate that vocab terms must clear. Re-sweep on a
+    /// large-vocab benchmark before relying on this value.
+    ///
     /// - Parameter size: Number of vocabulary terms.
     /// - Returns: `VocabSizeConfig` with appropriate thresholds.
     public static func rescorerConfig(forVocabSize size: Int) -> VocabSizeConfig {
         let isLarge = size > largeVocabThreshold
         return VocabSizeConfig(
             minSimilarity: isLarge ? 0.60 : 0.50,
-            cbw: isLarge ? 2.5 : 3.0
+            cbw: isLarge ? 5.0 : 4.5
         )
     }
 

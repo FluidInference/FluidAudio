@@ -60,13 +60,13 @@ final class ContextBiasingConstantsTests: XCTestCase {
     func testSmallVocabConfig() {
         let config = ContextBiasingConstants.rescorerConfig(forVocabSize: 5)
         XCTAssertEqual(config.minSimilarity, 0.50, accuracy: 0.01)
-        XCTAssertEqual(config.cbw, 3.0, accuracy: 0.01)
+        XCTAssertEqual(config.cbw, 4.5, accuracy: 0.01)
     }
 
     func testLargeVocabConfig() {
         let config = ContextBiasingConstants.rescorerConfig(forVocabSize: 15)
         XCTAssertEqual(config.minSimilarity, 0.60, accuracy: 0.01)
-        XCTAssertEqual(config.cbw, 2.5, accuracy: 0.01)
+        XCTAssertEqual(config.cbw, 5.0, accuracy: 0.01)
     }
 
     func testBoundaryVocabConfig() {
