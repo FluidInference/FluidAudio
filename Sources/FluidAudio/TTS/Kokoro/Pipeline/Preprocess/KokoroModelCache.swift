@@ -48,7 +48,8 @@ public actor KokoroModelCache {
                 throw TTSError.modelNotFound(ModelNames.TTS.bundle(for: variant))
             }
             kokoroModels[variant] = model
-            tokenLengthCache[variant] = KokoroSynthesizer.inferTokenLength(from: model)
+            let tokenLength = max(1, KokoroSynthesizer.inferTokenLength(from: model))
+            tokenLengthCache[variant] = tokenLength
             logger.info("Loaded Kokoro \(variantDescription(variant)) model from cache")
         }
 
@@ -78,7 +79,7 @@ public actor KokoroModelCache {
             return cached
         }
         let model = try await model(for: variant)
-        let length = KokoroSynthesizer.inferTokenLength(from: model)
+        let length = max(1, KokoroSynthesizer.inferTokenLength(from: model))
         tokenLengthCache[variant] = length
         return length
     }
@@ -112,7 +113,8 @@ public actor KokoroModelCache {
         for (variant, model) in models.modelsByVariant {
             downloadedModels[variant] = model
             kokoroModels[variant] = model
-            tokenLengthCache[variant] = KokoroSynthesizer.inferTokenLength(from: model)
+            let tokenLength = max(1, KokoroSynthesizer.inferTokenLength(from: model))
+            tokenLengthCache[variant] = tokenLength
         }
 
         if referenceDimension == nil {
