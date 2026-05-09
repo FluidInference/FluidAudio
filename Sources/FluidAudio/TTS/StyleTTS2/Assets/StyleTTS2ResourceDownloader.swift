@@ -43,6 +43,28 @@ public enum StyleTTS2ResourceDownloader {
         return repoDir
     }
 
+    /// Ensure the Misaki gold (and best-effort silver) English lexicons
+    /// are cached locally. Both files live under the Kokoro HF repo and
+    /// are reused verbatim by the StyleTTS2 phonemizer for lookup-first
+    /// IPA resolution. Silver download failures are swallowed; the gold
+    /// lexicon alone covers the common case.
+    public static func ensureLexicons() async throws -> URL {
+        do {
+            let goldURL = try await TtsResourceDownloader.ensureLexiconFile(
+                named: "us_gold.json")
+            do {
+                _ = try await TtsResourceDownloader.ensureLexiconFile(
+                    named: "us_silver.json")
+            } catch {
+                logger.notice(
+                    "Silver lexicon download failed (\(error)); proceeding with gold only")
+            }
+            return goldURL.deletingLastPathComponent()
+        } catch {
+            throw StyleTTS2Error.downloadFailed("Misaki gold lexicon: \(error)")
+        }
+    }
+
     /// Ensure the bucket-variant pair (`bert_fp16_t<T>` +
     /// `fused_diffusion_sampler_fp16_t<T>`) for token bucket `t` is present.
     /// No-op when both files already exist locally.

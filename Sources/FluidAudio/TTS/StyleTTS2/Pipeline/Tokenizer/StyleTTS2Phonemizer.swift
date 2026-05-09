@@ -5,22 +5,34 @@ import Foundation
 /// The Python pipeline runs `phonemizer.backend.EspeakBackend(language="en-us",
 /// preserve_punctuation=True, with_stress=True)` followed by
 /// `nltk.tokenize.word_tokenize` and finally `TextCleaner`. FluidAudio cannot
-/// ship the espeak C library, so the Swift backend uses the existing
-/// `MultilingualG2PModel` (CharsiuG2P ByT5) actor instead.
+/// ship the espeak C library, so the Swift backend mirrors Kokoro's
+/// gold-first lookup pattern instead:
 ///
-/// > Important: CharsiuG2P uses a different IPA convention than espeak —
-/// > most notably it lacks stress markers (`ˈ`, `ˌ`) and yields slightly
-/// > different vowel choices for some words. The model produces
-/// > intelligible speech but quality is meaningfully below the espeak
-/// > reference. Callers with a reliable phonemizer should pass IPA
-/// > directly via `StyleTTS2Manager.synthesizePhonemes(...)`.
+///   1. The Misaki gold lexicon (`us_gold.json`) — high-confidence,
+///      hand-curated, includes stress markers (`ˈ`, `ˌ`).
+///   2. The Misaki silver lexicon (`us_silver.json`) — lower confidence
+///      but still curated.
+///   3. CharsiuG2P (`MultilingualG2PModel`) — neural fallback for words
+///      not in either lexicon. CharsiuG2P uses a different IPA convention
+///      (no stress markers, slightly different vowel choices), so this
+///      branch is reserved for genuine misses to keep the synthesizer
+///      close to the espeak training distribution.
+///
+/// > Important: callers with a reliable phonemizer (e.g. server-side
+/// > espeak) can still bypass everything via
+/// > `StyleTTS2Manager.synthesize(ipa:referenceAudioURL:...)`.
 public struct StyleTTS2Phonemizer: Sendable {
 
     private let logger = AppLogger(category: "StyleTTS2Phonemizer")
     private let language: MultilingualG2PLanguage
+    private let lexicon: StyleTTS2GoldLexicon?
 
-    public init(language: MultilingualG2PLanguage = .americanEnglish) {
+    public init(
+        language: MultilingualG2PLanguage = .americanEnglish,
+        lexicon: StyleTTS2GoldLexicon? = nil
+    ) {
         self.language = language
+        self.lexicon = lexicon
     }
 
     /// Phonemize a sentence and encode it into the StyleTTS2 token IDs.
@@ -47,6 +59,9 @@ public struct StyleTTS2Phonemizer: Sendable {
         ipaParts.reserveCapacity(words.count)
 
         var anyResolved = false
+        var lexiconHits = 0
+        var g2pHits = 0
+
         for word in words {
             if word.isEmpty { continue }
             // Punctuation passes through verbatim — TextCleaner has direct
@@ -56,12 +71,22 @@ public struct StyleTTS2Phonemizer: Sendable {
                 continue
             }
 
+            // 1. Misaki gold/silver lexicon (case-sensitive → normalized).
+            if let lexicon = lexicon, let ipa = await lexicon.phonemes(for: word) {
+                ipaParts.append(ipa)
+                anyResolved = true
+                lexiconHits += 1
+                continue
+            }
+
+            // 2. CharsiuG2P fallback for unknown words.
             do {
                 let phonemes = try await MultilingualG2PModel.shared.phonemize(
                     word: word, language: language)
                 if let phonemes, !phonemes.isEmpty {
                     ipaParts.append(phonemes.joined())
                     anyResolved = true
+                    g2pHits += 1
                 } else {
                     // Degraded fallback: pass the grapheme through. The
                     // decoder's vocab includes ASCII letters, so this still
@@ -76,9 +101,15 @@ public struct StyleTTS2Phonemizer: Sendable {
             }
         }
 
+        if lexicon != nil {
+            logger.debug(
+                "Phonemized \(words.count) tokens — gold/silver hits: \(lexiconHits), G2P fallback: \(g2pHits)"
+            )
+        }
+
         if !anyResolved {
             throw StyleTTS2Error.phonemizationFailed(
-                "no words resolved by CharsiuG2P (input='\(text.prefix(40))')")
+                "no words resolved by lexicon or CharsiuG2P (input='\(text.prefix(40))')")
         }
 
         return ipaParts.joined(separator: " ")

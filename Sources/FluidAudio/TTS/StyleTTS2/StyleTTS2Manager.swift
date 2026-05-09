@@ -81,10 +81,11 @@ public actor StyleTTS2Manager {
     public func initialize() async throws {
         if synthesizer != nil { return }
 
-        logger.warning(
-            "StyleTTS2 phonemizer uses CharsiuG2P (no espeak) — output IPA "
-                + "differs from the upstream reference. Pass IPA directly via "
-                + "synthesize(ipa:...) for full parity.")
+        logger.info(
+            "StyleTTS2 phonemizer uses Misaki gold/silver lexicon first, "
+                + "with CharsiuG2P as a fallback for OOV words. Pass IPA "
+                + "directly via synthesize(ipa:...) when you have a "
+                + "higher-quality phonemizer.")
 
         let store = StyleTTS2ModelStore(
             directory: directory, computeUnits: computeUnits)
@@ -96,7 +97,18 @@ public actor StyleTTS2Manager {
         // is shared and the call is idempotent.
         try await MultilingualG2PModel.shared.ensureModelsAvailable()
 
-        self.phonemizer = StyleTTS2Phonemizer(language: g2pLanguage)
+        // Fetch Misaki gold (+ best-effort silver) lexicons and load them
+        // up-front so per-word lookup is hash-table fast at synthesis time.
+        let lexiconDir = try await StyleTTS2ResourceDownloader.ensureLexicons()
+        let lexicon = StyleTTS2GoldLexicon()
+        do {
+            try await lexicon.load(directory: lexiconDir)
+        } catch {
+            logger.warning(
+                "Misaki lexicon load failed (\(error)); falling back to CharsiuG2P-only path")
+        }
+
+        self.phonemizer = StyleTTS2Phonemizer(language: g2pLanguage, lexicon: lexicon)
         self.melExtractor = StyleTTS2MelExtractor()
         self.synthesizer = StyleTTS2Synthesizer(store: store)
 
