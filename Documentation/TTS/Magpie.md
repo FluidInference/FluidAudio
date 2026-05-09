@@ -5,10 +5,49 @@ Lives under `Sources/FluidAudio/TTS/Magpie/`.
 
 ## Status
 
-> ⚠️ **Beta / experimental.** Below real-time on Apple Silicon
+> ⚠️ **Batch model. Beta / experimental.** Magpie is a **batch / offline
+> TTS model** — not a streaming model. Below real-time on Apple Silicon
 > (agg-RTFx ~0.41× on M2). Not for latency-sensitive use; prefer
 > Kokoro / Kokoro ANE or PocketTTS for real-time. Initializing
 > `MagpieTtsManager` logs a runtime beta warning at `.warning` level.
+
+## Batch / offline inference (not streaming)
+
+Magpie is a **batch model**. Despite NVIDIA marketing copy describing
+Magpie as "targeting streaming applications," the released NeMo
+inference path is batch-only:
+
+- `MagpieTTSModel.infer_batch` / `do_tts` in
+  `nemo/collections/tts/models/magpietts.py` runs the AR loop to
+  completion, accumulating every audio code into `state.all_predictions`
+  (≈ lines 6850–6860).
+- After the loop, codes are concatenated
+  (`torch.cat(state.all_predictions, dim=-1)`) and the codec is invoked
+  exactly once per utterance via
+  `self._codec_helper.codes_to_audio(predicted_codes, predicted_codes_lens)`
+  (≈ lines 5334–5351 / 6889–6891).
+- There is no incremental codec dispatch, no per-step yield, and no
+  callback hook anywhere in the released NeMo path.
+
+The Swift port preserves these batch semantics:
+
+- `MagpieTtsManager.synthesize(text:...)` is the only entry point — it
+  returns a single `MagpieSynthesisResult` after the full AR loop and
+  codec pass complete. There is no streaming variant; long inputs are
+  sentence-split internally via `MagpieChunker` so each chunk fits
+  NanoCodec's 256-frame static-shape cap, but the full result is
+  concatenated and returned as one buffer.
+- Within `synthesize(...)`, AR(N+1) ‖ codec(N) chunk-level pipelining
+  overlaps the next chunk's AR loop with the current chunk's codec
+  pass. This is a wallclock optimization, not incremental yield.
+- `MagpieNanocodec`'s v2/v3 24-frame chunked sliding-window dispatch is
+  a memory + first-audio-latency optimization on the CoreML side; it is
+  not codec-level streaming.
+
+If you need a TTS model that genuinely streams audio frame-by-frame as
+the AR loop emits codes, use **PocketTTS** (Mimi, ~1.2 s TTFT) or
+**Kokoro** (parallel, no AR loop). Magpie's value prop is multilingual
+coverage and the 5 built-in speaker contexts, not throughput or latency.
 
 Functional but **below real-time — not for latency-sensitive use.**
 On the full `minimax-english` 100-phrase corpus (M2, default compute

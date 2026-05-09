@@ -151,7 +151,7 @@ public actor StyleTTS2Synthesizer {
             "input_lengths": MLFeatureValue(multiArray: lengths),
             "text_mask": MLFeatureValue(multiArray: textMask),
         ])
-        let out = try predict(model, provider: provider, stage: "text_encoder")
+        let out = try await predict(model, provider: provider, stage: "text_encoder")
         let outputName = firstOutputName(of: model)
         guard let arr = out.featureValue(for: outputName)?.multiArrayValue else {
             throw StyleTTS2Error.inferenceFailed(
@@ -182,7 +182,7 @@ public actor StyleTTS2Synthesizer {
             "tokens": MLFeatureValue(multiArray: tokensArr),
             "attention_mask": MLFeatureValue(multiArray: attnArr),
         ])
-        let out = try predict(model, provider: provider, stage: "bert")
+        let out = try await predict(model, provider: provider, stage: "bert")
 
         let outputs = orderedOutputs(of: model)
         guard outputs.count == 2 else {
@@ -224,7 +224,7 @@ public actor StyleTTS2Synthesizer {
         let provider = try MLDictionaryFeatureProvider(dictionary: [
             "mel": MLFeatureValue(multiArray: melArr)
         ])
-        let out = try predict(model, provider: provider, stage: "ref_encoder")
+        let out = try await predict(model, provider: provider, stage: "ref_encoder")
         let outputName = firstOutputName(of: model)
         guard let arr = out.featureValue(for: outputName)?.multiArrayValue else {
             throw StyleTTS2Error.inferenceFailed(
@@ -273,7 +273,7 @@ public actor StyleTTS2Synthesizer {
             "embedding": MLFeatureValue(multiArray: embeddingArr),
             "features": MLFeatureValue(multiArray: featuresArr),
         ])
-        let out = try predict(model, provider: provider, stage: "fused_diffusion_sampler")
+        let out = try await predict(model, provider: provider, stage: "fused_diffusion_sampler")
         let outputName = firstOutputName(of: model)
         guard let arr = out.featureValue(for: outputName)?.multiArrayValue else {
             throw StyleTTS2Error.inferenceFailed(
@@ -300,7 +300,7 @@ public actor StyleTTS2Synthesizer {
             "s": MLFeatureValue(multiArray: sArr),
             "text_mask": MLFeatureValue(multiArray: textMaskArr),
         ])
-        let out = try predict(model, provider: provider, stage: "duration_predictor")
+        let out = try await predict(model, provider: provider, stage: "duration_predictor")
 
         let outputs = orderedOutputs(of: model)
         guard outputs.count == 2 else {
@@ -330,7 +330,7 @@ public actor StyleTTS2Synthesizer {
             "en": MLFeatureValue(multiArray: enArr),
             "s": MLFeatureValue(multiArray: sArr),
         ])
-        let out = try predict(model, provider: provider, stage: "fused_f0n_har_source")
+        let out = try await predict(model, provider: provider, stage: "fused_f0n_har_source")
 
         let outputs = orderedOutputs(of: model)
         guard outputs.count == 3 else {
@@ -377,7 +377,7 @@ public actor StyleTTS2Synthesizer {
             "n_pred": MLFeatureValue(multiArray: nArr),
             "ref": MLFeatureValue(multiArray: refArr),
         ])
-        let out = try predict(model, provider: provider, stage: "decoder_pre")
+        let out = try await predict(model, provider: provider, stage: "decoder_pre")
         let outputName = firstOutputName(of: model)
         guard let arr = out.featureValue(for: outputName)?.multiArrayValue else {
             throw StyleTTS2Error.inferenceFailed(
@@ -403,7 +403,7 @@ public actor StyleTTS2Synthesizer {
             "ref": MLFeatureValue(multiArray: refArr),
             "har_source": MLFeatureValue(multiArray: harArr),
         ])
-        let out = try predict(model, provider: provider, stage: "decoder_upsample")
+        let out = try await predict(model, provider: provider, stage: "decoder_upsample")
         let outputName = firstOutputName(of: model)
         guard let arr = out.featureValue(for: outputName)?.multiArrayValue else {
             throw StyleTTS2Error.inferenceFailed(
@@ -416,9 +416,9 @@ public actor StyleTTS2Synthesizer {
 
     private func predict(
         _ model: MLModel, provider: MLFeatureProvider, stage: String
-    ) throws -> sending MLFeatureProvider {
+    ) async throws -> sending MLFeatureProvider {
         do {
-            return try model.prediction(from: provider)
+            return try await model.prediction(from: provider)
         } catch {
             throw StyleTTS2Error.inferenceFailed(stage: stage, underlying: "\(error)")
         }

@@ -24,6 +24,20 @@ import Foundation
 /// nanocodec_decoder) plus a small 1-layer "local transformer" implemented in Swift
 /// to sample the 8 codebook tokens per step.
 ///
+/// > Note: **Magpie is a batch / offline model, not a streaming model.**
+/// > Despite NVIDIA marketing copy claiming Magpie "targets streaming
+/// > applications", the upstream NeMo reference
+/// > (`MagpieTTSModel.infer_batch` / `do_tts` in
+/// > `nemo/collections/tts/models/magpietts.py`) is batch-only: the AR loop
+/// > accumulates *all* audio codes into `state.all_predictions` (≈ lines
+/// > 6850–6860), then `torch.cat(state.all_predictions, dim=-1)` and the
+/// > codec (`self._codec_helper.codes_to_audio(...)`) are invoked exactly
+/// > once per utterance after the loop completes (≈ lines 5334–5351 /
+/// > 6889–6891). There is no incremental codec dispatch and no per-chunk
+/// > yield anywhere in the released NeMo inference path. `synthesize(...)`
+/// > below is the only entry point — it returns a single
+/// > `MagpieSynthesisResult` after the full AR + codec pipeline completes.
+///
 /// Usage:
 /// ```swift
 /// let manager = try await MagpieTtsManager.downloadAndCreate(
@@ -146,33 +160,6 @@ public actor MagpieTtsManager {
             throw MagpieError.notInitialized
         }
         return try await synthesizer.synthesize(
-            text: text, speaker: speaker, language: language, options: options)
-    }
-
-    /// Streaming variant of `synthesize(text:...)`. Yields one
-    /// `MagpieAudioChunk` per chunk as soon as its NanoCodec decode finishes,
-    /// instead of waiting for the entire utterance to complete.
-    ///
-    /// The chunker reserves the first chunk for a small clause-sized head
-    /// (~50 codec frames ≈ 2.3 s of audio) to minimize time-to-first-audio.
-    /// Subsequent chunks pack at the normal capacity. Each non-final chunk
-    /// already includes any punctuation-aware trailing silence, so callers
-    /// can append `samples` arrays back-to-back for gapless playback.
-    ///
-    /// `peakNormalize` is force-disabled in streaming mode (cannot be applied
-    /// without buffering the full utterance).
-    ///
-    /// Cancelling the consuming task cancels in-flight synthesis cleanly.
-    public func synthesizeStream(
-        text: String,
-        speaker: MagpieSpeaker = .john,
-        language: MagpieLanguage = .english,
-        options: MagpieSynthesisOptions = .default
-    ) async throws -> AsyncThrowingStream<MagpieAudioChunk, Error> {
-        guard let synthesizer = synthesizer else {
-            throw MagpieError.notInitialized
-        }
-        return synthesizer.synthesizeStream(
             text: text, speaker: speaker, language: language, options: options)
     }
 

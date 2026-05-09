@@ -9,6 +9,15 @@ import Foundation
 ///
 /// Chunked builds slide a 24-frame window with stride 8 / overlap 16
 /// (= dilated-conv input receptive field).
+///
+/// **Upstream behavior.** NeMo's reference inference
+/// (`MagpieTTSModel.infer_batch` / `do_tts` in
+/// `nemo/collections/tts/models/magpietts.py`, ≈ lines 5334–5351 and
+/// 6889–6891) invokes `_codec_helper.codes_to_audio(...)` exactly once
+/// per utterance, after the AR loop has accumulated every codebook frame.
+/// The v2/v3 chunked sliding-window dispatch implemented here is purely
+/// a memory + first-audio-latency optimization on the CoreML side; it is
+/// not an indication that the codec or the model as a whole is streaming.
 public struct MagpieNanocodec {
 
     public let model: MLModel
