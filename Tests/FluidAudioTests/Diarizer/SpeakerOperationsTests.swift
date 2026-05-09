@@ -434,38 +434,38 @@ final class SpeakerOperationsTests: XCTestCase {
     // MARK: - SpeakerManager Extension Tests
 
     func testReassignSegment() async {
-        let manager = SpeakerManager()
+        var manager = SpeakerManager()
 
         // Create initial speakers
         let emb1 = createDistinctEmbedding(pattern: 1)
         let emb2 = createDistinctEmbedding(pattern: 2)
 
-        let speaker1 = await manager.assignSpeaker(emb1, speechDuration: 5.0)
-        let speaker2 = await manager.assignSpeaker(emb2, speechDuration: 5.0)
+        let speaker1 = manager.assignSpeaker(emb1, speechDuration: 5.0)
+        let speaker2 = manager.assignSpeaker(emb2, speechDuration: 5.0)
 
         XCTAssertNotNil(speaker1)
         XCTAssertNotNil(speaker2)
 
         // Test that both speakers were created
-        let speakerCount = await manager.speakerCount
+        let speakerCount = manager.speakerCount
         XCTAssertEqual(speakerCount, 2)
 
         // Test reassigning an embedding that's closer to speaker2
-        let reassignedSpeaker = await manager.assignSpeaker(emb2, speechDuration: 3.0)
+        let reassignedSpeaker = manager.assignSpeaker(emb2, speechDuration: 3.0)
         XCTAssertEqual(reassignedSpeaker?.id, speaker2?.id)
     }
 
     func testGetCurrentSpeakerNames() async {
-        let manager = SpeakerManager()
+        var manager = SpeakerManager()
 
         // Add speakers with names
         let alice = Speaker(id: "alice", name: "Alice", currentEmbedding: createDistinctEmbedding(pattern: 1))
         let bob = Speaker(id: "bob", name: "Bob", currentEmbedding: createDistinctEmbedding(pattern: 2))
 
-        await manager.initializeKnownSpeakers([alice, bob])
+        manager.initializeKnownSpeakers([alice, bob])
 
         // getCurrentSpeakerNames actually returns speaker IDs, not names
-        let speakerIds = await manager.getCurrentSpeakerNames()
+        let speakerIds = manager.getCurrentSpeakerNames()
 
         XCTAssertEqual(speakerIds.count, 2)
         XCTAssertTrue(speakerIds.contains("alice"))
@@ -473,19 +473,19 @@ final class SpeakerOperationsTests: XCTestCase {
     }
 
     func testGetGlobalSpeakerStats() async {
-        let manager = SpeakerManager(speakerThreshold: 0.5)  // Use higher threshold to ensure distinct speakers
+        var manager = SpeakerManager(speakerThreshold: 0.5)  // Use higher threshold to ensure distinct speakers
 
         // Add speakers with very different embeddings to ensure they're distinct
-        let speaker1 = await manager.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 10.0)
-        let speaker2 = await manager.assignSpeaker(createDistinctEmbedding(pattern: 100), speechDuration: 20.0)
-        let speaker3 = await manager.assignSpeaker(createDistinctEmbedding(pattern: 200), speechDuration: 30.0)
+        let speaker1 = manager.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 10.0)
+        let speaker2 = manager.assignSpeaker(createDistinctEmbedding(pattern: 100), speechDuration: 20.0)
+        let speaker3 = manager.assignSpeaker(createDistinctEmbedding(pattern: 200), speechDuration: 30.0)
 
         // Debug: check if all speakers were created
         XCTAssertNotNil(speaker1)
         XCTAssertNotNil(speaker2)
         XCTAssertNotNil(speaker3)
 
-        let stats = await manager.getGlobalSpeakerStats()
+        let stats = manager.getGlobalSpeakerStats()
 
         // If not all 3 speakers were created, adjust expectations
         XCTAssertGreaterThanOrEqual(stats.totalSpeakers, 2)

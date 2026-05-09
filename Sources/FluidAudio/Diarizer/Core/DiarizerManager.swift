@@ -19,7 +19,7 @@ public final class DiarizerManager {
     private let memoryOptimizer = ANEMemoryOptimizer()
 
     // Speaker manager for consistent speaker tracking
-    public let speakerManager: SpeakerManager
+    public var speakerManager: SpeakerManager
 
     public init(config: DiarizerConfig = .default) {
         self.config = config
@@ -71,8 +71,8 @@ public final class DiarizerManager {
     /// Accepts Speaker structs and adds them to the in-memory database.
     ///
     /// - Parameter speakers: Array of Speaker structs with embeddings and metadata
-    public func initializeKnownSpeakers(_ speakers: [Speaker]) async {
-        await speakerManager.initializeKnownSpeakers(speakers)
+    public func initializeKnownSpeakers(_ speakers: [Speaker]) {
+        speakerManager.initializeKnownSpeakers(speakers)
     }
 
     /// Extract a 256-dimensional speaker embedding from audio samples.
@@ -152,7 +152,7 @@ public final class DiarizerManager {
     /// ```
     public func performCompleteDiarization<C>(
         _ samples: C, sampleRate: Int = 16000, atTime startTime: TimeInterval = 0
-    ) async throws -> DiarizationResult
+    ) throws -> DiarizationResult
     where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
         guard let models else {
             throw DiarizerError.notInitialized
@@ -183,7 +183,7 @@ public final class DiarizerManager {
             let chunk = samples[chunkStart..<chunkEnd]
             let chunkOffset = Double(chunkStartOffset) / Double(sampleRate) + startTime
 
-            let (chunkSegments, chunkTimings) = try await processChunkWithSpeakerTracking(
+            let (chunkSegments, chunkTimings) = try processChunkWithSpeakerTracking(
                 chunk,
                 chunkOffset: chunkOffset,
                 models: models,
@@ -213,7 +213,7 @@ public final class DiarizerManager {
             )
 
             // Build speakerDatabase from speakerManager for debug output
-            let speakerDB = await speakerManager.getAllSpeakers().reduce(into: [String: [Float]]()) {
+            let speakerDB = speakerManager.getAllSpeakers().reduce(into: [String: [Float]]()) {
                 result, item in
                 result[item.key] = item.value.currentEmbedding
             }
@@ -251,7 +251,7 @@ public final class DiarizerManager {
         sampleRate: Int = 16000,
         chunkSize: Int,
         chunkBuffer: inout [Float]
-    ) async throws -> ([TimedSpeakerSegment], ChunkTimings)
+    ) throws -> ([TimedSpeakerSegment], ChunkTimings)
     where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
         let segmentationStartTime = Date()
 
@@ -350,7 +350,7 @@ public final class DiarizerManager {
 
                     let quality = calculateEmbeddingQuality(embedding) * (activity / Float(numFrames))
 
-                    if let speaker = await speakerManager.assignSpeaker(
+                    if let speaker = speakerManager.assignSpeaker(
                         embedding,
                         speechDuration: duration,
                         confidence: quality
