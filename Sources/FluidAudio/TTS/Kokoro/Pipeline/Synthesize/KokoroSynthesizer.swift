@@ -261,7 +261,8 @@ public struct KokoroSynthesizer {
             throw TTSError.processingFailed("No input IDs generated for chunk: \(chunk.words.joined(separator: " "))")
         }
         guard targetTokens > 0 else {
-            throw TTSError.processingFailed("Invalid targetTokens (\(targetTokens)) for chunk: \(chunk.words.joined(separator: " "))")
+            throw TTSError.processingFailed(
+                "Invalid targetTokens (\(targetTokens)) for chunk: \(chunk.words.joined(separator: " "))")
         }
 
         let kokoro = try await model(for: variant)

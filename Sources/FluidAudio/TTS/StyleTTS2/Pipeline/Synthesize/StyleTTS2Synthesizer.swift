@@ -411,7 +411,7 @@ public actor StyleTTS2Synthesizer {
 
     private func predict(
         _ model: MLModel, provider: MLFeatureProvider, stage: String
-    ) throws -> MLFeatureProvider {
+    ) throws -> sending MLFeatureProvider {
         do {
             return try model.prediction(from: provider)
         } catch {
