@@ -118,8 +118,11 @@ public actor StyleTTS2Synthesizer {
             f0Pred: f0Pred, nPred: nPred, ref: ref128)
 
         // ---- Stage 8: decoder_upsample (CPU_ONLY, fp16) ----
+        // x_pre is [1, 512, totalFrames * 2] (decoder_pre upsamples once);
+        // har_source is [1, 1, har.count].
         let audio = try await runDecoderUpsample(
-            xPre: xPre, ref: ref128, harSource: har)
+            xPre: xPre, xPreChannels: 512, xPreFrames: totalFrames * 2,
+            ref: ref128, harSource: har)
 
         // Tail trim — mirrors `np.squeeze(audio_np)[..., :-50]`.
         let trim = min(StyleTTS2Constants.tailTrimSamples, audio.count)
@@ -380,15 +383,16 @@ public actor StyleTTS2Synthesizer {
     }
 
     private func runDecoderUpsample(
-        xPre: [Float], ref: [Float], harSource: [Float]
+        xPre: [Float], xPreChannels: Int, xPreFrames: Int,
+        ref: [Float], harSource: [Float]
     ) async throws -> [Float] {
         let model = try await store.decoderUpsample()
         let xPreArr = try StyleTTS2MultiArray.makeFloat32(
-            xPre, shape: [1, xPre.count])
+            xPre, shape: [1, xPreChannels, xPreFrames])
         let refArr = try StyleTTS2MultiArray.makeFloat32(
             ref, shape: [1, ref.count])
         let harArr = try StyleTTS2MultiArray.makeFloat32(
-            harSource, shape: [1, harSource.count])
+            harSource, shape: [1, 1, harSource.count])
 
         let provider = try MLDictionaryFeatureProvider(dictionary: [
             "x_pre": MLFeatureValue(multiArray: xPreArr),
