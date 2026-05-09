@@ -538,56 +538,23 @@ public enum TtsBenchmarkCommand {
                 "speaker": speaker.displayName, "language": language.rawValue,
             ]
         ) { text in
-            // Drive Magpie through `synthesizeStream` so TTFT measures
-            // time-to-first-chunk-yield rather than full-utterance wall.
-            // The chunker carves a small first chunk
-            // (`MagpieChunker.streamingFirstChunkCap` = 50 codec frames ≈
-            // 2.3 s of audio) when the first sentence is long enough; for
-            // short phrases the stream degrades to one chunk == whole
-            // utterance and TTFT == synthMs (no streaming benefit, no
-            // measurement penalty).
-            //
-            // Trade-off vs. the prior `synthesize()` path: per-stage
-            // timings (`text_encoder`/`prefill`/`ar_loop`/…) are only
-            // surfaced on `MagpieSynthesisResult`, not per
-            // `MagpieAudioChunk`, so `stageMs` is empty here. That matches
-            // PocketTTS streaming which also publishes empty `stageMs`.
+            // Magpie is a batch / offline model — `synthesize()` runs the
+            // full chunked AR + codec pipeline and returns a single
+            // `MagpieSynthesisResult`. TTFT therefore equals synthMs (no
+            // incremental yield to measure against).
             let t0 = Date()
-            let stream = try await manager.synthesizeStream(
+            let result = try await manager.synthesize(
                 text: text, speaker: speaker, language: language)
-            var aggregated: [Float] = []
-            var ttftMs: Double = 0
-            var chunkCount = 0
-            var codeCount = 0
-            var finishedOnEos = false
-            var sampleRate = MagpieConstants.audioSampleRate
-            for try await chunk in stream {
-                if chunkCount == 0 {
-                    ttftMs = Date().timeIntervalSince(t0) * 1000
-                }
-                aggregated.append(contentsOf: chunk.samples)
-                chunkCount += 1
-                codeCount += chunk.codeCount
-                sampleRate = chunk.sampleRate
-                if chunk.isFinal {
-                    finishedOnEos = chunk.finishedOnEos
-                }
-            }
             let synthMs = Date().timeIntervalSince(t0) * 1000
-            // Empty-stream guard (synthesizeStream returns immediately on
-            // zero-length input). Fall back to synthMs so downstream
-            // percentile math doesn't see ttftMs == 0.
-            if chunkCount == 0 { ttftMs = synthMs }
             return BackendPhraseSample(
                 synthMs: synthMs,
-                ttftMs: ttftMs,
-                samples: aggregated,
-                sampleRate: sampleRate,
+                ttftMs: synthMs,
+                samples: result.samples,
+                sampleRate: result.sampleRate,
                 stageMs: [:],
                 extraFields: [
-                    "code_count": codeCount,
-                    "finished_on_eos": finishedOnEos,
-                    "chunk_count": chunkCount,
+                    "code_count": result.codeCount,
+                    "finished_on_eos": result.finishedOnEos,
                 ]
             )
         }

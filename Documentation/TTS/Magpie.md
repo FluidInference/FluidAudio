@@ -31,18 +31,15 @@ inference path is batch-only:
 
 The Swift port preserves these batch semantics:
 
-- `MagpieTtsManager.synthesize(text:...)` is the canonical batch entry
-  point — it returns a single `MagpieSynthesisResult` after the full
-  AR loop and codec pass complete.
-- `MagpieTtsManager.synthesizeStream(text:...)` is **not native model
-  streaming.** It is a chunked-text wrapper: input text is sentence-split
-  via `MagpieChunker` so each chunk fits NanoCodec's 256-frame static-
-  shape cap, each chunk runs its own full AR + codec pass, and completed
-  chunks are yielded back to the caller. This is the same architectural
-  pattern the Pipecat / Daily.co integration uses (custom WebSocket
-  server wrapping `infer_batch`); it gives you incremental playback at
-  sentence granularity but does not change the underlying model from
-  batch to streaming.
+- `MagpieTtsManager.synthesize(text:...)` is the only entry point — it
+  returns a single `MagpieSynthesisResult` after the full AR loop and
+  codec pass complete. There is no streaming variant; long inputs are
+  sentence-split internally via `MagpieChunker` so each chunk fits
+  NanoCodec's 256-frame static-shape cap, but the full result is
+  concatenated and returned as one buffer.
+- Within `synthesize(...)`, AR(N+1) ‖ codec(N) chunk-level pipelining
+  overlaps the next chunk's AR loop with the current chunk's codec
+  pass. This is a wallclock optimization, not incremental yield.
 - `MagpieNanocodec`'s v2/v3 24-frame chunked sliding-window dispatch is
   a memory + first-audio-latency optimization on the CoreML side; it is
   not codec-level streaming.

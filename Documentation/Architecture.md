@@ -47,7 +47,7 @@ protocols or callbacks.
   — `Sources/FluidAudio/ASR/Parakeet/SlidingWindow/SlidingWindowAsrManager.swift:217`
 - ASR progress: `AsyncThrowingStream<Double, Error>` (throwing — long-form
   transcription must surface errors)
-- TTS streaming synthesis (PocketTTS, Magpie):
+- TTS streaming synthesis (PocketTTS):
   `AsyncThrowingStream<AudioFrame, Error>`
 - Offline diarization: `AsyncThrowingStream<SegmentationChunk, Error>`
   drives concurrent segmentation/embedding stages

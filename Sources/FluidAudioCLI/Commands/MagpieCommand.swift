@@ -74,7 +74,6 @@ public enum MagpieCommand {
         var temperature = MagpieConstants.defaultTemperature
         var seed: UInt64? = nil
         var allowIpa = true
-        var streaming = false
 
         var i = 0
         while i < arguments.count {
@@ -117,8 +116,6 @@ public enum MagpieCommand {
                 }
             case "--no-ipa-override":
                 allowIpa = false
-            case "--stream":
-                streaming = true
             case "--text":
                 if i + 1 < arguments.count {
                     text = arguments[i + 1]
@@ -159,137 +156,45 @@ public enum MagpieCommand {
             try FileManager.default.createDirectory(
                 at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
 
-            if streaming {
-                try await runStreaming(
-                    manager: manager, text: text, speaker: speaker,
-                    language: language, options: opts, outURL: outURL)
-            } else {
-                let start = Date()
-                let result = try await manager.synthesize(
-                    text: text, speaker: speaker, language: language, options: opts)
-                let elapsed = Date().timeIntervalSince(start)
+            let start = Date()
+            let result = try await manager.synthesize(
+                text: text, speaker: speaker, language: language, options: opts)
+            let elapsed = Date().timeIntervalSince(start)
 
-                let wav = try AudioWAV.data(
-                    from: result.samples,
-                    sampleRate: Double(result.sampleRate))
-                try wav.write(to: outURL)
+            let wav = try AudioWAV.data(
+                from: result.samples,
+                sampleRate: Double(result.sampleRate))
+            try wav.write(to: outURL)
 
-                let audioSecs = result.durationSeconds
-                let rtfx = elapsed > 0 ? audioSecs / elapsed : 0
-                let t = result.timings
-                let stepCount = result.codeCount > 0 ? result.codeCount : 1
-                let perStepDecoderMs = t.decoderStepSeconds * 1000.0 / Double(stepCount)
-                let perStepSamplerMs = t.samplerSeconds * 1000.0 / Double(stepCount)
-                let lines = [
-                    "Magpie synthesis complete",
-                    "  Speaker: \(speaker.displayName), Language: \(language.rawValue)",
-                    "  Codes: \(result.codeCount), EOS: \(result.finishedOnEos)",
-                    "  Audio: \(String(format: "%.3f", audioSecs))s, "
-                        + "Synthesis: \(String(format: "%.3f", elapsed))s, "
-                        + "RTFx: \(String(format: "%.2f", rtfx))x",
-                    "  Stages:",
-                    "    text_encoder: \(String(format: "%.0f", t.textEncoderSeconds * 1000))ms",
-                    "    prefill:      \(String(format: "%.0f", t.prefillSeconds * 1000))ms",
-                    "    AR loop:      \(String(format: "%.2f", t.arLoopSeconds))s "
-                        + "(decoder=\(String(format: "%.2f", t.decoderStepSeconds))s "
-                        + "@ \(String(format: "%.1f", perStepDecoderMs))ms/step, "
-                        + "sampler=\(String(format: "%.2f", t.samplerSeconds))s "
-                        + "@ \(String(format: "%.1f", perStepSamplerMs))ms/step)",
-                    "    nanocodec:    \(String(format: "%.0f", t.nanocodecSeconds * 1000))ms",
-                    "  Output: \(outURL.path)",
-                ]
-                FileHandle.standardError.write(Data((lines.joined(separator: "\n") + "\n").utf8))
-            }
+            let audioSecs = result.durationSeconds
+            let rtfx = elapsed > 0 ? audioSecs / elapsed : 0
+            let t = result.timings
+            let stepCount = result.codeCount > 0 ? result.codeCount : 1
+            let perStepDecoderMs = t.decoderStepSeconds * 1000.0 / Double(stepCount)
+            let perStepSamplerMs = t.samplerSeconds * 1000.0 / Double(stepCount)
+            let lines = [
+                "Magpie synthesis complete",
+                "  Speaker: \(speaker.displayName), Language: \(language.rawValue)",
+                "  Codes: \(result.codeCount), EOS: \(result.finishedOnEos)",
+                "  Audio: \(String(format: "%.3f", audioSecs))s, "
+                    + "Synthesis: \(String(format: "%.3f", elapsed))s, "
+                    + "RTFx: \(String(format: "%.2f", rtfx))x",
+                "  Stages:",
+                "    text_encoder: \(String(format: "%.0f", t.textEncoderSeconds * 1000))ms",
+                "    prefill:      \(String(format: "%.0f", t.prefillSeconds * 1000))ms",
+                "    AR loop:      \(String(format: "%.2f", t.arLoopSeconds))s "
+                    + "(decoder=\(String(format: "%.2f", t.decoderStepSeconds))s "
+                    + "@ \(String(format: "%.1f", perStepDecoderMs))ms/step, "
+                    + "sampler=\(String(format: "%.2f", t.samplerSeconds))s "
+                    + "@ \(String(format: "%.1f", perStepSamplerMs))ms/step)",
+                "    nanocodec:    \(String(format: "%.0f", t.nanocodecSeconds * 1000))ms",
+                "  Output: \(outURL.path)",
+            ]
+            FileHandle.standardError.write(Data((lines.joined(separator: "\n") + "\n").utf8))
         } catch {
             logger.error("Magpie synthesis failed: \(error.localizedDescription)")
             exit(1)
         }
-    }
-
-    /// Streaming mode: consume `synthesizeStream` chunk-by-chunk, log
-    /// time-to-first-audio + per-chunk arrival times, then write the
-    /// concatenated waveform to `outURL` so the produced audio is comparable
-    /// to the offline path.
-    private static func runStreaming(
-        manager: MagpieTtsManager,
-        text: String,
-        speaker: MagpieSpeaker,
-        language: MagpieLanguage,
-        options: MagpieSynthesisOptions,
-        outURL: URL
-    ) async throws {
-        FileHandle.standardError.write(
-            Data("Magpie streaming synthesis (chunk-level)\n".utf8))
-        FileHandle.standardError.write(
-            Data(
-                "  Speaker: \(speaker.displayName), Language: \(language.rawValue)\n"
-                    .utf8))
-
-        let stream = try await manager.synthesizeStream(
-            text: text, speaker: speaker, language: language, options: options)
-
-        let start = Date()
-        var combined: [Float] = []
-        var ttfa: Double? = nil
-        var chunkCount = 0
-        var totalCodes = 0
-        var sampleRate = MagpieConstants.audioSampleRate
-
-        for try await chunk in stream {
-            let now = Date().timeIntervalSince(start)
-            if ttfa == nil {
-                ttfa = now
-                let ttfaLine =
-                    "  TTFA: \(String(format: "%.3f", now))s "
-                    + "(first chunk of \(chunk.codeCount) codes "
-                    + "= \(String(format: "%.2f", chunk.durationSeconds))s audio)\n"
-                FileHandle.standardError.write(Data(ttfaLine.utf8))
-            }
-            chunkCount += 1
-            totalCodes += chunk.codeCount
-            sampleRate = chunk.sampleRate
-            let preview =
-                chunk.text.count > 60
-                ? String(chunk.text.prefix(57)) + "..." : chunk.text
-            let line =
-                "    [chunk \(chunk.sequenceIndex)] +\(String(format: "%.3f", now))s "
-                + "audio=\(String(format: "%.2f", chunk.durationSeconds))s "
-                + "codes=\(chunk.codeCount) "
-                + "eos=\(chunk.finishedOnEos) "
-                + "final=\(chunk.isFinal) "
-                + "\"\(preview)\"\n"
-            FileHandle.standardError.write(Data(line.utf8))
-            combined.append(contentsOf: chunk.samples)
-        }
-        let elapsed = Date().timeIntervalSince(start)
-
-        // Optional peak-normalize once we have the full buffer (matches the
-        // offline default).
-        if options.peakNormalize {
-            var peak: Float = 0
-            for s in combined where abs(s) > peak { peak = abs(s) }
-            if peak > 0 {
-                let scale = MagpieConstants.peakTarget / peak
-                for i in 0..<combined.count { combined[i] *= scale }
-            }
-        }
-
-        let wav = try AudioWAV.data(
-            from: combined, sampleRate: Double(sampleRate))
-        try wav.write(to: outURL)
-
-        let audioSecs = Double(combined.count) / Double(sampleRate)
-        let rtfx = elapsed > 0 ? audioSecs / elapsed : 0
-        let summary = [
-            "  Chunks: \(chunkCount), Codes: \(totalCodes)",
-            "  TTFA: \(String(format: "%.3f", ttfa ?? 0))s "
-                + "(\(String(format: "%.0f", (ttfa ?? 0) * 1000))ms)",
-            "  Audio: \(String(format: "%.3f", audioSecs))s, "
-                + "Total synthesis: \(String(format: "%.3f", elapsed))s, "
-                + "RTFx: \(String(format: "%.2f", rtfx))x",
-            "  Output: \(outURL.path)",
-        ]
-        FileHandle.standardError.write(Data((summary.joined(separator: "\n") + "\n").utf8))
     }
 
     // MARK: - bench
