@@ -1,3 +1,4 @@
+import CoreML
 import FluidAudio
 import Foundation
 
@@ -176,6 +177,14 @@ public struct TTS {
         var pocketLanguage: PocketTtsLanguage = .english
         // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
         var pocketSeed: UInt64? = nil
+        // StyleTTS2 zero-shot args. `--reference` (already parsed above for
+        // cv3) doubles as the reference-audio path; `--alpha` / `--beta` map
+        // to StyleTTS2Constants defaults; `--seed` is reused via cv3Seed.
+        var styletts2Alpha: Float = StyleTTS2Constants.defaultAlpha
+        var styletts2Beta: Float = StyleTTS2Constants.defaultBeta
+        // Optional pre-computed IPA passed via `--ipa "…"`. Bypasses
+        // CharsiuG2P entirely (the espeak-parity escape hatch).
+        var styletts2Ipa: String? = nil
 
         var i = 0
         while i < arguments.count {
@@ -252,9 +261,26 @@ public struct TTS {
                         cv3FrontendParityMode = true
                     case "kokoro-ane", "kokoroane", "lai":
                         backend = .kokoroAne
+                    case "styletts2", "style-tts2", "stts2":
+                        backend = .styletts2
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro")
                     }
+                    i += 1
+                }
+            case "--alpha":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    styletts2Alpha = v
+                    i += 1
+                }
+            case "--beta":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    styletts2Beta = v
+                    i += 1
+                }
+            case "--ipa":
+                if i + 1 < arguments.count {
+                    styletts2Ipa = arguments[i + 1]
                     i += 1
                 }
             case "--fixture":
@@ -485,6 +511,18 @@ public struct TTS {
             await runKokoroAne(
                 text: text, output: output, voice: voice, metricsPath: metricsPath,
                 variant: kokoroAneVariant, lexiconPath: lexiconPath)
+            return
+        }
+
+        if backend == .styletts2 {
+            await runStyleTTS2(
+                text: text, ipa: styletts2Ipa,
+                referencePath: cv3ReferencePath,
+                output: output,
+                alpha: styletts2Alpha, beta: styletts2Beta,
+                seed: cv3Seed,
+                metricsPath: metricsPath,
+                cpuOnly: cv3CpuOnly)
             return
         }
 
@@ -1084,6 +1122,106 @@ public struct TTS {
         }
     }
 
+    /// Run StyleTTS2 LibriTTS zero-shot TTS. Requires a reference audio
+    /// file (any sample rate / channel layout — resampled to 24 kHz mono
+    /// internally) and either a text prompt or a pre-computed IPA string.
+    private static func runStyleTTS2(
+        text: String, ipa: String?,
+        referencePath: String?,
+        output: String,
+        alpha: Float, beta: Float, seed: UInt64,
+        metricsPath: String?, cpuOnly: Bool
+    ) async {
+        guard let referencePath else {
+            logger.error(
+                "styletts2 backend requires --reference <speaker-audio-file>")
+            return
+        }
+        do {
+            let tStart = Date()
+            let computeUnits: MLComputeUnits = cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
+            let manager = StyleTTS2Manager(computeUnits: computeUnits)
+
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+
+            let referenceURL = resolveInputURL(referencePath)
+            logger.info("StyleTTS2 reference audio: \(referenceURL.path)")
+            logger.info(
+                "StyleTTS2 alpha=\(String(format: "%.2f", alpha)) "
+                    + "beta=\(String(format: "%.2f", beta)) seed=\(seed)")
+
+            let tSynth0 = Date()
+            let samples: [Float]
+            if let ipa, !ipa.isEmpty {
+                logger.info("StyleTTS2 IPA override: \(ipa.prefix(60))…")
+                samples = try await manager.synthesize(
+                    ipa: ipa, referenceAudioURL: referenceURL,
+                    alpha: alpha, beta: beta, noiseSeed: seed)
+            } else {
+                samples = try await manager.synthesize(
+                    text: text, referenceAudioURL: referenceURL,
+                    alpha: alpha, beta: beta, noiseSeed: seed)
+            }
+            let tSynth1 = Date()
+
+            let outURL = resolveInputURL(output)
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            let wav = try AudioWAV.data(
+                from: samples,
+                sampleRate: Double(StyleTTS2Constants.sampleRate))
+            try wav.write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let totalS = tSynth1.timeIntervalSince(tStart)
+            let audioSecs = Double(samples.count) / Double(StyleTTS2Constants.sampleRate)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+
+            logger.info("StyleTTS2 synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Total: \(String(format: "%.3f", totalS))s")
+            logger.info("  Output: \(outURL.path)")
+
+            if let metricsPath {
+                let metricsDict: [String: Any] = [
+                    "backend": "styletts2",
+                    "text": text,
+                    "reference": referenceURL.path,
+                    "alpha": Double(alpha),
+                    "beta": Double(beta),
+                    "seed": seed,
+                    "output": outURL.path,
+                    "model_load_time_s": loadS,
+                    "inference_time_s": synthS,
+                    "audio_duration_s": audioSecs,
+                    "realtime_speed": rtfx,
+                    "total_time_s": totalS,
+                ]
+                let artifactsRoot = try ensureArtifactsRoot()
+                let mURL = resolveOutputURL(
+                    metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+                try FileManager.default.createDirectory(
+                    at: mURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true)
+                let json = try JSONSerialization.data(
+                    withJSONObject: metricsDict, options: [.prettyPrinted])
+                try json.write(to: mURL)
+                logger.info("Metrics saved: \(mURL.path)")
+            }
+        } catch {
+            logger.error("StyleTTS2 Error: \(error)")
+            print("StyleTTS2 failed: \(error)")
+            exit(1)
+        }
+    }
+
     private static func printUsage() {
         print(
             """
@@ -1093,13 +1231,19 @@ public struct TTS {
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for Kokoro, alba for PocketTTS)
               --backend            TTS backend: kokoro (default), pocket, kokoro-ane,
-                                   or cosyvoice3 [BETA — slow, RTFx < 1.0]
+                                   styletts2, or cosyvoice3 [BETA — slow, RTFx < 1.0]
                                    CosyVoice3 dev sub-backends:
                                      cosyvoice3-parity            Phase 1 fixture parity harness
                                      cosyvoice3-frontend-parity   lm_input_embeds parity vs Python
                                      cosyvoice3-tokenizer-parity  Qwen2 BPE round-trip
                                    (Production cosyvoice3 backend auto-downloads
                                     assets from HuggingFace on first synthesis.)
+                                   StyleTTS2 (zero-shot, English):
+                                     --reference <speaker.wav>  required
+                                     --alpha 0.3                ref-side blend (default 0.3)
+                                     --beta 0.7                 prosody-side blend (default 0.7)
+                                     --seed N                   RNG seed for fused sampler
+                                     --ipa "…"                  bypass G2P, feed raw IPA
               --lexicon, -l        Custom pronunciation lexicon file. Format depends on backend:
                                      Kokoro (default backend):
                                        word=phon1phon2 phon3   (IPA, grapheme-split)
