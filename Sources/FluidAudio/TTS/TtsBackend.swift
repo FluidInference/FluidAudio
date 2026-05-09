@@ -23,11 +23,13 @@ public enum TtsBackend: Sendable {
     /// duration_predictor → fused_f0n_har_source → decoder_pre →
     /// decoder_upsample`. Reference-audio-driven style; 24 kHz mono output.
     ///
-    /// > Note: Phonemization is the gating issue — StyleTTS2 was trained on
-    /// > espeak IPA with stress markers. FluidAudio has no espeak shim, so
-    /// > the Swift backend uses `MultilingualG2PModel` (CharsiuG2P ByT5) as
-    /// > a best-effort fallback. Quality is below espeak parity; callers
-    /// > with pre-phonemized IPA should pass it via the explicit phoneme
-    /// > entry point on `StyleTTS2Manager`.
+    /// > Note: Phonemization mirrors Kokoro — Misaki preprocessed lexicon
+    /// > (`us_lexicon_cache.json`) lookup first, BART G2P CoreML
+    /// > (`G2PEncoder.mlmodelc` / `G2PDecoder.mlmodelc`) for OOV English
+    /// > words. Misaki's 5-char ASCII diphthong shorthand
+    /// > (`A O I Y W` → `eɪ oʊ aɪ ɔɪ aʊ`) is expanded before encoding so
+    /// > the output matches the espeak IPA StyleTTS2 was trained on.
+    /// > Callers with their own espeak-compatible phonemizer can bypass
+    /// > the entire stack via `StyleTTS2Manager.synthesize(ipa:...)`.
     case styletts2
 }
