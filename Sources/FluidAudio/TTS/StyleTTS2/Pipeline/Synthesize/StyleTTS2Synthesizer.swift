@@ -152,7 +152,8 @@ public actor StyleTTS2Synthesizer {
             "text_mask": MLFeatureValue(multiArray: textMask),
         ])
         let out = try predict(model, provider: provider, stage: "text_encoder")
-        guard let arr = out.featureValue(for: firstOutputName(of: model))?.multiArrayValue else {
+        let outputName = firstOutputName(of: model)
+        guard let arr = out.featureValue(for: outputName)?.multiArrayValue else {
             throw StyleTTS2Error.inferenceFailed(
                 stage: "text_encoder", underlying: "no output value")
         }
@@ -224,7 +225,8 @@ public actor StyleTTS2Synthesizer {
             "mel": MLFeatureValue(multiArray: melArr)
         ])
         let out = try predict(model, provider: provider, stage: "ref_encoder")
-        guard let arr = out.featureValue(for: firstOutputName(of: model))?.multiArrayValue else {
+        let outputName = firstOutputName(of: model)
+        guard let arr = out.featureValue(for: outputName)?.multiArrayValue else {
             throw StyleTTS2Error.inferenceFailed(
                 stage: "ref_encoder", underlying: "no output value")
         }
@@ -272,7 +274,8 @@ public actor StyleTTS2Synthesizer {
             "features": MLFeatureValue(multiArray: featuresArr),
         ])
         let out = try predict(model, provider: provider, stage: "fused_diffusion_sampler")
-        guard let arr = out.featureValue(for: firstOutputName(of: model))?.multiArrayValue else {
+        let outputName = firstOutputName(of: model)
+        guard let arr = out.featureValue(for: outputName)?.multiArrayValue else {
             throw StyleTTS2Error.inferenceFailed(
                 stage: "fused_diffusion_sampler", underlying: "no output value")
         }
@@ -375,7 +378,8 @@ public actor StyleTTS2Synthesizer {
             "ref": MLFeatureValue(multiArray: refArr),
         ])
         let out = try predict(model, provider: provider, stage: "decoder_pre")
-        guard let arr = out.featureValue(for: firstOutputName(of: model))?.multiArrayValue else {
+        let outputName = firstOutputName(of: model)
+        guard let arr = out.featureValue(for: outputName)?.multiArrayValue else {
             throw StyleTTS2Error.inferenceFailed(
                 stage: "decoder_pre", underlying: "no output value")
         }
@@ -400,7 +404,8 @@ public actor StyleTTS2Synthesizer {
             "har_source": MLFeatureValue(multiArray: harArr),
         ])
         let out = try predict(model, provider: provider, stage: "decoder_upsample")
-        guard let arr = out.featureValue(for: firstOutputName(of: model))?.multiArrayValue else {
+        let outputName = firstOutputName(of: model)
+        guard let arr = out.featureValue(for: outputName)?.multiArrayValue else {
             throw StyleTTS2Error.inferenceFailed(
                 stage: "decoder_upsample", underlying: "no output value")
         }
@@ -419,14 +424,14 @@ public actor StyleTTS2Synthesizer {
         }
     }
 
-    private func firstOutputName(of model: MLModel) -> String {
+    private nonisolated func firstOutputName(of model: MLModel) -> String {
         return model.modelDescription.outputDescriptionsByName.keys.first ?? ""
     }
 
     /// Output names in the canonical spec order. CoreML preserves output
     /// declaration order, but `outputDescriptionsByName` is a dictionary;
     /// fall back to a stable sort if the spec walk fails.
-    private func orderedOutputs(of model: MLModel) -> [String] {
+    private nonisolated func orderedOutputs(of model: MLModel) -> [String] {
         let descMap = model.modelDescription.outputDescriptionsByName
         return descMap.keys.sorted()
     }
