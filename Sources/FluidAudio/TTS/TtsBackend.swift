@@ -18,4 +18,16 @@ public enum TtsBackend: Sendable {
     /// laishere/kokoro 7-stage CoreML chain (ALBERT → PostAlbert → Alignment →
     /// Prosody → Noise → Vocoder → Tail) with per-stage ANE/GPU assignment.
     case kokoroAne
+    /// StyleTTS2 (LibriTTS, iteration_3) — 8-stage CoreML pipeline:
+    /// `text_encoder → bert → ref_encoder → fused_diffusion_sampler →
+    /// duration_predictor → fused_f0n_har_source → decoder_pre →
+    /// decoder_upsample`. Reference-audio-driven style; 24 kHz mono output.
+    ///
+    /// > Note: Phonemization is the gating issue — StyleTTS2 was trained on
+    /// > espeak IPA with stress markers. FluidAudio has no espeak shim, so
+    /// > the Swift backend uses `MultilingualG2PModel` (CharsiuG2P ByT5) as
+    /// > a best-effort fallback. Quality is below espeak parity; callers
+    /// > with pre-phonemized IPA should pass it via the explicit phoneme
+    /// > entry point on `StyleTTS2Manager`.
+    case styletts2
 }
