@@ -24,6 +24,26 @@ import Foundation
 /// nanocodec_decoder) plus a small 1-layer "local transformer" implemented in Swift
 /// to sample the 8 codebook tokens per step.
 ///
+/// > Note: **Magpie is a batch / offline model, not a streaming model.**
+/// > Despite NVIDIA marketing copy claiming Magpie "targets streaming
+/// > applications", the upstream NeMo reference
+/// > (`MagpieTTSModel.infer_batch` / `do_tts` in
+/// > `nemo/collections/tts/models/magpietts.py`) is batch-only: the AR loop
+/// > accumulates *all* audio codes into `state.all_predictions` (≈ lines
+/// > 6850–6860), then `torch.cat(state.all_predictions, dim=-1)` and the
+/// > codec (`self._codec_helper.codes_to_audio(...)`) are invoked exactly
+/// > once per utterance after the loop completes (≈ lines 5334–5351 /
+/// > 6889–6891). There is no incremental codec dispatch and no per-chunk
+/// > yield anywhere in the released NeMo inference path.
+/// >
+/// > `synthesizeStream(...)` below is therefore a **chunked-text wrapper**
+/// > on top of that offline AR — text is sentence-split via `MagpieChunker`
+/// > so each chunk fits NanoCodec's 256-frame static-shape cap, each chunk
+/// > runs its own full AR + codec pass, and completed chunks are yielded.
+/// > This is the same architectural pattern the Pipecat / Daily.co
+/// > integration uses (custom WebSocket server wrapping `infer_batch`); it
+/// > is *not* native model streaming.
+///
 /// Usage:
 /// ```swift
 /// let manager = try await MagpieTtsManager.downloadAndCreate(

@@ -13,6 +13,18 @@ import Foundation
 ///        embed current 8 codes → `decoder_step` → LT sample → new codes.
 ///   6. NanoCodec decode → fp32 PCM 22 kHz.
 ///   7. Peak-normalize to 0.9 when `options.peakNormalize`.
+///
+/// **Batch semantics.** Steps 5–6 are fully offline-batch within each
+/// chunk — the AR loop accumulates *all* codebook rows for the chunk
+/// before NanoCodec is invoked, exactly mirroring NeMo upstream's
+/// `MagpieTTSModel.infer_batch` / `do_tts` (`nemo/collections/tts/models/
+/// magpietts.py`, ≈ lines 6850–6891 and 5334–5351), where
+/// `state.all_predictions` is concatenated and `_codec_helper.codes_to_audio`
+/// runs exactly once after the loop. There is no incremental / partial
+/// codec dispatch inside the AR loop. `synthesize(text:...)` chunks at
+/// the *text* level so each chunk fits the NanoCodec 256-frame static-
+/// shape cap; the chunk-level pipelining below (AR(N+1) ‖ codec(N)) is a
+/// throughput optimization, not native model streaming.
 public actor MagpieSynthesizer {
 
     private let logger = AppLogger(category: "MagpieSynthesizer")
