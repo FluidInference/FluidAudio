@@ -121,7 +121,7 @@ extension DiarizerModels {
         localSegmentationModel: URL,
         localEmbeddingModel: URL,
         configuration: MLModelConfiguration? = nil
-    ) async throws -> DiarizerModels {
+    ) throws -> DiarizerModels {
 
         let logger = AppLogger(category: "DiarizerModels")
         logger.info("Loading predownloaded models")

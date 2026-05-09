@@ -513,7 +513,7 @@ extension SpeakerManager {
     ///   - toSpeakerId: The target speaker ID
     /// - Returns: True if successful, false if segment not found or speakers don't exist
     @discardableResult
-    public func reassignSegment(
+    public mutating func reassignSegment(
         segmentId: UUID,
         from fromSpeakerId: String,
         to toSpeakerId: String
