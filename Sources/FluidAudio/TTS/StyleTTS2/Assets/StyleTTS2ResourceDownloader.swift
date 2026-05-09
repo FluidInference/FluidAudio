@@ -6,6 +6,13 @@ import Foundation
 /// 14 `.mlmodelc` directories: 8 default-path stages + 6 bucketed variants of the
 /// two stages that can't accept `RangeDim` on the token axis (`bert`,
 /// `fused_diffusion_sampler`).
+///
+/// The phonemizer side reuses Kokoro's preprocessed Misaki lexicon
+/// (`us_lexicon_cache.json`) and the BART G2P CoreML model
+/// (`G2PEncoder.mlmodelc` / `G2PDecoder.mlmodelc` + `g2p_vocab.json`),
+/// both fetched from the kokoro HF repo and cached under
+/// `~/.cache/fluidaudio/Models/kokoro/` — exactly where Kokoro itself
+/// looks for them, so a single download serves both backends.
 public enum StyleTTS2ResourceDownloader {
 
     private static let logger = AppLogger(category: "StyleTTS2ResourceDownloader")
@@ -43,25 +50,50 @@ public enum StyleTTS2ResourceDownloader {
         return repoDir
     }
 
-    /// Ensure the Misaki gold (and best-effort silver) English lexicons
-    /// are cached locally. Both files live under the Kokoro HF repo and
-    /// are reused verbatim by the StyleTTS2 phonemizer for lookup-first
-    /// IPA resolution. Silver download failures are swallowed; the gold
-    /// lexicon alone covers the common case.
-    public static func ensureLexicons() async throws -> URL {
+    /// Ensure Kokoro's preprocessed Misaki lexicon cache
+    /// (`us_lexicon_cache.json`) is present locally, then return the kokoro
+    /// cache directory that holds it. The same payload is consumed by
+    /// `KokoroSynthesizer.LexiconCache`, so the StyleTTS2 backend is using
+    /// the exact same word→phoneme map Kokoro ships.
+    @discardableResult
+    public static func ensureLexiconCache() async throws -> URL {
         do {
-            let goldURL = try await TtsResourceDownloader.ensureLexiconFile(
-                named: "us_gold.json")
-            do {
-                _ = try await TtsResourceDownloader.ensureLexiconFile(
-                    named: "us_silver.json")
-            } catch {
-                logger.notice(
-                    "Silver lexicon download failed (\(error)); proceeding with gold only")
-            }
-            return goldURL.deletingLastPathComponent()
+            let cacheURL = try await TtsResourceDownloader.ensureLexiconFile(
+                named: "us_lexicon_cache.json")
+            return cacheURL.deletingLastPathComponent()
         } catch {
-            throw StyleTTS2Error.downloadFailed("Misaki gold lexicon: \(error)")
+            throw StyleTTS2Error.downloadFailed("us_lexicon_cache.json: \(error)")
+        }
+    }
+
+    /// Ensure Kokoro's BART grapheme-to-phoneme CoreML assets
+    /// (`G2PEncoder.mlmodelc`, `G2PDecoder.mlmodelc`, `g2p_vocab.json`)
+    /// are present in the kokoro cache. `G2PModel.shared` only loads from
+    /// disk — without this call, a first-time StyleTTS2 user (who hasn't
+    /// already downloaded the kokoro repo) would fail with
+    /// `G2PModelError.vocabLoadFailed` the first time the OOV path is hit.
+    public static func ensureG2PAssets(
+        directory: URL? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws {
+        let modelsRoot = try directory ?? defaultCacheRoot()
+        let kokoroDir = modelsRoot.appendingPathComponent(Repo.kokoro.folderName)
+        let allPresent = ModelNames.G2P.requiredModels.allSatisfy { name in
+            FileManager.default.fileExists(atPath: kokoroDir.appendingPathComponent(name).path)
+        }
+        if allPresent {
+            return
+        }
+        logger.info("Downloading kokoro G2P CoreML assets (g2p-only variant) from HuggingFace…")
+        do {
+            try await DownloadUtils.downloadRepo(
+                .kokoro,
+                to: modelsRoot,
+                variant: "g2p-only",
+                progressHandler: progressHandler
+            )
+        } catch {
+            throw StyleTTS2Error.downloadFailed("kokoro G2P assets: \(error)")
         }
     }
 

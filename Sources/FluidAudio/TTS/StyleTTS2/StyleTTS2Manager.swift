@@ -7,7 +7,10 @@ import Foundation
 /// pipeline:
 ///   1. `StyleTTS2ModelStore`        — downloads + holds the 8 default
 ///      `.mlmodelc` bundles (plus 6 lazily-loaded bucket variants).
-///   2. `StyleTTS2Phonemizer`        — runs CharsiuG2P over the input text.
+///   2. `StyleTTS2Phonemizer`        — Kokoro-style lookup over the Misaki
+///      `us_lexicon_cache.json` payload, falling back to the BART G2P
+///      CoreML model (`G2PEncoder.mlmodelc` / `G2PDecoder.mlmodelc`) for
+///      OOV English words.
 ///   3. `StyleTTS2MelExtractor`      — computes the 80-bin HTK log-mel of
 ///      the reference audio.
 ///   4. `StyleTTS2Synthesizer`       — drives the 8-stage CoreML graph and
@@ -16,12 +19,12 @@ import Foundation
 /// > Important — Phonemizer parity gap.
 /// > The Python reference uses `phonemizer.backend.EspeakBackend(language=
 /// > "en-us", with_stress=True)`. FluidAudio cannot ship the espeak C
-/// > library, so the default text path uses `MultilingualG2PModel`
-/// > (CharsiuG2P ByT5). CharsiuG2P uses a different IPA convention (no
-/// > stress markers, slightly different vowels) — output is intelligible but
-/// > below the espeak reference. Callers with a reliable phonemizer (e.g.
-/// > server-side espeak, or custom IPA) should pass the IPA string directly
-/// > via `synthesize(ipa:referenceAudioURL:...)`.
+/// > library, so the default text path mirrors Kokoro's tokenizer: lookup
+/// > against the Misaki lexicon cache first, BART G2P CoreML model for
+/// > OOV. Output is intelligible but does not always reproduce the exact
+/// > stress markers espeak would emit. Callers with a reliable phonemizer
+/// > (e.g. server-side espeak, or custom IPA) should pass the IPA string
+/// > directly via `synthesize(ipa:referenceAudioURL:...)`.
 ///
 /// Usage:
 /// ```swift
@@ -37,7 +40,6 @@ public actor StyleTTS2Manager {
 
     private let directory: URL?
     private let computeUnits: MLComputeUnits
-    private let g2pLanguage: MultilingualG2PLanguage
 
     private var store: StyleTTS2ModelStore?
     private var phonemizer: StyleTTS2Phonemizer?
@@ -46,12 +48,10 @@ public actor StyleTTS2Manager {
 
     public init(
         directory: URL? = nil,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        g2pLanguage: MultilingualG2PLanguage = .americanEnglish
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
-        self.g2pLanguage = g2pLanguage
     }
 
     public var isAvailable: Bool {
@@ -61,13 +61,11 @@ public actor StyleTTS2Manager {
     /// Convenience factory: download assets and return a ready-to-use manager.
     public static func downloadAndCreate(
         cacheDirectory: URL? = nil,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        g2pLanguage: MultilingualG2PLanguage = .americanEnglish
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
     ) async throws -> StyleTTS2Manager {
         let manager = StyleTTS2Manager(
             directory: cacheDirectory,
-            computeUnits: computeUnits,
-            g2pLanguage: g2pLanguage)
+            computeUnits: computeUnits)
         try await manager.initialize()
         return manager
     }
@@ -82,33 +80,48 @@ public actor StyleTTS2Manager {
         if synthesizer != nil { return }
 
         logger.info(
-            "StyleTTS2 phonemizer uses Misaki gold/silver lexicon first, "
-                + "with CharsiuG2P as a fallback for OOV words. Pass IPA "
-                + "directly via synthesize(ipa:...) when you have a "
-                + "higher-quality phonemizer.")
+            "StyleTTS2 phonemizer mirrors Kokoro: Misaki lexicon-cache lookup "
+                + "first, BART G2P CoreML for OOV. Pass IPA directly via "
+                + "synthesize(ipa:...) when you have a higher-quality phonemizer.")
 
         let store = StyleTTS2ModelStore(
             directory: directory, computeUnits: computeUnits)
         try await store.loadIfNeeded()
         self.store = store
 
-        // Eagerly fetch the CharsiuG2P CoreML bundles so the first synthesize
-        // call doesn't pay download cost mid-request. `MultilingualG2PModel`
-        // is shared and the call is idempotent.
-        try await MultilingualG2PModel.shared.ensureModelsAvailable()
+        // Eagerly fetch the BART G2P CoreML bundles + lexicon cache so the
+        // first synthesize call doesn't pay download cost mid-request. Both
+        // live under the kokoro cache dir; downloading them here is
+        // idempotent.
+        try await StyleTTS2ResourceDownloader.ensureG2PAssets(directory: directory)
+        let kokoroDir = try await StyleTTS2ResourceDownloader.ensureLexiconCache()
 
-        // Fetch Misaki gold (+ best-effort silver) lexicons and load them
-        // up-front so per-word lookup is hash-table fast at synthesis time.
-        let lexiconDir = try await StyleTTS2ResourceDownloader.ensureLexicons()
-        let lexicon = StyleTTS2GoldLexicon()
+        // Verify the BART G2P CoreML model can actually be loaded — fail
+        // fast at init time rather than on the first OOV word.
+        try await G2PModel.shared.ensureModelsAvailable()
+
+        // Load the same preprocessed Misaki cache Kokoro consumes, filtered
+        // to StyleTTS2's character vocab so any token returned by the
+        // lexicon is directly encodable by `StyleTTS2TextCleaner`.
+        let allowedTokens = Set(StyleTTS2TextCleaner.dictionary.keys.map { String($0) })
+        let lexiconCache = KokoroSynthesizer.LexiconCache()
+        let lexicons: (word: [String: [String]], caseSensitive: [String: [String]])
         do {
-            try await lexicon.load(directory: lexiconDir)
+            try await lexiconCache.ensureLoaded(
+                kokoroDirectory: kokoroDir, allowedTokens: allowedTokens)
+            lexicons = await lexiconCache.lexicons()
+            logger.info(
+                "Loaded Misaki lexicon cache: \(lexicons.word.count) lower entries, "
+                    + "\(lexicons.caseSensitive.count) case-sensitive entries")
         } catch {
             logger.warning(
-                "Misaki lexicon load failed (\(error)); falling back to CharsiuG2P-only path")
+                "Lexicon cache load failed (\(error)); falling back to G2P-only path")
+            lexicons = ([:], [:])
         }
 
-        self.phonemizer = StyleTTS2Phonemizer(language: g2pLanguage, lexicon: lexicon)
+        self.phonemizer = StyleTTS2Phonemizer(
+            wordToPhonemes: lexicons.word,
+            caseSensitiveWordToPhonemes: lexicons.caseSensitive)
         self.melExtractor = StyleTTS2MelExtractor()
         self.synthesizer = StyleTTS2Synthesizer(store: store)
 
@@ -152,8 +165,8 @@ public actor StyleTTS2Manager {
 
     // MARK: - Synthesis: IPA path (espeak-parity escape hatch)
 
-    /// Synthesize directly from a pre-phonemized IPA string. Bypasses
-    /// CharsiuG2P entirely — use this when you have a higher-quality
+    /// Synthesize directly from a pre-phonemized IPA string. Bypasses the
+    /// lexicon + G2P entirely — use this when you have a higher-quality
     /// phonemizer (e.g. server-side espeak) and want to feed the IPA the
     /// model was actually trained against.
     ///
