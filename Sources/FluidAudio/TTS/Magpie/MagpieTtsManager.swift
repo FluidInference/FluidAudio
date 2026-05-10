@@ -176,6 +176,48 @@ public actor MagpieTtsManager {
             phonemes: phonemes, speaker: speaker, options: options)
     }
 
+    /// Re-warm the Magpie CoreML graphs so the next user-facing
+    /// ``synthesize(text:speaker:language:options:)`` call doesn't pay
+    /// first-dispatch / ANE-recompile cost.
+    ///
+    /// `initialize()` already runs a warmup at load time, so this method is
+    /// **only useful in two scenarios**:
+    ///
+    /// 1. **After system sleep / wake**, when Apple's `anecompilerservice`
+    ///    has invalidated the per-process ANE compile cache. The next
+    ///    `synthesize` call would otherwise stall 10–20 s while the ANE
+    ///    graphs recompile (cf. VoiceInk issue #321 cold-start reports).
+    ///    Call this from your app's wake-handler to amortize the cost in
+    ///    the background instead of on the user's next interaction.
+    /// 2. **After long idle periods** (~minutes+) where the OS may have
+    ///    paged out CoreML state. Same recompile risk.
+    ///
+    /// The implementation runs a 16-step throwaway synthesis on a single
+    /// `.` input (CFG off, no IPA override) to force first-dispatch
+    /// specialization across `text_encoder` → `prefill` → `decoder_step` →
+    /// `nanocodec_decoder`. The audio is discarded. Total wall time on M2
+    /// is roughly 1.5–2 s.
+    ///
+    /// Safe to call repeatedly — there is no internal "already warm" cache
+    /// guard. If the ANE state is still warm, the predict() calls run
+    /// fast and the method returns quickly. If the ANE cache was
+    /// invalidated, the method pays the recompile cost so your next
+    /// `synthesize` call doesn't.
+    ///
+    /// Throws `MagpieError.notInitialized` if called before
+    /// ``initialize()``. Other failures are propagated from the underlying
+    /// CoreML graphs.
+    ///
+    /// - Note: Run this in a `Task { try? await manager.warmup() }` if you
+    ///   don't want to block the calling context — there is no internal
+    ///   background-queue dispatch.
+    public func warmup() async throws {
+        guard let synthesizer = synthesizer else {
+            throw MagpieError.notInitialized
+        }
+        try await synthesizer.warmup()
+    }
+
     public func cleanup() async {
         if let store = store {
             await store.unload()
