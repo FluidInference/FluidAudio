@@ -7,8 +7,6 @@
 > here are directly paper-comparable.
 > **Status:** Kokoro ANE (English + Mandarin), PocketTTS (English),
 > Magpie (English), and StyleTTS2 (English, zero-shot) all complete
-> the full 100-phrase MiniMax run; CosyVoice3 completes the full
-> Mandarin run.
 >
 > [minimax]: https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
 > [mms]: https://arxiv.org/abs/2505.07916
@@ -58,7 +56,6 @@ Reference each language as `--corpus minimax-<lang>`:
 | PocketTTS   | `minimax-english`  | 6L packs: `english`, `german`, `italian`, `portuguese`, `spanish`. 24L packs: `french_24l`, `german_24l`, `italian_24l`, `portuguese_24l`, `spanish_24l` |
 | Magpie      | `minimax-english`  | `english`, `spanish`, `german`, `french`, `italian`, `vietnamese`, `chinese`, `hindi` |
 | StyleTTS2   | `minimax-english`  | `english` only (LibriTTS iteration_3, zero-shot from `--reference` audio) |
-| CosyVoice3  | `minimax-chinese`  | `chinese`, `cantonese`                         |
 
 Lines beginning with `#` are comments. Custom corpora can still be
 passed with `--corpus-path <file.txt>`.
@@ -72,7 +69,7 @@ Per phrase:
   **PocketTTS** is benchmarked through `synthesizeStreaming`, so its
   `ttft_ms` is the timestamp of the first 80 ms audio frame (1920
   samples @ 24 kHz) — actually-perceptible TTFA. **Kokoro ANE,
-  Magpie, StyleTTS2, CosyVoice3** are batch / one-shot
+  Magpie, StyleTTS2** are batch / one-shot
   (`synthesize(...)` returns the full waveform), so `ttft_ms ==
   synth_ms == time-to-complete-wav` for those — interpret it as
   full-wav latency, not as TTFA.
@@ -82,7 +79,7 @@ Per phrase:
 - `wer`, `cer` — via Parakeet ASR roundtrip on the rendered WAV.
 - `stage_ms` — per-stage breakdown (backend-specific keys; populated
   for Kokoro ANE; empty for Kokoro / PocketTTS / Magpie /
-  StyleTTS2 / CosyVoice3 in this report).
+  StyleTTS2 in this report).
 - Backend-specific extras: `encoder_tokens`, `acoustic_frames`,
   `chunk_count`, `frame_count`, `code_count`, `finished_on_eos`,
   `generated_token_count`, etc.
@@ -251,97 +248,3 @@ discussion](https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set/
 absolute WER is best read **relatively** (backend A vs. backend B on
 the same corpus + same ASR + same normalizer) rather than against
 raw paper numbers.
-
-## CosyVoice3 Decode budget cap
-
-CosyVoice3's Flow CFM was exported with a fixed input shape of
-`[1, 250]` speech tokens (`flowTotalTokens` in
-`CosyVoice3Constants.swift:45`). The LLM-Decode AR loop is allowed to
-emit up to `flowTotalTokens − N_prompt` tokens before being cut off
-(typically ~163 generated tokens after the speech-prompt portion).
-At `tokenMelRatio=2 × hiftSamplesPerFrame=480 / sampleRate=24000`
-that's **40 ms of audio per generated token**, so the loop produces
-**at most ~6.5 s of speech per phrase**, regardless of how long the
-input text is.
-
-When the AR loop exits because it ran out of budget (i.e. no EOS
-token in `stopRange = 6_561…6_760`) instead of natural termination,
-`CosyVoice3Synthesizer` now:
-
-1. Logs a `.warning` (one-shot per phrase) naming the
-   `decoded.count / maxNew` budget and the produced audio duration.
-2. Sets `CosyVoice3SynthesisResult.finishedOnEos = false`, which the
-   benchmark harness surfaces as the `finished_on_eos` field on each
-   phrase in the JSON report.
-
-Footprint on the cantonese corpus (`minimax-cantonese`,
-100 phrases) **without the chunker**: 80 / 100 phrases would hit the
-cap, all producing exactly 163 generated tokens / ~6.5 s of audio.
-The mandarin corpus sees a much lower truncation rate because
-MiniMax-zh phrases are shorter on average.
-
-The structural fix — re-exporting the Flow CFM from
-[`mobius-cosyvoice3`](https://github.com/voicelink-ai/mobius-cosyvoice3)
-with a larger fixed input shape (e.g. `[1, 500]`) — is upstream
-work; bumping the constant in Swift alone would make the Flow
-input/output shapes mismatch at predict time. The shipped workaround
-is the call-site [auto-chunker](#cosyvoice3-auto-chunker), which
-drops cantonese truncation from 80/100 → 5/100 by splitting long
-inputs at clause boundaries and crossfading the results.
-
-Surfaced in
-`CosyVoice3Synthesizer.synthesize`
-(`Sources/FluidAudio/TTS/CosyVoice3/Pipeline/Synthesize/CosyVoice3Synthesizer.swift`)
-and
-`CosyVoice3SynthesisResult.finishedOnEos`
-(`Sources/FluidAudio/TTS/CosyVoice3/Pipeline/Synthesize/CosyVoice3Types.swift`).
-
-## CosyVoice3 auto-chunker
-
-Re-exporting Flow CFM with a larger fixed input shape is gated on
-upstream conversion work. Until that lands, `CosyVoice3TtsManager`
-splits long inputs at the call site, synthesizes each chunk
-independently, and merges with an 8 ms equal-power cosine crossfade.
-
-**Splitter policy** (`CosyVoice3TextChunker`):
-
-- **Hard enders** commit always: `.`, `!`, `?`, `。`, `！`, `？`,
-  `\n`.
-- **Soft enders** commit only when the running estimate is at or past
-  the budget: `，`, `、`, `；`, `：`, `;`, `,`, ASCII space.
-- **Force-split** at `budget + 30` tokens of overshoot if no natural
-  boundary appeared (rare; mostly continuous CJK with no
-  punctuation).
-
-**Token-rate estimate** (calibrated against minimax-zh + minimax-yue
-runs):
-
-| Char class | Tokens / char | Rationale                                                    |
-|------------|---------------|--------------------------------------------------------------|
-| CJK        | 7.5           | worst-case observed in real generation; varies 5.5–9 per char |
-| ASCII      | 1.5           | matches BPE rate on English text                              |
-| Other      | 2.5           | conservative for accented Latin / non-CJK Unicode             |
-
-`defaultMaxSpeechTokens` is **110**, leaving margin under the
-250-token Flow cap minus typical 60–90 token speech-prompt context.
-
-**Concatenation**: 8 ms equal-power cosine crossfade at 24 kHz
-between adjacent chunks; single-chunk path short-circuits to plain
-copy.
-
-**Validation** (full `minimax-cantonese`, 100 phrases, M2):
-
-| Metric                                    | Pre-chunker | Post-chunker | Δ          |
-|-------------------------------------------|-------------|--------------|------------|
-| `finished_on_eos=false` (truncated)       | 80 / 100    | **5 / 100**  | −94%       |
-| Longest audio output                      | 6.5 s       | **16.1 s**   | +148%      |
-| agg-RTFx                                  | 0.245×      | 0.249×       | +1.6%      |
-| TTFT p50                                  | 23.9 s      | 35.7 s       | +49%       |
-| TTFT p95                                  | 41.2 s      | 60.5 s       | +47%       |
-| Peak RSS                                  | 2016 MB     | 3264 MB      | +62%       |
-
-The 5/100 residual is the long-tail token-rate worst case (some
-Cantonese characters generate >9 speech tokens); raising the
-per-CJK heuristic further would over-fragment short phrases.
-Cleaner fix is the upstream Flow re-export.
-
