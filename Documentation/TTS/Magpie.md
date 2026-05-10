@@ -143,6 +143,54 @@ let result = try await manager.synthesize(
 // result.durationSeconds : Double
 ```
 
+## Cold-start mitigation (`warmup()`)
+
+Magpie's CoreML graphs are **ANE-resident**. Apple's `anecompilerservice`
+caches compiled graphs per-process, but invalidates that cache on
+**system sleep / wake** and after long idle periods. The next
+`synthesize` call after a wake event then stalls 10–20 s while the ANE
+graphs recompile — this is the user-visible "TTS hang" downstream apps
+see in cold-start scenarios (cf. VoiceInk issue #321).
+
+`MagpieTtsManager` runs an automatic warmup at the end of `initialize()`,
+so the first `synthesize` after app launch is fast. To mitigate the
+post-wake recompile, call `warmup()` from your app's wake-handler:
+
+```swift
+public func warmup() async throws  // throws .notInitialized if called pre-init
+```
+
+Recommended pattern:
+
+```swift
+// 1. App launch — no manual warmup needed; initialize() runs it.
+let manager = try await MagpieTtsManager.downloadAndCreate(languages: [.english])
+
+// 2. App wake / re-foreground — re-warm in the background so the next
+// synthesize() doesn't pay ANE recompile cost.
+NotificationCenter.default.addObserver(
+    forName: NSApplication.didBecomeActiveNotification, object: nil, queue: nil
+) { _ in
+    Task { try? await manager.warmup() }
+}
+```
+
+Implementation runs a 16-step throwaway synthesis on a single `.` input
+(CFG off, output discarded) to force first-dispatch specialization across
+`text_encoder` → `prefill` → `decoder_step` → `nanocodec_decoder`. Total
+wall time ≈ 1.5–2 s on M2.
+
+`warmup()` is **safe to call repeatedly**. There is no internal
+"already warm" guard — if the ANE state is still warm, the predict()
+calls run fast; if the cache was invalidated, the method pays the
+recompile so your next user-facing synthesize doesn't.
+
+> **Note:** `warmup()` does not dispatch to a background queue
+> internally. Wrap the call in `Task { ... }` if you don't want to
+> block the calling context. The same applies to `initialize()` — both
+> are normal `async` functions that run on whatever executor the caller
+> awaits them from.
+
 ## CLI
 
 ```bash
