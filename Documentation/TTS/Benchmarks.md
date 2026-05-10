@@ -7,6 +7,7 @@
 > here are directly paper-comparable.
 > **Status:** Kokoro ANE (English + Mandarin), PocketTTS (English),
 > Magpie (English), and StyleTTS2 (English, zero-shot) all complete
+> the full 100-phrase MiniMax run.
 >
 > [minimax]: https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
 > [mms]: https://arxiv.org/abs/2505.07916
@@ -52,7 +53,7 @@ Reference each language as `--corpus minimax-<lang>`:
 
 | Backend     | Default corpus     | Other supported MiniMax languages              |
 |-------------|--------------------|------------------------------------------------|
-| Kokoro / Kokoro ANE | `minimax-english` | `english` (`af_heart`); Kokoro ANE also ships `chinese` (`--variant mandarin`, voice `zf_001`) |
+| Kokoro ANE  | `minimax-english` | `english` (`af_heart`); Kokoro ANE also ships `chinese` (`--variant mandarin`, voice `zf_001`) |
 | PocketTTS   | `minimax-english`  | 6L packs: `english`, `german`, `italian`, `portuguese`, `spanish`. 24L packs: `french_24l`, `german_24l`, `italian_24l`, `portuguese_24l`, `spanish_24l` |
 | Magpie      | `minimax-english`  | `english`, `spanish`, `german`, `french`, `italian`, `vietnamese`, `chinese`, `hindi` |
 | StyleTTS2   | `minimax-english`  | `english` only (LibriTTS iteration_3, zero-shot from `--reference` audio) |
@@ -69,24 +70,22 @@ Per phrase:
   **PocketTTS** is benchmarked through `synthesizeStreaming`, so its
   `ttft_ms` is the timestamp of the first 80 ms audio frame (1920
   samples @ 24 kHz) — actually-perceptible TTFA. **Kokoro ANE,
-  Magpie, StyleTTS2** are batch / one-shot
-  (`synthesize(...)` returns the full waveform), so `ttft_ms ==
-  synth_ms == time-to-complete-wav` for those — interpret it as
-  full-wav latency, not as TTFA.
+  Magpie, StyleTTS2** are batch / one-shot (`synthesize(...)` returns
+  the full waveform), so `ttft_ms == synth_ms == time-to-complete-wav`
+  for those — interpret it as full-wav latency, not as TTFA.
 - `synth_ms` — total synth wall time.
 - `audio_ms` — generated audio duration.
 - `rtfx` — `audio_ms / synth_ms`.
 - `wer`, `cer` — via Parakeet ASR roundtrip on the rendered WAV.
 - `stage_ms` — per-stage breakdown (backend-specific keys; populated
-  for Kokoro ANE; empty for Kokoro / PocketTTS / Magpie /
+  for Kokoro ANE; empty for / PocketTTS / Magpie /
   StyleTTS2 in this report).
 - Backend-specific extras: `encoder_tokens`, `acoustic_frames`,
-  `chunk_count`, `frame_count`, `code_count`, `finished_on_eos`,
-  `generated_token_count`, etc.
+  `chunk_count`, `frame_count`, `code_count`, `generated_token_count`,
+  etc.
 
 Aggregates:
-- `cold_start_s` — `manager.initialize()` wall time. CosyVoice3 also
-  includes voice-asset load.
+- `cold_start_s` — `manager.initialize()` wall time.
 - `first_synth_ms` — first synth call after init (still cold-ish).
 - `ttft_ms_p50` / `ttft_ms_p95`.
 - `warm_synth_ms_p50` / `warm_synth_ms_p95`.
@@ -141,9 +140,9 @@ swift run fluidaudio tts-benchmark \
 The harness writes a JSON report to `--output-json` and (optionally)
 keeps WAVs under `--audio-dir`. Pass `--skip-asr` to drop the ASR
 roundtrip. The default ASR backend is `parakeet` for English-only
-runs and is skipped for CosyVoice3; pass `--asr-backend cohere
---cohere-model-dir <dir>` to score Mandarin (or any of the 14
-Cohere languages) against [Cohere Transcribe](../../Sources/FluidAudio/ASR/Cohere/).
+runs; pass `--asr-backend cohere --cohere-model-dir <dir>` to score
+Mandarin (or any of the 14 Cohere languages) against
+[Cohere Transcribe](../../Sources/FluidAudio/ASR/Cohere/).
 
 ## Results
 
@@ -185,10 +184,9 @@ against the WAVs rendered by `tts-benchmark --backend kokoro-ane
 (0.0414)** across 100 phrases (table reports the macro figure).
 WER is omitted because Mandarin has no word boundaries and
 `WERCalculator` splits on whitespace — word-level WER reads near
-100% and is meaningless. Same caveat applies to the CosyVoice3
-zh run reported separately in the [decode budget cap](#cosyvoice3-decode-budget-cap)
-section. Cohere Transcribe q8 hit a `MILCompilerForANE` cache
-failure on this M2 host, so whisper is the local source of truth.
+100% and is meaningless. Cohere Transcribe q8 hit a
+`MILCompilerForANE` cache failure on this M2 host, so whisper is
+the local source of truth for Mandarin CER.
 
 ∥ Magpie: batch-only. `synthesize(...)` returns one
 `MagpieSynthesisResult` after the full AR + codec pipeline completes,
