@@ -14,6 +14,7 @@ import Foundation
 ///   kokoro        — single-graph CPU+GPU (chunk-level only)
 ///   pocket-tts    — streaming flow-matching (no per-stage timings)
 ///   magpie        — encoder-decoder + NanoCodec (6-stage timings, slow)
+///   styletts2     — LibriTTS iteration_3, zero-shot w/ reference audio
 ///   cosyvoice3    — Mandarin LLM-based (Mandarin corpus only, no WER)
 ///
 /// Usage:
@@ -105,6 +106,8 @@ public enum TtsBenchmarkCommand {
         var cohereModelDirArg: String?
         var asrLanguageArg: String?
         var cohereComputeUnitsArg: String?
+        var referencePath: String?
+        var variantArg: String?
 
         var i = 0
         while i < arguments.count {
@@ -177,6 +180,16 @@ public enum TtsBenchmarkCommand {
                     cohereComputeUnitsArg = arguments[i + 1]
                     i += 1
                 }
+            case "--reference":
+                if i + 1 < arguments.count {
+                    referencePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--variant":
+                if i + 1 < arguments.count {
+                    variantArg = arguments[i + 1]
+                    i += 1
+                }
             case "--help", "-h":
                 printUsage()
                 return
@@ -245,9 +258,11 @@ public enum TtsBenchmarkCommand {
         do {
             switch backend {
             case .kokoroAne:
+                let kaVariant = parseKokoroAneVariant(variantArg)
                 try await runKokoroAne(
                     phrases: phrases, corpusLabel: corpusLabel,
-                    voice: voice ?? KokoroAneConstants.defaultVoice,
+                    variant: kaVariant,
+                    voice: voice ?? kaVariant.defaultVoice,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
             case .kokoro:
@@ -269,6 +284,12 @@ public enum TtsBenchmarkCommand {
                     speakerName: speakerName, languageName: languageName,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
+            case .styleTts2:
+                try await runStyleTTS2(
+                    phrases: phrases, corpusLabel: corpusLabel,
+                    referencePath: referencePath,
+                    preset: preset, outputJson: outputJson, audioDir: audioDir,
+                    asrChoice: asrChoice)
             case .cosyVoice3:
                 try await runCosyVoice3(
                     phrases: phrases, corpusLabel: corpusLabel,
@@ -287,6 +308,7 @@ public enum TtsBenchmarkCommand {
     private static func runKokoroAne(
         phrases: [(category: String, text: String)],
         corpusLabel: String,
+        variant: KokoroAneVariant,
         voice: String,
         preset: TtsComputeUnitPreset,
         outputJson: String?,
@@ -294,7 +316,7 @@ public enum TtsBenchmarkCommand {
         asrChoice: AsrChoice
     ) async throws {
         let units = KokoroAneComputeUnits(preset: preset)
-        let manager = KokoroAneManager(defaultVoice: voice, computeUnits: units)
+        let manager = KokoroAneManager(variant: variant, defaultVoice: voice, computeUnits: units)
 
         let coldStart = Date()
         try await manager.initialize()
@@ -556,6 +578,80 @@ public enum TtsBenchmarkCommand {
                     "code_count": result.codeCount,
                     "finished_on_eos": result.finishedOnEos,
                 ]
+            )
+        }
+    }
+
+    // MARK: - StyleTTS2 driver
+
+    private static func runStyleTTS2(
+        phrases: [(category: String, text: String)],
+        corpusLabel: String,
+        referencePath: String?,
+        preset: TtsComputeUnitPreset,
+        outputJson: String?,
+        audioDir: String?,
+        asrChoice: AsrChoice
+    ) async throws {
+        guard let referencePath, !referencePath.isEmpty else {
+            logger.error(
+                "styletts2 backend requires --reference <speaker-audio-file> "
+                    + "(any sample rate / channel layout — resampled to 24 kHz mono).")
+            exit(1)
+        }
+        let referenceURL = resolveURL(referencePath, isDirectory: false)
+        guard FileManager.default.fileExists(atPath: referenceURL.path) else {
+            logger.error("Reference audio not found: \(referenceURL.path)")
+            exit(1)
+        }
+        logger.info("StyleTTS2 reference audio: \(referenceURL.path)")
+
+        let units = preset.uniformUnits ?? .cpuAndNeuralEngine
+        let manager = StyleTTS2Manager(computeUnits: units)
+
+        let coldStart = Date()
+        try await manager.initialize()
+        let coldStartS = Date().timeIntervalSince(coldStart)
+        logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
+
+        let firstStart = Date()
+        _ = try await manager.synthesize(
+            text: "Initialization warm-up.",
+            referenceAudioURL: referenceURL)
+        let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
+        logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
+
+        try await runPhraseLoop(
+            backendId: "styletts2",
+            voiceLabel: referenceURL.lastPathComponent,
+            corpusLabel: corpusLabel,
+            phrases: phrases,
+            preset: preset,
+            coldStartS: coldStartS,
+            firstSynthMs: firstSynthMs,
+            outputJson: outputJson,
+            audioDir: audioDir,
+            asrChoice: asrChoice,
+            extraSummary: [
+                "reference": referenceURL.path,
+                "alpha": Double(StyleTTS2Constants.defaultAlpha),
+                "beta": Double(StyleTTS2Constants.defaultBeta),
+            ]
+        ) { text in
+            // StyleTTS2 is a one-shot diffusion-based synthesizer — no
+            // streaming yield, so TTFT == synthMs. The per-phrase mel
+            // recompute is tiny vs. the 5-step ADPM2 + decoder cost.
+            let t0 = Date()
+            let samples = try await manager.synthesize(
+                text: text, referenceAudioURL: referenceURL)
+            let synthMs = Date().timeIntervalSince(t0) * 1000
+            return BackendPhraseSample(
+                synthMs: synthMs,
+                ttftMs: synthMs,
+                samples: samples,
+                sampleRate: StyleTTS2Constants.sampleRate,
+                stageMs: [:],
+                extraFields: [:]
             )
         }
     }
@@ -885,6 +981,7 @@ public enum TtsBenchmarkCommand {
         case kokoro
         case pocketTts
         case magpie
+        case styleTts2
         case cosyVoice3
 
         var defaultCorpus: String {
@@ -905,6 +1002,8 @@ public enum TtsBenchmarkCommand {
             return .pocketTts
         case "magpie":
             return .magpie
+        case "styletts2", "style-tts2", "styletts", "style-tts":
+            return .styleTts2
         case "cosyvoice3", "cosyvoice", "cosy":
             return .cosyVoice3
         default:
@@ -935,6 +1034,17 @@ public enum TtsBenchmarkCommand {
         case "leo": return .leo
         case "john", nil, "": return .john
         default: return .john
+        }
+    }
+
+    private static func parseKokoroAneVariant(_ name: String?) -> KokoroAneVariant {
+        switch name?.lowercased() {
+        case "mandarin", "zh", "chinese", "zh-cn":
+            return .mandarin
+        case "english", "en", "en-us", nil, "":
+            return .english
+        default:
+            return .english
         }
     }
 
@@ -1193,6 +1303,7 @@ public enum TtsBenchmarkCommand {
               kokoro        Single-graph CPU+GPU
               pocket-tts    Streaming flow-matching (multilingual)
               magpie        Encoder-decoder + NanoCodec (per-stage, slow)
+              styletts2     LibriTTS iteration_3, zero-shot, requires --reference
               cosyvoice3    Mandarin LLM-based (auto-picks Cohere ASR for zh)
 
             Options:
@@ -1232,13 +1343,22 @@ public enum TtsBenchmarkCommand {
                                         fails (`MILCompilerForANE error: …`)
                                         — avoids the multi-minute fallback
                                         compile on first call.
+              --reference <path>        StyleTTS2 speaker-reference audio
+                                        (required for --backend styletts2;
+                                        any sample rate / channel layout —
+                                        resampled to 24 kHz mono internally)
+              --variant <name>          Kokoro ANE variant: english (default) or
+                                        mandarin (aliases: zh, chinese)
               --help, -h                Show this help
 
             Examples:
               fluidaudio tts-benchmark --backend kokoro-ane --output-json bench.json
+              fluidaudio tts-benchmark --backend kokoro-ane --variant mandarin \\
+                  --voice zf_001 --corpus minimax-chinese --skip-asr
               fluidaudio tts-benchmark --backend kokoro --corpus minimax-english
               fluidaudio tts-benchmark --backend pocket-tts --corpus minimax-german --language german
               fluidaudio tts-benchmark --backend magpie --speaker sofia --language en
+              fluidaudio tts-benchmark --backend styletts2 --reference speaker.wav
               fluidaudio tts-benchmark --backend cosyvoice3 --corpus minimax-chinese \\
                   --asr-backend cohere --cohere-model-dir ~/.fluidaudio/cohere/q8
 
