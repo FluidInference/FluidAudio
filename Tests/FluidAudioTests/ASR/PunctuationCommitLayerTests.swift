@@ -164,8 +164,12 @@ struct PunctuationCommitLayerTests {
 
     @Test("New text cancels debounce timer")
     func testDebounceTimerCancellation() async throws {
+        // Use a wide timer:pre-cancel-sleep ratio (10:1) so CI scheduler
+        // jitter cannot let the first 100ms timer fire before the second
+        // processPartialText() lands on the actor. The previous 100ms/50ms
+        // ratio was flaky on macos-15 GitHub runners.
         let layer = PunctuationCommitLayer(
-            debounceTimeout: 0.1,  // 100ms for fast testing
+            debounceTimeout: 0.5,  // 500ms
             commitOnTimeout: true
         )
 
@@ -177,12 +181,12 @@ struct PunctuationCommitLayerTests {
         }
 
         _ = await layer.processPartialText("Hello")
-        try await Task.sleep(nanoseconds: 50_000_000)  // 50ms (before timeout)
+        try await Task.sleep(nanoseconds: 50_000_000)  // 50ms (well before 500ms timeout)
 
         // New text should cancel previous timer
         _ = await layer.processPartialText("Hello world")
-        try await Task.sleep(nanoseconds: 120_000_000)  // 120ms
-        try await Task.sleep(nanoseconds: 50_000_000)  // Extra 50ms for callback
+        try await Task.sleep(nanoseconds: 600_000_000)  // 600ms (past the new 500ms timer)
+        try await Task.sleep(nanoseconds: 100_000_000)  // Extra 100ms for callback hop
 
         // Should only commit once (from second update)
         let timeoutCommits = await updateActor.timeoutCommitCount
@@ -229,8 +233,10 @@ struct PunctuationCommitLayerTests {
 
     @Test("EOU cancels debounce timer")
     func testEOUCancelsDebounce() async throws {
+        // 500ms / 50ms (10:1) gives the EOU call enough head room to land
+        // on the actor before the timer fires on a slow CI runner.
         let layer = PunctuationCommitLayer(
-            debounceTimeout: 0.1,
+            debounceTimeout: 0.5,
             commitOnTimeout: true
         )
 
@@ -242,11 +248,11 @@ struct PunctuationCommitLayerTests {
         }
 
         _ = await layer.processPartialText("Hello")
-        try await Task.sleep(nanoseconds: 50_000_000)  // 50ms
+        try await Task.sleep(nanoseconds: 50_000_000)  // 50ms (well before 500ms timeout)
 
         // EOU should cancel debounce timer
         _ = await layer.processEOU()
-        try await Task.sleep(nanoseconds: 100_000_000)  // Wait past original timeout
+        try await Task.sleep(nanoseconds: 600_000_000)  // 600ms — past the original 500ms timeout
 
         // Should not have committed via timeout
         let timeoutCommits = await updateActor.timeoutCommitCount
