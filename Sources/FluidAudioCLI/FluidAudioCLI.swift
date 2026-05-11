@@ -115,7 +115,7 @@ struct FluidAudioCLI {
                 fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
                 transcribe              Transcribe audio file using streaming ASR
                 multi-stream            Transcribe multiple audio files in parallel
-                tts                     Synthesize speech from text using Kokoro TTS
+                tts                     Synthesize speech from text (KokoroAne / PocketTTS / StyleTTS2)
                 magpie                  Magpie TTS Multilingual 357M (experimental, ~0.04 RTFx — slow, needs perf work)
                 tts-asr-verify          Batch TTS→ASR roundtrip WER verification
                 tts-benchmark           Quantitative TTS benchmark (latency, quality, compute-unit sweep)

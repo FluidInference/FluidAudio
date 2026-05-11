@@ -11,6 +11,30 @@ public struct SSMLProcessingResult: Sendable {
     }
 }
 
+/// A pronunciation override produced by `<phoneme>` / markdown phonetic syntax.
+///
+/// `wordIndex` is the 0-based position of the affected word in the original
+/// pre-substitution input. `tokens` / `scalarTokens` carry the raw and
+/// individually-scalar-split forms so consuming backends can encode either
+/// representation depending on their tokenizer.
+public struct TtsPhoneticOverride: Sendable {
+    public let wordIndex: Int
+    public let tokens: [String]
+    public let scalarTokens: [String]
+    public let raw: String
+    public let word: String
+
+    public init(
+        wordIndex: Int, tokens: [String], scalarTokens: [String], raw: String, word: String
+    ) {
+        self.wordIndex = wordIndex
+        self.tokens = tokens
+        self.scalarTokens = scalarTokens
+        self.raw = raw
+        self.word = word
+    }
+}
+
 /// Represents a parsed SSML tag with its position in the source text
 struct SSMLParsedTag: Sendable {
     enum TagType: Sendable {

@@ -119,7 +119,7 @@ public struct MandarinCustomLexicon: Sendable, Equatable {
     // MARK: - Merge
 
     /// Combine two lexicons. Keys from `other` overwrite keys from
-    /// `self` on collision (mirrors ``TtsCustomLexicon/merged(with:)``).
+    /// `self` on collision.
     public func merged(with other: MandarinCustomLexicon) -> MandarinCustomLexicon {
         var combined = entries
         for (k, v) in other.entries {

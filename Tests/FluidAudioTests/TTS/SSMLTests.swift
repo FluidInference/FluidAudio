@@ -351,34 +351,6 @@ final class SSMLTests: XCTestCase {
         XCTAssertEqual(result.phoneticOverrides[1].word, "two")
     }
 
-    // MARK: - Integration with TtsTextPreprocessor
-
-    func testPreprocessorWithSSML() {
-        let text = #"The number <say-as interpret-as="cardinal">1000</say-as> is big."#
-        let result = TtsTextPreprocessor.preprocessDetailed(text)
-
-        XCTAssertTrue(result.text.contains("one thousand"))
-    }
-
-    func testPreprocessorSSMLCoexistsWithMarkdown() {
-        let text = #"<say-as interpret-as="ordinal">1</say-as> and [second](/sɛkənd/)"#
-        let result = TtsTextPreprocessor.preprocessDetailed(text)
-
-        XCTAssertTrue(result.text.contains("first"))
-        XCTAssertTrue(result.text.contains("second"))
-        // Should have phonetic override from markdown syntax
-        XCTAssertGreaterThanOrEqual(result.phoneticOverrides.count, 1)
-    }
-
-    func testPreprocessorSSMLThenNormalization() {
-        // SSML processed first, then currency normalization
-        let text = #"<say-as interpret-as="cardinal">5</say-as> costs $12.50."#
-        let result = TtsTextPreprocessor.preprocessDetailed(text)
-
-        XCTAssertTrue(result.text.contains("five"))
-        XCTAssertTrue(result.text.contains("dollars"))
-    }
-
     // MARK: - Edge Cases: Malformed SSML Tags
 
     func testMalformedPhonemeNoClosingTag() {
@@ -616,16 +588,6 @@ final class SSMLTests: XCTestCase {
     func testFractionLargeDenominator() {
         let result = SayAsInterpreter.interpret(content: "3/100", interpretAs: "fraction", format: nil)
         XCTAssertTrue(result.contains("hundredth"))
-    }
-
-    func testWordIndexAfterCurrencyExpansion() {
-        // SSML word index is calculated on ORIGINAL text before currency expansion
-        let text = "Cost is $10 and <phoneme ph=\"test\">word</phoneme> follows"
-        let result = TtsTextPreprocessor.preprocessDetailed(text)
-        XCTAssertEqual(result.phoneticOverrides.count, 1)
-        // Original: "Cost is $10 and word follows" - word index 4
-        // (Currency expansion happens after SSML processing)
-        XCTAssertEqual(result.phoneticOverrides[0].wordIndex, 4)
     }
 
     func testAdjacentTags() {

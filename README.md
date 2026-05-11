@@ -589,26 +589,29 @@ swift run fluidaudiocli tts "Hello world." --output out.wav --backend pocket --c
 See [Documentation/TTS/PocketTTS.md](Documentation/TTS/PocketTTS.md#languages)
 for the full language table.
 
-### Kokoro
+### KokoroAne
 
-High-quality parallel TTS with SSML and phoneme-level pronunciation control. Uses a CoreML G2P (grapheme-to-phoneme) model for out-of-vocabulary words — no external dependencies required.
+ANE-resident Kokoro 82M (4-stage on Neural Engine, 3-stage on GPU). Yields
+3-11× RTFx on Apple Silicon vs. the prior single-graph Kokoro path. English
+(`af_heart`) and Mandarin variants ship with a built-in G2P pipeline (BART
+CoreML for English OOV, jieba + sandhi + G2pW for Mandarin).
 
 ```swift
 import FluidAudio
 
 Task {
-    let manager = KokoroTtsManager()
+    let manager = KokoroAneManager()
     try await manager.initialize()
-    let data = try await manager.synthesize(text: "Hello from FluidAudio.")
-    try data.write(to: URL(fileURLWithPath: "out.wav"))
+    let samples = try await manager.synthesize(text: "Hello from FluidAudio.")
+    // `samples` is 24 kHz mono Float32 PCM
 }
 ```
 
 ```bash
-swift run fluidaudiocli tts "Hello from FluidAudio." --auto-download --output out.wav
+swift run fluidaudiocli tts "Hello from FluidAudio." --backend kokoroAne --output out.wav
 ```
 
-Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.
+Model assets are cached under `~/.cache/fluidaudio/Models/kokoro/`.
 
 ### Magpie (Multilingual) — experimental
 

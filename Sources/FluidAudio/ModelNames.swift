@@ -20,6 +20,11 @@ public enum Repo: String, CaseIterable, Sendable {
     case nemotronStreaming160 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/160ms"
     case nemotronStreaming80 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/80ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
+    /// Root of the kokoro HF repo. The mono Kokoro TTS backend was removed in
+    /// favor of `kokoroAne`/`kokoroAneZh`, but this case is kept because the
+    /// shared G2P CoreML assets (`G2PEncoder.mlmodelc`, `G2PDecoder.mlmodelc`,
+    /// `g2p_vocab.json`) used by KokoroAne for text→IPA still live at the
+    /// repository root and are pulled via `variant: "g2p-only"`.
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case kokoroAne = "FluidInference/kokoro-82m-coreml/ANE"
     case kokoroAneZh = "FluidInference/kokoro-82m-coreml/ANE-zh"
@@ -33,7 +38,6 @@ public enum Repo: String, CaseIterable, Sendable {
     case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
     case multilingualG2p = "FluidInference/charsiu-g2p-byt5-coreml"
     case parakeetTdtCtc110m = "FluidInference/parakeet-tdt-ctc-110m-coreml"
-    case cosyvoice3 = "FluidInference/CosyVoice3-0.5B-coreml"
     case cohereTranscribeCoreml = "FluidInference/cohere-transcribe-03-2026-coreml/q8"
     case magpieTts = "FluidInference/magpie-tts-multilingual-357m-coreml"
     /// StyleTTS2 LibriTTS — `iteration_3/compiled/` is the only directory
@@ -101,8 +105,6 @@ public enum Repo: String, CaseIterable, Sendable {
             return "charsiu-g2p-byt5-coreml"
         case .parakeetTdtCtc110m:
             return "parakeet-tdt-ctc-110m-coreml"
-        case .cosyvoice3:
-            return "CosyVoice3-0.5B-coreml"
         case .cohereTranscribeCoreml:
             return "cohere-transcribe-03-2026-coreml/q8"
         case .magpieTts:
@@ -227,8 +229,6 @@ public enum Repo: String, CaseIterable, Sendable {
             return "ls-eend/dih2"
         case .lseendDihard3:
             return "ls-eend/dih3"
-        case .cosyvoice3:
-            return "cosyvoice3"
         case .cohereTranscribeCoreml:
             return "cohere-transcribe/q8"
         case .magpieTts:
@@ -726,47 +726,6 @@ public enum ModelNames {
         ]
     }
 
-    /// CosyVoice3 (Mandarin) model names. Files live on HuggingFace at
-    /// `FluidInference/CosyVoice3-0.5B-coreml` (see `Repo.cosyvoice3`). The
-    /// expected local directory layout is encoded in `CosyVoice3Constants.Files`.
-    public enum CosyVoice3 {
-        public static let llmPrefill = "LLM-Prefill-T256-M768-fp16"
-        public static let llmDecode = "LLM-Decode-M768-fp16"
-        public static let flow = "Flow-N250-fp16"
-        public static let hift = "HiFT-T500-fp16"
-        public static let speechEmbeddings = "speech_embedding-fp16.safetensors"
-
-        public static let llmPrefillFile = llmPrefill + ".mlmodelc"
-        public static let llmDecodeFile = llmDecode + ".mlmodelc"
-        public static let flowFile = flow + ".mlmodelc"
-        public static let hiftFile = hift + ".mlmodelc"
-
-        public static let requiredModels: Set<String> = [
-            llmPrefillFile,
-            llmDecodeFile,
-            flowFile,
-            hiftFile,
-        ]
-
-        /// Sidecar assets living under subdirectories of the HF repo (not part
-        /// of `requiredModels`; pulled via `downloadSubdirectory` / direct file
-        /// fetch by `CosyVoice3ResourceDownloader`).
-        public enum Sidecar {
-            public static let embeddingsDir = "embeddings"
-            public static let tokenizerDir = "tokenizer"
-            public static let voicesDir = "voices"
-
-            public static let speechEmbeddings = "speech_embedding-fp16.safetensors"
-            public static let runtimeEmbeddings = "embeddings-runtime-fp32.safetensors"
-            public static let specialTokens = "special_tokens.json"
-            public static let vocab = "vocab.json"
-            public static let merges = "merges.txt"
-            public static let tokenizerConfig = "tokenizer_config.json"
-
-            public static let defaultVoiceId = "cosyvoice3-default-zh"
-        }
-    }
-
     /// Magpie TTS Multilingual 357M model names.
     ///
     /// Four CoreML models + a `constants/` directory + a `tokenizer/` directory of
@@ -962,55 +921,6 @@ public enum ModelNames {
         ]
     }
 
-    /// TTS model names
-    public enum TTS {
-
-        /// Available Kokoro variants shipped with the library.
-        public enum Variant: CaseIterable, Sendable {
-            case fiveSecond
-            case fifteenSecond
-
-            /// Underlying model bundle filename.
-            public var fileName: String {
-                // Use v1 models on all platforms - v2 has source_noise issues
-                switch self {
-                case .fiveSecond:
-                    return "kokoro_21_5s.mlmodelc"
-                case .fifteenSecond:
-                    return "kokoro_21_15s.mlmodelc"
-                }
-            }
-
-            /// Approximate maximum duration in seconds handled by the variant.
-            public var maxDurationSeconds: Int {
-                switch self {
-                case .fiveSecond:
-                    return 5
-                case .fifteenSecond:
-                    return 15
-                }
-            }
-        }
-
-        /// Preferred variant for general-purpose synthesis.
-        public static let defaultVariant: Variant = .fifteenSecond
-
-        /// Convenience accessor for bundle name lookup.
-        public static func bundle(for variant: Variant) -> String {
-            variant.fileName
-        }
-
-        /// Default bundle filename (legacy accessor).
-        public static var defaultBundle: String {
-            defaultVariant.fileName
-        }
-
-        /// All Kokoro model bundles required by the downloader.
-        public static var requiredModels: Set<String> {
-            Set(Variant.allCases.map(\.fileName))
-        }
-    }
-
     /// laishere/kokoro-coreml — 7-stage CoreML chain (fp16+int8pal, ANE-optimized)
     /// vendored from https://github.com/laishere/kokoro-coreml.
     public enum KokoroAne {
@@ -1090,21 +1000,10 @@ public enum ModelNames {
             }
             return ModelNames.Diarizer.requiredModels
         case .kokoro:
-            // Sentinel variant used by KokoroAne to fetch only the shared G2P
-            // CoreML assets out of the kokoro repo (the KokoroAne backend
-            // reuses the kokoro G2P models for text -> IPA, but doesn't need
-            // the TTS bundles or the multilingual G2P).
-            if variant == "g2p-only" {
-                return ModelNames.G2P.requiredModels
-            }
-            let ttsModels: Set<String>
-            if let variant = variant {
-                ttsModels = [variant]
-            } else {
-                ttsModels = ModelNames.TTS.requiredModels
-            }
-            return ttsModels.union(ModelNames.G2P.requiredModels)
-                .union(ModelNames.MultilingualG2P.requiredModels)
+            // The mono Kokoro TTS backend was removed; this repo is now only
+            // used by KokoroAne to fetch the shared G2P CoreML assets out of
+            // the repo root for text -> IPA conversion.
+            return ModelNames.G2P.requiredModels
         case .pocketTts:
             return ModelNames.PocketTTS.requiredModels
         case .kokoroAne:
@@ -1125,8 +1024,6 @@ public enum ModelNames {
             return ModelNames.Qwen3ASR.requiredModelsFull
         case .multilingualG2p:
             return ModelNames.MultilingualG2P.requiredModels
-        case .cosyvoice3:
-            return ModelNames.CosyVoice3.requiredModels
         case .cohereTranscribeCoreml:
             return ModelNames.CohereTranscribe.requiredModels
         case .magpieTts:
