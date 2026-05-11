@@ -52,9 +52,23 @@ public enum PocketTtsResourceDownloader {
             logger.info(
                 "PocketTTS \(language.rawValue) (\(precision)) models found in cache")
             // Pre-#592 caches lack `constants_bin/bos_before_voice.bin`. The
-            // language-pack files are otherwise complete, so fetch just the
-            // missing constant rather than re-downloading the whole subdir.
-            try await ensureBosBeforeVoice(language: language, languageRoot: languageRoot)
+            // language-pack files are otherwise complete, so try to fetch just
+            // the missing constant rather than re-downloading the whole subdir.
+            //
+            // Best-effort: shipped snapshot voices don't need this file at all,
+            // and the v1 cloned-voice prefill path enforces presence at use
+            // time (PocketTtsConstantsLoader returns nil gracefully). Failing
+            // the fetch here — e.g. offline, or before the file lands on HF —
+            // must not block users who only synthesize with shipped voices.
+            do {
+                try await ensureBosBeforeVoice(language: language, languageRoot: languageRoot)
+            } catch {
+                logger.warning(
+                    "Failed to backfill bos_before_voice.bin for \(language.rawValue): "
+                        + "\(error.localizedDescription). Cloned-voice v1 prefill will fail "
+                        + "until this file is available; shipped snapshot voices are unaffected."
+                )
+            }
             return languageRoot
         }
 
