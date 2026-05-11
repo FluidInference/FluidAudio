@@ -19,14 +19,21 @@ public enum PocketTtsVoiceCloner {
     /// Frame size for the encoder (1920 samples = 80ms).
     public static let frameSize: Int = PocketTtsConstants.samplesPerFrame
 
-    /// Maximum voice prompt frames (caps at ~20s to leave KV cache room for text tokens).
-    public static let maxVoiceFrames: Int = 250
+    /// Fixed encoder input length in samples (10s @ 24kHz). `mimi_encoderv2` has
+    /// `hasShapeFlexibility: "0"` and accepts exactly this many samples.
+    public static let encoderInputSamples: Int = 240_000
+
+    /// Maximum voice prompt frames produced by the encoder for one forward pass
+    /// (`encoderInputSamples / frameSize`). The encoder output shape is fixed at
+    /// `[1, 125, 1024]`, so 125 is the hard ceiling.
+    public static let maxVoiceFrames: Int = 125
 
     /// Minimum audio duration in seconds for voice cloning.
     public static let minDurationSeconds: Double = 1.0
 
-    /// Maximum audio duration in seconds for voice cloning.
-    public static let maxDurationSeconds: Double = 30.0
+    /// Maximum audio duration in seconds for voice cloning (matches
+    /// `encoderInputSamples`). Audio longer than this is truncated.
+    public static let maxDurationSeconds: Double = 10.0
 
     // MARK: - Voice Cloning
 
@@ -49,22 +56,24 @@ public enum PocketTtsVoiceCloner {
                     + "(minimum \(minDurationSeconds)s required)"
             )
         }
-        guard durationSeconds <= maxDurationSeconds else {
-            throw PocketTTSError.processingFailed(
-                "Audio too long for voice cloning: \(String(format: "%.1f", durationSeconds))s "
-                    + "(maximum \(maxDurationSeconds)s allowed)"
-            )
-        }
 
-        // Pad audio to frame boundary
-        let paddedSamples = padToFrameBoundary(samples)
+        // mimi_encoderv2 has a fixed input shape [1, 1, 240000]. Pad shorter
+        // audio with zeros; truncate longer audio. Track the real sample count
+        // so we can drop encoded-zero-padding frames from the output.
+        let realSampleCount = min(samples.count, encoderInputSamples)
+        let encoderInput = makeEncoderInputBuffer(samples)
 
-        logger.info("Encoding \(paddedSamples.count) samples (\(String(format: "%.1f", durationSeconds))s)")
+        logger.info(
+            "Encoding \(realSampleCount) samples (\(String(format: "%.1f", durationSeconds))s) "
+                + "padded/truncated to \(encoderInputSamples)"
+        )
 
-        // Create input tensor [1, 1, T]
-        let audioArray = try MLMultiArray(shape: [1, 1, NSNumber(value: paddedSamples.count)], dataType: .float32)
-        for (i, sample) in paddedSamples.enumerated() {
-            audioArray[[0, 0, NSNumber(value: i)]] = NSNumber(value: sample)
+        // Create input tensor [1, 1, 240000]
+        let audioArray = try MLMultiArray(
+            shape: [1, 1, NSNumber(value: encoderInputSamples)], dataType: .float32)
+        let dst = audioArray.dataPointer.bindMemory(to: Float.self, capacity: encoderInputSamples)
+        encoderInput.withUnsafeBufferPointer { src in
+            dst.update(from: src.baseAddress!, count: encoderInputSamples)
         }
 
         // Run encoder
@@ -78,7 +87,11 @@ public enum PocketTtsVoiceCloner {
 
         let numFrames = conditioning.shape[1].intValue
         let embDim = conditioning.shape[2].intValue
-        let usableFrames = min(numFrames, maxVoiceFrames)
+        // Drop trailing frames that correspond to zero-padded audio. Each frame
+        // covers `frameSize` samples (80ms @ 24kHz); round up so the last
+        // partial real frame still contributes voice content.
+        let realFrames = (realSampleCount + frameSize - 1) / frameSize
+        let usableFrames = min(numFrames, realFrames, maxVoiceFrames)
         logger.info("Encoded to \(numFrames) frames, using \(usableFrames)")
 
         // Extract conditioning with bulk memory copy (no zero-padding)
@@ -168,13 +181,16 @@ public enum PocketTtsVoiceCloner {
 
     // MARK: - Private Helpers
 
-    private static func padToFrameBoundary(_ samples: [Float]) -> [Float] {
-        let length = samples.count
-        let padLength = (frameSize - (length % frameSize)) % frameSize
-        if padLength > 0 {
-            return samples + [Float](repeating: 0, count: padLength)
+    /// Build a fixed-length `encoderInputSamples`-sized buffer: copy the first
+    /// `encoderInputSamples` of `samples` (truncating overflow), zero-pad the
+    /// remainder. `mimi_encoderv2`'s input shape is non-flexible at runtime.
+    private static func makeEncoderInputBuffer(_ samples: [Float]) -> [Float] {
+        var buffer = [Float](repeating: 0, count: encoderInputSamples)
+        let copyCount = min(samples.count, encoderInputSamples)
+        if copyCount > 0 {
+            buffer.replaceSubrange(0..<copyCount, with: samples[0..<copyCount])
         }
-        return samples
+        return buffer
     }
 
     /// Extract conditioning floats from MLMultiArray [1, frames, embDim] via bulk memory copy.

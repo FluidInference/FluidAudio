@@ -5,6 +5,11 @@ public struct PocketTtsConstantsBundle: Sendable {
     public let bosEmbedding: [Float]
     public let textEmbedTable: [Float]
     public let tokenizer: SentencePieceTokenizer
+    /// `flow_lm.bos_before_voice` (1024 floats) — prepended to the v1
+    /// audio_prompt during `cond_step` prefill. `nil` when the language
+    /// pack predates the FluidAudio #592 fix and omits the file; v2
+    /// (snapshot) voices don't need it, so loading stays best-effort.
+    public let bosBeforeVoice: [Float]?
 }
 
 /// Pre-loaded voice conditioning data.
@@ -100,12 +105,15 @@ public enum PocketTtsConstantsLoader {
             throw LoadError.tokenizerLoadFailed(error.localizedDescription)
         }
 
+        let bosBeforeVoice = try loadBosBeforeVoiceIfPresent(in: constantsDir)
+
         logger.info("Loaded PocketTTS constants from \(directory.lastPathComponent)")
 
         return PocketTtsConstantsBundle(
             bosEmbedding: bosEmb,
             textEmbedTable: embedTable,
-            tokenizer: tokenizer
+            tokenizer: tokenizer,
+            bosBeforeVoice: bosBeforeVoice
         )
     }
 
@@ -257,6 +265,33 @@ public enum PocketTtsConstantsLoader {
         }
 
         return PocketTtsVoiceCacheSnapshot(layers: layers, cacheSeqLen: seqLen)
+    }
+
+    // MARK: - Internal helpers
+
+    /// Load `bos_before_voice.bin` from `constantsDir` if it exists.
+    ///
+    /// `bos_before_voice.bin` ships with language packs updated for the
+    /// FluidAudio #592 fix (pocket-tts 2.0.0 `flow_lm.bos_before_voice`).
+    /// Older packs and snapshot-only callers don't need it, so a missing
+    /// file resolves to `nil` rather than throwing — the v1 prefill path
+    /// enforces presence at use time.
+    ///
+    /// Exposed at internal access for unit tests; production code goes
+    /// through `load(from:)`.
+    static func loadBosBeforeVoiceIfPresent(in constantsDir: URL) throws -> [Float]? {
+        let url = constantsDir.appendingPathComponent("bos_before_voice.bin")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            logger.info(
+                "PocketTTS constants_bin/bos_before_voice.bin not present; cloned-voice v1 prefill will fail until the language pack is updated"
+            )
+            return nil
+        }
+        return try loadFloatArray(
+            from: url,
+            expectedCount: PocketTtsConstants.embeddingDim,
+            name: "bos_before_voice"
+        )
     }
 
     // MARK: - Private

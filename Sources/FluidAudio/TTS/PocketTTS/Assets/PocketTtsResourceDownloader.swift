@@ -48,9 +48,13 @@ public enum PocketTtsResourceDownloader {
                 atPath: languageRoot.appendingPathComponent(model).path)
         }
 
-        guard !allPresent else {
+        if allPresent {
             logger.info(
                 "PocketTTS \(language.rawValue) (\(precision)) models found in cache")
+            // Pre-#592 caches lack `constants_bin/bos_before_voice.bin`. The
+            // language-pack files are otherwise complete, so fetch just the
+            // missing constant rather than re-downloading the whole subdir.
+            try await ensureBosBeforeVoice(language: language, languageRoot: languageRoot)
             return languageRoot
         }
 
@@ -69,6 +73,34 @@ public enum PocketTtsResourceDownloader {
         removeUnusedFlowlmVariant(at: languageRoot, keeping: precision)
 
         return languageRoot
+    }
+
+    /// Backfill `constants_bin/bos_before_voice.bin` for cached language packs
+    /// that were downloaded before the FluidAudio #592 fix. New downloads pick
+    /// it up via `downloadSubdirectory` — this helper exists only to upgrade
+    /// older caches without a full re-download.
+    private static func ensureBosBeforeVoice(
+        language: PocketTtsLanguage,
+        languageRoot: URL
+    ) async throws {
+        let constantsDir = languageRoot.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
+        let bosURL = constantsDir.appendingPathComponent("bos_before_voice.bin")
+        if FileManager.default.fileExists(atPath: bosURL.path) {
+            return
+        }
+        try FileManager.default.createDirectory(
+            at: constantsDir, withIntermediateDirectories: true)
+        let remotePath = "\(language.repoSubdirectory)/constants_bin/bos_before_voice.bin"
+        let remoteURL = try ModelRegistry.resolveModel(Repo.pocketTts.remotePath, remotePath)
+        logger.info(
+            "Backfilling bos_before_voice.bin for cached \(language.rawValue) pack...")
+        let data = try await AssetDownloader.fetchData(
+            from: remoteURL,
+            description: "bos_before_voice.bin (\(language.rawValue))",
+            logger: logger
+        )
+        try data.write(to: bosURL, options: [.atomic])
+        logger.info("Wrote bos_before_voice.bin (\(data.count) bytes)")
     }
 
     /// Delete the FlowLM `.mlmodelc` and `.mlpackage` directories that don't
