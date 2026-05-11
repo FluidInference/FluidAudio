@@ -1,3 +1,4 @@
+import Accelerate
 @preconcurrency import AVFoundation
 @preconcurrency import CoreML
 import Foundation
@@ -87,11 +88,8 @@ public enum PocketTtsVoiceCloner {
 
         let numFrames = conditioning.shape[1].intValue
         let embDim = conditioning.shape[2].intValue
-        // Drop trailing frames that correspond to zero-padded audio. Each frame
-        // covers `frameSize` samples (80ms @ 24kHz); round up so the last
-        // partial real frame still contributes voice content.
-        let realFrames = (realSampleCount + frameSize - 1) / frameSize
-        let usableFrames = min(numFrames, realFrames, maxVoiceFrames)
+        let usableFrames = usableFrameCount(
+            realSampleCount: realSampleCount, availableFrames: numFrames)
         logger.info("Encoded to \(numFrames) frames, using \(usableFrames)")
 
         // Extract conditioning with bulk memory copy (no zero-padding)
@@ -184,7 +182,10 @@ public enum PocketTtsVoiceCloner {
     /// Build a fixed-length `encoderInputSamples`-sized buffer: copy the first
     /// `encoderInputSamples` of `samples` (truncating overflow), zero-pad the
     /// remainder. `mimi_encoderv2`'s input shape is non-flexible at runtime.
-    private static func makeEncoderInputBuffer(_ samples: [Float]) -> [Float] {
+    ///
+    /// Exposed at internal access for unit tests; production callers go
+    /// through `cloneVoice(from:using:)`.
+    static func makeEncoderInputBuffer(_ samples: [Float]) -> [Float] {
         var buffer = [Float](repeating: 0, count: encoderInputSamples)
         let copyCount = min(samples.count, encoderInputSamples)
         if copyCount > 0 {
@@ -193,19 +194,52 @@ public enum PocketTtsVoiceCloner {
         return buffer
     }
 
-    /// Extract conditioning floats from MLMultiArray [1, frames, embDim] via bulk memory copy.
+    /// Number of encoder output frames that correspond to real (non-padded)
+    /// audio. Drops trailing frames covering the zero-padded tail; rounds up
+    /// so the last partial real frame still contributes voice content.
+    /// Capped by both the encoder's actual frame output and `maxVoiceFrames`.
+    ///
+    /// Exposed at internal access for unit tests.
+    static func usableFrameCount(realSampleCount: Int, availableFrames: Int) -> Int {
+        let realFrames = (realSampleCount + frameSize - 1) / frameSize
+        return min(availableFrames, realFrames, maxVoiceFrames)
+    }
+
+    /// Extract conditioning floats from MLMultiArray `[1, frames, embDim]`.
+    ///
+    /// Both dtype paths assume contiguous storage starting at the array's
+    /// base pointer: the encoder writes `[1, 125, 1024]` in row-major order
+    /// and we read the leading `frames` rows. The Float32 path is a bulk
+    /// `UnsafeBufferPointer` copy; the Float16 path uses
+    /// `vDSP.convertElements` (vectorized fp16→fp32 conversion) so
+    /// `mimi_encoderv2`'s Float16 output doesn't have to pay 128 k
+    /// MLMultiArray subscript calls per clone. Falls back to NSNumber
+    /// subscripting on x86 hosts where Swift `Float16` isn't available.
     private static func extractConditioning(
         _ conditioning: MLMultiArray, frames: Int, embDim: Int
     ) -> [Float] {
         let count = frames * embDim
         if conditioning.dataType == .float16 {
-            return (0..<count).map { i in
+            var result = [Float](repeating: 0, count: count)
+            #if arch(arm64)
+            let srcPtr = conditioning.dataPointer.bindMemory(to: Float16.self, capacity: count)
+            let srcBuffer = UnsafeBufferPointer(start: srcPtr, count: count)
+            result.withUnsafeMutableBufferPointer { dst in
+                vDSP.convertElements(of: srcBuffer, to: &dst)
+            }
+            #else
+            // x86: Swift Float16 unavailable. Route through NSNumber.
+            for i in 0..<count {
                 let frame = i / embDim
                 let dim = i % embDim
-                return conditioning[[0, NSNumber(value: frame), NSNumber(value: dim)]].floatValue
+                result[i] =
+                    conditioning[[0, NSNumber(value: frame), NSNumber(value: dim)]]
+                    .floatValue
             }
+            #endif
+            return result
         }
-        // Fast path: float32 bulk copy
+        // Float32: contiguous bulk copy
         let srcPtr = conditioning.dataPointer.bindMemory(to: Float.self, capacity: count)
         return Array(UnsafeBufferPointer(start: srcPtr, count: count))
     }

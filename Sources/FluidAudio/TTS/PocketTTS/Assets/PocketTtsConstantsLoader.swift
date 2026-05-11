@@ -282,7 +282,11 @@ public enum PocketTtsConstantsLoader {
     static func loadBosBeforeVoiceIfPresent(in constantsDir: URL) throws -> [Float]? {
         let url = constantsDir.appendingPathComponent("bos_before_voice.bin")
         guard FileManager.default.fileExists(atPath: url.path) else {
-            logger.info(
+            // Snapshot-voice users never need this file, so absence is the
+            // expected steady state for pre-#592 caches. Log at debug to
+            // avoid noise; the v1 cloned-voice path surfaces a clear error
+            // at `prefillKVCache` use time when it actually matters.
+            logger.debug(
                 "PocketTTS constants_bin/bos_before_voice.bin not present; cloned-voice v1 prefill will fail until the language pack is updated"
             )
             return nil
