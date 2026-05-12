@@ -347,7 +347,7 @@ let probs = try model.predict(from: input)
 // with sigmoid already applied.
 ```
 
-`predict` is internally serialized (an `NSLock` guards the CoreML call) and updates `input.state` in place by swapping the six recurrent-state `MLMultiArray` references.
+`predict` is internally serialized (an `NSLock` guards the CoreML call) and updates `input.state` in place via output backings.
 
 ---
 
@@ -362,7 +362,7 @@ let input = try LSEENDInput(from: model.metadata, state: existingState)  // resu
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `state` | `LSEENDState` | Six recurrent-state tensors (`~Copyable`). Swapped in place by `predict`. |
+| `state` | `LSEENDState` | Six recurrent-state tensors (`~Copyable`). Updated in place by `predict`. |
 | `melFeatures` | `MLMultiArray` | `[1, melFrames, nMels]`, fed to the model's `features` input |
 | `decoderMask` | `MLMultiArray` | `[chunkSize]`, fed to the model's `valid_mask` input |
 | `warmupFrames` | `Int` | Number of leading output frames to strip (warmup region inside `decoderMask`) |
