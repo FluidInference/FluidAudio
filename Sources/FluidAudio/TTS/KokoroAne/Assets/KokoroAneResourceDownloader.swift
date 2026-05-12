@@ -15,29 +15,235 @@ public enum KokoroAneResourceDownloader {
     /// Returns the repo directory containing them.
     @discardableResult
     public static func ensureModels(
+        variant: KokoroAneVariant = .english,
         directory: URL? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
         let modelsDirectory = try directory ?? defaultModelsDirectory()
-        let repoDir = modelsDirectory.appendingPathComponent(Repo.kokoroAne.folderName)
+        let repo = variant.repo
+        let repoDir = modelsDirectory.appendingPathComponent(repo.folderName)
 
-        let required = ModelNames.KokoroAne.requiredModels
+        let required: Set<String>
+        switch variant {
+        case .english:
+            required = ModelNames.KokoroAne.requiredModels
+        case .mandarin:
+            required = ModelNames.KokoroAne.requiredModelsZh
+        }
         let allPresent = required.allSatisfy { name in
             FileManager.default.fileExists(atPath: repoDir.appendingPathComponent(name).path)
         }
 
         if !allPresent {
-            logger.info("Downloading laishere Kokoro models from HuggingFace...")
+            logger.info("Downloading laishere Kokoro models (\(variant.rawValue)) from HuggingFace...")
             try await DownloadUtils.downloadRepo(
-                .kokoroAne,
+                repo,
                 to: modelsDirectory,
                 progressHandler: progressHandler
             )
         } else {
-            logger.info("laishere Kokoro models found in cache at \(repoDir.path)")
+            logger.info("laishere Kokoro models (\(variant.rawValue)) found in cache at \(repoDir.path)")
         }
 
         return repoDir
+    }
+
+    /// Ensure the Mandarin G2P binary dictionaries (`pinyin_phrases.bin`,
+    /// `pinyin_single.bin`) are resident under `<repoDir>/g2p/`. The
+    /// uncompressed `.bin` artefacts are pulled from
+    /// `FluidInference/kokoro-82m-coreml/ANE-zh/assets/` (co-located with
+    /// the CoreML weights so the Mandarin variant has a single HF
+    /// dependency).
+    ///
+    /// Returns `<repoDir>/g2p/`. Idempotent.
+    @discardableResult
+    public static func ensureMandarinG2P(
+        repoDirectory: URL,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws -> URL {
+        let g2pDir = repoDirectory.appendingPathComponent(KokoroAneConstants.g2pSubdir)
+        if !FileManager.default.fileExists(atPath: g2pDir.path) {
+            try FileManager.default.createDirectory(
+                at: g2pDir, withIntermediateDirectories: true)
+        }
+
+        let needed = [
+            (
+                local: KokoroAneConstants.g2pPinyinPhrasesFile,
+                remote: KokoroAneConstants.g2pPinyinPhrasesRemoteFile
+            ),
+            (
+                local: KokoroAneConstants.g2pPinyinSingleFile,
+                remote: KokoroAneConstants.g2pPinyinSingleRemoteFile
+            ),
+        ]
+
+        for entry in needed {
+            let localURL = g2pDir.appendingPathComponent(entry.local)
+            if FileManager.default.fileExists(atPath: localURL.path) { continue }
+
+            logger.info(
+                "Downloading Mandarin G2P asset '\(entry.remote)' from "
+                    + "\(KokoroAneConstants.g2pRemoteRepo)/\(KokoroAneConstants.g2pRemoteSubdir)/...")
+            let remotePath = "\(KokoroAneConstants.g2pRemoteSubdir)/\(entry.remote)"
+            let remoteURL = try ModelRegistry.resolveModel(
+                KokoroAneConstants.g2pRemoteRepo, remotePath)
+            let data = try await AssetDownloader.fetchData(
+                from: remoteURL,
+                description: "Mandarin G2P asset \(entry.remote)",
+                logger: logger
+            )
+            try data.write(to: localURL, options: [.atomic])
+            logger.info("Cached \(entry.local) (\(data.count / 1024) KB)")
+        }
+
+        return g2pDir
+    }
+
+    /// Best-effort fetch of the jieba HMM tables (start / trans / emit)
+    /// into the same `<repoDir>/g2p/` cache.
+    ///
+    /// Returns the cache directory when all three artefacts are
+    /// resident locally (either pre-cached or freshly downloaded).
+    /// Returns `nil` when any artefact is missing both locally and
+    /// remotely — the caller is expected to fall back to the
+    /// FMM/single-char-only segmentation path. The Mandarin variant
+    /// stays usable in that case; HMM is a quality booster, not a
+    /// hard dependency.
+    public static func ensureMandarinJiebaHmm(
+        repoDirectory: URL
+    ) async -> URL? {
+        let g2pDir = repoDirectory.appendingPathComponent(KokoroAneConstants.g2pSubdir)
+        if !FileManager.default.fileExists(atPath: g2pDir.path) {
+            do {
+                try FileManager.default.createDirectory(
+                    at: g2pDir, withIntermediateDirectories: true)
+            } catch {
+                logger.warning(
+                    "Could not create jieba HMM cache dir: \(error.localizedDescription)")
+                return nil
+            }
+        }
+
+        let needed = [
+            (
+                local: KokoroAneConstants.jiebaHmmStartFile,
+                remote: KokoroAneConstants.jiebaHmmStartRemoteFile
+            ),
+            (
+                local: KokoroAneConstants.jiebaHmmTransFile,
+                remote: KokoroAneConstants.jiebaHmmTransRemoteFile
+            ),
+            (
+                local: KokoroAneConstants.jiebaHmmEmitFile,
+                remote: KokoroAneConstants.jiebaHmmEmitRemoteFile
+            ),
+        ]
+
+        for entry in needed {
+            let localURL = g2pDir.appendingPathComponent(entry.local)
+            if FileManager.default.fileExists(atPath: localURL.path) { continue }
+            do {
+                logger.info(
+                    "Downloading jieba HMM asset '\(entry.remote)' from "
+                        + "\(KokoroAneConstants.g2pRemoteRepo)/\(KokoroAneConstants.g2pRemoteSubdir)/...")
+                let remotePath = "\(KokoroAneConstants.g2pRemoteSubdir)/\(entry.remote)"
+                let remoteURL = try ModelRegistry.resolveModel(
+                    KokoroAneConstants.g2pRemoteRepo, remotePath)
+                let data = try await AssetDownloader.fetchData(
+                    from: remoteURL,
+                    description: "jieba HMM asset \(entry.remote)",
+                    logger: logger
+                )
+                try data.write(to: localURL, options: [.atomic])
+                logger.info("Cached \(entry.local) (\(data.count / 1024) KB)")
+            } catch {
+                logger.warning(
+                    "Jieba HMM asset '\(entry.remote)' unavailable "
+                        + "(\(error.localizedDescription)); HMM segmentation disabled.")
+                return nil
+            }
+        }
+        return g2pDir
+    }
+
+    /// Ensure the Mandarin g2pW polyphone disambiguator assets are
+    /// resident under `<repoDir>/g2pw/`. Returns the directory URL on
+    /// success, or `nil` if any required artefact is unavailable
+    /// (network failure, asset not yet published, …) so callers can
+    /// fall back to the dict-only Mandarin pipeline without throwing.
+    ///
+    /// The CoreML bundle (`g2pw.mlmodelc/`) is a directory and is
+    /// expected to land via the bulk `ensureModels` repo grab once the
+    /// asset is added to the `requiredModelsZh` set. This helper only
+    /// fetches the two auxiliary text files (`vocab.txt`,
+    /// `POLYPHONIC_CHARS.txt`) that ship alongside the model and then
+    /// validates the bundle is on disk.
+    @discardableResult
+    public static func ensureMandarinG2pw(
+        repoDirectory: URL
+    ) async -> URL? {
+        let g2pwDir = repoDirectory.appendingPathComponent(KokoroAneConstants.g2pwSubdir)
+        if !FileManager.default.fileExists(atPath: g2pwDir.path) {
+            do {
+                try FileManager.default.createDirectory(
+                    at: g2pwDir, withIntermediateDirectories: true)
+            } catch {
+                logger.info(
+                    "g2pW assets unavailable (could not create cache dir: \(error.localizedDescription))"
+                )
+                return nil
+            }
+        }
+
+        let needed = [
+            (
+                local: KokoroAneConstants.g2pwVocabFile,
+                remote: KokoroAneConstants.g2pwVocabRemoteFile
+            ),
+            (
+                local: KokoroAneConstants.g2pwPolyphonicCharsFile,
+                remote: KokoroAneConstants.g2pwPolyphonicCharsRemoteFile
+            ),
+        ]
+
+        for entry in needed {
+            let localURL = g2pwDir.appendingPathComponent(entry.local)
+            if FileManager.default.fileExists(atPath: localURL.path) { continue }
+
+            do {
+                let remotePath = "\(KokoroAneConstants.g2pwRemoteSubdir)/\(entry.remote)"
+                let remoteURL = try ModelRegistry.resolveModel(
+                    KokoroAneConstants.g2pRemoteRepo, remotePath)
+                let data = try await AssetDownloader.fetchData(
+                    from: remoteURL,
+                    description: "Mandarin g2pW asset \(entry.remote)",
+                    logger: logger
+                )
+                try data.write(to: localURL, options: [.atomic])
+                logger.info("Cached \(entry.local) (\(data.count / 1024) KB)")
+            } catch {
+                logger.info(
+                    "g2pW asset '\(entry.local)' unavailable (\(error.localizedDescription))"
+                        + " — Mandarin G2P will run dict-only"
+                )
+                return nil
+            }
+        }
+
+        // The CoreML bundle is required for the model to actually run.
+        // Without it, return nil and let the caller skip g2pW entirely.
+        let modelURL =
+            repoDirectory
+            .appendingPathComponent(KokoroAneConstants.g2pwSubdir)
+            .appendingPathComponent(KokoroAneConstants.g2pwModelBundle)
+        if !FileManager.default.fileExists(atPath: modelURL.path) {
+            logger.info(
+                "g2pW CoreML bundle missing at \(modelURL.path) — Mandarin G2P will run dict-only"
+            )
+            return nil
+        }
+        return g2pwDir
     }
 
     /// Ensure the shared G2P CoreML assets (encoder + decoder + vocab) exist
@@ -68,32 +274,47 @@ public enum KokoroAneResourceDownloader {
     }
 
     /// Ensure a specific voice pack `.bin` file exists, downloading if missing.
-    /// Default voice (`af_heart.bin`) is included in `requiredModels`; this
+    /// Default voice for each variant is included in `requiredModels(Zh)`; this
     /// helper covers any additional voice that ships separately.
+    ///
+    /// Mandarin (`ANE-zh/`) voice packs live under a `voices/` subdirectory,
+    /// both remotely and on disk. English (`ANE/`) voice packs sit at the
+    /// bundle root.
     @discardableResult
     public static func ensureVoicePack(
         _ voice: String,
-        repoDirectory: URL
+        repoDirectory: URL,
+        variant: KokoroAneVariant = .english
     ) async throws -> URL {
         let sanitized = voice.filter { $0.isLetter || $0.isNumber || $0 == "_" }
         guard !sanitized.isEmpty else {
             throw KokoroAneError.downloadFailed("Invalid voice name: \(voice)")
         }
         let filename = "\(sanitized).bin"
-        let localURL = repoDirectory.appendingPathComponent(filename)
+        let relativePath = variant.useVoicesSubdir ? "voices/\(filename)" : filename
+        let localURL = repoDirectory.appendingPathComponent(relativePath)
 
         if FileManager.default.fileExists(atPath: localURL.path) {
             return localURL
         }
 
-        logger.info("Downloading voice pack '\(sanitized)' from HuggingFace...")
-        let remoteFilePath: String
-        if let sub = Repo.kokoroAne.subPath {
-            remoteFilePath = "\(sub)/\(filename)"
-        } else {
-            remoteFilePath = filename
+        // Ensure the parent dir (`voices/`) exists for Mandarin voices that
+        // are downloaded individually rather than via the bulk repo grab.
+        let parentDir = localURL.deletingLastPathComponent()
+        if !FileManager.default.fileExists(atPath: parentDir.path) {
+            try FileManager.default.createDirectory(
+                at: parentDir, withIntermediateDirectories: true)
         }
-        let remoteURL = try ModelRegistry.resolveModel(Repo.kokoroAne.remotePath, remoteFilePath)
+
+        logger.info("Downloading voice pack '\(sanitized)' (\(variant.rawValue)) from HuggingFace...")
+        let repo = variant.repo
+        let remoteFilePath: String
+        if let sub = repo.subPath {
+            remoteFilePath = "\(sub)/\(relativePath)"
+        } else {
+            remoteFilePath = relativePath
+        }
+        let remoteURL = try ModelRegistry.resolveModel(repo.remotePath, remoteFilePath)
         let data = try await AssetDownloader.fetchData(
             from: remoteURL,
             description: "\(sanitized) voice pack",

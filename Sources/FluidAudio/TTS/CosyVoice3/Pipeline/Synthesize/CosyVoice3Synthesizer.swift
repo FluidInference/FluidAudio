@@ -549,6 +549,7 @@ public actor CosyVoice3Synthesizer {
         // Branch on src dtype so the fp16 ANE-port Flow output doesn't get
         // reinterpreted as fp32 (would read past end of buffer → SIGSEGV).
         switch fullMel.dataType {
+        #if arch(arm64)
         case .float16:
             let srcBase = fullMel.dataPointer.bindMemory(
                 to: Float16.self, capacity: fullMel.count)
@@ -559,6 +560,7 @@ public actor CosyVoice3Synthesizer {
                     dstBase[dstOff] = Float(srcBase[srcOff])
                 }
             }
+        #endif
         case .float32:
             let srcBase = fullMel.dataPointer.bindMemory(
                 to: Float.self, capacity: fullMel.count)

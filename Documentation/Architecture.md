@@ -47,7 +47,7 @@ protocols or callbacks.
   — `Sources/FluidAudio/ASR/Parakeet/SlidingWindow/SlidingWindowAsrManager.swift:217`
 - ASR progress: `AsyncThrowingStream<Double, Error>` (throwing — long-form
   transcription must surface errors)
-- TTS streaming synthesis (PocketTTS, Magpie):
+- TTS streaming synthesis (PocketTTS):
   `AsyncThrowingStream<AudioFrame, Error>`
 - Offline diarization: `AsyncThrowingStream<SegmentationChunk, Error>`
   drives concurrent segmentation/embedding stages
@@ -243,8 +243,6 @@ We tried. Each TTS family has fundamentally different I/O contracts:
   flow → vocoder).
 - **Magpie** is a 4-graph autoregressive pipeline plus a Swift-side
   1-layer "local transformer" to sample 8 codebook tokens per frame.
-- **StyleTTS2** is a 4-stage diffusion pipeline (text predictor →
-  ADPM2 diffusion → F0/energy → HiFi-GAN decoder).
 
 A protocol that accepted all of them would either expose a useless
 lowest-common-denominator (`func synth(text:) -> [Float]`) or be a fat
@@ -477,7 +475,6 @@ points:
 | TTS (PocketTTS) | `PocketTtsModelStore`, `PocketTtsSynthesizer` | `TTS/PocketTTS/Pipeline/PocketTtsModelStore.swift:12` |
 | TTS (CosyVoice3) | `CosyVoice3TtsManager` | `TTS/CosyVoice3/CosyVoice3TtsManager.swift:1` |
 | TTS (Magpie) | `MagpieTtsManager` | `TTS/Magpie/MagpieTtsManager.swift:1` |
-| TTS (StyleTTS2) | `StyleTTS2Manager` | `TTS/StyleTTS2/StyleTTS2Manager.swift:1` |
 | TTS (G2P) | `MultilingualG2PModel.shared` | `TTS/G2P/MultilingualG2PModel.swift:11` |
 | VAD | `VadManager` | `VAD/VadManager.swift:14` |
 | Diarization (online) | `DiarizerManager` | `Diarizer/Core/DiarizerManager.swift:6` |

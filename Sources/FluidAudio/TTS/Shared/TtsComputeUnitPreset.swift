@@ -5,7 +5,7 @@ import Foundation
 ///
 /// Each backend keeps its own per-stage `<Backend>ComputeUnits` struct
 /// because stage names differ (Kokoro ANE has 7 stages, PocketTTS has 4
-/// CoreML models, StyleTTS2 has 4 models, etc.). This preset is the
+/// CoreML models, etc.). This preset is the
 /// uniform knob the benchmarking harness flips so a single CLI flag
 /// (`--compute-units default|all-ane|cpu-and-gpu|cpu-only`) maps to a
 /// sensible per-stage assignment on every backend.

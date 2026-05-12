@@ -1,200 +1,289 @@
+@preconcurrency import CoreML
 import Foundation
 
-/// Manages text-to-speech synthesis using the StyleTTS2 4-stage diffusion
-/// pipeline (LibriTTS multi-speaker checkpoint).
+/// Top-level public API for StyleTTS2 LibriTTS (iteration_3) zero-shot TTS.
 ///
-/// Pipeline (per utterance):
-///  1. `text_predictor` (fp16, ANE) → `bert_dur` features + duration logits.
-///  2. `diffusion_step_512` (fp16, CPU+GPU) — ADPM2 sampler, 5× per utt + CFG.
-///  3. `f0n_energy` (fp16, ANE) → F0 + energy regression.
-///  4. `decoder` (fp32, CPU+GPU) — HiFi-GAN waveform synthesis.
+/// `StyleTTS2Manager` orchestrates the four moving pieces of the Swift
+/// pipeline:
+///   1. `StyleTTS2ModelStore`        — downloads + holds the 8 default
+///      `.mlmodelc` bundles (plus 6 lazily-loaded bucket variants).
+///   2. `StyleTTS2Phonemizer`        — Kokoro-style lookup over the Misaki
+///      `us_lexicon_cache.json` payload, falling back to the BART G2P
+///      CoreML model (`G2PEncoder.mlmodelc` / `G2PDecoder.mlmodelc`) for
+///      OOV English words.
+///   3. `StyleTTS2MelExtractor`      — computes the 80-bin HTK log-mel of
+///      the reference audio.
+///   4. `StyleTTS2Synthesizer`       — drives the 8-stage CoreML graph and
+///      returns 24 kHz mono Float32 audio.
 ///
-/// The Swift host is responsible for:
-///   - espeak-ng IPA phonemization + vocab lookup,
-///   - the ADPM2 + Karras sampler loop around `diffusion_step`,
-///   - cumsum-of-durations → one-hot → matmul hard-alignment,
-///   - bucket selection (round token length → text_predictor; round
-///     mel frames → decoder).
+/// > Important — Phonemizer parity gap.
+/// > The Python reference uses `phonemizer.backend.EspeakBackend(language=
+/// > "en-us", with_stress=True)`. FluidAudio cannot ship the espeak C
+/// > library, so the default text path mirrors Kokoro's tokenizer: lookup
+/// > against the Misaki lexicon cache first, BART G2P CoreML model for
+/// > OOV. Output is intelligible but does not always reproduce the exact
+/// > stress markers espeak would emit. Callers with a reliable phonemizer
+/// > (e.g. server-side espeak, or custom IPA) should pass the IPA string
+/// > directly via `synthesize(ipa:referenceAudioURL:...)`.
+///
+/// Usage:
+/// ```swift
+/// let manager = try await StyleTTS2Manager.downloadAndCreate()
+/// let audio = try await manager.synthesize(
+///     text: "Hello from StyleTTS2.",
+///     referenceAudioURL: refURL)
+/// // `audio` is 24 kHz mono Float32 PCM.
+/// ```
 public actor StyleTTS2Manager {
 
     private let logger = AppLogger(category: "StyleTTS2Manager")
-    private let modelStore: StyleTTS2ModelStore
-    private let synthesizer: StyleTTS2Synthesizer
-    private var isInitialized = false
 
-    /// - Parameter directory: Optional override for the base cache directory.
-    ///   When `nil`, uses the default platform cache location.
-    public init(directory: URL? = nil) {
-        let store = StyleTTS2ModelStore(directory: directory)
-        self.modelStore = store
-        self.synthesizer = StyleTTS2Synthesizer(modelStore: store)
+    private let directory: URL?
+    private let computeUnits: MLComputeUnits
+
+    private var store: StyleTTS2ModelStore?
+    private var phonemizer: StyleTTS2Phonemizer?
+    private var melExtractor: StyleTTS2MelExtractor?
+    private var synthesizer: StyleTTS2Synthesizer?
+
+    public init(
+        directory: URL? = nil,
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+    ) {
+        self.directory = directory
+        self.computeUnits = computeUnits
     }
 
     public var isAvailable: Bool {
-        isInitialized
+        synthesizer != nil
     }
 
-    /// Download the bundle (mlpackages + config + vocab) and resolve the
-    /// repo root. Models are loaded lazily on first synthesis call.
-    ///
-    /// Also decodes and validates `config.json` against `StyleTTS2Constants`
-    /// so wrong-bundle / partial-download / version-mismatch errors surface
-    /// here rather than as cryptic CoreML shape errors at synthesis time.
-    public func initialize(
-        progressHandler: DownloadUtils.ProgressHandler? = nil
-    ) async throws {
-        logger.warning(
-            "StyleTTS2 is experimental / beta. WER on long English phrases is "
-                + "elevated on the MiniMax corpus (~44% vs Kokoro 1.3%) — see "
-                + "Documentation/TTS/Benchmarks.md.")
-        _ = try await modelStore.ensureAssetsAvailable(progressHandler: progressHandler)
-        let config = try await modelStore.bundleConfig()
-        try config.validate()
+    /// Convenience factory: download assets and return a ready-to-use manager.
+    public static func downloadAndCreate(
+        cacheDirectory: URL? = nil,
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+    ) async throws -> StyleTTS2Manager {
+        let manager = StyleTTS2Manager(
+            directory: cacheDirectory,
+            computeUnits: computeUnits)
+        try await manager.initialize()
+        return manager
+    }
 
-        // The English G2P CoreML assets ship in the kokoro repo and are loaded
-        // from `~/.cache/fluidaudio/Models/kokoro/`. `G2PModel.loadIfNeeded`
-        // only reads from cache (it never downloads), so a first-time
-        // StyleTTS2 user who has never run kokoro/kokoroAne would otherwise
-        // hit a cryptic `G2PModelError.vocabLoadFailed` deep inside
-        // `synthesize`. Mirror `KokoroAneManager.initialize` and fetch the
-        // shared G2P assets explicitly here.
-        //
-        // NOTE: pass nil (not the caller's `directory`) — `G2PModel.shared`
-        // is a singleton that hardcodes the default cache path
-        // (`TtsModels.cacheDirectoryURL()/Models/kokoro`). Honouring a
-        // custom override here would write to a path the singleton can't
-        // read and we'd still hit `vocabLoadFailed`.
-        try await KokoroAneResourceDownloader.ensureG2PAssets(
-            directory: nil, progressHandler: progressHandler)
+    /// Download the 8 default-path StyleTTS2 mlmodelc bundles, load them, and
+    /// initialize the phonemizer + mel extractor + synthesizer.
+    ///
+    /// Bucket variants (T = 64 / 128 / 256) are *not* fetched here — they
+    /// download lazily the first time a prompt exceeds the previous bucket's
+    /// token capacity.
+    public func initialize() async throws {
+        if synthesizer != nil { return }
+
+        logger.info(
+            "StyleTTS2 phonemizer mirrors Kokoro: Misaki lexicon-cache lookup "
+                + "first, BART G2P CoreML for OOV. Pass IPA directly via "
+                + "synthesize(ipa:...) when you have a higher-quality phonemizer.")
+
+        let store = StyleTTS2ModelStore(
+            directory: directory, computeUnits: computeUnits)
+        try await store.loadIfNeeded()
+        self.store = store
+
+        // Eagerly fetch the BART G2P CoreML bundles + lexicon cache so the
+        // first synthesize call doesn't pay download cost mid-request. Both
+        // live under the kokoro cache dir; downloading them here is
+        // idempotent.
+        try await StyleTTS2ResourceDownloader.ensureG2PAssets(directory: directory)
+        let kokoroDir = try await StyleTTS2ResourceDownloader.ensureLexiconCache()
+
+        // Verify the BART G2P CoreML model can actually be loaded — fail
+        // fast at init time rather than on the first OOV word.
         try await G2PModel.shared.ensureModelsAvailable()
 
-        isInitialized = true
-        logger.notice("StyleTTS2Manager initialized")
+        // Load the same preprocessed Misaki cache Kokoro consumes, filtered
+        // to StyleTTS2's character vocab so any token returned by the
+        // lexicon is directly encodable by `StyleTTS2TextCleaner`.
+        let allowedTokens = Set(StyleTTS2TextCleaner.dictionary.keys.map { String($0) })
+        let lexiconCache = KokoroSynthesizer.LexiconCache()
+        let lexicons: (word: [String: [String]], caseSensitive: [String: [String]])
+        do {
+            try await lexiconCache.ensureLoaded(
+                kokoroDirectory: kokoroDir, allowedTokens: allowedTokens)
+            lexicons = await lexiconCache.lexicons()
+            logger.info(
+                "Loaded Misaki lexicon cache: \(lexicons.word.count) lower entries, "
+                    + "\(lexicons.caseSensitive.count) case-sensitive entries")
+        } catch {
+            logger.warning(
+                "Lexicon cache load failed (\(error)); falling back to G2P-only path")
+            lexicons = ([:], [:])
+        }
+
+        self.phonemizer = StyleTTS2Phonemizer(
+            wordToPhonemes: lexicons.word,
+            caseSensitiveWordToPhonemes: lexicons.caseSensitive)
+        self.melExtractor = StyleTTS2MelExtractor()
+        self.synthesizer = StyleTTS2Synthesizer(store: store)
+
+        logger.info("StyleTTS2 ready (compute units: \(computeUnits.description))")
     }
 
-    /// Synthesize text to a WAV blob at 24 kHz.
+    // MARK: - Synthesis: text path
+
+    /// Phonemize `text`, extract the reference-audio mel, and synthesize
+    /// 24 kHz mono Float32 audio. The reference audio file is decoded and
+    /// resampled to 24 kHz mono internally.
     ///
     /// - Parameters:
-    ///   - text: Text to synthesize.
-    ///   - voiceStyleURL: Path to a precomputed `ref_s.bin` (256 fp32 LE,
-    ///     1024 bytes) produced offline by
-    ///     `mobius-styletts2/scripts/06_dump_ref_s.py`. The on-device style
-    ///     encoder export is a follow-up; until it lands, voices ship as
-    ///     these blobs.
-    ///   - language: G2P language for phonemization.
-    ///   - diffusionSteps: Number of ADPM2 sampler iterations (default 5).
-    ///   - alpha: Acoustic style mix weight (default 0.3).
-    ///   - beta: Prosody style mix weight (default 0.7).
-    ///   - randomSeed: Seed for the diffusion noise RNG. `nil` → use the
-    ///     system RNG (non-reproducible).
-    /// - Returns: WAV audio data (24 kHz, mono, 16-bit PCM).
+    ///   - text: Source utterance. Empty strings throw
+    ///     `StyleTTS2Error.phonemizationFailed`.
+    ///   - referenceAudioURL: WAV / AIFF / CAF / m4a file readable by
+    ///     `AVAudioFile`. Any sample rate / channel layout — the loader
+    ///     resamples to 24 kHz mono.
+    ///   - alpha: Reference-side blend weight (default 0.3 — 30 % diffusion,
+    ///     70 % reference style).
+    ///   - beta: Prosody-side blend weight (default 0.7 — 70 % diffusion,
+    ///     30 % reference prosody).
+    ///   - noiseSeed: RNG seed for the fused-sampler aux noises (default 0).
+    ///     Same seed → same audio for the same text + reference.
     public func synthesize(
         text: String,
-        voiceStyleURL: URL,
-        language: MultilingualG2PLanguage = .americanEnglish,
-        diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
-        alpha: Float = 0.3,
-        beta: Float = 0.7,
-        randomSeed: UInt64? = nil
-    ) async throws -> Data {
-        guard isInitialized else {
-            throw StyleTTS2Error.modelNotFound("StyleTTS2 model not initialized")
+        referenceAudioURL: URL,
+        alpha: Float = StyleTTS2Constants.defaultAlpha,
+        beta: Float = StyleTTS2Constants.defaultBeta,
+        noiseSeed: UInt64 = 0
+    ) async throws -> [Float] {
+        guard let phonemizer = phonemizer else {
+            throw StyleTTS2Error.notInitialized
         }
-        let voice = try StyleTTS2VoiceStyle.load(from: voiceStyleURL)
-        let (_, ids) = try await tokenize(text: text, language: language)
-        let options = StyleTTS2Synthesizer.Options(
-            diffusionSteps: diffusionSteps,
-            alpha: alpha,
-            beta: beta,
-            randomSeed: randomSeed
-        )
-        return try await synthesizer.synthesize(ids: ids, voice: voice, options: options)
+        let tokenIds = try await phonemizer.encode(text)
+        return try await synthesize(
+            tokenIds: tokenIds,
+            referenceAudioURL: referenceAudioURL,
+            alpha: alpha, beta: beta, noiseSeed: noiseSeed)
     }
 
-    /// Same as `synthesize` but returns raw fp32 PCM samples + sample rate.
-    /// Used by callers (e.g. the tts-benchmark harness, ASR pairing) that
-    /// don't want the WAV-encoding round trip.
-    public func synthesizeSamples(
-        text: String,
-        voiceStyleURL: URL,
-        language: MultilingualG2PLanguage = .americanEnglish,
-        diffusionSteps: Int = StyleTTS2Constants.defaultDiffusionSteps,
-        alpha: Float = 0.3,
-        beta: Float = 0.7,
-        randomSeed: UInt64? = nil
-    ) async throws -> (samples: [Float], sampleRate: Int) {
-        guard isInitialized else {
-            throw StyleTTS2Error.modelNotFound("StyleTTS2 model not initialized")
-        }
-        let voice = try StyleTTS2VoiceStyle.load(from: voiceStyleURL)
-        let (_, ids) = try await tokenize(text: text, language: language)
-        let options = StyleTTS2Synthesizer.Options(
-            diffusionSteps: diffusionSteps,
-            alpha: alpha,
-            beta: beta,
-            randomSeed: randomSeed
-        )
-        let samples = try await synthesizer.synthesizeSamples(
-            ids: ids, voice: voice, options: options)
-        return (samples, StyleTTS2Constants.audioSampleRate)
-    }
+    // MARK: - Synthesis: IPA path (espeak-parity escape hatch)
 
-    /// Run the text frontend (preprocess → G2P → vocab encode) end-to-end.
+    /// Synthesize directly from a pre-phonemized IPA string. Bypasses the
+    /// lexicon + G2P entirely — use this when you have a higher-quality
+    /// phonemizer (e.g. server-side espeak) and want to feed the IPA the
+    /// model was actually trained against.
     ///
-    /// Available before the diffusion synthesizer is wired so callers can
-    /// validate the bundle, vocab, and G2P installation. The returned ids
-    /// are exactly what the `text_predictor` model would consume after
-    /// padding to a bucket length.
+    /// `ipa` is fed verbatim through `StyleTTS2TextCleaner.encode(_)` (which
+    /// silently drops any character outside the StyleTTS2 symbol vocab).
+    public func synthesize(
+        ipa: String,
+        referenceAudioURL: URL,
+        alpha: Float = StyleTTS2Constants.defaultAlpha,
+        beta: Float = StyleTTS2Constants.defaultBeta,
+        noiseSeed: UInt64 = 0
+    ) async throws -> [Float] {
+        let tokenIds = StyleTTS2TextCleaner.encode(ipa)
+        return try await synthesize(
+            tokenIds: tokenIds,
+            referenceAudioURL: referenceAudioURL,
+            alpha: alpha, beta: beta, noiseSeed: noiseSeed)
+    }
+
+    // MARK: - Synthesis: low-level path
+
+    /// Synthesize from already-encoded TextCleaner token IDs. The
+    /// reference-audio mel is computed internally from `referenceAudioURL`.
+    public func synthesize(
+        tokenIds: [Int32],
+        referenceAudioURL: URL,
+        alpha: Float = StyleTTS2Constants.defaultAlpha,
+        beta: Float = StyleTTS2Constants.defaultBeta,
+        noiseSeed: UInt64 = 0
+    ) async throws -> [Float] {
+        guard let melExtractor = melExtractor, let synthesizer = synthesizer else {
+            throw StyleTTS2Error.notInitialized
+        }
+
+        let refSamples = try loadReferenceAudio(url: referenceAudioURL)
+        let (mel, frames) = melExtractor.compute(audio: refSamples)
+        guard frames > 0 else {
+            throw StyleTTS2Error.unsupportedReferenceAudio(
+                "reference audio at \(referenceAudioURL.lastPathComponent) yielded 0 mel frames")
+        }
+
+        return try await synthesizer.synthesize(
+            tokenIds: tokenIds,
+            referenceMel: mel, referenceMelFrames: frames,
+            alpha: alpha, beta: beta, noiseSeed: noiseSeed)
+    }
+
+    /// Synthesize with a caller-provided reference mel. Useful when the same
+    /// reference audio is reused for many prompts — compute the mel once and
+    /// pass it on every call to skip the FFT / mel work.
     ///
-    /// - Parameters:
-    ///   - text: Source text to phonemize.
-    ///   - language: G2P language. Defaults to `.americanEnglish` because
-    ///     the shipped LibriTTS checkpoint is English-only.
-    /// - Returns: A tuple of the IPA phoneme string and its `[Int32]` token
-    ///   id encoding under the 178-token espeak-ng vocab.
-    public func tokenize(
-        text: String,
-        language: MultilingualG2PLanguage = .americanEnglish
-    ) async throws -> (phonemes: String, ids: [Int32]) {
-        guard isInitialized else {
-            throw StyleTTS2Error.modelNotFound("StyleTTS2 model not initialized")
+    /// `referenceMel` must be a flat row-major `[1, 1, 80, frames]`
+    /// Float32 buffer matching the layout produced by
+    /// `StyleTTS2MelExtractor.compute(audio:)`.
+    public func synthesize(
+        tokenIds: [Int32],
+        referenceMel: [Float],
+        referenceMelFrames: Int,
+        alpha: Float = StyleTTS2Constants.defaultAlpha,
+        beta: Float = StyleTTS2Constants.defaultBeta,
+        noiseSeed: UInt64 = 0
+    ) async throws -> [Float] {
+        guard let synthesizer = synthesizer else {
+            throw StyleTTS2Error.notInitialized
         }
-        let phonemes = try await StyleTTS2Phonemizer.phonemize(
-            text: text, language: language)
-        let vocab = try await modelStore.vocabulary()
-        let ids = vocab.encode(phonemes)
-        return (phonemes, ids)
+        return try await synthesizer.synthesize(
+            tokenIds: tokenIds,
+            referenceMel: referenceMel, referenceMelFrames: referenceMelFrames,
+            alpha: alpha, beta: beta, noiseSeed: noiseSeed)
     }
 
-    /// Diagnostic tokenize: same as `tokenize(text:language:)` but also
-    /// returns the per-scalar drop frequency from
-    /// `StyleTTS2Vocab.encodeWithReport`. Used by the CLI to quantify
-    /// how much of the misaki BART G2P output the espeak-ng-trained
-    /// 178-token vocab can actually consume.
-    public func tokenizeWithReport(
-        text: String,
-        language: MultilingualG2PLanguage = .americanEnglish
-    ) async throws -> (
-        phonemes: String, ids: [Int32], dropped: [Unicode.Scalar: Int]
-    ) {
-        guard isInitialized else {
-            throw StyleTTS2Error.modelNotFound("StyleTTS2 model not initialized")
+    // MARK: - Reference-audio mel preview
+
+    /// Compute (and return) the reference-audio mel without running
+    /// synthesis. Intended for callers that want to cache the mel for many
+    /// utterances against the same speaker reference.
+    public func referenceMel(from url: URL) throws -> (mel: [Float], frames: Int) {
+        guard let melExtractor = melExtractor else {
+            throw StyleTTS2Error.notInitialized
         }
-        let phonemes = try await StyleTTS2Phonemizer.phonemize(
-            text: text, language: language)
-        let vocab = try await modelStore.vocabulary()
-        let (ids, dropped) = vocab.encodeWithReport(phonemes)
-        return (phonemes, ids, dropped)
+        let samples = try loadReferenceAudio(url: url)
+        return melExtractor.compute(audio: samples)
     }
 
-    public func cleanup() {
-        isInitialized = false
+    // MARK: - Cleanup
+
+    public func cleanup() async {
+        if let store = store {
+            await store.unload()
+        }
+        store = nil
+        phonemizer = nil
+        melExtractor = nil
+        synthesizer = nil
     }
 
-    // MARK: - Internal accessors (for the synthesizer once it lands)
+    // MARK: - Helpers
 
-    /// Expose the model store to the not-yet-written synthesizer module.
-    public func underlyingModelStore() -> StyleTTS2ModelStore {
-        modelStore
+    private func loadReferenceAudio(url: URL) throws -> [Float] {
+        let converter = AudioConverter(sampleRate: Double(StyleTTS2Constants.sampleRate))
+        do {
+            return try converter.resampleAudioFile(url)
+        } catch {
+            throw StyleTTS2Error.unsupportedReferenceAudio("\(error)")
+        }
+    }
+}
+
+// MARK: - Description shim for log lines.
+extension MLComputeUnits {
+    fileprivate var description: String {
+        switch self {
+        case .cpuOnly: return "cpuOnly"
+        case .cpuAndGPU: return "cpuAndGPU"
+        case .all: return "all"
+        case .cpuAndNeuralEngine: return "cpuAndNeuralEngine"
+        @unknown default: return "unknown"
+        }
     }
 }

@@ -5,12 +5,7 @@ import OSLog
 /// In-memory speaker database for streaming diarization
 /// Tracks speakers across chunks and maintains consistent IDs
 ///
-/// This is an `actor` to provide thread-safe access under Swift 6 strict
-/// concurrency. Previous implementations used a `DispatchQueue` which could
-/// trigger `unsafeForcedSync` warnings (and occasional libmalloc heap
-/// corruption via concurrent `[Float]` COW mutations) when called from
-/// async contexts such as VAD / diarization buffer callbacks.
-public actor SpeakerManager {
+public struct SpeakerManager: Sendable {
     internal let logger = AppLogger(category: "SpeakerManager")
 
     // Constants
@@ -23,10 +18,29 @@ public actor SpeakerManager {
     // Track the highest speaker ID to ensure uniqueness
     private var highestSpeakerId = 0
 
-    public var speakerThreshold: Float  // Max distance for speaker assignment (default: 0.65)
-    public var embeddingThreshold: Float  // Max distance for updating embeddings (default: 0.45)
-    public var minSpeechDuration: Float  // Min duration to create speaker (default: 1.0)
-    public var minEmbeddingUpdateDuration: Float  // Min duration to update embeddings (default: 2.0)
+    /// Max distance for speaker assignment.
+    ///
+    /// The default value is `0.65`.
+    ///
+    public var speakerThreshold: Float
+
+    /// Max distance for updating embeddings.
+    ///
+    /// The default value is `0.45`.
+    ///
+    public var embeddingThreshold: Float
+
+    /// Min duration to create speaker.
+    ///
+    /// The default value is `1.0`.
+    ///
+    public var minSpeechDuration: Float
+
+    /// Min duration to update embeddings.
+    ///
+    /// The default value is `2.0`.
+    ///
+    public var minEmbeddingUpdateDuration: Float
 
     public init(
         speakerThreshold: Float = 0.65,
@@ -40,19 +54,12 @@ public actor SpeakerManager {
         self.minEmbeddingUpdateDuration = minEmbeddingUpdateDuration
     }
 
-    // MARK: - Threshold setters (actor-isolated)
-
-    public func setSpeakerThreshold(_ value: Float) { self.speakerThreshold = value }
-    public func setEmbeddingThreshold(_ value: Float) { self.embeddingThreshold = value }
-    public func setMinSpeechDuration(_ value: Float) { self.minSpeechDuration = value }
-    public func setMinEmbeddingUpdateDuration(_ value: Float) { self.minEmbeddingUpdateDuration = value }
-
     /// Add known speakers to the database
     /// - Parameters:
     ///   - speakers: Array of `Speaker`s to add
     ///   - mode: Mode for handling overlapping ID conflicts.
     ///   - preservePermanent: Whether to avoid overwriting/merging pre-existing permanent speakers
-    public func initializeKnownSpeakers(
+    public mutating func initializeKnownSpeakers(
         _ speakers: [Speaker], mode: SpeakerInitializationMode = .skip, preserveIfPermanent: Bool = true
     ) {
         if mode == .reset {
@@ -125,7 +132,7 @@ public actor SpeakerManager {
     ///    - speakerThreshold: The maximum cosine distance to an existing speaker to create a new one (uses the default threshold for this `SpeakerManager` object if none is provided)
     ///    - newName: Name to assign the speaker if a new one is created (default: `Speaker $id`)
     ///  - Returns: A `Speaker` object if a match was found or a new one was created. Returns `nil` if an error occurred.
-    public func assignSpeaker(
+    public mutating func assignSpeaker(
         _ embedding: [Float],
         speechDuration: Float,
         confidence: Float = 1.0,
@@ -213,7 +220,7 @@ public actor SpeakerManager {
 
     /// Mark a speaker as permanent
     /// - Parameter speakerId: ID of the speaker to mark as permanent
-    public func makeSpeakerPermanent(_ speakerId: String) {
+    public mutating func makeSpeakerPermanent(_ speakerId: String) {
         guard speakerDatabase[speakerId] != nil else {
             logger.warning("Failed to mark speaker \(speakerId) as permanent (speaker not found).")
             return
@@ -224,7 +231,7 @@ public actor SpeakerManager {
 
     /// Remove a speaker's permanent marker
     /// - Parameter speakerId: ID of the speaker from which to remove the permanent marker
-    public func revokePermanence(from speakerId: String) {
+    public mutating func revokePermanence(from speakerId: String) {
         guard speakerDatabase[speakerId] != nil else {
             logger.warning("Failed to revoke permanence from speaker \(speakerId) (speaker not found).")
             return
@@ -240,7 +247,7 @@ public actor SpeakerManager {
     ///   - destinationId: ID of the `Speaker` that absorbs the other one
     ///   - mergedName: New name for the merged speaker (uses `destination`'s name if not provided)
     ///   - stopIfPermanent: Whether to stop merging if the source speaker is permanent
-    public func mergeSpeaker(
+    public mutating func mergeSpeaker(
         _ sourceId: String, into destinationId: String, mergedName: String? = nil, stopIfPermanent: Bool = true
     ) {
         // don't merge a speaker into itself
@@ -324,7 +331,7 @@ public actor SpeakerManager {
     /// - Parameters:
     ///   - speakerID: ID of the speaker being removed
     ///   - keepIfPermanent: Whether to stop the removal if the speaker is marked as permanent
-    public func removeSpeaker(_ speakerID: String, keepIfPermanent: Bool = true) {
+    public mutating func removeSpeaker(_ speakerID: String, keepIfPermanent: Bool = true) {
         // determine if we should skip the removal due to permanence
         if keepIfPermanent, let speaker = self.speakerDatabase[speakerID], speaker.isPermanent {
             logger.warning("Failed to remove speaker: \(speakerID) (Speaker is permanent)")
@@ -343,7 +350,7 @@ public actor SpeakerManager {
     /// - Parameters:
     ///   - date: Speakers who have not been active after this date will be removed.
     ///   - keepIfPermanent: Whether to stop the removal if the speaker is marked as permanent
-    public func removeSpeakersInactive(since date: Date, keepIfPermanent: Bool = true) {
+    public mutating func removeSpeakersInactive(since date: Date, keepIfPermanent: Bool = true) {
         if keepIfPermanent {
             // don't remove permanent speakers
             for (speakerId, speaker) in speakerDatabase where speaker.updatedAt < date && !speaker.isPermanent {
@@ -363,7 +370,7 @@ public actor SpeakerManager {
     /// - Parameters:
     ///   - durationInactive: Minimum duration for which a speaker needs to be inactive to be removed
     ///   - keepIfPermanent: Whether to stop the removal if the speaker is marked as permanent
-    public func removeSpeakersInactive(for durationInactive: TimeInterval, keepIfPermanent: Bool = true) {
+    public mutating func removeSpeakersInactive(for durationInactive: TimeInterval, keepIfPermanent: Bool = true) {
         let date = Date().addingTimeInterval(-durationInactive)
         self.removeSpeakersInactive(since: date, keepIfPermanent: keepIfPermanent)
     }
@@ -372,7 +379,7 @@ public actor SpeakerManager {
     /// - Parameters:
     ///   - predicate: The predicate to determine whether the speaker should be removed
     ///   - keepIfPermanent: Whether to stop the removal if the speaker is marked as permanent
-    public func removeSpeakers(where predicate: @Sendable (Speaker) -> Bool, keepIfPermanent: Bool = true) {
+    public mutating func removeSpeakers(where predicate: @Sendable (Speaker) -> Bool, keepIfPermanent: Bool = true) {
         if keepIfPermanent {
             // don't remove permanent speakers
             for (speakerId, speaker) in speakerDatabase where predicate(speaker) && !speaker.isPermanent {
@@ -390,7 +397,7 @@ public actor SpeakerManager {
     /// Remove non-permanent speakers that meet a certain predicate
     /// - Parameters:
     ///   - predicate: Predicate to determine whether the speaker should be removed
-    public func removeSpeakers(where predicate: @Sendable (Speaker) -> Bool) {
+    public mutating func removeSpeakers(where predicate: @Sendable (Speaker) -> Bool) {
         removeSpeakers(where: predicate, keepIfPermanent: true)
     }
 
@@ -422,7 +429,7 @@ public actor SpeakerManager {
         return (closestSpeakerId, minDistance)
     }
 
-    private func updateExistingSpeaker(
+    private mutating func updateExistingSpeaker(
         speakerId: String,
         embedding: [Float],
         duration: Float,
@@ -452,7 +459,7 @@ public actor SpeakerManager {
         }
     }
 
-    private func createNewSpeaker(
+    private mutating func createNewSpeaker(
         embedding: [Float],
         duration: Float,
         distanceToClosest: Float,
@@ -517,7 +524,7 @@ public actor SpeakerManager {
     }
 
     /// - Parameter speaker: The Speaker object to upsert
-    public func upsertSpeaker(_ speaker: Speaker) {
+    public mutating func upsertSpeaker(_ speaker: Speaker) {
         upsertSpeaker(
             id: speaker.id,
             name: speaker.name,
@@ -542,7 +549,7 @@ public actor SpeakerManager {
     ///   - createdAt: Creation timestamp
     ///   - updatedAt: Last update timestamp
     ///   - isPermanent: Whether the speaker should be protected from merges and removals by default
-    public func upsertSpeaker(
+    public mutating func upsertSpeaker(
         id: String,
         name: String? = nil,
         currentEmbedding: [Float],
@@ -600,7 +607,7 @@ public actor SpeakerManager {
 
     /// Reset the speaker database
     /// - Parameter keepIfPermanent: Whether to keep permanent speakers
-    public func reset(keepIfPermanent: Bool = false) {
+    public mutating func reset(keepIfPermanent: Bool = false) {
         if !keepIfPermanent {
             speakerDatabase.removeAll()
             nextSpeakerId = 1
@@ -621,7 +628,7 @@ public actor SpeakerManager {
     }
 
     /// Mark all speakers as not permanent
-    public func resetPermanentFlags() {
+    public mutating func resetPermanentFlags() {
         for id in Array(speakerDatabase.keys) {
             speakerDatabase[id]?.isPermanent = false
         }

@@ -24,6 +24,20 @@ import Foundation
 /// nanocodec_decoder) plus a small 1-layer "local transformer" implemented in Swift
 /// to sample the 8 codebook tokens per step.
 ///
+/// > Note: **Magpie is a batch / offline model, not a streaming model.**
+/// > Despite NVIDIA marketing copy claiming Magpie "targets streaming
+/// > applications", the upstream NeMo reference
+/// > (`MagpieTTSModel.infer_batch` / `do_tts` in
+/// > `nemo/collections/tts/models/magpietts.py`) is batch-only: the AR loop
+/// > accumulates *all* audio codes into `state.all_predictions` (≈ lines
+/// > 6850–6860), then `torch.cat(state.all_predictions, dim=-1)` and the
+/// > codec (`self._codec_helper.codes_to_audio(...)`) are invoked exactly
+/// > once per utterance after the loop completes (≈ lines 5334–5351 /
+/// > 6889–6891). There is no incremental codec dispatch and no per-chunk
+/// > yield anywhere in the released NeMo inference path. `synthesize(...)`
+/// > below is the only entry point — it returns a single
+/// > `MagpieSynthesisResult` after the full AR + codec pipeline completes.
+///
 /// Usage:
 /// ```swift
 /// let manager = try await MagpieTtsManager.downloadAndCreate(
@@ -38,6 +52,7 @@ public actor MagpieTtsManager {
     private let directory: URL?
     private let computeUnits: MLComputeUnits
     private let preferredLanguages: Set<MagpieLanguage>
+    private let nanocodecPrecision: MagpieNanocodecPrecision
 
     private var store: MagpieModelStore?
     private var tokenizer: MagpieTokenizer?
@@ -46,11 +61,13 @@ public actor MagpieTtsManager {
     public init(
         directory: URL? = nil,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        preferredLanguages: Set<MagpieLanguage> = [.english]
+        preferredLanguages: Set<MagpieLanguage> = [.english],
+        nanocodecPrecision: MagpieNanocodecPrecision = .fp32
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
         self.preferredLanguages = preferredLanguages
+        self.nanocodecPrecision = nanocodecPrecision
     }
 
     public var isAvailable: Bool {
@@ -61,12 +78,14 @@ public actor MagpieTtsManager {
     public static func downloadAndCreate(
         languages: Set<MagpieLanguage> = [.english],
         cacheDirectory: URL? = nil,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
+        nanocodecPrecision: MagpieNanocodecPrecision = .fp32
     ) async throws -> MagpieTtsManager {
         let manager = MagpieTtsManager(
             directory: cacheDirectory,
             computeUnits: computeUnits,
-            preferredLanguages: languages)
+            preferredLanguages: languages,
+            nanocodecPrecision: nanocodecPrecision)
         try await manager.initialize()
         return manager
     }
@@ -83,7 +102,8 @@ public actor MagpieTtsManager {
         let store = MagpieModelStore(
             directory: directory,
             computeUnits: computeUnits,
-            preferredLanguages: preferredLanguages)
+            preferredLanguages: preferredLanguages,
+            nanocodecPrecision: nanocodecPrecision)
         try await store.loadIfNeeded()
         self.store = store
 
@@ -143,33 +163,6 @@ public actor MagpieTtsManager {
             text: text, speaker: speaker, language: language, options: options)
     }
 
-    /// Streaming variant of `synthesize(text:...)`. Yields one
-    /// `MagpieAudioChunk` per chunk as soon as its NanoCodec decode finishes,
-    /// instead of waiting for the entire utterance to complete.
-    ///
-    /// The chunker reserves the first chunk for a small clause-sized head
-    /// (~50 codec frames ≈ 2.3 s of audio) to minimize time-to-first-audio.
-    /// Subsequent chunks pack at the normal capacity. Each non-final chunk
-    /// already includes any punctuation-aware trailing silence, so callers
-    /// can append `samples` arrays back-to-back for gapless playback.
-    ///
-    /// `peakNormalize` is force-disabled in streaming mode (cannot be applied
-    /// without buffering the full utterance).
-    ///
-    /// Cancelling the consuming task cancels in-flight synthesis cleanly.
-    public func synthesizeStream(
-        text: String,
-        speaker: MagpieSpeaker = .john,
-        language: MagpieLanguage = .english,
-        options: MagpieSynthesisOptions = .default
-    ) async throws -> AsyncThrowingStream<MagpieAudioChunk, Error> {
-        guard let synthesizer = synthesizer else {
-            throw MagpieError.notInitialized
-        }
-        return synthesizer.synthesizeStream(
-            text: text, speaker: speaker, language: language, options: options)
-    }
-
     /// Synthesize from pre-tokenized phoneme/IPA tokens, bypassing the text frontend.
     public func synthesize(
         phonemes: MagpiePhonemeTokens,
@@ -181,6 +174,48 @@ public actor MagpieTtsManager {
         }
         return try await synthesizer.synthesize(
             phonemes: phonemes, speaker: speaker, options: options)
+    }
+
+    /// Re-warm the Magpie CoreML graphs so the next user-facing
+    /// ``synthesize(text:speaker:language:options:)`` call doesn't pay
+    /// first-dispatch / ANE-recompile cost.
+    ///
+    /// `initialize()` already runs a warmup at load time, so this method is
+    /// **only useful in two scenarios**:
+    ///
+    /// 1. **After system sleep / wake**, when Apple's `anecompilerservice`
+    ///    has invalidated the per-process ANE compile cache. The next
+    ///    `synthesize` call would otherwise stall 10–20 s while the ANE
+    ///    graphs recompile (cf. VoiceInk issue #321 cold-start reports).
+    ///    Call this from your app's wake-handler to amortize the cost in
+    ///    the background instead of on the user's next interaction.
+    /// 2. **After long idle periods** (~minutes+) where the OS may have
+    ///    paged out CoreML state. Same recompile risk.
+    ///
+    /// The implementation runs a 16-step throwaway synthesis on a single
+    /// `.` input (CFG off, no IPA override) to force first-dispatch
+    /// specialization across `text_encoder` → `prefill` → `decoder_step` →
+    /// `nanocodec_decoder`. The audio is discarded. Total wall time on M2
+    /// is roughly 1.5–2 s.
+    ///
+    /// Safe to call repeatedly — there is no internal "already warm" cache
+    /// guard. If the ANE state is still warm, the predict() calls run
+    /// fast and the method returns quickly. If the ANE cache was
+    /// invalidated, the method pays the recompile cost so your next
+    /// `synthesize` call doesn't.
+    ///
+    /// Throws `MagpieError.notInitialized` if called before
+    /// ``initialize()``. Other failures are propagated from the underlying
+    /// CoreML graphs.
+    ///
+    /// - Note: Run this in a `Task { try? await manager.warmup() }` if you
+    ///   don't want to block the calling context — there is no internal
+    ///   background-queue dispatch.
+    public func warmup() async throws {
+        guard let synthesizer = synthesizer else {
+            throw MagpieError.notInitialized
+        }
+        try await synthesizer.warmup()
     }
 
     public func cleanup() async {

@@ -66,10 +66,11 @@ final class MagpieConstantsTests: XCTestCase {
         }
 
         // Sanity: the three core CoreML models + the constants directory are
-        // the minimum required for English synthesis.
+        // the minimum required for English synthesis. The nanocodec
+        // production default is v3 (`nanocodecDecoderV3File`).
         XCTAssertTrue(required.contains(ModelNames.Magpie.textEncoderFile))
         XCTAssertTrue(required.contains(ModelNames.Magpie.decoderStepFile))
-        XCTAssertTrue(required.contains(ModelNames.Magpie.nanocodecDecoderFile))
+        XCTAssertTrue(required.contains(ModelNames.Magpie.nanocodecDecoderV3File))
         XCTAssertTrue(required.contains(ModelNames.Magpie.constantsDir))
     }
 }
