@@ -444,4 +444,65 @@ final class PocketTtsStreamingTests: XCTestCase {
             trimmed.hasSuffix("."),
             "Mid-sentence chunk must not append a period; got: \(text)")
     }
+
+    // MARK: - Mid-sentence short-chunk prosody (issue #584 follow-up)
+
+    func testNormalizeTextMidSentenceShortChunkSkipsLeadingPadding() {
+        // Mid-sentence continuations under the short-text threshold (e.g. an
+        // orphan-tail "stations-service de" at 2 words, or a clause split
+        // like "d'aboutir à une trêve" at 4 words) must NOT receive the
+        // 8-space leading pad. Otherwise the synthesizer emits silence at
+        // the seam, re-creating the prosody break that #584 fixes.
+        let (orphan, _) = PocketTtsSynthesizer.normalizeText(
+            "stations-service de", isMidSentence: true, language: .french24L)
+        XCTAssertFalse(
+            orphan.hasPrefix(" "),
+            "Mid-sentence short chunk must not be left-padded; got: '\(orphan)'")
+
+        let (clause, _) = PocketTtsSynthesizer.normalizeText(
+            "d'aboutir à une trêve", isMidSentence: true, language: .french24L)
+        XCTAssertFalse(
+            clause.hasPrefix(" "),
+            "Mid-sentence short chunk must not be left-padded; got: '\(clause)'")
+    }
+
+    func testNormalizeTextMidSentenceShortChunkUsesLongTextExtraFrames() {
+        // Mid-sentence short chunks must use the long-text trailing frame
+        // budget; the short-text pad value adds extra silence after EOS that
+        // shows up as a gap between continuation chunks.
+        let (_, orphanFrames) = PocketTtsSynthesizer.normalizeText(
+            "stations-service de", isMidSentence: true, language: .french24L)
+        XCTAssertEqual(
+            orphanFrames, PocketTtsConstants.longTextExtraFrames,
+            "Mid-sentence short chunk must not use shortTextPadFrames")
+
+        let (_, clauseFrames) = PocketTtsSynthesizer.normalizeText(
+            "d'aboutir à une trêve", isMidSentence: true, language: .french24L)
+        XCTAssertEqual(
+            clauseFrames, PocketTtsConstants.longTextExtraFrames,
+            "Mid-sentence short clause must not use shortTextPadFrames")
+    }
+
+    func testNormalizeTextFullSentenceShortChunkStillPads() {
+        // The padding behaviour for legitimate short sentences (the original
+        // prosody-stabilisation case) must remain unchanged.
+        let (text, frames) = PocketTtsSynthesizer.normalizeText(
+            "Hi there", isMidSentence: false, language: .english)
+        XCTAssertTrue(
+            text.hasPrefix(" "),
+            "Full short sentence should still be left-padded; got: '\(text)'")
+        XCTAssertEqual(
+            frames, PocketTtsConstants.shortTextPadFrames,
+            "Full short sentence should still use shortTextPadFrames")
+    }
+
+    func testNormalizeTextMidSentenceLongChunkUnchanged() {
+        // Sanity check: mid-sentence chunks at or above the threshold behave
+        // identically to the pre-fix code path (no leading pad, longTextExtraFrames).
+        let (text, frames) = PocketTtsSynthesizer.normalizeText(
+            "qu'elle juge déloyal en raison de la concurrence",
+            isMidSentence: true, language: .french24L)
+        XCTAssertFalse(text.hasPrefix(" "))
+        XCTAssertEqual(frames, PocketTtsConstants.longTextExtraFrames)
+    }
 }
