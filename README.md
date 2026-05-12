@@ -358,14 +358,15 @@ End-to-end streaming diarization with CoreML inference. Default choice for onlin
 import FluidAudio
 
 Task {
-    let diarizer = LSEENDDiarizer()
-    try await diarizer.initialize(variant: .dihard3)
+    let diarizer = try await LSEENDDiarizer(variant: .dihard3)
 
     let samples = try await loadSamples16kMono(path: "path/to/meeting.wav")
     let timeline = try diarizer.processComplete(samples, sourceSampleRate: 16_000)
 
-    for segment in timeline.segments {
-        print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
+    for speaker in timeline.speakers.values {
+        for segment in speaker.finalizedSegments {
+            print("Speaker \(speaker.index): \(segment.startTime)s - \(segment.endTime)s")
+        }
     }
 }
 ```

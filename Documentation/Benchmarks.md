@@ -676,20 +676,21 @@ AVERAGE          31.7     21.5      0.5      9.7         -     126.7
 ## LS-EEND Streaming Diarization
 A research prototype from Westlake University for streaming speaker diarization.
 
-Model: [GradientDescent2718/ls-eend-coreml](https://huggingface.co/GradientDescent2718/ls-eend-coreml). 
+Model: [FluidInference/lseend-coreml](https://huggingface.co/FluidInference/lseend-coreml).
 
 Hardware: Apple M4 MAX, 2026, macOS 26.1 (CPU only)
 
-### AMI SDM Dataset (AMI Config - 1s latency, 0.5s between updates)
+### AMI SDM Dataset (AMI variant, `--step-size 500ms`)
+
+Each LS-EEND CoreML bundle is keyed by `(variant, stepSize)`. The run below uses the `.ami` variant with `.step500ms`, which commits 5 output frames (~500 ms) per CoreML call.
 
 ```bash
-swift run fluidaudiocli lseend-benchmark --variant ami --auto-download
+swift run fluidaudiocli lseend-benchmark --variant ami --step-size 500ms --auto-download
 ```
 
 ```text
 ================================================================================
 LS-EEND BENCHMARK SUMMARY
-[23:17:34.535] [DEBUG] [FluidAudio.LSEENDDiarizer] LS-EEND state reset
 ================================================================================
 Results Sorted by DER:
 ----------------------------------------------------------------------
