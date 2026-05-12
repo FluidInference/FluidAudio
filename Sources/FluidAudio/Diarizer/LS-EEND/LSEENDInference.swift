@@ -130,19 +130,19 @@ public class LSEENDInput: MLFeatureProvider {
     public var state: LSEENDState {
         didSet { refreshOutputBackings() }
     }
-    
+
     /// Incoming Mels
     public let melFeatures: MLMultiArray
-    
+
     /// Masks of valid frames to prevent warmup frames from influencing the recurrent state
     public let decoderMask: MLMultiArray
-    
+
     /// Pre-allocated `probs` output backing — shape `[1, chunkSize, maxSpeakers]`
     public let outputProbs: MLMultiArray
-    
+
     /// Reusable prediction options with `outputBackings` for output backing
     public let predictionOptions = MLPredictionOptions()
-    
+
     /// Number of warmup frames in the input
     public var warmupFrames: Int = 0
 
