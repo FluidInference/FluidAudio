@@ -2,6 +2,8 @@ import Foundation
 import CoreML
 import Accelerate
 
+// MARK: - LSEENDModel
+
 public class LSEENDModel {
     public let metadata: LSEENDMetadata
 
@@ -87,26 +89,8 @@ public class LSEENDModel {
             lock.lock()
             defer { lock.unlock() }
 
-            let prediction = try model.prediction(from: input)
-
-            guard let probsMA = prediction.featureValue(for: "probs")?.multiArrayValue,
-                let encKvMA = prediction.featureValue(for: "enc_kv_new")?.multiArrayValue,
-                let encScaleMA = prediction.featureValue(for: "enc_scale_new")?.multiArrayValue,
-                let encConvCacheMA = prediction.featureValue(for: "enc_conv_cache_new")?.multiArrayValue,
-                let cnnWindowMA = prediction.featureValue(for: "cnn_window_new")?.multiArrayValue,
-                let decKvMA = prediction.featureValue(for: "dec_kv_new")?.multiArrayValue,
-                let decScaleMA = prediction.featureValue(for: "dec_scale_new")?.multiArrayValue
-            else {
-                throw LSEENDError.inferenceFailed("Failed to extract predictions from CoreML model.")
-            }
-
-            // Update state
-            input.state.encRetKv = encKvMA
-            input.state.encRetScale = encScaleMA
-            input.state.encConvCache = encConvCacheMA
-            input.state.cnnWindow = cnnWindowMA
-            input.state.decRetKv = decKvMA
-            input.state.decRetScale = decScaleMA
+            _ = try model.prediction(from: input, options: input.predictionOptions)
+            let probsMA = input.outputProbs
 
             // Copy speaker sigmoids and skip warmup frames
             let warmup = input.warmupFrames
@@ -139,10 +123,27 @@ public class LSEENDModel {
     }
 }
 
+// MARK: - LSEENDInput
+
 public class LSEENDInput: MLFeatureProvider {
-    public var state: LSEENDState
+    /// Recurrent state
+    public var state: LSEENDState {
+        didSet { refreshOutputBackings() }
+    }
+    
+    /// Incoming Mels
     public let melFeatures: MLMultiArray
+    
+    /// Masks of valid frames to prevent warmup frames from influencing the recurrent state
     public let decoderMask: MLMultiArray
+    
+    /// Pre-allocated `probs` output backing — shape `[1, chunkSize, maxSpeakers]`
+    public let outputProbs: MLMultiArray
+    
+    /// Reusable prediction options with `outputBackings` for output backing
+    public let predictionOptions = MLPredictionOptions()
+    
+    /// Number of warmup frames in the input
     public var warmupFrames: Int = 0
 
     public var featureNames: Set<String> {
@@ -155,13 +156,35 @@ public class LSEENDInput: MLFeatureProvider {
         ]
     }
 
+    // MARK: - Init
+
     public init(from metadata: LSEENDMetadata, state: consuming LSEENDState? = nil) throws {
         self.state = try state ?? LSEENDState(from: metadata)
         let T = NSNumber(value: metadata.chunkSize)
         let M = NSNumber(value: metadata.melFrames)
         let N = NSNumber(value: metadata.nMels)
+        let S = NSNumber(value: metadata.maxSpeakers)
         self.melFeatures = try MLMultiArray(shape: [1, M, N], dataType: .float32)
         self.decoderMask = try MLMultiArray(shape: [T], dataType: .float32)
+        self.outputProbs = try ANEMemoryUtils.createAlignedArray(
+            shape: [1, T, S], dataType: .float32, zeroClear: false)
+        // Build the initial outputBackings dict. didSet doesn't fire from
+        // init, so we wire it explicitly here.
+        refreshOutputBackings()
+    }
+
+    // MARK: - Buffer management
+
+    private func refreshOutputBackings() {
+        predictionOptions.outputBackings = [
+            "probs": outputProbs,
+            "enc_kv_new": state.encRetKv,
+            "enc_scale_new": state.encRetScale,
+            "enc_conv_cache_new": state.encConvCache,
+            "cnn_window_new": state.cnnWindow,
+            "dec_kv_new": state.decRetKv,
+            "dec_scale_new": state.decRetScale,
+        ]
     }
 
     /// Reset state
