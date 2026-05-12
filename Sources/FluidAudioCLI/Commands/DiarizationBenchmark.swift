@@ -438,8 +438,8 @@ enum StreamDiarizationBenchmark {
             diarizerManager.initialize(models: models)
 
             // Configure streaming manager
-            await diarizerManager.speakerManager.setSpeakerThreshold(assignmentThreshold)
-            await diarizerManager.speakerManager.setEmbeddingThreshold(updateThreshold)
+            diarizerManager.speakerManager.speakerThreshold = assignmentThreshold
+            diarizerManager.speakerManager.embeddingThreshold = updateThreshold
 
             // Process in chunks
             let samplesPerChunk = Int(chunkSeconds * 16000)
@@ -472,7 +472,7 @@ enum StreamDiarizationBenchmark {
 
                 // Process chunk and track timing
                 let inferenceStart = Date()
-                let chunkResult = try await diarizerManager.performCompleteDiarization(
+                let chunkResult = try diarizerManager.performCompleteDiarization(
                     paddedChunk, atTime: chunkStartTime)
                 let inferenceTime = Date().timeIntervalSince(inferenceStart)
 
@@ -515,7 +515,7 @@ enum StreamDiarizationBenchmark {
                     let processedDuration = Double(position) / 16000.0
                     let rtfx = processedDuration / elapsed
 
-                    let currentSpeakerCount = await diarizerManager.speakerManager.speakerCount
+                    let currentSpeakerCount = diarizerManager.speakerManager.speakerCount
                     logger.info(
                         String(
                             format: "    [Chunk %3d] %.1f%% | RTFx: %.1fx | Speakers: %d | Latency: %.3fs",
@@ -565,7 +565,7 @@ enum StreamDiarizationBenchmark {
             // Calculate total inference time
             let totalInferenceTime = totalSegmentationTime + totalEmbeddingTime + totalClusteringTime
 
-            let finalSpeakerCount = await diarizerManager.speakerManager.speakerCount
+            let finalSpeakerCount = diarizerManager.speakerManager.speakerCount
 
             return BenchmarkResult(
                 meetingName: meetingName,

@@ -49,28 +49,28 @@ final class SpeakerTests: XCTestCase {
 
     // MARK: - Speaker Enrollment Workflow
 
-    func testSpeakerEnrollmentWithName() async {
+    func testSpeakerEnrollmentWithName() {
         // Simulate the "My name is Alice" enrollment scenario
-        let manager = SpeakerManager()
+        var manager = SpeakerManager()
         let aliceEmbedding = createDistinctEmbedding(pattern: 10)
 
         // Step 1: User speaks and we get their embedding
-        let speaker = await manager.assignSpeaker(aliceEmbedding, speechDuration: 3.0)
+        let speaker = manager.assignSpeaker(aliceEmbedding, speechDuration: 3.0)
         XCTAssertNotNil(speaker)
 
         // Step 2: Transcription detects "My name is Alice"
         // Step 3: Update the speaker's name from default to actual name (persist via upsert since struct)
         if var updated = speaker {
             updated.name = "Alice"
-            await manager.upsertSpeaker(updated)
+            manager.upsertSpeaker(updated)
         }
 
-        let stored = await manager.getSpeaker(for: speaker!.id)
+        let stored = manager.getSpeaker(for: speaker!.id)
         XCTAssertEqual(stored?.name, "Alice")
         XCTAssertNotEqual(stored?.name, stored?.id)  // Name should be different from ID
 
         // Step 4: Future audio from same speaker should be identified as "Alice"
-        let futureSpeaker = await manager.assignSpeaker(aliceEmbedding, speechDuration: 2.0)
+        let futureSpeaker = manager.assignSpeaker(aliceEmbedding, speechDuration: 2.0)
         XCTAssertEqual(futureSpeaker?.id, speaker?.id)
         XCTAssertEqual(futureSpeaker?.name, "Alice")
     }

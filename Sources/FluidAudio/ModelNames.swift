@@ -22,6 +22,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case kokoroAne = "FluidInference/kokoro-82m-coreml/ANE"
+    case kokoroAneZh = "FluidInference/kokoro-82m-coreml/ANE-zh"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
     case lseendAmi = "FluidInference/ls-eend-coreml/optimized/ami"
     case lseendCallHome = "FluidInference/ls-eend-coreml/optimized/ch"
@@ -35,7 +36,11 @@ public enum Repo: String, CaseIterable, Sendable {
     case cosyvoice3 = "FluidInference/CosyVoice3-0.5B-coreml"
     case cohereTranscribeCoreml = "FluidInference/cohere-transcribe-03-2026-coreml/q8"
     case magpieTts = "FluidInference/magpie-tts-multilingual-357m-coreml"
-    case styleTts2 = "FluidInference/StyleTTS-2-coreml"
+    /// StyleTTS2 LibriTTS — `iteration_3/compiled/` is the only directory
+    /// with `.mlmodelc` artifacts; the parent repo also ships `packages/`
+    /// (`.mlpackage` source) and `swift/` (a debug harness) that the Swift
+    /// loader never touches.
+    case styletts2 = "FluidInference/StyleTTS-2-coreml/iteration_3/compiled"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -74,6 +79,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "kokoro-82m-coreml"
         case .kokoroAne:
             return "kokoro-82m-coreml/ANE"
+        case .kokoroAneZh:
+            return "kokoro-82m-coreml/ANE-zh"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
         case .lseendAmi:
@@ -100,8 +107,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "cohere-transcribe-03-2026-coreml/q8"
         case .magpieTts:
             return "magpie-tts-multilingual-357m-coreml"
-        case .styleTts2:
-            return "StyleTTS-2-coreml"
+        case .styletts2:
+            return "StyleTTS-2-coreml/iteration_3/compiled"
         }
     }
 
@@ -114,7 +121,7 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-ctc-0.6b-coreml"
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
-        case .kokoroAne:
+        case .kokoroAne, .kokoroAneZh:
             return "FluidInference/kokoro-82m-coreml"
         case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
@@ -128,6 +135,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-tdt-ctc-110m-coreml"
         case .cohereTranscribeCoreml:
             return "FluidInference/cohere-transcribe-03-2026-coreml"
+        case .styletts2:
+            return "FluidInference/StyleTTS-2-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -138,6 +147,8 @@ public enum Repo: String, CaseIterable, Sendable {
         switch self {
         case .kokoroAne:
             return "ANE"
+        case .kokoroAneZh:
+            return "ANE-zh"
         case .parakeetEou160:
             return "160ms"
         case .parakeetEou320:
@@ -166,6 +177,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "optimized/dih3"
         case .cohereTranscribeCoreml:
             return "q8"
+        case .styletts2:
+            return "iteration_3/compiled"
         default:
             return nil
         }
@@ -178,6 +191,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "kokoro"
         case .kokoroAne:
             return "kokoro-82m-coreml/ANE"
+        case .kokoroAneZh:
+            return "kokoro-82m-coreml/ANE-zh"
         case .parakeetEou160:
             return "parakeet-eou-streaming/160ms"
         case .parakeetEou320:
@@ -218,7 +233,7 @@ public enum Repo: String, CaseIterable, Sendable {
             return "cohere-transcribe/q8"
         case .magpieTts:
             return "magpie-tts"
-        case .styleTts2:
+        case .styletts2:
             return "styletts2"
         default:
             return name.replacingOccurrences(of: "-coreml", with: "")
@@ -761,103 +776,122 @@ public enum ModelNames {
         public static let textEncoder = "text_encoder"
         public static let decoderPrefill = "decoder_prefill"
         public static let decoderStep = "decoder_step"
+        /// v1: T=256 monolithic, fp16, CPU. Legacy fallback (noisy + slow).
         public static let nanocodecDecoder = "nanocodec_decoder"
+        /// v2: T_in=24 chunked, fp16. Fast (~43% ANE) but noisy on voiced speech.
+        public static let nanocodecDecoderV2 = "nanocodec_decoder_v2"
+        /// v3: T_in=24 chunked, fp32, CPU. Audibly clean (default).
+        public static let nanocodecDecoderV3 = "nanocodec_decoder_v3"
+        /// v4: T_in=24 chunked, fp32 compute + 8-bit kmeans palettized weights, CPU.
+        /// Acoustically transparent vs v3 (33.6 dB SNR on AR speech, identical
+        /// quiet floor) at ~4× smaller on disk (31 MB vs 121 MB) and ~11 %
+        /// lower peak RSS. Same recipe Kokoro Noise uses (`fp32 + int8pal`).
+        public static let nanocodecDecoderV4 = "nanocodec_decoder_v4"
 
         public static let textEncoderFile = textEncoder + ".mlmodelc"
         public static let decoderPrefillFile = decoderPrefill + ".mlmodelc"
         public static let decoderStepFile = decoderStep + ".mlmodelc"
         public static let nanocodecDecoderFile = nanocodecDecoder + ".mlmodelc"
+        public static let nanocodecDecoderV2File = nanocodecDecoderV2 + ".mlmodelc"
+        public static let nanocodecDecoderV3File = nanocodecDecoderV3 + ".mlmodelc"
+        public static let nanocodecDecoderV4File = nanocodecDecoderV4 + ".mlmodelc"
 
         public static let constantsDir = "constants"
         public static let tokenizerDir = "tokenizer"
 
         /// Files required for English synthesis. Other languages append their own
-        /// lookup files on top (see `MagpieResourceDownloader`).
+        /// lookup files on top (see `MagpieResourceDownloader`). Listing
+        /// `nanocodecDecoderV3File` ensures legacy v1-only caches get
+        /// re-downloaded and upgraded to the clean v3.
         public static let requiredModels: Set<String> = [
             textEncoderFile,
             decoderStepFile,
-            nanocodecDecoderFile,
+            nanocodecDecoderV3File,
             constantsDir,
         ]
     }
 
-    /// StyleTTS2 model names (4-stage diffusion TTS, LibriTTS multi-speaker checkpoint).
-    ///
-    /// Pipeline (per utterance, all stages combined run at ~4.32× RTFx warm on M-series):
-    /// 1. `text_predictor` — fp16 ANE, 5 token-length buckets (32/64/128/256/512). 1× call.
-    /// 2. `diffusion_step_512` — fp16 CPU+GPU, single bert_dur=512 bucket. 5× calls (ADPM2).
-    /// 3. `f0n_energy` — fp16 ANE, dynamic shape. 1× call.
-    /// 4. `decoder` — fp32 CPU+GPU, 5 mel-length buckets (256/512/1024/2048/4096). 1× call.
-    ///
-    /// Decoder must be fp32 (SineGen phase-saturation in fp16 produces robotic audio).
-    /// On disk the HF repo ships precompiled `.mlmodelc` bundles under `compiled/`;
-    /// the `.mlpackage` doubles at the repo root are portability artifacts and are
-    /// not fetched by `requiredModels`.
+    /// StyleTTS2 LibriTTS (iteration_3) — 8-stage CoreML pipeline + 6 bucket
+    /// variants (T = 64 / 128 / 256) for the two stages that can't accept
+    /// `RangeDim` on the token axis (`bert`, `fused_diffusion_sampler`).
+    /// File names match the HuggingFace tree at
+    /// `FluidInference/StyleTTS-2-coreml/iteration_3/compiled/`.
     public enum StyleTTS2 {
-        // Text predictor buckets (token-length axis).
-        public static let textPredictor32 = "styletts2_text_predictor_32"
-        public static let textPredictor64 = "styletts2_text_predictor_64"
-        public static let textPredictor128 = "styletts2_text_predictor_128"
-        public static let textPredictor256 = "styletts2_text_predictor_256"
-        public static let textPredictor512 = "styletts2_text_predictor_512"
+        // ---- Stage 1: text encoder (CPU_ONLY, fp16, RangeDim T) ----
+        public static let textEncoder = "text_encoder_fp16"
+        public static let textEncoderFile = textEncoder + ".mlmodelc"
 
-        // Diffusion step (single B=512 bucket; smaller buckets pruned upstream).
-        public static let diffusionStep512 = "styletts2_diffusion_step_512"
+        // ---- Stage 2: bert + bert_encoder (ALL, fp16, fixed T axis) ----
+        // Default T = 57 (capped at ~37 chars). Buckets cover longer prompts.
+        public static let bert = "bert_fp16"
+        public static let bertFile = bert + ".mlmodelc"
+        public static let bertT64File = "bert_fp16_t64.mlmodelc"
+        public static let bertT128File = "bert_fp16_t128.mlmodelc"
+        public static let bertT256File = "bert_fp16_t256.mlmodelc"
 
-        // F0/N energy regressor (dynamic input shape).
-        public static let f0nEnergy = "styletts2_f0n_energy"
+        // ---- Stage 3: ref encoder (CPU_AND_GPU, fp16, mel-driven) ----
+        public static let refEncoder = "ref_encoder_fp16"
+        public static let refEncoderFile = refEncoder + ".mlmodelc"
 
-        // Decoder buckets (mel-frame axis).
-        public static let decoder256 = "styletts2_decoder_256"
-        public static let decoder512 = "styletts2_decoder_512"
-        public static let decoder1024 = "styletts2_decoder_1024"
-        public static let decoder2048 = "styletts2_decoder_2048"
-        public static let decoder4096 = "styletts2_decoder_4096"
+        // ---- Stage 4: fused 5-step ADPM2 sampler (ALL, fp16, fixed T axis) ----
+        public static let fusedDiffusionSampler = "fused_diffusion_sampler_fp16"
+        public static let fusedDiffusionSamplerFile = fusedDiffusionSampler + ".mlmodelc"
+        public static let fusedDiffusionSamplerT64File = "fused_diffusion_sampler_fp16_t64.mlmodelc"
+        public static let fusedDiffusionSamplerT128File = "fused_diffusion_sampler_fp16_t128.mlmodelc"
+        public static let fusedDiffusionSamplerT256File = "fused_diffusion_sampler_fp16_t256.mlmodelc"
 
-        // Precompiled `.mlmodelc` filenames (live under `compiled/` on the HF
-        // repo). We load the precompiled artifacts to skip the cold-start
-        // `anecompilerservice` hit; the `.mlpackage` doubles at the repo root
-        // are kept for portability/debugging only and are not fetched.
-        public static let textPredictor32File = "compiled/" + textPredictor32 + ".mlmodelc"
-        public static let textPredictor64File = "compiled/" + textPredictor64 + ".mlmodelc"
-        public static let textPredictor128File = "compiled/" + textPredictor128 + ".mlmodelc"
-        public static let textPredictor256File = "compiled/" + textPredictor256 + ".mlmodelc"
-        public static let textPredictor512File = "compiled/" + textPredictor512 + ".mlmodelc"
+        // ---- Stage 5: duration predictor (CPU_ONLY, fp16, RangeDim T) ----
+        public static let durationPredictor = "duration_predictor_fp16"
+        public static let durationPredictorFile = durationPredictor + ".mlmodelc"
 
-        public static let diffusionStep512File = "compiled/" + diffusionStep512 + ".mlmodelc"
-        public static let f0nEnergyFile = "compiled/" + f0nEnergy + ".mlmodelc"
+        // ---- Stage 6: fused f0n + harmonic source (CPU_ONLY, **fp32**) ----
+        // Kept fp32 — har computes sin(2π × cumsum(f0)) over 88 200 samples
+        // and fp16 cumsum drifts ~10 bits, causing audible phase distortion
+        // in the second half of the clip.
+        public static let fusedF0nHarSource = "fused_f0n_har_source"
+        public static let fusedF0nHarSourceFile = fusedF0nHarSource + ".mlmodelc"
 
-        public static let decoder256File = "compiled/" + decoder256 + ".mlmodelc"
-        public static let decoder512File = "compiled/" + decoder512 + ".mlmodelc"
-        public static let decoder1024File = "compiled/" + decoder1024 + ".mlmodelc"
-        public static let decoder2048File = "compiled/" + decoder2048 + ".mlmodelc"
-        public static let decoder4096File = "compiled/" + decoder4096 + ".mlmodelc"
+        // ---- Stage 7: decoder pre (CPU_AND_NE, fp16, AdaIN encode/decode) ----
+        public static let decoderPre = "decoder_pre_fp16"
+        public static let decoderPreFile = decoderPre + ".mlmodelc"
 
-        /// Phoneme→id table mirrored from upstream `text_utils.TextCleaner` (178 tokens).
-        public static let vocabularyFile = "constants/text_cleaner_vocab.json"
+        // ---- Stage 8: decoder upsample (CPU_ONLY, fp16, HiFi-GAN ups) ----
+        public static let decoderUpsample = "decoder_upsample_fp16"
+        public static let decoderUpsampleFile = decoderUpsample + ".mlmodelc"
 
-        /// Top-level bundle config (audio params, bucket sizes, sampler config).
-        public static let configFile = "config.json"
-
-        public static let textPredictorBuckets: [Int] = [32, 64, 128, 256, 512]
-        public static let decoderBuckets: [Int] = [256, 512, 1024, 2048, 4096]
-
+        /// The 8 default-path mlmodelc bundles (T = 57). Bucketed variants
+        /// are downloaded on demand by the synthesizer when a prompt's
+        /// token count exceeds the bucket below it.
         public static let requiredModels: Set<String> = [
-            textPredictor32File,
-            textPredictor64File,
-            textPredictor128File,
-            textPredictor256File,
-            textPredictor512File,
-            diffusionStep512File,
-            f0nEnergyFile,
-            decoder256File,
-            decoder512File,
-            decoder1024File,
-            decoder2048File,
-            decoder4096File,
-            vocabularyFile,
-            configFile,
+            textEncoderFile,
+            bertFile,
+            refEncoderFile,
+            fusedDiffusionSamplerFile,
+            durationPredictorFile,
+            fusedF0nHarSourceFile,
+            decoderPreFile,
+            decoderUpsampleFile,
         ]
+
+        /// All 14 mlmodelc bundles (8 defaults + 6 bucket variants). Used
+        /// when the caller wants to pre-stage every artefact at install
+        /// time (e.g. CLI download command).
+        public static let allModels: Set<String> = requiredModels.union([
+            bertT64File, bertT128File, bertT256File,
+            fusedDiffusionSamplerT64File, fusedDiffusionSamplerT128File, fusedDiffusionSamplerT256File,
+        ])
+
+        /// Sentinel used by the downloader to fetch only the bucket variants
+        /// for a specific T. Returned set holds both the bert + sampler files
+        /// for that bucket.
+        public static func bucketModels(forT t: Int) -> Set<String> {
+            switch t {
+            case 64: return [bertT64File, fusedDiffusionSamplerT64File]
+            case 128: return [bertT128File, fusedDiffusionSamplerT128File]
+            case 256: return [bertT256File, fusedDiffusionSamplerT256File]
+            default: return []
+            }
+        }
     }
 
     /// Multilingual G2P (CharsiuG2P ByT5) model names
@@ -992,14 +1026,40 @@ public enum ModelNames {
         public static let vocab = "vocab.json"
         public static let defaultVoiceFile = "af_heart.bin"
 
+        /// Mandarin (`ANE-zh/`) default voice. Voice packs in the Mandarin
+        /// bundle live under a `voices/` subdirectory; the path is kept in
+        /// the constant so the existing "all-required-files-present" check
+        /// still resolves correctly when the file lands at
+        /// `<repoDir>/voices/zf_001.bin`.
+        public static let defaultVoiceFileZh = "voices/zf_001.bin"
+
+        /// Mandarin g2pW polyphone-disambiguator CoreML bundle. Lives under
+        /// `<repoDir>/g2pw/` — included in `requiredModelsZh` so the bulk
+        /// `ensureModels(.mandarin)` grab pulls it without an extra round
+        /// trip. The two auxiliary text files (`vocab.txt`,
+        /// `POLYPHONIC_CHARS.txt`) ship via the lazy
+        /// `KokoroAneResourceDownloader.ensureMandarinG2pw` helper because
+        /// `DownloadUtils.downloadRepo` does not whitelist `.txt` for
+        /// subPath repos and a manual fetch keeps the bulk-grab matcher
+        /// idempotent.
+        public static let g2pwModelZh = "g2pw/g2pw.mlmodelc"
+
         /// All seven .mlmodelc bundles.
         public static let requiredCoreMLModels: Set<String> = [
             albert, postAlbert, alignment, prosody, noise, vocoder, tail,
         ]
 
-        /// CoreML bundles + the vocab JSON + the default voice .bin.
+        /// CoreML bundles + the vocab JSON + the English default voice .bin.
         public static var requiredModels: Set<String> {
             requiredCoreMLModels.union([vocab, defaultVoiceFile])
+        }
+
+        /// CoreML bundles + the vocab JSON + the Mandarin default voice .bin
+        /// (under `voices/`) + the g2pW CoreML bundle (under `g2pw/`).
+        public static var requiredModelsZh: Set<String> {
+            requiredCoreMLModels.union([
+                vocab, defaultVoiceFileZh, g2pwModelZh,
+            ])
         }
     }
 
@@ -1047,10 +1107,10 @@ public enum ModelNames {
                 .union(ModelNames.MultilingualG2P.requiredModels)
         case .pocketTts:
             return ModelNames.PocketTTS.requiredModels
-        case .styleTts2:
-            return ModelNames.StyleTTS2.requiredModels
         case .kokoroAne:
             return ModelNames.KokoroAne.requiredModels
+        case .kokoroAneZh:
+            return ModelNames.KokoroAne.requiredModelsZh
         case .sortformer:
             if let variant = variant {
                 return [variant]
@@ -1071,6 +1131,23 @@ public enum ModelNames {
             return ModelNames.CohereTranscribe.requiredModels
         case .magpieTts:
             return ModelNames.Magpie.requiredModels
+        case .styletts2:
+            // Sentinel variants:
+            //   "all"     → 14 bundles (8 defaults + 6 buckets)
+            //   "t64" / "t128" / "t256" → just that bucket pair
+            //   nil       → 8 default mlmodelc bundles
+            switch variant {
+            case "all":
+                return ModelNames.StyleTTS2.allModels
+            case "t64":
+                return ModelNames.StyleTTS2.bucketModels(forT: 64)
+            case "t128":
+                return ModelNames.StyleTTS2.bucketModels(forT: 128)
+            case "t256":
+                return ModelNames.StyleTTS2.bucketModels(forT: 256)
+            default:
+                return ModelNames.StyleTTS2.requiredModels
+            }
         }
     }
 }

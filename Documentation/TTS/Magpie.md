@@ -5,10 +5,49 @@ Lives under `Sources/FluidAudio/TTS/Magpie/`.
 
 ## Status
 
-> ⚠️ **Beta / experimental.** Below real-time on Apple Silicon
+> ⚠️ **Batch model. Beta / experimental.** Magpie is a **batch / offline
+> TTS model** — not a streaming model. Below real-time on Apple Silicon
 > (agg-RTFx ~0.41× on M2). Not for latency-sensitive use; prefer
 > Kokoro / Kokoro ANE or PocketTTS for real-time. Initializing
 > `MagpieTtsManager` logs a runtime beta warning at `.warning` level.
+
+## Batch / offline inference (not streaming)
+
+Magpie is a **batch model**. Despite NVIDIA marketing copy describing
+Magpie as "targeting streaming applications," the released NeMo
+inference path is batch-only:
+
+- `MagpieTTSModel.infer_batch` / `do_tts` in
+  `nemo/collections/tts/models/magpietts.py` runs the AR loop to
+  completion, accumulating every audio code into `state.all_predictions`
+  (≈ lines 6850–6860).
+- After the loop, codes are concatenated
+  (`torch.cat(state.all_predictions, dim=-1)`) and the codec is invoked
+  exactly once per utterance via
+  `self._codec_helper.codes_to_audio(predicted_codes, predicted_codes_lens)`
+  (≈ lines 5334–5351 / 6889–6891).
+- There is no incremental codec dispatch, no per-step yield, and no
+  callback hook anywhere in the released NeMo path.
+
+The Swift port preserves these batch semantics:
+
+- `MagpieTtsManager.synthesize(text:...)` is the only entry point — it
+  returns a single `MagpieSynthesisResult` after the full AR loop and
+  codec pass complete. There is no streaming variant; long inputs are
+  sentence-split internally via `MagpieChunker` so each chunk fits
+  NanoCodec's 256-frame static-shape cap, but the full result is
+  concatenated and returned as one buffer.
+- Within `synthesize(...)`, AR(N+1) ‖ codec(N) chunk-level pipelining
+  overlaps the next chunk's AR loop with the current chunk's codec
+  pass. This is a wallclock optimization, not incremental yield.
+- `MagpieNanocodec`'s v2/v3 24-frame chunked sliding-window dispatch is
+  a memory + first-audio-latency optimization on the CoreML side; it is
+  not codec-level streaming.
+
+If you need a TTS model that genuinely streams audio frame-by-frame as
+the AR loop emits codes, use **PocketTTS** (Mimi, ~1.2 s TTFT) or
+**Kokoro** (parallel, no AR loop). Magpie's value prop is multilingual
+coverage and the 5 built-in speaker contexts, not throughput or latency.
 
 Functional but **below real-time — not for latency-sensitive use.**
 On the full `minimax-english` 100-phrase corpus (M2, default compute
@@ -103,6 +142,54 @@ let result = try await manager.synthesize(
 // result.codeCount : Int
 // result.durationSeconds : Double
 ```
+
+## Cold-start mitigation (`warmup()`)
+
+Magpie's CoreML graphs are **ANE-resident**. Apple's `anecompilerservice`
+caches compiled graphs per-process, but invalidates that cache on
+**system sleep / wake** and after long idle periods. The next
+`synthesize` call after a wake event then stalls 10–20 s while the ANE
+graphs recompile — this is the user-visible "TTS hang" downstream apps
+see in cold-start scenarios (cf. VoiceInk issue #321).
+
+`MagpieTtsManager` runs an automatic warmup at the end of `initialize()`,
+so the first `synthesize` after app launch is fast. To mitigate the
+post-wake recompile, call `warmup()` from your app's wake-handler:
+
+```swift
+public func warmup() async throws  // throws .notInitialized if called pre-init
+```
+
+Recommended pattern:
+
+```swift
+// 1. App launch — no manual warmup needed; initialize() runs it.
+let manager = try await MagpieTtsManager.downloadAndCreate(languages: [.english])
+
+// 2. App wake / re-foreground — re-warm in the background so the next
+// synthesize() doesn't pay ANE recompile cost.
+NotificationCenter.default.addObserver(
+    forName: NSApplication.didBecomeActiveNotification, object: nil, queue: nil
+) { _ in
+    Task { try? await manager.warmup() }
+}
+```
+
+Implementation runs a 16-step throwaway synthesis on a single `.` input
+(CFG off, output discarded) to force first-dispatch specialization across
+`text_encoder` → `prefill` → `decoder_step` → `nanocodec_decoder`. Total
+wall time ≈ 1.5–2 s on M2.
+
+`warmup()` is **safe to call repeatedly**. There is no internal
+"already warm" guard — if the ANE state is still warm, the predict()
+calls run fast; if the cache was invalidated, the method pays the
+recompile so your next user-facing synthesize doesn't.
+
+> **Note:** `warmup()` does not dispatch to a background queue
+> internally. Wrap the call in `Task { ... }` if you don't want to
+> block the calling context. The same applies to `initialize()` — both
+> are normal `async` functions that run on whatever executor the caller
+> awaits them from.
 
 ## CLI
 

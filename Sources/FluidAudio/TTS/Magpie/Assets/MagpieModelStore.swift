@@ -1,6 +1,17 @@
 @preconcurrency import CoreML
 import Foundation
 
+/// Which chunked nanocodec build to load.
+/// `.fp32` (v3) is the audibly-clean default; `.fp16` (v2) is faster
+/// (~4×, partial ANE) but noisy on voiced speech. `.fp32Pal` (v4) is
+/// fp32 compute with 8-bit kmeans palettized weights — acoustically
+/// transparent vs v3 at ~4× smaller on disk and ~11 % lower peak RSS.
+public enum MagpieNanocodecPrecision: String, Sendable {
+    case fp16
+    case fp32
+    case fp32Pal
+}
+
 /// Actor-based store for Magpie CoreML models + constants + LocalTransformer weights.
 ///
 /// Manages loading of 3 required models (text_encoder, decoder_step, nanocodec_decoder)
@@ -14,6 +25,8 @@ public actor MagpieModelStore {
     private var textEncoderModel: MLModel?
     private var decoderPrefillModel: MLModel?  // optional fast path
     private var decoderStepModel: MLModel?
+    /// v3 / v2 / v1 nanocodec — `MagpieNanocodec` chunks based on the
+    /// model's input shape.
     private var nanocodecDecoderModel: MLModel?
 
     private var constantsBundle: MagpieConstantsBundle?
@@ -24,19 +37,23 @@ public actor MagpieModelStore {
     private let directory: URL?
     private let computeUnits: MLComputeUnits
     private let preferredLanguages: Set<MagpieLanguage>
+    private let nanocodecPrecision: MagpieNanocodecPrecision
 
     /// - Parameters:
     ///   - directory: Optional override for the base cache directory.
     ///   - computeUnits: CoreML compute preference for all models.
-    ///   - preferredLanguages: Set of languages whose tokenizer data should be fetched.
+    ///   - preferredLanguages: Languages whose tokenizer data is fetched.
+    ///   - nanocodecPrecision: Chunked nanocodec build (default `.fp32`).
     public init(
         directory: URL? = nil,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        preferredLanguages: Set<MagpieLanguage> = [.english]
+        preferredLanguages: Set<MagpieLanguage> = [.english],
+        nanocodecPrecision: MagpieNanocodecPrecision = .fp32
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
         self.preferredLanguages = preferredLanguages
+        self.nanocodecPrecision = nanocodecPrecision
     }
 
     /// Download (if missing) and load all Magpie CoreML models + constants.
@@ -57,32 +74,36 @@ public actor MagpieModelStore {
         let config = MLModelConfiguration()
         config.computeUnits = computeUnits
 
-        // `decoder_step.mlmodelc` reliably fails ANE compilation
-        // (`MILCompilerForANE error: ANECCompile() FAILED`) due to its rank-4
-        // split-K/V scatter layout, then falls back to CPU at the cost of one
-        // failed ANE compile attempt per call (~hundreds of ms each). Pin it
-        // to `.cpuAndGPU` so CoreML skips the ANE attempt entirely and runs
-        // on Metal MPS — verified end-to-end as the fastest path
-        // (96s warm vs 103s warm on `.cpuAndNeuralEngine`).
-        let gpuConfig = MLModelConfiguration()
-        gpuConfig.computeUnits =
-            computeUnits == .cpuOnly ? .cpuOnly : .cpuAndGPU
+        // `decoder_step` is 97 % ANE-resident; pinning to ANE is ~2× faster
+        // than CPU+GPU and the only path that terminates correctly via EOS.
+        let aneConfig = MLModelConfiguration()
+        aneConfig.computeUnits =
+            computeUnits == .cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
 
-        // `nanocodec_decoder.mlmodelc` is fastest on **CPU only**. The model's
-        // upsample stack (5 transposed convs + 96 sin/pow per-frame embedding
-        // ops + 86 LeakyReLU) doesn't map well onto Metal MPS, and ANE compile
-        // fails on its conv stack. Empirically (M-series, single fwd of 256
-        // frames):
-        //   .cpuOnly             ~2.87 s
-        //   .cpuAndGPU           ~3.86 s
-        //   .cpuAndNeuralEngine ~10.12 s   (ANE compile fail → CPU fallback dance)
-        //   .all                 ~2.95 s
-        // Putting it on `.cpuAndGPU` also makes `decoder_step` ~40 ms/step
-        // because both contend for the same Metal queue. Pinning nanocodec to
-        // CPU keeps Metal exclusive for decoder_step (25 ms/step) and saves a
-        // full second on the nanocodec call → ~1.03x RTFx vs ~0.91x before.
-        let cpuConfig = MLModelConfiguration()
-        cpuConfig.computeUnits = .cpuOnly
+        // Nanocodec compute units track precision: fp32 / fp32Pal → CPU-only
+        // (ANE is fp16-only; palettized weights dequantize to fp32 at runtime
+        // so compute is still fp32); fp16 → ANE unless caller explicitly
+        // pinned CPU.
+        func nanocodecConfig(for precision: MagpieNanocodecPrecision) -> MLModelConfiguration {
+            let cfg = MLModelConfiguration()
+            switch precision {
+            case .fp32, .fp32Pal:
+                cfg.computeUnits = .cpuOnly
+            case .fp16:
+                cfg.computeUnits =
+                    computeUnits == .cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
+            }
+            return cfg
+        }
+
+        // Filename for a chunked nanocodec build.
+        func nanocodecFile(for precision: MagpieNanocodecPrecision) -> String {
+            switch precision {
+            case .fp16: return ModelNames.Magpie.nanocodecDecoderV2File
+            case .fp32: return ModelNames.Magpie.nanocodecDecoderV3File
+            case .fp32Pal: return ModelNames.Magpie.nanocodecDecoderV4File
+            }
+        }
 
         let loadStart = Date()
 
@@ -95,14 +116,51 @@ public actor MagpieModelStore {
         decoderStepModel = try loadModel(
             repoDir: repoDir,
             fileName: ModelNames.Magpie.decoderStepFile,
-            config: gpuConfig,
+            config: aneConfig,
             required: true)
 
-        nanocodecDecoderModel = try loadModel(
-            repoDir: repoDir,
-            fileName: ModelNames.Magpie.nanocodecDecoderFile,
-            config: cpuConfig,
-            required: true)
+        // Try the requested precision, then the other chunked builds in a
+        // sensible audibility-preserving order, then the legacy monolithic
+        // v1. Each candidate carries its own config so the fallback doesn't
+        // inherit the primary's compute-unit selection. fp16 (v2) is only
+        // reached when explicitly requested or when no other candidate is
+        // present, since it's audibly noisy on voiced speech.
+        let fallbackOrder: [MagpieNanocodecPrecision]
+        switch nanocodecPrecision {
+        case .fp32Pal:
+            fallbackOrder = [.fp32Pal, .fp32, .fp16]
+        case .fp32:
+            fallbackOrder = [.fp32, .fp32Pal, .fp16]
+        case .fp16:
+            fallbackOrder = [.fp16, .fp32Pal, .fp32]
+        }
+
+        for (index, candidate) in fallbackOrder.enumerated() {
+            let candidateName = nanocodecFile(for: candidate)
+            if index > 0 {
+                logger.warning(
+                    "Requested \(fallbackOrder[0].rawValue) nanocodec absent; trying \(candidate.rawValue) (\(candidateName))"
+                )
+            }
+            nanocodecDecoderModel = try loadModel(
+                repoDir: repoDir,
+                fileName: candidateName,
+                config: nanocodecConfig(for: candidate),
+                required: false)
+            if nanocodecDecoderModel != nil { break }
+        }
+        if nanocodecDecoderModel == nil {
+            logger.notice(
+                "No chunked nanocodec (v2/v3/v4) present; falling back to legacy monolithic CPU-only nanocodec_decoder.mlmodelc (audibly noisy)"
+            )
+            let monolithicConfig = MLModelConfiguration()
+            monolithicConfig.computeUnits = .cpuOnly
+            nanocodecDecoderModel = try loadModel(
+                repoDir: repoDir,
+                fileName: ModelNames.Magpie.nanocodecDecoderFile,
+                config: monolithicConfig,
+                required: true)
+        }
 
         decoderPrefillModel = try loadModel(
             repoDir: repoDir,

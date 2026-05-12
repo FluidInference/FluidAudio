@@ -13,6 +13,18 @@ import Foundation
 ///        embed current 8 codes → `decoder_step` → LT sample → new codes.
 ///   6. NanoCodec decode → fp32 PCM 22 kHz.
 ///   7. Peak-normalize to 0.9 when `options.peakNormalize`.
+///
+/// **Batch semantics.** Steps 5–6 are fully offline-batch within each
+/// chunk — the AR loop accumulates *all* codebook rows for the chunk
+/// before NanoCodec is invoked, exactly mirroring NeMo upstream's
+/// `MagpieTTSModel.infer_batch` / `do_tts` (`nemo/collections/tts/models/
+/// magpietts.py`, ≈ lines 6850–6891 and 5334–5351), where
+/// `state.all_predictions` is concatenated and `_codec_helper.codes_to_audio`
+/// runs exactly once after the loop. There is no incremental / partial
+/// codec dispatch inside the AR loop. `synthesize(text:...)` chunks at
+/// the *text* level so each chunk fits the NanoCodec 256-frame static-
+/// shape cap; the chunk-level pipelining below (AR(N+1) ‖ codec(N)) is a
+/// throughput optimization, not native model streaming.
 public actor MagpieSynthesizer {
 
     private let logger = AppLogger(category: "MagpieSynthesizer")
@@ -221,139 +233,6 @@ public actor MagpieSynthesizer {
         let seconds: Double
     }
 
-    /// Streaming variant of `synthesize(text:...)`: yields `MagpieAudioChunk`s
-    /// as each chunk's codec decode finishes, instead of returning a single
-    /// concatenated buffer at the end.
-    ///
-    /// The chunker uses a smaller cap on the *first* chunk
-    /// (`MagpieChunker.streamingFirstChunkCap`, ~50 codec frames ≈ 2.3 s) so
-    /// time-to-first-audio drops from "all-text AR loop" to roughly
-    /// `prefill + (50-step AR loop) + nanocodec ≈ 1.5–4 s` on M-series. Later
-    /// chunks pack normally (≤ `MagpieChunker.maxCodesPerChunk` = 220 codes).
-    ///
-    /// Producer/consumer split internal:
-    ///   - Producer task runs the AR loop on the actor and pushes per-chunk
-    ///     `ChunkFrames` into an internal `AsyncThrowingStream`.
-    ///   - Consumer (this method's body) drains those, runs `nanocodec_decoder`
-    ///     on a detached task per chunk, applies a 5 ms edge-fade, and yields
-    ///     the resulting `MagpieAudioChunk` to the public stream.
-    ///
-    /// AR (slow, GPU/Metal) overlaps nanocodec (fast, CPU) via actor
-    /// reentrancy: while the consumer is awaiting a detached nanocodec task,
-    /// the actor is free for the producer to run the next AR loop.
-    ///
-    /// Cancellation: cancelling the consumer task (or breaking out of the
-    /// `for try await` loop) terminates the producer task as well.
-    ///
-    /// Note: `peakNormalize` is force-disabled for the stream (we can't peak-
-    /// normalize incrementally without changing chunk gain mid-stream).
-    public nonisolated func synthesizeStream(
-        text: String, speaker: MagpieSpeaker, language: MagpieLanguage,
-        options: MagpieSynthesisOptions
-    ) -> AsyncThrowingStream<MagpieAudioChunk, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    try await self.produceStream(
-                        text: text, speaker: speaker, language: language,
-                        options: options, continuation: continuation)
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-
-    private func produceStream(
-        text: String, speaker: MagpieSpeaker, language: MagpieLanguage,
-        options: MagpieSynthesisOptions,
-        continuation: AsyncThrowingStream<MagpieAudioChunk, Error>.Continuation
-    ) async throws {
-        let chunks = MagpieChunker.chunkForStreaming(text: text, language: language)
-        logger.info(
-            "[stream] chunker produced \(chunks.count) chunk(s) "
-                + "from \(text.count)-char input (lang=\(language.rawValue))")
-        guard !chunks.isEmpty else { return }
-
-        var perChunkOptions = options
-        perChunkOptions.peakNormalize = false
-
-        let sampleRate = MagpieConstants.audioSampleRate
-        let nanoModel = try await store.nanocodecDecoder()
-        let numCodebooks = try await store.constants().config.numCodebooks
-        let totalChunks = chunks.count
-
-        // Producer/consumer pipe.
-        let (framesStream, framesContinuation) = AsyncThrowingStream<
-            ProducedFrames, Error
-        >.makeStream()
-
-        // Producer: AR loop on actor. Pushes each chunk's frames as soon as
-        // they're ready.
-        let producerTokenizer = self.tokenizer
-        let producer = Task {
-            do {
-                for (i, chunk) in chunks.enumerated() {
-                    try Task.checkCancellation()
-                    let tokenized = try await producerTokenizer.tokenize(
-                        chunk.text, language: language, options: perChunkOptions)
-                    let frames = try await self.synthesizeFrames(
-                        tokenized: tokenized, speaker: speaker,
-                        options: perChunkOptions)
-                    framesContinuation.yield(
-                        ProducedFrames(index: i, frames: frames, chunk: chunk))
-                }
-                framesContinuation.finish()
-            } catch {
-                framesContinuation.finish(throwing: error)
-            }
-        }
-        defer { producer.cancel() }
-
-        // Consumer: drain frames, run nano per chunk, yield audio in order.
-        var consumed = 0
-        for try await produced in framesStream {
-            try Task.checkCancellation()
-            let isFinal = (produced.index == totalChunks - 1)
-            let rows = produced.frames.codebookRows
-            let pauseMs = produced.chunk.pauseAfterMs
-            let nanoTask = Self.startNanoFramesTask(
-                model: nanoModel, numCodebooks: numCodebooks, rows: rows)
-            var samples = try await nanoTask.value
-            Self.applyEdgeFade(&samples, sampleRate: sampleRate)
-            if !isFinal && pauseMs > 0 {
-                let pad = (pauseMs * sampleRate) / 1_000
-                if pad > 0 {
-                    samples.append(
-                        contentsOf: Swift.Array<Float>(repeating: 0, count: pad))
-                }
-            }
-            let audioChunk = MagpieAudioChunk(
-                samples: samples,
-                sampleRate: sampleRate,
-                sequenceIndex: produced.index,
-                isFinal: isFinal,
-                text: produced.chunk.text,
-                codeCount: produced.frames.numFrames,
-                finishedOnEos: produced.frames.finishedOnEos)
-            continuation.yield(audioChunk)
-            consumed += 1
-        }
-
-        if consumed != totalChunks {
-            logger.warning(
-                "[stream] producer ended early: \(consumed)/\(totalChunks) chunks yielded")
-        }
-    }
-
-    private struct ProducedFrames: Sendable {
-        let index: Int
-        let frames: ChunkFrames
-        let chunk: MagpieTextChunk
-    }
-
     /// Nonisolated factory for the chunked-path detached task. Creating
     /// `Task.detached` from a nonisolated static context (rather than from
     /// inside an actor method) keeps the closure itself nonisolated, which
@@ -370,20 +249,9 @@ public actor MagpieSynthesizer {
         }
     }
 
-    /// Nonisolated factory for the streaming-path detached task. See
-    /// `startNanoChunkTask` for the rationale.
-    nonisolated private static func startNanoFramesTask(
-        model: sending MLModel, numCodebooks: Int, rows: sending [[Int32]]
-    ) -> Task<[Float], Error> {
-        Task.detached(priority: .utility) {
-            try Self.decodeNanoFrames(
-                model: model, numCodebooks: numCodebooks, rows: rows)
-        }
-    }
-
     /// Nonisolated nanocodec wrapper used by detached tasks in the chunked
-    /// non-streaming path. Returning a `Sendable` `NanocodecJobResult` lets
-    /// the result cross the actor boundary cleanly without tripping Swift 6
+    /// batch path. Returning a `Sendable` `NanocodecJobResult` lets the
+    /// result cross the actor boundary cleanly without tripping Swift 6
     /// region-based isolation.
     nonisolated private static func decodeNanoChunk(
         model: MLModel, numCodebooks: Int, rows: [[Int32]], chunkIndex: Int
@@ -395,29 +263,6 @@ public actor MagpieSynthesizer {
             chunkIndex: chunkIndex,
             samples: samples,
             seconds: Date().timeIntervalSince(start))
-    }
-
-    /// Nonisolated nanocodec wrapper used by detached tasks in the streaming
-    /// path. Returns the raw `[Float]` PCM buffer (Sendable).
-    nonisolated private static func decodeNanoFrames(
-        model: MLModel, numCodebooks: Int, rows: [[Int32]]
-    ) throws -> [Float] {
-        let nano = MagpieNanocodec(model: model, numCodebooks: numCodebooks)
-        return try nano.decode(frames: rows)
-    }
-
-    /// 5 ms linear fade-in/out at chunk boundaries to mask zero-crossing pops
-    /// when chunks are concatenated by the consumer.
-    private static func applyEdgeFade(_ samples: inout [Float], sampleRate: Int) {
-        let fadeMs = 5
-        let fadeLen = (fadeMs * sampleRate) / 1_000
-        let n = min(fadeLen, samples.count / 2)
-        guard n > 0 else { return }
-        for i in 0..<n {
-            let t = Float(i) / Float(n)
-            samples[i] *= t
-            samples[samples.count - 1 - i] *= t
-        }
     }
 
     /// Codebook rows + per-stage timings for a single chunk; the nanocodec

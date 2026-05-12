@@ -112,48 +112,6 @@ public struct MagpieSynthesisTimings: Sendable {
     }
 }
 
-/// One incremental output of a streaming synthesis call.
-///
-/// Audio chunks arrive in sequence (`sequenceIndex` strictly increasing). They
-/// can be played gaplessly: each non-final chunk's `samples` already includes
-/// the trailing silence the chunker assigned for natural prosody breaks at
-/// sentence/clause boundaries, plus a brief edge-fade at both ends to mask
-/// any boundary discontinuity.
-public struct MagpieAudioChunk: Sendable {
-    /// fp32 PCM samples in [-1, 1], mono.
-    public let samples: [Float]
-    /// Always `MagpieConstants.audioSampleRate` (22050 Hz).
-    public let sampleRate: Int
-    /// 0-based index into the chunk sequence for this synthesis call.
-    public let sequenceIndex: Int
-    /// `true` for the last chunk of the call (after which the stream finishes).
-    public let isFinal: Bool
-    /// Source text for this chunk — useful for rolling captions.
-    public let text: String
-    /// Number of codec frames (pre-NanoCodec) that produced this chunk.
-    public let codeCount: Int
-    /// Whether the AR loop ended on EOS (vs hitting `maxSteps`) for this chunk.
-    public let finishedOnEos: Bool
-
-    public init(
-        samples: [Float], sampleRate: Int, sequenceIndex: Int, isFinal: Bool,
-        text: String, codeCount: Int, finishedOnEos: Bool
-    ) {
-        self.samples = samples
-        self.sampleRate = sampleRate
-        self.sequenceIndex = sequenceIndex
-        self.isFinal = isFinal
-        self.text = text
-        self.codeCount = codeCount
-        self.finishedOnEos = finishedOnEos
-    }
-
-    public var durationSeconds: Double {
-        guard sampleRate > 0 else { return 0 }
-        return Double(samples.count) / Double(sampleRate)
-    }
-}
-
 /// Result of a synthesis call.
 public struct MagpieSynthesisResult: Sendable {
     /// 32-bit float PCM samples in [-1, 1], mono.

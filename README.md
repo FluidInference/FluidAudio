@@ -104,6 +104,8 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Sayboard](https://github.com/stanlsv/sayboard)** | Privacy-first AI voice keyboard for iOS. Local models, no servers, no tracking, no subscriptions, no ads, no in-app purchases. Fully offline and open-source. |
 | **[Kesha Voice Kit](https://github.com/drakulavich/kesha-voice-kit)** | Open-source voice toolkit for Apple Silicon. CLI tool and [OpenClaw](https://github.com/openclaw/openclaw) skill that gives LLM agents local speech-to-text in 25 languages. Uses Parakeet TDT ASR via FluidAudio. |
 | **[Dictato](https://dicta.to)** | Turn your voice into text anywhere on your Mac. Fully local, private, and offline — boost your own vocabulary and dictate in multiple languages. Uses Parakeet TDT ASR. |
+| **[Utter](https://github.com/joepetrakovich/utter)** | An ultra-minimal speech-to-text status bar utility for Mac.  Register a hotkey and go. |
+| **[Resonant](https://onresonant.com)** | macOS voice workspace for dictation, meetings, and ambient work context. Uses FluidAudio for local transcription and speaker diarization. |
 
 ## Installation
 

@@ -115,6 +115,18 @@ public actor PunctuationCommitLayer {
     /// Active debounce timer task.
     private var debounceTask: Task<Void, Never>?
 
+    /// Monotonically increasing generation for the active debounce timer.
+    ///
+    /// Incremented whenever a pending timer is invalidated (new partial
+    /// text, EOU, manual commit, reset, or a fresh timer being started).
+    /// The timer task captures the generation it was created under and
+    /// re-checks it after landing back on the actor, which closes the
+    /// race where `Task.sleep` already returned and the
+    /// `!Task.isCancelled` guard passed before a subsequent call to
+    /// `processPartialText` / `processEOU` / `manualCommit` / `reset`
+    /// requested cancellation.
+    private var debounceGeneration: UInt64 = 0
+
     /// Callback invoked when updates occur.
     private var updateCallback: (@Sendable (CommitLayerUpdate) -> Void)?
 
@@ -149,7 +161,7 @@ public actor PunctuationCommitLayer {
     /// - Returns: Update containing committed text, ghost text, and commit reason.
     public func processPartialText(_ text: String) async -> CommitLayerUpdate {
         // Cancel existing debounce timer
-        debounceTask?.cancel()
+        invalidateDebounce()
         lastUpdateTime = Date()
 
         // Find last punctuation mark in text
@@ -223,7 +235,7 @@ public actor PunctuationCommitLayer {
     ///
     /// - Returns: Update with all text committed and EOU commit reason.
     public func processEOU() async -> CommitLayerUpdate {
-        debounceTask?.cancel()
+        invalidateDebounce()
         lastUpdateTime = Date()
 
         // EOU signals end of utterance: commit everything
@@ -262,7 +274,7 @@ public actor PunctuationCommitLayer {
     ///
     /// - Returns: Update with ghost text promoted to committed text.
     public func manualCommit() async -> CommitLayerUpdate {
-        debounceTask?.cancel()
+        invalidateDebounce()
         lastUpdateTime = Date()
 
         guard !ghostText.isEmpty else {
@@ -298,7 +310,7 @@ public actor PunctuationCommitLayer {
 
     /// Resets the commit layer, clearing all committed and ghost text.
     public func reset() async {
-        debounceTask?.cancel()
+        invalidateDebounce()
         committedText = ""
         ghostText = ""
         lastUpdateTime = Date()
@@ -323,9 +335,19 @@ public actor PunctuationCommitLayer {
 
     // MARK: - Private Helpers
 
+    /// Cancels any pending debounce timer and bumps the generation so any
+    /// timer task already past its `!Task.isCancelled` guard becomes a
+    /// no-op when it lands back on the actor.
+    private func invalidateDebounce() {
+        debounceTask?.cancel()
+        debounceTask = nil
+        debounceGeneration &+= 1
+    }
+
     /// Starts a debounce timer that commits ghost text after the timeout expires.
     private func startDebounceTimer() {
-        debounceTask?.cancel()
+        invalidateDebounce()
+        let pendingGeneration = debounceGeneration
 
         debounceTask = Task { [weak self, debounceTimeout, commitOnTimeout] in
             try? await Task.sleep(nanoseconds: UInt64(debounceTimeout * 1_000_000_000))
@@ -337,9 +359,19 @@ public actor PunctuationCommitLayer {
             if commitOnTimeout {
                 // Check cancellation again before acquiring actor executor
                 guard !Task.isCancelled else { return }
-                await self.commitGhostText(reason: .debounceTimeout)
+                await self.fireDebounceCommit(generation: pendingGeneration)
             }
         }
+    }
+
+    /// Commits ghost text only if no newer timer / commit / reset has
+    /// superseded the timer that scheduled this commit. Closes the race
+    /// where `Task.sleep` returns and `!Task.isCancelled` is observed
+    /// `false` *before* a subsequent call to `processPartialText`,
+    /// `processEOU`, `manualCommit`, or `reset` cancels us.
+    private func fireDebounceCommit(generation: UInt64) async {
+        guard generation == debounceGeneration else { return }
+        await commitGhostText(reason: .debounceTimeout)
     }
 
     /// Commits ghost text to committed text with the specified reason.
