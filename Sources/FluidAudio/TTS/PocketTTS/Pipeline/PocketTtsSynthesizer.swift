@@ -273,8 +273,8 @@ public struct PocketTtsSynthesizer {
         //  - Shipped voices (cacheSnapshot != nil): drop pre-baked K/V into
         //    cache, skip cond_step entirely (`promptLength == 0`, so the
         //    loop in `prefillKVCacheVoice` would be a no-op anyway).
-        //  - Cloned voices (flat audio prompt): feed every voice token
-        //    through cond_step.
+        //  - Cloned voices (flat audio prompt): feed `bos_before_voice`
+        //    plus every voice token through cond_step.
         let voiceKVSnapshot: KVCacheState
         if let snapshot = voiceData.cacheSnapshot {
             voiceKVSnapshot = try kvCacheStateFromSnapshot(
@@ -282,8 +282,9 @@ public struct PocketTtsSynthesizer {
         } else {
             let emptyState = try emptyKVCacheState(layers: condLayerKeys.layerCount)
             voiceKVSnapshot = try await prefillKVCacheVoice(
-                state: emptyState, voiceData: voiceData, model: condModel,
-                layerKeys: condLayerKeys
+                state: emptyState, voiceData: voiceData,
+                bosBeforeVoice: constants.bosBeforeVoice,
+                model: condModel, layerKeys: condLayerKeys
             )
         }
 
@@ -438,6 +439,7 @@ public struct PocketTtsSynthesizer {
                     var kvState = try await PocketTtsSynthesizer.prefillKVCache(
                         voiceData: voiceData,
                         textEmbeddings: textEmbeddings,
+                        bosBeforeVoice: constants.bosBeforeVoice,
                         model: condModel,
                         layerKeys: condLayerKeys
                     )
