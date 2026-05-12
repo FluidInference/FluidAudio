@@ -26,24 +26,38 @@ struct ChunkProcessor {
     /// Context samples prepended from previous chunk for mel spectrogram stability (80ms = 1 encoder frame).
     /// The FastConformer encoder's depthwise convolutions need left context for stable output.
     /// Without this, the first frames of a chunk may produce features that cause all-blank predictions.
+    ///
+    /// Issue #594: on `parakeet-tdt-0.6b-v3-coreml` with non-English audio
+    /// this prepend shifts the encoder's first-frame distribution enough
+    /// to make the SOS-primed decoder drift to its English-biased prior.
+    /// Callers can opt out via `ASRConfig.melChunkContext = false` to
+    /// restore clean non-English transcription at chunk boundaries.
     private let melContextSamples: Int = ASRConstants.samplesPerEncoderFrame  // 1280 samples = 80ms
 
     private var maxModelSamples: Int { ASRConstants.maxModelSamples }
 
-    private var chunkSamples: Int {
-        // Reserve space for context samples that will be prepended to non-first chunks.
-        // This ensures chunkSamples + melContextSamples <= maxModelSamples.
-        let maxActualChunk = maxModelSamples - melContextSamples  // 240000 - 1280 = 238720
+    /// Effective per-chunk mel-context size based on the runtime flag.
+    private func effectiveMelContextSamples(melChunkContext: Bool) -> Int {
+        melChunkContext ? melContextSamples : 0
+    }
+
+    /// Frame-aligned chunk size that reserves space for the context prepend
+    /// (or fills the encoder window when context is disabled).
+    private func chunkSamples(melChunkContext: Bool) -> Int {
+        let reserved = effectiveMelContextSamples(melChunkContext: melChunkContext)
+        let maxActualChunk = maxModelSamples - reserved
         let raw = max(maxActualChunk - ASRConstants.melHopSize, ASRConstants.samplesPerEncoderFrame)
         return raw / ASRConstants.samplesPerEncoderFrame * ASRConstants.samplesPerEncoderFrame
     }
-    private var overlapSamples: Int {
+
+    private func overlapSamples(forChunkSamples chunkSamples: Int) -> Int {
         let requested = Int(overlapSeconds * Double(ASRConstants.sampleRate))
         let capped = min(requested, chunkSamples / 2)
         return capped / ASRConstants.samplesPerEncoderFrame * ASRConstants.samplesPerEncoderFrame
     }
-    private var strideSamples: Int {
-        let raw = max(chunkSamples - overlapSamples, ASRConstants.samplesPerEncoderFrame)
+
+    private func strideSamples(forChunkSamples chunkSamples: Int) -> Int {
+        let raw = max(chunkSamples - overlapSamples(forChunkSamples: chunkSamples), ASRConstants.samplesPerEncoderFrame)
         return raw / ASRConstants.samplesPerEncoderFrame * ASRConstants.samplesPerEncoderFrame
     }
 
@@ -68,6 +82,13 @@ struct ChunkProcessor {
         let workers = await makeWorkerPool(using: manager, count: requestedConcurrency) ?? [manager]
         let decoderLayers = await manager.decoderLayerCount
         let maxModelSamples = self.maxModelSamples
+        // Issue #594: opt-out of PR #264's 80ms mel-context prepend for
+        // non-English audio. When disabled, expand chunks to fill the
+        // encoder window (no prepended frames).
+        let melChunkContext = await manager.melChunkContext
+        let melContextSamples = effectiveMelContextSamples(melChunkContext: melChunkContext)
+        let chunkSamples = self.chunkSamples(melChunkContext: melChunkContext)
+        let strideSamples = self.strideSamples(forChunkSamples: chunkSamples)
 
         var chunkOutputs: [[TokenWindow]?] = []
         var availableWorkers = Array(workers.indices)

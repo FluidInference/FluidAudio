@@ -650,6 +650,7 @@ extension ASRBenchmark {
         var streamingChunkDuration = 10.0
         var useStreamingEou = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
+        var melChunkContext = true  // Issue #594: opt-out of PR #264's 80ms mel-context prepend
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -717,6 +718,8 @@ extension ASRBenchmark {
                     }
                     i += 1
                 }
+            case "--no-mel-context":
+                melChunkContext = false
             default:
                 break
             }
@@ -743,6 +746,7 @@ extension ASRBenchmark {
         logger.info("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
         logger.info("   Test streaming: \(testStreaming ? "enabled" : "disabled")")
         logger.info("   Streaming EOU: \(useStreamingEou ? "enabled" : "disabled")")
+        logger.info("   Mel chunk context (PR #264): \(melChunkContext ? "enabled" : "disabled")")
         if testStreaming {
             logger.info("   Chunk duration: \(streamingChunkDuration)s")
         }
@@ -764,7 +768,8 @@ extension ASRBenchmark {
         let tdtConfig = TdtConfig(blankId: modelVersion.blankId)
         let asrConfig = ASRConfig(
             tdtConfig: tdtConfig,
-            encoderHiddenSize: modelVersion.encoderHiddenSize
+            encoderHiddenSize: modelVersion.encoderHiddenSize,
+            melChunkContext: melChunkContext
         )
 
         let asrManager = AsrManager(config: asrConfig)
@@ -1035,6 +1040,7 @@ extension ASRBenchmark {
                 --no-auto-download        Disable automatic dataset download
                 --test-streaming          Enable streaming simulation mode
                 --chunk-duration <secs>   Chunk duration for streaming mode (default: 0.1s, min: 1.0s)
+                --no-mel-context          Disable 80ms mel-context prepend (Issue #594; required for non-English long audio on v3)
                 --help, -h               Show this help message
 
             Description:

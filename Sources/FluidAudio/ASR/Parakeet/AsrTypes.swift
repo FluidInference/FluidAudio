@@ -23,6 +23,21 @@ public struct ASRConfig: Sendable {
     /// Default: 480,000 samples (~30 seconds at 16kHz)
     public let streamingThreshold: Int
 
+    /// Enable the 80ms (1 encoder frame) mel-context prepend on non-first
+    /// chunks in the long-form batch path. Added in PR #264 to fix
+    /// all-blank predictions at chunk boundaries on long English audio.
+    ///
+    /// Issue #594 root cause: on `parakeet-tdt-0.6b-v3-coreml` with
+    /// non-English audio, the 80ms prepend shifts the FastConformer
+    /// encoder's first-frame distribution just enough that the SOS-primed
+    /// TDT decoder drifts back to its English-biased prior. Disabling this
+    /// flag (`false`) restores clean French/multilingual transcription at
+    /// chunk boundaries while keeping parallel chunk processing.
+    ///
+    /// Default `true` preserves PR #264's blank-prediction fix on English.
+    /// Set to `false` for non-English long-form batch transcription.
+    public let melChunkContext: Bool
+
     public static let `default` = ASRConfig()
 
     public init(
@@ -31,7 +46,8 @@ public struct ASRConfig: Sendable {
         encoderHiddenSize: Int = ASRConstants.encoderHiddenSize,
         parallelChunkConcurrency: Int = 4,
         streamingEnabled: Bool = true,
-        streamingThreshold: Int = 480_000
+        streamingThreshold: Int = 480_000,
+        melChunkContext: Bool = true
     ) {
         self.sampleRate = sampleRate
         self.tdtConfig = tdtConfig
@@ -39,6 +55,7 @@ public struct ASRConfig: Sendable {
         self.parallelChunkConcurrency = max(1, parallelChunkConcurrency)
         self.streamingEnabled = streamingEnabled
         self.streamingThreshold = streamingThreshold
+        self.melChunkContext = melChunkContext
     }
 }
 

@@ -216,6 +216,7 @@ enum TranscribeCommand {
         var parakeetVariant: StreamingModelVariant?
         var language: Language?
         var encoderPrecision: ParakeetEncoderPrecision = .int8
+        var melChunkContext = true
 
         // Parse options
         var i = 1
@@ -293,6 +294,11 @@ enum TranscribeCommand {
                     encoderPrecision = precision
                     i += 1
                 }
+            case "--no-mel-context":
+                // Issue #594: opt-out of PR #264's 80ms mel-context prepend
+                // on non-first chunks. Restores clean transcription at chunk
+                // boundaries for non-English audio on parakeet-tdt-0.6b-v3.
+                melChunkContext = false
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
@@ -317,7 +323,8 @@ enum TranscribeCommand {
             await testBatchTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
                 outputJsonPath: outputJsonPath, modelVersion: modelVersion, customVocabPath: customVocabPath,
-                modelDir: modelDir, language: language, encoderPrecision: encoderPrecision)
+                modelDir: modelDir, language: language, encoderPrecision: encoderPrecision,
+                melChunkContext: melChunkContext)
         }
     }
 
@@ -325,7 +332,8 @@ enum TranscribeCommand {
     private static func testBatchTranscription(
         audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
         modelVersion: AsrModelVersion, customVocabPath: String?, modelDir: String? = nil,
-        language: Language? = nil, encoderPrecision: ParakeetEncoderPrecision = .int8
+        language: Language? = nil, encoderPrecision: ParakeetEncoderPrecision = .int8,
+        melChunkContext: Bool = true
     ) async {
         do {
             // Initialize ASR models
@@ -340,7 +348,8 @@ enum TranscribeCommand {
             let tdtConfig = TdtConfig(blankId: modelVersion.blankId)
             let asrConfig = ASRConfig(
                 tdtConfig: tdtConfig,
-                encoderHiddenSize: modelVersion.encoderHiddenSize
+                encoderHiddenSize: modelVersion.encoderHiddenSize,
+                melChunkContext: melChunkContext
             )
             let asrManager = AsrManager(config: asrConfig)
             try await asrManager.loadModels(models)
@@ -895,6 +904,7 @@ enum TranscribeCommand {
                 --model-dir <path>     Path to local model directory (skips download)
                 --custom-vocab <file>  Apply vocabulary boosting using terms from file (batch mode only)
                 --parakeet-variant <variant>  Use any Parakeet model via StreamingAsrManager protocol
+                --no-mel-context  Disable 80ms mel-context prepend (Issue #594; required for non-English long audio on v3)
 
             Streaming variants (for --parakeet-variant):
                 parakeet-eou-160ms, parakeet-eou-320ms, parakeet-eou-1280ms,

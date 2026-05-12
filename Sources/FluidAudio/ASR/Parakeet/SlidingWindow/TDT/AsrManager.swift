@@ -29,6 +29,13 @@ public actor AsrManager {
         config.parallelChunkConcurrency
     }
 
+    /// Issue #594: opt-out flag exposed to `ChunkProcessor`. When `false`,
+    /// disables PR #264's 80ms mel-context prepend so non-English audio
+    /// stops drifting at chunk boundaries.
+    internal var melChunkContext: Bool {
+        config.melChunkContext
+    }
+
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
     #if DEBUG
