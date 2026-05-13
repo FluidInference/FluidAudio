@@ -28,6 +28,7 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
   <a href="https://snaply.ai"><img src="Documentation/assets/snaply.png" height="40" alt="Snaply"></a>
   <a href="https://github.com/yazinsai/OpenOats"><img src="Documentation/assets/openoats.png" height="40" alt="OpenOats"></a>
   <a href="https://talat.app"><img src="Documentation/assets/talat.png" height="40" alt="Talat"></a>
+  <a href="https://thoth-app.com"><img src="Documentation/assets/thoth.png" height="40" alt="Thoth"></a>
 <!-- Add your app: submit logo via PR. The Fluid Inference team works to curate this and add new apps to the showcase section every couple of weeks. We appreciate your patience. -->
 </p>
 
@@ -106,6 +107,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Dictato](https://dicta.to)** | Turn your voice into text anywhere on your Mac. Fully local, private, and offline — boost your own vocabulary and dictate in multiple languages. Uses Parakeet TDT ASR. |
 | **[Utter](https://github.com/joepetrakovich/utter)** | An ultra-minimal speech-to-text status bar utility for Mac.  Register a hotkey and go. |
 | **[Resonant](https://onresonant.com)** | macOS voice workspace for dictation, meetings, and ambient work context. Uses FluidAudio for local transcription and speaker diarization. |
+| **[Thoth](https://thoth-app.com)** | Privacy-first meeting recorder for Mac. Records both sides of any call with dual-channel audio, transcribes locally with speaker diarization, and summarizes with on-device AI or BYOK cloud. Available on the Mac App Store. Featured in [MacGeneration](https://www.macg.co/logiciels/2026/05/thoth-une-nouvelle-app-de-transcription-axee-sur-les-reunions-et-le-temps-reel-308471). Uses Parakeet EOU and Parakeet TDT ASR. |
 
 ## Installation
 
