@@ -110,6 +110,30 @@ final class TdtRefactoredComponentsTests: XCTestCase {
         XCTAssertEqual(result, -30, "Should handle negative offsets")
     }
 
+    func testWarmupPrefixEmissionSuppressionUsesGlobalBoundary() {
+        XCTAssertFalse(
+            TdtDecoderV3.shouldEmitToken(
+                emissionTimestamp: 161,
+                emitTokensAfterGlobalFrame: 162
+            ),
+            "Tokens before the real chunk body are warmup-only"
+        )
+        XCTAssertTrue(
+            TdtDecoderV3.shouldEmitToken(
+                emissionTimestamp: 162,
+                emitTokensAfterGlobalFrame: 162
+            ),
+            "Tokens at the body boundary should be emitted"
+        )
+        XCTAssertTrue(
+            TdtDecoderV3.shouldEmitToken(
+                emissionTimestamp: 10,
+                emitTokensAfterGlobalFrame: nil
+            ),
+            "Normal decode paths emit all non-blank tokens"
+        )
+    }
+
     // MARK: - TdtDurationMapping Tests
 
     func testMapDurationBinValidIndices() throws {

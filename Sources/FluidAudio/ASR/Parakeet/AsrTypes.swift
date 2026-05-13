@@ -27,15 +27,15 @@ public struct ASRConfig: Sendable {
     /// chunks in the long-form batch path. Added in PR #264 to fix
     /// all-blank predictions at chunk boundaries on long English audio.
     ///
-    /// Issue #594 root cause: on `parakeet-tdt-0.6b-v3-coreml` with
-    /// non-English audio, the 80ms prepend shifts the FastConformer
-    /// encoder's first-frame distribution just enough that the SOS-primed
-    /// TDT decoder drifts back to its English-biased prior. Disabling this
-    /// flag (`false`) restores clean French/multilingual transcription at
-    /// chunk boundaries while keeping parallel chunk processing.
+    /// Issue #594 root cause: on `parakeet-tdt-0.6b-v3-coreml` multilingual
+    /// long-form audio, the 80ms prepend can shift the FastConformer encoder's
+    /// first-frame distribution enough that the SOS-primed TDT decoder drifts
+    /// back to its English-biased prior. Disabling this flag (`false`) lets
+    /// the v3 batch path use acoustic warmup plus silence-aligned starts while
+    /// keeping parallel chunk processing.
     ///
     /// Default `true` preserves PR #264's blank-prediction fix on English.
-    /// Set to `false` for non-English long-form batch transcription.
+    /// Set to `false` for v3 multilingual long-form batch transcription.
     public let melChunkContext: Bool
 
     public static let `default` = ASRConfig()

@@ -11,7 +11,9 @@ extension AsrManager {
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
         globalFrameOffset: Int = 0,
-        language: Language? = nil
+        language: Language? = nil,
+        emitTokensAfterGlobalFrame: Int? = nil,
+        initialTimeIndexOverride: Int? = nil
     ) async throws -> (hypothesis: TdtHypothesis, encoderSequenceLength: Int) {
 
         let preprocessorInput = try await preparePreprocessorInput(
@@ -70,7 +72,9 @@ extension AsrManager {
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,
                 globalFrameOffset: globalFrameOffset,
-                language: language
+                language: language,
+                emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
+                initialTimeIndexOverride: initialTimeIndexOverride
             )
 
             if let preprocessorAudioArray {

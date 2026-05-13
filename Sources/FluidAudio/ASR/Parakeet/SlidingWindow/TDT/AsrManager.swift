@@ -25,13 +25,17 @@ public actor AsrManager {
         asrModels?.version.decoderLayers ?? 2
     }
 
+    internal var modelVersion: AsrModelVersion? {
+        asrModels?.version
+    }
+
     internal var parallelChunkConcurrency: Int {
         config.parallelChunkConcurrency
     }
 
     /// Issue #594: opt-out flag exposed to `ChunkProcessor`. When `false`,
-    /// disables PR #264's 80ms mel-context prepend so non-English audio
-    /// stops drifting at chunk boundaries.
+    /// disables PR #264's 80ms mel-context prepend so v3 multilingual
+    /// long-form audio can use the no-mel boundary warmup path.
     internal var melChunkContext: Bool {
         config.melChunkContext
     }
@@ -211,7 +215,9 @@ public actor AsrManager {
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
         globalFrameOffset: Int = 0,
-        language: Language? = nil
+        language: Language? = nil,
+        emitTokensAfterGlobalFrame: Int? = nil,
+        initialTimeIndexOverride: Int? = nil
     ) async throws -> TdtHypothesis {
         // Route to appropriate decoder based on model version
         guard let models = asrModels, let decoder_ = decoderModel, let joint = jointModel else {
@@ -238,7 +244,8 @@ public actor AsrManager {
                 encoderHiddenSize: workingConfig.encoderHiddenSize,
                 parallelChunkConcurrency: workingConfig.parallelChunkConcurrency,
                 streamingEnabled: workingConfig.streamingEnabled,
-                streamingThreshold: workingConfig.streamingThreshold
+                streamingThreshold: workingConfig.streamingThreshold,
+                melChunkContext: workingConfig.melChunkContext
             )
         }
 
@@ -251,7 +258,8 @@ public actor AsrManager {
                 encoderHiddenSize: models.version.encoderHiddenSize,
                 parallelChunkConcurrency: workingConfig.parallelChunkConcurrency,
                 streamingEnabled: workingConfig.streamingEnabled,
-                streamingThreshold: workingConfig.streamingThreshold
+                streamingThreshold: workingConfig.streamingThreshold,
+                melChunkContext: workingConfig.melChunkContext
             )
         } else {
             adaptedConfig = workingConfig
@@ -292,7 +300,9 @@ public actor AsrManager {
                 isLastChunk: isLastChunk,
                 globalFrameOffset: globalFrameOffset,
                 language: language,
-                vocabulary: vocabulary
+                vocabulary: vocabulary,
+                emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
+                initialTimeIndexOverride: initialTimeIndexOverride
             )
         case .tdtJa:
             // The Japanese model outputs Kanji / Hiragana / Katakana, none of
