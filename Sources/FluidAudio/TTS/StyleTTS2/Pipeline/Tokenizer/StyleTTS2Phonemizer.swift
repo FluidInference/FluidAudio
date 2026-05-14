@@ -1,22 +1,21 @@
 import Foundation
 
-/// English-only StyleTTS2 phonemizer that mirrors Kokoro's tokenization.
+/// English-only StyleTTS2 phonemizer.
 ///
-/// Per-word resolution uses Kokoro's preprocessed Misaki cache
-/// (`us_lexicon_cache.json`) loaded via `KokoroSynthesizer.LexiconCache`,
-/// so the dictionaries handed to this struct are the exact same maps
-/// Kokoro consumes. Token strings in those maps are pre-filtered against
-/// StyleTTS2's character vocabulary at load time, so anything that comes
-/// back is directly encodable by `StyleTTS2TextCleaner`.
+/// Per-word resolution uses the preprocessed Misaki lexicon cache
+/// (`us_lexicon_cache.json`) loaded via `LexiconAssetCache`. Token
+/// strings in those maps are pre-filtered against StyleTTS2's character
+/// vocabulary at load time, so anything that comes back is directly
+/// encodable by `StyleTTS2TextCleaner`.
 ///
-/// Resolution order (mirrors `KokoroChunker.resolvePhonemes`):
+/// Resolution order:
 ///   1. case-sensitive lexicon hit on the original spelling (proper nouns,
 ///      abbreviations like `AI`, `NATO`)
 ///   2. case-sensitive lexicon hit on the normalized lower-case form
 ///   3. lower-case lexicon hit
-///   4. Kokoro's BART grapheme-to-phoneme CoreML model
-///      (`G2PEncoder.mlmodelc` / `G2PDecoder.mlmodelc`) — last resort for
-///      OOV words.
+///   4. BART grapheme-to-phoneme CoreML model
+///      (`G2PEncoder.mlmodelc` / `G2PDecoder.mlmodelc`, fetched from the
+///      kokoro repo) — last resort for OOV words.
 ///
 /// > Important: callers with a higher-quality phonemizer (e.g. server-side
 /// > espeak) can still bypass everything via
@@ -160,9 +159,9 @@ public struct StyleTTS2Phonemizer: Sendable {
 
     // MARK: - Lexicon lookup
 
-    /// Mirror `KokoroChunker.resolvePhonemes` for the lexicon portion:
-    /// case-sensitive hit on the original spelling first, then on the
-    /// lower-cased form, then the lower-cased-only map.
+    /// Lexicon resolution: case-sensitive hit on the original spelling
+    /// first, then on the lower-cased form, then the lower-cased-only
+    /// map.
     private func lookupLexicon(word: String) -> [String]? {
         if let phones = caseSensitiveWordToPhonemes[word] { return phones }
         let normalized = normalizeKey(word)
@@ -171,8 +170,8 @@ public struct StyleTTS2Phonemizer: Sendable {
         return wordToPhonemes[normalized]
     }
 
-    /// Lowercase + strip non-letter/digit/apostrophe chars, mirroring
-    /// `KokoroChunker.normalize` so we hit the same cache entries.
+    /// Lowercase + strip non-letter/digit/apostrophe chars so we hit the
+    /// same Misaki cache entries the preprocessor wrote.
     private func normalizeKey(_ word: String) -> String {
         let lowered = word.lowercased()
         let allowedSet = CharacterSet.letters.union(.decimalDigits)

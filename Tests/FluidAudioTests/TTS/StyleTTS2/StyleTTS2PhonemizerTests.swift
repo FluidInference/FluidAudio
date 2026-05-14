@@ -5,7 +5,7 @@ import XCTest
 /// Unit tests for the lexicon-driven path of `StyleTTS2Phonemizer`.
 ///
 /// We hand the struct synthetic word→phoneme dictionaries (matching the
-/// shape `KokoroSynthesizer.LexiconCache.lexicons()` produces) so the
+/// shape `LexiconAssetCache.lexicons()` produces) so the
 /// tests don't depend on the real Misaki cache or the BART G2P CoreML
 /// model being downloaded. The OOV branch (which would call
 /// `G2PModel.shared`) is exercised only by the negative test that

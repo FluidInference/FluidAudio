@@ -1,31 +1,27 @@
 # Kokoro ANE (7-Stage)
 
-ANE-resident sibling of [Kokoro](Kokoro.md). Splits the Kokoro 82M graph into 7
-CoreML stages so the ANE-friendly layers (Albert / PostAlbert / Alignment /
-Vocoder) stay resident on the Neural Engine while Prosody / Noise / Tail run
-on CPU+GPU. Yields **3-11× RTFx** on Apple Silicon vs. the single-graph
-[`KokoroTtsManager`](Kokoro.md), at the cost of single-voice / no chunker /
-no custom lexicon.
+Splits the Kokoro 82M graph into 7 CoreML stages so the ANE-friendly layers
+(Albert / PostAlbert / Alignment / Vocoder) stay resident on the Neural Engine
+while Prosody / Noise / Tail run on CPU+GPU. Yields **3-11× RTFx** on Apple
+Silicon.
 
 Derived from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml),
 used with the author's permission. Conversion lives in
 [mobius/models/tts/kokoro/laishere-coreml](https://github.com/FluidInference/mobius/tree/main/models/tts/kokoro/laishere-coreml).
 
-## When To Pick This Over `KokoroTtsManager`
+## Constraints
 
-|                  | `KokoroTtsManager`        | `KokoroAneManager`                              |
-|------------------|---------------------------|-------------------------------------------------|
-| Compute          | CPU + GPU (single graph)  | 4 stages on ANE, 3 on GPU                       |
-| Voices           | Multi (`.json` packs)     | Single per variant (`af_heart` / `zf_001`)      |
-| Long input       | Built-in chunker          | ≤ 510 IPA / Bopomofo phonemes / utt.            |
-| Custom lexicon   | Yes (`TtsCustomLexicon`)  | No                                              |
-| SSML             | Yes                       | No                                              |
-| Languages        | English only              | English (`ANE/`) + Mandarin (`ANE-zh/`)         |
+| Aspect           | `KokoroAneManager`                              |
+|------------------|-------------------------------------------------|
+| Compute          | 4 stages on ANE, 3 on GPU                       |
+| Voices           | Single per variant (`af_heart` / `zf_001`)      |
+| Input length     | ≤ 510 IPA / Bopomofo phonemes / utt.            |
+| Custom lexicon   | No                                              |
+| SSML             | No                                              |
+| Languages        | English (`ANE/`) + Mandarin (`ANE-zh/`)         |
 
-Use `KokoroAneManager` when you want the lowest latency on Apple Silicon and
-can live with the variant's single voice and short inputs. Use
-`KokoroTtsManager` when you need any of: multi-voice, custom pronunciations,
-SSML, long-form text.
+For multi-voice / SSML / long-form, use `PocketTtsSynthesizer`,
+`StyleTTS2Manager`, or `MagpieManager` instead.
 
 ## Variants
 

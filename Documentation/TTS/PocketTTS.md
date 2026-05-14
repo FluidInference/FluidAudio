@@ -225,7 +225,7 @@ text → SentencePiece tokenizer → subword tokens → PocketTTS model → audi
                                           (no external control)
 ```
 
-Unlike Kokoro which uses a CoreML G2P model to convert text to IPA phonemes **before** the model, PocketTTS feeds raw text tokens directly into the neural network. The model learned text→pronunciation mappings during training — there is no phoneme stage to intercept.
+Unlike KokoroAne / StyleTTS2 which run a CoreML G2P model to convert text to IPA phonemes **before** the model, PocketTTS feeds raw text tokens directly into the neural network. The model learned text→pronunciation mappings during training — there is no phoneme stage to intercept.
 
 ### Feature Support
 
@@ -251,7 +251,7 @@ Text-level preprocessing that runs **before** the SentencePiece tokenizer:
 - **Custom lexicon** — no phoneme stage to apply word → IPA mappings
 - **Fine-grained pronunciation control** — the model decides pronunciation from text tokens alone
 
-See [Kokoro.md](Kokoro.md) if you need pronunciation control.
+See [KokoroAne.md](KokoroAne.md) or [StyleTTS2.md](StyleTTS2.md) if you need pronunciation control.
 
 ## Session API
 
