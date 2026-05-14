@@ -134,11 +134,10 @@ try await diarizer.initialize(mainModelPath: modelURL)
 Streaming diarization using LS-EEND. Variable speaker slots, 8 kHz input, 100 ms frame duration, 20.7% DER on AMI SDM.
 
 ```swift
-let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
-try await diarizer.initialize(variant: .dihard3)
+let diarizer = try await LSEENDDiarizer(variant: .dihard3)
 ```
 
-**Variants:** ami, callhome, dihard2, dihard3 (via `LSEENDModelDescriptor.loadFromHuggingFace(variant:)`).
+**Variants:** ami, callhome, dihard2, dihard3 (via `LSEENDModel.loadFromHuggingFace(variant:stepSize:)`). The optional `LSEENDStepSize` selects how many output frames the model commits per CoreML call (`.step100ms` … `.step500ms`); smaller steps reduce latency, larger steps raise throughput.
 
 Call `finalizeSession()` at end-of-stream to flush pending audio before reading the final timeline.
 

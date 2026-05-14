@@ -680,7 +680,7 @@ public enum ModelNames {
         public static let flowlmStepV2 = "flowlm_stepv2"
         public static let flowDecoder = "flow_decoder"
         public static let mimiDecoder = "mimi_decoder"
-        public static let mimiEncoder = "mimi_encoder"
+        public static let mimiEncoder = "mimi_encoderv2"
 
         public static let condStepFile = condStep + ".mlmodelc"
         public static let flowlmStepFile = flowlmStep + ".mlmodelc"

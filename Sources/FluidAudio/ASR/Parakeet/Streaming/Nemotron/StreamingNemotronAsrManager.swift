@@ -187,6 +187,12 @@ public actor StreamingNemotronAsrManager {
         cacheChannel = caches.channel
         cacheTime = caches.time
         cacheLen = caches.len
+        // Seed cache_len with 1 instead of 0 so the encoder's
+        // `ios17.slice_by_index` op never sees a zero-length slice, which would
+        // fail CoreML shape inference and skip MPSGraph caching on every
+        // session start. The cache buffers are zero, so this is equivalent to
+        // 1 frame of silence preamble. See issue #607.
+        cacheLen?[0] = 1
 
         // Mel cache (will be initialized on first chunk)
         melCache = nil

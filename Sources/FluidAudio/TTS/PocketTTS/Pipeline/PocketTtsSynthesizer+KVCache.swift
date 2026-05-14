@@ -121,11 +121,20 @@ extension PocketTtsSynthesizer {
 
     /// Prefill a KV cache state with voice conditioning tokens.
     ///
-    /// Processes all voice tokens from the voice data, writing K/V projections
-    /// into the cache starting at the current position.
+    /// Prepends a single `bos_before_voice` token to match pocket-tts 2.0.0's
+    /// `flow_lm.bos_before_voice` prefix (see FluidAudio #592 — without it
+    /// `cond_step` diverges from the deployed flowlm/flow_decoder weights and
+    /// the LM emits EOS within a few steps, producing garbled audio). Then
+    /// processes all voice tokens from `voiceData.audioPrompt`, writing K/V
+    /// projections into the cache starting at the current position.
+    ///
+    /// `bosBeforeVoice` must be provided whenever `voiceData.audioPrompt`
+    /// has content (i.e. cloned voices); shipped v2 voices skip this path
+    /// entirely via `cacheSnapshot`.
     static func prefillKVCacheVoice(
         state: KVCacheState,
         voiceData: PocketTtsVoiceData,
+        bosBeforeVoice: [Float]?,
         model: MLModel,
         layerKeys: PocketTtsLayerKeys
     ) async throws -> KVCacheState {
@@ -133,6 +142,33 @@ extension PocketTtsSynthesizer {
         let dim = PocketTtsConstants.embeddingDim
 
         let voiceTokenCount = voiceData.promptLength
+        guard voiceTokenCount > 0 else {
+            // Nothing to prefill (e.g. session warmup with empty cloned
+            // voice). Skip the BOS prepend too — runtime callers that go
+            // through `prefillKVCache` only hit this branch when both
+            // `cacheSnapshot == nil` and `promptLength == 0`, which is a
+            // no-op.
+            return state
+        }
+
+        guard let bosBeforeVoice else {
+            throw PocketTTSError.processingFailed(
+                "PocketTTS v1 cloned-voice prefill requires bos_before_voice constant. "
+                    + "Re-download the language pack to get constants_bin/bos_before_voice.bin "
+                    + "(added in the FluidAudio #592 fix)."
+            )
+        }
+        guard bosBeforeVoice.count == dim else {
+            throw PocketTTSError.processingFailed(
+                "bos_before_voice has \(bosBeforeVoice.count) floats, expected \(dim)"
+            )
+        }
+
+        let bosToken = try createConditioningToken(
+            from: bosBeforeVoice, offset: 0, dim: dim)
+        try await runCondStep(
+            conditioning: bosToken, state: &state, model: model, layerKeys: layerKeys)
+
         for tokenIdx in 0..<voiceTokenCount {
             let token = try createConditioningToken(
                 from: voiceData.audioPrompt,
@@ -252,13 +288,15 @@ extension PocketTtsSynthesizer {
     ///
     /// Two voice paths:
     ///  - **Snapshot** (shipped voices): drop pre-baked K/V into cache, skip
-    ///    `cond_step` voice prefill entirely.
-    ///  - **Flat audio prompt** (cloned voices): feed every voice token
-    ///    through `cond_step`.
+    ///    `cond_step` voice prefill entirely. `bos_before_voice` is already
+    ///    baked into the snapshot.
+    ///  - **Flat audio prompt** (cloned voices): feed `bos_before_voice`
+    ///    then every voice token through `cond_step`.
     /// Text prefill runs identically in both cases.
     static func prefillKVCache(
         voiceData: PocketTtsVoiceData,
         textEmbeddings: [[Float]],
+        bosBeforeVoice: [Float]?,
         model: MLModel,
         layerKeys: PocketTtsLayerKeys
     ) async throws -> KVCacheState {
@@ -268,7 +306,9 @@ extension PocketTtsSynthesizer {
         } else {
             let emptyState = try emptyKVCacheState(layers: layerKeys.layerCount)
             state = try await prefillKVCacheVoice(
-                state: emptyState, voiceData: voiceData, model: model, layerKeys: layerKeys
+                state: emptyState, voiceData: voiceData,
+                bosBeforeVoice: bosBeforeVoice,
+                model: model, layerKeys: layerKeys
             )
         }
         state = try await prefillKVCacheText(
