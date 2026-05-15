@@ -175,7 +175,13 @@ enum ProcessCommand {
             let result = try await manager.process(
                 audioSource: diskSource,
                 audioLoadingSeconds: diskSourceResult.loadDuration
-            )
+            ) { chunksProcessed, totalChunks in
+                let printInterval = max(1, totalChunks / 4)
+                if chunksProcessed % printInterval == 0 || chunksProcessed == totalChunks {
+                    let percent = Int(Double(chunksProcessed) / Double(totalChunks) * 100)
+                    logger.info("   Progress: \(percent)% (\(chunksProcessed)/\(totalChunks) chunks)")
+                }
+            }
             let processingTime = Date().timeIntervalSince(startTime)
 
             let durationSeconds = Double(diskSource.sampleCount) / Double(targetSampleRate)
