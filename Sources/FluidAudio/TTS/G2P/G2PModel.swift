@@ -165,7 +165,9 @@ actor G2PModel {
     private func loadIfNeeded() throws {
         if graphemeToId != nil && encoder != nil && decoder != nil { return }
 
-        let kokoroDir = try TtsModels.cacheDirectoryURL().appendingPathComponent("Models/kokoro")
+        let kokoroDir = try TtsCacheDirectory.ensure()
+            .appendingPathComponent("Models")
+            .appendingPathComponent(Repo.kokoro.folderName)
 
         // Load g2p_vocab.json from cache directory
         let vocabURL = kokoroDir.appendingPathComponent(ModelNames.G2P.vocabularyFile)

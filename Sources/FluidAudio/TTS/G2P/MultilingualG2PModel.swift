@@ -147,7 +147,7 @@ public actor MultilingualG2PModel {
     private func loadIfNeeded() throws {
         if encoder != nil && decoder != nil { return }
 
-        let modelsDir = try TtsModels.cacheDirectoryURL()
+        let modelsDir = try TtsCacheDirectory.ensure()
             .appendingPathComponent("Models")
             .appendingPathComponent(Repo.kokoro.folderName)
 

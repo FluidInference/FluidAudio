@@ -192,34 +192,25 @@ Read as a fraction.
 <!-- Output: "three and one half" -->
 ```
 
-## Usage with KokoroTtsManager
+## Usage
 
-SSML tags are processed automatically when you call `synthesize()`:
+`SSMLProcessor` is a standalone utility — call it directly to normalize a
+string and recover any phonetic overrides before feeding the cleaned text to
+a TTS backend that accepts them (e.g. `StyleTTS2Manager`,
+`PocketTtsSynthesizer`). `KokoroAneManager` does not currently accept
+SSML overrides (`text → G2P → token ids` has no interception point).
 
 ```swift
 import FluidAudio
 
-let ttsManager = KokoroTtsManager()
-try await ttsManager.initialize()
-
-// SSML is processed automatically
 let text = """
     The price is <say-as interpret-as="cardinal">42</say-as> dollars.
     Call us at <say-as interpret-as="telephone">555-1234</say-as>.
     """
 
-let audio = try await ttsManager.synthesize(text: text, voice: .afHeart)
-```
-
-## Coexistence with Markdown Syntax
-
-SSML tags coexist with the existing markdown-style phonetic syntax:
-
-```swift
-// Both syntaxes work together
-let text = """
-    <phoneme ph="kəˈkɔɹo">Kokoro</phoneme> and [Misaki](/mɪˈsɑːki/)
-    """
+let result = SSMLProcessor.process(text)
+// result.text                 → "The price is forty-two dollars. Call us at ..."
+// result.phoneticOverrides    → [] (no <phoneme> tags in this sample)
 ```
 
 ## Edge Cases

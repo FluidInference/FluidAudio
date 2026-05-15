@@ -52,17 +52,33 @@ public enum StyleTTS2ResourceDownloader {
 
     /// Ensure Kokoro's preprocessed Misaki lexicon cache
     /// (`us_lexicon_cache.json`) is present locally, then return the kokoro
-    /// cache directory that holds it. The same payload is consumed by
-    /// `KokoroSynthesizer.LexiconCache`, so the StyleTTS2 backend is using
-    /// the exact same word→phoneme map Kokoro ships.
+    /// cache directory that holds it. The lexicon file lives under the
+    /// kokoro HF repo root and is consumed by the shared
+    /// `LexiconAssetCache`.
     @discardableResult
     public static func ensureLexiconCache() async throws -> URL {
+        let modelsRoot = try defaultCacheRoot()
+        let kokoroDir = modelsRoot.appendingPathComponent(Repo.kokoro.folderName)
+        try FileManager.default.createDirectory(
+            at: kokoroDir, withIntermediateDirectories: true)
+
+        let filename = "us_lexicon_cache.json"
+        let localURL = kokoroDir.appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            return kokoroDir
+        }
+
         do {
-            let cacheURL = try await TtsResourceDownloader.ensureLexiconFile(
-                named: "us_lexicon_cache.json")
-            return cacheURL.deletingLastPathComponent()
+            let remoteURL = try ModelRegistry.resolveModel(Repo.kokoro.remotePath, filename)
+            let descriptor = AssetDownloader.Descriptor(
+                description: filename,
+                remoteURL: remoteURL,
+                destinationURL: localURL
+            )
+            _ = try await AssetDownloader.ensure(descriptor, logger: logger)
+            return kokoroDir
         } catch {
-            throw StyleTTS2Error.downloadFailed("us_lexicon_cache.json: \(error)")
+            throw StyleTTS2Error.downloadFailed("\(filename): \(error)")
         }
     }
 

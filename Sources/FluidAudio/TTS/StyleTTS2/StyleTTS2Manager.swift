@@ -104,7 +104,7 @@ public actor StyleTTS2Manager {
         // to StyleTTS2's character vocab so any token returned by the
         // lexicon is directly encodable by `StyleTTS2TextCleaner`.
         let allowedTokens = Set(StyleTTS2TextCleaner.dictionary.keys.map { String($0) })
-        let lexiconCache = KokoroSynthesizer.LexiconCache()
+        let lexiconCache = LexiconAssetCache()
         let lexicons: (word: [String: [String]], caseSensitive: [String: [String]])
         do {
             try await lexiconCache.ensureLoaded(
