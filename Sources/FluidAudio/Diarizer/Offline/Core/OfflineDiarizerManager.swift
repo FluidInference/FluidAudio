@@ -129,6 +129,8 @@ public final class OfflineDiarizerManager {
     }
 
     /// - Parameters:
+    ///   - audioSource: Audio sample source to process.
+    ///   - audioLoadingSeconds: Time spent loading/converting the audio, included in timing logs.
     ///   - progressCallback: Optional callback receiving `(chunksProcessed, totalChunks)` after each segmentation chunk.
     public func process(
         audioSource: AudioSampleSource,
