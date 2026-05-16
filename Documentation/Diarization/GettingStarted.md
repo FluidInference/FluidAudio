@@ -228,7 +228,7 @@ let result = try await manager.process(audio: samples) { chunksProcessed, totalC
 }
 ```
 
-The callback is invoked on a background task. To update UI state, dispatch to the main actor from inside the callback:
+The callback is invoked on an unspecified executor — not guaranteed to be a background thread or the main actor. To update UI state, hop to `@MainActor` from inside the callback:
 
 ```swift
 @MainActor

@@ -158,7 +158,7 @@ public final class OfflineDiarizerManager {
         let capturedModels = models
         let capturedConfig = config
 
-        let segmentationTask = Task(priority: .userInitiated) {
+        let segmentationTask = Task.detached(priority: .userInitiated) {
             [capturedModels, capturedConfig] () throws -> (SegmentationOutput, TimeInterval) in
             let processor = OfflineSegmentationProcessor()
             let start = Date()
@@ -187,7 +187,7 @@ public final class OfflineDiarizerManager {
             }
         }
 
-        let embeddingTask = Task(priority: .userInitiated) {
+        let embeddingTask = Task.detached(priority: .userInitiated) {
             [capturedModels, capturedConfig] () throws -> ([TimedEmbedding], TimeInterval) in
             let extractor = OfflineEmbeddingExtractor(
                 fbankModel: capturedModels.fbankModel,
