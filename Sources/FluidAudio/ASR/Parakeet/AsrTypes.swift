@@ -38,19 +38,30 @@ public struct ASRConfig: Sendable {
     /// Set to `false` for v3 multilingual long-form batch transcription.
     public let melChunkContext: Bool
 
-    /// Opt-in per-chunk dual-decode arbitration for the v3 + no-mel batch
-    /// path. When `true`, every non-first chunk is decoded twice: once with
-    /// regular stride boundaries and no warmup prefix (the simple PR #596
-    /// shape), and once with silence-aligned boundaries plus a 7-frame
-    /// real-audio warmup prefix (the PR #604 shape). The per-chunk emitted
-    /// tokens are then arbitrated by mean per-token joint log-probability:
-    /// whichever chunk has higher mean confidence becomes the chunk's
-    /// contribution before the existing LCS+midpoint merger runs.
+    /// Opt-in dual-decode arbitration for the v3 + no-mel batch path.
+    /// When `true`, the first non-trivial chunks of each file are decoded
+    /// twice — once *without* the 7-frame warmup prefix (the "G1-only"
+    /// shape, preferred for content preservation on long French/English/
+    /// Spanish audio) and once *with* it (the "G1+G2" PR #604 shape,
+    /// preferred for cross-script bias avoidance on Slovenian and similar)
+    /// — both at the same silence-aligned chunk start. The file then
+    /// commits to whichever path has higher probe mean confidence and
+    /// decodes the remaining chunks single-path with that choice. Probe
+    /// ties go to the warmup-free path (the content-safer default).
+    ///
+    /// Per-file commitment (rather than per-chunk arbitration) eliminates
+    /// the inter-path stitching artifacts the LCS+midpoint merger produces
+    /// when adjacent chunks are decoded under different warmup conditions
+    /// — observed as mid-word duplicates and dropped clauses on
+    /// heterogeneous-confidence files like long Spanish narration.
     ///
     /// Mechanism is language-agnostic (confidence-based; no text inspection,
-    /// no vocabulary/script/token filtering). Default `false` because cost is
-    /// ~2× per-chunk encoder+decoder runtime and the wins it captures are a
-    /// subset of `melChunkContext = false` use cases.
+    /// no vocabulary/script/token filtering, no language hints).
+    ///
+    /// Default `false`. Off-by-default because the wins are quality-tier
+    /// rather than correctness-tier, and the probe adds a modest constant
+    /// overhead (≈1.1–1.5× depending on file length) over the regular
+    /// `melChunkContext = false` path.
     public let dualDecodeArbitration: Bool
 
     public static let `default` = ASRConfig()
