@@ -217,6 +217,38 @@ let result = try await manager.process(url)
 
 The file-based API internally uses memory-mapped streaming to avoid materializing the entire buffer in memory.
 
+#### Progress Tracking
+
+All three `process` overloads accept an optional `progressCallback` that fires after each segmentation chunk, reporting `(chunksProcessed, totalChunks)`:
+
+```swift
+let result = try await manager.process(audio: samples) { chunksProcessed, totalChunks in
+    let percent = Int(Double(chunksProcessed) / Double(totalChunks) * 100)
+    print("Progress: \(percent)% (\(chunksProcessed)/\(totalChunks) chunks)")
+}
+```
+
+The callback is invoked on a background task. To update UI state, dispatch to the main actor from inside the callback:
+
+```swift
+@MainActor
+class TranscriptionViewModel: ObservableObject {
+    @Published var progress: Double = 0
+
+    func run(url: URL) async throws {
+        let manager = OfflineDiarizerManager()
+        let result = try await manager.process(url) { chunksProcessed, totalChunks in
+            Task { @MainActor in
+                self.progress = Double(chunksProcessed) / Double(totalChunks)
+            }
+        }
+        // use result...
+    }
+}
+```
+
+`totalChunks` is derived from the audio length and `OfflineDiarizerConfig.samplesPerStep` before processing starts, so it is consistent across all callback invocations. The final call always has `chunksProcessed == totalChunks`.
+
 The offline controller mirrors the reference pipeline:
 
 - **Segmentation:** `SegmentationRunner` feeds 10 s/160 k sample chunks through the Core ML segmentation model. Each chunk yields 589 frame-level log probabilities over the 7 local powerset classes.
