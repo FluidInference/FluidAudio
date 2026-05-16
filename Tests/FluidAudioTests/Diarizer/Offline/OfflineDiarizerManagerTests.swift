@@ -29,7 +29,10 @@ final class OfflineDiarizerManagerProgressTests: XCTestCase {
 
     func testProgressCallbackFiresAndIsMonotonic() async throws {
         let modelsDir = OfflineDiarizerModels.defaultModelsDirectory()
-        guard FileManager.default.fileExists(atPath: modelsDir.path) else {
+        let allPresent = ModelNames.OfflineDiarizer.requiredModels.allSatisfy {
+            FileManager.default.fileExists(atPath: modelsDir.appendingPathComponent($0).path)
+        }
+        guard allPresent else {
             throw XCTSkip("Offline diarizer models not available")
         }
 
@@ -64,7 +67,10 @@ final class OfflineDiarizerManagerProgressTests: XCTestCase {
 
     func testProgressCallbackIsOptional() async throws {
         let modelsDir = OfflineDiarizerModels.defaultModelsDirectory()
-        guard FileManager.default.fileExists(atPath: modelsDir.path) else {
+        let allPresent = ModelNames.OfflineDiarizer.requiredModels.allSatisfy {
+            FileManager.default.fileExists(atPath: modelsDir.appendingPathComponent($0).path)
+        }
+        guard allPresent else {
             throw XCTSkip("Offline diarizer models not available")
         }
 
