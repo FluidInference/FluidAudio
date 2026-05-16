@@ -11,8 +11,7 @@ enum SortformerBenchmark {
     typealias BenchmarkResult = DiarizationBenchmarkUtils.BenchmarkResult
 
     static func printUsage() {
-        print(
-            """
+        let usage = """
             Sortformer Benchmark Command
 
             Evaluates Sortformer streaming speaker diarization on various corpora.
@@ -20,23 +19,29 @@ enum SortformerBenchmark {
             Usage: fluidaudio sortformer-benchmark [options]
 
             Options:
-                --dataset <name>         Dataset to use: ami, voxconverse, callhome (default: ami)
-                --single-file <name>     Process a specific meeting (e.g., ES2004a)
-                --max-files <n>          Maximum number of files to process
-                --threshold <value>      Speaker activity threshold (default: 0.5)
-                --model <path>           Path to Sortformer.mlpackage
-                --nvidia-low-latency     Use NVIDIA 1.04s latency config (20.57% DER target)
-                --nvidia-high-latency            Use NVIDIA 30.4s latency config (20.57% DER target)
-                --gradient-descent       Use Gradient Descent config
-                --hf                     Use HuggingFace/cache-backed model loading
-                --local                  Use local mlpackage loading instead of HuggingFace/cache-backed loading
-                --output <file>          Output JSON file for results
-                --progress <file>        Progress file for resuming (default: .sortformer_progress.json)
-                --resume                 Resume from previous progress file
-                --verbose                Enable verbose output
-                --debug                  Enable debug mode
-                --auto-download          Auto-download AMI dataset if missing
-                --help                   Show this help message
+                --dataset <name>            Dataset to use: ami, voxconverse, callhome (default: ami)
+                --single-file <name>        Process a specific meeting (e.g., ES2004a)
+                --max-files <n>             Maximum number of files to process
+                --threshold <value>         Speaker activity threshold (default: 0.5)
+                --silence-threshold <0-1>   Silence detection threshold (default: 0.2)
+                --scores-boost-latest <fl>  Boost factor for latest frames (default: 0.05)
+                --strong-boost-rate <0-1>   Strong boost rate (default: 0.75)
+                --weak-boost-rate <fl>      Weak boost rate (default: 1.5)
+                --min-pos-scores-rate <0-1> Minimum positive scores rate (default: 0.5)
+                --spkcache-sil-frames <n>   Silence frames per speaker in cache (default: 3)
+                --model <path>              Path to Sortformer.mlpackage
+                --nvidia-low-latency        Use NVIDIA 1.04s latency config
+                --nvidia-high-latency       Use NVIDIA 30.4s latency config
+                --gradient-descent          Use Gradient Descent config (default)
+                --hf                        Use HuggingFace/cache-backed model loading
+                --local                     Use local mlpackage loading
+                --output <file>             Output JSON file for results
+                --progress <file>           Progress file for resuming (default: .sortformer_progress.json)
+                --resume                    Resume from previous progress file
+                --verbose                   Enable verbose output
+                --debug                     Enable debug mode
+                --auto-download             Auto-download AMI dataset if missing
+                --help                      Show this help message
 
             Performance Targets:
                 DER ~11%   (NVIDIA benchmark on DI-HARD III)
@@ -53,7 +58,9 @@ enum SortformerBenchmark {
                 fluidaudio sortformer-benchmark --single-file ES2004a \\
                     --preprocessor ./models/SortformerPreprocessor.mlpackage \\
                     --model ./models/Sortformer.mlpackage
-            """)
+            """
+        fputs(usage, stderr)
+        fflush(stderr)
     }
 
     static func run(arguments: [String]) async {
@@ -73,6 +80,14 @@ enum SortformerBenchmark {
         var progressFile: String = ".sortformer_progress.json"
         var resumeFromProgress = false
         var dataset: Dataset = .ami
+
+        // SortformerConfig tuning fields
+        var silenceThreshold: Float?
+        var scoresBoostLatest: Float?
+        var strongBoostRate: Float?
+        var weakBoostRate: Float?
+        var minPosScoresRate: Float?
+        var spkcacheSilFramesPerSpk: Int?
 
         var i = 0
         while i < arguments.count {
@@ -129,7 +144,38 @@ enum SortformerBenchmark {
             case "--nvidia-low-latency":
                 useNvidiaLowLatency = true
             case "--gradient-descent":
+                // gradient-descent uses the default SortformerConfig which is already selected
                 break
+            case "--silence-threshold":
+                if i + 1 < arguments.count {
+                    silenceThreshold = Float(arguments[i + 1])
+                    i += 1
+                }
+            case "--scores-boost-latest":
+                if i + 1 < arguments.count {
+                    scoresBoostLatest = Float(arguments[i + 1])
+                    i += 1
+                }
+            case "--strong-boost-rate":
+                if i + 1 < arguments.count {
+                    strongBoostRate = Float(arguments[i + 1])
+                    i += 1
+                }
+            case "--weak-boost-rate":
+                if i + 1 < arguments.count {
+                    weakBoostRate = Float(arguments[i + 1])
+                    i += 1
+                }
+            case "--min-pos-scores-rate":
+                if i + 1 < arguments.count {
+                    minPosScoresRate = Float(arguments[i + 1])
+                    i += 1
+                }
+            case "--spkcache-sil-frames":
+                if i + 1 < arguments.count {
+                    spkcacheSilFramesPerSpk = Int(arguments[i + 1])
+                    i += 1
+                }
             case "--hf":
                 useHuggingFace = true
             case "--local":
@@ -238,10 +284,16 @@ enum SortformerBenchmark {
         } else if useNvidiaLowLatency {
             config = SortformerConfig.balancedV2_1
         } else {
-            config = SortformerConfig.default
+            config = SortformerConfig.default  // gradient-descent uses the default
         }
         config.debugMode = debugMode
         config.predScoreThreshold = threshold
+        if let v = silenceThreshold { config.silenceThreshold = v }
+        if let v = scoresBoostLatest { config.scoresBoostLatest = v }
+        if let v = strongBoostRate { config.strongBoostRate = v }
+        if let v = weakBoostRate { config.weakBoostRate = v }
+        if let v = minPosScoresRate { config.minPosScoresRate = v }
+        if let v = spkcacheSilFramesPerSpk { config.spkcacheSilFramesPerSpk = v }
         let diarizer = SortformerDiarizer(config: config)
 
         do {

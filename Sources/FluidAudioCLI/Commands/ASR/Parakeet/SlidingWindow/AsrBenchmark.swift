@@ -1,6 +1,7 @@
 #if os(macOS)
 import AVFoundation
 import FluidAudio
+import Foundation
 import OSLog
 
 /// LibriSpeech dataset manager and ASR benchmarking
@@ -649,6 +650,7 @@ extension ASRBenchmark {
         var testStreaming = false
         var streamingChunkDuration = 10.0
         var useStreamingEou = false
+        var longAudioOnly = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
 
         // Check for help flag first
@@ -690,6 +692,8 @@ extension ASRBenchmark {
                 testStreaming = true
             case "--streaming-eou":
                 useStreamingEou = true
+            case "--long-audio-only":
+                longAudioOnly = true
             case "--dump-features":
                 // Enable debug features if this flag is present
                 debugMode = true
@@ -752,7 +756,7 @@ extension ASRBenchmark {
             subset: subset,
             maxFiles: maxFiles,
             debugMode: debugMode,
-            longAudioOnly: false,
+            longAudioOnly: longAudioOnly,
             testStreaming: testStreaming,
             streamingChunkDuration: streamingChunkDuration,
             useStreamingEou: useStreamingEou
@@ -1017,25 +1021,26 @@ extension ASRBenchmark {
     }
 
     private static func printUsage() {
-        let logger = AppLogger(category: "Benchmark")
-        logger.info(
-            """
+        let usage = """
             ASR Benchmark Command Usage:
                 fluidaudio asr-benchmark [options]
 
             Options:
-                --subset <name>           LibriSpeech subset to use (default: test-clean)
-                                         Available: test-clean, test-other, dev-clean, dev-other
-                --max-files <number>      Maximum number of files to process (default: all)
-                --single-file <id>        Process only a specific file (e.g., 1089-134686-0011)
-                --output <file>           Output JSON file path (default: asr_benchmark_results.json)
-                --model-version <version> ASR model version to use: v2, v3, or tdt-ctc-110m (default: v3)
-                --debug                   Enable debug logging
-                --auto-download           Automatically download LibriSpeech dataset (default)
-                --no-auto-download        Disable automatic dataset download
-                --test-streaming          Enable streaming simulation mode
-                --chunk-duration <secs>   Chunk duration for streaming mode (default: 0.1s, min: 1.0s)
-                --help, -h               Show this help message
+                --subset <name>            LibriSpeech subset to use (default: test-clean)
+                                          Available: test-clean, test-other, dev-clean, dev-other
+                --max-files <number>       Maximum number of files to process (default: all)
+                --single-file <id>         Process only a specific file (e.g., 1089-134686-0011)
+                --output <file>            Output JSON file path (default: asr_benchmark_results.json)
+                --model-version <version>  ASR model version: v2, v3, or tdt-ctc-110m (default: v3)
+                --debug                    Enable debug logging
+                --auto-download            Automatically download LibriSpeech dataset (default)
+                --no-auto-download         Disable automatic dataset download
+                --test-streaming           Enable streaming simulation mode
+                --chunk-duration <secs>    Chunk duration for streaming mode (default: 0.1s, min: 1.0s)
+                --streaming-eou           Use Streaming EOU model for transcription
+                --long-audio-only          Only process files with 4-20 second duration
+                --dump-features            Dump CoreML mel features to JSON (requires --streaming-eou + --single-file)
+                --help, -h                Show this help message
 
             Description:
                 The ASR benchmark command evaluates Automatic Speech Recognition performance
@@ -1063,8 +1068,8 @@ extension ASRBenchmark {
                 # Test streaming performance with 0.5s chunks
                 fluidaudio asr-benchmark --test-streaming --chunk-duration 1-
 
-                # Debug mode with custom output file
-                fluidaudio asr-benchmark --debug --output my_results.json
+                # Only process files with longer duration
+                fluidaudio asr-benchmark --long-audio-only --max-files 10
 
             Expected Performance:
                 - test-clean: 2-6% WER for good ASR systems
@@ -1074,7 +1079,8 @@ extension ASRBenchmark {
             Note: First run will download LibriSpeech dataset (~1.1GB for test-clean).
                   ASR models will be downloaded automatically if not present.
             """
-        )
+        fputs(usage, stderr)
+        fflush(stderr)
     }
 }
 #endif

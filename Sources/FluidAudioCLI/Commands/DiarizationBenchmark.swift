@@ -33,32 +33,109 @@ enum StreamDiarizationBenchmark {
         let totalInferenceTime: Double
     }
 
+    private struct ParsedArgs {
+        var mode = "streaming"
+        var dataset = "ami-sdm"
+        var singleFile: String?
+        var maxFiles: Int?
+        var chunkSeconds: Double = 10.0
+        var overlapSeconds: Double = 0.0
+        var thresholdS: Float = 0.7045655  // matches pyannote config.yaml
+        var assignmentThreshold: Float = 0.84
+        var updateThreshold: Float = 0.56
+        var outputFile: String?
+        var csvFile: String?
+        var verbose = false
+        var debugMode = false
+        var autoDownload = false
+        var iterations = 1
+
+        // Streaming DiarizerConfig
+        var minSpeechDuration: Float = 1.0
+        var minSilenceGap: Float = 0.5
+        var minActiveFramesCount: Float = 10.0
+        var minEmbeddingUpdateDuration: Float = 2.0
+        var numClusters: Int = -1
+
+        // Offline DiarizerConfig
+        var thresholdD: Double = 0.6
+        var fa: Double = 0.07
+        var fb: Double = 0.8
+        var windowDuration: Double = 10.0
+        var sampleRate: Int = 16000
+        var stepRatio: Double = 0.2
+        var batchSize: Int = 32
+        var excludeOverlap = true
+        var skipSimilarity: Float?
+        var minSegmentDuration: Double = 1.0
+        var minGapDuration: Double = 0.1
+        var exclusiveSegments = true
+        var onsetThreshold: Float = 0.5
+        var offsetThreshold: Float = 0.5
+        var segMinDurationOn: Double = 0.0
+        var segMinDurationOff: Double = 0.0
+        var maxVBxIterations: Int = 20
+        var convergenceTolerance: Double = 1e-4
+        var minSpeakers: Int?
+        var maxSpeakers: Int?
+        var numSpeakers: Int?
+    }
+
     static func printUsage() {
-        logger.info(
-            """
+        let usage = """
             Diarization Benchmark Command
 
             Evaluates speaker diarization in either streaming (online) or offline (VBx) mode.
 
             Usage: fluidaudio diarization-benchmark [options]
 
-            Options:
+            Common Options:
                 --mode <streaming|offline>  Diarization mode (default: streaming)
-                --dataset <name>         Dataset to benchmark (default: ami-sdm)
-                --single-file <name>     Process a specific meeting (e.g., ES2004a)
-                --max-files <n>          Maximum number of files to process
-                --chunk-seconds <sec>    Chunk duration for streaming (default: 10.0, streaming only)
-                --overlap-seconds <sec>  Overlap between chunks (default: 0.0, streaming only)
-                --threshold <value>      Clustering threshold (default: 0.7)
-                --assignment-threshold   Threshold for assigning to existing speakers (default: 0.84, streaming only)
-                --update-threshold       Threshold for updating speaker embeddings (default: 0.56, streaming only)
-                --output <file>         Output JSON file for results
-                --csv <file>            Output CSV file for summary
-                --verbose               Enable verbose output
-                --debug                 Enable debug output
-                --auto-download         Auto-download dataset if missing
-                --iterations <n>        Number of iterations per file (default: 1)
-                --help                  Show this help message
+                --dataset <name>            Dataset to benchmark (default: ami-sdm)
+                --single-file <name>        Process a specific meeting (e.g., ES2004a)
+                --max-files <n>             Maximum number of files to process
+                --output <file>             Output JSON file for results
+                --csv <file>                Output CSV file for summary
+                --verbose                   Enable verbose output
+                --debug                     Enable debug output
+                --auto-download             Auto-download dataset if missing
+                --iterations <n>            Number of iterations per file (default: 1)
+                --help                      Show this help message
+
+            Streaming Mode Options:
+                --chunk-seconds <sec>       Chunk duration (default: 10.0)
+                --overlap-seconds <sec>     Overlap between chunks (default: 0.0)
+                --threshold <0.5-0.9>       Clustering threshold, lower = more speakers (default: 0.7045655)
+                --assignment-threshold      Threshold for assigning to speakers (default: 0.84)
+                --update-threshold          Threshold for updating embeddings (default: 0.56)
+                --min-speech-duration <sec>  Drop segments shorter than this (default: 1.0)
+                --min-silence-gap <sec>     Split same-speaker if gap exceeds this (default: 0.5)
+                --min-active-frames <n>     Minimum active frames for valid speech (default: 10.0)
+                --num-clusters <n>          Expected speakers, -1 = auto (default: -1)
+                --min-embed-update <sec>    Min segment duration to update embeddings (default: 2.0)
+
+            Offline Mode Options:
+                --threshold <0-√2>          Clustering threshold (default: 0.6)
+                --fa <float>                VBx warm-start precision (default: 0.07)
+                --fb <float>                VBx warm-start recall (default: 0.8)
+                --window-duration <sec>     Segmentation window size (default: 10.0)
+                --sample-rate <hz>          Target audio sample rate (default: 16000)
+                --step-ratio <0-1>          Segmentation step ratio (default: 0.2)
+                --batch-size <1-32>         Embedding batch size (default: 32)
+                --include-overlap           Include overlap in embedding extraction
+                --skip-similarity <0-1>     Skip embedding if mask similarity >= threshold
+                --min-segment-duration <sec> Minimum segment duration (default: 1.0)
+                --min-gap-duration <sec>    Merge segments separated by less than this gap (default: 0.1)
+                --overlapping-segments      Allow speakers to overlap in output
+                --onset-threshold <0-1>     VAD onset probability (default: 0.5)
+                --offset-threshold <0-1>    VAD offset probability (default: 0.5)
+                --min-duration-on <sec>     Min speech to trigger VAD on (default: 0.0)
+                --min-duration-off <sec>    Min silence to trigger VAD off (default: 0.0)
+                --max-vbx-iterations <n>    VBx max iterations (default: 20)
+                --convergence-tolerance <f> VBx convergence tolerance (default: 1e-4)
+                --min-speakers <n>          Minimum number of speakers
+                --max-speakers <n>          Maximum number of speakers
+                --num-speakers <n>          Exact speaker count (overrides min/max)
 
             Modes:
                 streaming   Online diarization with chunk-based processing (first-occurrence speaker mapping)
@@ -86,99 +163,216 @@ enum StreamDiarizationBenchmark {
 
                 # Quick test on 5 files (offline)
                 fluidaudio diarization-benchmark --mode offline --max-files 5 --verbose
-            """)
+            """
+        fputs(usage, stderr)
+        fflush(stderr)
     }
 
     static func run(arguments: [String]) async {
-        // Parse arguments
-        var mode = "streaming"  // Default to streaming mode
-        var dataset = "ami-sdm"
-        var singleFile: String?
-        var maxFiles: Int?
-        var chunkSeconds: Double = 10.0
-        var overlapSeconds: Double = 0.0
-        var threshold: Float = 0.7
-        var assignmentThreshold: Float = 0.84
-        var updateThreshold: Float = 0.56
-        var outputFile: String?
-        var csvFile: String?
-        var verbose = false
-        var debugMode = false
-        var autoDownload = false
-        var iterations = 1
+        if arguments.contains("--help") || arguments.contains("-h") {
+            printUsage()
+            return
+        }
+
+        var args = ParsedArgs()
 
         var i = 0
         while i < arguments.count {
             switch arguments[i] {
             case "--mode":
                 if i + 1 < arguments.count {
-                    mode = arguments[i + 1]
+                    args.mode = arguments[i + 1]
                     i += 1
                 }
             case "--dataset":
                 if i + 1 < arguments.count {
-                    dataset = arguments[i + 1]
+                    args.dataset = arguments[i + 1]
                     i += 1
                 }
             case "--single-file":
                 if i + 1 < arguments.count {
-                    singleFile = arguments[i + 1]
+                    args.singleFile = arguments[i + 1]
                     i += 1
                 }
             case "--max-files":
                 if i + 1 < arguments.count {
-                    maxFiles = Int(arguments[i + 1])
+                    args.maxFiles = Int(arguments[i + 1])
                     i += 1
                 }
             case "--chunk-seconds":
                 if i + 1 < arguments.count {
-                    chunkSeconds = Double(arguments[i + 1]) ?? 10.0
+                    args.chunkSeconds = Double(arguments[i + 1]) ?? 10.0
                     i += 1
                 }
             case "--overlap-seconds":
                 if i + 1 < arguments.count {
-                    overlapSeconds = Double(arguments[i + 1]) ?? 0.0
+                    args.overlapSeconds = Double(arguments[i + 1]) ?? 0.0
                     i += 1
                 }
             case "--threshold":
                 if i + 1 < arguments.count {
-                    threshold = Float(arguments[i + 1]) ?? 0.7
+                    if let val = Float(arguments[i + 1]) {
+                        args.thresholdS = val
+                        args.thresholdD = Double(val)
+                    } else {
+                        logger.warning("Invalid --threshold value '\(arguments[i + 1])', using defaults")
+                    }
                     i += 1
                 }
             case "--assignment-threshold":
                 if i + 1 < arguments.count {
-                    assignmentThreshold = Float(arguments[i + 1]) ?? 0.84
+                    args.assignmentThreshold = Float(arguments[i + 1]) ?? 0.84
                     i += 1
                 }
             case "--update-threshold":
                 if i + 1 < arguments.count {
-                    updateThreshold = Float(arguments[i + 1]) ?? 0.56
+                    args.updateThreshold = Float(arguments[i + 1]) ?? 0.56
                     i += 1
                 }
             case "--output":
                 if i + 1 < arguments.count {
-                    outputFile = arguments[i + 1]
+                    args.outputFile = arguments[i + 1]
                     i += 1
                 }
             case "--csv":
                 if i + 1 < arguments.count {
-                    csvFile = arguments[i + 1]
+                    args.csvFile = arguments[i + 1]
                     i += 1
                 }
             case "--verbose":
-                verbose = true
+                args.verbose = true
             case "--debug":
-                debugMode = true
+                args.debugMode = true
             case "--auto-download":
-                autoDownload = true
+                args.autoDownload = true
             case "--iterations":
                 if i + 1 < arguments.count {
-                    iterations = Int(arguments[i + 1]) ?? 1
+                    args.iterations = Int(arguments[i + 1]) ?? 1
                     i += 1
                 }
-            case "--help":
-                printUsage()
-                return
+
+            // Streaming-only flags
+            case "--min-speech-duration":
+                if i + 1 < arguments.count {
+                    args.minSpeechDuration = Float(arguments[i + 1]) ?? 1.0
+                    i += 1
+                }
+            case "--min-silence-gap":
+                if i + 1 < arguments.count {
+                    args.minSilenceGap = Float(arguments[i + 1]) ?? 0.5
+                    i += 1
+                }
+            case "--min-active-frames":
+                if i + 1 < arguments.count {
+                    args.minActiveFramesCount = Float(arguments[i + 1]) ?? 10.0
+                    i += 1
+                }
+            case "--num-clusters":
+                if i + 1 < arguments.count {
+                    args.numClusters = Int(arguments[i + 1]) ?? -1
+                    i += 1
+                }
+            case "--min-embed-update":
+                if i + 1 < arguments.count {
+                    args.minEmbeddingUpdateDuration = Float(arguments[i + 1]) ?? 2.0
+                    i += 1
+                }
+
+            // Offline-only flags
+            case "--fa":
+                if i + 1 < arguments.count {
+                    args.fa = Double(arguments[i + 1]) ?? 0.07
+                    i += 1
+                }
+            case "--fb":
+                if i + 1 < arguments.count {
+                    args.fb = Double(arguments[i + 1]) ?? 0.8
+                    i += 1
+                }
+            case "--window-duration":
+                if i + 1 < arguments.count {
+                    args.windowDuration = Double(arguments[i + 1]) ?? 10.0
+                    i += 1
+                }
+            case "--sample-rate":
+                if i + 1 < arguments.count {
+                    args.sampleRate = Int(arguments[i + 1]) ?? 16000
+                    i += 1
+                }
+            case "--step-ratio":
+                if i + 1 < arguments.count {
+                    args.stepRatio = Double(arguments[i + 1]) ?? 0.2
+                    i += 1
+                }
+            case "--batch-size":
+                if i + 1 < arguments.count {
+                    args.batchSize = Int(arguments[i + 1]) ?? 32
+                    i += 1
+                }
+            case "--include-overlap":
+                args.excludeOverlap = false
+            case "--skip-similarity":
+                if i + 1 < arguments.count {
+                    args.skipSimilarity = Float(arguments[i + 1])
+                    i += 1
+                }
+            case "--min-segment-duration":
+                if i + 1 < arguments.count {
+                    args.minSegmentDuration = Double(arguments[i + 1]) ?? 1.0
+                    i += 1
+                }
+            case "--min-gap-duration":
+                if i + 1 < arguments.count {
+                    args.minGapDuration = Double(arguments[i + 1]) ?? 0.1
+                    i += 1
+                }
+            case "--overlapping-segments":
+                args.exclusiveSegments = false
+            case "--onset-threshold":
+                if i + 1 < arguments.count {
+                    args.onsetThreshold = Float(arguments[i + 1]) ?? 0.5
+                    i += 1
+                }
+            case "--offset-threshold":
+                if i + 1 < arguments.count {
+                    args.offsetThreshold = Float(arguments[i + 1]) ?? 0.5
+                    i += 1
+                }
+            case "--min-duration-on":
+                if i + 1 < arguments.count {
+                    args.segMinDurationOn = Double(arguments[i + 1]) ?? 0.0
+                    i += 1
+                }
+            case "--min-duration-off":
+                if i + 1 < arguments.count {
+                    args.segMinDurationOff = Double(arguments[i + 1]) ?? 0.0
+                    i += 1
+                }
+            case "--max-vbx-iterations":
+                if i + 1 < arguments.count {
+                    args.maxVBxIterations = Int(arguments[i + 1]) ?? 20
+                    i += 1
+                }
+            case "--convergence-tolerance":
+                if i + 1 < arguments.count {
+                    args.convergenceTolerance = Double(arguments[i + 1]) ?? 1e-4
+                    i += 1
+                }
+            case "--min-speakers":
+                if i + 1 < arguments.count {
+                    args.minSpeakers = Int(arguments[i + 1])
+                    i += 1
+                }
+            case "--max-speakers":
+                if i + 1 < arguments.count {
+                    args.maxSpeakers = Int(arguments[i + 1])
+                    i += 1
+                }
+            case "--num-speakers":
+                if i + 1 < arguments.count {
+                    args.numSpeakers = Int(arguments[i + 1])
+                    i += 1
+                }
             default:
                 logger.warning("Unknown argument: \(arguments[i])")
             }
@@ -186,30 +380,30 @@ enum StreamDiarizationBenchmark {
         }
 
         // Validate mode
-        guard mode == "streaming" || mode == "offline" else {
-            logger.error("Invalid mode: \(mode). Must be 'streaming' or 'offline'")
+        guard args.mode == "streaming" || args.mode == "offline" else {
+            logger.error("Invalid mode: \(args.mode). Must be 'streaming' or 'offline'")
             printUsage()
             return
         }
 
-        logger.info("🚀 Starting Diarization Benchmark (\(mode.uppercased()) MODE)")
-        logger.info("   Dataset: \(dataset)")
-        logger.info("   Clustering threshold: \(threshold)")
+        logger.info("🚀 Starting Diarization Benchmark (\(args.mode.uppercased()) MODE)")
+        logger.info("   Dataset: \(args.dataset)")
+        logger.info("   Clustering threshold: \(args.thresholdS)")
 
-        if mode == "streaming" {
+        if args.mode == "streaming" {
             // Validate streaming settings
-            let hopSize = max(chunkSeconds - overlapSeconds, 1.0)
-            let overlapRatio = overlapSeconds / chunkSeconds
+            let hopSize = max(args.chunkSeconds - args.overlapSeconds, 1.0)
+            let overlapRatio = args.overlapSeconds / args.chunkSeconds
 
-            logger.info("   Chunk size: \(chunkSeconds)s")
-            logger.info("   Overlap: \(overlapSeconds)s (\(String(format: "%.0f", overlapRatio * 100))%)")
+            logger.info("   Chunk size: \(args.chunkSeconds)s")
+            logger.info("   Overlap: \(args.overlapSeconds)s (\(String(format: "%.0f", overlapRatio * 100))%)")
             logger.info("   Hop size: \(hopSize)s")
-            logger.info("   Assignment threshold: \(assignmentThreshold)")
-            logger.info("   Update threshold: \(updateThreshold)")
+            logger.info("   Assignment threshold: \(args.assignmentThreshold)")
+            logger.info("   Update threshold: \(args.updateThreshold)")
 
             // Determine streaming mode
             let streamingMode: String
-            if overlapSeconds == 0 {
+            if args.overlapSeconds == 0 {
                 streamingMode = "Batch (no overlap)"
             } else if overlapRatio >= 0.6 {
                 streamingMode = "Real-time (high overlap)"
@@ -224,23 +418,23 @@ enum StreamDiarizationBenchmark {
         logger.info("")
 
         // Download dataset if needed
-        if autoDownload {
+        if args.autoDownload {
             logger.info("📥 Downloading AMI dataset if needed...")
             // Download both audio and annotations
             await DatasetDownloader.downloadAMIDataset(
-                variant: dataset == "ami-ihm" ? .ihm : .sdm,
+                variant: args.dataset == "ami-ihm" ? .ihm : .sdm,
                 force: false,
-                singleFile: singleFile
+                singleFile: args.singleFile
             )
             await DatasetDownloader.downloadAMIAnnotations(force: false)
         }
 
         // Get list of files to process
         let filesToProcess: [String]
-        if let meeting = singleFile {
+        if let meeting = args.singleFile {
             filesToProcess = [meeting]
         } else {
-            filesToProcess = getAMIFiles(dataset: dataset, maxFiles: maxFiles)
+            filesToProcess = getAMIFiles(dataset: args.dataset, maxFiles: args.maxFiles)
         }
 
         if filesToProcess.isEmpty {
@@ -260,11 +454,39 @@ enum StreamDiarizationBenchmark {
             models = try await DiarizerModels.downloadIfNeeded()
 
             // For offline mode, also initialize the offline manager
-            if mode == "offline" {
+            if args.mode == "offline" {
                 let modelDir = OfflineDiarizerModels.defaultModelsDirectory()
-                let offlineConfig = OfflineDiarizerConfig(
-                    clusteringThreshold: Double(threshold)
+                let embeddingSkipStrategy: OfflineDiarizerConfig.EmbeddingSkipStrategy =
+                    if let simThreshold = args.skipSimilarity {
+                        .maskSimilarity(threshold: simThreshold)
+                    } else {
+                        .none
+                    }
+                var offlineConfig = OfflineDiarizerConfig(
+                    clusteringThreshold: args.thresholdD,
+                    Fa: args.fa,
+                    Fb: args.fb,
+                    windowDuration: args.windowDuration,
+                    sampleRate: args.sampleRate,
+                    segmentationStepRatio: args.stepRatio,
+                    embeddingBatchSize: args.batchSize,
+                    embeddingExcludeOverlap: args.excludeOverlap,
+                    embeddingSkipStrategy: embeddingSkipStrategy,
+                    minSegmentDuration: args.minSegmentDuration,
+                    minGapDuration: args.minGapDuration,
+                    exclusiveSegments: args.exclusiveSegments,
+                    speechOnsetThreshold: args.onsetThreshold,
+                    speechOffsetThreshold: args.offsetThreshold,
+                    segmentationMinDurationOn: args.segMinDurationOn,
+                    segmentationMinDurationOff: args.segMinDurationOff,
+                    maxVBxIterations: args.maxVBxIterations,
+                    convergenceTolerance: args.convergenceTolerance
                 )
+                if let exact = args.numSpeakers {
+                    offlineConfig = offlineConfig.withSpeakers(exactly: exact)
+                } else if args.minSpeakers != nil || args.maxSpeakers != nil {
+                    offlineConfig = offlineConfig.withSpeakers(min: args.minSpeakers, max: args.maxSpeakers)
+                }
                 offlineManager = OfflineDiarizerManager(config: offlineConfig)
                 let offlineModels = try await OfflineDiarizerModels.load(from: modelDir)
                 offlineManager?.initialize(models: offlineModels)
@@ -287,32 +509,37 @@ enum StreamDiarizationBenchmark {
 
             var iterationResults: [BenchmarkResult] = []
 
-            for iteration in 1...iterations {
-                if iterations > 1 {
-                    logger.info("  Iteration \(iteration)/\(iterations)")
+            for iteration in 1...args.iterations {
+                if args.iterations > 1 {
+                    logger.info("  Iteration \(iteration)/\(args.iterations)")
                 }
 
                 let result: BenchmarkResult?
-                if mode == "streaming" {
+                if args.mode == "streaming" {
                     result = await processStreamingMeeting(
                         meetingName: meetingName,
                         models: models,
                         modelInitTime: modelInitTime,
-                        chunkSeconds: chunkSeconds,
-                        overlapSeconds: overlapSeconds,
-                        threshold: threshold,
-                        assignmentThreshold: assignmentThreshold,
-                        updateThreshold: updateThreshold,
-                        verbose: verbose,
-                        debugMode: debugMode
+                        chunkSeconds: args.chunkSeconds,
+                        overlapSeconds: args.overlapSeconds,
+                        threshold: args.thresholdS,
+                        assignmentThreshold: args.assignmentThreshold,
+                        updateThreshold: args.updateThreshold,
+                        minSpeechDuration: args.minSpeechDuration,
+                        minSilenceGap: args.minSilenceGap,
+                        minActiveFramesCount: args.minActiveFramesCount,
+                        minEmbeddingUpdateDuration: args.minEmbeddingUpdateDuration,
+                        numClusters: args.numClusters,
+                        verbose: args.verbose,
+                        debugMode: args.debugMode
                     )
                 } else {
                     result = await processOfflineMeeting(
                         meetingName: meetingName,
                         controller: offlineManager!,
                         modelInitTime: modelInitTime,
-                        verbose: verbose,
-                        debugMode: debugMode
+                        verbose: args.verbose,
+                        debugMode: args.debugMode
                     )
                 }
 
@@ -366,8 +593,8 @@ enum StreamDiarizationBenchmark {
                 let avgResult = averageResults(iterationResults)
                 allResults.append(avgResult)
 
-                if iterations > 1 {
-                    logger.info("📊 Average over \(iterations) iterations:")
+                if args.iterations > 1 {
+                    logger.info("📊 Average over \(args.iterations) iterations:")
                     logger.info(
                         "  DER: \(String(format: "%.1f", avgResult.der))% ± \(String(format: "%.1f", standardDeviation(iterationResults.map { $0.der })))%"
                     )
@@ -382,11 +609,11 @@ enum StreamDiarizationBenchmark {
         printFinalSummary(results: allResults)
 
         // Save results
-        if let outputPath = outputFile {
+        if let outputPath = args.outputFile {
             saveJSONResults(results: allResults, to: outputPath)
         }
 
-        if let csvPath = csvFile {
+        if let csvPath = args.csvFile {
             saveCSVResults(results: allResults, to: csvPath)
         }
     }
@@ -400,6 +627,11 @@ enum StreamDiarizationBenchmark {
         threshold: Float,
         assignmentThreshold: Float,
         updateThreshold: Float,
+        minSpeechDuration: Float,
+        minSilenceGap: Float,
+        minActiveFramesCount: Float,
+        minEmbeddingUpdateDuration: Float,
+        numClusters: Int,
         verbose: Bool,
         debugMode: Bool
     ) async -> BenchmarkResult? {
@@ -426,9 +658,11 @@ enum StreamDiarizationBenchmark {
             // Initialize diarizer with streaming manager
             let config = DiarizerConfig(
                 clusteringThreshold: threshold,
-                minSpeechDuration: 1.0,
-                minSilenceGap: 0.5,
-                minActiveFramesCount: 10.0,
+                minSpeechDuration: minSpeechDuration,
+                minEmbeddingUpdateDuration: minEmbeddingUpdateDuration,
+                minSilenceGap: minSilenceGap,
+                numClusters: numClusters,
+                minActiveFramesCount: minActiveFramesCount,
                 debugMode: debugMode,
                 chunkDuration: Float(chunkSeconds),
                 chunkOverlap: Float(overlapSeconds)
