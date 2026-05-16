@@ -198,8 +198,13 @@ struct TextNormalizer {
             withTemplate: ""
         )
 
-        // Remove stuttering patterns like "th-", "o-", "y-" (single letter followed by dash)
-        let stutterPattern = try! NSRegularExpression(pattern: "\\b[a-z]+-\\s*", options: [])
+        // Remove stuttering patterns like "th-", "o-", "y-" (1-2 letter prefix
+        // followed by a dash). Require trailing whitespace so we do not strip
+        // hyphenated words ("Frazer-Nash", "well-known") or trailing-dash
+        // tokens before alphanumerics (e.g. "Bose- Okay" with a space after
+        // the dash is still a stutter; "Bose-Okay" without one would be a
+        // compound and is left alone).
+        let stutterPattern = try! NSRegularExpression(pattern: "\\b[a-z]{1,2}-\\s+", options: [])
         normalized = stutterPattern.stringByReplacingMatches(
             in: normalized,
             options: [],

@@ -14,8 +14,10 @@ extension VocabularyRescorer {
 
     // MARK: - Stopwords
 
-    /// Common stopwords that should not be replaced by vocabulary terms.
-    /// Defined once as a static constant to avoid recreation in hot loops.
+    /// Common stopwords used by the **single-word** rescue path to skip
+    /// substituting vocabulary terms over short common words (prevents
+    /// false positives like `just` → `Wyost`). Wider than the multi-word
+    /// set because lone-word substitutions are the most error-prone.
     static let stopwords: Set<String> = [
         // Articles and determiners
         "a", "an", "the", "some", "any", "no", "every", "each", "all",
@@ -37,6 +39,29 @@ extension VocabularyRescorer {
         // Common short words
         "just", "also", "only", "even", "still", "now", "here", "there", "very",
         "well", "back", "way", "own", "new", "old", "good", "great", "first", "last",
+    ]
+
+    /// Subset of `stopwords` used by the **multi-word** rescue path to
+    /// raise the similarity floor on phrases like `at this` → `Matthew`.
+    /// Restricted to true function words so content words like
+    /// `new red` → `Newrez` (sim 0.83) are not silently upgraded to a
+    /// 0.85 threshold and rejected.
+    static let multiWordStopwords: Set<String> = [
+        // Articles and determiners
+        "a", "an", "the", "some", "any", "no", "every", "each", "all",
+        // Conjunctions
+        "and", "or", "but", "so", "if", "then", "than", "as",
+        // Prepositions
+        "in", "on", "at", "to", "for", "of", "with", "by", "from", "up", "down",
+        "out", "about", "into", "over", "after", "before", "between", "under",
+        // Be verbs
+        "is", "are", "was", "were", "be", "been", "being", "am",
+        // Auxiliaries
+        "have", "has", "had", "do", "does", "did", "will", "would", "can", "could",
+        // Pronouns
+        "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
+        "my", "your", "his", "its", "our", "their", "this", "that", "these", "those",
+        "who", "what", "which", "where", "when", "how", "why",
     ]
 
     // MARK: - CTC Match Types
@@ -762,6 +787,36 @@ extension VocabularyRescorer {
             }
         }
 
+        // SPOTTER-ANCHORED RESCUE PASS:
+        //
+        // The string-similarity gate above only fires when TDT's
+        // hypothesis is near (in edit-distance) some vocabulary term.
+        // For rare brand names that TDT mangles beyond ~0.55 similarity
+        // (e.g. `Quhuo` → `chuhua`, `HepsiJet` → `the jet`,
+        // `DiaSorin` → `the solar`), the CTC keyword spotter still
+        // detects the keyword acoustically. This pass collects those
+        // detections and proposes them as replacements.
+        //
+        // **Size-gated**: only runs when vocabulary is small enough that
+        // the spotter's keyword-vs-keyword competition is reliable. On
+        // extra-large vocabularies (e.g. 670 drug names with ~600
+        // distractors), the spotter has too many phonetically-similar
+        // terms producing false-positive rescues like
+        // `and` → `Evenity`. The TDT-anchored path above already covers
+        // those cases via Levenshtein matching against the larger
+        // distractor pool.
+        if vocabulary.terms.count <= ContextBiasingConstants.largeVocabThreshold {
+            collectSpotterAnchoredCandidates(
+                wordTimings: wordTimings,
+                logProbs: logProbs,
+                frameDuration: frameDuration,
+                cbw: cbw,
+                marginSeconds: marginSeconds,
+                vocabularyNormalizedSet: vocabularyNormalizedSet,
+                pendingReplacements: &pendingReplacements
+            )
+        }
+
         // PASS 2 & 3: Sort, apply, and reconstruct (shared logic)
         return finalizeReplacements(
             pendingReplacements: pendingReplacements,
@@ -769,5 +824,198 @@ extension VocabularyRescorer {
             replacedIndices: &replacedIndices,
             replacements: &replacements
         )
+    }
+
+    // MARK: - Spotter-Anchored Rescue
+
+    /// Minimum CTC keyword-spotter score to consider a detection for the
+    /// rescue path. Looser than the production spotter floor (-15) but
+    /// strict enough that the CTC-vs-CTC comparison can still reject
+    /// borderline acoustic matches.
+    private static let spotterRescueMinScore: Float = -10.0
+
+    /// Collect candidate replacements grounded in CTC-keyword-spotter
+    /// detections rather than in TDT string similarity.
+    ///
+    /// For each detection, locate the TDT word indices whose timestamp
+    /// window overlaps the detection. Build a `CTCMatchCandidate`
+    /// (similarity is computed for ranking only — the gate is the
+    /// CTC-vs-CTC comparison plus cbw boost performed by
+    /// `evaluateCTCMatch`).
+    private func collectSpotterAnchoredCandidates(
+        wordTimings: [WordTiming],
+        logProbs: [[Float]],
+        frameDuration: Double,
+        cbw: Float,
+        marginSeconds: Double,
+        vocabularyNormalizedSet: Set<String>,
+        pendingReplacements: inout [PendingReplacement]
+    ) {
+        let result = spotter.spotKeywordsFromLogProbs(
+            logProbs: logProbs,
+            frameDuration: frameDuration,
+            customVocabulary: vocabulary,
+            minScore: Self.spotterRescueMinScore
+        )
+        guard !result.detections.isEmpty else { return }
+
+        // Sort detections by score descending — the highest-confidence
+        // acoustic detection for each (term, time-window) pair gets to
+        // race for the span first.
+        let detections = result.detections.sorted { $0.score > $1.score }
+        var seenSpans = Set<String>()  // dedupe by termLower:firstIdx:spanLength
+
+        for detection in detections {
+            let term = detection.term
+            let vocabTerm = term.text
+            guard vocabTerm.count >= vocabulary.minTermLength else { continue }
+
+            // Map detection time window → TDT word indices.
+            let span = wordIndices(
+                in: wordTimings,
+                overlapping: detection.startTime,
+                end: detection.endTime
+            )
+            guard !span.isEmpty else { continue }
+
+            // Bound to a sensible width so we don't replace whole
+            // sentences with a single keyword on a misaligned spotter
+            // hit. 4 mirrors the multi-word ceiling in the term-centric
+            // loop above.
+            guard span.count <= 4 else { continue }
+
+            let dedupeKey = "\(term.textLowercased):\(span.first!):\(span.count)"
+            guard seenSpans.insert(dedupeKey).inserted else { continue }
+
+            let spanWords = span.map { wordTimings[$0].word }
+            let originalPhrase = spanWords.joined(separator: " ")
+            let normalizedPhrase = Self.normalizeForSimilarity(originalPhrase)
+
+            // If the TDT phrase already matches some other vocabulary
+            // term verbatim, leave it alone — that's the same guard the
+            // primary path applies.
+            let normalizedForms = buildNormalizedForms(for: term)
+            let normalizedCurrentSet = Set(normalizedForms.map { $0.normalized })
+            if vocabularyNormalizedSet.contains(normalizedPhrase),
+                !normalizedCurrentSet.contains(normalizedPhrase)
+            {
+                continue
+            }
+
+            // If the TDT phrase already equals the canonical (or an
+            // alias), there's nothing to replace.
+            let normalizedCanonical = Self.normalizeForSimilarity(vocabTerm)
+            if normalizedPhrase == normalizedCanonical { continue }
+            if normalizedCurrentSet.contains(normalizedPhrase) { continue }
+
+            guard let vocabTokens = term.ctcTokenIds ?? term.tokenIds, !vocabTokens.isEmpty else {
+                continue
+            }
+
+            // STOPWORD/CONTENT GUARD:
+            // Reject rescues whose entire span is short common words.
+            // Without this, drug-list FPs like `and` → `Evenity`,
+            // `the` → `ELEVIDYS`, `by` → `Stelara` slip through because
+            // the spotter score, evaluated in its own (acoustic) window,
+            // beats the original stopword's CTC score in that same
+            // window — yet the spotter window is several frames wider
+            // than the lone TDT word it lands on.
+            let normalizedSpanWords =
+                span.map { Self.normalizeForSimilarity(wordTimings[$0].word) }
+            if span.count == 1 && Self.stopwords.contains(normalizedSpanWords[0]) {
+                continue
+            }
+            if span.count >= 2 {
+                let allStopwords = normalizedSpanWords.allSatisfy { Self.stopwords.contains($0) }
+                if allStopwords { continue }
+            }
+
+            // Compute similarity for ranking only — the gate is CTC
+            // evidence, not similarity.
+            var bestSimilarity: Float = 0
+            for form in normalizedForms {
+                bestSimilarity = max(bestSimilarity, Self.stringSimilarity(normalizedPhrase, form.normalized))
+            }
+
+            let firstIdx = span.first!
+            let lastIdx = span.last!
+            let candidate = CTCMatchCandidate(
+                originalPhrase: originalPhrase,
+                vocabTerm: vocabTerm,
+                vocabTokens: vocabTokens,
+                similarity: bestSimilarity,
+                spanLength: span.count,
+                spanIndices: span,
+                spanStartTime: wordTimings[firstIdx].startTime,
+                spanEndTime: wordTimings[lastIdx].endTime
+            )
+
+            let evalResult = evaluateCTCMatch(
+                candidate: candidate,
+                logProbs: logProbs,
+                frameDuration: frameDuration,
+                cbw: cbw,
+                marginSeconds: marginSeconds
+            )
+            guard evalResult.shouldReplace else { continue }
+
+            debugLog(
+                "  [SPOTTER-RESCUE] '\(originalPhrase)' → '\(vocabTerm)' "
+                    + "spotter=\(String(format: "%.2f", detection.score)), "
+                    + "sim=\(String(format: "%.2f", bestSimilarity))"
+            )
+
+            pendingReplacements.append(
+                PendingReplacement(
+                    candidate: candidate,
+                    result: evalResult,
+                    similarity: bestSimilarity
+                )
+            )
+        }
+    }
+
+    /// Find the indices of TDT words whose [startTime, endTime] window
+    /// overlaps the supplied detection range. Returns at most a small
+    /// contiguous run; non-contiguous overlaps are reduced to the run
+    /// containing the time-center of the detection.
+    private func wordIndices(
+        in wordTimings: [WordTiming],
+        overlapping start: Double,
+        end: Double
+    ) -> [Int] {
+        guard !wordTimings.isEmpty, start < end else { return [] }
+
+        var overlapping: [Int] = []
+        for (idx, w) in wordTimings.enumerated() {
+            if w.endTime < start { continue }
+            if w.startTime > end { break }
+            overlapping.append(idx)
+        }
+        if overlapping.isEmpty {
+            // Fall back to nearest word to the detection center.
+            let center = (start + end) / 2.0
+            var bestIdx = 0
+            var bestDelta = Double.infinity
+            for (idx, w) in wordTimings.enumerated() {
+                let mid = (w.startTime + w.endTime) / 2.0
+                let delta = abs(mid - center)
+                if delta < bestDelta {
+                    bestDelta = delta
+                    bestIdx = idx
+                }
+            }
+            return [bestIdx]
+        }
+        // Ensure contiguity (consecutive indices).
+        var contiguous: [Int] = [overlapping[0]]
+        for i in 1..<overlapping.count {
+            if overlapping[i] == contiguous.last! + 1 {
+                contiguous.append(overlapping[i])
+            } else {
+                break
+            }
+        }
+        return contiguous
     }
 }

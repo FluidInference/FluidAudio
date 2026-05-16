@@ -226,7 +226,7 @@ extension VocabularyRescorer {
 
         // Multi-word span stopword check - raise threshold
         if spanLength >= 2 {
-            let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
+            let containsStopword = spanWords.contains { Self.multiWordStopwords.contains($0) }
             if containsStopword {
                 minSimilarity = max(minSimilarity, ContextBiasingConstants.stopwordSpanSimilarity)
                 debugLog(

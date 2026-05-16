@@ -125,4 +125,57 @@ final class VocabularyRescorerUtilsTests: XCTestCase {
         XCTAssertEqual(config.useAdaptiveThresholds, ContextBiasingConstants.defaultUseAdaptiveThresholds)
         XCTAssertEqual(config.referenceTokenCount, ContextBiasingConstants.defaultReferenceTokenCount)
     }
+
+    // MARK: - Stopword Sets
+
+    func testMultiWordStopwordsExcludeContentWords() {
+        // The multi-word path raises the threshold for spans containing
+        // function words (the/and/of/etc.). It must NOT raise the
+        // threshold on content words like "new"/"old"/"good"/"great" so
+        // that rescues like `new red` → `Newrez` (sim 0.83) clear the
+        // 0.55 floor.
+        let contentWords = [
+            "new", "old", "good", "great", "first", "last",
+            "well", "back", "way", "own", "just", "also",
+            "only", "even", "still", "now", "here",
+            "there", "very",
+        ]
+        for word in contentWords {
+            XCTAssertFalse(
+                VocabularyRescorer.multiWordStopwords.contains(word),
+                "'\(word)' should not be in multiWordStopwords (poisons multi-word rescue)"
+            )
+        }
+    }
+
+    func testMultiWordStopwordsIncludeFunctionWords() {
+        // Function words still raise the threshold on multi-word spans.
+        let functionWords = [
+            "a", "the", "and", "or", "is", "to", "for",
+            "in", "of", "with", "by", "i", "you", "he",
+            "she", "it", "we", "they", "this", "that",
+        ]
+        for word in functionWords {
+            XCTAssertTrue(
+                VocabularyRescorer.multiWordStopwords.contains(word),
+                "'\(word)' should be in multiWordStopwords"
+            )
+        }
+    }
+
+    func testSingleWordStopwordsRetainContentWords() {
+        // Single-word path uses the wider list to avoid lone-word
+        // substitutions like `just` → `Wyost`. Make sure the broader
+        // set still includes those guards.
+        let mustGuard = [
+            "just", "new", "old", "good", "great", "back",
+            "way", "own", "now", "here", "there", "still",
+        ]
+        for word in mustGuard {
+            XCTAssertTrue(
+                VocabularyRescorer.stopwords.contains(word),
+                "'\(word)' should be in stopwords (single-word guard)"
+            )
+        }
+    }
 }
