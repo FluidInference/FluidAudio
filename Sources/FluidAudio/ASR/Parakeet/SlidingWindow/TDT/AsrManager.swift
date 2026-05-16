@@ -40,6 +40,12 @@ public actor AsrManager {
         config.melChunkContext
     }
 
+    /// Opt-in dual-decode arbitration flag exposed to `ChunkProcessor`.
+    /// Only active alongside `melChunkContext == false` on v3.
+    internal var dualDecodeArbitration: Bool {
+        config.dualDecodeArbitration
+    }
+
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
     #if DEBUG
@@ -245,7 +251,8 @@ public actor AsrManager {
                 parallelChunkConcurrency: workingConfig.parallelChunkConcurrency,
                 streamingEnabled: workingConfig.streamingEnabled,
                 streamingThreshold: workingConfig.streamingThreshold,
-                melChunkContext: workingConfig.melChunkContext
+                melChunkContext: workingConfig.melChunkContext,
+                dualDecodeArbitration: workingConfig.dualDecodeArbitration
             )
         }
 
@@ -259,7 +266,8 @@ public actor AsrManager {
                 parallelChunkConcurrency: workingConfig.parallelChunkConcurrency,
                 streamingEnabled: workingConfig.streamingEnabled,
                 streamingThreshold: workingConfig.streamingThreshold,
-                melChunkContext: workingConfig.melChunkContext
+                melChunkContext: workingConfig.melChunkContext,
+                dualDecodeArbitration: workingConfig.dualDecodeArbitration
             )
         } else {
             adaptedConfig = workingConfig

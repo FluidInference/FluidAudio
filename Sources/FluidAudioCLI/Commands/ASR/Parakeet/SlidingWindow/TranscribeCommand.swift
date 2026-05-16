@@ -217,6 +217,7 @@ enum TranscribeCommand {
         var language: Language?
         var encoderPrecision: ParakeetEncoderPrecision = .int8
         var melChunkContext = true
+        var dualDecodeArbitration = false
 
         // Parse options
         var i = 1
@@ -299,6 +300,11 @@ enum TranscribeCommand {
                 // on non-first chunks. Restores clean transcription at chunk
                 // boundaries for non-English audio on parakeet-tdt-0.6b-v3.
                 melChunkContext = false
+            case "--dual-decode-arbitration":
+                // Opt-in per-chunk dual-decode arbitration (v3 + no-mel only).
+                // Doubles per-chunk runtime; arbitrates by mean per-token
+                // joint log-probability. Language-agnostic.
+                dualDecodeArbitration = true
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
@@ -324,7 +330,8 @@ enum TranscribeCommand {
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
                 outputJsonPath: outputJsonPath, modelVersion: modelVersion, customVocabPath: customVocabPath,
                 modelDir: modelDir, language: language, encoderPrecision: encoderPrecision,
-                melChunkContext: melChunkContext)
+                melChunkContext: melChunkContext,
+                dualDecodeArbitration: dualDecodeArbitration)
         }
     }
 
@@ -333,7 +340,8 @@ enum TranscribeCommand {
         audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
         modelVersion: AsrModelVersion, customVocabPath: String?, modelDir: String? = nil,
         language: Language? = nil, encoderPrecision: ParakeetEncoderPrecision = .int8,
-        melChunkContext: Bool = true
+        melChunkContext: Bool = true,
+        dualDecodeArbitration: Bool = false
     ) async {
         do {
             // Initialize ASR models
@@ -349,7 +357,8 @@ enum TranscribeCommand {
             let asrConfig = ASRConfig(
                 tdtConfig: tdtConfig,
                 encoderHiddenSize: modelVersion.encoderHiddenSize,
-                melChunkContext: melChunkContext
+                melChunkContext: melChunkContext,
+                dualDecodeArbitration: dualDecodeArbitration
             )
             let asrManager = AsrManager(config: asrConfig)
             try await asrManager.loadModels(models)

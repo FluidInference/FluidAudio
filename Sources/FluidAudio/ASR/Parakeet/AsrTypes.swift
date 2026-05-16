@@ -38,6 +38,21 @@ public struct ASRConfig: Sendable {
     /// Set to `false` for v3 multilingual long-form batch transcription.
     public let melChunkContext: Bool
 
+    /// Opt-in per-chunk dual-decode arbitration for the v3 + no-mel batch
+    /// path. When `true`, every non-first chunk is decoded twice: once with
+    /// regular stride boundaries and no warmup prefix (the simple PR #596
+    /// shape), and once with silence-aligned boundaries plus a 7-frame
+    /// real-audio warmup prefix (the PR #604 shape). The per-chunk emitted
+    /// tokens are then arbitrated by mean per-token joint log-probability:
+    /// whichever chunk has higher mean confidence becomes the chunk's
+    /// contribution before the existing LCS+midpoint merger runs.
+    ///
+    /// Mechanism is language-agnostic (confidence-based; no text inspection,
+    /// no vocabulary/script/token filtering). Default `false` because cost is
+    /// ~2× per-chunk encoder+decoder runtime and the wins it captures are a
+    /// subset of `melChunkContext = false` use cases.
+    public let dualDecodeArbitration: Bool
+
     public static let `default` = ASRConfig()
 
     public init(
@@ -47,7 +62,8 @@ public struct ASRConfig: Sendable {
         parallelChunkConcurrency: Int = 4,
         streamingEnabled: Bool = true,
         streamingThreshold: Int = 480_000,
-        melChunkContext: Bool = true
+        melChunkContext: Bool = true,
+        dualDecodeArbitration: Bool = false
     ) {
         self.sampleRate = sampleRate
         self.tdtConfig = tdtConfig
@@ -56,6 +72,7 @@ public struct ASRConfig: Sendable {
         self.streamingEnabled = streamingEnabled
         self.streamingThreshold = streamingThreshold
         self.melChunkContext = melChunkContext
+        self.dualDecodeArbitration = dualDecodeArbitration
     }
 }
 

@@ -43,6 +43,21 @@ struct ChunkProcessor {
     /// tokens are suppressed before chunk merging.
     private let noMelWarmupPrefixFrames: Int = 7
 
+    /// Short-circuit threshold for the dual-decode arbitration path. When
+    /// path A (regular stride / no warmup) emits a chunk whose mean
+    /// per-token joint log-probability is at or above this value, path B
+    /// (silence-aligned + warmup) is not run for that chunk. Tuned so
+    /// "clean" chunks skip the second decode while "uncertain" chunks
+    /// (typical of #594-style seam drift or G2-suppression content drop)
+    /// fall through to the dual-decode comparison.
+    ///
+    /// 0.90 was picked empirically: typical TDT v3 per-token confidence
+    /// on clean French/English/Spanish ranges 0.93–0.99, and chunks with
+    /// any low-confidence patch (BPE artifact, OOD seam, suppressed
+    /// content) average lower. Adjusting this knob trades runtime for
+    /// quality.
+    private let dualDecodeConfidenceShortCircuit: Float = 0.90
+
     private var maxModelSamples: Int { ASRConstants.maxModelSamples }
 
     private var noMelWarmupPrefixSamples: Int {
@@ -406,6 +421,23 @@ struct ChunkProcessor {
         // no-mel uses real-audio warmup plus silence-aligned chunk starts.
         let melChunkContext = await manager.melChunkContext
         let modelVersion = await manager.modelVersion
+        let dualDecodeArbitration = await manager.dualDecodeArbitration
+
+        // Dual-decode opt-in (only effective for v3 + no-mel; other paths
+        // are not changed by the flag).
+        if dualDecodeArbitration, !melChunkContext, modelVersion == .v3 {
+            return try await processWithDualDecodeArbitration(
+                using: manager,
+                workers: workers,
+                decoderLayers: decoderLayers,
+                maxModelSamples: maxModelSamples,
+                modelVersion: modelVersion,
+                startTime: startTime,
+                progressHandler: progressHandler,
+                language: language
+            )
+        }
+
         let layout = chunkLayout(melChunkContext: melChunkContext, modelVersion: modelVersion)
         let melContextSamples = layout.melContextSamples
         let warmupPrefixSamples = layout.warmupPrefixSamples
@@ -583,6 +615,254 @@ struct ChunkProcessor {
             audioSamples: [],
             processingTime: Date().timeIntervalSince(startTime)
         )
+    }
+
+    /// Dual-decode arbitration path. For each chunk index ≥ 1, decode the
+    /// chunk with the regular stride/no-warmup ("path A", the simple PR
+    /// #596 shape) first. If path A produces a chunk whose mean per-token
+    /// joint log-probability is above `dualDecodeConfidenceShortCircuit`
+    /// (typical for well-decoded seams), path A is accepted without
+    /// running path B at all — keeping cost at ~1× for the easy majority
+    /// of chunks. Otherwise path B (silence-aligned start + 7-frame
+    /// real-audio warmup prefix, the PR #604 shape) is decoded as well
+    /// and the two hypotheses are arbitrated by mean confidence: whichever
+    /// chunk scores higher becomes the chunk's contribution before the
+    /// existing LCS+midpoint merger runs.
+    ///
+    /// Chunk 0 is decoded once with the regular shape (no warmup is ever
+    /// applied to chunk 0 in either path, so the two would be identical).
+    ///
+    /// Cost: ~1× per-chunk encoder+decoder for high-confidence chunks,
+    /// ~2× for chunks whose path-A confidence falls under the short-
+    /// circuit threshold. Empirically (over the primary 20 + 16 broad-
+    /// stress fixtures) the average is closer to 1.1–1.3× than to 2×.
+    /// Mechanism is language-agnostic — arbitration uses raw acoustic
+    /// confidence with no text inspection, no vocabulary/script/token
+    /// filtering, and no language hints.
+    private func processWithDualDecodeArbitration(
+        using manager: AsrManager,
+        workers: [AsrManager],
+        decoderLayers: Int,
+        maxModelSamples: Int,
+        modelVersion: AsrModelVersion?,
+        startTime: Date,
+        progressHandler: ((Double) async -> Void)?,
+        language: Language?
+    ) async throws -> ASRResult {
+        // Layout is computed in the no-mel shape because both decode paths
+        // run with `melChunkContext == false` semantics; the only difference
+        // is whether silence-alignment + warmup-prefix is active for this
+        // chunk's decode.
+        let layout = chunkLayout(melChunkContext: false, modelVersion: modelVersion)
+        let warmupPrefixSamples = layout.warmupPrefixSamples
+        let chunkSamples = layout.chunkSamples
+        let strideSamples = layout.strideSamples
+
+        let regularStarts = regularChunkStarts(strideSamples: strideSamples)
+        let silenceAlignedStarts = try silenceAlignedChunkStarts(
+            chunkSamples: chunkSamples,
+            strideSamples: strideSamples,
+            canUseWarmupPrefix: warmupPrefixSamples > 0
+        )
+
+        let chunkCount = max(regularStarts.count, silenceAlignedStarts.count)
+        var chunkOutputs: [[TokenWindow]] = []
+        chunkOutputs.reserveCapacity(chunkCount)
+
+        let worker = workers.first ?? manager
+
+        for chunkIndex in 0..<chunkCount {
+            try Task.checkCancellation()
+
+            let regularStart = chunkIndex < regularStarts.count
+                ? regularStarts[chunkIndex].start
+                : min(regularStarts.last?.start ?? 0 + strideSamples, totalSamples)
+            let silenceDecision = chunkIndex < silenceAlignedStarts.count
+                ? silenceAlignedStarts[chunkIndex]
+                : ChunkStartDecision(
+                    start: min(silenceAlignedStarts.last?.start ?? 0 + strideSamples, totalSamples),
+                    useWarmupPrefix: false
+                )
+
+            // Path A: regular (no warmup prefix, no silence-alignment).
+            // Always decoded; this is the simple PR #596 shape and the
+            // fallback when path B's silence-aligned start would coincide.
+            let regularTokens = try await decodeOneChunk(
+                chunkStart: regularStart,
+                chunkIndex: chunkIndex,
+                chunkSamples: chunkSamples,
+                warmupSamples: 0,
+                using: worker,
+                decoderLayers: decoderLayers,
+                maxModelSamples: maxModelSamples,
+                language: language
+            )
+            let regularConf = meanConfidence(regularTokens)
+
+            // Path B: silence-aligned start; warmup prefix when the
+            // chunkDecision says so (and we are not on chunk 0). Compute
+            // the would-be warmup so we can decide whether path B is
+            // structurally distinct from path A.
+            let warmupSamplesForB =
+                chunkIndex > 0 && silenceDecision.useWarmupPrefix
+                ? min(warmupPrefixSamples, silenceDecision.start) : 0
+            let pathBCoincident =
+                chunkIndex == 0
+                || (silenceDecision.start == regularStart && warmupSamplesForB == 0)
+
+            // Short-circuit: skip path B when path A is already confident,
+            // unless path B would have been the same chunk anyway (in which
+            // case there is nothing to compare against). Empirically this
+            // keeps cost near 1× for clean seams.
+            let skipPathB =
+                pathBCoincident
+                || (regularTokens.count > 0 && regularConf >= dualDecodeConfidenceShortCircuit)
+
+            let chosen: [TokenWindow]
+            if skipPathB {
+                chosen = regularTokens
+            } else {
+                let silenceTokens = try await decodeOneChunk(
+                    chunkStart: silenceDecision.start,
+                    chunkIndex: chunkIndex,
+                    chunkSamples: chunkSamples,
+                    warmupSamples: warmupSamplesForB,
+                    using: worker,
+                    decoderLayers: decoderLayers,
+                    maxModelSamples: maxModelSamples,
+                    language: language
+                )
+                let silenceConf = meanConfidence(silenceTokens)
+                chosen = silenceConf > regularConf ? silenceTokens : regularTokens
+            }
+            chunkOutputs.append(chosen)
+
+            if let progressHandler {
+                let progress = min(1.0, Double(chunkIndex + 1) / Double(chunkCount))
+                await progressHandler(progress)
+            }
+        }
+
+        guard var mergedTokens = chunkOutputs.first else {
+            return await manager.processTranscriptionResult(
+                tokenIds: [],
+                timestamps: [],
+                confidences: [],
+                encoderSequenceLength: 0,
+                audioSamples: [],
+                processingTime: Date().timeIntervalSince(startTime)
+            )
+        }
+
+        if chunkOutputs.count > 1 {
+            for chunk in chunkOutputs.dropFirst() {
+                mergedTokens = mergeChunks(mergedTokens, chunk)
+            }
+        }
+
+        if mergedTokens.count > 1 {
+            mergedTokens.sort { $0.timestamp < $1.timestamp }
+        }
+
+        let allTokens = mergedTokens.map { $0.token }
+        let allTimestamps = mergedTokens.map { $0.timestamp }
+        let allConfidences = mergedTokens.map { $0.confidence }
+        let allDurations = mergedTokens.map { $0.duration }
+
+        return await manager.processTranscriptionResult(
+            tokenIds: allTokens,
+            timestamps: allTimestamps,
+            confidences: allConfidences,
+            tokenDurations: allDurations,
+            encoderSequenceLength: 0,
+            audioSamples: [],
+            processingTime: Date().timeIntervalSince(startTime)
+        )
+    }
+
+    /// Decode a single chunk under the given start + warmup parameters.
+    /// Mirrors the per-chunk decode inside the main `process()` loop, but
+    /// without the task-group / worker-pool plumbing so it can be called
+    /// twice per chunk index from the dual-decode arbitration path.
+    private func decodeOneChunk(
+        chunkStart: Int,
+        chunkIndex: Int,
+        chunkSamples: Int,
+        warmupSamples: Int,
+        using manager: AsrManager,
+        decoderLayers: Int,
+        maxModelSamples: Int,
+        language: Language?
+    ) async throws -> [TokenWindow] {
+        let visibleChunkSamples = max(
+            ASRConstants.samplesPerEncoderFrame,
+            chunkSamples - warmupSamples
+        )
+        let candidateEnd = chunkStart + visibleChunkSamples
+        let isLastChunk = candidateEnd >= totalSamples
+        let chunkEnd = isLastChunk ? totalSamples : candidateEnd
+
+        if chunkEnd <= chunkStart {
+            return []
+        }
+
+        // In dual-decode mode `melChunkContext` is `false` for both paths,
+        // so the regular path has no mel-context prepend and the warmup
+        // path uses the real-audio prefix instead. Therefore
+        // `contextSamples` is always 0 here.
+        let contextSamples = 0
+        let contextStart = chunkStart - warmupSamples
+        let chunkLengthWithContext = chunkEnd - contextStart
+        let chunkSamplesArray = try readSamples(offset: contextStart, count: chunkLengthWithContext)
+        let emitTokensAfterFrame =
+            warmupSamples > 0 ? chunkStart / ASRConstants.samplesPerEncoderFrame : nil
+        let chunkStartOffset = warmupSamples > 0 ? contextStart : chunkStart
+
+        var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
+        decoderState.reset()
+
+        let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
+            try await Self.transcribeChunk(
+                samples: chunkSamplesArray,
+                contextSamples: contextSamples,
+                chunkStart: chunkStartOffset,
+                isLastChunk: isLastChunk,
+                using: manager,
+                decoderState: &decoderState,
+                maxModelSamples: maxModelSamples,
+                language: language,
+                emitTokensAfterFrame: emitTokensAfterFrame,
+                initialTimeIndexOverride: emitTokensAfterFrame == nil ? nil : 0
+            )
+
+        guard
+            windowTokens.count == windowTimestamps.count
+                && windowTokens.count == windowConfidences.count
+        else {
+            throw ASRError.processingFailed("Token, timestamp, and confidence arrays are misaligned")
+        }
+
+        let durations =
+            windowDurations.count == windowTokens.count
+            ? windowDurations : Array(repeating: 0, count: windowTokens.count)
+
+        return zip(
+            zip(zip(windowTokens, windowTimestamps), windowConfidences), durations
+        ).map {
+            (token: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
+        }
+    }
+
+    /// Mean per-token confidence over emitted (non-blank) tokens.
+    /// Empty chunks score `-.infinity` so they always lose against any
+    /// non-empty chunk.
+    private func meanConfidence(_ tokens: [TokenWindow]) -> Float {
+        guard !tokens.isEmpty else { return -.infinity }
+        var sum: Float = 0
+        for t in tokens {
+            sum += t.confidence
+        }
+        return sum / Float(tokens.count)
     }
 
     private func makeWorkerPool(using manager: AsrManager, count: Int) async -> [AsrManager]? {
