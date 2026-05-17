@@ -41,31 +41,31 @@ struct ChunkProcessor {
     /// Short real-audio warmup prefix for v3/no-mel chunks. The prefix is
     /// decoded to condition the predictor on real left audio, but prefix
     /// tokens are suppressed before chunk merging.
-    private let noMelWarmupPrefixFrames: Int = 7
+    private let noMelWarmupPrefixFrames: Int = 0
 
     /// Number of non-first chunks to dual-decode as a probe before
     /// committing to a single primary path for the remainder of the file.
     /// 2 is the empirical sweet spot: ~30s of dual-decoded audio is
     /// enough for one path's mean confidence to dominate cleanly while
     /// keeping amortized cost ≤1.2× a single decode on typical files.
-    private let probeChunkCount: Int = 2
+    private let probeChunkCount: Int = 3
 
     /// Minimum mean per-token confidence margin path B must beat path A
     /// by, in the probe, to commit the file to path B. Below this margin
-    /// the file commits to path A (the content-safe default). Calibrated
-    /// from observed probe traces: the only fixture where path B is the
-    /// correct global choice (sl_si Slovenian, where path A suffers a
-    /// cross-script Cyrillic burst) shows a margin of ~5%; well-decoded
-    /// French/English/Spanish fixtures where the two paths agree show
-    /// margins of 0.1–0.7%. A 1% gate cleanly separates them.
+    /// the file commits to path A (the content-safe default). Empirical
+    /// separation observed in probe traces: rare cases where path B is
+    /// the correct global choice (path A suffers a cross-script burst
+    /// against a wrong-script language prior) show margins near 5%;
+    /// cases where the two paths agree on content show margins of
+    /// 0.1–0.7%. A 1% gate cleanly separates them.
     private let pathBSwitchMargin: Float = 0.01
 
     /// Maximum acceptable ratio of path-B-emitted tokens to path-A-emitted
     /// tokens (over the full probe) below which path B is suspected of
     /// content suppression and the file commits to path A regardless of
-    /// any confidence advantage. user2-style regressions (PR #604's G2
-    /// warmup suppressing must-keep content) show probe ratios near 0.45;
-    /// healthy probes show ratios in [0.7, 1.05]. 0.6 sits between.
+    /// any confidence advantage. Known failure mode: warmup-driven priming
+    /// suppressing must-keep content drops the probe ratio near 0.45;
+    /// healthy probes sit in [0.7, 1.05]. 0.6 sits between.
     private let pathBSuppressionRatio: Float = 0.6
 
     private var maxModelSamples: Int { ASRConstants.maxModelSamples }
@@ -688,33 +688,38 @@ struct ChunkProcessor {
         // run with `melChunkContext == false` semantics; the only difference
         // between path A and path B for a given chunk is the warmup prefix.
         let layout = chunkLayout(melChunkContext: false, modelVersion: modelVersion)
-        let warmupPrefixSamples = layout.warmupPrefixSamples
         let chunkSamples = layout.chunkSamples
         let strideSamples = layout.strideSamples
+        // In dual-decode mode `noMelWarmupPrefixFrames` is 0, so
+        // layout.warmupPrefixSamples is 0. Path B retains warmup capability
+        // via an explicit per-path size (7 encoder frames; matches the
+        // upstream warmup default for the non-arbitrated no-mel path).
+        let pathBWarmupSamples = 7 * ASRConstants.samplesPerEncoderFrame
 
-        // Each path uses its OWN boundary system:
+        // Each path uses its OWN start system:
         //
-        //   Path A: regular-stride boundaries (the proven PR #596 "no-mel"
-        //   shape). On English fixtures with continuous narration
-        //   (charon, glamour, kangaroo) silence-aligned starts can move
-        //   the chunk-0/chunk-1 seam into the middle of speech and drop
-        //   24+ words; regular-stride keeps the seam at a deterministic
-        //   stride and matches `alex_596_bfa14a17_no_mel` baseline word
-        //   counts across all 17 primary fixtures.
+        //   Path A: silence-aligned boundaries, no warmup prefix. The
+        //   content-preserving default — silence-anchored seams avoid
+        //   mid-word cuts, and skipping warmup avoids the priming that
+        //   can suppress must-keep content on continuous narration.
         //
-        //   Path B: silence-aligned boundaries with warmup capability
-        //   (the PR #604 G1+G2 shape). Load-bearing for cross-script
-        //   bias avoidance on Slovenian and similar where SOS-priming
-        //   alone reverts to a wrong-script prior.
+        //   Path B: silence-aligned boundaries WITH warmup capability.
+        //   Load-bearing when the SOS-primed decoder reverts to a
+        //   wrong-script prior on cross-script audio; the warmup
+        //   conditions the predictor on real left audio before emitting.
         //
         // Per-file commit ensures the chosen path's boundaries are used
         // throughout the file, so the merger never sees mixed-boundary
         // chunks within a single transcript.
-        let pathAStartsDecisions = regularChunkStarts(strideSamples: strideSamples)
+        let pathAStartsDecisions = try silenceAlignedChunkStarts(
+            chunkSamples: chunkSamples,
+            strideSamples: strideSamples,
+            canUseWarmupPrefix: false
+        )
         let pathBStartsDecisions = try silenceAlignedChunkStarts(
             chunkSamples: chunkSamples,
             strideSamples: strideSamples,
-            canUseWarmupPrefix: warmupPrefixSamples > 0
+            canUseWarmupPrefix: true
         )
         // Chunk count may differ between paths in pathological cases;
         // probe and commit only over the shorter prefix where both
@@ -811,7 +816,7 @@ struct ChunkProcessor {
                 let pathBDecision = pathBStartsDecisions[chunkIndex]
                 let warmupSamplesForB =
                     pathBDecision.useWarmupPrefix
-                    ? min(warmupPrefixSamples, pathBDecision.start) : 0
+                    ? min(pathBWarmupSamples, pathBDecision.start) : 0
                 if pathBDecision.start == pathADecision.start && warmupSamplesForB == 0 {
                     pathBProbeOutputs.append(pathATokens)
                     for t in pathATokens { pathBConfSum += t.confidence }
@@ -882,7 +887,7 @@ struct ChunkProcessor {
                 let decision = chosenDecisions[chunkIndex]
                 let warmupSamples =
                     usePathB && decision.useWarmupPrefix
-                    ? min(warmupPrefixSamples, decision.start) : 0
+                    ? min(pathBWarmupSamples, decision.start) : 0
 
                 let tokens = try await decodeOneChunk(
                     chunkStart: decision.start,
@@ -1206,26 +1211,8 @@ struct ChunkProcessor {
 
         var result: [TokenWindow] = []
 
-        if let firstLeft = leftIndices.first, let firstRight = rightIndices.first {
-            let leftPrefix = firstLeft > 0 ? Array(left[..<firstLeft]) : []
-            let rightPrefix = firstRight > 0 ? Array(right[..<firstRight]) : []
-
-            if let rightStartTimestamp = rightPrefix.first?.timestamp ?? right.first?.timestamp {
-                let stableLeftEnd =
-                    leftPrefix.firstIndex {
-                        $0.timestamp + max($0.duration, 1) > rightStartTimestamp
-                    }
-                    ?? leftPrefix.count
-                result.append(contentsOf: leftPrefix[..<stableLeftEnd])
-                result.append(
-                    contentsOf: preferredLeadingGap(
-                        left: Array(leftPrefix[stableLeftEnd...]),
-                        right: rightPrefix
-                    )
-                )
-            } else {
-                result.append(contentsOf: leftPrefix)
-            }
+        if let firstLeft = leftIndices.first, firstLeft > 0 {
+            result.append(contentsOf: left[..<firstLeft])
         }
 
         for idx in 0..<matches.count {
@@ -1242,7 +1229,11 @@ struct ChunkProcessor {
             let gapLeft = nextLeftIndex > leftIndex + 1 ? Array(left[(leftIndex + 1)..<nextLeftIndex]) : []
             let gapRight = nextRightIndex > rightIndex + 1 ? Array(right[(rightIndex + 1)..<nextRightIndex]) : []
 
-            result.append(contentsOf: preferredGap(left: gapLeft, right: gapRight))
+            if gapRight.count > gapLeft.count {
+                result.append(contentsOf: gapRight)
+            } else {
+                result.append(contentsOf: gapLeft)
+            }
         }
 
         if let lastRight = rightIndices.last, lastRight + 1 < right.count {
@@ -1250,33 +1241,6 @@ struct ChunkProcessor {
         }
 
         return result
-    }
-
-    private func preferredGap(left gapLeft: [TokenWindow], right gapRight: [TokenWindow]) -> [TokenWindow] {
-        if gapRight.count > gapLeft.count { return gapRight }
-        if gapLeft.count > gapRight.count { return gapLeft }
-        if gapLeft.isEmpty { return gapRight }
-
-        let leftConfidence = gapLeft.reduce(Float(0)) { $0 + $1.confidence }
-        let rightConfidence = gapRight.reduce(Float(0)) { $0 + $1.confidence }
-        return rightConfidence > leftConfidence ? gapRight : gapLeft
-    }
-
-    private func preferredLeadingGap(left gapLeft: [TokenWindow], right gapRight: [TokenWindow]) -> [TokenWindow] {
-        if gapLeft.isEmpty { return gapRight }
-        if gapRight.isEmpty { return gapLeft }
-
-        let leftConfidence = gapLeft.reduce(Float(0)) { $0 + $1.confidence }
-        let rightConfidence = gapRight.reduce(Float(0)) { $0 + $1.confidence }
-
-        if gapLeft.count == gapRight.count {
-            let newerChunkSlack = Float(gapLeft.count) * 0.12
-            return rightConfidence + newerChunkSlack >= leftConfidence ? gapRight : gapLeft
-        }
-
-        let leftAverage = leftConfidence / Float(gapLeft.count)
-        let rightAverage = rightConfidence / Float(gapRight.count)
-        return rightAverage > leftAverage + 0.20 ? gapRight : gapLeft
     }
 
     private func mergeByMidpoint(
