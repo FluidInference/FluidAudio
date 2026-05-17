@@ -306,8 +306,15 @@ that matches your input text — there is no automatic language detection.
 Notes:
 - French only ships a 24-layer pack upstream (no 6-layer variant).
 - 24-layer packs are higher quality but slower and larger.
-- The 21 voice names (alba, anna, eve, michael, …) are shared across
-  languages, but the underlying acoustic embeddings are per-language.
+- 26 voice names are shared across every language pack, but the underlying
+  acoustic embeddings are per-language. The set is 21 English-trained
+  "literary" voices (alba, anna, azelma, bill_boerst, caro_davy, charles,
+  cosette, eponine, eve, fantine, george, jane, javert, jean, marius, mary,
+  michael, paul, peter_yearsley, stuart_bell, vera) plus 5 voices recorded
+  natively in their target language: `estelle` (French), `lola` (Spanish),
+  `juergen` (German), `rafael` (Portuguese), `giovanni` (Italian). The
+  native-language voices generally produce the most idiomatic prosody for
+  their matching language pack.
 - Mimi encoder weights (used for voice cloning) are language-agnostic and
   always live at the repo root.
 
