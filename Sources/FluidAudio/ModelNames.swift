@@ -867,10 +867,10 @@ public enum ModelNames {
     /// JSON files. File names match the HuggingFace tree at
     /// `FluidInference/supertonic-3-coreml/`.
     public enum Supertonic3 {
-        public static let textEncoder = "text_encoder"
-        public static let durationPredictor = "duration_predictor"
-        public static let vectorEstimator = "vector_estimator"
-        public static let vocoder = "vocoder"
+        public static let textEncoder = "TextEncoder"
+        public static let durationPredictor = "DurationPredictor"
+        public static let vectorEstimator = "VectorEstimator"
+        public static let vocoder = "Vocoder"
 
         public static let textEncoderFile = textEncoder + ".mlmodelc"
         public static let durationPredictorFile = durationPredictor + ".mlmodelc"

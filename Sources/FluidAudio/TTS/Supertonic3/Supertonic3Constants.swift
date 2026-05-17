@@ -52,6 +52,12 @@ public enum Supertonic3Constants {
     /// Text-encoder output channel count fed into `vector_estimator.text_emb`.
     public static let textEmbDim: Int = 256
 
+    /// Pinned text-token sequence length expected by `text_encoder` and
+    /// `duration_predictor`. The CoreML conversion fixes the T axis at 128;
+    /// the unicode processor pads/truncates inputs to match. Mirrors
+    /// `TEXT_T_FIXED = 128` in the reference Python driver.
+    public static let textTFixed: Int = 128
+
     // MARK: - Inference
 
     /// Default number of denoising steps for the vector_estimator loop. The
@@ -67,11 +73,16 @@ public enum Supertonic3Constants {
     public static let defaultSilenceDuration: Float = 0.3
 
     /// Max characters per chunk when synthesizing long English/Latin text.
-    public static let maxChunkLengthLatin: Int = 300
+    /// Sized to fit within `textTFixed = 128` after NFKD decomposition and
+    /// `<lang>…</lang>` wrapping (~10-char overhead, allowing 8-char tags
+    /// plus a small margin for diacritic expansion). Longer text is split
+    /// by `Supertonic3TextChunker` before reaching the encoder.
+    public static let maxChunkLengthLatin: Int = 110
 
-    /// Tighter chunk cap for Korean / Japanese to keep per-call latency bounded
-    /// (the reference Swift CLI uses 120 here).
-    public static let maxChunkLengthCJK: Int = 120
+    /// Tighter chunk cap for Korean / Japanese. CJK uses more codepoints per
+    /// visible character after NFKD, so we leave additional headroom inside
+    /// the 128-token window.
+    public static let maxChunkLengthCJK: Int = 90
 
     // MARK: - Language whitelist (matches AVAILABLE_LANGS in the reference)
 

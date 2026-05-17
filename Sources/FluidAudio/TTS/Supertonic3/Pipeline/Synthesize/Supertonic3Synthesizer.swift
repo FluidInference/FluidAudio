@@ -174,9 +174,9 @@ struct Supertonic3Synthesizer {
             stage: "vocoder",
             model: await store.vocoder(),
             inputs: ["latent": MLFeatureValue(multiArray: noisyLatent)])
-        guard let wavArray = vocoderOut.featureValue(for: "wav_tts")?.multiArrayValue else {
+        guard let wavArray = vocoderOut.featureValue(for: "wav")?.multiArrayValue else {
             throw Supertonic3Error.inferenceFailed(
-                stage: "vocoder", underlying: "missing 'wav_tts' output")
+                stage: "vocoder", underlying: "missing 'wav' output")
         }
 
         let wavSamples = Supertonic3MultiArray.extractFloats(wavArray)

@@ -51,14 +51,17 @@ struct Supertonic3UnicodeProcessor {
             processed.append(cleaned)
         }
 
-        let lengths = processed.map { $0.unicodeScalars.count }
-        let maxLen = lengths.max() ?? 0
+        // The text_encoder + duration_predictor models pin the T axis at
+        // `textTFixed` (128). Truncate longer inputs and zero-pad shorter
+        // ones so the bound MLMultiArray shape always matches the spec.
+        let maxLen = Supertonic3Constants.textTFixed
+        let lengths = processed.map { min($0.unicodeScalars.count, maxLen) }
 
         var ids: [[Int64]] = []
         ids.reserveCapacity(processed.count)
         for text in processed {
             var row = [Int64](repeating: 0, count: maxLen)
-            for (j, scalar) in text.unicodeScalars.enumerated() {
+            for (j, scalar) in text.unicodeScalars.prefix(maxLen).enumerated() {
                 let value = Int(scalar.value)
                 if value < indexer.count {
                     row[j] = indexer[value]
