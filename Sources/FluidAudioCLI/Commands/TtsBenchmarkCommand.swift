@@ -14,6 +14,7 @@ import Foundation
 ///   pocket-tts    — streaming flow-matching (no per-stage timings)
 ///   magpie        — encoder-decoder + NanoCodec (6-stage timings, slow)
 ///   styletts2     — LibriTTS iteration_3, zero-shot w/ reference audio
+///   supertonic3   — 4-stage multilingual flow-matching diffusion (31 langs)
 ///
 /// Usage:
 ///   fluidaudio tts-benchmark --backend kokoro-ane \
@@ -107,6 +108,9 @@ public enum TtsBenchmarkCommand {
         var cohereComputeUnitsArg: String?
         var referencePath: String?
         var variantArg: String?
+        var voiceStylePath: String?
+        var totalStepsArg: Int?
+        var speedArg: Float?
 
         var i = 0
         while i < arguments.count {
@@ -187,6 +191,21 @@ public enum TtsBenchmarkCommand {
             case "--variant":
                 if i + 1 < arguments.count {
                     variantArg = arguments[i + 1]
+                    i += 1
+                }
+            case "--voice-style":
+                if i + 1 < arguments.count {
+                    voiceStylePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--total-steps":
+                if i + 1 < arguments.count {
+                    totalStepsArg = Int(arguments[i + 1])
+                    i += 1
+                }
+            case "--speed":
+                if i + 1 < arguments.count {
+                    speedArg = Float(arguments[i + 1])
                     i += 1
                 }
             case "--help", "-h":
@@ -279,6 +298,16 @@ public enum TtsBenchmarkCommand {
                 try await runStyleTTS2(
                     phrases: phrases, corpusLabel: corpusLabel,
                     referencePath: referencePath,
+                    preset: preset, outputJson: outputJson, audioDir: audioDir,
+                    asrChoice: asrChoice)
+            case .supertonic3:
+                try await runSupertonic3(
+                    phrases: phrases, corpusLabel: corpusLabel,
+                    voiceStylePath: voiceStylePath,
+                    languageName: languageName,
+                    totalSteps: totalStepsArg
+                        ?? Supertonic3Constants.defaultTotalSteps,
+                    speed: speedArg ?? Supertonic3Constants.defaultSpeed,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
             }
@@ -586,6 +615,103 @@ public enum TtsBenchmarkCommand {
         }
     }
 
+    // MARK: - Supertonic-3 driver
+
+    private static func runSupertonic3(
+        phrases: [(category: String, text: String)],
+        corpusLabel: String,
+        voiceStylePath: String?,
+        languageName: String?,
+        totalSteps: Int,
+        speed: Float,
+        preset: TtsComputeUnitPreset,
+        outputJson: String?,
+        audioDir: String?,
+        asrChoice: AsrChoice
+    ) async throws {
+        guard let voiceStylePath, !voiceStylePath.isEmpty else {
+            logger.error(
+                "supertonic3 backend requires --voice-style <path-to-voice.json> "
+                    + "(e.g. M1.json from FluidInference/supertonic-3-coreml).")
+            exit(1)
+        }
+        let voiceURL = resolveURL(voiceStylePath, isDirectory: false)
+        guard FileManager.default.fileExists(atPath: voiceURL.path) else {
+            logger.error("Voice style JSON not found: \(voiceURL.path)")
+            exit(1)
+        }
+        let style: Supertonic3VoiceStyle
+        do {
+            style = try Supertonic3VoiceStyle.load(from: voiceURL)
+        } catch {
+            logger.error("Failed to load voice style: \(error.localizedDescription)")
+            exit(1)
+        }
+
+        let language = resolveSupertonic3Language(
+            explicit: languageName, corpus: corpusLabel)
+        logger.info(
+            "Supertonic-3 voice=\(style.name) lang=\(language) "
+                + "steps=\(totalSteps) speed=\(speed)")
+
+        let units = preset.uniformUnits ?? .cpuAndNeuralEngine
+        let manager = Supertonic3Manager(computeUnits: units)
+
+        let coldStart = Date()
+        try await manager.initialize()
+        let coldStartS = Date().timeIntervalSince(coldStart)
+        logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
+
+        let firstStart = Date()
+        _ = try await manager.synthesize(
+            text: "Initialization warm-up.",
+            language: language,
+            style: style,
+            totalSteps: totalSteps,
+            speed: speed)
+        let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
+        logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
+
+        try await runPhraseLoop(
+            backendId: "supertonic3",
+            voiceLabel: style.name,
+            corpusLabel: corpusLabel,
+            phrases: phrases,
+            preset: preset,
+            coldStartS: coldStartS,
+            firstSynthMs: firstSynthMs,
+            outputJson: outputJson,
+            audioDir: audioDir,
+            asrChoice: asrChoice,
+            extraSummary: [
+                "voice_style": style.name,
+                "language": language,
+                "total_steps": totalSteps,
+                "speed": Double(speed),
+            ]
+        ) { text in
+            // Supertonic-3 is a one-shot diffusion synthesizer — `synthesize`
+            // returns the full waveform after the 8-step vector_estimator
+            // loop completes, so TTFT == synthMs (no incremental yield).
+            let t0 = Date()
+            let result = try await manager.synthesize(
+                text: text, language: language, style: style,
+                totalSteps: totalSteps, speed: speed)
+            let synthMs = Date().timeIntervalSince(t0) * 1000
+            return BackendPhraseSample(
+                synthMs: synthMs,
+                ttftMs: synthMs,
+                samples: result.samples,
+                sampleRate: Supertonic3Constants.sampleRate,
+                stageMs: [:],
+                extraFields: [
+                    "total_steps": totalSteps,
+                    "speed": Double(speed),
+                ]
+            )
+        }
+    }
+
     // MARK: - Shared per-phrase loop + summary
 
     private static func runPhraseLoop(
@@ -850,6 +976,7 @@ public enum TtsBenchmarkCommand {
         case pocketTts
         case magpie
         case styleTts2
+        case supertonic3
 
         var defaultCorpus: String {
             return "minimax-english"
@@ -866,6 +993,8 @@ public enum TtsBenchmarkCommand {
             return .magpie
         case "styletts2", "style-tts2", "styletts", "style-tts":
             return .styleTts2
+        case "supertonic3", "supertonic-3", "sup3", "supertonic":
+            return .supertonic3
         default:
             logger.warning("Unknown backend '\(name)' — defaulting to kokoro-ane")
             return .kokoroAne
@@ -896,6 +1025,57 @@ public enum TtsBenchmarkCommand {
         default: return .john
         }
     }
+
+    /// Map an explicit `--language` flag or a `minimax-<lang>` corpus name
+    /// onto one of the 31 ISO codes accepted by Supertonic-3
+    /// (`Supertonic3Constants.availableLanguages`). Falls back to English.
+    private static func resolveSupertonic3Language(
+        explicit: String?, corpus: String
+    ) -> String {
+        if let explicit, !explicit.isEmpty {
+            let lower = explicit.lowercased()
+            if Supertonic3Constants.availableLanguages.contains(lower) {
+                return lower
+            }
+            if let mapped = supertonic3LanguageAliases[lower] {
+                return mapped
+            }
+        }
+        let lower = corpus.lowercased()
+        for (needle, code) in supertonic3CorpusToLanguage where lower.contains(needle) {
+            return code
+        }
+        return "en"
+    }
+
+    /// Long-name → ISO code aliases for the `--language` flag.
+    private static let supertonic3LanguageAliases: [String: String] = [
+        "english": "en", "korean": "ko", "japanese": "ja", "arabic": "ar",
+        "bulgarian": "bg", "czech": "cs", "danish": "da", "german": "de",
+        "greek": "el", "spanish": "es", "estonian": "et", "finnish": "fi",
+        "french": "fr", "hindi": "hi", "croatian": "hr", "hungarian": "hu",
+        "indonesian": "id", "italian": "it", "lithuanian": "lt",
+        "latvian": "lv", "dutch": "nl", "polish": "pl", "portuguese": "pt",
+        "romanian": "ro", "russian": "ru", "slovak": "sk", "slovenian": "sl",
+        "swedish": "sv", "turkish": "tr", "ukrainian": "uk",
+        "vietnamese": "vi",
+    ]
+
+    /// Ordered scan list for `minimax-<lang>` corpus labels — longest /
+    /// least-ambiguous matches first.
+    private static let supertonic3CorpusToLanguage: [(String, String)] = [
+        ("korean", "ko"), ("japanese", "ja"), ("arabic", "ar"),
+        ("bulgarian", "bg"), ("czech", "cs"), ("danish", "da"),
+        ("german", "de"), ("greek", "el"), ("spanish", "es"),
+        ("estonian", "et"), ("finnish", "fi"), ("french", "fr"),
+        ("hindi", "hi"), ("croatian", "hr"), ("hungarian", "hu"),
+        ("indonesian", "id"), ("italian", "it"), ("lithuanian", "lt"),
+        ("latvian", "lv"), ("dutch", "nl"), ("polish", "pl"),
+        ("portuguese", "pt"), ("romanian", "ro"), ("russian", "ru"),
+        ("slovak", "sk"), ("slovenian", "sl"), ("swedish", "sv"),
+        ("turkish", "tr"), ("ukrainian", "uk"), ("vietnamese", "vi"),
+        ("english", "en"),
+    ]
 
     private static func parseKokoroAneVariant(_ name: String?) -> KokoroAneVariant {
         switch name?.lowercased() {
@@ -1155,6 +1335,8 @@ public enum TtsBenchmarkCommand {
               pocket-tts    Streaming flow-matching (multilingual)
               magpie        Encoder-decoder + NanoCodec (per-stage, slow)
               styletts2     LibriTTS iteration_3, zero-shot, requires --reference
+              supertonic3   4-stage multilingual flow-matching (31 langs);
+                            requires --voice-style <preset.json>
 
             Options:
               --backend <name>          See list above (default: kokoro-ane)
@@ -1199,6 +1381,14 @@ public enum TtsBenchmarkCommand {
                                         resampled to 24 kHz mono internally)
               --variant <name>          Kokoro ANE variant: english (default) or
                                         mandarin (aliases: zh, chinese)
+              --voice-style <path>      Supertonic-3 voice style JSON
+                                        (required for --backend supertonic3;
+                                        e.g. M1.json shipped under
+                                        FluidInference/supertonic-3-coreml).
+              --total-steps <n>         Supertonic-3 denoising steps
+                                        (default 8 — matches reference CLI).
+              --speed <f>               Supertonic-3 speech-rate multiplier
+                                        (default 1.05; divides duration).
               --help, -h                Show this help
 
             Examples:
@@ -1208,6 +1398,8 @@ public enum TtsBenchmarkCommand {
               fluidaudio tts-benchmark --backend pocket-tts --corpus minimax-german --language german
               fluidaudio tts-benchmark --backend magpie --speaker sofia --language en
               fluidaudio tts-benchmark --backend styletts2 --reference speaker.wav
+              fluidaudio tts-benchmark --backend supertonic3 \\
+                  --voice-style M1.json --corpus minimax-english
 
             Notes:
               For Chinese (zh) and Japanese (ja), WER is meaningless because
