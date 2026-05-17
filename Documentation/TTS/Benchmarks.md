@@ -6,8 +6,8 @@
 > by [MiniMax-Speech][mms], seed-tts-eval, and Gradium, so numbers
 > here are directly paper-comparable.
 > **Status:** Kokoro ANE (English + Mandarin), PocketTTS (English),
-> Magpie (English), and StyleTTS2 (English, zero-shot) all complete
-> the full 100-phrase MiniMax run.
+> Magpie (English), StyleTTS2 (English, zero-shot), and Supertonic-3
+> (English) all complete the full 100-phrase MiniMax run.
 >
 > [minimax]: https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
 > [mms]: https://arxiv.org/abs/2505.07916
@@ -57,6 +57,7 @@ Reference each language as `--corpus minimax-<lang>`:
 | PocketTTS   | `minimax-english`  | 6L packs: `english`, `german`, `italian`, `portuguese`, `spanish`. 24L packs: `french_24l`, `german_24l`, `italian_24l`, `portuguese_24l`, `spanish_24l` |
 | Magpie      | `minimax-english`  | `english`, `spanish`, `german`, `french`, `italian`, `vietnamese`, `chinese`, `hindi` |
 | StyleTTS2   | `minimax-english`  | `english` only (LibriTTS iteration_3, zero-shot from `--reference` audio) |
+| Supertonic-3 | `minimax-english` | 31 ISO codes minus `zh`: `english`, `korean`, `japanese`, `arabic`, `bulgarian`, `czech`, `danish`, `german`, `greek`, `spanish`, `estonian`, `finnish`, `french`, `hindi`, `croatian`, `hungarian`, `indonesian`, `italian`, `lithuanian`, `latvian`, `dutch`, `polish`, `portuguese`, `romanian`, `russian`, `slovak`, `slovenian`, `swedish`, `turkish`, `ukrainian`, `vietnamese`. Voice styling via `--voice-style <preset.json>` |
 
 Lines beginning with `#` are comments. Custom corpora can still be
 passed with `--corpus-path <file.txt>`.
@@ -79,7 +80,7 @@ Per phrase:
 - `wer`, `cer` — via Parakeet ASR roundtrip on the rendered WAV.
 - `stage_ms` — per-stage breakdown (backend-specific keys; populated
   for Kokoro ANE; empty for / PocketTTS / Magpie /
-  StyleTTS2 in this report).
+  StyleTTS2 / Supertonic-3 in this report).
 - Backend-specific extras: `encoder_tokens`, `acoustic_frames`,
   `chunk_count`, `frame_count`, `code_count`, `generated_token_count`,
   etc.
@@ -135,6 +136,15 @@ swift run fluidaudio tts-benchmark \
   --backend styletts2 --reference ref.wav \
   --corpus minimax-english \
   --output-json bench-styletts2.json --audio-dir bench-wavs-styletts2/
+
+# Supertonic-3 (multilingual, voice-style JSON). M1.json / F1.json / …
+# ship under FluidInference/supertonic-3-coreml/assets/voice_styles/.
+# `--lang` defaults are inferred from the corpus name; override with
+# `--language <iso>` (e.g. ja, ko, fr). No `zh` — Mandarin is Kokoro ANE.
+swift run fluidaudio tts-benchmark \
+  --backend supertonic3 --voice-style M1.json \
+  --corpus minimax-english \
+  --output-json bench-supertonic3.json --audio-dir bench-wavs-sup3/
 ```
 
 The harness writes a JSON report to `--output-json` and (optionally)
@@ -169,6 +179,7 @@ peak RSS, WER, CER) so there is a single source of truth.
 | PocketTTS  | research   | en (`alba`, 6L pack)      | int8 ~0.55 GB | 24 kHz      | 80 ms Mimi frame, streams until EOS (no fixed cap)               | Yes       | **710 / 1496 ms** | 5160 / 9801 ms    | 1.10×     | 1167 MB  | 1.0%   | 0.4%   |
 | Magpie     | research   | en (`John`)               | ~1.3 GB                    | 22.05 kHz   | 256 NanoCodec frames / pass (≈11.9 s); sentence-split for longer | No        | 11470 / 26042 ms∥ | 11470 / 26042 ms∥ | 0.87×∥    | 543 MB∥  | 3.8%   | 2.6%   |
 | StyleTTS2  | research   | en (LibriTTS iteration_3) | ~0.67 GB¶                  | 24 kHz      | 256 tokens / pass (≈30 s of audio max)                           | No        | 1574 / 3088 ms    | 1574 / 3088 ms    | 4.59×     | 522 MB   | 9.4%   | 4.1%   |
+| Supertonic-3 | Apache-2.0 | en (`M1`, 31-lang)        | ~0.40 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥110 char Latin / 90 CJK)  | No        | **479 / 6491 ms** | 479 / 6491 ms     | 5.55×     | 679 MB   | 0.8%   | 0.3%   |
 
 \* TTFT for **PocketTTS** is first-frame emit through the streaming
 API (perceptual TTFA). **Kokoro ANE / Magpie / StyleTTS2** all run
@@ -234,6 +245,40 @@ This document does not currently re-publish the per-stage table on
 `main`: the AR loop dominates and its absolute numbers are
 in active flux on `feat/magpie-lt-fusion` (fused sampler + 24-frame
 NanoCodec cap). Republish here once that branch lands on `main`.
+
+### Supertonic-3 — per-language breakdown (M2, default preset, `M1` voice)
+
+Same harness, same `M1.json` voice style, same default
+(`--total-steps 8 --speed 1.05 --compute-units default`). All 10
+languages complete the full 100-phrase `minimax-<lang>` run. WER /
+CER are populated only for English (Parakeet TDT roundtrip); the
+nine non-English runs use `--skip-asr` because Parakeet is
+English-only and the FluidAudio harness's Cohere ASR fallback was
+not wired here. Peak RSS is process-wide so the English row is
+inflated by the additional Parakeet models held in memory; the
+nine non-English rows reflect Supertonic-3 in isolation.
+
+| Language        | Code | Synth p50 / p95   | Agg RTFx | Peak RSS | WER†   | CER†   |
+|-----------------|------|-------------------|----------|----------|--------|--------|
+| English         | en   | **479 / 6491 ms** | 5.55×    | 679 MB‡  | 0.84%  | 0.32%  |
+| Arabic          | ar   | 427 / 5827 ms     | 6.76×    | 396 MB   | n/a    | n/a    |
+| French          | fr   | 926 / 5897 ms     | 5.58×    | 292 MB   | n/a    | n/a    |
+| German          | de   | **313 / 2318 ms** | 8.75×    | 345 MB   | n/a    | n/a    |
+| Italian         | it   | 691 / 4626 ms     | 11.05×   | 486 MB   | n/a    | n/a    |
+| Japanese        | ja   | 643 / 2058 ms     | 8.69×    | 329 MB   | n/a    | n/a    |
+| Korean          | ko   | 438 / 1599 ms     | **11.36×** | 370 MB | n/a    | n/a    |
+| Russian         | ru   | **321 / 6563 ms** | 7.97×    | 356 MB   | n/a    | n/a    |
+| Spanish         | es   | **354 / 583 ms**  | **15.90×** | 351 MB | n/a    | n/a    |
+| Vietnamese      | vi   | 776 / 3934 ms     | 7.02×    | 440 MB   | n/a    | n/a    |
+
+† Score WER / CER for any non-English row by re-running with
+`--asr-backend cohere --asr-language <iso>` (Cohere Transcribe
+supports en, zh, ja, ko, vi, fr, de, es, it, pt, nl, pl, el, ar)
+once a local cache of `cohere-transcribe/q8` is populated.
+
+‡ English row includes Parakeet TDT loaded in-process for the
+ASR roundtrip; the other nine rows ran with `--skip-asr` so the
+RSS column reflects only the four Supertonic-3 graphs + indexer.
 
 ### About the WER / CER numbers
 

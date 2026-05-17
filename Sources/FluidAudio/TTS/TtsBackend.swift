@@ -21,4 +21,10 @@ public enum TtsBackend: Sendable {
     /// > Callers with their own espeak-compatible phonemizer can bypass
     /// > the entire stack via `StyleTTS2Manager.synthesize(ipa:...)`.
     case styletts2
+    /// Supertonic-3 v1.7.3 — 4-stage CoreML pipeline:
+    /// `text_encoder → duration_predictor → vector_estimator (8-step
+    /// flow-matching diffusion with CFG) → vocoder`. Multilingual
+    /// (31 languages), 44.1 kHz mono output. Voice styling via per-voice
+    /// JSON (`style_ttl` / `style_dp` tensors).
+    case supertonic3
 }
