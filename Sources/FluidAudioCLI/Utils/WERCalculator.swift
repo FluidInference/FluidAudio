@@ -55,6 +55,118 @@ enum WERCalculator {
         )
     }
 
+    /// WER + CER using the conservative `basicNormalize` path (lowercase, NFKD,
+    /// strip symbols/punctuation, collapse whitespace, KEEP diacritics).
+    ///
+    /// Use for non-English languages where `normalize`'s English-specific
+    /// transformations (British→American, contraction expansion, English
+    /// abbreviation/number-word folding) inflate WER by mangling hypothesis
+    /// and reference asymmetrically. This matches the "basic" normalizer
+    /// reported in the Whisper paper / NeMo `BasicTextProcessing` and is the
+    /// standard for multilingual ASR leaderboards (FLEURS, MLS).
+    static func calculateBasicWERAndCER(
+        hypothesis rawHypothesis: String, reference rawReference: String
+    )
+        -> (
+            wer: Double, cer: Double, insertions: Int, deletions: Int, substitutions: Int, totalWords: Int,
+            totalCharacters: Int
+        )
+    {
+        let hypothesis = TextNormalizer.basicNormalize(rawHypothesis)
+        let reference = TextNormalizer.basicNormalize(rawReference)
+
+        let hypWords = hypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let refWords = reference.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+
+        let wordDistance = editDistance(hypWords, refWords)
+        let wer = refWords.isEmpty ? 0.0 : Double(wordDistance.total) / Double(refWords.count)
+
+        let hypChars = Array(hypothesis.replacingOccurrences(of: " ", with: ""))
+        let refChars = Array(reference.replacingOccurrences(of: " ", with: ""))
+        let charDistance = editDistance(hypChars.map(String.init), refChars.map(String.init))
+        let cer = refChars.isEmpty ? 0.0 : Double(charDistance.total) / Double(refChars.count)
+
+        return (
+            wer,
+            cer,
+            wordDistance.insertions,
+            wordDistance.deletions,
+            wordDistance.substitutions,
+            refWords.count,
+            refChars.count
+        )
+    }
+
+    /// CJK-aware WER+CER. For languages without inter-word spaces (Japanese,
+    /// Korean, Chinese, …), whitespace-tokenized WER is a meaningless number
+    /// because hypothesis and reference disagree on segmentation. Both ESPnet
+    /// and OpenAI's Whisper paper report character-level edit rate as the
+    /// primary metric for these languages.
+    ///
+    /// This method:
+    ///   1. Strips all whitespace from both strings (so any segmentation
+    ///      differences are erased).
+    ///   2. Splits each into individual Unicode scalar / grapheme clusters.
+    ///   3. Returns character edit distance for both `wer` and `cer` fields.
+    ///
+    /// The two output fields are deliberately equal — keeping the same
+    /// return shape as `calculateWERAndCER` so callers can swap calculators
+    /// without changing downstream code.
+    static func calculateCJKMetrics(
+        hypothesis rawHypothesis: String, reference rawReference: String
+    )
+        -> (
+            wer: Double, cer: Double, insertions: Int, deletions: Int, substitutions: Int, totalWords: Int,
+            totalCharacters: Int
+        )
+    {
+        let hypothesis = TextNormalizer.normalize(rawHypothesis)
+        let reference = TextNormalizer.normalize(rawReference)
+
+        let hypChars = Array(
+            hypothesis
+                .components(separatedBy: .whitespacesAndNewlines)
+                .joined()
+        ).map(String.init)
+        let refChars = Array(
+            reference
+                .components(separatedBy: .whitespacesAndNewlines)
+                .joined()
+        ).map(String.init)
+
+        let charDistance = editDistance(hypChars, refChars)
+        let rate = refChars.isEmpty ? 0.0 : Double(charDistance.total) / Double(refChars.count)
+
+        return (
+            rate,
+            rate,
+            charDistance.insertions,
+            charDistance.deletions,
+            charDistance.substitutions,
+            refChars.count,
+            refChars.count
+        )
+    }
+
+    /// Returns true if the given FLEURS language code uses a CJK / no-space
+    /// script where word-level WER over whitespace tokens is not meaningful.
+    static func isCJKLanguage(_ fleursOrPromptCode: String) -> Bool {
+        let lc = fleursOrPromptCode.lowercased()
+        // FLEURS codes
+        if lc.hasPrefix("ja") || lc.hasPrefix("ko") {
+            return true
+        }
+        // Chinese variants
+        if lc.hasPrefix("cmn") || lc.hasPrefix("yue") || lc.hasPrefix("zh") {
+            return true
+        }
+        // Thai and Lao are also no-space scripts; include them defensively.
+        if lc.hasPrefix("th") || lc.hasPrefix("lo") {
+            return true
+        }
+        return false
+    }
+
     private struct EditDistanceResult {
         let total: Int
         let insertions: Int

@@ -560,6 +560,37 @@ public enum ModelNames {
         ]
     }
 
+    /// Nemotron Speech Streaming Multilingual 0.6B model names.
+    ///
+    /// Unlike the English variant, the multilingual build keeps all four
+    /// CoreML artifacts at the top level (no `encoder/` subdirectory), and
+    /// the encoder takes an extra `prompt_id` int32 input per chunk.
+    /// The model is local-path-only at the moment (no HuggingFace repo yet),
+    /// so there is no `Repo` enum case and no `requiredModels` set wired into
+    /// `getRequiredModelNames`.
+    public enum NemotronMultilingualStreaming {
+        public static let preprocessor = "preprocessor"
+        public static let encoder = "encoder"
+        public static let decoder = "decoder"
+        public static let joint = "joint"
+        public static let tokenizer = "tokenizer.json"
+        public static let metadata = "metadata.json"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+        public static let jointFile = joint + ".mlmodelc"
+
+        /// Same model names with the uncompiled `.mlpackage` extension that
+        /// `mobius/.../coreml/build_int8/` ships before CoreML compilation.
+        /// `StreamingNemotronMultilingualAsrManager` accepts either layout
+        /// (compiled `.mlmodelc` is preferred when both are present).
+        public static let preprocessorPackage = preprocessor + ".mlpackage"
+        public static let encoderPackage = encoder + ".mlpackage"
+        public static let decoderPackage = decoder + ".mlpackage"
+        public static let jointPackage = joint + ".mlpackage"
+    }
+
     /// Sortformer streaming diarization model names
     public enum Sortformer {
         public enum Variant: CaseIterable, Sendable {
