@@ -73,11 +73,15 @@ struct ChunkProcessor {
     /// signature of an over-aggressive warmup-driven over-decode (it
     /// invents tokens) rather than the drift-suppression case the path-B
     /// switch is meant to capture. The drift-suppression case shows path
-    /// B emitting *equal-or-fewer* tokens than path A while holding a
-    /// confidence advantage; the over-decode case shows path B emitting
-    /// strictly more tokens. 1.0 separates the two: B may match or
-    /// shrink the token count, but may not grow it.
-    private let pathBMaxContentRatio: Float = 1.0
+    /// B emitting *materially fewer* tokens than path A while holding a
+    /// confidence advantage; over-decode shows path B emitting more
+    /// tokens. A small drop below 1.0 separates the two and excludes
+    /// near-equal token-count cases where the warmup-aided B output
+    /// differs from A only in boundary jitter (a single ±1–2 tokens) and
+    /// the resulting transcript divergence is not net-positive content.
+    /// Path B is reserved for the cases where warmup demonstrably
+    /// suppresses content (true drift recovery): ratios well under 1.0.
+    private let pathBMaxContentRatio: Float = 0.9
 
     /// Maximum acceptable ratio of path-B-emitted tokens to path-A-emitted
     /// tokens (over the full probe) below which path B is suspected of
