@@ -68,6 +68,26 @@ struct ChunkProcessor {
     /// healthy probes sit in [0.7, 1.05]. 0.6 sits between.
     private let pathBSuppressionRatio: Float = 0.6
 
+    /// Minimum ratio of path-C-emitted tokens to path-A-emitted tokens
+    /// over the probe at which path C is selected as a content-recovery
+    /// fallback. Path C uses fixed-stride boundaries (no silence-snap)
+    /// and recovers seam tokens that the silence-snap can move outside
+    /// any single chunk's decoder span. The recovery is real when path C
+    /// reliably emits more tokens than path A over the probe; below this
+    /// ratio the two paths effectively agree on content and the safer
+    /// silence-aligned default wins to avoid mid-word starts that bias
+    /// the decoder toward an English-prior wrong-language burst on
+    /// non-English audio.
+    private let pathCContentRatio: Float = 1.01
+
+    /// Maximum acceptable confidence headroom path C can have above path
+    /// A before path C is suspected of being a wrong-language drift.
+    /// Cross-language drift typically shows artificially high per-token
+    /// confidence because the decoder is settling into its default
+    /// (English) prior; real seam recovery shows similar confidence to
+    /// path A.
+    private let pathCDriftConfidenceCeiling: Float = 0.03
+
     private var maxModelSamples: Int { ASRConstants.maxModelSamples }
 
     private var noMelWarmupPrefixSamples: Int {
@@ -700,13 +720,25 @@ struct ChunkProcessor {
         //
         //   Path A: silence-aligned boundaries, no warmup prefix. The
         //   content-preserving default — silence-anchored seams avoid
-        //   mid-word cuts, and skipping warmup avoids the priming that
-        //   can suppress must-keep content on continuous narration.
+        //   mid-word cuts that would seed an English-prior wrong-language
+        //   burst on non-English audio, and skipping warmup avoids the
+        //   priming that can suppress must-keep content on continuous
+        //   narration.
         //
         //   Path B: silence-aligned boundaries WITH warmup capability.
         //   Load-bearing when the SOS-primed decoder reverts to a
         //   wrong-script prior on cross-script audio; the warmup
         //   conditions the predictor on real left audio before emitting.
+        //
+        //   Path C: regular fixed-stride boundaries, no warmup prefix.
+        //   Seam-recovery option for audio where the silence-snap moves
+        //   the boundary past a syllable that no single chunk's decoder
+        //   then sees with right-context. Selected only when its probe
+        //   emits materially more tokens than path A AND its mean
+        //   per-token confidence is comparable to path A (a strongly
+        //   higher confidence with similar token count signals a
+        //   wrong-language drift on non-English audio, not a content
+        //   recovery, and the suspect-drift gate rejects it).
         //
         // Per-file commit ensures the chosen path's boundaries are used
         // throughout the file, so the merger never sees mixed-boundary
@@ -721,11 +753,13 @@ struct ChunkProcessor {
             strideSamples: strideSamples,
             canUseWarmupPrefix: true
         )
+        let pathCStartsDecisions = regularChunkStarts(strideSamples: strideSamples)
         // Chunk count may differ between paths in pathological cases;
         // probe and commit only over the shorter prefix where both
         // disagree, and use the chosen path's full layout for the rest.
         let pathACount = pathAStartsDecisions.count
         let pathBCount = pathBStartsDecisions.count
+        let pathCCount = pathCStartsDecisions.count
         // For chunk 0 both paths agree (start = 0, no warmup), so use
         // path A's count as the working chunk count for the probe.
         let chunkCount = pathACount
@@ -770,16 +804,19 @@ struct ChunkProcessor {
         await reportProgress(through: 0)
 
         // ----- Probe phase. -----
-        // Run both paths on chunks 1..probeEnd; accumulate per-path
+        // Run all three paths on chunks 1..probeEnd; accumulate per-path
         // confidence stats; remember outputs so we don't re-decode the
         // winning path's probe chunks.
         let probeEnd = min(probeChunkCount, chunkCount - 1)
         var pathAProbeOutputs: [[TokenWindow]] = []
         var pathBProbeOutputs: [[TokenWindow]] = []
+        var pathCProbeOutputs: [[TokenWindow]] = []
         var pathAConfSum: Float = 0
         var pathBConfSum: Float = 0
+        var pathCConfSum: Float = 0
         var pathATokenCount: Int = 0
         var pathBTokenCount: Int = 0
+        var pathCTokenCount: Int = 0
 
         if probeEnd >= 1 {
             for chunkIndex in 1...probeEnd {
@@ -805,36 +842,66 @@ struct ChunkProcessor {
                 // (and its own per-chunk warmup decision). When path B's
                 // start coincides with path A's AND warmup wouldn't apply,
                 // the two are structurally identical and we reuse path A.
-                guard chunkIndex < pathBCount else {
+                if chunkIndex < pathBCount {
+                    let pathBDecision = pathBStartsDecisions[chunkIndex]
+                    let warmupSamplesForB =
+                        pathBDecision.useWarmupPrefix
+                        ? min(pathBWarmupSamples, pathBDecision.start) : 0
+                    if pathBDecision.start == pathADecision.start && warmupSamplesForB == 0 {
+                        pathBProbeOutputs.append(pathATokens)
+                        for t in pathATokens { pathBConfSum += t.confidence }
+                        pathBTokenCount += pathATokens.count
+                    } else {
+                        let pathBTokens = try await decodeOneChunk(
+                            chunkStart: pathBDecision.start,
+                            chunkIndex: chunkIndex,
+                            chunkSamples: chunkSamples,
+                            warmupSamples: warmupSamplesForB,
+                            using: worker,
+                            decoderLayers: decoderLayers,
+                            maxModelSamples: maxModelSamples,
+                            language: language
+                        )
+                        pathBProbeOutputs.append(pathBTokens)
+                        for t in pathBTokens { pathBConfSum += t.confidence }
+                        pathBTokenCount += pathBTokens.count
+                    }
+                } else {
                     // Path B has fewer chunks here; reuse path A and let
                     // the probe still produce a stable signal.
                     pathBProbeOutputs.append(pathATokens)
                     for t in pathATokens { pathBConfSum += t.confidence }
                     pathBTokenCount += pathATokens.count
-                    continue
                 }
-                let pathBDecision = pathBStartsDecisions[chunkIndex]
-                let warmupSamplesForB =
-                    pathBDecision.useWarmupPrefix
-                    ? min(pathBWarmupSamples, pathBDecision.start) : 0
-                if pathBDecision.start == pathADecision.start && warmupSamplesForB == 0 {
-                    pathBProbeOutputs.append(pathATokens)
-                    for t in pathATokens { pathBConfSum += t.confidence }
-                    pathBTokenCount += pathATokens.count
+
+                // Path C decode under regular fixed-stride start. When
+                // path C's start coincides with path A's (silence-snap
+                // landed on the regular-stride frame), reuse path A.
+                if chunkIndex < pathCCount {
+                    let pathCDecision = pathCStartsDecisions[chunkIndex]
+                    if pathCDecision.start == pathADecision.start {
+                        pathCProbeOutputs.append(pathATokens)
+                        for t in pathATokens { pathCConfSum += t.confidence }
+                        pathCTokenCount += pathATokens.count
+                    } else {
+                        let pathCTokens = try await decodeOneChunk(
+                            chunkStart: pathCDecision.start,
+                            chunkIndex: chunkIndex,
+                            chunkSamples: chunkSamples,
+                            warmupSamples: 0,
+                            using: worker,
+                            decoderLayers: decoderLayers,
+                            maxModelSamples: maxModelSamples,
+                            language: language
+                        )
+                        pathCProbeOutputs.append(pathCTokens)
+                        for t in pathCTokens { pathCConfSum += t.confidence }
+                        pathCTokenCount += pathCTokens.count
+                    }
                 } else {
-                    let pathBTokens = try await decodeOneChunk(
-                        chunkStart: pathBDecision.start,
-                        chunkIndex: chunkIndex,
-                        chunkSamples: chunkSamples,
-                        warmupSamples: warmupSamplesForB,
-                        using: worker,
-                        decoderLayers: decoderLayers,
-                        maxModelSamples: maxModelSamples,
-                        language: language
-                    )
-                    pathBProbeOutputs.append(pathBTokens)
-                    for t in pathBTokens { pathBConfSum += t.confidence }
-                    pathBTokenCount += pathBTokens.count
+                    pathCProbeOutputs.append(pathATokens)
+                    for t in pathATokens { pathCConfSum += t.confidence }
+                    pathCTokenCount += pathATokens.count
                 }
             }
         }
@@ -843,42 +910,71 @@ struct ChunkProcessor {
             pathATokenCount > 0 ? pathAConfSum / Float(pathATokenCount) : -Float.infinity
         let pathBMean =
             pathBTokenCount > 0 ? pathBConfSum / Float(pathBTokenCount) : -Float.infinity
-        let tokenRatio: Float =
+        let pathCMean =
+            pathCTokenCount > 0 ? pathCConfSum / Float(pathCTokenCount) : -Float.infinity
+        let tokenRatioB: Float =
             pathATokenCount > 0
             ? Float(pathBTokenCount) / Float(pathATokenCount) : 1.0
+        let tokenRatioC: Float =
+            pathATokenCount > 0
+            ? Float(pathCTokenCount) / Float(pathATokenCount) : 1.0
 
-        // Decide globally. Path A is the content-safe default:
-        //   1) Suppression guard — if path B emitted a substantially
-        //      smaller share of tokens than path A across the probe, path
-        //      B is almost certainly suppressing must-keep content
-        //      (user2-style regression from PR #604's G2 warmup), and we
-        //      commit to A regardless of any confidence margin.
-        //   2) Confidence margin gate — path B must beat path A's mean
-        //      per-token confidence by at least `pathBSwitchMargin`. Small
-        //      gaps (≤1%) on well-decoded fixtures (notes_1408, wwii,
-        //      buenaventura, climate) are within decoder noise and would
-        //      commit to path B's PR #604 in-chunk artifacts with no
-        //      offsetting benefit. The only fixtures where path B is the
-        //      correct global choice (sl_si Latin-script recovery) show
-        //      margins ≥5%.
-        let suppressionGuardTripped =
-            pathATokenCount > 0 && tokenRatio < pathBSuppressionRatio
+        // Decide globally. Path A is the content-safe default. The order
+        // is path C first (seam recovery), then path B (cross-script
+        // recovery), then default to path A.
+        //
+        //   Path C is selected when it emits materially more tokens than
+        //   path A AND its mean per-token confidence is close to path A's
+        //   (within a drift ceiling). The token-count signal isolates the
+        //   case where the silence-snap dropped a seam syllable that the
+        //   fixed-stride boundary preserved; the confidence-ceiling
+        //   signal rejects wrong-language drifts, which present as
+        //   suspiciously high-confidence emissions against an English
+        //   prior on non-English audio.
+        //
+        //   Path B is selected by the v26 suppression-guard / margin
+        //   logic: it must not be suppressing content and must beat
+        //   path A's confidence by at least `pathBSwitchMargin`.
+        let pathBSuppressionGuardTripped =
+            pathATokenCount > 0 && tokenRatioB < pathBSuppressionRatio
+        let usePathC =
+            pathATokenCount > 0
+            && tokenRatioC >= pathCContentRatio
+            && pathCMean <= pathAMean + pathCDriftConfidenceCeiling
+            && pathCMean >= pathAMean - pathCDriftConfidenceCeiling
         let usePathB =
-            !suppressionGuardTripped
+            !usePathC
+            && !pathBSuppressionGuardTripped
             && pathBMean > pathAMean + pathBSwitchMargin
+
+        let chosenPath: String = usePathC ? "C" : (usePathB ? "B" : "A")
         logger.debug(
-            "[dual-decode probe] A=(n=\(pathATokenCount), conf=\(pathAMean)) B=(n=\(pathBTokenCount), conf=\(pathBMean)) B/A=\(tokenRatio) suppression=\(suppressionGuardTripped) → \(usePathB ? "B" : "A")"
+            "[dual-decode probe] A=(n=\(pathATokenCount), conf=\(pathAMean)) B=(n=\(pathBTokenCount), conf=\(pathBMean)) C=(n=\(pathCTokenCount), conf=\(pathCMean)) B/A=\(tokenRatioB) C/A=\(tokenRatioC) → \(chosenPath)"
         )
 
         // Commit probe outputs in chunk order.
-        let chosenProbeOutputs = usePathB ? pathBProbeOutputs : pathAProbeOutputs
+        let chosenProbeOutputs: [[TokenWindow]]
+        if usePathC {
+            chosenProbeOutputs = pathCProbeOutputs
+        } else if usePathB {
+            chosenProbeOutputs = pathBProbeOutputs
+        } else {
+            chosenProbeOutputs = pathAProbeOutputs
+        }
         chunkOutputs.append(contentsOf: chosenProbeOutputs)
         if probeEnd >= 1 {
             await reportProgress(through: probeEnd)
         }
 
         // ----- Post-probe phase: single-path decode for remaining chunks.
-        let chosenDecisions = usePathB ? pathBStartsDecisions : pathAStartsDecisions
+        let chosenDecisions: [ChunkStartDecision]
+        if usePathC {
+            chosenDecisions = pathCStartsDecisions
+        } else if usePathB {
+            chosenDecisions = pathBStartsDecisions
+        } else {
+            chosenDecisions = pathAStartsDecisions
+        }
         let postProbeEnd = chosenDecisions.count
         if probeEnd + 1 < postProbeEnd {
             for chunkIndex in (probeEnd + 1)..<postProbeEnd {
