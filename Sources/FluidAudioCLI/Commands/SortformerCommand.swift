@@ -7,6 +7,11 @@ enum SortformerCommand {
     private static let logger = AppLogger(category: "Sortformer")
 
     static func run(arguments: [String]) async {
+        if arguments.contains("--help") || arguments.contains("-h") {
+            printUsage()
+            exit(0)
+        }
+
         guard !arguments.isEmpty else {
             fputs("ERROR: No audio file specified\n", stderr)
             fflush(stderr)
@@ -27,6 +32,15 @@ enum SortformerCommand {
         var minDurationOn: Float?
         var minDurationOff: Float?
         var modelPath: String?
+
+        // SortformerConfig tuning fields
+        var predScoreThreshold: Float?
+        var silenceThreshold: Float?
+        var scoresBoostLatest: Float?
+        var strongBoostRate: Float?
+        var weakBoostRate: Float?
+        var minPosScoresRate: Float?
+        var spkcacheSilFramesPerSpk: Int?
 
         // Parse remaining arguments
         var i = 1
@@ -74,6 +88,41 @@ enum SortformerCommand {
                     modelPath = arguments[i + 1]
                     i += 1
                 }
+            case "--threshold":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    predScoreThreshold = v
+                    i += 1
+                }
+            case "--silence-threshold":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    silenceThreshold = v
+                    i += 1
+                }
+            case "--scores-boost-latest":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    scoresBoostLatest = v
+                    i += 1
+                }
+            case "--strong-boost-rate":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    strongBoostRate = v
+                    i += 1
+                }
+            case "--weak-boost-rate":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    weakBoostRate = v
+                    i += 1
+                }
+            case "--min-pos-scores-rate":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    minPosScoresRate = v
+                    i += 1
+                }
+            case "--spkcache-sil-frames":
+                if i + 1 < arguments.count, let v = Int(arguments[i + 1]) {
+                    spkcacheSilFramesPerSpk = v
+                    i += 1
+                }
             default:
                 logger.warning("Unknown option: \(arguments[i])")
             }
@@ -87,6 +136,13 @@ enum SortformerCommand {
         var config = SortformerConfig.default
         var postConfig = DiarizerTimelineConfig.sortformerDefault
         config.debugMode = debugMode
+        if let v = predScoreThreshold { config.predScoreThreshold = v }
+        if let v = silenceThreshold { config.silenceThreshold = v }
+        if let v = scoresBoostLatest { config.scoresBoostLatest = v }
+        if let v = strongBoostRate { config.strongBoostRate = v }
+        if let v = weakBoostRate { config.weakBoostRate = v }
+        if let v = minPosScoresRate { config.minPosScoresRate = v }
+        if let v = spkcacheSilFramesPerSpk { config.spkcacheSilFramesPerSpk = v }
 
         if let v = onset { postConfig.onsetThreshold = v }
         if let v = offset { postConfig.offsetThreshold = v }
@@ -234,22 +290,28 @@ enum SortformerCommand {
     }
 
     private static func printUsage() {
-        print(
-            """
+        let usage = """
 
             Sortformer Command Usage:
                 fluidaudio sortformer <audio_file> [options]
 
             Options:
-                --model-path <path>     Path to local CoreML model (.mlpackage or .mlmodelc)
-                --debug                 Enable debug mode
-                --output <file>         Save results to JSON file
-                --onset <value>         Onset threshold for speech detection (default: 0.5)
-                --offset <value>        Offset threshold for speech detection (default: 0.5)
-                --pad-onset <value>     Padding before speech segments in seconds
-                --pad-offset <value>    Padding after speech segments in seconds
-                --min-duration-on <v>   Minimum speech segment duration in seconds
-                --min-duration-off <v>  Minimum silence duration in seconds
+                --model-path <path>         Path to local CoreML model (.mlpackage or .mlmodelc)
+                --debug                     Enable debug mode
+                --output <file>             Save results to JSON file
+                --onset <value>             Onset threshold for speech detection (default: 0.5)
+                --offset <value>            Offset threshold for speech detection (default: 0.5)
+                --pad-onset <value>         Padding before speech segments in seconds
+                --pad-offset <value>        Padding after speech segments in seconds
+                --min-duration-on <v>       Minimum speech segment duration in seconds
+                --min-duration-off <v>      Minimum silence duration in seconds
+                --threshold <0-1>           Prediction score threshold (default: 0.25)
+                --silence-threshold <0-1>   Silence detection threshold (default: 0.2)
+                --scores-boost-latest <fl>  Boost factor for latest frames (default: 0.05)
+                --strong-boost-rate <0-1>   Strong boost rate for top-k selection (default: 0.75)
+                --weak-boost-rate <fl>      Weak boost rate (default: 1.5)
+                --min-pos-scores-rate <0-1> Minimum positive scores rate (default: 0.5)
+                --spkcache-sil-frames <n>   Silence frames per speaker in cache (default: 3)
 
             Examples:
                 # Basic usage (downloads model from HuggingFace)
@@ -258,9 +320,14 @@ enum SortformerCommand {
                 # With local model path
                 fluidaudio sortformer audio.wav --model-path ./coreml_models/SortformerPipeline.mlpackage
 
+                # Tune streaming parameters
+                fluidaudio sortformer audio.wav --threshold 0.3 --silence-threshold 0.15
+
                 # Save results to file
                 fluidaudio sortformer audio.wav --output results.json
-            """)
+            """
+        fputs(usage, stderr)
+        fflush(stderr)
     }
 }
 #endif
