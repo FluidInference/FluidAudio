@@ -88,6 +88,15 @@ struct ChunkProcessor {
     /// path A.
     private let pathCDriftConfidenceCeiling: Float = 0.03
 
+    /// Minimum fraction of path-A tokens that must have an exact token-id
+    /// match in path C (matched by timestamp within the chunk-overlap
+    /// tolerance window). Below this fraction, path C is substituting
+    /// path A's content rather than preserving and extending it — the
+    /// signature of a wrong-language drift on non-English audio.
+    /// Real seam recovery preserves the matched-content prefix and only
+    /// changes how the seam tail is decoded, so the agreement is high.
+    private let pathCAgreementRatio: Float = 0.75
+
     private var maxModelSamples: Int { ASRConstants.maxModelSamples }
 
     private var noMelWarmupPrefixSamples: Int {
@@ -919,6 +928,33 @@ struct ChunkProcessor {
             pathATokenCount > 0
             ? Float(pathCTokenCount) / Float(pathATokenCount) : 1.0
 
+        // Per-probe-chunk agreement between path A and path C: count
+        // how many of path A's tokens have an exact token-id match in
+        // path C's tokens whose timestamp lies within the overlap
+        // tolerance window. High agreement means path C reproduces
+        // path A's recognized content and may also add seam tokens
+        // (real recovery); low agreement means path C is substituting
+        // path A's content with a different vocabulary (drift).
+        let agreementToleranceFrames = Int(overlapSeconds / ASRConstants.secondsPerEncoderFrame) / 2
+        var pathACMatchedTokens = 0
+        for chunkIndex in 0..<pathAProbeOutputs.count {
+            let a = pathAProbeOutputs[chunkIndex]
+            let c = chunkIndex < pathCProbeOutputs.count ? pathCProbeOutputs[chunkIndex] : []
+            for aTok in a {
+                for cTok in c {
+                    if aTok.token == cTok.token
+                        && abs(aTok.timestamp - cTok.timestamp) <= agreementToleranceFrames
+                    {
+                        pathACMatchedTokens += 1
+                        break
+                    }
+                }
+            }
+        }
+        let pathCAgreement: Float =
+            pathATokenCount > 0
+            ? Float(pathACMatchedTokens) / Float(pathATokenCount) : 1.0
+
         // Decide globally. Path A is the content-safe default. The order
         // is path C first (seam recovery), then path B (cross-script
         // recovery), then default to path A.
@@ -940,6 +976,7 @@ struct ChunkProcessor {
         let usePathC =
             pathATokenCount > 0
             && tokenRatioC >= pathCContentRatio
+            && pathCAgreement >= pathCAgreementRatio
             && pathCMean <= pathAMean + pathCDriftConfidenceCeiling
             && pathCMean >= pathAMean - pathCDriftConfidenceCeiling
         let usePathB =
@@ -949,7 +986,7 @@ struct ChunkProcessor {
 
         let chosenPath: String = usePathC ? "C" : (usePathB ? "B" : "A")
         logger.debug(
-            "[dual-decode probe] A=(n=\(pathATokenCount), conf=\(pathAMean)) B=(n=\(pathBTokenCount), conf=\(pathBMean)) C=(n=\(pathCTokenCount), conf=\(pathCMean)) B/A=\(tokenRatioB) C/A=\(tokenRatioC) → \(chosenPath)"
+            "[dual-decode probe] A=(n=\(pathATokenCount), conf=\(pathAMean)) B=(n=\(pathBTokenCount), conf=\(pathBMean)) C=(n=\(pathCTokenCount), conf=\(pathCMean)) B/A=\(tokenRatioB) C/A=\(tokenRatioC) C-agree=\(pathCAgreement) → \(chosenPath)"
         )
 
         // Commit probe outputs in chunk order.
