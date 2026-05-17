@@ -12,7 +12,7 @@ import Foundation
 ///                          latent_mask, text_mask,
 ///                          current_step, total_step) → denoised_latent`
 ///      and feed `denoised_latent` back as `noisy_latent` for the next step.
-///   5. `vocoder(latent) → wav_tts` (44.1 kHz Float32 PCM).
+///   5. `vocoder(latent) → wav` (44.1 kHz Float32 PCM).
 ///
 /// Input / output tensor names match the upstream ONNX graph; the conversion
 /// script (`Scripts/convert_supertonic3_to_coreml.py`) preserves them.

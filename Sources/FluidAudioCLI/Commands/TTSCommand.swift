@@ -75,7 +75,7 @@ public struct TTS {
         // StyleTTS2 zero-shot args.
         var styletts2ReferencePath: String? = nil
         var styletts2Seed: UInt64 = 42
-        var styletts2CpuOnly: Bool = false
+        var cpuOnly: Bool = false
         var styletts2Alpha: Float = StyleTTS2Constants.defaultAlpha
         var styletts2Beta: Float = StyleTTS2Constants.defaultBeta
         // Optional pre-computed IPA passed via `--ipa "…"`. Bypasses
@@ -191,7 +191,7 @@ public struct TTS {
                     i += 1
                 }
             case "--cpu-only":
-                styletts2CpuOnly = true
+                cpuOnly = true
             case "--text":
                 if i + 1 < arguments.count {
                     text = arguments[i + 1]
@@ -268,13 +268,13 @@ public struct TTS {
                 alpha: styletts2Alpha, beta: styletts2Beta,
                 seed: styletts2Seed,
                 metricsPath: metricsPath,
-                cpuOnly: styletts2CpuOnly)
+                cpuOnly: cpuOnly)
         case .supertonic3:
             await runSupertonic3(
                 text: text, output: output, language: supertonicLanguage,
                 voiceStylePath: supertonicVoiceStylePath,
                 totalSteps: supertonicTotalSteps, speed: supertonicSpeed,
-                metricsPath: metricsPath, cpuOnly: styletts2CpuOnly)
+                metricsPath: metricsPath, cpuOnly: cpuOnly)
         }
     }
 

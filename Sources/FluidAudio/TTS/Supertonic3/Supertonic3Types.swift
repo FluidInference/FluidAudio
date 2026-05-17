@@ -139,6 +139,17 @@ public struct Supertonic3VoiceStyle: Sendable {
                 path: url.path, underlying: "decode: \(error)")
         }
 
+        let expectedTtl = [1, Supertonic3Constants.ttlStyleTokens, Supertonic3Constants.ttlStyleDim]
+        if decoded.styleTtl.dims != expectedTtl {
+            throw Supertonic3Error.voiceStyleShapeMismatch(
+                component: "style_ttl", expected: expectedTtl, got: decoded.styleTtl.dims)
+        }
+        let expectedDp = [1, Supertonic3Constants.dpStyleTokens, Supertonic3Constants.dpStyleDim]
+        if decoded.styleDp.dims != expectedDp {
+            throw Supertonic3Error.voiceStyleShapeMismatch(
+                component: "style_dp", expected: expectedDp, got: decoded.styleDp.dims)
+        }
+
         let ttlFlat = flatten(decoded.styleTtl.data, dims: decoded.styleTtl.dims)
         let dpFlat = flatten(decoded.styleDp.data, dims: decoded.styleDp.dims)
 

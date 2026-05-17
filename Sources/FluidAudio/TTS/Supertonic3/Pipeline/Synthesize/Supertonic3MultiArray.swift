@@ -10,7 +10,13 @@ import Foundation
 public enum Supertonic3MultiArray {
 
     public static func makeFloat32(_ values: [Float], shape: [Int]) throws -> MLMultiArray {
-        precondition(values.count == shape.reduce(1, *), "shape product must match buffer length")
+        let expected = shape.reduce(1, *)
+        guard values.count == expected else {
+            throw Supertonic3Error.invalidTensorShape(
+                stage: "makeFloat32",
+                expected: "\(expected) (shape \(shape))",
+                got: "\(values.count)")
+        }
         let arr = try MLMultiArray(shape: shape.map(NSNumber.init), dataType: .float32)
         let dst = arr.dataPointer.bindMemory(to: Float.self, capacity: values.count)
         values.withUnsafeBufferPointer { src in
@@ -20,7 +26,13 @@ public enum Supertonic3MultiArray {
     }
 
     public static func makeInt32(_ values: [Int32], shape: [Int]) throws -> MLMultiArray {
-        precondition(values.count == shape.reduce(1, *), "shape product must match buffer length")
+        let expected = shape.reduce(1, *)
+        guard values.count == expected else {
+            throw Supertonic3Error.invalidTensorShape(
+                stage: "makeInt32",
+                expected: "\(expected) (shape \(shape))",
+                got: "\(values.count)")
+        }
         let arr = try MLMultiArray(shape: shape.map(NSNumber.init), dataType: .int32)
         let dst = arr.dataPointer.bindMemory(to: Int32.self, capacity: values.count)
         values.withUnsafeBufferPointer { src in
