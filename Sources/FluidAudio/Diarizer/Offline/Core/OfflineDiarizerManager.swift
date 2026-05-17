@@ -88,18 +88,32 @@ public final class OfflineDiarizerManager {
         }
     }
 
-    public func process(audio: [Float]) async throws -> DiarizationResult {
+    /// - Parameters:
+    ///   - audio: Mono audio samples at the model's target sample rate.
+    ///   - progressCallback: Optional callback receiving `(chunksProcessed, totalChunks)` after each segmentation chunk.
+    public func process(
+        audio: [Float], progressCallback: (@Sendable (Int, Int) -> Void)? = nil
+    )
+        async throws -> DiarizationResult
+    {
         try await process(
             audioSource: ArrayAudioSampleSource(samples: audio),
-            audioLoadingSeconds: 0
+            audioLoadingSeconds: 0,
+            progressCallback: progressCallback
         )
     }
 
     /// Process audio from a file URL using memory-mapped streaming for efficiency.
     /// Automatically converts the audio to the target sample rate and processes in chunks.
-    /// - Parameter url: Path to the audio file
+    /// - Parameters:
+    ///   - url: Path to the audio file.
+    ///   - progressCallback: Optional callback receiving `(chunksProcessed, totalChunks)` after each segmentation chunk.
     /// - Returns: Diarization result with speaker segments
-    public func process(_ url: URL) async throws -> DiarizationResult {
+    public func process(
+        _ url: URL, progressCallback: (@Sendable (Int, Int) -> Void)? = nil
+    )
+        async throws -> DiarizationResult
+    {
         let factory = AudioSourceFactory()
         let (source, loadDuration) = try factory.makeDiskBackedSource(
             from: url,
@@ -109,13 +123,19 @@ public final class OfflineDiarizerManager {
 
         return try await process(
             audioSource: source,
-            audioLoadingSeconds: loadDuration
+            audioLoadingSeconds: loadDuration,
+            progressCallback: progressCallback
         )
     }
 
+    /// - Parameters:
+    ///   - audioSource: Audio sample source to process.
+    ///   - audioLoadingSeconds: Time spent loading/converting the audio, included in timing logs.
+    ///   - progressCallback: Optional callback receiving `(chunksProcessed, totalChunks)` after each segmentation chunk.
     public func process(
         audioSource: AudioSampleSource,
-        audioLoadingSeconds: TimeInterval
+        audioLoadingSeconds: TimeInterval,
+        progressCallback: (@Sendable (Int, Int) -> Void)? = nil
     ) async throws -> DiarizationResult {
         try config.validate()
         if models == nil {
@@ -127,6 +147,8 @@ public final class OfflineDiarizerManager {
         }
 
         let totalStart = Date()
+        let totalChunks = max(
+            1, (audioSource.sampleCount + config.samplesPerStep - 1) / config.samplesPerStep)
 
         let streamPair = AsyncThrowingStream<SegmentationChunk, Error>.makeStream()
         let chunkStream = streamPair.stream
@@ -136,7 +158,7 @@ public final class OfflineDiarizerManager {
         let capturedModels = models
         let capturedConfig = config
 
-        let segmentationTask = Task(priority: .userInitiated) {
+        let segmentationTask = Task.detached(priority: .userInitiated) {
             [capturedModels, capturedConfig] () throws -> (SegmentationOutput, TimeInterval) in
             let processor = OfflineSegmentationProcessor()
             let start = Date()
@@ -146,6 +168,7 @@ public final class OfflineDiarizerManager {
                     segmentationModel: capturedModels.segmentationModel,
                     config: capturedConfig,
                     chunkHandler: { chunk in
+                        progressCallback?(chunk.chunkIndex + 1, totalChunks)
                         switch chunkContinuation.yield(chunk) {
                         case .enqueued, .dropped:
                             return .continue
@@ -164,7 +187,7 @@ public final class OfflineDiarizerManager {
             }
         }
 
-        let embeddingTask = Task(priority: .userInitiated) {
+        let embeddingTask = Task.detached(priority: .userInitiated) {
             [capturedModels, capturedConfig] () throws -> ([TimedEmbedding], TimeInterval) in
             let extractor = OfflineEmbeddingExtractor(
                 fbankModel: capturedModels.fbankModel,
