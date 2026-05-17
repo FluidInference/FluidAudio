@@ -53,12 +53,31 @@ struct ChunkProcessor {
     /// Minimum mean per-token confidence margin path B must beat path A
     /// by, in the probe, to commit the file to path B. Below this margin
     /// the file commits to path A (the content-safe default). Empirical
-    /// separation observed in probe traces: rare cases where path B is
-    /// the correct global choice (path A suffers a cross-script burst
-    /// against a wrong-script language prior) show margins near 5%;
-    /// cases where the two paths agree on content show margins of
-    /// 0.1–0.7%. A 1% gate cleanly separates them.
-    private let pathBSwitchMargin: Float = 0.01
+    /// separation observed in probe traces: cases where path B is the
+    /// correct global choice (path A suffers a cross-script burst against
+    /// a wrong-script language prior, or path A drifts an English filler
+    /// across a near-silence boundary that warmup-priming corrects) span
+    /// a wide margin range — from sub-millisecond confidence ties to ~5%
+    /// gaps. The sub-percent end is exposed because path A's content-
+    /// preservation advantage and path B's drift-suppression advantage
+    /// can produce near-identical mean confidence even when the chosen
+    /// path is clearly preferable.  The token-ratio guard below (B must
+    /// not emit more tokens than A) keeps this low margin from flipping
+    /// fixtures where path B's extra confidence reflects content
+    /// suppression rather than drift suppression.
+    private let pathBSwitchMargin: Float = 0.001
+
+    /// Maximum acceptable path-B-to-path-A token-count ratio at which
+    /// path B is still considered the better global choice. Above this
+    /// ratio path B is emitting *more* content than path A, which is the
+    /// signature of an over-aggressive warmup-driven over-decode (it
+    /// invents tokens) rather than the drift-suppression case the path-B
+    /// switch is meant to capture. The drift-suppression case shows path
+    /// B emitting *equal-or-fewer* tokens than path A while holding a
+    /// confidence advantage; the over-decode case shows path B emitting
+    /// strictly more tokens. 1.0 separates the two: B may match or
+    /// shrink the token count, but may not grow it.
+    private let pathBMaxContentRatio: Float = 1.0
 
     /// Maximum acceptable ratio of path-B-emitted tokens to path-A-emitted
     /// tokens (over the full probe) below which path B is suspected of
@@ -73,12 +92,17 @@ struct ChunkProcessor {
     /// fallback. Path C uses fixed-stride boundaries (no silence-snap)
     /// and recovers seam tokens that the silence-snap can move outside
     /// any single chunk's decoder span. The recovery is real when path C
-    /// reliably emits more tokens than path A over the probe; below this
-    /// ratio the two paths effectively agree on content and the safer
-    /// silence-aligned default wins to avoid mid-word starts that bias
-    /// the decoder toward an English-prior wrong-language burst on
-    /// non-English audio.
-    private let pathCContentRatio: Float = 1.01
+    /// reliably emits a materially larger token count than path A over
+    /// the probe; below this ratio the two paths effectively agree on
+    /// content and the safer silence-aligned default wins to avoid
+    /// mid-word starts that bias the decoder toward an English-prior
+    /// wrong-language burst on non-English audio. Set well above 1.0
+    /// because near-1.0 ratios capture single-token substitutions (the
+    /// same-length wrong-word signature, e.g. an English filler inserted
+    /// for a same-position function word) whereas a real dropped-seam
+    /// recovery introduces a sentence-scale gain that pushes the ratio
+    /// well past 1.10.
+    private let pathCContentRatio: Float = 1.15
 
     /// Maximum acceptable confidence headroom path C can have above path
     /// A before path C is suspected of being a wrong-language drift.
@@ -982,6 +1006,7 @@ struct ChunkProcessor {
         let usePathB =
             !usePathC
             && !pathBSuppressionGuardTripped
+            && tokenRatioB <= pathBMaxContentRatio
             && pathBMean > pathAMean + pathBSwitchMargin
 
         let chosenPath: String = usePathC ? "C" : (usePathB ? "B" : "A")
