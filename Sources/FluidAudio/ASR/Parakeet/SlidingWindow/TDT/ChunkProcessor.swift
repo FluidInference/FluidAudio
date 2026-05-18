@@ -38,9 +38,9 @@ struct ChunkProcessor {
     /// use the v3/no-mel boundary warmup path below.
     private let melContextSamples: Int = ASRConstants.samplesPerEncoderFrame  // 1280 samples = 80ms
 
-    /// Short real-audio warmup prefix for v3/no-mel chunks. The prefix is
-    /// decoded to condition the predictor on real left audio, but prefix
-    /// tokens are suppressed before chunk merging.
+    /// Default v3/no-mel path warmup size. v42 intentionally keeps the
+    /// non-arbitrated path warmup-free; the opt-in arbitration path's path B
+    /// owns the explicit 7-frame warmup probe.
     private let noMelWarmupPrefixFrames: Int = 0
 
     /// Number of non-first chunks to dual-decode as a probe before
@@ -747,10 +747,10 @@ struct ChunkProcessor {
         let layout = chunkLayout(melChunkContext: false, modelVersion: modelVersion)
         let chunkSamples = layout.chunkSamples
         let strideSamples = layout.strideSamples
-        // In dual-decode mode `noMelWarmupPrefixFrames` is 0, so
+        // In v42 the non-arbitrated no-mel path is warmup-free, so
         // layout.warmupPrefixSamples is 0. Path B retains warmup capability
-        // via an explicit per-path size (7 encoder frames; matches the
-        // upstream warmup default for the non-arbitrated no-mel path).
+        // via an explicit per-path size (7 encoder frames, the earlier
+        // warmup candidate's prefix length).
         let pathBWarmupSamples = 7 * ASRConstants.samplesPerEncoderFrame
 
         // Each path uses its OWN start system:

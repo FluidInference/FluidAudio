@@ -39,15 +39,12 @@ public struct ASRConfig: Sendable {
     public let melChunkContext: Bool
 
     /// Opt-in dual-decode arbitration for the v3 + no-mel batch path.
-    /// When `true`, the first non-trivial chunks of each file are decoded
-    /// twice — once *without* the 7-frame warmup prefix (the "G1-only"
-    /// shape, preferred for content preservation on long French/English/
-    /// Spanish audio) and once *with* it (the "G1+G2" PR #604 shape,
-    /// preferred for cross-script bias avoidance on Slovenian and similar)
-    /// — both at the same silence-aligned chunk start. The file then
-    /// commits to whichever path has higher probe mean confidence and
-    /// decodes the remaining chunks single-path with that choice. Probe
-    /// ties go to the warmup-free path (the content-safer default).
+    /// When `true`, the first non-trivial chunks of each file are probed
+    /// with three strategies: silence-aligned without warmup, silence-
+    /// aligned with a 7-frame warmup prefix, and regular fixed-stride
+    /// chunking. The file then commits to the winning path and decodes the
+    /// remaining chunks single-path with that choice. Probe ties go to the
+    /// warmup-free path (the content-safer default).
     ///
     /// Per-file commitment (rather than per-chunk arbitration) eliminates
     /// the inter-path stitching artifacts the LCS+midpoint merger produces

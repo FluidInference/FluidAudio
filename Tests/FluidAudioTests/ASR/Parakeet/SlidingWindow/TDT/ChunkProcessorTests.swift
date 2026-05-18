@@ -166,23 +166,22 @@ final class ChunkProcessorTests: XCTestCase {
         XCTAssertEqual(audio.count, 480_000, "30 second audio should be 480,000 samples")
     }
 
-    func testNoMelV3UsesConditionalWarmupPrefixInsideModelWindow() {
+    func testNoMelV3DefaultPathKeepsWarmupDisabled() {
         let audio = createMockAudioSamples(durationSeconds: 30.0)
         let processor = ChunkProcessor(audioSamples: audio)
 
         let layout = processor.chunkLayoutForTesting(melChunkContext: false, modelVersion: .v3)
-        let expectedWarmupPrefixSamples = 7 * ASRConstants.samplesPerEncoderFrame
 
         XCTAssertEqual(layout.melContextSamples, 0, "No-mel mode must not use contextFrameAdjustment")
         XCTAssertEqual(
             layout.warmupPrefixSamples,
-            expectedWarmupPrefixSamples,
-            "v3/no-mel can decode a short prefix only on acoustically quiet boundaries"
+            0,
+            "v42 keeps the non-arbitrated v3/no-mel path warmup-free; only the opt-in arbitration path B uses a 7-frame warmup probe"
         )
         XCTAssertLessThanOrEqual(
-            layout.chunkSamples - layout.warmupPrefixSamples + layout.warmupPrefixSamples,
+            layout.chunkSamples,
             ASRConstants.maxModelSamples,
-            "When prefix warmup is used, the visible body is shortened so the CoreML encoder window is not exceeded"
+            "No-mel v3 chunks still fit inside the CoreML encoder window"
         )
         XCTAssertEqual(
             layout.strideSamples,
@@ -270,7 +269,7 @@ final class ChunkProcessorTests: XCTestCase {
         )
     }
 
-    func testNoMelV3UsesWarmupOnlyForShortPostBoundaryQuiet() throws {
+    func testNoMelV3DefaultPathDoesNotWarmupShortPostBoundaryQuiet() throws {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         var audio = [Float](repeating: 0.02, count: 45 * ASRConstants.sampleRate)
         let processorForLayout = ChunkProcessor(audioSamples: audio)
@@ -288,9 +287,9 @@ final class ChunkProcessorTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(decisions.count, 2)
         XCTAssertEqual(decisions[1].start, silentBoundary)
-        XCTAssertTrue(
+        XCTAssertFalse(
             decisions[1].useWarmupPrefix,
-            "Short acoustic troughs should decode a hidden warmup prefix before visible tokens"
+            "The default v3/no-mel path should stay warmup-free; opt-in arbitration path B owns warmup probing"
         )
     }
 
@@ -314,8 +313,8 @@ final class ChunkProcessorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(decisions.count, 2)
         XCTAssertEqual(
             decisions[1].start,
-            stride / frameSamples * frameSamples,
-            "A phrase-internal short trough several seconds before the grid should not pull the next chunk boundary onto a continuation word"
+            shortTrough,
+            "Path A still silence-aligns to real quiet troughs, but does not add warmup on the default path"
         )
         XCTAssertFalse(decisions[1].useWarmupPrefix)
     }
@@ -496,7 +495,7 @@ final class ChunkProcessorTests: XCTestCase {
         XCTAssertNotNil(processor)
     }
 
-    func testGapResolutionPrefersHigherConfidenceWhenSameLength() {
+    func testGapResolutionKeepsOlderChunkWhenSameLength() {
         let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
 
         let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
@@ -514,10 +513,10 @@ final class ChunkProcessorTests: XCTestCase {
 
         let merged = processor.mergeTokenWindowsForTesting(left: left, right: right).map(\.token)
 
-        XCTAssertEqual(merged, [100, 200, 902, 300, 400])
+        XCTAssertEqual(merged, [100, 200, 901, 300, 400])
     }
 
-    func testLeadingOverlapGapPrefersHigherConfidenceNewerChunk() {
+    func testLeadingOverlapGapKeepsOlderChunkWhenSameLength() {
         let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
 
         let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
@@ -534,7 +533,7 @@ final class ChunkProcessorTests: XCTestCase {
 
         let merged = processor.mergeTokenWindowsForTesting(left: left, right: right).map(\.token)
 
-        XCTAssertEqual(merged, [100, 110, 902, 300, 400])
+        XCTAssertEqual(merged, [100, 110, 901, 300, 400])
     }
 
     func testLeadingOverlapGapKeepsOlderChunkWhenNewerConfidenceIsMuchLower() {
@@ -560,7 +559,7 @@ final class ChunkProcessorTests: XCTestCase {
         XCTAssertEqual(merged, [100, 901, 902, 903, 300, 400])
     }
 
-    func testLeadingOverlapGapUsesTokenEndForContestedPrefix() {
+    func testLeadingOverlapGapKeepsOlderChunkForContestedPrefix() {
         let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
 
         let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
@@ -576,7 +575,7 @@ final class ChunkProcessorTests: XCTestCase {
 
         let merged = processor.mergeTokenWindowsForTesting(left: left, right: right).map(\.token)
 
-        XCTAssertEqual(merged, [100, 902, 300, 400])
+        XCTAssertEqual(merged, [100, 901, 300, 400])
     }
 
     func testGapResolutionNoGaps() {
