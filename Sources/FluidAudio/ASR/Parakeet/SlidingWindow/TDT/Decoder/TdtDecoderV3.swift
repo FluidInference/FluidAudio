@@ -549,25 +549,6 @@ internal struct TdtDecoderV3: Sendable {
         return hypothesis
     }
 
-    /// Update hypothesis with new token
-    internal func updateHypothesis(
-        _ hypothesis: inout TdtHypothesis,
-        token: Int,
-        score: Float,
-        duration: Int,
-        timeIdx: Int,
-        decoderState: TdtDecoderState
-    ) {
-        hypothesis.ySequence.append(token)
-        hypothesis.score += score
-        hypothesis.timestamps.append(timeIdx)
-        hypothesis.tokenConfidences.append(score)
-        hypothesis.decState = decoderState
-        hypothesis.lastToken = token
-
-        hypothesis.tokenDurations.append(duration)
-    }
-
     internal static func shouldEmitToken(
         emissionTimestamp: Int,
         emitTokensAfterGlobalFrame: Int?
