@@ -15,6 +15,7 @@
 - [Custom Vocabulary](ASR/CustomVocabulary.md)
 - [Custom Pronunciation](ASR/CustomPronunciation.md)
 - [Post-Processing (ITN)](ASR/PostProcessing.md)
+- [Long Transcription](ASR/LongTranscription.md)
 - [Last Chunk Handling](ASR/LastChunkHandling.md)
 - [Manual Model Loading](ASR/ManualModelLoading.md)
 - [Directory Structure](ASR/DirectoryStructure.md)
