@@ -18,7 +18,7 @@ public enum StreamingChunkSize: Sendable {
     /// Encoder steps: 4, Shift: 2 (80ms overlap)
     /// Default configuration, well-tested with ~8-9% WER on LibriSpeech test-clean.
     case ms160
-
+    
     /// 320ms mode - higher throughput, 320ms latency between outputs
     ///
     /// NeMo config: `encoder.setup_streaming_params(chunk_size=8, shift_size=4)`
@@ -34,7 +34,7 @@ public enum StreamingChunkSize: Sendable {
     ///
     /// Performance: ~5.73% WER, 14x RTFx on LibriSpeech test-clean
     case ms320
-
+    
     /// 1280ms mode - higher throughput, 1280ms latency between outputs
     ///
     /// NeMo config: `encoder.setup_streaming_params(chunk_size=16, shift_size=16)`
@@ -45,79 +45,79 @@ public enum StreamingChunkSize: Sendable {
     ///
     /// Model available at: FluidInference/parakeet-realtime-eou-120m-coreml/1280ms
     case ms1280
-
+    
     /// Number of audio samples per chunk
     /// Calculated from mel frames: (mel_frames - 1) * hop_length for center-padded mel spectrogram
     /// computeFlat uses: numFrames = 1 + (audioCount + 2*(nFFT/2) - winLength) / hopLength
     /// so chunkSamples = (melFrames - 1) * hopLength
     public var chunkSamples: Int {
         switch self {
-        case .ms160: return 2560  // (17-1) * 160 = 2560 samples (160ms)
-        case .ms320:
-            // 320ms mode: 64 mel frames from NeMo's streaming_cfg.chunk_size[1]
-            // Formula: (mel_frames - 1) * hop_length = (64-1) * 160 = 10080 samples
-            // This is ~630ms of audio per chunk (but 320ms latency due to shift)
-            return 10080
-        case .ms1280: return 20480  // (129-1) * 160 = 20480 samples (1280ms)
+            case .ms160: return 2560  // (17-1) * 160 = 2560 samples (160ms)
+            case .ms320:
+                // 320ms mode: 64 mel frames from NeMo's streaming_cfg.chunk_size[1]
+                // Formula: (mel_frames - 1) * hop_length = (64-1) * 160 = 10080 samples
+                // This is ~630ms of audio per chunk (but 320ms latency due to shift)
+                return 10080
+            case .ms1280: return 20480  // (129-1) * 160 = 20480 samples (1280ms)
         }
     }
-
+    
     /// Number of mel spectrogram frames (from NeMo's chunk_size config)
     /// For 160ms: 17 mel frames → 2 valid encoder outputs
     /// For 320ms: 64 mel frames → 4 valid encoder outputs
     /// For 1280ms: 129 mel frames → 16 valid encoder outputs
     public var melFrames: Int {
         switch self {
-        case .ms160: return 17
-        case .ms320:
-            // 320ms: NeMo's streaming_cfg.chunk_size = [57, 64] after setup_streaming_params(8, 4)
-            // Use index [1] = 64 mel frames (the larger/padded size)
-            return 64
-        case .ms1280: return 129  // From CoreML conversion with --chunk-frames 129
+            case .ms160: return 17
+            case .ms320:
+                // 320ms: NeMo's streaming_cfg.chunk_size = [57, 64] after setup_streaming_params(8, 4)
+                // Use index [1] = 64 mel frames (the larger/padded size)
+                return 64
+            case .ms1280: return 129  // From CoreML conversion with --chunk-frames 129
         }
     }
-
+    
     /// Chunk duration in milliseconds
     public var durationMs: Int {
         switch self {
-        case .ms160: return 160
-        case .ms320: return 630  // 10080 samples / 16 = 630ms audio
-        case .ms1280: return 1280  // 20480 samples / 16 = 1280ms
+            case .ms160: return 160
+            case .ms320: return 630  // 10080 samples / 16 = 630ms audio
+            case .ms1280: return 1280  // 20480 samples / 16 = 1280ms
         }
     }
-
+    
     /// Default model subdirectory name
     public var modelSubdirectory: String {
         switch self {
-        case .ms160: return "160ms"
-        case .ms320: return "320ms"
-        case .ms1280: return "1280ms"
+            case .ms160: return "160ms"
+            case .ms320: return "320ms"
+            case .ms1280: return "1280ms"
         }
     }
-
+    
     /// Number of valid encoder output frames per chunk
     public var validOutputLen: Int {
         switch self {
-        case .ms160: return 2
-        case .ms320: return 4
-        case .ms1280: return 16
+            case .ms160: return 2
+            case .ms320: return 4
+            case .ms1280: return 16
         }
     }
-
+    
     /// Pre-cache size in mel frames (for mel-level context in loopback encoder)
     /// This is from NeMo's pre_encode_cache_size configuration.
     public var preCacheSize: Int {
         switch self {
-        case .ms160: return 16  // Legacy value for 160ms
-        case .ms320:
-            // 320ms: NeMo's streaming_cfg.pre_encode_cache_size = [0, 9]
-            // Smaller than 160ms (16) because 64 mel frames already contain more context
-            // Bigger chunks are more self-contained, need less external lookahead
-            return 9
-        case .ms1280: return 16  // From CoreML conversion (same as 160ms default)
+            case .ms160: return 16  // Legacy value for 160ms
+            case .ms320:
+                // 320ms: NeMo's streaming_cfg.pre_encode_cache_size = [0, 9]
+                // Smaller than 160ms (16) because 64 mel frames already contain more context
+                // Bigger chunks are more self-contained, need less external lookahead
+                return 9
+            case .ms1280: return 16  // From CoreML conversion (same as 160ms default)
         }
     }
-
+    
     /// Audio samples to shift between chunks.
     ///
     /// For the loopback encoder architecture:
@@ -134,18 +134,18 @@ public enum StreamingChunkSize: Sendable {
     /// For 1280ms, use NeMo's shift_size directly.
     public var shiftSamples: Int {
         switch self {
-        case .ms160:
-            // 160ms uses 50% audio overlap (matches NeMo's default behavior)
-            return chunkSamples / 2  // 1280 samples
-        case .ms320:
-            // 320ms: NeMo's streaming_cfg.shift_size = [25, 32] mel frames
-            // Use index [1] = 32 mel frames × 10ms/frame = 320ms latency
-            // shift_samples = 32 * hop_length = 32 * 160 = 5120 samples
-            return 5120
-        case .ms1280:
-            // 1280ms: shift_size=128 mel frames (1280ms latency)
-            // Context provided by mel pre-cache (16 frames), no audio overlap needed
-            return 128 * 160  // 20480 samples
+            case .ms160:
+                // 160ms uses 50% audio overlap (matches NeMo's default behavior)
+                return chunkSamples / 2  // 1280 samples
+            case .ms320:
+                // 320ms: NeMo's streaming_cfg.shift_size = [25, 32] mel frames
+                // Use index [1] = 32 mel frames × 10ms/frame = 320ms latency
+                // shift_samples = 32 * hop_length = 32 * 160 = 5120 samples
+                return 5120
+            case .ms1280:
+                // 1280ms: shift_size=128 mel frames (1280ms latency)
+                // Context provided by mel pre-cache (16 frames), no audio overlap needed
+                return 128 * 160  // 20480 samples
         }
     }
 }
@@ -162,33 +162,42 @@ public typealias PartialCallback = @Sendable (String) -> Void
 /// Uses native Swift mel spectrogram for exact NeMo parity.
 public actor StreamingEouAsrManager {
     private let logger = AppLogger(category: "StreamingEOU")
-
+    
     private var processedChunks = 0
-
+    
     // Models
     private var streamingEncoder: MLModel?  // Single Loopback Model
     private var decoder: MLModel?
     private var joint: MLModel?
-
+    
     // Components
     private var rnntDecoder: RnntDecoder?
     private let audioConverter = AudioConverter()
     private var tokenizer: Tokenizer?
     private let melProcessor = AudioMelSpectrogram()  // Native Swift mel spectrogram
-
+    
     // Configuration - now based on chunkSize
     public let chunkSize: StreamingChunkSize
     private let hopLength = 160
     private var chunkSamples: Int { chunkSize.chunkSamples }
     // Shift based on valid encoder output frames (see StreamingChunkSize.shiftSamples)
     private var shiftSamples: Int { chunkSize.shiftSamples }
-
+    
     // Audio Buffer
     private var audioBuffer: [Float] = []
-
+    
     // Accumulated token IDs from incremental decoding (NeMo-style)
     private var accumulatedTokenIds: [Int] = []
-
+    // Accumulated token timestamps in ms, aligned with accumulatedTokenIds
+    private var accumulatedTokenTimestampsMs: [Int] = []
+    // Accumulated raw token strings, aligned with accumulatedTokenIds
+    private var accumulatedRawTokenStrings: [String] = []
+    // Accumulated EoU timestamps in ms
+    private var accumulatedEouTimestampsMs: [Int] = []
+    
+    // Timestamp granularity for RNNT frames
+    private let frameDurationMs: Int = 80
+    
     // EOU Detection
     /// Whether End-of-Utterance was detected in the last chunk processed
     public private(set) var eouDetected: Bool = false
@@ -196,23 +205,23 @@ public actor StreamingEouAsrManager {
     private var eouCallback: EouCallback?
     /// Optional callback invoked after each chunk with partial transcript
     private var partialCallback: PartialCallback?
-
+    
     // EOU Debouncing - requires sustained silence before triggering
     /// Minimum duration of silence (in ms) before EOU is confirmed
     public var eouDebounceMs: Int = 1280
     /// Timestamp when EOU was first detected (for debouncing)
     private var eouFirstDetectedAt: Int?  // in processed samples
-    /// Total samples processed (for timing)
+                                          /// Total samples processed (for timing)
     private var totalSamplesProcessed: Int = 0
-
+    
     public private(set) var configuration: MLModelConfiguration
     public let debugFeatures: Bool
     private var debugFeatureBuffer: [Float] = []
-
+    
     // --- Loopback States ---
     // 1. Pre-Cache (Audio Context) [1, 128, 16]
     private var preCache: MLMultiArray?
-
+    
     // 2. Conformer Caches
     // cache_last_channel: [17, 1, 70, 512]
     // cache_last_time: [17, 1, 512, 8]
@@ -220,7 +229,7 @@ public actor StreamingEouAsrManager {
     private var cacheLastChannel: MLMultiArray?
     private var cacheLastTime: MLMultiArray?
     private var cacheLastChannelLen: MLMultiArray?
-
+    
     public init(
         configuration: MLModelConfiguration = MLModelConfiguration(),
         chunkSize: StreamingChunkSize = .ms160,
@@ -233,24 +242,48 @@ public actor StreamingEouAsrManager {
         self.debugFeatures = debugFeatures
         logger.info("Initialized with chunk size: \(chunkSize.durationMs)ms, EOU debounce: \(eouDebounceMs)ms")
     }
-
+    
     /// Set a callback to be invoked when End-of-Utterance is detected.
     /// The callback receives the transcript accumulated up to the EOU point.
     public func setEouCallback(_ callback: @escaping EouCallback) {
         self.eouCallback = callback
     }
-
+    
     /// Set a callback to be invoked when new tokens are decoded.
     /// Useful for displaying "ghost text" during speech.
     public func setPartialCallback(_ callback: @escaping PartialCallback) {
         self.partialCallback = callback
     }
-
+    
+    /// Returns timestamps (ms) aligned with the accumulated token IDs.
+    /// Each value is the elapsed time from the start of the conversation.
+    public func getTokenTimestampsMs() -> [Int] {
+        accumulatedTokenTimestampsMs
+    }
+    
+    /// Returns raw token strings aligned with accumulated token IDs/timestamps.
+    public func getRawTokenStrings() -> [String] {
+        accumulatedRawTokenStrings
+    }
+    
+    /// Returns EoU timestamps when utterances end.
+    public func getEouTimestampsMs() -> [Int] {
+        accumulatedEouTimestampsMs
+    }
+    
+    static func computeTokenTimestampsMs(
+        baseFrame: Int,
+        tokenFrames: [Int],
+        frameDurationMs: Int
+    ) -> [Int] {
+        tokenFrames.map { (baseFrame + $0) * frameDurationMs }
+    }
+    
     /// Load models from a specific directory
     /// - Parameter directory: Directory containing the model files
     public func loadModels(from directory: URL) async throws {
         logger.info("Loading CoreML models from \(directory.path)...")
-
+        
         // No longer loading preprocessor - using native Swift AudioMelSpectrogram instead
         self.streamingEncoder = try await MLModel.load(
             contentsOf: directory.appendingPathComponent("streaming_encoder.mlmodelc"),
@@ -260,21 +293,21 @@ public actor StreamingEouAsrManager {
             contentsOf: directory.appendingPathComponent("decoder.mlmodelc"), configuration: self.configuration)
         self.joint = try await MLModel.load(
             contentsOf: directory.appendingPathComponent("joint_decision.mlmodelc"), configuration: self.configuration)
-
+        
         // Load Tokenizer
         let vocabUrl = directory.appendingPathComponent("vocab.json")
         self.tokenizer = try Tokenizer(vocabPath: vocabUrl)
-
+        
         self.rnntDecoder = RnntDecoder(decoderModel: self.decoder!, jointModel: self.joint!)
-
+        
         // Initialize States
         try self.resetStates()
-
+        
         self.audioBuffer.removeAll()
-
+        
         logger.info("Models loaded successfully.")
     }
-
+    
     /// Downloads and loads Parakeet EOU streaming models from Hugging Face if not cached locally.
     ///
     /// - Parameters:
@@ -289,50 +322,50 @@ public actor StreamingEouAsrManager {
         if let configuration {
             self.configuration = configuration
         }
-
+        
         let modelsRoot = directory ?? Self.defaultCacheDirectory()
         let repo: Repo
         switch chunkSize {
-        case .ms160:
-            repo = .parakeetEou160
-        case .ms320:
-            repo = .parakeetEou320
-        case .ms1280:
-            repo = .parakeetEou1280
+            case .ms160:
+                repo = .parakeetEou160
+            case .ms320:
+                repo = .parakeetEou320
+            case .ms1280:
+                repo = .parakeetEou1280
         }
         let modelDir = modelsRoot.appendingPathComponent(repo.folderName, isDirectory: true)
-
+        
         let requiredModels = ModelNames.ParakeetEOU.requiredModels
         let modelsExist = requiredModels.allSatisfy { modelName in
             FileManager.default.fileExists(atPath: modelDir.appendingPathComponent(modelName).path)
         }
-
+        
         if !modelsExist {
             logger.info("Downloading Parakeet EOU models to \(modelsRoot.path)...")
             try await DownloadUtils.downloadRepo(repo, to: modelsRoot, progressHandler: progressHandler)
         } else {
             logger.info("Using cached Parakeet EOU models at \(modelDir.path)")
         }
-
+        
         try await loadModels(from: modelDir)
     }
-
+    
     private static func defaultCacheDirectory() -> URL {
         let applicationSupportURL = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
         return
-            applicationSupportURL
+        applicationSupportURL
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent("parakeet-eou-streaming", isDirectory: true)
     }
-
+    
     private func resetStates() throws {
         // pre_cache: [1, 128, preCacheSize] - size varies by chunk size
         let preCacheSize = chunkSize.preCacheSize
         self.preCache = try EncoderCacheManager.createZeroArray(shape: [1, 128, preCacheSize])
-
+        
         // Encoder caches using EncoderCacheManager
         let cacheConfig = EncoderCacheManager.CacheConfig(
             channelShape: [17, 1, 70, 512],
@@ -344,30 +377,30 @@ public actor StreamingEouAsrManager {
         self.cacheLastTime = caches.time
         self.cacheLastChannelLen = caches.len
     }
-
+    
     /// Append audio to buffer without processing (for Simulated Streaming and VAD)
     public func appendAudio(_ buffer: AVAudioPCMBuffer) throws {
         try StreamingAsrUtils.appendAudio(buffer, using: audioConverter, to: &audioBuffer)
     }
-
+    
     public func process(audioBuffer: AVAudioPCMBuffer) async throws -> String {
         // 1. Convert to 16kHz Mono Float32
         let samples = try audioConverter.resampleBuffer(audioBuffer)
         self.audioBuffer.append(contentsOf: samples)
-
+        
         // 2. Process chunks with 50% overlap (NeMo-style)
         // We accumulate encoder outputs and decode at the end
         while true {
             // Check buffer size before processing
             guard self.audioBuffer.count >= chunkSamples else { break }
-
+            
             // Extract chunk and calculate how many samples we'll shift
             let chunk = Array(self.audioBuffer.prefix(self.chunkSamples))
             let samplesToShift = self.shiftSamples
-
+            
             // 3. Run encoder and decode incrementally (NeMo-style)
             try await processChunkAndDecode(chunk)
-
+            
             // 4. Shift buffer by 80ms (50% overlap) - re-check count after await
             // Another actor method (e.g., reset()) could have modified the buffer during the await
             let actualShift = min(samplesToShift, self.audioBuffer.count)
@@ -375,48 +408,54 @@ public actor StreamingEouAsrManager {
                 self.audioBuffer.removeFirst(actualShift)
             }
         }
-
+        
         // Return empty - actual transcription happens in finish()
         return ""
     }
-
+    
     public func finish() async throws -> String {
         // 1. Process remaining audio (padded) if any
         if !audioBuffer.isEmpty {
             let remaining = audioBuffer.count
             let paddingNeeded = chunkSamples - remaining
-
+            
             if paddingNeeded > 0 {
                 audioBuffer.append(contentsOf: Array(repeating: 0.0, count: paddingNeeded))
             }
-
+            
             // Process final chunk with decoding
             let chunk = Array(audioBuffer.prefix(chunkSamples))
             try await processChunkAndDecode(chunk)
-
+            
             // Clear buffer
             audioBuffer.removeAll()
         }
-
+        
         // 2. Return accumulated transcript from incremental decoding
         guard let tokenizer = tokenizer else {
             return ""
         }
-
+        
         let transcript = tokenizer.decode(ids: accumulatedTokenIds)
-
+        
         // Clear accumulated tokens
         accumulatedTokenIds.removeAll()
-
+        accumulatedTokenTimestampsMs.removeAll()
+        accumulatedRawTokenStrings.removeAll()
+        accumulatedEouTimestampsMs.removeAll()
+        
         return transcript
     }
-
+    
     public func reset() async {
         StreamingAsrUtils.resetSharedState(
             audioBuffer: &audioBuffer,
             accumulatedTokenIds: &accumulatedTokenIds,
             processedChunks: &processedChunks
         )
+        accumulatedTokenTimestampsMs.removeAll()
+        accumulatedRawTokenStrings.removeAll()
+        accumulatedEouTimestampsMs.removeAll()
         debugFeatureBuffer.removeAll()
         eouDetected = false
         eouFirstDetectedAt = nil
@@ -424,7 +463,7 @@ public actor StreamingEouAsrManager {
         try? resetStates()
         rnntDecoder?.resetState()
     }
-
+    
     public func cleanup() async {
         await reset()
         streamingEncoder = nil
@@ -438,43 +477,43 @@ public actor StreamingEouAsrManager {
         cacheLastChannelLen = nil
         logger.info("StreamingEouAsrManager resources cleaned up")
     }
-
+    
     public func injectSilence(_ seconds: Double) {
         let silenceSamples = Int(seconds * 16000)
         audioBuffer.append(contentsOf: Array(repeating: 0.0, count: silenceSamples))
     }
-
+    
     /// Process a chunk through native mel spectrogram, encoder, and RNNT decoder (NeMo-style incremental)
     private func processChunkAndDecode(_ samples: [Float]) async throws {
         guard let streamingEncoder = streamingEncoder,
-            let preCache = preCache,
-            let cacheLastChannel = cacheLastChannel,
-            let cacheLastTime = cacheLastTime,
-            let cacheLastChannelLen = cacheLastChannelLen,
-            let rnntDecoder = rnntDecoder
+              let preCache = preCache,
+              let cacheLastChannel = cacheLastChannel,
+              let cacheLastTime = cacheLastTime,
+              let cacheLastChannelLen = cacheLastChannelLen,
+              let rnntDecoder = rnntDecoder
         else {
             throw ASRError.notInitialized
         }
-
+        
         // A. Compute mel spectrogram with native Swift implementation (NeMo-matching)
         let (melFlat, melLength, numFrames) = melProcessor.computeFlat(audio: samples)
-
+        
         // Create MLMultiArray for mel: [1, 128, numFrames]
         let mel = try MLMultiArray(shape: [1, 128, NSNumber(value: numFrames)], dataType: .float32)
         let melPtr = mel.dataPointer.bindMemory(to: Float.self, capacity: mel.count)
-
+        
         // AudioMelSpectrogram returns [nMels, T] row-major (mel bin, then time)
         // CoreML expects [1, 128, T] which is the same layout
         melPtr.update(from: melFlat, count: melFlat.count)
-
+        
         // Create mel_length: [1] with valid frame count
         let melLen = try MLMultiArray(shape: [1], dataType: .int32)
         melLen[0] = NSNumber(value: melLength)
-
+        
         if debugFeatures {
             debugFeatureBuffer.append(contentsOf: melFlat)
         }
-
+        
         // B. Streaming Encoder
         let encoderInput = try MLDictionaryFeatureProvider(dictionary: [
             "audio_signal": MLFeatureValue(multiArray: mel),
@@ -484,9 +523,9 @@ public actor StreamingEouAsrManager {
             "cache_last_time": MLFeatureValue(multiArray: cacheLastTime),
             "cache_last_channel_len": MLFeatureValue(multiArray: cacheLastChannelLen),
         ])
-
+        
         let encoderOutput = try await streamingEncoder.prediction(from: encoderInput)
-
+        
         // C. Update States (Loopback)
         if let newPreCache = encoderOutput.featureValue(for: "new_pre_cache")?.multiArrayValue {
             self.preCache = newPreCache
@@ -507,28 +546,46 @@ public actor StreamingEouAsrManager {
         if let newLen = updatedCaches.len {
             self.cacheLastChannelLen = newLen
         }
-
+        
         // D. Decode this chunk's encoder output incrementally (NeMo-style)
         guard let encoded = encoderOutput.featureValue(for: "encoded_output")?.multiArrayValue else {
             throw ASRError.processingFailed("Missing encoder output")
         }
-
+        
         // Decode this chunk - RNNT decoder state (h, c, lastToken) carries across chunks
         // NeMo truncates encoder output to valid_out_len frames before decoding
         let decodeResult = try rnntDecoder.decodeWithEOU(
             encoderOutput: encoded, timeOffset: processedChunks, skipFrames: 0,
             validOutLen: chunkSize.validOutputLen)
         accumulatedTokenIds.append(contentsOf: decodeResult.tokenIds)
-
+        
+        if let tokenizer, !decodeResult.tokenIds.isEmpty {
+            let rawTokens = decodeResult.tokenIds.map { tokenId in
+                tokenizer.rawToken(for: tokenId) ?? "<id:\(tokenId)>"
+            }
+            accumulatedRawTokenStrings.append(contentsOf: rawTokens)
+        }
+        
+        // Convert per-chunk frame indices into global timestamps (ms) aligned with tokens.
+        if !decodeResult.tokenFrames.isEmpty {
+            let baseFrame = processedChunks * chunkSize.validOutputLen
+            let timestampsMs = Self.computeTokenTimestampsMs(
+                baseFrame: baseFrame,
+                tokenFrames: decodeResult.tokenFrames,
+                frameDurationMs: frameDurationMs
+            )
+            accumulatedTokenTimestampsMs.append(contentsOf: timestampsMs)
+        }
+        
         // Invoke partial callback for ghost text (only when new tokens decoded)
         if let callback = partialCallback, let tokenizer = tokenizer, !decodeResult.tokenIds.isEmpty {
             let partial = tokenizer.decode(ids: accumulatedTokenIds)
             callback(partial)
         }
-
+        
         // Track total samples for timing
         totalSamplesProcessed += shiftSamples
-
+        
         // Handle EOU detection with debouncing
         // EOU requires sustained silence for eouDebounceMs before triggering
         if decodeResult.eouDetected {
@@ -540,16 +597,18 @@ public actor StreamingEouAsrManager {
                 eouFirstDetectedAt = totalSamplesProcessed
                 logger.debug("EOU candidate at chunk \(processedChunks), starting debounce timer")
             }
-
+            
             // Check if debounce period has elapsed
             if let firstDetected = eouFirstDetectedAt {
                 let elapsedSamples = totalSamplesProcessed - firstDetected
                 let elapsedMs = (elapsedSamples * 1000) / 16000  // Convert samples to ms at 16kHz
-
+                
                 if elapsedMs >= eouDebounceMs && !eouDetected {
                     eouDetected = true
                     logger.info("EOU confirmed at chunk \(processedChunks) after \(elapsedMs)ms silence")
-
+                    let eouTimestampMs = (totalSamplesProcessed * 1000) / 16000
+                    accumulatedEouTimestampsMs.append(eouTimestampMs)
+                    
                     // Invoke callback with current transcript
                     if let callback = eouCallback, let tokenizer = tokenizer {
                         let transcript = tokenizer.decode(ids: accumulatedTokenIds)
@@ -561,16 +620,16 @@ public actor StreamingEouAsrManager {
             // Model did not predict EOU - speech is ongoing, reset debounce timer
             eouFirstDetectedAt = nil
         }
-
+        
         processedChunks += 1
     }
-
+    
     public func saveDebugFeatures(to url: URL) throws {
         let outputData: [String: Any] = [
             "mel_features": debugFeatureBuffer,
             "count": debugFeatureBuffer.count,
         ]
-
+        
         let data = try JSONSerialization.data(withJSONObject: outputData, options: .prettyPrinted)
         try data.write(to: url)
         logger.info("Dumped \(debugFeatureBuffer.count) features to \(url.path)")
@@ -583,11 +642,11 @@ extension StreamingEouAsrManager: StreamingAsrManager {
     public var displayName: String {
         "Parakeet EOU 120M (\(chunkSize.durationMs)ms)"
     }
-
+    
     public func loadModels() async throws {
         try await loadModels(to: nil, configuration: nil, progressHandler: nil)
     }
-
+    
     public func processBufferedAudio() async throws {
         while audioBuffer.count >= chunkSamples {
             let chunk = Array(audioBuffer.prefix(chunkSamples))
@@ -599,13 +658,15 @@ extension StreamingEouAsrManager: StreamingAsrManager {
             }
         }
     }
-
+    
     public func setPartialTranscriptCallback(_ callback: @escaping @Sendable (String) -> Void) {
         self.partialCallback = callback
     }
-
+    
     public func getPartialTranscript() -> String {
         guard let tokenizer = tokenizer else { return "" }
         return tokenizer.decode(ids: accumulatedTokenIds)
     }
 }
+
+extension StreamingEouAsrManager: StreamingAsrTokenTimestampProvider, StreamingAsrRawTokenProvider, StreamingAsrEouProvider {}
