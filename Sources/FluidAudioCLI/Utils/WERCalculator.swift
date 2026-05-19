@@ -65,15 +65,16 @@ enum WERCalculator {
     /// reported in the Whisper paper / NeMo `BasicTextProcessing` and is the
     /// standard for multilingual ASR leaderboards (FLEURS, MLS).
     static func calculateBasicWERAndCER(
-        hypothesis rawHypothesis: String, reference rawReference: String
+        hypothesis rawHypothesis: String, reference rawReference: String,
+        spellOutLocale: Locale? = nil
     )
         -> (
             wer: Double, cer: Double, insertions: Int, deletions: Int, substitutions: Int, totalWords: Int,
             totalCharacters: Int
         )
     {
-        let hypothesis = TextNormalizer.basicNormalize(rawHypothesis)
-        let reference = TextNormalizer.basicNormalize(rawReference)
+        let hypothesis = TextNormalizer.basicNormalize(rawHypothesis, spellOutLocale: spellOutLocale)
+        let reference = TextNormalizer.basicNormalize(rawReference, spellOutLocale: spellOutLocale)
 
         let hypWords = hypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
         let refWords = reference.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }

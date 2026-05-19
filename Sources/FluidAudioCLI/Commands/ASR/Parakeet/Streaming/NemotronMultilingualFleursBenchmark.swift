@@ -29,6 +29,11 @@ public class NemotronMultilingualFleursBenchmark {
         /// matching the current language before each session (Whisper-style
         /// hard language lock). Encoder still gets `prompt_id` as usual.
         var forcedPrefix: Bool = false
+        /// Optional JSONL path. If set, writes one line per processed sample
+        /// with raw hypothesis/reference and both English-normalized and basic-
+        /// normalized variants plus per-sample WER under each. For debugging
+        /// the gap between `normalize()` and `basicNormalize()`.
+        var dumpSamplesPath: String? = nil
     }
 
     public struct LanguageResult {
@@ -68,6 +73,24 @@ public class NemotronMultilingualFleursBenchmark {
         }
     }
 
+    /// Map a FLEURS language code to a `Locale` suitable for
+    /// `NumberFormatter`'s `.spellOut` style. Returns nil for languages where
+    /// digit-to-word ITN doesn't apply (English uses `normalize()` not
+    /// `basicNormalize()`, CJK uses character-level scoring with `normalize()`
+    /// — both bypass `basicNormalize`). Used to match NVIDIA's multilingual
+    /// FLEURS scoring pipeline, which ITNs digits in the reference so the
+    /// model's spelled-out output isn't penalized.
+    public static func fleursToSpellOutLocale(_ fleursCode: String) -> Locale? {
+        switch fleursCode {
+        case "fr_fr": return Locale(identifier: "fr_FR")
+        case "de_de": return Locale(identifier: "de_DE")
+        case "es_419": return Locale(identifier: "es_419")
+        case "it_it": return Locale(identifier: "it_IT")
+        case "pt_br": return Locale(identifier: "pt_BR")
+        default: return nil
+        }
+    }
+
     public func run() async throws -> [LanguageResult] {
         logger.info("Starting Nemotron Multilingual FLEURS Benchmark")
         logger.info(String(repeating: "=", count: 50))
@@ -100,6 +123,16 @@ public class NemotronMultilingualFleursBenchmark {
             logger.info("Forced-prefix decoding enabled (Whisper-style hard language lock)")
         }
 
+        // Optional per-sample JSONL dump for normalizer debugging.
+        var dumpHandle: FileHandle?
+        if let dumpPath = config.dumpSamplesPath {
+            let url = URL(fileURLWithPath: dumpPath)
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            dumpHandle = try? FileHandle(forWritingTo: url)
+            logger.info("Per-sample dump: \(url.path)")
+        }
+        defer { try? dumpHandle?.close() }
+
         var results: [LanguageResult] = []
         let groups = Dictionary(grouping: samples, by: { $0.language })
         // Preserve user-specified language order in output.
@@ -113,7 +146,8 @@ public class NemotronMultilingualFleursBenchmark {
                 manager: manager,
                 language: lang,
                 promptLanguageCode: promptLang,
-                samples: langSamples
+                samples: langSamples,
+                dumpHandle: dumpHandle
             )
             results.append(result)
 
@@ -130,7 +164,8 @@ public class NemotronMultilingualFleursBenchmark {
         manager: StreamingNemotronMultilingualAsrManager,
         language: String,
         promptLanguageCode: String,
-        samples: [FLEURSBenchmark.FLEURSSample]
+        samples: [FLEURSBenchmark.FLEURSSample],
+        dumpHandle: FileHandle?
     ) async throws -> LanguageResult {
         var totalWER = 0.0
         var totalCER = 0.0
@@ -194,14 +229,86 @@ public class NemotronMultilingualFleursBenchmark {
                             hypothesis: hypothesis,
                             reference: sample.transcription
                         )
-                    } else {
+                    } else if language.lowercased().hasPrefix("en") {
+                        // English: apply the full HF/Whisper EnglishTextNormalizer
+                        // equivalent (contraction expansion, number folding,
+                        // British→American, abbreviations) — matches NVIDIA's
+                        // pipeline for English FLEURS scoring.
                         metrics = WERCalculator.calculateWERAndCER(
                             hypothesis: hypothesis,
                             reference: sample.transcription
                         )
+                    } else {
+                        // Non-English Latin-script langs (fr/de/es/it/pt/...):
+                        // apply the BasicTextNormalizer-equivalent (lowercase,
+                        // NFKD, strip punctuation/symbols, keep diacritics)
+                        // plus an ITN pass (digits → spelled-out via
+                        // NumberFormatter) so the reference's literal "1976"
+                        // is comparable to the model's "mille neuf cent
+                        // soixante seize". This matches NeMo / NVIDIA's
+                        // multilingual leaderboard scoring; without ITN, the
+                        // ~22-25% of FLEURS samples that contain digits in
+                        // the reference get heavily penalized.
+                        let locale = Self.fleursToSpellOutLocale(language)
+                        metrics = WERCalculator.calculateBasicWERAndCER(
+                            hypothesis: hypothesis,
+                            reference: sample.transcription,
+                            spellOutLocale: locale
+                        )
                     }
                     totalWER += metrics.wer
                     totalCER += metrics.cer
+
+                    // Per-sample dump: capture raw + both-normalizer variants
+                    // + per-sample WER under each so we can diagnose why the
+                    // basic normalizer raises WER on non-English vs the
+                    // English normalizer.
+                    if let handle = dumpHandle {
+                        let engMetrics = WERCalculator.calculateWERAndCER(
+                            hypothesis: hypothesis,
+                            reference: sample.transcription
+                        )
+                        let basicMetrics = WERCalculator.calculateBasicWERAndCER(
+                            hypothesis: hypothesis,
+                            reference: sample.transcription
+                        )
+                        let spellLocale = Self.fleursToSpellOutLocale(language)
+                        let basicItnMetrics = WERCalculator.calculateBasicWERAndCER(
+                            hypothesis: hypothesis,
+                            reference: sample.transcription,
+                            spellOutLocale: spellLocale
+                        )
+                        let row: [String: Any] = [
+                            "sampleId": sample.sampleId,
+                            "language": language,
+                            "hyp_raw": hypothesis,
+                            "ref_raw": sample.transcription,
+                            "hyp_eng": TextNormalizer.normalize(hypothesis),
+                            "ref_eng": TextNormalizer.normalize(sample.transcription),
+                            "hyp_basic": TextNormalizer.basicNormalize(hypothesis),
+                            "ref_basic": TextNormalizer.basicNormalize(sample.transcription),
+                            "hyp_basic_itn": TextNormalizer.basicNormalize(
+                                hypothesis, spellOutLocale: spellLocale),
+                            "ref_basic_itn": TextNormalizer.basicNormalize(
+                                sample.transcription, spellOutLocale: spellLocale),
+                            "wer_eng": engMetrics.wer,
+                            "wer_basic": basicMetrics.wer,
+                            "wer_basic_itn": basicItnMetrics.wer,
+                            "ins_eng": engMetrics.insertions,
+                            "del_eng": engMetrics.deletions,
+                            "sub_eng": engMetrics.substitutions,
+                            "ins_basic": basicMetrics.insertions,
+                            "del_basic": basicMetrics.deletions,
+                            "sub_basic": basicMetrics.substitutions,
+                            "ins_basic_itn": basicItnMetrics.insertions,
+                            "del_basic_itn": basicItnMetrics.deletions,
+                            "sub_basic_itn": basicItnMetrics.substitutions,
+                        ]
+                        if let data = try? JSONSerialization.data(withJSONObject: row, options: []) {
+                            handle.write(data)
+                            handle.write(Data([0x0A]))  // newline
+                        }
+                    }
                 }
 
                 totalDuration += audioDuration
@@ -304,6 +411,7 @@ extension NemotronMultilingualFleursBenchmark {
         var modelDir: URL?
         var debugMode = false
         var forcedPrefix = false
+        var dumpSamplesPath: String?
 
         var i = 0
         while i < arguments.count {
@@ -347,6 +455,11 @@ extension NemotronMultilingualFleursBenchmark {
                 debugMode = true
             case "--forced-prefix":
                 forcedPrefix = true
+            case "--dump-samples":
+                if i + 1 < arguments.count {
+                    dumpSamplesPath = arguments[i + 1]
+                    i += 1
+                }
             case "--help", "-h":
                 printUsage()
                 return
@@ -379,7 +492,8 @@ extension NemotronMultilingualFleursBenchmark {
             modelDir: modelDir,
             debugMode: debugMode,
             datasetRepo: datasetRepo,
-            forcedPrefix: forcedPrefix
+            forcedPrefix: forcedPrefix,
+            dumpSamplesPath: dumpSamplesPath
         )
 
         let benchmark = NemotronMultilingualFleursBenchmark(config: config)
@@ -459,6 +573,9 @@ extension NemotronMultilingualFleursBenchmark {
                 --samples <n|all>        Samples per language (default: 100)
                 --output <file>          Output JSON file (default: nemotron_multilingual_fleurs_results.json)
                 --cache-dir <path>       FLEURS dataset cache (default: ~/Library/Application Support/FluidAudio/FLEURS)
+                --dump-samples <path>    Write per-sample JSONL with raw + English/basic
+                                         normalized hyp/ref + per-sample WER under each
+                                         (for normalizer debugging)
                 --debug                  Verbose logging
                 --help, -h               Show this help
 
