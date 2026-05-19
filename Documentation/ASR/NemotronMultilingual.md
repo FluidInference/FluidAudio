@@ -85,33 +85,43 @@ await manager.reset()
 
 ## Benchmark Results
 
-Apple M2, **full FLEURS test set** (Google `google/fleurs` test split, extracted from arrows), int8 encoder, `MLComputeUnits.cpuAndNeuralEngine`.
+Apple M2, FLEURS test set, int8 encoder, `MLComputeUnits.cpuAndNeuralEngine`.
 
-### Chunk size sweep (full FLEURS)
+### Normalizer
 
-| Language | 320 ms | 560 ms | 1120 ms | NVIDIA @ 320 ms | Δ (1120 vs NVIDIA) | n   |
-|----------|-------:|-------:|--------:|----------------:|-------------------:|----:|
-| en_us    |  17.5  |  12.1  |   12.0  |         11.35   |             +0.65  | 647 |
-| fr_fr    |  18.2  |  15.7  |   15.5  |         13.44   |             +2.06  | 676 |
-| de_de    |  18.7  |  15.8  |   14.5  |           —     |               —    | 862 |
-| es_419   |  10.5  |   9.4  |    9.3  |          8.69   |             +0.61  | 908 |
-| ja_jp    |  21.9  |  18.4  |   17.4  |           —     |               —    | 650 |
-| it_it    |  10.4  |   8.5  |    7.9  |          7.33   |             +0.57  | 865 |
-| pt_br    |  16.8  |  13.1  |   11.6  |          8.99   |             +2.61  | 919 |
-| **AVG**  |**16.3**|**13.3**|**12.6** |                 |                    |     |
-| RTFx     |  10.1  |  15.4  |   15.9  |                 |                    |     |
+Scoring follows the [HF Open ASR Leaderboard](https://github.com/huggingface/open_asr_leaderboard) convention used by NVIDIA in the Canary/Parakeet-v3 paper:
 
-WER% for spaced scripts, CER% for ja_jp (segmentation-free). NVIDIA's published numbers are at 320 ms on the same test split. We compare their 320 ms against our 1120 ms because it's the lowest-WER point we ship — NVIDIA does not publish multilingual 1120 ms numbers.
+- **English** → `EnglishTextNormalizer` (whisper-normalizer 0.1.12 equivalent: contraction expansion, British→American, number folding, abbreviation expansion). Our `TextNormalizer.normalize()`.
+- **Non-English Latin** (fr, de, es, it, pt, …) → `BasicTextNormalizer(remove_diacritics=False)`: NFKC, lowercase, replace any Unicode M/S/P category char with a space, collapse whitespace, keep diacritics. Our `TextNormalizer.basicNormalize()`.
+- **CJK** (ja, ko, zh, th) → character-level edit rate after whitespace stripping (segmentation-free). Reported in the "WER" column by community convention.
 
-**3 of 5 published languages (en, es, it) are within ~0.6 pp of NVIDIA at 1120 ms.** French and Portuguese show a real, persistent gap of ~2 pp that does not collapse with more chunk-size context or by going to fp16 — suggesting model-side differences (decoder hyperparams, language-tag prompting, or checkpoint vintage) rather than anything fixable in the CoreML pipeline.
+### Chunk size sweep (FLEURS test split, full data)
 
-**320 ms is degenerate on English and accent-heavy languages.** en_us jumps from 12.0 → 17.5 (+5.5 pp) and pt_br from 11.6 → 16.8 (+5.2 pp) when dropping from 1120 ms to 320 ms. 560 ms recovers most of the loss (<1 pp from 1120 ms on every language). If you need low latency, ship 560 ms; only use 320 ms if you absolutely need sub-half-second response and can tolerate the English regression.
+All three builds use `att_context_size=[56,0]` (NVIDIA's lowest-latency mode); they differ only in `chunk_mel_frames` (32 / 56 / 112 → 320 / 560 / 1120 ms processing chunks). NVIDIA's published FLEURS numbers are also at `[56,0]`, so the comparison is architecturally apples-to-apples.
+
+| Language | 320 ms | 560 ms | 1120 ms | NVIDIA ([56,0]) | Δ (560 vs NVIDIA) | n   |
+|----------|-------:|-------:|--------:|----------------:|------------------:|----:|
+| en_us    |  17.5  |  12.1  |   12.0  |         11.35   |            +0.75  | 647 |
+| fr_fr    |  18.5  |  15.9  |   15.7  |         13.44   |            +2.46  | 676 |
+| de_de    |  18.5  |  15.6  |   14.4  |           —     |              —    | 862 |
+| es_419   |  10.4  |   9.3  |    9.3  |          8.69   |            +0.61  | 908 |
+| ja_jp    |  21.9  |  18.4  |   17.4  |           —     |              —    | 650 |
+| it_it    |  10.5  |   8.7  |    8.2  |          7.33   |            +1.37  | 865 |
+| pt_br    |  16.2  |  12.7  |   11.2  |          8.99   |            +3.71  | 919 |
+| **AVG**  |**16.2**|**13.3**|**12.6** |                 |                   |     |
+| RTFx     |   9.4  |  13.2  |   20.0  |                 |                   |     |
+
+WER% for spaced scripts, CER% for ja_jp (segmentation-free). Full `google/fleurs` test splits (en=647, fr=676, de=862, es=908, ja=650, it=865, pt=919). The "Δ (560 vs NVIDIA)" column compares our 560 ms build to NVIDIA's published number because it's the lowest chunk size that doesn't show degenerate boundary effects on English; the 1120 ms column is included for the full chunk-size sweep.
+
+**3 of 5 published languages (en, es, it) are within ~1.4 pp of NVIDIA at 560 ms.** French and Portuguese show a ~2.5–3.7 pp gap that does not collapse with more chunk-size context or by going to fp16 — suggesting model-side differences (decoder hyperparams, language-tag prompting, or checkpoint vintage) rather than anything fixable in the CoreML pipeline.
+
+**320 ms is degenerate on English and accent-heavy languages.** en_us jumps from 12.0 → 17.5 (+5.5 pp) and pt_br from 11.2 → 16.2 (+5.0 pp) when dropping from 1120 ms to 320 ms. 560 ms recovers most of the loss (<1.5 pp from 1120 ms on every language). If you need low latency, ship 560 ms; only use 320 ms if you absolutely need sub-half-second response and can tolerate the English regression.
 
 ### Caveats
 
 - **`MLComputeUnits` matters a lot.** Default `.all` routes the int8 encoder to GPU and runs ~10× slower than ANE. The manager pins `.cpuAndNeuralEngine` automatically; do not override unless you have a reason.
 - **int8 vs fp16 is a wash.** Average WER is identical at all three chunk sizes; per-language drift is within ±1 pp. Ship int8 for the 50% size win and ANE residency.
-- **The 4 latency modes published by NVIDIA are 80 / 160 / 560 / 1120 ms.** FluidAudio currently ships 320 / 560 / 1120 ms builds. 80 / 160 ms are degenerate at this model size (>50% WER on the English variant); not converted.
+- **Two independent latency axes.** NVIDIA's published modes (`att_context_size = [56,0] / [56,3] / [56,6] / [56,13]` → ~80 / 320 / 560 / 1120 ms architectural lookahead) control right-context inside the encoder. Our `320 / 560 / 1120 ms` build labels refer to `chunk_mel_frames` (processing chunk size), not lookahead. All FluidAudio builds currently ship `[56,0]` (no lookahead).
 - **CJK languages** use character-level edit rate as the "WER" field by convention; whitespace tokenization is meaningless for ja/ko/zh/th.
 
 ## See Also
