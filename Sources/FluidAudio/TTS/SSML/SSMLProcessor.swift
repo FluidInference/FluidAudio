@@ -65,8 +65,7 @@ public enum SSMLProcessor {
 
     // MARK: - Private Helpers
 
-    /// Count completed words before a given index in the text
-    /// This matches the word counting logic in TtsTextPreprocessor
+    /// Count completed words before a given index in the text.
     private static func countWordsBeforeIndex(in text: String, index: String.Index) -> Int {
         let prefix = String(text[..<index])
         var wordCount = 0

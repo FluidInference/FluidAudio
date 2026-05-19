@@ -65,10 +65,9 @@ by **measured precision**, not preference.
 | Model | Compute Units | Why |
 |-------|---------------|-----|
 | Parakeet TDT (ASR) | `.cpuAndNeuralEngine` | TDT blank-skipping is FP32-tolerant; ANE wins on throughput |
-| Kokoro TTS (single-graph) | `.all` (iOS 26+: `.cpuAndGPU`) | iOS 26 ANE compiler regressed; `.cpuAndGPU` is the workaround |
 | KokoroAne (7-stage split) | Per-stage tuning | Albert/Alignment/Vocoder on ANE; Prosody/Noise/Tail on `.all` |
 | PocketTTS (4 models) | `.cpuAndGPU` (forced) | Mimi decoder's streaming state feedback loop is FP16-sensitive; ANE introduces audible artifacts |
-| CosyVoice3 Flow | `.cpuAndGPU` (forced) | Fused `layer_norm` produces NaNs on ANE (CoreMLTools limitation) |
+| StyleTTS2 | `.cpuAndNeuralEngine` | 8-stage CoreML graph; ANE-resident for the heavy encoders |
 | Magpie | `.cpuAndNeuralEngine` | Throughput priority; experimental |
 | VAD (Silero) | `.cpuAndNeuralEngine` (default) | LSTM is small; ANE eliminates GPU contention |
 | Diarization | `.all` (CI: `.cpuAndNeuralEngine`) | Segmentation + embedding both ANE-friendly |
@@ -89,8 +88,7 @@ Pure Swift:
 - G2P preprocessing (text normalization, IPA conversion outside the model)
 - SSML parsing
 - Audio post-processing (de-essing biquad, padding, fade-in/out)
-- ODE / Euler integration glue between CoreML calls (PocketTTS,
-  CosyVoice3 Flow)
+- ODE / Euler integration glue between CoreML calls (PocketTTS)
 - Embedding lookups (`text_embed_table.bin` flat-file index — Qwen3 also
   does this to eliminate one CoreML graph)
 - Clustering thresholds and state machines (VAD hysteresis, online
@@ -239,8 +237,9 @@ We tried. Each TTS family has fundamentally different I/O contracts:
   three of which (flowlm_step + flow_decoder + mimi_decoder) run inside
   a per-frame loop, with one of those (flow_decoder) inside a fixed
   8-iteration inner loop.
-- **CosyVoice3** is a 5-stage diffusion pipeline (LLM prefill → decode →
-  flow → vocoder).
+- **StyleTTS2** is an 8-stage CoreML graph (BERT → reference style →
+  prosody → fused diffusion sampler → decoder), with per-token bucket
+  variants for the BERT and sampler stages.
 - **Magpie** is a 4-graph autoregressive pipeline plus a Swift-side
   1-layer "local transformer" to sample 8 codebook tokens per frame.
 
@@ -470,10 +469,9 @@ points:
 | ASR (Parakeet TDT) | `AsrManager`, `SlidingWindowAsrManager` | `ASR/Parakeet/SlidingWindow/TDT/AsrManager.swift:6` |
 | ASR (Qwen3) | `Qwen3AsrManager` | `ASR/Qwen3/Qwen3AsrManager.swift:21` |
 | ASR (Cohere) | (via `CoherePipeline`) | `ASR/Cohere/CoherePipeline.swift:1` |
-| TTS (Kokoro) | `KokoroTtsManager` | `TTS/Kokoro/KokoroTtsManager.swift:38` |
-| TTS (KokoroAne) | `KokoroAneModelStore` | `TTS/KokoroAne/Pipeline/KokoroAneModelStore.swift:4` |
+| TTS (KokoroAne) | `KokoroAneManager`, `KokoroAneModelStore` | `TTS/KokoroAne/KokoroAneManager.swift:32` |
 | TTS (PocketTTS) | `PocketTtsModelStore`, `PocketTtsSynthesizer` | `TTS/PocketTTS/Pipeline/PocketTtsModelStore.swift:12` |
-| TTS (CosyVoice3) | `CosyVoice3TtsManager` | `TTS/CosyVoice3/CosyVoice3TtsManager.swift:1` |
+| TTS (StyleTTS2) | `StyleTTS2Manager` | `TTS/StyleTTS2/StyleTTS2Manager.swift:37` |
 | TTS (Magpie) | `MagpieTtsManager` | `TTS/Magpie/MagpieTtsManager.swift:1` |
 | TTS (G2P) | `MultilingualG2PModel.shared` | `TTS/G2P/MultilingualG2PModel.swift:11` |
 | VAD | `VadManager` | `VAD/VadManager.swift:14` |

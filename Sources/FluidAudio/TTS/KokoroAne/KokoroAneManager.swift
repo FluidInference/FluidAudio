@@ -5,21 +5,16 @@ import Foundation
 ///
 /// Splits the model so ANE-friendly layers (Albert / PostAlbert / Alignment /
 /// Vocoder) stay resident on the Neural Engine while Prosody / Noise / Tail
-/// run on CPU+GPU. Yields **3-11× RTFx** on Apple Silicon vs. the single-graph
-/// ``KokoroTtsManager``.
+/// run on CPU+GPU. Yields **3-11× RTFx** on Apple Silicon vs. a single-graph
+/// CPU+GPU Kokoro implementation.
 ///
-/// Trade-offs vs. ``KokoroTtsManager``:
+/// Constraints:
+///   * Single voice per variant (`af_heart.bin` for English).
+///   * IPA input capped at 512 tokens — chunk longer prompts upstream.
+///   * No runtime custom-lexicon API.
+///   * Loads from HF path `kokoro-82m-coreml/ANE/`.
 ///
-/// |                  | ``KokoroTtsManager``      | ``KokoroAneManager``         |
-/// |------------------|---------------------------|------------------------------|
-/// | Compute          | CPU + GPU                 | 4 stages on ANE, 3 on GPU    |
-/// | Voices           | Multi (`.json` packs)     | Single (`af_heart.bin`)      |
-/// | Long input       | Built-in chunker          | ≤ 512 IPA tokens             |
-/// | Custom lexicon   | Yes (`TtsCustomLexicon`)  | No                           |
-/// | HF path          | `kokoro-82m-coreml/`      | `kokoro-82m-coreml/ANE/`     |
-///
-/// Mirrors the public surface of ``KokoroTtsManager`` so callers can swap
-/// backends with minimal churn. Internally:
+/// Pipeline:
 ///   * Text → IPA via the existing `G2PModel` (per-word, joined with " ")
 ///   * IPA → input ids via `KokoroAneVocab`
 ///   * Voice pack slice via `KokoroAneVoicePack`
@@ -70,7 +65,7 @@ public actor KokoroAneManager {
         // before warming the in-process G2P model.
         //
         // NOTE: pass nil (not `directory`) — `G2PModel.shared` is a singleton
-        // that hardcodes the default cache path (TtsModels.cacheDirectoryURL()
+        // that hardcodes the default cache path (TtsCacheDirectory.ensure()
         // /Models/kokoro). If we honoured the caller's custom `directory` here
         // we'd download to a path G2PModel can't see and still hit
         // vocabLoadFailed. The KokoroAne mlmodelc chain itself does respect

@@ -134,11 +134,10 @@ try await diarizer.initialize(mainModelPath: modelURL)
 Streaming diarization using LS-EEND. Variable speaker slots, 8 kHz input, 100 ms frame duration, 20.7% DER on AMI SDM.
 
 ```swift
-let diarizer = LSEENDDiarizer(computeUnits: .cpuOnly)
-try await diarizer.initialize(variant: .dihard3)
+let diarizer = try await LSEENDDiarizer(variant: .dihard3)
 ```
 
-**Variants:** ami, callhome, dihard2, dihard3 (via `LSEENDModelDescriptor.loadFromHuggingFace(variant:)`).
+**Variants:** ami, callhome, dihard2, dihard3 (via `LSEENDModel.loadFromHuggingFace(variant:stepSize:)`). The optional `LSEENDStepSize` selects how many output frames the model commits per CoreML call (`.step100ms` … `.step500ms`); smaller steps reduce latency, larger steps raise throughput.
 
 Call `finalizeSession()` at end-of-stream to flush pending audio before reading the final timeline.
 
@@ -337,73 +336,10 @@ Qwen3-based speech recognition with Whisper mel spectrogram frontend.
 
 ## Text-to-Speech (TTS)
 
-### KokoroTtsManager
-Text-to-speech synthesis using Kokoro CoreML models.
-
-**Key Methods:**
-- `init(defaultVoice:defaultSpeakerId:directory:computeUnits:customLexicon:)`
-  - Create TTS manager with optional configuration
-  - `computeUnits`: Use `.cpuAndGPU` on iOS 26+ to avoid ANE issues
-- `initialize(preloadVoices:) async throws`
-  - Download and initialize TTS models
-  - Optionally preload specific voices
-- `synthesize(text:voice:speakerId:speed:pitch:) async throws -> [Float]`
-  - Synthesize speech from text
-  - Returns audio samples at 24kHz
-- `synthesizeDetailed(text:voice:speakerId:speed:pitch:) async throws -> (audio: [Float], alignments: [AlignmentInfo])`
-  - Synthesize with phoneme-level timing information
-- `synthesizeToFile(text:outputURL:voice:speakerId:speed:pitch:) async throws`
-  - Synthesize directly to WAV file
-- `setDefaultVoice(_:speakerId:) async throws`
-  - Change default voice for subsequent synthesis
-- `setCustomLexicon(_:)`
-  - Set custom pronunciation dictionary
-- `cleanup()`
-  - Release models and free memory
-
-**Available Voices:**
-- `af` — American Female
-- `af_bella`, `af_nicole`, `af_sarah` — American Female variants
-- `am` — American Male
-- `am_adam`, `am_michael` — American Male variants
-- `bf` — British Female
-- `bm` — British Male
-
-**Configuration:**
-- `defaultVoice`: Voice identifier (default: `"af"`)
-- `defaultSpeakerId`: Speaker ID for multi-speaker voices (default: 0)
-- `speed`: Speech rate multiplier (0.5–2.0, default: 1.0)
-- `pitch`: Pitch shift in semitones (-12 to +12, default: 0)
-- `customLexicon`: Custom pronunciation dictionary
-
-**Usage:**
-```swift
-let manager = KokoroTtsManager(defaultVoice: "af")
-try await manager.initialize()
-
-let audio = try await manager.synthesize(
-    text: "Hello from FluidAudio!",
-    speed: 1.0,
-    pitch: 0
-)
-
-// Save to file
-try await manager.synthesizeToFile(
-    text: "Hello world",
-    outputURL: URL(fileURLWithPath: "output.wav")
-)
-```
-
-**Performance:**
-- Real-time factor: ~5-10x on Apple Silicon
-- Output sample rate: 24kHz
-- Supports SSML for prosody control
-
 ### KokoroAneManager
-ANE-resident sibling of `KokoroTtsManager` — splits the Kokoro 82M graph into
-7 CoreML stages so the ANE-friendly layers stay resident on the Neural
-Engine. **3-11× RTFx** on Apple Silicon vs. the single-graph default. See
-[KokoroAne](TTS/KokoroAne.md) for the full pipeline.
+ANE-resident Kokoro 82M — splits the graph into 7 CoreML stages so the
+ANE-friendly layers stay resident on the Neural Engine. **3-11× RTFx** on
+Apple Silicon. See [KokoroAne](TTS/KokoroAne.md) for the full pipeline.
 
 **Key Methods:**
 - `init(defaultVoice:directory:computeUnits:modelStore:)`
@@ -455,7 +391,7 @@ print("  total: \(t.totalMs) ms")
 ```
 
 **Performance:**
-- Real-time factor: 3-11× RTFx on Apple Silicon (vs. 5-10× for `KokoroTtsManager`)
+- Real-time factor: 3-11× RTFx on Apple Silicon
 - Cold load (first ever, ANE compile): ~20 s; warm load: ~0.3 s
 - Output sample rate: 24 kHz
 

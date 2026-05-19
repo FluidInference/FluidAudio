@@ -258,9 +258,8 @@ public enum TTSAsrVerifyCommand {
 
     private static func parseBackend(_ name: String) -> TtsBackend {
         switch name.lowercased() {
-        case "kokoro": return .kokoro
         case "pocket", "pockettts", "pocket-tts": return .pocketTts
-        case "kokoro-ane", "kokoroane", "lai": return .kokoroAne
+        case "kokoro-ane", "kokoroane", "kokoro", "lai": return .kokoroAne
         default: return .kokoroAne
         }
     }

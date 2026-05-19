@@ -11,11 +11,10 @@ import Foundation
 ///
 /// Backends:
 ///   kokoro-ane    — 7-stage ANE pipeline (per-stage timings, per-stage CU)
-///   kokoro        — single-graph CPU+GPU (chunk-level only)
 ///   pocket-tts    — streaming flow-matching (no per-stage timings)
 ///   magpie        — encoder-decoder + NanoCodec (6-stage timings, slow)
 ///   styletts2     — LibriTTS iteration_3, zero-shot w/ reference audio
-///   cosyvoice3    — Mandarin LLM-based (Mandarin corpus only, no WER)
+///   supertonic3   — 4-stage multilingual flow-matching diffusion (31 langs)
 ///
 /// Usage:
 ///   fluidaudio tts-benchmark --backend kokoro-ane \
@@ -51,8 +50,9 @@ public enum TtsBenchmarkCommand {
     // The harness supports two ASR backends for the TTS→ASR roundtrip:
     //   .parakeet — Parakeet TDT (English-only, auto-downloaded).
     //   .cohere   — Cohere Transcribe cache-external (14 languages incl. zh).
-    // CosyVoice3's Mandarin output requires `.cohere` for a meaningful CER
-    // — Parakeet's English-only output collapses to ~100% on zh.
+    // Non-English TTS output (e.g. KokoroAne `mandarin` variant) needs
+    // `.cohere` for a meaningful CER — Parakeet's English-only output
+    // collapses to ~100% WER on zh.
     fileprivate enum AsrChoice {
         case skip
         case parakeet
@@ -108,6 +108,9 @@ public enum TtsBenchmarkCommand {
         var cohereComputeUnitsArg: String?
         var referencePath: String?
         var variantArg: String?
+        var voiceStylePath: String?
+        var totalStepsArg: Int?
+        var speedArg: Float?
 
         var i = 0
         while i < arguments.count {
@@ -190,6 +193,21 @@ public enum TtsBenchmarkCommand {
                     variantArg = arguments[i + 1]
                     i += 1
                 }
+            case "--voice-style":
+                if i + 1 < arguments.count {
+                    voiceStylePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--total-steps":
+                if i + 1 < arguments.count {
+                    totalStepsArg = Int(arguments[i + 1])
+                    i += 1
+                }
+            case "--speed":
+                if i + 1 < arguments.count {
+                    speedArg = Float(arguments[i + 1])
+                    i += 1
+                }
             case "--help", "-h":
                 printUsage()
                 return
@@ -236,8 +254,6 @@ public enum TtsBenchmarkCommand {
         //   --skip-asr or --asr-backend none → .skip
         //   --asr-backend cohere             → .cohere(modelDir, language)
         //   --asr-backend parakeet           → .parakeet
-        //   no flag, backend == cosyvoice3   → .skip (Parakeet is English-only;
-        //                                       Mandarin output collapses to ~100% WER)
         //   no flag, otherwise               → .parakeet
         let asrChoice: AsrChoice
         do {
@@ -265,12 +281,6 @@ public enum TtsBenchmarkCommand {
                     voice: voice ?? kaVariant.defaultVoice,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
-            case .kokoro:
-                try await runKokoro(
-                    phrases: phrases, corpusLabel: corpusLabel,
-                    voice: voice ?? TtsConstants.recommendedVoice,
-                    preset: preset, outputJson: outputJson, audioDir: audioDir,
-                    asrChoice: asrChoice)
             case .pocketTts:
                 try await runPocketTts(
                     phrases: phrases, corpusLabel: corpusLabel,
@@ -290,10 +300,14 @@ public enum TtsBenchmarkCommand {
                     referencePath: referencePath,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
-            case .cosyVoice3:
-                try await runCosyVoice3(
+            case .supertonic3:
+                try await runSupertonic3(
                     phrases: phrases, corpusLabel: corpusLabel,
-                    voice: voice,
+                    voiceStylePath: voiceStylePath,
+                    languageName: languageName,
+                    totalSteps: totalStepsArg
+                        ?? Supertonic3Constants.defaultTotalSteps,
+                    speed: speedArg ?? Supertonic3Constants.defaultSpeed,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
             }
@@ -364,61 +378,6 @@ public enum TtsBenchmarkCommand {
                 extraFields: [
                     "encoder_tokens": result.encoderTokens,
                     "acoustic_frames": result.acousticFrames,
-                ]
-            )
-        }
-    }
-
-    // MARK: - Kokoro driver (single-graph)
-
-    private static func runKokoro(
-        phrases: [(category: String, text: String)],
-        corpusLabel: String,
-        voice: String,
-        preset: TtsComputeUnitPreset,
-        outputJson: String?,
-        audioDir: String?,
-        asrChoice: AsrChoice
-    ) async throws {
-        let units = preset.uniformUnits ?? .all
-        let manager = KokoroTtsManager(defaultVoice: voice, computeUnits: units)
-
-        let coldStart = Date()
-        try await manager.initialize(preloadVoices: [voice])
-        let coldStartS = Date().timeIntervalSince(coldStart)
-        logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
-
-        let firstStart = Date()
-        _ = try await manager.synthesizeDetailed(text: "Initialization warm-up.", voice: voice)
-        let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
-        logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
-
-        try await runPhraseLoop(
-            backendId: "kokoro",
-            voiceLabel: voice,
-            corpusLabel: corpusLabel,
-            phrases: phrases,
-            preset: preset,
-            coldStartS: coldStartS,
-            firstSynthMs: firstSynthMs,
-            outputJson: outputJson,
-            audioDir: audioDir,
-            asrChoice: asrChoice,
-            extraSummary: ["voice": voice]
-        ) { text in
-            let t0 = Date()
-            let result = try await manager.synthesizeDetailed(text: text, voice: voice)
-            let synthMs = Date().timeIntervalSince(t0) * 1000
-            let samples = result.chunks.flatMap { $0.samples }
-            return BackendPhraseSample(
-                synthMs: synthMs,
-                ttftMs: synthMs,
-                samples: samples,
-                sampleRate: 24000,
-                stageMs: [:],
-                extraFields: [
-                    "chunk_count": result.chunks.count,
-                    "wav_bytes": result.audio.count,
                 ]
             )
         }
@@ -656,36 +615,66 @@ public enum TtsBenchmarkCommand {
         }
     }
 
-    // MARK: - CosyVoice3 driver
+    // MARK: - Supertonic-3 driver
 
-    private static func runCosyVoice3(
+    private static func runSupertonic3(
         phrases: [(category: String, text: String)],
         corpusLabel: String,
-        voice: String?,
+        voiceStylePath: String?,
+        languageName: String?,
+        totalSteps: Int,
+        speed: Float,
         preset: TtsComputeUnitPreset,
         outputJson: String?,
         audioDir: String?,
         asrChoice: AsrChoice
     ) async throws {
+        guard let voiceStylePath, !voiceStylePath.isEmpty else {
+            logger.error(
+                "supertonic3 backend requires --voice-style <path-to-voice.json> "
+                    + "(e.g. M1.json from FluidInference/supertonic-3-coreml).")
+            exit(1)
+        }
+        let voiceURL = resolveURL(voiceStylePath, isDirectory: false)
+        guard FileManager.default.fileExists(atPath: voiceURL.path) else {
+            logger.error("Voice style JSON not found: \(voiceURL.path)")
+            exit(1)
+        }
+        let style: Supertonic3VoiceStyle
+        do {
+            style = try Supertonic3VoiceStyle.load(from: voiceURL)
+        } catch {
+            logger.error("Failed to load voice style: \(error.localizedDescription)")
+            exit(1)
+        }
+
+        let language = resolveSupertonic3Language(
+            explicit: languageName, corpus: corpusLabel)
+        logger.info(
+            "Supertonic-3 voice=\(style.name) lang=\(language) "
+                + "steps=\(totalSteps) speed=\(speed)")
+
         let units = preset.uniformUnits ?? .cpuAndNeuralEngine
-        let voiceId = voice ?? "cosyvoice3-default-zh"
+        let manager = Supertonic3Manager(computeUnits: units)
 
         let coldStart = Date()
-        let manager = try await CosyVoice3TtsManager.downloadAndCreate(
-            cacheDirectory: nil, includeDefaultVoice: true, computeUnits: units)
         try await manager.initialize()
-        let promptAssets = try await manager.loadVoice(voiceId)
         let coldStartS = Date().timeIntervalSince(coldStart)
-        logger.info(String(format: "Cold start (download+init+voice): %.2fs", coldStartS))
+        logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
 
         let firstStart = Date()
-        _ = try await manager.synthesize(text: "你好", promptAssets: promptAssets)
+        _ = try await manager.synthesize(
+            text: "Initialization warm-up.",
+            language: language,
+            style: style,
+            totalSteps: totalSteps,
+            speed: speed)
         let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
         logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
 
         try await runPhraseLoop(
-            backendId: "cosyvoice3",
-            voiceLabel: voiceId,
+            backendId: "supertonic3",
+            voiceLabel: style.name,
             corpusLabel: corpusLabel,
             phrases: phrases,
             preset: preset,
@@ -694,24 +683,30 @@ public enum TtsBenchmarkCommand {
             outputJson: outputJson,
             audioDir: audioDir,
             asrChoice: asrChoice,
-            extraSummary: ["voice": voiceId]
+            extraSummary: [
+                "voice_style": style.name,
+                "language": language,
+                "total_steps": totalSteps,
+                "speed": Double(speed),
+            ]
         ) { text in
+            // Supertonic-3 is a one-shot diffusion synthesizer — `synthesize`
+            // returns the full waveform after the 8-step vector_estimator
+            // loop completes, so TTFT == synthMs (no incremental yield).
             let t0 = Date()
-            let result = try await manager.synthesize(text: text, promptAssets: promptAssets)
+            let result = try await manager.synthesize(
+                text: text, language: language, style: style,
+                totalSteps: totalSteps, speed: speed)
             let synthMs = Date().timeIntervalSince(t0) * 1000
             return BackendPhraseSample(
                 synthMs: synthMs,
                 ttftMs: synthMs,
                 samples: result.samples,
-                sampleRate: result.sampleRate,
+                sampleRate: Supertonic3Constants.sampleRate,
                 stageMs: [:],
                 extraFields: [
-                    "generated_token_count": result.generatedTokenCount,
-                    "decoded_token_count": result.decodedTokens.count,
-                    // Surface the structural 250-token Flow-input cap as a
-                    // per-phrase boolean so corpus reports can tally how many
-                    // long phrases hit silent truncation.
-                    "finished_on_eos": result.finishedOnEos,
+                    "total_steps": totalSteps,
+                    "speed": Double(speed),
                 ]
             )
         }
@@ -978,34 +973,28 @@ public enum TtsBenchmarkCommand {
 
     private enum Backend: String {
         case kokoroAne
-        case kokoro
         case pocketTts
         case magpie
         case styleTts2
-        case cosyVoice3
+        case supertonic3
 
         var defaultCorpus: String {
-            switch self {
-            case .cosyVoice3: return "minimax-chinese"
-            default: return "minimax-english"
-            }
+            return "minimax-english"
         }
     }
 
     private static func parseBackend(_ name: String) -> Backend {
         switch name.lowercased() {
-        case "kokoro-ane", "kokoroane", "kokoro_ane", "lai":
+        case "kokoro-ane", "kokoroane", "kokoro_ane", "kokoro", "lai":
             return .kokoroAne
-        case "kokoro":
-            return .kokoro
         case "pocket-tts", "pockettts", "pocket":
             return .pocketTts
         case "magpie":
             return .magpie
         case "styletts2", "style-tts2", "styletts", "style-tts":
             return .styleTts2
-        case "cosyvoice3", "cosyvoice", "cosy":
-            return .cosyVoice3
+        case "supertonic3", "supertonic-3", "sup3", "supertonic":
+            return .supertonic3
         default:
             logger.warning("Unknown backend '\(name)' — defaulting to kokoro-ane")
             return .kokoroAne
@@ -1036,6 +1025,57 @@ public enum TtsBenchmarkCommand {
         default: return .john
         }
     }
+
+    /// Map an explicit `--language` flag or a `minimax-<lang>` corpus name
+    /// onto one of the 31 ISO codes accepted by Supertonic-3
+    /// (`Supertonic3Constants.availableLanguages`). Falls back to English.
+    private static func resolveSupertonic3Language(
+        explicit: String?, corpus: String
+    ) -> String {
+        if let explicit, !explicit.isEmpty {
+            let lower = explicit.lowercased()
+            if Supertonic3Constants.availableLanguages.contains(lower) {
+                return lower
+            }
+            if let mapped = supertonic3LanguageAliases[lower] {
+                return mapped
+            }
+        }
+        let lower = corpus.lowercased()
+        for (needle, code) in supertonic3CorpusToLanguage where lower.contains(needle) {
+            return code
+        }
+        return "en"
+    }
+
+    /// Long-name → ISO code aliases for the `--language` flag.
+    private static let supertonic3LanguageAliases: [String: String] = [
+        "english": "en", "korean": "ko", "japanese": "ja", "arabic": "ar",
+        "bulgarian": "bg", "czech": "cs", "danish": "da", "german": "de",
+        "greek": "el", "spanish": "es", "estonian": "et", "finnish": "fi",
+        "french": "fr", "hindi": "hi", "croatian": "hr", "hungarian": "hu",
+        "indonesian": "id", "italian": "it", "lithuanian": "lt",
+        "latvian": "lv", "dutch": "nl", "polish": "pl", "portuguese": "pt",
+        "romanian": "ro", "russian": "ru", "slovak": "sk", "slovenian": "sl",
+        "swedish": "sv", "turkish": "tr", "ukrainian": "uk",
+        "vietnamese": "vi",
+    ]
+
+    /// Ordered scan list for `minimax-<lang>` corpus labels — longest /
+    /// least-ambiguous matches first.
+    private static let supertonic3CorpusToLanguage: [(String, String)] = [
+        ("korean", "ko"), ("japanese", "ja"), ("arabic", "ar"),
+        ("bulgarian", "bg"), ("czech", "cs"), ("danish", "da"),
+        ("german", "de"), ("greek", "el"), ("spanish", "es"),
+        ("estonian", "et"), ("finnish", "fi"), ("french", "fr"),
+        ("hindi", "hi"), ("croatian", "hr"), ("hungarian", "hu"),
+        ("indonesian", "id"), ("italian", "it"), ("lithuanian", "lt"),
+        ("latvian", "lv"), ("dutch", "nl"), ("polish", "pl"),
+        ("portuguese", "pt"), ("romanian", "ro"), ("russian", "ru"),
+        ("slovak", "sk"), ("slovenian", "sl"), ("swedish", "sv"),
+        ("turkish", "tr"), ("ukrainian", "uk"), ("vietnamese", "vi"),
+        ("english", "en"),
+    ]
 
     private static func parseKokoroAneVariant(_ name: String?) -> KokoroAneVariant {
         switch name?.lowercased() {
@@ -1071,9 +1111,9 @@ public enum TtsBenchmarkCommand {
     /// Map CLI flags + TTS backend defaults to a concrete `AsrChoice`.
     ///
     /// Precedence: `--skip-asr` and `--asr-backend none` always win. With
-    /// no flag, English-friendly TTS backends default to Parakeet TDT and
-    /// CosyVoice3 defaults to `.skip` (Parakeet is English-only — its WER
-    /// on Mandarin output reads ~100% and is meaningless).
+    /// no flag, defaults to Parakeet TDT (English-only). Non-English TTS
+    /// output (e.g. KokoroAne `mandarin` variant) should use Cohere via
+    /// `--asr-backend cohere`.
     private static func resolveAsrChoice(
         skipAsrFlag: Bool,
         backendName: String?,
@@ -1097,14 +1137,6 @@ public enum TtsBenchmarkCommand {
         case "parakeet":
             return .parakeet
         case nil:
-            // Implicit defaults: skip for CosyVoice3 (no English ASR pairing),
-            // Parakeet otherwise.
-            if ttsBackend == .cosyVoice3 {
-                logger.info(
-                    "CosyVoice3: no --asr-backend selected; skipping ASR. "
-                        + "Pass `--asr-backend cohere --cohere-model-dir <dir>` for CER.")
-                return .skip
-            }
             return .parakeet
         default:
             logger.warning(
@@ -1300,11 +1332,11 @@ public enum TtsBenchmarkCommand {
 
             Backends:
               kokoro-ane    7-stage ANE pipeline (per-stage timings, per-stage CU)
-              kokoro        Single-graph CPU+GPU
               pocket-tts    Streaming flow-matching (multilingual)
               magpie        Encoder-decoder + NanoCodec (per-stage, slow)
               styletts2     LibriTTS iteration_3, zero-shot, requires --reference
-              cosyvoice3    Mandarin LLM-based (auto-picks Cohere ASR for zh)
+              supertonic3   4-stage multilingual flow-matching (31 langs);
+                            requires --voice-style <preset.json>
 
             Options:
               --backend <name>          See list above (default: kokoro-ane)
@@ -1313,7 +1345,7 @@ public enum TtsBenchmarkCommand {
                                         minimax-vietnamese — 24 languages total;
                                         see Documentation/TTS/MinimaxCorpus.md)
               --corpus-path <path>      Custom corpus file (overrides --corpus)
-              --voice <name>            Voice id (Kokoro/PocketTTS/CosyVoice3)
+              --voice <name>            Voice id (KokoroAne/PocketTTS)
               --speaker <name>          Magpie speaker: john|sofia|aria|jason|leo
               --language <code>         PocketTTS lang pack or Magpie language code
               --compute-units <preset>  default | all-ane | cpu-and-gpu | cpu-only
@@ -1349,18 +1381,25 @@ public enum TtsBenchmarkCommand {
                                         resampled to 24 kHz mono internally)
               --variant <name>          Kokoro ANE variant: english (default) or
                                         mandarin (aliases: zh, chinese)
+              --voice-style <path>      Supertonic-3 voice style JSON
+                                        (required for --backend supertonic3;
+                                        e.g. M1.json shipped under
+                                        FluidInference/supertonic-3-coreml).
+              --total-steps <n>         Supertonic-3 denoising steps
+                                        (default 8 — matches reference CLI).
+              --speed <f>               Supertonic-3 speech-rate multiplier
+                                        (default 1.05; divides duration).
               --help, -h                Show this help
 
             Examples:
               fluidaudio tts-benchmark --backend kokoro-ane --output-json bench.json
               fluidaudio tts-benchmark --backend kokoro-ane --variant mandarin \\
                   --voice zf_001 --corpus minimax-chinese --skip-asr
-              fluidaudio tts-benchmark --backend kokoro --corpus minimax-english
               fluidaudio tts-benchmark --backend pocket-tts --corpus minimax-german --language german
               fluidaudio tts-benchmark --backend magpie --speaker sofia --language en
               fluidaudio tts-benchmark --backend styletts2 --reference speaker.wav
-              fluidaudio tts-benchmark --backend cosyvoice3 --corpus minimax-chinese \\
-                  --asr-backend cohere --cohere-model-dir ~/.fluidaudio/cohere/q8
+              fluidaudio tts-benchmark --backend supertonic3 \\
+                  --voice-style M1.json --corpus minimax-english
 
             Notes:
               For Chinese (zh) and Japanese (ja), WER is meaningless because

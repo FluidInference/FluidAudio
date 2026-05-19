@@ -106,6 +106,8 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Dictato](https://dicta.to)** | Turn your voice into text anywhere on your Mac. Fully local, private, and offline — boost your own vocabulary and dictate in multiple languages. Uses Parakeet TDT ASR. |
 | **[Utter](https://github.com/joepetrakovich/utter)** | An ultra-minimal speech-to-text status bar utility for Mac.  Register a hotkey and go. |
 | **[Resonant](https://onresonant.com)** | macOS voice workspace for dictation, meetings, and ambient work context. Uses FluidAudio for local transcription and speaker diarization. |
+| **[Thoth](https://thoth-app.com)** | Privacy-first meeting recorder for Mac. Records both sides of any call with dual-channel audio, transcribes locally with speaker diarization, and summarizes with on-device AI or BYOK cloud. Available on the Mac App Store. Featured in [MacGeneration](https://www.macg.co/logiciels/2026/05/thoth-une-nouvelle-app-de-transcription-axee-sur-les-reunions-et-le-temps-reel-308471). Uses Parakeet EOU and Parakeet TDT ASR. |
+| **[Dettivo](https://dettivo.com)** | Local-first Mac app for private dictation, transcripts, and meeting workflows in one place, with developer tooling across CLI, MCP, REST, and app automation. Uses FluidAudio Parakeet TDT ASR and offline speaker diarization. |
 
 ## Installation
 
@@ -358,14 +360,15 @@ End-to-end streaming diarization with CoreML inference. Default choice for onlin
 import FluidAudio
 
 Task {
-    let diarizer = LSEENDDiarizer()
-    try await diarizer.initialize(variant: .dihard3)
+    let diarizer = try await LSEENDDiarizer(variant: .dihard3)
 
     let samples = try await loadSamples16kMono(path: "path/to/meeting.wav")
     let timeline = try diarizer.processComplete(samples, sourceSampleRate: 16_000)
 
-    for segment in timeline.segments {
-        print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
+    for speaker in timeline.speakers.values {
+        for segment in speaker.finalizedSegments {
+            print("Speaker \(speaker.index): \(segment.startTime)s - \(segment.endTime)s")
+        }
     }
 }
 ```
@@ -589,26 +592,29 @@ swift run fluidaudiocli tts "Hello world." --output out.wav --backend pocket --c
 See [Documentation/TTS/PocketTTS.md](Documentation/TTS/PocketTTS.md#languages)
 for the full language table.
 
-### Kokoro
+### KokoroAne
 
-High-quality parallel TTS with SSML and phoneme-level pronunciation control. Uses a CoreML G2P (grapheme-to-phoneme) model for out-of-vocabulary words — no external dependencies required.
+ANE-resident Kokoro 82M (4-stage on Neural Engine, 3-stage on GPU). Yields
+3-11× RTFx on Apple Silicon vs. the prior single-graph Kokoro path. English
+(`af_heart`) and Mandarin variants ship with a built-in G2P pipeline (BART
+CoreML for English OOV, jieba + sandhi + G2pW for Mandarin).
 
 ```swift
 import FluidAudio
 
 Task {
-    let manager = KokoroTtsManager()
+    let manager = KokoroAneManager()
     try await manager.initialize()
-    let data = try await manager.synthesize(text: "Hello from FluidAudio.")
-    try data.write(to: URL(fileURLWithPath: "out.wav"))
+    let samples = try await manager.synthesize(text: "Hello from FluidAudio.")
+    // `samples` is 24 kHz mono Float32 PCM
 }
 ```
 
 ```bash
-swift run fluidaudiocli tts "Hello from FluidAudio." --auto-download --output out.wav
+swift run fluidaudiocli tts "Hello from FluidAudio." --backend kokoroAne --output out.wav
 ```
 
-Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.
+Model assets are cached under `~/.cache/fluidaudio/Models/kokoro/`.
 
 ### Magpie (Multilingual) — experimental
 

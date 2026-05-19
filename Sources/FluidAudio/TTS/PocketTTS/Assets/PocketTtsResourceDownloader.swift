@@ -25,9 +25,15 @@ public enum PocketTtsResourceDownloader {
     ///
     /// Note: the upstream `v2/<lang>/` directory ships both flowlm variants,
     /// so a fresh download pulls the unused variant too. After download
-    /// completes, the unused FlowLM `.mlmodelc` and `.mlpackage` directories
-    /// are deleted so only the requested precision occupies disk
-    /// (~217 MB savings for `.int8`, ~75 MB savings for `.fp16`).
+    /// completes, the unused FlowLM `.mlmodelc` directory is deleted so only
+    /// the requested precision occupies disk (~140 MB savings for `.int8`,
+    /// ~75 MB savings for `.fp16`).
+    ///
+    /// The downloader also skips redundant repo artifacts entirely:
+    /// `.mlpackage` sources (CoreML never loads them — the compiled
+    /// `.mlmodelc` next to each one is what Swift uses), `constants/`
+    /// `.npy/.npz` intermediates (`constants_bin/*.bin` files are the
+    /// loaded form), and incidental files (`verify.wav`, `.DS_Store`).
     public static func ensureModels(
         language: PocketTtsLanguage,
         directory: URL? = nil,
@@ -48,9 +54,27 @@ public enum PocketTtsResourceDownloader {
                 atPath: languageRoot.appendingPathComponent(model).path)
         }
 
-        guard !allPresent else {
+        if allPresent {
             logger.info(
                 "PocketTTS \(language.rawValue) (\(precision)) models found in cache")
+            // Pre-#592 caches lack `constants_bin/bos_before_voice.bin`. The
+            // language-pack files are otherwise complete, so try to fetch just
+            // the missing constant rather than re-downloading the whole subdir.
+            //
+            // Best-effort: shipped snapshot voices don't need this file at all,
+            // and the v1 cloned-voice prefill path enforces presence at use
+            // time (PocketTtsConstantsLoader returns nil gracefully). Failing
+            // the fetch here — e.g. offline, or before the file lands on HF —
+            // must not block users who only synthesize with shipped voices.
+            do {
+                try await ensureBosBeforeVoice(language: language, languageRoot: languageRoot)
+            } catch {
+                logger.warning(
+                    "Failed to backfill bos_before_voice.bin for \(language.rawValue): "
+                        + "\(error.localizedDescription). Cloned-voice v1 prefill will fail "
+                        + "until this file is available; shipped snapshot voices are unaffected."
+                )
+            }
             return languageRoot
         }
 
@@ -61,7 +85,8 @@ public enum PocketTtsResourceDownloader {
             .pocketTts,
             subdirectory: subdir,
             to: repoDir,
-            progressHandler: progressHandler
+            progressHandler: progressHandler,
+            shouldSkip: Self.shouldSkipAsset(at:)
         )
 
         // The HF subdir contains both FlowLM precisions; delete the one we
@@ -71,9 +96,63 @@ public enum PocketTtsResourceDownloader {
         return languageRoot
     }
 
-    /// Delete the FlowLM `.mlmodelc` and `.mlpackage` directories that don't
-    /// match the requested precision. Idempotent — silently skips paths that
-    /// don't exist.
+    /// Skip filter applied to every remote path the HF lister walks for a
+    /// PocketTTS language pack. Excluded categories were identified during
+    /// the v2 repo cleanup audit: every `.mlpackage` ships with a compiled
+    /// `.mlmodelc` next to it and CoreML only loads the latter; `constants/`
+    /// holds intermediate `.npy/.npz` files whose binary equivalents live
+    /// under `constants_bin/`; `verify.wav` is an upstream debug artifact;
+    /// `.DS_Store` is macOS junk.
+    @Sendable
+    private static func shouldSkipAsset(at path: String) -> Bool {
+        let basename = (path as NSString).lastPathComponent
+        if basename == ".DS_Store" || basename == "verify.wav" {
+            return true
+        }
+        if basename.hasSuffix(".mlpackage") || path.contains(".mlpackage/") {
+            return true
+        }
+        // Only skip the intermediate "constants/" subdirectory, never
+        // "constants_bin/" (which contains the .bin and voice .safetensors
+        // files Swift loads at runtime).
+        for component in path.split(separator: "/") where component == "constants" {
+            return true
+        }
+        return false
+    }
+
+    /// Backfill `constants_bin/bos_before_voice.bin` for cached language packs
+    /// that were downloaded before the FluidAudio #592 fix. New downloads pick
+    /// it up via `downloadSubdirectory` — this helper exists only to upgrade
+    /// older caches without a full re-download.
+    private static func ensureBosBeforeVoice(
+        language: PocketTtsLanguage,
+        languageRoot: URL
+    ) async throws {
+        let constantsDir = languageRoot.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
+        let bosURL = constantsDir.appendingPathComponent("bos_before_voice.bin")
+        if FileManager.default.fileExists(atPath: bosURL.path) {
+            return
+        }
+        try FileManager.default.createDirectory(
+            at: constantsDir, withIntermediateDirectories: true)
+        let remotePath = "\(language.repoSubdirectory)/constants_bin/bos_before_voice.bin"
+        let remoteURL = try ModelRegistry.resolveModel(Repo.pocketTts.remotePath, remotePath)
+        logger.info(
+            "Backfilling bos_before_voice.bin for cached \(language.rawValue) pack...")
+        let data = try await AssetDownloader.fetchData(
+            from: remoteURL,
+            description: "bos_before_voice.bin (\(language.rawValue))",
+            logger: logger
+        )
+        try data.write(to: bosURL, options: [.atomic])
+        logger.info("Wrote bos_before_voice.bin (\(data.count) bytes)")
+    }
+
+    /// Delete the FlowLM `.mlmodelc` directory that doesn't match the
+    /// requested precision. Idempotent — silently skips paths that don't
+    /// exist. `.mlpackage` siblings are no longer downloaded (see
+    /// `shouldSkipAsset`), so this only touches `.mlmodelc` directories.
     private static func removeUnusedFlowlmVariant(
         at languageRoot: URL,
         keeping precision: PocketTtsPrecision
@@ -82,16 +161,10 @@ public enum PocketTtsResourceDownloader {
         switch precision {
         case .fp16:
             // Loading flowlm_step.mlmodelc; drop the int8 variant.
-            unusedNames = [
-                ModelNames.PocketTTS.flowlmStepV2 + ".mlmodelc",
-                ModelNames.PocketTTS.flowlmStepV2 + ".mlpackage",
-            ]
+            unusedNames = [ModelNames.PocketTTS.flowlmStepV2 + ".mlmodelc"]
         case .int8:
             // Loading flowlm_stepv2.mlmodelc; drop the default variant.
-            unusedNames = [
-                ModelNames.PocketTTS.flowlmStep + ".mlmodelc",
-                ModelNames.PocketTTS.flowlmStep + ".mlpackage",
-            ]
+            unusedNames = [ModelNames.PocketTTS.flowlmStep + ".mlmodelc"]
         }
         for name in unusedNames {
             let url = languageRoot.appendingPathComponent(name)

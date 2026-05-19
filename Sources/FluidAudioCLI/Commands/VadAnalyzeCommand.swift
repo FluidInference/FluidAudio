@@ -1,5 +1,6 @@
 #if os(macOS)
 import AVFoundation
+import CoreML
 import FluidAudio
 import Foundation
 
@@ -12,6 +13,7 @@ enum VadAnalyzeCommand {
         var streaming: Bool = false
         var threshold: Float?
         var debug: Bool = false
+        var computeUnits: MLComputeUnits = .cpuAndNeuralEngine
         var minSpeechDuration: TimeInterval?
         var minSilenceDuration: TimeInterval?
         var maxSpeechDuration: TimeInterval?
@@ -60,6 +62,17 @@ enum VadAnalyzeCommand {
                 options.minSilenceAtMaxSpeech = parseDurationMillis(arguments, &index)
             case "--use-last-silence":
                 options.useMaxSilenceAtMaxSpeech = false
+            case "--compute-units":
+                if index + 1 < arguments.count {
+                    switch arguments[index + 1].lowercased() {
+                    case "all": options.computeUnits = .cpuAndNeuralEngine
+                    case "cpu-only": options.computeUnits = .cpuOnly
+                    case "ane": options.computeUnits = .cpuAndNeuralEngine
+                    default:
+                        logger.warning("Invalid --compute-units value '\(arguments[index + 1])', using 'all'")
+                    }
+                    index += 1
+                }
             case "--export-wav":
                 options.exportPath = parseString(arguments, &index) { raw in
                     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -88,7 +101,8 @@ enum VadAnalyzeCommand {
             let manager = try await VadManager(
                 config: VadConfig(
                     defaultThreshold: options.threshold ?? VadConfig.default.defaultThreshold,
-                    debugMode: options.debug
+                    debugMode: options.debug,
+                    computeUnits: options.computeUnits
                 )
             )
 
@@ -413,8 +427,7 @@ enum VadAnalyzeCommand {
     }
 
     private static func printUsage() {
-        logger.info(
-            """
+        let usage = """
 
             VAD Analyze Command Usage:
                 fluidaudio vad-analyze <audio_file> [options]
@@ -423,6 +436,7 @@ enum VadAnalyzeCommand {
                 --streaming                              Run streaming simulation instead of offline segmentation
                 --threshold <float>                      Override VAD probability threshold
                 --debug                                  Enable VadManager debug logging
+                --compute-units <all|cpu-only|ane>       ML compute units (default: all)
                 --min-speech-ms <double>                 Minimum speech span considered valid
                 --min-silence-ms <double>                Required trailing silence duration
                 --max-speech-s <double>                  Maximum length of a single speech segment
@@ -438,7 +452,8 @@ enum VadAnalyzeCommand {
                 fluidaudio vad-analyze audio.wav
                 fluidaudio vad-analyze audio.wav --streaming
             """
-        )
+        fputs(usage, stderr)
+        fflush(stderr)
     }
 }
 #endif

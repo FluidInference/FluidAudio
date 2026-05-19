@@ -8,7 +8,7 @@ Lives under `Sources/FluidAudio/TTS/Magpie/`.
 > ⚠️ **Batch model. Beta / experimental.** Magpie is a **batch / offline
 > TTS model** — not a streaming model. Below real-time on Apple Silicon
 > (agg-RTFx ~0.41× on M2). Not for latency-sensitive use; prefer
-> Kokoro / Kokoro ANE or PocketTTS for real-time. Initializing
+> Kokoro ANE or PocketTTS for real-time. Initializing
 > `MagpieTtsManager` logs a runtime beta warning at `.warning` level.
 
 ## Batch / offline inference (not streaming)
@@ -46,7 +46,7 @@ The Swift port preserves these batch semantics:
 
 If you need a TTS model that genuinely streams audio frame-by-frame as
 the AR loop emits codes, use **PocketTTS** (Mimi, ~1.2 s TTFT) or
-**Kokoro** (parallel, no AR loop). Magpie's value prop is multilingual
+**Kokoro ANE** (parallel, no AR loop). Magpie's value prop is multilingual
 coverage and the 5 built-in speaker contexts, not throughput or latency.
 
 Functional but **below real-time — not for latency-sensitive use.**
@@ -60,7 +60,7 @@ and grows super-linearly with phrase length; the
 [`outputBackings` fast path](Benchmarks.md#magpie-outputbackings-fast-path)
 already eliminated the per-step KV reallocation cost. Further gains
 likely need an MLX-backed LocalTransformer or a smaller-K/V variant.
-For real-time use prefer Kokoro / Kokoro ANE (2–5× RTFx) or PocketTTS
+For real-time use prefer Kokoro ANE (3–11× RTFx) or PocketTTS
 (streaming, TTFT ~1.2 s); Magpie's value prop is multilingual coverage
 (en/es/de/fr/it/vi/zh/hi) and 5 built-in speaker contexts, not
 throughput.

@@ -85,10 +85,8 @@ Models we converted and tested but are not supported: too large for on-device de
 | Diarization (Pyannote) | [FluidInference/speaker-diarization-coreml](https://huggingface.co/FluidInference/speaker-diarization-coreml) |
 | LS-EEND | [FluidInference/lseend-coreml](https://huggingface.co/FluidInference/lseend-coreml) |
 | Sortformer | [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml) |
-| Kokoro TTS | [FluidInference/kokoro-82m-coreml](https://huggingface.co/FluidInference/kokoro-82m-coreml) |
 | Kokoro ANE (7-stage) | [FluidInference/kokoro-82m-coreml/tree/main/ANE](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE) |
 | PocketTTS | [FluidInference/pocket-tts-coreml](https://huggingface.co/FluidInference/pocket-tts-coreml) |
 | StyleTTS2 (LibriTTS, iteration_3) | [FluidInference/StyleTTS-2-coreml/iteration_3/compiled](https://huggingface.co/FluidInference/StyleTTS-2-coreml/tree/main/iteration_3/compiled) (shared phonemizer assets pulled from [`FluidInference/kokoro-82m-coreml`](https://huggingface.co/FluidInference/kokoro-82m-coreml): `G2PEncoder.mlmodelc`, `G2PDecoder.mlmodelc`, `g2p_vocab.json`, `us_lexicon_cache.json`) |
 | Magpie TTS Multilingual | [FluidInference/magpie-tts-multilingual-357m-coreml](https://huggingface.co/FluidInference/magpie-tts-multilingual-357m-coreml) |
-| CosyVoice3 (Mandarin) | [FluidInference/CosyVoice3-0.5B-coreml](https://huggingface.co/FluidInference/CosyVoice3-0.5B-coreml) |
 | Nemotron Streaming | [FluidInference/nemotron-speech-streaming-en-0.6b-coreml](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml) |

@@ -67,6 +67,7 @@ public actor PocketTtsSession {
     private let constants: PocketTtsConstantsBundle
     private let bosEmb: MLMultiArray
     private let temperature: Float
+    private let language: PocketTtsLanguage
     private var mimiState: PocketTtsSynthesizer.MimiState
     private var rng: SeededRNG
 
@@ -88,7 +89,8 @@ public actor PocketTtsSession {
         mimiKeys: PocketTtsMimiKeys,
         bosEmb: MLMultiArray,
         temperature: Float,
-        seed: UInt64
+        seed: UInt64,
+        language: PocketTtsLanguage = .english
     ) {
         self.voiceKVSnapshot = voiceKVSnapshot
         self.mimiState = mimiState
@@ -102,6 +104,7 @@ public actor PocketTtsSession {
         self.mimiKeys = mimiKeys
         self.bosEmb = bosEmb
         self.temperature = temperature
+        self.language = language
         self.rng = SeededRNG(seed: seed)
 
         // Text queue channel
@@ -141,17 +144,18 @@ public actor PocketTtsSession {
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { continue }
 
-                let chunks = PocketTtsSynthesizer.chunkText(
-                    trimmed, tokenizer: constants.tokenizer
+                let chunks = PocketTtsSynthesizer.chunkTextWithMetadata(
+                    trimmed, tokenizer: constants.tokenizer, language: language
                 )
                 Self.logger.info(
                     "Session enqueued '\(trimmed)', \(chunks.count) chunk(s)")
 
-                for (chunkIndex, chunkText) in chunks.enumerated() {
+                for (chunkIndex, chunk) in chunks.enumerated() {
                     if Task.isCancelled { break }
 
                     try await generateChunk(
-                        text: chunkText,
+                        text: chunk.text,
+                        isMidSentence: chunk.isMidSentence,
                         chunkIndex: chunkIndex,
                         chunkCount: chunks.count,
                         utteranceIndex: utteranceIndex
@@ -167,11 +171,13 @@ public actor PocketTtsSession {
 
     private func generateChunk(
         text: String,
+        isMidSentence: Bool,
         chunkIndex: Int,
         chunkCount: Int,
         utteranceIndex: Int
     ) async throws {
-        let (normalizedChunk, framesAfterEos) = PocketTtsSynthesizer.normalizeText(text)
+        let (normalizedChunk, framesAfterEos) = PocketTtsSynthesizer.normalizeText(
+            text, isMidSentence: isMidSentence, language: language)
         Self.logger.info("Session chunk \(chunkIndex): '\(normalizedChunk)'")
 
         // Tokenize and embed

@@ -34,7 +34,7 @@ swift run fluidaudiocli tts "Hello from StyleTTS2." \
 `--reference` is required and must be readable by `AVAudioFile` (WAV /
 AIFF / CAF / m4a — any sample rate / channel layout, internally
 resampled to 24 kHz mono). On first invocation the CLI downloads the
-8 default-path `.mlmodelc` bundles plus Kokoro's lexicon cache + BART
+8 default-path `.mlmodelc` bundles plus the shared lexicon cache + BART
 G2P assets; subsequent calls reuse the disk cache.
 
 Optional flags:
@@ -117,7 +117,7 @@ with what the model saw during training.
 | `StyleTTS2Constants.swift` | All trace-time constants (sample rate, hop, mel filterbank, diffusion schedule, α/β defaults, style dim) |
 | `StyleTTS2Error.swift` | Per-module `Error, LocalizedError` enum |
 | `Assets/StyleTTS2ModelStore.swift` | Actor — loads the 8 default models with per-stage compute-units, lazy-loads bucket variants |
-| `Assets/StyleTTS2ResourceDownloader.swift` | HuggingFace pull for `FluidInference/StyleTTS-2-coreml/iteration_3/compiled/` + ensures Kokoro lexicon cache + G2P assets |
+| `Assets/StyleTTS2ResourceDownloader.swift` | HuggingFace pull for `FluidInference/StyleTTS-2-coreml/iteration_3/compiled/` + ensures the shared lexicon cache + G2P assets |
 | `Pipeline/Tokenizer/StyleTTS2Phonemizer.swift` | Misaki lexicon-cache lookup → BART G2P fallback → Misaki diphthong shorthand expansion |
 | `Pipeline/Tokenizer/StyleTTS2TextCleaner.swift` | Symbol vocab + `encode(_:)` (leading pad token + per-symbol IDs) |
 | `Pipeline/Preprocess/StyleTTS2MelExtractor.swift` | HTK 80-bin log-mel of the reference audio |
@@ -127,13 +127,13 @@ with what the model saw during training.
 | `Pipeline/Sampler/StyleTTS2DiffusionSchedule.swift` | Karras σ schedule + ADPM2 step coefficients for the fused sampler |
 
 The English BART G2P model (`G2PModel`) lives under
-`TTS/G2P/G2PModel.swift` — shared with Kokoro and KokoroAne.
+`TTS/G2P/G2PModel.swift` — shared with KokoroAne.
 
 ## Phonemizer
 
 StyleTTS2 was trained on espeak transcripts with stress markers
 (`with_stress=True`). FluidAudio cannot ship the espeak C library, so
-the default text path mirrors Kokoro's tokenizer:
+the default text path mirrors KokoroAne's tokenizer:
 
 1. **Case-sensitive original spelling** in the Misaki lexicon
    (proper nouns, abbreviations like `AI`, `iPhone`).
@@ -272,7 +272,7 @@ The shared phonemizer assets (`G2PEncoder.mlmodelc`,
 fetched from
 [`FluidInference/kokoro-82m-coreml`](https://huggingface.co/FluidInference/kokoro-82m-coreml)
 and cached under `~/.cache/fluidaudio/Models/kokoro/`, the same
-location Kokoro itself uses — a single download serves both backends.
+location KokoroAne reuses — a single download serves both backends.
 
 ## License
 
