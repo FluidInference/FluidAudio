@@ -38,6 +38,7 @@ phrase at the wrong point.
 | Default mel-context | `ASRConfig.melChunkContext = true` | Batch TDT long audio | Preserves the existing 80 ms left-context behavior for non-first chunks. |
 | v3 no-mel | `ASRConfig.melChunkContext = false`, CLI `--no-mel-context` | Parakeet TDT v3 batch long audio | Avoids the v3 multilingual drift introduced by prepending mel context at chunk boundaries. |
 | v3 dual-decode arbitration | `melChunkContext = false` plus `ASRConfig.dualDecodeArbitration = true`, CLI `--no-mel-context --dual-decode-arbitration` | Parakeet TDT v3 no-mel batch long audio | Opt-in quality mode for files where one boundary strategy is clearly safer than another. |
+| Parallel chunk workers | `ASRConfig.parallelChunkConcurrency` (default `4`, clamped to `>= 1`) | Stateless chunked batch TDT (all of the above) | Decodes independent chunks concurrently across a worker pool of cloned `AsrManager` instances. |
 
 The dual-decode path probes the first few non-first chunks with three strategies:
 
@@ -66,6 +67,51 @@ The no-mel v3 path removes that context shift and prefers acoustic boundaries
 near low-energy regions. The arbitration mode adds a short probe for cases where
 different boundary strategies preserve different content. Committing globally to
 one strategy favors consistency over per-chunk switching.
+
+## Parallel Chunk Processing
+
+Long files are split into independent chunks that share no decoder state across
+seams, so chunk decoding parallelizes cleanly. `ChunkProcessor` runs a worker
+pool of cloned `AsrManager` instances and merges results in chunk-emission
+order, preserving the same overlap merge logic used by the single-worker path.
+
+| Field | Default | Notes |
+|---|---|---|
+| `ASRConfig.parallelChunkConcurrency` | `4` | Number of chunks decoded concurrently. Clamped to `max(1, …)`. Applies only to stateless chunked transcription paths (long-form batch TDT). |
+
+How it works:
+
+- `ChunkProcessor.process(using:)` reads `manager.parallelChunkConcurrency` and
+  builds a worker pool via `manager.makeWorkerClone()`. Each clone reuses the
+  already-loaded encoder/decoder/joint Core ML models, so no model
+  re-initialization happens per worker.
+- Chunks are dispatched with `ThrowingTaskGroup`. The dispatch loop reuses an
+  `availableWorkers` index list so the number of in-flight tasks never exceeds
+  `parallelChunkConcurrency` (backpressure).
+- Each task constructs a fresh `TdtDecoderState` (stateless per-chunk
+  decoding), runs `transcribeChunk` against its assigned worker, and returns a
+  `TaskResult { index, tokens, workerIndex }`. Results are gathered into a
+  pre-sized `chunkOutputs` array indexed by chunk order, then merged exactly
+  as the serial path did.
+- Streaming and real-time paths
+  (`StreamingAsrManager`, `SlidingWindowAsrManager`) are unaffected: they
+  remain single-decoder and cache-aware, since they depend on persistent
+  decoder/encoder state across windows.
+
+Notes for tuning:
+
+- Default `4` was selected from device-matrix testing; benchmarks on Apple M3
+  with a 1-hour file show roughly 2.2–2.8× wall-clock speedup over the serial
+  path across Parakeet v2/v3 variants, with about 19–31 MiB extra resident
+  memory for the additional worker clones.
+- Setting `parallelChunkConcurrency = 1` is the closest configuration to the
+  pre-parallel behavior and is useful for A/B-ing transcripts against older
+  output. It does not bypass `ChunkProcessor`; the worker pool collapses to a
+  single worker that reuses the calling `AsrManager`.
+- Word timings and per-chunk decoding are unchanged by the parallel path —
+  the parallelization is in chunk dispatch, not in decoder behavior, and
+  transcripts and timings remain identical to the serial version for the same
+  inputs.
 
 ## Validation Strategy
 
@@ -96,10 +142,16 @@ auditable instead of relying on memory of why a clip was added.
 - `Sources/FluidAudio/ASR/Parakeet/AsrTypes.swift`
   - `ASRConfig.melChunkContext`
   - `ASRConfig.dualDecodeArbitration`
+  - `ASRConfig.parallelChunkConcurrency`
+- `Sources/FluidAudio/ASR/Parakeet/AsrManager.swift`
+  - `parallelChunkConcurrency` actor-isolated accessor
+  - `makeWorkerClone()` factory used to populate the chunk worker pool
 - `Sources/FluidAudio/ASR/Parakeet/SlidingWindow/TDT/AsrManager+Transcription.swift`
   - routes long audio through `ChunkProcessor`
 - `Sources/FluidAudio/ASR/Parakeet/SlidingWindow/TDT/ChunkProcessor.swift`
-  - chunk sizing, boundary search, regular long-form chunk loop, and overlap merge
+  - chunk sizing, boundary search, regular long-form chunk loop, overlap merge,
+    worker-pool construction (`makeWorkerPool`), and the static
+    `transcribeChunk(...)` task body used by the parallel dispatch loop
 - `Sources/FluidAudio/ASR/Parakeet/SlidingWindow/TDT/DualDecodeArbitration.swift`
   - opt-in v3/no-mel arbitration path
 - `Sources/FluidAudio/ASR/Parakeet/SlidingWindow/TDT/Decoder/TdtDecoderV3.swift`
@@ -118,4 +170,5 @@ Useful focused checks:
 swift test --filter ChunkProcessorTests
 swift test --filter TdtRefactoredComponentsTests
 swift test --filter TdtDecoderV2Tests
+swift test --filter ASRConfigTests   # covers parallelChunkConcurrency default, clamping, override
 ```
