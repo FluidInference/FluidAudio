@@ -102,10 +102,12 @@ internal struct TdtDecoderV3: Sendable {
         // timeIndices: Current position in encoder frames (advances by duration)
         // timeJump: Tracks overflow when we process beyond current chunk (for streaming)
         // contextFrameAdjustment: Adjusts for adaptive context overlap
-        var timeIndices = initialTimeIndexOverride ?? TdtFrameNavigation.calculateInitialTimeIndices(
-            timeJump: decoderState.timeJump,
-            contextFrameAdjustment: contextFrameAdjustment
-        )
+        var timeIndices =
+            initialTimeIndexOverride
+            ?? TdtFrameNavigation.calculateInitialTimeIndices(
+                timeJump: decoderState.timeJump,
+                contextFrameAdjustment: contextFrameAdjustment
+            )
 
         let navigationState = TdtFrameNavigation.initializeNavigationState(
             timeIndices: timeIndices,

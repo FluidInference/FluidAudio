@@ -198,8 +198,8 @@ final class ChunkProcessorTests: XCTestCase {
         let v3MelLayout = processor.chunkLayoutForTesting(melChunkContext: true, modelVersion: .v3)
         let expectedNoMelChunkSamples =
             (ASRConstants.maxModelSamples - ASRConstants.melHopSize)
-                / ASRConstants.samplesPerEncoderFrame
-                * ASRConstants.samplesPerEncoderFrame
+            / ASRConstants.samplesPerEncoderFrame
+            * ASRConstants.samplesPerEncoderFrame
 
         XCTAssertEqual(v2NoMelLayout.warmupPrefixSamples, 0)
         XCTAssertEqual(v2NoMelLayout.chunkSamples, expectedNoMelChunkSamples)
@@ -211,7 +211,8 @@ final class ChunkProcessorTests: XCTestCase {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         var audio = [Float](repeating: 0.02, count: 45 * ASRConstants.sampleRate)
         let processorForLayout = ChunkProcessor(audioSamples: audio)
-        let stride = processorForLayout
+        let stride =
+            processorForLayout
             .chunkLayoutForTesting(melChunkContext: false, modelVersion: .v3)
             .strideSamples
         let silentBoundary = stride + (3 * frameSamples)
@@ -273,7 +274,8 @@ final class ChunkProcessorTests: XCTestCase {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         var audio = [Float](repeating: 0.02, count: 45 * ASRConstants.sampleRate)
         let processorForLayout = ChunkProcessor(audioSamples: audio)
-        let stride = processorForLayout
+        let stride =
+            processorForLayout
             .chunkLayoutForTesting(melChunkContext: false, modelVersion: .v3)
             .strideSamples
         let silentBoundary = stride + (3 * frameSamples)
@@ -297,7 +299,8 @@ final class ChunkProcessorTests: XCTestCase {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         var audio = [Float](repeating: 0.02, count: 45 * ASRConstants.sampleRate)
         let processorForLayout = ChunkProcessor(audioSamples: audio)
-        let stride = processorForLayout
+        let stride =
+            processorForLayout
             .chunkLayoutForTesting(melChunkContext: false, modelVersion: .v3)
             .strideSamples
         let threeSecondFrames = Int((3.0 * Double(ASRConstants.sampleRate)) / Double(frameSamples))
@@ -323,7 +326,8 @@ final class ChunkProcessorTests: XCTestCase {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         var audio = [Float](repeating: 0.02, count: 45 * ASRConstants.sampleRate)
         let processorForLayout = ChunkProcessor(audioSamples: audio)
-        let stride = processorForLayout
+        let stride =
+            processorForLayout
             .chunkLayoutForTesting(melChunkContext: false, modelVersion: .v3)
             .strideSamples
         let silentBoundary = stride + (3 * frameSamples)
