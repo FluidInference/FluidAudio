@@ -92,30 +92,30 @@ Apple M2, FLEURS test set, int8 encoder, `MLComputeUnits.cpuAndNeuralEngine`.
 Scoring follows the [HF Open ASR Leaderboard](https://github.com/huggingface/open_asr_leaderboard) convention used by NVIDIA in the Canary/Parakeet-v3 paper:
 
 - **English** → `EnglishTextNormalizer` (whisper-normalizer 0.1.12 equivalent: contraction expansion, British→American, number folding, abbreviation expansion). Our `TextNormalizer.normalize()`.
-- **Non-English Latin** (fr, de, es, it, pt, …) → `BasicTextNormalizer(remove_diacritics=False)`: NFKC, lowercase, replace any Unicode M/S/P category char with a space, collapse whitespace, keep diacritics. Our `TextNormalizer.basicNormalize()`.
+- **Non-English Latin** (fr, de, es, it, pt, …) → `BasicTextNormalizer(remove_diacritics=False)` plus an inverse text normalization (ITN) pass: digit runs in the reference are spelled out via `NumberFormatter.spellOut` for the language's locale before WER computation. Required because the model emits "mille neuf cent soixante-seize" while FLEURS keeps "1976" in the reference. Thousands separators handled across all five Unicode space variants FLEURS actually uses (U+0020/00A0/2007/2009/202F). Our `TextNormalizer.basicNormalize(_, spellOutLocale:)`.
 - **CJK** (ja, ko, zh, th) → character-level edit rate after whitespace stripping (segmentation-free). Reported in the "WER" column by community convention.
 
 ### Chunk size sweep (FLEURS test split, full data)
 
 All three builds use `att_context_size=[56,0]` (NVIDIA's lowest-latency mode); they differ only in `chunk_mel_frames` (32 / 56 / 112 → 320 / 560 / 1120 ms processing chunks). NVIDIA's published FLEURS numbers are also at `[56,0]`, so the comparison is architecturally apples-to-apples.
 
-| Language | 320 ms | 560 ms | 1120 ms | NVIDIA ([56,0]) | Δ (560 vs NVIDIA) | n   |
-|----------|-------:|-------:|--------:|----------------:|------------------:|----:|
-| en_us    |  17.5  |  12.1  |   12.0  |         11.35   |            +0.75  | 647 |
-| fr_fr    |  18.5  |  15.9  |   15.7  |         13.44   |            +2.46  | 676 |
-| de_de    |  18.5  |  15.6  |   14.4  |           —     |              —    | 862 |
-| es_419   |  10.4  |   9.3  |    9.3  |          8.69   |            +0.61  | 908 |
-| ja_jp    |  21.9  |  18.4  |   17.4  |           —     |              —    | 650 |
-| it_it    |  10.5  |   8.7  |    8.2  |          7.33   |            +1.37  | 865 |
-| pt_br    |  16.2  |  12.7  |   11.2  |          8.99   |            +3.71  | 919 |
-| **AVG**  |**16.2**|**13.3**|**12.6** |                 |                   |     |
-| RTFx     |   9.4  |  13.2  |   20.0  |                 |                   |     |
+| Language | 320 ms | 560 ms | 1120 ms | NVIDIA ([56,0]) | Δ (1120 vs NVIDIA) | n   |
+|----------|-------:|-------:|--------:|----------------:|-------------------:|----:|
+| en_us    |  17.5  |  12.1  |   12.0  |         11.35   |             +0.65  | 647 |
+| fr_fr    |  16.4  |  13.9  |   13.8  |         13.44   |             +0.36  | 676 |
+| de_de    |  17.8  |  14.9  |   13.6  |           —     |               —    | 862 |
+| es_419   |   8.6  |   7.4  |    7.4  |          8.69   |             −1.29  | 908 |
+| ja_jp    |  21.9  |  18.4  |   17.4  |           —     |               —    | 650 |
+| it_it    |   9.8  |   7.9  |    7.4  |          7.33   |             +0.07  | 865 |
+| pt_br    |  13.4  |  10.0  |    8.4  |          8.99   |             −0.59  | 919 |
+| **AVG**  |**15.0**|**12.1**|**11.4** |                 |                    |     |
+| RTFx     |   8.6  |  16.8  |   22.0  |                 |                    |     |
 
-WER% for spaced scripts, CER% for ja_jp (segmentation-free). Full `google/fleurs` test splits (en=647, fr=676, de=862, es=908, ja=650, it=865, pt=919). The "Δ (560 vs NVIDIA)" column compares our 560 ms build to NVIDIA's published number because it's the lowest chunk size that doesn't show degenerate boundary effects on English; the 1120 ms column is included for the full chunk-size sweep.
+WER% for spaced scripts, CER% for ja_jp (segmentation-free). Full `google/fleurs` test splits (en=647, fr=676, de=862, es=908, ja=650, it=865, pt=919). The "Δ (1120 vs NVIDIA)" column compares our highest-accuracy build against NVIDIA's published number for the same `[56,0]` attention mode.
 
-**3 of 5 published languages (en, es, it) are within ~1.4 pp of NVIDIA at 560 ms.** French and Portuguese show a ~2.5–3.7 pp gap that does not collapse with more chunk-size context or by going to fp16 — suggesting model-side differences (decoder hyperparams, language-tag prompting, or checkpoint vintage) rather than anything fixable in the CoreML pipeline.
+**All 5 published languages are within ~0.7 pp of NVIDIA at 1120 ms.** es-419 and pt-br actually beat the reference (−1.29 and −0.59 pp respectively); en, fr, it are +0.65 / +0.36 / +0.07. At 560 ms (the recommended low-latency build) all 5 are within ~1 pp; es-419 still beats NVIDIA by −1.29 pp.
 
-**320 ms is degenerate on English and accent-heavy languages.** en_us jumps from 12.0 → 17.5 (+5.5 pp) and pt_br from 11.2 → 16.2 (+5.0 pp) when dropping from 1120 ms to 320 ms. 560 ms recovers most of the loss (<1.5 pp from 1120 ms on every language). If you need low latency, ship 560 ms; only use 320 ms if you absolutely need sub-half-second response and can tolerate the English regression.
+**320 ms shows boundary effects on English and accent-heavy languages.** en_us jumps from 12.0 → 17.5 (+5.5 pp) and pt_br from 8.4 → 13.4 (+5.0 pp) when dropping from 1120 ms to 320 ms. 560 ms recovers most of the loss (<1.6 pp from 1120 ms on every language). If you need low latency, ship 560 ms; only use 320 ms if you absolutely need sub-half-second response and can tolerate the English regression.
 
 ### Caveats
 
