@@ -652,6 +652,7 @@ extension ASRBenchmark {
         var useStreamingEou = false
         var longAudioOnly = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
+        var melChunkContext = true  // Issue #594: opt-out of PR #264's 80ms mel-context prepend
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -721,6 +722,8 @@ extension ASRBenchmark {
                     }
                     i += 1
                 }
+            case "--no-mel-context":
+                melChunkContext = false
             default:
                 break
             }
@@ -747,6 +750,7 @@ extension ASRBenchmark {
         logger.info("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
         logger.info("   Test streaming: \(testStreaming ? "enabled" : "disabled")")
         logger.info("   Streaming EOU: \(useStreamingEou ? "enabled" : "disabled")")
+        logger.info("   Mel chunk context (PR #264): \(melChunkContext ? "enabled" : "disabled")")
         if testStreaming {
             logger.info("   Chunk duration: \(streamingChunkDuration)s")
         }
@@ -768,7 +772,8 @@ extension ASRBenchmark {
         let tdtConfig = TdtConfig(blankId: modelVersion.blankId)
         let asrConfig = ASRConfig(
             tdtConfig: tdtConfig,
-            encoderHiddenSize: modelVersion.encoderHiddenSize
+            encoderHiddenSize: modelVersion.encoderHiddenSize,
+            melChunkContext: melChunkContext
         )
 
         let asrManager = AsrManager(config: asrConfig)
@@ -1040,6 +1045,7 @@ extension ASRBenchmark {
                 --streaming-eou           Use Streaming EOU model for transcription
                 --long-audio-only          Only process files with 4-20 second duration
                 --dump-features            Dump CoreML mel features to JSON (requires --streaming-eou + --single-file)
+                --no-mel-context           Disable 80ms mel-context prepend for long-form batch ASR
                 --help, -h                Show this help message
 
             Description:

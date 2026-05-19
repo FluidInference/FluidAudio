@@ -14,6 +14,7 @@
 - [CTC Decoder Guide](CtcDecoderGuide.md)
 - [Custom Vocabulary](ASR/CustomVocabulary.md)
 - [Post-Processing (ITN)](ASR/PostProcessing.md)
+- [Long Transcription](ASR/LongTranscription.md)
 - [Last Chunk Handling](ASR/LastChunkHandling.md)
 - [Manual Model Loading](ASR/ManualModelLoading.md)
 - [Directory Structure](ASR/DirectoryStructure.md)

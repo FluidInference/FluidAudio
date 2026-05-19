@@ -209,6 +209,8 @@ enum TranscribeCommand {
         var parakeetVariant: StreamingModelVariant?
         var language: Language?
         var encoderPrecision: ParakeetEncoderPrecision = .int8
+        var melChunkContext = true
+        var dualDecodeArbitration = false
         var streamingMode = false
 
         // Streaming mode (SlidingWindowAsrConfig)
@@ -305,6 +307,10 @@ enum TranscribeCommand {
                     parsed.encoderPrecision = precision
                     i += 1
                 }
+            case "--no-mel-context":
+                parsed.melChunkContext = false
+            case "--dual-decode-arbitration":
+                parsed.dualDecodeArbitration = true
 
             // Streaming mode config
             case "--chunk-seconds":
@@ -422,7 +428,9 @@ enum TranscribeCommand {
             let tdtConfig = TdtConfig(blankId: args.modelVersion.blankId)
             let asrConfig = ASRConfig(
                 tdtConfig: tdtConfig,
-                encoderHiddenSize: args.modelVersion.encoderHiddenSize
+                encoderHiddenSize: args.modelVersion.encoderHiddenSize,
+                melChunkContext: args.melChunkContext,
+                dualDecodeArbitration: args.dualDecodeArbitration
             )
             let asrManager = AsrManager(config: asrConfig)
             try await asrManager.loadModels(models)
@@ -961,6 +969,9 @@ enum TranscribeCommand {
                 --model-dir <path>             Local model directory (skips download)
                 --encoder-precision <int8|int4> Encoder quantization (default: int8)
                 --language <code>              Language hint (e.g., en, de, fr, es)
+                --custom-vocab <file>          Apply vocabulary boosting in batch mode
+                --no-mel-context               Disable 80ms mel-context prepend for long-form batch ASR
+                --dual-decode-arbitration      Enable v3/no-mel long-form boundary arbitration
 
             STREAMING MODE OPTIONS (--streaming, SlidingWindowAsrManager):
                 --chunk-seconds <sec>                Audio chunk size (default: 11.0)
