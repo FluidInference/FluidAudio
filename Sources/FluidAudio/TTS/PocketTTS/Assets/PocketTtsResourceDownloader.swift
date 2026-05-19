@@ -25,9 +25,15 @@ public enum PocketTtsResourceDownloader {
     ///
     /// Note: the upstream `v2/<lang>/` directory ships both flowlm variants,
     /// so a fresh download pulls the unused variant too. After download
-    /// completes, the unused FlowLM `.mlmodelc` and `.mlpackage` directories
-    /// are deleted so only the requested precision occupies disk
-    /// (~217 MB savings for `.int8`, ~75 MB savings for `.fp16`).
+    /// completes, the unused FlowLM `.mlmodelc` directory is deleted so only
+    /// the requested precision occupies disk (~140 MB savings for `.int8`,
+    /// ~75 MB savings for `.fp16`).
+    ///
+    /// The downloader also skips redundant repo artifacts entirely:
+    /// `.mlpackage` sources (CoreML never loads them — the compiled
+    /// `.mlmodelc` next to each one is what Swift uses), `constants/`
+    /// `.npy/.npz` intermediates (`constants_bin/*.bin` files are the
+    /// loaded form), and incidental files (`verify.wav`, `.DS_Store`).
     public static func ensureModels(
         language: PocketTtsLanguage,
         directory: URL? = nil,
@@ -79,7 +85,8 @@ public enum PocketTtsResourceDownloader {
             .pocketTts,
             subdirectory: subdir,
             to: repoDir,
-            progressHandler: progressHandler
+            progressHandler: progressHandler,
+            shouldSkip: Self.shouldSkipAsset(at:)
         )
 
         // The HF subdir contains both FlowLM precisions; delete the one we
@@ -87,6 +94,31 @@ public enum PocketTtsResourceDownloader {
         removeUnusedFlowlmVariant(at: languageRoot, keeping: precision)
 
         return languageRoot
+    }
+
+    /// Skip filter applied to every remote path the HF lister walks for a
+    /// PocketTTS language pack. Excluded categories were identified during
+    /// the v2 repo cleanup audit: every `.mlpackage` ships with a compiled
+    /// `.mlmodelc` next to it and CoreML only loads the latter; `constants/`
+    /// holds intermediate `.npy/.npz` files whose binary equivalents live
+    /// under `constants_bin/`; `verify.wav` is an upstream debug artifact;
+    /// `.DS_Store` is macOS junk.
+    @Sendable
+    private static func shouldSkipAsset(at path: String) -> Bool {
+        let basename = (path as NSString).lastPathComponent
+        if basename == ".DS_Store" || basename == "verify.wav" {
+            return true
+        }
+        if basename.hasSuffix(".mlpackage") || path.contains(".mlpackage/") {
+            return true
+        }
+        // Only skip the intermediate "constants/" subdirectory, never
+        // "constants_bin/" (which contains the .bin and voice .safetensors
+        // files Swift loads at runtime).
+        for component in path.split(separator: "/") where component == "constants" {
+            return true
+        }
+        return false
     }
 
     /// Backfill `constants_bin/bos_before_voice.bin` for cached language packs
@@ -117,9 +149,10 @@ public enum PocketTtsResourceDownloader {
         logger.info("Wrote bos_before_voice.bin (\(data.count) bytes)")
     }
 
-    /// Delete the FlowLM `.mlmodelc` and `.mlpackage` directories that don't
-    /// match the requested precision. Idempotent — silently skips paths that
-    /// don't exist.
+    /// Delete the FlowLM `.mlmodelc` directory that doesn't match the
+    /// requested precision. Idempotent — silently skips paths that don't
+    /// exist. `.mlpackage` siblings are no longer downloaded (see
+    /// `shouldSkipAsset`), so this only touches `.mlmodelc` directories.
     private static func removeUnusedFlowlmVariant(
         at languageRoot: URL,
         keeping precision: PocketTtsPrecision
@@ -128,16 +161,10 @@ public enum PocketTtsResourceDownloader {
         switch precision {
         case .fp16:
             // Loading flowlm_step.mlmodelc; drop the int8 variant.
-            unusedNames = [
-                ModelNames.PocketTTS.flowlmStepV2 + ".mlmodelc",
-                ModelNames.PocketTTS.flowlmStepV2 + ".mlpackage",
-            ]
+            unusedNames = [ModelNames.PocketTTS.flowlmStepV2 + ".mlmodelc"]
         case .int8:
             // Loading flowlm_stepv2.mlmodelc; drop the default variant.
-            unusedNames = [
-                ModelNames.PocketTTS.flowlmStep + ".mlmodelc",
-                ModelNames.PocketTTS.flowlmStep + ".mlpackage",
-            ]
+            unusedNames = [ModelNames.PocketTTS.flowlmStep + ".mlmodelc"]
         }
         for name in unusedNames {
             let url = languageRoot.appendingPathComponent(name)

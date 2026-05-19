@@ -1,4 +1,4 @@
-![banner.png](banner.png)
+d![banner.png](banner.png)
 
 # FluidAudio - Transcription, Text-to-speech, VAD, Speaker diarization with CoreML Models
 
@@ -57,6 +57,9 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 | **[Parakeet EOU Ultra-Low Latency](https://x.com/y_earu/status/2038654262608064967)** | Real-time Parakeet EOU transcription on iOS demonstrating ultra-low latency speech-to-text |
 | **[Action Phrase Live Production Control](https://www.youtube.com/watch?v=ykcvdTHHmrk)** | Voice-controlled live production workflow using FluidAudio's ASR and speaker diarization to trigger cameras, graphics, and layouts with natural voice commands |
 | **[talat - VAD, ASR, Speaker ID](https://www.youtube.com/watch?v=OjP4Adrv9_E)** | A video demo showcasing FluidAudio's VAD, two different ASR models, and speaker diarization during a talat.app meeting recording |
+| **[MagpieTTS Multilingual on iPhone 17 Pro](https://x.com/sach1n/status/2030521943263436934)** | NVIDIA's MagpieTTS Multilingual model converted to CoreML and running on an iPhone 17 Pro |
+| **[Kyutai PocketTTS on ANE](https://x.com/sach1n/status/2051375097408360596)** | Kyutai labs PocketTTS in iOS running fast on the ANE & background-capable |
+| **[Supertonic-3 on iPhone 17 Pro ANE](https://x.com/sach1n/status/2056476851825250685)** | Supertonic-3 running on iPhone 17 Pro via ANE/CoreML with 2 minutes of audio generated in 3 seconds with low RAM & background support |
 
 ## Showcase
 
@@ -107,6 +110,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Utter](https://github.com/joepetrakovich/utter)** | An ultra-minimal speech-to-text status bar utility for Mac.  Register a hotkey and go. |
 | **[Resonant](https://onresonant.com)** | macOS voice workspace for dictation, meetings, and ambient work context. Uses FluidAudio for local transcription and speaker diarization. |
 | **[Thoth](https://thoth-app.com)** | Privacy-first meeting recorder for Mac. Records both sides of any call with dual-channel audio, transcribes locally with speaker diarization, and summarizes with on-device AI or BYOK cloud. Available on the Mac App Store. Featured in [MacGeneration](https://www.macg.co/logiciels/2026/05/thoth-une-nouvelle-app-de-transcription-axee-sur-les-reunions-et-le-temps-reel-308471). Uses Parakeet EOU and Parakeet TDT ASR. |
+| **[Dettivo](https://dettivo.com)** | Local-first Mac app for private dictation, transcripts, and meeting workflows in one place, with developer tooling across CLI, MCP, REST, and app automation. Uses FluidAudio Parakeet TDT ASR and offline speaker diarization. |
 
 ## Installation
 

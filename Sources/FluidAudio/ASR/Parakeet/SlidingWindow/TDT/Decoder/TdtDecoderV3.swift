@@ -71,7 +71,9 @@ internal struct TdtDecoderV3: Sendable {
         isLastChunk: Bool = false,
         globalFrameOffset: Int = 0,
         language: Language? = nil,
-        vocabulary: [Int: String]? = nil
+        vocabulary: [Int: String]? = nil,
+        emitTokensAfterGlobalFrame: Int? = nil,
+        initialTimeIndexOverride: Int? = nil
     ) async throws -> TdtHypothesis {
         // Early exit for very short audio (< 160ms)
         guard encoderSequenceLength > 1 else {
@@ -100,10 +102,12 @@ internal struct TdtDecoderV3: Sendable {
         // timeIndices: Current position in encoder frames (advances by duration)
         // timeJump: Tracks overflow when we process beyond current chunk (for streaming)
         // contextFrameAdjustment: Adjusts for adaptive context overlap
-        var timeIndices = TdtFrameNavigation.calculateInitialTimeIndices(
-            timeJump: decoderState.timeJump,
-            contextFrameAdjustment: contextFrameAdjustment
-        )
+        var timeIndices =
+            initialTimeIndexOverride
+            ?? TdtFrameNavigation.calculateInitialTimeIndices(
+                timeJump: decoderState.timeJump,
+                contextFrameAdjustment: contextFrameAdjustment
+            )
 
         let navigationState = TdtFrameNavigation.initializeNavigationState(
             timeIndices: timeIndices,
@@ -354,12 +358,18 @@ internal struct TdtDecoderV3: Sendable {
                     break
                 }
 
-                // Add token to output sequence
-                hypothesis.ySequence.append(label)
-                hypothesis.score += score
-                hypothesis.timestamps.append(timeIndicesCurrentLabels + globalFrameOffset)
-                hypothesis.tokenConfidences.append(score)
-                hypothesis.tokenDurations.append(duration)
+                let emissionTimestamp = timeIndicesCurrentLabels + globalFrameOffset
+                if Self.shouldEmitToken(
+                    emissionTimestamp: emissionTimestamp,
+                    emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame
+                ) {
+                    // Add token to output sequence
+                    hypothesis.ySequence.append(label)
+                    hypothesis.score += score
+                    hypothesis.timestamps.append(emissionTimestamp)
+                    hypothesis.tokenConfidences.append(score)
+                    hypothesis.tokenDurations.append(duration)
+                }
                 hypothesis.lastToken = label  // Remember for next iteration
 
                 // CRITICAL: Update decoder LSTM with the new token
@@ -462,8 +472,8 @@ internal struct TdtDecoderV3: Sendable {
                     needsTopK: needsTopK
                 )
 
-                var token = decision.token
-                var score = TdtDurationMapping.clampProbability(decision.probability)
+                let token = decision.token
+                let score = TdtDurationMapping.clampProbability(decision.probability)
 
                 // Also get duration for proper timestamp calculation
                 let duration = try TdtDurationMapping.mapDurationBin(
@@ -474,15 +484,20 @@ internal struct TdtDecoderV3: Sendable {
                 } else {
                     consecutiveBlanks = 0  // Reset on non-blank
 
-                    // Non-blank token found - emit it
-                    hypothesis.ySequence.append(token)
-                    hypothesis.score += score
-                    // Use the current processing position for timestamp, ensuring it doesn't exceed bounds
                     let finalTimestamp =
                         min(finalProcessingTimeIndices, effectiveSequenceLength - 1) + globalFrameOffset
-                    hypothesis.timestamps.append(finalTimestamp)
-                    hypothesis.tokenConfidences.append(score)
-                    hypothesis.tokenDurations.append(duration)
+                    if Self.shouldEmitToken(
+                        emissionTimestamp: finalTimestamp,
+                        emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame
+                    ) {
+                        // Non-blank token found - emit it
+                        hypothesis.ySequence.append(token)
+                        hypothesis.score += score
+                        // Use the current processing position for timestamp, ensuring it doesn't exceed bounds
+                        hypothesis.timestamps.append(finalTimestamp)
+                        hypothesis.tokenConfidences.append(score)
+                        hypothesis.tokenDurations.append(duration)
+                    }
                     hypothesis.lastToken = token
 
                     // Update decoder state
@@ -536,23 +551,12 @@ internal struct TdtDecoderV3: Sendable {
         return hypothesis
     }
 
-    /// Update hypothesis with new token
-    internal func updateHypothesis(
-        _ hypothesis: inout TdtHypothesis,
-        token: Int,
-        score: Float,
-        duration: Int,
-        timeIdx: Int,
-        decoderState: TdtDecoderState
-    ) {
-        hypothesis.ySequence.append(token)
-        hypothesis.score += score
-        hypothesis.timestamps.append(timeIdx)
-        hypothesis.tokenConfidences.append(score)
-        hypothesis.decState = decoderState
-        hypothesis.lastToken = token
-
-        hypothesis.tokenDurations.append(duration)
+    internal static func shouldEmitToken(
+        emissionTimestamp: Int,
+        emitTokensAfterGlobalFrame: Int?
+    ) -> Bool {
+        guard let emitTokensAfterGlobalFrame else { return true }
+        return emissionTimestamp >= emitTokensAfterGlobalFrame
     }
 
     // MARK: - Private Helper Methods

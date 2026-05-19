@@ -157,47 +157,4 @@ final class TdtDecoderV3HelperTests: XCTestCase {
         }
         XCTAssertEqual(decoderFeature.shape, [1, NSNumber(value: ASRConstants.decoderHiddenSize), 1])
     }
-    // MARK: - Update Hypothesis Tests
-
-    func testUpdateHypothesis() throws {
-
-        let newState = try TdtDecoderState()
-        var hypothesis = TdtHypothesis(decState: newState)
-
-        decoder.updateHypothesis(
-            &hypothesis,
-            token: 42,
-            score: 0.95,
-            duration: 3,
-            timeIdx: 10,
-            decoderState: newState
-        )
-
-        XCTAssertEqual(hypothesis.ySequence, [42])
-        XCTAssertEqual(hypothesis.score, 0.95, accuracy: 0.0001)
-        XCTAssertEqual(hypothesis.timestamps, [10])
-        XCTAssertEqual(hypothesis.lastToken, 42)
-        XCTAssertNotNil(hypothesis.decState)
-
-        // Test with includeTokenDuration
-        if config.tdtConfig.includeTokenDuration {
-            XCTAssertEqual(hypothesis.tokenDurations, [3])
-        }
-
-        // Add another token
-        decoder.updateHypothesis(
-            &hypothesis,
-            token: 100,
-            score: 0.85,
-            duration: 1,
-            timeIdx: 13,
-            decoderState: newState
-        )
-
-        XCTAssertEqual(hypothesis.ySequence, [42, 100])
-        XCTAssertEqual(hypothesis.score, 1.8, accuracy: 0.0001)
-        XCTAssertEqual(hypothesis.timestamps, [10, 13])
-        XCTAssertEqual(hypothesis.lastToken, 100)
-    }
-
 }

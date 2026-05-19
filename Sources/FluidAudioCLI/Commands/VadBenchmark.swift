@@ -1,5 +1,6 @@
 #if os(macOS)
 import AVFoundation
+import CoreML
 import FluidAudio
 import Foundation
 
@@ -12,29 +13,34 @@ struct VadBenchmark {
             try await runVadBenchmarkWithErrorHandling(arguments: arguments)
         } catch {
             logger.error("VAD Benchmark failed: \(error)")
-            // Don't exit - return gracefully so comparison can continue
         }
     }
 
     static func runVadBenchmarkWithErrorHandling(arguments: [String]) async throws {
+        if arguments.contains("--help") || arguments.contains("-h") {
+            printUsage()
+            exit(0)
+        }
+
         logger.info("Starting VAD Benchmark")
-        var numFiles = -1  // Default to all files
-        var useAllFiles = true  // Default to all files
+        var numFiles = -1
+        var useAllFiles = true
         var vadThreshold: Float = 0.3
-        var activityThreshold: Float = 0.1  // Percentage of chunks that must be active
+        var activityThreshold: Float = 0.1
         var outputFile: String?
-        var dataset = "mini50"  // Default to mini50 dataset
-        var debugMode = false  // Default to no debug output
+        var dataset = "mini50"
+        var debugMode = false
+        var computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+
         logger.info("Parsing arguments...")
 
-        // Parse arguments
         var i = 0
         while i < arguments.count {
             switch arguments[i] {
             case "--num-files":
                 if i + 1 < arguments.count {
                     numFiles = Int(arguments[i + 1]) ?? -1
-                    useAllFiles = false  // Override default when specific count is given
+                    useAllFiles = false
                     i += 1
                 }
             case "--all-files":
@@ -62,6 +68,17 @@ struct VadBenchmark {
                 }
             case "--debug":
                 debugMode = true
+            case "--compute-units":
+                if i + 1 < arguments.count {
+                    switch arguments[i + 1].lowercased() {
+                    case "all": computeUnits = .cpuAndNeuralEngine
+                    case "cpu-only": computeUnits = .cpuOnly
+                    case "ane": computeUnits = .cpuAndNeuralEngine
+                    default:
+                        logger.warning("Invalid --compute-units value '\(arguments[i + 1])', using 'all'")
+                    }
+                    i += 1
+                }
             default:
                 logger.warning("Unknown option: \(arguments[i])")
             }
@@ -74,25 +91,21 @@ struct VadBenchmark {
         logger.info("Activity threshold: \(activityThreshold)")
         logger.info("Debug mode: \(debugMode)")
 
-        // Use VadManager with the trained model
         let vadManager = try await VadManager(
             config: VadConfig(
                 defaultThreshold: vadThreshold,
-                debugMode: debugMode
+                debugMode: debugMode,
+                computeUnits: computeUnits
             ))
 
         logger.info("VAD system initialized")
 
-        // Download test files
         let testFiles = try await downloadVadTestFiles(
             count: useAllFiles ? -1 : numFiles, dataset: dataset)
 
-        // Run benchmark
         let result = try await runVadBenchmarkInternal(
             vadManager: vadManager, testFiles: testFiles, threshold: vadThreshold, activityThreshold: activityThreshold)
 
-        // Print results
-        // Calculate RTFx for display
         let rtfx = try await calculateRTFx(result: result, testFiles: testFiles)
 
         logger.info("VAD Benchmark Results:")
@@ -112,7 +125,6 @@ struct VadBenchmark {
         logger.info(
             "Avg Time per File: \(String(format: "%.3f", result.processingTime / Double(result.totalFiles)))s")
 
-        // Save results with RTFx
         if let outputFile = outputFile {
             try await saveVadBenchmarkResultsWithRTFx(
                 result, testFiles: testFiles, to: outputFile)
@@ -123,15 +135,37 @@ struct VadBenchmark {
             logger.info("Results saved to: vad_benchmark_results.json")
         }
 
-        // Performance assessment
         if result.f1Score >= 70.0 {
             logger.info("EXCELLENT: F1-Score above 70%")
         } else if result.f1Score >= 60.0 {
             logger.warning("ACCEPTABLE: F1-Score above 60%")
         } else {
             logger.warning("NEEDS IMPROVEMENT: F1-Score below 60%")
-            // Don't exit - just report the poor performance
         }
+    }
+
+    private static func printUsage() {
+        let usage = """
+            VAD Benchmark Command Usage:
+                fluidaudio vad-benchmark [options]
+
+            Options:
+                --num-files <n>           Number of files to process (default: all)
+                --all-files               Process all available files
+                --threshold <float>        VAD probability threshold (default: 0.3)
+                --activity-threshold <fl>  Activity threshold as fraction of chunks (default: 0.1)
+                --dataset <name>           Dataset: mini50, mini100, musan-full, voices-subset (default: mini50)
+                --output <file>            Save results to JSON file
+                --debug                    Enable debug logging
+                --compute-units <all|cpu-only|ane>
+                                         ML compute units (default: all)
+
+            Examples:
+                fluidaudio vad-benchmark
+                fluidaudio vad-benchmark --num-files 10 --compute-units cpu-only
+            """
+        fputs(usage, stderr)
+        fflush(stderr)
     }
 
     static func downloadVadTestFiles(
@@ -145,37 +179,31 @@ struct VadBenchmark {
             logger.info("Loading \(count) test audio files...")
         }
 
-        // First check if this is full MUSAN dataset
         if dataset == "musan-full" {
             if let musanFiles = try await loadFullMusanDataset(count: count) {
                 return musanFiles
             }
         }
 
-        // Check if this is VOiCES subset
         if dataset == "voices-subset" {
             if let voicesFiles = try await loadVoicesSubset(count: count) {
                 return voicesFiles
             }
         }
 
-        // First try to load from local dataset directory
         if let localFiles = try await loadLocalDataset(count: count) {
             return localFiles
         }
 
-        // Second, try to load from Hugging Face cache
         if let cachedFiles = try await loadHuggingFaceVadDataset(count: count, dataset: dataset) {
             return cachedFiles
         }
 
-        // Finally, download from Hugging Face
         logger.info("Downloading VAD dataset from Hugging Face...")
         if let hfFiles = try await downloadHuggingFaceVadDataset(count: count, dataset: dataset) {
             return hfFiles
         }
 
-        // No fallback to mock data - fail cleanly
         logger.error(
             "Failed to load VAD dataset from all sources:\nLocal dataset not found\nHugging Face cache empty\nHugging Face download failed\nTry: swift run fluidaudiocli download --dataset vad"
         )
@@ -188,7 +216,6 @@ struct VadBenchmark {
     }
 
     static func loadLocalDataset(count: Int) async throws -> [VadTestFile]? {
-        // Check for local VAD dataset directories
         let possiblePaths = [
             "VADDataset/",
             "vad_test_data/",
@@ -207,7 +234,6 @@ struct VadBenchmark {
 
             var testFiles: [VadTestFile] = []
 
-            // Look for speech and non-speech subdirectories
             let speechDir = datasetDir.appendingPathComponent("speech")
             let nonSpeechDir = datasetDir.appendingPathComponent("non_speech")
 
@@ -275,7 +301,6 @@ struct VadBenchmark {
     {
         let cacheDir = getVadDatasetCacheDirectory()
 
-        // Check if cache exists and has the required structure
         let speechDir = cacheDir.appendingPathComponent("speech")
         let noiseDir = cacheDir.appendingPathComponent("noise")
 
@@ -286,22 +311,17 @@ struct VadBenchmark {
             return nil
         }
 
-        // Load files from cache
         var testFiles: [VadTestFile] = []
 
-        // Determine max files based on dataset
         let maxFilesForDataset = dataset == "mini100" ? 100 : 50
 
-        // If count is -1, use all available files (but respect dataset limit)
         if count == -1 {
             logger.info("Loading all available files from Hugging Face cache...")
 
-            // Load speech files (half of dataset)
             let speechFiles = try loadAudioFiles(
                 from: speechDir, expectedLabel: 1, maxCount: maxFilesForDataset / 2)
             testFiles.append(contentsOf: speechFiles)
 
-            // Load noise files (half of dataset)
             let noiseFiles = try loadAudioFiles(
                 from: noiseDir, expectedLabel: 0, maxCount: maxFilesForDataset / 2)
             testFiles.append(contentsOf: noiseFiles)
@@ -309,12 +329,10 @@ struct VadBenchmark {
             let speechCount = count / 2
             let noiseCount = count - speechCount
 
-            // Load speech files
             let speechFiles = try loadAudioFiles(
                 from: speechDir, expectedLabel: 1, maxCount: speechCount)
             testFiles.append(contentsOf: speechFiles)
 
-            // Load noise files
             let noiseFiles = try loadAudioFiles(
                 from: noiseDir, expectedLabel: 0, maxCount: noiseCount)
             testFiles.append(contentsOf: noiseFiles)
@@ -336,26 +354,22 @@ struct VadBenchmark {
     {
         let cacheDir = getVadDatasetCacheDirectory()
 
-        // Create cache directories
         let speechDir = cacheDir.appendingPathComponent("speech")
         let noiseDir = cacheDir.appendingPathComponent("noise")
         try FileManager.default.createDirectory(
             at: speechDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: noiseDir, withIntermediateDirectories: true)
 
-        // Select repository based on dataset parameter
         let repoName = dataset == "mini100" ? "musan_mini100" : "musan_mini50"
         let repoBase = ModelRegistry.resolveDatasetBase("alexwengg/\(repoName)")
 
         var testFiles: [VadTestFile] = []
 
-        // If count is -1, download many files (large number)
         let maxFiles = dataset == "mini100" ? 100 : 50
         let speechCount = count == -1 ? maxFiles / 2 : count / 2
         let noiseCount = count == -1 ? maxFiles / 2 : count - speechCount
 
         do {
-            // Download speech files
             logger.info("Downloading speech samples...")
             let speechFiles = try await DatasetDownloader.downloadVadFilesFromHF(
                 baseUrl: "\(repoBase)/speech",
@@ -367,7 +381,6 @@ struct VadBenchmark {
             )
             testFiles.append(contentsOf: speechFiles)
 
-            // Download noise files
             logger.info("Downloading noise samples...")
             let noiseFiles = try await DatasetDownloader.downloadVadFilesFromHF(
                 baseUrl: "\(repoBase)/noise",
@@ -386,7 +399,6 @@ struct VadBenchmark {
 
         } catch {
             logger.error("Failed to download from Hugging Face: \(error)")
-            // Clean up partial downloads
             try? FileManager.default.removeItem(at: cacheDir)
         }
 
@@ -425,20 +437,17 @@ struct VadBenchmark {
             logger.info("Processing \(index + 1)/\(testFiles.count): \(testFile.name)")
 
             do {
-                // Load + convert audio (counted as loading time)
                 let loadStartTime = Date()
                 let audioFile = try AVAudioFile(forReading: testFile.url)
                 let audioDuration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
                 loadingTime += Date().timeIntervalSince(loadStartTime)
                 totalAudioDuration += audioDuration
 
-                // Process with VAD using new convenience API for raw samples
                 let url = URL(fileURLWithPath: testFile.url.path)
                 let inferenceStartTime = Date()
                 let vadResults = try await vadManager.process(url)
                 inferenceTime += Date().timeIntervalSince(inferenceStartTime)
 
-                // Aggregate results (use activity ratio as file-level decision)
                 let activeChunks = vadResults.filter { $0.isVoiceActive }.count
                 let activityRatio = Float(activeChunks) / Float(vadResults.count)
                 let prediction = activityRatio >= activityThreshold ? 1 : 0
@@ -450,7 +459,6 @@ struct VadBenchmark {
                 let fileProcessingTime = Date().timeIntervalSince(fileStartTime)
                 fileDurations.append(fileProcessingTime)
 
-                // Calculate RTFx for this file
                 let fileRTFx = audioDuration > 0 ? fileProcessingTime / audioDuration : 0
                 let rtfxDisplay =
                     if fileRTFx < 1.0 && fileRTFx > 0 {
@@ -465,13 +473,11 @@ struct VadBenchmark {
 
             } catch {
                 logger.warning("Error: \(error)")
-                // Use default prediction on error
                 predictions.append(0)
                 groundTruth.append(testFile.expectedLabel)
                 fileDurations.append(Date().timeIntervalSince(fileStartTime))
             }
 
-            // Periodic buffer pool cleanup every 10 files to prevent ANE memory buildup
             if (index + 1) % 10 == 0 {
                 memoryOptimizer.clearBufferPool()
             }
@@ -479,16 +485,13 @@ struct VadBenchmark {
 
         let processingTime = Date().timeIntervalSince(startTime)
 
-        // Calculate metrics
         let metrics = calculateVadMetrics(predictions: predictions, groundTruth: groundTruth)
 
-        // Calculate timing statistics
         let avgProcessingTime =
             fileDurations.isEmpty ? 0 : fileDurations.reduce(0, +) / Double(fileDurations.count)
         let minProcessingTime = fileDurations.min() ?? 0
         let maxProcessingTime = fileDurations.max() ?? 0
 
-        // Calculate RTFx (Real-Time Factor)
         let rtfx = totalAudioDuration > 0 ? processingTime / totalAudioDuration : 0
 
         logger.info("Timing Statistics:")
@@ -580,7 +583,6 @@ struct VadBenchmark {
                     Double(audioFile.length) / audioFile.processingFormat.sampleRate
                 totalAudioDuration += audioDuration
             } catch {
-                // Skip files that can't be read
                 continue
             }
         }
@@ -606,12 +608,9 @@ struct VadBenchmark {
 
         var testFiles: [VadTestFile] = []
 
-        // Load clean and noisy speech files
         let cleanDir = voicesDir.appendingPathComponent("clean")
         let noisyDir = voicesDir.appendingPathComponent("noisy")
 
-        // For a balanced VAD test, we need both speech and non-speech samples
-        // VOiCES only has speech, so we'll also load non-speech from MUSAN
         let requestedSpeechCount = count == -1 ? 25 : count / 2
 
         if FileManager.default.fileExists(atPath: cleanDir.path) {
@@ -628,7 +627,6 @@ struct VadBenchmark {
             logger.info("Loaded \(noisyFiles.count) noisy speech files")
         }
 
-        // Load non-speech samples from MUSAN mini dataset
         logger.info("Loading non-speech samples from MUSAN...")
         let vadCacheDir = appSupport.appendingPathComponent("FluidAudio/vadDataset")
         let noiseDir = vadCacheDir.appendingPathComponent("noise")
@@ -640,12 +638,10 @@ struct VadBenchmark {
             testFiles.append(contentsOf: noiseFiles)
             logger.info("Loaded \(noiseFiles.count) non-speech files from MUSAN")
         } else {
-            // If MUSAN noise samples aren't available, download them
             logger.info("Downloading non-speech samples from MUSAN...")
             if let musanFiles = try await downloadHuggingFaceVadDataset(
                 count: testFiles.count, dataset: "mini50")
             {
-                // Filter only non-speech samples
                 let nonSpeechFiles = musanFiles.filter { $0.expectedLabel == 0 }
                 testFiles.append(contentsOf: nonSpeechFiles)
                 logger.info("Downloaded \(nonSpeechFiles.count) non-speech files")
@@ -656,7 +652,6 @@ struct VadBenchmark {
             return nil
         }
 
-        // Shuffle to mix speech and non-speech samples
         testFiles.shuffle()
 
         logger.info("Using VOiCES + MUSAN mixed dataset: \(testFiles.count) files total")
@@ -684,7 +679,6 @@ struct VadBenchmark {
 
         var testFiles: [VadTestFile] = []
 
-        // Load speech files
         let speechDir = musanDir.appendingPathComponent("speech")
         if FileManager.default.fileExists(atPath: speechDir.path) {
             let speechFiles = try loadAudioFiles(
@@ -693,7 +687,6 @@ struct VadBenchmark {
             logger.info("Loaded \(speechFiles.count) speech files")
         }
 
-        // Load music files (treat as non-speech for VAD)
         let musicDir = musanDir.appendingPathComponent("music")
         if FileManager.default.fileExists(atPath: musicDir.path) {
             let musicFiles = try loadAudioFiles(
@@ -702,7 +695,6 @@ struct VadBenchmark {
             logger.info("Loaded \(musicFiles.count) music files")
         }
 
-        // Load noise files
         let noiseDir = musanDir.appendingPathComponent("noise")
         if FileManager.default.fileExists(atPath: noiseDir.path) {
             let noiseFiles = try loadAudioFiles(
@@ -717,7 +709,7 @@ struct VadBenchmark {
         }
 
         logger.info("Using full MUSAN dataset: \(testFiles.count) files total")
-        return testFiles.shuffled()  // Shuffle to mix different types
+        return testFiles.shuffled()
     }
 
     static func saveVadBenchmarkResultsWithRTFx(
@@ -732,7 +724,6 @@ struct VadBenchmark {
                     Double(audioFile.length) / audioFile.processingFormat.sampleRate
                 totalAudioDuration += audioDuration
             } catch {
-                // Skip files that can't be read
                 continue
             }
         }

@@ -72,7 +72,9 @@ internal struct TdtDecoderV2 {
             encoderHiddenSize: config.encoderHiddenSize,
             parallelChunkConcurrency: config.parallelChunkConcurrency,
             streamingEnabled: config.streamingEnabled,
-            streamingThreshold: config.streamingThreshold
+            streamingThreshold: config.streamingThreshold,
+            melChunkContext: config.melChunkContext,
+            dualDecodeArbitration: config.dualDecodeArbitration
         )
     }
 }

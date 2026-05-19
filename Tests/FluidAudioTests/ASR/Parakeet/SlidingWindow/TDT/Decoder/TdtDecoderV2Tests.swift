@@ -27,6 +27,8 @@ final class TdtDecoderV2Tests: XCTestCase {
             adaptedConfig.tdtConfig.consecutiveBlankLimit,
             baseConfig.tdtConfig.consecutiveBlankLimit
         )
+        XCTAssertEqual(adaptedConfig.melChunkContext, baseConfig.melChunkContext)
+        XCTAssertEqual(adaptedConfig.dualDecodeArbitration, baseConfig.dualDecodeArbitration)
     }
 
     func testAdaptConfigLeavesExistingV2ConfigUnchanged() {
@@ -45,6 +47,8 @@ final class TdtDecoderV2Tests: XCTestCase {
             adaptedConfig.tdtConfig.consecutiveBlankLimit,
             baseConfig.tdtConfig.consecutiveBlankLimit
         )
+        XCTAssertEqual(adaptedConfig.melChunkContext, baseConfig.melChunkContext)
+        XCTAssertEqual(adaptedConfig.dualDecodeArbitration, baseConfig.dualDecodeArbitration)
     }
 
     // MARK: - Helpers
@@ -59,7 +63,12 @@ final class TdtDecoderV2Tests: XCTestCase {
             maxTokensPerChunk: 42,
             consecutiveBlankLimit: 3
         )
-        return ASRConfig(sampleRate: 44_100, tdtConfig: tdtConfig)
+        return ASRConfig(
+            sampleRate: 44_100,
+            tdtConfig: tdtConfig,
+            melChunkContext: false,
+            dualDecodeArbitration: true
+        )
     }
 
     private func extractConfig(

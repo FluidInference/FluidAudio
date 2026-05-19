@@ -201,14 +201,24 @@ public class DownloadUtils {
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
         let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
-        let allModelsExist = requiredModels.allSatisfy { model in
+        // The caller-supplied `modelNames` may include files outside the repo's
+        // default "required" set (e.g. CtcHead.mlmodelc inside parakeet-ctc-110m
+        // when loaded by the TDT-CTC manager — see issue #524). Union them in
+        // so the cache-validity check and the download filter both consider
+        // every model the caller actually needs.
+        let extraModelNames = Set(modelNames).subtracting(requiredModels)
+        let effectiveModels = requiredModels.union(extraModelNames)
+        let allModelsExist = effectiveModels.allSatisfy { model in
             let modelPath = repoPath.appendingPathComponent(model)
             return FileManager.default.fileExists(atPath: modelPath.path)
         }
 
         if !allModelsExist {
             logger.info("Models not found in cache at \(repoPath.path)")
-            try await downloadRepo(repo, to: directory, variant: variant, progressHandler: progressHandler)
+            try await downloadRepo(
+                repo, to: directory, variant: variant,
+                additionalModelNames: extraModelNames,
+                progressHandler: progressHandler)
         } else {
             logger.info("Found \(repo.folderName) locally, no download needed")
             progressHandler?(
@@ -276,11 +286,18 @@ public class DownloadUtils {
         return models
     }
 
-    /// Download a HuggingFace repository using URLSession (does not load models)
+    /// Download a HuggingFace repository using URLSession (does not load models).
+    ///
+    /// - Parameter additionalModelNames: Extra model directory names (e.g.
+    ///   `"CtcHead.mlmodelc"`) to fetch in addition to the repo's default
+    ///   `ModelNames.getRequiredModelNames(...)` set. Used by `loadModels` to
+    ///   forward caller-requested files that are not part of the repo's
+    ///   baseline required set.
     public static func downloadRepo(
         _ repo: Repo,
         to directory: URL,
         variant: String? = nil,
+        additionalModelNames: Set<String> = [],
         progressHandler: ProgressHandler? = nil
     ) async throws {
         logger.info("Downloading \(repo.folderName) from HuggingFace...")
@@ -289,6 +306,7 @@ public class DownloadUtils {
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
         let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
+            .union(additionalModelNames)
         let subPath = repo.subPath  // e.g., "160ms" for parakeetEou160
 
         // Build patterns for filtering (relative to subPath if present)
@@ -569,11 +587,17 @@ public class DownloadUtils {
     ///   - subdirectory: Path within the repo to download (e.g. `"mimi_encoder.mlmodelc"`).
     ///   - repoDirectory: Local directory corresponding to the repo root.
     ///     Files are saved at `repoDirectory/<remote_path>`.
+    ///   - shouldSkip: Optional predicate evaluated on each remote path
+    ///     (both files and directories). Returning `true` excludes the file
+    ///     or, for directories, skips the whole subtree without recursing.
+    ///     Used to avoid pulling redundant artifacts (e.g. `.mlpackage`
+    ///     sources next to compiled `.mlmodelc`).
     public static func downloadSubdirectory(
         _ repo: Repo,
         subdirectory: String,
         to repoDirectory: URL,
-        progressHandler: ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil,
+        shouldSkip: (@Sendable (String) -> Bool)? = nil
     ) async throws {
         progressHandler?(DownloadProgress(fractionCompleted: 0.0, phase: .listing))
         var filesToDownload: [(path: String, size: Int)] = []
@@ -599,6 +623,10 @@ public class DownloadUtils {
                 guard let itemPath = item["path"] as? String,
                     let itemType = item["type"] as? String
                 else { continue }
+
+                if shouldSkip?(itemPath) == true {
+                    continue
+                }
 
                 if itemType == "directory" {
                     try await listFiles(at: itemPath)
