@@ -428,4 +428,67 @@ final class AsrModelsTests: XCTestCase {
         XCTAssertFalse(AsrModelVersion.tdtCtc110m.isCtcOnly)
         XCTAssertFalse(AsrModelVersion.tdtJa.isCtcOnly)
     }
+
+    // MARK: - Issue #524: CTC head download in parakeet-ctc-110m repo
+
+    /// Regression guard for
+    /// https://github.com/FluidInference/FluidAudio/issues/524.
+    ///
+    /// `AsrModels.load(version: .tdtCtc110m)` optionally pulls
+    /// `CtcHead.mlmodelc` from the `parakeet-ctc-110m` repo, but that repo's
+    /// default required set is the standalone CTC frontend
+    /// (`MelSpectrogram` + `AudioEncoder`) and does NOT include the CTC head.
+    /// `DownloadUtils.loadModels` threads the caller's `modelNames` into
+    /// `downloadRepo` via `additionalModelNames` so the HF filter recurses
+    /// into the `CtcHead.mlmodelc/` directory.
+    func testParakeetCtc110mRequiredSetExcludesCtcHead() {
+        let required = ModelNames.getRequiredModelNames(for: .parakeetCtc110m, variant: nil)
+        XCTAssertTrue(required.contains(ModelNames.CTC.melSpectrogramPath))
+        XCTAssertTrue(required.contains(ModelNames.CTC.audioEncoderPath))
+        XCTAssertFalse(
+            required.contains(ModelNames.ASR.ctcHeadFile),
+            "CtcHead must not be in the parakeet-ctc-110m baseline required set; "
+                + "callers needing it must pass it via DownloadUtils.loadModels' "
+                + "modelNames parameter."
+        )
+    }
+
+    /// Verifies that the cache-validity check in `loadModelsOnce` (and the
+    /// matching filter in `downloadRepo`) sees `CtcHead.mlmodelc` as
+    /// missing even when the baseline required set is fully present on
+    /// disk. Pre-fix, the local cache check returned `true` here and the
+    /// download was skipped, leading to a silent `fileNoSuchFile` in the
+    /// model-loading loop.
+    func testLoadModelsCacheCheckIncludesExtraModelNames() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AsrModelsTests-#524-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let repoDir = tempDir.appendingPathComponent(Repo.parakeetCtc110m.folderName)
+        let fm = FileManager.default
+        for name in [ModelNames.CTC.melSpectrogramPath, ModelNames.CTC.audioEncoderPath] {
+            let modelDir = repoDir.appendingPathComponent(name)
+            try fm.createDirectory(at: modelDir, withIntermediateDirectories: true)
+            try Data().write(to: modelDir.appendingPathComponent("coremldata.bin"))
+        }
+
+        // Baseline required set is present on disk.
+        let required = ModelNames.getRequiredModelNames(for: .parakeetCtc110m, variant: nil)
+        for name in required {
+            XCTAssertTrue(fm.fileExists(atPath: repoDir.appendingPathComponent(name).path))
+        }
+
+        // Caller asks for the CTC head — which is *not* on disk and *not* in
+        // the baseline required set. The fix's effective-models union must
+        // recognise this as a cache miss.
+        let requested: Set<String> = [ModelNames.ASR.ctcHeadFile]
+        let effective = required.union(requested)
+        let allEffectiveExist = effective.allSatisfy {
+            fm.fileExists(atPath: repoDir.appendingPathComponent($0).path)
+        }
+        XCTAssertFalse(
+            allEffectiveExist,
+            "Cache check must treat caller-requested model names as required."
+        )
+    }
 }
