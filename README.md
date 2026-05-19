@@ -57,6 +57,9 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 | **[Parakeet EOU Ultra-Low Latency](https://x.com/y_earu/status/2038654262608064967)** | Real-time Parakeet EOU transcription on iOS demonstrating ultra-low latency speech-to-text |
 | **[Action Phrase Live Production Control](https://www.youtube.com/watch?v=ykcvdTHHmrk)** | Voice-controlled live production workflow using FluidAudio's ASR and speaker diarization to trigger cameras, graphics, and layouts with natural voice commands |
 | **[talat - VAD, ASR, Speaker ID](https://www.youtube.com/watch?v=OjP4Adrv9_E)** | A video demo showcasing FluidAudio's VAD, two different ASR models, and speaker diarization during a talat.app meeting recording |
+| **[MagpieTTS Multilingual on iPhone 17 Pro](https://x.com/sach1n/status/2030521943263436934)** | NVIDIA's MagpieTTS Multilingual model converted to CoreML and running on an iPhone 17 Pro |
+| **[Kyutai PocketTTS on ANE](https://x.com/sach1n/status/2051375097408360596)** | Kyutai labs PocketTTS in CoreML running on the ANE — fast and background-capable on iOS |
+| **[Supertonic-3 on iPhone 17 Pro ANE](https://x.com/sach1n/status/2056476851825250685)** | Supertonic-3 running on iPhone 17 Pro via ANE/CoreML — 2 minutes of audio generated in 3 seconds with low RAM and background support |
 
 ## Showcase
 
