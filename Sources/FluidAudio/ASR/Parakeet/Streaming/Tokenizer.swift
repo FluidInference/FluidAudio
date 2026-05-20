@@ -3,11 +3,11 @@ import Foundation
 public class Tokenizer {
     private var vocab: [String: String] = [:]
     private var idToToken: [Int: String] = [:]
-    
+
     public init(vocabPath: URL) throws {
         let data = try Data(contentsOf: vocabPath)
         let json = try JSONSerialization.jsonObject(with: data, options: []) as! [String: String]
-        
+
         self.vocab = json
         for (key, value) in json {
             if let id = Int(key) {
@@ -15,7 +15,7 @@ public class Tokenizer {
             }
         }
     }
-    
+
     public func decode(ids: [Int]) -> String {
         var text = ""
         for id in ids {
@@ -27,7 +27,7 @@ public class Tokenizer {
         return text.replacingOccurrences(of: "\u{2581}", with: " ")
             .trimmingCharacters(in: .whitespaces)
     }
-    
+
     /// Returns the exact token string from vocab for a token id.
     public func rawToken(for id: Int) -> String? {
         idToToken[id]
