@@ -44,4 +44,4 @@ swift format --in-place --recursive --configuration .swift-format Sources/ Tests
 
 ## Mobius Plan
 
-When users ask you to perform tasks that might be more compilcated, make sure you look at PLANS.md and follow the instructions there to plan the change out first and follow the instructions there. The plans should be in a .mobius/ folder and never committed directly to Github
+When users ask you to perform tasks that might be more compilcated, make sure you look at PLANS.md and follow the instructions there to plan the change out first and follow the instructions there. The plans should be in a .mobius/ folder and never committed directly to GitHub
