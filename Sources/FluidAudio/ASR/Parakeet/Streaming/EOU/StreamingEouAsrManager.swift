@@ -195,8 +195,8 @@ public actor StreamingEouAsrManager {
     // Accumulated EoU timestamps in ms
     private var accumulatedEouTimestampsMs: [Int] = []
     
-    // Timestamp granularity for RNNT frames
-    private let frameDurationMs: Int = 80
+    // Timestamp granularity for RNNT frames is derived per-chunk from encoder
+    // shift (samples) and the number of valid encoder output frames.
     
     // EOU Detection
     /// Whether End-of-Utterance was detected in the last chunk processed
@@ -354,8 +354,7 @@ public actor StreamingEouAsrManager {
         let applicationSupportURL = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
-        return
-        applicationSupportURL
+        return applicationSupportURL
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent("parakeet-eou-streaming", isDirectory: true)
@@ -569,6 +568,15 @@ public actor StreamingEouAsrManager {
         // Convert per-chunk frame indices into global timestamps (ms) aligned with tokens.
         if !decodeResult.tokenFrames.isEmpty {
             let baseFrame = processedChunks * chunkSize.validOutputLen
+            
+            // Derive per-frame duration (ms) from shiftSamples and validOutputLen.
+            // frameDurationMs = (shiftSamples [samples] * 1000) / (sampleRate * validOutputLen)
+            // Using 16kHz sample rate for Parakeet models.
+            let shift = Float(self.shiftSamples)
+            let validOut = Float(chunkSize.validOutputLen)
+            let frameDurationMsFloat = (shift * 1000.0) / (16000.0 * validOut)
+            let frameDurationMs = Int(round(frameDurationMsFloat))
+            
             let timestampsMs = Self.computeTokenTimestampsMs(
                 baseFrame: baseFrame,
                 tokenFrames: decodeResult.tokenFrames,
