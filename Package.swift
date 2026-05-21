@@ -2,38 +2,6 @@
 import PackageDescription
 import Foundation
 
-// MARK: - Optional Metaphone3 integration
-//
-// Metaphone3 is a paid product. To enable phonetic-fallback matching in
-// the vocabulary rescorer, drop `Metaphone3.xcframework` into
-// `Frameworks/` at the package root before resolving. When the
-// xcframework is present:
-//   - the `Metaphone3Binary` binary target is added,
-//   - `FluidAudioCLI` depends on it,
-//   - the `METAPHONE3_AVAILABLE` Swift flag is defined for FluidAudioCLI.
-// When absent, none of the above happens and FluidAudio builds and runs
-// without any Metaphone3 references — appropriate for the open-source
-// distribution.
-let metaphone3FrameworkPath = "Frameworks/Metaphone3.xcframework"
-let hasMetaphone3 = FileManager.default.fileExists(
-    atPath: "\(FileManager.default.currentDirectoryPath)/\(metaphone3FrameworkPath)"
-)
-
-var cliDependencies: [Target.Dependency] = ["FluidAudio"]
-var extraTargets: [Target] = []
-var cliSwiftSettings: [SwiftSetting] = []
-
-if hasMetaphone3 {
-    extraTargets.append(
-        .binaryTarget(
-            name: "Metaphone3Binary",
-            path: metaphone3FrameworkPath
-        )
-    )
-    cliDependencies.append("Metaphone3Binary")
-    cliSwiftSettings.append(.define("METAPHONE3_AVAILABLE"))
-}
-
 let package = Package(
     name: "FluidAudio",
     platforms: [
@@ -58,10 +26,7 @@ let package = Package(
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
             ],
-            path: "Sources/FluidAudio",
-            exclude: [
-                "Frameworks"
-            ]
+            path: "Sources/FluidAudio"
         ),
         .target(
             name: "FastClusterWrapper",
@@ -75,13 +40,12 @@ let package = Package(
         ),
         .executableTarget(
             name: "FluidAudioCLI",
-            dependencies: cliDependencies,
+            dependencies: ["FluidAudio"],
             path: "Sources/FluidAudioCLI",
             exclude: ["README.md"],
             resources: [
                 .process("Utils/english.json")
-            ],
-            swiftSettings: cliSwiftSettings
+            ]
         ),
         .testTarget(
             name: "FluidAudioTests",
@@ -90,6 +54,6 @@ let package = Package(
                 "FluidAudioCLI",
             ]
         ),
-    ] + extraTargets,
+    ],
     cxxLanguageStandard: .cxx17
 )

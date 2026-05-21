@@ -124,8 +124,3 @@ fluidaudio_cli/*
 # scripts + trials live in mobius repo, see models/tts/supertonic_3/).
 .venv-supertonic3/
 build/supertonic-3-coreml/
-
-# Optional Metaphone3 integration: paid xcframework, never committed.
-# Drop at Frameworks/Metaphone3.xcframework to enable phonetic fallback
-# in the vocabulary rescorer. See Package.swift for gating logic.
-/Frameworks/

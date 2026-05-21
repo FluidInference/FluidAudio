@@ -78,25 +78,6 @@ public enum ContextBiasingConstants {
 
     // MARK: - Similarity Thresholds
 
-    /// Minimum Levenshtein similarity required for a phonetic-fallback
-    /// match to be accepted.
-    ///
-    /// When a `PhoneticEncoder` is configured on the rescorer and a
-    /// candidate replacement *sounds* alike (same metaphone code) but
-    /// has Levenshtein similarity below `minSimilarity`, the candidate
-    /// is accepted iff its Levenshtein similarity is also at least this
-    /// floor. The floor exists so that pairs which are phonetically
-    /// indistinguishable but textually unrelated (e.g., short generic
-    /// codes that happen to collide) cannot be rescued by phonetic
-    /// matching alone.
-    ///
-    /// - Value: `0.30` (30% character overlap required)
-    /// - Example: `chronicity` vs `Crenessity` = 0.40 ✓ (rescuable),
-    ///   `Alhemo` vs `Ilumya` = 0.17 ✗ (rejected even though metaphone3
-    ///   produces matching codes for both)
-    /// - Used in: `VocabularyRescorer+TokenEvaluation.checkPhoneticFallback`
-    public static let phoneticSimilarityFloor: Float = 0.30
-
     /// Absolute minimum similarity floor for any vocabulary matching.
     ///
     /// No replacement is considered if string similarity falls below this floor.

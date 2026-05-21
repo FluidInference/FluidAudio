@@ -530,21 +530,11 @@ public enum CtcEarningsBenchmark {
             let rescorerConfig = VocabularyRescorer.Config.default
 
             let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
-            // Metaphone3-based phonetic fallback is only wired when the
-            // paid xcframework is present. Open-source consumers without
-            // a license get the original behavior (Levenshtein-only gate).
-            let phoneticEncoder: PhoneticEncoder?
-            #if METAPHONE3_AVAILABLE
-            phoneticEncoder = Metaphone3PhoneticEncoder()
-            #else
-            phoneticEncoder = nil
-            #endif
             let rescorer = try await VocabularyRescorer.create(
                 spotter: spotter,
                 vocabulary: customVocab,
                 config: rescorerConfig,
-                ctcModelDirectory: ctcModelDir,
-                phoneticEncoder: phoneticEncoder
+                ctcModelDirectory: ctcModelDir
             )
 
             // Adjust similarity threshold based on vocabulary size
