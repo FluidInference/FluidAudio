@@ -186,9 +186,13 @@ public enum ContextBiasingConstants {
     /// When aligning vocabulary terms to transcript words, this margin
     /// allows for timing imprecision in word boundaries.
     ///
-    /// - Value: `0.5` seconds (500ms tolerance)
+    /// - Value: `0.10` seconds (~5 encoder frames each side at 12.5 fps).
+    ///   Reduced from 0.5 after the +1-frame TDT emission-delay correction
+    ///   in `AsrManager+TokenProcessing.createTokenTimings`. Sweep on
+    ///   earnings22 / FDA / FDA-extended showed identical metrics from 0.5
+    ///   down to 0.10, with the first regression at 0.05 (-8 TP earnings22).
     /// - Used in: `VocabularyRescorer+TokenRescoring.ctcTokenRescore()`
-    public static let defaultMarginSeconds: Double = 0.5
+    public static let defaultMarginSeconds: Double = 0.10
 
     // MARK: - Vocabulary Size
 

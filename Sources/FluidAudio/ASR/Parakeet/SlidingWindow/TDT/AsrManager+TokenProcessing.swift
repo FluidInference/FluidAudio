@@ -52,10 +52,23 @@ extension AsrManager {
 
         let frameDuration = ASRConstants.secondsPerEncoderFrame
 
+        // TDT emission-delay correction: tokens are emitted ~1 encoder frame after
+        // the acoustic event (median offsetStart = +1 frame on earnings22 across
+        // both v2 and v3). Shift each token's frame index down by one so timestamps
+        // line up with where the rescorer's CTC head sees the peak.
+        // Override via TDT_EMISSION_DELAY_FRAMES env var for sweeps.
+        let emissionDelayFrames =
+            ProcessInfo.processInfo.environment["TDT_EMISSION_DELAY_FRAMES"]
+            .flatMap { Int($0) } ?? 1
+
         for i in 0..<sortedData.count {
             let data = sortedData[i]
             let tokenId = data.tokenId
-            let frameIndex = data.timestamp
+            let frameIndex = max(0, data.timestamp - emissionDelayFrames)
+            let nextFrameIndex =
+                i < sortedData.count - 1
+                ? max(0, sortedData[i + 1].timestamp - emissionDelayFrames)
+                : frameIndex
 
             let startTime = TimeInterval(frameIndex) * frameDuration
 
@@ -65,7 +78,7 @@ extension AsrManager {
                 let durationInSeconds = TimeInterval(data.duration) * frameDuration
                 endTime = startTime + max(durationInSeconds, frameDuration)
             } else if i < sortedData.count - 1 {
-                let nextStartTime = TimeInterval(sortedData[i + 1].timestamp) * frameDuration
+                let nextStartTime = TimeInterval(nextFrameIndex) * frameDuration
                 endTime = max(nextStartTime, startTime + frameDuration)
             } else {
                 endTime = startTime + frameDuration
