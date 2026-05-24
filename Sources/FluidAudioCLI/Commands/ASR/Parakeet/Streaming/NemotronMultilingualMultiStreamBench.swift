@@ -89,38 +89,38 @@ public enum NemotronMultilingualMultiStreamBench {
         let files = Array(flacs.prefix(take))
         logger.info("Multi-stream bench: \(config.streams) streams × \(files.count) files (LS \(config.datasetSubset))")
 
-        // Pre-load N managers in parallel — each loads its own model copy.
-        // Model load is the dominant fixed cost (~10s with mlpackage compile);
-        // doing them in parallel saves wall time.
+        // Load CoreML models ONCE into a shared bundle, then initialize
+        // N managers off that bundle. Each manager allocates only its
+        // own per-stream state (~50 MB) rather than a fresh model copy
+        // (~1.5 GB). Memory footprint: O(1) for models + O(N) for state,
+        // down from O(N) total in the original MVP.
         let loadStart = Date()
+        let shared: SharedNemotronMultilingualModels
+        do {
+            shared = try await StreamingNemotronMultilingualAsrManager.preloadShared(from: modelDir)
+        } catch {
+            logger.error("Shared preload failed: \(error)")
+            return
+        }
         var managers: [StreamingNemotronMultilingualAsrManager] = []
         managers.reserveCapacity(config.streams)
         let langForLoad = config.language
-        let modelDirForLoad = modelDir
-        await withTaskGroup(of: StreamingNemotronMultilingualAsrManager?.self) { group in
-            for streamIdx in 0..<config.streams {
-                group.addTask {
-                    let mgr = StreamingNemotronMultilingualAsrManager()
-                    do {
-                        try await mgr.loadModels(from: modelDirForLoad)
-                        await mgr.setLanguage(langForLoad)
-                        return mgr
-                    } catch {
-                        print("Stream \(streamIdx) load failed: \(error)")
-                        return nil
-                    }
-                }
-            }
-            for await mgr in group {
-                if let m = mgr { managers.append(m) }
+        for streamIdx in 0..<config.streams {
+            let mgr = StreamingNemotronMultilingualAsrManager()
+            do {
+                try await mgr.loadFromShared(shared)
+                await mgr.setLanguage(langForLoad)
+                managers.append(mgr)
+            } catch {
+                print("Stream \(streamIdx) init failed: \(error)")
             }
         }
         guard managers.count == config.streams else {
-            logger.error("Only \(managers.count)/\(config.streams) managers loaded; aborting")
+            logger.error("Only \(managers.count)/\(config.streams) managers initialized; aborting")
             return
         }
         let loadTime = Date().timeIntervalSince(loadStart)
-        logger.info("Loaded \(managers.count) managers in \(String(format: "%.1f", loadTime))s")
+        logger.info("Loaded shared bundle + \(managers.count) managers in \(String(format: "%.1f", loadTime))s")
 
         // Distribute files across N work queues. Round-robin keeps the load
         // balanced for short clips with similar length (LS test-clean fits).
