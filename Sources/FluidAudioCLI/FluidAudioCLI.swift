@@ -136,7 +136,7 @@ struct FluidAudioCLI {
                 nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
                 nemotron-transcribe     Transcribe custom audio files with Nemotron
                 nemotron-multilingual-transcribe   Transcribe audio with Nemotron multilingual (local model path)
-                nemotron-multilingual-benchmark    Run Nemotron multilingual FLEURS benchmark (local model path)
+                nemotron-multilingual-benchmark    Run Nemotron multilingual benchmark on FLEURS / MCV-17 / MLS (local model path)
                 ctc-zh-cn-transcribe    Transcribe Mandarin Chinese audio with Parakeet CTC
                 ctc-zh-cn-benchmark     Run CTC zh-CN benchmark on THCHS-30 dataset
                 ja-benchmark            Run Japanese ASR benchmark on JSUT/Common Voice
