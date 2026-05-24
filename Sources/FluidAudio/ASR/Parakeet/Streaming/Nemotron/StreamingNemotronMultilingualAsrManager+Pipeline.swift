@@ -297,7 +297,19 @@ extension StreamingNemotronMultilingualAsrManager {
         // Activates when joint_noencproj_batched.mlpackage is loaded
         // AND either: (A) encoder emits encoder_proj OR (B) native
         // weights are available for the Swift-side projection.
-        let smartSpecEnabled = ProcessInfo.processInfo.environment["FLUIDAUDIO_ENABLE_SMART_SPECULATIVE"] != nil
+        //
+        // Default-on as of May 2026 (T3 confirmed K=4 at 1120ms is
+        // +2.0% non-overlapping, K=8 at 4480ms is +1.7% non-overlapping,
+        // both WER-neutral). Opt-out via FLUIDAUDIO_ENABLE_SMART_SPECULATIVE=0
+        // (or "false"). When the required assets aren't shipped, the path
+        // falls back transparently to the legacy inner loop regardless.
+        let smartSpecEnabled: Bool
+        if let v = ProcessInfo.processInfo.environment["FLUIDAUDIO_ENABLE_SMART_SPECULATIVE"] {
+            let lowered = v.lowercased()
+            smartSpecEnabled = !(lowered == "0" || lowered == "false" || lowered == "no")
+        } else {
+            smartSpecEnabled = true
+        }
         let useSwiftEncProj = (encoderProj == nil) && (self.nativeRnnt != nil)
         if smartSpecEnabled,
            let jointBatched = self.jointNoEncProjBatched,
@@ -951,7 +963,7 @@ extension StreamingNemotronMultilingualAsrManager {
         newTokens: inout [Int],
         tokenizer: NemotronMultilingualTokenizer
     ) async throws {
-        let K = 8
+        let K = self.jointNoEncProjBatchedK
         let blankIdx = config.blankIdx
 
         // Pre-allocate the batched encoder_proj slice buffer [1, K, 640].
@@ -1048,7 +1060,12 @@ extension StreamingNemotronMultilingualAsrManager {
                 "encoder_proj": MLFeatureValue(multiArray: encProjBatchBuf),
                 "decoder": MLFeatureValue(multiArray: decOut),
             ])
-            let jointOutput = try await jointBatched.prediction(from: jointInput)
+            let jointOutput: MLFeatureProvider
+            if let opts = jointNoEncProjBatchedPredictionOptions {
+                jointOutput = try await jointBatched.prediction(from: jointInput, options: opts)
+            } else {
+                jointOutput = try await jointBatched.prediction(from: jointInput)
+            }
             guard let logits = jointOutput.featureValue(for: "logits")?.multiArrayValue else {
                 throw ASRError.processingFailed("Speculative joint_noencproj_batched failed")
             }
