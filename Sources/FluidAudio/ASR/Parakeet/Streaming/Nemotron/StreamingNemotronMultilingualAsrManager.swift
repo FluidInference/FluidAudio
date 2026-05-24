@@ -61,6 +61,12 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// Used by the smarter speculative-blank decode path that fast-skips
     /// blank-streaks K-at-a-time.
     internal var jointNoEncProjBatched: MLModel?
+    /// K (speculative window width) read from jointNoEncProjBatched's
+    /// encoder_proj input shape at load time. The Swift inner loop must
+    /// always match the loaded mlpackage's K — hardcoding here would
+    /// shape-mismatch any non-K=8 build. Defaults to 8 (no-op fallback)
+    /// when the model isn't present.
+    internal var jointNoEncProjBatchedK: Int = 8
     /// Optional native-Accelerate RNN-T inner-loop replacement. When present,
     /// the per-token decoder + joint CoreML calls are replaced by pure-Swift
     /// vDSP/cblas forward (~5-10x fewer dispatch overhead per token). Loaded
@@ -121,6 +127,12 @@ public actor StreamingNemotronMultilingualAsrManager {
     internal var decoderJointPredictionOptions: MLPredictionOptions?
     internal var decoderJointArgmaxPredictionOptions: MLPredictionOptions?
     internal var decoderJointNoEncProjPredictionOptions: MLPredictionOptions?
+    /// Output backings for the smart-spec batched joint hot path.
+    /// runSpeculativeBlankDecodeV2 calls jointBatched.prediction() once per
+    /// K-frame window; pre-allocating the [1, K, 1, V] logits backing once
+    /// avoids per-call MLMultiArray allocation. Only populated when
+    /// jointNoEncProjBatched is loaded.
+    internal var jointNoEncProjBatchedPredictionOptions: MLPredictionOptions?
     /// Reusable per-frame encoder step buffer. Refilled in-place inside the
     /// inner RNN-T greedy loop instead of allocating a fresh [1, 1024, 1]
     /// every emitted token.
@@ -399,6 +411,18 @@ public actor StreamingNemotronMultilingualAsrManager {
             self.jointNoEncProjBatched = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
             logger.info("Compiled + loaded joint_noencproj_batched.mlpackage — smart speculative-blank path available")
         }
+        // Read K from the loaded model's encoder_proj input shape so the
+        // Swift hot loop always matches the asset (K=8 historically; K=4
+        // build under evaluation at 1120ms).
+        if let m = self.jointNoEncProjBatched,
+           let constraint = m.modelDescription.inputDescriptionsByName["encoder_proj"]?.multiArrayConstraint,
+           constraint.shape.count >= 2 {
+            let kFromModel = constraint.shape[1].intValue
+            if kFromModel > 0 {
+                self.jointNoEncProjBatchedK = kFromModel
+                logger.info("Smart-spec K = \(kFromModel) (from joint_noencproj_batched encoder_proj input shape)")
+            }
+        }
 
         // Optional native-Accelerate RNN-T inner loop. Loaded from
         // `<build>/native_weights/` (weights.bin + weights_index.json).
@@ -412,6 +436,43 @@ public actor StreamingNemotronMultilingualAsrManager {
                 logger.warning("Found native_weights/ but failed to initialize NativeRnntInner")
             }
         }
+
+        // Smart-speculative-blank load-time state report. Smart-spec is
+        // default-on as of May 2026 (T3 K=4 at 1120ms = +2.0%, K=8 at
+        // 4480ms = +1.7%, both A/B/A/B non-overlapping, WER-neutral).
+        // Honor explicit opt-out: env-var = "0"/"false"/"no" disables.
+        // Missing assets → transparent fallback to legacy inner loop.
+        let smartSpecEnvVar = ProcessInfo.processInfo.environment["FLUIDAUDIO_ENABLE_SMART_SPECULATIVE"]
+        let smartSpecExplicitlyDisabled: Bool = {
+            guard let v = smartSpecEnvVar?.lowercased() else { return false }
+            return v == "0" || v == "false" || v == "no"
+        }()
+        let smartSpecEnabledForLogging = !smartSpecExplicitlyDisabled
+        var smartSpecMissing: [String] = []
+        if self.jointNoEncProjBatched == nil {
+            smartSpecMissing.append("joint_noencproj_batched.mlpackage")
+        }
+        if self.nativeRnnt == nil {
+            smartSpecMissing.append("native_weights/")
+        }
+        if smartSpecExplicitlyDisabled {
+            logger.info("Smart-spec: explicitly disabled via FLUIDAUDIO_ENABLE_SMART_SPECULATIVE=\(smartSpecEnvVar ?? "")")
+        } else if smartSpecMissing.isEmpty {
+            logger.info("Smart-spec: enabled (default-on; assets present; K=\(self.jointNoEncProjBatchedK))")
+        } else {
+            // Default-on intent, but assets missing → legacy fallback.
+            // Warn only if the user explicitly opted IN with the env-var
+            // (they probably expected smart-spec to run); otherwise emit
+            // info because the operator may have intentionally trimmed
+            // the bundle.
+            let msg = "Smart-spec: assets missing (\(smartSpecMissing.joined(separator: ", "))); falling back to legacy inner loop"
+            if smartSpecEnvVar != nil {
+                logger.warning(msg)
+            } else {
+                logger.info(msg)
+            }
+        }
+        _ = smartSpecEnabledForLogging  // silence unused warning if introspected later
 
         // Load tokenizer with lang-tag filter set
         let tokenizerURL = directory.appendingPathComponent(ModelNames.NemotronMultilingualStreaming.tokenizer)
@@ -432,6 +493,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         self.decoderJointPredictionOptions = Self.makePredictionOptions(for: self.decoderJoint)
         self.decoderJointArgmaxPredictionOptions = Self.makePredictionOptions(for: self.decoderJointArgmax)
         self.decoderJointNoEncProjPredictionOptions = Self.makePredictionOptions(for: self.decoderJointNoEncProj)
+        self.jointNoEncProjBatchedPredictionOptions = Self.makePredictionOptions(for: self.jointNoEncProjBatched)
         // Reusable inner-loop step buffers ([1, encoder_dim, 1] and
         // [1, 1, joint_dim] for the B3 path).
         self.encoderStepBuf = try? MLMultiArray(shape: [1, NSNumber(value: config.encoderDim), 1], dataType: .float32)
