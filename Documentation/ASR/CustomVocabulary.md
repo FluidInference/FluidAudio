@@ -366,6 +366,40 @@ Frame 3:  log_prob[3][t₃] = -2.1
 
 All constants are defined in `ContextBiasingConstants.swift`.
 
+### Vocabulary-Size-Aware Tuning
+
+`minSimilarity` is the primary lever for the precision/recall trade-off,
+and the optimal value depends on **distractor density** — how many
+vocabulary terms are confusable with each other. The rescorer picks the
+threshold automatically based on vocabulary size:
+
+| Vocab size | `minSimilarity` | Rationale |
+|------------|-----------------|-----------|
+| ≤ 10 terms | 0.50 | Small vocabularies have low collision risk; permissive gate maximizes recall |
+| 11–100 terms | 0.55 | Medium vocabularies need a tighter gate to filter weak matches |
+| > 100 terms | 0.60 | Large vocabularies (e.g. drug lists with biotech distractors) require strict gating to suppress false-positive replacements between similar terms |
+
+Tuning was performed on three benchmarks after the blank-aware DP fix:
+
+- **Small (earnings22 KWS, ≤9 terms/file):** `cbw` sweep showed F-score
+  plateaus at `cbw ≈ 4.5`. Below 3.5 each step costs 1–5 TPs; above 4.5
+  the curve is flat.
+- **Large (FDA-approved-drugs KWS, 37–55 terms/file):** `minSimilarity`
+  peaks at 0.50–0.55 (TP=218, FP=0, F=96.0). The earlier 0.60 default
+  left 5 TPs on the table.
+- **Extra-large (FDA-extended, ~670 terms/file with 600+ Purple Book
+  biologic distractors that never appear in the audio):**
+  `minSimilarity=0.55` produced 33 FPs (precision 86.2%); raising to
+  0.60 cut FPs to 8 (precision 96.3%) at the cost of just 1 TP.
+
+`cbw` had no measurable effect on either large-vocab benchmark
+(precision was already ceiling-bound), so all three buckets converge
+on `cbw=4.5`.
+
+The thresholds, the size buckets (`largeVocabThreshold = 10`,
+`extraLargeVocabThreshold = 100`), and the dispatch logic live in
+`ContextBiasingConstants.rescorerConfig(forVocabSize:)`.
+
 ## Usage Example
 
 ```swift
