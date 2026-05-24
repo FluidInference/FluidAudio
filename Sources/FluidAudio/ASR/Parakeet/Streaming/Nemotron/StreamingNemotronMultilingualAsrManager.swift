@@ -28,6 +28,20 @@ public actor StreamingNemotronMultilingualAsrManager {
     internal var encoder: MLModel?
     internal var decoder: MLModel?
     internal var joint: MLModel?
+    /// Optional fused decoder+joint mlpackage. If non-nil, the RNN-T inner
+    /// loop uses this single call instead of separate decoder + joint calls
+    /// (Tier B1 optimization, expected +5-12% RTFx by halving per-token CoreML
+    /// invocations).
+    internal var decoderJoint: MLModel?
+    /// Optional triple-fused decoder+joint+argmax mlpackage. If non-nil,
+    /// supersedes decoderJoint AND eliminates the logit-tensor transfer + Swift
+    /// argmax (Tier B2 extension, additional +1-3% RTFx).
+    /// Returns `token_id (int32)` directly instead of full vocab logits.
+    internal var decoderJointArgmax: MLModel?
+    /// Optional B3+B1 fused decoder+joint-without-encproj mlpackage. Pairs with
+    /// the B3 encoder (encprojsplit converter) which emits `encoder_proj` as a
+    /// 6th output. Takes precedence over decoderJoint when present.
+    internal var decoderJointNoEncProj: MLModel?
 
     // Components
     private let audioConverter = AudioConverter()
@@ -36,8 +50,12 @@ public actor StreamingNemotronMultilingualAsrManager {
     // Configuration (loaded from metadata.json)
     public private(set) var config: NemotronMultilingualStreamingConfig
 
-    // Audio Buffer
+    // Audio Buffer + read offset. Using an offset instead of removeFirst()
+    // avoids O(N²) memmove cost when processing very long files (the buffer
+    // holds the whole input until compacted; removeFirst would shift
+    // gigabytes per chunk). The offset is reset by periodic compaction.
     private var audioBuffer: [Float] = []
+    private var audioBufferOffset: Int = 0
 
     // Accumulated token IDs (raw, including any lang-tag tokens)
     internal var accumulatedTokenIds: [Int] = []
@@ -50,8 +68,53 @@ public actor StreamingNemotronMultilingualAsrManager {
     internal var cacheTime: MLMultiArray?
     internal var cacheLen: MLMultiArray?
 
+    /// MLState for stateful encoder (cache_channel + cache_time live in ANE
+    /// memory across calls). Stored as `Any?` because `MLState` is only
+    /// available on macOS 15+/iOS 18+; cast at use sites guarded by
+    /// `#available`. Non-nil only if the loaded encoder was traced with
+    /// ct.StateType for those tensors (see
+    /// `convert_nemotron_multilingual_mlstate.py`).
+    internal var encoderState: Any?
+
     // Mel cache (last 9 frames from previous chunk)
     internal var melCache: MLMultiArray?
+
+    /// Pipelining: mel for the next chunk, pre-computed by the previous
+    /// processChunk while the encoder was running on ANE. Hides preprocessor
+    /// latency from every chunk after the first.
+    internal var prefetchedMel: MLMultiArray?
+
+    /// Pre-allocated output-backing buffers passed via
+    /// `MLPredictionOptions.outputBackings` so each CoreML prediction writes
+    /// in-place into a stable buffer instead of allocating a fresh
+    /// MLMultiArray every call. Saves ~5 MB of allocation per encoder call
+    /// and ~4 KB per inner-loop joint/decoder_joint call.
+    internal var encoderPredictionOptions: MLPredictionOptions?
+    internal var decoderPredictionOptions: MLPredictionOptions?
+    internal var jointPredictionOptions: MLPredictionOptions?
+    internal var decoderJointPredictionOptions: MLPredictionOptions?
+    internal var decoderJointArgmaxPredictionOptions: MLPredictionOptions?
+    internal var decoderJointNoEncProjPredictionOptions: MLPredictionOptions?
+    /// Reusable per-frame encoder step buffer. Refilled in-place inside the
+    /// inner RNN-T greedy loop instead of allocating a fresh [1, 1024, 1]
+    /// every emitted token.
+    internal var encoderStepBuf: MLMultiArray?
+    internal var encoderProjStepBuf: MLMultiArray?
+
+    // Triple-stage pipelining: encoder[t+1] dispatched concurrent with
+    // decode[t]. These are the prefetched encoder outputs (and the caches
+    // it produced) — set during processChunk(t), consumed by processChunk(t+1).
+    internal var prefetchedEncoded: MLMultiArray?
+    internal var prefetchedEncoderProj: MLMultiArray?
+    internal var prefetchedCacheChannel: MLMultiArray?
+    internal var prefetchedCacheTime: MLMultiArray?
+    internal var prefetchedCacheLen: MLMultiArray?
+
+    // Per-stage timing accumulators (seconds). Reset on `reset()`.
+    public internal(set) var prepNanos: UInt64 = 0
+    public internal(set) var encNanos: UInt64 = 0
+    public internal(set) var decNanos: UInt64 = 0
+    public internal(set) var chunkCount: Int = 0
 
     // Decoder LSTM states
     internal var hState: MLMultiArray?
@@ -78,6 +141,12 @@ public actor StreamingNemotronMultilingualAsrManager {
 
     // Stats
     internal var processedChunks: Int = 0
+
+    // Diagnostic stats from last `finish()` call (token count + detected language
+    // captured before state is cleared). Used by benchmark `--dump-samples`.
+    private var lastFinishTokenCount: Int = 0
+    private var lastFinishDetectedLanguage: String?
+    private var lastFinishProcessedChunks: Int = 0
 
     public private(set) var mlConfiguration: MLModelConfiguration
 
@@ -185,6 +254,14 @@ public actor StreamingNemotronMultilingualAsrManager {
             uncompiled: ModelNames.NemotronMultilingualStreaming.encoderPackage
         )
         self.encoder = try await MLModel.load(contentsOf: encoderURL, configuration: mlConfiguration)
+        // Detect stateful encoder (cache_channel/cache_time as MLState rather
+        // than I/O tensors). makeState() returns a fresh zero-initialized state.
+        if #available(macOS 15, iOS 18, *) {
+            if let enc = self.encoder, !enc.modelDescription.stateDescriptionsByName.isEmpty {
+                self.encoderState = enc.makeState()
+                logger.info("Loaded stateful encoder (MLState cache) — using ANE-resident cache path")
+            }
+        }
 
         let decoderURL = try await locateModelBundle(
             in: directory,
@@ -200,6 +277,50 @@ public actor StreamingNemotronMultilingualAsrManager {
         )
         self.joint = try await MLModel.load(contentsOf: jointURL, configuration: mlConfiguration)
 
+        // Optional triple-fused decoder+joint+argmax mlpackage (Tier B2).
+        // Takes precedence over the dec+joint fusion below if present.
+        let argmaxCompiledURL = directory.appendingPathComponent("decoder_joint_argmax.mlmodelc")
+        let argmaxPackageURL = directory.appendingPathComponent("decoder_joint_argmax.mlpackage")
+        if FileManager.default.fileExists(atPath: argmaxCompiledURL.path) {
+            self.decoderJointArgmax = try await MLModel.load(contentsOf: argmaxCompiledURL, configuration: mlConfiguration)
+            logger.info("Loaded fused decoder_joint_argmax.mlmodelc — using triple-fusion inner-loop path")
+        } else if FileManager.default.fileExists(atPath: argmaxPackageURL.path) {
+            let tempCompiledURL = try await MLModel.compileModel(at: argmaxPackageURL)
+            self.decoderJointArgmax = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
+            logger.info("Compiled + loaded fused decoder_joint_argmax.mlpackage — using triple-fusion inner-loop path")
+        }
+
+        // Optional B3+B1 fused decoder+joint-without-encproj mlpackage. Takes
+        // precedence over plain B1 decoder_joint when present (requires the
+        // encoder to also emit `encoder_proj`).
+        if self.decoderJointArgmax == nil {
+            let noEncProjCompiledURL = directory.appendingPathComponent("decoder_joint_noencproj.mlmodelc")
+            let noEncProjPackageURL = directory.appendingPathComponent("decoder_joint_noencproj.mlpackage")
+            if FileManager.default.fileExists(atPath: noEncProjCompiledURL.path) {
+                self.decoderJointNoEncProj = try await MLModel.load(contentsOf: noEncProjCompiledURL, configuration: mlConfiguration)
+                logger.info("Loaded fused decoder_joint_noencproj.mlmodelc — using B3+B1 inner-loop path")
+            } else if FileManager.default.fileExists(atPath: noEncProjPackageURL.path) {
+                let tempCompiledURL = try await MLModel.compileModel(at: noEncProjPackageURL)
+                self.decoderJointNoEncProj = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
+                logger.info("Compiled + loaded fused decoder_joint_noencproj.mlpackage — using B3+B1 inner-loop path")
+            }
+        }
+
+        // Optional fused decoder+joint mlpackage (Tier B1 optimization).
+        // Used if triple-fusion and B3+B1 are not present.
+        if self.decoderJointArgmax == nil && self.decoderJointNoEncProj == nil {
+            let fusedCompiledURL = directory.appendingPathComponent("decoder_joint.mlmodelc")
+            let fusedPackageURL = directory.appendingPathComponent("decoder_joint.mlpackage")
+            if FileManager.default.fileExists(atPath: fusedCompiledURL.path) {
+                self.decoderJoint = try await MLModel.load(contentsOf: fusedCompiledURL, configuration: mlConfiguration)
+                logger.info("Loaded fused decoder_joint.mlmodelc — using merged inner-loop path")
+            } else if FileManager.default.fileExists(atPath: fusedPackageURL.path) {
+                let tempCompiledURL = try await MLModel.compileModel(at: fusedPackageURL)
+                self.decoderJoint = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
+                logger.info("Compiled + loaded fused decoder_joint.mlpackage — using merged inner-loop path")
+            }
+        }
+
         // Load tokenizer with lang-tag filter set
         let tokenizerURL = directory.appendingPathComponent(ModelNames.NemotronMultilingualStreaming.tokenizer)
         self.tokenizer = try NemotronMultilingualTokenizer(
@@ -210,9 +331,52 @@ public actor StreamingNemotronMultilingualAsrManager {
         // Initialize states
         try resetStates()
 
+        // Build output-backing prediction options for each model. All output
+        // shapes are static, so we can allocate once and pass via
+        // MLPredictionOptions.outputBackings to skip per-call allocation.
+        self.encoderPredictionOptions = Self.makePredictionOptions(for: self.encoder)
+        self.decoderPredictionOptions = Self.makePredictionOptions(for: self.decoder)
+        self.jointPredictionOptions = Self.makePredictionOptions(for: self.joint)
+        self.decoderJointPredictionOptions = Self.makePredictionOptions(for: self.decoderJoint)
+        self.decoderJointArgmaxPredictionOptions = Self.makePredictionOptions(for: self.decoderJointArgmax)
+        self.decoderJointNoEncProjPredictionOptions = Self.makePredictionOptions(for: self.decoderJointNoEncProj)
+        // Reusable inner-loop step buffers ([1, encoder_dim, 1] and
+        // [1, 1, joint_dim] for the B3 path).
+        self.encoderStepBuf = try? MLMultiArray(shape: [1, NSNumber(value: config.encoderDim), 1], dataType: .float32)
+        self.encoderProjStepBuf = try? MLMultiArray(shape: [1, 1, NSNumber(value: 640)], dataType: .float32)
+
         logger.info(
             "Nemotron multilingual models loaded successfully (\(config.chunkMs)ms chunks)."
         )
+    }
+
+    /// Build an `MLPredictionOptions` with pre-allocated output backings.
+    /// IMPORTANT: skip outputs that loop back as inputs to the next call
+    /// (decoder/joint LSTM state, encoder cache state) — sharing those
+    /// backings across calls causes the model to overwrite the value
+    /// before the next call has finished reading it. Causes catastrophic
+    /// WER regression. Only backing-allocate "one-shot" outputs.
+    private static let loopbackOutputNames: Set<String> = [
+        "h_out", "c_out",
+        "cache_channel_out", "cache_time_out", "cache_len_out",
+        "mel_cache_out",
+    ]
+
+    private static func makePredictionOptions(for model: MLModel?) -> MLPredictionOptions? {
+        guard let model = model else { return nil }
+        var backings: [String: Any] = [:]
+        for (name, desc) in model.modelDescription.outputDescriptionsByName {
+            if loopbackOutputNames.contains(name) { continue }
+            guard let cons = desc.multiArrayConstraint else { continue }
+            let shape = cons.shape.map { $0 }
+            if shape.contains(where: { $0.intValue <= 0 }) { continue }
+            guard let arr = try? MLMultiArray(shape: shape, dataType: cons.dataType) else { continue }
+            backings[name] = arr
+        }
+        guard !backings.isEmpty else { return nil }
+        let options = MLPredictionOptions()
+        options.outputBackings = backings
+        return options
     }
 
     private func locateModelBundle(in directory: URL, compiled: String, uncompiled: String) async throws -> URL {
@@ -260,6 +424,7 @@ public actor StreamingNemotronMultilingualAsrManager {
             accumulatedTokenIds: &accumulatedTokenIds,
             processedChunks: &processedChunks
         )
+        audioBufferOffset = 0
         firstDetectedLanguage = nil
         do {
             try resetStates()
@@ -348,6 +513,13 @@ public actor StreamingNemotronMultilingualAsrManager {
         cacheChannel = caches.channel
         cacheTime = caches.time
         cacheLen = caches.len
+        // Stateful encoder: a fresh state has zero-initialized buffers, which
+        // matches what createInitialCaches produces. Recreate it on reset.
+        if #available(macOS 15, iOS 18, *) {
+            if let enc = encoder, !enc.modelDescription.stateDescriptionsByName.isEmpty {
+                encoderState = enc.makeState()
+            }
+        }
         // Seed cache_len with 1 instead of 0 so the encoder's
         // `ios17.slice_by_index` op never sees a zero-length slice, which would
         // fail CoreML shape inference and skip MPSGraph caching on every
@@ -357,6 +529,13 @@ public actor StreamingNemotronMultilingualAsrManager {
 
         // Mel cache (will be initialized on first chunk)
         melCache = nil
+        // Drop any prefetched mel/encoder outputs from a previous session
+        prefetchedMel = nil
+        prefetchedEncoded = nil
+        prefetchedEncoderProj = nil
+        prefetchedCacheChannel = nil
+        prefetchedCacheTime = nil
+        prefetchedCacheLen = nil
 
         // Decoder LSTM states
         hState = try EncoderCacheManager.createZeroArray(
@@ -385,12 +564,31 @@ public actor StreamingNemotronMultilingualAsrManager {
         let samples = try audioConverter.resampleBuffer(audioBuffer)
         self.audioBuffer.append(contentsOf: samples)
 
-        while self.audioBuffer.count >= config.chunkSamples {
-            let chunk = Array(self.audioBuffer.prefix(config.chunkSamples))
-            try await processChunk(chunk)
-            // Recheck buffer count after await to handle actor reentrancy
-            let samplesToRemove = min(config.chunkSamples, self.audioBuffer.count)
-            self.audioBuffer.removeFirst(samplesToRemove)
+        let chunkSamples = config.chunkSamples
+        // Drain the buffer using offset arithmetic instead of removeFirst —
+        // removeFirst would memmove the entire remaining buffer on every
+        // chunk, giving O(N²) cost for long files (3.6 GB shifted 51k times
+        // for a 16h file).
+        while (self.audioBuffer.count - self.audioBufferOffset) >= chunkSamples {
+            let chunkStart = self.audioBufferOffset
+            let chunkEnd = chunkStart + chunkSamples
+            let chunk = Array(self.audioBuffer[chunkStart..<chunkEnd])
+            // Pipelining: peek at the NEXT chunk for preprocessor[t+1] on CPU
+            // concurrent with encoder[t] on ANE.
+            let nextStart = chunkEnd
+            let nextEnd = nextStart + chunkSamples
+            let nextChunkSamples: [Float]? = (self.audioBuffer.count - nextStart) >= chunkSamples
+                ? Array(self.audioBuffer[nextStart..<nextEnd])
+                : nil
+            try await processChunk(chunk, nextChunkSamples: nextChunkSamples)
+            self.audioBufferOffset += chunkSamples
+
+            // Periodic compaction: once we've consumed enough prefix, do a
+            // single memmove to drop it. Amortized O(1) per chunk.
+            if self.audioBufferOffset > 16 * chunkSamples {
+                self.audioBuffer.removeFirst(self.audioBufferOffset)
+                self.audioBufferOffset = 0
+            }
         }
 
         return ""
@@ -409,24 +607,51 @@ public actor StreamingNemotronMultilingualAsrManager {
             throw ASRError.notInitialized
         }
 
-        if !audioBuffer.isEmpty {
-            let paddingNeeded = config.chunkSamples - audioBuffer.count
+        let remaining = audioBuffer.count - audioBufferOffset
+        if remaining > 0 {
+            let paddingNeeded = config.chunkSamples - remaining
             if paddingNeeded > 0 {
                 audioBuffer.append(contentsOf: Array(repeating: 0.0, count: paddingNeeded))
             }
 
-            let chunk = Array(audioBuffer.prefix(config.chunkSamples))
+            let chunkStart = audioBufferOffset
+            let chunkEnd = chunkStart + config.chunkSamples
+            let chunk = Array(audioBuffer[chunkStart..<chunkEnd])
             try await processChunk(chunk)
             audioBuffer.removeAll()
+            audioBufferOffset = 0
         }
 
         let decoded = tokenizer.decode(ids: accumulatedTokenIds)
         if firstDetectedLanguage == nil {
             firstDetectedLanguage = decoded.detectedLanguage
         }
+        // Capture diagnostic stats before we clear state.
+        lastFinishTokenCount = accumulatedTokenIds.count
+        lastFinishDetectedLanguage = firstDetectedLanguage ?? decoded.detectedLanguage
+        lastFinishProcessedChunks = processedChunks
         accumulatedTokenIds.removeAll()
 
+        // TEMP profiling: per-stage breakdown to identify the bottleneck.
+        if chunkCount > 0 {
+            let prepMs = Double(prepNanos) / 1_000_000.0
+            let encMs = Double(encNanos) / 1_000_000.0
+            let decMs = Double(decNanos) / 1_000_000.0
+            let totalMs = prepMs + encMs + decMs
+            let perChunk = totalMs / Double(chunkCount)
+            FileHandle.standardError.write(Data("[PROFILE] chunks=\(chunkCount) prep=\(String(format: "%.0f", prepMs))ms enc=\(String(format: "%.0f", encMs))ms dec=\(String(format: "%.0f", decMs))ms total=\(String(format: "%.0f", totalMs))ms per_chunk=\(String(format: "%.2f", perChunk))ms\n".utf8))
+        }
+
         return decoded.text
+    }
+
+    /// Diagnostic stats captured at the most recent `finish()` call.
+    /// `tokenCount` is the number of raw token ids accumulated (including any
+    /// lang-tag tokens). `detectedLanguage` is the first lang-tag piece seen
+    /// (e.g. "es-419") or nil if none. `processedChunks` is how many chunks
+    /// were fed through the encoder for that session.
+    public func lastDecodeStats() -> (tokenCount: Int, detectedLanguage: String?, processedChunks: Int) {
+        return (lastFinishTokenCount, lastFinishDetectedLanguage, lastFinishProcessedChunks)
     }
 
     /// Get current partial transcript without finishing
