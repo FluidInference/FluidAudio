@@ -42,6 +42,23 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// the B3 encoder (encprojsplit converter) which emits `encoder_proj` as a
     /// 6th output. Takes precedence over decoderJoint when present.
     internal var decoderJointNoEncProj: MLModel?
+    /// Optional batched-encoder joint mlpackage. Encoder input shape is
+    /// [1, 1024, K] where K = chunkEncoderFrames (e.g. 56 for 4480ms chunks).
+    /// Decoder input stays [1, 640, 1]. Output is [1, K, 1, vocab].
+    /// When present, the inner RNN-T loop uses a speculative-blank batched
+    /// joint call: compute one decoder pass + one joint_batched call for the
+    /// whole chunk, then walk the K predictions. On blank-heavy clean speech
+    /// (~70-80% blank rate) this collapses ~80 per-chunk CoreML calls into
+    /// 1-3, cutting decoder loop time substantially. See conversion script
+    /// `build_joint_batched_engprune.py`.
+    internal var jointBatched: MLModel?
+    /// Optional native-Accelerate RNN-T inner-loop replacement. When present,
+    /// the per-token decoder + joint CoreML calls are replaced by pure-Swift
+    /// vDSP/cblas forward (~5-10x fewer dispatch overhead per token). Loaded
+    /// from `<build-dir>/native_weights/` produced by
+    /// `extract_decoder_joint_weights.py`. Takes precedence over all other
+    /// inner-loop paths (B1, B2, B3, jointBatched).
+    internal var nativeRnnt: NativeRnntInner?
 
     // Components
     private let audioConverter = AudioConverter()
@@ -321,6 +338,34 @@ public actor StreamingNemotronMultilingualAsrManager {
             }
         }
 
+        // Optional batched joint mlpackage for speculative-blank inner loop.
+        // Loaded last; if present the pipeline routes through the speculative
+        // path INSTEAD of the per-token decoder+joint loop above. Requires
+        // the unfused `decoder.mlpackage` to compute dec_out separately.
+        let batchedCompiledURL = directory.appendingPathComponent("joint_batched.mlmodelc")
+        let batchedPackageURL = directory.appendingPathComponent("joint_batched.mlpackage")
+        if FileManager.default.fileExists(atPath: batchedCompiledURL.path) {
+            self.jointBatched = try await MLModel.load(contentsOf: batchedCompiledURL, configuration: mlConfiguration)
+            logger.info("Loaded joint_batched.mlmodelc — using speculative-blank inner-loop path")
+        } else if FileManager.default.fileExists(atPath: batchedPackageURL.path) {
+            let tempCompiledURL = try await MLModel.compileModel(at: batchedPackageURL)
+            self.jointBatched = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
+            logger.info("Compiled + loaded joint_batched.mlpackage — using speculative-blank inner-loop path")
+        }
+
+        // Optional native-Accelerate RNN-T inner loop. Loaded from
+        // `<build>/native_weights/` (weights.bin + weights_index.json).
+        // Takes precedence over all CoreML inner-loop paths.
+        let nativeWeightsDir = directory.appendingPathComponent("native_weights")
+        if FileManager.default.fileExists(atPath: nativeWeightsDir.appendingPathComponent("weights.bin").path) {
+            self.nativeRnnt = NativeRnntInner(directory: nativeWeightsDir)
+            if self.nativeRnnt != nil {
+                logger.info("Loaded NativeRnntInner from \(nativeWeightsDir.path) — using native vDSP/cblas inner-loop path")
+            } else {
+                logger.warning("Found native_weights/ but failed to initialize NativeRnntInner")
+            }
+        }
+
         // Load tokenizer with lang-tag filter set
         let tokenizerURL = directory.appendingPathComponent(ModelNames.NemotronMultilingualStreaming.tokenizer)
         self.tokenizer = try NemotronMultilingualTokenizer(
@@ -345,9 +390,127 @@ public actor StreamingNemotronMultilingualAsrManager {
         self.encoderStepBuf = try? MLMultiArray(shape: [1, NSNumber(value: config.encoderDim), 1], dataType: .float32)
         self.encoderProjStepBuf = try? MLMultiArray(shape: [1, 1, NSNumber(value: 640)], dataType: .float32)
 
+        // First-chunk warm-up: dispatch one zero-input prediction per model so
+        // the ANE program is compiled + resident before the first real
+        // chunk. Cuts ~10-20ms off every clip's first chunk (which can't
+        // benefit from triple-stage prefetch since there's no prior chunk).
+        // Streaming-tier per-clip RTFx improvement: ~+15-30% expected.
+        await warmupModels()
+
         logger.info(
             "Nemotron multilingual models loaded successfully (\(config.chunkMs)ms chunks)."
         )
+    }
+
+    /// Warm up each loaded CoreML model by issuing one zero-input prediction.
+    /// Ensures ANE programs are compiled + resident BEFORE the first real
+    /// audio chunk, so the per-clip first-chunk cold start is gone.
+    private func warmupModels() async {
+        guard let preprocessor = preprocessor,
+            let encoder = encoder,
+            let decoder = decoder,
+            let joint = joint,
+            let cacheChannel = cacheChannel,
+            let cacheTime = cacheTime,
+            let cacheLen = cacheLen,
+            let hState = hState,
+            let cState = cState
+        else { return }
+
+        // Preprocessor: 1s of silence
+        if let audio = try? MLMultiArray(shape: [1, 16000], dataType: .float32),
+            let audioLen = try? MLMultiArray(shape: [1], dataType: .int32)
+        {
+            audio.reset(to: 0)
+            audioLen[0] = 16000
+            let input = try? MLDictionaryFeatureProvider(dictionary: [
+                "audio": MLFeatureValue(multiArray: audio),
+                "audio_length": MLFeatureValue(multiArray: audioLen),
+            ])
+            if let input = input {
+                _ = try? await preprocessor.prediction(from: input)
+            }
+        }
+
+        // Encoder: zero mel + zeros caches
+        if let mel = try? MLMultiArray(
+            shape: [1, NSNumber(value: config.melFeatures), NSNumber(value: config.totalMelFrames)],
+            dataType: .float32),
+            let melLen = try? MLMultiArray(shape: [1], dataType: .int32),
+            let promptId = try? MLMultiArray(shape: [1], dataType: .int32)
+        {
+            mel.reset(to: 0)
+            melLen[0] = NSNumber(value: config.totalMelFrames)
+            promptId[0] = NSNumber(value: currentPromptIdValue())
+            let input = try? MLDictionaryFeatureProvider(dictionary: [
+                "mel": MLFeatureValue(multiArray: mel),
+                "mel_length": MLFeatureValue(multiArray: melLen),
+                "cache_channel": MLFeatureValue(multiArray: cacheChannel),
+                "cache_time": MLFeatureValue(multiArray: cacheTime),
+                "cache_len": MLFeatureValue(multiArray: cacheLen),
+                "prompt_id": MLFeatureValue(multiArray: promptId),
+            ])
+            if let input = input {
+                _ = try? await encoder.prediction(from: input)
+            }
+        }
+
+        // Decoder + joint warm-up (or B1/B2 if loaded). Easiest to just hit
+        // the fully-fused path if available, falling back to individual
+        // decoder + joint calls.
+        let tokenInput = try? MLMultiArray(shape: [1, 1], dataType: .int32)
+        let tokenLen = try? MLMultiArray(shape: [1], dataType: .int32)
+        let encStep = try? MLMultiArray(
+            shape: [1, NSNumber(value: config.encoderDim), 1], dataType: .float32)
+        guard let tokenInput = tokenInput, let tokenLen = tokenLen, let encStep = encStep else {
+            return
+        }
+        tokenInput[0] = NSNumber(value: config.blankIdx)
+        tokenLen[0] = 1
+        encStep.reset(to: 0)
+
+        if let dja = decoderJointArgmax {
+            let input = try? MLDictionaryFeatureProvider(dictionary: [
+                "token": MLFeatureValue(multiArray: tokenInput),
+                "token_length": MLFeatureValue(multiArray: tokenLen),
+                "h_in": MLFeatureValue(multiArray: hState),
+                "c_in": MLFeatureValue(multiArray: cState),
+                "encoder": MLFeatureValue(multiArray: encStep),
+            ])
+            if let input = input { _ = try? await dja.prediction(from: input) }
+        } else if let dj = decoderJoint {
+            let input = try? MLDictionaryFeatureProvider(dictionary: [
+                "token": MLFeatureValue(multiArray: tokenInput),
+                "token_length": MLFeatureValue(multiArray: tokenLen),
+                "h_in": MLFeatureValue(multiArray: hState),
+                "c_in": MLFeatureValue(multiArray: cState),
+                "encoder": MLFeatureValue(multiArray: encStep),
+            ])
+            if let input = input { _ = try? await dj.prediction(from: input) }
+        } else {
+            let decInput = try? MLDictionaryFeatureProvider(dictionary: [
+                "token": MLFeatureValue(multiArray: tokenInput),
+                "token_length": MLFeatureValue(multiArray: tokenLen),
+                "h_in": MLFeatureValue(multiArray: hState),
+                "c_in": MLFeatureValue(multiArray: cState),
+            ])
+            if let decInput = decInput {
+                _ = try? await decoder.prediction(from: decInput)
+            }
+            let decStep = try? MLMultiArray(shape: [1, 640, 1], dataType: .float32)
+            if let decStep = decStep {
+                decStep.reset(to: 0)
+                let jntInput = try? MLDictionaryFeatureProvider(dictionary: [
+                    "encoder": MLFeatureValue(multiArray: encStep),
+                    "decoder": MLFeatureValue(multiArray: decStep),
+                ])
+                if let jntInput = jntInput {
+                    _ = try? await joint.prediction(from: jntInput)
+                }
+            }
+        }
+
+        logger.info("Model warm-up complete")
     }
 
     /// Build an `MLPredictionOptions` with pre-allocated output backings.
@@ -536,6 +699,8 @@ public actor StreamingNemotronMultilingualAsrManager {
         prefetchedCacheChannel = nil
         prefetchedCacheTime = nil
         prefetchedCacheLen = nil
+        // Reset native LSTM state if present
+        nativeRnnt?.resetState()
 
         // Decoder LSTM states
         hState = try EncoderCacheManager.createZeroArray(

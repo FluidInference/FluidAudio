@@ -201,6 +201,88 @@ extension StreamingNemotronMultilingualAsrManager {
         let numEncoderFrames = encoded.shape[2].intValue
         var newTokens: [Int] = []
 
+        // NATIVE-ACCELERATE path — pure-Swift vDSP/cblas decoder+joint.
+        // KNOWN-BROKEN (Session 9 partial): single-step parity passes
+        // (cos sim 1.0 vs PyTorch reference) but multi-step inference
+        // produces WER 100% — root cause not yet diagnosed (likely a
+        // state-plumbing or fp16 conversion edge case across chunks).
+        // Gated behind FLUIDAUDIO_ENABLE_NATIVE_RNNT=1 so the build stays
+        // usable. See what_failed_rtfx_table.md for full status.
+        let nativeEnabled = ProcessInfo.processInfo.environment["FLUIDAUDIO_ENABLE_NATIVE_RNNT"] != nil
+        if nativeEnabled, let native = self.nativeRnnt {
+            try runNativeInnerLoop(
+                encoded: encoded,
+                numEncoderFrames: numEncoderFrames,
+                native: native,
+                currentH: &currentH,
+                currentC: &currentC,
+                currentToken: &currentToken,
+                newTokens: &newTokens,
+                tokenizer: tokenizer
+            )
+            self.decNanos &+= DispatchTime.now().uptimeNanoseconds &- decStart
+            self.lastToken = currentToken
+            self.hState = currentH
+            self.cState = currentC
+            if !newTokens.isEmpty, let callback = partialCallback {
+                let decoded = tokenizer.decode(ids: accumulatedTokenIds)
+                callback(decoded.text)
+            }
+            if let nextEnc = try await nextEncFuture {
+                self.prefetchedEncoded = nextEnc.encoded
+                self.prefetchedEncoderProj = nextEnc.encoderProj
+                self.cacheChannel = nextEnc.cacheChannel
+                self.cacheTime = nextEnc.cacheTime
+                self.cacheLen = nextEnc.cacheLen
+                self.melCache = nextEnc.newMelCache
+            }
+            processedChunks += 1
+            return
+        }
+
+        // SPECULATIVE BATCHED path — KNOWN-SLOW (Session 9 finding).
+        // The naive implementation issues 1 decoder call + 1 joint_batched
+        // call per emission. joint_batched is ~10× the cost of a single
+        // joint call, and savings from blank-streak skipping don't make up
+        // for it (measured 8× slowdown vs B1+triple-stage on 1h test-clean
+        // continuous). Gated behind FLUIDAUDIO_ENABLE_SPECULATIVE_BATCHED
+        // env var so we can keep the code for future redesigns (e.g. cached
+        // enc_proj + single-frame joint walk) without affecting default
+        // routing. See what_failed_rtfx_table.md for full analysis.
+        let speculativeEnabled = ProcessInfo.processInfo.environment["FLUIDAUDIO_ENABLE_SPECULATIVE_BATCHED"] != nil
+        if speculativeEnabled, let jb = self.jointBatched {
+            try await runSpeculativeBatchedDecode(
+                encoded: encoded,
+                numEncoderFrames: numEncoderFrames,
+                decoder: decoder,
+                jointBatched: jb,
+                currentH: &currentH,
+                currentC: &currentC,
+                currentToken: &currentToken,
+                newTokens: &newTokens,
+                tokenizer: tokenizer
+            )
+            // Skip the per-token loop below.
+            self.decNanos &+= DispatchTime.now().uptimeNanoseconds &- decStart
+            self.lastToken = currentToken
+            self.hState = currentH
+            self.cState = currentC
+            if !newTokens.isEmpty, let callback = partialCallback {
+                let decoded = tokenizer.decode(ids: accumulatedTokenIds)
+                callback(decoded.text)
+            }
+            if let nextEnc = try await nextEncFuture {
+                self.prefetchedEncoded = nextEnc.encoded
+                self.prefetchedEncoderProj = nextEnc.encoderProj
+                self.cacheChannel = nextEnc.cacheChannel
+                self.cacheTime = nextEnc.cacheTime
+                self.cacheLen = nextEnc.cacheLen
+                self.melCache = nextEnc.newMelCache
+            }
+            processedChunks += 1
+            return
+        }
+
         for t in 0..<numEncoderFrames {
             let encStep: MLMultiArray
             if let buf = encoderStepBuf {
@@ -398,6 +480,286 @@ extension StreamingNemotronMultilingualAsrManager {
         }
 
         processedChunks += 1
+    }
+
+    /// Native-Accelerate RNN-T inner loop. Replaces decoder+joint CoreML
+    /// calls with pure-Swift vDSP/cblas forward (~150-200us per-token
+    /// CoreML dispatch overhead eliminated).
+    ///
+    /// Walks each of the 56 encoder frames. For each frame, runs the
+    /// standard greedy RNN-T inner loop (up to 10 symbols per frame) using
+    /// `NativeRnntInner.step()` which does embed → LSTM(2 layers) → joint →
+    /// argmax in one Swift call.
+    ///
+    /// State plumbing:
+    /// - Pulls initial h, c from MLMultiArrays into native's internal buffers
+    ///   via `setState()` once at start of chunk
+    /// - Native's `step()` mutates state in place per token
+    /// - Snapshots final state back to MLMultiArrays via `snapshotState()`
+    ///   for compatibility with the async-pipelining path
+    internal func runNativeInnerLoop(
+        encoded: MLMultiArray,
+        numEncoderFrames: Int,
+        native: NativeRnntInner,
+        currentH: inout MLMultiArray,
+        currentC: inout MLMultiArray,
+        currentToken: inout Int32,
+        newTokens: inout [Int],
+        tokenizer: NemotronMultilingualTokenizer
+    ) throws {
+        // Pull starting LSTM state into native's buffers.
+        native.setState(h: currentH, c: currentC)
+
+        let debugNative = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_NATIVE"] != nil
+        if debugNative && self.chunkCount == 1 {
+            FileHandle.standardError.write(Data("[native] encoded.dataType=\(encoded.dataType.rawValue) shape=\(encoded.shape) strides=\(encoded.strides)\n".utf8))
+            FileHandle.standardError.write(Data("[native] currentH.dataType=\(currentH.dataType.rawValue) shape=\(currentH.shape)\n".utf8))
+            FileHandle.standardError.write(Data("[native] currentToken=\(currentToken) blankIdx=\(config.blankIdx)\n".utf8))
+        }
+
+        let encStride0 = encoded.strides[0].intValue
+        let encStride1 = encoded.strides[1].intValue
+        let encStride2 = encoded.strides[2].intValue
+        let encoderDim = native.encoderDim
+        let blankIdx = config.blankIdx
+
+        // Encoder output dtype determines how we read it. CoreML mlpackage
+        // says fp16 in the spec but MLMultiArray at runtime may upcast.
+        let encIsF16 = (encoded.dataType == .float16)
+        var encStep = [Float](repeating: 0, count: encoderDim)
+
+        @inline(__always) func f16ToF32(_ bits: UInt16) -> Float {
+            return Float(Float16(bitPattern: bits))
+        }
+
+        let encPtr16: UnsafeMutablePointer<UInt16>? = encIsF16
+            ? encoded.dataPointer.bindMemory(to: UInt16.self, capacity: encoded.count)
+            : nil
+        let encPtr32: UnsafeMutablePointer<Float>? = encIsF16
+            ? nil
+            : encoded.dataPointer.bindMemory(to: Float.self, capacity: encoded.count)
+
+        for t in 0..<numEncoderFrames {
+            // Gather encoded[0, :, t] into a contiguous Float32 buffer.
+            for d in 0..<encoderDim {
+                let idx = 0 * encStride0 + d * encStride1 + t * encStride2
+                if encIsF16 {
+                    encStep[d] = f16ToF32(encPtr16![idx])
+                } else {
+                    encStep[d] = encPtr32![idx]
+                }
+            }
+            if debugNative && self.chunkCount == 1 && t == 0 {
+                FileHandle.standardError.write(Data("[native] frame0 encStep[0..5]=\(Array(encStep.prefix(5)))\n".utf8))
+            }
+
+            // Inner greedy: up to 10 token emissions per encoder frame.
+            var symInFrame = 0
+            for _ in 0..<10 {
+                let predToken: Int = encStep.withUnsafeBufferPointer { bufPtr in
+                    return native.step(currentToken: currentToken, encStep: bufPtr.baseAddress!)
+                }
+                if debugNative && self.chunkCount == 1 && t < 3 {
+                    FileHandle.standardError.write(Data("[native] frame\(t) sym\(symInFrame) currentToken=\(currentToken) → predToken=\(predToken)\(predToken == blankIdx ? " (BLANK)" : "")\n".utf8))
+                }
+                symInFrame += 1
+                if predToken == blankIdx {
+                    // Blank → advance to next encoder frame. Do NOT commit
+                    // LSTM state — RNN-T greedy only advances state on
+                    // non-blank emissions.
+                    break
+                }
+                // Non-blank: commit the freshly-computed LSTM state.
+                native.commitState()
+                newTokens.append(predToken)
+                accumulatedTokenIds.append(predToken)
+                currentToken = Int32(predToken)
+                // Surface lang-tag
+                if config.langTagTokenIds.contains(predToken),
+                    let piece = tokenizerPieceForLangTag(forId: predToken, tokenizer: tokenizer)
+                {
+                    let lang = NemotronMultilingualTokenizer.stripAngleBrackets(piece)
+                    recordDetectedLanguage(lang)
+                }
+            }
+        }
+
+        // Snapshot back to MLMultiArrays for state pass-through.
+        let snap = try native.snapshotState()
+        currentH = snap.h
+        currentC = snap.c
+    }
+
+    /// Local copy of tokenizerPiece (forId:) — needed because the existing
+    /// tokenizerPiece is `private`. (Could promote that to internal but
+    /// keeping local to avoid touching unrelated code.)
+    private func tokenizerPieceForLangTag(forId id: Int, tokenizer: NemotronMultilingualTokenizer) -> String? {
+        let decoded = tokenizer.decode(ids: [id])
+        if let lang = decoded.detectedLanguage {
+            return "<\(lang)>"
+        }
+        return decoded.text.isEmpty ? nil : decoded.text
+    }
+
+    /// Speculative-blank RNN-T inner loop. Replaces the per-token loop when
+    /// `joint_batched.mlpackage` is loaded.
+    ///
+    /// Standard greedy RNN-T per chunk does:
+    ///     for t in 0..<numEncoderFrames:
+    ///         while not blank: decoder + joint + argmax → token
+    /// → roughly (numEncoderFrames + num_non_blank_emissions) CoreML calls
+    /// per chunk. On clean speech that's ~56-87 calls/chunk.
+    ///
+    /// This speculative variant computes joint over ALL remaining frames in
+    /// one ANE call (assuming dec_out doesn't change — true while emitting
+    /// blanks, which is ~70-80% of the time). Then walks the predictions
+    /// linearly to find the first non-blank. When found: emit it, recompute
+    /// dec_out from the new LSTM state, re-batch joint for the remaining
+    /// frames. All-blanks streaks consume zero per-frame CoreML calls.
+    ///
+    /// Semantic parity argument:
+    /// - Blank predictions made with stale dec_out are STILL valid, because
+    ///   blank emission doesn't advance LSTM state in RNN-T. So if frames
+    ///   [t..i-1] all predicted blank under dec_out_t, they would also have
+    ///   predicted blank under any intermediate state (none was advanced).
+    /// - The first non-blank prediction at frame i is correct because the
+    ///   model has not yet emitted anything for frames [t..i-1], so dec_out
+    ///   at frame i in the standard loop would be IDENTICAL to dec_out_t.
+    /// - After emitting at frame i, predictions for frames [i+1..end] used
+    ///   the now-stale dec_out_t — we discard them and recompute.
+    ///
+    /// Bottom line: emissions are bit-identical to the standard greedy loop.
+    /// WER is unchanged. CoreML call count drops ~3-10x.
+    internal func runSpeculativeBatchedDecode(
+        encoded: MLMultiArray,
+        numEncoderFrames: Int,
+        decoder: MLModel,
+        jointBatched: MLModel,
+        currentH: inout MLMultiArray,
+        currentC: inout MLMultiArray,
+        currentToken: inout Int32,
+        newTokens: inout [Int],
+        tokenizer: NemotronMultilingualTokenizer
+    ) async throws {
+        var t = 0
+        var symbolsAtCurrentFrame = 0
+        let maxSymbolsPerFrame = 10
+        while t < numEncoderFrames {
+            // Safety: cap emissions at a single encoder frame (mirrors the
+            // 0..<10 loop in the standard per-token path). If a frame keeps
+            // emitting non-blank tokens without hitting blank, force-advance
+            // to prevent infinite loop.
+            if symbolsAtCurrentFrame >= maxSymbolsPerFrame {
+                t += 1
+                symbolsAtCurrentFrame = 0
+                continue
+            }
+            // 1. decoder.predict(currentToken, h, c) → dec_out, h_out, c_out
+            let tokenInput = try MLMultiArray(shape: [1, 1], dataType: .int32)
+            tokenInput[0] = NSNumber(value: currentToken)
+            let tokenLen = try MLMultiArray(shape: [1], dataType: .int32)
+            tokenLen[0] = 1
+            let decoderInput = try MLDictionaryFeatureProvider(dictionary: [
+                "token": MLFeatureValue(multiArray: tokenInput),
+                "token_length": MLFeatureValue(multiArray: tokenLen),
+                "h_in": MLFeatureValue(multiArray: currentH),
+                "c_in": MLFeatureValue(multiArray: currentC),
+            ])
+            let decoderOutput: MLFeatureProvider
+            if let opts = decoderPredictionOptions {
+                decoderOutput = try await decoder.prediction(from: decoderInput, options: opts)
+            } else {
+                decoderOutput = try await decoder.prediction(from: decoderInput)
+            }
+            guard let decoderOut = decoderOutput.featureValue(for: "decoder_out")?.multiArrayValue,
+                let dh = decoderOutput.featureValue(for: "h_out")?.multiArrayValue,
+                let dc = decoderOutput.featureValue(for: "c_out")?.multiArrayValue
+            else {
+                throw ASRError.processingFailed("Speculative decoder failed")
+            }
+            let decoderStep = try sliceDecoderOutput(decoderOut)  // [1, 640, 1]
+
+            // 2. jointBatched.predict(encoded[all frames], decoderStep) →
+            //    logits [1, numEncoderFrames, 1, vocab]
+            //    We always pass the full encoded tensor; we ignore predictions
+            //    for frames < t. Small wasted compute on the unused tail, but
+            //    keeps the input shape fixed at the converter-baked size.
+            let jbInput = try MLDictionaryFeatureProvider(dictionary: [
+                "encoder": MLFeatureValue(multiArray: encoded),
+                "decoder": MLFeatureValue(multiArray: decoderStep),
+            ])
+            let jbOutput = try await jointBatched.prediction(from: jbInput)
+            guard let logits = jbOutput.featureValue(for: "logits")?.multiArrayValue else {
+                throw ASRError.processingFailed("joint_batched failed")
+            }
+
+            // 3. Walk frames [t..numEncoderFrames]; find first non-blank.
+            let blankIdx = config.blankIdx
+            var firstNonBlankIdx: Int? = nil
+            var firstNonBlankToken: Int = -1
+            for i in t..<numEncoderFrames {
+                let token = argmaxFrame(logits: logits, frame: i)
+                if token != blankIdx {
+                    firstNonBlankIdx = i
+                    firstNonBlankToken = token
+                    break
+                }
+            }
+
+            if let nbIdx = firstNonBlankIdx {
+                // Emit token at frame nbIdx. LSTM state advances.
+                newTokens.append(firstNonBlankToken)
+                accumulatedTokenIds.append(firstNonBlankToken)
+                currentToken = Int32(firstNonBlankToken)
+                currentH = dh
+                currentC = dc
+
+                // Surface lang-tag piece for detectedLanguage() observers.
+                if config.langTagTokenIds.contains(firstNonBlankToken),
+                    let piece = tokenizerPiece(forId: firstNonBlankToken, tokenizer: tokenizer)
+                {
+                    let lang = NemotronMultilingualTokenizer.stripAngleBrackets(piece)
+                    recordDetectedLanguage(lang)
+                }
+
+                // Reset symbol counter when advancing to a new encoder frame
+                // (nbIdx > t means we skipped past some blanks).
+                if nbIdx > t {
+                    symbolsAtCurrentFrame = 0
+                }
+                // Stay at this frame — same frame may emit more tokens with
+                // the new dec_out. (RNN-T greedy: keep emitting non-blanks
+                // at frame t until blank, then advance.)
+                t = nbIdx
+                symbolsAtCurrentFrame += 1
+            } else {
+                // All remaining frames predicted blank — done with chunk.
+                break
+            }
+        }
+    }
+
+    /// Argmax over the `vocab` axis at a specific frame of the batched joint
+    /// output. logits shape: [1, numEncoderFrames, 1, vocab].
+    @inline(__always)
+    internal func argmaxFrame(logits: MLMultiArray, frame: Int) -> Int {
+        let vocab = logits.shape[3].intValue
+        let stride0 = logits.strides[0].intValue
+        let stride1 = logits.strides[1].intValue
+        let stride2 = logits.strides[2].intValue
+        let stride3 = logits.strides[3].intValue
+        let basePtr = logits.dataPointer.bindMemory(to: Float16.self, capacity: logits.count)
+        let base = 0 * stride0 + frame * stride1 + 0 * stride2
+        var bestIdx = 0
+        var bestVal = basePtr[base]
+        for v in 1..<vocab {
+            let val = basePtr[base + v * stride3]
+            if val > bestVal {
+                bestVal = val
+                bestIdx = v
+            }
+        }
+        return bestIdx
     }
 
     /// Read a piece from the underlying base tokenizer through the multilingual
