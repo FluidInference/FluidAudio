@@ -282,6 +282,44 @@ extension StreamingNemotronMultilingualAsrManager {
             return
         }
 
+        // HYBRID-NATIVE-LSTM path — Native LSTM forward (fast CPU) +
+        // CoreML joint on ANE. Different from full native (which did
+        // joint matmul on single-core CPU and was slower). Hypothesis:
+        // LSTM is small enough that CPU is competitive, while ANE wins
+        // big on the joint matmul. Gated by FLUIDAUDIO_ENABLE_HYBRID_NATIVE_LSTM.
+        let hybridEnabled = ProcessInfo.processInfo.environment["FLUIDAUDIO_ENABLE_HYBRID_NATIVE_LSTM"] != nil
+        if hybridEnabled, let native = self.nativeRnnt, let coremlJoint = self.joint {
+            try await runHybridNativeLSTMInnerLoop(
+                encoded: encoded,
+                numEncoderFrames: numEncoderFrames,
+                native: native,
+                coremlJoint: coremlJoint,
+                currentH: &currentH,
+                currentC: &currentC,
+                currentToken: &currentToken,
+                newTokens: &newTokens,
+                tokenizer: tokenizer
+            )
+            self.decNanos &+= DispatchTime.now().uptimeNanoseconds &- decStart
+            self.lastToken = currentToken
+            self.hState = currentH
+            self.cState = currentC
+            if !newTokens.isEmpty, let callback = partialCallback {
+                let decoded = tokenizer.decode(ids: accumulatedTokenIds)
+                callback(decoded.text)
+            }
+            if let nextEnc = try await nextEncFuture {
+                self.prefetchedEncoded = nextEnc.encoded
+                self.prefetchedEncoderProj = nextEnc.encoderProj
+                self.cacheChannel = nextEnc.cacheChannel
+                self.cacheTime = nextEnc.cacheTime
+                self.cacheLen = nextEnc.cacheLen
+                self.melCache = nextEnc.newMelCache
+            }
+            processedChunks += 1
+            return
+        }
+
         // SPECULATIVE BATCHED path — KNOWN-SLOW (Session 9 finding).
         // The naive implementation issues 1 decoder call + 1 joint_batched
         // call per emission. joint_batched is ~10× the cost of a single
@@ -658,6 +696,96 @@ extension StreamingNemotronMultilingualAsrManager {
             return "<\(lang)>"
         }
         return decoded.text.isEmpty ? nil : decoded.text
+    }
+
+    /// Hybrid path: native LSTM forward (CPU vDSP — small per-token cost)
+    /// + CoreML joint on ANE (large matmul). The full-native path
+    /// (`runNativeInnerLoop`) was 20% SLOWER because cblas_sgemv on
+    /// single-core CPU lost the joint-output matmul (vocab=989 × hidden=640).
+    /// This hybrid keeps that matmul on the ANE.
+    ///
+    /// Per-token cost (theory): ~1ms LSTM + 1 CoreML joint call.
+    /// vs. standard B1 path: 1 CoreML decoder_joint call.
+    /// Hybrid wins if (native_LSTM + ANE_joint) < (ANE decoder_joint).
+    /// Plausible because: B1's CoreML decoder forward involves an
+    /// MLDictionaryFeatureProvider + per-call overhead, whereas
+    /// `stepLSTMOnly` is a direct vDSP path.
+    ///
+    /// Caveats:
+    /// - The joint call still goes through MLPredictionOptions; per-call
+    ///   overhead is the same as standard joint
+    /// - LSTM state synced via `setState`/`snapshotState` at chunk
+    ///   boundaries (cheap)
+    internal func runHybridNativeLSTMInnerLoop(
+        encoded: MLMultiArray,
+        numEncoderFrames: Int,
+        native: NativeRnntInner,
+        coremlJoint: MLModel,
+        currentH: inout MLMultiArray,
+        currentC: inout MLMultiArray,
+        currentToken: inout Int32,
+        newTokens: inout [Int],
+        tokenizer: NemotronMultilingualTokenizer
+    ) async throws {
+        // Pull starting LSTM state into native's buffers.
+        native.setState(h: currentH, c: currentC)
+
+        // Per-token dec_out buffer for CoreML joint input (shape [1, 640, 1]).
+        let decOut = try MLMultiArray(shape: [1, NSNumber(value: native.hidden), 1], dataType: .float32)
+
+        let blankIdx = config.blankIdx
+
+        for t in 0..<numEncoderFrames {
+            let encStep: MLMultiArray
+            if let buf = encoderStepBuf {
+                fillEncoderStep(into: buf, from: encoded, timeIndex: t)
+                encStep = buf
+            } else {
+                encStep = try extractEncoderStep(from: encoded, timeIndex: t)
+            }
+
+            for _ in 0..<10 {
+                // Native LSTM forward — fills `decOut` in place.
+                native.stepLSTMOnly(currentToken: currentToken, decOut: decOut)
+
+                // CoreML joint(encoder, decoder) → logits.
+                let jointInput = try MLDictionaryFeatureProvider(dictionary: [
+                    "encoder": MLFeatureValue(multiArray: encStep),
+                    "decoder": MLFeatureValue(multiArray: decOut),
+                ])
+                let jointOutput: MLFeatureProvider
+                if let opts = jointPredictionOptions {
+                    jointOutput = try await coremlJoint.prediction(from: jointInput, options: opts)
+                } else {
+                    jointOutput = try await coremlJoint.prediction(from: jointInput)
+                }
+                guard let logits = jointOutput.featureValue(for: "logits")?.multiArrayValue else {
+                    throw ASRError.processingFailed("Hybrid joint failed to produce logits")
+                }
+                let predToken = findMaxIndex(logits)
+
+                if predToken == blankIdx {
+                    break  // RNN-T: blank doesn't commit state
+                }
+                // Non-blank: emit + commit native LSTM state
+                newTokens.append(predToken)
+                accumulatedTokenIds.append(predToken)
+                currentToken = Int32(predToken)
+                native.commitState()
+
+                if config.langTagTokenIds.contains(predToken),
+                    let piece = tokenizerPiece(forId: predToken, tokenizer: tokenizer)
+                {
+                    let lang = NemotronMultilingualTokenizer.stripAngleBrackets(piece)
+                    recordDetectedLanguage(lang)
+                }
+            }
+        }
+
+        // Snapshot native state back to MLMultiArrays for the next chunk.
+        let snapshot = try native.snapshotState()
+        currentH = snapshot.h
+        currentC = snapshot.c
     }
 
     /// Speculative-blank RNN-T inner loop. Replaces the per-token loop when
