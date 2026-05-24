@@ -1,0 +1,214 @@
+#if os(macOS)
+import AVFoundation
+import FluidAudio
+import Foundation
+
+/// Multi-stream parallel benchmark for Nemotron multilingual.
+///
+/// Spawns N independent `StreamingNemotronMultilingualAsrManager` instances
+/// (each loads its own copy of the CoreML models — accept N× model memory
+/// in exchange for clean per-stream cache isolation), distributes a batch
+/// of audio files across them via a shared work queue, and reports the
+/// aggregate throughput.
+///
+/// The Apple Neural Engine has limited concurrent context support. The
+/// expected curve is roughly:
+///   N=1 → baseline (e.g. ~99.6 RTFx test-clean on LP [42,13]+B1+triple-stage)
+///   N=2 → ~1.5-1.8× aggregate (some ANE contention, but triple-stage
+///         within a single stream already overlaps CPU+ANE so the
+///         per-stream parallel gain is smaller than naive 2×)
+///   N=4 → flattens — ANE dispatch becomes the bottleneck
+///
+/// Use this command to validate the multi-stream model for batch
+/// transcription workloads (podcast queues, meeting backlogs, etc.).
+public enum NemotronMultilingualMultiStreamBench {
+    private static let logger = AppLogger(category: "NemotronMultiStream")
+
+    public struct Config {
+        var modelDir: URL?
+        var streams: Int = 2
+        var samples: Int = 100
+        var language: String = "en-US"
+        var datasetSubset: String = "test-clean"
+        public init() {}
+    }
+
+    public static func run(arguments: [String]) async {
+        var config = Config()
+        var i = 0
+        while i < arguments.count {
+            switch arguments[i] {
+            case "--model-dir", "-m":
+                i += 1
+                if i < arguments.count { config.modelDir = URL(fileURLWithPath: arguments[i]) }
+            case "--streams", "-n":
+                i += 1
+                if i < arguments.count, let n = Int(arguments[i]) { config.streams = max(1, n) }
+            case "--samples":
+                i += 1
+                if i < arguments.count, let s = Int(arguments[i]) { config.samples = s }
+            case "--language", "-l":
+                i += 1
+                if i < arguments.count { config.language = arguments[i] }
+            case "--subset":
+                i += 1
+                if i < arguments.count { config.datasetSubset = arguments[i] }
+            case "--help", "-h":
+                printUsage(); return
+            default:
+                logger.warning("Unknown arg: \(arguments[i])")
+            }
+            i += 1
+        }
+        guard let modelDir = config.modelDir else {
+            logger.error("--model-dir is required")
+            printUsage(); return
+        }
+
+        // Locate LS test-clean samples
+        let cacheRoot = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first!
+            .appendingPathComponent("FluidAudio/Datasets/LibriSpeech")
+        let subsetDir = cacheRoot.appendingPathComponent(config.datasetSubset)
+        guard FileManager.default.fileExists(atPath: subsetDir.path) else {
+            logger.error("LibriSpeech subset missing at \(subsetDir.path)")
+            return
+        }
+
+        var flacs: [URL] = []
+        if let walker = FileManager.default.enumerator(at: subsetDir, includingPropertiesForKeys: nil) {
+            while let item = walker.nextObject() {
+                if let url = item as? URL, url.pathExtension.lowercased() == "flac" {
+                    flacs.append(url)
+                }
+            }
+        }
+        flacs.sort { $0.lastPathComponent < $1.lastPathComponent }
+        let take = config.samples == Int.max ? flacs.count : min(config.samples, flacs.count)
+        let files = Array(flacs.prefix(take))
+        logger.info("Multi-stream bench: \(config.streams) streams × \(files.count) files (LS \(config.datasetSubset))")
+
+        // Pre-load N managers in parallel — each loads its own model copy.
+        // Model load is the dominant fixed cost (~10s with mlpackage compile);
+        // doing them in parallel saves wall time.
+        let loadStart = Date()
+        var managers: [StreamingNemotronMultilingualAsrManager] = []
+        managers.reserveCapacity(config.streams)
+        let langForLoad = config.language
+        let modelDirForLoad = modelDir
+        await withTaskGroup(of: StreamingNemotronMultilingualAsrManager?.self) { group in
+            for streamIdx in 0..<config.streams {
+                group.addTask {
+                    let mgr = StreamingNemotronMultilingualAsrManager()
+                    do {
+                        try await mgr.loadModels(from: modelDirForLoad)
+                        await mgr.setLanguage(langForLoad)
+                        return mgr
+                    } catch {
+                        print("Stream \(streamIdx) load failed: \(error)")
+                        return nil
+                    }
+                }
+            }
+            for await mgr in group {
+                if let m = mgr { managers.append(m) }
+            }
+        }
+        guard managers.count == config.streams else {
+            logger.error("Only \(managers.count)/\(config.streams) managers loaded; aborting")
+            return
+        }
+        let loadTime = Date().timeIntervalSince(loadStart)
+        logger.info("Loaded \(managers.count) managers in \(String(format: "%.1f", loadTime))s")
+
+        // Distribute files across N work queues. Round-robin keeps the load
+        // balanced for short clips with similar length (LS test-clean fits).
+        var queues: [[URL]] = Array(repeating: [], count: config.streams)
+        for (idx, url) in files.enumerated() {
+            queues[idx % config.streams].append(url)
+        }
+
+        // Compute total audio duration once for aggregate RTFx
+        var totalDurationSec: Double = 0
+        for url in files {
+            if let f = try? AVAudioFile(forReading: url) {
+                totalDurationSec += Double(f.length) / f.processingFormat.sampleRate
+            }
+        }
+        logger.info("Total audio: \(String(format: "%.1f", totalDurationSec))s")
+
+        // Process all queues concurrently
+        let processStart = Date()
+        await withTaskGroup(of: (Int, Int, Double).self) { group in
+            for (streamIdx, queue) in queues.enumerated() {
+                let mgr = managers[streamIdx]
+                let queueCopy = queue
+                let idx = streamIdx
+                group.addTask {
+                    var processed = 0
+                    var streamAudio: Double = 0
+                    for url in queueCopy {
+                        guard let audioFile = try? AVAudioFile(forReading: url) else { continue }
+                        let dur = Double(audioFile.length) / audioFile.processingFormat.sampleRate
+                        streamAudio += dur
+                        guard let buf = AVAudioPCMBuffer(
+                            pcmFormat: audioFile.processingFormat,
+                            frameCapacity: AVAudioFrameCount(audioFile.length)
+                        ) else { continue }
+                        do {
+                            try audioFile.read(into: buf)
+                            _ = try await mgr.process(audioBuffer: buf)
+                            _ = try await mgr.finish()
+                            await mgr.reset()
+                        } catch {
+                            print("Stream \(idx) file \(url.lastPathComponent) failed: \(error)")
+                        }
+                        processed += 1
+                    }
+                    return (idx, processed, streamAudio)
+                }
+            }
+            for await (streamIdx, processed, streamAudio) in group {
+                logger.info("Stream \(streamIdx): processed \(processed) files (\(String(format: "%.1f", streamAudio))s audio)")
+            }
+        }
+        let wallTime = Date().timeIntervalSince(processStart)
+        let aggregateRtfx = totalDurationSec / wallTime
+        // Print summary to stdout (logger.info routes to os_log which doesn't
+        // surface in shell). PROFILE counters already go to stderr.
+        print(String(repeating: "=", count: 60))
+        print("Streams: \(config.streams)")
+        print("Files: \(files.count)")
+        print("Total audio: \(String(format: "%.1f", totalDurationSec))s")
+        print("Wall time: \(String(format: "%.1f", wallTime))s")
+        print("Aggregate RTFx: \(String(format: "%.2f", aggregateRtfx))x")
+        print("Per-stream RTFx (avg): \(String(format: "%.2f", aggregateRtfx / Double(config.streams)))x")
+        print(String(repeating: "=", count: 60))
+    }
+
+    private static func printUsage() {
+        print(
+            """
+            Nemotron Multilingual — Multi-Stream Parallel Benchmark
+
+            Usage: fluidaudio nemotron-multilingual-multi-stream-bench --model-dir <path> [options]
+
+            Options:
+                --model-dir, -m <path>   Path to multilingual CoreML models (required)
+                --streams, -n <N>        Number of concurrent streams (default: 2)
+                --samples <N>            Files per benchmark (default: 100)
+                --subset <name>          LS subset: test-clean / test-other (default: test-clean)
+                --language, -l <code>    Language hint (default: en-US)
+                --help, -h               Show this help
+
+            Memory: each stream loads its own copy of the encoder (~1.1 GB FP16
+                / ~430 MB LAYERPOS). Plan ~1.5 GB per stream + ~1 GB baseline.
+
+            Outputs aggregate RTFx = total_audio_seconds / wall_time. Compare
+            against N=1 baseline (which equals the single-stream per-file RTFx).
+            """
+        )
+    }
+}
+#endif
