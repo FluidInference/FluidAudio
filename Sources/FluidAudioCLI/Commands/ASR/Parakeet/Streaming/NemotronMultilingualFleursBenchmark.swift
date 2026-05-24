@@ -160,6 +160,11 @@ public class NemotronMultilingualFleursBenchmark {
                 subset: config.librispeechSubset,
                 samplesPerLanguage: config.samplesPerLanguage
             )
+        case .earnings22:
+            samples = try loadEarnings22Samples(
+                cacheRoot: URL(fileURLWithPath: config.cacheDir),
+                samplesPerLanguage: config.samplesPerLanguage
+            )
         }
         if samples.isEmpty {
             logger.warning("No samples loaded. Aborting.")
@@ -423,6 +428,70 @@ public class NemotronMultilingualFleursBenchmark {
         )
     }
 
+    /// Load samples from the Earnings22 KWS dataset (argmaxinc/contextual-earnings22).
+    /// Layout: `<cacheRoot>/test-dataset/<id>_chunk<N>.wav` plus
+    /// `<id>_chunk<N>.text.txt` siblings. Populate via
+    /// `fluidaudio download --dataset earnings22-kws`.
+    /// Samples are returned in natural-sort order (by call id, then chunk).
+    private func loadEarnings22Samples(
+        cacheRoot: URL,
+        samplesPerLanguage: Int
+    ) throws -> [FLEURSBenchmark.FLEURSSample] {
+        let dataDir = cacheRoot.appendingPathComponent("test-dataset")
+        guard FileManager.default.fileExists(atPath: dataDir.path) else {
+            logger.warning(
+                "Earnings22 not found at \(dataDir.path). Run "
+                    + "`fluidaudio download --dataset earnings22-kws` first."
+            )
+            return []
+        }
+        let fm = FileManager.default
+        let wavs = ((try? fm.contentsOfDirectory(at: dataDir, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension.lowercased() == "wav" }
+            .sorted { a, b in
+                // Natural sort: by call id then by chunk index. File names
+                // look like "4483857_chunk_0.wav" or "4471961_chunk91.wav"
+                // (some have the underscore between "chunk" and the number,
+                // some don't). Sort by the (id, chunkIdx) tuple.
+                func parse(_ url: URL) -> (String, Int) {
+                    let stem = url.deletingPathExtension().lastPathComponent
+                    let parts = stem.split(separator: "_", omittingEmptySubsequences: false).map(String.init)
+                    let id = parts.first ?? stem
+                    let idx = Int(parts.last ?? "0") ?? 0
+                    return (id, idx)
+                }
+                let pa = parse(a)
+                let pb = parse(b)
+                if pa.0 != pb.0 { return pa.0 < pb.0 }
+                return pa.1 < pb.1
+            }
+        let take = samplesPerLanguage == Int.max ? wavs.count : min(samplesPerLanguage, wavs.count)
+        var out: [FLEURSBenchmark.FLEURSSample] = []
+        for wav in wavs.prefix(take) {
+            let id = wav.deletingPathExtension().lastPathComponent
+            let refURL = wav.deletingPathExtension().appendingPathExtension("text.txt")
+            let reference = (try? String(contentsOf: refURL).trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
+            if reference.isEmpty {
+                // Skip chunks whose reference is missing; the KWS variant
+                // omits the .text.txt for some chunks.
+                continue
+            }
+            out.append(
+                FLEURSBenchmark.FLEURSSample(
+                    audioPath: wav.path,
+                    transcription: reference,
+                    language: "en_us",
+                    sampleId: id
+                )
+            )
+        }
+        logger.info(
+            "Loaded \(out.count) Earnings22 samples"
+                + (out.count < wavs.count ? " (limited by --samples or missing refs)" : "")
+        )
+        return out
+    }
+
     /// Load samples from an on-disk LibriSpeech subset (test-clean by default).
     /// Layout: `<cacheRoot>/<subset>/<speaker>/<chapter>/<id>.flac` and
     /// `<speaker>-<chapter>.trans.txt` in the same directory. Use the
@@ -631,7 +700,7 @@ extension NemotronMultilingualFleursBenchmark {
                         dataset = parsed
                     } else {
                         logger.error(
-                            "Unknown --dataset value '\(raw)'. Expected one of: fleurs, mcv, mls, librispeech.")
+                            "Unknown --dataset value '\(raw)'. Expected one of: fleurs, mcv, mls, librispeech, earnings22.")
                         return
                     }
                     i += 1
@@ -816,6 +885,9 @@ extension NemotronMultilingualFleursBenchmark {
                                                      - librispeech: LibriSpeech English (test-clean default)
                                                                (no HF token needed; auto-downloaded by
                                                                `fluidaudio download --dataset librispeech-test-clean`)
+                                                     - earnings22: Earnings22 financial earnings calls
+                                                               (real multi-speaker; auto-downloaded by
+                                                               `fluidaudio download --dataset earnings22-kws`)
                             --languages <list>       Comma-separated FLEURS codes (default: en_us,fr_fr,de_de,es_419,ja_jp)
                             --samples <n|all>        Samples per language. Default: 100 for FLEURS, "all" for MCV/MLS.
                             --output <file>          Output JSON file (default: nemotron_multilingual_<dataset>_results.json)
