@@ -1,5 +1,6 @@
 #if os(macOS)
 import AVFoundation
+import CoreML
 import FluidAudio
 import Foundation
 
@@ -21,7 +22,12 @@ public class NemotronMultilingualFleursBenchmark {
         var cacheDir: String
         var modelDir: URL
         var debugMode: Bool
-        /// HuggingFace dataset repo. Defaults to `FluidInference/fleurs-full`
+        /// Which benchmark dataset to evaluate against (FLEURS, MCV-17, MLS).
+        /// Default `.fleurs` preserves backward compatibility with existing
+        /// invocations.
+        var dataset: MultilingualBenchmarkDataset = .fleurs
+        /// HuggingFace FLEURS dataset repo override. Only consulted when
+        /// `dataset == .fleurs`. Defaults to `FluidInference/fleurs-full`
         /// (30 languages including CJK / Arabic / Indic) instead of the
         /// European-only `FluidInference/fleurs` used by Parakeet TDT.
         var datasetRepo: String = "FluidInference/fleurs-full"
@@ -34,6 +40,18 @@ public class NemotronMultilingualFleursBenchmark {
         /// normalized variants plus per-sample WER under each. For debugging
         /// the gap between `normalize()` and `basicNormalize()`.
         var dumpSamplesPath: String? = nil
+        /// Optional prompt-code override (e.g. "es-US", "pt-PT"). When set,
+        /// bypasses the FLEURS-code → prompt-code mapping and feeds this code
+        /// directly to `manager.setLanguage(_:)`. Used for regional-prompt A/Bs
+        /// (e.g. running MLS pt with "pt-PT" instead of the auto-derived "pt-BR").
+        var promptOverride: String? = nil
+        /// Optional compute-units override for the ASR manager's MLModelConfiguration.
+        /// Default (nil) uses MLModelConfigurationUtils.defaultConfiguration() = .cpuAndNeuralEngine.
+        /// Use `.cpuAndGPU` for INT4 builds (ANE compilation hangs on macOS 26.5 with int4 affine_dequantize).
+        var computeUnits: MLComputeUnits? = nil
+        /// LibriSpeech subset, only used when `dataset == .librispeech`.
+        /// One of "test-clean" (default), "test-other", "dev-clean", "dev-other".
+        var librispeechSubset: String = "test-clean"
     }
 
     public struct LanguageResult {
@@ -95,19 +113,54 @@ public class NemotronMultilingualFleursBenchmark {
         logger.info("Starting Nemotron Multilingual FLEURS Benchmark")
         logger.info(String(repeating: "=", count: 50))
 
-        // Reuse the existing FLEURSBenchmark to download / load samples so
-        // the cache directory layout is shared.
-        let downloadConfig = FLEURSBenchmark.FLEURSConfig(
-            languages: config.languages,
-            samplesPerLanguage: config.samplesPerLanguage,
-            outputFile: config.outputFile,
-            cacheDir: config.cacheDir,
-            debugMode: config.debugMode,
-            datasetRepo: config.datasetRepo
-        )
-        let downloader = FLEURSBenchmark(config: downloadConfig)
-        try await downloader.downloadFLEURS(languages: config.languages)
-        let samples = try downloader.loadFLEURSSamples(languages: config.languages)
+        // Download + load samples for the configured dataset. All three
+        // loaders normalize to the LibriSpeech-style on-disk layout
+        // (`<cache>/<lang>/<id>.{wav|mp3|flac}` + `<lang>.trans.txt`) so we
+        // can reuse `FLEURSBenchmark.loadFLEURSSamples` to produce the
+        // `[FLEURSSample]` consumed below regardless of dataset.
+        let samples: [FLEURSBenchmark.FLEURSSample]
+        switch config.dataset {
+        case .fleurs:
+            let downloadConfig = FLEURSBenchmark.FLEURSConfig(
+                languages: config.languages,
+                samplesPerLanguage: config.samplesPerLanguage,
+                outputFile: config.outputFile,
+                cacheDir: config.cacheDir,
+                debugMode: config.debugMode,
+                datasetRepo: config.datasetRepo
+            )
+            let downloader = FLEURSBenchmark(config: downloadConfig)
+            try await downloader.downloadFLEURS(languages: config.languages)
+            samples = try downloader.loadFLEURSSamples(languages: config.languages)
+        case .mcv:
+            try await HFDatasetsServerDownloader.downloadMCV(
+                languages: config.languages,
+                cacheRoot: URL(fileURLWithPath: config.cacheDir),
+                samplesPerLanguage: config.samplesPerLanguage
+            )
+            samples = try loadHFDatasetsServerSamples(
+                cacheRoot: URL(fileURLWithPath: config.cacheDir),
+                languages: config.languages,
+                audioExtension: MultilingualBenchmarkDataset.mcv.audioExtension
+            )
+        case .mls:
+            try await HFDatasetsServerDownloader.downloadMLS(
+                languages: config.languages,
+                cacheRoot: URL(fileURLWithPath: config.cacheDir),
+                samplesPerLanguage: config.samplesPerLanguage
+            )
+            samples = try loadHFDatasetsServerSamples(
+                cacheRoot: URL(fileURLWithPath: config.cacheDir),
+                languages: config.languages,
+                audioExtension: MultilingualBenchmarkDataset.mls.audioExtension
+            )
+        case .librispeech:
+            samples = try loadLibriSpeechSamples(
+                cacheRoot: URL(fileURLWithPath: config.cacheDir),
+                subset: config.librispeechSubset,
+                samplesPerLanguage: config.samplesPerLanguage
+            )
+        }
         if samples.isEmpty {
             logger.warning("No samples loaded. Aborting.")
             return []
@@ -116,7 +169,14 @@ public class NemotronMultilingualFleursBenchmark {
         logger.info("Loaded \(samples.count) samples across \(config.languages.count) languages")
 
         // Load the multilingual ASR manager once.
-        let manager = StreamingNemotronMultilingualAsrManager()
+        var mlConfig: MLModelConfiguration? = nil
+        if let units = config.computeUnits {
+            let cfg = MLModelConfiguration()
+            cfg.computeUnits = units
+            mlConfig = cfg
+            logger.info("Forcing computeUnits = \(units)")
+        }
+        let manager = StreamingNemotronMultilingualAsrManager(configuration: mlConfig)
         try await manager.loadModels(from: config.modelDir)
         if config.forcedPrefix {
             await manager.setForcedPrefix(true)
@@ -138,7 +198,7 @@ public class NemotronMultilingualFleursBenchmark {
         // Preserve user-specified language order in output.
         for lang in config.languages {
             guard let langSamples = groups[lang] else { continue }
-            let promptLang = Self.fleursToMultilingualLanguage(lang)
+            let promptLang = config.promptOverride ?? Self.fleursToMultilingualLanguage(lang)
             await manager.setLanguage(promptLang)
             await manager.reset()
 
@@ -212,6 +272,9 @@ public class NemotronMultilingualFleursBenchmark {
                 _ = try await manager.process(audioBuffer: buffer)
                 let hypothesis = try await manager.finish()
                 let processingTime = Date().timeIntervalSince(startTime)
+                // Capture diagnostic stats from this finish() call before any
+                // subsequent reset() clears them.
+                let decodeStats = await manager.lastDecodeStats()
 
                 if !sample.transcription.isEmpty {
                     // For CJK / no-space scripts, FLEURS word-tokenized WER
@@ -281,6 +344,10 @@ public class NemotronMultilingualFleursBenchmark {
                         let row: [String: Any] = [
                             "sampleId": sample.sampleId,
                             "language": language,
+                            "audio_duration": audioDuration,
+                            "accumulated_token_count": decodeStats.tokenCount,
+                            "detected_language": decodeStats.detectedLanguage ?? NSNull(),
+                            "processed_chunks": decodeStats.processedChunks,
                             "hyp_raw": hypothesis,
                             "ref_raw": sample.transcription,
                             "hyp_eng": TextNormalizer.normalize(hypothesis),
@@ -356,14 +423,125 @@ public class NemotronMultilingualFleursBenchmark {
         )
     }
 
+    /// Load samples from an on-disk LibriSpeech subset (test-clean by default).
+    /// Layout: `<cacheRoot>/<subset>/<speaker>/<chapter>/<id>.flac` and
+    /// `<speaker>-<chapter>.trans.txt` in the same directory. Use the
+    /// `download --dataset librispeech-test-clean` command to populate this.
+    private func loadLibriSpeechSamples(
+        cacheRoot: URL,
+        subset: String,
+        samplesPerLanguage: Int
+    ) throws -> [FLEURSBenchmark.FLEURSSample] {
+        let subsetDir = cacheRoot.appendingPathComponent(subset)
+        guard FileManager.default.fileExists(atPath: subsetDir.path) else {
+            logger.warning(
+                "LibriSpeech subset not found at \(subsetDir.path). Run "
+                    + "`fluidaudio download --dataset librispeech-\(subset)` first."
+            )
+            return []
+        }
+        let fm = FileManager.default
+        var transcripts: [String: String] = [:]
+        var flacs: [URL] = []
+        if let walker = fm.enumerator(at: subsetDir, includingPropertiesForKeys: nil) {
+            for case let url as URL in walker {
+                let ext = url.pathExtension.lowercased()
+                if ext == "flac" {
+                    flacs.append(url)
+                } else if url.lastPathComponent.hasSuffix(".trans.txt") {
+                    let content = (try? String(contentsOf: url)) ?? ""
+                    for line in content.components(separatedBy: .newlines) where !line.isEmpty {
+                        let parts = line.split(separator: " ", maxSplits: 1)
+                        if parts.count == 2 {
+                            transcripts[String(parts[0])] = String(parts[1])
+                        }
+                    }
+                }
+            }
+        }
+        flacs.sort { $0.lastPathComponent < $1.lastPathComponent }
+        let take = samplesPerLanguage == Int.max ? flacs.count : min(samplesPerLanguage, flacs.count)
+        var out: [FLEURSBenchmark.FLEURSSample] = []
+        for url in flacs.prefix(take) {
+            let id = url.deletingPathExtension().lastPathComponent
+            out.append(
+                FLEURSBenchmark.FLEURSSample(
+                    audioPath: url.path,
+                    transcription: transcripts[id] ?? "",
+                    language: "en_us",
+                    sampleId: id
+                )
+            )
+        }
+        logger.info(
+            "Loaded \(out.count) LibriSpeech \(subset) samples"
+                + (out.count < flacs.count ? " (limited by --samples)" : "")
+        )
+        return out
+    }
+
+    /// Load samples produced by `HFDatasetsServerDownloader` (MCV / MLS).
+    /// Layout mirrors FLEURS: per-language directory containing audio files
+    /// and a `<lang>.trans.txt` LibriSpeech-style transcript file.
+    private func loadHFDatasetsServerSamples(
+        cacheRoot: URL,
+        languages: [String],
+        audioExtension: String
+    ) throws -> [FLEURSBenchmark.FLEURSSample] {
+        var out: [FLEURSBenchmark.FLEURSSample] = []
+        for lang in languages {
+            let langDir = cacheRoot.appendingPathComponent(lang)
+            guard FileManager.default.fileExists(atPath: langDir.path) else {
+                logger.warning("No data found for \(lang). Skipping.")
+                continue
+            }
+            let transFile = langDir.appendingPathComponent("\(lang).trans.txt")
+            var transcripts: [String: String] = [:]
+            if FileManager.default.fileExists(atPath: transFile.path) {
+                let content = (try? String(contentsOf: transFile)) ?? ""
+                for line in content.components(separatedBy: .newlines) where !line.isEmpty {
+                    let parts = line.split(separator: " ", maxSplits: 1)
+                    if parts.count >= 1 {
+                        let id = String(parts[0])
+                        transcripts[id] = parts.count > 1 ? String(parts[1]) : ""
+                    }
+                }
+            }
+            let files =
+                (try? FileManager.default.contentsOfDirectory(at: langDir, includingPropertiesForKeys: nil)) ?? []
+            let audioFiles =
+                files
+                .filter { $0.pathExtension.lowercased() == audioExtension.lowercased() }
+                .sorted { $0.lastPathComponent < $1.lastPathComponent }
+                .prefix(config.samplesPerLanguage == Int.max ? Int.max : config.samplesPerLanguage)
+            for url in audioFiles {
+                let id = url.deletingPathExtension().lastPathComponent
+                out.append(
+                    FLEURSBenchmark.FLEURSSample(
+                        audioPath: url.path,
+                        transcription: transcripts[id] ?? "",
+                        language: lang,
+                        sampleId: id
+                    )
+                )
+            }
+            if !audioFiles.isEmpty {
+                logger.info("Loaded \(audioFiles.count) samples for \(lang)")
+            }
+        }
+        return out
+    }
+
     public func saveResults(_ results: [LanguageResult], to outputPath: String) throws {
         func sanitize(_ value: Double) -> Double {
             value.isNaN || value.isInfinite ? 0.0 : value
         }
         let output: [String: Any] = [
-            "benchmark": "Nemotron Multilingual FLEURS",
+            "benchmark": "Nemotron Multilingual \(config.dataset.rawValue.uppercased())",
+            "dataset": config.dataset.rawValue,
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             "config": [
+                "dataset": config.dataset.rawValue,
                 "languages": config.languages,
                 "samplesPerLanguage": config.samplesPerLanguage,
                 "modelDir": config.modelDir.path,
@@ -404,14 +582,18 @@ extension NemotronMultilingualFleursBenchmark {
         // Defaults: n=100 samples, 5 languages spread across the multilingual model.
         var languages: [String] = ["en_us", "fr_fr", "de_de", "es_419", "ja_jp"]
         var samplesPerLanguage = 100
-        var outputFile = "nemotron_multilingual_fleurs_results.json"
-        var cacheDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/FluidAudio/FLEURS-full").path
+        var samplesExplicitlySet = false
+        var outputFile: String?
+        var cacheDir: String?
+        var dataset: MultilingualBenchmarkDataset = .fleurs
         var datasetRepo = "FluidInference/fleurs-full"
         var modelDir: URL?
         var debugMode = false
         var forcedPrefix = false
         var dumpSamplesPath: String?
+        var promptOverride: String?
+        var computeUnits: MLComputeUnits?
+        var librispeechSubset = "test-clean"
 
         var i = 0
         while i < arguments.count {
@@ -424,6 +606,7 @@ extension NemotronMultilingualFleursBenchmark {
                 }
             case "--samples":
                 if i + 1 < arguments.count {
+                    samplesExplicitlySet = true
                     if arguments[i + 1].lowercased() == "all" {
                         samplesPerLanguage = Int.max
                     } else if let v = Int(arguments[i + 1]) {
@@ -439,6 +622,23 @@ extension NemotronMultilingualFleursBenchmark {
             case "--cache-dir":
                 if i + 1 < arguments.count {
                     cacheDir = arguments[i + 1]
+                    i += 1
+                }
+            case "--dataset":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1].lowercased()
+                    if let parsed = MultilingualBenchmarkDataset(rawValue: raw) {
+                        dataset = parsed
+                    } else {
+                        logger.error(
+                            "Unknown --dataset value '\(raw)'. Expected one of: fleurs, mcv, mls, librispeech.")
+                        return
+                    }
+                    i += 1
+                }
+            case "--librispeech-subset":
+                if i + 1 < arguments.count {
+                    librispeechSubset = arguments[i + 1]
                     i += 1
                 }
             case "--dataset-repo":
@@ -460,6 +660,23 @@ extension NemotronMultilingualFleursBenchmark {
                     dumpSamplesPath = arguments[i + 1]
                     i += 1
                 }
+            case "--prompt":
+                if i + 1 < arguments.count {
+                    promptOverride = arguments[i + 1]
+                    i += 1
+                }
+            case "--compute-units":
+                if i + 1 < arguments.count {
+                    switch arguments[i + 1].lowercased() {
+                    case "cpu", "cpuonly": computeUnits = .cpuOnly
+                    case "gpu", "cpuandgpu", "cpu+gpu": computeUnits = .cpuAndGPU
+                    case "ane", "cpuandneuralengine", "cpu+ane": computeUnits = .cpuAndNeuralEngine
+                    case "all": computeUnits = .all
+                    default:
+                        logger.warning("Unknown --compute-units value '\(arguments[i + 1])'. Using default.")
+                    }
+                    i += 1
+                }
             case "--help", "-h":
                 printUsage()
                 return
@@ -475,33 +692,54 @@ extension NemotronMultilingualFleursBenchmark {
             return
         }
 
-        logger.info("Nemotron Multilingual FLEURS Benchmark")
+        // Default samples behavior:
+        // - FLEURS: 100 (matches existing behavior)
+        // - MCV / MLS: all (test splits are larger; explicit opt-in to a
+        //   small slice via `--samples N`).
+        if !samplesExplicitlySet && dataset != .fleurs {
+            samplesPerLanguage = Int.max
+        }
+        let resolvedCacheDir =
+            cacheDir
+            ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/FluidAudio/\(dataset.cacheSubdir)").path
+        let resolvedOutput =
+            outputFile ?? "nemotron_multilingual_\(dataset.rawValue)_results.json"
+
+        logger.info("Nemotron Multilingual \(dataset.rawValue.uppercased()) Benchmark")
         logger.info(String(repeating: "=", count: 50))
+        logger.info("Dataset: \(dataset.rawValue) (\(dataset.hfRepo))")
         logger.info("Languages: \(languages.joined(separator: ", "))")
         logger.info("Samples per language: \(samplesPerLanguage == Int.max ? "all" : String(samplesPerLanguage))")
         logger.info("Model dir: \(modelDir.path)")
-        logger.info("Dataset repo: \(datasetRepo)")
-        logger.info("Cache dir: \(cacheDir)")
-        logger.info("Output: \(outputFile)")
+        if dataset == .fleurs {
+            logger.info("Dataset repo: \(datasetRepo)")
+        }
+        logger.info("Cache dir: \(resolvedCacheDir)")
+        logger.info("Output: \(resolvedOutput)")
 
         let config = Config(
             languages: languages,
             samplesPerLanguage: samplesPerLanguage,
-            outputFile: outputFile,
-            cacheDir: cacheDir,
+            outputFile: resolvedOutput,
+            cacheDir: resolvedCacheDir,
             modelDir: modelDir,
             debugMode: debugMode,
+            dataset: dataset,
             datasetRepo: datasetRepo,
             forcedPrefix: forcedPrefix,
-            dumpSamplesPath: dumpSamplesPath
+            dumpSamplesPath: dumpSamplesPath,
+            promptOverride: promptOverride,
+            computeUnits: computeUnits,
+            librispeechSubset: librispeechSubset
         )
 
         let benchmark = NemotronMultilingualFleursBenchmark(config: config)
 
         do {
             let results = try await benchmark.run()
-            try benchmark.saveResults(results, to: outputFile)
-            logger.info("Results saved to \(outputFile)")
+            try benchmark.saveResults(results, to: resolvedOutput)
+            logger.info("Results saved to \(resolvedOutput)")
 
             // Print summary table
             print("")
@@ -560,34 +798,55 @@ extension NemotronMultilingualFleursBenchmark {
         logger.info(
             """
 
-            Nemotron Multilingual FLEURS Benchmark Usage:
-                fluidaudio nemotron-multilingual-benchmark --model-dir <path> [options]
+                        Nemotron Multilingual Benchmark Usage:
+                            fluidaudio nemotron-multilingual-benchmark --model-dir <path> [options]
 
-            Required:
-                --model-dir, -m <path>   Path to multilingual model directory
-                                         (must contain metadata.json, tokenizer.json,
-                                         encoder.mlmodelc or encoder.mlpackage, etc.)
+                        Required:
+                            --model-dir, -m <path>   Path to multilingual model directory
+                                                     (must contain metadata.json, tokenizer.json,
+                                                     encoder.mlmodelc or encoder.mlpackage, etc.)
 
-            Options:
-                --languages <list>       Comma-separated FLEURS codes (default: en_us,fr_fr,de_de,es_419,ja_jp)
-                --samples <n|all>        Samples per language (default: 100)
-                --output <file>          Output JSON file (default: nemotron_multilingual_fleurs_results.json)
-                --cache-dir <path>       FLEURS dataset cache (default: ~/Library/Application Support/FluidAudio/FLEURS)
-                --dump-samples <path>    Write per-sample JSONL with raw + English/basic
-                                         normalized hyp/ref + per-sample WER under each
-                                         (for normalizer debugging)
-                --debug                  Verbose logging
-                --help, -h               Show this help
+                        Options:
+                            --dataset <name>         Benchmark dataset: fleurs (default) | mcv | mls
+                                                     - fleurs: FLEURS (any supported language)
+                                                     - mcv:    Mozilla Common Voice v17.0
+                                                               (en/es/fr/it/pt; gated, needs HF_TOKEN)
+                                                     - mls:    Multilingual LibriSpeech
+                                                               (en/es/fr/it/pt; gated, needs HF_TOKEN)
+                                                     - librispeech: LibriSpeech English (test-clean default)
+                                                               (no HF token needed; auto-downloaded by
+                                                               `fluidaudio download --dataset librispeech-test-clean`)
+                            --languages <list>       Comma-separated FLEURS codes (default: en_us,fr_fr,de_de,es_419,ja_jp)
+                            --samples <n|all>        Samples per language. Default: 100 for FLEURS, "all" for MCV/MLS.
+                            --output <file>          Output JSON file (default: nemotron_multilingual_<dataset>_results.json)
+                            --cache-dir <path>       Dataset cache (default: ~/Library/Application Support/FluidAudio/<DatasetDir>)
+                            --dataset-repo <repo>    Override FLEURS HF repo (default: FluidInference/fleurs-full)
+                                                     Ignored for mcv / mls / librispeech.
+                            --librispeech-subset <name>  LibriSpeech subset (default: test-clean).
+                                                         One of: test-clean, test-other, dev-clean, dev-other.
+                                                         Only used when --dataset librispeech.
+                            --dump-samples <path>    Write per-sample JSONL with raw + English/basic
+                                                     normalized hyp/ref + per-sample WER under each
+                                                     (for normalizer debugging)
+                            --debug                  Verbose logging
+                            --help, -h               Show this help
 
-            Examples:
-                # Default run: 5 languages × 100 samples
-                fluidaudio nemotron-multilingual-benchmark --model-dir ~/my-multilingual-model
+                        Examples:
+                            # FLEURS, 5 languages × 100 samples (default)
+                            fluidaudio nemotron-multilingual-benchmark --model-dir ~/my-multilingual-model
 
-                # Custom language mix
-                fluidaudio nemotron-multilingual-benchmark \\
-                    --model-dir ~/my-multilingual-model \\
-                    --languages en_us,zh_cn,ja_jp \\
-                    --samples 50
+                            # MCV-17 cross-validation, all 5 European-Latin languages, full test split
+                            HF_TOKEN=hf_... fluidaudio nemotron-multilingual-benchmark \\
+                                --model-dir ~/my-multilingual-model \\
+                                --dataset mcv \\
+                                --languages en_us,fr_fr,es_419,it_it,pt_br
+
+                            # MLS quick smoke test (10 samples / lang)
+                            HF_TOKEN=hf_... fluidaudio nemotron-multilingual-benchmark \\
+                                --model-dir ~/my-multilingual-model \\
+                                --dataset mls \\
+                                --languages en_us \\
+                                --samples 10
 
             """
         )
