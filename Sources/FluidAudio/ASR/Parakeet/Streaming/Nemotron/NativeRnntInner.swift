@@ -290,6 +290,40 @@ public final class NativeRnntInner {
         return Int(maxIdx)
     }
 
+    /// Hybrid path: run only the LSTM forward (embed + 2-layer LSTM),
+    /// produce `dec_out` (= h1_new, [hidden=640]) WITHOUT running the
+    /// native joint. Caller invokes CoreML joint with this dec_out.
+    ///
+    /// Same state semantics as `step`: state is NOT committed; caller
+    /// must `commitState()` on non-blank emission only.
+    ///
+    /// Writes h1_new (the new layer-1 hidden, == dec_out for RNN-T) into
+    /// the caller-provided `decOut` MLMultiArray (shape [1, hidden, 1]
+    /// float32, matching CoreML joint's `decoder` input). Caller passes
+    /// the same buffer every iter; LSTM advances on-blank-skipped.
+    public func stepLSTMOnly(currentToken: Int32, decOut: MLMultiArray) {
+        let tokenIdx = Int(currentToken)
+        let embedOffset = tokenIdx * hidden
+        var x = [Float](repeating: 0, count: hidden)
+        embed.withUnsafeBufferPointer { embPtr in
+            memcpy(&x, embPtr.baseAddress!.advanced(by: embedOffset), hidden * MemoryLayout<Float>.stride)
+        }
+        lstmCellForward(
+            x: x, h: h0, c: c0,
+            W_ih: lstm0_W_ih, W_hh: lstm0_W_hh, bias: lstm0_bias,
+            outH: &h0_new, outC: &c0_new
+        )
+        lstmCellForward(
+            x: h0_new, h: h1, c: c1,
+            W_ih: lstm1_W_ih, W_hh: lstm1_W_hh, bias: lstm1_bias,
+            outH: &h1_new, outC: &c1_new
+        )
+        let dstPtr = decOut.dataPointer.bindMemory(to: Float.self, capacity: hidden)
+        h1_new.withUnsafeBufferPointer { srcPtr in
+            memcpy(dstPtr, srcPtr.baseAddress!, hidden * MemoryLayout<Float>.stride)
+        }
+    }
+
     /// Commit the most-recently computed LSTM state. Caller should ONLY
     /// invoke this after a non-blank emission, mirroring CoreML RNN-T
     /// greedy semantics. State stays unchanged on blank.
