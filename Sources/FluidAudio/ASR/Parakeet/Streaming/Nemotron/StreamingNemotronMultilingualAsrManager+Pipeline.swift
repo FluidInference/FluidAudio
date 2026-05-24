@@ -282,19 +282,38 @@ extension StreamingNemotronMultilingualAsrManager {
             return
         }
 
-        // SMART SPECULATIVE BLANK path — B3 split + batched
-        // joint_noencproj. Encoder pre-projects encoder_proj once per
-        // chunk; speculative scan over K=8 frames per batched joint
-        // call. Blank streaks consume 1 joint call per K frames vs K
-        // calls in the standard per-token loop.
+        // SMART SPECULATIVE BLANK path — speculative scan over K=8 frames
+        // per batched joint call. Blank streaks consume 1 joint call per
+        // K frames vs K calls in the standard per-token loop.
         //
-        // Activates when encoder_proj is in the output and the
-        // joint_noencproj_batched mlpackage is loaded. Bypasses B1
-        // fusion intentionally (B3+B1 alternative gets the encoder_proj
-        // savings but loses the speculative-skip win on blank streaks).
+        // Two ways to get encoder_proj:
+        // (A) Multi-output encoder (was tried; breaks ANE compilation
+        //     — stalls in ANECompilerService for 30+ min)
+        // (B) Compute encoder_proj IN SWIFT via cblas_sgemm using
+        //     joint.enc weights from native_weights/ (this path).
+        //     Standard encoder stays ANE-resident; encoder_proj is a
+        //     ~4ms CPU matmul per chunk.
+        //
+        // Activates when joint_noencproj_batched.mlpackage is loaded
+        // AND either: (A) encoder emits encoder_proj OR (B) native
+        // weights are available for the Swift-side projection.
         let smartSpecEnabled = ProcessInfo.processInfo.environment["FLUIDAUDIO_ENABLE_SMART_SPECULATIVE"] != nil
-        if smartSpecEnabled, let encProj = encoderProj, let jointBatched = self.jointNoEncProjBatched {
+        let useSwiftEncProj = (encoderProj == nil) && (self.nativeRnnt != nil)
+        if smartSpecEnabled,
+           let jointBatched = self.jointNoEncProjBatched,
+           let encProjResolved: MLMultiArray = try await {
+               if let direct = encoderProj { return direct }
+               if useSwiftEncProj, let native = self.nativeRnnt {
+                   return try Self.computeEncoderProjSwift(
+                       encoded: encoded,
+                       native: native
+                   )
+               }
+               return nil
+           }() {
+            let encProj = encProjResolved
             try await runSpeculativeBlankDecodeV2(
+                encoded: encoded,
                 encoderProj: encProj,
                 numEncoderFrames: numEncoderFrames,
                 decoder: decoder,
@@ -831,6 +850,59 @@ extension StreamingNemotronMultilingualAsrManager {
         currentC = snapshot.c
     }
 
+    /// Compute encoder_proj on CPU via cblas_sgemm using the joint.enc
+    /// weights from NativeRnntInner. One ~4ms CPU matmul per chunk
+    /// instead of a multi-output encoder (which breaks ANE compilation).
+    ///
+    /// Input encoded: MLMultiArray [1, encoderDim=1024, T_enc]
+    /// Output:        MLMultiArray [1, T_enc, hidden=640]
+    nonisolated internal static func computeEncoderProjSwift(
+        encoded: MLMultiArray,
+        native: NativeRnntInner
+    ) throws -> MLMultiArray {
+        let encoderDim = native.encoderDim   // 1024
+        let hidden = native.hidden            // 640
+        let T_enc = encoded.shape[2].intValue
+
+        // Gather encoded[0, :, :] into a contiguous [T_enc, encoderDim] fp32 buffer.
+        var encodedRowMajor = [Float](repeating: 0, count: T_enc * encoderDim)
+        let stride0 = encoded.strides[0].intValue
+        let stride1 = encoded.strides[1].intValue
+        let stride2 = encoded.strides[2].intValue
+        let isF16 = (encoded.dataType == .float16)
+        if isF16 {
+            let srcPtr = encoded.dataPointer.bindMemory(to: UInt16.self, capacity: encoded.count)
+            for t in 0..<T_enc {
+                for d in 0..<encoderDim {
+                    let srcIdx = 0 * stride0 + d * stride1 + t * stride2
+                    encodedRowMajor[t * encoderDim + d] = Float(Float16(bitPattern: srcPtr[srcIdx]))
+                }
+            }
+        } else {
+            let srcPtr = encoded.dataPointer.bindMemory(to: Float.self, capacity: encoded.count)
+            for t in 0..<T_enc {
+                for d in 0..<encoderDim {
+                    let srcIdx = 0 * stride0 + d * stride1 + t * stride2
+                    encodedRowMajor[t * encoderDim + d] = srcPtr[srcIdx]
+                }
+            }
+        }
+
+        // Output: [1, T_enc, hidden] fp32
+        let encProj = try MLMultiArray(shape: [1, NSNumber(value: T_enc), NSNumber(value: hidden)], dataType: .float32)
+        let dstPtr = encProj.dataPointer.bindMemory(to: Float.self, capacity: encProj.count)
+
+        encodedRowMajor.withUnsafeBufferPointer { srcPtr in
+            native.computeEncoderProjBatch(
+                encoded: srcPtr.baseAddress!,
+                T_enc: T_enc,
+                outBuf: dstPtr
+            )
+        }
+
+        return encProj
+    }
+
     /// Smart speculative-blank decode (V2). Uses B3 encoder-proj split +
     /// batched joint_noencproj to fast-skip blank streaks K-at-a-time.
     ///
@@ -868,6 +940,7 @@ extension StreamingNemotronMultilingualAsrManager {
     /// K is a fixed structural choice (matches joint_noencproj_batched batch
     /// dim). Not benchmark-tuned.
     internal func runSpeculativeBlankDecodeV2(
+        encoded: MLMultiArray,
         encoderProj: MLMultiArray,
         numEncoderFrames: Int,
         decoder: MLModel,
@@ -1029,12 +1102,7 @@ extension StreamingNemotronMultilingualAsrManager {
                 // All-blank streak — fast skip
                 t += kActual
             } else {
-                // Emit single non-blank at t + firstNonBlankAt.
-                // NOTE: standard RNN-T allows up to 10 emissions per encoder
-                // frame (multi-symbol). MVP version emits ONLY ONE per
-                // speculative iteration — if WER regresses vs B1 baseline,
-                // we need to add a per-frame multi-emission fallback at
-                // t+firstNonBlankAt before resuming speculative scan.
+                // Emit first non-blank from speculative scan.
                 newTokens.append(emittedToken)
                 accumulatedTokenIds.append(emittedToken)
                 currentToken = Int32(emittedToken)
@@ -1046,6 +1114,110 @@ extension StreamingNemotronMultilingualAsrManager {
                 {
                     let lang = NemotronMultilingualTokenizer.stripAngleBrackets(piece)
                     recordDetectedLanguage(lang)
+                }
+
+                // MULTI-EMISSION DRAIN: standard RNN-T allows up to 10
+                // emissions per encoder frame. After the speculative scan
+                // finds the FIRST non-blank, fall back to per-frame loop
+                // AT THIS FRAME until blank (max 9 more).
+                //
+                // OPTIMIZED: use B1 fusion (decoder_joint.mlpackage,
+                // single CoreML call per emission) for the drain rather
+                // than re-using joint_noencproj_batched at K=8 (8×
+                // wasteful — model computes K logits we read 1 of).
+                // B1 path takes encoder [1, 1024, 1] + token + state.
+                // We extract encoded[:, :, drainFrameT:drainFrameT+1].
+                let drainFrameT = t + firstNonBlankAt
+                let drainEncStep: MLMultiArray
+                if let buf = encoderStepBuf {
+                    fillEncoderStep(into: buf, from: encoded, timeIndex: drainFrameT)
+                    drainEncStep = buf
+                } else {
+                    drainEncStep = try extractEncoderStep(from: encoded, timeIndex: drainFrameT)
+                }
+
+                for _ in 0..<9 {
+                    let tokInput2: MLMultiArray
+                    if let buf = tokenInputBuf {
+                        tokInput2 = buf
+                    } else {
+                        tokInput2 = try MLMultiArray(shape: [1, 1], dataType: .int32)
+                    }
+                    tokInput2[0] = NSNumber(value: currentToken)
+                    let tokLen2: MLMultiArray
+                    if let buf = tokenLenBuf {
+                        tokLen2 = buf
+                    } else {
+                        tokLen2 = try MLMultiArray(shape: [1], dataType: .int32)
+                        tokLen2[0] = 1
+                    }
+
+                    // Use B1 fused decoder_joint if available; falls back to
+                    // separate decoder+joint calls if not.
+                    var dBestIdx = blankIdx
+                    var newH: MLMultiArray = currentH
+                    var newC: MLMultiArray = currentC
+
+                    if let dj = self.decoderJoint {
+                        let djInput = try MLDictionaryFeatureProvider(dictionary: [
+                            "token": MLFeatureValue(multiArray: tokInput2),
+                            "token_length": MLFeatureValue(multiArray: tokLen2),
+                            "h_in": MLFeatureValue(multiArray: currentH),
+                            "c_in": MLFeatureValue(multiArray: currentC),
+                            "encoder": MLFeatureValue(multiArray: drainEncStep),
+                        ])
+                        let djOutput: MLFeatureProvider
+                        if let opts = decoderJointPredictionOptions {
+                            djOutput = try await dj.prediction(from: djInput, options: opts)
+                        } else {
+                            djOutput = try await dj.prediction(from: djInput)
+                        }
+                        guard let djLogits = djOutput.featureValue(for: "logits")?.multiArrayValue,
+                            let djH = djOutput.featureValue(for: "h_out")?.multiArrayValue,
+                            let djC = djOutput.featureValue(for: "c_out")?.multiArrayValue
+                        else { throw ASRError.processingFailed("Drain B1 failed") }
+                        dBestIdx = findMaxIndex(djLogits)
+                        newH = djH
+                        newC = djC
+                    } else {
+                        // Fallback: decoder + separate joint
+                        let decIn2 = try MLDictionaryFeatureProvider(dictionary: [
+                            "token": MLFeatureValue(multiArray: tokInput2),
+                            "token_length": MLFeatureValue(multiArray: tokLen2),
+                            "h_in": MLFeatureValue(multiArray: currentH),
+                            "c_in": MLFeatureValue(multiArray: currentC),
+                        ])
+                        let dec2 = try await decoder.prediction(from: decIn2)
+                        guard let do2Raw = dec2.featureValue(for: "decoder_out")?.multiArrayValue,
+                            let h2 = dec2.featureValue(for: "h_out")?.multiArrayValue,
+                            let c2 = dec2.featureValue(for: "c_out")?.multiArrayValue
+                        else { throw ASRError.processingFailed("Drain decoder failed") }
+                        let decOut2 = try sliceDecoderOutput(do2Raw)
+                        let jIn = try MLDictionaryFeatureProvider(dictionary: [
+                            "encoder": MLFeatureValue(multiArray: drainEncStep),
+                            "decoder": MLFeatureValue(multiArray: decOut2),
+                        ])
+                        let jOut = try await self.joint!.prediction(from: jIn)
+                        guard let jLogits = jOut.featureValue(for: "logits")?.multiArrayValue
+                        else { throw ASRError.processingFailed("Drain joint failed") }
+                        dBestIdx = findMaxIndex(jLogits)
+                        newH = h2
+                        newC = c2
+                    }
+
+                    if dBestIdx == blankIdx { break }
+                    // Non-blank → emit + commit state
+                    newTokens.append(dBestIdx)
+                    accumulatedTokenIds.append(dBestIdx)
+                    currentToken = Int32(dBestIdx)
+                    currentH = newH
+                    currentC = newC
+                    if config.langTagTokenIds.contains(dBestIdx),
+                        let piece = tokenizerPiece(forId: dBestIdx, tokenizer: tokenizer)
+                    {
+                        let lang = NemotronMultilingualTokenizer.stripAngleBrackets(piece)
+                        recordDetectedLanguage(lang)
+                    }
                 }
 
                 t = t + firstNonBlankAt + 1

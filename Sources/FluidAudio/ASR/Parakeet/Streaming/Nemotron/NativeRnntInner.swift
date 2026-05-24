@@ -290,6 +290,55 @@ public final class NativeRnntInner {
         return Int(maxIdx)
     }
 
+    /// Speculative-blank helper: compute `encoder_proj = joint.enc(encoded)`
+    /// for an entire chunk in ONE matmul, instead of redoing it per token.
+    ///
+    /// This bypasses the multi-output encoder approach (which broke ANE
+    /// compilation): the standard encoder stays ANE-resident, and we do
+    /// the small 1024→640 projection on CPU once per chunk via cblas_sgemm.
+    ///
+    /// Per-chunk cost: T_enc × 1024 × 640 ≈ 37M ops (at T=56), ~4ms on M-series
+    /// CPU. Negligible vs the per-token decoder loop time.
+    ///
+    /// Inputs:
+    ///   encoded: [encoderDim=1024, T_enc] floats (contiguous, caller-provided)
+    ///   T_enc:   number of encoder frames in `encoded`
+    ///   outBuf:  output buffer [T_enc, hidden=640] floats
+    /// (caller manages memory; outBuf must be at least T_enc * 640 floats)
+    public func computeEncoderProjBatch(
+        encoded: UnsafePointer<Float>,
+        T_enc: Int,
+        outBuf: UnsafeMutablePointer<Float>
+    ) {
+        // joint_enc_W: [hidden=640, encoderDim=1024], row-major
+        // Treat encoded as [encoderDim, T_enc] column-major (i.e. row-major [T_enc, encoderDim])
+        // Want: outBuf[T_enc, hidden] = encoded[T_enc, encoderDim] @ joint_enc_W^T
+        //
+        // For BLAS: C[M, N] = alpha * A[M, K] * B[K, N] + beta * C
+        //   M = T_enc, N = hidden, K = encoderDim
+        //   A = encoded (treated as [T_enc, encoderDim] row-major) — leading dim K
+        //   B = joint_enc_W^T (treated as [encoderDim, hidden] row-major) — leading dim N
+        // cblas_sgemm with CblasNoTrans for A and CblasTrans for B:
+        //   B stored as [hidden, encoderDim] row-major (leading dim = encoderDim)
+        joint_enc_W.withUnsafeBufferPointer { wPtr in
+            cblas_sgemm(
+                CblasRowMajor, CblasNoTrans, CblasTrans,
+                Int32(T_enc), Int32(hidden), Int32(encoderDim),
+                1.0,
+                encoded, Int32(encoderDim),
+                wPtr.baseAddress, Int32(encoderDim),
+                0.0,
+                outBuf, Int32(hidden)
+            )
+        }
+        // Add joint_enc_b broadcast over T_enc rows
+        joint_enc_b.withUnsafeBufferPointer { bPtr in
+            for t in 0..<T_enc {
+                vDSP_vadd(outBuf.advanced(by: t * hidden), 1, bPtr.baseAddress!, 1, outBuf.advanced(by: t * hidden), 1, vDSP_Length(hidden))
+            }
+        }
+    }
+
     /// Hybrid path: run only the LSTM forward (embed + 2-layer LSTM),
     /// produce `dec_out` (= h1_new, [hidden=640]) WITHOUT running the
     /// native joint. Caller invokes CoreML joint with this dec_out.
