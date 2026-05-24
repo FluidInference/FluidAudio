@@ -744,7 +744,8 @@ public enum CtcEarningsBenchmark {
                 let substring = String(normalizedText[position..<endPos])
 
                 // Try with SentencePiece prefix for word start
-                let withPrefix = isWordStart ? "▁" + substring : substring
+                let withPrefix =
+                    isWordStart ? ASRConstants.sentencePieceWordBoundary + substring : substring
 
                 if let tokenId = tokenToId[withPrefix] {
                     result.append(tokenId)

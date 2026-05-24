@@ -118,8 +118,9 @@ public final class BpeTokenizer: Sendable {
         let normalized = text.lowercased().precomposedStringWithCompatibilityMapping
 
         // Pre-tokenize: replace spaces with ▁ (sentencepiece style)
-        let leading = prependWordBoundary ? "▁" : ""
-        let preprocessed = leading + normalized.replacingOccurrences(of: " ", with: "▁")
+        let leading = prependWordBoundary ? ASRConstants.sentencePieceWordBoundary : ""
+        let preprocessed =
+            leading + normalized.replacingOccurrences(of: " ", with: ASRConstants.sentencePieceWordBoundary)
 
         // Split into characters
         var word = preprocessed.map { String($0) }

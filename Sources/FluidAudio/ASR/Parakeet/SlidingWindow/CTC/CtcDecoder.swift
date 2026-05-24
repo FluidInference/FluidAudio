@@ -175,7 +175,7 @@ public func ctcBeamSearch(
                 var newWordPieces = beam.wordPieces
                 var newPrevWord = beam.prevWord
                 var lmDelta: Float = 0.0
-                if let lm = lm, piece.hasPrefix("▁") {
+                if let lm = lm, piece.hasPrefix(ASRConstants.sentencePieceWordBoundary) {
                     let completedWord = newWordPieces.joined()
                     let hasCompletedWord = !completedWord.isEmpty
                     lmDelta =
@@ -292,6 +292,6 @@ public func logAddExp(_ a: Float, _ b: Float) -> Float {
 public func decodeCtcTokenIds(_ ids: [Int], vocabulary: [Int: String]) -> String {
     ids.compactMap { vocabulary[$0] }
         .joined()
-        .replacingOccurrences(of: "▁", with: " ")
+        .replacingOccurrences(of: ASRConstants.sentencePieceWordBoundary, with: " ")
         .trimmingCharacters(in: .whitespaces)
 }

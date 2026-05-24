@@ -39,6 +39,12 @@ public enum ASRConstants {
     /// Punctuation token IDs (period, question mark, exclamation mark)
     public static let punctuationTokens: [Int] = [7883, 7952, 7948]
 
+    /// SentencePiece word-boundary marker (U+2581 LOWER ONE EIGHTH BLOCK).
+    /// Prefixes tokens that begin a new word in BPE/Unigram tokenization.
+    /// Used by Parakeet's tokenizer (TDT vocab, CTC vocab, etc.) and the
+    /// rescorer's word-boundary detection.
+    public static let sentencePieceWordBoundary: String = "▁"
+
     /// Standard overlap in encoder frames (2.0s = 25 frames at 0.08s per frame)
     public static let standardOverlapFrames: Int = 25
 
