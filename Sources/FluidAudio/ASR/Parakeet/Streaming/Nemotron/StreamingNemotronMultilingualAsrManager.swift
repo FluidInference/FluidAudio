@@ -52,6 +52,15 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// 1-3, cutting decoder loop time substantially. See conversion script
     /// `build_joint_batched_engprune.py`.
     internal var jointBatched: MLModel?
+
+    /// B3 speculative-blank batched joint: takes pre-projected
+    /// `encoder_proj` (640-d, K frames) + decoder (640-d, 1 frame) and
+    /// produces logits over K frames. Unlocked when (a) the encoder
+    /// mlpackage emits `encoder_proj` as a separate output (B3 split)
+    /// and (b) `joint_noencproj_batched.mlpackage` is present.
+    /// Used by the smarter speculative-blank decode path that fast-skips
+    /// blank-streaks K-at-a-time.
+    internal var jointNoEncProjBatched: MLModel?
     /// Optional native-Accelerate RNN-T inner-loop replacement. When present,
     /// the per-token decoder + joint CoreML calls are replaced by pure-Swift
     /// vDSP/cblas forward (~5-10x fewer dispatch overhead per token). Loaded
@@ -373,6 +382,22 @@ public actor StreamingNemotronMultilingualAsrManager {
             let tempCompiledURL = try await MLModel.compileModel(at: batchedPackageURL)
             self.jointBatched = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
             logger.info("Compiled + loaded joint_batched.mlpackage — using speculative-blank inner-loop path")
+        }
+
+        // Optional smart speculative-blank batched joint (B3 split +
+        // post-projection batching). Takes pre-projected encoder_proj
+        // [1, K, 640] + decoder [1, 640, 1] → logits [1, K, 1, V].
+        // Requires the encoder to emit `encoder_proj` as a separate
+        // output (B3 split encoder).
+        let specBatchedCompiledURL = directory.appendingPathComponent("joint_noencproj_batched.mlmodelc")
+        let specBatchedPackageURL = directory.appendingPathComponent("joint_noencproj_batched.mlpackage")
+        if FileManager.default.fileExists(atPath: specBatchedCompiledURL.path) {
+            self.jointNoEncProjBatched = try await MLModel.load(contentsOf: specBatchedCompiledURL, configuration: mlConfiguration)
+            logger.info("Loaded joint_noencproj_batched.mlmodelc — smart speculative-blank path available")
+        } else if FileManager.default.fileExists(atPath: specBatchedPackageURL.path) {
+            let tempCompiledURL = try await MLModel.compileModel(at: specBatchedPackageURL)
+            self.jointNoEncProjBatched = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
+            logger.info("Compiled + loaded joint_noencproj_batched.mlpackage — smart speculative-blank path available")
         }
 
         // Optional native-Accelerate RNN-T inner loop. Loaded from
