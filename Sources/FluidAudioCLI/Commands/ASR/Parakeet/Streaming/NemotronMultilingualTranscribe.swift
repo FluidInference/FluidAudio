@@ -171,21 +171,29 @@ public class NemotronMultilingualTranscribe {
 
                 do {
                     let audioFile = try AVAudioFile(forReading: fileURL)
-                    guard
-                        let buffer = AVAudioPCMBuffer(
-                            pcmFormat: audioFile.processingFormat,
-                            frameCapacity: AVAudioFrameCount(audioFile.length)
-                        )
-                    else {
-                        logger.error("  Failed to create audio buffer")
-                        continue
-                    }
-                    try audioFile.read(into: buffer)
-
                     let audioDuration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
 
+                    // Streaming read: feed the manager in 60-second blocks
+                    // instead of allocating one giant PCM buffer for the
+                    // whole file. Lifts the ~2 GB AVAudioPCMBuffer ceiling
+                    // (>=20h files) and reduces peak memory pressure.
+                    let blockSeconds: Double = 60
+                    let blockFrames = AVAudioFrameCount(audioFile.processingFormat.sampleRate * blockSeconds)
+
                     let startTime = Date()
-                    _ = try await manager.process(audioBuffer: buffer)
+                    while audioFile.framePosition < audioFile.length {
+                        let remaining = AVAudioFrameCount(audioFile.length - audioFile.framePosition)
+                        let thisFrames = min(blockFrames, remaining)
+                        guard let block = AVAudioPCMBuffer(
+                            pcmFormat: audioFile.processingFormat,
+                            frameCapacity: thisFrames
+                        ) else {
+                            logger.error("  Failed to create audio buffer for block")
+                            break
+                        }
+                        try audioFile.read(into: block, frameCount: thisFrames)
+                        _ = try await manager.process(audioBuffer: block)
+                    }
                     let transcript = try await manager.finish()
                     let processingTime = Date().timeIntervalSince(startTime)
 
