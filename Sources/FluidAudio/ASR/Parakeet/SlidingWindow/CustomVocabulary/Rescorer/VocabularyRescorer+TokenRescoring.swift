@@ -191,10 +191,18 @@ extension VocabularyRescorer {
         marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
         minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> RescoreOutput {
+        // Build word-level timings once at the entrypoint and pass into both
+        // dispatch paths. Computing this once instead of twice avoids
+        // duplicate work for the BK-tree branch and keeps the private
+        // functions parameterized by `[WordTiming]` rather than the raw
+        // `[TokenTiming]` (cleaner contract; useful if a caller ever wants
+        // to supply pre-computed timings from another source).
+        let wordTimings = buildWordTimings(from: tokenTimings)
+
         if useBKTree {
             return rescoreWithConstrainedCTCWordCentric(
                 transcript: transcript,
-                tokenTimings: tokenTimings,
+                wordTimings: wordTimings,
                 logProbs: logProbs,
                 frameDuration: frameDuration,
                 cbw: cbw,
@@ -204,7 +212,7 @@ extension VocabularyRescorer {
         } else {
             return rescoreWithConstrainedCTCTermCentric(
                 transcript: transcript,
-                tokenTimings: tokenTimings,
+                wordTimings: wordTimings,
                 logProbs: logProbs,
                 frameDuration: frameDuration,
                 cbw: cbw,
@@ -226,16 +234,13 @@ extension VocabularyRescorer {
     /// Best used with BK-tree enabled for O(W x log V) performance.
     private func rescoreWithConstrainedCTCWordCentric(
         transcript: String,
-        tokenTimings: [TokenTiming],
+        wordTimings: [WordTiming],
         logProbs: [[Float]],
         frameDuration: Double,
         cbw: Float = ContextBiasingConstants.defaultCbw,
         marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
         minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> RescoreOutput {
-        // Build word-level timings from token timings
-        let wordTimings = buildWordTimings(from: tokenTimings)
-
         guard !wordTimings.isEmpty, !logProbs.isEmpty else {
             return RescoreOutput(text: transcript, replacements: [], wasModified: false)
         }
@@ -431,16 +436,13 @@ extension VocabularyRescorer {
     /// This approach processes vocabulary in file order and produces better benchmark results.
     private func rescoreWithConstrainedCTCTermCentric(
         transcript: String,
-        tokenTimings: [TokenTiming],
+        wordTimings: [WordTiming],
         logProbs: [[Float]],
         frameDuration: Double,
         cbw: Float = ContextBiasingConstants.defaultCbw,
         marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
         minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> RescoreOutput {
-        // Build word-level timings from token timings
-        let wordTimings = buildWordTimings(from: tokenTimings)
-
         guard !wordTimings.isEmpty, !logProbs.isEmpty else {
             return RescoreOutput(text: transcript, replacements: [], wasModified: false)
         }
