@@ -170,8 +170,13 @@ extension StreamingNemotronMultilingualAsrManager {
             cacheLen: MLMultiArray,
             newMelCache: MLMultiArray
         )? = {
+            // TEMP env-var disable used during the session-9 A/B bench that
+            // measures baseline vs +triple-stage. Remove after the doc table
+            // is finalized.
+            let tripleStageDisabled = ProcessInfo.processInfo.environment["FLUIDAUDIO_DISABLE_TRIPLE_STAGE"] != nil
             guard let next = nextChunkSamples,
                 !mlStateActive,
+                !tripleStageDisabled,
                 let ch = snapshotCacheChannel,
                 let ti = snapshotCacheTime,
                 let ln = snapshotCacheLen
