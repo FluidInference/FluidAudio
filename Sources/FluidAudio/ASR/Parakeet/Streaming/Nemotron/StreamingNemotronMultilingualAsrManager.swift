@@ -21,7 +21,7 @@ public typealias NemotronMultilingualPartialCallback = @Sendable (String) -> Voi
 /// bundles (or `.mlpackage` archives) plus `metadata.json` and
 /// `tokenizer.json`.
 public actor StreamingNemotronMultilingualAsrManager {
-    private let logger = AppLogger(category: "NemotronMultilingualStreaming")
+    internal let logger = AppLogger(category: "NemotronMultilingualStreaming")
 
     // Models
     internal var preprocessor: MLModel?
@@ -65,7 +65,7 @@ public actor StreamingNemotronMultilingualAsrManager {
     internal var tokenizer: NemotronMultilingualTokenizer?
 
     // Configuration (loaded from metadata.json)
-    public private(set) var config: NemotronMultilingualStreamingConfig
+    public internal(set) var config: NemotronMultilingualStreamingConfig
 
     // Audio Buffer + read offset. Using an offset instead of removeFirst()
     // avoids O(N²) memmove cost when processing very long files (the buffer
@@ -148,7 +148,7 @@ public actor StreamingNemotronMultilingualAsrManager {
 
     // Current prompt id (the language hint). Defaults to `defaultPromptId`
     // ("auto" mode) until the caller sets a specific language.
-    private var currentPromptId: Int32
+    internal var currentPromptId: Int32
 
     // Current language code requested by the caller (e.g. "en-US"). Used
     // to look up the matching lang-tag token id when forced-prefix decoding
@@ -173,7 +173,7 @@ public actor StreamingNemotronMultilingualAsrManager {
     private var lastFinishDetectedLanguage: String?
     private var lastFinishProcessedChunks: Int = 0
 
-    public private(set) var mlConfiguration: MLModelConfiguration
+    public internal(set) var mlConfiguration: MLModelConfiguration
 
     public init(configuration: MLModelConfiguration? = nil) {
         // Default to `.cpuAndNeuralEngine`: the int8 encoder is ANE-targeted.
@@ -545,7 +545,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         "mel_cache_out",
     ]
 
-    private static func makePredictionOptions(for model: MLModel?) -> MLPredictionOptions? {
+    internal static func makePredictionOptions(for model: MLModel?) -> MLPredictionOptions? {
         guard let model = model else { return nil }
         var backings: [String: Any] = [:]
         for (name, desc) in model.modelDescription.outputDescriptionsByName {
@@ -686,7 +686,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         logger.info("StreamingNemotronMultilingualAsrManager resources cleaned up")
     }
 
-    private func resetStates() throws {
+    internal func resetStates() throws {
         let cacheConfig = EncoderCacheManager.CacheConfig(
             channelShape: config.cacheChannelShape,
             timeShape: config.cacheTimeShape,
