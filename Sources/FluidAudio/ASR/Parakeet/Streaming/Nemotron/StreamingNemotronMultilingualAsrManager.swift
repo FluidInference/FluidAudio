@@ -118,6 +118,13 @@ public actor StreamingNemotronMultilingualAsrManager {
     internal var encoderStepBuf: MLMultiArray?
     internal var encoderProjStepBuf: MLMultiArray?
 
+    /// Reusable per-token decoder inputs. The inner RNN-T loop previously
+    /// allocated fresh [1,1] int32 token + [1] int32 length arrays on every
+    /// emitted token (~25k allocs/h on test-clean). Pre-allocated once at
+    /// loadModels, refilled in place by the caller.
+    internal var tokenInputBuf: MLMultiArray?
+    internal var tokenLenBuf: MLMultiArray?
+
     // Triple-stage pipelining: encoder[t+1] dispatched concurrent with
     // decode[t]. These are the prefetched encoder outputs (and the caches
     // it produced) — set during processChunk(t), consumed by processChunk(t+1).
@@ -132,6 +139,7 @@ public actor StreamingNemotronMultilingualAsrManager {
     public internal(set) var encNanos: UInt64 = 0
     public internal(set) var decNanos: UInt64 = 0
     public internal(set) var chunkCount: Int = 0
+    public internal(set) var vadSkipCount: Int = 0
 
     // Decoder LSTM states
     internal var hState: MLMultiArray?
@@ -389,6 +397,18 @@ public actor StreamingNemotronMultilingualAsrManager {
         // [1, 1, joint_dim] for the B3 path).
         self.encoderStepBuf = try? MLMultiArray(shape: [1, NSNumber(value: config.encoderDim), 1], dataType: .float32)
         self.encoderProjStepBuf = try? MLMultiArray(shape: [1, 1, NSNumber(value: 640)], dataType: .float32)
+
+        // Reusable per-token decoder input buffers. tokenLen is a constant
+        // 1 written once at allocation; tokenInput is refilled per iteration
+        // with the current token ID. Saves ~25k MLMultiArray allocs/h on
+        // test-clean.
+        if let tokInput = try? MLMultiArray(shape: [1, 1], dataType: .int32) {
+            self.tokenInputBuf = tokInput
+        }
+        if let tokLen = try? MLMultiArray(shape: [1], dataType: .int32) {
+            tokLen[0] = 1
+            self.tokenLenBuf = tokLen
+        }
 
         // First-chunk warm-up: dispatch one zero-input prediction per model so
         // the ANE program is compiled + resident before the first real
