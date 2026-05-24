@@ -35,6 +35,19 @@ extension StreamingNemotronMultilingualAsrManager {
         var currentToken = lastToken
 
         self.chunkCount += 1
+
+        // VAD-GATED SKIP: if this chunk is below the configured RMS energy
+        // threshold, skip preprocessor + encoder + decode entirely. Caches
+        // are NOT advanced (next non-silent chunk's encoder sees the cache
+        // from the last non-silent chunk — fine for true silence since the
+        // model produces no information in silent regions anyway).
+        // Threshold is opt-in via FLUIDAUDIO_VAD_RMS_THRESHOLD (default 0 = disabled).
+        // Recommended starting value: 0.003-0.005 for conservative skip.
+        if Self.vadRmsThreshold > 0, Self.isAudioSilent(samples: samples, threshold: Self.vadRmsThreshold) {
+            self.vadSkipCount &+= 1
+            return
+        }
+
         let prepStart = DispatchTime.now().uptimeNanoseconds
 
         // TRIPLE-STAGE: if encoder[t] was prefetched by the previous chunk's
@@ -304,12 +317,29 @@ extension StreamingNemotronMultilingualAsrManager {
             }
 
             // Greedy decode loop (max 10 symbols per frame)
+            let disablePrealloc = ProcessInfo.processInfo.environment["FLUIDAUDIO_DISABLE_TOKEN_PREALLOC"] != nil
             for _ in 0..<10 {
-                let tokenInput = try MLMultiArray(shape: [1, 1], dataType: .int32)
-                tokenInput[0] = NSNumber(value: currentToken)
+                // Reuse pre-allocated buffers from the manager when present;
+                // tokenInput just needs slot 0 refilled with currentToken
+                // (tokenLen is a constant 1 already set at loadModels).
+                // Set FLUIDAUDIO_DISABLE_TOKEN_PREALLOC=1 to A/B the old
+                // alloc-per-iter path.
+                let tokenInput: MLMultiArray
+                if let buf = tokenInputBuf, !disablePrealloc {
+                    buf[0] = NSNumber(value: currentToken)
+                    tokenInput = buf
+                } else {
+                    tokenInput = try MLMultiArray(shape: [1, 1], dataType: .int32)
+                    tokenInput[0] = NSNumber(value: currentToken)
+                }
 
-                let tokenLen = try MLMultiArray(shape: [1], dataType: .int32)
-                tokenLen[0] = 1
+                let tokenLen: MLMultiArray
+                if let buf = tokenLenBuf, !disablePrealloc {
+                    tokenLen = buf
+                } else {
+                    tokenLen = try MLMultiArray(shape: [1], dataType: .int32)
+                    tokenLen[0] = 1
+                }
 
                 // Inner-loop call: priority is (1) triple-fused (B2) → returns int32
                 // token_id directly, (2) dec+joint fusion (B1) → returns logits +
@@ -812,6 +842,30 @@ extension StreamingNemotronMultilingualAsrManager {
     /// Returns: (encoded, encoderProj, cacheChannelOut, cacheTimeOut, cacheLenOut).
     /// Uses no output backings (passes nil prediction options) so its output
     /// buffers don't race with the current chunk's `encoded` reads.
+    /// Cached env-var read: FLUIDAUDIO_VAD_RMS_THRESHOLD ([0,1] linear PCM).
+    /// 0 (default) = VAD disabled. Recommended starting values:
+    ///   0.003 = very conservative (only dead silence)
+    ///   0.005 = conservative (silence + faint background)
+    ///   0.010 = aggressive (background room noise included; WER risk)
+    nonisolated internal static let vadRmsThreshold: Float = {
+        guard let s = ProcessInfo.processInfo.environment["FLUIDAUDIO_VAD_RMS_THRESHOLD"],
+              let v = Float(s), v > 0, v < 1.0
+        else { return 0 }
+        return v
+    }()
+
+    /// Energy-based silence detector. Returns true iff the RMS of `samples`
+    /// is below `threshold`. Uses vDSP_rmsqv for one-pass single-instruction
+    /// RMS — cost is dwarfed by even one MLMultiArray alloc.
+    nonisolated internal static func isAudioSilent(samples: [Float], threshold: Float) -> Bool {
+        guard !samples.isEmpty else { return true }
+        var rms: Float = 0
+        samples.withUnsafeBufferPointer { ptr in
+            vDSP_rmsqv(ptr.baseAddress!, 1, &rms, vDSP_Length(samples.count))
+        }
+        return rms < threshold
+    }
+
     nonisolated internal static func runPrepAndEncoderPure(
         samples: [Float],
         melCacheForPrepend: MLMultiArray?,
@@ -832,6 +886,14 @@ extension StreamingNemotronMultilingualAsrManager {
         cacheLen: MLMultiArray,
         newMelCache: MLMultiArray
     )? {
+        // VAD short-circuit in the triple-stage prefetch helper: same rules
+        // as in processChunk — skip the entire encoder call for silent
+        // chunks. Returning nil makes processChunk(t+1) fall through to its
+        // own serial preprocessor+encoder path, where the VAD check fires
+        // again (and skips if still silent).
+        if vadRmsThreshold > 0, isAudioSilent(samples: samples, threshold: vadRmsThreshold) {
+            return nil
+        }
         guard let chunkMel = try await runPreprocessorPure(samples: samples, preprocessor: preprocessor) else {
             return nil
         }
