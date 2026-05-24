@@ -86,6 +86,8 @@ struct FluidAudioCLI {
             await NemotronMultilingualTranscribe.run(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-multilingual-benchmark":
             await NemotronMultilingualFleursBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+        case "native-rnnt-parity":
+            await NativeRnntParityCheck.run(arguments: Array(arguments.dropFirst(2)))
         case "ctc-zh-cn-transcribe":
             await CtcZhCnTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "ctc-zh-cn-benchmark":
