@@ -123,13 +123,24 @@ extension VocabularyRescorer {
         // Span length still tiebreaks at near-equal similarity to keep the
         // existing preference for compact replacements when both candidates
         // are equally plausible.
+        // Quantize similarity into 0.05-wide buckets so candidates whose raw
+        // similarities differ by less than the bucket width are treated as
+        // equivalent for ranking. Span length breaks ties within a bucket;
+        // raw similarity breaks ties at equal span. Quantization yields a
+        // strict weak ordering (transitive by construction) — the previous
+        // implementation compared `abs(simDiff) > 0.05` directly, which is
+        // non-transitive: e.g. for similarities 0.70/0.66/0.62 across span
+        // lengths 3/2/1, A vs B and B vs C dispatch to the span tiebreaker
+        // while A vs C dispatches to similarity, producing a cycle.
+        let quantized: (Float) -> Int = { Int(($0 / 0.05).rounded()) }
         let sortedReplacements = pendingReplacements.sorted { a, b in
-            let simDiff = a.similarity - b.similarity
-            if abs(simDiff) > 0.05 {
-                return simDiff > 0  // Prefer higher similarity
+            let aBucket = quantized(a.similarity)
+            let bBucket = quantized(b.similarity)
+            if aBucket != bBucket {
+                return aBucket > bBucket  // Prefer higher similarity bucket
             }
             if a.candidate.spanLength != b.candidate.spanLength {
-                return a.candidate.spanLength < b.candidate.spanLength  // Prefer shorter spans on near-tie
+                return a.candidate.spanLength < b.candidate.spanLength  // Prefer shorter spans within a bucket
             }
             return a.similarity > b.similarity
         }
