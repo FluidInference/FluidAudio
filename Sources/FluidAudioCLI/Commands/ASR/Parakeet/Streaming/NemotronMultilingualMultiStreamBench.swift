@@ -129,18 +129,35 @@ public enum NemotronMultilingualMultiStreamBench {
             queues[idx % config.streams].append(url)
         }
 
-        // Compute total audio duration once for aggregate RTFx
+        // Compute total audio duration + load LS-style trans.txt
+        // references for WER verification. Each LS speaker subdir
+        // contains a `<spk>-<chap>.trans.txt` mapping file_id → text.
         var totalDurationSec: Double = 0
+        var references: [String: String] = [:]
         for url in files {
             if let f = try? AVAudioFile(forReading: url) {
                 totalDurationSec += Double(f.length) / f.processingFormat.sampleRate
             }
         }
-        logger.info("Total audio: \(String(format: "%.1f", totalDurationSec))s")
+        // Walk subset dir for trans.txt to populate references
+        if let walker = FileManager.default.enumerator(at: subsetDir, includingPropertiesForKeys: nil) {
+            while let item = walker.nextObject() {
+                guard let url = item as? URL, url.lastPathComponent.hasSuffix(".trans.txt") else { continue }
+                let content = (try? String(contentsOf: url)) ?? ""
+                for line in content.components(separatedBy: .newlines) where !line.isEmpty {
+                    let parts = line.split(separator: " ", maxSplits: 1)
+                    if parts.count == 2 { references[String(parts[0])] = String(parts[1]) }
+                }
+            }
+        }
+        logger.info("Total audio: \(String(format: "%.1f", totalDurationSec))s, \(references.count) references loaded")
 
-        // Process all queues concurrently
+        // Process all queues concurrently. Each task returns (idx,
+        // processed, audio, [(file_id, hypothesis)]) so we can compute
+        // per-stream WER vs reference at the end.
         let processStart = Date()
-        await withTaskGroup(of: (Int, Int, Double).self) { group in
+        var perStreamHyps: [Int: [(String, String)]] = [:]
+        await withTaskGroup(of: (Int, Int, Double, [(String, String)]).self) { group in
             for (streamIdx, queue) in queues.enumerated() {
                 let mgr = managers[streamIdx]
                 let queueCopy = queue
@@ -148,6 +165,7 @@ public enum NemotronMultilingualMultiStreamBench {
                 group.addTask {
                     var processed = 0
                     var streamAudio: Double = 0
+                    var hyps: [(String, String)] = []
                     for url in queueCopy {
                         guard let audioFile = try? AVAudioFile(forReading: url) else { continue }
                         let dur = Double(audioFile.length) / audioFile.processingFormat.sampleRate
@@ -159,24 +177,42 @@ public enum NemotronMultilingualMultiStreamBench {
                         do {
                             try audioFile.read(into: buf)
                             _ = try await mgr.process(audioBuffer: buf)
-                            _ = try await mgr.finish()
+                            let result = try await mgr.finish()
+                            let fileId = url.deletingPathExtension().lastPathComponent
+                            hyps.append((fileId, result))
                             await mgr.reset()
                         } catch {
                             print("Stream \(idx) file \(url.lastPathComponent) failed: \(error)")
                         }
                         processed += 1
                     }
-                    return (idx, processed, streamAudio)
+                    return (idx, processed, streamAudio, hyps)
                 }
             }
-            for await (streamIdx, processed, streamAudio) in group {
+            for await (streamIdx, processed, streamAudio, hyps) in group {
+                perStreamHyps[streamIdx] = hyps
                 logger.info("Stream \(streamIdx): processed \(processed) files (\(String(format: "%.1f", streamAudio))s audio)")
             }
         }
         let wallTime = Date().timeIntervalSince(processStart)
         let aggregateRtfx = totalDurationSec / wallTime
-        // Print summary to stdout (logger.info routes to os_log which doesn't
-        // surface in shell). PROFILE counters already go to stderr.
+
+        // Compute aggregate WER across all streams. Use English
+        // normalizer (LS test-clean is English audiobook).
+        var totalWER: Double = 0
+        var werSamples = 0
+        for (_, hyps) in perStreamHyps {
+            for (fileId, hyp) in hyps {
+                guard let ref = references[fileId] else { continue }
+                let m = WERCalculator.calculateWERAndCER(hypothesis: hyp, reference: ref)
+                totalWER += m.wer
+                werSamples += 1
+            }
+        }
+        let avgWER = werSamples > 0 ? totalWER / Double(werSamples) : 0
+
+        // Print summary to stdout (logger.info routes to os_log which
+        // doesn't surface in shell). PROFILE counters already go to stderr.
         print(String(repeating: "=", count: 60))
         print("Streams: \(config.streams)")
         print("Files: \(files.count)")
@@ -184,6 +220,7 @@ public enum NemotronMultilingualMultiStreamBench {
         print("Wall time: \(String(format: "%.1f", wallTime))s")
         print("Aggregate RTFx: \(String(format: "%.2f", aggregateRtfx))x")
         print("Per-stream RTFx (avg): \(String(format: "%.2f", aggregateRtfx / Double(config.streams)))x")
+        print("Avg WER: \(String(format: "%.2f", avgWER * 100))% (\(werSamples) samples scored)")
         print(String(repeating: "=", count: 60))
     }
 
