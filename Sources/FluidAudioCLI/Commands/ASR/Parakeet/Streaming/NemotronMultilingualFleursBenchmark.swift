@@ -260,21 +260,15 @@ public class NemotronMultilingualFleursBenchmark {
             let audioDuration = Double(audioSamples.count) / 16000.0
 
             do {
-                let audioFile = try AVAudioFile(forReading: audioURL)
-                guard
-                    let buffer = AVAudioPCMBuffer(
-                        pcmFormat: audioFile.processingFormat,
-                        frameCapacity: AVAudioFrameCount(audioFile.length)
-                    )
-                else {
-                    logger.warning("Buffer alloc failed for \(sample.sampleId)")
-                    skipped += 1
-                    continue
-                }
-                try audioFile.read(into: buffer)
-
+                // Predecoded-PCM bench mode: `audioSamples` is already
+                // resampled to 16 kHz by `audioConverter.resampleAudioFile`
+                // above. Feed it directly via `process(samples:)` to bypass
+                // the redundant AVAudioFile open + AVAudioPCMBuffer alloc +
+                // second `resampleBuffer` resample inside
+                // `process(audioBuffer:)`. Isolates model wall-time from
+                // file-IO/resample harness overhead.
                 let startTime = Date()
-                _ = try await manager.process(audioBuffer: buffer)
+                _ = try await manager.process(samples: audioSamples)
                 let hypothesis = try await manager.finish()
                 let processingTime = Date().timeIntervalSince(startTime)
                 // Capture diagnostic stats from this finish() call before any

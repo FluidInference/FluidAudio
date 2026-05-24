@@ -125,6 +125,14 @@ public actor StreamingNemotronMultilingualAsrManager {
     internal var tokenInputBuf: MLMultiArray?
     internal var tokenLenBuf: MLMultiArray?
 
+    /// Reusable preprocessor input buffers ([1, chunkSamples] float32 audio +
+    /// [1] int32 length). Triple-stage helper allocates one set per chunk
+    /// (~25-800 allocs/h depending on chunk size). Pre-allocated once,
+    /// refilled in place. Triple-stage helpers are sequential (await before
+    /// next dispatch) so a single shared buffer is safe.
+    internal var audioInputBuf: MLMultiArray?
+    internal var audioLenBuf: MLMultiArray?
+
     // Triple-stage pipelining: encoder[t+1] dispatched concurrent with
     // decode[t]. These are the prefetched encoder outputs (and the caches
     // it produced) — set during processChunk(t), consumed by processChunk(t+1).
@@ -140,6 +148,12 @@ public actor StreamingNemotronMultilingualAsrManager {
     public internal(set) var decNanos: UInt64 = 0
     public internal(set) var chunkCount: Int = 0
     public internal(set) var vadSkipCount: Int = 0
+
+    /// Smarter-VAD hangover state: number of consecutive low-RMS chunks
+    /// seen. Skip fires only after `vadHangoverChunks` consecutive low-RMS
+    /// chunks — preserves the first low chunk after speech (consonant
+    /// tails) and only skips true sustained silence.
+    internal var vadConsecutiveLowChunks: Int = 0
 
     // Decoder LSTM states
     internal var hState: MLMultiArray?
@@ -408,6 +422,16 @@ public actor StreamingNemotronMultilingualAsrManager {
         if let tokLen = try? MLMultiArray(shape: [1], dataType: .int32) {
             tokLen[0] = 1
             self.tokenLenBuf = tokLen
+        }
+
+        // Reusable preprocessor input buffers — [1, chunkSamples] float32
+        // audio + [1] int32 length. Refilled by triple-stage helper.
+        if let audBuf = try? MLMultiArray(shape: [1, NSNumber(value: config.chunkSamples)], dataType: .float32) {
+            self.audioInputBuf = audBuf
+        }
+        if let audLen = try? MLMultiArray(shape: [1], dataType: .int32) {
+            audLen[0] = NSNumber(value: config.chunkSamples)
+            self.audioLenBuf = audLen
         }
 
         // First-chunk warm-up: dispatch one zero-input prediction per model so
@@ -742,11 +766,19 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// Process audio. Returns the empty string because the partial transcript
     /// is delivered via the partial callback or `getPartialTranscript()`.
     public func process(audioBuffer: AVAudioPCMBuffer) async throws -> String {
+        let samples = try audioConverter.resampleBuffer(audioBuffer)
+        return try await process(samples: samples)
+    }
+
+    /// Process pre-resampled 16 kHz Float samples directly. Skips
+    /// `AVAudioPCMBuffer` + `AudioConverter.resampleBuffer` overhead — use
+    /// this when the caller already has the audio as `[Float]` at 16 kHz
+    /// (e.g. predecoded-PCM benchmarks or memory-cached pipelines).
+    public func process(samples: [Float]) async throws -> String {
         guard preprocessor != nil, encoder != nil, decoder != nil, joint != nil else {
             throw ASRError.notInitialized
         }
 
-        let samples = try audioConverter.resampleBuffer(audioBuffer)
         self.audioBuffer.append(contentsOf: samples)
 
         let chunkSamples = config.chunkSamples

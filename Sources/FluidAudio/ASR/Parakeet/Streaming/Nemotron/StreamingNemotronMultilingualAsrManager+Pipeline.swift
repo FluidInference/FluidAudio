@@ -36,16 +36,25 @@ extension StreamingNemotronMultilingualAsrManager {
 
         self.chunkCount += 1
 
-        // VAD-GATED SKIP: if this chunk is below the configured RMS energy
-        // threshold, skip preprocessor + encoder + decode entirely. Caches
-        // are NOT advanced (next non-silent chunk's encoder sees the cache
-        // from the last non-silent chunk — fine for true silence since the
-        // model produces no information in silent regions anyway).
-        // Threshold is opt-in via FLUIDAUDIO_VAD_RMS_THRESHOLD (default 0 = disabled).
-        // Recommended starting value: 0.003-0.005 for conservative skip.
-        if Self.vadRmsThreshold > 0, Self.isAudioSilent(samples: samples, threshold: Self.vadRmsThreshold) {
-            self.vadSkipCount &+= 1
-            return
+        // VAD-GATED SKIP with hangover: skip only after N consecutive
+        // low-RMS chunks (default N=2). The first low chunk after speech
+        // is ALWAYS processed — preserves consonant tails / quiet word
+        // endings on dense speech. On podcast/silence-heavy audio, true
+        // sustained silence still gets skipped after the hangover window.
+        //
+        // FLUIDAUDIO_VAD_RMS_THRESHOLD: 0 (disabled) / 0.003-0.010 (workload-tuned)
+        // FLUIDAUDIO_VAD_HANGOVER_CHUNKS: required consecutive low-RMS chunks (default 2)
+        if Self.vadRmsThreshold > 0 {
+            if Self.isAudioSilent(samples: samples, threshold: Self.vadRmsThreshold) {
+                self.vadConsecutiveLowChunks &+= 1
+                if self.vadConsecutiveLowChunks >= Self.vadHangoverChunks {
+                    self.vadSkipCount &+= 1
+                    return
+                }
+                // Within hangover window — process normally (edge preserve).
+            } else {
+                self.vadConsecutiveLowChunks = 0
+            }
         }
 
         let prepStart = DispatchTime.now().uptimeNanoseconds
@@ -75,9 +84,25 @@ extension StreamingNemotronMultilingualAsrManager {
                 chunkMel = prefetched
                 self.prefetchedMel = nil
             } else {
-                let audioArray = try createAudioArray(samples)
-                let audioLen = try MLMultiArray(shape: [1], dataType: .int32)
-                audioLen[0] = NSNumber(value: samples.count)
+                // Reuse pre-allocated audio buffer when sized correctly
+                // (chunkSamples == config.chunkSamples for normal chunks).
+                // Final chunk may be shorter (padded) so falls back to fresh
+                // alloc to match the actual sample count.
+                let audioArray: MLMultiArray
+                let audioLen: MLMultiArray
+                if let buf = audioInputBuf,
+                   buf.shape[1].intValue == samples.count,
+                   let lenBuf = audioLenBuf {
+                    let ptr = buf.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
+                    ptr.update(from: samples, count: samples.count)
+                    lenBuf[0] = NSNumber(value: samples.count)
+                    audioArray = buf
+                    audioLen = lenBuf
+                } else {
+                    audioArray = try createAudioArray(samples)
+                    audioLen = try MLMultiArray(shape: [1], dataType: .int32)
+                    audioLen[0] = NSNumber(value: samples.count)
+                }
                 let preprocInput = try MLDictionaryFeatureProvider(dictionary: [
                     "audio": MLFeatureValue(multiArray: audioArray),
                     "audio_length": MLFeatureValue(multiArray: audioLen),
@@ -171,6 +196,8 @@ extension StreamingNemotronMultilingualAsrManager {
         nonisolated(unsafe) let snapshotCacheTime = self.cacheTime
         nonisolated(unsafe) let snapshotCacheLen = self.cacheLen
         nonisolated(unsafe) let snapshotMelCache = self.melCache
+        nonisolated(unsafe) let snapshotAudioBuf = self.audioInputBuf
+        nonisolated(unsafe) let snapshotAudioLenBuf = self.audioLenBuf
         let snapshotPromptId = currentPromptIdValue()
         let snapshotTotalMelFrames = config.totalMelFrames
         let snapshotMelFeatures = config.melFeatures
@@ -205,7 +232,9 @@ extension StreamingNemotronMultilingualAsrManager {
                 melFeatures: snapshotMelFeatures,
                 preEncodeCache: snapshotPreEncodeCache,
                 preprocessor: preprocessor,
-                encoder: encoder
+                encoder: encoder,
+                audioInputBuf: snapshotAudioBuf,
+                audioLenBuf: snapshotAudioLenBuf
             )
         }()
 
@@ -820,13 +849,31 @@ extension StreamingNemotronMultilingualAsrManager {
 
     /// Nonisolated helper for async pipelining — runs the preprocessor on a
     /// chunk of samples without touching actor state. Sendable inputs only.
-    nonisolated internal static func runPreprocessorPure(samples: [Float], preprocessor: MLModel) async throws -> MLMultiArray? {
-        let array = try MLMultiArray(shape: [1, NSNumber(value: samples.count)], dataType: .float32)
-        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
-        ptr.update(from: samples, count: samples.count)
-
-        let audioLen = try MLMultiArray(shape: [1], dataType: .int32)
-        audioLen[0] = NSNumber(value: samples.count)
+    /// Reuses caller-provided `audioInputBuf` / `audioLenBuf` when supplied
+    /// and shape-compatible; otherwise falls back to fresh allocation.
+    nonisolated internal static func runPreprocessorPure(
+        samples: [Float],
+        preprocessor: MLModel,
+        audioInputBuf: MLMultiArray? = nil,
+        audioLenBuf: MLMultiArray? = nil
+    ) async throws -> MLMultiArray? {
+        let array: MLMultiArray
+        let audioLen: MLMultiArray
+        if let buf = audioInputBuf,
+           buf.shape[1].intValue == samples.count,
+           let lenBuf = audioLenBuf {
+            let ptr = buf.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
+            ptr.update(from: samples, count: samples.count)
+            lenBuf[0] = NSNumber(value: samples.count)
+            array = buf
+            audioLen = lenBuf
+        } else {
+            array = try MLMultiArray(shape: [1, NSNumber(value: samples.count)], dataType: .float32)
+            let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
+            ptr.update(from: samples, count: samples.count)
+            audioLen = try MLMultiArray(shape: [1], dataType: .int32)
+            audioLen[0] = NSNumber(value: samples.count)
+        }
 
         let input = try MLDictionaryFeatureProvider(dictionary: [
             "audio": MLFeatureValue(multiArray: array),
@@ -854,6 +901,17 @@ extension StreamingNemotronMultilingualAsrManager {
         return v
     }()
 
+    /// Smarter-VAD hangover: number of consecutive low-RMS chunks required
+    /// before triggering a skip. Default 2 — first low chunk after speech
+    /// is always processed (consonant-tail edge preserve). Set to 1 to
+    /// match the old per-chunk-only behavior.
+    nonisolated internal static let vadHangoverChunks: Int = {
+        guard let s = ProcessInfo.processInfo.environment["FLUIDAUDIO_VAD_HANGOVER_CHUNKS"],
+              let v = Int(s), v >= 1
+        else { return 2 }
+        return v
+    }()
+
     /// Energy-based silence detector. Returns true iff the RMS of `samples`
     /// is below `threshold`. Uses vDSP_rmsqv for one-pass single-instruction
     /// RMS — cost is dwarfed by even one MLMultiArray alloc.
@@ -877,7 +935,9 @@ extension StreamingNemotronMultilingualAsrManager {
         melFeatures: Int,
         preEncodeCache: Int,
         preprocessor: MLModel,
-        encoder: MLModel
+        encoder: MLModel,
+        audioInputBuf: MLMultiArray? = nil,
+        audioLenBuf: MLMultiArray? = nil
     ) async throws -> (
         encoded: MLMultiArray,
         encoderProj: MLMultiArray?,
@@ -894,7 +954,12 @@ extension StreamingNemotronMultilingualAsrManager {
         if vadRmsThreshold > 0, isAudioSilent(samples: samples, threshold: vadRmsThreshold) {
             return nil
         }
-        guard let chunkMel = try await runPreprocessorPure(samples: samples, preprocessor: preprocessor) else {
+        guard let chunkMel = try await runPreprocessorPure(
+            samples: samples,
+            preprocessor: preprocessor,
+            audioInputBuf: audioInputBuf,
+            audioLenBuf: audioLenBuf
+        ) else {
             return nil
         }
         let inputMel = try prependMelCachePure(
