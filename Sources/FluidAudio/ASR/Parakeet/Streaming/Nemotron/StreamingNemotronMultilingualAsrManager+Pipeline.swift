@@ -1084,27 +1084,36 @@ extension StreamingNemotronMultilingualAsrManager {
                 : logits.dataPointer.bindMemory(to: Float.self, capacity: logits.count)
 
             // ── Step 4: scan for first non-blank in kActual frames.
+            // Fast path: Float32 logits with vocab-stride=1 → vDSP_maxvi
+            // (SIMD argmax). Falls back to scalar loop for FP16 or strided.
+            let vocabContiguous = (logitsStride3 == 1)
             var firstNonBlankAt = -1
             var emittedToken = blankIdx
             for kk in 0..<kActual {
-                // Argmax over vocab at frame kk
-                var bestVal: Float = -.greatestFiniteMagnitude
                 var bestIdx = blankIdx
                 let frameBase = 0 * logitsStride0 + kk * logitsStride1 + 0 * logitsStride2
-                if logitsIsF16 {
-                    for v in 0..<vocabSize {
-                        let val = Float(Float16(bitPattern: logitsF16Ptr![frameBase + v * logitsStride3]))
-                        if val > bestVal {
-                            bestVal = val
-                            bestIdx = v
-                        }
-                    }
+                if !logitsIsF16, vocabContiguous, let f32 = logitsF32Ptr {
+                    var maxVal: Float = 0
+                    var maxIdx: vDSP_Length = 0
+                    vDSP_maxvi(f32.advanced(by: frameBase), 1, &maxVal, &maxIdx, vDSP_Length(vocabSize))
+                    bestIdx = Int(maxIdx)
                 } else {
-                    for v in 0..<vocabSize {
-                        let val = logitsF32Ptr![frameBase + v * logitsStride3]
-                        if val > bestVal {
-                            bestVal = val
-                            bestIdx = v
+                    var bestVal: Float = -.greatestFiniteMagnitude
+                    if logitsIsF16 {
+                        for v in 0..<vocabSize {
+                            let val = Float(Float16(bitPattern: logitsF16Ptr![frameBase + v * logitsStride3]))
+                            if val > bestVal {
+                                bestVal = val
+                                bestIdx = v
+                            }
+                        }
+                    } else {
+                        for v in 0..<vocabSize {
+                            let val = logitsF32Ptr![frameBase + v * logitsStride3]
+                            if val > bestVal {
+                                bestVal = val
+                                bestIdx = v
+                            }
                         }
                     }
                 }
@@ -1169,13 +1178,38 @@ extension StreamingNemotronMultilingualAsrManager {
                         tokLen2[0] = 1
                     }
 
-                    // Use B1 fused decoder_joint if available; falls back to
-                    // separate decoder+joint calls if not.
+                    // Drain priority: B2 (decoder_joint_argmax) > B1 (decoder_joint)
+                    // > slow decoder+joint fallback. B2 returns token_id
+                    // directly so we skip findMaxIndex. Critical: respects the
+                    // same load priority as the main loop — production bundles
+                    // with B2 were previously falling into the slow fallback
+                    // because this site only checked B1.
                     var dBestIdx = blankIdx
                     var newH: MLMultiArray = currentH
                     var newC: MLMultiArray = currentC
 
-                    if let dj = self.decoderJoint {
+                    if let dja = self.decoderJointArgmax {
+                        let djaInput = try MLDictionaryFeatureProvider(dictionary: [
+                            "token": MLFeatureValue(multiArray: tokInput2),
+                            "token_length": MLFeatureValue(multiArray: tokLen2),
+                            "h_in": MLFeatureValue(multiArray: currentH),
+                            "c_in": MLFeatureValue(multiArray: currentC),
+                            "encoder": MLFeatureValue(multiArray: drainEncStep),
+                        ])
+                        let djaOutput: MLFeatureProvider
+                        if let opts = decoderJointArgmaxPredictionOptions {
+                            djaOutput = try await dja.prediction(from: djaInput, options: opts)
+                        } else {
+                            djaOutput = try await dja.prediction(from: djaInput)
+                        }
+                        guard let tokenIdArr = djaOutput.featureValue(for: "token_id")?.multiArrayValue,
+                            let djaH = djaOutput.featureValue(for: "h_out")?.multiArrayValue,
+                            let djaC = djaOutput.featureValue(for: "c_out")?.multiArrayValue
+                        else { throw ASRError.processingFailed("Drain B2 failed") }
+                        dBestIdx = Int(tokenIdArr[0].int32Value)
+                        newH = djaH
+                        newC = djaC
+                    } else if let dj = self.decoderJoint {
                         let djInput = try MLDictionaryFeatureProvider(dictionary: [
                             "token": MLFeatureValue(multiArray: tokInput2),
                             "token_length": MLFeatureValue(multiArray: tokLen2),

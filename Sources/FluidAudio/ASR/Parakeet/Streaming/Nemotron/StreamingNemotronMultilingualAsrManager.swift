@@ -306,14 +306,20 @@ public actor StreamingNemotronMultilingualAsrManager {
             compiled: ModelNames.NemotronMultilingualStreaming.preprocessorFile,
             uncompiled: ModelNames.NemotronMultilingualStreaming.preprocessorPackage
         )
-        self.preprocessor = try await MLModel.load(contentsOf: preprocessorURL, configuration: mlConfiguration)
+        self.preprocessor = try await MLModel.load(
+            contentsOf: preprocessorURL,
+            configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_PREPROCESSOR_CU", base: mlConfiguration, logger: logger)
+        )
 
         let encoderURL = try await locateModelBundle(
             in: directory,
             compiled: ModelNames.NemotronMultilingualStreaming.encoderFile,
             uncompiled: ModelNames.NemotronMultilingualStreaming.encoderPackage
         )
-        self.encoder = try await MLModel.load(contentsOf: encoderURL, configuration: mlConfiguration)
+        self.encoder = try await MLModel.load(
+            contentsOf: encoderURL,
+            configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_ENCODER_CU", base: mlConfiguration, logger: logger)
+        )
         // Detect stateful encoder (cache_channel/cache_time as MLState rather
         // than I/O tensors). makeState() returns a fresh zero-initialized state.
         if #available(macOS 15, iOS 18, *) {
@@ -328,88 +334,80 @@ public actor StreamingNemotronMultilingualAsrManager {
             compiled: ModelNames.NemotronMultilingualStreaming.decoderFile,
             uncompiled: ModelNames.NemotronMultilingualStreaming.decoderPackage
         )
-        self.decoder = try await MLModel.load(contentsOf: decoderURL, configuration: mlConfiguration)
+        self.decoder = try await MLModel.load(
+            contentsOf: decoderURL,
+            configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_DECODER_CU", base: mlConfiguration, logger: logger)
+        )
 
         let jointURL = try await locateModelBundle(
             in: directory,
             compiled: ModelNames.NemotronMultilingualStreaming.jointFile,
             uncompiled: ModelNames.NemotronMultilingualStreaming.jointPackage
         )
-        self.joint = try await MLModel.load(contentsOf: jointURL, configuration: mlConfiguration)
+        self.joint = try await MLModel.load(
+            contentsOf: jointURL,
+            configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_JOINT_CU", base: mlConfiguration, logger: logger)
+        )
 
         // Optional triple-fused decoder+joint+argmax mlpackage (Tier B2).
         // Takes precedence over the dec+joint fusion below if present.
-        let argmaxCompiledURL = directory.appendingPathComponent("decoder_joint_argmax.mlmodelc")
-        let argmaxPackageURL = directory.appendingPathComponent("decoder_joint_argmax.mlpackage")
-        if FileManager.default.fileExists(atPath: argmaxCompiledURL.path) {
-            self.decoderJointArgmax = try await MLModel.load(contentsOf: argmaxCompiledURL, configuration: mlConfiguration)
-            logger.info("Loaded fused decoder_joint_argmax.mlmodelc — using triple-fusion inner-loop path")
-        } else if FileManager.default.fileExists(atPath: argmaxPackageURL.path) {
-            let tempCompiledURL = try await MLModel.compileModel(at: argmaxPackageURL)
-            self.decoderJointArgmax = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
-            logger.info("Compiled + loaded fused decoder_joint_argmax.mlpackage — using triple-fusion inner-loop path")
+        if let argmaxURL = try await locateOptionalModelBundle(
+            in: directory, compiled: "decoder_joint_argmax.mlmodelc",
+            uncompiled: "decoder_joint_argmax.mlpackage"
+        ) {
+            self.decoderJointArgmax = try await MLModel.load(
+                contentsOf: argmaxURL,
+                configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_DECODERJOINT_CU", base: mlConfiguration, logger: logger)
+            )
+            logger.info("Loaded decoder_joint_argmax — using triple-fusion inner-loop path")
         }
 
         // Optional B3+B1 fused decoder+joint-without-encproj mlpackage. Takes
         // precedence over plain B1 decoder_joint when present (requires the
         // encoder to also emit `encoder_proj`).
-        if self.decoderJointArgmax == nil {
-            let noEncProjCompiledURL = directory.appendingPathComponent("decoder_joint_noencproj.mlmodelc")
-            let noEncProjPackageURL = directory.appendingPathComponent("decoder_joint_noencproj.mlpackage")
-            if FileManager.default.fileExists(atPath: noEncProjCompiledURL.path) {
-                self.decoderJointNoEncProj = try await MLModel.load(contentsOf: noEncProjCompiledURL, configuration: mlConfiguration)
-                logger.info("Loaded fused decoder_joint_noencproj.mlmodelc — using B3+B1 inner-loop path")
-            } else if FileManager.default.fileExists(atPath: noEncProjPackageURL.path) {
-                let tempCompiledURL = try await MLModel.compileModel(at: noEncProjPackageURL)
-                self.decoderJointNoEncProj = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
-                logger.info("Compiled + loaded fused decoder_joint_noencproj.mlpackage — using B3+B1 inner-loop path")
-            }
+        if self.decoderJointArgmax == nil,
+            let noEncProjURL = try await locateOptionalModelBundle(
+                in: directory, compiled: "decoder_joint_noencproj.mlmodelc",
+                uncompiled: "decoder_joint_noencproj.mlpackage"
+            )
+        {
+            self.decoderJointNoEncProj = try await MLModel.load(contentsOf: noEncProjURL, configuration: mlConfiguration)
+            logger.info("Loaded decoder_joint_noencproj — using B3+B1 inner-loop path")
         }
 
         // Optional fused decoder+joint mlpackage (Tier B1 optimization).
         // Used if triple-fusion and B3+B1 are not present.
-        if self.decoderJointArgmax == nil && self.decoderJointNoEncProj == nil {
-            let fusedCompiledURL = directory.appendingPathComponent("decoder_joint.mlmodelc")
-            let fusedPackageURL = directory.appendingPathComponent("decoder_joint.mlpackage")
-            if FileManager.default.fileExists(atPath: fusedCompiledURL.path) {
-                self.decoderJoint = try await MLModel.load(contentsOf: fusedCompiledURL, configuration: mlConfiguration)
-                logger.info("Loaded fused decoder_joint.mlmodelc — using merged inner-loop path")
-            } else if FileManager.default.fileExists(atPath: fusedPackageURL.path) {
-                let tempCompiledURL = try await MLModel.compileModel(at: fusedPackageURL)
-                self.decoderJoint = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
-                logger.info("Compiled + loaded fused decoder_joint.mlpackage — using merged inner-loop path")
-            }
+        if self.decoderJointArgmax == nil && self.decoderJointNoEncProj == nil,
+            let fusedURL = try await locateOptionalModelBundle(
+                in: directory, compiled: "decoder_joint.mlmodelc",
+                uncompiled: "decoder_joint.mlpackage"
+            )
+        {
+            self.decoderJoint = try await MLModel.load(contentsOf: fusedURL, configuration: mlConfiguration)
+            logger.info("Loaded decoder_joint — using merged inner-loop path")
         }
 
-        // Optional batched joint mlpackage for speculative-blank inner loop.
-        // Loaded last; if present the pipeline routes through the speculative
-        // path INSTEAD of the per-token decoder+joint loop above. Requires
-        // the unfused `decoder.mlpackage` to compute dec_out separately.
-        let batchedCompiledURL = directory.appendingPathComponent("joint_batched.mlmodelc")
-        let batchedPackageURL = directory.appendingPathComponent("joint_batched.mlpackage")
-        if FileManager.default.fileExists(atPath: batchedCompiledURL.path) {
-            self.jointBatched = try await MLModel.load(contentsOf: batchedCompiledURL, configuration: mlConfiguration)
-            logger.info("Loaded joint_batched.mlmodelc — using speculative-blank inner-loop path")
-        } else if FileManager.default.fileExists(atPath: batchedPackageURL.path) {
-            let tempCompiledURL = try await MLModel.compileModel(at: batchedPackageURL)
-            self.jointBatched = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
-            logger.info("Compiled + loaded joint_batched.mlpackage — using speculative-blank inner-loop path")
+        // Optional batched joint mlpackage for speculative-blank inner loop
+        // (V1, preserved behind FLUIDAUDIO_ENABLE_SPECULATIVE_BATCHED).
+        if let batchedURL = try await locateOptionalModelBundle(
+            in: directory, compiled: "joint_batched.mlmodelc",
+            uncompiled: "joint_batched.mlpackage"
+        ) {
+            self.jointBatched = try await MLModel.load(contentsOf: batchedURL, configuration: mlConfiguration)
+            logger.info("Loaded joint_batched — V1 speculative-blank inner-loop path available")
         }
 
-        // Optional smart speculative-blank batched joint (B3 split +
-        // post-projection batching). Takes pre-projected encoder_proj
-        // [1, K, 640] + decoder [1, 640, 1] → logits [1, K, 1, V].
-        // Requires the encoder to emit `encoder_proj` as a separate
-        // output (B3 split encoder).
-        let specBatchedCompiledURL = directory.appendingPathComponent("joint_noencproj_batched.mlmodelc")
-        let specBatchedPackageURL = directory.appendingPathComponent("joint_noencproj_batched.mlpackage")
-        if FileManager.default.fileExists(atPath: specBatchedCompiledURL.path) {
-            self.jointNoEncProjBatched = try await MLModel.load(contentsOf: specBatchedCompiledURL, configuration: mlConfiguration)
-            logger.info("Loaded joint_noencproj_batched.mlmodelc — smart speculative-blank path available")
-        } else if FileManager.default.fileExists(atPath: specBatchedPackageURL.path) {
-            let tempCompiledURL = try await MLModel.compileModel(at: specBatchedPackageURL)
-            self.jointNoEncProjBatched = try await MLModel.load(contentsOf: tempCompiledURL, configuration: mlConfiguration)
-            logger.info("Compiled + loaded joint_noencproj_batched.mlpackage — smart speculative-blank path available")
+        // Optional smart speculative-blank batched joint (V2, default-on).
+        // Takes pre-projected encoder_proj [1, K, 640] + decoder
+        // [1, 640, 1] → logits [1, K, 1, V]. K is auto-detected from the
+        // input shape further down.
+        if let specBatchedURL = try await locateOptionalModelBundle(
+            in: directory, compiled: "joint_noencproj_batched.mlmodelc",
+            uncompiled: "joint_noencproj_batched.mlpackage"
+        ) {
+            let specConfig = Self.computeUnitOverride(name: "FLUIDAUDIO_JOINT_BATCHED_CU", base: mlConfiguration, logger: logger)
+            self.jointNoEncProjBatched = try await MLModel.load(contentsOf: specBatchedURL, configuration: specConfig)
+            logger.info("Loaded joint_noencproj_batched — smart speculative-blank path available")
         }
         // Read K from the loaded model's encoder_proj input shape so the
         // Swift hot loop always matches the asset (K=8 historically; K=4
@@ -641,6 +639,30 @@ public actor StreamingNemotronMultilingualAsrManager {
             }
         }
 
+        // Smart-spec batched joint warm-up. Skipped until now — production
+        // hot path was paying compile/dispatch cost on the first chunk.
+        // Uses encoder_proj [1, K, 640] + decoder [1, 640, 1] → logits.
+        if let jb = jointNoEncProjBatched {
+            let K = jointNoEncProjBatchedK
+            if let encProj = try? MLMultiArray(shape: [1, NSNumber(value: K), 640], dataType: .float32),
+                let decStep = try? MLMultiArray(shape: [1, 640, 1], dataType: .float32)
+            {
+                encProj.reset(to: 0)
+                decStep.reset(to: 0)
+                let input = try? MLDictionaryFeatureProvider(dictionary: [
+                    "encoder_proj": MLFeatureValue(multiArray: encProj),
+                    "decoder": MLFeatureValue(multiArray: decStep),
+                ])
+                if let input = input {
+                    if let opts = jointNoEncProjBatchedPredictionOptions {
+                        _ = try? await jb.prediction(from: input, options: opts)
+                    } else {
+                        _ = try? await jb.prediction(from: input)
+                    }
+                }
+            }
+        }
+
         logger.info("Model warm-up complete")
     }
 
@@ -655,6 +677,34 @@ public actor StreamingNemotronMultilingualAsrManager {
         "cache_channel_out", "cache_time_out", "cache_len_out",
         "mel_cache_out",
     ]
+
+    /// Per-model compute-unit override. Reads the named env var; if set
+    /// to CPU / CPU_AND_NE / CPU_AND_GPU / ALL, builds a fresh
+    /// MLModelConfiguration with that compute unit. Falls back to the
+    /// base config otherwise. Logs once when overridden.
+    internal static func computeUnitOverride(
+        name: String,
+        base: MLModelConfiguration,
+        logger: AppLogger
+    ) -> MLModelConfiguration {
+        guard let raw = ProcessInfo.processInfo.environment[name]?.uppercased() else {
+            return base
+        }
+        let override: MLComputeUnits
+        switch raw {
+        case "CPU", "CPU_ONLY": override = .cpuOnly
+        case "CPU_AND_NE": override = .cpuAndNeuralEngine
+        case "CPU_AND_GPU": override = .cpuAndGPU
+        case "ALL": override = .all
+        default:
+            logger.warning("Unknown value for \(name): \(raw); ignoring")
+            return base
+        }
+        let cfg = MLModelConfiguration()
+        cfg.computeUnits = override
+        logger.info("\(name)=\(raw) → MLComputeUnits.\(override.rawValue)")
+        return cfg
+    }
 
     internal static func makePredictionOptions(for model: MLModel?) -> MLPredictionOptions? {
         guard let model = model else { return nil }
@@ -671,6 +721,22 @@ public actor StreamingNemotronMultilingualAsrManager {
         let options = MLPredictionOptions()
         options.outputBackings = backings
         return options
+    }
+
+    /// Like `locateModelBundle` but returns nil if NEITHER the compiled
+    /// nor the uncompiled bundle exists. Use for optional models so the
+    /// load site still gets the caching behavior (mlpackage → cached
+    /// .mlmodelc next to source) instead of compiling to a temp dir per
+    /// cold start.
+    private func locateOptionalModelBundle(in directory: URL, compiled: String, uncompiled: String) async throws -> URL? {
+        let compiledURL = directory.appendingPathComponent(compiled)
+        let uncompiledURL = directory.appendingPathComponent(uncompiled)
+        if !FileManager.default.fileExists(atPath: compiledURL.path)
+            && !FileManager.default.fileExists(atPath: uncompiledURL.path)
+        {
+            return nil
+        }
+        return try await locateModelBundle(in: directory, compiled: compiled, uncompiled: uncompiled)
     }
 
     private func locateModelBundle(in directory: URL, compiled: String, uncompiled: String) async throws -> URL {
