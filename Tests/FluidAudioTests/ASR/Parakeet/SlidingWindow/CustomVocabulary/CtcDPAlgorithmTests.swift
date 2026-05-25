@@ -181,4 +181,150 @@ final class CtcDPAlgorithmTests: XCTestCase {
         // Normalized score = sum(-0.05 * 3) / 3 = -0.05
         XCTAssertEqual(result.score, -0.05, accuracy: 0.01)
     }
+
+    // MARK: - Blank-aware DP behavior (arXiv:2406.07096)
+
+    /// Build a per-frame log-prob row by exact assignment (one token = highScore,
+    /// blank = blankScore, everything else = coldScore). Lets tests reason about
+    /// blank emission cost explicitly.
+    private func makeFrame(
+        vocabSize: Int,
+        hotToken: Int?,
+        highScore: Float,
+        blankId: Int,
+        blankScore: Float,
+        coldScore: Float
+    ) -> [Float] {
+        var row = [Float](repeating: coldScore, count: vocabSize)
+        if blankId < vocabSize { row[blankId] = blankScore }
+        if let h = hotToken, h < vocabSize { row[h] = highScore }
+        return row
+    }
+
+    /// When the keyword is two tokens and the audio shows token0 then a long
+    /// blank stretch then token1, the per-token average score must reflect the
+    /// blank emission costs along the stay path. Previously the DP added 0 for
+    /// stay frames, which hid the blank cost.
+    func testBlankEmissionCostIsAccumulated() {
+        // 5 frames, vocab = 3 token IDs + blank at 3.
+        // Frame 0: token 0 hot. Frames 1-3: blank hot. Frame 4: token 1 hot.
+        let blankId = 3
+        let vocabSize = 4
+        let hi: Float = -0.1
+        let blank: Float = -0.5
+        let cold: Float = -10.0
+
+        let logProbs: [[Float]] = [
+            makeFrame(
+                vocabSize: vocabSize, hotToken: 0, highScore: hi, blankId: blankId, blankScore: blank, coldScore: cold),
+            makeFrame(
+                vocabSize: vocabSize, hotToken: nil, highScore: hi, blankId: blankId, blankScore: blank, coldScore: cold
+            ),
+            makeFrame(
+                vocabSize: vocabSize, hotToken: nil, highScore: hi, blankId: blankId, blankScore: blank, coldScore: cold
+            ),
+            makeFrame(
+                vocabSize: vocabSize, hotToken: nil, highScore: hi, blankId: blankId, blankScore: blank, coldScore: cold
+            ),
+            makeFrame(
+                vocabSize: vocabSize, hotToken: 1, highScore: hi, blankId: blankId, blankScore: blank, coldScore: cold),
+        ]
+
+        let result = CtcDPAlgorithm.ctcWordSpotConstrained(
+            logProbs: logProbs,
+            keywordTokens: [0, 1],
+            searchStartFrame: 0,
+            searchEndFrame: logProbs.count,
+            blankId: blankId
+        )
+
+        // The best path emits token0 at frame 0, three blanks at frames 1-3,
+        // and token1 at frame 4. Raw = -0.1 -0.5 -0.5 -0.5 -0.1 = -1.7.
+        // Per-token normalization (N = 2) → -0.85.
+        XCTAssertEqual(result.score, -0.85, accuracy: 0.01)
+    }
+
+    /// CTC requires a blank between identical adjacent tokens. The previous DP
+    /// allowed `t t → t` directly, collapsing repeats and inflating scores.
+    /// With the blank-aware DP, a keyword with repeated tokens scores noticeably
+    /// worse on audio that lacks the intervening blank than on audio that has it.
+    func testRepeatedTokensRequireInterveningBlank() {
+        let blankId = 2
+        let vocabSize = 3
+        let hi: Float = -0.1
+        let blank: Float = -0.5
+        let cold: Float = -10.0
+
+        // Two-frame audio with token 0 hot at both frames (no blank between).
+        let noBlank: [[Float]] = [
+            makeFrame(
+                vocabSize: vocabSize, hotToken: 0, highScore: hi, blankId: blankId, blankScore: blank, coldScore: cold),
+            makeFrame(
+                vocabSize: vocabSize, hotToken: 0, highScore: hi, blankId: blankId, blankScore: blank, coldScore: cold),
+        ]
+
+        // Three-frame audio with token0 / blank / token0 (proper CTC shape).
+        let withBlank: [[Float]] = [
+            makeFrame(
+                vocabSize: vocabSize, hotToken: 0, highScore: hi, blankId: blankId, blankScore: blank, coldScore: cold),
+            makeFrame(
+                vocabSize: vocabSize, hotToken: nil, highScore: hi, blankId: blankId, blankScore: blank, coldScore: cold
+            ),
+            makeFrame(
+                vocabSize: vocabSize, hotToken: 0, highScore: hi, blankId: blankId, blankScore: blank, coldScore: cold),
+        ]
+
+        let resNoBlank = CtcDPAlgorithm.ctcWordSpotConstrained(
+            logProbs: noBlank,
+            keywordTokens: [0, 0],
+            searchStartFrame: 0,
+            searchEndFrame: noBlank.count,
+            blankId: blankId
+        )
+        let resWithBlank = CtcDPAlgorithm.ctcWordSpotConstrained(
+            logProbs: withBlank,
+            keywordTokens: [0, 0],
+            searchStartFrame: 0,
+            searchEndFrame: withBlank.count,
+            blankId: blankId
+        )
+
+        // The two-frame "no blank" alignment is forbidden, so the DP has to
+        // burn a cold token to bridge → score drops well below the
+        // properly-spaced version.
+        XCTAssertGreaterThan(resWithBlank.score, resNoBlank.score + 1.0)
+    }
+
+    /// Wildcards must remain free-cost matches even with blank-aware DP.
+    func testWildcardStillFreeCost() {
+        let wildcard = CtcDPAlgorithm.wildcardTokenId
+        let blankId = 3
+        let vocabSize = 4
+        let hi: Float = -0.1
+        let cold: Float = -10.0
+
+        // 3 frames: token0 hot, blank hot, token2 hot. Wildcard sits between
+        // tokens 0 and 2 in the keyword and should match the middle frame
+        // for free.
+        let logProbs: [[Float]] = [
+            makeFrame(
+                vocabSize: vocabSize, hotToken: 0, highScore: hi, blankId: blankId, blankScore: cold, coldScore: cold),
+            makeFrame(
+                vocabSize: vocabSize, hotToken: nil, highScore: hi, blankId: blankId, blankScore: hi, coldScore: cold),
+            makeFrame(
+                vocabSize: vocabSize, hotToken: 2, highScore: hi, blankId: blankId, blankScore: cold, coldScore: cold),
+        ]
+
+        let result = CtcDPAlgorithm.ctcWordSpotConstrained(
+            logProbs: logProbs,
+            keywordTokens: [0, wildcard, 2],
+            searchStartFrame: 0,
+            searchEndFrame: logProbs.count,
+            blankId: blankId
+        )
+
+        // Raw = -0.1 + 0 (wildcard) + -0.1. Normalization counts only the
+        // two non-wildcard tokens → -0.1 per token.
+        XCTAssertEqual(result.score, -0.1, accuracy: 0.05)
+    }
 }

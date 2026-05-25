@@ -62,6 +62,8 @@ struct FluidAudioCLI {
             await ParakeetEouCommand.main(Array(arguments.dropFirst(2)))
         case "ctc-earnings-benchmark":
             await CtcEarningsBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+        case "emission-delay-benchmark":
+            await EmissionDelayBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "sortformer":
             await SortformerCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "sortformer-benchmark":
@@ -122,6 +124,7 @@ struct FluidAudioCLI {
                 minimax-corpus          Fetch MiniMax TTS Multilingual Test Set into Benchmarks/tts/corpus/minimax
                 parakeet-eou            Run Parakeet EOU Streaming ASR on a single file
                 ctc-earnings-benchmark  Run CTC keyword spotting benchmark on Earnings22
+                emission-delay-benchmark Measure TDT-vs-CTC timestamp offset on Earnings22
                 sortformer              Run Sortformer streaming diarization
                 sortformer-benchmark    Run Sortformer benchmark on AMI dataset
                 lseend                  Run LS-EEND diarization on a single file

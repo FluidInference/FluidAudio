@@ -317,7 +317,8 @@ public struct CtcKeywordSpotter: Sendable {
             logProbs: logProbs,
             keywordTokens: keywordTokens,
             searchStartFrame: searchStartFrame,
-            searchEndFrame: searchEndFrame
+            searchEndFrame: searchEndFrame,
+            blankId: blankId
         )
     }
 
@@ -331,7 +332,8 @@ public struct CtcKeywordSpotter: Sendable {
             logProbs: logProbs,
             keywordTokens: keywordTokens,
             minScore: minScore,
-            mergeOverlap: mergeOverlap
+            mergeOverlap: mergeOverlap,
+            blankId: blankId
         )
     }
 

@@ -153,7 +153,7 @@ extension VocabularyRescorer {
 /// - Parameter token: The token string to check
 /// - Returns: True if the token starts a new word
 public func isWordBoundary(_ token: String) -> Bool {
-    token.hasPrefix("▁") || token.hasPrefix(" ")
+    token.hasPrefix(ASRConstants.sentencePieceWordBoundary) || token.hasPrefix(" ")
 }
 
 /// Strip word boundary prefix from a token.
@@ -163,7 +163,7 @@ public func isWordBoundary(_ token: String) -> Bool {
 /// - Parameter token: The token string to process
 /// - Returns: Token with word boundary prefix removed
 public func stripWordBoundaryPrefix(_ token: String) -> String {
-    if token.hasPrefix("▁") || token.hasPrefix(" ") {
+    if token.hasPrefix(ASRConstants.sentencePieceWordBoundary) || token.hasPrefix(" ") {
         return String(token.dropFirst())
     }
     return token
