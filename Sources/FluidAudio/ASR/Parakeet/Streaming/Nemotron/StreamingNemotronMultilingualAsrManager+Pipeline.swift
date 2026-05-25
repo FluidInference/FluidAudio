@@ -154,10 +154,13 @@ extension StreamingNemotronMultilingualAsrManager {
                     encoderOutput = try await encoder.prediction(from: encoderInput)
                 }
                 let updatedCaches = EncoderCacheManager.extractCachesFromOutput(encoderOutput)
+                let cacheInt8Sim = ProcessInfo.processInfo.environment["FLUIDAUDIO_C2_CACHE_INT8_SIM"] != nil
                 if let newChannel = updatedCaches.channel {
+                    if cacheInt8Sim { Self.simulateCacheInt8RoundTrip(newChannel) }
                     self.cacheChannel = newChannel
                 }
                 if let newTime = updatedCaches.time {
+                    if cacheInt8Sim { Self.simulateCacheInt8RoundTrip(newTime) }
                     self.cacheTime = newTime
                 }
                 if let newLen = updatedCaches.len {
@@ -1608,6 +1611,16 @@ extension StreamingNemotronMultilingualAsrManager {
         else {
             return nil
         }
+        // C2 cache INT8 round-trip simulation (env-var gated). Applies
+        // dynamic per-tensor Int8 quantize+dequantize on the cache outputs
+        // to measure the WER impact of compressing the cache state.
+        // If this passes WER, the converter-level C2 (true Int8 cache I/O
+        // saving transfer bandwidth) becomes viable. If WER drifts, the
+        // entire C2 path is invalidated regardless of converter work.
+        if ProcessInfo.processInfo.environment["FLUIDAUDIO_C2_CACHE_INT8_SIM"] != nil {
+            simulateCacheInt8RoundTrip(cacheChOut)
+            simulateCacheInt8RoundTrip(cacheTOut)
+        }
         let encoderProj = encOutput.featureValue(for: "encoder_proj")?.multiArrayValue
         let newMelCache = try extractMelCachePure(
             chunkMel: chunkMel,
@@ -1615,6 +1628,41 @@ extension StreamingNemotronMultilingualAsrManager {
             preEncodeCache: preEncodeCache
         )
         return (encoded, encoderProj, cacheChOut, cacheTOut, cacheLenOut, newMelCache)
+    }
+
+    /// In-place dynamic per-tensor Int8 quantize+dequantize round-trip on
+    /// a Float32 MLMultiArray. Simulates the precision loss of storing this
+    /// tensor as Int8 between encoder chunks. Per-chunk dynamic scale =
+    /// max(|x|)/127 (no calibration data — runtime-derived). Used to
+    /// stress-test whether the cache state can survive Int8 storage.
+    nonisolated internal static func simulateCacheInt8RoundTrip(_ array: MLMultiArray) {
+        guard array.dataType == .float32 else { return }
+        let count = array.count
+        if count == 0 { return }
+        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: count)
+
+        var absMax: Float = 0
+        vDSP_maxmgv(ptr, 1, &absMax, vDSP_Length(count))
+        if absMax < 1e-9 { return }  // all-zero — no-op
+
+        let scale = absMax / 127.0
+        var invScale = 1.0 / scale
+        let temp = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        defer { temp.deallocate() }
+        var int8Buf = [Int8](repeating: 0, count: count)
+
+        // float → int8 (scale + truncate-to-int8)
+        vDSP_vsmul(ptr, 1, &invScale, temp, 1, vDSP_Length(count))
+        int8Buf.withUnsafeMutableBufferPointer { ib in
+            vDSP_vfix8(temp, 1, ib.baseAddress!, 1, vDSP_Length(count))
+        }
+        // int8 → float
+        int8Buf.withUnsafeBufferPointer { ib in
+            vDSP_vflt8(ib.baseAddress!, 1, temp, 1, vDSP_Length(count))
+        }
+        // dequantize: multiply by scale
+        var scaleVar = scale
+        vDSP_vsmul(temp, 1, &scaleVar, ptr, 1, vDSP_Length(count))
     }
 
     nonisolated internal static func extractMelCachePure(
