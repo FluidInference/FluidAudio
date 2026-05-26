@@ -25,6 +25,8 @@ public struct SharedNemotronMultilingualModels: @unchecked Sendable {
     public let decoderJointNoEncProj: MLModel?
     /// Speculative batched joint. May be nil.
     public let jointBatched: MLModel?
+    /// Smart-speculative batched joint. May be nil.
+    public let jointNoEncProjBatched: MLModel?
     /// True iff the encoder uses MLState for cache (iOS 18+ stateful path).
     public let encoderIsStateful: Bool
     public let config: NemotronMultilingualStreamingConfig
@@ -44,6 +46,7 @@ public struct SharedNemotronMultilingualModels: @unchecked Sendable {
         decoderJointArgmax: MLModel?,
         decoderJointNoEncProj: MLModel?,
         jointBatched: MLModel?,
+        jointNoEncProjBatched: MLModel?,
         encoderIsStateful: Bool,
         config: NemotronMultilingualStreamingConfig,
         tokenizer: NemotronMultilingualTokenizer,
@@ -58,6 +61,7 @@ public struct SharedNemotronMultilingualModels: @unchecked Sendable {
         self.decoderJointArgmax = decoderJointArgmax
         self.decoderJointNoEncProj = decoderJointNoEncProj
         self.jointBatched = jointBatched
+        self.jointNoEncProjBatched = jointNoEncProjBatched
         self.encoderIsStateful = encoderIsStateful
         self.config = config
         self.tokenizer = tokenizer
@@ -181,6 +185,14 @@ extension StreamingNemotronMultilingualAsrManager {
             logName: "joint_batched",
             logger: logger
         )
+        let jointNoEncProjBatched = try await Self.loadOptionalShared(
+            directory: directory,
+            compiledName: "joint_noencproj_batched.mlmodelc",
+            packageName: "joint_noencproj_batched.mlpackage",
+            configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_JOINT_BATCHED_CU", base: mlConfiguration, logger: logger),
+            logName: "joint_noencproj_batched",
+            logger: logger
+        )
 
         // Tokenizer
         let tokenizerURL = directory.appendingPathComponent(ModelNames.NemotronMultilingualStreaming.tokenizer)
@@ -205,6 +217,7 @@ extension StreamingNemotronMultilingualAsrManager {
             decoderJointArgmax: decoderJointArgmax,
             decoderJointNoEncProj: decoderJointNoEncProj,
             jointBatched: jointBatched,
+            jointNoEncProjBatched: jointNoEncProjBatched,
             encoderIsStateful: encoderIsStateful,
             config: config,
             tokenizer: tokenizer,
@@ -236,7 +249,18 @@ extension StreamingNemotronMultilingualAsrManager {
         self.decoderJointArgmax = shared.decoderJointArgmax
         self.decoderJointNoEncProj = shared.decoderJointNoEncProj
         self.jointBatched = shared.jointBatched
+        self.jointNoEncProjBatched = shared.jointNoEncProjBatched
         self.tokenizer = shared.tokenizer
+
+        if let m = self.jointNoEncProjBatched,
+            let constraint = m.modelDescription.inputDescriptionsByName["encoder_proj"]?.multiArrayConstraint,
+            constraint.shape.count >= 2
+        {
+            let kFromModel = constraint.shape[1].intValue
+            if kFromModel > 0 {
+                self.jointNoEncProjBatchedK = kFromModel
+            }
+        }
 
         // Per-stream MLState instance (each stream gets its own).
         // makeState() returns a fresh zero-initialized state.
@@ -262,6 +286,7 @@ extension StreamingNemotronMultilingualAsrManager {
         self.decoderJointPredictionOptions = Self.makePredictionOptions(for: self.decoderJoint)
         self.decoderJointArgmaxPredictionOptions = Self.makePredictionOptions(for: self.decoderJointArgmax)
         self.decoderJointNoEncProjPredictionOptions = Self.makePredictionOptions(for: self.decoderJointNoEncProj)
+        self.jointNoEncProjBatchedPredictionOptions = Self.makePredictionOptions(for: self.jointNoEncProjBatched)
 
         // Per-stream inner-loop step buffers
         self.encoderStepBuf = try? MLMultiArray(shape: [1, NSNumber(value: config.encoderDim), 1], dataType: .float32)
