@@ -139,6 +139,21 @@ public actor StreamingNemotronMultilingualAsrManager {
     internal var encoderStepBuf: MLMultiArray?
     internal var encoderProjStepBuf: MLMultiArray?
 
+    /// L8 outputBackings tightening: reusable buffers for the Swift-side
+    /// encoder_proj computation in the smart-spec path.
+    ///
+    /// `encProjReusable`: [1, T_enc, 640] fp32 — holds the full-chunk
+    ///   encoder_proj computed by computeEncoderProjSwift each chunk. Was
+    ///   allocated fresh per chunk (~143 KB × 7860 chunks ≈ 1.1 GB churn
+    ///   across a full test-clean run).
+    /// `encProjBatchReusable`: [1, K, 640] fp32 — sliced batch of K frames
+    ///   from encProjReusable fed to jointBatched. Was allocated fresh per
+    ///   call (~30 KB × N calls/chunk × 7860 chunks).
+    /// Reuse is safe because processChunk is sequential per actor — no
+    /// overlapping consumers of these buffers within a single stream.
+    internal var encProjReusable: MLMultiArray?
+    internal var encProjBatchReusable: MLMultiArray?
+
     /// Reusable per-token decoder inputs. The inner RNN-T loop previously
     /// allocated fresh [1,1] int32 token + [1] int32 length arrays on every
     /// emitted token (~25k allocs/h on test-clean). Pre-allocated once at
