@@ -316,10 +316,23 @@ extension StreamingNemotronMultilingualAsrManager {
            let encProjResolved: MLMultiArray = try await {
                if let direct = encoderProj { return direct }
                if useSwiftEncProj, let native = self.nativeRnnt {
-                   return try Self.computeEncoderProjSwift(
+                   // L8: lazy-init reusable encProj buffer, then fill in place.
+                   let T_enc = encoded.shape[2].intValue
+                   if self.encProjReusable == nil
+                       || self.encProjReusable?.shape[1].intValue != T_enc
+                   {
+                       self.encProjReusable = try MLMultiArray(
+                           shape: [1, NSNumber(value: T_enc), NSNumber(value: native.hidden)],
+                           dataType: .float32
+                       )
+                   }
+                   let buf = self.encProjReusable!
+                   try Self.computeEncoderProjSwift(
                        encoded: encoded,
-                       native: native
+                       native: native,
+                       outBuf: buf
                    )
+                   return buf
                }
                return nil
            }() {
@@ -867,11 +880,15 @@ extension StreamingNemotronMultilingualAsrManager {
     /// instead of a multi-output encoder (which breaks ANE compilation).
     ///
     /// Input encoded: MLMultiArray [1, encoderDim=1024, T_enc]
-    /// Output:        MLMultiArray [1, T_enc, hidden=640]
+    /// Output:        Fills `outBuf` shape [1, T_enc, hidden=640] fp32
+    ///
+    /// L8 change: caller passes in a reusable outBuf to avoid the
+    /// per-chunk MLMultiArray allocation (~143 KB × 7860 chunks).
     nonisolated internal static func computeEncoderProjSwift(
         encoded: MLMultiArray,
-        native: NativeRnntInner
-    ) throws -> MLMultiArray {
+        native: NativeRnntInner,
+        outBuf: MLMultiArray
+    ) throws {
         let encoderDim = native.encoderDim   // 1024
         let hidden = native.hidden            // 640
         let T_enc = encoded.shape[2].intValue
@@ -900,9 +917,11 @@ extension StreamingNemotronMultilingualAsrManager {
             }
         }
 
-        // Output: [1, T_enc, hidden] fp32
-        let encProj = try MLMultiArray(shape: [1, NSNumber(value: T_enc), NSNumber(value: hidden)], dataType: .float32)
-        let dstPtr = encProj.dataPointer.bindMemory(to: Float.self, capacity: encProj.count)
+        // Validate outBuf has expected shape [1, T_enc, hidden] fp32
+        precondition(outBuf.dataType == .float32, "encoder_proj outBuf must be fp32")
+        precondition(outBuf.shape.count == 3 && outBuf.shape[1].intValue == T_enc && outBuf.shape[2].intValue == hidden,
+            "encoder_proj outBuf shape mismatch")
+        let dstPtr = outBuf.dataPointer.bindMemory(to: Float.self, capacity: outBuf.count)
 
         encodedRowMajor.withUnsafeBufferPointer { srcPtr in
             native.computeEncoderProjBatch(
@@ -911,8 +930,6 @@ extension StreamingNemotronMultilingualAsrManager {
                 outBuf: dstPtr
             )
         }
-
-        return encProj
     }
 
     /// Smart speculative-blank decode (V2). Uses B3 encoder-proj split +
@@ -966,9 +983,17 @@ extension StreamingNemotronMultilingualAsrManager {
         let K = self.jointNoEncProjBatchedK
         let blankIdx = config.blankIdx
 
-        // Pre-allocate the batched encoder_proj slice buffer [1, K, 640].
-        // encoder_proj from encoder has shape [1, T_enc=56, 640].
-        let encProjBatchBuf = try MLMultiArray(shape: [1, NSNumber(value: K), 640], dataType: .float32)
+        // L8: reuse the batched encoder_proj slice buffer across chunks
+        // (was allocated fresh per chunk before; ~30 KB × 7860 chunks ≈
+        // 235 MB allocation churn over a full test-clean run).
+        if self.encProjBatchReusable == nil
+            || self.encProjBatchReusable?.shape[1].intValue != K
+        {
+            self.encProjBatchReusable = try MLMultiArray(
+                shape: [1, NSNumber(value: K), 640], dataType: .float32
+            )
+        }
+        let encProjBatchBuf = self.encProjBatchReusable!
 
         // Stride/dim info for slicing encoderProj into the batched buf.
         // encoderProj shape: [1, T_enc, 640]
