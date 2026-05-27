@@ -185,6 +185,15 @@ public actor StreamingNemotronMultilingualAsrManager {
     public internal(set) var chunkCount: Int = 0
     public internal(set) var vadSkipCount: Int = 0
 
+    // E4: smart-spec acceptance-rate counters. Track how often the K=4
+    // batched speculation finds an all-blank window (fast-skip path) vs
+    // hits a non-blank (must fall back to per-frame inner loop). High
+    // all-blank rate means K could potentially be larger; low rate means
+    // smaller K might be better (less wasted speculation).
+    public internal(set) var specWindowsTotal: Int = 0
+    public internal(set) var specWindowsAllBlank: Int = 0
+    public internal(set) var specWindowsHitNonBlank: Int = 0
+
     /// Smarter-VAD hangover state: number of consecutive low-RMS chunks
     /// seen. Skip fires only after `vadHangoverChunks` consecutive low-RMS
     /// chunks — preserves the first low chunk after speech (consonant
@@ -1025,6 +1034,13 @@ public actor StreamingNemotronMultilingualAsrManager {
             let totalMs = prepMs + encMs + decMs
             let perChunk = totalMs / Double(chunkCount)
             FileHandle.standardError.write(Data("[PROFILE] chunks=\(chunkCount) prep=\(String(format: "%.0f", prepMs))ms enc=\(String(format: "%.0f", encMs))ms dec=\(String(format: "%.0f", decMs))ms total=\(String(format: "%.0f", totalMs))ms per_chunk=\(String(format: "%.2f", perChunk))ms\n".utf8))
+            // E4 instrumentation: speculation acceptance rate. High all-blank
+            // rate suggests K could grow; low rate suggests K could shrink.
+            if specWindowsTotal > 0 {
+                let allBlankPct = Double(specWindowsAllBlank) / Double(specWindowsTotal) * 100.0
+                let hitPct = Double(specWindowsHitNonBlank) / Double(specWindowsTotal) * 100.0
+                FileHandle.standardError.write(Data("[SPEC] windows=\(specWindowsTotal) all_blank=\(specWindowsAllBlank) (\(String(format: "%.1f", allBlankPct))%) hit_non_blank=\(specWindowsHitNonBlank) (\(String(format: "%.1f", hitPct))%)\n".utf8))
+            }
         }
 
         return decoded.text
