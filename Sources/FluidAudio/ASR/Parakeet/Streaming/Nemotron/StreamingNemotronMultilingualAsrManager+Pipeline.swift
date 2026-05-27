@@ -1149,10 +1149,14 @@ extension StreamingNemotronMultilingualAsrManager {
                 }
             }
 
+            // E4 instrumentation: count this speculation window.
+            self.specWindowsTotal &+= 1
             if firstNonBlankAt == -1 {
                 // All-blank streak — fast skip
+                self.specWindowsAllBlank &+= 1
                 t += kActual
             } else {
+                self.specWindowsHitNonBlank &+= 1
                 // Emit first non-blank from speculative scan.
                 newTokens.append(emittedToken)
                 accumulatedTokenIds.append(emittedToken)
