@@ -1,4 +1,4 @@
-d![banner.png](banner.png)
+![banner.png](banner.png)
 
 # FluidAudio - Transcription, Text-to-speech, VAD, Speaker diarization with CoreML Models
 
