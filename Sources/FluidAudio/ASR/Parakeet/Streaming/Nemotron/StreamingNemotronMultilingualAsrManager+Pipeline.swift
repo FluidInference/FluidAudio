@@ -1190,6 +1190,21 @@ extension StreamingNemotronMultilingualAsrManager {
                 } else {
                     drainEncStep = try extractEncoderStep(from: encoded, timeIndex: drainFrameT)
                 }
+                // E7: also slice encoder_proj[:, drainFrameT, :] for B3+B1
+                // drain path. Only populated if B3+B1 asset is loaded
+                // (`decoderJointNoEncProj != nil`); otherwise drainEncStep
+                // alone is sufficient for B2/B1 drain.
+                let drainEncProjStep: MLMultiArray?
+                if self.decoderJointNoEncProj != nil {
+                    if let projBuf = encoderProjStepBuf {
+                        fillEncoderProjStep(into: projBuf, from: encoderProj, timeIndex: drainFrameT)
+                        drainEncProjStep = projBuf
+                    } else {
+                        drainEncProjStep = try extractEncoderProjStep(from: encoderProj, timeIndex: drainFrameT)
+                    }
+                } else {
+                    drainEncProjStep = nil
+                }
 
                 for _ in 0..<9 {
                     let tokInput2: MLMultiArray
@@ -1207,17 +1222,40 @@ extension StreamingNemotronMultilingualAsrManager {
                         tokLen2[0] = 1
                     }
 
-                    // Drain priority: B2 (decoder_joint_argmax) > B1 (decoder_joint)
-                    // > slow decoder+joint fallback. B2 returns token_id
-                    // directly so we skip findMaxIndex. Critical: respects the
-                    // same load priority as the main loop — production bundles
-                    // with B2 were previously falling into the slow fallback
-                    // because this site only checked B1.
+                    // Drain priority (May 26 update): B3+B1 (decoder_joint_noencproj)
+                    // > B2 (decoder_joint_argmax) > B1 (decoder_joint) > slow
+                    // decoder+joint fallback. B3+B1 saves the 1024→640 encoder
+                    // projection matmul per drain emission by taking the
+                    // pre-projected encoder_proj directly. Earnings22-1h
+                    // decoder is 85% of wall time, so per-token drain savings
+                    // visibly move the headline.
                     var dBestIdx = blankIdx
                     var newH: MLMultiArray = currentH
                     var newC: MLMultiArray = currentC
 
-                    if let dja = self.decoderJointArgmax {
+                    if let djne = self.decoderJointNoEncProj,
+                       let drainProjStep = drainEncProjStep {
+                        let djneInput = try MLDictionaryFeatureProvider(dictionary: [
+                            "token": MLFeatureValue(multiArray: tokInput2),
+                            "token_length": MLFeatureValue(multiArray: tokLen2),
+                            "h_in": MLFeatureValue(multiArray: currentH),
+                            "c_in": MLFeatureValue(multiArray: currentC),
+                            "encoder_proj": MLFeatureValue(multiArray: drainProjStep),
+                        ])
+                        let djneOutput: MLFeatureProvider
+                        if let opts = decoderJointNoEncProjPredictionOptions {
+                            djneOutput = try await djne.prediction(from: djneInput, options: opts)
+                        } else {
+                            djneOutput = try await djne.prediction(from: djneInput)
+                        }
+                        guard let djneLogits = djneOutput.featureValue(for: "logits")?.multiArrayValue,
+                            let djneH = djneOutput.featureValue(for: "h_out")?.multiArrayValue,
+                            let djneC = djneOutput.featureValue(for: "c_out")?.multiArrayValue
+                        else { throw ASRError.processingFailed("Drain B3+B1 failed") }
+                        dBestIdx = findMaxIndex(djneLogits)
+                        newH = djneH
+                        newC = djneC
+                    } else if let dja = self.decoderJointArgmax {
                         let djaInput = try MLDictionaryFeatureProvider(dictionary: [
                             "token": MLFeatureValue(multiArray: tokInput2),
                             "token_length": MLFeatureValue(multiArray: tokLen2),
