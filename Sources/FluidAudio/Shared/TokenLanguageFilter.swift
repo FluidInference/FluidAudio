@@ -9,6 +9,15 @@ public enum Language: String, Sendable, CaseIterable {
     case italian = "it"
     case portuguese = "pt"
     case romanian = "ro"  // uses ș, ț (Latin Extended-B)
+    case dutch = "nl"
+    case danish = "da"
+    case swedish = "sv"
+    case finnish = "fi"
+    case hungarian = "hu"
+    case estonian = "et"
+    case latvian = "lv"
+    case lithuanian = "lt"
+    case maltese = "mt"
 
     // Latin-script Slavic — prone to Cyrillic confusion in multilingual ASR.
     case polish = "pl"
@@ -24,13 +33,20 @@ public enum Language: String, Sendable, CaseIterable {
     case bulgarian = "bg"
     case serbian = "sr"
 
+    // Greek script
+    case greek = "el"
+
     public var script: Script {
         switch self {
         case .english, .spanish, .french, .german, .italian, .portuguese, .romanian,
+            .dutch, .danish, .swedish, .finnish, .hungarian, .estonian, .latvian,
+            .lithuanian, .maltese,
             .polish, .czech, .slovak, .slovenian, .croatian, .bosnian:
             return .latin
         case .russian, .ukrainian, .belarusian, .bulgarian, .serbian:
             return .cyrillic
+        case .greek:
+            return .greek
         }
     }
 }
@@ -40,6 +56,7 @@ public enum Language: String, Sendable, CaseIterable {
 public enum Script: Sendable {
     case latin
     case cyrillic
+    case greek
 }
 
 /// Filters ASR decoder tokens against the target language's alphabet.
@@ -87,6 +104,24 @@ internal struct TokenLanguageFilter: Sendable {
                 // must be rejected (see function doc).
                 if value >= 0x0020 && value <= 0x007F {
                     if (value >= 0x41 && value <= 0x5A) || (value >= 0x61 && value <= 0x7A) {
+                        return false
+                    }
+                    return true
+                }
+                return false
+            }
+        case .greek:
+            return chars.allSatisfy { char in
+                let value = char.value
+                // Greek and Coptic block (U+0370–U+03FF); Coptic subset not used
+                if value >= 0x0370 && value <= 0x03FF { return true }
+                // Greek Extended (polytonic/ancient Greek diacritics)
+                if value >= 0x1F00 && value <= 0x1FFF { return true }
+                // Allow ASCII punctuation, digits, spaces (script-neutral)
+                if value >= 0x0020 && value <= 0x007F {
+                    // Reject Latin letters A-Z/a-z
+                    if (value >= 0x41 && value <= 0x5A) ||
+                       (value >= 0x61 && value <= 0x7A) {
                         return false
                     }
                     return true
