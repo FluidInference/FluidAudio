@@ -118,13 +118,13 @@ internal struct TokenLanguageFilter: Sendable {
                 // Greek Extended (polytonic/ancient Greek diacritics)
                 if value >= 0x1F00 && value <= 0x1FFF { return true }
                 // Allow ASCII punctuation, digits, spaces (script-neutral)
-                if value >= 0x0020 && value <= 0x007F {
-                    // Reject Latin letters A-Z/a-z
-                    if (value >= 0x41 && value <= 0x5A) || (value >= 0x61 && value <= 0x7A) {
-                        return false
-                    }
-                    return true
+                // Reject ASCII Latin letters A-Z/a-z
+                if (value >= 0x41 && value <= 0x5A) || (value >= 0x61 && value <= 0x7A) {
+                    return false
                 }
+                // Allow remaining ASCII punctuation, digits, spaces (script-neutral)
+                if value >= 0x0020 && value <= 0x007F { return true }
+
                 return false
             }
         }
