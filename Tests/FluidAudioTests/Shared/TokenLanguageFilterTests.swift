@@ -450,7 +450,7 @@ final class TokenLanguageFilterTests: XCTestCase {
         for language in Language.allCases {
             let script = language.script
             XCTAssertTrue(
-                script == .latin || script == .cyrillic,
+                script == .latin || script == .cyrillic || script == .greek,
                 "\(language.rawValue) must have a valid script")
         }
     }
