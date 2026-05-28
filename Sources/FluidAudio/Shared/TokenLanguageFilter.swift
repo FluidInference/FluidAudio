@@ -120,8 +120,7 @@ internal struct TokenLanguageFilter: Sendable {
                 // Allow ASCII punctuation, digits, spaces (script-neutral)
                 if value >= 0x0020 && value <= 0x007F {
                     // Reject Latin letters A-Z/a-z
-                    if (value >= 0x41 && value <= 0x5A) ||
-                       (value >= 0x61 && value <= 0x7A) {
+                    if (value >= 0x41 && value <= 0x5A) || (value >= 0x61 && value <= 0x7A) {
                         return false
                     }
                     return true
