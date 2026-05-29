@@ -574,10 +574,12 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// Ensures ANE programs are compiled + resident BEFORE the first real
     /// audio chunk, so the per-clip first-chunk cold start is gone.
     private func warmupModels() async {
+        // preprocessor + encoder are always present and are the bulk of cold
+        // start — warm them unconditionally. Bare decoder/joint are optional on
+        // lean B1 ships; requiring them here skipped ALL warmup (incl. encoder)
+        // on those ships. They're bound only in the unfused branch below.
         guard let preprocessor = preprocessor,
             let encoder = encoder,
-            let decoder = decoder,
-            let joint = joint,
             let cacheChannel = cacheChannel,
             let cacheTime = cacheTime,
             let cacheLen = cacheLen,
@@ -655,7 +657,7 @@ public actor StreamingNemotronMultilingualAsrManager {
                 "encoder": MLFeatureValue(multiArray: encStep),
             ])
             if let input = input { _ = try? await dj.prediction(from: input) }
-        } else {
+        } else if let decoder = decoder, let joint = joint {
             let decInput = try? MLDictionaryFeatureProvider(dictionary: [
                 "token": MLFeatureValue(multiArray: tokenInput),
                 "token_length": MLFeatureValue(multiArray: tokenLen),

@@ -12,7 +12,7 @@ import Foundation
 /// model object. Per-stream mutable state (caches, hState/cState,
 /// melCache, prediction output backings) stays inside the manager
 /// actor.
-public struct SharedNemotronMultilingualModels: @unchecked Sendable {
+public struct SharedNemotronMultilingualModels: Sendable {
     public let preprocessor: MLModel
     public let encoder: MLModel
     /// Bare prediction LSTM. Optional: a lean ship may omit it when B1
