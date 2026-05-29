@@ -203,7 +203,8 @@ extension StreamingNemotronMultilingualAsrManager {
             directory: directory,
             compiledName: "joint_noencproj_batched.mlmodelc",
             packageName: "joint_noencproj_batched.mlpackage",
-            configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_JOINT_BATCHED_CU", base: mlConfiguration, logger: logger),
+            configuration: Self.computeUnitOverride(
+                name: "FLUIDAUDIO_JOINT_BATCHED_CU", base: mlConfiguration, logger: logger),
             logName: "joint_noencproj_batched",
             logger: logger
         )

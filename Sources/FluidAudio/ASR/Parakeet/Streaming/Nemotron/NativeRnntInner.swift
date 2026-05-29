@@ -47,19 +47,19 @@ public final class NativeRnntInner {
     private var c1: [Float]
 
     // MARK: - Scratch buffers
-    private var gates: [Float]       // [4*hidden]
-    private var encProj: [Float]     // [hidden]
-    private var predProj: [Float]    // [hidden]
-    private var combined: [Float]    // [hidden]
-    private var logits: [Float]      // [vocab]
+    private var gates: [Float]  // [4*hidden]
+    private var encProj: [Float]  // [hidden]
+    private var predProj: [Float]  // [hidden]
+    private var combined: [Float]  // [hidden]
+    private var logits: [Float]  // [vocab]
     private var h0_new: [Float]
     private var c0_new: [Float]
     private var h1_new: [Float]
     private var c1_new: [Float]
     // Persistent scratch for LSTM gate activations + tanh(c_new). Pre-allocated
     // once to avoid per-token allocation in the inner loop.
-    private var sigScratch: [Float]   // [hidden]
-    private var tanhCScratch: [Float] // [hidden]
+    private var sigScratch: [Float]  // [hidden]
+    private var tanhCScratch: [Float]  // [hidden]
 
     /// Public state snapshots for compatibility with the existing CoreML
     /// MLMultiArray-based state-passing in the manager.
@@ -159,7 +159,10 @@ public final class NativeRnntInner {
 
     public func resetState() {
         for i in 0..<hidden {
-            h0[i] = 0; c0[i] = 0; h1[i] = 0; c1[i] = 0
+            h0[i] = 0
+            c0[i] = 0
+            h1[i] = 0
+            c1[i] = 0
         }
     }
 
@@ -334,7 +337,9 @@ public final class NativeRnntInner {
         // Add joint_enc_b broadcast over T_enc rows
         joint_enc_b.withUnsafeBufferPointer { bPtr in
             for t in 0..<T_enc {
-                vDSP_vadd(outBuf.advanced(by: t * hidden), 1, bPtr.baseAddress!, 1, outBuf.advanced(by: t * hidden), 1, vDSP_Length(hidden))
+                vDSP_vadd(
+                    outBuf.advanced(by: t * hidden), 1, bPtr.baseAddress!, 1, outBuf.advanced(by: t * hidden), 1,
+                    vDSP_Length(hidden))
             }
         }
     }
@@ -434,10 +439,10 @@ public final class NativeRnntInner {
         // Apply gate nonlinearities IN-PLACE per gate slice
         // sigmoid via 1/(1+exp(-x))
         // For sigmoid in vDSP: negate, exp, add 1, reciprocal
-        applySigmoid(buffer: &gates, offset: 0, length: H)            // i
-        applySigmoid(buffer: &gates, offset: H, length: H)            // f
-        applyTanh(buffer: &gates, offset: 2 * H, length: H)           // g
-        applySigmoid(buffer: &gates, offset: 3 * H, length: H)        // o
+        applySigmoid(buffer: &gates, offset: 0, length: H)  // i
+        applySigmoid(buffer: &gates, offset: H, length: H)  // f
+        applyTanh(buffer: &gates, offset: 2 * H, length: H)  // g
+        applySigmoid(buffer: &gates, offset: 3 * H, length: H)  // o
 
         // c_new = f * c + i * g
         // Compute tmp = f * c
@@ -454,8 +459,8 @@ public final class NativeRnntInner {
         // outC += i * g
         gates.withUnsafeBufferPointer { gPtr in
             vDSP_vma(
-                gPtr.baseAddress!, 1,                          // i
-                gPtr.baseAddress!.advanced(by: 2 * H), 1,      // g
+                gPtr.baseAddress!, 1,  // i
+                gPtr.baseAddress!.advanced(by: 2 * H), 1,  // g
                 outC, 1,
                 &outC, 1,
                 vDSP_Length(H)
@@ -488,7 +493,8 @@ public final class NativeRnntInner {
         buffer.withUnsafeBufferPointer { bPtr in
             var negOne: Float = -1
             sigScratch.withUnsafeMutableBufferPointer { scratchPtr in
-                vDSP_vsmul(bPtr.baseAddress!.advanced(by: offset), 1, &negOne, scratchPtr.baseAddress!, 1, vDSP_Length(length))
+                vDSP_vsmul(
+                    bPtr.baseAddress!.advanced(by: offset), 1, &negOne, scratchPtr.baseAddress!, 1, vDSP_Length(length))
             }
         }
         var lenInt32 = Int32(length)
