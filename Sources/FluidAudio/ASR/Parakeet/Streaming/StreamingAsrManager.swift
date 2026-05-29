@@ -57,3 +57,21 @@ public protocol StreamingAsrManager: Actor {
     /// Get the current partial transcript without finishing.
     func getPartialTranscript() -> String
 }
+
+/// Optional capability for streaming managers that can provide per-token timestamps.
+public protocol StreamingAsrTokenTimestampProvider: Actor {
+    /// Returns timestamps (ms) aligned with the current accumulated token IDs.
+    func getTokenTimestampsMs() -> [Int]
+}
+
+/// Optional capability for streaming managers that can expose raw decoder tokens.
+public protocol StreamingAsrRawTokenProvider: Actor {
+    /// Returns raw token strings aligned with token IDs/timestamps.
+    func getRawTokenStrings() -> [String]
+}
+
+/// Optional capability for streaming managers that can expose EoU timestamps.
+public protocol StreamingAsrEouProvider: Actor {
+    /// Returns End-of-Utterance timestamps in ms for confidence scoring.
+    func getEouTimestampsMs() -> [Int]
+}

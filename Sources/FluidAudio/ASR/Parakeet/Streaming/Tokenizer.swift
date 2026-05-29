@@ -27,4 +27,9 @@ public class Tokenizer {
         return text.replacingOccurrences(of: "\u{2581}", with: " ")
             .trimmingCharacters(in: .whitespaces)
     }
+
+    /// Returns the exact token string from vocab for a token id.
+    public func rawToken(for id: Int) -> String? {
+        idToToken[id]
+    }
 }
