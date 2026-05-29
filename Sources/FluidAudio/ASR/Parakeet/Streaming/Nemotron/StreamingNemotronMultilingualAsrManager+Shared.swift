@@ -310,6 +310,87 @@ extension StreamingNemotronMultilingualAsrManager {
         )
     }
 
+    /// Map a language hint (e.g. "en-US", "zh-CN", "de-DE", "auto") to the
+    /// model folder in the HuggingFace repo. Unknown / "auto" falls back to
+    /// the full-vocab multilingual model.
+    public static func languageDirectory(for languageCode: String) -> String {
+        let c = languageCode.lowercased()
+        if c.hasPrefix("en") { return "en" }
+        if c.hasPrefix("es") { return "es" }
+        if c.hasPrefix("fr") { return "fr" }
+        if c.hasPrefix("it") { return "it" }
+        if c.hasPrefix("pt") { return "pt" }
+        if c.hasPrefix("de") { return "de" }
+        if c.hasPrefix("zh") || c.hasPrefix("cmn") { return "zh" }
+        if c.hasPrefix("ja") { return "ja" }
+        return "multilingual"
+    }
+
+    /// Download the requested `<language>/<chunkMs>ms` variant from the
+    /// HuggingFace repo (compiled `.mlmodelc` only — the repo also ships
+    /// `.mlpackage`, which is skipped) and preload it.
+    ///
+    /// - Parameters:
+    ///   - languageCode: Language hint, e.g. "en-US", "zh-CN", "de-DE", or
+    ///     "auto"/"multilingual" for the full-vocab model. Per-language ships
+    ///     are vocab-pruned (faster); the multilingual ship covers 100+ langs.
+    ///   - chunkMs: Chunk size tier — 560, 1120, 2240 (recommended), or 4480.
+    ///   - directory: Model cache root (default: Application Support/FluidAudio/Models).
+    public static func downloadAndPreloadShared(
+        languageCode: String = "auto",
+        chunkMs: Int = 2240,
+        to directory: URL? = nil,
+        configuration: MLModelConfiguration? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws -> SharedNemotronMultilingualModels {
+        let variantDir = try await downloadVariant(
+            languageCode: languageCode, chunkMs: chunkMs,
+            to: directory, progressHandler: progressHandler)
+        return try await preloadShared(from: variantDir, configuration: configuration)
+    }
+
+    /// Download the requested `<language>/<chunkMs>ms` variant from the
+    /// HuggingFace repo (compiled `.mlmodelc` only; the repo also ships
+    /// `.mlpackage`, which is skipped) and return the local variant directory.
+    /// Cached downloads are reused.
+    public static func downloadVariant(
+        languageCode: String = "auto",
+        chunkMs: Int = 2240,
+        to directory: URL? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws -> URL {
+        let logger = AppLogger(category: "NemotronMultilingualStreaming")
+        let langDir = languageDirectory(for: languageCode)
+        let subdirectory = "\(langDir)/\(chunkMs)ms"
+
+        let modelsBaseDir =
+            directory
+            ?? FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
+            .appendingPathComponent("FluidAudio", isDirectory: true)
+            .appendingPathComponent("Models", isDirectory: true)
+
+        let repoCacheDir = modelsBaseDir.appendingPathComponent(Repo.nemotronMultilingual.folderName)
+        let variantDir = repoCacheDir.appendingPathComponent(subdirectory)
+        let metadataPath = variantDir.appendingPathComponent(
+            ModelNames.NemotronMultilingualStreaming.metadata)
+
+        if FileManager.default.fileExists(atPath: metadataPath.path) {
+            logger.info("Using cached multilingual variant at \(variantDir.path)")
+        } else {
+            logger.info("Downloading multilingual variant \(subdirectory) (.mlmodelc only)...")
+            try await DownloadUtils.downloadSubdirectory(
+                .nemotronMultilingual,
+                subdirectory: subdirectory,
+                to: repoCacheDir,
+                progressHandler: progressHandler,
+                shouldSkip: { $0.contains(".mlpackage") }
+            )
+        }
+        return variantDir
+    }
+
     /// Compile-if-needed + load helper for required model files.
     private static func loadShared(
         directory: URL,

@@ -20,6 +20,8 @@ public class NemotronMultilingualTranscribe {
         var language: String?
         /// Raw prompt id override. Takes precedence over `language` if set.
         var promptId: Int?
+        /// Chunk-size tier in ms (560 / 1120 / 2240 / 4480) for auto-download.
+        var chunkMs: Int = 2240
 
         public init() {}
     }
@@ -63,6 +65,11 @@ public class NemotronMultilingualTranscribe {
                 if i < arguments.count, let pid = Int(arguments[i]) {
                     config.promptId = pid
                 }
+            case "--chunk-ms":
+                i += 1
+                if i < arguments.count, let ms = Int(arguments[i]) {
+                    config.chunkMs = ms
+                }
             case "--help", "-h":
                 printUsage()
                 return
@@ -79,11 +86,23 @@ public class NemotronMultilingualTranscribe {
         }
 
         if config.modelDir == nil {
-            logger.error(
-                "Missing --model-dir. The multilingual model is not auto-downloaded; supply a local path containing the .mlmodelc/.mlpackage bundles plus metadata.json and tokenizer.json."
-            )
-            printUsage()
-            return
+            // Auto-download the requested <language>/<chunkMs>ms variant
+            // (compiled .mlmodelc only) from HuggingFace.
+            do {
+                logger.info(
+                    "No --model-dir supplied; downloading multilingual variant "
+                        + "(\(config.language ?? "auto") @ \(config.chunkMs)ms) from HuggingFace..."
+                )
+                let dir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
+                    languageCode: config.language ?? "auto",
+                    chunkMs: config.chunkMs
+                )
+                config.modelDir = dir
+                logger.info("Downloaded to \(dir.path)")
+            } catch {
+                logger.error("Auto-download failed: \(error.localizedDescription)")
+                return
+            }
         }
 
         let transcriber = NemotronMultilingualTranscribe(config: config)
@@ -99,25 +118,36 @@ public class NemotronMultilingualTranscribe {
 
             Options:
                 --input, -i <path>        Audio file to transcribe (.wav) - required, repeatable
-                --model-dir, -m <path>    Path to multilingual CoreML models (required)
-                --language, -l <code>     Language hint (e.g. en-US, zh-CN, ja-JP, auto)
+                --model-dir, -m <path>    Local path to CoreML models. If omitted, the
+                                          matching variant is auto-downloaded from HuggingFace.
+                --language, -l <code>     Language hint (e.g. en-US, zh-CN, ja-JP, de-DE, auto).
+                                          Also selects the per-language ship for auto-download.
+                --chunk-ms <int>          Chunk-size tier for auto-download: 560 / 1120 /
+                                          2240 (default, recommended) / 4480.
                 --prompt-id <int>         Raw prompt id (overrides --language)
                 --help, -h                Show this help
 
             Notes:
-                - This command is local-path-only: the multilingual model is not
-                  hosted on HuggingFace yet.
+                - Auto-download pulls compiled .mlmodelc only from
+                  FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML,
+                  cached under ~/Library/Application Support/FluidAudio/Models/.
+                - Per-language hints (en/es/fr/it/pt/de/zh/ja) fetch the vocab-pruned
+                  ship; "auto" or any other language fetches the full multilingual model.
                 - When neither --language nor --prompt-id is provided, the model's
                   default prompt id ("auto") is used.
 
             Examples:
-                # Transcribe with auto language detection
+                # Auto-download German @ 2240ms and transcribe
+                fluidaudio nemotron-multilingual-transcribe \\
+                    --input audio.wav --language de-DE
+
+                # Pin a chunk tier
+                fluidaudio nemotron-multilingual-transcribe \\
+                    --input audio.wav --language ja-JP --chunk-ms 1120
+
+                # Use a local model directory instead of downloading
                 fluidaudio nemotron-multilingual-transcribe \\
                     --input audio.wav --model-dir ~/my-models
-
-                # Transcribe with explicit language hint
-                fluidaudio nemotron-multilingual-transcribe \\
-                    --input audio.wav --model-dir ~/my-models --language zh-CN
             """
         )
     }
