@@ -210,6 +210,7 @@ public class NemotronMultilingualTranscribe {
                     let blockSeconds: Double = 60
                     let blockFrames = AVAudioFrameCount(audioFile.processingFormat.sampleRate * blockSeconds)
 
+                    let converter = AudioConverter()
                     let startTime = Date()
                     while audioFile.framePosition < audioFile.length {
                         let remaining = AVAudioFrameCount(audioFile.length - audioFile.framePosition)
@@ -224,7 +225,12 @@ public class NemotronMultilingualTranscribe {
                             break
                         }
                         try audioFile.read(into: block, frameCount: thisFrames)
-                        _ = try await manager.process(audioBuffer: block)
+                        // Resample each block to 16 kHz [Float] (Sendable) before the
+                        // actor hop — a non-Sendable AVAudioPCMBuffer fails Swift 6
+                        // sending checks. Same per-block resample the manager would
+                        // have done internally, so behavior is unchanged.
+                        let blockSamples = try converter.resampleBuffer(block)
+                        _ = try await manager.process(samples: blockSamples)
                     }
                     let transcript = try await manager.finish()
                     let processingTime = Date().timeIntervalSince(startTime)

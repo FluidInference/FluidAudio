@@ -168,19 +168,17 @@ public enum NemotronMultilingualMultiStreamBench {
                     var processed = 0
                     var streamAudio: Double = 0
                     var hyps: [(String, String)] = []
+                    let converter = AudioConverter()
                     for url in queueCopy {
-                        guard let audioFile = try? AVAudioFile(forReading: url) else { continue }
-                        let dur = Double(audioFile.length) / audioFile.processingFormat.sampleRate
-                        streamAudio += dur
-                        guard
-                            let buf = AVAudioPCMBuffer(
-                                pcmFormat: audioFile.processingFormat,
-                                frameCapacity: AVAudioFrameCount(audioFile.length)
-                            )
-                        else { continue }
                         do {
-                            try audioFile.read(into: buf)
-                            _ = try await mgr.process(audioBuffer: buf)
+                            // Resample to 16 kHz [Float] up front (Sendable) and feed
+                            // process(samples:) — passing a non-Sendable
+                            // AVAudioPCMBuffer across the actor boundary fails Swift 6
+                            // sending checks (the buffer's region is merged with the
+                            // non-Sendable AVAudioFile via read(into:)).
+                            let samples = try converter.resampleAudioFile(url)
+                            streamAudio += Double(samples.count) / 16000.0
+                            _ = try await mgr.process(samples: samples)
                             let result = try await mgr.finish()
                             let fileId = url.deletingPathExtension().lastPathComponent
                             hyps.append((fileId, result))
