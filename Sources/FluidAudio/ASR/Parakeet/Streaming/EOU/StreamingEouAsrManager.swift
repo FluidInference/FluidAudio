@@ -188,6 +188,15 @@ public actor StreamingEouAsrManager {
 
     // Accumulated token IDs from incremental decoding (NeMo-style)
     private var accumulatedTokenIds: [Int] = []
+    // Accumulated token timestamps in ms, aligned with accumulatedTokenIds
+    private var accumulatedTokenTimestampsMs: [Int] = []
+    // Accumulated raw token strings, aligned with accumulatedTokenIds
+    private var accumulatedRawTokenStrings: [String] = []
+    // Accumulated EoU timestamps in ms
+    private var accumulatedEouTimestampsMs: [Int] = []
+
+    // Timestamp granularity for RNNT frames is derived per-chunk from encoder
+    // shift (samples) and the number of valid encoder output frames.
 
     // EOU Detection
     /// Whether End-of-Utterance was detected in the last chunk processed
@@ -244,6 +253,30 @@ public actor StreamingEouAsrManager {
     /// Useful for displaying "ghost text" during speech.
     public func setPartialCallback(_ callback: @escaping PartialCallback) {
         self.partialCallback = callback
+    }
+
+    /// Returns timestamps (ms) aligned with the accumulated token IDs.
+    /// Each value is the elapsed time from the start of the conversation.
+    public func getTokenTimestampsMs() -> [Int] {
+        accumulatedTokenTimestampsMs
+    }
+
+    /// Returns raw token strings aligned with accumulated token IDs/timestamps.
+    public func getRawTokenStrings() -> [String] {
+        accumulatedRawTokenStrings
+    }
+
+    /// Returns EoU timestamps when utterances end.
+    public func getEouTimestampsMs() -> [Int] {
+        accumulatedEouTimestampsMs
+    }
+
+    static func computeTokenTimestampsMs(
+        baseFrame: Int,
+        tokenFrames: [Int],
+        frameDurationMs: Int
+    ) -> [Int] {
+        tokenFrames.map { (baseFrame + $0) * frameDurationMs }
     }
 
     /// Load models from a specific directory
@@ -407,6 +440,9 @@ public actor StreamingEouAsrManager {
 
         // Clear accumulated tokens
         accumulatedTokenIds.removeAll()
+        accumulatedTokenTimestampsMs.removeAll()
+        accumulatedRawTokenStrings.removeAll()
+        accumulatedEouTimestampsMs.removeAll()
 
         return transcript
     }
@@ -417,6 +453,9 @@ public actor StreamingEouAsrManager {
             accumulatedTokenIds: &accumulatedTokenIds,
             processedChunks: &processedChunks
         )
+        accumulatedTokenTimestampsMs.removeAll()
+        accumulatedRawTokenStrings.removeAll()
+        accumulatedEouTimestampsMs.removeAll()
         debugFeatureBuffer.removeAll()
         eouDetected = false
         eouFirstDetectedAt = nil
@@ -520,6 +559,33 @@ public actor StreamingEouAsrManager {
             validOutLen: chunkSize.validOutputLen)
         accumulatedTokenIds.append(contentsOf: decodeResult.tokenIds)
 
+        if let tokenizer, !decodeResult.tokenIds.isEmpty {
+            let rawTokens = decodeResult.tokenIds.map { tokenId in
+                tokenizer.rawToken(for: tokenId) ?? "<id:\(tokenId)>"
+            }
+            accumulatedRawTokenStrings.append(contentsOf: rawTokens)
+        }
+
+        // Convert per-chunk frame indices into global timestamps (ms) aligned with tokens.
+        if !decodeResult.tokenFrames.isEmpty {
+            let baseFrame = processedChunks * chunkSize.validOutputLen
+
+            // Derive per-frame duration (ms) from shiftSamples and validOutputLen.
+            // frameDurationMs = (shiftSamples [samples] * 1000) / (sampleRate * validOutputLen)
+            // Using 16kHz sample rate for Parakeet models.
+            let shift = Float(self.shiftSamples)
+            let validOut = Float(chunkSize.validOutputLen)
+            let frameDurationMsFloat = (shift * 1000.0) / (16000.0 * validOut)
+            let frameDurationMs = Int(round(frameDurationMsFloat))
+
+            let timestampsMs = Self.computeTokenTimestampsMs(
+                baseFrame: baseFrame,
+                tokenFrames: decodeResult.tokenFrames,
+                frameDurationMs: frameDurationMs
+            )
+            accumulatedTokenTimestampsMs.append(contentsOf: timestampsMs)
+        }
+
         // Invoke partial callback for ghost text (only when new tokens decoded)
         if let callback = partialCallback, let tokenizer = tokenizer, !decodeResult.tokenIds.isEmpty {
             let partial = tokenizer.decode(ids: accumulatedTokenIds)
@@ -549,6 +615,8 @@ public actor StreamingEouAsrManager {
                 if elapsedMs >= eouDebounceMs && !eouDetected {
                     eouDetected = true
                     logger.info("EOU confirmed at chunk \(processedChunks) after \(elapsedMs)ms silence")
+                    let eouTimestampMs = (totalSamplesProcessed * 1000) / 16000
+                    accumulatedEouTimestampsMs.append(eouTimestampMs)
 
                     // Invoke callback with current transcript
                     if let callback = eouCallback, let tokenizer = tokenizer {
@@ -609,3 +677,7 @@ extension StreamingEouAsrManager: StreamingAsrManager {
         return tokenizer.decode(ids: accumulatedTokenIds)
     }
 }
+
+extension StreamingEouAsrManager: StreamingAsrTokenTimestampProvider, StreamingAsrRawTokenProvider,
+    StreamingAsrEouProvider
+{}

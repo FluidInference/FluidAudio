@@ -28,10 +28,8 @@ public class Tokenizer {
             .trimmingCharacters(in: .whitespaces)
     }
 
-    /// Return the raw SentencePiece piece for a given token id, or `nil`
-    /// if the id is not in the vocabulary. Used by callers that need
-    /// the original piece text (e.g. multilingual lang-tag inspection).
-    public func piece(forId id: Int) -> String? {
-        return idToToken[id]
+    /// Returns the exact token string from vocab for a token id.
+    public func rawToken(for id: Int) -> String? {
+        idToToken[id]
     }
 }

@@ -505,7 +505,7 @@ public actor AsrManager {
     }
 
     nonisolated internal func normalizedTimingToken(_ token: String) -> String {
-        token.replacingOccurrences(of: "▁", with: " ")
+        token.replacingOccurrences(of: ASRConstants.sentencePieceWordBoundary, with: " ")
     }
 
     /// Decode token IDs to text using SentencePiece conventions.
@@ -514,7 +514,7 @@ public actor AsrManager {
 
         let tokens = tokenIds.compactMap { vocabulary[$0] }.filter { !$0.isEmpty }
         return tokens.joined()
-            .replacingOccurrences(of: "▁", with: " ")
+            .replacingOccurrences(of: ASRConstants.sentencePieceWordBoundary, with: " ")
             .trimmingCharacters(in: .whitespaces)
     }
 

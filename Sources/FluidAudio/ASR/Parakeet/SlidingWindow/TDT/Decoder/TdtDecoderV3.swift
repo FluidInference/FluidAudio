@@ -37,6 +37,46 @@ internal struct TdtDecoderV3: Sendable {
     private let modelInference = TdtModelInference()
     // Parakeet‑TDT‑v3: duration head has 5 bins mapping directly to frame advances
 
+    // English-exclusive whole-word token IDs used by applyEnglishBlocklist.
+    // Space-prefixed SentencePiece tokens that are essentially impossible in French prose.
+    static let englishBlocklistIds: Set<Int> = [
+        506, 1502,  // ' the', ' The'
+        575, 1976,  // ' and', ' And'
+        2530,  // ' they'
+        1180, 3247,  // ' you', ' You'
+        1868,  // ' with'
+        1050, 7603,  // ' that', ' That'
+        1974, 5831,  // ' this', ' This'
+        1647,  // ' have'
+        3109,  // ' from'
+        924, 4020,  // ' was', ' Was'
+        4250,  // ' were'
+        1714,  // ' are'
+        4908,  // ' been'
+        4223,  // ' would'
+        6167,  // ' could'
+        2783,  // ' will'
+        4396,  // ' their'
+        3357,  // ' there'
+        4611,  // ' when'
+        3470,  // ' what'
+        6843,  // ' where'
+        4333,  // ' which'
+        4980,  // ' who'
+        1491,  // ' not'
+        3592, 2681,  // ' But', ' but'
+        1960, 547,  // ' So', ' so'
+        2336,  // ' It'
+        750, 1842,  // ' we', ' We'
+        3285,  // ' our'
+        3629,  // ' your'
+        1103,  // ' my'
+        4384,  // ' him'
+        1535,  // ' her'
+        4421,  // ' them'
+        5726,  // ' these'
+    ]
+
     init(config: ASRConfig) {
         self.config = config
     }
@@ -250,6 +290,13 @@ internal struct TdtDecoderV3: Sendable {
                 vocabulary: vocabulary,
                 blankId: blankId
             )
+            if let lang = language, lang.script == .latin, lang != .english,
+                let ids = decision.topKIds, let logits = decision.topKLogits, let vocab = vocabulary
+            {
+                Self.applyEnglishBlocklist(
+                    label: &label, score: &score,
+                    topKIds: ids, topKLogits: logits, vocabulary: vocab, blankId: blankId)
+            }
 
             // Map duration bin to actual frame count
             // durationBins typically = [0,1,2,3,4] meaning skip 0-4 frames
@@ -330,6 +377,14 @@ internal struct TdtDecoderV3: Sendable {
                     vocabulary: vocabulary,
                     blankId: blankId
                 )
+                if let lang = language, lang.script == .latin, lang != .english,
+                    let ids = innerDecision.topKIds, let logits = innerDecision.topKLogits,
+                    let vocab = vocabulary
+                {
+                    Self.applyEnglishBlocklist(
+                        label: &label, score: &score,
+                        topKIds: ids, topKLogits: logits, vocabulary: vocab, blankId: blankId)
+                }
 
                 duration = try TdtDurationMapping.mapDurationBin(
                     innerDecision.durationBin, durationBins: config.tdtConfig.durationBins)
@@ -560,6 +615,48 @@ internal struct TdtDecoderV3: Sendable {
     }
 
     // MARK: - Private Helper Methods
+
+    /// When the target language is a non-English Latin-script language and the
+    /// winning token is in the English-exclusive blocklist, replace it with the
+    /// highest-logit top-K token that is not in the blocklist.
+    ///
+    /// This runs AFTER `tokenLanguageFilter` (which only distinguishes
+    /// Latin from Cyrillic and leaves English/French ambiguous). It targets
+    /// the spontaneous-speech translation phenomenon where the model falls back
+    /// to its English prior on acoustically ambiguous frames.
+    static func applyEnglishBlocklist(
+        label: inout Int,
+        score: inout Float,
+        topKIds: [Int],
+        topKLogits: [Float],
+        vocabulary: [Int: String],
+        blankId: Int
+    ) {
+        guard label != blankId, englishBlocklistIds.contains(label) else { return }
+
+        var bestIdx = -1
+        var bestLogit: Float = -.infinity
+        for i in 0..<min(topKIds.count, topKLogits.count) {
+            let id = topKIds[i]
+            let logit = topKLogits[i]
+            guard id != blankId, !englishBlocklistIds.contains(id) else { continue }
+            if let text = vocabulary[id], TokenLanguageFilter.matches(text, script: .latin) {
+                if bestIdx < 0 || logit > bestLogit {
+                    bestLogit = logit
+                    bestIdx = i
+                }
+            }
+        }
+
+        guard bestIdx >= 0 else { return }
+        label = topKIds[bestIdx]
+
+        var maxLogit: Float = -.infinity
+        for l in topKLogits { if l > maxLogit { maxLogit = l } }
+        var sumExp: Float = 0
+        for l in topKLogits { sumExp += expf(l - maxLogit) }
+        score = sumExp > 0 ? expf(bestLogit - maxLogit) / sumExp : 0
+    }
 
     /// Replace `label`/`score` with the best right-language top-K candidate
     /// when the joint's top-1 token is in the wrong language for `language`.

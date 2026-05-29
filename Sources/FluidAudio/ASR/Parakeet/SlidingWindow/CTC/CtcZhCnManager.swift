@@ -188,7 +188,7 @@ public actor CtcZhCnManager {
         }
 
         // Replace SentencePiece underscores with spaces
-        text = text.replacingOccurrences(of: "▁", with: " ")
+        text = text.replacingOccurrences(of: ASRConstants.sentencePieceWordBoundary, with: " ")
 
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }

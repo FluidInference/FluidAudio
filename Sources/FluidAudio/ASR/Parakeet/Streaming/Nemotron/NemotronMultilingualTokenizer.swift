@@ -40,7 +40,7 @@ public final class NemotronMultilingualTokenizer {
 
         for id in ids {
             if langTagTokenIds.contains(id) {
-                if detected == nil, let piece = base.piece(forId: id) {
+                if detected == nil, let piece = base.rawToken(for: id) {
                     detected = NemotronMultilingualTokenizer.stripAngleBrackets(piece)
                 }
                 continue
@@ -67,7 +67,7 @@ public final class NemotronMultilingualTokenizer {
     public func langTagTokenId(forLanguage language: String) -> Int? {
         let target = "<\(language)>"
         for id in langTagTokenIds {
-            if base.piece(forId: id) == target {
+            if base.rawToken(for: id) == target {
                 return id
             }
         }

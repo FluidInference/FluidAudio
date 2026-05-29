@@ -1,4 +1,4 @@
-d![banner.png](banner.png)
+![banner.png](banner.png)
 
 # FluidAudio - Transcription, Text-to-speech, VAD, Speaker diarization with CoreML Models
 
@@ -89,7 +89,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Summit AI Notes](https://summitnotes.app/)** | Local meeting transcription and summarization with speaker identification. Supports 100+ languages. |
 | **[Ora](https://futurelab.studio/ora)** | Local voice assistant for macOS with speech recognition and text-to-speech. |
 | **[Flowstay](https://flowstay.app)** | Easy text-to-speech, local post-processing and Claude Code integration for macOS. Free forever. |
-| **[macos-speech-server](https://github.com/dokterbob/macos-speech-server)** | OpenAI compatible STT/transcription and TTS/speech API server. |
+| **[macos-speech-server](https://github.com/dokterbob/macos-speech-server)** | Wyoming (Home Assistant) and OpenAI compatible STT/transcription and TTS/speech API server. |
 | **[Snaply](https://snaply.ai)** |Free, Fast, 100% local AI dictation for Mac. |
 | **[OpenOats](https://github.com/yazinsai/OpenOats)** | Open-source meeting note-taker that transcribes conversations in real time and surfaces relevant notes from your knowledge base. Uses FluidAudio for local transcription. |
 | **[Enconvo](https://enconvo.com)** | AI Agent Launcher for macOS with voice input, live captions, and text-to-speech. Uses Parakeet ASR for local speech recognition. |

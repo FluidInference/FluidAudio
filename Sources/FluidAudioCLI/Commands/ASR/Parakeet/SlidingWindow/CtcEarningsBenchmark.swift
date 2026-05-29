@@ -554,6 +554,13 @@ public enum CtcEarningsBenchmark {
             let cbw: Float =
                 ProcessInfo.processInfo.environment["CBW"]
                 .flatMap { Float($0) } ?? defaultCbw
+            // Margin defaults to the production value
+            // (`ContextBiasingConstants.defaultMarginSeconds`) so this
+            // benchmark measures what end users actually get. Override via
+            // `MARGIN_SECONDS=<seconds>` for tuning sweeps.
+            let marginSeconds: Double =
+                ProcessInfo.processInfo.environment["MARGIN_SECONDS"]
+                .flatMap { Double($0) } ?? ContextBiasingConstants.defaultMarginSeconds
 
             if useConstrainedCTC, let tokenTimings = tdtResult.tokenTimings, !tokenTimings.isEmpty {
                 // Use constrained CTC rescoring (string similarity first, then constrained DP)
@@ -563,7 +570,7 @@ public enum CtcEarningsBenchmark {
                     logProbs: logProbs,
                     frameDuration: frameDuration,
                     cbw: cbw,
-                    marginSeconds: 0.5,
+                    marginSeconds: marginSeconds,
                     minSimilarity: minSimilarity
                 )
                 hypothesis = rescoreResult.text
@@ -737,7 +744,8 @@ public enum CtcEarningsBenchmark {
                 let substring = String(normalizedText[position..<endPos])
 
                 // Try with SentencePiece prefix for word start
-                let withPrefix = isWordStart ? "▁" + substring : substring
+                let withPrefix =
+                    isWordStart ? ASRConstants.sentencePieceWordBoundary + substring : substring
 
                 if let tokenId = tokenToId[withPrefix] {
                     result.append(tokenId)
