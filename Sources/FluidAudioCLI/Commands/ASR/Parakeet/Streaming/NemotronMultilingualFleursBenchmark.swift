@@ -657,6 +657,8 @@ extension NemotronMultilingualFleursBenchmark {
         var promptOverride: String?
         var computeUnits: MLComputeUnits?
         var librispeechSubset = "test-clean"
+        var autoDownload = false
+        var chunkMs = 2240
 
         var i = 0
         while i < arguments.count {
@@ -741,6 +743,13 @@ extension NemotronMultilingualFleursBenchmark {
                     }
                     i += 1
                 }
+            case "--auto-download":
+                autoDownload = true
+            case "--chunk-ms":
+                if i + 1 < arguments.count {
+                    if let v = Int(arguments[i + 1]) { chunkMs = v }
+                    i += 1
+                }
             case "--help", "-h":
                 printUsage()
                 return
@@ -750,8 +759,30 @@ extension NemotronMultilingualFleursBenchmark {
             i += 1
         }
 
+        // Resolve the model directory: either an explicit local --model-dir, or
+        // --auto-download to fetch the per-language variant (`<lang>/<chunkMs>ms`,
+        // .mlmodelc only) from the HuggingFace repo. Auto-download is
+        // single-language only — each per-language ship is a separate variant
+        // directory, so a multi-language run must point at a local --model-dir.
+        if modelDir == nil && autoDownload {
+            guard languages.count == 1 else {
+                logger.error(
+                    "--auto-download supports a single language at a time (got \(languages.count): "
+                        + "\(languages.joined(separator: ", "))). Use --model-dir for multi-language runs.")
+                return
+            }
+            do {
+                logger.info("Auto-downloading variant \(languages[0])/\(chunkMs)ms from HuggingFace...")
+                modelDir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
+                    languageCode: languages[0], chunkMs: chunkMs)
+            } catch {
+                logger.error("Auto-download failed: \(error)")
+                return
+            }
+        }
+
         guard let modelDir = modelDir else {
-            logger.error("Missing --model-dir. The multilingual model is not auto-downloaded.")
+            logger.error("Missing --model-dir (or pass --auto-download). The model is not auto-downloaded by default.")
             printUsage()
             return
         }
