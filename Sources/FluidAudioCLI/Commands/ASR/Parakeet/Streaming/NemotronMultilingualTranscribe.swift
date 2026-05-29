@@ -214,10 +214,12 @@ public class NemotronMultilingualTranscribe {
                     while audioFile.framePosition < audioFile.length {
                         let remaining = AVAudioFrameCount(audioFile.length - audioFile.framePosition)
                         let thisFrames = min(blockFrames, remaining)
-                        guard let block = AVAudioPCMBuffer(
-                            pcmFormat: audioFile.processingFormat,
-                            frameCapacity: thisFrames
-                        ) else {
+                        guard
+                            let block = AVAudioPCMBuffer(
+                                pcmFormat: audioFile.processingFormat,
+                                frameCapacity: thisFrames
+                            )
+                        else {
                             logger.error("  Failed to create audio buffer for block")
                             break
                         }

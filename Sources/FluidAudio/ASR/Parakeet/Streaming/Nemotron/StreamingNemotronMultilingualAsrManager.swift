@@ -332,7 +332,8 @@ public actor StreamingNemotronMultilingualAsrManager {
         )
         self.preprocessor = try await MLModel.load(
             contentsOf: preprocessorURL,
-            configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_PREPROCESSOR_CU", base: mlConfiguration, logger: logger)
+            configuration: Self.computeUnitOverride(
+                name: "FLUIDAUDIO_PREPROCESSOR_CU", base: mlConfiguration, logger: logger)
         )
 
         let encoderURL = try await locateModelBundle(
@@ -342,7 +343,8 @@ public actor StreamingNemotronMultilingualAsrManager {
         )
         self.encoder = try await MLModel.load(
             contentsOf: encoderURL,
-            configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_ENCODER_CU", base: mlConfiguration, logger: logger)
+            configuration: Self.computeUnitOverride(
+                name: "FLUIDAUDIO_ENCODER_CU", base: mlConfiguration, logger: logger)
         )
         // Detect stateful encoder (cache_channel/cache_time as MLState rather
         // than I/O tensors). makeState() returns a fresh zero-initialized state.
@@ -362,7 +364,8 @@ public actor StreamingNemotronMultilingualAsrManager {
         ) {
             self.decoder = try await MLModel.load(
                 contentsOf: decoderURL,
-                configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_DECODER_CU", base: mlConfiguration, logger: logger)
+                configuration: Self.computeUnitOverride(
+                    name: "FLUIDAUDIO_DECODER_CU", base: mlConfiguration, logger: logger)
             )
         }
 
@@ -373,7 +376,8 @@ public actor StreamingNemotronMultilingualAsrManager {
         ) {
             self.joint = try await MLModel.load(
                 contentsOf: jointURL,
-                configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_JOINT_CU", base: mlConfiguration, logger: logger)
+                configuration: Self.computeUnitOverride(
+                    name: "FLUIDAUDIO_JOINT_CU", base: mlConfiguration, logger: logger)
             )
         }
 
@@ -385,7 +389,8 @@ public actor StreamingNemotronMultilingualAsrManager {
         ) {
             self.decoderJointArgmax = try await MLModel.load(
                 contentsOf: argmaxURL,
-                configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_DECODERJOINT_CU", base: mlConfiguration, logger: logger)
+                configuration: Self.computeUnitOverride(
+                    name: "FLUIDAUDIO_DECODERJOINT_CU", base: mlConfiguration, logger: logger)
             )
             logger.info("Loaded decoder_joint_argmax — using triple-fusion inner-loop path")
         }
@@ -399,7 +404,8 @@ public actor StreamingNemotronMultilingualAsrManager {
                 uncompiled: "decoder_joint_noencproj.mlpackage"
             )
         {
-            self.decoderJointNoEncProj = try await MLModel.load(contentsOf: noEncProjURL, configuration: mlConfiguration)
+            self.decoderJointNoEncProj = try await MLModel.load(
+                contentsOf: noEncProjURL, configuration: mlConfiguration)
             logger.info("Loaded decoder_joint_noencproj — using B3+B1 inner-loop path")
         }
 
@@ -433,7 +439,8 @@ public actor StreamingNemotronMultilingualAsrManager {
             in: directory, compiled: "joint_noencproj_batched.mlmodelc",
             uncompiled: "joint_noencproj_batched.mlpackage"
         ) {
-            let specConfig = Self.computeUnitOverride(name: "FLUIDAUDIO_JOINT_BATCHED_CU", base: mlConfiguration, logger: logger)
+            let specConfig = Self.computeUnitOverride(
+                name: "FLUIDAUDIO_JOINT_BATCHED_CU", base: mlConfiguration, logger: logger)
             self.jointNoEncProjBatched = try await MLModel.load(contentsOf: specBatchedURL, configuration: specConfig)
             logger.info("Loaded joint_noencproj_batched — smart speculative-blank path available")
         }
@@ -441,8 +448,9 @@ public actor StreamingNemotronMultilingualAsrManager {
         // Swift hot loop always matches the asset (K=8 historically; K=4
         // build under evaluation at 1120ms).
         if let m = self.jointNoEncProjBatched,
-           let constraint = m.modelDescription.inputDescriptionsByName["encoder_proj"]?.multiArrayConstraint,
-           constraint.shape.count >= 2 {
+            let constraint = m.modelDescription.inputDescriptionsByName["encoder_proj"]?.multiArrayConstraint,
+            constraint.shape.count >= 2
+        {
             let kFromModel = constraint.shape[1].intValue
             if kFromModel > 0 {
                 self.jointNoEncProjBatchedK = kFromModel
@@ -457,7 +465,8 @@ public actor StreamingNemotronMultilingualAsrManager {
         if FileManager.default.fileExists(atPath: nativeWeightsDir.appendingPathComponent("weights.bin").path) {
             self.nativeRnnt = NativeRnntInner(directory: nativeWeightsDir)
             if self.nativeRnnt != nil {
-                logger.info("Loaded NativeRnntInner from \(nativeWeightsDir.path) — using native vDSP/cblas inner-loop path")
+                logger.info(
+                    "Loaded NativeRnntInner from \(nativeWeightsDir.path) — using native vDSP/cblas inner-loop path")
             } else {
                 logger.warning("Found native_weights/ but failed to initialize NativeRnntInner")
             }
@@ -482,7 +491,8 @@ public actor StreamingNemotronMultilingualAsrManager {
             smartSpecMissing.append("native_weights/")
         }
         if smartSpecExplicitlyDisabled {
-            logger.info("Smart-spec: explicitly disabled via FLUIDAUDIO_ENABLE_SMART_SPECULATIVE=\(smartSpecEnvVar ?? "")")
+            logger.info(
+                "Smart-spec: explicitly disabled via FLUIDAUDIO_ENABLE_SMART_SPECULATIVE=\(smartSpecEnvVar ?? "")")
         } else if smartSpecMissing.isEmpty {
             logger.info("Smart-spec: enabled (default-on; assets present; K=\(self.jointNoEncProjBatchedK))")
         } else {
@@ -491,7 +501,8 @@ public actor StreamingNemotronMultilingualAsrManager {
             // (they probably expected smart-spec to run); otherwise emit
             // info because the operator may have intentionally trimmed
             // the bundle.
-            let msg = "Smart-spec: assets missing (\(smartSpecMissing.joined(separator: ", "))); falling back to legacy inner loop"
+            let msg =
+                "Smart-spec: assets missing (\(smartSpecMissing.joined(separator: ", "))); falling back to legacy inner loop"
             if smartSpecEnvVar != nil {
                 logger.warning(msg)
             } else {
@@ -756,7 +767,8 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// load site still gets the caching behavior (mlpackage → cached
     /// .mlmodelc next to source) instead of compiling to a temp dir per
     /// cold start.
-    private func locateOptionalModelBundle(in directory: URL, compiled: String, uncompiled: String) async throws -> URL? {
+    private func locateOptionalModelBundle(in directory: URL, compiled: String, uncompiled: String) async throws -> URL?
+    {
         let compiledURL = directory.appendingPathComponent(compiled)
         let uncompiledURL = directory.appendingPathComponent(uncompiled)
         if !FileManager.default.fileExists(atPath: compiledURL.path)
@@ -946,7 +958,7 @@ public actor StreamingNemotronMultilingualAsrManager {
 
     /// Process audio. Returns the empty string because the partial transcript
     /// is delivered via the partial callback or `getPartialTranscript()`.
-    public func process(audioBuffer: AVAudioPCMBuffer) async throws -> String {
+    public func process(audioBuffer: sending AVAudioPCMBuffer) async throws -> String {
         let samples = try audioConverter.resampleBuffer(audioBuffer)
         return try await process(samples: samples)
     }
@@ -980,7 +992,8 @@ public actor StreamingNemotronMultilingualAsrManager {
             // concurrent with encoder[t] on ANE.
             let nextStart = chunkEnd
             let nextEnd = nextStart + chunkSamples
-            let nextChunkSamples: [Float]? = (self.audioBuffer.count - nextStart) >= chunkSamples
+            let nextChunkSamples: [Float]? =
+                (self.audioBuffer.count - nextStart) >= chunkSamples
                 ? Array(self.audioBuffer[nextStart..<nextEnd])
                 : nil
             try await processChunk(chunk, nextChunkSamples: nextChunkSamples)
@@ -1044,13 +1057,19 @@ public actor StreamingNemotronMultilingualAsrManager {
             let decMs = Double(decNanos) / 1_000_000.0
             let totalMs = prepMs + encMs + decMs
             let perChunk = totalMs / Double(chunkCount)
-            FileHandle.standardError.write(Data("[PROFILE] chunks=\(chunkCount) prep=\(String(format: "%.0f", prepMs))ms enc=\(String(format: "%.0f", encMs))ms dec=\(String(format: "%.0f", decMs))ms total=\(String(format: "%.0f", totalMs))ms per_chunk=\(String(format: "%.2f", perChunk))ms\n".utf8))
+            FileHandle.standardError.write(
+                Data(
+                    "[PROFILE] chunks=\(chunkCount) prep=\(String(format: "%.0f", prepMs))ms enc=\(String(format: "%.0f", encMs))ms dec=\(String(format: "%.0f", decMs))ms total=\(String(format: "%.0f", totalMs))ms per_chunk=\(String(format: "%.2f", perChunk))ms\n"
+                        .utf8))
             // E4 instrumentation: speculation acceptance rate. High all-blank
             // rate suggests K could grow; low rate suggests K could shrink.
             if specWindowsTotal > 0 {
                 let allBlankPct = Double(specWindowsAllBlank) / Double(specWindowsTotal) * 100.0
                 let hitPct = Double(specWindowsHitNonBlank) / Double(specWindowsTotal) * 100.0
-                FileHandle.standardError.write(Data("[SPEC] windows=\(specWindowsTotal) all_blank=\(specWindowsAllBlank) (\(String(format: "%.1f", allBlankPct))%) hit_non_blank=\(specWindowsHitNonBlank) (\(String(format: "%.1f", hitPct))%)\n".utf8))
+                FileHandle.standardError.write(
+                    Data(
+                        "[SPEC] windows=\(specWindowsTotal) all_blank=\(specWindowsAllBlank) (\(String(format: "%.1f", allBlankPct))%) hit_non_blank=\(specWindowsHitNonBlank) (\(String(format: "%.1f", hitPct))%)\n"
+                            .utf8))
             }
         }
 

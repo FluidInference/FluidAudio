@@ -694,7 +694,8 @@ extension NemotronMultilingualFleursBenchmark {
                         dataset = parsed
                     } else {
                         logger.error(
-                            "Unknown --dataset value '\(raw)'. Expected one of: fleurs, mcv, mls, librispeech, earnings22.")
+                            "Unknown --dataset value '\(raw)'. Expected one of: fleurs, mcv, mls, librispeech, earnings22."
+                        )
                         return
                     }
                     i += 1
