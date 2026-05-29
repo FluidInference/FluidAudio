@@ -107,6 +107,189 @@ final class OfflineTypesTests: XCTestCase {
     }
 }
 
+/// Coverage for the per-chunk embedding exposure surface added to surface
+/// fine-grained data for downstream cluster-purity correction. Exercises the
+/// public API contract (default off, opt-in on) plus the internal mapping
+/// helper without requiring a full pipeline run.
+@available(macOS 13.0, iOS 16.0, *)
+final class ChunkEmbeddingExposureTests: XCTestCase {
+
+    func testExposeChunkEmbeddingsDefaultsToFalse() {
+        let config = OfflineDiarizerConfig()
+        XCTAssertFalse(
+            config.exposeChunkEmbeddings,
+            "Per-chunk embedding exposure must be opt-in to avoid imposing the "
+                + "memory cost on existing callers."
+        )
+    }
+
+    func testExposeChunkEmbeddingsCanBeEnabledAndPersisted() {
+        var config = OfflineDiarizerConfig()
+        XCTAssertFalse(config.exposeChunkEmbeddings)
+        config.exposeChunkEmbeddings = true
+        XCTAssertTrue(config.exposeChunkEmbeddings)
+    }
+
+    func testDiarizationResultChunkEmbeddingsDefaultsToNil() {
+        let result = DiarizationResult(segments: [])
+        XCTAssertNil(result.chunkEmbeddings)
+        XCTAssertNil(result.speakerDatabase)
+        XCTAssertNil(result.timings)
+        XCTAssertTrue(result.segments.isEmpty)
+    }
+
+    func testDiarizationResultPreservesProvidedChunkEmbeddings() {
+        let chunk = ChunkEmbedding(
+            speakerId: "S1",
+            chunkIndex: 0,
+            speakerIndex: 0,
+            startTimeSeconds: 0.0,
+            endTimeSeconds: 1.6,
+            embedding256: [Float](repeating: 0.1, count: 256)
+            // rho128 omitted — defaults to [], representing "no PLDA available"
+        )
+
+        let result = DiarizationResult(
+            segments: [],
+            speakerDatabase: nil,
+            chunkEmbeddings: [chunk],
+            timings: nil
+        )
+
+        XCTAssertEqual(result.chunkEmbeddings?.count, 1)
+        XCTAssertEqual(result.chunkEmbeddings?.first?.speakerId, "S1")
+        XCTAssertEqual(result.chunkEmbeddings?.first?.startTimeSeconds, 0.0)
+        XCTAssertEqual(result.chunkEmbeddings?.first?.endTimeSeconds, 1.6)
+        XCTAssertEqual(result.chunkEmbeddings?.first?.embedding256.count, 256)
+        XCTAssertEqual(
+            result.chunkEmbeddings?.first?.rho128, [],
+            "Default rho128 should be empty when no PLDA payload is provided."
+        )
+    }
+
+    func testChunkEmbeddingCodableRoundTrip() throws {
+        let original = ChunkEmbedding(
+            speakerId: "S3",
+            chunkIndex: 7,
+            speakerIndex: 2,
+            startTimeSeconds: 5.5,
+            endTimeSeconds: 7.1,
+            embedding256: (0..<256).map { Float($0) / 255.0 },
+            rho128: (0..<128).map { Double($0) / 127.0 }
+        )
+
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ChunkEmbedding.self, from: encoded)
+
+        XCTAssertEqual(decoded.speakerId, original.speakerId)
+        XCTAssertEqual(decoded.chunkIndex, original.chunkIndex)
+        XCTAssertEqual(decoded.speakerIndex, original.speakerIndex)
+        XCTAssertEqual(decoded.startTimeSeconds, original.startTimeSeconds)
+        XCTAssertEqual(decoded.endTimeSeconds, original.endTimeSeconds)
+        XCTAssertEqual(decoded.embedding256, original.embedding256)
+        XCTAssertEqual(decoded.rho128, original.rho128)
+    }
+
+    func testChunkEmbeddingFieldsRoundTrip() {
+        let embedding = (0..<256).map { Float($0) / 255.0 }
+        let rho = (0..<128).map { Double($0) / 127.0 }
+        let chunk = ChunkEmbedding(
+            speakerId: "S2",
+            chunkIndex: 42,
+            speakerIndex: 1,
+            startTimeSeconds: 12.34,
+            endTimeSeconds: 13.94,
+            embedding256: embedding,
+            rho128: rho
+        )
+
+        XCTAssertEqual(chunk.speakerId, "S2")
+        XCTAssertEqual(chunk.chunkIndex, 42)
+        XCTAssertEqual(chunk.speakerIndex, 1)
+        XCTAssertEqual(chunk.startTimeSeconds, 12.34, accuracy: 1e-9)
+        XCTAssertEqual(chunk.endTimeSeconds, 13.94, accuracy: 1e-9)
+        XCTAssertEqual(chunk.embedding256, embedding)
+        XCTAssertEqual(chunk.rho128, rho)
+    }
+
+    func testBuildPublicChunkEmbeddingsAssignsSpeakerIdsViaClusterPlusOne() {
+        let logger = AppLogger(category: "ChunkEmbeddingExposureTests")
+        let timed: [TimedEmbedding] = [
+            TimedEmbedding(
+                chunkIndex: 0, speakerIndex: 0, startFrame: 0, endFrame: 588,
+                frameWeights: [], startTime: 0.0, endTime: 1.6,
+                embedding256: [Float](repeating: 0.0, count: 4),
+                rho128: []
+            ),
+            TimedEmbedding(
+                chunkIndex: 1, speakerIndex: 0, startFrame: 0, endFrame: 588,
+                frameWeights: [], startTime: 1.6, endTime: 3.2,
+                embedding256: [Float](repeating: 0.5, count: 4),
+                rho128: []
+            ),
+            TimedEmbedding(
+                chunkIndex: 2, speakerIndex: 1, startFrame: 0, endFrame: 588,
+                frameWeights: [], startTime: 3.2, endTime: 4.8,
+                embedding256: [Float](repeating: 1.0, count: 4),
+                rho128: []
+            ),
+        ]
+        let assignments = [0, 2, 1]
+
+        let result = OfflineDiarizerManager.buildPublicChunkEmbeddings(
+            timedEmbeddings: timed,
+            assignments: assignments,
+            logger: logger
+        )
+
+        XCTAssertEqual(result.count, 3)
+        XCTAssertEqual(result.map { $0.speakerId }, ["S1", "S3", "S2"])
+        XCTAssertEqual(result[0].startTimeSeconds, 0.0, accuracy: 1e-9)
+        XCTAssertEqual(result[1].startTimeSeconds, 1.6, accuracy: 1e-9)
+        XCTAssertEqual(result[2].startTimeSeconds, 3.2, accuracy: 1e-9)
+        // Confirm all chunk-level fields propagate
+        XCTAssertEqual(result[0].chunkIndex, 0)
+        XCTAssertEqual(result[1].chunkIndex, 1)
+        XCTAssertEqual(result[2].chunkIndex, 2)
+        XCTAssertEqual(result[0].speakerIndex, 0)
+        XCTAssertEqual(result[2].speakerIndex, 1)
+    }
+
+    func testBuildPublicChunkEmbeddingsReturnsEmptyOnLengthMismatch() {
+        let logger = AppLogger(category: "ChunkEmbeddingExposureTests")
+        let timed: [TimedEmbedding] = [
+            TimedEmbedding(
+                chunkIndex: 0, speakerIndex: 0, startFrame: 0, endFrame: 588,
+                frameWeights: [], startTime: 0.0, endTime: 1.6,
+                embedding256: [], rho128: []
+            )
+        ]
+        // Mismatched: 1 timed embedding but 2 assignments
+        let assignments = [0, 0]
+
+        let result = OfflineDiarizerManager.buildPublicChunkEmbeddings(
+            timedEmbeddings: timed,
+            assignments: assignments,
+            logger: logger
+        )
+
+        XCTAssertTrue(
+            result.isEmpty,
+            "Mismatched lengths should produce an empty result rather than a partial mapping."
+        )
+    }
+
+    func testBuildPublicChunkEmbeddingsHandlesEmptyInput() {
+        let logger = AppLogger(category: "ChunkEmbeddingExposureTests")
+        let result = OfflineDiarizerManager.buildPublicChunkEmbeddings(
+            timedEmbeddings: [],
+            assignments: [],
+            logger: logger
+        )
+        XCTAssertTrue(result.isEmpty)
+    }
+}
+
 @available(macOS 13.0, iOS 16.0, *)
 final class ModelWarmupTests: XCTestCase {
 

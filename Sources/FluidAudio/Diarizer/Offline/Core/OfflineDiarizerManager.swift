@@ -338,6 +338,15 @@ public final class OfflineDiarizerManager {
             )
         }
 
+        let publicChunkEmbeddings: [ChunkEmbedding]? =
+            config.exposeChunkEmbeddings
+            ? Self.buildPublicChunkEmbeddings(
+                timedEmbeddings: timedEmbeddings,
+                assignments: assignments,
+                logger: logger
+            )
+            : nil
+
         let totalProcessing = Date().timeIntervalSince(totalStart)
         let timings = PipelineTimings(
             modelCompilationSeconds: models.compilationDuration,
@@ -351,8 +360,46 @@ public final class OfflineDiarizerManager {
         return DiarizationResult(
             segments: segments,
             speakerDatabase: speakerDatabase,
+            chunkEmbeddings: publicChunkEmbeddings,
             timings: timings
         )
+    }
+
+    /// Map the internal `[TimedEmbedding] + assignments` pair to the public
+    /// `[ChunkEmbedding]` representation. Speaker IDs follow the same
+    /// "S\(cluster + 1)" convention used by `OfflineReconstruction.buildSegments`,
+    /// so chunk embeddings can be aligned to `DiarizationResult.segments[*].speakerId`
+    /// by string equality.
+    ///
+    /// Returns `[]` if the input arrays disagree on length — this is treated as
+    /// a logged invariant violation so an unexpected mismatch surfaces in
+    /// production logs rather than silently breaking the public API contract.
+    ///
+    /// `internal` so unit tests in `OfflineModuleTests` can exercise the
+    /// mapping without needing a full pipeline run.
+    static func buildPublicChunkEmbeddings(
+        timedEmbeddings: [TimedEmbedding],
+        assignments: [Int],
+        logger: AppLogger
+    ) -> [ChunkEmbedding] {
+        guard timedEmbeddings.count == assignments.count else {
+            logger.warning(
+                "buildPublicChunkEmbeddings: timedEmbeddings.count (\(timedEmbeddings.count)) "
+                    + "!= assignments.count (\(assignments.count)); chunkEmbeddings will be empty"
+            )
+            return []
+        }
+        return zip(timedEmbeddings, assignments).map { te, cluster in
+            ChunkEmbedding(
+                speakerId: "S\(cluster + 1)",
+                chunkIndex: te.chunkIndex,
+                speakerIndex: te.speakerIndex,
+                startTimeSeconds: te.startTime,
+                endTimeSeconds: te.endTime,
+                embedding256: te.embedding256,
+                rho128: te.rho128
+            )
+        }
     }
 
     private func purgeDiarizerRepo(at baseDirectory: URL) throws {
