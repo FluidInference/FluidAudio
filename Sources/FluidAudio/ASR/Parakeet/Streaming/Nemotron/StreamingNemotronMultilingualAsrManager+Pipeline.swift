@@ -1513,18 +1513,30 @@ extension StreamingNemotronMultilingualAsrManager {
         let stride1 = logits.strides[1].intValue
         let stride2 = logits.strides[2].intValue
         let stride3 = logits.strides[3].intValue
-        let basePtr = logits.dataPointer.bindMemory(to: Float16.self, capacity: logits.count)
         let base = 0 * stride0 + frame * stride1 + 0 * stride2
-        var bestIdx = 0
-        var bestVal = basePtr[base]
-        for v in 1..<vocab {
-            let val = basePtr[base + v * stride3]
-            if val > bestVal {
-                bestVal = val
-                bestIdx = v
+
+        // Read with the model's actual element type. Hardcoding Float16 here
+        // reinterprets Float32 logits as garbage (→ wrong tokens / ~100% WER)
+        // whenever the joint emits Float32. Mirror runSpeculativeBlankDecodeV2's
+        // dtype-aware handling.
+        func scan<T: Comparable>(_ ptr: UnsafeMutablePointer<T>) -> Int {
+            var bestIdx = 0
+            var bestVal = ptr[base]
+            for v in 1..<vocab {
+                let val = ptr[base + v * stride3]
+                if val > bestVal {
+                    bestVal = val
+                    bestIdx = v
+                }
             }
+            return bestIdx
         }
-        return bestIdx
+
+        if logits.dataType == .float16 {
+            return scan(logits.dataPointer.bindMemory(to: Float16.self, capacity: logits.count))
+        } else {
+            return scan(logits.dataPointer.bindMemory(to: Float.self, capacity: logits.count))
+        }
     }
 
     /// Read a piece from the underlying base tokenizer through the multilingual

@@ -1,19 +1,21 @@
 import Foundation
 
-public class Tokenizer {
-    private var vocab: [String: String] = [:]
-    private var idToToken: [Int: String] = [:]
+public final class Tokenizer: Sendable {
+    private let vocab: [String: String]
+    private let idToToken: [Int: String]
 
     public init(vocabPath: URL) throws {
         let data = try Data(contentsOf: vocabPath)
         let json = try JSONSerialization.jsonObject(with: data, options: []) as! [String: String]
 
         self.vocab = json
+        var idToToken: [Int: String] = [:]
         for (key, value) in json {
             if let id = Int(key) {
-                self.idToToken[id] = value
+                idToToken[id] = value
             }
         }
+        self.idToToken = idToToken
     }
 
     public func decode(ids: [Int]) -> String {
