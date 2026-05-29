@@ -26,6 +26,12 @@ public enum Repo: String, CaseIterable, Sendable {
     case nemotronStreaming560 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/560ms"
     case nemotronStreaming160 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/160ms"
     case nemotronStreaming80 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/80ms"
+    /// Multilingual streaming model. The HF repo is organized as
+    /// `<lang>/<tier>ms/` subfolders (9 languages x 4 chunk tiers); the
+    /// specific variant subdirectory is supplied dynamically at download
+    /// time (see `StreamingNemotronMultilingualAsrManager.downloadAndPreloadShared`),
+    /// so this case carries no static subPath.
+    case nemotronMultilingual = "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     /// Root of the kokoro HF repo. The mono Kokoro TTS backend was removed in
     /// favor of `kokoroAne`/`kokoroAneZh`, but this case is kept because the
@@ -62,6 +68,8 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Repository slug (without owner)
     public var name: String {
         switch self {
+        case .nemotronMultilingual:
+            return "Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"
         case .vad:
             return "silero-vad-coreml"
         case .parakeetV3:
@@ -146,6 +154,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/kokoro-82m-coreml"
         case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
+        case .nemotronMultilingual:
+            return "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"
         case .sortformer:
             return "FluidInference/diar-streaming-sortformer-coreml"
         case .lseendAmi, .lseendCallHome, .lseendDihard2, .lseendDihard3:
@@ -220,6 +230,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-eou-streaming/320ms"
         case .parakeetEou1280:
             return "parakeet-eou-streaming/1280ms"
+        case .nemotronMultilingual:
+            return "nemotron-multilingual"
         case .nemotronStreaming1120:
             return "nemotron-streaming/1120ms"
         case .nemotronStreaming560:
@@ -1114,6 +1126,19 @@ public enum ModelNames {
 
     static func getRequiredModelNames(for repo: Repo, variant: String?) -> Set<String> {
         switch repo {
+        case .nemotronMultilingual:
+            // Compiled .mlmodelc component dirs. Download is normally driven by
+            // `downloadSubdirectory` (dynamic <lang>/<tier>ms path), which does
+            // not consult this set; provided for completeness / exhaustiveness.
+            return [
+                NemotronMultilingualStreaming.preprocessorFile,
+                NemotronMultilingualStreaming.encoderFile,
+                NemotronMultilingualStreaming.decoderFile,
+                NemotronMultilingualStreaming.jointFile,
+                "decoder_joint.mlmodelc",
+                "decoder_joint_noencproj.mlmodelc",
+                "joint_noencproj_batched.mlmodelc",
+            ]
         case .vad:
             return ModelNames.VAD.requiredModels
         case .parakeetV3:
