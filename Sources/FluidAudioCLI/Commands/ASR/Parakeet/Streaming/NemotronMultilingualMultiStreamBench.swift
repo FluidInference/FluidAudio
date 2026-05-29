@@ -54,7 +54,8 @@ public enum NemotronMultilingualMultiStreamBench {
                 i += 1
                 if i < arguments.count { config.datasetSubset = arguments[i] }
             case "--help", "-h":
-                printUsage(); return
+                printUsage()
+                return
             default:
                 logger.warning("Unknown arg: \(arguments[i])")
             }
@@ -62,7 +63,8 @@ public enum NemotronMultilingualMultiStreamBench {
         }
         guard let modelDir = config.modelDir else {
             logger.error("--model-dir is required")
-            printUsage(); return
+            printUsage()
+            return
         }
 
         // Locate LS test-clean samples
@@ -170,10 +172,12 @@ public enum NemotronMultilingualMultiStreamBench {
                         guard let audioFile = try? AVAudioFile(forReading: url) else { continue }
                         let dur = Double(audioFile.length) / audioFile.processingFormat.sampleRate
                         streamAudio += dur
-                        guard let buf = AVAudioPCMBuffer(
-                            pcmFormat: audioFile.processingFormat,
-                            frameCapacity: AVAudioFrameCount(audioFile.length)
-                        ) else { continue }
+                        guard
+                            let buf = AVAudioPCMBuffer(
+                                pcmFormat: audioFile.processingFormat,
+                                frameCapacity: AVAudioFrameCount(audioFile.length)
+                            )
+                        else { continue }
                         do {
                             try audioFile.read(into: buf)
                             _ = try await mgr.process(audioBuffer: buf)
@@ -191,7 +195,8 @@ public enum NemotronMultilingualMultiStreamBench {
             }
             for await (streamIdx, processed, streamAudio, hyps) in group {
                 perStreamHyps[streamIdx] = hyps
-                logger.info("Stream \(streamIdx): processed \(processed) files (\(String(format: "%.1f", streamAudio))s audio)")
+                logger.info(
+                    "Stream \(streamIdx): processed \(processed) files (\(String(format: "%.1f", streamAudio))s audio)")
             }
         }
         let wallTime = Date().timeIntervalSince(processStart)

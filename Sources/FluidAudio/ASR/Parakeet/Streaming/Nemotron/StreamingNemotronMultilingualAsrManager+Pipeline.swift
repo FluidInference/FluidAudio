@@ -91,8 +91,9 @@ extension StreamingNemotronMultilingualAsrManager {
                 let audioArray: MLMultiArray
                 let audioLen: MLMultiArray
                 if let buf = audioInputBuf,
-                   buf.shape[1].intValue == samples.count,
-                   let lenBuf = audioLenBuf {
+                    buf.shape[1].intValue == samples.count,
+                    let lenBuf = audioLenBuf
+                {
                     let ptr = buf.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
                     ptr.update(from: samples, count: samples.count)
                     lenBuf[0] = NSNumber(value: samples.count)
@@ -202,41 +203,42 @@ extension StreamingNemotronMultilingualAsrManager {
         let snapshotTotalMelFrames = config.totalMelFrames
         let snapshotMelFeatures = config.melFeatures
         let snapshotPreEncodeCache = config.preEncodeCache
-        async let nextEncFuture: (
-            encoded: MLMultiArray,
-            encoderProj: MLMultiArray?,
-            cacheChannel: MLMultiArray,
-            cacheTime: MLMultiArray,
-            cacheLen: MLMultiArray,
-            newMelCache: MLMultiArray
-        )? = {
-            // TEMP env-var disable used during the session-9 A/B bench that
-            // measures baseline vs +triple-stage. Remove after the doc table
-            // is finalized.
-            let tripleStageDisabled = ProcessInfo.processInfo.environment["FLUIDAUDIO_DISABLE_TRIPLE_STAGE"] != nil
-            guard let next = nextChunkSamples,
-                !mlStateActive,
-                !tripleStageDisabled,
-                let ch = snapshotCacheChannel,
-                let ti = snapshotCacheTime,
-                let ln = snapshotCacheLen
-            else { return nil }
-            return try await Self.runPrepAndEncoderPure(
-                samples: next,
-                melCacheForPrepend: snapshotMelCache,
-                cacheChannel: ch,
-                cacheTime: ti,
-                cacheLen: ln,
-                promptId: snapshotPromptId,
-                totalMelFrames: snapshotTotalMelFrames,
-                melFeatures: snapshotMelFeatures,
-                preEncodeCache: snapshotPreEncodeCache,
-                preprocessor: preprocessor,
-                encoder: encoder,
-                audioInputBuf: snapshotAudioBuf,
-                audioLenBuf: snapshotAudioLenBuf
-            )
-        }()
+        async let nextEncFuture:
+            (
+                encoded: MLMultiArray,
+                encoderProj: MLMultiArray?,
+                cacheChannel: MLMultiArray,
+                cacheTime: MLMultiArray,
+                cacheLen: MLMultiArray,
+                newMelCache: MLMultiArray
+            )? = {
+                // TEMP env-var disable used during the session-9 A/B bench that
+                // measures baseline vs +triple-stage. Remove after the doc table
+                // is finalized.
+                let tripleStageDisabled = ProcessInfo.processInfo.environment["FLUIDAUDIO_DISABLE_TRIPLE_STAGE"] != nil
+                guard let next = nextChunkSamples,
+                    !mlStateActive,
+                    !tripleStageDisabled,
+                    let ch = snapshotCacheChannel,
+                    let ti = snapshotCacheTime,
+                    let ln = snapshotCacheLen
+                else { return nil }
+                return try await Self.runPrepAndEncoderPure(
+                    samples: next,
+                    melCacheForPrepend: snapshotMelCache,
+                    cacheChannel: ch,
+                    cacheTime: ti,
+                    cacheLen: ln,
+                    promptId: snapshotPromptId,
+                    totalMelFrames: snapshotTotalMelFrames,
+                    melFeatures: snapshotMelFeatures,
+                    preEncodeCache: snapshotPreEncodeCache,
+                    preprocessor: preprocessor,
+                    encoder: encoder,
+                    audioInputBuf: snapshotAudioBuf,
+                    audioLenBuf: snapshotAudioLenBuf
+                )
+            }()
 
         // 4. RNNT decode loop for each encoder frame
         let decStart = DispatchTime.now().uptimeNanoseconds
@@ -312,31 +314,32 @@ extension StreamingNemotronMultilingualAsrManager {
         }
         let useSwiftEncProj = (encoderProj == nil) && (self.nativeRnnt != nil)
         if smartSpecEnabled,
-           let jointBatched = self.jointNoEncProjBatched,
-           let decoder = self.decoder,
-           let encProjResolved: MLMultiArray = try await {
-               if let direct = encoderProj { return direct }
-               if useSwiftEncProj, let native = self.nativeRnnt {
-                   // L8: lazy-init reusable encProj buffer, then fill in place.
-                   let T_enc = encoded.shape[2].intValue
-                   if self.encProjReusable == nil
-                       || self.encProjReusable?.shape[1].intValue != T_enc
-                   {
-                       self.encProjReusable = try MLMultiArray(
-                           shape: [1, NSNumber(value: T_enc), NSNumber(value: native.hidden)],
-                           dataType: .float32
-                       )
-                   }
-                   let buf = self.encProjReusable!
-                   try Self.computeEncoderProjSwift(
-                       encoded: encoded,
-                       native: native,
-                       outBuf: buf
-                   )
-                   return buf
-               }
-               return nil
-           }() {
+            let jointBatched = self.jointNoEncProjBatched,
+            let decoder = self.decoder,
+            let encProjResolved: MLMultiArray = try await {
+                if let direct = encoderProj { return direct }
+                if useSwiftEncProj, let native = self.nativeRnnt {
+                    // L8: lazy-init reusable encProj buffer, then fill in place.
+                    let T_enc = encoded.shape[2].intValue
+                    if self.encProjReusable == nil
+                        || self.encProjReusable?.shape[1].intValue != T_enc
+                    {
+                        self.encProjReusable = try MLMultiArray(
+                            shape: [1, NSNumber(value: T_enc), NSNumber(value: native.hidden)],
+                            dataType: .float32
+                        )
+                    }
+                    let buf = self.encProjReusable!
+                    try Self.computeEncoderProjSwift(
+                        encoded: encoded,
+                        native: native,
+                        outBuf: buf
+                    )
+                    return buf
+                }
+                return nil
+            }()
+        {
             let encProj = encProjResolved
             try await runSpeculativeBlankDecodeV2(
                 encoded: encoded,
@@ -700,9 +703,14 @@ extension StreamingNemotronMultilingualAsrManager {
 
         let debugNative = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_NATIVE"] != nil
         if debugNative && self.chunkCount == 1 {
-            FileHandle.standardError.write(Data("[native] encoded.dataType=\(encoded.dataType.rawValue) shape=\(encoded.shape) strides=\(encoded.strides)\n".utf8))
-            FileHandle.standardError.write(Data("[native] currentH.dataType=\(currentH.dataType.rawValue) shape=\(currentH.shape)\n".utf8))
-            FileHandle.standardError.write(Data("[native] currentToken=\(currentToken) blankIdx=\(config.blankIdx)\n".utf8))
+            FileHandle.standardError.write(
+                Data(
+                    "[native] encoded.dataType=\(encoded.dataType.rawValue) shape=\(encoded.shape) strides=\(encoded.strides)\n"
+                        .utf8))
+            FileHandle.standardError.write(
+                Data("[native] currentH.dataType=\(currentH.dataType.rawValue) shape=\(currentH.shape)\n".utf8))
+            FileHandle.standardError.write(
+                Data("[native] currentToken=\(currentToken) blankIdx=\(config.blankIdx)\n".utf8))
         }
 
         let encStride0 = encoded.strides[0].intValue
@@ -720,10 +728,12 @@ extension StreamingNemotronMultilingualAsrManager {
             return Float(Float16(bitPattern: bits))
         }
 
-        let encPtr16: UnsafeMutablePointer<UInt16>? = encIsF16
+        let encPtr16: UnsafeMutablePointer<UInt16>? =
+            encIsF16
             ? encoded.dataPointer.bindMemory(to: UInt16.self, capacity: encoded.count)
             : nil
-        let encPtr32: UnsafeMutablePointer<Float>? = encIsF16
+        let encPtr32: UnsafeMutablePointer<Float>? =
+            encIsF16
             ? nil
             : encoded.dataPointer.bindMemory(to: Float.self, capacity: encoded.count)
 
@@ -748,7 +758,10 @@ extension StreamingNemotronMultilingualAsrManager {
                     return native.step(currentToken: currentToken, encStep: bufPtr.baseAddress!)
                 }
                 if debugNative && self.chunkCount == 1 && t < 3 {
-                    FileHandle.standardError.write(Data("[native] frame\(t) sym\(symInFrame) currentToken=\(currentToken) → predToken=\(predToken)\(predToken == blankIdx ? " (BLANK)" : "")\n".utf8))
+                    FileHandle.standardError.write(
+                        Data(
+                            "[native] frame\(t) sym\(symInFrame) currentToken=\(currentToken) → predToken=\(predToken)\(predToken == blankIdx ? " (BLANK)" : "")\n"
+                                .utf8))
                 }
                 symInFrame += 1
                 if predToken == blankIdx {
@@ -893,8 +906,8 @@ extension StreamingNemotronMultilingualAsrManager {
         native: NativeRnntInner,
         outBuf: MLMultiArray
     ) throws {
-        let encoderDim = native.encoderDim   // 1024
-        let hidden = native.hidden            // 640
+        let encoderDim = native.encoderDim  // 1024
+        let hidden = native.hidden  // 640
         let T_enc = encoded.shape[2].intValue
 
         // Gather encoded[0, :, :] into a contiguous [T_enc, encoderDim] fp32 buffer.
@@ -923,7 +936,8 @@ extension StreamingNemotronMultilingualAsrManager {
 
         // Validate outBuf has expected shape [1, T_enc, hidden] fp32
         precondition(outBuf.dataType == .float32, "encoder_proj outBuf must be fp32")
-        precondition(outBuf.shape.count == 3 && outBuf.shape[1].intValue == T_enc && outBuf.shape[2].intValue == hidden,
+        precondition(
+            outBuf.shape.count == 3 && outBuf.shape[1].intValue == T_enc && outBuf.shape[2].intValue == hidden,
             "encoder_proj outBuf shape mismatch")
         let dstPtr = outBuf.dataPointer.bindMemory(to: Float.self, capacity: outBuf.count)
 
@@ -1009,10 +1023,12 @@ extension StreamingNemotronMultilingualAsrManager {
 
         // encProj may be fp16 on ANE; convert per-element when copying.
         let encProjIsF16 = (encoderProj.dataType == .float16)
-        let srcF16Ptr: UnsafeMutablePointer<UInt16>? = encProjIsF16
+        let srcF16Ptr: UnsafeMutablePointer<UInt16>? =
+            encProjIsF16
             ? encoderProj.dataPointer.bindMemory(to: UInt16.self, capacity: encoderProj.count)
             : nil
-        let srcF32Ptr: UnsafeMutablePointer<Float>? = encProjIsF16
+        let srcF32Ptr: UnsafeMutablePointer<Float>? =
+            encProjIsF16
             ? nil
             : encoderProj.dataPointer.bindMemory(to: Float.self, capacity: encoderProj.count)
         let dstPtr = encProjBatchBuf.dataPointer.bindMemory(to: Float.self, capacity: encProjBatchBuf.count)
@@ -1105,10 +1121,12 @@ extension StreamingNemotronMultilingualAsrManager {
             let logitsStride3 = logits.strides[3].intValue
             let vocabSize = logits.shape[3].intValue
             let logitsIsF16 = (logits.dataType == .float16)
-            let logitsF16Ptr: UnsafeMutablePointer<UInt16>? = logitsIsF16
+            let logitsF16Ptr: UnsafeMutablePointer<UInt16>? =
+                logitsIsF16
                 ? logits.dataPointer.bindMemory(to: UInt16.self, capacity: logits.count)
                 : nil
-            let logitsF32Ptr: UnsafeMutablePointer<Float>? = logitsIsF16
+            let logitsF32Ptr: UnsafeMutablePointer<Float>? =
+                logitsIsF16
                 ? nil
                 : logits.dataPointer.bindMemory(to: Float.self, capacity: logits.count)
 
@@ -1238,7 +1256,8 @@ extension StreamingNemotronMultilingualAsrManager {
                     var newC: MLMultiArray = currentC
 
                     if let djne = self.decoderJointNoEncProj,
-                       let drainProjStep = drainEncProjStep {
+                        let drainProjStep = drainEncProjStep
+                    {
                         let djneInput = try MLDictionaryFeatureProvider(dictionary: [
                             "token": MLFeatureValue(multiArray: tokInput2),
                             "token_length": MLFeatureValue(multiArray: tokLen2),
@@ -1547,8 +1566,9 @@ extension StreamingNemotronMultilingualAsrManager {
         let array: MLMultiArray
         let audioLen: MLMultiArray
         if let buf = audioInputBuf,
-           buf.shape[1].intValue == samples.count,
-           let lenBuf = audioLenBuf {
+            buf.shape[1].intValue == samples.count,
+            let lenBuf = audioLenBuf
+        {
             let ptr = buf.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
             ptr.update(from: samples, count: samples.count)
             lenBuf[0] = NSNumber(value: samples.count)
@@ -1583,7 +1603,7 @@ extension StreamingNemotronMultilingualAsrManager {
     ///   0.010 = aggressive (background room noise included; WER risk)
     nonisolated internal static let vadRmsThreshold: Float = {
         guard let s = ProcessInfo.processInfo.environment["FLUIDAUDIO_VAD_RMS_THRESHOLD"],
-              let v = Float(s), v > 0, v < 1.0
+            let v = Float(s), v > 0, v < 1.0
         else { return 0 }
         return v
     }()
@@ -1594,7 +1614,7 @@ extension StreamingNemotronMultilingualAsrManager {
     /// match the old per-chunk-only behavior.
     nonisolated internal static let vadHangoverChunks: Int = {
         guard let s = ProcessInfo.processInfo.environment["FLUIDAUDIO_VAD_HANGOVER_CHUNKS"],
-              let v = Int(s), v >= 1
+            let v = Int(s), v >= 1
         else { return 2 }
         return v
     }()
@@ -1641,12 +1661,14 @@ extension StreamingNemotronMultilingualAsrManager {
         if vadRmsThreshold > 0, isAudioSilent(samples: samples, threshold: vadRmsThreshold) {
             return nil
         }
-        guard let chunkMel = try await runPreprocessorPure(
-            samples: samples,
-            preprocessor: preprocessor,
-            audioInputBuf: audioInputBuf,
-            audioLenBuf: audioLenBuf
-        ) else {
+        guard
+            let chunkMel = try await runPreprocessorPure(
+                samples: samples,
+                preprocessor: preprocessor,
+                audioInputBuf: audioInputBuf,
+                audioLenBuf: audioLenBuf
+            )
+        else {
             return nil
         }
         let inputMel = try prependMelCachePure(
