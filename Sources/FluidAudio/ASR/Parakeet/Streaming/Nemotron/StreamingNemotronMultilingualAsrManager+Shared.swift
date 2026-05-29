@@ -15,8 +15,14 @@ import Foundation
 public struct SharedNemotronMultilingualModels: @unchecked Sendable {
     public let preprocessor: MLModel
     public let encoder: MLModel
-    public let decoder: MLModel
-    public let joint: MLModel
+    /// Bare prediction LSTM. Optional: a lean ship may omit it when B1
+    /// (`decoderJoint`) covers the standard path and no smart-spec (K=4)
+    /// asset is present (the smart-spec path is the only consumer of the
+    /// unfused decoder, for `dec_out`).
+    public let decoder: MLModel?
+    /// Bare joint. Optional: only the smart-spec drain and the hybrid path
+    /// use it standalone; the standard path uses B1.
+    public let joint: MLModel?
     /// B1 fusion (decoder + joint merged). May be nil.
     public let decoderJoint: MLModel?
     /// B2 triple-fusion (decoder + joint + argmax). May be nil.
@@ -40,8 +46,8 @@ public struct SharedNemotronMultilingualModels: @unchecked Sendable {
     fileprivate init(
         preprocessor: MLModel,
         encoder: MLModel,
-        decoder: MLModel,
-        joint: MLModel,
+        decoder: MLModel?,
+        joint: MLModel?,
         decoderJoint: MLModel?,
         decoderJointArgmax: MLModel?,
         decoderJointNoEncProj: MLModel?,
@@ -131,18 +137,26 @@ extension StreamingNemotronMultilingualAsrManager {
             encoderIsStateful = false
         }
 
-        let decoder = try await Self.loadShared(
+        // Bare decoder + joint are now OPTIONAL. A lean B1 ship can omit them;
+        // they're only consumed by the smart-spec (K=4) path and the hybrid
+        // path. The standard decode path uses B1 (`decoderJoint`). A valid
+        // decode path is enforced after the fused assets load (below).
+        let decoder = try await Self.loadOptionalShared(
             directory: directory,
             compiledName: ModelNames.NemotronMultilingualStreaming.decoderFile,
             packageName: ModelNames.NemotronMultilingualStreaming.decoderPackage,
-            configuration: mlConfiguration
+            configuration: mlConfiguration,
+            logName: "decoder",
+            logger: logger
         )
 
-        let joint = try await Self.loadShared(
+        let joint = try await Self.loadOptionalShared(
             directory: directory,
             compiledName: ModelNames.NemotronMultilingualStreaming.jointFile,
             packageName: ModelNames.NemotronMultilingualStreaming.jointPackage,
-            configuration: mlConfiguration
+            configuration: mlConfiguration,
+            logName: "joint",
+            logger: logger
         )
 
         // Optional fusion mlpackages (B2 > B3+B1 > B1 priority — same
@@ -193,6 +207,28 @@ extension StreamingNemotronMultilingualAsrManager {
             logName: "joint_noencproj_batched",
             logger: logger
         )
+
+        // Validate a usable decode path exists now that decoder/joint are
+        // optional. Standard path needs a fused decoder_joint (B1/B3/B2) or
+        // the bare decoder+joint pair. Smart-spec (K=4) consumes the bare
+        // decoder (for dec_out) and bare joint (drain), so if it's present
+        // both must be too — otherwise its force-unwraps would crash.
+        let hasStandardPath =
+            decoderJoint != nil || decoderJointNoEncProj != nil || decoderJointArgmax != nil
+            || (decoder != nil && joint != nil)
+        guard hasStandardPath else {
+            throw ASRError.processingFailed(
+                "No decode path in \(directory.path): provide a fused decoder_joint (B1/B3) "
+                    + "or both bare decoder.mlmodelc + joint.mlmodelc.")
+        }
+        if jointNoEncProjBatched != nil && (decoder == nil || joint == nil) {
+            throw ASRError.processingFailed(
+                "Smart-spec asset joint_noencproj_batched present but bare decoder/joint missing "
+                    + "— K=4 needs both. Either add them or remove the smart-spec asset.")
+        }
+        if decoder == nil && joint == nil {
+            logger.info("Lean B1 ship: bare decoder/joint omitted; using fused decode path only.")
+        }
 
         // Tokenizer
         let tokenizerURL = directory.appendingPathComponent(ModelNames.NemotronMultilingualStreaming.tokenizer)

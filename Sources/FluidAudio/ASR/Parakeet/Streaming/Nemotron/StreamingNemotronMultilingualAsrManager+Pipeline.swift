@@ -17,10 +17,10 @@ extension StreamingNemotronMultilingualAsrManager {
     /// If `nextChunkSamples` is non-nil, runs preprocessor[t+1] in parallel
     /// with encoder[t] (CPU preprocessor while ANE encoder runs).
     internal func processChunk(_ samples: [Float], nextChunkSamples: [Float]? = nil) async throws {
+        // decoder/joint are optional (lean B1 ships omit them) — bound
+        // locally at the sites that need them (smart-spec, unfused fallback).
         guard let preprocessor = preprocessor,
             let encoder = encoder,
-            let decoder = decoder,
-            let joint = joint,
             let cacheChannel = cacheChannel,
             let cacheTime = cacheTime,
             let cacheLen = cacheLen,
@@ -313,6 +313,7 @@ extension StreamingNemotronMultilingualAsrManager {
         let useSwiftEncProj = (encoderProj == nil) && (self.nativeRnnt != nil)
         if smartSpecEnabled,
            let jointBatched = self.jointNoEncProjBatched,
+           let decoder = self.decoder,
            let encProjResolved: MLMultiArray = try await {
                if let direct = encoderProj { return direct }
                if useSwiftEncProj, let native = self.nativeRnnt {
@@ -417,7 +418,7 @@ extension StreamingNemotronMultilingualAsrManager {
         // enc_proj + single-frame joint walk) without affecting default
         // routing. See what_failed_rtfx_table.md for full analysis.
         let speculativeEnabled = ProcessInfo.processInfo.environment["FLUIDAUDIO_ENABLE_SPECULATIVE_BATCHED"] != nil
-        if speculativeEnabled, let jb = self.jointBatched {
+        if speculativeEnabled, let jb = self.jointBatched, let decoder = self.decoder {
             try await runSpeculativeBatchedDecode(
                 encoded: encoded,
                 numEncoderFrames: numEncoderFrames,
@@ -574,7 +575,7 @@ extension StreamingNemotronMultilingualAsrManager {
                     predToken = findMaxIndex(fl)
                     hOut = fh
                     cOut = fc
-                } else {
+                } else if let decoder = self.decoder, let joint = self.joint {
                     let decoderInput = try MLDictionaryFeatureProvider(dictionary: [
                         "token": MLFeatureValue(multiArray: tokenInput),
                         "token_length": MLFeatureValue(multiArray: tokenLen),
@@ -610,6 +611,9 @@ extension StreamingNemotronMultilingualAsrManager {
                     predToken = findMaxIndex(jl)
                     hOut = dh
                     cOut = dc
+                } else {
+                    throw ASRError.processingFailed(
+                        "No decode path: need a fused decoder_joint (B1/B3/B2) or bare decoder+joint")
                 }
 
                 if predToken == config.blankIdx {

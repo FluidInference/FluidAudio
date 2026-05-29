@@ -353,25 +353,29 @@ public actor StreamingNemotronMultilingualAsrManager {
             }
         }
 
-        let decoderURL = try await locateModelBundle(
+        // Bare decoder + joint are optional (lean B1 ships omit them).
+        // Loaded only if present; a valid decode path is enforced below.
+        if let decoderURL = try await locateOptionalModelBundle(
             in: directory,
             compiled: ModelNames.NemotronMultilingualStreaming.decoderFile,
             uncompiled: ModelNames.NemotronMultilingualStreaming.decoderPackage
-        )
-        self.decoder = try await MLModel.load(
-            contentsOf: decoderURL,
-            configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_DECODER_CU", base: mlConfiguration, logger: logger)
-        )
+        ) {
+            self.decoder = try await MLModel.load(
+                contentsOf: decoderURL,
+                configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_DECODER_CU", base: mlConfiguration, logger: logger)
+            )
+        }
 
-        let jointURL = try await locateModelBundle(
+        if let jointURL = try await locateOptionalModelBundle(
             in: directory,
             compiled: ModelNames.NemotronMultilingualStreaming.jointFile,
             uncompiled: ModelNames.NemotronMultilingualStreaming.jointPackage
-        )
-        self.joint = try await MLModel.load(
-            contentsOf: jointURL,
-            configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_JOINT_CU", base: mlConfiguration, logger: logger)
-        )
+        ) {
+            self.joint = try await MLModel.load(
+                contentsOf: jointURL,
+                configuration: Self.computeUnitOverride(name: "FLUIDAUDIO_JOINT_CU", base: mlConfiguration, logger: logger)
+            )
+        }
 
         // Optional triple-fused decoder+joint+argmax mlpackage (Tier B2).
         // Takes precedence over the dec+joint fusion below if present.
@@ -952,7 +956,12 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// this when the caller already has the audio as `[Float]` at 16 kHz
     /// (e.g. predecoded-PCM benchmarks or memory-cached pipelines).
     public func process(samples: [Float]) async throws -> String {
-        guard preprocessor != nil, encoder != nil, decoder != nil, joint != nil else {
+        // decoder/joint are optional (lean B1 ships omit them); require a
+        // valid decode path instead — fused B1/B3/B2, or the bare pair.
+        let hasDecodePath =
+            decoderJoint != nil || decoderJointNoEncProj != nil || decoderJointArgmax != nil
+            || (decoder != nil && joint != nil)
+        guard preprocessor != nil, encoder != nil, hasDecodePath else {
             throw ASRError.notInitialized
         }
 
@@ -992,11 +1001,13 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// final transcript text. The detected language is available via
     /// `detectedLanguage()` after this returns.
     public func finish() async throws -> String {
+        let hasDecodePath =
+            decoderJoint != nil || decoderJointNoEncProj != nil || decoderJointArgmax != nil
+            || (decoder != nil && joint != nil)
         guard let tokenizer = tokenizer,
             preprocessor != nil,
             encoder != nil,
-            decoder != nil,
-            joint != nil
+            hasDecodePath
         else {
             throw ASRError.notInitialized
         }
