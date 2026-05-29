@@ -23,7 +23,7 @@ public struct NemotronMultilingualDecoded: Sendable {
 ///
 /// Underlying vocab format is identical to the English variant: a flat
 /// `{"id": "piece"}` JSON dictionary, decoded by the shared `Tokenizer`.
-public final class NemotronMultilingualTokenizer {
+public final class NemotronMultilingualTokenizer: Sendable {
     private let base: Tokenizer
     private let langTagTokenIds: Set<Int>
 

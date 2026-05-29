@@ -86,8 +86,12 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
     /// - Parameter configuration: Optional `MLModelConfiguration` override.
     /// - Returns: A streaming ASR manager conforming to `StreamingAsrManager`.
     public func createManager(
-        configuration: MLModelConfiguration? = nil
+        configuration: sending MLModelConfiguration? = nil
     ) -> any StreamingAsrManager {
+        // `sending` so the (non-Sendable) configuration transfers into the
+        // actor manager inits without a data-race diagnostic. Xcode 16's iOS
+        // build enforces this region check more strictly than the macOS 6.1
+        // toolchain, which accepts the unannotated form.
         let mlConfig = configuration ?? MLModelConfiguration()
         switch engineFamily {
         case .parakeetEou:
