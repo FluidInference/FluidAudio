@@ -79,6 +79,19 @@ public actor StreamingNemotronMultilingualAsrManager {
     private let audioConverter = AudioConverter()
     internal var tokenizer: NemotronMultilingualTokenizer?
 
+    /// Every token id that means "blank" (no emission). Some pruned vocabs carry
+    /// a *duplicate* `<blank>` surface mid-vocab in addition to the canonical
+    /// `blank_idx`; if the decode only suppresses `blank_idx`, the model can emit
+    /// the duplicate as a literal `"<blank>"` token and desync the RNN-T state
+    /// (mangling nearby tokens). Populated at load from the tokenizer.
+    internal var blankIds: Set<Int> = []
+
+    /// True if `token` is any blank id (canonical or a duplicate). Used at every
+    /// emission decision instead of `== config.blankIdx`.
+    @inline(__always) internal func isBlank(_ token: Int) -> Bool {
+        token == config.blankIdx || blankIds.contains(token)
+    }
+
     // Configuration (loaded from metadata.json)
     public internal(set) var config: NemotronMultilingualStreamingConfig
 
@@ -517,6 +530,15 @@ public actor StreamingNemotronMultilingualAsrManager {
             vocabPath: tokenizerURL,
             langTagTokenIds: config.langTagTokenIds
         )
+        // Collect all <blank> ids (handles vocabs with a duplicate blank). The
+        // decode treats every one as no-emission; see `isBlank`.
+        self.blankIds = self.tokenizer?.ids(matching: "<blank>") ?? []
+        self.blankIds.insert(config.blankIdx)
+        if self.blankIds.count > 1 {
+            logger.info(
+                "Tokenizer has \(self.blankIds.count) <blank> ids \(self.blankIds.sorted()) — all treated as no-emission"
+            )
+        }
 
         // Initialize states
         try resetStates()

@@ -61,6 +61,12 @@ public final class NemotronMultilingualTokenizer: Sendable {
         return String(piece.dropFirst().dropLast())
     }
 
+    /// All token ids whose surface piece equals `surface` (e.g. every `<blank>`
+    /// id when the vocab carries a duplicate).
+    public func ids(matching surface: String) -> Set<Int> {
+        base.ids(matching: surface)
+    }
+
     /// Look up the token id for a language-tag piece (e.g. `"en-US"` →
     /// the id whose piece equals `"<en-US>"`). Returns `nil` if no
     /// matching tag is present in `langTagTokenIds`.

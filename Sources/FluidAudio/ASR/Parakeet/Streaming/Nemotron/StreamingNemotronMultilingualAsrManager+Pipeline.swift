@@ -619,7 +619,7 @@ extension StreamingNemotronMultilingualAsrManager {
                         "No decode path: need a fused decoder_joint (B1/B3/B2) or bare decoder+joint")
                 }
 
-                if predToken == config.blankIdx {
+                if isBlank(predToken) {
                     // Blank token - move to next encoder frame
                     break
                 } else {
@@ -764,7 +764,7 @@ extension StreamingNemotronMultilingualAsrManager {
                                 .utf8))
                 }
                 symInFrame += 1
-                if predToken == blankIdx {
+                if isBlank(predToken) {
                     // Blank → advance to next encoder frame. Do NOT commit
                     // LSTM state — RNN-T greedy only advances state on
                     // non-blank emissions.
@@ -837,8 +837,6 @@ extension StreamingNemotronMultilingualAsrManager {
         // Per-token dec_out buffer for CoreML joint input (shape [1, 640, 1]).
         let decOut = try MLMultiArray(shape: [1, NSNumber(value: native.hidden), 1], dataType: .float32)
 
-        let blankIdx = config.blankIdx
-
         for t in 0..<numEncoderFrames {
             let encStep: MLMultiArray
             if let buf = encoderStepBuf {
@@ -868,7 +866,7 @@ extension StreamingNemotronMultilingualAsrManager {
                 }
                 let predToken = findMaxIndex(logits)
 
-                if predToken == blankIdx {
+                if isBlank(predToken) {
                     break  // RNN-T: blank doesn't commit state
                 }
                 // Non-blank: emit + commit native LSTM state
@@ -1164,7 +1162,7 @@ extension StreamingNemotronMultilingualAsrManager {
                         }
                     }
                 }
-                if bestIdx != blankIdx {
+                if !isBlank(bestIdx) {
                     firstNonBlankAt = kk
                     emittedToken = bestIdx
                     break
@@ -1346,7 +1344,7 @@ extension StreamingNemotronMultilingualAsrManager {
                         newC = c2
                     }
 
-                    if dBestIdx == blankIdx { break }
+                    if isBlank(dBestIdx) { break }
                     // Non-blank → emit + commit state
                     newTokens.append(dBestIdx)
                     accumulatedTokenIds.append(dBestIdx)
@@ -1459,12 +1457,11 @@ extension StreamingNemotronMultilingualAsrManager {
             }
 
             // 3. Walk frames [t..numEncoderFrames]; find first non-blank.
-            let blankIdx = config.blankIdx
             var firstNonBlankIdx: Int? = nil
             var firstNonBlankToken: Int = -1
             for i in t..<numEncoderFrames {
                 let token = argmaxFrame(logits: logits, frame: i)
-                if token != blankIdx {
+                if !isBlank(token) {
                     firstNonBlankIdx = i
                     firstNonBlankToken = token
                     break
