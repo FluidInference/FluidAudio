@@ -1,10 +1,11 @@
-name: Nemotron English Benchmark (B1 vs K=4)
+name: Nemotron English Benchmark (FLEURS)
 
-# Runs the English Nemotron 3.5 multilingual ship on FLEURS en_us twice —
-# once with the default K=4 smart-spec decode path, once B1-fused-only
-# (FLUIDAUDIO_ENABLE_SMART_SPECULATIVE=0) — and compares WER + RTFx so the
-# K=4 finisher's effect is visible on every relevant PR. Model is fetched
-# from the gated HF repo using the HF_NEMOTRON_V2_TOKEN secret.
+# Runs the English Nemotron 3.5 multilingual ship on FLEURS en_us and reports
+# WER + RTFx on every relevant PR. The shipped ships use the B1 decoder⊕joint
+# fusion path; K=4 smart-spec components are NOT published on the multilingual
+# repo (the pruned/full tokenizers carry duplicate <blank> tokens that break
+# the K=4 recovery step), so the decode path here is B1. Model is fetched from
+# the gated HF repo using the HF_NEMOTRON_V2_TOKEN secret.
 
 on:
   pull_request:
@@ -16,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       samples:
-        description: 'FLEURS en_us samples per run'
+        description: 'FLEURS en_us samples'
         required: false
         default: '100'
       chunk_ms:
@@ -26,7 +27,7 @@ on:
 
 jobs:
   nemotron-english-benchmark:
-    name: Nemotron English Benchmark (B1 vs K=4)
+    name: Nemotron English Benchmark (FLEURS)
     runs-on: macos-15
     permissions:
       contents: read
@@ -54,70 +55,41 @@ jobs:
       - name: Build
         run: swift build -c release
 
-      - name: Run benchmark — K=4 smart-spec (default)
-        id: bench-k4
+      - name: Run benchmark — English FLEURS (B1)
+        id: bench
         continue-on-error: true
         run: |
-          echo "=== English FLEURS, chunk ${CHUNK_MS}ms, ${SAMPLES} samples, K=4 (default) ==="
+          echo "=== English FLEURS, chunk ${CHUNK_MS}ms, ${SAMPLES} samples (B1 fused) ==="
           .build/release/fluidaudiocli nemotron-multilingual-benchmark \
             --auto-download \
             --languages en_us \
             --chunk-ms "$CHUNK_MS" \
             --dataset fleurs \
             --samples "$SAMPLES" \
-            --output results-k4.json \
-            2>&1 | tee log-k4.txt
+            --output results.json \
+            2>&1 | tee log.txt
           exit ${PIPESTATUS[0]}
 
-      - name: Run benchmark — B1 fused-only
-        id: bench-b1
-        continue-on-error: true
-        env:
-          FLUIDAUDIO_ENABLE_SMART_SPECULATIVE: "0"
-        run: |
-          echo "=== English FLEURS, chunk ${CHUNK_MS}ms, ${SAMPLES} samples, B1 fused-only ==="
-          .build/release/fluidaudiocli nemotron-multilingual-benchmark \
-            --auto-download \
-            --languages en_us \
-            --chunk-ms "$CHUNK_MS" \
-            --dataset fleurs \
-            --samples "$SAMPLES" \
-            --output results-b1.json \
-            2>&1 | tee log-b1.txt
-          exit ${PIPESTATUS[0]}
-
-      - name: Extract + compare results
+      - name: Extract results
         if: always()
-        id: compare
+        id: extract
         run: |
           read_metric() { jq -r ".summary.$2 // \"N/A\"" "$1" 2>/dev/null || echo "N/A"; }
           pct() { [ "$1" = "N/A" ] && echo "N/A" || echo "$1 * 100" | bc -l | xargs printf "%.2f"; }
           one() { [ "$1" = "N/A" ] && echo "N/A" || echo "$1" | xargs printf "%.1f"; }
 
-          K4_WER=$(pct "$(read_metric results-k4.json averageWER)")
-          K4_RTFX=$(one "$(read_metric results-k4.json averageRTFx)")
-          B1_WER=$(pct "$(read_metric results-b1.json averageWER)")
-          B1_RTFX=$(one "$(read_metric results-b1.json averageRTFx)")
-          SAMP=$(jq -r '.summary.totalSamples // "N/A"' results-k4.json 2>/dev/null || echo "N/A")
-
-          # K=4 RTFx delta vs B1 (%)
-          DELTA="N/A"
-          if [ "$K4_RTFX" != "N/A" ] && [ "$B1_RTFX" != "N/A" ] && [ "$B1_RTFX" != "0.0" ]; then
-            DELTA=$(echo "($K4_RTFX - $B1_RTFX) / $B1_RTFX * 100" | bc -l | xargs printf "%+.1f")
-          fi
+          WER=$(pct "$(read_metric results.json averageWER)")
+          RTFX=$(one "$(read_metric results.json averageRTFx)")
+          SAMP=$(jq -r '.summary.totalSamples // "N/A"' results.json 2>/dev/null || echo "N/A")
 
           {
-            echo "k4_wer=$K4_WER"; echo "k4_rtfx=$K4_RTFX"
-            echo "b1_wer=$B1_WER"; echo "b1_rtfx=$B1_RTFX"
-            echo "samples=$SAMP"; echo "delta=$DELTA"
+            echo "wer=$WER"; echo "rtfx=$RTFX"; echo "samples=$SAMP"
           } >> "$GITHUB_OUTPUT"
 
-          echo "B1 fused : WER ${B1_WER}%  RTFx ${B1_RTFX}x"
-          echo "K=4 spec : WER ${K4_WER}%  RTFx ${K4_RTFX}x  (RTFx ${DELTA}% vs B1)"
+          echo "English FLEURS (B1): WER ${WER}%  RTFx ${RTFX}x  (${SAMP} samples)"
 
-          # Fail if either run produced no usable RTFx (download / decode failure)
-          if [ "$K4_RTFX" = "N/A" ] || [ "$K4_RTFX" = "0.0" ] || [ "$B1_RTFX" = "N/A" ] || [ "$B1_RTFX" = "0.0" ]; then
-            echo "❌ A run produced RTFx 0/N/A — benchmark failed"
+          if [ "$RTFX" = "N/A" ] || [ "$RTFX" = "0.0" ]; then
+            echo "❌ Run produced RTFx 0/N/A — benchmark failed"
             exit 1
           fi
 
@@ -126,24 +98,22 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const o = ${{ toJSON(steps.compare.outputs) }};
-            const ok = '${{ steps.bench-k4.outcome }}' === 'success' && '${{ steps.bench-b1.outcome }}' === 'success';
-            const body = `## ${ok ? '✅' : '❌'} Nemotron English Benchmark — B1 vs K=4
+            const o = ${{ toJSON(steps.extract.outputs) }};
+            const ok = '${{ steps.bench.outcome }}' === 'success';
+            const body = `## ${ok ? '✅' : '❌'} Nemotron English Benchmark — FLEURS
 
-            FLEURS \`en_us\`, chunk \`${{ env.CHUNK_MS }}ms\`, ${o.samples} samples. WER is byte-identical between paths (K=4 is lossless); RTFx is where K=4 should win.
+            FLEURS \`en_us\`, chunk \`${{ env.CHUNK_MS }}ms\`, ${o.samples} samples, B1 fused decode path.
 
             | Decode path | WER | RTFx |
             |---|---:|---:|
-            | B1 (fused, default-equivalent) | ${o.b1_wer}% | ${o.b1_rtfx}x |
-            | **K=4 smart-spec** | ${o.k4_wer}% | **${o.k4_rtfx}x** |
-            | **Δ RTFx (K=4 vs B1)** | | **${o.delta}%** |
+            | **B1 (fused, shipped)** | **${o.wer}%** | **${o.rtfx}x** |
 
-            ${ok ? '' : '⚠️ One or both runs failed — see logs.'}
+            ${ok ? '' : '⚠️ Run failed — see logs.'}
 
-            <details><summary>K=4 log (tail)</summary>
+            <details><summary>Log (tail)</summary>
 
             \`\`\`
-            ${require('fs').existsSync('log-k4.txt') ? require('fs').readFileSync('log-k4.txt','utf8').slice(-3000) : '(no log)'}
+            ${require('fs').existsSync('log.txt') ? require('fs').readFileSync('log.txt','utf8').slice(-3000) : '(no log)'}
             \`\`\`
             </details>`;
             github.rest.issues.createComment({
@@ -159,12 +129,12 @@ jobs:
         with:
           name: nemotron-english-benchmark-results
           path: |
-            results-*.json
-            log-*.txt
+            results.json
+            log.txt
           retention-days: 30
 
-      - name: Fail if a run failed
-        if: steps.bench-k4.outcome == 'failure' || steps.bench-b1.outcome == 'failure'
+      - name: Fail if the run failed
+        if: steps.bench.outcome == 'failure'
         run: |
-          echo "A benchmark run failed (see logs above)."
+          echo "Benchmark run failed (see logs above)."
           exit 1
