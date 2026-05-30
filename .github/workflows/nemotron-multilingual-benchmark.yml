@@ -1,14 +1,15 @@
 name: Nemotron Multilingual Benchmark (FLEURS)
 
-# Benchmarks BOTH shipped models on FLEURS on every relevant PR, so a break in
-# either model's download or decode path is caught:
-#   - latin/        (Latin-script-pruned vocab) via English  -> WER
-#   - multilingual/ (full 13087 vocab)          via Japanese -> CER
-# The auto-downloader routes the language hint to the right folder
-# (en_us -> latin, ja_jp -> multilingual). Decode path is B1 fused; K=4
-# smart-spec components are not published (the tokenizers carry duplicate
-# <blank> tokens that break K=4 recovery). Model is fetched from the gated HF
-# repo using the HF_NEMOTRON_V2_TOKEN secret.
+# Downloads BOTH shipped models and benchmarks each on the SAME English FLEURS
+# audio, so a break in either folder's download/decode is caught and the two
+# models are compared apples-to-apples on every relevant PR:
+#   - latin/        (Latin-script-pruned 2828 vocab) -> English WER
+#   - multilingual/ (full 13087 vocab)               -> English WER
+# `--model-variant latin|multilingual` forces which folder --auto-download
+# fetches, independent of --languages. Decode path is B1 fused; K=4 smart-spec
+# components are not published (the tokenizers carry duplicate <blank> tokens
+# that break K=4 recovery). Model is fetched from the gated HF repo using the
+# HF_NEMOTRON_V2_TOKEN secret.
 
 on:
   pull_request:
@@ -58,34 +59,36 @@ jobs:
       - name: Build
         run: swift build -c release
 
-      - name: Benchmark — English → latin/ (WER)
-        id: bench-en
+      - name: Benchmark — English on latin/
+        id: bench-latin
         continue-on-error: true
         run: |
           echo "=== English FLEURS en_us, chunk ${CHUNK_MS}ms, ${SAMPLES} samples → latin/ ==="
           .build/release/fluidaudiocli nemotron-multilingual-benchmark \
             --auto-download \
+            --model-variant latin \
             --languages en_us \
             --chunk-ms "$CHUNK_MS" \
             --dataset fleurs \
             --samples "$SAMPLES" \
-            --output results-en.json \
-            2>&1 | tee log-en.txt
+            --output results-latin.json \
+            2>&1 | tee log-latin.txt
           exit ${PIPESTATUS[0]}
 
-      - name: Benchmark — Japanese → multilingual/ (CER)
-        id: bench-ja
+      - name: Benchmark — English on multilingual/
+        id: bench-multi
         continue-on-error: true
         run: |
-          echo "=== Japanese FLEURS ja_jp, chunk ${CHUNK_MS}ms, ${SAMPLES} samples → multilingual/ ==="
+          echo "=== English FLEURS en_us, chunk ${CHUNK_MS}ms, ${SAMPLES} samples → multilingual/ ==="
           .build/release/fluidaudiocli nemotron-multilingual-benchmark \
             --auto-download \
-            --languages ja_jp \
+            --model-variant multilingual \
+            --languages en_us \
             --chunk-ms "$CHUNK_MS" \
             --dataset fleurs \
             --samples "$SAMPLES" \
-            --output results-ja.json \
-            2>&1 | tee log-ja.txt
+            --output results-multi.json \
+            2>&1 | tee log-multi.txt
           exit ${PIPESTATUS[0]}
 
       - name: Extract results
@@ -96,23 +99,23 @@ jobs:
           pct() { [ "$1" = "N/A" ] && echo "N/A" || echo "$1 * 100" | bc -l | xargs printf "%.2f"; }
           one() { [ "$1" = "N/A" ] && echo "N/A" || echo "$1" | xargs printf "%.1f"; }
 
-          EN_WER=$(pct "$(read_metric results-en.json averageWER)")
-          EN_RTFX=$(one "$(read_metric results-en.json averageRTFx)")
-          JA_CER=$(pct "$(read_metric results-ja.json averageCER)")
-          JA_RTFX=$(one "$(read_metric results-ja.json averageRTFx)")
-          SAMP=$(jq -r '.summary.totalSamples // "N/A"' results-en.json 2>/dev/null || echo "N/A")
+          LAT_WER=$(pct "$(read_metric results-latin.json averageWER)")
+          LAT_RTFX=$(one "$(read_metric results-latin.json averageRTFx)")
+          MUL_WER=$(pct "$(read_metric results-multi.json averageWER)")
+          MUL_RTFX=$(one "$(read_metric results-multi.json averageRTFx)")
+          SAMP=$(jq -r '.summary.totalSamples // "N/A"' results-latin.json 2>/dev/null || echo "N/A")
 
           {
-            echo "en_wer=$EN_WER"; echo "en_rtfx=$EN_RTFX"
-            echo "ja_cer=$JA_CER"; echo "ja_rtfx=$JA_RTFX"
+            echo "lat_wer=$LAT_WER"; echo "lat_rtfx=$LAT_RTFX"
+            echo "mul_wer=$MUL_WER"; echo "mul_rtfx=$MUL_RTFX"
             echo "samples=$SAMP"
           } >> "$GITHUB_OUTPUT"
 
-          echo "latin/        en  WER ${EN_WER}%  RTFx ${EN_RTFX}x"
-          echo "multilingual/ ja  CER ${JA_CER}%  RTFx ${JA_RTFX}x"
+          echo "latin/        en  WER ${LAT_WER}%  RTFx ${LAT_RTFX}x"
+          echo "multilingual/ en  WER ${MUL_WER}%  RTFx ${MUL_RTFX}x"
 
           # Fail if either model produced no usable RTFx (download / decode failure)
-          if [ "$EN_RTFX" = "N/A" ] || [ "$EN_RTFX" = "0.0" ] || [ "$JA_RTFX" = "N/A" ] || [ "$JA_RTFX" = "0.0" ]; then
+          if [ "$LAT_RTFX" = "N/A" ] || [ "$LAT_RTFX" = "0.0" ] || [ "$MUL_RTFX" = "N/A" ] || [ "$MUL_RTFX" = "0.0" ]; then
             echo "❌ A model produced RTFx 0/N/A — benchmark failed"
             exit 1
           fi
@@ -123,15 +126,15 @@ jobs:
         with:
           script: |
             const o = ${{ toJSON(steps.extract.outputs) }};
-            const ok = '${{ steps.bench-en.outcome }}' === 'success' && '${{ steps.bench-ja.outcome }}' === 'success';
+            const ok = '${{ steps.bench-latin.outcome }}' === 'success' && '${{ steps.bench-multi.outcome }}' === 'success';
             const body = `## ${ok ? '✅' : '❌'} Nemotron Multilingual Benchmark — FLEURS
 
-            chunk \`${{ env.CHUNK_MS }}ms\`, ${o.samples} samples/lang, B1 fused decode path. One language per shipped model.
+            FLEURS \`en_us\`, chunk \`${{ env.CHUNK_MS }}ms\`, ${o.samples} samples, B1 fused decode path. Same English audio against both shipped models.
 
-            | Model | Language | Metric | RTFx |
+            | Model | Language | WER | RTFx |
             |---|---|---:|---:|
-            | \`latin/\` | English | ${o.en_wer}% WER | ${o.en_rtfx}x |
-            | \`multilingual/\` | Japanese | ${o.ja_cer}% CER | ${o.ja_rtfx}x |
+            | \`latin/\` (pruned 2828) | English | ${o.lat_wer}% | ${o.lat_rtfx}x |
+            | \`multilingual/\` (full 13087) | English | ${o.mul_wer}% | ${o.mul_rtfx}x |
 
             ${ok ? '' : '⚠️ One or both runs failed — see logs.'}
 
@@ -139,10 +142,10 @@ jobs:
 
             \`\`\`
             [latin / English]
-            ${require('fs').existsSync('log-en.txt') ? require('fs').readFileSync('log-en.txt','utf8').slice(-1500) : '(no log)'}
+            ${require('fs').existsSync('log-latin.txt') ? require('fs').readFileSync('log-latin.txt','utf8').slice(-1500) : '(no log)'}
 
-            [multilingual / Japanese]
-            ${require('fs').existsSync('log-ja.txt') ? require('fs').readFileSync('log-ja.txt','utf8').slice(-1500) : '(no log)'}
+            [multilingual / English]
+            ${require('fs').existsSync('log-multi.txt') ? require('fs').readFileSync('log-multi.txt','utf8').slice(-1500) : '(no log)'}
             \`\`\`
             </details>`;
             github.rest.issues.createComment({
@@ -163,7 +166,7 @@ jobs:
           retention-days: 30
 
       - name: Fail if a run failed
-        if: steps.bench-en.outcome == 'failure' || steps.bench-ja.outcome == 'failure'
+        if: steps.bench-latin.outcome == 'failure' || steps.bench-multi.outcome == 'failure'
         run: |
           echo "A benchmark run failed (see logs above)."
           exit 1
