@@ -787,8 +787,8 @@ extension NemotronMultilingualFleursBenchmark {
                 // against either model.
                 let downloadHint: String
                 switch modelVariant {
-                case "multilingual": downloadHint = "auto"   // -> multilingual/
-                case "latin": downloadHint = "en"            // -> latin/
+                case "multilingual": downloadHint = "auto"  // -> multilingual/
+                case "latin": downloadHint = "en"  // -> latin/
                 case .some(let other):
                     logger.warning("Unknown --model-variant '\(other)' (use latin|multilingual); routing by language.")
                     downloadHint = languages[0]
