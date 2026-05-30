@@ -364,8 +364,7 @@ extension StreamingNemotronMultilingualAsrManager {
     }
 
     /// Download the requested `<language>/<chunkMs>ms` variant from the
-    /// HuggingFace repo (compiled `.mlmodelc` only — the repo also ships
-    /// `.mlpackage`, which is skipped) and preload it.
+    /// HuggingFace repo (compiled `.mlmodelc` only) and preload it.
     ///
     /// - Parameters:
     ///   - languageCode: Language hint, e.g. "en-US", "zh-CN", "de-DE", or
@@ -387,9 +386,8 @@ extension StreamingNemotronMultilingualAsrManager {
     }
 
     /// Download the requested `<language>/<chunkMs>ms` variant from the
-    /// HuggingFace repo (compiled `.mlmodelc` only; the repo also ships
-    /// `.mlpackage`, which is skipped) and return the local variant directory.
-    /// Cached downloads are reused.
+    /// HuggingFace repo (compiled `.mlmodelc` only) and return the local
+    /// variant directory. Cached downloads are reused.
     public static func downloadVariant(
         languageCode: String = "auto",
         chunkMs: Int = 2240,
