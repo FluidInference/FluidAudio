@@ -659,6 +659,10 @@ extension NemotronMultilingualFleursBenchmark {
         var librispeechSubset = "test-clean"
         var autoDownload = false
         var chunkMs = 2240
+        // Force which model folder --auto-download fetches ("latin" or
+        // "multilingual"), independent of --languages. Lets you run the same
+        // language (e.g. English) against both shipped models.
+        var modelVariant: String?
 
         var i = 0
         while i < arguments.count {
@@ -745,6 +749,11 @@ extension NemotronMultilingualFleursBenchmark {
                 }
             case "--auto-download":
                 autoDownload = true
+            case "--model-variant":
+                if i + 1 < arguments.count {
+                    modelVariant = arguments[i + 1].lowercased()
+                    i += 1
+                }
             case "--chunk-ms":
                 if i + 1 < arguments.count {
                     if let v = Int(arguments[i + 1]) { chunkMs = v }
@@ -772,9 +781,23 @@ extension NemotronMultilingualFleursBenchmark {
                 return
             }
             do {
-                logger.info("Auto-downloading variant \(languages[0])/\(chunkMs)ms from HuggingFace...")
+                // Routing hint for which folder to fetch. By default the
+                // language picks it (en -> latin, zh/ja -> multilingual);
+                // --model-variant forces it so the same language can run
+                // against either model.
+                let downloadHint: String
+                switch modelVariant {
+                case "multilingual": downloadHint = "auto"   // -> multilingual/
+                case "latin": downloadHint = "en"            // -> latin/
+                case .some(let other):
+                    logger.warning("Unknown --model-variant '\(other)' (use latin|multilingual); routing by language.")
+                    downloadHint = languages[0]
+                case nil: downloadHint = languages[0]
+                }
+                let folder = StreamingNemotronMultilingualAsrManager.languageDirectory(for: downloadHint)
+                logger.info("Auto-downloading \(folder)/\(chunkMs)ms from HuggingFace (lang=\(languages[0]))...")
                 modelDir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
-                    languageCode: languages[0], chunkMs: chunkMs)
+                    languageCode: downloadHint, chunkMs: chunkMs)
             } catch {
                 logger.error("Auto-download failed: \(error)")
                 return
