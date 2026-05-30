@@ -249,7 +249,7 @@ public class NemotronMultilingualFleursBenchmark {
             }
 
             let audioURL = URL(fileURLWithPath: sample.audioPath)
-            let audioSamples: [Float]
+            var audioSamples: [Float]
             do {
                 audioSamples = try audioConverter.resampleAudioFile(path: sample.audioPath)
             } catch {
@@ -258,6 +258,17 @@ public class NemotronMultilingualFleursBenchmark {
                 continue
             }
             let audioDuration = Double(audioSamples.count) / 16000.0
+
+            // Onset warmup (env-gated A/B): prepend leading silence so the
+            // cache-aware encoder reaches a warmed steady-state before the
+            // first real-audio chunk, reducing first-chunk onset errors.
+            // Silence decodes to nothing, so the transcript is unaffected
+            // except via the warmed cache. FLUIDAUDIO_WARMUP_MS=1120 etc.
+            if let ws = ProcessInfo.processInfo.environment["FLUIDAUDIO_WARMUP_MS"],
+                let ms = Int(ws), ms > 0
+            {
+                audioSamples = [Float](repeating: 0, count: ms * 16) + audioSamples
+            }
 
             do {
                 // Predecoded-PCM bench mode: `audioSamples` is already
