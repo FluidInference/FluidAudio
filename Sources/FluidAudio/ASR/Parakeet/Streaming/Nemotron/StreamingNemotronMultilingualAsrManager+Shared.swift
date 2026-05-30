@@ -348,18 +348,17 @@ extension StreamingNemotronMultilingualAsrManager {
     }
 
     /// Map a language hint (e.g. "en-US", "zh-CN", "de-DE", "auto") to the
-    /// model folder in the HuggingFace repo. Unknown / "auto" falls back to
-    /// the full-vocab multilingual model.
+    /// model folder in the HuggingFace repo.
+    ///
+    /// The repo ships two models: `latin` (a Latin-script-pruned vocab shared by
+    /// en/es/fr/it/pt/de — smaller, faster joint) and `multilingual` (the full
+    /// 13087-token vocab covering every language, incl. zh/ja). Latin-script
+    /// language hints route to `latin`; everything else, and "auto", falls back
+    /// to the full-vocab `multilingual` model.
     public static func languageDirectory(for languageCode: String) -> String {
         let c = languageCode.lowercased()
-        if c.hasPrefix("en") { return "en" }
-        if c.hasPrefix("es") { return "es" }
-        if c.hasPrefix("fr") { return "fr" }
-        if c.hasPrefix("it") { return "it" }
-        if c.hasPrefix("pt") { return "pt" }
-        if c.hasPrefix("de") { return "de" }
-        if c.hasPrefix("zh") || c.hasPrefix("cmn") { return "zh" }
-        if c.hasPrefix("ja") { return "ja" }
+        let latinPrefixes = ["en", "es", "fr", "it", "pt", "de"]
+        if latinPrefixes.contains(where: { c.hasPrefix($0) }) { return "latin" }
         return "multilingual"
     }
 
