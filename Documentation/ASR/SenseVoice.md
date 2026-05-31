@@ -56,40 +56,19 @@ let text = try await manager.transcribe(audioURL: url)
 
 ## Benchmarks
 
-Measured on Apple M5 Pro with the CoreML FP16 encoder on the Neural Engine, over
-the **full** canonical test sets — directly comparable to the published
-[SenseVoice-Small results](https://github.com/FunAudioLLM/SenseVoice).
+Full canonical test sets on Apple M5 Pro (CoreML FP16 / ANE) — see
+[Benchmarks.md#sensevoice](../Benchmarks.md#sensevoice) for the full tables and methodology.
 
-### English — LibriSpeech test-clean (full, 2,620 utts)
+| Set | CoreML (ANE) | Official SenseVoice-Small |
+|-----|--------------|---------------------------|
+| LibriSpeech test-clean (2,620) | **WER 3.22%** | ~3.1% |
+| AISHELL-1 test (7,176) | **CER 3.09%** | ~2.9% |
 
-| Metric | CoreML (ANE) | Official SenseVoice-Small |
-|--------|--------------|---------------------------|
-| **WER** | **3.22%** | ~3.1% |
-| Median RTFx | 299 | — |
-
-### Chinese — AISHELL-1 test (full, ~7,176 utts)
-
-| Metric | CoreML (ANE) | Official SenseVoice-Small |
-|--------|--------------|---------------------------|
-| **CER** | **3.09%** | ~2.9% |
-| Median RTFx | 382 | — |
-
-Both reproduce the published numbers, confirming the conversion (front-end +
-encoder + decode) is faithful. Offline CoreML↔PyTorch parity was also verified on
-FLEURS (en WER Δ +0.00 pp, zh CER Δ −0.03 pp).
-
-### Reproduction
-
-English (FLEURS, in-repo) via the CLI:
+Both reproduce the published numbers; CoreML↔PyTorch parity also verified on FLEURS (en Δ +0.00 pp, zh Δ −0.03 pp).
 
 ```bash
-swift run -c release fluidaudiocli sensevoice-benchmark \
-    --languages en_us,cmn_hans_cn --samples all
+swift run -c release fluidaudiocli sensevoice-benchmark --languages en_us,cmn_hans_cn --samples all
 ```
-
-The canonical LibriSpeech / AISHELL-1 numbers above were measured with the same
-CoreML(ANE) model via the conversion repo's Python harness (the FLEURS CLI
-benchmark above is the in-repo, multilingual reproducible path).
 
 ## Conversion notes & findings
 

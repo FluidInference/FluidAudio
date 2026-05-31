@@ -411,6 +411,40 @@ Full benchmark across all 30 languages supported by Qwen3-ASR, matching the offi
 swift run -c release fluidaudiocli qwen3-benchmark --dataset fleurs --languages all
 ```
 
+## SenseVoice
+
+Non-autoregressive multilingual ASR using SenseVoiceSmall (FunASR, ~234M) converted to CoreML — SANM encoder + single CTC head, all tokens in one forward pass. See [ASR/SenseVoice.md](ASR/SenseVoice.md) for the architecture and conversion notes.
+
+Model: [FluidInference/sensevoice-small-coreml](https://huggingface.co/FluidInference/sensevoice-small-coreml)
+
+Hardware: Apple M5 Pro, macOS 26. FP16 encoder on the Neural Engine (`CPU_AND_NE`); FP32 CPU front-end. Full canonical test sets, directly comparable to the published [SenseVoice-Small results](https://github.com/FunAudioLLM/SenseVoice).
+
+### LibriSpeech test-clean (2620 files)
+
+| Metric | CoreML (ANE) | Official SenseVoice-Small |
+|--------|--------------|---------------------------|
+| WER (Avg) | **3.22%** | ~3.1% |
+| Median RTFx | 299x | — |
+
+### AISHELL-1 Chinese (7176 files)
+
+| Metric | CoreML (ANE) | Official SenseVoice-Small |
+|--------|--------------|---------------------------|
+| CER (Avg) | **3.09%** | ~2.9% |
+| Median RTFx | 382x | — |
+
+**Methodology notes:**
+- CER (character-level, whitespace removed) is the primary metric for Chinese, matching the official SenseVoice chart (AISHELL-1 test).
+- Both numbers reproduce the published SenseVoice-Small results, confirming the CoreML conversion (front-end + encoder + decode) is faithful.
+- CoreML↔PyTorch parity additionally verified on FLEURS: en WER Δ +0.00pp, zh CER Δ −0.03pp (100 samples/lang).
+- The FP16 encoder is correct only on the Neural Engine (NaN on the CPU/GPU FP16 path); non-ANE hardware uses the `--fp32` build. See [ASR/SenseVoice.md](ASR/SenseVoice.md#conversion-notes--findings).
+- AISHELL-1 dataset: [TwinkStart/AISHELL-1](https://huggingface.co/datasets/TwinkStart/AISHELL-1).
+
+```bash
+# FLEURS WER/CER (in-repo, multilingual)
+swift run -c release fluidaudiocli sensevoice-benchmark --languages en_us,cmn_hans_cn --samples all
+```
+
 ## Streaming ASR (Parakeet EOU)
 
 Real-time streaming ASR with End-of-Utterance detection using the Parakeet EOU 120M CoreML model.
