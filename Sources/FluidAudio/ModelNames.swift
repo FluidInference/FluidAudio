@@ -419,17 +419,20 @@ public enum ModelNames {
     /// Plus `vocab.json` (25055 SentencePiece tokens, auto-fetched as a root file).
     public enum SenseVoice {
         public static let preprocessor = "SenseVoicePreprocessor"
-        public static let encoder = "SenseVoiceSmall"  // fp16, runs on ANE
-        public static let encoderFp32 = "SenseVoiceSmall_fp32"  // fallback
+        public static let encoder = "SenseVoiceSmall"  // fp16, runs on ANE (default)
+        public static let encoderInt8 = "SenseVoiceSmall_int8"  // int8 weights, ANE, ~half size
+        public static let encoderFp32 = "SenseVoiceSmall_fp32"  // fp32 fallback (non-ANE)
 
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
+        public static let encoderInt8File = encoderInt8 + ".mlmodelc"
         public static let encoderFp32File = encoderFp32 + ".mlmodelc"
         public static let vocabularyFile = "vocab.json"
 
         public static let requiredModels: Set<String> = [
             preprocessorFile,
             encoderFile,
+            encoderInt8File,
             encoderFp32File,
         ]
     }

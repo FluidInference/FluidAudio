@@ -1,6 +1,26 @@
 @preconcurrency import CoreML
 import Foundation
 
+/// SenseVoice encoder weight precision. fp16 and int8 run on the Neural Engine
+/// (int8 is ~half the size, accuracy-neutral); fp32 is the non-ANE fallback.
+public enum SenseVoiceEncoderPrecision: String, Sendable {
+    case fp16
+    case int8
+    case fp32
+
+    var modelName: String {
+        switch self {
+        case .fp16: return ModelNames.SenseVoice.encoder
+        case .int8: return ModelNames.SenseVoice.encoderInt8
+        case .fp32: return ModelNames.SenseVoice.encoderFp32
+        }
+    }
+
+    var computeUnits: MLComputeUnits {
+        self == .fp32 ? .all : .cpuAndNeuralEngine
+    }
+}
+
 /// Loaded SenseVoiceSmall CoreML models + vocabulary.
 ///
 /// 3 stages from `FluidInference/sensevoice-small-coreml`:
@@ -23,15 +43,14 @@ public struct SenseVoiceModels: Sendable {
 
     /// Download (if needed) and load all SenseVoice models.
     ///
-    /// - Parameter useFp32Encoder: load the fp32 encoder fallback instead of the
-    ///   fp16/ANE encoder. Use on hardware without a Neural Engine (the fp16
-    ///   encoder is correct only on ANE).
+    /// - Parameter precision: encoder weight precision (`.fp16` default ANE,
+    ///   `.int8` ~half size on ANE, `.fp32` fallback for non-ANE hardware).
     public static func downloadAndLoad(
-        useFp32Encoder: Bool = false,
+        precision: SenseVoiceEncoderPrecision = .fp16,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> SenseVoiceModels {
         let directory = try await download(progressHandler: progressHandler)
-        return try load(from: directory, useFp32Encoder: useFp32Encoder)
+        return try load(from: directory, precision: precision)
     }
 
     /// Download the repo into the shared model cache; returns the model directory.
@@ -65,24 +84,24 @@ public struct SenseVoiceModels: Sendable {
     }
 
     /// Load models from a directory that already contains the artifacts.
-    public static func load(from directory: URL, useFp32Encoder: Bool = false) throws -> SenseVoiceModels {
+    public static func load(
+        from directory: URL, precision: SenseVoiceEncoderPrecision = .fp16
+    ) throws -> SenseVoiceModels {
         // Preprocessor must run fp32 on CPU (power-spectrum/log exceed fp16 range,
         // and the big identity convs fail ANE compile).
         let cpuConfig = MLModelConfiguration()
         cpuConfig.computeUnits = .cpuOnly
 
-        // The fp16 encoder is numerically correct only on the Neural Engine;
-        // the fp32 fallback can run anywhere.
+        // fp16/int8 encoders are correct on the Neural Engine; fp32 runs anywhere.
         let encoderConfig = MLModelConfiguration()
-        encoderConfig.computeUnits = useFp32Encoder ? .all : .cpuAndNeuralEngine
+        encoderConfig.computeUnits = precision.computeUnits
 
         let preprocessor = try loadModel(
             named: ModelNames.SenseVoice.preprocessor, from: directory, configuration: cpuConfig)
-        let encoderName = useFp32Encoder ? ModelNames.SenseVoice.encoderFp32 : ModelNames.SenseVoice.encoder
-        let encoder = try loadModel(named: encoderName, from: directory, configuration: encoderConfig)
+        let encoder = try loadModel(named: precision.modelName, from: directory, configuration: encoderConfig)
         let vocabulary = try loadVocabulary(from: directory)
 
-        logger.info("Loaded SenseVoice (encoder: \(useFp32Encoder ? "fp32" : "fp16/ANE"), vocab: \(vocabulary.count))")
+        logger.info("Loaded SenseVoice (encoder: \(precision.rawValue), vocab: \(vocabulary.count))")
         return SenseVoiceModels(preprocessor: preprocessor, encoder: encoder, vocabulary: vocabulary)
     }
 

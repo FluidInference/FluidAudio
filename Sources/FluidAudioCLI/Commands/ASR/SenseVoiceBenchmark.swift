@@ -14,7 +14,7 @@ enum SenseVoiceBenchmark {
     static func run(arguments: [String]) async {
         var languages = ["en_us", "cmn_hans_cn"]
         var samplesPerLanguage = 100
-        var useFp32 = false
+        var precision: SenseVoiceEncoderPrecision = .fp16
         var verbose = false
 
         var i = 0
@@ -31,12 +31,16 @@ enum SenseVoiceBenchmark {
                         arguments[i + 1].lowercased() == "all" ? Int.max : (Int(arguments[i + 1]) ?? 100)
                     i += 1
                 }
+            case "--int8":
+                precision = .int8
             case "--fp32":
-                useFp32 = true
+                precision = .fp32
             case "--verbose", "-v":
                 verbose = true
             case "--help", "-h":
-                print("Usage: fluidaudio sensevoice-benchmark [--languages en_us,cmn_hans_cn] [--samples N] [--fp32]")
+                print(
+                    "Usage: fluidaudio sensevoice-benchmark [--languages en_us,cmn_hans_cn] [--samples N|all] [--int8|--fp32]"
+                )
                 return
             default:
                 break
@@ -48,8 +52,8 @@ enum SenseVoiceBenchmark {
             .appendingPathComponent("Library/Application Support/FluidAudio/FLEURS").path
 
         do {
-            logger.info("Loading SenseVoice (encoder: \(useFp32 ? "fp32" : "fp16/ANE"))...")
-            let manager = try await SenseVoiceManager.load(useFp32Encoder: useFp32)
+            logger.info("Loading SenseVoice (encoder: \(precision.rawValue))...")
+            let manager = try await SenseVoiceManager.load(precision: precision)
 
             let fleurs = FLEURSBenchmark(
                 config: .init(

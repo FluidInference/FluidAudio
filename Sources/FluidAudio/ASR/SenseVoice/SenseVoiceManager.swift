@@ -26,11 +26,11 @@ public actor SenseVoiceManager {
 
     /// Load models from the default cache (downloading if needed), then build a manager.
     public static func load(
-        useFp32Encoder: Bool = false,
+        precision: SenseVoiceEncoderPrecision = .fp16,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> SenseVoiceManager {
         let models = try await SenseVoiceModels.downloadAndLoad(
-            useFp32Encoder: useFp32Encoder, progressHandler: progressHandler)
+            precision: precision, progressHandler: progressHandler)
         return SenseVoiceManager(models: models)
     }
 
