@@ -166,7 +166,8 @@ final class PocketTtsVoiceClonerTests: XCTestCase {
     }
 
     func testExtractConditioningContiguousFloat32() {
-        let frames = 4, embDim = 8
+        let frames = 4
+        let embDim = 8
         let (arr, expected) = makeConditioning(
             frames: frames, embDim: embDim, framePad: 0, dataType: .float32
         ) { f, d in Float(f * 100 + d) }
@@ -177,7 +178,8 @@ final class PocketTtsVoiceClonerTests: XCTestCase {
     func testExtractConditioningStridedFloat32() {
         // framePad > 0: a naive contiguous read would interleave the -99
         // padding into the output. Stride-aware extraction must not.
-        let frames = 5, embDim = 8
+        let frames = 5
+        let embDim = 8
         let (arr, expected) = makeConditioning(
             frames: frames, embDim: embDim, framePad: 3, dataType: .float32
         ) { f, d in Float(f * 1000 + d) }
@@ -204,7 +206,8 @@ final class PocketTtsVoiceClonerTests: XCTestCase {
 
     #if arch(arm64)
     func testExtractConditioningContiguousFloat16() {
-        let frames = 3, embDim = 8
+        let frames = 3
+        let embDim = 8
         let (arr, expected) = makeConditioning(
             frames: frames, embDim: embDim, framePad: 0, dataType: .float16
         ) { f, d in Float(f) + Float(d) * 0.25 }  // fp16-exact
@@ -213,7 +216,8 @@ final class PocketTtsVoiceClonerTests: XCTestCase {
     }
 
     func testExtractConditioningStridedFloat16() {
-        let frames = 4, embDim = 8
+        let frames = 4
+        let embDim = 8
         let (arr, expected) = makeConditioning(
             frames: frames, embDim: embDim, framePad: 4, dataType: .float16
         ) { f, d in Float(f) + Float(d) * 0.5 }  // fp16-exact
