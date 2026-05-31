@@ -7,7 +7,7 @@ import Foundation
 ///   - `preprocessor` (fp32, CPU): waveform → [1, T, 560] LFR features
 ///   - `encoder` (fp16 on ANE, or fp32 fallback): features + lang/textnorm → CTC logits
 ///   - `vocabulary`: 25055 SentencePiece tokens (id → piece)
-public final class SenseVoiceModels: @unchecked Sendable {
+public struct SenseVoiceModels: Sendable {
 
     public let preprocessor: MLModel
     public let encoder: MLModel
