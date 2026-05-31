@@ -1,3 +1,4 @@
+import CoreML
 import Foundation
 import XCTest
 
@@ -104,4 +105,121 @@ final class PocketTtsVoiceClonerTests: XCTestCase {
             realSampleCount: 100, availableFrames: 125)
         XCTAssertEqual(usable, 1)
     }
+
+    // MARK: - extractConditioning stride handling (FluidAudio #612)
+
+    /// Build an MLMultiArray of shape `[1, frames, embDim]` whose logical
+    /// element `[0, f, d]` holds `value(f, d)`. `framePad` extra elements are
+    /// inserted (and poisoned with -99) between frames, so the array is
+    /// non-contiguous: a naive contiguous read would pick up the padding
+    /// instead of the next frame. `framePad == 0` yields a contiguous array.
+    /// Returns the array plus the expected packed row-major extraction.
+    private func makeConditioning(
+        frames: Int, embDim: Int, framePad: Int,
+        dataType: MLMultiArrayDataType,
+        value: (Int, Int) -> Float
+    ) -> (MLMultiArray, [Float]) {
+        let frameStride = embDim + framePad
+        let total = frames * frameStride
+        let shape: [NSNumber] = [1, NSNumber(value: frames), NSNumber(value: embDim)]
+        let strides: [NSNumber] = [
+            NSNumber(value: total), NSNumber(value: frameStride), NSNumber(value: 1),
+        ]
+        var expected = [Float]()
+        expected.reserveCapacity(frames * embDim)
+
+        if dataType == .float16 {
+            #if arch(arm64)
+            let buf = UnsafeMutablePointer<Float16>.allocate(capacity: total)
+            buf.initialize(repeating: Float16(-99), count: total)
+            for f in 0..<frames {
+                for d in 0..<embDim {
+                    let v = value(f, d)
+                    buf[f * frameStride + d] = Float16(v)
+                    expected.append(Float(Float16(v)))  // round-trip through fp16
+                }
+            }
+            let array = try! MLMultiArray(
+                dataPointer: UnsafeMutableRawPointer(buf),
+                shape: shape, dataType: .float16, strides: strides,
+                deallocator: { _ in buf.deallocate() })
+            return (array, expected)
+            #else
+            fatalError("fp16 conditioning test requires arm64")
+            #endif
+        }
+
+        let buf = UnsafeMutablePointer<Float>.allocate(capacity: total)
+        buf.initialize(repeating: -99, count: total)
+        for f in 0..<frames {
+            for d in 0..<embDim {
+                let v = value(f, d)
+                buf[f * frameStride + d] = v
+                expected.append(v)
+            }
+        }
+        let array = try! MLMultiArray(
+            dataPointer: UnsafeMutableRawPointer(buf),
+            shape: shape, dataType: .float32, strides: strides,
+            deallocator: { _ in buf.deallocate() })
+        return (array, expected)
+    }
+
+    func testExtractConditioningContiguousFloat32() {
+        let frames = 4, embDim = 8
+        let (arr, expected) = makeConditioning(
+            frames: frames, embDim: embDim, framePad: 0, dataType: .float32
+        ) { f, d in Float(f * 100 + d) }
+        let out = PocketTtsVoiceCloner.extractConditioning(arr, frames: frames, embDim: embDim)
+        XCTAssertEqual(out, expected)
+    }
+
+    func testExtractConditioningStridedFloat32() {
+        // framePad > 0: a naive contiguous read would interleave the -99
+        // padding into the output. Stride-aware extraction must not.
+        let frames = 5, embDim = 8
+        let (arr, expected) = makeConditioning(
+            frames: frames, embDim: embDim, framePad: 3, dataType: .float32
+        ) { f, d in Float(f * 1000 + d) }
+        let out = PocketTtsVoiceCloner.extractConditioning(arr, frames: frames, embDim: embDim)
+        XCTAssertEqual(out, expected)
+        XCTAssertFalse(out.contains(-99), "padding must not leak into the extraction")
+    }
+
+    func testExtractConditioningReadsLeadingFramesOnly() {
+        // Encoder emits more frames than usable; extraction must read only the
+        // leading `frames` rows, stride-correct.
+        let embDim = 8
+        let (arr, _) = makeConditioning(
+            frames: 10, embDim: embDim, framePad: 2, dataType: .float32
+        ) { f, d in Float(f * 1000 + d) }
+        let out = PocketTtsVoiceCloner.extractConditioning(arr, frames: 3, embDim: embDim)
+        XCTAssertEqual(out.count, 3 * embDim)
+        for f in 0..<3 {
+            for d in 0..<embDim {
+                XCTAssertEqual(out[f * embDim + d], Float(f * 1000 + d))
+            }
+        }
+    }
+
+    #if arch(arm64)
+    func testExtractConditioningContiguousFloat16() {
+        let frames = 3, embDim = 8
+        let (arr, expected) = makeConditioning(
+            frames: frames, embDim: embDim, framePad: 0, dataType: .float16
+        ) { f, d in Float(f) + Float(d) * 0.25 }  // fp16-exact
+        let out = PocketTtsVoiceCloner.extractConditioning(arr, frames: frames, embDim: embDim)
+        XCTAssertEqual(out, expected)
+    }
+
+    func testExtractConditioningStridedFloat16() {
+        let frames = 4, embDim = 8
+        let (arr, expected) = makeConditioning(
+            frames: frames, embDim: embDim, framePad: 4, dataType: .float16
+        ) { f, d in Float(f) + Float(d) * 0.5 }  // fp16-exact
+        let out = PocketTtsVoiceCloner.extractConditioning(arr, frames: frames, embDim: embDim)
+        XCTAssertEqual(out, expected)
+        XCTAssertFalse(out.contains(-99), "padding must not leak into the extraction")
+    }
+    #endif
 }

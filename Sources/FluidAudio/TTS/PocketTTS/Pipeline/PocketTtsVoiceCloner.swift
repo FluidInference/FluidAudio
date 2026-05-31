@@ -92,7 +92,7 @@ public enum PocketTtsVoiceCloner {
             realSampleCount: realSampleCount, availableFrames: numFrames)
         logger.info("Encoded to \(numFrames) frames, using \(usableFrames)")
 
-        // Extract conditioning with bulk memory copy (no zero-padding)
+        // Extract conditioning, honoring the array's strides (no zero-padding).
         let totalFloats = usableFrames * embDim
         let voiceData = extractConditioning(conditioning, frames: usableFrames, embDim: embDim)
 
@@ -205,43 +205,81 @@ public enum PocketTtsVoiceCloner {
         return min(availableFrames, realFrames, maxVoiceFrames)
     }
 
-    /// Extract conditioning floats from MLMultiArray `[1, frames, embDim]`.
+    /// Extract conditioning floats from MLMultiArray `[1, frames, embDim]`
+    /// into packed row-major `[frames * embDim]`.
     ///
-    /// Both dtype paths assume contiguous storage starting at the array's
-    /// base pointer: the encoder writes `[1, 125, 1024]` in row-major order
-    /// and we read the leading `frames` rows. The Float32 path is a bulk
-    /// `UnsafeBufferPointer` copy; the Float16 path uses
-    /// `vDSP.convertElements` (vectorized fp16→fp32 conversion) so
-    /// `mimi_encoderv2`'s Float16 output doesn't have to pay 128 k
-    /// MLMultiArray subscript calls per clone. Falls back to NSNumber
-    /// subscripting on x86 hosts where Swift `Float16` isn't available.
-    private static func extractConditioning(
+    /// CoreML can return the `conditioning` array strided / non-contiguous
+    /// (padding between frames, or `dimStride != 1`), so we read using the
+    /// array's reported strides rather than assuming packed storage. Reading
+    /// a strided buffer as if it were contiguous scrambles the embedding
+    /// order and produces clipped / clicky cloned audio (see FluidAudio
+    /// #612).
+    ///
+    /// A genuinely contiguous array (`dimStride == 1 && frameStride == embDim`)
+    /// keeps the fast bulk path: a single `UnsafeBufferPointer` copy for
+    /// Float32, or vectorized `vDSP.convertElements` (fp16→fp32) for Float16,
+    /// avoiding 128 k MLMultiArray subscript calls per clone. A strided array
+    /// falls back to stride-aware pointer arithmetic; cloning runs once per
+    /// voice (not in the generation loop), so the per-element copy is cheap.
+    /// On x86 (no Swift `Float16`) the fp16 path routes through NSNumber
+    /// subscripting, which is stride-correct by construction.
+    ///
+    /// Exposed at internal access for unit tests.
+    static func extractConditioning(
         _ conditioning: MLMultiArray, frames: Int, embDim: Int
     ) -> [Float] {
         let count = frames * embDim
+        let strides = conditioning.strides.map { $0.intValue }
+        let frameStride = strides.count >= 3 ? strides[1] : embDim
+        let dimStride = strides.count >= 3 ? strides[2] : 1
+        let isContiguous = (dimStride == 1 && frameStride == embDim)
+        // Highest element index reachable under the reported strides.
+        let lastIndex = max(0, (frames - 1) * frameStride + (embDim - 1) * dimStride)
+
         if conditioning.dataType == .float16 {
             var result = [Float](repeating: 0, count: count)
             #if arch(arm64)
-            let srcPtr = conditioning.dataPointer.bindMemory(to: Float16.self, capacity: count)
-            let srcBuffer = UnsafeBufferPointer(start: srcPtr, count: count)
-            result.withUnsafeMutableBufferPointer { dst in
-                vDSP.convertElements(of: srcBuffer, to: &dst)
+            let srcPtr = conditioning.dataPointer.bindMemory(
+                to: Float16.self, capacity: lastIndex + 1)
+            if isContiguous {
+                let srcBuffer = UnsafeBufferPointer(start: srcPtr, count: count)
+                result.withUnsafeMutableBufferPointer { dst in
+                    vDSP.convertElements(of: srcBuffer, to: &dst)
+                }
+            } else {
+                for frame in 0..<frames {
+                    let base = frame * frameStride
+                    for dim in 0..<embDim {
+                        result[frame * embDim + dim] = Float(srcPtr[base + dim * dimStride])
+                    }
+                }
             }
             #else
-            // x86: Swift Float16 unavailable. Route through NSNumber.
-            for i in 0..<count {
-                let frame = i / embDim
-                let dim = i % embDim
-                result[i] =
-                    conditioning[[0, NSNumber(value: frame), NSNumber(value: dim)]]
-                    .floatValue
+            // x86: Swift Float16 unavailable. NSNumber subscripting is stride-safe.
+            for frame in 0..<frames {
+                for dim in 0..<embDim {
+                    result[frame * embDim + dim] =
+                        conditioning[[0, NSNumber(value: frame), NSNumber(value: dim)]]
+                        .floatValue
+                }
             }
             #endif
             return result
         }
-        // Float32: contiguous bulk copy
-        let srcPtr = conditioning.dataPointer.bindMemory(to: Float.self, capacity: count)
-        return Array(UnsafeBufferPointer(start: srcPtr, count: count))
+
+        // Float32
+        let srcPtr = conditioning.dataPointer.bindMemory(to: Float.self, capacity: lastIndex + 1)
+        if isContiguous {
+            return Array(UnsafeBufferPointer(start: srcPtr, count: count))
+        }
+        var result = [Float](repeating: 0, count: count)
+        for frame in 0..<frames {
+            let base = frame * frameStride
+            for dim in 0..<embDim {
+                result[frame * embDim + dim] = srcPtr[base + dim * dimStride]
+            }
+        }
+        return result
     }
 
     /// Load audio from a file and convert to 24kHz mono Float32.
