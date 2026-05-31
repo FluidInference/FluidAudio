@@ -58,6 +58,38 @@ public struct Supertonic3Config: Codable, Sendable {
             latentDim: Supertonic3Constants.latentDim))
 }
 
+/// The 10 built-in Supertonic-3 voice styles published at
+/// `FluidInference/supertonic-3-coreml/voice_styles/`: female `f1`-`f5`,
+/// male `m1`-`m5`. Fetch one with
+/// `Supertonic3ResourceDownloader.downloadVoiceStyle(_:)` (or download + decode
+/// in one call via `loadVoiceStyle(_:)`). Custom styles can still be supplied
+/// as any file via `Supertonic3VoiceStyle.load(from:)`.
+public enum Supertonic3Voice: String, CaseIterable, Sendable {
+    case f1 = "F1"
+    case f2 = "F2"
+    case f3 = "F3"
+    case f4 = "F4"
+    case f5 = "F5"
+    case m1 = "M1"
+    case m2 = "M2"
+    case m3 = "M3"
+    case m4 = "M4"
+    case m5 = "M5"
+
+    /// Default voice (`M1`), the style shipped before the others were added.
+    public static let `default`: Supertonic3Voice = .m1
+
+    /// Repo-relative path of this voice's style JSON
+    /// (e.g. `voice_styles/F3.json`).
+    public var fileName: String { "voice_styles/\(rawValue).json" }
+
+    /// Parse a voice name case-insensitively, e.g. `"f3"` or `"M1"`.
+    /// Returns `nil` for unknown names.
+    public init?(name: String) {
+        self.init(rawValue: name.uppercased())
+    }
+}
+
 /// On-disk schema of a Supertonic-3 voice style JSON file (the `M1` /
 /// `F1` / etc. presets shipped under `assets/voice_styles/` in the
 /// reference repo).

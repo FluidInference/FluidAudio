@@ -40,6 +40,58 @@ public enum Supertonic3ResourceDownloader {
         return repoDir
     }
 
+    /// Ensure a built-in voice style JSON is present locally, downloading it
+    /// from `FluidInference/supertonic-3-coreml/voice_styles/` if missing, and
+    /// return its local file URL. Custom voices can skip this and load any file
+    /// directly via `Supertonic3VoiceStyle.load(from:)`.
+    @discardableResult
+    public static func downloadVoiceStyle(
+        _ voice: Supertonic3Voice,
+        directory: URL? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws -> URL {
+        let modelsRoot = try directory ?? defaultCacheRoot()
+        let repoDir = modelsRoot.appendingPathComponent(Repo.supertonic3.folderName)
+        let localURL = repoDir.appendingPathComponent(voice.fileName)
+
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            logger.info("Supertonic-3 voice \(voice.rawValue) found in cache")
+            return localURL
+        }
+
+        logger.info("Downloading Supertonic-3 voice \(voice.rawValue) from HuggingFace…")
+        do {
+            // The HF tree API only lists directories, so pull the single file
+            // out of voice_styles/ by skipping every other entry.
+            try await DownloadUtils.downloadSubdirectory(
+                .supertonic3,
+                subdirectory: "voice_styles",
+                to: repoDir,
+                progressHandler: progressHandler,
+                shouldSkip: { $0 != voice.fileName }
+            )
+        } catch {
+            throw Supertonic3Error.downloadFailed("voice \(voice.rawValue): \(error)")
+        }
+
+        guard FileManager.default.fileExists(atPath: localURL.path) else {
+            throw Supertonic3Error.downloadFailed(
+                "voice \(voice.rawValue) missing after download")
+        }
+        return localURL
+    }
+
+    /// Download (if needed) and decode a built-in voice style in one call.
+    public static func loadVoiceStyle(
+        _ voice: Supertonic3Voice,
+        directory: URL? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws -> Supertonic3VoiceStyle {
+        let url = try await downloadVoiceStyle(
+            voice, directory: directory, progressHandler: progressHandler)
+        return try Supertonic3VoiceStyle.load(from: url)
+    }
+
     private static func defaultCacheRoot() throws -> URL {
         // Delegate to the shared TTS cache root (Application Support on iOS,
         // ~/.cache/fluidaudio on macOS) so all backends share one location.
