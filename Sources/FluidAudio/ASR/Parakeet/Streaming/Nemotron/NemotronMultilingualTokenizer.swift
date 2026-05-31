@@ -48,7 +48,13 @@ public final class NemotronMultilingualTokenizer: Sendable {
             filtered.append(id)
         }
 
-        let text = base.decode(ids: filtered)
+        // Collapse runs of spaces to one. The model can emit a standalone
+        // word-boundary token (`▁`, id 2) — e.g. after sentence-final
+        // punctuation — on top of the next word's own leading `▁`, which the
+        // SentencePiece detokenizer would otherwise render as a double space.
+        let raw = base.decode(ids: filtered)
+        let text = raw.replacingOccurrences(
+            of: " {2,}", with: " ", options: .regularExpression)
         return NemotronMultilingualDecoded(text: text, detectedLanguage: detected)
     }
 
