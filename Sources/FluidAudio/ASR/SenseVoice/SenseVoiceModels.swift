@@ -49,19 +49,24 @@ public struct SenseVoiceModels: Sendable {
         precision: SenseVoiceEncoderPrecision = .fp16,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> SenseVoiceModels {
-        let directory = try await download(progressHandler: progressHandler)
+        let directory = try await download(precision: precision, progressHandler: progressHandler)
         return try load(from: directory, precision: precision)
     }
 
     /// Download the repo into the shared model cache; returns the model directory.
+    ///
+    /// `precision` ensures the requested encoder variant is present — a cache that
+    /// predates a variant (e.g. fp16-only) re-fetches just the missing file
+    /// (`DownloadUtils.downloadRepo` skips files already on disk).
     public static func download(
+        precision: SenseVoiceEncoderPrecision = .fp16,
         force: Bool = false,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = modelsRootDirectory()
         let targetDir = modelsRoot.appendingPathComponent(Repo.senseVoiceSmall.folderName, isDirectory: true)
 
-        if !force && modelsExist(at: targetDir) {
+        if !force && modelsExist(at: targetDir, precision: precision) {
             logger.info("SenseVoice models already present at: \(targetDir.path)")
             return targetDir
         }
@@ -73,11 +78,13 @@ public struct SenseVoiceModels: Sendable {
         return targetDir
     }
 
-    public static func modelsExist(at directory: URL) -> Bool {
+    public static func modelsExist(
+        at directory: URL, precision: SenseVoiceEncoderPrecision = .fp16
+    ) -> Bool {
         let fm = FileManager.default
         let required = [
             ModelNames.SenseVoice.preprocessorFile,
-            ModelNames.SenseVoice.encoderFile,
+            precision.modelName + ".mlmodelc",
             ModelNames.SenseVoice.vocabularyFile,
         ]
         return required.allSatisfy { fm.fileExists(atPath: directory.appendingPathComponent($0).path) }
