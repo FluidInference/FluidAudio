@@ -8,6 +8,10 @@ public enum Repo: String, CaseIterable, Sendable {
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
     case parakeetCtcZhCn = "FluidInference/parakeet-ctc-0.6b-zh-cn-coreml"
+    /// SenseVoiceSmall (FunASR) — non-autoregressive multilingual ASR (50+ langs).
+    /// 3-stage: fp32 CPU preprocessor (waveform→560-d LFR feats) + fp16 ANE
+    /// encoder+CTC (+ fp32 fallback) + host greedy-CTC decode. See ASR/SenseVoice.
+    case senseVoiceSmall = "FluidInference/sensevoice-small-coreml"
     // Japanese hybrid TDT: INT8 CTC-trained preprocessor+encoder paired with a
     // TDT decoder+joint. CTC-only inference for Japanese was removed in
     // 846924a1d; only the preprocessor+encoder files from this repo are reused.
@@ -67,6 +71,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-ctc-0.6b-coreml"
         case .parakeetCtcZhCn:
             return "parakeet-ctc-0.6b-zh-cn-coreml"
+        case .senseVoiceSmall:
+            return "sensevoice-small-coreml"
         case .parakeetJa:
             return "parakeet-0.6b-ja-coreml"
         case .parakeetEou160:
@@ -403,6 +409,31 @@ public enum ModelNames {
             encoderFile,  // int8 encoder
             encoderFp32File,  // fp32 encoder
             decoderFile,
+        ]
+    }
+
+    /// SenseVoiceSmall (FunASR) model names. 3-stage pipeline:
+    ///   Preprocessor (fp32, CPU): waveform → 560-d LFR features
+    ///   SenseVoiceSmall (fp16, ANE): features + lang/textnorm → CTC logits
+    ///   SenseVoiceSmall_fp32 (fp32): encoder fallback for non-ANE hardware
+    /// Plus `vocab.json` (25055 SentencePiece tokens, auto-fetched as a root file).
+    public enum SenseVoice {
+        public static let preprocessor = "SenseVoicePreprocessor"
+        public static let encoder = "SenseVoiceSmall"  // fp16, runs on ANE (default)
+        public static let encoderInt8 = "SenseVoiceSmall_int8"  // int8 weights, ANE, ~half size
+        public static let encoderFp32 = "SenseVoiceSmall_fp32"  // fp32 fallback (non-ANE)
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let encoderInt8File = encoderInt8 + ".mlmodelc"
+        public static let encoderFp32File = encoderFp32 + ".mlmodelc"
+        public static let vocabularyFile = "vocab.json"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            encoderInt8File,
+            encoderFp32File,
         ]
     }
 
@@ -1028,6 +1059,8 @@ public enum ModelNames {
             return ModelNames.CTC.requiredModels
         case .parakeetCtcZhCn:
             return ModelNames.CTCZhCn.requiredModels
+        case .senseVoiceSmall:
+            return ModelNames.SenseVoice.requiredModels
         case .parakeetJa:
             return ModelNames.TDTJa.requiredModels
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
