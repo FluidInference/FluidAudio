@@ -41,12 +41,4 @@ public final class Tokenizer: Sendable {
     public func piece(forId id: Int) -> String? {
         return idToToken[id]
     }
-
-    /// All token ids whose surface piece exactly equals `surface`. Used to find
-    /// duplicate special tokens (e.g. a vocab carrying two `<blank>` ids).
-    public func ids(matching surface: String) -> Set<Int> {
-        var out = Set<Int>()
-        for (id, piece) in idToToken where piece == surface { out.insert(id) }
-        return out
-    }
 }
