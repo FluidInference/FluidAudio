@@ -86,6 +86,8 @@ struct FluidAudioCLI {
             await CtcZhCnTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-transcribe":
             await SenseVoiceTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "sensevoice-benchmark":
+            await SenseVoiceBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "ctc-zh-cn-benchmark":
             await CtcZhCnBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "ja-benchmark":
