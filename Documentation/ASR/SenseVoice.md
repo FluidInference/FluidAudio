@@ -90,3 +90,57 @@ swift run -c release fluidaudiocli sensevoice-benchmark \
 The canonical LibriSpeech / AISHELL-1 numbers above were measured with the same
 CoreML(ANE) model via the conversion repo's Python harness (the FLEURS CLI
 benchmark above is the in-repo, multilingual reproducible path).
+
+## Conversion notes & findings
+
+The conversion surfaced several non-obvious issues. They're recorded here so the
+design choices above are clear and the dead-ends aren't re-tried.
+
+### Conversion path
+- **PyTorch (FunASR) → `torch.jit.trace` → coremltools**, not ONNX — coremltools
+  dropped direct ONNX ingestion in 7.0, so we trace the original module.
+- **`model.encode()` is bypassed.** Its source uses `torch.rand(1) > 0.2`, Python
+  list-comprehensions and dict lookups (`lid_int_dict` / `textnorm_int_dict`) —
+  all trace-hostile. We replicate only its deterministic inference path: prepend
+  the 4 query embeddings `[language, event1, event2, style]`, then encoder + CTC.
+  The host maps the language/text-norm choice to embed indices.
+
+### The FP16-NaN investigation (the big one)
+1. **Synthetic full-length parity hid the bug.** A 1800-frame random input gave
+   100% argmax agreement; the failure only appears on *real* short audio
+   zero-padded to a large shape.
+2. **The NaN is compute-unit dependent, not a wrapper bug.** PyTorch handles the
+   padding correctly, and the *same* FP16 `.mlpackage` gives **0 NaN on
+   `CPU_AND_NE` (ANE)** but **all-NaN on `CPU_ONLY`, `CPU_AND_GPU`, and `ALL`**.
+   The CPU/GPU FP16 path overflows on the zero-padded positions; ANE does not.
+   (A freshly-loaded `MLModel(path)` defaults to `ALL` → watch the compute unit.)
+3. **Clamping the attention mask fill (`-inf` → `-1e4`) did *not* fix it** — kept
+   as a correct FP16-safety measure, but it was not the cure.
+4. **FP32 is exact on every unit** but slow — kept only as the `--fp32` fallback.
+5. **What fixed it:** `ct.EnumeratedShapes` length buckets `[128,256,512,1024,1800]`
+   (small padding) **+ running on ANE**. 0 NaN, 100% argmax, and RTFx scales with
+   audio length (5.5 s clip: bucket 128 → ~524 RTFx, bucket 1800 → ~14).
+
+> **Known limitation.** The FP16 encoder is NaN on CPU/GPU; non-ANE hardware must
+> use the `--fp32` build. Hardening FP16 for the CPU/GPU path (isolating the
+> overflowing op via selective precision) is open follow-up work.
+
+### Front-end (preprocessor)
+- A CoreML replica of FunASR's `WavFrontend`: kaldi fbank-80 + LFR(m=7,n=6) + CMVN.
+  Framing and LFR use **conv1d identity kernels** and the DFT is a **matmul against
+  a precomputed cos/sin basis** — coremltools has no FFT and rejects `unfold`/int64
+  `gather`. Kaldi's window + mel matrix are baked from torchaudio, so it's
+  bit-for-bit kaldi (torch parity max\|Δ\| ≈ 2.3e-5).
+- It runs **FP32 on CPU**: the power spectrum + log exceed the FP16 range, and the
+  large framing convs fail ANE compile. FP32 CoreML parity: max\|Δ\| ≈ 2.9e-6.
+
+### Parity metric
+- For ASR we gate on **argmax CTC-token agreement** (what governs WER), not raw
+  logit drift — FP16 logit drift on a 234M encoder is expected and benign once the
+  argmax matches.
+
+### Environment gotchas
+- `torchaudio` is a required `funasr` import dependency.
+- `ct.TensorType(dtype=…)` wants **numpy** dtypes (not `ct.converters.mil.types`).
+- Benchmark inputs must be *representative*: all-zero or N(0,1) random inputs are
+  out-of-distribution and either mask or fabricate failures.
