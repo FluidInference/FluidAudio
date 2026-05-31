@@ -23,7 +23,10 @@ enum SenseVoiceBenchmark {
             case "--languages":
                 if i + 1 < arguments.count { languages = arguments[i + 1].split(separator: ",").map(String.init); i += 1 }
             case "--samples", "-n":
-                if i + 1 < arguments.count { samplesPerLanguage = Int(arguments[i + 1]) ?? 100; i += 1 }
+                if i + 1 < arguments.count {
+                    samplesPerLanguage = arguments[i + 1].lowercased() == "all" ? Int.max : (Int(arguments[i + 1]) ?? 100)
+                    i += 1
+                }
             case "--fp32":
                 useFp32 = true
             case "--verbose", "-v":
