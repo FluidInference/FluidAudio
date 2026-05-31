@@ -328,26 +328,8 @@ public enum KokoroAneResourceDownloader {
     // MARK: - Private
 
     private static func defaultModelsDirectory() throws -> URL {
-        let baseDirectory: URL
-        #if os(macOS)
-        baseDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".cache")
-        #else
-        guard
-            let first = FileManager.default.urls(
-                for: .cachesDirectory, in: .userDomainMask
-            ).first
-        else {
-            throw KokoroAneError.downloadFailed("Failed to locate caches directory")
-        }
-        baseDirectory = first
-        #endif
-
-        let cacheDirectory = baseDirectory.appendingPathComponent("fluidaudio")
-        if !FileManager.default.fileExists(atPath: cacheDirectory.path) {
-            try FileManager.default.createDirectory(
-                at: cacheDirectory, withIntermediateDirectories: true)
-        }
-        return cacheDirectory.appendingPathComponent(modelsSubdirectory)
+        // Delegate to the shared TTS cache root (Application Support on iOS,
+        // ~/.cache/fluidaudio on macOS) so all backends share one location.
+        return try TtsCacheDirectory.ensure().appendingPathComponent(modelsSubdirectory)
     }
 }

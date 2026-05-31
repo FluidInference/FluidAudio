@@ -145,19 +145,9 @@ public enum StyleTTS2ResourceDownloader {
     }
 
     private static func defaultCacheRoot() throws -> URL {
-        let base: URL
-        #if os(macOS)
-        base = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".cache")
-        #else
-        guard
-            let first = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-        else {
-            throw StyleTTS2Error.downloadFailed("failed to locate caches directory")
-        }
-        base = first
-        #endif
-        let root = base.appendingPathComponent("fluidaudio").appendingPathComponent("Models")
+        // Delegate to the shared TTS cache root (Application Support on iOS,
+        // ~/.cache/fluidaudio on macOS) so all backends share one location.
+        let root = try TtsCacheDirectory.ensure().appendingPathComponent("Models")
         if !FileManager.default.fileExists(atPath: root.path) {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         }

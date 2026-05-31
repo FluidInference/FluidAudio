@@ -9,7 +9,13 @@ import Foundation
 /// backend-specific manager.
 ///
 /// macOS resolves to `~/.cache/fluidaudio`; other platforms use the
-/// caches directory under `fluidaudio/`.
+/// application-support directory under `fluidaudio/`.
+///
+/// On iOS/iPadOS this deliberately avoids `.cachesDirectory`: `Library/Caches`
+/// is reclaimable by the system under disk pressure, so models (hundreds of MB)
+/// could be silently purged while backgrounded and require a full re-download.
+/// `.applicationSupportDirectory` is the recommended location for re-obtainable
+/// but expensive-to-replace data, matching the ASR side.
 public enum TtsCacheDirectory {
 
     /// Ensures the platform-appropriate cache root exists and returns it.
@@ -21,10 +27,10 @@ public enum TtsCacheDirectory {
         #else
         guard
             let first = FileManager.default.urls(
-                for: .cachesDirectory, in: .userDomainMask
+                for: .applicationSupportDirectory, in: .userDomainMask
             ).first
         else {
-            throw TTSError.processingFailed("Failed to locate caches directory")
+            throw TTSError.processingFailed("Failed to locate application support directory")
         }
         base = first
         #endif

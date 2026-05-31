@@ -163,7 +163,8 @@ public class DownloadUtils {
     ///
     /// Clears both cache locations:
     /// - `~/Library/Application Support/FluidAudio/Models/` (ASR, VAD, Diarization)
-    /// - `~/.cache/fluidaudio/Models/` (TTS)
+    /// - the shared TTS root: `~/.cache/fluidaudio/` on macOS,
+    ///   `Application Support/fluidaudio/` on iOS (matches `TtsCacheDirectory`).
     public static func clearAllModelCaches() {
         let fm = FileManager.default
 
@@ -173,14 +174,16 @@ public class DownloadUtils {
             try? fm.removeItem(at: modelsDir)
         }
 
-        // TTS models (Kokoro, PocketTTS)
+        // TTS models (Kokoro, PocketTTS, Magpie, Supertonic3, StyleTTS2).
+        // Remove the whole `fluidaudio/` root so every backend subdirectory
+        // (Models/, voice packs, etc.) is cleared, not just `Models/`.
         #if os(macOS)
         let home = fm.homeDirectoryForCurrentUser
-        let ttsCache = home.appendingPathComponent(".cache/fluidaudio/Models")
+        let ttsCache = home.appendingPathComponent(".cache/fluidaudio")
         try? fm.removeItem(at: ttsCache)
         #else
-        if let cacheDir = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            let ttsCache = cacheDir.appendingPathComponent("fluidaudio/Models")
+        if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let ttsCache = appSupport.appendingPathComponent("fluidaudio")
             try? fm.removeItem(at: ttsCache)
         }
         #endif
