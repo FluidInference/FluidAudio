@@ -21,10 +21,14 @@ enum SenseVoiceBenchmark {
         while i < arguments.count {
             switch arguments[i] {
             case "--languages":
-                if i + 1 < arguments.count { languages = arguments[i + 1].split(separator: ",").map(String.init); i += 1 }
+                if i + 1 < arguments.count {
+                    languages = arguments[i + 1].split(separator: ",").map(String.init)
+                    i += 1
+                }
             case "--samples", "-n":
                 if i + 1 < arguments.count {
-                    samplesPerLanguage = arguments[i + 1].lowercased() == "all" ? Int.max : (Int(arguments[i + 1]) ?? 100)
+                    samplesPerLanguage =
+                        arguments[i + 1].lowercased() == "all" ? Int.max : (Int(arguments[i + 1]) ?? 100)
                     i += 1
                 }
             case "--fp32":
@@ -58,9 +62,12 @@ enum SenseVoiceBenchmark {
             let converter = AudioConverter(sampleRate: 16_000)
             for language in languages {
                 let samples = allSamples.filter { $0.language == language }.prefix(samplesPerLanguage)
-                var wordErrors = 0, totalWords = 0
-                var charErrors = 0.0, totalChars = 0
-                var audioSec = 0.0, procSec = 0.0
+                var wordErrors = 0
+                var totalWords = 0
+                var charErrors = 0.0
+                var totalChars = 0
+                var audioSec = 0.0
+                var procSec = 0.0
                 var n = 0
                 for sample in samples {
                     guard let audio = try? converter.resampleAudioFile(path: sample.audioPath) else { continue }
@@ -79,7 +86,8 @@ enum SenseVoiceBenchmark {
                 let cer = totalChars > 0 ? 100.0 * charErrors / Double(totalChars) : 0
                 let rtfx = procSec > 0 ? audioSec / procSec : 0
                 logger.info(
-                    "[\(language)] n=\(n)  WER=\(String(format: "%.2f", wer))%  CER=\(String(format: "%.2f", cer))%  RTFx=\(String(format: "%.0f", rtfx))")
+                    "[\(language)] n=\(n)  WER=\(String(format: "%.2f", wer))%  CER=\(String(format: "%.2f", cer))%  RTFx=\(String(format: "%.0f", rtfx))"
+                )
             }
         } catch {
             logger.error("Benchmark failed: \(error)")

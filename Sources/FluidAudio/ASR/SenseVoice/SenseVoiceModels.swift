@@ -124,7 +124,8 @@ public struct SenseVoiceModels: Sendable {
     private static func modelsRootDirectory() -> URL {
         let fm = FileManager.default
         if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            return appSupport
+            return
+                appSupport
                 .appendingPathComponent("FluidAudio", isDirectory: true)
                 .appendingPathComponent("Models", isDirectory: true)
         }

@@ -121,7 +121,10 @@ public actor SenseVoiceManager {
             var bestVal = frameBase(0)
             for v in 1..<vocab {
                 let x = frameBase(v)
-                if x > bestVal { bestVal = x; best = v }
+                if x > bestVal {
+                    bestVal = x
+                    best = v
+                }
             }
             if best != SenseVoiceConfig.blankId && best != prev { ids.append(best) }
             prev = best
@@ -140,7 +143,8 @@ public actor SenseVoiceManager {
         }
 
         let raw = decodeCtcTokenIds(ids, vocabulary: models.vocabulary)
-        return raw
+        return
+            raw
             .replacingOccurrences(of: "<\\|[^|]*\\|>", with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
     }
