@@ -435,14 +435,14 @@ Hardware: Apple M5 Pro, macOS 26. FP16 encoder on the Neural Engine (`CPU_AND_NE
 
 ### int8 encoder variant (`--int8`)
 
-Post-training weight quantization of the encoder — **~half the size, accuracy-neutral** vs fp16 (run on ANE):
+Post-training weight quantization of the encoder — **~half the size, accuracy-neutral** vs fp16 (run on ANE). Full canonical test sets:
 
 | | size | LibriSpeech WER | AISHELL CER | peak RAM |
 |---|------|-----------------|-------------|----------|
-| fp16 (default) | 447 MB | 3.27% | 3.40% | 0.54 GB |
-| **int8** | **225 MB** | **3.22%** | **3.43%** | **0.32 GB** |
+| fp16 (default) | 447 MB | 3.22% | 3.09% | 0.54 GB |
+| **int8** | **225 MB** | **3.25%** | **3.09%** | **0.32 GB** |
 
-(Δ ≤ 0.05 pp on 300-sample subsets, 0 NaN.) int4 per-tensor palettization wrecks accuracy (WER 31%) and is not shipped.
+(Δ +0.03 pp / 0.00 pp on the full LibriSpeech test-clean (2,620) / AISHELL-1 test (7,176), 0 NaN.) int4 per-tensor palettization wrecks accuracy (WER 31%) and is not shipped.
 
 **Methodology notes:**
 - CER (character-level, whitespace removed) is the primary metric for Chinese, matching the official SenseVoice chart (AISHELL-1 test).
