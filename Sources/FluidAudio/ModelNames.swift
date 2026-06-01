@@ -12,6 +12,8 @@ public enum Repo: String, CaseIterable, Sendable {
     /// 3-stage: fp32 CPU preprocessor (waveform→560-d LFR feats) + fp16 ANE
     /// encoder+CTC (+ fp32 fallback) + host greedy-CTC decode. See ASR/SenseVoice.
     case senseVoiceSmall = "FluidInference/sensevoice-small-coreml"
+    /// FSMN-VAD voice activity detection (FunASR). See VAD/Fsmn.
+    case fsmnVad = "FluidInference/fsmn-vad-coreml"
     // Japanese hybrid TDT: INT8 CTC-trained preprocessor+encoder paired with a
     // TDT decoder+joint. CTC-only inference for Japanese was removed in
     // 846924a1d; only the preprocessor+encoder files from this repo are reused.
@@ -73,6 +75,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-ctc-0.6b-zh-cn-coreml"
         case .senseVoiceSmall:
             return "sensevoice-small-coreml"
+        case .fsmnVad:
+            return "fsmn-vad-coreml"
         case .parakeetJa:
             return "parakeet-0.6b-ja-coreml"
         case .parakeetEou160:
@@ -434,6 +438,23 @@ public enum ModelNames {
             encoderFile,
             encoderInt8File,
             encoderFp32File,
+        ]
+    }
+
+    /// FSMN-VAD model names (2 CoreML stages + host decision).
+    ///   Preprocessor (fp32/CPU): waveform -> 400-d features (fbank80 + LFR m=5,n=1)
+    ///   FsmnVad (fp16/ANE): features -> [1,T,248] frame scores (col 0 = silence prob)
+    /// Plus `vad_config.json` (auto-fetched as a root file).
+    public enum FsmnVad {
+        public static let preprocessor = "FsmnVadPreprocessor"
+        public static let scorer = "FsmnVad"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let scorerFile = scorer + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            scorerFile,
         ]
     }
 
@@ -1061,6 +1082,8 @@ public enum ModelNames {
             return ModelNames.CTCZhCn.requiredModels
         case .senseVoiceSmall:
             return ModelNames.SenseVoice.requiredModels
+        case .fsmnVad:
+            return ModelNames.FsmnVad.requiredModels
         case .parakeetJa:
             return ModelNames.TDTJa.requiredModels
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
