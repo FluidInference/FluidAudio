@@ -45,8 +45,11 @@ public actor FsmnVadManager {
     }
 
     public func detect(audioURL: URL) throws -> [FsmnVadSegment] {
-        let converter = AudioConverter(sampleRate: 16_000)
-        return try detect(audio: try converter.resampleAudioFile(audioURL))
+        let audio = try autoreleasepool { () -> [Float] in
+            let converter = AudioConverter(sampleRate: 16_000)
+            return try converter.resampleAudioFile(audioURL)
+        }
+        return try detect(audio: audio)
     }
 
     public func detect(audio: [Float]) throws -> [FsmnVadSegment] {
@@ -65,7 +68,10 @@ public actor FsmnVadManager {
         while offset < audio.count {
             let end = min(offset + chunkSamples, audio.count)
             let chunk = Array(audio[offset..<end])
-            sil.append(contentsOf: try chunkSilence(chunk))
+            // Drain CoreML's autoreleased MLMultiArrays per chunk so memory stays
+            // bounded on long audio; otherwise they accumulate across the whole file.
+            let chunkSil = try autoreleasepool { try chunkSilence(chunk) }
+            sil.append(contentsOf: chunkSil)
             offset = end
         }
         return sil

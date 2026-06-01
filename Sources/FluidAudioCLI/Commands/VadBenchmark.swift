@@ -98,6 +98,8 @@ struct VadBenchmark {
         logger.info("Debug mode: \(debugMode)")
 
         if backend == "fsmn" {
+            logger.warning(
+                "FSMN-VAD is a beta/experimental backend (over-triggers on music); silero-vad is the default.")
             try await runFsmnVadBenchmark(
                 dataset: dataset, count: useAllFiles ? -1 : numFiles, activityThreshold: activityThreshold)
             return
@@ -216,6 +218,27 @@ struct VadBenchmark {
         logger.info("Recall: \(String(format: "%.1f", m.recall))%")
         logger.info("F1-Score: \(String(format: "%.1f", m.f1Score))%")
         logger.info("RTFx: \(String(format: "%.0f", rtfx))x")
+
+        // Persist to JSON so results survive release-mode logging (info -> os_log only).
+        let resultJSON: [String: Any] = [
+            "test_name": "FSMN_VAD_\(dataset)_\(testFiles.count)_Files",
+            "backend": "fsmn",
+            "dataset": dataset,
+            "accuracy": m.accuracy,
+            "precision": m.precision,
+            "recall": m.recall,
+            "f1_score": m.f1Score,
+            "rtfx": rtfx,
+            "total_files": testFiles.count,
+            "total_audio_duration_seconds": audioSec,
+            "processing_time_seconds": procSec,
+        ]
+        if let data = try? JSONSerialization.data(
+            withJSONObject: resultJSON, options: [.prettyPrinted, .sortedKeys])
+        {
+            try? data.write(to: URL(fileURLWithPath: "fsmn_vad_results.json"))
+            logger.info("Results saved to: fsmn_vad_results.json")
+        }
     }
 
     static func downloadVadTestFiles(
