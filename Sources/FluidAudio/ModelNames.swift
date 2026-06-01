@@ -15,6 +15,9 @@ public enum Repo: String, CaseIterable, Sendable {
     /// CAM++ speaker-embedding model (fbank80 -> 192-d) for speaker verification /
     /// diarization clustering. See Speaker/CampPlusEmbedder.
     case campPlus = "FluidInference/campplus-coreml"
+    /// Paraformer-large (zh) — non-autoregressive ASR: SANM encoder + CIF
+    /// predictor (host-side integrate-and-fire) + parallel decoder. See ASR/Paraformer.
+    case paraformerLargeZh = "FluidInference/paraformer-large-zh-coreml"
     // Japanese hybrid TDT: INT8 CTC-trained preprocessor+encoder paired with a
     // TDT decoder+joint. CTC-only inference for Japanese was removed in
     // 846924a1d; only the preprocessor+encoder files from this repo are reused.
@@ -78,6 +81,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "sensevoice-small-coreml"
         case .campPlus:
             return "campplus-coreml"
+        case .paraformerLargeZh:
+            return "paraformer-large-zh-coreml"
         case .parakeetJa:
             return "parakeet-0.6b-ja-coreml"
         case .parakeetEou160:
@@ -455,6 +460,38 @@ public enum ModelNames {
         public static let requiredModels: Set<String> = [
             preprocessorFile,
             modelFile,
+        ]
+    }
+
+    /// Paraformer-large (zh) model names. 4 CoreML stages + host CIF:
+    ///   Preprocessor (fp32/CPU): waveform -> 560-d LFR features
+    ///   Encoder (fp16/ANE): SANM encoder (enumerated buckets)
+    ///   CifAlphas (fp16/ANE): enc_out -> per-frame alphas (host does integrate-and-fire)
+    ///   Decoder (fp16/ANE): parallel decoder -> token logits
+    /// Plus `vocab.json` (8404 CharTokenizer tokens, auto-fetched as a root file).
+    public enum ParaformerZh {
+        public static let preprocessor = "ParaformerPreprocessor"
+        public static let encoder = "ParaformerEncoder"
+        public static let encoderInt8 = "ParaformerEncoder_int8"  // ~half size, ANE
+        public static let cifAlphas = "ParaformerCifAlphas"
+        public static let decoder = "ParaformerDecoder"
+        public static let decoderInt8 = "ParaformerDecoder_int8"  // ~half size, ANE
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let encoderInt8File = encoderInt8 + ".mlmodelc"
+        public static let cifAlphasFile = cifAlphas + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+        public static let decoderInt8File = decoderInt8 + ".mlmodelc"
+        public static let vocabularyFile = "vocab.json"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            encoderInt8File,
+            cifAlphasFile,
+            decoderFile,
+            decoderInt8File,
         ]
     }
 
@@ -1084,6 +1121,8 @@ public enum ModelNames {
             return ModelNames.SenseVoice.requiredModels
         case .campPlus:
             return ModelNames.CampPlus.requiredModels
+        case .paraformerLargeZh:
+            return ModelNames.ParaformerZh.requiredModels
         case .parakeetJa:
             return ModelNames.TDTJa.requiredModels
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
