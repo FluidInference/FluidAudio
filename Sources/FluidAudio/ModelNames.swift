@@ -12,6 +12,9 @@ public enum Repo: String, CaseIterable, Sendable {
     /// 3-stage: fp32 CPU preprocessor (waveform→560-d LFR feats) + fp16 ANE
     /// encoder+CTC (+ fp32 fallback) + host greedy-CTC decode. See ASR/SenseVoice.
     case senseVoiceSmall = "FluidInference/sensevoice-small-coreml"
+    /// Paraformer-large (zh) — non-autoregressive ASR: SANM encoder + CIF
+    /// predictor (host-side integrate-and-fire) + parallel decoder. See ASR/Paraformer.
+    case paraformerLargeZh = "FluidInference/paraformer-large-zh-coreml"
     // Japanese hybrid TDT: INT8 CTC-trained preprocessor+encoder paired with a
     // TDT decoder+joint. CTC-only inference for Japanese was removed in
     // 846924a1d; only the preprocessor+encoder files from this repo are reused.
@@ -73,6 +76,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-ctc-0.6b-zh-cn-coreml"
         case .senseVoiceSmall:
             return "sensevoice-small-coreml"
+        case .paraformerLargeZh:
+            return "paraformer-large-zh-coreml"
         case .parakeetJa:
             return "parakeet-0.6b-ja-coreml"
         case .parakeetEou160:
@@ -434,6 +439,32 @@ public enum ModelNames {
             encoderFile,
             encoderInt8File,
             encoderFp32File,
+        ]
+    }
+
+    /// Paraformer-large (zh) model names. 4 CoreML stages + host CIF:
+    ///   Preprocessor (fp32/CPU): waveform -> 560-d LFR features
+    ///   Encoder (fp16/ANE): SANM encoder (enumerated buckets)
+    ///   CifAlphas (fp16/ANE): enc_out -> per-frame alphas (host does integrate-and-fire)
+    ///   Decoder (fp16/ANE): parallel decoder -> token logits
+    /// Plus `vocab.json` (8404 CharTokenizer tokens, auto-fetched as a root file).
+    public enum ParaformerZh {
+        public static let preprocessor = "ParaformerPreprocessor"
+        public static let encoder = "ParaformerEncoder"
+        public static let cifAlphas = "ParaformerCifAlphas"
+        public static let decoder = "ParaformerDecoder"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let cifAlphasFile = cifAlphas + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+        public static let vocabularyFile = "vocab.json"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            cifAlphasFile,
+            decoderFile,
         ]
     }
 
@@ -1061,6 +1092,8 @@ public enum ModelNames {
             return ModelNames.CTCZhCn.requiredModels
         case .senseVoiceSmall:
             return ModelNames.SenseVoice.requiredModels
+        case .paraformerLargeZh:
+            return ModelNames.ParaformerZh.requiredModels
         case .parakeetJa:
             return ModelNames.TDTJa.requiredModels
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
