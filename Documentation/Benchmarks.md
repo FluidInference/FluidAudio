@@ -240,6 +240,28 @@ Peak memory usage (process-wide): 1.503 GB
 Model is nearly identical to the base model in terms of quality, performance wise we see an up to ~3.5x improvement compared to the silero Pytorch VAD model with the 256ms batch model (8 chunks of 32ms)
 
 ![VAD/speed.png](VAD/speed.png)
+
+### FSMN-VAD (`fsmn-vad-segment`)
+
+CoreML FSMN-VAD (FunASR, ~5.2M), an alternative to silero-vad. Model: [FluidInference/fsmn-vad-coreml](https://huggingface.co/FluidInference/fsmn-vad-coreml). 2-stage: fbank80+LFR preprocessor (fp32/CPU) → FSMN scorer (fp16/ANE, enumerated buckets) → host decision (port of FunASR `FsmnVADStreaming`). Hardware: Apple M5 Pro.
+
+Fidelity vs the FunASR reference (frame-level, 10 ms, FLEURS zh, n=50):
+
+| Metric | Value |
+|--------|-------|
+| **Frame F1** | **97.4%** |
+| Precision | 100.0% |
+| Recall | 94.8% |
+| Median RTFx | 1209× |
+
+**Notes:**
+- Reference = FunASR `am.generate` segments; the metric is conversion+decision fidelity (not vs hand-labeled ground truth). On a 20 s clip the boundaries match FunASR within ~50 ms.
+- 100% precision / ~95% recall: the decision is slightly conservative at boundaries (lookback/lookahead), never over-detecting speech.
+- Long audio is processed in ~30 s chunks (the FSMN's dilated conv needs fixed shapes; RangeDim is rejected by the ANE/BNNS compiler).
+
+```bash
+swift run -c release fluidaudiocli fsmn-vad-segment audio.wav
+```
 ![VAD/correlation.png](VAD/correlation.png)
 
 Dataset: https://github.com/Lab41/VOiCES-subset
