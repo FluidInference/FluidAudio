@@ -16,8 +16,11 @@ public actor ParaformerManager {
         self.models = models
     }
 
-    public static func load(progressHandler: DownloadUtils.ProgressHandler? = nil) async throws -> ParaformerManager {
-        ParaformerManager(models: try await ParaformerModels.downloadAndLoad(progressHandler: progressHandler))
+    public static func load(
+        precision: ParaformerPrecision = .fp16, progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws -> ParaformerManager {
+        ParaformerManager(
+            models: try await ParaformerModels.downloadAndLoad(precision: precision, progressHandler: progressHandler))
     }
 
     public func transcribe(audioURL: URL) throws -> String {

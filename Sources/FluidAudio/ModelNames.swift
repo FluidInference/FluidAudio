@@ -451,20 +451,26 @@ public enum ModelNames {
     public enum ParaformerZh {
         public static let preprocessor = "ParaformerPreprocessor"
         public static let encoder = "ParaformerEncoder"
+        public static let encoderInt8 = "ParaformerEncoder_int8"  // ~half size, ANE
         public static let cifAlphas = "ParaformerCifAlphas"
         public static let decoder = "ParaformerDecoder"
+        public static let decoderInt8 = "ParaformerDecoder_int8"  // ~half size, ANE
 
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
+        public static let encoderInt8File = encoderInt8 + ".mlmodelc"
         public static let cifAlphasFile = cifAlphas + ".mlmodelc"
         public static let decoderFile = decoder + ".mlmodelc"
+        public static let decoderInt8File = decoderInt8 + ".mlmodelc"
         public static let vocabularyFile = "vocab.json"
 
         public static let requiredModels: Set<String> = [
             preprocessorFile,
             encoderFile,
+            encoderInt8File,
             cifAlphasFile,
             decoderFile,
+            decoderInt8File,
         ]
     }
 

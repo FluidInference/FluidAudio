@@ -1,6 +1,20 @@
 @preconcurrency import CoreML
 import Foundation
 
+/// Encoder/decoder weight precision. Both fp16 and int8 run on the Neural Engine;
+/// int8 is ~half the size and accuracy-neutral (AISHELL CER unchanged).
+public enum ParaformerPrecision: String, Sendable {
+    case fp16
+    case int8
+
+    var encoderName: String {
+        self == .int8 ? ModelNames.ParaformerZh.encoderInt8 : ModelNames.ParaformerZh.encoder
+    }
+    var decoderName: String {
+        self == .int8 ? ModelNames.ParaformerZh.decoderInt8 : ModelNames.ParaformerZh.decoder
+    }
+}
+
 /// Loaded Paraformer-large (zh) CoreML models + vocabulary.
 ///
 /// 4 stages from `FluidInference/paraformer-large-zh-coreml`:
@@ -30,18 +44,20 @@ public struct ParaformerModels: Sendable {
     }
 
     public static func downloadAndLoad(
+        precision: ParaformerPrecision = .fp16,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> ParaformerModels {
-        let directory = try await download(progressHandler: progressHandler)
-        return try load(from: directory)
+        let directory = try await download(precision: precision, progressHandler: progressHandler)
+        return try load(from: directory, precision: precision)
     }
 
     public static func download(
+        precision: ParaformerPrecision = .fp16,
         force: Bool = false, progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = modelsRootDirectory()
         let targetDir = modelsRoot.appendingPathComponent(Repo.paraformerLargeZh.folderName, isDirectory: true)
-        if !force && modelsExist(at: targetDir) {
+        if !force && modelsExist(at: targetDir, precision: precision) {
             logger.info("Paraformer models already present at: \(targetDir.path)")
             return targetDir
         }
@@ -52,30 +68,30 @@ public struct ParaformerModels: Sendable {
         return targetDir
     }
 
-    public static func modelsExist(at directory: URL) -> Bool {
+    public static func modelsExist(at directory: URL, precision: ParaformerPrecision = .fp16) -> Bool {
         let fm = FileManager.default
         let required = [
             ModelNames.ParaformerZh.preprocessorFile,
-            ModelNames.ParaformerZh.encoderFile,
+            precision.encoderName + ".mlmodelc",
             ModelNames.ParaformerZh.cifAlphasFile,
-            ModelNames.ParaformerZh.decoderFile,
+            precision.decoderName + ".mlmodelc",
             ModelNames.ParaformerZh.vocabularyFile,
         ]
         return required.allSatisfy { fm.fileExists(atPath: directory.appendingPathComponent($0).path) }
     }
 
-    public static func load(from directory: URL) throws -> ParaformerModels {
+    public static func load(from directory: URL, precision: ParaformerPrecision = .fp16) throws -> ParaformerModels {
         let cpu = MLModelConfiguration()
         cpu.computeUnits = .cpuOnly
         let ane = MLModelConfiguration()
         ane.computeUnits = .cpuAndNeuralEngine
 
         let pre = try loadModel(named: ModelNames.ParaformerZh.preprocessor, from: directory, configuration: cpu)
-        let enc = try loadModel(named: ModelNames.ParaformerZh.encoder, from: directory, configuration: ane)
+        let enc = try loadModel(named: precision.encoderName, from: directory, configuration: ane)
         let cif = try loadModel(named: ModelNames.ParaformerZh.cifAlphas, from: directory, configuration: ane)
-        let dec = try loadModel(named: ModelNames.ParaformerZh.decoder, from: directory, configuration: ane)
+        let dec = try loadModel(named: precision.decoderName, from: directory, configuration: ane)
         let vocab = try loadVocabulary(from: directory)
-        logger.info("Loaded Paraformer (vocab: \(vocab.count))")
+        logger.info("Loaded Paraformer (encoder/decoder: \(precision.rawValue), vocab: \(vocab.count))")
         return ParaformerModels(preprocessor: pre, encoder: enc, cifAlphas: cif, decoder: dec, vocabulary: vocab)
     }
 
