@@ -12,6 +12,9 @@ public enum Repo: String, CaseIterable, Sendable {
     /// 3-stage: fp32 CPU preprocessor (waveform→560-d LFR feats) + fp16 ANE
     /// encoder+CTC (+ fp32 fallback) + host greedy-CTC decode. See ASR/SenseVoice.
     case senseVoiceSmall = "FluidInference/sensevoice-small-coreml"
+    /// CAM++ speaker-embedding model (fbank80 -> 192-d) for speaker verification /
+    /// diarization clustering. See Speaker/CampPlusEmbedder.
+    case campPlus = "FluidInference/campplus-coreml"
     // Japanese hybrid TDT: INT8 CTC-trained preprocessor+encoder paired with a
     // TDT decoder+joint. CTC-only inference for Japanese was removed in
     // 846924a1d; only the preprocessor+encoder files from this repo are reused.
@@ -73,6 +76,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-ctc-0.6b-zh-cn-coreml"
         case .senseVoiceSmall:
             return "sensevoice-small-coreml"
+        case .campPlus:
+            return "campplus-coreml"
         case .parakeetJa:
             return "parakeet-0.6b-ja-coreml"
         case .parakeetEou160:
@@ -434,6 +439,22 @@ public enum ModelNames {
             encoderFile,
             encoderInt8File,
             encoderFp32File,
+        ]
+    }
+
+    /// CAM++ speaker-embedding model names (2 CoreML stages).
+    ///   Preprocessor (fp32/CPU): waveform -> 80-d fbank
+    ///   CamPlusPlus (fp16/ANE): fbank -> 192-d speaker embedding
+    public enum CampPlus {
+        public static let preprocessor = "CamPlusPreprocessor"
+        public static let model = "CamPlusPlus"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let modelFile = model + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            modelFile,
         ]
     }
 
@@ -1061,6 +1082,8 @@ public enum ModelNames {
             return ModelNames.CTCZhCn.requiredModels
         case .senseVoiceSmall:
             return ModelNames.SenseVoice.requiredModels
+        case .campPlus:
+            return ModelNames.CampPlus.requiredModels
         case .parakeetJa:
             return ModelNames.TDTJa.requiredModels
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
