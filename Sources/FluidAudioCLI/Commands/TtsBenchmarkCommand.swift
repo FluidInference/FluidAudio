@@ -257,7 +257,7 @@ public enum TtsBenchmarkCommand {
         //   no flag, otherwise               → .parakeet
         let asrChoice: AsrChoice
         do {
-            asrChoice = try resolveAsrChoice(
+            asrChoice = try await resolveAsrChoice(
                 skipAsrFlag: skipAsr,
                 backendName: asrBackendName,
                 cohereModelDir: cohereModelDirArg,
@@ -1122,14 +1122,14 @@ public enum TtsBenchmarkCommand {
         cohereComputeUnits: String?,
         corpusLabel: String,
         ttsBackend: Backend
-    ) throws -> AsrChoice {
+    ) async throws -> AsrChoice {
         let normalized = backendName?.lowercased()
         if skipAsrFlag || normalized == "none" {
             return .skip
         }
         switch normalized {
         case "cohere":
-            let dir = try resolveCohereModelDir(cohereModelDir)
+            let dir = try await resolveCohereModelDir(cohereModelDir)
             let language = inferCohereLanguage(
                 explicit: asrLanguage, corpus: corpusLabel)
             let units = try resolveCohereComputeUnits(cohereComputeUnits)
@@ -1153,34 +1153,39 @@ public enum TtsBenchmarkCommand {
     ///   1. Explicit `--cohere-model-dir <path>`.
     ///   2. The default cache location at
     ///      `~/Library/Application Support/FluidAudio/Models/cohere-transcribe/q8`,
-    ///      matching `Repo.cohereTranscribeCoreml.folderName`.
+    ///      matching `Repo.cohereTranscribeCoreml.folderName`. Auto-downloaded
+    ///      from HuggingFace if missing.
     ///
-    /// Auto-download is intentionally not wired here: the upstream
-    /// `Repo.cohereTranscribeCoreml` registration ships `vocab.json` in
-    /// `requiredModels`, but the file lives at the repo root rather than
-    /// under the `q8/` subPath, so `DownloadUtils.downloadRepo` would fail
-    /// the post-download verify. Fix this when the registry learns about
-    /// repo-root files; until then, callers must pre-populate the cache
-    /// (e.g. via `fluidaudio cohere-transcribe ... --model-dir <dir>`).
-    private static func resolveCohereModelDir(_ override: String?) throws -> URL {
+    /// `Repo.cohereTranscribeCoreml` ships `vocab.json` in `requiredModels`, and
+    /// that file lives at the repo root rather than under the `q8/` subPath.
+    /// `DownloadUtils.downloadRepo` now sweeps the repo root for required
+    /// auxiliary files (issue #649), so auto-download resolves it correctly.
+    private static func resolveCohereModelDir(_ override: String?) async throws -> URL {
         if let override {
             return resolveURL(override, isDirectory: true)
         }
         let appSupport = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask, appropriateFor: nil, create: true)
-        let target =
-            appSupport
-            .appendingPathComponent("FluidAudio/Models/cohere-transcribe/q8")
+        // `downloadRepo` appends `repo.folderName` (cohere-transcribe/q8), so
+        // pass the Models base dir and let it land the bundle at `target`.
+        let modelsBase = appSupport.appendingPathComponent("FluidAudio/Models")
+        let target = modelsBase.appendingPathComponent("cohere-transcribe/q8")
         let needed = [
             ModelNames.CohereTranscribe.encoderCompiledFile,
             ModelNames.CohereTranscribe.decoderCacheExternalV2CompiledFile,
             "vocab.json",
         ]
-        let missing = needed.filter { name in
-            !FileManager.default.fileExists(
-                atPath: target.appendingPathComponent(name).path)
+        func missingFiles() -> [String] {
+            needed.filter { name in
+                !FileManager.default.fileExists(
+                    atPath: target.appendingPathComponent(name).path)
+            }
         }
+        if !missingFiles().isEmpty {
+            try await DownloadUtils.downloadRepo(.cohereTranscribeCoreml, to: modelsBase)
+        }
+        let missing = missingFiles()
         guard missing.isEmpty else {
             throw NSError(
                 domain: "TtsBenchmark", code: 1,

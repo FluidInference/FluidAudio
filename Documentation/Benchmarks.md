@@ -485,6 +485,33 @@ Post-training weight quantization of the encoder — **~half the size, accuracy-
 swift run -c release fluidaudiocli sensevoice-benchmark --languages en_us,cmn_hans_cn --samples all
 ```
 
+## Paraformer
+
+Non-autoregressive Mandarin (zh) ASR: SANM encoder + CIF predictor (host
+integrate-and-fire) + parallel decoder. See [ASR/Paraformer.md](ASR/Paraformer.md).
+
+Model: [FluidInference/paraformer-large-zh-coreml](https://huggingface.co/FluidInference/paraformer-large-zh-coreml)
+
+Hardware: Apple M5 Pro, macOS 26. Encoder/CifAlphas/decoder on ANE; FP32 CPU front-end.
+
+### AISHELL-1 Chinese (7176 files, full test, full-CoreML pipeline)
+
+| Precision | size (enc+dec) | CER | median RTFx | peak RAM | Official |
+|-----------|----------------|-----|-------------|----------|----------|
+| fp16 (default) | 411 MB | **2.12%** | 85× | 0.38 GB | ~1.95% |
+| int8 | 207 MB | **2.12%** | 84× | 0.24 GB | ~1.95% |
+
+**Methodology notes:**
+- CER (character-level, whitespace removed) is the primary metric for Chinese, matching the official Paraformer-large AISHELL-1 number.
+- int8 weight quantization (encoder + decoder) is accuracy-neutral (CER unchanged on the full set), ~half the size/memory.
+- The ~0.17 pp gap vs official is fp16 + the fixed-shape decoder (enc 512 / tokens 128). RTFx (~85×) is lower than SenseVoice (~400×) because Paraformer runs 3 CoreML predicts/clip + the decoder pads short clips to 512 frames — an enumerated decoder would raise it.
+- AISHELL-1 dataset: [TwinkStart/AISHELL-1](https://huggingface.co/datasets/TwinkStart/AISHELL-1).
+
+```bash
+swift run -c release fluidaudiocli paraformer-transcribe audio.wav         # fp16
+swift run -c release fluidaudiocli paraformer-transcribe audio.wav --int8  # half size
+```
+
 ## Streaming ASR (Parakeet EOU)
 
 Real-time streaming ASR with End-of-Utterance detection using the Parakeet EOU 120M CoreML model.
