@@ -245,21 +245,19 @@ Model is nearly identical to the base model in terms of quality, performance wis
 
 CoreML FSMN-VAD (FunASR, ~5.2M), an alternative to silero-vad. Model: [FluidInference/fsmn-vad-coreml](https://huggingface.co/FluidInference/fsmn-vad-coreml). 2-stage: fbank80+LFR preprocessor (fp32/CPU) → FSMN scorer (fp16/ANE, enumerated buckets) → host decision (port of FunASR `FsmnVADStreaming`). Hardware: Apple M5 Pro.
 
-Fidelity vs the FunASR reference (frame-level, 10 ms, FLEURS zh, n=50):
+Evaluated on the **mini50** labeled set via the standard `vad-benchmark` harness (per-clip speech/non-speech), same metric as the silero baseline:
 
-| Metric | Value |
-|--------|-------|
-| **Frame F1** | **97.4%** |
-| Precision | 100.0% |
-| Recall | 94.8% |
-| Median RTFx | 1209× |
+| Backend | Accuracy | Precision | Recall | F1 | RTFx |
+|---------|----------|-----------|--------|----|------|
+| silero (baseline) | 82.0% | 73.5% | 100% | 84.7% | 1408× |
+| **FSMN-VAD** | **98.0%** | **96.2%** | 100% | **98.0%** | 640× |
 
-**Notes:**
-- Reference = FunASR `am.generate` segments; the metric is conversion+decision fidelity (not vs hand-labeled ground truth). On a 20 s clip the boundaries match FunASR within ~50 ms.
-- 100% precision / ~95% recall: the decision is slightly conservative at boundaries (lookback/lookahead), never over-detecting speech.
-- Long audio is processed in ~30 s chunks (the FSMN's dilated conv needs fixed shapes; RangeDim is rejected by the ANE/BNNS compiler).
+FSMN-VAD is far more precise (96.2% vs 73.5%) at the same 100% recall — many fewer false speech detections — at ~640× real-time. Fidelity vs FunASR's own segments: frame F1 97.4%, boundaries within ~50 ms (`vad_bench.py` in the conversion repo).
+
+Long audio is processed in ~30 s chunks (the FSMN's dilated conv needs fixed shapes; RangeDim is rejected by the ANE/BNNS compiler).
 
 ```bash
+swift run -c release fluidaudiocli vad-benchmark --dataset mini50 --backend fsmn
 swift run -c release fluidaudiocli fsmn-vad-segment audio.wav
 ```
 ![VAD/correlation.png](VAD/correlation.png)
