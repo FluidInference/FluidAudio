@@ -661,28 +661,34 @@ struct VadBenchmark {
         let cleanDir = voicesDir.appendingPathComponent("clean")
         let noisyDir = voicesDir.appendingPathComponent("noisy")
 
-        let requestedSpeechCount = count == -1 ? 25 : count / 2
+        // count == -1 means "--all-files": load every VOiCES speech clip. Otherwise
+        // split the budget evenly across clean + noisy speech (count / 4 each).
+        let allFiles = count == -1
+        let perSideSpeech = allFiles ? Int.max : max(1, count / 4)
 
         if FileManager.default.fileExists(atPath: cleanDir.path) {
             let cleanFiles = try loadAudioFiles(
-                from: cleanDir, expectedLabel: 1, maxCount: requestedSpeechCount / 2)
+                from: cleanDir, expectedLabel: 1, maxCount: perSideSpeech)
             testFiles.append(contentsOf: cleanFiles)
             logger.info("Loaded \(cleanFiles.count) clean speech files")
         }
 
         if FileManager.default.fileExists(atPath: noisyDir.path) {
             let noisyFiles = try loadAudioFiles(
-                from: noisyDir, expectedLabel: 1, maxCount: requestedSpeechCount / 2)
+                from: noisyDir, expectedLabel: 1, maxCount: perSideSpeech)
             testFiles.append(contentsOf: noisyFiles)
             logger.info("Loaded \(noisyFiles.count) noisy speech files")
         }
 
+        let speechCount = testFiles.count
         logger.info("Loading non-speech samples from MUSAN...")
         let vadCacheDir = appSupport.appendingPathComponent("FluidAudio/vadDataset")
         let noiseDir = vadCacheDir.appendingPathComponent("noise")
 
         if FileManager.default.fileExists(atPath: noiseDir.path) {
-            let requestedNoiseCount = count == -1 ? 25 : count - testFiles.count
+            // Balance the negatives to the speech count when loading everything,
+            // otherwise fill the remainder of the requested budget.
+            let requestedNoiseCount = allFiles ? speechCount : max(0, count - speechCount)
             let noiseFiles = try loadAudioFiles(
                 from: noiseDir, expectedLabel: 0, maxCount: requestedNoiseCount)
             testFiles.append(contentsOf: noiseFiles)
