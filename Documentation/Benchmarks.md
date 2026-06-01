@@ -254,6 +254,15 @@ Evaluated on the **mini50** labeled set via the standard `vad-benchmark` harness
 
 FSMN-VAD is far more precise (96.2% vs 73.5%) at the same 100% recall — many fewer false speech detections — at ~640× real-time. Fidelity vs FunASR's own segments: frame F1 97.4%, boundaries within ~50 ms (`vad_bench.py` in the conversion repo).
 
+Full [FluidInference/musan](https://huggingface.co/datasets/FluidInference/musan) noise set (774 noise clips) — noise rejection / specificity (correctly classified non-speech):
+
+| Backend | Noise rejected (specificity) | False-positive rate | RTFx |
+|---------|------------------------------|---------------------|------|
+| silero | 69.8% | 30.2% | 1341× |
+| **FSMN-VAD** | **81.9%** | **18.1%** | 571× |
+
+On the full MUSAN noise set FSMN-VAD rejects 12 pp more noise as non-speech (18% vs 30% false positives) — consistently more precise than silero on both the balanced (mini50) and noise-heavy (full MUSAN) evaluations.
+
 Long audio is processed in ~30 s chunks (the FSMN's dilated conv needs fixed shapes; RangeDim is rejected by the ANE/BNNS compiler).
 
 ```bash
