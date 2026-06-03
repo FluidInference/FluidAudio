@@ -2,6 +2,45 @@ import Accelerate
 @preconcurrency import CoreML
 import Foundation
 
+/// IEEE-754 binary16 (half) bit pattern → `Float`.
+///
+/// On arm64 this uses the native `Float16` hardware conversion. On x86_64
+/// (Intel) macOS, Swift's `Float16` lacks the `bitPattern:` initializer, the
+/// `Float(_:)` conversion, and `Comparable` conformance (no hardware half
+/// precision), so a Universal build's x86_64 slice fails to compile. The
+/// portable integer path below produces bit-identical results, keeping this
+/// file arch-agnostic with no behavior change on arm64.
+@inline(__always)
+internal func nemotronHalfBitsToFloat(_ bits: UInt16) -> Float {
+    #if arch(arm64)
+    return Float(Float16(bitPattern: bits))
+    #else
+    let h = UInt32(bits)
+    let sign = (h & 0x8000) << 16
+    var exp = Int32((h & 0x7C00) >> 10)
+    var mant = h & 0x03FF
+    let f: UInt32
+    if exp == 0 {
+        if mant == 0 {
+            f = sign  // ±0
+        } else {
+            exp = 1  // subnormal → normalized
+            while (mant & 0x0400) == 0 {
+                mant <<= 1
+                exp -= 1
+            }
+            mant &= 0x03FF
+            f = sign | (UInt32(exp + 112) << 23) | (mant << 13)
+        }
+    } else if exp == 0x1F {
+        f = sign | 0x7F80_0000 | (mant << 13)  // Inf / NaN
+    } else {
+        f = sign | (UInt32(exp + 112) << 23) | (mant << 13)  // normalized
+    }
+    return Float(bitPattern: f)
+    #endif
+}
+
 /// Internal processing pipeline for Nemotron multilingual streaming ASR.
 ///
 /// Mirrors the English-only pipeline (`StreamingNemotronAsrManager+Pipeline`)
@@ -725,7 +764,7 @@ extension StreamingNemotronMultilingualAsrManager {
         var encStep = [Float](repeating: 0, count: encoderDim)
 
         @inline(__always) func f16ToF32(_ bits: UInt16) -> Float {
-            return Float(Float16(bitPattern: bits))
+            return nemotronHalfBitsToFloat(bits)
         }
 
         let encPtr16: UnsafeMutablePointer<UInt16>? =
@@ -921,7 +960,7 @@ extension StreamingNemotronMultilingualAsrManager {
             for t in 0..<T_enc {
                 for d in 0..<encoderDim {
                     let srcIdx = 0 * stride0 + d * stride1 + t * stride2
-                    encodedRowMajor[t * encoderDim + d] = Float(Float16(bitPattern: srcPtr[srcIdx]))
+                    encodedRowMajor[t * encoderDim + d] = nemotronHalfBitsToFloat(srcPtr[srcIdx])
                 }
             }
         } else {
@@ -1084,7 +1123,7 @@ extension StreamingNemotronMultilingualAsrManager {
                     if encProjIsF16 {
                         for d in 0..<projDim {
                             let srcIdx = 0 * encProjStride0 + srcT * encProjStride1 + d * encProjStride2
-                            dstPtr[dstBase + d] = Float(Float16(bitPattern: srcF16Ptr![srcIdx]))
+                            dstPtr[dstBase + d] = nemotronHalfBitsToFloat(srcF16Ptr![srcIdx])
                         }
                     } else {
                         for d in 0..<projDim {
@@ -1148,7 +1187,7 @@ extension StreamingNemotronMultilingualAsrManager {
                     var bestVal: Float = -.greatestFiniteMagnitude
                     if logitsIsF16 {
                         for v in 0..<vocabSize {
-                            let val = Float(Float16(bitPattern: logitsF16Ptr![frameBase + v * logitsStride3]))
+                            let val = nemotronHalfBitsToFloat(logitsF16Ptr![frameBase + v * logitsStride3])
                             if val > bestVal {
                                 bestVal = val
                                 bestIdx = v
@@ -1533,7 +1572,20 @@ extension StreamingNemotronMultilingualAsrManager {
         }
 
         if logits.dataType == .float16 {
-            return scan(logits.dataPointer.bindMemory(to: Float16.self, capacity: logits.count))
+            // x86_64 has no `Float16: Comparable`; scan the raw UInt16 bits and
+            // convert each candidate to Float for the max. (arm64 path is
+            // unchanged numerically — same native conversion under the hood.)
+            let ptr = logits.dataPointer.bindMemory(to: UInt16.self, capacity: logits.count)
+            var bestIdx = 0
+            var bestVal = nemotronHalfBitsToFloat(ptr[base])
+            for v in 1..<vocab {
+                let val = nemotronHalfBitsToFloat(ptr[base + v * stride3])
+                if val > bestVal {
+                    bestVal = val
+                    bestIdx = v
+                }
+            }
+            return bestIdx
         } else {
             return scan(logits.dataPointer.bindMemory(to: Float.self, capacity: logits.count))
         }
