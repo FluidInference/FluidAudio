@@ -82,6 +82,14 @@ public actor StreamingNemotronMultilingualAsrManager {
     // Configuration (loaded from metadata.json)
     public internal(set) var config: NemotronMultilingualStreamingConfig
 
+    /// When `true`, `finish()` tidies the final transcript for display:
+    /// capitalizes the first character and appends a sentence-terminal mark
+    /// (`.`, or `。` for zh/ja) when the text doesn't already end in one.
+    ///
+    /// Heuristic only — it cannot recover a missing mid-clause comma and always
+    /// guesses a period over `?`/`!`. Off by default; opt in for UI polish.
+    public var appendTerminalPunctuation: Bool = false
+
     // Audio Buffer + read offset. Using an offset instead of removeFirst()
     // avoids O(N²) memmove cost when processing very long files (the buffer
     // holds the whole input until compacted; removeFirst would shift
@@ -1075,7 +1083,27 @@ public actor StreamingNemotronMultilingualAsrManager {
             }
         }
 
+        if appendTerminalPunctuation {
+            return Self.tidyTerminalPunctuation(
+                decoded.text, language: lastFinishDetectedLanguage)
+        }
         return decoded.text
+    }
+
+    /// Display-only heuristic: capitalize the first character and append a
+    /// terminal mark if the text doesn't already end in one. Cannot recover a
+    /// missing mid-clause comma; always uses a period (`。` for zh/ja). Gated
+    /// behind `appendTerminalPunctuation`.
+    static func tidyTerminalPunctuation(_ text: String, language: String?) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let last = trimmed.last else { return text }
+        var result = trimmed.prefix(1).uppercased() + trimmed.dropFirst()
+        let terminals: Set<Character> = [".", "!", "?", "。", "！", "？", "…"]
+        if !terminals.contains(last) {
+            let isCJK = (language?.hasPrefix("zh") ?? false) || (language?.hasPrefix("ja") ?? false)
+            result.append(isCJK ? "。" : ".")
+        }
+        return result
     }
 
     /// Diagnostic stats captured at the most recent `finish()` call.
