@@ -15,11 +15,12 @@ public typealias NemotronMultilingualPartialCallback = @Sendable (String) -> Voi
 ///      `<en-US>` which are filtered from the transcript.
 ///   3. The channel cache shape is `[1, 24, 56, 1024]` (att_context_size=[56,0]).
 ///
-/// **Local-path-only**: this manager intentionally does not auto-download
-/// from HuggingFace because the multilingual model has not been uploaded yet.
-/// Callers must point at a directory containing the compiled `.mlmodelc`
-/// bundles (or `.mlpackage` archives) plus `metadata.json` and
-/// `tokenizer.json`.
+/// **Models** are published at
+/// `FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML`. Use
+/// `downloadAndPreloadShared(...)` to fetch + load a `latin/` or `multilingual/`
+/// `<chunkMs>ms` variant from HuggingFace, or point at a local directory
+/// containing the compiled `.mlmodelc` bundles (or `.mlpackage` archives) plus
+/// `metadata.json` and `tokenizer.json`.
 public actor StreamingNemotronMultilingualAsrManager {
     internal let logger = AppLogger(category: "NemotronMultilingualStreaming")
 

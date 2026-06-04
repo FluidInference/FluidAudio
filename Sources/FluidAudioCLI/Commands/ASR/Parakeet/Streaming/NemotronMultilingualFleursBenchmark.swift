@@ -9,8 +9,8 @@ import Foundation
 /// same `~/Library/Application Support/FluidAudio/FLEURS/<lang>/` directories
 /// are populated and shared with the Parakeet TDT benchmark.
 ///
-/// Local-model-path-only: the multilingual model is not auto-downloaded.
-/// Pass `--model-dir <path>` pointing at the directory containing
+/// Pass `--auto-download` to fetch a single-language variant from the
+/// HuggingFace repo, or `--model-dir <path>` for a local directory containing
 /// `metadata.json`, `tokenizer.json`, and the `.mlmodelc`/`.mlpackage` bundles.
 public class NemotronMultilingualFleursBenchmark {
     private let logger = AppLogger(category: "NemotronMultilingualFleurs")

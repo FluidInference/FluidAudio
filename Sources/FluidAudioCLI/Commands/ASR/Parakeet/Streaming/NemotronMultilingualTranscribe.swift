@@ -5,10 +5,10 @@ import Foundation
 
 /// Nemotron Speech Streaming Multilingual transcription for custom audio files.
 ///
-/// Local-path-only: the multilingual model is not yet uploaded to HuggingFace,
-/// so the caller must supply `--model-dir` pointing at a directory that
-/// contains the compiled `.mlmodelc` (or uncompiled `.mlpackage`) bundles plus
-/// `metadata.json` and `tokenizer.json`.
+/// Pass `--auto-download` to fetch the model from the HuggingFace repo, or
+/// `--model-dir` pointing at a local directory that contains the compiled
+/// `.mlmodelc` (or uncompiled `.mlpackage`) bundles plus `metadata.json` and
+/// `tokenizer.json`.
 public class NemotronMultilingualTranscribe {
     private let logger = AppLogger(category: "NemotronMultilingualTranscribe")
 
