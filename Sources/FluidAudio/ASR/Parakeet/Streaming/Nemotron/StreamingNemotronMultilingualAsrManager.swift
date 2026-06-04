@@ -470,7 +470,6 @@ public actor StreamingNemotronMultilingualAsrManager {
             guard let v = smartSpecEnvVar?.lowercased() else { return false }
             return v == "0" || v == "false" || v == "no"
         }()
-        let smartSpecEnabledForLogging = !smartSpecExplicitlyDisabled
         var smartSpecMissing: [String] = []
         if self.jointNoEncProjBatched == nil {
             smartSpecMissing.append("joint_noencproj_batched.mlpackage")
@@ -494,8 +493,6 @@ public actor StreamingNemotronMultilingualAsrManager {
                 logger.info(msg)
             }
         }
-        _ = smartSpecEnabledForLogging  // silence unused warning if introspected later
-
         // Load tokenizer with lang-tag filter set
         let tokenizerURL = directory.appendingPathComponent(ModelNames.NemotronMultilingualStreaming.tokenizer)
         self.tokenizer = try NemotronMultilingualTokenizer(
