@@ -43,16 +43,6 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// the B3 encoder (encprojsplit converter) which emits `encoder_proj` as a
     /// 6th output. Takes precedence over decoderJoint when present.
     internal var decoderJointNoEncProj: MLModel?
-    /// Optional batched-encoder joint mlpackage. Encoder input shape is
-    /// [1, 1024, K] where K = chunkEncoderFrames (e.g. 56 for 4480ms chunks).
-    /// Decoder input stays [1, 640, 1]. Output is [1, K, 1, vocab].
-    /// When present, the inner RNN-T loop uses a speculative-blank batched
-    /// joint call: compute one decoder pass + one joint_batched call for the
-    /// whole chunk, then walk the K predictions. On blank-heavy clean speech
-    /// (~70-80% blank rate) this collapses ~80 per-chunk CoreML calls into
-    /// 1-3, cutting decoder loop time substantially. See conversion script
-    /// `build_joint_batched_engprune.py`.
-    internal var jointBatched: MLModel?
 
     /// B3 speculative-blank batched joint: takes pre-projected
     /// `encoder_proj` (640-d, K frames) + decoder (640-d, 1 frame) and
@@ -421,16 +411,6 @@ public actor StreamingNemotronMultilingualAsrManager {
         {
             self.decoderJoint = try await MLModel.load(contentsOf: fusedURL, configuration: mlConfiguration)
             logger.info("Loaded decoder_joint — using merged inner-loop path")
-        }
-
-        // Optional batched joint mlpackage for speculative-blank inner loop
-        // (V1, preserved behind FLUIDAUDIO_ENABLE_SPECULATIVE_BATCHED).
-        if let batchedURL = try await locateOptionalModelBundle(
-            in: directory, compiled: "joint_batched.mlmodelc",
-            uncompiled: "joint_batched.mlpackage"
-        ) {
-            self.jointBatched = try await MLModel.load(contentsOf: batchedURL, configuration: mlConfiguration)
-            logger.info("Loaded joint_batched — V1 speculative-blank inner-loop path available")
         }
 
         // Optional smart speculative-blank batched joint (V2, default-on).
@@ -1032,29 +1012,6 @@ public actor StreamingNemotronMultilingualAsrManager {
         lastFinishDetectedLanguage = firstDetectedLanguage ?? decoded.detectedLanguage
         lastFinishProcessedChunks = processedChunks
         accumulatedTokenIds.removeAll()
-
-        // TEMP profiling: per-stage breakdown to identify the bottleneck.
-        if chunkCount > 0 {
-            let prepMs = Double(prepNanos) / 1_000_000.0
-            let encMs = Double(encNanos) / 1_000_000.0
-            let decMs = Double(decNanos) / 1_000_000.0
-            let totalMs = prepMs + encMs + decMs
-            let perChunk = totalMs / Double(chunkCount)
-            FileHandle.standardError.write(
-                Data(
-                    "[PROFILE] chunks=\(chunkCount) prep=\(String(format: "%.0f", prepMs))ms enc=\(String(format: "%.0f", encMs))ms dec=\(String(format: "%.0f", decMs))ms total=\(String(format: "%.0f", totalMs))ms per_chunk=\(String(format: "%.2f", perChunk))ms\n"
-                        .utf8))
-            // E4 instrumentation: speculation acceptance rate. High all-blank
-            // rate suggests K could grow; low rate suggests K could shrink.
-            if specWindowsTotal > 0 {
-                let allBlankPct = Double(specWindowsAllBlank) / Double(specWindowsTotal) * 100.0
-                let hitPct = Double(specWindowsHitNonBlank) / Double(specWindowsTotal) * 100.0
-                FileHandle.standardError.write(
-                    Data(
-                        "[SPEC] windows=\(specWindowsTotal) all_blank=\(specWindowsAllBlank) (\(String(format: "%.1f", allBlankPct))%) hit_non_blank=\(specWindowsHitNonBlank) (\(String(format: "%.1f", hitPct))%)\n"
-                            .utf8))
-            }
-        }
 
         if appendTerminalPunctuation {
             return Self.tidyTerminalPunctuation(

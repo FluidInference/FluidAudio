@@ -29,8 +29,6 @@ public struct SharedNemotronMultilingualModels: Sendable {
     public let decoderJointArgmax: MLModel?
     /// B3+B1 fusion (decoder + joint-without-encproj). May be nil.
     public let decoderJointNoEncProj: MLModel?
-    /// Speculative batched joint. May be nil.
-    public let jointBatched: MLModel?
     /// Smart-speculative batched joint. May be nil.
     public let jointNoEncProjBatched: MLModel?
     /// True iff the encoder uses MLState for cache (iOS 18+ stateful path).
@@ -49,7 +47,6 @@ public struct SharedNemotronMultilingualModels: Sendable {
         decoderJoint: MLModel?,
         decoderJointArgmax: MLModel?,
         decoderJointNoEncProj: MLModel?,
-        jointBatched: MLModel?,
         jointNoEncProjBatched: MLModel?,
         encoderIsStateful: Bool,
         config: NemotronMultilingualStreamingConfig,
@@ -63,7 +60,6 @@ public struct SharedNemotronMultilingualModels: Sendable {
         self.decoderJoint = decoderJoint
         self.decoderJointArgmax = decoderJointArgmax
         self.decoderJointNoEncProj = decoderJointNoEncProj
-        self.jointBatched = jointBatched
         self.jointNoEncProjBatched = jointNoEncProjBatched
         self.encoderIsStateful = encoderIsStateful
         self.config = config
@@ -187,14 +183,6 @@ extension StreamingNemotronMultilingualAsrManager {
                 logger: logger
             )
         }
-        let jointBatched = try await Self.loadOptionalShared(
-            directory: directory,
-            compiledName: "joint_batched.mlmodelc",
-            packageName: "joint_batched.mlpackage",
-            configuration: mlConfiguration,
-            logName: "joint_batched",
-            logger: logger
-        )
         let jointNoEncProjBatched = try await Self.loadOptionalShared(
             directory: directory,
             compiledName: "joint_noencproj_batched.mlmodelc",
@@ -244,7 +232,6 @@ extension StreamingNemotronMultilingualAsrManager {
             decoderJoint: decoderJoint,
             decoderJointArgmax: decoderJointArgmax,
             decoderJointNoEncProj: decoderJointNoEncProj,
-            jointBatched: jointBatched,
             jointNoEncProjBatched: jointNoEncProjBatched,
             encoderIsStateful: encoderIsStateful,
             config: config,
@@ -275,7 +262,6 @@ extension StreamingNemotronMultilingualAsrManager {
         self.decoderJoint = shared.decoderJoint
         self.decoderJointArgmax = shared.decoderJointArgmax
         self.decoderJointNoEncProj = shared.decoderJointNoEncProj
-        self.jointBatched = shared.jointBatched
         self.jointNoEncProjBatched = shared.jointNoEncProjBatched
         self.tokenizer = shared.tokenizer
 
