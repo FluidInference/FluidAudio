@@ -68,13 +68,6 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// shape-mismatch any non-K=8 build. Defaults to 8 (no-op fallback)
     /// when the model isn't present.
     internal var jointNoEncProjBatchedK: Int = 8
-    /// Optional native-Accelerate RNN-T inner-loop replacement. When present,
-    /// the per-token decoder + joint CoreML calls are replaced by pure-Swift
-    /// vDSP/cblas forward (~5-10x fewer dispatch overhead per token). Loaded
-    /// from `<build-dir>/native_weights/` produced by
-    /// `extract_decoder_joint_weights.py`. Takes precedence over all other
-    /// inner-loop paths (B1, B2, B3, jointBatched).
-    internal var nativeRnnt: NativeRnntInner?
 
     // Components
     private let audioConverter = AudioConverter()
@@ -467,20 +460,6 @@ public actor StreamingNemotronMultilingualAsrManager {
             }
         }
 
-        // Optional native-Accelerate RNN-T inner loop. Loaded from
-        // `<build>/native_weights/` (weights.bin + weights_index.json).
-        // Takes precedence over all CoreML inner-loop paths.
-        let nativeWeightsDir = directory.appendingPathComponent("native_weights")
-        if FileManager.default.fileExists(atPath: nativeWeightsDir.appendingPathComponent("weights.bin").path) {
-            self.nativeRnnt = NativeRnntInner(directory: nativeWeightsDir)
-            if self.nativeRnnt != nil {
-                logger.info(
-                    "Loaded NativeRnntInner from \(nativeWeightsDir.path) — using native vDSP/cblas inner-loop path")
-            } else {
-                logger.warning("Found native_weights/ but failed to initialize NativeRnntInner")
-            }
-        }
-
         // Smart-speculative-blank load-time state report. Smart-spec is
         // default-on as of May 2026 (T3 K=4 at 1120ms = +2.0%, K=8 at
         // 4480ms = +1.7%, both A/B/A/B non-overlapping, WER-neutral).
@@ -495,9 +474,6 @@ public actor StreamingNemotronMultilingualAsrManager {
         var smartSpecMissing: [String] = []
         if self.jointNoEncProjBatched == nil {
             smartSpecMissing.append("joint_noencproj_batched.mlpackage")
-        }
-        if self.nativeRnnt == nil {
-            smartSpecMissing.append("native_weights/")
         }
         if smartSpecExplicitlyDisabled {
             logger.info(
@@ -948,7 +924,6 @@ public actor StreamingNemotronMultilingualAsrManager {
         prefetchedCacheTime = nil
         prefetchedCacheLen = nil
         // Reset native LSTM state if present
-        nativeRnnt?.resetState()
 
         // Decoder LSTM states
         hState = try EncoderCacheManager.createZeroArray(

@@ -37,8 +37,6 @@ public struct SharedNemotronMultilingualModels: Sendable {
     public let encoderIsStateful: Bool
     public let config: NemotronMultilingualStreamingConfig
     public let tokenizer: NemotronMultilingualTokenizer
-    /// Optional native-Accelerate RNN-T weights blob directory.
-    public let nativeWeightsDir: URL?
     /// MLModelConfiguration used to load these. Each manager uses the
     /// same configuration to stay on the same compute units.
     public let mlConfiguration: MLModelConfiguration
@@ -56,7 +54,6 @@ public struct SharedNemotronMultilingualModels: Sendable {
         encoderIsStateful: Bool,
         config: NemotronMultilingualStreamingConfig,
         tokenizer: NemotronMultilingualTokenizer,
-        nativeWeightsDir: URL?,
         mlConfiguration: MLModelConfiguration
     ) {
         self.preprocessor = preprocessor
@@ -71,7 +68,6 @@ public struct SharedNemotronMultilingualModels: Sendable {
         self.encoderIsStateful = encoderIsStateful
         self.config = config
         self.tokenizer = tokenizer
-        self.nativeWeightsDir = nativeWeightsDir
         self.mlConfiguration = mlConfiguration
     }
 }
@@ -238,11 +234,6 @@ extension StreamingNemotronMultilingualAsrManager {
             langTagTokenIds: config.langTagTokenIds
         )
 
-        let nativeWeightsDir = directory.appendingPathComponent("native_weights")
-        let nativeAvailable = FileManager.default.fileExists(
-            atPath: nativeWeightsDir.appendingPathComponent("weights.bin").path
-        )
-
         logger.info("Shared models preload complete — ready for N consumers")
 
         return SharedNemotronMultilingualModels(
@@ -258,7 +249,6 @@ extension StreamingNemotronMultilingualAsrManager {
             encoderIsStateful: encoderIsStateful,
             config: config,
             tokenizer: tokenizer,
-            nativeWeightsDir: nativeAvailable ? nativeWeightsDir : nil,
             mlConfiguration: mlConfiguration
         )
     }
@@ -305,11 +295,6 @@ extension StreamingNemotronMultilingualAsrManager {
             if shared.encoderIsStateful {
                 self.encoderState = shared.encoder.makeState()
             }
-        }
-
-        // Per-stream NativeRnntInner (has its own LSTM state buffers).
-        if let nativeDir = shared.nativeWeightsDir {
-            self.nativeRnnt = NativeRnntInner(directory: nativeDir)
         }
 
         // Per-stream cache/state init
