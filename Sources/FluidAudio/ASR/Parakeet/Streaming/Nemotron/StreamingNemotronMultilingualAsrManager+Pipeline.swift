@@ -615,17 +615,6 @@ extension StreamingNemotronMultilingualAsrManager {
         processedChunks += 1
     }
 
-    /// Local copy of tokenizerPiece (forId:) — needed because the existing
-    /// tokenizerPiece is `private`. (Could promote that to internal but
-    /// keeping local to avoid touching unrelated code.)
-    private func tokenizerPieceForLangTag(forId id: Int, tokenizer: NemotronMultilingualTokenizer) -> String? {
-        let decoded = tokenizer.decode(ids: [id])
-        if let lang = decoded.detectedLanguage {
-            return "<\(lang)>"
-        }
-        return decoded.text.isEmpty ? nil : decoded.text
-    }
-
     /// Smart speculative-blank decode (V2). Uses B3 encoder-proj split +
     /// batched joint_noencproj to fast-skip blank streaks K-at-a-time.
     ///
