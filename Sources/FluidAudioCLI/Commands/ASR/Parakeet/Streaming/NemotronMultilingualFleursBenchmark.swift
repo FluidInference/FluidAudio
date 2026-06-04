@@ -22,7 +22,7 @@ public class NemotronMultilingualFleursBenchmark {
         var cacheDir: String
         var modelDir: URL
         var debugMode: Bool
-        /// Which benchmark dataset to evaluate against (FLEURS, MCV-17, MLS).
+        /// Which benchmark dataset to evaluate against (FLEURS, LibriSpeech, Earnings22).
         /// Default `.fleurs` preserves backward compatibility with existing
         /// invocations.
         var dataset: MultilingualBenchmarkDataset = .fleurs
@@ -43,7 +43,7 @@ public class NemotronMultilingualFleursBenchmark {
         /// Optional prompt-code override (e.g. "es-US", "pt-PT"). When set,
         /// bypasses the FLEURS-code → prompt-code mapping and feeds this code
         /// directly to `manager.setLanguage(_:)`. Used for regional-prompt A/Bs
-        /// (e.g. running MLS pt with "pt-PT" instead of the auto-derived "pt-BR").
+        /// (e.g. running pt with "pt-PT" instead of the auto-derived "pt-BR").
         var promptOverride: String? = nil
         /// Optional compute-units override for the ASR manager's MLModelConfiguration.
         /// Default (nil) uses MLModelConfigurationUtils.defaultConfiguration() = .cpuAndNeuralEngine.
@@ -132,28 +132,6 @@ public class NemotronMultilingualFleursBenchmark {
             let downloader = FLEURSBenchmark(config: downloadConfig)
             try await downloader.downloadFLEURS(languages: config.languages)
             samples = try downloader.loadFLEURSSamples(languages: config.languages)
-        case .mcv:
-            try await HFDatasetsServerDownloader.downloadMCV(
-                languages: config.languages,
-                cacheRoot: URL(fileURLWithPath: config.cacheDir),
-                samplesPerLanguage: config.samplesPerLanguage
-            )
-            samples = try loadHFDatasetsServerSamples(
-                cacheRoot: URL(fileURLWithPath: config.cacheDir),
-                languages: config.languages,
-                audioExtension: MultilingualBenchmarkDataset.mcv.audioExtension
-            )
-        case .mls:
-            try await HFDatasetsServerDownloader.downloadMLS(
-                languages: config.languages,
-                cacheRoot: URL(fileURLWithPath: config.cacheDir),
-                samplesPerLanguage: config.samplesPerLanguage
-            )
-            samples = try loadHFDatasetsServerSamples(
-                cacheRoot: URL(fileURLWithPath: config.cacheDir),
-                languages: config.languages,
-                audioExtension: MultilingualBenchmarkDataset.mls.audioExtension
-            )
         case .librispeech:
             samples = try loadLibriSpeechSamples(
                 cacheRoot: URL(fileURLWithPath: config.cacheDir),
@@ -543,58 +521,6 @@ public class NemotronMultilingualFleursBenchmark {
         return out
     }
 
-    /// Load samples produced by `HFDatasetsServerDownloader` (MCV / MLS).
-    /// Layout mirrors FLEURS: per-language directory containing audio files
-    /// and a `<lang>.trans.txt` LibriSpeech-style transcript file.
-    private func loadHFDatasetsServerSamples(
-        cacheRoot: URL,
-        languages: [String],
-        audioExtension: String
-    ) throws -> [FLEURSBenchmark.FLEURSSample] {
-        var out: [FLEURSBenchmark.FLEURSSample] = []
-        for lang in languages {
-            let langDir = cacheRoot.appendingPathComponent(lang)
-            guard FileManager.default.fileExists(atPath: langDir.path) else {
-                logger.warning("No data found for \(lang). Skipping.")
-                continue
-            }
-            let transFile = langDir.appendingPathComponent("\(lang).trans.txt")
-            var transcripts: [String: String] = [:]
-            if FileManager.default.fileExists(atPath: transFile.path) {
-                let content = (try? String(contentsOf: transFile)) ?? ""
-                for line in content.components(separatedBy: .newlines) where !line.isEmpty {
-                    let parts = line.split(separator: " ", maxSplits: 1)
-                    if parts.count >= 1 {
-                        let id = String(parts[0])
-                        transcripts[id] = parts.count > 1 ? String(parts[1]) : ""
-                    }
-                }
-            }
-            let files =
-                (try? FileManager.default.contentsOfDirectory(at: langDir, includingPropertiesForKeys: nil)) ?? []
-            let audioFiles =
-                files
-                .filter { $0.pathExtension.lowercased() == audioExtension.lowercased() }
-                .sorted { $0.lastPathComponent < $1.lastPathComponent }
-                .prefix(config.samplesPerLanguage == Int.max ? Int.max : config.samplesPerLanguage)
-            for url in audioFiles {
-                let id = url.deletingPathExtension().lastPathComponent
-                out.append(
-                    FLEURSBenchmark.FLEURSSample(
-                        audioPath: url.path,
-                        transcription: transcripts[id] ?? "",
-                        language: lang,
-                        sampleId: id
-                    )
-                )
-            }
-            if !audioFiles.isEmpty {
-                logger.info("Loaded \(audioFiles.count) samples for \(lang)")
-            }
-        }
-        return out
-    }
-
     public func saveResults(_ results: [LanguageResult], to outputPath: String) throws {
         func sanitize(_ value: Double) -> Double {
             value.isNaN || value.isInfinite ? 0.0 : value
@@ -700,7 +626,7 @@ extension NemotronMultilingualFleursBenchmark {
                         dataset = parsed
                     } else {
                         logger.error(
-                            "Unknown --dataset value '\(raw)'. Expected one of: fleurs, mcv, mls, librispeech, earnings22."
+                            "Unknown --dataset value '\(raw)'. Expected one of: fleurs, librispeech, earnings22."
                         )
                         return
                     }
@@ -812,7 +738,7 @@ extension NemotronMultilingualFleursBenchmark {
 
         // Default samples behavior:
         // - FLEURS: 100 (matches existing behavior)
-        // - MCV / MLS: all (test splits are larger; explicit opt-in to a
+        // - others: all (test splits are larger; explicit opt-in to a
         //   small slice via `--samples N`).
         if !samplesExplicitlySet && dataset != .fleurs {
             samplesPerLanguage = Int.max
@@ -925,12 +851,8 @@ extension NemotronMultilingualFleursBenchmark {
                                                      encoder.mlmodelc or encoder.mlpackage, etc.)
 
                         Options:
-                            --dataset <name>         Benchmark dataset: fleurs (default) | mcv | mls
+                            --dataset <name>         Benchmark dataset: fleurs (default) | librispeech | earnings22
                                                      - fleurs: FLEURS (any supported language)
-                                                     - mcv:    Mozilla Common Voice v17.0
-                                                               (en/es/fr/it/pt; gated, needs HF_TOKEN)
-                                                     - mls:    Multilingual LibriSpeech
-                                                               (en/es/fr/it/pt; gated, needs HF_TOKEN)
                                                      - librispeech: LibriSpeech English (test-clean default)
                                                                (no HF token needed; auto-downloaded by
                                                                `fluidaudio download --dataset librispeech-test-clean`)
@@ -938,11 +860,11 @@ extension NemotronMultilingualFleursBenchmark {
                                                                (real multi-speaker; auto-downloaded by
                                                                `fluidaudio download --dataset earnings22-kws`)
                             --languages <list>       Comma-separated FLEURS codes (default: en_us,fr_fr,de_de,es_419,ja_jp)
-                            --samples <n|all>        Samples per language. Default: 100 for FLEURS, "all" for MCV/MLS.
+                            --samples <n|all>        Samples per language. Default: 100 for FLEURS, "all" otherwise.
                             --output <file>          Output JSON file (default: nemotron_multilingual_<dataset>_results.json)
                             --cache-dir <path>       Dataset cache (default: ~/Library/Application Support/FluidAudio/<DatasetDir>)
                             --dataset-repo <repo>    Override FLEURS HF repo (default: FluidInference/fleurs-full)
-                                                     Ignored for mcv / mls / librispeech.
+                                                     Ignored for librispeech / earnings22.
                             --librispeech-subset <name>  LibriSpeech subset (default: test-clean).
                                                          One of: test-clean, test-other, dev-clean, dev-other.
                                                          Only used when --dataset librispeech.
@@ -955,19 +877,6 @@ extension NemotronMultilingualFleursBenchmark {
                         Examples:
                             # FLEURS, 5 languages × 100 samples (default)
                             fluidaudio nemotron-multilingual-benchmark --model-dir ~/my-multilingual-model
-
-                            # MCV-17 cross-validation, all 5 European-Latin languages, full test split
-                            HF_TOKEN=hf_... fluidaudio nemotron-multilingual-benchmark \\
-                                --model-dir ~/my-multilingual-model \\
-                                --dataset mcv \\
-                                --languages en_us,fr_fr,es_419,it_it,pt_br
-
-                            # MLS quick smoke test (10 samples / lang)
-                            HF_TOKEN=hf_... fluidaudio nemotron-multilingual-benchmark \\
-                                --model-dir ~/my-multilingual-model \\
-                                --dataset mls \\
-                                --languages en_us \\
-                                --samples 10
 
             """
         )
