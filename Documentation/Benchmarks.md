@@ -530,6 +530,60 @@ swift run -c release fluidaudiocli nemotron-benchmark --chunk 1120
 swift run -c release fluidaudiocli nemotron-benchmark --chunk 560
 ```
 
+## Streaming ASR (Nemotron Multilingual)
+
+NVIDIA's Nemotron 3.5 ASR Streaming Multilingual 0.6B — real-time streaming RNN-T
+covering ~40 language-locales, fully on-device. Two models share one encoder per
+tier: `latin` (en/es/fr/it/pt/de, 2,828-token script-pruned vocab) and
+`multilingual` (zh/ja + 100+ via `prompt_id`, full 13,087 vocab).
+
+Model: [FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML](https://huggingface.co/FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML)
+
+Hardware: Apple M5 Pro, macOS 26.5. Encoder/decoder/joint on ANE
+(`.cpuAndNeuralEngine`), CoreML iOS 17 target. Per-file sum-aggregate RTFx, 2.24 s
+(2240 ms) tier, B1 fused decode.
+
+### LibriSpeech test-clean (English, 2620 files, 5.40h audio)
+
+| Model | Vocab | WER | RTFx |
+|-------|-------|-----|------|
+| `latin` | 2,828 | 3.6% | 124x |
+| `multilingual` | 13,087 | 3.2% | 76x |
+
+`latin` is ~1.6× faster than the full-vocab model on the same English audio
+(smaller per-frame joint matmul) at ~0.4 pp WER. English WER uses the HF
+`EnglishTextNormalizer` (Open ASR Leaderboard convention).
+
+### FLEURS (full test splits, 2.24 s tier)
+
+| Language | Model | WER / CER | RTFx |
+|----------|-------|-----------|------|
+| English (en) | `latin` | 8.96% | 130x |
+| Spanish (es) | `latin` | 4.80% | 140x |
+| French (fr) | `latin` | 9.52% | 130x |
+| Italian (it) | `latin` | 5.41% | 147x |
+| Portuguese (pt) | `latin` | 6.14% | 141x |
+| German (de) | `latin` | 9.83% | 144x |
+| Chinese (zh) | `multilingual` | 18.57% CER | 89x |
+| Japanese (ja) | `multilingual` | 13.79% CER | 84x |
+
+FLEURS is multi-domain and digit-bearing, so it runs higher than test-clean for
+the same model. Non-English Latin languages are scored with the Whisper
+`BasicTextNormalizer` + digit ITN to match NVIDIA's FLEURS pipeline; zh/ja use
+CER. The full-vocab `multilingual` model is chunk-sensitive — use the 2 s tier
+for zh/ja.
+
+```bash
+# LibriSpeech test-clean (English)
+swift run -c release fluidaudiocli nemotron-multilingual-benchmark \
+  --dataset librispeech --librispeech-subset test-clean --model-dir <model-dir>
+
+# FLEURS per-language
+swift run -c release fluidaudiocli nemotron-multilingual-benchmark \
+  --dataset fleurs --languages en_us,es_419,fr_fr,it_it,pt_br,de_de,cmn_hans_cn,ja_jp \
+  --model-dir <model-dir>
+```
+
 ## Speaker Diarization
 
 Both offline and online versions use the community-1 model (via FluidInference/speaker-diarization-coreml).
