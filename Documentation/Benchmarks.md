@@ -568,10 +568,14 @@ Hardware: Apple M5 Pro, macOS 26.5. Encoder/decoder/joint on ANE
 | Japanese (ja) | `multilingual` | 13.79% CER | 84x |
 
 FLEURS is multi-domain and digit-bearing, so it runs higher than test-clean for
-the same model. Non-English Latin languages are scored with the Whisper
-`BasicTextNormalizer` + digit ITN to match NVIDIA's FLEURS pipeline; zh/ja use
-CER. The full-vocab `multilingual` model is chunk-sensitive — use the 2 s tier
-for zh/ja.
+the same model. Reference and hypothesis are normalized with
+[`text-processing-rs`](https://github.com/FluidInference/text-processing-rs) —
+FluidInference's Rust port of NVIDIA NeMo's (inverse) text-normalization grammars
+(~98.6% NeMo-suite compatibility) — to match NVIDIA's FLEURS scoring; zh/ja are
+scored as CER. (The `nemotron-multilingual-benchmark` CLI's built-in scorer uses
+a lighter Swift normalizer, so non-English numbers it prints may differ slightly
+from these.) The full-vocab `multilingual` model is chunk-sensitive — use the 2 s
+tier for zh/ja.
 
 ```bash
 # LibriSpeech test-clean (English)
