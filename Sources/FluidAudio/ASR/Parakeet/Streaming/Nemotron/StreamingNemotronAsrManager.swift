@@ -143,7 +143,7 @@ public actor StreamingNemotronAsrManager {
             self.mlConfiguration = configuration
         }
 
-        let chunkSize = requestedChunkSize ?? .ms1120
+        let chunkSize = requestedChunkSize ?? .ms2240
         let repo = chunkSize.repo
 
         let modelsBaseDir =

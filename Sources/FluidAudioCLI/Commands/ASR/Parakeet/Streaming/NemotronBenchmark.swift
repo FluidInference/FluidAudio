@@ -11,7 +11,7 @@ public class NemotronBenchmark {
         var maxFiles: Int?
         var subset: String = "test-clean"
         var modelDir: URL?
-        var chunkSize: NemotronChunkSize = .ms1120
+        var chunkSize: NemotronChunkSize = .ms2240
 
         public init() {}
     }
