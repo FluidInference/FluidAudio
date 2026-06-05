@@ -187,6 +187,7 @@ public actor StreamingNemotronAsrManager {
         encoder = nil
         decoder = nil
         joint = nil
+        decoderJoint = nil
         tokenizer = nil
         cacheChannel = nil
         cacheTime = nil

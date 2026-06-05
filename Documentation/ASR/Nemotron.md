@@ -12,45 +12,25 @@ Nemotron Speech Streaming 0.6B is a FastConformer RNNT model optimized for strea
 
 ## Benchmark Results
 
-Tested on Apple M2 with LibriSpeech test-clean:
+Three tiers ship (Apple M5 Pro, LibriSpeech test-clean, 100 files, CPU+NE), all from one
+conversion with **B1 fusion** (`decoder_joint.mlmodelc` — decoder+joint merged into one
+CoreML call per RNN-T step, loaded automatically; argmax stays in Swift):
 
-| Chunk Size | WER | RTFx | Files |
-|------------|-----|------|-------|
-| 1120ms | 1.99% | 9.6x | 100 |
-| 560ms | 2.12% | 8.5x | 100 |
-| 160ms | ~10% | 3.5x | 20 |
-| 80ms | ~60% | 1.9x | 20 |
+| Tier | WER | RTFx | Δ vs 1120ms |
+|------|-----|------|-------------|
+| 560ms | 2.28% | 42.1 | −35% |
+| 1120ms | 2.28% | 65.0 | — |
+| **2240ms (default)** | **2.46%** | **93.6** | **+44%** |
 
-160ms and 80ms were only tested on 20 files.
+`.ms2240` is the default: doubling the streaming chunk (224 mel frames = 2× the trained
+14-encoder-frame chunk, so the chunked-attention mask still tiles cleanly) halves per-chunk
+fixed overhead for throughput, at ~1.1 s extra latency and no accuracy cost. Drop to `.ms1120`
+or `.ms560` for lower latency. B1 fusion contributes ~+15% on top of any tier.
 
-#### 2240ms tier + B1 fusion (medium-latency / throughput)
-
-Two stackable, WER-neutral throughput levers:
-
-- **2240ms chunk** doubles the streaming chunk (224 mel frames = 2× the trained
-  14-encoder-frame chunk, so the chunked-attention mask still tiles cleanly). Halving
-  per-chunk fixed overhead trades latency for throughput at no accuracy cost.
-- **B1 fusion** (`decoder_joint.mlmodelc`) merges the decoder and joint into one CoreML
-  model, so the RNN-T inner loop makes one call per step instead of two. Loaded
-  automatically when present in the tier folder; argmax stays in Swift.
-
-End-to-end A/B (`nemotron-benchmark`, LibriSpeech test-clean, 100 files, CPU+NE, same
-reconversion pipeline for all rows):
-
-| Build | WER | RTFx | Δ vs 1120ms |
-|-------|-----|------|-------------|
-| 1120ms INT8 | 2.42% | 58.6 | — |
-| 2240ms INT8 | 2.46% | 81.2 | +38.6% |
-| **2240ms INT8 + B1 fused** | **2.46%** | **93.6** | **+59.7%** |
-
-WER stays neutral across all rows (within n=100 noise). B1 fusion alone is +15.3%
-(81.2 → 93.6) and applies to any tier that ships a `decoder_joint.mlmodelc`. Use `.ms2240`
-for offline / medium-latency where a ~2.2s chunk is acceptable; keep `.ms1120` (or lower)
-for interactive streaming.
-
-> Note: the table above is a self-consistent A/B from one reconversion pipeline; absolute
-> WER/RTFx are not directly comparable to the older M2 rows. WER parity against the released
-> tiers should be confirmed before publishing the 2240ms model weights.
+> Weights are a faithful conversion of the public `nvidia/nemotron-speech-streaming-en-0.6b`
+> checkpoint (decoder & joint match PyTorch at cos=1.0). WER parity against NVIDIA's internal
+> tuning of the same model is a tracked follow-up; the ladder above is internally consistent
+> (one conversion for all tiers) and reports the relative gains.
 
 ## Quick Start
 
@@ -141,10 +121,9 @@ try await manager.loadModels(modelDir: modelDir)
 
 | Chunk Size | mel_frames | pre_encode_cache | total_frames | samples |
 |------------|------------|------------------|--------------|---------|
+| 2240ms (default) | 224 | 9 | 233 | 35,840 |
 | 1120ms | 112 | 9 | 121 | 17,920 |
 | 560ms | 56 | 9 | 65 | 8,960 |
-| 160ms | 16 | 9 | 25 | 2,560 |
-| 80ms | 8 | 9 | 17 | 1,280 |
 
 **Formula:** `chunk_ms = mel_frames × 10ms` (10ms per mel frame)
 

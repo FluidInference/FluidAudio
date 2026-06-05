@@ -10,7 +10,7 @@ public class NemotronTranscribe {
     public struct Config {
         var inputFiles: [URL] = []
         var modelDir: URL?
-        var chunkSize: NemotronChunkSize = .ms1120
+        var chunkSize: NemotronChunkSize = .ms2240
 
         public init() {}
     }
@@ -49,13 +49,12 @@ public class NemotronTranscribe {
                 i += 1
                 if i < arguments.count, let ms = Int(arguments[i]) {
                     switch ms {
+                    case 2240: config.chunkSize = .ms2240
                     case 1120: config.chunkSize = .ms1120
                     case 560: config.chunkSize = .ms560
-                    case 160: config.chunkSize = .ms160
-                    case 80: config.chunkSize = .ms80
                     default:
                         logger.warning(
-                            "Invalid chunk size: \(ms)ms. Valid options: 1120, 560, 160, or 80. Using default 1120ms.")
+                            "Invalid chunk size: \(ms)ms. Valid options: 2240, 1120, or 560. Using default 2240ms.")
                     }
                 }
             case "--help", "-h":
@@ -87,24 +86,23 @@ public class NemotronTranscribe {
             Options:
                 --input, -i <path>        Audio file to transcribe (.wav) - required, can be used multiple times
                 --model-dir, -m <path>    Path to Nemotron CoreML models (optional, auto-downloads if not provided)
-                --chunk, -c <ms>          Chunk size: 1120, 560, 160, or 80 (default: 1120)
+                --chunk, -c <ms>          Chunk size: 2240, 1120, or 560 (default: 2240)
                 --help, -h                Show this help
 
             Chunk Sizes:
-                1120ms  Original chunk size (1.12s) - best accuracy & speed
-                560ms   Half chunk size (0.56s) - lower latency
-                160ms   Very low latency (0.16s)
-                80ms    Ultra low latency (0.08s)
+                2240ms  Default (2.24s) - highest throughput (+B1 fused decode), WER-neutral
+                1120ms  Trained chunk (1.12s) - lower latency
+                560ms   Lowest-latency tier (0.56s)
 
             Examples:
-                # Transcribe a single file
+                # Transcribe a single file (defaults to 2240ms)
                 fluidaudio nemotron-transcribe --input audio.wav
 
-                # Transcribe multiple files with 560ms chunks
-                fluidaudio nemotron-transcribe -i file1.wav -i file2.wav --chunk 560
+                # Transcribe multiple files with 1120ms chunks
+                fluidaudio nemotron-transcribe -i file1.wav -i file2.wav --chunk 1120
 
-                # Ultra low latency with 160ms chunks
-                fluidaudio nemotron-transcribe --input audio.wav --chunk 160
+                # Lower latency with 560ms chunks
+                fluidaudio nemotron-transcribe --input audio.wav --chunk 560
 
                 # Use custom model directory
                 fluidaudio nemotron-transcribe --input audio.wav --model-dir ~/my-models

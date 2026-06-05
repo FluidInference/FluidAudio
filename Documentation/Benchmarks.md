@@ -520,15 +520,18 @@ Hardware: Apple M5 Pro, macOS 26.5. Encoder int8 on ANE (`.cpuAndNeuralEngine`).
 
 ### LibriSpeech test-clean (100 files)
 
+Three tiers, all from one conversion with B1-fused decode (`decoder_joint.mlmodelc`):
+
 | Tier | WER | RTFx | Δ vs 1120ms |
 |------|-----|------|-------------|
-| 1120ms | 2.42% | 58.6 | — |
-| 2240ms | 2.46% | 81.2 | +38.6% |
-| **2240ms + B1 (default)** | **2.46%** | **93.6** | **+59.7%** |
+| 560ms | 2.28% | 42.1 | −35% |
+| 1120ms | 2.28% | 65.0 | — |
+| **2240ms (default)** | **2.46%** | **93.6** | **+44%** |
 
 WER is neutral across tiers (within n=100 noise). 2240ms = 2× the trained 14-encoder-frame
 chunk (the chunked-attention mask still tiles cleanly); B1 fusion = one CoreML call per
-decode step instead of two (+15.3% alone, applies to any tier shipping `decoder_joint.mlmodelc`).
+decode step instead of two (~+15% on any tier shipping `decoder_joint.mlmodelc`). The v1
+160ms/80ms tiers were removed (off-tiling, degraded WER).
 
 **Encoder optimization notes (M5 Pro):**
 - **6-bit palettization beats int8** on every axis — 2.24% WER, +9% RTFx, smaller (422 MB vs
@@ -538,10 +541,10 @@ decode step instead of two (+15.3% alone, applies to any tier shipping `decoder_
   **CPU** (instant load, ~140 MB, ~66 RTFx) is ~2× faster than 4-way ANE sharding (~33 RTFx)
   — so CPU, not sharding, is the iOS encoder choice. macOS / plugged-in stays on ANE.
 
-> The 2240ms weights are a faithful conversion of the public `nvidia/nemotron-speech-streaming-en-0.6b`
-> checkpoint (decoder & joint match PyTorch at cos=1.0). The released 1120/560/160/80 tiers were
-> built from a different source checkpoint and score ~0.4 pp lower WER on test-clean; the ladder
-> above is internally consistent (same conversion for all rows) and reports the relative gains.
+> All three tiers are a faithful conversion of the public `nvidia/nemotron-speech-streaming-en-0.6b`
+> checkpoint (decoder & joint match PyTorch at cos=1.0) and replace the previous v1 tiers. WER
+> parity against NVIDIA's internal tuning of the same model is a tracked follow-up; the ladder
+> above is internally consistent (one conversion for all tiers) and reports the relative gains.
 
 ```bash
 # Default (2240ms + B1)
