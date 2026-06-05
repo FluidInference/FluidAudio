@@ -23,23 +23,34 @@ Tested on Apple M2 with LibriSpeech test-clean:
 
 160ms and 80ms were only tested on 20 files.
 
-#### 2240ms tier (medium-latency / throughput)
+#### 2240ms tier + B1 fusion (medium-latency / throughput)
 
-The `2240ms` tier doubles the streaming chunk (224 mel frames = 2× the trained
-14-encoder-frame chunk, so the chunked-attention mask still tiles cleanly). Doubling
-the chunk halves the per-chunk fixed overhead while the decoder emits the same tokens,
-so it trades latency for throughput at no accuracy cost. Controlled A/B on the converted
-INT8 builds (LibriSpeech test-clean, 100 files, CPU+NE):
+Two stackable, WER-neutral throughput levers:
 
-| Tier | WER | RTFx | Δ RTFx |
-|------|-----|------|--------|
-| 1120ms (INT8) | 2.24% | 61.7 | — |
-| **2240ms (INT8)** | **2.41%** | **87.0** | **+41%** |
+- **2240ms chunk** doubles the streaming chunk (224 mel frames = 2× the trained
+  14-encoder-frame chunk, so the chunked-attention mask still tiles cleanly). Halving
+  per-chunk fixed overhead trades latency for throughput at no accuracy cost.
+- **B1 fusion** (`decoder_joint.mlmodelc`) merges the decoder and joint into one CoreML
+  model, so the RNN-T inner loop makes one call per step instead of two. Loaded
+  automatically when present in the tier folder; argmax stays in Swift.
 
-WER stays neutral (+0.17pp, within n=100 noise). Use `.ms2240` for offline or
-medium-latency transcription where a ~2.2s chunk is acceptable; keep `.ms1120` (or lower)
-for interactive streaming. RTFx here is from the conversion harness and is not directly
-comparable to the older M2 rows above.
+End-to-end A/B (`nemotron-benchmark`, LibriSpeech test-clean, 100 files, CPU+NE, same
+reconversion pipeline for all rows):
+
+| Build | WER | RTFx | Δ vs 1120ms |
+|-------|-----|------|-------------|
+| 1120ms INT8 | 2.42% | 58.6 | — |
+| 2240ms INT8 | 2.46% | 81.2 | +38.6% |
+| **2240ms INT8 + B1 fused** | **2.46%** | **93.6** | **+59.7%** |
+
+WER stays neutral across all rows (within n=100 noise). B1 fusion alone is +15.3%
+(81.2 → 93.6) and applies to any tier that ships a `decoder_joint.mlmodelc`. Use `.ms2240`
+for offline / medium-latency where a ~2.2s chunk is acceptable; keep `.ms1120` (or lower)
+for interactive streaming.
+
+> Note: the table above is a self-consistent A/B from one reconversion pipeline; absolute
+> WER/RTFx are not directly comparable to the older M2 rows. WER parity against the released
+> tiers should be confirmed before publishing the 2240ms model weights.
 
 ## Quick Start
 

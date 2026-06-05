@@ -90,38 +90,66 @@ extension StreamingNemotronAsrManager {
                 let tokenLen = try MLMultiArray(shape: [1], dataType: .int32)
                 tokenLen[0] = 1
 
-                let decoderInput = try MLDictionaryFeatureProvider(dictionary: [
-                    "token": MLFeatureValue(multiArray: tokenInput),
-                    "token_length": MLFeatureValue(multiArray: tokenLen),
-                    "h_in": MLFeatureValue(multiArray: currentH),
-                    "c_in": MLFeatureValue(multiArray: currentC),
-                ])
+                let predToken: Int
+                let stepH: MLMultiArray
+                let stepC: MLMultiArray
 
-                let decoderOutput = try await decoder.prediction(from: decoderInput)
+                if let decoderJoint = self.decoderJoint {
+                    // B1 fused path: one CoreML call merges decoder + joint.
+                    let fusedInput = try MLDictionaryFeatureProvider(dictionary: [
+                        "token": MLFeatureValue(multiArray: tokenInput),
+                        "token_length": MLFeatureValue(multiArray: tokenLen),
+                        "h_in": MLFeatureValue(multiArray: currentH),
+                        "c_in": MLFeatureValue(multiArray: currentC),
+                        "encoder": MLFeatureValue(multiArray: encStep),
+                    ])
 
-                guard let decoderOut = decoderOutput.featureValue(for: "decoder_out")?.multiArrayValue,
-                    let hOut = decoderOutput.featureValue(for: "h_out")?.multiArrayValue,
-                    let cOut = decoderOutput.featureValue(for: "c_out")?.multiArrayValue
-                else {
-                    throw ASRError.processingFailed("Decoder failed")
+                    let fusedOutput = try await decoderJoint.prediction(from: fusedInput)
+
+                    guard let logits = fusedOutput.featureValue(for: "logits")?.multiArrayValue,
+                        let hOut = fusedOutput.featureValue(for: "h_out")?.multiArrayValue,
+                        let cOut = fusedOutput.featureValue(for: "c_out")?.multiArrayValue
+                    else {
+                        throw ASRError.processingFailed("Fused decoder_joint failed")
+                    }
+                    predToken = findMaxIndex(logits)
+                    stepH = hOut
+                    stepC = cOut
+                } else {
+                    // Separate decoder -> joint path.
+                    let decoderInput = try MLDictionaryFeatureProvider(dictionary: [
+                        "token": MLFeatureValue(multiArray: tokenInput),
+                        "token_length": MLFeatureValue(multiArray: tokenLen),
+                        "h_in": MLFeatureValue(multiArray: currentH),
+                        "c_in": MLFeatureValue(multiArray: currentC),
+                    ])
+
+                    let decoderOutput = try await decoder.prediction(from: decoderInput)
+
+                    guard let decoderOut = decoderOutput.featureValue(for: "decoder_out")?.multiArrayValue,
+                        let hOut = decoderOutput.featureValue(for: "h_out")?.multiArrayValue,
+                        let cOut = decoderOutput.featureValue(for: "c_out")?.multiArrayValue
+                    else {
+                        throw ASRError.processingFailed("Decoder failed")
+                    }
+
+                    // Joint: encoder_step + decoder_out -> logits
+                    let decoderStep = try sliceDecoderOutput(decoderOut)
+
+                    let jointInput = try MLDictionaryFeatureProvider(dictionary: [
+                        "encoder": MLFeatureValue(multiArray: encStep),
+                        "decoder": MLFeatureValue(multiArray: decoderStep),
+                    ])
+
+                    let jointOutput = try await joint.prediction(from: jointInput)
+
+                    guard let logits = jointOutput.featureValue(for: "logits")?.multiArrayValue else {
+                        throw ASRError.processingFailed("Joint failed")
+                    }
+                    predToken = findMaxIndex(logits)
+                    stepH = hOut
+                    stepC = cOut
                 }
-
-                // Joint: encoder_step + decoder_out -> logits
-                let decoderStep = try sliceDecoderOutput(decoderOut)
-
-                let jointInput = try MLDictionaryFeatureProvider(dictionary: [
-                    "encoder": MLFeatureValue(multiArray: encStep),
-                    "decoder": MLFeatureValue(multiArray: decoderStep),
-                ])
-
-                let jointOutput = try await joint.prediction(from: jointInput)
-
-                guard let logits = jointOutput.featureValue(for: "logits")?.multiArrayValue else {
-                    throw ASRError.processingFailed("Joint failed")
-                }
-
-                // Find predicted token (index of maximum logit)
-                let predToken = findMaxIndex(logits)
 
                 if predToken == config.blankIdx {
                     // Blank token - move to next encoder frame
@@ -131,8 +159,8 @@ extension StreamingNemotronAsrManager {
                     newTokens.append(predToken)
                     accumulatedTokenIds.append(predToken)
                     currentToken = Int32(predToken)
-                    currentH = hOut
-                    currentC = cOut
+                    currentH = stepH
+                    currentC = stepC
                 }
             }
         }

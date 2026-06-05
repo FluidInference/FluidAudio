@@ -562,6 +562,9 @@ public enum ModelNames {
         public static let encoderFile = encoder + ".mlmodelc"
         public static let decoderFile = decoder + ".mlmodelc"
         public static let jointFile = joint + ".mlmodelc"
+        /// Optional fused decoder+joint (B1). Present in tiers that ship the
+        /// merged inner-loop model (e.g. 2240ms); loaded only if the file exists.
+        public static let decoderJointFile = "decoder_joint.mlmodelc"
 
         // Encoder in subdirectory (int8 quantized only)
         public static let encoderInt8File = "encoder/encoder_int8.mlmodelc"
