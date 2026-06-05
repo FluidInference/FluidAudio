@@ -507,27 +507,51 @@ swift run -c release fluidaudiocli parakeet-eou --benchmark --chunk-size 320 --u
 swift run -c release fluidaudiocli parakeet-eou --benchmark --chunk-size 160 --use-cache
 ```
 
-## Streaming ASR (Nemotron)
+## Streaming ASR (Nemotron, English)
 
-NVIDIA's Nemotron Speech Streaming 0.6B model for low-latency streaming ASR.
+NVIDIA's Nemotron Speech Streaming 0.6B for streaming ASR. The default tier is now
+**2240ms with B1-fused decode** (decoder+joint merged into one CoreML call per step) —
+it trades ~1.1 s of chunk latency for throughput at no accuracy cost. Pass an explicit
+`NemotronChunkSize` / `--chunk` (1120/560/160/80) for lower-latency tiers.
 
-Model: [FluidInference/nemotron-speech-streaming-0.6b-coreml](https://huggingface.co/FluidInference/nemotron-speech-streaming-0.6b-coreml)
+Model: [FluidInference/nemotron-speech-streaming-en-0.6b-coreml](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml)
 
-Hardware: Apple M1, 2020, macOS 26
+Hardware: Apple M5 Pro, macOS 26.5. Encoder int8 on ANE (`.cpuAndNeuralEngine`).
 
-### LibriSpeech test-clean (2620 files, 5.40h audio)
+### LibriSpeech test-clean (100 files)
 
-| Chunk Size | WER (Avg) | Median WER | RTFx | Total Time |
-|------------|-----------|------------|------|------------|
-| 1120ms     | 2.51%     | 0.00%      | 6.03x | 3228s (53.8m) |
-| 560ms      | 2.12%     | 0.00%      | TBD  | TBD |
+Three tiers, all from one conversion with B1-fused decode (`decoder_joint.mlmodelc`):
+
+| Tier | WER | RTFx | Δ vs 1120ms |
+|------|-----|------|-------------|
+| 560ms | 2.28% | 42.1 | −35% |
+| 1120ms | 2.28% | 65.0 | — |
+| **2240ms (default)** | **2.46%** | **93.6** | **+44%** |
+
+WER is neutral across tiers (within n=100 noise). 2240ms = 2× the trained 14-encoder-frame
+chunk (the chunked-attention mask still tiles cleanly); B1 fusion = one CoreML call per
+decode step instead of two (~+15% on any tier shipping `decoder_joint.mlmodelc`). The v1
+160ms/80ms tiers were removed (off-tiling, degraded WER).
+
+**Encoder optimization notes (M5 Pro):**
+- **6-bit palettization beats int8** on every axis — 2.24% WER, +9% RTFx, smaller (422 MB vs
+  564 MB). Planned follow-up to replace the shipped int8 encoder.
+- **Encoder placement / iOS:** ANE gives the fastest inference but slowest load (the iOS
+  ~1.4 GB / ~130 s residency wall for the 24-layer encoder). On iOS, running the encoder on
+  **CPU** (instant load, ~140 MB, ~66 RTFx) is ~2× faster than 4-way ANE sharding (~33 RTFx)
+  — so CPU, not sharding, is the iOS encoder choice. macOS / plugged-in stays on ANE.
+
+> All three tiers are a faithful conversion of the public `nvidia/nemotron-speech-streaming-en-0.6b`
+> checkpoint (decoder & joint match PyTorch at cos=1.0) and replace the previous v1 tiers. WER
+> parity against NVIDIA's internal tuning of the same model is a tracked follow-up; the ladder
+> above is internally consistent (one conversion for all tiers) and reports the relative gains.
 
 ```bash
-# Run 1120ms benchmark
-swift run -c release fluidaudiocli nemotron-benchmark --chunk 1120
+# Default (2240ms + B1)
+swift run -c release fluidaudiocli nemotron-benchmark --max-files 100
 
-# Run 560ms benchmark
-swift run -c release fluidaudiocli nemotron-benchmark --chunk 560
+# Lower-latency tier
+swift run -c release fluidaudiocli nemotron-benchmark --chunk 1120 --max-files 100
 ```
 
 ## Streaming ASR (Nemotron Multilingual)

@@ -15,6 +15,11 @@ public actor StreamingNemotronAsrManager {
     internal var encoder: MLModel?
     internal var decoder: MLModel?
     internal var joint: MLModel?
+    /// Optional fused decoder+joint model (B1). When present, the RNN-T inner
+    /// loop makes one CoreML call per step instead of two (decoder then joint),
+    /// halving per-step dispatch. Argmax stays in Swift. Mirrors the multilingual
+    /// manager's `decoderJoint` path. Falls back to separate decoder+joint when nil.
+    internal var decoderJoint: MLModel?
 
     // Components
     private let audioConverter = AudioConverter()
@@ -105,6 +110,14 @@ public actor StreamingNemotronAsrManager {
         let jointPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.jointFile)
         self.joint = try await MLModel.load(contentsOf: jointPath, configuration: mlConfiguration)
 
+        // Optional fused decoder+joint (B1). When the tier folder ships a
+        // `decoder_joint.mlmodelc`, prefer it in the inner loop (one call/step).
+        let fusedPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.decoderJointFile)
+        if FileManager.default.fileExists(atPath: fusedPath.path) {
+            self.decoderJoint = try await MLModel.load(contentsOf: fusedPath, configuration: mlConfiguration)
+            logger.info("Loaded fused decoder_joint (B1) — merged inner-loop path enabled")
+        }
+
         // Load tokenizer
         let tokenizerUrl = directory.appendingPathComponent(ModelNames.NemotronStreaming.tokenizer)
         self.tokenizer = try Tokenizer(vocabPath: tokenizerUrl)
@@ -130,7 +143,7 @@ public actor StreamingNemotronAsrManager {
             self.mlConfiguration = configuration
         }
 
-        let chunkSize = requestedChunkSize ?? .ms1120
+        let chunkSize = requestedChunkSize ?? .ms2240
         let repo = chunkSize.repo
 
         let modelsBaseDir =
@@ -174,6 +187,7 @@ public actor StreamingNemotronAsrManager {
         encoder = nil
         decoder = nil
         joint = nil
+        decoderJoint = nil
         tokenizer = nil
         cacheChannel = nil
         cacheTime = nil

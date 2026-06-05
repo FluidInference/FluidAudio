@@ -22,10 +22,9 @@ public enum Repo: String, CaseIterable, Sendable {
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case parakeetEou1280 = "FluidInference/parakeet-realtime-eou-120m-coreml/1280ms"
+    case nemotronStreaming2240 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/2240ms"
     case nemotronStreaming1120 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/1120ms"
     case nemotronStreaming560 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/560ms"
-    case nemotronStreaming160 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/160ms"
-    case nemotronStreaming80 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/80ms"
     /// Multilingual streaming model. The HF repo is organized as
     /// `<lang>/<tier>ms/` subfolders (9 languages x 4 chunk tiers); the
     /// specific variant subdirectory is supplied dynamically at download
@@ -94,14 +93,12 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-realtime-eou-120m-coreml/320ms"
         case .parakeetEou1280:
             return "parakeet-realtime-eou-120m-coreml/1280ms"
+        case .nemotronStreaming2240:
+            return "nemotron-speech-streaming-en-0.6b-coreml/2240ms"
         case .nemotronStreaming1120:
             return "nemotron-speech-streaming-en-0.6b-coreml/1120ms"
         case .nemotronStreaming560:
             return "nemotron-speech-streaming-en-0.6b-coreml/560ms"
-        case .nemotronStreaming160:
-            return "nemotron-speech-streaming-en-0.6b-coreml/160ms"
-        case .nemotronStreaming80:
-            return "nemotron-speech-streaming-en-0.6b-coreml/80ms"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -152,7 +149,7 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .kokoroAne, .kokoroAneZh:
             return "FluidInference/kokoro-82m-coreml"
-        case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
+        case .nemotronStreaming2240, .nemotronStreaming1120, .nemotronStreaming560:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
         case .nemotronMultilingual:
             return "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"
@@ -190,14 +187,12 @@ public enum Repo: String, CaseIterable, Sendable {
             return "f32"
         case .qwen3AsrInt8:
             return "int8"
+        case .nemotronStreaming2240:
+            return "nemotron_coreml_2240ms"
         case .nemotronStreaming1120:
             return "nemotron_coreml_1120ms"
         case .nemotronStreaming560:
             return "nemotron_coreml_560ms"
-        case .nemotronStreaming160:
-            return "nemotron_coreml_160ms"
-        case .nemotronStreaming80:
-            return "nemotron_coreml_80ms"
         case .lseendAmi:
             return "optimized/ami"
         case .lseendCallHome:
@@ -232,14 +227,12 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-eou-streaming/1280ms"
         case .nemotronMultilingual:
             return "nemotron-multilingual"
+        case .nemotronStreaming2240:
+            return "nemotron-streaming/2240ms"
         case .nemotronStreaming1120:
             return "nemotron-streaming/1120ms"
         case .nemotronStreaming560:
             return "nemotron-streaming/560ms"
-        case .nemotronStreaming160:
-            return "nemotron-streaming/160ms"
-        case .nemotronStreaming80:
-            return "nemotron-streaming/80ms"
         case .sortformer:
             return "sortformer"
         case .parakeetCtc110m:
@@ -558,6 +551,9 @@ public enum ModelNames {
         public static let encoderFile = encoder + ".mlmodelc"
         public static let decoderFile = decoder + ".mlmodelc"
         public static let jointFile = joint + ".mlmodelc"
+        /// Optional fused decoder+joint (B1). Present in tiers that ship the
+        /// merged inner-loop model (e.g. 2240ms); loaded only if the file exists.
+        public static let decoderJointFile = "decoder_joint.mlmodelc"
 
         // Encoder in subdirectory (int8 quantized only)
         public static let encoderInt8File = "encoder/encoder_int8.mlmodelc"
@@ -567,6 +563,7 @@ public enum ModelNames {
             encoderInt8File,
             decoderFile,
             jointFile,
+            decoderJointFile,
             tokenizer,
             metadata,
         ]
@@ -1160,7 +1157,7 @@ public enum ModelNames {
             return ModelNames.TDTJa.requiredModels
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return ModelNames.ParakeetEOU.requiredModels
-        case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
+        case .nemotronStreaming2240, .nemotronStreaming1120, .nemotronStreaming560:
             return ModelNames.NemotronStreaming.requiredModels
         case .diarizer:
             if variant == "offline" {
