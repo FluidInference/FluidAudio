@@ -23,10 +23,12 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
 
     // MARK: - Nemotron Speech Streaming (cache-aware streaming, 0.6B params)
 
-    /// Nemotron 0.6B with 560ms chunks (balanced)
-    case nemotron560ms = "nemotron-560ms"
-    /// Nemotron 0.6B with 1120ms chunks (best accuracy)
+    /// Nemotron 0.6B with 2240ms chunks (default; highest throughput, +B1 fused decode)
+    case nemotron2240ms = "nemotron-2240ms"
+    /// Nemotron 0.6B with 1120ms chunks (lower latency)
     case nemotron1120ms = "nemotron-1120ms"
+    /// Nemotron 0.6B with 560ms chunks (lowest-latency tier)
+    case nemotron560ms = "nemotron-560ms"
 
     /// Human-readable display name
     public var displayName: String {
@@ -34,8 +36,9 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case .parakeetEou160ms: return "Parakeet EOU 120M (160ms)"
         case .parakeetEou320ms: return "Parakeet EOU 120M (320ms)"
         case .parakeetEou1280ms: return "Parakeet EOU 120M (1280ms)"
-        case .nemotron560ms: return "Nemotron 0.6B (560ms)"
+        case .nemotron2240ms: return "Nemotron 0.6B (2240ms)"
         case .nemotron1120ms: return "Nemotron 0.6B (1120ms)"
+        case .nemotron560ms: return "Nemotron 0.6B (560ms)"
         }
     }
 
@@ -45,8 +48,9 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case .parakeetEou160ms: return .parakeetEou160
         case .parakeetEou320ms: return .parakeetEou320
         case .parakeetEou1280ms: return .parakeetEou1280
-        case .nemotron560ms: return .nemotronStreaming560
+        case .nemotron2240ms: return .nemotronStreaming2240
         case .nemotron1120ms: return .nemotronStreaming1120
+        case .nemotron560ms: return .nemotronStreaming560
         }
     }
 
@@ -55,7 +59,7 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         switch self {
         case .parakeetEou160ms, .parakeetEou320ms, .parakeetEou1280ms:
             return .parakeetEou
-        case .nemotron560ms, .nemotron1120ms:
+        case .nemotron2240ms, .nemotron1120ms, .nemotron560ms:
             return .nemotron
         }
     }
@@ -73,8 +77,9 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
     /// The streaming chunk size for Nemotron variants (nil for non-Nemotron)
     public var nemotronChunkSize: NemotronChunkSize? {
         switch self {
-        case .nemotron560ms: return .ms560
+        case .nemotron2240ms: return .ms2240
         case .nemotron1120ms: return .ms1120
+        case .nemotron560ms: return .ms560
         default: return nil
         }
     }
@@ -98,7 +103,7 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
             let chunkSize = eouChunkSize ?? .ms160
             return StreamingEouAsrManager(configuration: mlConfig, chunkSize: chunkSize)
         case .nemotron:
-            let chunkSize = nemotronChunkSize ?? .ms1120
+            let chunkSize = nemotronChunkSize ?? .ms2240
             return StreamingNemotronAsrManager(configuration: mlConfig, requestedChunkSize: chunkSize)
         }
     }
