@@ -2,6 +2,7 @@ import Foundation
 
 /// Chunk size variant for Nemotron streaming
 public enum NemotronChunkSize: Int, Sendable, CaseIterable {
+    case ms2240 = 2240  // 2.24s - highest throughput (+41% RTFx vs 1120ms), WER-neutral; medium-latency / offline
     case ms1120 = 1120  // 1.12s - original, best accuracy
     case ms560 = 560  // 0.56s - lower latency, same accuracy
     case ms160 = 160  // 0.16s - very low latency
@@ -9,6 +10,7 @@ public enum NemotronChunkSize: Int, Sendable, CaseIterable {
 
     public var repo: Repo {
         switch self {
+        case .ms2240: return .nemotronStreaming2240
         case .ms1120: return .nemotronStreaming1120
         case .ms560: return .nemotronStreaming560
         case .ms160: return .nemotronStreaming160

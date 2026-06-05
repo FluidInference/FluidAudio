@@ -23,6 +23,24 @@ Tested on Apple M2 with LibriSpeech test-clean:
 
 160ms and 80ms were only tested on 20 files.
 
+#### 2240ms tier (medium-latency / throughput)
+
+The `2240ms` tier doubles the streaming chunk (224 mel frames = 2× the trained
+14-encoder-frame chunk, so the chunked-attention mask still tiles cleanly). Doubling
+the chunk halves the per-chunk fixed overhead while the decoder emits the same tokens,
+so it trades latency for throughput at no accuracy cost. Controlled A/B on the converted
+INT8 builds (LibriSpeech test-clean, 100 files, CPU+NE):
+
+| Tier | WER | RTFx | Δ RTFx |
+|------|-----|------|--------|
+| 1120ms (INT8) | 2.24% | 61.7 | — |
+| **2240ms (INT8)** | **2.41%** | **87.0** | **+41%** |
+
+WER stays neutral (+0.17pp, within n=100 noise). Use `.ms2240` for offline or
+medium-latency transcription where a ~2.2s chunk is acceptable; keep `.ms1120` (or lower)
+for interactive streaming. RTFx here is from the conversion harness and is not directly
+comparable to the older M2 rows above.
+
 ## Quick Start
 
 ### Basic Usage

@@ -22,6 +22,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case parakeetEou1280 = "FluidInference/parakeet-realtime-eou-120m-coreml/1280ms"
+    case nemotronStreaming2240 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/2240ms"
     case nemotronStreaming1120 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/1120ms"
     case nemotronStreaming560 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/560ms"
     case nemotronStreaming160 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/160ms"
@@ -94,6 +95,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-realtime-eou-120m-coreml/320ms"
         case .parakeetEou1280:
             return "parakeet-realtime-eou-120m-coreml/1280ms"
+        case .nemotronStreaming2240:
+            return "nemotron-speech-streaming-en-0.6b-coreml/2240ms"
         case .nemotronStreaming1120:
             return "nemotron-speech-streaming-en-0.6b-coreml/1120ms"
         case .nemotronStreaming560:
@@ -152,7 +155,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .kokoroAne, .kokoroAneZh:
             return "FluidInference/kokoro-82m-coreml"
-        case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
+        case .nemotronStreaming2240, .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160,
+            .nemotronStreaming80:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
         case .nemotronMultilingual:
             return "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"
@@ -1160,7 +1164,8 @@ public enum ModelNames {
             return ModelNames.TDTJa.requiredModels
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return ModelNames.ParakeetEOU.requiredModels
-        case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
+        case .nemotronStreaming2240, .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160,
+            .nemotronStreaming80:
             return ModelNames.NemotronStreaming.requiredModels
         case .diarizer:
             if variant == "offline" {
