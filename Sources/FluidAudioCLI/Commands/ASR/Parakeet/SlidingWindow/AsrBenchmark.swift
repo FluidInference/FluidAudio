@@ -1,5 +1,6 @@
 #if os(macOS)
 import AVFoundation
+import CoreML
 import FluidAudio
 import Foundation
 import OSLog
@@ -653,6 +654,7 @@ extension ASRBenchmark {
         var longAudioOnly = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
         var melChunkContext = true  // Issue #594: opt-out of PR #264's 80ms mel-context prepend
+        var encoderComputeUnits: MLComputeUnits?  // nil = library default (ANE); see --encoder-compute-units
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -724,6 +726,24 @@ extension ASRBenchmark {
                 }
             case "--no-mel-context":
                 melChunkContext = false
+            case "--encoder-compute-units":
+                if i + 1 < arguments.count {
+                    switch arguments[i + 1].lowercased() {
+                    case "ane", "cpuandneuralengine", "neural-engine":
+                        encoderComputeUnits = .cpuAndNeuralEngine
+                    case "gpu", "cpuandgpu":
+                        encoderComputeUnits = .cpuAndGPU
+                    case "cpu", "cpuonly":
+                        encoderComputeUnits = .cpuOnly
+                    case "all":
+                        encoderComputeUnits = .all
+                    default:
+                        logger.error(
+                            "Invalid --encoder-compute-units: \(arguments[i + 1]). Use 'ane', 'gpu', 'cpu', or 'all'.")
+                        exit(1)
+                    }
+                    i += 1
+                }
             default:
                 break
             }
@@ -816,7 +836,8 @@ extension ASRBenchmark {
 
             logger.info("Initializing ASR system...")
             do {
-                let models = try await AsrModels.downloadAndLoad(version: modelVersion)
+                let models = try await AsrModels.downloadAndLoad(
+                    version: modelVersion, encoderComputeUnits: encoderComputeUnits)
                 try await asrManager.loadModels(models)
                 logger.info("ASR system initialized successfully")
 
@@ -1046,6 +1067,7 @@ extension ASRBenchmark {
                 --long-audio-only          Only process files with 4-20 second duration
                 --dump-features            Dump CoreML mel features to JSON (requires --streaming-eou + --single-file)
                 --no-mel-context           Disable 80ms mel-context prepend for long-form batch ASR
+                --encoder-compute-units <u> Encoder placement: ane (default), gpu (~+8% RTFx on Apple Silicon, WER-neutral), cpu, all
                 --help, -h                Show this help message
 
             Description:

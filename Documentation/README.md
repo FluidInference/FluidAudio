@@ -17,6 +17,7 @@
 - [Long Transcription](ASR/LongTranscription.md)
 - [Last Chunk Handling](ASR/LastChunkHandling.md)
 - [Manual Model Loading](ASR/ManualModelLoading.md)
+- [Encoder Compute Placement](ASR/EncoderComputePlacement.md)
 - [Directory Structure](ASR/DirectoryStructure.md)
 - [Parakeet Benchmarks](ASR/benchmarks100.md)
 
