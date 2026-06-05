@@ -62,8 +62,8 @@ import FluidAudio
 // Create manager
 let manager = StreamingNemotronAsrManager()
 
-// Load models (defaults to 1120ms chunk size)
-let modelDir = URL(fileURLWithPath: "~/.cache/fluidaudio/models/nemotron-streaming/1120ms")
+// Load models (defaults to the 2240ms tier + B1-fused decode)
+let modelDir = URL(fileURLWithPath: "~/.cache/fluidaudio/models/nemotron-streaming/2240ms")
 try await manager.loadModels(modelDir: modelDir)
 
 // Process audio buffer
