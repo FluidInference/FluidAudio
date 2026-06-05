@@ -120,7 +120,8 @@ extension AsrModels {
     private static func createModelSpecs(
         using config: MLModelConfiguration,
         version: AsrModelVersion,
-        encoderPrecision: ParakeetEncoderPrecision
+        encoderPrecision: ParakeetEncoderPrecision,
+        encoderComputeUnits: MLComputeUnits? = nil
     ) -> [ModelSpec] {
         if version.hasFusedEncoder {
             // Fused preprocessor+encoder runs on ANE (it contains the conformer encoder)
@@ -134,7 +135,16 @@ extension AsrModels {
             // that 100% of the the operations map to the CPU anyways.
             ModelSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
 
-            ModelSpec(fileName: fileNames.encoder, computeUnits: config.computeUnits),
+            // The conformer encoder defaults to the configuration's compute units
+            // (`.cpuAndNeuralEngine`). It can be overridden to `.cpuAndGPU`, which
+            // is ~24% faster on Apple Silicon GPUs (17.8ms vs 23.5ms per 15s window,
+            // M-series) for ~+8% end-to-end RTFx, WER-neutral. ANE remains the default
+            // because it is far more power-efficient on iOS; opt into GPU for
+            // throughput-oriented / plugged-in workloads. See docs/perf/parakeet-v3-encoder.md.
+            ModelSpec(
+                fileName: fileNames.encoder,
+                computeUnits: encoderComputeUnits ?? config.computeUnits
+            ),
         ]
     }
 
@@ -219,6 +229,12 @@ extension AsrModels {
     ///                   computeUnits will be respected. When nil, platform-optimized defaults
     ///                   are used (per-model optimization based on model type).
     ///   - version: ASR model version to load (defaults to v3)
+    ///   - encoderComputeUnits: Optional override for the conformer encoder's compute units.
+    ///                   When `nil` (default) the encoder uses the configuration's compute
+    ///                   units (`.cpuAndNeuralEngine`). Pass `.cpuAndGPU` to run the encoder
+    ///                   on the GPU (~+8% RTFx, WER-neutral on Apple Silicon) for
+    ///                   throughput-oriented workloads; ANE stays the default for power
+    ///                   efficiency on iOS. See docs/perf/parakeet-v3-encoder.md.
     ///
     /// - Returns: Loaded ASR models
     ///
@@ -230,6 +246,7 @@ extension AsrModels {
         configuration: MLModelConfiguration? = nil,
         version: AsrModelVersion = .v3,
         encoderPrecision: ParakeetEncoderPrecision = .int8,
+        encoderComputeUnits: MLComputeUnits? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> AsrModels {
         // Validate that CTC-only models use their dedicated managers
@@ -245,7 +262,9 @@ extension AsrModels {
 
         let parentDirectory = directory.deletingLastPathComponent()
         let downloadVariant: String? = (version == .v3) ? encoderPrecision.rawValue : nil
-        let specs = createModelSpecs(using: config, version: version, encoderPrecision: encoderPrecision)
+        let specs = createModelSpecs(
+            using: config, version: version, encoderPrecision: encoderPrecision,
+            encoderComputeUnits: encoderComputeUnits)
 
         var loadedModels: [String: MLModel] = [:]
 
@@ -414,11 +433,13 @@ extension AsrModels {
     public static func loadFromCache(
         configuration: MLModelConfiguration? = nil,
         version: AsrModelVersion = .v3,
+        encoderComputeUnits: MLComputeUnits? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> AsrModels {
         let cacheDir = defaultCacheDirectory(for: version)
         return try await load(
             from: cacheDir, configuration: configuration, version: version,
+            encoderComputeUnits: encoderComputeUnits,
             progressHandler: progressHandler)
     }
 
@@ -426,10 +447,13 @@ extension AsrModels {
     public static func loadWithAutoRecovery(
         from directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
+        encoderComputeUnits: MLComputeUnits? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> AsrModels {
         let targetDir = directory ?? defaultCacheDirectory()
-        return try await load(from: targetDir, configuration: configuration, progressHandler: progressHandler)
+        return try await load(
+            from: targetDir, configuration: configuration,
+            encoderComputeUnits: encoderComputeUnits, progressHandler: progressHandler)
     }
 
     private static func describeComputeUnits(_ units: MLComputeUnits) -> String {
@@ -555,6 +579,7 @@ extension AsrModels {
         configuration: MLModelConfiguration? = nil,
         version: AsrModelVersion = .v3,
         encoderPrecision: ParakeetEncoderPrecision = .int8,
+        encoderComputeUnits: MLComputeUnits? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> AsrModels {
         let targetDir = try await download(
@@ -568,6 +593,7 @@ extension AsrModels {
             configuration: configuration,
             version: version,
             encoderPrecision: encoderPrecision,
+            encoderComputeUnits: encoderComputeUnits,
             progressHandler: progressHandler)
     }
 
