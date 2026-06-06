@@ -48,6 +48,7 @@ Optional flags:
 | `--lang <code>` | `en` | One of the 31 supported ISO codes — see [Languages](#languages) |
 | `--total-steps <n>` | `8` | Denoising step count; lower trades quality for latency |
 | `--speed <f>` | `1.05` | Speech-rate multiplier; divides predicted duration |
+| `--ve-variant <v>` | `fp16` | VectorEstimator build — `fp16`, `int8`/`int6`/`int4` (ANE-bucketed), or `dyn-int8`/`dyn-int6`/`dyn-int4` (dynamic CPU/GPU). See [VectorEstimator variants](#vectorestimator-variants) |
 
 ### Swift
 
@@ -55,7 +56,8 @@ Optional flags:
 import FluidAudio
 
 let manager = try await Supertonic3Manager.downloadAndCreate(
-    computeUnits: .cpuAndNeuralEngine
+    computeUnits: .cpuAndNeuralEngine,
+    vectorEstimator: .aneBucketed(.int4)   // optional; default .fp16Dynamic
 )
 
 let style = try Supertonic3VoiceStyle.load(
@@ -184,7 +186,7 @@ All CoreML packages live under
 |---|---|---|
 | Text encoder | `TextEncoder.mlmodelc` | T=128 fixed, outputs `text_emb [1, 256, 128]` |
 | Duration predictor | `DurationPredictor.mlmodelc` | T=128 fixed, outputs scalar `duration` |
-| Vector estimator | `VectorEstimator.mlmodelc` | 8 denoising steps with fused CFG (W_COND = 4.0, W_UNCOND = 3.0) |
+| Vector estimator | `VectorEstimator.mlmodelc` | FP16 dynamic (RangeDim), CPU/GPU. 8 denoising steps with fused CFG (W_COND = 4.0, W_UNCOND = 3.0). See [variants](#vectorestimator-variants) for quantized / ANE builds |
 | Vocoder | `Vocoder.mlmodelc` | Outputs `wav` at 44.1 kHz mono Float32 |
 
 Companion assets:
@@ -194,6 +196,48 @@ Companion assets:
 | `tts.json` | Sample rate, chunk-compress factor, base chunk size — overrides the compile-time defaults in `Supertonic3Constants` |
 | `unicode_indexer.json` | Flat `[Int64]` array, indexed by codepoint, mapping every Unicode scalar to a model token id |
 | `assets/voice_styles/*.json` | Per-speaker `style_ttl` / `style_dp` tensors |
+
+## VectorEstimator variants
+
+`VectorEstimator` is the cost center (run once per denoising step × 8), so it
+ships in 12 weight-compressed builds under
+[`FluidInference/supertonic-3-coreml/VectorEstimatorVariants/`](https://huggingface.co/FluidInference/supertonic-3-coreml/tree/main/VectorEstimatorVariants).
+Select one via `Supertonic3Manager(vectorEstimator:)` or the `--ve-variant`
+CLI flag. Two independent axes:
+
+**Shape → compute device.** Dynamic (RangeDim) shapes cannot use the ANE
+(Core ML rejects data-dependent shapes), so they run on CPU/GPU. Fixed-length
+builds land ~94–96% on the Neural Engine (~2.7× faster end-to-end). The
+synthesizer pads each chunk's latent up to the smallest bucket ≥ its length and
+trims back before the vocoder; the bucket model is loaded lazily. Per-chunk
+length is bounded by the 110/90-char chunker, so the **L128** bucket covers the
+common case.
+
+| `Supertonic3VectorEstimator` | `--ve-variant` | shape | device | bundle |
+|---|---|---|---|---|
+| `.fp16Dynamic` (default) | `fp16` | RangeDim | CPU/GPU | `VectorEstimator.mlmodelc` (repo root) |
+| `.dynamic(q)` | `dyn-int8` / `dyn-int6` / `dyn-int4` | RangeDim | CPU/GPU | `VectorEstimatorVariants/VectorEstimator_int{8,6,4}.mlmodelc` |
+| `.aneBucketed(q)` | `int8` / `int6` / `int4` | fixed L=128/256/512 | **ANE** | `VectorEstimatorVariants/VectorEstimator_L{128,256,512}_int{8,6,4}.mlmodelc` |
+
+**Quantization → size only** (placement and latency are unchanged — ANE compute
+is precision-independent). All are post-training, weight-only:
+
+| suffix | method | size vs FP16 | quality |
+|---|---|---|---|
+| `int8` | linear, per-channel symmetric int8 | ~2.0× smaller (64.5 MB) | transparent (closest to FP16) |
+| `int6` | 6-bit k-means palettization | ~2.5× smaller (48.4 MB) | very good |
+| `int4` | 4-bit k-means palettization | ~3.9× smaller (32.5 MB) | perceptually clean in A/B listening |
+
+Only the selected build downloads (via the variant filter), so non-default
+choices add no cost to other configurations. Max audio per chunk for the fixed
+buckets is `L × 0.0697 s` (L128 ≈ 8.9 s, L256 ≈ 17.8 s, L512 ≈ 35.7 s); the
+synthesizer picks the smallest bucket that fits.
+
+> Quality note: waveform/spectral SNR of the quantized builds vs FP16 looks low,
+> but that is **diffusion trajectory divergence, not degradation** — an 8-step
+> flow-matching ODE under a slightly-perturbed vector field lands on a
+> different-but-valid sample, and sample-aligned SNR is phase-sensitive. Judge by
+> listening (or ASR), not waveform SNR.
 
 ## Known issues
 

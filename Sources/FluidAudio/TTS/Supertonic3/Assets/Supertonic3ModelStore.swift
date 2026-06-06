@@ -20,21 +20,45 @@ public actor Supertonic3ModelStore {
 
     private let directory: URL?
     private let computeUnits: MLComputeUnits
+    private let veOption: Supertonic3VectorEstimator
 
     private var repoDirectory: URL?
     private var textEncoderModel: MLModel?
     private var durationPredictorModel: MLModel?
-    private var vectorEstimatorModel: MLModel?
     private var vocoderModel: MLModel?
+
+    /// Single VectorEstimator for the non-bucketed (`.fp16Dynamic` / `.dynamic`)
+    /// modes. `nil` in bucketed mode, where models are loaded lazily per bucket.
+    private var vectorEstimatorModel: MLModel?
+    /// Lazily-loaded fixed-length VectorEstimators keyed by latent bucket length
+    /// (used only in `.aneBucketed` mode).
+    private var bucketModels: [Int: MLModel] = [:]
 
     private(set) var config: Supertonic3Config = .defaults
 
     public init(
         directory: URL? = nil,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
+        vectorEstimator: Supertonic3VectorEstimator = .default
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
+        self.veOption = vectorEstimator
+    }
+
+    /// Compute units the VectorEstimator stage should use. Dynamic-shape builds
+    /// cannot use the ANE (CoreML rejects data-dependent shapes), so they are
+    /// pinned to CPU/GPU; bucketed builds target the ANE.
+    private var veComputeUnits: MLComputeUnits {
+        // An explicit .cpuOnly request always wins (it already excludes the ANE,
+        // so no override is needed). Otherwise dynamic shapes avoid the ANE
+        // (Core ML rejects them) and bucketed builds target it.
+        if computeUnits == .cpuOnly { return .cpuOnly }
+        switch veOption {
+        case .fp16Dynamic: return computeUnits  // preserve historical behavior
+        case .dynamic: return .cpuAndGPU
+        case .aneBucketed: return .cpuAndNeuralEngine
+        }
     }
 
     // MARK: - Public API
@@ -44,7 +68,8 @@ public actor Supertonic3ModelStore {
     public func loadIfNeeded() async throws {
         if textEncoderModel != nil { return }
 
-        let repoDir = try await Supertonic3ResourceDownloader.ensureModels(directory: directory)
+        let repoDir = try await Supertonic3ResourceDownloader.ensureModels(
+            directory: directory, veVariant: veOption.downloadVariant)
         self.repoDirectory = repoDir
 
         // tts.json — optional override of the compile-time defaults. If parsing
@@ -72,12 +97,21 @@ public actor Supertonic3ModelStore {
         durationPredictorModel = try loadModel(
             repoDir: repoDir,
             fileName: ModelNames.Supertonic3.durationPredictorFile, config: cfg)
-        vectorEstimatorModel = try loadModel(
-            repoDir: repoDir,
-            fileName: ModelNames.Supertonic3.vectorEstimatorFile, config: cfg)
         vocoderModel = try loadModel(
             repoDir: repoDir,
             fileName: ModelNames.Supertonic3.vocoderFile, config: cfg)
+
+        // VectorEstimator: dynamic builds load eagerly; bucketed builds load
+        // each fixed-length model lazily on first use (see vectorEstimator(forLatentLength:)).
+        if !veOption.isBucketed {
+            let veCfg = MLModelConfiguration()
+            veCfg.computeUnits = veComputeUnits
+            vectorEstimatorModel = try loadModel(
+                repoDir: repoDir,
+                fileName: ModelNames.Supertonic3.vectorEstimatorFile(
+                    precisionSuffix: veOption.precisionSuffix, bucket: nil),
+                config: veCfg)
+        }
 
         let elapsed = Date().timeIntervalSince(loadStart)
         logger.info(
@@ -90,8 +124,37 @@ public actor Supertonic3ModelStore {
     public func durationPredictor() throws -> MLModel {
         try unwrap(durationPredictorModel, name: "duration_predictor")
     }
-    public func vectorEstimator() throws -> MLModel {
-        try unwrap(vectorEstimatorModel, name: "vector_estimator")
+    /// Resolve the VectorEstimator for a chunk of `latentLength` TTL slots.
+    ///
+    /// Returns the model plus the latent length the caller must feed it: in
+    /// dynamic modes that equals `latentLength` (no padding); in bucketed mode
+    /// it is the smallest published bucket ≥ `latentLength`, and the caller pads
+    /// the latent/mask up to that length. Bucket models are loaded lazily and
+    /// cached.
+    public func vectorEstimator(forLatentLength latentLength: Int) throws -> (model: MLModel, paddedLength: Int) {
+        guard veOption.isBucketed else {
+            return (try unwrap(vectorEstimatorModel, name: "vector_estimator"), latentLength)
+        }
+        guard let bucket = ModelNames.Supertonic3.aneBuckets.first(where: { $0 >= latentLength })
+        else {
+            throw Supertonic3Error.inferenceFailed(
+                stage: "vector_estimator",
+                underlying:
+                    "latent length \(latentLength) exceeds largest ANE bucket "
+                    + "\(ModelNames.Supertonic3.aneBuckets.last ?? 0); use a dynamic VectorEstimator")
+        }
+        if let cached = bucketModels[bucket] { return (cached, bucket) }
+
+        guard let repoDir = repoDirectory else { throw Supertonic3Error.notInitialized }
+        let veCfg = MLModelConfiguration()
+        veCfg.computeUnits = veComputeUnits
+        let model = try loadModel(
+            repoDir: repoDir,
+            fileName: ModelNames.Supertonic3.vectorEstimatorFile(
+                precisionSuffix: veOption.precisionSuffix, bucket: bucket),
+            config: veCfg)
+        bucketModels[bucket] = model
+        return (model, bucket)
     }
     public func vocoder() throws -> MLModel { try unwrap(vocoderModel, name: "vocoder") }
 
@@ -109,6 +172,7 @@ public actor Supertonic3ModelStore {
         textEncoderModel = nil
         durationPredictorModel = nil
         vectorEstimatorModel = nil
+        bucketModels.removeAll()
         vocoderModel = nil
     }
 

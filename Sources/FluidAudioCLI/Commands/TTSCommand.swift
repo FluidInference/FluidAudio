@@ -86,6 +86,9 @@ public struct TTS {
         var supertonicVoiceStylePath: String? = nil
         var supertonicTotalSteps: Int = Supertonic3Constants.defaultTotalSteps
         var supertonicSpeed: Float = Supertonic3Constants.defaultSpeed
+        // VectorEstimator build: fp16 | int8/int6/int4 (ANE-bucketed) |
+        // dyn-int8/dyn-int6/dyn-int4 (dynamic CPU/GPU). Default fp16.
+        var supertonicVE: Supertonic3VectorEstimator = .fp16Dynamic
 
         var i = 0
         while i < arguments.count {
@@ -152,6 +155,18 @@ public struct TTS {
             case "--voice-style":
                 if i + 1 < arguments.count {
                     supertonicVoiceStylePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--ve-variant", "--vector-estimator":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1].lowercased()
+                    if let v = Self.parseSupertonicVE(raw) {
+                        supertonicVE = v
+                    } else {
+                        logger.warning(
+                            "Unknown --ve-variant '\(raw)'; using fp16. "
+                                + "Valid: fp16, int8/int6/int4 (ANE), dyn-int8/dyn-int6/dyn-int4.")
+                    }
                     i += 1
                 }
             case "--total-steps":
@@ -274,6 +289,7 @@ public struct TTS {
                 text: text, output: output, language: supertonicLanguage,
                 voiceStylePath: supertonicVoiceStylePath, voiceName: voice,
                 totalSteps: supertonicTotalSteps, speed: supertonicSpeed,
+                vectorEstimator: supertonicVE,
                 metricsPath: metricsPath, cpuOnly: cpuOnly)
         }
     }
@@ -734,16 +750,31 @@ public struct TTS {
     /// Run Supertonic-3 multilingual TTS. Voice comes from a built-in style
     /// (`--voice F1`..`M5`, downloaded on demand, default `M1`) or an explicit
     /// `--voice-style <file.json>`, which overrides `--voice`.
+    /// Map a `--ve-variant` token to a `Supertonic3VectorEstimator`.
+    private static func parseSupertonicVE(_ raw: String) -> Supertonic3VectorEstimator? {
+        func q(_ s: String) -> Supertonic3Quantization? { Supertonic3Quantization(rawValue: s) }
+        switch raw {
+        case "fp16", "fp16dynamic", "default", "": return .fp16Dynamic
+        case "int8", "int6", "int4", "ane-int8", "ane-int6", "ane-int4":
+            return q(String(raw.split(separator: "-").last!)).map { .aneBucketed($0) }
+        case "dyn-int8", "dyn-int6", "dyn-int4", "dynamic-int8", "dynamic-int6", "dynamic-int4":
+            return q("int" + String(raw.suffix(1))).map { .dynamic($0) }
+        default: return nil
+        }
+    }
+
     private static func runSupertonic3(
         text: String, output: String, language: String,
         voiceStylePath: String?, voiceName: String,
         totalSteps: Int, speed: Float,
+        vectorEstimator: Supertonic3VectorEstimator,
         metricsPath: String?, cpuOnly: Bool
     ) async {
         do {
             let tStart = Date()
             let computeUnits: MLComputeUnits = cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
-            let manager = Supertonic3Manager(computeUnits: computeUnits)
+            let manager = Supertonic3Manager(
+                computeUnits: computeUnits, vectorEstimator: vectorEstimator)
 
             let tLoad0 = Date()
             try await manager.initialize()
