@@ -131,9 +131,7 @@ public actor Supertonic3ModelStore {
     /// it is the smallest published bucket ≥ `latentLength`, and the caller pads
     /// the latent/mask up to that length. Bucket models are loaded lazily and
     /// cached.
-    public func vectorEstimator(forLatentLength latentLength: Int) throws -> (
-        model: MLModel, paddedLength: Int
-    ) {
+    public func vectorEstimator(forLatentLength latentLength: Int) throws -> (model: MLModel, paddedLength: Int) {
         guard veOption.isBucketed else {
             return (try unwrap(vectorEstimatorModel, name: "vector_estimator"), latentLength)
         }
