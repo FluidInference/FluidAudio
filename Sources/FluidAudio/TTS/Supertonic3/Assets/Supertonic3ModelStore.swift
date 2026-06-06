@@ -50,6 +50,10 @@ public actor Supertonic3ModelStore {
     /// cannot use the ANE (CoreML rejects data-dependent shapes), so they are
     /// pinned to CPU/GPU; bucketed builds target the ANE.
     private var veComputeUnits: MLComputeUnits {
+        // An explicit .cpuOnly request always wins (it already excludes the ANE,
+        // so no override is needed). Otherwise dynamic shapes avoid the ANE
+        // (Core ML rejects them) and bucketed builds target it.
+        if computeUnits == .cpuOnly { return .cpuOnly }
         switch veOption {
         case .fp16Dynamic: return computeUnits  // preserve historical behavior
         case .dynamic: return .cpuAndGPU
