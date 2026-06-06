@@ -39,16 +39,23 @@ public actor Supertonic3Manager {
 
     private let directory: URL?
     private let computeUnits: MLComputeUnits
+    private let vectorEstimatorOption: Supertonic3VectorEstimator
 
     private var store: Supertonic3ModelStore?
     private var synthesizer: Supertonic3Synthesizer?
 
+    /// - Parameters:
+    ///   - vectorEstimator: which VectorEstimator build to download/run. Default
+    ///     `.fp16Dynamic` preserves prior behavior; `.aneBucketed(.int4)` etc.
+    ///     opt into the smaller, ANE-resident fixed-length builds.
     public init(
         directory: URL? = nil,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
+        vectorEstimator: Supertonic3VectorEstimator = .default
     ) {
         self.directory = directory
         self.computeUnits = computeUnits
+        self.vectorEstimatorOption = vectorEstimator
     }
 
     public var isAvailable: Bool { synthesizer != nil }
@@ -56,11 +63,13 @@ public actor Supertonic3Manager {
     /// Convenience factory: download assets and return a ready-to-use manager.
     public static func downloadAndCreate(
         cacheDirectory: URL? = nil,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
+        vectorEstimator: Supertonic3VectorEstimator = .default
     ) async throws -> Supertonic3Manager {
         let manager = Supertonic3Manager(
             directory: cacheDirectory,
-            computeUnits: computeUnits)
+            computeUnits: computeUnits,
+            vectorEstimator: vectorEstimator)
         try await manager.initialize()
         return manager
     }
@@ -70,7 +79,8 @@ public actor Supertonic3Manager {
         if synthesizer != nil { return }
 
         let store = Supertonic3ModelStore(
-            directory: directory, computeUnits: computeUnits)
+            directory: directory, computeUnits: computeUnits,
+            vectorEstimator: vectorEstimatorOption)
         try await store.loadIfNeeded()
         let indexerURL = try await store.unicodeIndexerURL()
         let processor = try Supertonic3UnicodeProcessor(unicodeIndexerURL: indexerURL)

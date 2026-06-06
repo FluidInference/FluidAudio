@@ -136,13 +136,30 @@ struct Supertonic3Synthesizer {
                 chunkCompress: cfg.ttl.chunkCompressFactor,
                 latentDim: cfg.ttl.latentDim)
 
-        let latentShape = [latentDims.bsz, latentDims.channels, latentDims.length]
-        let latentMaskShape = [latentDims.bsz, 1, latentDims.length]
+        let trueLen = latentDims.length
+        let channels = latentDims.channels
+        let latentShape = [latentDims.bsz, channels, trueLen]
 
-        var noisyLatent = try makeFloat(values: initialLatent, shape: latentShape)
-        let latentMask = try makeFloat(values: latentMaskFlat, shape: latentMaskShape)
+        // Resolve the VectorEstimator for this chunk. In bucketed (ANE) mode the
+        // store returns a fixed-length model and the bucket length to pad up to;
+        // in dynamic mode `padLen == trueLen` and no padding happens.
+        let (vectorEstimator, padLen) = try await store.vectorEstimator(forLatentLength: trueLen)
 
-        let vectorEstimator = try await store.vectorEstimator()
+        let veLatentShape = [latentDims.bsz, channels, padLen]
+        let veMaskShape = [latentDims.bsz, 1, padLen]
+
+        let noisyFlat =
+            padLen == trueLen
+            ? initialLatent
+            : Self.padRows(initialLatent, channels: channels, fromLen: trueLen, toLen: padLen)
+        let veMaskFlat =
+            padLen == trueLen
+            ? latentMaskFlat
+            : Self.padTail(latentMaskFlat, toLen: padLen)
+
+        var noisyLatent = try makeFloat(values: noisyFlat, shape: veLatentShape)
+        let latentMask = try makeFloat(values: veMaskFlat, shape: veMaskShape)
+
         for step in 0..<totalSteps {
             let currentStep = try makeFloat(values: [Float(step)], shape: [1])
             let totalStep = try makeFloat(values: [Float(totalSteps)], shape: [1])
@@ -166,14 +183,26 @@ struct Supertonic3Synthesizer {
                     stage: "vector_estimator", underlying: "missing 'denoised_latent' output")
             }
             // Rebind without recopying when the shape and dtype already match.
-            noisyLatent = try reshape(denoised, to: latentShape)
+            noisyLatent = try reshape(denoised, to: veLatentShape)
+        }
+
+        // Trim the padded bucket output back to the true latent length before the
+        // vocoder (which accepts a RangeDim latent length).
+        let vocoderLatent: MLMultiArray
+        if padLen == trueLen {
+            vocoderLatent = noisyLatent
+        } else {
+            let denoisedFlat = Supertonic3MultiArray.extractFloats(noisyLatent)
+            let trimmed = Self.trimRows(
+                denoisedFlat, channels: channels, fromLen: padLen, toLen: trueLen)
+            vocoderLatent = try makeFloat(values: trimmed, shape: latentShape)
         }
 
         // --- Stage 4: vocoder --- //
         let vocoderOut = try predict(
             stage: "vocoder",
             model: await store.vocoder(),
-            inputs: ["latent": MLFeatureValue(multiArray: noisyLatent)])
+            inputs: ["latent": MLFeatureValue(multiArray: vocoderLatent)])
         guard let wavArray = vocoderOut.featureValue(for: "wav")?.multiArrayValue else {
             throw Supertonic3Error.inferenceFailed(
                 stage: "vocoder", underlying: "missing 'wav' output")
@@ -213,6 +242,39 @@ struct Supertonic3Synthesizer {
                 stage: "tensor", expected: "\(shape)",
                 got: "len=\(values.count) (\(error))")
         }
+    }
+
+    // MARK: - Bucket padding helpers (channel-major [1, C, L] flattened)
+
+    /// Right-pad each channel row from `fromLen` to `toLen` with zeros.
+    /// Input/output are row-major `[1, channels, len]` flattened (`c*len + t`).
+    static func padRows(_ flat: [Float], channels: Int, fromLen: Int, toLen: Int) -> [Float] {
+        guard toLen > fromLen else { return flat }
+        var out = [Float](repeating: 0, count: channels * toLen)
+        for c in 0..<channels {
+            let src = c * fromLen
+            let dst = c * toLen
+            for t in 0..<fromLen { out[dst + t] = flat[src + t] }
+        }
+        return out
+    }
+
+    /// Trim each channel row from `fromLen` down to `toLen` (drops the padding).
+    static func trimRows(_ flat: [Float], channels: Int, fromLen: Int, toLen: Int) -> [Float] {
+        guard fromLen > toLen else { return flat }
+        var out = [Float](repeating: 0, count: channels * toLen)
+        for c in 0..<channels {
+            let src = c * fromLen
+            let dst = c * toLen
+            for t in 0..<toLen { out[dst + t] = flat[src + t] }
+        }
+        return out
+    }
+
+    /// Right-pad a single `[1, 1, L]` mask row with zeros up to `toLen`.
+    static func padTail(_ flat: [Float], toLen: Int) -> [Float] {
+        guard toLen > flat.count else { return flat }
+        return flat + [Float](repeating: 0, count: toLen - flat.count)
     }
 
     private func makeInt32(values: [Int32], shape: [Int]) throws -> MLMultiArray {
