@@ -173,7 +173,8 @@ Latency **measured on real synthesis**, warm (one short sentence; `tts --backend
 | Model | Type | ANE | GPU | CPU | ops | Size | Heavy graph → device |
 |-------|------|----:|----:|----:|----:|-----:|----------------------|
 | Kokoro ANE (7-stage) | batch (per utterance) | 75% | 0% | 25% | 1472 | 83 MB | Vocoder → ANE |
-| Supertonic | batch (8-step diffusion) | 30% | 0% | 70% | 1365 | 192 MB | VectorEstimator → **CPU** (ANE compile fails) |
+| Supertonic (default fp16) | batch (8-step diffusion) | 30% | 0% | 70% | 1365 | 192 MB | VectorEstimator → **CPU** (dynamic shapes can't use ANE) |
+| Supertonic (`--ve-variant int4`) | batch (8-step diffusion) | ~90% | 0% | ~10% | 1289 | 102 MB | VectorEstimator → **ANE** (fixed L-buckets) |
 | PocketTTS | streaming (autoregressive) | 0% | 0% | 100% | 1504 | 606 MB | all stages → CPU (mimi_encoder crashes loader) |
 
 **Component detail**
@@ -205,15 +206,24 @@ Autoregressive: stages run many steps per utterance. All on CPU.
 > unknown). Getting these onto the ANE is future work.
 
 ### Supertonic
-`VectorEstimator` runs once per denoising step (default 8). It's the heaviest stage and is stuck on
-CPU because it **fails ANE compile** (`ANECCompile() FAILED`), fp32 and int8 both.
+`VectorEstimator` runs once per denoising step (default 8) and is the heaviest stage. The **default**
+build uses dynamic (RangeDim) shapes, which Core ML **cannot place on the ANE** — so it runs on CPU.
+The opt-in **fixed-length** builds (`--ve-variant int8|int6|int4`, L = 128/256/512) land ~94% on the
+ANE (~2.7× faster end-to-end); the synthesizer pads each chunk's latent to the nearest bucket. The
+`ANECCompile() FAILED` line emitted for the dynamic build is **non-fatal noise** — the fixed builds
+compile and execute on the ANE (verified M5 Pro / macOS 26.5; see
+[Supertonic3 docs](TTS/Supertonic3.md#vectorestimator-variants)).
 
 | Component | ANE | GPU | CPU | ops | Size | Lat ms |
 |-----------|----:|----:|----:|----:|-----:|-------:|
 | TextEncoder | 98% | 0% | 2% | 308 | 18 MB | 1.2 |
 | DurationPredictor | 0% | 0% | 100% | 195 | 2 MB | 2.5 |
-| VectorEstimator | 0% | 0% | 100% | 755 | 123 / 62 MB | 89 ms (8× @ 11.1) |
+| VectorEstimator (fp16 dynamic, default) | 0% | 0% | 100% | 755 | 123 MB | 89 ms (8× @ 11.1) |
+| VectorEstimator (fixed L128, int4) | 94% | 0% | 6% | 679 | 33 MB | ~31 ms (8× @ 3.8)¹ |
 | Vocoder | 100% | 0% | 0% | 107 | 49 MB | 10.5 |
+
+¹ Fixed-build split + per-step latency from `MLComputePlan` + warm CPU-vs-NE timing at L128 (NE 3.8 ms
+vs CPU-only 14.2 ms/step). A cold first call additionally pays a one-time ANE compile.
 
 ---
 
@@ -222,8 +232,6 @@ CPU because it **fails ANE compile** (`ANECCompile() FAILED`), fp32 and int8 bot
 - [ ] **PocketTTS**: get `cond_step` (255 MB) and `flowlm_step` (291 MB) onto the ANE; file a
   loader-crash bug for `mimi_encoder` (SIGSEGV in `MLComputePlan.load`). Biggest CPU-bound graphs in
   the lineup.
-- [ ] **Supertonic `VectorEstimator`**: file ANE-compile bug (`ANECCompile() FAILED`, fp32 + int8,
-  123 MB on CPU).
 
 **profiled is based on model downloads** 
 
