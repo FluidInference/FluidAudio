@@ -55,10 +55,13 @@ public actor PocketTtsSession {
 
     // Models
     private let condModel: MLModel
+    private let condPrefillModel: MLModel
+    private let useCondPrefill: Bool
     private let stepModel: MLModel
     private let flowModel: MLModel
     private let mimiModel: MLModel
     private let condLayerKeys: PocketTtsLayerKeys
+    private let condPrefillLayerKeys: PocketTtsLayerKeys?
     private let flowlmLayerKeys: PocketTtsLayerKeys
     private let mimiKeys: PocketTtsMimiKeys
 
@@ -81,10 +84,13 @@ public actor PocketTtsSession {
         mimiState: PocketTtsSynthesizer.MimiState,
         constants: PocketTtsConstantsBundle,
         condModel: MLModel,
+        condPrefillModel: MLModel,
+        useCondPrefill: Bool,
         stepModel: MLModel,
         flowModel: MLModel,
         mimiModel: MLModel,
         condLayerKeys: PocketTtsLayerKeys,
+        condPrefillLayerKeys: PocketTtsLayerKeys?,
         flowlmLayerKeys: PocketTtsLayerKeys,
         mimiKeys: PocketTtsMimiKeys,
         bosEmb: MLMultiArray,
@@ -96,10 +102,13 @@ public actor PocketTtsSession {
         self.mimiState = mimiState
         self.constants = constants
         self.condModel = condModel
+        self.condPrefillModel = condPrefillModel
+        self.useCondPrefill = useCondPrefill
         self.stepModel = stepModel
         self.flowModel = flowModel
         self.mimiModel = mimiModel
         self.condLayerKeys = condLayerKeys
+        self.condPrefillLayerKeys = condPrefillLayerKeys
         self.flowlmLayerKeys = flowlmLayerKeys
         self.mimiKeys = mimiKeys
         self.bosEmb = bosEmb
@@ -188,7 +197,9 @@ public actor PocketTtsSession {
         var kvState = try PocketTtsSynthesizer.cloneKVCacheState(voiceKVSnapshot)
         kvState = try await PocketTtsSynthesizer.prefillKVCacheText(
             state: kvState, textEmbeddings: textEmbeddings, model: condModel,
-            layerKeys: condLayerKeys
+            layerKeys: condLayerKeys,
+            prefillModel: condPrefillModel, prefillLayerKeys: condPrefillLayerKeys,
+            useFastPrefill: useCondPrefill
         )
 
         // Generation loop

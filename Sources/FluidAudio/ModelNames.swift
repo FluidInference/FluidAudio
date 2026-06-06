@@ -791,6 +791,10 @@ public enum ModelNames {
     /// PocketTTS model names (flow-matching language model TTS)
     public enum PocketTTS {
         public static let condStep = "cond_step"
+        /// Optional one-shot conditioning prefill. Fills the whole voice+text
+        /// KV block in a single predict; when the file is absent the prefill
+        /// runs token-by-token through `cond_step` (same output schema).
+        public static let condPrefill = "cond_prefill"
         public static let flowlmStep = "flowlm_step"
         /// int8 variant of the FlowLM transformer published upstream alongside
         /// the default `flowlm_step`. Lives in the same `v2/<lang>/` directory
@@ -801,6 +805,7 @@ public enum ModelNames {
         public static let mimiEncoder = "mimi_encoderv2"
 
         public static let condStepFile = condStep + ".mlmodelc"
+        public static let condPrefillFile = condPrefill + ".mlmodelc"
         public static let flowlmStepFile = flowlmStep + ".mlmodelc"
         public static let flowlmStepV2File = flowlmStepV2 + ".mlmodelc"
         public static let flowDecoderFile = flowDecoder + ".mlmodelc"

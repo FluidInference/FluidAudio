@@ -23,7 +23,20 @@ public enum PocketTtsConstants {
     // MARK: - Generation parameters
 
     /// Number of Euler integration steps in flow_decoder (noise → audio code).
-    public static let numLsdSteps: Int = 8
+    ///
+    /// MUST match the step count baked into the fused decoder at conversion
+    /// (`convert_flow_decoder_fused.py --num-steps`). Lowered 8 → 4 for ~2×
+    /// fewer internal flow_net evals on top of the fusion dispatch savings.
+    /// PENDING a Whisper A/B: PRECISION.md flags the LSD denoiser as
+    /// precision-sensitive — if 4 steps degrades intelligibility, revert this
+    /// to 8 and re-convert the fused model with --num-steps 8.
+    public static let numLsdSteps: Int = 4
+
+    /// Fixed conditioning-block length compiled into `cond_prefill.mlpackage`
+    /// (`convert_cond_prefill.py --t-max`). The host pads the real voice+text
+    /// block to this length and passes the true count as `valid_len`; if a
+    /// block exceeds this, the prefill falls back to per-token `cond_step`.
+    public static let condPrefillMaxTokens: Int = 256
     /// Controls randomness in flow_decoder: scales initial noise by sqrt(temperature).
     public static let temperature: Float = 0.7
     /// flowlm_step EOS logit threshold — above this means the model is done speaking.

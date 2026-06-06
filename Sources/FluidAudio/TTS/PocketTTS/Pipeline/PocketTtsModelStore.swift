@@ -14,6 +14,7 @@ public actor PocketTtsModelStore {
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "PocketTtsModelStore")
 
     private var condStepModel: MLModel?
+    private var condPrefillModel: MLModel?
     private var flowlmStepModel: MLModel?
     private var flowDecoderModel: MLModel?
     private var mimiDecoderModel: MLModel?
@@ -22,6 +23,7 @@ public actor PocketTtsModelStore {
     private var voiceCache: [String: PocketTtsVoiceData] = [:]
     private var languageRootDirectory: URL?
     private var condLayerKeys: PocketTtsLayerKeys?
+    private var condPrefillLayerKeys: PocketTtsLayerKeys?
     private var flowlmLayerKeys: PocketTtsLayerKeys?
     private var mimiDecoderKeysCache: PocketTtsMimiKeys?
     private let directory: URL?
@@ -63,29 +65,43 @@ public actor PocketTtsModelStore {
             "Loading PocketTTS CoreML models (language=\(self.language.rawValue), precision=\(self.precision))..."
         )
 
-        // Use CPU+GPU for all models to avoid ANE float16 precision loss.
-        // The ANE processes in native float16, which causes audible artifacts
-        // in the Mimi decoder's streaming state feedback loop and may degrade
-        // quality in the other models. CPU/GPU compute in float32 matches the
-        // Python reference implementation.
-        let config = MLModelConfiguration()
-        config.computeUnits = .cpuAndGPU
+        // Per-model compute units. The global `.cpuAndGPU` hammer was set to
+        // stop the Mimi decoder beeping (its streaming-state fp16 feedback loop
+        // compounds ANE float16 error into audible artifacts — see
+        // mobius IOS_COREML_ISSUES.md #7). But that ban only needs to apply to
+        // Mimi; pinning every model off the ANE also throws away the documented
+        // wins: flowlm_step is 1.97× faster on ANE and the (fused) flow decoder
+        // is fully ANE-eligible. So assign per model:
+        //   cond / cond_prefill : .cpuAndGPU  (rank-5 KV cache trips the ANE
+        //                         partitioner; prefill is once-per-chunk anyway)
+        //   flowlm_step         : .all        (1.97× ANE win, the hot model)
+        //   flow_decoder(_fused): .all        (small MLP + Euler, ANE-friendly)
+        //   mimi_decoder        : .cpuOnly    (fp32, no beep, also 1.74× > GPU)
+        func config(_ units: MLComputeUnits) -> MLModelConfiguration {
+            let c = MLModelConfiguration()
+            c.computeUnits = units
+            return c
+        }
+        let condConfig = config(.cpuAndGPU)
+        let flowlmConfig = config(.all)
+        let flowDecoderConfig = config(.all)
+        let mimiConfig = config(.cpuOnly)
 
         let loadStart = Date()
 
-        let modelFiles: [String] = [
-            ModelNames.PocketTTS.condStepFile,
-            ModelNames.PocketTTS.flowlmStepFile(precision: precision),
-            ModelNames.PocketTTS.flowDecoderFile,
-            ModelNames.PocketTTS.mimiDecoderFile,
+        let modelSpecs: [(file: String, config: MLModelConfiguration)] = [
+            (ModelNames.PocketTTS.condStepFile, condConfig),
+            (ModelNames.PocketTTS.flowlmStepFile(precision: precision), flowlmConfig),
+            (ModelNames.PocketTTS.flowDecoderFile, flowDecoderConfig),
+            (ModelNames.PocketTTS.mimiDecoderFile, mimiConfig),
         ]
 
         var loadedModels: [MLModel] = []
-        for file in modelFiles {
-            let modelURL = languageRoot.appendingPathComponent(file)
-            let model = try MLModel(contentsOf: modelURL, configuration: config)
+        for spec in modelSpecs {
+            let modelURL = languageRoot.appendingPathComponent(spec.file)
+            let model = try MLModel(contentsOf: modelURL, configuration: spec.config)
             loadedModels.append(model)
-            logger.info("Loaded \(file)")
+            logger.info("Loaded \(spec.file) (computeUnits=\(spec.config.computeUnits.rawValue))")
         }
 
         condStepModel = loadedModels[0]
@@ -109,6 +125,34 @@ public actor PocketTtsModelStore {
             modelName: "flowlm_step"
         )
 
+        // Optional one-shot conditioning prefill (cond_prefill). Absent in
+        // older packs → fall back to per-token cond_step. Its output schema is
+        // identical to cond_step (N caches + N positions), so the `.condStep`
+        // discovery applies unchanged; only the inputs differ (conditioning
+        // [1, T_max, 1024] + valid_len). Loaded `.cpuAndGPU` like cond_step
+        // (rank-5 KV blocks ANE).
+        let condPrefillURL = languageRoot.appendingPathComponent(ModelNames.PocketTTS.condPrefillFile)
+        if FileManager.default.fileExists(atPath: condPrefillURL.path) {
+            do {
+                let model = try MLModel(contentsOf: condPrefillURL, configuration: condConfig)
+                condPrefillModel = model
+                condPrefillLayerKeys = try PocketTtsLayerKeys.discover(
+                    from: model,
+                    kind: .condStep,
+                    expectedLayers: expectedLayers,
+                    modelName: "cond_prefill"
+                )
+                logger.info("Loaded \(ModelNames.PocketTTS.condPrefillFile) (one-shot prefill)")
+            } catch {
+                // Non-fatal: keep per-token cond_step prefill.
+                logger.warning("cond_prefill present but failed to load (\(error)); using per-token cond_step")
+                condPrefillModel = nil
+                condPrefillLayerKeys = nil
+            }
+        } else {
+            logger.info("cond_prefill not present; using per-token cond_step prefill")
+        }
+
         // Discover Mimi decoder schema (per-state input→output mapping +
         // audio output name). CoreML auto-generates `var_NNN` output names
         // during conversion so the exact names vary across packs.
@@ -128,6 +172,30 @@ public actor PocketTtsModelStore {
             throw PocketTTSError.modelNotFound("PocketTTS cond_step model not loaded")
         }
         return model
+    }
+
+    /// The one-shot conditioning prefill model. Throws when the pack doesn't
+    /// ship `cond_prefill`; gate with `hasCondPrefill()` first (callers fall
+    /// back to per-token cond_step). Returned non-optional because the
+    /// (preconcurrency-Sendable) `MLModel` crosses the actor boundary while
+    /// `Optional<MLModel>` does not.
+    public func condPrefill() throws -> MLModel {
+        guard let model = condPrefillModel else {
+            throw PocketTTSError.modelNotFound("PocketTTS cond_prefill model not loaded")
+        }
+        return model
+    }
+
+    /// Whether the optional one-shot prefill model is available.
+    public func hasCondPrefill() -> Bool {
+        condPrefillModel != nil
+    }
+
+    /// Discovered output names for the cond_prefill model (same schema as
+    /// cond_step). `nil` when cond_prefill isn't loaded. `PocketTtsLayerKeys`
+    /// is Sendable, so `Optional<PocketTtsLayerKeys>` crosses the boundary fine.
+    func condPrefillStepLayerKeys() -> PocketTtsLayerKeys? {
+        condPrefillLayerKeys
     }
 
     /// The autoregressive generation step model.

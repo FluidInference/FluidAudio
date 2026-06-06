@@ -119,6 +119,71 @@ extension PocketTtsSynthesizer {
         }
     }
 
+    /// Run the one-shot conditioning prefill model: fill the whole voice or
+    /// text block in a single `predict()` instead of one call per token.
+    ///
+    /// `flatConditioning` is `tokenCount × embeddingDim` row-major. The block is
+    /// copied into a `[1, T_max, 1024]` input and zero-padded; `valid_len` =
+    /// `tokenCount` tells the model how many rows are real, so padded rows write
+    /// to a masked dump slot and the position advances by `tokenCount` only
+    /// (see mobius traceable_cond_prefill.py — neutralizes the Trial 8 padding
+    /// corruption). Output schema is identical to `cond_step`.
+    static func runCondPrefill(
+        flatConditioning: [Float],
+        tokenCount: Int,
+        state: inout KVCacheState,
+        model: MLModel,
+        layerKeys: PocketTtsLayerKeys
+    ) async throws {
+        let dim = PocketTtsConstants.embeddingDim
+        let tMax = PocketTtsConstants.condPrefillMaxTokens
+        guard tokenCount > 0, tokenCount <= tMax else {
+            throw PocketTTSError.processingFailed(
+                "cond_prefill token count \(tokenCount) out of range (1...\(tMax))")
+        }
+        let layers = layerKeys.layerCount
+
+        let conditioning = try MLMultiArray(
+            shape: [1, NSNumber(value: tMax), NSNumber(value: dim)], dataType: .float32)
+        let condPtr = conditioning.dataPointer.bindMemory(to: Float.self, capacity: tMax * dim)
+        condPtr.initialize(repeating: 0, count: tMax * dim)
+        let copyCount = min(tokenCount * dim, flatConditioning.count)
+        flatConditioning.withUnsafeBufferPointer { buffer in
+            guard let base = buffer.baseAddress else { return }
+            condPtr.update(from: base, count: copyCount)
+        }
+
+        let validLen = try MLMultiArray(shape: [1], dataType: .float32)
+        validLen[0] = NSNumber(value: Float(tokenCount))
+
+        var inputDict: [String: Any] = [
+            "conditioning": conditioning,
+            "valid_len": validLen,
+        ]
+        for i in 0..<layers {
+            inputDict["cache\(i)"] = state.caches[i]
+            inputDict["position\(i)"] = state.positions[i]
+        }
+
+        let input = try MLDictionaryFeatureProvider(dictionary: inputDict)
+        let output = try await model.compatPrediction(from: input, options: MLPredictionOptions())
+
+        for i in 0..<layers {
+            guard let newCache = output.featureValue(for: layerKeys.cacheKeys[i])?.multiArrayValue
+            else {
+                throw PocketTTSError.processingFailed(
+                    "Missing cond_prefill cache output: \(layerKeys.cacheKeys[i])")
+            }
+            guard let newPos = output.featureValue(for: layerKeys.positionKeys[i])?.multiArrayValue
+            else {
+                throw PocketTTSError.processingFailed(
+                    "Missing cond_prefill position output: \(layerKeys.positionKeys[i])")
+            }
+            state.caches[i] = newCache
+            state.positions[i] = newPos
+        }
+    }
+
     /// Prefill a KV cache state with voice conditioning tokens.
     ///
     /// Prepends a single `bos_before_voice` token to match pocket-tts 2.0.0's
@@ -136,7 +201,10 @@ extension PocketTtsSynthesizer {
         voiceData: PocketTtsVoiceData,
         bosBeforeVoice: [Float]?,
         model: MLModel,
-        layerKeys: PocketTtsLayerKeys
+        layerKeys: PocketTtsLayerKeys,
+        prefillModel: MLModel,
+        prefillLayerKeys: PocketTtsLayerKeys?,
+        useFastPrefill: Bool
     ) async throws -> KVCacheState {
         var state = state
         let dim = PocketTtsConstants.embeddingDim
@@ -162,6 +230,22 @@ extension PocketTtsSynthesizer {
             throw PocketTTSError.processingFailed(
                 "bos_before_voice has \(bosBeforeVoice.count) floats, expected \(dim)"
             )
+        }
+
+        // Fast path: one-shot prefill of [bos, voice...] in a single predict
+        // when cond_prefill is available and the block fits T_max.
+        let totalVoiceTokens = 1 + voiceTokenCount
+        if useFastPrefill, let prefillLayerKeys,
+            totalVoiceTokens <= PocketTtsConstants.condPrefillMaxTokens
+        {
+            var flat = [Float]()
+            flat.reserveCapacity(totalVoiceTokens * dim)
+            flat.append(contentsOf: bosBeforeVoice)
+            flat.append(contentsOf: voiceData.audioPrompt[0..<(voiceTokenCount * dim)])
+            try await runCondPrefill(
+                flatConditioning: flat, tokenCount: totalVoiceTokens,
+                state: &state, model: prefillModel, layerKeys: prefillLayerKeys)
+            return state
         }
 
         let bosToken = try createConditioningToken(
@@ -190,10 +274,28 @@ extension PocketTtsSynthesizer {
         state: KVCacheState,
         textEmbeddings: [[Float]],
         model: MLModel,
-        layerKeys: PocketTtsLayerKeys
+        layerKeys: PocketTtsLayerKeys,
+        prefillModel: MLModel,
+        prefillLayerKeys: PocketTtsLayerKeys?,
+        useFastPrefill: Bool
     ) async throws -> KVCacheState {
         var state = state
         let dim = PocketTtsConstants.embeddingDim
+
+        // Fast path: one-shot prefill of the whole text block in a single
+        // predict when cond_prefill is available and the block fits T_max.
+        if useFastPrefill, let prefillLayerKeys,
+            !textEmbeddings.isEmpty,
+            textEmbeddings.count <= PocketTtsConstants.condPrefillMaxTokens
+        {
+            var flat = [Float]()
+            flat.reserveCapacity(textEmbeddings.count * dim)
+            for embedding in textEmbeddings { flat.append(contentsOf: embedding) }
+            try await runCondPrefill(
+                flatConditioning: flat, tokenCount: textEmbeddings.count,
+                state: &state, model: prefillModel, layerKeys: prefillLayerKeys)
+            return state
+        }
 
         for embedding in textEmbeddings {
             let token = try createConditioningToken(from: embedding, offset: 0, dim: dim)
@@ -298,7 +400,10 @@ extension PocketTtsSynthesizer {
         textEmbeddings: [[Float]],
         bosBeforeVoice: [Float]?,
         model: MLModel,
-        layerKeys: PocketTtsLayerKeys
+        layerKeys: PocketTtsLayerKeys,
+        prefillModel: MLModel,
+        prefillLayerKeys: PocketTtsLayerKeys?,
+        useFastPrefill: Bool
     ) async throws -> KVCacheState {
         var state: KVCacheState
         if let snapshot = voiceData.cacheSnapshot {
@@ -308,11 +413,15 @@ extension PocketTtsSynthesizer {
             state = try await prefillKVCacheVoice(
                 state: emptyState, voiceData: voiceData,
                 bosBeforeVoice: bosBeforeVoice,
-                model: model, layerKeys: layerKeys
+                model: model, layerKeys: layerKeys,
+                prefillModel: prefillModel, prefillLayerKeys: prefillLayerKeys,
+                useFastPrefill: useFastPrefill
             )
         }
         state = try await prefillKVCacheText(
-            state: state, textEmbeddings: textEmbeddings, model: model, layerKeys: layerKeys
+            state: state, textEmbeddings: textEmbeddings, model: model, layerKeys: layerKeys,
+            prefillModel: prefillModel, prefillLayerKeys: prefillLayerKeys,
+            useFastPrefill: useFastPrefill
         )
 
         let finalPos = state.positions[0][0].floatValue

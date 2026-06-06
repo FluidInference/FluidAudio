@@ -227,10 +227,14 @@ public struct PocketTtsSynthesizer {
             text, tokenizer: constants.tokenizer,
             maxTokens: maxTokensPerChunk, language: language)
         let condModel = try await store.condStep()
+        let hasCondPrefill = await store.hasCondPrefill()
         let stepModel = try await store.flowlmStep()
         let flowModel = try await store.flowDecoder()
         let mimiModel = try await store.mimiDecoder()
         let condLayerKeys = try await store.condStepLayerKeys()
+        let condPrefillLayerKeys = await store.condPrefillStepLayerKeys()
+        let useCondPrefill = hasCondPrefill && condPrefillLayerKeys != nil
+        let condPrefillModel = useCondPrefill ? try await store.condPrefill() : condModel
         let flowlmLayerKeys = try await store.flowLMStepLayerKeys()
         let mimiKeys = try await store.mimiDecoderKeys()
         let repoDir = try await store.repoDir()
@@ -244,10 +248,13 @@ public struct PocketTtsSynthesizer {
             voiceData: voiceData,
             chunks: chunks,
             condModel: condModel,
+            condPrefillModel: condPrefillModel,
+            useCondPrefill: useCondPrefill,
             stepModel: stepModel,
             flowModel: flowModel,
             mimiModel: mimiModel,
             condLayerKeys: condLayerKeys,
+            condPrefillLayerKeys: condPrefillLayerKeys,
             flowlmLayerKeys: flowlmLayerKeys,
             mimiKeys: mimiKeys,
             mimiInitialState: mimiInitialState,
@@ -279,10 +286,14 @@ public struct PocketTtsSynthesizer {
 
         let constants = try await store.constants()
         let condModel = try await store.condStep()
+        let hasCondPrefill = await store.hasCondPrefill()
         let stepModel = try await store.flowlmStep()
         let flowModel = try await store.flowDecoder()
         let mimiModel = try await store.mimiDecoder()
         let condLayerKeys = try await store.condStepLayerKeys()
+        let condPrefillLayerKeys = await store.condPrefillStepLayerKeys()
+        let useCondPrefill = hasCondPrefill && condPrefillLayerKeys != nil
+        let condPrefillModel = useCondPrefill ? try await store.condPrefill() : condModel
         let flowlmLayerKeys = try await store.flowLMStepLayerKeys()
         let mimiKeys = try await store.mimiDecoderKeys()
         let repoDir = try await store.repoDir()
@@ -305,7 +316,9 @@ public struct PocketTtsSynthesizer {
             voiceKVSnapshot = try await prefillKVCacheVoice(
                 state: emptyState, voiceData: voiceData,
                 bosBeforeVoice: constants.bosBeforeVoice,
-                model: condModel, layerKeys: condLayerKeys
+                model: condModel, layerKeys: condLayerKeys,
+                prefillModel: condPrefillModel, prefillLayerKeys: condPrefillLayerKeys,
+                useFastPrefill: useCondPrefill
             )
         }
 
@@ -318,10 +331,13 @@ public struct PocketTtsSynthesizer {
             mimiState: mimiState,
             constants: constants,
             condModel: condModel,
+            condPrefillModel: condPrefillModel,
+            useCondPrefill: useCondPrefill,
             stepModel: stepModel,
             flowModel: flowModel,
             mimiModel: mimiModel,
             condLayerKeys: condLayerKeys,
+            condPrefillLayerKeys: condPrefillLayerKeys,
             flowlmLayerKeys: flowlmLayerKeys,
             mimiKeys: mimiKeys,
             bosEmb: bosEmb,
@@ -345,10 +361,13 @@ public struct PocketTtsSynthesizer {
         let voiceData: PocketTtsVoiceData
         let chunks: [TextChunk]
         let condModel: MLModel
+        let condPrefillModel: MLModel
+        let useCondPrefill: Bool
         let stepModel: MLModel
         let flowModel: MLModel
         let mimiModel: MLModel
         let condLayerKeys: PocketTtsLayerKeys
+        let condPrefillLayerKeys: PocketTtsLayerKeys?
         let flowlmLayerKeys: PocketTtsLayerKeys
         let mimiKeys: PocketTtsMimiKeys
         var mimiState: MimiState
@@ -363,10 +382,13 @@ public struct PocketTtsSynthesizer {
             voiceData: PocketTtsVoiceData,
             chunks: [TextChunk],
             condModel: MLModel,
+            condPrefillModel: MLModel,
+            useCondPrefill: Bool,
             stepModel: MLModel,
             flowModel: MLModel,
             mimiModel: MLModel,
             condLayerKeys: PocketTtsLayerKeys,
+            condPrefillLayerKeys: PocketTtsLayerKeys?,
             flowlmLayerKeys: PocketTtsLayerKeys,
             mimiKeys: PocketTtsMimiKeys,
             mimiInitialState: MimiState,
@@ -380,10 +402,13 @@ public struct PocketTtsSynthesizer {
             self.voiceData = voiceData
             self.chunks = chunks
             self.condModel = condModel
+            self.condPrefillModel = condPrefillModel
+            self.useCondPrefill = useCondPrefill
             self.stepModel = stepModel
             self.flowModel = flowModel
             self.mimiModel = mimiModel
             self.condLayerKeys = condLayerKeys
+            self.condPrefillLayerKeys = condPrefillLayerKeys
             self.flowlmLayerKeys = flowlmLayerKeys
             self.mimiKeys = mimiKeys
             self.mimiState = mimiInitialState
@@ -469,7 +494,10 @@ public struct PocketTtsSynthesizer {
                         textEmbeddings: textEmbeddings,
                         bosBeforeVoice: constants.bosBeforeVoice,
                         model: condModel,
-                        layerKeys: condLayerKeys
+                        layerKeys: condLayerKeys,
+                        prefillModel: condPrefillModel,
+                        prefillLayerKeys: condPrefillLayerKeys,
+                        useFastPrefill: useCondPrefill
                     )
 
                     let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: chunk.text)
