@@ -33,6 +33,13 @@ public enum TtsComputeUnitPreset: String, Sendable, CaseIterable {
     /// every backend should at least run here, however slowly.
     case cpuOnly
 
+    /// Kokoro on M5 / macOS 26.5: all stages `.cpuAndNeuralEngine` EXCEPT
+    /// the tail (iSTFT), which goes to `.cpuAndGPU`. The default `.all`
+    /// routing crashes the prosody RNN on the GPU (`GPURNNOps` JIT assert);
+    /// `all-ane` instead crashes the tail iSTFT in `libBNNS`. This preset
+    /// keeps the RNN off the GPU while keeping the iSTFT off BNNS. See #667.
+    case aneTailGpu
+
     /// Concrete `MLComputeUnits` for "force every stage to X" presets.
     /// Returns `nil` for `.default`, which means "let the backend keep
     /// its empirical mapping".
@@ -42,6 +49,7 @@ public enum TtsComputeUnitPreset: String, Sendable, CaseIterable {
         case .allAne: return .cpuAndNeuralEngine
         case .cpuAndGpu: return .cpuAndGPU
         case .cpuOnly: return .cpuOnly
+        case .aneTailGpu: return nil  // per-stage; resolved by each backend
         }
     }
 
@@ -54,6 +62,7 @@ public enum TtsComputeUnitPreset: String, Sendable, CaseIterable {
         case "all-ane", "ane", "neural-engine": self = .allAne
         case "cpu-and-gpu", "cpuandgpu", "gpu": self = .cpuAndGpu
         case "cpu-only", "cpu", "cpuonly": self = .cpuOnly
+        case "ane-tail-gpu", "anetailgpu", "m5": self = .aneTailGpu
         default: return nil
         }
     }
@@ -67,6 +76,7 @@ public enum TtsComputeUnitPreset: String, Sendable, CaseIterable {
         case .allAne: return "all-ane"
         case .cpuAndGpu: return "cpu-and-gpu"
         case .cpuOnly: return "cpu-only"
+        case .aneTailGpu: return "ane-tail-gpu"
         }
     }
 }
