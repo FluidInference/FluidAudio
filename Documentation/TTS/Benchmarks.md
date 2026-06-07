@@ -194,14 +194,18 @@ peak RSS, WER, CER) so there is a single source of truth.
 | Supertonic-3 (int4) | Apache-2.0 | en (`M1`, 31-lang)        | int4 ~0.10 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥110 char Latin / 90 CJK)  | No        | **80 / 86 ms** | 80 / 86 ms     | **118×** | 201 MB   | 6.86%ᶜ | 4.08%ᶜ |
 
 ᴷ **Kokoro ANE (M2)** — numbers carried from the M2 reference. Kokoro
-**cannot run on this M5 Pro / macOS 26.5 host**: longer phrases
-segfault (`EXC_BAD_ACCESS` / SIGSEGV) inside Apple's `libBNNS.dylib`
-(`BNNSGraphContextExecute_v2` → `BnnsCpuInferenceOperation::ExecuteSync`),
-on the **CPU** path — so it reproduces under `--compute-units default`,
-`all-ane`, *and* `cpu-only` (it is not a GPU/ANE-routing issue). Short
-phrases (phrase 1) complete; the crash is an Apple-framework bug, not
-fixable from FluidAudio. Tracked in [#667][i667]. Re-baseline once
-Apple ships a fix.
+**cannot be benchmarked on this M5 Pro / macOS 26.5 host**: a *single*
+synthesis works (verified, correct audio, en + zh), but the **2nd+
+prediction in a process crashes** — even for the identical short
+phrase. The mode depends on routing: `--compute-units default` hits a
+GPU `MetalPerformanceShadersGraph GPURNNOps … 'JIT not supported'`
+assert (SIGABRT) on the prosody RNN; `all-ane` / `cpu-only` segfault in
+`libBNNS.dylib` (`BnnsCpuInferenceOperation::ExecuteSync`, SIGSEGV,
+nondeterministic). It is not phrase-length, not ASR contention, and no
+compute-unit routing avoids it — an Apple-framework instability on
+repeated dynamic-shape predictions, not fixable from FluidAudio.
+Tracked in [#667][i667]. Re-baseline once Apple ships a fix (or the
+Kokoro graphs are re-exported with bucketed shapes).
 
 ᶜ **Supertonic-3 (int4)** is measured on **M5 Pro / macOS 26.5** with
 the default **int4 L-bucketed (ANE) VectorEstimator**. The int4-ANE
