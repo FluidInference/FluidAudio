@@ -23,7 +23,20 @@ public enum PocketTtsConstants {
     // MARK: - Generation parameters
 
     /// Number of Euler integration steps in flow_decoder (noise → audio code).
+    ///
+    /// Informational: the LSD Euler step count BAKED INTO `flow_decoder_fused`
+    /// at conversion (`convert_flow_decoder_fused.py --num-steps`). NOT read at
+    /// runtime — `flowDecode` calls the fused model which runs this many steps
+    /// internally. The shipped v2.1 packs were converted with 8. To change it,
+    /// re-convert the fused model and update this value; editing it alone has no
+    /// runtime effect.
     public static let numLsdSteps: Int = 8
+
+    /// Fixed conditioning-block length compiled into `cond_prefill.mlpackage`
+    /// (`convert_cond_prefill.py --t-max`). The host pads the real voice+text
+    /// block to this length and passes the true count as `valid_len`; if a
+    /// block exceeds this, the prefill falls back to per-token `cond_step`.
+    public static let condPrefillMaxTokens: Int = 256
     /// Controls randomness in flow_decoder: scales initial noise by sqrt(temperature).
     public static let temperature: Float = 0.7
     /// flowlm_step EOS logit threshold — above this means the model is done speaking.
@@ -79,7 +92,9 @@ public enum PocketTtsLanguage: String, Sendable, CaseIterable {
 
     /// HF subdirectory under the pocket-tts-coreml repo root.
     public var repoSubdirectory: String {
-        "v2/\(rawValue)"
+        // v2.1 = optimized re-conversion of v2 (fused flow decoder on ANE,
+        // one-shot cond prefill, fp16 flowlm). Same weights as v2.
+        "v2.1/\(rawValue)"
     }
 }
 
