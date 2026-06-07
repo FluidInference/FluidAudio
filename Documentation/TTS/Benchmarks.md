@@ -176,10 +176,20 @@ peak RSS, WER, CER) so there is a single source of truth.
 |------------|------------|---------------------------|----------------------------|-------------|------------------------------------------------------------------|-----------|-------------------|-------------------|-----------|----------|--------|--------|
 | Kokoro ANE | Apache-2.0 | en (`af_heart`)           | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **988 / 2068 ms** | 988 / 2068 ms     | **7.47×** | 1027 MB  | 10.8%  | 4.0%   |
 | Kokoro ANE | Apache-2.0 | zh (`zf_001`)             | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **956 / 1802 ms** | 956 / 1802 ms     | 6.37×     | 685 MB   | n/a‡   | 4.0%‡  |
-| PocketTTS  | research   | en (`alba`, 6L pack)      | int8 ~0.55 GB | 24 kHz      | 80 ms Mimi frame, streams until EOS (no fixed cap)               | Yes       | **710 / 1496 ms** | 5160 / 9801 ms    | 1.10×     | 1167 MB  | 1.0%   | 0.4%   |
+| PocketTTS (v2.1)◆ | research   | en (`alba`, 6L pack)      | fp16 ~330 MB | 24 kHz      | 80 ms Mimi frame, streams until EOS (no fixed cap)               | Yes       | **22 / 27 ms** | 987 / 1343 ms    | **6.18×**◆ | 696 MB◆  | 1.0%◆  | 0.4%◆  |
 | Magpie     | research   | en (`John`)               | ~1.3 GB                    | 22.05 kHz   | 256 NanoCodec frames / pass (≈11.9 s); sentence-split for longer | No        | 11470 / 26042 ms∥ | 11470 / 26042 ms∥ | 0.87×∥    | 543 MB∥  | 3.8%   | 2.6%   |
 | StyleTTS2  | research   | en (LibriTTS iteration_3) | ~0.67 GB¶                  | 24 kHz      | 256 tokens / pass (≈30 s of audio max)                           | No        | 1574 / 3088 ms    | 1574 / 3088 ms    | 4.59×     | 522 MB   | 9.4%   | 4.1%   |
 | Supertonic-3 | Apache-2.0 | en (`M1`, 31-lang)        | ~0.40 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥110 char Latin / 90 CJK)  | No        | **479 / 6491 ms** | 479 / 6491 ms     | 5.55×     | 679 MB   | 0.8%   | 0.3%   |
+
+◆ **PocketTTS (v2.1)** is the only row measured on **M5 Pro / macOS 26** with
+the optimized v2.1 packs (fused flow decoder on the ANE + one-shot cond_prefill
++ fp16 flowlm) — **not** the M2 reference, so its TTFT / synth / RTFx are **not
+directly comparable** to the M2 rows above (chip *and* code differ). On M5 Pro,
+cond_prefill collapses TTFT from ~710 ms (v2) to ~22 ms and agg RTFx is 6.18×
+(100 phrases). WER/CER are carried from the v2 run (identical weights; fp16
+intelligibility device-verified via Whisper, e.g. "Hello, this is a
+text-to-speech system." exact) and were **not** re-scored with ASR here. Re-run
+on the M2 reference for a row comparable to the others.
 
 \* TTFT for **PocketTTS** is first-frame emit through the streaming
 API (perceptual TTFA). **Kokoro ANE / Magpie / StyleTTS2** all run
