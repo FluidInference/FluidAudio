@@ -27,7 +27,7 @@ jobs:
         with:
           path: |
             .build
-            ~/.cache/fluidaudio/Models/pocket-tts-coreml
+            ~/.cache/fluidaudio/Models/pocket-tts
           key: ${{ runner.os }}-pocket-tts-v2.1-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/PocketTTS/**', 'Sources/FluidAudio/ModelNames.swift') }}
 
       - name: Build
