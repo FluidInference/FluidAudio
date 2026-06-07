@@ -70,19 +70,23 @@ public actor PocketTtsModelStore {
         // compounds ANE float16 error into audible artifacts — see
         // mobius IOS_COREML_ISSUES.md #7). But that ban only needs to apply to
         // Mimi; pinning every model off the ANE also throws away the documented
-        // wins: flowlm_step is 1.97× faster on ANE and the (fused) flow decoder
-        // is fully ANE-eligible. So assign per model:
-        //   cond / cond_prefill : .cpuAndGPU  (rank-5 KV cache trips the ANE
-        //                         partitioner; prefill is once-per-chunk anyway)
-        //   flowlm_step         : .all        (1.97× ANE win, the hot model)
-        //   flow_decoder(_fused): .all        (small MLP + Euler, ANE-friendly)
-        //   mimi_decoder        : .cpuOnly    (fp32, no beep, also 1.74× > GPU)
+        // wins. Configs below are the MEASURED fastest per model (M-series /
+        // macOS 26, coreml-cli medians across all 4 compute-unit configs):
+        //   cond / cond_prefill : .all     prefill 4.7ms @ all vs 7.5 @ cpuAndGPU
+        //                                   (ANE compile fails on rank-5 → GPU,
+        //                                   but `.all` GPU placement is faster)
+        //   flowlm_step         : .all     fp16 3.4ms @ all vs 5.0 @ cpuAndGPU
+        //                                   (GPU — NOT ANE; rank-5 scatter blocks ANE)
+        //   flow_decoder_fused  : .all     1.09ms, the ONE model that is 100% ANE
+        //   mimi_decoder        : .cpuOnly 6.0ms, faster than GPU + avoids ANE beep
+        // NOTE: the earlier "flowlm 1.97× on ANE" claim was disproven on-device —
+        // only the fused decoder reaches the ANE; the rest are GPU/CPU.
         func config(_ units: MLComputeUnits) -> MLModelConfiguration {
             let c = MLModelConfiguration()
             c.computeUnits = units
             return c
         }
-        let condConfig = config(.cpuAndGPU)
+        let condConfig = config(.all)
         let flowlmConfig = config(.all)
         let flowDecoderConfig = config(.all)
         let mimiConfig = config(.cpuOnly)
