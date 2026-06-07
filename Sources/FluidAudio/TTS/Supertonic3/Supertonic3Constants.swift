@@ -77,7 +77,7 @@ public enum Supertonic3Constants {
     /// `<lang>…</lang>` wrapping (~10-char overhead, allowing 8-char tags
     /// plus a small margin for diacritic expansion). Longer text is split
     /// by `Supertonic3TextChunker` before reaching the encoder.
-    public static let maxChunkLengthLatin: Int = 110
+    public static let maxChunkLengthLatin: Int = 70
 
     /// Tighter chunk cap for Korean / Japanese. CJK uses more codepoints per
     /// visible character after NFKD, so we leave additional headroom inside
