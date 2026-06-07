@@ -203,7 +203,6 @@ feedback produces audible artifacts on the ANE, and it is compute-bound anyway).
 | flowlm_step (fp16) | 0% | 100% | 0% | 556 | 145 MB | 149 ms (43× @ 3.46) |
 | flow_decoder_fused | **100%** | 0% | 0% | 1252 | 18 MB | 46 ms (42× @ 1.09) |
 | mimi_decoder | 0% | 0% | 100% | 271¹ | 41 MB | 302 ms (42× @ 7.2) |
-| mimi_encoder | _crash_ | n/a | n/a | n/a | 70 MB | voice-clone only |
 
 ¹ `MLComputePlan` crashes on `cond_prefill` (ANE compile) and `mimi_decoder`
 (streaming state), so their device split is inferred from the runtime config
@@ -218,7 +217,9 @@ metric MLComputePlan reports — verified equal on the fused decoder: 1252).
 > (18→1); **fp16 flowlm**. The earlier "flowlm 1.97× on ANE" claim did **not**
 > reproduce — flowlm is GPU. mimi is the remaining floor (~60% of wall-time),
 > compute-bound (not overhead-bound — an MLState micro-bench showed state
-> marshalling is only ~0.5 ms/call). `mimi_encoder` still crashes the loader.
+> marshalling is only ~0.5 ms/call). Voice cloning uses the unchanged v2
+> `mimi_encoder` (repo-root, language-agnostic; still crashes
+> `MLComputePlan.load`) — not part of the v2.1 synthesis path.
 
 ### Supertonic
 `VectorEstimator` runs once per denoising step (default 8) and is the heaviest stage. The **default is
@@ -241,12 +242,6 @@ vs CPU-only 14.2 ms/step). A cold first call additionally pays a one-time ANE co
 
 ---
 
-## Todos 
-
-
-**profiled is based on model downloads** 
-
----
 
 ## How to measure
 
