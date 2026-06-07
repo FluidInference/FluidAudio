@@ -1,19 +1,19 @@
 # TTS Benchmarks
 
 > **Setup:** Apple M5 Pro, 24 GB, macOS 26.5 (25F71), on AC.
-> Kokoro ANE and StyleTTS2 rows are carried from the M2 reference
-> (MacBook Air M2, 16 GB) — they cannot run on this M5 host (see the
-> Kokoro libBNNS and StyleTTS2 asset footnotes below).
+> Kokoro ANE runs on M5 with `--compute-units ane-tail-gpu` (the
+> `default`/`all-ane` paths crash — see the ᴷ footnote). Only the
+> StyleTTS2 row is carried from the M2 reference (MacBook Air M2,
+> 16 GB), pending a HF asset fix (see the ˢ footnote below).
 > **Corpus:** [MiniMax Multilingual TTS Test Set][minimax] (100
 > phrases / language, CC-BY-SA-4.0) — the same public corpus used
 > by [MiniMax-Speech][mms], seed-tts-eval, and Gradium, so numbers
 > here are directly paper-comparable.
-> **Status:** PocketTTS (English), Magpie (English), and Supertonic-3
-> (English) complete the full 100-phrase MiniMax run on **M5 Pro**.
-> Kokoro ANE (English + Mandarin) and StyleTTS2 (English, zero-shot)
-> are **M2-only** here — Kokoro segfaults inside Apple's `libBNNS`
-> on M5/macOS 26.5 and StyleTTS2's bucketed BERT assets ship without
-> `model.mil`; both rows carry their M2 numbers.
+> **Status:** Kokoro ANE (English + Mandarin), PocketTTS (English),
+> Magpie (English), and Supertonic-3 (English) all complete the full
+> 100-phrase MiniMax run on **M5 Pro** (Kokoro via the `ane-tail-gpu`
+> preset). Only **StyleTTS2** is **M2-only** here — its bucketed BERT
+> assets ship without `model.mil`; that row carries its M2 numbers.
 >
 > [minimax]: https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
 > [mms]: https://arxiv.org/abs/2505.07916
@@ -165,19 +165,18 @@ Mandarin (or any of the 14 Cohere languages) against
 ### Per-backend top-line
 
 Reference machine: **Apple M5 Pro, 24 GB unified memory, macOS 26.5
-(`25F71`), on AC** for the PocketTTS, Magpie, and Supertonic-3 rows.
-The **Kokoro ANE** (en + zh) and **StyleTTS2** rows are carried from
-the prior **MacBook Air, Apple M2 (2022), 8-core CPU / 8-core GPU /
-16-core Neural Engine, 16 GB, macOS 26** (`Mac14,2`) reference —
-they do not run on the M5 host (Kokoro: Apple `libBNNS` SIGSEGV on
-longer phrases in every compute mode; StyleTTS2: missing `model.mil`
-in the shipped bucketed BERT graphs — see footnotes ᴷ / ˢ). M5
-rows use `--compute-units default`; M2 rows used `--compute-units
-default` on M2. 100 phrases per language. Voices are backend defaults
-(`af_heart` for Kokoro ANE en, `zf_001` for Kokoro ANE zh,
-`alba` for PocketTTS, `John` for Magpie, LibriTTS iteration_3 for
-StyleTTS2). English WER / CER via Parakeet TDT roundtrip; Mandarin
-CER via `whisper-large-v3`.
+(`25F71`), on AC** for the Kokoro ANE, PocketTTS, Magpie, and
+Supertonic-3 rows. Only the **StyleTTS2** row is carried from the
+prior **MacBook Air, Apple M2 (2022), 8-core CPU / 8-core GPU /
+16-core Neural Engine, 16 GB, macOS 26** (`Mac14,2`) reference — it
+does not run on the M5 host (missing `model.mil` in the shipped
+bucketed BERT graphs — see footnote ˢ). M5 rows use `--compute-units
+default`, **except Kokoro ANE which uses `ane-tail-gpu`** (the only
+preset that runs on M5/macOS 26.5 — see footnote ᴷ). 100 phrases per
+language. Voices are backend defaults (`af_heart` for Kokoro ANE en,
+`zf_001` for Kokoro ANE zh, `alba` for PocketTTS, `John` for Magpie,
+LibriTTS iteration_3 for StyleTTS2). English WER / CER via Parakeet
+TDT roundtrip; Mandarin CER via `whisper-large-v3-turbo`.
 
 One consolidated table per backend × language. **Basic info**
 (license, language, footprint, sample rate, max chunk per pass,
@@ -186,26 +185,26 @@ peak RSS, WER, CER) so there is a single source of truth.
 
 | Backend    | License    | Language (voice)          | Footprint                  | Sample rate | Max chunk per pass                                               | Streaming | TTFT p50 / p95\*  | Synth p50 / p95   | Agg RTFx  | Peak RSS | WER    | CER    |
 |------------|------------|---------------------------|----------------------------|-------------|------------------------------------------------------------------|-----------|-------------------|-------------------|-----------|----------|--------|--------|
-| Kokoro ANE (M2)ᴷ | Apache-2.0 | en (`af_heart`)           | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **988 / 2068 ms** | 988 / 2068 ms     | **7.47×** | 1027 MB  | 10.8%  | 4.0%   |
-| Kokoro ANE (M2)ᴷ | Apache-2.0 | zh (`zf_001`)             | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **956 / 1802 ms** | 956 / 1802 ms     | 6.37×     | 685 MB   | n/a‡   | 4.0%‡  |
+| Kokoro ANEᴷ | Apache-2.0 | en (`af_heart`)           | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **314 / 410 ms** | 314 / 410 ms     | **25.4×**ᴷ | 734 MB   | 10.33% | 3.72%  |
+| Kokoro ANEᴷ | Apache-2.0 | zh (`zf_001`)             | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **201 / 286 ms** | 201 / 286 ms     | 20.1×ᴷ     | 761 MB   | n/a‡   | 3.81%‡ |
 | PocketTTS (v2.1) | research   | en (`alba`, 6L pack)      | fp16 ~330 MB | 24 kHz      | 80 ms Mimi frame, streams until EOS (no fixed cap)               | Yes       | **26 / 27 ms** | 933 / 1233 ms    | **6.51×** | 761 MB   | 0.51%  | 0.08%  |
 | Magpie     | research   | en (`John`)               | ~1.3 GB                    | 22.05 kHz   | 256 NanoCodec frames / pass (≈11.9 s); sentence-split for longer | No        | 3765 / 12110 ms∥ | 3765 / 12110 ms∥ | 2.34×∥    | 832 MB∥  | 3.98%  | 2.44%  |
 | StyleTTS2 (M2)ˢ | research   | en (LibriTTS iteration_3) | ~0.67 GB¶                  | 24 kHz      | 256 tokens / pass (≈30 s of audio max)                           | No        | 1574 / 3088 ms    | 1574 / 3088 ms    | 4.59×     | 522 MB   | 9.4%   | 4.1%   |
 | Supertonic-3 (int4) | Apache-2.0 | en (`M1`, 31-lang)        | int4 ~0.10 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥110 char Latin / 90 CJK)  | No        | **80 / 86 ms** | 80 / 86 ms     | **118×** | 201 MB   | 6.86%ᶜ | 4.08%ᶜ |
 
-ᴷ **Kokoro ANE (M2)** — numbers carried from the M2 reference. Kokoro
-**cannot be benchmarked on this M5 Pro / macOS 26.5 host**: a *single*
-synthesis works (verified, correct audio, en + zh), but the **2nd+
-prediction in a process crashes** — even for the identical short
-phrase. The mode depends on routing: `--compute-units default` hits a
-GPU `MetalPerformanceShadersGraph GPURNNOps … 'JIT not supported'`
-assert (SIGABRT) on the prosody RNN; `all-ane` / `cpu-only` segfault in
-`libBNNS.dylib` (`BnnsCpuInferenceOperation::ExecuteSync`, SIGSEGV,
-nondeterministic). It is not phrase-length, not ASR contention, and no
-compute-unit routing avoids it — an Apple-framework instability on
-repeated dynamic-shape predictions, not fixable from FluidAudio.
-Tracked in [#667][i667]. Re-baseline once Apple ships a fix (or the
-Kokoro graphs are re-exported with bucketed shapes).
+ᴷ **Kokoro ANE on M5** is measured with **`--compute-units
+ane-tail-gpu`**, which is required on M5 / macOS 26.5: the stock
+routings crash on the 2nd+ prediction in a process (`default` → GPU
+`MetalPerformanceShadersGraph GPURNNOps … 'JIT not supported'` on the
+prosody RNN; `all-ane`/`cpu-only` → `libBNNS` SIGSEGV on the tail
+iSTFT). The `ane-tail-gpu` preset pins every stage to
+`.cpuAndNeuralEngine` **except the tail (iSTFT) → `.cpuAndGPU`**,
+keeping the RNN off the GPU while keeping the iSTFT off BNNS — which
+dodges both crashes with dynamic shapes. Quality matches the prior M2
+baseline (en WER 10.33% vs 10.8%; zh CER 3.81% vs 4.01%), confirming
+the routing change is numerically faithful. The underlying Apple bug
+(stock routings) is tracked in [#667][i667]; the preset shipped in
+`TtsComputeUnitPreset.aneTailGpu`.
 
 ᶜ **Supertonic-3 (int4)** is measured on **M5 Pro / macOS 26.5** with
 the default **int4 L-bucketed (ANE) VectorEstimator**. The int4-ANE
@@ -229,17 +228,14 @@ one-shot per phrase (no streaming yield on `main`), so for those
 rows `ttft_ms == synth_ms == time-to-complete-wav`.
 
 ‡ Kokoro ANE Mandarin CER measured on the **full 100-phrase**
-`minimax-chinese` corpus via `whisper-large-v3` (Python CPU FP32,
-[`Scripts/whisper_zh_cer.py`](../../Scripts/whisper_zh_cer.py))
+`minimax-chinese` corpus via `mlx-community/whisper-large-v3-turbo`
 against the WAVs rendered by `tts-benchmark --backend kokoro-ane
 --variant mandarin --voice zf_001 --corpus minimax-chinese
---skip-asr`: **macro CER 4.01% (0.0401)**, **micro CER 4.14%
-(0.0414)** across 100 phrases (table reports the macro figure).
-WER is omitted because Mandarin has no word boundaries and
-`WERCalculator` splits on whitespace — word-level WER reads near
-100% and is meaningless. Cohere Transcribe q8 hit a
-`MILCompilerForANE` cache failure on this M2 host, so whisper is
-the local source of truth for Mandarin CER.
+--compute-units ane-tail-gpu --skip-asr`: **macro CER 3.81% (M5 Pro /
+macOS 26.5)**, in line with the prior M2 baseline (4.01%). WER is
+omitted because Mandarin has no word boundaries and `WERCalculator`
+splits on whitespace — word-level WER reads near 100% and is
+meaningless.
 
 ∥ Magpie: batch-only. `synthesize(...)` returns one
 `MagpieSynthesisResult` after the full AR + codec pipeline completes,
@@ -271,8 +267,11 @@ files are re-uploaded.
 ### Kokoro ANE — per-stage breakdown (default preset, MiniMax-English)
 
 Means across 100 `minimax-english` phrases on M2 (`af_heart`,
-post-laishere 7-graph chain). Stages map to the 7-CoreML-graph split
-documented in [KokoroAne.md](KokoroAne.md). Vocoder + noise together
+post-laishere 7-graph chain, `default` preset). On M5 / macOS 26.5 the
+main table uses the `ane-tail-gpu` preset (tail iSTFT on GPU instead of
+the default routing — see footnote ᴷ), so the per-stage split there
+differs. Stages map to the 7-CoreML-graph split documented in
+[KokoroAne.md](KokoroAne.md). Vocoder + noise together
 account for ~90% of synth time, which is the natural target for any
 further per-stage compute-unit re-tuning.
 
