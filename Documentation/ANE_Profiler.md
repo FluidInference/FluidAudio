@@ -175,7 +175,7 @@ Latency **measured on real synthesis**, warm (one short sentence; `tts --backend
 | Kokoro ANE (7-stage) | batch (per utterance) | 75% | 0% | 25% | 1472 | 83 MB | Vocoder → ANE |
 | Supertonic (default fp16) | batch (8-step diffusion) | 30% | 0% | 70% | 1365 | 192 MB | VectorEstimator → **CPU** (dynamic shapes can't use ANE) |
 | Supertonic (`--ve-variant int4`) | batch (8-step diffusion) | ~90% | 0% | ~10% | 1289 | 102 MB | VectorEstimator → **ANE** (fixed L-buckets) |
-| PocketTTS | streaming (autoregressive) | 0% | 0% | 100% | 1504 | 606 MB | all stages → CPU (mimi_encoder crashes loader) |
+| PocketTTS (v2.1) | streaming (autoregressive) | ~9% | ~31% | ~60% | — | ~330 MB | flow_decoder_fused → **ANE**; flowlm/cond → GPU; mimi → CPU |
 
 **Component detail**
 
@@ -190,20 +190,34 @@ Latency **measured on real synthesis**, warm (one short sentence; `tts --backend
 | Vocoder | 99% | 0% | 1% | 655 | 47 MB | 71.8 |
 | Tail | 0% | 0% | 100% | 13 | 1 MB | 9.6 |
 
-### PocketTTS
-Autoregressive: stages run many steps per utterance. All on CPU.
+### PocketTTS (v2.1)
+Autoregressive: stages run many steps per utterance. Measured on M-series /
+macOS 26 with the v2.1 optimized packs. Only the fused flow decoder reaches the
+ANE; flowlm/cond run on GPU (the rank-5 KV-cache `scatter` is rejected by the
+ANE compiler at **any** precision), and mimi is CPU (fp16 streaming-state
+feedback produces audible artifacts on the ANE, and it is compute-bound anyway).
 
 | Component | ANE | GPU | CPU | ops | Size | Lat ms |
 |-----------|----:|----:|----:|----:|-----:|-------:|
-| cond_step | 0% | 0% | 100% | 492 | 255 MB | 122 ms (18× @ 6.8) |
-| flowlm_step | 0% | 0% | 100% | 540 | 291 MB | 231 ms (43× @ 5.4) |
-| flow_decoder | 0% | 0% | 100% | 165 | 38 MB | 249 ms (336× @ 0.74) |
-| mimi_decoder | 0% | 0% | 100% | 307 | 22 MB | 302 ms (42× @ 7.2) |
+| cond_prefill | 0% | 100% | 0% | n/a¹ | 127 MB | ~5 ms (1× @ 4.8) |
+| flowlm_step (fp16) | 0% | 100% | 0% | 540 | 145 MB | 149 ms (43× @ 3.46) |
+| flow_decoder_fused | **100%** | 0% | 0% | 1252 | 18 MB | 46 ms (42× @ 1.09) |
+| mimi_decoder | 0% | 0% | 100% | n/a¹ | 41 MB | 302 ms (42× @ 7.2) |
 | mimi_encoder | _crash_ | n/a | n/a | n/a | 70 MB | voice-clone only |
 
-> PocketTTS is an outlier, ~900 ms of CPU work per utterance across four stages, all 100% CPU.
-> `mimi_encoder` runs only for voice cloning (and crashes `MLComputePlan.load`, so its split is
-> unknown). Getting these onto the ANE is future work.
+¹ `MLComputePlan` crashes on `cond_prefill` (ANE compile) and `mimi_decoder`
+(streaming state), so the per-op split is unavailable; they still run cleanly on
+GPU / CPU respectively.
+
+> v2.1 cut the per-utterance pipeline ~905 ms → ~452–520 ms (**~1.8× RTFx**),
+> device-verified end-to-end (Whisper exact). Wins: **fused flow decoder** — the
+> 8-step LSD Euler loop unrolled into one call (336→42 dispatches/utt), and the
+> fat scatter-free fp16 graph flips **0% → 100% ANE** (the single-step kernel was
+> always rejected); **cond_prefill** — whole conditioning block in one call
+> (18→1); **fp16 flowlm**. The earlier "flowlm 1.97× on ANE" claim did **not**
+> reproduce — flowlm is GPU. mimi is the remaining floor (~60% of wall-time),
+> compute-bound (not overhead-bound — an MLState micro-bench showed state
+> marshalling is only ~0.5 ms/call). `mimi_encoder` still crashes the loader.
 
 ### Supertonic
 `VectorEstimator` runs once per denoising step (default 8) and is the heaviest stage. The **default**
@@ -229,9 +243,12 @@ vs CPU-only 14.2 ms/step). A cold first call additionally pays a one-time ANE co
 
 ## Todos 
 
-- [ ] **PocketTTS**: get `cond_step` (255 MB) and `flowlm_step` (291 MB) onto the ANE; file a
-  loader-crash bug for `mimi_encoder` (SIGSEGV in `MLComputePlan.load`). Biggest CPU-bound graphs in
-  the lineup.
+- [x] **PocketTTS (v2.1)**: fused flow decoder is now **100% ANE**. `flowlm`/`cond`
+  **cannot** reach the ANE — the rank-5 KV-cache `scatter` is rejected by the ANE
+  compiler at any precision (verified: fp32/fp16/int8 and a rank-4 split all fail;
+  it's the scatter op, not the shape). mimi is compute-bound on CPU. The remaining
+  lever is **cross-engine pipelining** (overlap mimi-CPU with flowlm-GPU/flow-ANE),
+  not ANE placement. Still open: `mimi_encoder` loader crash (`MLComputePlan.load`).
 
 **profiled is based on model downloads** 
 
