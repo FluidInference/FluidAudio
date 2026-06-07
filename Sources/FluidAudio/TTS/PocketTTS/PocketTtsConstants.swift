@@ -24,13 +24,13 @@ public enum PocketTtsConstants {
 
     /// Number of Euler integration steps in flow_decoder (noise → audio code).
     ///
-    /// MUST match the step count baked into the fused decoder at conversion
-    /// (`convert_flow_decoder_fused.py --num-steps`). Lowered 8 → 4 for ~2×
-    /// fewer internal flow_net evals on top of the fusion dispatch savings.
-    /// PENDING a Whisper A/B: PRECISION.md flags the LSD denoiser as
-    /// precision-sensitive — if 4 steps degrades intelligibility, revert this
-    /// to 8 and re-convert the fused model with --num-steps 8.
-    public static let numLsdSteps: Int = 4
+    /// Informational: the LSD Euler step count BAKED INTO `flow_decoder_fused`
+    /// at conversion (`convert_flow_decoder_fused.py --num-steps`). NOT read at
+    /// runtime — `flowDecode` calls the fused model which runs this many steps
+    /// internally. The shipped v2.1 packs were converted with 8. To change it,
+    /// re-convert the fused model and update this value; editing it alone has no
+    /// runtime effect.
+    public static let numLsdSteps: Int = 8
 
     /// Fixed conditioning-block length compiled into `cond_prefill.mlpackage`
     /// (`convert_cond_prefill.py --t-max`). The host pads the real voice+text

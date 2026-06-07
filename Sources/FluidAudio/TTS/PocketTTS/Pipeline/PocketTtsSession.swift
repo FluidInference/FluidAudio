@@ -234,7 +234,6 @@ public actor PocketTtsSession {
             var localRng = rng
             let latent = try await PocketTtsSynthesizer.flowDecode(
                 transformerOut: transformerOut,
-                numSteps: PocketTtsConstants.numLsdSteps,
                 temperature: temperature,
                 model: flowModel,
                 rng: &localRng

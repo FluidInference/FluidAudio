@@ -18,7 +18,6 @@ extension PocketTtsSynthesizer {
     /// value passed to `convert_flow_decoder_fused.py --num-steps`.
     static func flowDecode(
         transformerOut: MLMultiArray,
-        numSteps: Int,
         temperature: Float,
         model: MLModel,
         rng: inout some RandomNumberGenerator
@@ -45,7 +44,8 @@ extension PocketTtsSynthesizer {
             latentPtr.update(from: base, count: latentDim)
         }
 
-        // One fused predict: the model runs all `numSteps` Euler steps internally.
+        // One fused predict: the model runs all its baked-in Euler steps
+        // internally (step count fixed at conversion: --num-steps).
         let inputDict: [String: Any] = [
             "transformer_out": transformerFlat,
             "latent_init": latentArray,

@@ -137,50 +137,65 @@ extension PocketTtsSynthesizer {
     ) async throws {
         let dim = PocketTtsConstants.embeddingDim
         let tMax = PocketTtsConstants.condPrefillMaxTokens
-        guard tokenCount > 0, tokenCount <= tMax else {
-            throw PocketTTSError.processingFailed(
-                "cond_prefill token count \(tokenCount) out of range (1...\(tMax))")
-        }
+        guard tokenCount > 0 else { return }
         let layers = layerKeys.layerCount
 
-        let conditioning = try MLMultiArray(
-            shape: [1, NSNumber(value: tMax), NSNumber(value: dim)], dataType: .float32)
-        let condPtr = conditioning.dataPointer.bindMemory(to: Float.self, capacity: tMax * dim)
-        condPtr.initialize(repeating: 0, count: tMax * dim)
-        let copyCount = min(tokenCount * dim, flatConditioning.count)
-        flatConditioning.withUnsafeBufferPointer { buffer in
-            guard let base = buffer.baseAddress else { return }
-            condPtr.update(from: base, count: copyCount)
-        }
+        // Process the block in <= T_max windows so ANY conditioning length works
+        // (e.g. long cloned-voice prompts > T_max). The KV position carries
+        // across windows — each call appends to the prior one — so there is no
+        // per-token fallback (runCondStep is never invoked with this model).
+        var processed = 0
+        while processed < tokenCount {
+            let n = min(tMax, tokenCount - processed)
 
-        let validLen = try MLMultiArray(shape: [1], dataType: .float32)
-        validLen[0] = NSNumber(value: Float(tokenCount))
-
-        var inputDict: [String: Any] = [
-            "conditioning": conditioning,
-            "valid_len": validLen,
-        ]
-        for i in 0..<layers {
-            inputDict["cache\(i)"] = state.caches[i]
-            inputDict["position\(i)"] = state.positions[i]
-        }
-
-        let input = try MLDictionaryFeatureProvider(dictionary: inputDict)
-        let output = try await model.compatPrediction(from: input, options: MLPredictionOptions())
-
-        for i in 0..<layers {
-            guard let newCache = output.featureValue(for: layerKeys.cacheKeys[i])?.multiArrayValue
-            else {
-                throw PocketTTSError.processingFailed(
-                    "Missing cond_prefill cache output: \(layerKeys.cacheKeys[i])")
+            let conditioning = try MLMultiArray(
+                shape: [1, NSNumber(value: tMax), NSNumber(value: dim)], dataType: .float32)
+            let condPtr = conditioning.dataPointer.bindMemory(to: Float.self, capacity: tMax * dim)
+            condPtr.initialize(repeating: 0, count: tMax * dim)
+            let srcOffset = processed * dim
+            let copyCount = min(n * dim, max(0, flatConditioning.count - srcOffset))
+            if copyCount > 0 {
+                flatConditioning.withUnsafeBufferPointer { buffer in
+                    guard let base = buffer.baseAddress else { return }
+                    condPtr.update(from: base.advanced(by: srcOffset), count: copyCount)
+                }
             }
-            guard let newPos = output.featureValue(for: layerKeys.positionKeys[i])?.multiArrayValue
-            else {
-                throw PocketTTSError.processingFailed(
-                    "Missing cond_prefill position output: \(layerKeys.positionKeys[i])")
+
+            let validLen = try MLMultiArray(shape: [1], dataType: .float32)
+            validLen[0] = NSNumber(value: Float(n))
+
+            var inputDict: [String: Any] = [
+                "conditioning": conditioning,
+                "valid_len": validLen,
+            ]
+            for i in 0..<layers {
+                inputDict["cache\(i)"] = state.caches[i]
+                inputDict["position\(i)"] = state.positions[i]
             }
-            state.caches[i] = newCache
-            state.positions[i] = newPos
+
+            let input = try MLDictionaryFeatureProvider(dictionary: inputDict)
+            let output = try await model.compatPrediction(
+                from: input, options: MLPredictionOptions())
+
+            for i in 0..<layers {
+                guard
+                    let newCache = output.featureValue(for: layerKeys.cacheKeys[i])?
+                        .multiArrayValue
+                else {
+                    throw PocketTTSError.processingFailed(
+                        "Missing cond_prefill cache output: \(layerKeys.cacheKeys[i])")
+                }
+                guard
+                    let newPos = output.featureValue(for: layerKeys.positionKeys[i])?
+                        .multiArrayValue
+                else {
+                    throw PocketTTSError.processingFailed(
+                        "Missing cond_prefill position output: \(layerKeys.positionKeys[i])")
+                }
+                state.caches[i] = newCache
+                state.positions[i] = newPos
+            }
+            processed += n
         }
     }
 
@@ -235,9 +250,7 @@ extension PocketTtsSynthesizer {
         // Fast path: one-shot prefill of [bos, voice...] in a single predict
         // when cond_prefill is available and the block fits T_max.
         let totalVoiceTokens = 1 + voiceTokenCount
-        if useFastPrefill, let prefillLayerKeys,
-            totalVoiceTokens <= PocketTtsConstants.condPrefillMaxTokens
-        {
+        if useFastPrefill, let prefillLayerKeys {
             var flat = [Float]()
             flat.reserveCapacity(totalVoiceTokens * dim)
             flat.append(contentsOf: bosBeforeVoice)
@@ -284,10 +297,7 @@ extension PocketTtsSynthesizer {
 
         // Fast path: one-shot prefill of the whole text block in a single
         // predict when cond_prefill is available and the block fits T_max.
-        if useFastPrefill, let prefillLayerKeys,
-            !textEmbeddings.isEmpty,
-            textEmbeddings.count <= PocketTtsConstants.condPrefillMaxTokens
-        {
+        if useFastPrefill, let prefillLayerKeys, !textEmbeddings.isEmpty {
             var flat = [Float]()
             flat.reserveCapacity(textEmbeddings.count * dim)
             for embedding in textEmbeddings { flat.append(contentsOf: embedding) }

@@ -429,7 +429,6 @@ public struct PocketTtsSynthesizer {
             var localRng = rng
             let result = try await PocketTtsSynthesizer.flowDecode(
                 transformerOut: transformerOut,
-                numSteps: PocketTtsConstants.numLsdSteps,
                 temperature: temperature,
                 model: flowModel,
                 rng: &localRng
