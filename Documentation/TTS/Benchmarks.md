@@ -190,7 +190,7 @@ peak RSS, WER, CER) so there is a single source of truth.
 | PocketTTS (v2.1) | research   | en (`alba`, 6L pack)      | fp16 ~330 MB | 24 kHz      | 80 ms Mimi frame, streams until EOS (no fixed cap)               | Yes       | **26 / 27 ms** | 933 / 1233 ms    | **6.51×** | 761 MB   | 0.51%  | 0.08%  |
 | Magpie     | research   | en (`John`)               | ~1.3 GB                    | 22.05 kHz   | 256 NanoCodec frames / pass (≈11.9 s); sentence-split for longer | No        | 3765 / 12110 ms∥ | 3765 / 12110 ms∥ | 2.34×∥    | 832 MB∥  | 3.98%  | 2.44%  |
 | StyleTTS2 (M2)ˢ | research   | en (LibriTTS iteration_3) | ~0.67 GB¶                  | 24 kHz      | 256 tokens / pass (≈30 s of audio max)                           | No        | 1574 / 3088 ms    | 1574 / 3088 ms    | 4.59×     | 522 MB   | 9.4%   | 4.1%   |
-| Supertonic-3 (int4) | Apache-2.0 | en (`M1`, 31-lang)        | int4 ~0.10 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥110 char Latin / 90 CJK)  | No        | **80 / 86 ms** | 80 / 86 ms     | **118×** | 201 MB   | 6.86%ᶜ | 4.08%ᶜ |
+| Supertonic-3 (int4) | Apache-2.0 | en (`M1`, 31-lang)        | int4 ~0.10 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥70 char Latin / 90 CJK)   | No        | **81 / 120 ms** | 81 / 120 ms     | **94×** | 197 MB   | 1.02%ᶜ | 0.31%ᶜ |
 
 ᴷ **Kokoro ANE on M5** is measured with **`--compute-units
 ane-tail-gpu`**, which is required on M5 / macOS 26.5: the stock
@@ -208,19 +208,18 @@ the routing change is numerically faithful. The underlying Apple bug
 
 ᶜ **Supertonic-3 (int4)** is measured on **M5 Pro / macOS 26.5** with
 the default **int4 L-bucketed (ANE) VectorEstimator**. The int4-ANE
-path drops per-phrase synth to ~80 ms (agg RTFx 118× over 100 phrases)
-vs the prior fp16-dynamic-on-CPU path (5.55× on M2 — the speedup is the
-elimination of per-length MPSGraph recompiles, not a chip effect). The
-**6.86% WER / 4.08% CER are the actual M5 Parakeet roundtrip** on
-`minimax-english` — a regression from the **0.84% measured on M2**
-(see the per-language table below, same corpus, long phrases present).
-**int4 is not the cause**: on M5, fp16 (7.02%), int8 (6.15%), int6
-(6.36%), and int4 (6.86%) all land in the same band. The error is
-concentrated in the **chunker**: single-chunk phrases (<110 char) score
-**3.88% WER** while multi-chunk phrases (≥110 char) score **8.77%**,
-with garbling at chunk seams ("hot air"→"Hudir"). Whether the M2→M5
-regression is an Apple-framework numerical change or a chunker code
-change since the M2 run is under investigation in [#669][i669].
+path drops per-phrase synth to ~80 ms vs the prior fp16-dynamic-on-CPU
+path (5.55× on M2 — the speedup is the elimination of per-length
+MPSGraph recompiles, not a chip effect). **WER 1.02% / CER 0.31%** —
+restored to the M2 baseline (~0.84% / 0.3%) by the chunker fix in
+[#669][i669]: the model degrades as a chunk approaches the 110-char /
+128-token window (a 105-char *single* chunk scored 17.6% WER; a 71-char
+chunk scored 0%), so `maxChunkLengthLatin` was lowered 110 → 70, keeping
+every chunk in the clean regime. This cost ~20% RTFx (118× → 94×) but
+cut macro WER from 6.86% to 1.02% — and confirmed the earlier "6.86%"
+was chunk length, **not** an M2→M5 regression and **not** the int4
+quantization (fp16/int8/int6 all scored the same 6–7% band at maxLen
+110).
 
 \* TTFT for **PocketTTS** is first-frame emit through the streaming
 API (perceptual TTFA). **Kokoro ANE / Magpie / StyleTTS2** all run
@@ -303,11 +302,13 @@ Same harness, same `M1.json` voice style, same default
 (`--total-steps 8 --speed 1.05 --compute-units default`). All 10
 languages complete the full 100-phrase `minimax-<lang>` run.
 
-> **Note (M2 vs M5):** this breakdown is the **M2** run. On **M5 Pro /
-> macOS 26.5** the English WER regresses to **6.86%** (vs **0.84%**
-> here) — concentrated in chunker-split phrases and independent of
-> VectorEstimator precision. See the ᶜ footnote and [#669][i669]
-> before treating the per-language WER/CER as current on M5.
+> **Note (M2 vs M5):** this breakdown is the **M2** run at the old
+> 110-char chunk cap. On **M5 Pro / macOS 26.5** with the int4 default
+> and the [#669][i669] chunker fix (`maxChunkLengthLatin` 110 → 70),
+> English scores **WER 1.02% / CER 0.31%** — in line with the 0.84% /
+> 0.32% here. The per-language non-English rows below have **not** been
+> re-measured with the shorter chunk cap; expect a similar improvement
+> on the longer-phrase languages.
 
 WER / CER for English is from the in-process Parakeet TDT
 roundtrip. The nine non-English rows were synthesized with
