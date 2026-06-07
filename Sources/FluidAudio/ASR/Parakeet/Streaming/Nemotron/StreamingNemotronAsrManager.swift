@@ -322,6 +322,14 @@ public actor StreamingNemotronAsrManager {
         guard let tokenizer = tokenizer else { return "" }
         return tokenizer.decode(ids: accumulatedTokenIds)
     }
+
+    /// Get per-token timings accumulated so far without finishing. Aligned 1:1
+    /// with the tokens behind getPartialTranscript(). Use this when a caller must
+    /// salvage a partially-processed session that cannot safely call finish()
+    /// (e.g. after a mid-stream decode failure).
+    public func getTokenTimings() -> [TokenTiming] {
+        return accumulatedTokenTimings
+    }
 }
 
 // MARK: - StreamingAsrManager Conformance
