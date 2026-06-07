@@ -175,7 +175,7 @@ Latency **measured on real synthesis**, warm (one short sentence; `tts --backend
 | Kokoro ANE (7-stage) | batch (per utterance) | 75% | 0% | 25% | 1472 | 83 MB | Vocoder → ANE |
 | Supertonic (`--ve-variant fp16`, legacy) | batch (8-step diffusion) | 30% | 0% | 70% | 1365 | 192 MB | VectorEstimator → **CPU** (dynamic shapes can't use ANE) |
 | Supertonic (default, int4 L-bucketed) | batch (8-step diffusion) | ~90% | 0% | ~10% | 1289 | 102 MB | VectorEstimator → **ANE** (fixed L-buckets) |
-| PocketTTS (v2.1) | streaming (autoregressive) | ~9% | ~31% | ~60% | — | ~330 MB | flow_decoder_fused → **ANE**; flowlm/cond → GPU; mimi → CPU |
+| PocketTTS (v2.1) | streaming (autoregressive) | ~9% | ~31% | ~60% | 2629 | ~330 MB | flow_decoder_fused → **ANE**; flowlm/cond → GPU; mimi → CPU |
 
 **Component detail**
 
