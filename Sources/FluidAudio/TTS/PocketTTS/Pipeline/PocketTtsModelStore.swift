@@ -93,10 +93,12 @@ public actor PocketTtsModelStore {
 
         let loadStart = Date()
 
+        // v2.1 required set: cond_prefill (one-shot conditioner) + fused flow
+        // decoder replace v2's cond_step + per-step flow_decoder.
         let modelSpecs: [(file: String, config: MLModelConfiguration)] = [
-            (ModelNames.PocketTTS.condStepFile, condConfig),
+            (ModelNames.PocketTTS.condPrefillFile, condConfig),
             (ModelNames.PocketTTS.flowlmStepFile(precision: precision), flowlmConfig),
-            (ModelNames.PocketTTS.flowDecoderFile, flowDecoderConfig),
+            (ModelNames.PocketTTS.flowDecoderFusedFile, flowDecoderConfig),
             (ModelNames.PocketTTS.mimiDecoderFile, mimiConfig),
         ]
 
@@ -108,9 +110,14 @@ public actor PocketTtsModelStore {
             logger.info("Loaded \(spec.file) (computeUnits=\(spec.config.computeUnits.rawValue))")
         }
 
+        // In v2.1 the conditioner IS cond_prefill (no per-token cond_step).
+        // Assign it to both condStepModel (legacy accessor) and condPrefillModel
+        // so the prefill fast-path runs; the per-token fallback never fires
+        // (useCondPrefill=true, text chunks <= T_max).
         condStepModel = loadedModels[0]
+        condPrefillModel = loadedModels[0]
         flowlmStepModel = loadedModels[1]
-        flowDecoderModel = loadedModels[2]
+        flowDecoderModel = loadedModels[2]  // flow_decoder_fused
         mimiDecoderModel = loadedModels[3]
 
         // Discover per-model output names. Names differ between 6L and 24L
@@ -118,9 +125,9 @@ public actor PocketTtsModelStore {
         let expectedLayers = language.transformerLayers
         condLayerKeys = try PocketTtsLayerKeys.discover(
             from: loadedModels[0],
-            kind: .condStep,
+            kind: .condStep,  // cond_prefill shares cond_step's output schema
             expectedLayers: expectedLayers,
-            modelName: "cond_step"
+            modelName: "cond_prefill"
         )
         flowlmLayerKeys = try PocketTtsLayerKeys.discover(
             from: loadedModels[1],
@@ -129,33 +136,9 @@ public actor PocketTtsModelStore {
             modelName: "flowlm_step"
         )
 
-        // Optional one-shot conditioning prefill (cond_prefill). Absent in
-        // older packs → fall back to per-token cond_step. Its output schema is
-        // identical to cond_step (N caches + N positions), so the `.condStep`
-        // discovery applies unchanged; only the inputs differ (conditioning
-        // [1, T_max, 1024] + valid_len). Loaded `.cpuAndGPU` like cond_step
-        // (rank-5 KV blocks ANE).
-        let condPrefillURL = languageRoot.appendingPathComponent(ModelNames.PocketTTS.condPrefillFile)
-        if FileManager.default.fileExists(atPath: condPrefillURL.path) {
-            do {
-                let model = try MLModel(contentsOf: condPrefillURL, configuration: condConfig)
-                condPrefillModel = model
-                condPrefillLayerKeys = try PocketTtsLayerKeys.discover(
-                    from: model,
-                    kind: .condStep,
-                    expectedLayers: expectedLayers,
-                    modelName: "cond_prefill"
-                )
-                logger.info("Loaded \(ModelNames.PocketTTS.condPrefillFile) (one-shot prefill)")
-            } catch {
-                // Non-fatal: keep per-token cond_step prefill.
-                logger.warning("cond_prefill present but failed to load (\(error)); using per-token cond_step")
-                condPrefillModel = nil
-                condPrefillLayerKeys = nil
-            }
-        } else {
-            logger.info("cond_prefill not present; using per-token cond_step prefill")
-        }
+        // cond_prefill is the required v2.1 conditioner (loaded above as
+        // loadedModels[0]); its layer keys match cond_step's schema.
+        condPrefillLayerKeys = condLayerKeys
 
         // Discover Mimi decoder schema (per-state input→output mapping +
         // audio output name). CoreML auto-generates `var_NNN` output names

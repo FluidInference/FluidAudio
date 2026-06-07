@@ -92,7 +92,9 @@ public enum PocketTtsLanguage: String, Sendable, CaseIterable {
 
     /// HF subdirectory under the pocket-tts-coreml repo root.
     public var repoSubdirectory: String {
-        "v2/\(rawValue)"
+        // v2.1 = optimized re-conversion of v2 (fused flow decoder on ANE,
+        // one-shot cond prefill, fp16 flowlm). Same weights as v2.
+        "v2.1/\(rawValue)"
     }
 }
 

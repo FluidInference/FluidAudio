@@ -801,6 +801,9 @@ public enum ModelNames {
         /// and gets selected when the caller asks for `.int8` precision.
         public static let flowlmStepV2 = "flowlm_stepv2"
         public static let flowDecoder = "flow_decoder"
+        /// v2.1 fused flow decoder (8-step LSD unrolled, 100% ANE). Replaces
+        /// the per-step `flow_decoder` in v2.1 packs.
+        public static let flowDecoderFused = "flow_decoder_fused"
         public static let mimiDecoder = "mimi_decoder"
         public static let mimiEncoder = "mimi_encoderv2"
 
@@ -809,6 +812,7 @@ public enum ModelNames {
         public static let flowlmStepFile = flowlmStep + ".mlmodelc"
         public static let flowlmStepV2File = flowlmStepV2 + ".mlmodelc"
         public static let flowDecoderFile = flowDecoder + ".mlmodelc"
+        public static let flowDecoderFusedFile = flowDecoderFused + ".mlmodelc"
         public static let mimiDecoderFile = mimiDecoder + ".mlmodelc"
         public static let mimiEncoderFile = mimiEncoder + ".mlmodelc"
 
@@ -830,9 +834,9 @@ public enum ModelNames {
         /// given precision. The set differs only in the FlowLM filename.
         public static func requiredModels(precision: PocketTtsPrecision) -> Set<String> {
             [
-                condStepFile,
+                condPrefillFile,
                 flowlmStepFile(precision: precision),
-                flowDecoderFile,
+                flowDecoderFusedFile,
                 mimiDecoderFile,
                 constantsBinDir,
             ]
@@ -841,9 +845,9 @@ public enum ModelNames {
         /// Required files for the default precision. Kept for callers that
         /// haven't been updated to pass a precision argument.
         public static let requiredModels: Set<String> = [
-            condStepFile,
+            condPrefillFile,
             flowlmStepFile,
-            flowDecoderFile,
+            flowDecoderFusedFile,
             mimiDecoderFile,
             constantsBinDir,
         ]
