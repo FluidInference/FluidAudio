@@ -59,6 +59,17 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
         prosody: .cpuOnly, noise: .cpuOnly, vocoder: .cpuOnly, tail: .cpuOnly
     )
 
+    /// M5 / macOS 26.5 stability: all stages `.cpuAndNeuralEngine` except the
+    /// tail (iSTFT) on `.cpuAndGPU`. Keeps the prosody RNN off the GPU (which
+    /// otherwise hits the `GPURNNOps` JIT assert) while keeping the iSTFT off
+    /// the CPU/BNNS path (which otherwise segfaults in `libBNNS`). See #667.
+    public static let aneTailGpu = KokoroAneComputeUnits(
+        albert: .cpuAndNeuralEngine, postAlbert: .cpuAndNeuralEngine,
+        alignment: .cpuAndNeuralEngine, prosody: .cpuAndNeuralEngine,
+        noise: .cpuAndNeuralEngine, vocoder: .cpuAndNeuralEngine,
+        tail: .cpuAndGPU
+    )
+
     /// Build a configuration from a generic preset (used by the
     /// `tts-benchmark` CLI so a single flag maps cleanly across
     /// backends).
@@ -72,6 +83,8 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
             self = .cpuAndGpu
         case .cpuOnly:
             self = .cpuOnly
+        case .aneTailGpu:
+            self = .aneTailGpu
         }
     }
 

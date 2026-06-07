@@ -245,7 +245,7 @@ public enum TtsBenchmarkCommand {
 
         guard let preset = TtsComputeUnitPreset(cliValue: computeUnitsName) else {
             logger.error(
-                "Unknown --compute-units value: \(computeUnitsName). Expected default | all-ane | cpu-and-gpu | cpu-only."
+                "Unknown --compute-units value: \(computeUnitsName). Expected default | all-ane | cpu-and-gpu | cpu-only | ane-tail-gpu."
             )
             exit(1)
         }
@@ -1353,7 +1353,8 @@ public enum TtsBenchmarkCommand {
               --voice <name>            Voice id (KokoroAne/PocketTTS)
               --speaker <name>          Magpie speaker: john|sofia|aria|jason|leo
               --language <code>         PocketTTS lang pack or Magpie language code
-              --compute-units <preset>  default | all-ane | cpu-and-gpu | cpu-only
+              --compute-units <preset>  default | all-ane | cpu-and-gpu | cpu-only | ane-tail-gpu
+                                        (kokoro-ane on M5/macOS 26.5 needs ane-tail-gpu; see #667)
               --output-json <path>      Write JSON report
               --audio-dir <path>        Keep generated WAVs under this dir
               --skip-asr                Skip ASR roundtrip (no WER/CER)
