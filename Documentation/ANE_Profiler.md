@@ -233,7 +233,6 @@ Verified M5 Pro / macOS 26.5; see [Supertonic3 docs](TTS/Supertonic3.md#vectores
 |-----------|----:|----:|----:|----:|-----:|-------:|
 | TextEncoder | 98% | 0% | 2% | 308 | 18 MB | 1.2 |
 | DurationPredictor | 0% | 0% | 100% | 195 | 2 MB | 2.5 |
-| VectorEstimator (fp16 dynamic, legacy) | 0% | 0% | 100% | 755 | 123 MB | 89 ms (8× @ 11.1) |
 | VectorEstimator (fixed L128, int4, **default**) | 94% | 0% | 6% | 679 | 33 MB | ~31 ms (8× @ 3.8)² |
 | Vocoder | 100% | 0% | 0% | 107 | 49 MB | 10.5 |
 
@@ -244,12 +243,6 @@ vs CPU-only 14.2 ms/step). A cold first call additionally pays a one-time ANE co
 
 ## Todos 
 
-- [x] **PocketTTS (v2.1)**: fused flow decoder is now **100% ANE**. `flowlm`/`cond`
-  **cannot** reach the ANE — the rank-5 KV-cache `scatter` is rejected by the ANE
-  compiler at any precision (verified: fp32/fp16/int8 and a rank-4 split all fail;
-  it's the scatter op, not the shape). mimi is compute-bound on CPU. The remaining
-  lever is **cross-engine pipelining** (overlap mimi-CPU with flowlm-GPU/flow-ANE),
-  not ANE placement. Still open: `mimi_encoder` loader crash (`MLComputePlan.load`).
 
 **profiled is based on model downloads** 
 
