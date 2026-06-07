@@ -158,12 +158,31 @@ extension StreamingNemotronAsrManager {
                     // Non-blank token - emit and update local state
                     newTokens.append(predToken)
                     accumulatedTokenIds.append(predToken)
+                    // Capture absolute timing for this token. RNNT emits at the
+                    // encoder frame `t`; absoluteFrameBase carries the offset of
+                    // prior chunks. Duration is unknown for greedy RNNT, so the
+                    // span is one encoder frame wide.
+                    let tokenStartTime =
+                        Double(absoluteFrameBase + t) * ASRConstants.secondsPerEncoderFrame
+                    accumulatedTokenTimings.append(
+                        TokenTiming(
+                            token: tokenizer?.rawToken(for: predToken) ?? "",
+                            tokenId: predToken,
+                            startTime: tokenStartTime,
+                            endTime: tokenStartTime + ASRConstants.secondsPerEncoderFrame,
+                            confidence: 1.0
+                        )
+                    )
                     currentToken = Int32(predToken)
                     currentH = stepH
                     currentC = stepC
                 }
             }
         }
+
+        // Advance the absolute encoder-frame base by this chunk's frame count so
+        // the next chunk's token timings continue on the same timeline.
+        absoluteFrameBase += numEncoderFrames
 
         // Save final decoder state back to actor properties atomically
         self.lastToken = currentToken
