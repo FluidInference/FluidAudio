@@ -173,8 +173,8 @@ Latency **measured on real synthesis**, warm (one short sentence; `tts --backend
 | Model | Type | ANE | GPU | CPU | ops | Size | Heavy graph → device |
 |-------|------|----:|----:|----:|----:|-----:|----------------------|
 | Kokoro ANE (7-stage) | batch (per utterance) | 75% | 0% | 25% | 1472 | 83 MB | Vocoder → ANE |
-| Supertonic (default fp16) | batch (8-step diffusion) | 30% | 0% | 70% | 1365 | 192 MB | VectorEstimator → **CPU** (dynamic shapes can't use ANE) |
-| Supertonic (`--ve-variant int4`) | batch (8-step diffusion) | ~90% | 0% | ~10% | 1289 | 102 MB | VectorEstimator → **ANE** (fixed L-buckets) |
+| Supertonic (`--ve-variant fp16`, legacy) | batch (8-step diffusion) | 30% | 0% | 70% | 1365 | 192 MB | VectorEstimator → **CPU** (dynamic shapes can't use ANE) |
+| Supertonic (default, int4 L-bucketed) | batch (8-step diffusion) | ~90% | 0% | ~10% | 1289 | 102 MB | VectorEstimator → **ANE** (fixed L-buckets) |
 | PocketTTS (v2.1) | streaming (autoregressive) | ~9% | ~31% | ~60% | — | ~330 MB | flow_decoder_fused → **ANE**; flowlm/cond → GPU; mimi → CPU |
 
 **Component detail**
@@ -199,15 +199,16 @@ feedback produces audible artifacts on the ANE, and it is compute-bound anyway).
 
 | Component | ANE | GPU | CPU | ops | Size | Lat ms |
 |-----------|----:|----:|----:|----:|-----:|-------:|
-| cond_prefill | 0% | 100% | 0% | n/a¹ | 127 MB | ~5 ms (1× @ 4.8) |
-| flowlm_step (fp16) | 0% | 100% | 0% | 540 | 145 MB | 149 ms (43× @ 3.46) |
+| cond_prefill | 0% | 100% | 0% | 550¹ | 127 MB | ~5 ms (1× @ 4.8) |
+| flowlm_step (fp16) | 0% | 100% | 0% | 556 | 145 MB | 149 ms (43× @ 3.46) |
 | flow_decoder_fused | **100%** | 0% | 0% | 1252 | 18 MB | 46 ms (42× @ 1.09) |
-| mimi_decoder | 0% | 0% | 100% | n/a¹ | 41 MB | 302 ms (42× @ 7.2) |
+| mimi_decoder | 0% | 0% | 100% | 271¹ | 41 MB | 302 ms (42× @ 7.2) |
 | mimi_encoder | _crash_ | n/a | n/a | n/a | 70 MB | voice-clone only |
 
 ¹ `MLComputePlan` crashes on `cond_prefill` (ANE compile) and `mimi_decoder`
-(streaming state), so the per-op split is unavailable; they still run cleanly on
-GPU / CPU respectively.
+(streaming state), so their device split is inferred from the runtime config
+(GPU / CPU) and the op counts are from `model.mil` (non-const ops, the same
+metric MLComputePlan reports — verified equal on the fused decoder: 1252).
 
 > v2.1 cut the per-utterance pipeline ~905 ms → ~452–520 ms (**~1.8× RTFx**),
 > device-verified end-to-end (Whisper exact). Wins: **fused flow decoder** — the
@@ -220,23 +221,23 @@ GPU / CPU respectively.
 > marshalling is only ~0.5 ms/call). `mimi_encoder` still crashes the loader.
 
 ### Supertonic
-`VectorEstimator` runs once per denoising step (default 8) and is the heaviest stage. The **default**
-build uses dynamic (RangeDim) shapes, which Core ML **cannot place on the ANE** — so it runs on CPU.
-The opt-in **fixed-length** builds (`--ve-variant int8|int6|int4`, L = 128/256/512) land ~94% on the
-ANE (~2.7× faster end-to-end); the synthesizer pads each chunk's latent to the nearest bucket. The
-`ANECCompile() FAILED` line emitted for the dynamic build is **non-fatal noise** — the fixed builds
-compile and execute on the ANE (verified M5 Pro / macOS 26.5; see
-[Supertonic3 docs](TTS/Supertonic3.md#vectorestimator-variants)).
+`VectorEstimator` runs once per denoising step (default 8) and is the heaviest stage. The **default is
+now the fixed-length int4 (L-bucketed) build** (`.aneBucketed(.int4)`): ~94% on the ANE, ~2.7× faster
+end-to-end, with 4-bit k-means palettization that is perceptually clean. The synthesizer pads each
+chunk's latent up to the smallest bucket ≥ its length (L ∈ {128, 256, 512}; 128 covers the common
+case). The legacy **fp16 dynamic** build (`--ve-variant fp16`) uses RangeDim shapes Core ML **cannot
+place on the ANE**, so it stays on CPU; the `ANECCompile() FAILED` line it emits is non-fatal noise.
+Verified M5 Pro / macOS 26.5; see [Supertonic3 docs](TTS/Supertonic3.md#vectorestimator-variants).
 
 | Component | ANE | GPU | CPU | ops | Size | Lat ms |
 |-----------|----:|----:|----:|----:|-----:|-------:|
 | TextEncoder | 98% | 0% | 2% | 308 | 18 MB | 1.2 |
 | DurationPredictor | 0% | 0% | 100% | 195 | 2 MB | 2.5 |
-| VectorEstimator (fp16 dynamic, default) | 0% | 0% | 100% | 755 | 123 MB | 89 ms (8× @ 11.1) |
-| VectorEstimator (fixed L128, int4) | 94% | 0% | 6% | 679 | 33 MB | ~31 ms (8× @ 3.8)¹ |
+| VectorEstimator (fp16 dynamic, legacy) | 0% | 0% | 100% | 755 | 123 MB | 89 ms (8× @ 11.1) |
+| VectorEstimator (fixed L128, int4, **default**) | 94% | 0% | 6% | 679 | 33 MB | ~31 ms (8× @ 3.8)² |
 | Vocoder | 100% | 0% | 0% | 107 | 49 MB | 10.5 |
 
-¹ Fixed-build split + per-step latency from `MLComputePlan` + warm CPU-vs-NE timing at L128 (NE 3.8 ms
+² Fixed-build split + per-step latency from `MLComputePlan` + warm CPU-vs-NE timing at L128 (NE 3.8 ms
 vs CPU-only 14.2 ms/step). A cold first call additionally pays a one-time ANE compile.
 
 ---

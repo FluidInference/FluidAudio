@@ -88,7 +88,7 @@ public struct TTS {
         var supertonicSpeed: Float = Supertonic3Constants.defaultSpeed
         // VectorEstimator build: fp16 | int8/int6/int4 (ANE-bucketed) |
         // dyn-int8/dyn-int6/dyn-int4 (dynamic CPU/GPU). Default fp16.
-        var supertonicVE: Supertonic3VectorEstimator = .fp16Dynamic
+        var supertonicVE: Supertonic3VectorEstimator = .aneBucketed(.int4)
 
         var i = 0
         while i < arguments.count {
@@ -754,7 +754,8 @@ public struct TTS {
     private static func parseSupertonicVE(_ raw: String) -> Supertonic3VectorEstimator? {
         func q(_ s: String) -> Supertonic3Quantization? { Supertonic3Quantization(rawValue: s) }
         switch raw {
-        case "fp16", "fp16dynamic", "default", "": return .fp16Dynamic
+        case "fp16", "fp16dynamic": return .fp16Dynamic
+        case "default", "": return .aneBucketed(.int4)
         case "int8", "int6", "int4", "ane-int8", "ane-int6", "ane-int4":
             return q(String(raw.split(separator: "-").last!)).map { .aneBucketed($0) }
         case "dyn-int8", "dyn-int6", "dyn-int4", "dynamic-int8", "dynamic-int6", "dynamic-int4":

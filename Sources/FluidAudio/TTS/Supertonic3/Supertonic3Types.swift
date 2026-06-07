@@ -89,8 +89,10 @@ public enum Supertonic3VectorEstimator: Sendable, Equatable {
     case dynamic(Supertonic3Quantization)
     case aneBucketed(Supertonic3Quantization)
 
-    /// Default preserves the historical FP16 dynamic VectorEstimator.
-    public static let `default`: Supertonic3VectorEstimator = .fp16Dynamic
+    /// Default: ANE-bucketed int4 — ~94% on the ANE, ~2.7× faster end-to-end,
+    /// 4-bit k-means palettization that is perceptually clean. The historical
+    /// fp16 dynamic build stays available via `--ve-variant fp16`.
+    public static let `default`: Supertonic3VectorEstimator = .aneBucketed(.int4)
 
     /// `nil` for FP16; the rawValue (`"int8"`/`"int6"`/`"int4"`) otherwise.
     var precisionSuffix: String? {
