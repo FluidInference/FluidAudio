@@ -3,9 +3,17 @@ import Foundation
 
 /// Per-stage compute-unit assignment for the laishere chain.
 ///
-/// Mirrors the empirical optima from `iOSDemo` and the conversion script:
-/// Albert / PostAlbert / Alignment / Vocoder run on `cpuAndNeuralEngine`,
-/// while Prosody / Noise / Tail run on `all` (let the scheduler pick).
+/// Default placement: all stages on `cpuAndNeuralEngine` EXCEPT the tail
+/// (iSTFT) on `cpuAndGPU`. This is the only routing that runs on every Apple
+/// Silicon generation: the prosody RNN crashes the GPU MPSGraph JIT
+/// (`GPURNNOps`) on M5/macOS 26.5 if placed on `all`, and the tail iSTFT
+/// crashes `libBNNS` if placed on CPU/ANE — so the RNN-bearing stages stay on
+/// ANE while the iSTFT goes to the GPU. See #667.
+///
+/// (The earlier "Prosody/Noise/Tail on `all`" placement matched laishere's
+/// iOSDemo and ran fine on M2, but crashes by default on M5. The tail was
+/// always meant to run fp32 on CPU/GPU — ANE rejects the exp/sin/iSTFT — so
+/// pinning it to GPU is faithful, not a hack.)
 public struct KokoroAneComputeUnits: Sendable, Equatable {
     public var albert: MLComputeUnits
     public var postAlbert: MLComputeUnits
@@ -19,10 +27,10 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
         albert: MLComputeUnits = .cpuAndNeuralEngine,
         postAlbert: MLComputeUnits = .cpuAndNeuralEngine,
         alignment: MLComputeUnits = .cpuAndNeuralEngine,
-        prosody: MLComputeUnits = .all,
-        noise: MLComputeUnits = .all,
+        prosody: MLComputeUnits = .cpuAndNeuralEngine,
+        noise: MLComputeUnits = .cpuAndNeuralEngine,
         vocoder: MLComputeUnits = .cpuAndNeuralEngine,
-        tail: MLComputeUnits = .all
+        tail: MLComputeUnits = .cpuAndGPU
     ) {
         self.albert = albert
         self.postAlbert = postAlbert
@@ -33,7 +41,9 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
         self.tail = tail
     }
 
-    /// Empirical default — matches laishere's iOSDemo + this repo's conversion.
+    /// Default — RNN stages on ANE, tail iSTFT on GPU. Runs on M2 + M5
+    /// (the old `all`-placement default crashed on M5/macOS 26.5). See #667.
+    /// Identical to ``aneTailGpu``.
     public static let `default` = KokoroAneComputeUnits()
 
     /// CPU+GPU only (skip ANE entirely). Useful for a baseline / debugging.

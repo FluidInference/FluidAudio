@@ -1,18 +1,19 @@
 # TTS Benchmarks
 
 > **Setup:** Apple M5 Pro, 24 GB, macOS 26.5 (25F71), on AC.
-> Kokoro ANE runs on M5 with `--compute-units ane-tail-gpu` (the
-> `default`/`all-ane` paths crash — see the ᴷ footnote). Only the
-> StyleTTS2 row is carried from the M2 reference (MacBook Air M2,
-> 16 GB), pending a HF asset fix (see the ˢ footnote below).
+> Kokoro ANE now runs on M5 out of the box — the **default** compute
+> routing is the M5-safe placement (tail iSTFT on GPU, RNN stages on
+> ANE; see the ᴷ footnote). Only the StyleTTS2 row is carried from the
+> M2 reference (MacBook Air M2, 16 GB), pending a HF asset fix (see the
+> ˢ footnote below).
 > **Corpus:** [MiniMax Multilingual TTS Test Set][minimax] (100
 > phrases / language, CC-BY-SA-4.0) — the same public corpus used
 > by [MiniMax-Speech][mms], seed-tts-eval, and Gradium, so numbers
 > here are directly paper-comparable.
 > **Status:** Kokoro ANE (English + Mandarin), PocketTTS (English),
 > Magpie (English), and Supertonic-3 (English) all complete the full
-> 100-phrase MiniMax run on **M5 Pro** (Kokoro via the `ane-tail-gpu`
-> preset). Only **StyleTTS2** is **M2-only** here — its bucketed BERT
+> 100-phrase MiniMax run on **M5 Pro** (Kokoro on its default M5-safe
+> routing). Only **StyleTTS2** is **M2-only** here — its bucketed BERT
 > assets ship without `model.mil`; that row carries its M2 numbers.
 >
 > [minimax]: https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
@@ -170,9 +171,9 @@ Supertonic-3 rows. Only the **StyleTTS2** row is carried from the
 prior **MacBook Air, Apple M2 (2022), 8-core CPU / 8-core GPU /
 16-core Neural Engine, 16 GB, macOS 26** (`Mac14,2`) reference — it
 does not run on the M5 host (missing `model.mil` in the shipped
-bucketed BERT graphs — see footnote ˢ). M5 rows use `--compute-units
-default`, **except Kokoro ANE which uses `ane-tail-gpu`** (the only
-preset that runs on M5/macOS 26.5 — see footnote ᴷ). 100 phrases per
+bucketed BERT graphs — see footnote ˢ). All M5 rows use `--compute-units
+default`; for Kokoro ANE that default is now the M5-safe routing (tail
+iSTFT on GPU, RNN stages on ANE — see footnote ᴷ). 100 phrases per
 language. Voices are backend defaults (`af_heart` for Kokoro ANE en,
 `zf_001` for Kokoro ANE zh, `alba` for PocketTTS, `John` for Magpie,
 LibriTTS iteration_3 for StyleTTS2). English WER / CER via Parakeet
@@ -190,21 +191,22 @@ peak RSS, WER, CER) so there is a single source of truth.
 | PocketTTS (v2.1) | research   | en (`alba`, 6L pack)      | fp16 ~330 MB | 24 kHz      | 80 ms Mimi frame, streams until EOS (no fixed cap)               | Yes       | **26 / 27 ms** | 933 / 1233 ms    | **6.51×** | 761 MB   | 0.51%  | 0.08%  |
 | Magpie     | research   | en (`John`)               | ~1.3 GB                    | 22.05 kHz   | 256 NanoCodec frames / pass (≈11.9 s); sentence-split for longer | No        | 3765 / 12110 ms∥ | 3765 / 12110 ms∥ | 2.34×∥    | 832 MB∥  | 3.98%  | 2.44%  |
 | StyleTTS2 (M2)ˢ | research   | en (LibriTTS iteration_3) | ~0.67 GB¶                  | 24 kHz      | 256 tokens / pass (≈30 s of audio max)                           | No        | 1574 / 3088 ms    | 1574 / 3088 ms    | 4.59×     | 522 MB   | 9.4%   | 4.1%   |
-| Supertonic-3 (int4) | Apache-2.0 | en (`M1`, 31-lang)        | int4 ~0.10 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥70 char Latin / 90 CJK)   | No        | **81 / 120 ms** | 81 / 120 ms     | **94×** | 197 MB   | 1.02%ᶜ | 0.31%ᶜ |
+| Supertonic-3 (int4) | Apache-2.0 | en (`M1`, 31-lang)        | int4 ~0.10 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥70 char Latin / 57 CJK)   | No        | **81 / 120 ms** | 81 / 120 ms     | **94×** | 197 MB   | 1.02%ᶜ | 0.31%ᶜ |
 
-ᴷ **Kokoro ANE on M5** is measured with **`--compute-units
-ane-tail-gpu`**, which is required on M5 / macOS 26.5: the stock
-routings crash on the 2nd+ prediction in a process (`default` → GPU
-`MetalPerformanceShadersGraph GPURNNOps … 'JIT not supported'` on the
-prosody RNN; `all-ane`/`cpu-only` → `libBNNS` SIGSEGV on the tail
-iSTFT). The `ane-tail-gpu` preset pins every stage to
-`.cpuAndNeuralEngine` **except the tail (iSTFT) → `.cpuAndGPU`**,
-keeping the RNN off the GPU while keeping the iSTFT off BNNS — which
-dodges both crashes with dynamic shapes. Quality matches the prior M2
-baseline (en WER 10.33% vs 10.8%; zh CER 3.81% vs 4.01%), confirming
-the routing change is numerically faithful. The underlying Apple bug
-(stock routings) is tracked in [#667][i667]; the preset shipped in
-`TtsComputeUnitPreset.aneTailGpu`.
+ᴷ **Kokoro ANE on M5** runs on the **default** compute routing, which is
+now the M5-safe placement: every stage on `.cpuAndNeuralEngine` **except
+the tail (iSTFT) → `.cpuAndGPU`**. This is the only routing that runs on
+M5 / macOS 26.5 — the *previous* default (prosody/noise/tail on `.all`)
+crashed on the 2nd+ prediction in a process (`GPURNNOps … 'JIT not
+supported'` on the prosody RNN on the GPU), and `all-ane`/`cpu-only`
+crash in `libBNNS` (SIGSEGV) on the tail iSTFT. Keeping the RNN off the
+GPU and the iSTFT off BNNS dodges both (the tail was always meant to run
+fp32 on CPU/GPU — ANE rejects the exp/sin/iSTFT — so this is faithful,
+not a hack). Quality matches the prior M2 baseline (en WER 10.33% vs
+10.8%; zh CER 3.81% vs 4.01%). The old `.all` default ran fine on M2 but
+its M2 perf under the new default is not re-verified here. The underlying
+Apple bug is tracked in [#667][i667]; this routing is
+`TtsComputeUnitPreset.default` / `.aneTailGpu`.
 
 ᶜ **Supertonic-3 (int4)** is measured on **M5 Pro / macOS 26.5** with
 the default **int4 L-bucketed (ANE) VectorEstimator**. The int4-ANE
