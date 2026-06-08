@@ -96,6 +96,6 @@ public enum Supertonic3Constants {
         "ru", "sk", "sl", "sv", "tr", "uk", "vi", "na",
     ]
 
-    /// Languages that should use the tighter `maxChunkLengthCJK` (90-char) chunker.
+    /// Languages that should use the tighter `maxChunkLengthCJK` (57-char) chunker.
     public static let cjkLanguages: Set<String> = ["ko", "ja"]
 }
