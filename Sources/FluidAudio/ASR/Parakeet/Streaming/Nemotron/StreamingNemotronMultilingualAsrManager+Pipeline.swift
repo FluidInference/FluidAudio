@@ -88,6 +88,11 @@ extension StreamingNemotronMultilingualAsrManager {
                 self.vadConsecutiveLowChunks &+= 1
                 if self.vadConsecutiveLowChunks >= Self.vadHangoverChunks {
                     self.vadSkipCount &+= 1
+                    // The skipped chunk's audio still elapses on the file
+                    // timeline. No encoder ran, so advance the frame base by the
+                    // chunk's nominal encoder-frame count (derived from sample
+                    // count) to keep later token timings aligned.
+                    absoluteFrameBase += samples.count / ASRConstants.samplesPerEncoderFrame
                     return
                 }
                 // Within hangover window — process normally (edge preserve).
@@ -349,6 +354,9 @@ extension StreamingNemotronMultilingualAsrManager {
                 self.cacheLen = nextEnc.cacheLen
                 self.melCache = nextEnc.newMelCache
             }
+            // Advance the encoder-frame base by this chunk's frame count so the
+            // next chunk's token timings continue on the same timeline.
+            absoluteFrameBase += numEncoderFrames
             processedChunks += 1
             return
         }
@@ -525,6 +533,8 @@ extension StreamingNemotronMultilingualAsrManager {
                     // Non-blank token - emit and update local state
                     newTokens.append(predToken)
                     accumulatedTokenIds.append(predToken)
+                    // Legacy per-frame loop: this token was emitted at frame t.
+                    appendTokenTiming(predToken, frameInChunk: t, tokenizer: tokenizer)
                     currentToken = Int32(predToken)
                     currentH = hOut
                     currentC = cOut
@@ -569,6 +579,9 @@ extension StreamingNemotronMultilingualAsrManager {
             self.melCache = nextEnc.newMelCache
         }
 
+        // Advance the encoder-frame base by this chunk's frame count so the next
+        // chunk's token timings continue on the same timeline.
+        absoluteFrameBase += numEncoderFrames
         processedChunks += 1
     }
 }

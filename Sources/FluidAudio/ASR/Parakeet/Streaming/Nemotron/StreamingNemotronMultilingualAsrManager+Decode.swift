@@ -238,6 +238,9 @@ extension StreamingNemotronMultilingualAsrManager {
                 // Emit first non-blank from speculative scan.
                 newTokens.append(emittedToken)
                 accumulatedTokenIds.append(emittedToken)
+                // This token was found at encoder frame t + firstNonBlankAt.
+                appendTokenTiming(
+                    emittedToken, frameInChunk: t + firstNonBlankAt, tokenizer: tokenizer)
                 currentToken = Int32(emittedToken)
                 currentH = candidateH
                 currentC = candidateC
@@ -406,6 +409,8 @@ extension StreamingNemotronMultilingualAsrManager {
                     // Non-blank → emit + commit state
                     newTokens.append(dBestIdx)
                     accumulatedTokenIds.append(dBestIdx)
+                    // Multi-emission drain stays on the same frame: drainFrameT.
+                    appendTokenTiming(dBestIdx, frameInChunk: drainFrameT, tokenizer: tokenizer)
                     currentToken = Int32(dBestIdx)
                     currentH = newH
                     currentC = newC
@@ -484,5 +489,29 @@ extension StreamingNemotronMultilingualAsrManager {
             return "<\(lang)>"
         }
         return decoded.text.isEmpty ? nil : decoded.text
+    }
+
+    /// Append a per-token timing for a token emitted at encoder frame
+    /// `frameInChunk` within the current chunk. `startTime` is absolute seconds
+    /// from the start of the fed audio (`absoluteFrameBase` carries prior chunks).
+    /// Lang-tag tokens are skipped: they are stripped from the decoded transcript,
+    /// so excluding them keeps the timing stream aligned 1:1 with the user-visible
+    /// tokens. Uses `rawToken(for:)` (NOT `tokenizerPiece`, which strips the `▁`
+    /// word-boundary marker) so callers can reconstruct word boundaries.
+    internal func appendTokenTiming(
+        _ tokenId: Int, frameInChunk: Int, tokenizer: NemotronMultilingualTokenizer
+    ) {
+        guard !config.langTagTokenIds.contains(tokenId) else { return }
+        let startTime =
+            Double(absoluteFrameBase + frameInChunk) * ASRConstants.secondsPerEncoderFrame
+        accumulatedTokenTimings.append(
+            TokenTiming(
+                token: tokenizer.rawToken(for: tokenId) ?? "",
+                tokenId: tokenId,
+                startTime: startTime,
+                endTime: startTime + ASRConstants.secondsPerEncoderFrame,
+                confidence: 1.0
+            )
+        )
     }
 }
