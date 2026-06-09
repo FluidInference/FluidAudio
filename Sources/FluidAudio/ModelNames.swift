@@ -804,6 +804,12 @@ public enum ModelNames {
         /// v2.1 fused flow decoder (8-step LSD unrolled, 100% ANE). Replaces
         /// the per-step `flow_decoder` in v2.1 packs.
         public static let flowDecoderFused = "flow_decoder_fused"
+        /// Rank-4 ANE-eligible FlowLM step (mobius Trial 19): 100% ANE under
+        /// `.cpuAndNeuralEngine`; split k/v cache I/O with explicit output
+        /// names. Selected by `PocketTtsModelPlacement.ane`.
+        public static let flowlmStepAne = "flowlm_step_ane"
+        /// Rank-4 ANE-eligible conditioning prefill (mobius Trial 20).
+        public static let condPrefillAne = "cond_prefill_ane"
         public static let mimiDecoder = "mimi_decoder"
         public static let mimiEncoder = "mimi_encoderv2"
 
@@ -813,6 +819,8 @@ public enum ModelNames {
         public static let flowlmStepV2File = flowlmStepV2 + ".mlmodelc"
         public static let flowDecoderFile = flowDecoder + ".mlmodelc"
         public static let flowDecoderFusedFile = flowDecoderFused + ".mlmodelc"
+        public static let flowlmStepAneFile = flowlmStepAne + ".mlmodelc"
+        public static let condPrefillAneFile = condPrefillAne + ".mlmodelc"
         public static let mimiDecoderFile = mimiDecoder + ".mlmodelc"
         public static let mimiEncoderFile = mimiEncoder + ".mlmodelc"
 
@@ -833,13 +841,34 @@ public enum ModelNames {
         /// Required files inside any language's `v2/<lang>/` pack for the
         /// given precision. The set differs only in the FlowLM filename.
         public static func requiredModels(precision: PocketTtsPrecision) -> Set<String> {
-            [
-                condPrefillFile,
-                flowlmStepFile(precision: precision),
-                flowDecoderFusedFile,
-                mimiDecoderFile,
-                constantsBinDir,
-            ]
+            requiredModels(precision: precision, placement: .gpu)
+        }
+
+        /// Required files for a precision + placement combination. `.ane`
+        /// swaps the rank-5 conditioner/FlowLM for the rank-4 ANE-eligible
+        /// variants (fp16 only — `precision` does not affect the ANE set).
+        public static func requiredModels(
+            precision: PocketTtsPrecision,
+            placement: PocketTtsModelPlacement
+        ) -> Set<String> {
+            switch placement {
+            case .gpu:
+                return [
+                    condPrefillFile,
+                    flowlmStepFile(precision: precision),
+                    flowDecoderFusedFile,
+                    mimiDecoderFile,
+                    constantsBinDir,
+                ]
+            case .ane:
+                return [
+                    condPrefillAneFile,
+                    flowlmStepAneFile,
+                    flowDecoderFusedFile,
+                    mimiDecoderFile,
+                    constantsBinDir,
+                ]
+            }
         }
 
         /// Required files for the default precision. Kept for callers that

@@ -21,7 +21,11 @@ import Foundation
 /// strides that nevertheless increase monotonically per layer.
 struct PocketTtsLayerKeys: Sendable {
     /// One cache output name per transformer layer, ordered by layer index.
+    /// For split-KV (rank-4 `_ane`) models this holds the K cache names.
     let cacheKeys: [String]
+    /// V cache output names for split-KV (rank-4 `_ane`) models, ordered by
+    /// layer index. `nil` for the rank-5 packs (K+V share one tensor).
+    let vCacheKeys: [String]?
     /// One position output name per transformer layer, ordered by layer index.
     let positionKeys: [String]
     /// Hidden-state output name (flowlm_step only). `nil` for cond_step.
@@ -30,6 +34,23 @@ struct PocketTtsLayerKeys: Sendable {
     let eosLogit: String?
 
     var layerCount: Int { cacheKeys.count }
+    /// Whether the model uses rank-4 split k/v cache I/O.
+    var isSplitKV: Bool { vCacheKeys != nil }
+
+    /// Keys for the rank-4 `_ane` models, which ship EXPLICIT output names
+    /// (the k/v caches share a shape, so shape-bucket discovery can't tell
+    /// them apart — see mobius convert_flowlm_step_ane.py). No discovery:
+    /// names are `new_k_cache{i}` / `new_v_cache{i}` / `new_position{i}`,
+    /// plus `transformer_out` / `is_eos` for the FlowLM step.
+    static func aneKeys(layers: Int, kind: ModelKind) -> PocketTtsLayerKeys {
+        PocketTtsLayerKeys(
+            cacheKeys: (0..<layers).map { "new_k_cache\($0)" },
+            vCacheKeys: (0..<layers).map { "new_v_cache\($0)" },
+            positionKeys: (0..<layers).map { "new_position\($0)" },
+            transformerOut: kind == .flowlmStep ? "transformer_out" : nil,
+            eosLogit: kind == .flowlmStep ? "is_eos" : nil
+        )
+    }
 
     enum DiscoveryError: Error, LocalizedError {
         case shapeMismatch(modelName: String, expectedLayers: Int, actualCaches: Int)
@@ -131,6 +152,7 @@ struct PocketTtsLayerKeys: Sendable {
         case .condStep:
             return PocketTtsLayerKeys(
                 cacheKeys: cacheCandidates,
+                vCacheKeys: nil,
                 positionKeys: positionCandidates,
                 transformerOut: nil,
                 eosLogit: nil
@@ -145,6 +167,7 @@ struct PocketTtsLayerKeys: Sendable {
             }
             return PocketTtsLayerKeys(
                 cacheKeys: cacheCandidates,
+                vCacheKeys: nil,
                 positionKeys: positionCandidates,
                 transformerOut: transformerOut,
                 eosLogit: eosLogit

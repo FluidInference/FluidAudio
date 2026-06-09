@@ -150,3 +150,25 @@ public enum PocketTtsPrecision: Sendable, Hashable {
     case fp16
     case int8
 }
+
+/// Which transformer-model formulation (and compute-unit policy) to load.
+///
+/// The v2.1 packs ship rank-5 KV-cache graphs that the ANE compiler rejects
+/// outright (`ANECCompile FAILED`), so they run on GPU. The rank-4
+/// scatter-free rewrites (mobius Trials 19/20) are ANE-eligible:
+/// `flowlm_step_ane` plans 100% ANE and `cond_prefill_ane` 92% under
+/// `.cpuAndNeuralEngine`, bit-identical math to the rank-5 graphs.
+///
+/// On M-series Macs the GPU is slightly faster per call (flowlm 3.04 ms GPU
+/// vs 3.68 ms ANE), so `.gpu` stays the default. `.ane` removes the GPU
+/// from the synthesis path entirely — the per-frame loop becomes
+/// ANE (flowlm) → ANE (flow decoder) → CPU (mimi) — for power, engine
+/// parallelism with `useCrossEnginePipeline`, and iOS placement.
+public enum PocketTtsModelPlacement: String, Sendable, Hashable {
+    /// v2.1 rank-5 models, GPU-placed (default).
+    case gpu
+    /// Rank-4 ANE-eligible models (`flowlm_step_ane` + `cond_prefill_ane`).
+    /// Requires the `*_ane.mlmodelc` files in the language pack (fp16 only;
+    /// `precision` is ignored for the FlowLM when this is selected).
+    case ane
+}

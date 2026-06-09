@@ -310,9 +310,10 @@ public struct PocketTtsSynthesizer {
         let voiceKVSnapshot: KVCacheState
         if let snapshot = voiceData.cacheSnapshot {
             voiceKVSnapshot = try kvCacheStateFromSnapshot(
-                snapshot, layers: condLayerKeys.layerCount)
+                snapshot, layers: condLayerKeys.layerCount, splitKV: condLayerKeys.isSplitKV)
         } else {
-            let emptyState = try emptyKVCacheState(layers: condLayerKeys.layerCount)
+            let emptyState = try emptyKVCacheState(
+                layers: condLayerKeys.layerCount, splitKV: condLayerKeys.isSplitKV)
             voiceKVSnapshot = try await prefillKVCacheVoice(
                 state: emptyState, voiceData: voiceData,
                 bosBeforeVoice: constants.bosBeforeVoice,
@@ -501,7 +502,9 @@ public struct PocketTtsSynthesizer {
 
                     let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: chunk.text)
                     var eosStep: Int?
-                    var sequence = try PocketTtsSynthesizer.createNaNSequence()
+                    var sequence = try PocketTtsSynthesizer.createBosStartSequence(
+                        bosEmbedding: constants.bosEmbedding,
+                        splitKV: flowlmLayerKeys.isSplitKV)
                     let totalFramesAfterEos =
                         framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
 
@@ -613,7 +616,9 @@ public struct PocketTtsSynthesizer {
 
                     let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: chunk.text)
                     var eosStep: Int?
-                    var sequence = try PocketTtsSynthesizer.createNaNSequence()
+                    var sequence = try PocketTtsSynthesizer.createBosStartSequence(
+                        bosEmbedding: constants.bosEmbedding,
+                        splitKV: flowlmLayerKeys.isSplitKV)
                     let totalFramesAfterEos =
                         framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
 
@@ -663,8 +668,16 @@ public struct PocketTtsSynthesizer {
         }
     }
 
-    /// Opt-in cross-engine pipelining (mimi overlaps flowlm/flow). UNVERIFIED on
-    /// device — leave `false` until timing + audio ordering are confirmed.
+    /// Opt-in cross-engine pipelining (mimi overlaps flowlm/flow).
+    ///
+    /// MEASURED on-device (M5 Pro, macOS 26.5, release, 3-sentence utterance,
+    /// seed 42, 3 runs each): NO win over the serial loop on either placement
+    /// — serial `.ane` 1.108 s vs pipelined 1.124 s; serial `.gpu` ~1.33 s vs
+    /// pipelined ~1.33 s (WER 0 everywhere). The Phase 7 projection assumed
+    /// mimi(CPU) dominates and overlaps flowlm/flow; in the real host the
+    /// stages don't overlap as scheduled (producer-bound and/or predictions
+    /// not actually concurrent through `compatPrediction`). Keep `false`;
+    /// re-evaluate with per-stage timers before retrying.
     static let useCrossEnginePipeline = false
 
     /// Create the AsyncThrowingStream and spawn the generation task.
@@ -1207,6 +1220,21 @@ public struct PocketTtsSynthesizer {
             ptr.update(from: base, count: dim)
         }
         return array
+    }
+
+    /// Create the first-step `sequence` input for a generation loop.
+    ///
+    /// Rank-5 packs use the NaN-BOS protocol (the graph substitutes
+    /// `bos_emb` for NaN via `isnan`). The rank-4 `_ane` FlowLM has no such
+    /// path — the ANE mangles NaN inputs before `isnan` evaluates — so for
+    /// split-KV models the BOS latent embedding is passed directly.
+    static func createBosStartSequence(
+        bosEmbedding: [Float], splitKV: Bool
+    ) throws -> MLMultiArray {
+        if splitKV {
+            return try createSequenceFromLatent(bosEmbedding)
+        }
+        return try createNaNSequence()
     }
 
     /// Create a NaN-filled sequence `[1, 1, 32]` to signal beginning-of-sequence.

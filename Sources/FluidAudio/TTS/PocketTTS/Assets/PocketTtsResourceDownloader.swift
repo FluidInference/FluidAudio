@@ -38,6 +38,7 @@ public enum PocketTtsResourceDownloader {
         language: PocketTtsLanguage,
         directory: URL? = nil,
         precision: PocketTtsPrecision = .fp16,
+        placement: PocketTtsModelPlacement = .gpu,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
         let targetDir = try directory ?? cacheDirectory()
@@ -48,7 +49,8 @@ public enum PocketTtsResourceDownloader {
         let subdir = language.repoSubdirectory
         let languageRoot = repoDir.appendingPathComponent(subdir)
 
-        let required = ModelNames.PocketTTS.requiredModels(precision: precision)
+        let required = ModelNames.PocketTTS.requiredModels(
+            precision: precision, placement: placement)
         let allPresent = required.allSatisfy { model in
             FileManager.default.fileExists(
                 atPath: languageRoot.appendingPathComponent(model).path)

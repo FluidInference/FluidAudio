@@ -29,6 +29,7 @@ public actor PocketTtsModelStore {
     private let directory: URL?
     public let language: PocketTtsLanguage
     public let precision: PocketTtsPrecision
+    public let placement: PocketTtsModelPlacement
 
     /// - Parameters:
     ///   - language: Which upstream language pack to load. Defaults to
@@ -40,14 +41,20 @@ public actor PocketTtsModelStore {
     ///     `flowlm_step.mlmodelc` for `flowlm_stepv2.mlmodelc` from the
     ///     same upstream `v2/<lang>/` directory; the other three submodels
     ///     stay at fp16.
+    /// - Parameter placement: `.gpu` (default) loads the v2.1 rank-5 models;
+    ///   `.ane` loads the rank-4 `_ane` variants with the FlowLM pinned to
+    ///   `.cpuAndNeuralEngine` (see `PocketTtsModelPlacement`). `.ane`
+    ///   ignores `precision` for the FlowLM (fp16 only).
     public init(
         language: PocketTtsLanguage = .english,
         directory: URL? = nil,
-        precision: PocketTtsPrecision = .fp16
+        precision: PocketTtsPrecision = .fp16,
+        placement: PocketTtsModelPlacement = .gpu
     ) {
         self.language = language
         self.directory = directory
         self.precision = precision
+        self.placement = placement
     }
 
     /// Load all four CoreML models and the constants bundle.
@@ -57,7 +64,8 @@ public actor PocketTtsModelStore {
         let languageRoot = try await PocketTtsResourceDownloader.ensureModels(
             language: language,
             directory: directory,
-            precision: precision
+            precision: precision,
+            placement: placement
         )
         self.languageRootDirectory = languageRoot
 
@@ -86,18 +94,32 @@ public actor PocketTtsModelStore {
             c.computeUnits = units
             return c
         }
+        // `.ane` placement (rank-4 models, mobius Trials 19/20): the FlowLM
+        // plans 100% ANE under `.cpuAndNeuralEngine` (3.68 ms vs 3.04 GPU on
+        // M-series — the trade buys a GPU-free decode loop). cond_prefill_ane
+        // is 92% ANE-capable but its single fat T=256 call is ~2x faster on
+        // GPU, so it stays `.all` and lets the scheduler pick.
         let condConfig = config(.all)
-        let flowlmConfig = config(.all)
+        let flowlmConfig = config(placement == .ane ? .cpuAndNeuralEngine : .all)
         let flowDecoderConfig = config(.all)
         let mimiConfig = config(.cpuOnly)
 
         let loadStart = Date()
 
         // v2.1 required set: cond_prefill (one-shot conditioner) + fused flow
-        // decoder replace v2's cond_step + per-step flow_decoder.
+        // decoder replace v2's cond_step + per-step flow_decoder. `.ane`
+        // placement swaps in the rank-4 conditioner/FlowLM.
+        let condFile =
+            placement == .ane
+            ? ModelNames.PocketTTS.condPrefillAneFile
+            : ModelNames.PocketTTS.condPrefillFile
+        let flowlmFile =
+            placement == .ane
+            ? ModelNames.PocketTTS.flowlmStepAneFile
+            : ModelNames.PocketTTS.flowlmStepFile(precision: precision)
         let modelSpecs: [(file: String, config: MLModelConfiguration)] = [
-            (ModelNames.PocketTTS.condPrefillFile, condConfig),
-            (ModelNames.PocketTTS.flowlmStepFile(precision: precision), flowlmConfig),
+            (condFile, condConfig),
+            (flowlmFile, flowlmConfig),
             (ModelNames.PocketTTS.flowDecoderFusedFile, flowDecoderConfig),
             (ModelNames.PocketTTS.mimiDecoderFile, mimiConfig),
         ]
@@ -120,21 +142,29 @@ public actor PocketTtsModelStore {
         flowDecoderModel = loadedModels[2]  // flow_decoder_fused
         mimiDecoderModel = loadedModels[3]
 
-        // Discover per-model output names. Names differ between 6L and 24L
-        // packs because CoreML auto-generates them during tracing.
+        // Per-model output names. The rank-5 packs need shape-bucket
+        // discovery (CoreML auto-generates their names during tracing); the
+        // rank-4 `_ane` models ship explicit names, so the keys are static.
         let expectedLayers = language.transformerLayers
-        condLayerKeys = try PocketTtsLayerKeys.discover(
-            from: loadedModels[0],
-            kind: .condStep,  // cond_prefill shares cond_step's output schema
-            expectedLayers: expectedLayers,
-            modelName: "cond_prefill"
-        )
-        flowlmLayerKeys = try PocketTtsLayerKeys.discover(
-            from: loadedModels[1],
-            kind: .flowlmStep,
-            expectedLayers: expectedLayers,
-            modelName: "flowlm_step"
-        )
+        if placement == .ane {
+            condLayerKeys = PocketTtsLayerKeys.aneKeys(
+                layers: expectedLayers, kind: .condStep)
+            flowlmLayerKeys = PocketTtsLayerKeys.aneKeys(
+                layers: expectedLayers, kind: .flowlmStep)
+        } else {
+            condLayerKeys = try PocketTtsLayerKeys.discover(
+                from: loadedModels[0],
+                kind: .condStep,  // cond_prefill shares cond_step's output schema
+                expectedLayers: expectedLayers,
+                modelName: "cond_prefill"
+            )
+            flowlmLayerKeys = try PocketTtsLayerKeys.discover(
+                from: loadedModels[1],
+                kind: .flowlmStep,
+                expectedLayers: expectedLayers,
+                modelName: "flowlm_step"
+            )
+        }
 
         // cond_prefill is the required v2.1 conditioner (loaded above as
         // loadedModels[0]); its layer keys match cond_step's schema.

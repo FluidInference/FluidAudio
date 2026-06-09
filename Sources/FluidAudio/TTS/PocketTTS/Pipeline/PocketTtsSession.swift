@@ -205,7 +205,9 @@ public actor PocketTtsSession {
         // Generation loop
         let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: text)
         var eosStep: Int?
-        var sequence = try PocketTtsSynthesizer.createNaNSequence()
+        var sequence = try PocketTtsSynthesizer.createBosStartSequence(
+            bosEmbedding: constants.bosEmbedding,
+            splitKV: flowlmLayerKeys.isSplitKV)
         let totalFramesAfterEos = framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
 
         for step in 0..<maxGenLen {
