@@ -335,10 +335,6 @@ public actor AsrManager {
                 isLastChunk: isLastChunk,
                 globalFrameOffset: globalFrameOffset
             )
-        case .ctcZhCn:
-            throw ASRError.processingFailed(
-                "CTC-only model .ctcZhCn does not support TDT decoding. Use CtcZhCnManager instead."
-            )
         }
     }
 

@@ -7,8 +7,6 @@ public enum AsrModelVersion: Sendable {
     case v3
     /// 110M parameter hybrid TDT-CTC model with fused preprocessor+encoder
     case tdtCtc110m
-    /// 600M parameter CTC-only model for Mandarin Chinese (zh-CN)
-    case ctcZhCn
     /// 600M parameter TDT model for Japanese (ja) - hybrid CTC preprocessor/encoder + TDT decoder/joint v2
     case tdtJa
 
@@ -17,7 +15,6 @@ public enum AsrModelVersion: Sendable {
         case .v2: return .parakeetV2
         case .v3: return .parakeetV3
         case .tdtCtc110m: return .parakeetTdtCtc110m
-        case .ctcZhCn: return .parakeetCtcZhCn
         case .tdtJa: return .parakeetJa
         }
     }
@@ -30,19 +27,11 @@ public enum AsrModelVersion: Sendable {
         }
     }
 
-    /// Whether this model is CTC-only (no TDT decoder+joint)
-    public var isCtcOnly: Bool {
-        switch self {
-        case .ctcZhCn: return true
-        default: return false
-        }
-    }
-
     /// Encoder hidden dimension for this model version
     public var encoderHiddenSize: Int {
         switch self {
         case .tdtCtc110m: return 512
-        case .ctcZhCn, .tdtJa: return 1024
+        case .tdtJa: return 1024
         default: return 1024
         }
     }
@@ -52,7 +41,6 @@ public enum AsrModelVersion: Sendable {
         switch self {
         case .v2, .tdtCtc110m: return 1024
         case .v3: return 8192
-        case .ctcZhCn: return 7000
         case .tdtJa: return 3072
         }
     }
@@ -156,9 +144,6 @@ extension AsrModels {
 
     private static func inferredVersion(from directory: URL) -> AsrModelVersion? {
         let directoryPath = directory.path.lowercased()
-        // `.ctcZhCn` is intentionally absent: it is rejected at the top of
-        // `load(...)` and has its own dedicated loader (`CtcZhCnManager`), so
-        // inference callers should never hit this path with a ctcZhCn dir.
         let knownVersions: [AsrModelVersion] = [.tdtCtc110m, .v2, .v3, .tdtJa]
 
         for version in knownVersions {
@@ -249,13 +234,6 @@ extension AsrModels {
         encoderComputeUnits: MLComputeUnits? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> AsrModels {
-        // Validate that CTC-only models use their dedicated managers
-        if version.isCtcOnly {
-            throw AsrModelsError.loadingFailed(
-                "CTC-only model \(version) must be loaded via its dedicated manager class (e.g., CtcZhCnManager)"
-            )
-        }
-
         logger.info("Loading ASR models from: \(directory.path)")
 
         let config = configuration ?? defaultConfiguration()
@@ -509,13 +487,6 @@ extension AsrModels {
         encoderPrecision: ParakeetEncoderPrecision = .int8,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
-        // Validate that CTC-only models use their dedicated managers
-        if version.isCtcOnly {
-            throw AsrModelsError.downloadFailed(
-                "CTC-only model \(version) must be downloaded via its dedicated model class (e.g., CtcZhCnModels)"
-            )
-        }
-
         let targetDir = directory ?? defaultCacheDirectory(for: version)
         logger.info("Downloading ASR models to: \(targetDir.path)")
         let parentDir = targetDir.deletingLastPathComponent()
