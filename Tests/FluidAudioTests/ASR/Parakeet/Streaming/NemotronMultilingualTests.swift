@@ -155,6 +155,37 @@ final class NemotronMultilingualTests: XCTestCase {
         XCTAssertNil(decoded.detectedLanguage)
     }
 
+    func testRawTokenPreservesWordBoundaryMarker() throws {
+        // rawToken must return the UNMODIFIED SentencePiece vocab piece, with the
+        // `▁` word-boundary marker intact, so callers can group per-token timings
+        // into words. decode()/the visible transcript strip `▁`; rawToken must not,
+        // otherwise word starts can't be located and word-level timing breaks.
+        let vocab: [String: String] = [
+            "0": "<unk>",
+            "1": "\u{2581}hello",  // word-start piece (has ▁)
+            "2": "ing",  // mid-word continuation (no ▁)
+        ]
+        let vocabData = try JSONSerialization.data(withJSONObject: vocab)
+        let tmpURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("multilingual_vocab_test_\(UUID().uuidString).json")
+        try vocabData.write(to: tmpURL)
+        defer { try? FileManager.default.removeItem(at: tmpURL) }
+
+        let tokenizer = try NemotronMultilingualTokenizer(
+            vocabPath: tmpURL,
+            langTagTokenIds: Set<Int>()
+        )
+
+        // Word-start piece keeps the `▁` marker...
+        XCTAssertEqual(tokenizer.rawToken(for: 1), "\u{2581}hello")
+        // ...continuation piece has no marker...
+        XCTAssertEqual(tokenizer.rawToken(for: 2), "ing")
+        // ...the visible transcript strips the marker (why callers need rawToken)...
+        XCTAssertFalse(tokenizer.decode(ids: [1]).text.contains("\u{2581}"))
+        // ...and an out-of-vocab id returns nil so the caller skips its timing.
+        XCTAssertNil(tokenizer.rawToken(for: 999))
+    }
+
     // MARK: - ModelNames
 
     func testNemotronMultilingualModelNames() {

@@ -91,7 +91,9 @@ extension StreamingNemotronMultilingualAsrManager {
                     // The skipped chunk's audio still elapses on the file
                     // timeline. No encoder ran, so advance the frame base by the
                     // chunk's nominal encoder-frame count (derived from sample
-                    // count) to keep later token timings aligned.
+                    // count) to keep later token timings aligned. The processed
+                    // path asserts this nominal count equals the encoder's actual
+                    // output, so skipped and processed chunks stay on one timeline.
                     absoluteFrameBase += samples.count / ASRConstants.samplesPerEncoderFrame
                     return
                 }
@@ -287,6 +289,19 @@ extension StreamingNemotronMultilingualAsrManager {
         // 4. RNNT decode loop for each encoder frame
         let decStart = DispatchTime.now().uptimeNanoseconds
         let numEncoderFrames = encoded.shape[2].intValue
+        // AIDEV-NOTE: timing-invariant; processChunk always receives exactly
+        // config.chunkSamples (process() slices full chunks; finish() zero-pads
+        // the tail), so the encoder's actual frame count must equal the nominal
+        // sample-derived count the VAD-skip branch above uses to advance
+        // absoluteFrameBase. Assert it so a future model/tier whose CoreML
+        // encoder emits a different frame count is caught in debug/CI instead of
+        // silently drifting skipped-chunk token timings.
+        assert(
+            numEncoderFrames == samples.count / ASRConstants.samplesPerEncoderFrame,
+            "Nemotron encoder emitted \(numEncoderFrames) frames for \(samples.count) "
+                + "samples; expected \(samples.count / ASRConstants.samplesPerEncoderFrame). "
+                + "VAD-skip frame accounting assumes encoder frames == nominal."
+        )
         var newTokens: [Int] = []
 
         // SMART SPECULATIVE BLANK path — speculative scan over K=8 frames
