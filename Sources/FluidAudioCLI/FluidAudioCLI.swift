@@ -88,16 +88,12 @@ struct FluidAudioCLI {
             await NemotronMultilingualFleursBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-multilingual-multi-stream-bench":
             await NemotronMultilingualMultiStreamBench.run(arguments: Array(arguments.dropFirst(2)))
-        case "ctc-zh-cn-transcribe":
-            await CtcZhCnTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-transcribe":
             await SenseVoiceTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-benchmark":
             await SenseVoiceBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "paraformer-transcribe":
             await ParaformerTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
-        case "ctc-zh-cn-benchmark":
-            await CtcZhCnBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "ja-benchmark":
             await JapaneseAsrBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "cohere-transcribe":
@@ -149,8 +145,6 @@ struct FluidAudioCLI {
                 nemotron-multilingual-transcribe   Transcribe audio with Nemotron multilingual (local model path)
                 nemotron-multilingual-benchmark    Run Nemotron multilingual benchmark on FLEURS / MCV-17 / MLS (local model path)
                 nemotron-multilingual-multi-stream-bench  Parallel multi-stream benchmark (N concurrent managers)
-                ctc-zh-cn-transcribe    Transcribe Mandarin Chinese audio with Parakeet CTC
-                ctc-zh-cn-benchmark     Run CTC zh-CN benchmark on THCHS-30 dataset
                 ja-benchmark            Run Japanese ASR benchmark on JSUT/Common Voice
                 cohere-transcribe       Transcribe using Cohere Transcribe (cache-external pipeline, 14 languages)
                 cohere-benchmark        Run Cohere Transcribe FLEURS benchmark

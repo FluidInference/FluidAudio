@@ -924,55 +924,6 @@ Both the English BART G2P and multilingual ByT5 G2P models run fastest on CPU-on
 | all (ANE+GPU+CPU) | 17.3 |
 | cpuAndGPU | 23.4 |
 
-## CTC zh-CN Mandarin ASR (Experimental)
-
-Parakeet CTC 0.6B zh-CN model converted to CoreML for on-device Mandarin Chinese transcription.
-
-> **⚠️ Experimental Feature**: This is an early preview of Mandarin Chinese ASR support. The API and performance characteristics may change in future releases.
-
-Model: [FluidInference/parakeet-ctc-0.6b-zh-cn-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-zh-cn-coreml)
-
-Hardware: Apple M2, 2022, macOS 26
-
-### THCHS-30 Test Set
-
-Full benchmark on the complete THCHS-30 test set — 2,495 utterances (250 unique sentences × 10 speakers) from the THCHS-30 corpus.
-
-Dataset: [FluidInference/THCHS-30-tests](https://huggingface.co/datasets/FluidInference/THCHS-30-tests)
-
-```bash
-swift run -c release fluidaudiocli ctc-zh-cn-benchmark --auto-download
-```
-
-| Metric | int8 encoder (0.55 GB) |
-|---|---|
-| **Mean CER** | **8.23%** |
-| **Median CER** | **6.45%** |
-| CER = 0% (perfect) | 435 (17.4%) |
-| CER < 5% | 947 (38.0%) |
-| CER < 10% | 1,674 (67.1%) |
-| CER < 20% | 2,325 (93.2%) |
-| Mean Latency | 614 ms |
-| Mean RTFx | 14.83x |
-
-### Error Analysis
-
-Error analysis from the 100 highest-CER samples (out of the full 2,495) identified 862 substitution errors. The dominant patterns:
-
-- **Homophones / near-homophones**: acoustically similar syllables (e.g. 呢/了, 了/的) account for the majority of substitutions — unavoidable without a language model
-- **Digit representation**: the model may output Arabic digits (1, 5, 2011) when references use Chinese characters (一五, 二零一一); the benchmark normalizer converts digits before scoring to avoid penalizing this
-- **Sentence-final particles**: 了/的/呢/吧 are frequently confused, contributing a disproportionate share of errors given their high occurrence
-
-### Beam Search
-
-Beam search does not improve CER for this model without a language model. Greedy decoding (beam width 1) is recommended.
-
-### Recommendations
-
-- **Greedy decoding** is sufficient for production use at this CER level.
-- For applications requiring <8% CER, a character-level language model would be needed.
-- Int8 encoder (0.55 GB) performs on par with FP32 (1.1 GB).
-
 ## TDT Japanese ASR
 
 Parakeet TDT 0.6B Japanese model converted to CoreML for on-device Japanese transcription. Hybrid architecture using CTC preprocessor/encoder with TDT v2 decoder/joint (workaround for CoreML conversion bug).

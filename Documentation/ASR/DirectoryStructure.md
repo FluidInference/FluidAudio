@@ -95,9 +95,7 @@ ASR/
 │   │   │   ├── ARPALanguageModel.swift
 │   │   │   ├── CtcDecoder.swift
 │   │   │   ├── CtcJaManager.swift       (Japanese)
-│   │   │   ├── CtcJaModels.swift
-│   │   │   ├── CtcZhCnManager.swift     (Chinese)
-│   │   │   └── CtcZhCnModels.swift
+│   │   │   └── CtcJaModels.swift
 │   │   │
 │   │   └── CustomVocabulary/
 │   │       ├── BKTree/
@@ -142,7 +140,6 @@ Batch processing managers are now grouped by decoding algorithm within `SlidingW
 **CTC (Connectionist Temporal Classification):**
 - `CtcDecoder` - Greedy CTC decoding with optional LM
 - `CtcJaManager` - Japanese CTC batch processing
-- `CtcZhCnManager` - Chinese CTC batch processing
 - `ARPALanguageModel` - ARPA LM support for CTC decoding
 
 Both algorithm families use the sliding-window approach (large overlapping chunks with offline encoder), distinguishing them from the true streaming engines in `Streaming/`.
@@ -244,7 +241,7 @@ Tests/FluidAudioTests/ASR/
 ├── Parakeet/
 │   ├── SlidingWindow/
 │   │   ├── TDT/          (AsrManager, ChunkProcessor, TdtJa, Decoder tests)
-│   │   ├── CTC/          (CtcJa, CtcZhCn tests)
+│   │   ├── CTC/          (CtcJa tests)
 │   │   └── CustomVocabulary/ (BKTree, Rescorer, WordSpotting tests)
 │   └── Streaming/        (EOU, Nemotron, engine protocol tests)
 └── Qwen3/                (config, RoPE tests)
