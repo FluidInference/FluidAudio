@@ -233,7 +233,7 @@ public class DownloadUtils {
             try? fm.removeItem(at: modelsDir)
         }
 
-        // TTS models (Kokoro, PocketTTS, Magpie, Supertonic3, StyleTTS2).
+        // TTS models (Kokoro, PocketTTS, Supertonic3, StyleTTS2).
         // Remove the whole `fluidaudio/` root so every backend subdirectory
         // (Models/, voice packs, etc.) is cleared, not just `Models/`.
         #if os(macOS)
