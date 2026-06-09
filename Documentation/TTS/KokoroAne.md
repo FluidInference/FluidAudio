@@ -20,8 +20,8 @@ used with the author's permission. Conversion lives in
 | SSML             | No                                              |
 | Languages        | English (`ANE/`) + Mandarin (`ANE-zh/`)         |
 
-For multi-voice / SSML / long-form, use `PocketTtsSynthesizer`,
-`StyleTTS2Manager`, or `MagpieManager` instead.
+For multi-voice / SSML / long-form, use `PocketTtsSynthesizer` or
+`StyleTTS2Manager` instead.
 
 ## Variants
 

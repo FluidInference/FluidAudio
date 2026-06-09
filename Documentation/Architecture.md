@@ -68,7 +68,6 @@ by **measured precision**, not preference.
 | KokoroAne (7-stage split) | Per-stage tuning | Albert/Alignment/Vocoder on ANE; Prosody/Noise/Tail on `.all` |
 | PocketTTS (4 models) | `.cpuAndGPU` (forced) | Mimi decoder's streaming state feedback loop is FP16-sensitive; ANE introduces audible artifacts |
 | StyleTTS2 | `.cpuAndNeuralEngine` | 8-stage CoreML graph; ANE-resident for the heavy encoders |
-| Magpie | `.cpuAndNeuralEngine` | Throughput priority; experimental |
 | VAD (Silero) | `.cpuAndNeuralEngine` (default) | LSTM is small; ANE eliminates GPU contention |
 | Diarization | `.all` (CI: `.cpuAndNeuralEngine`) | Segmentation + embedding both ANE-friendly |
 
@@ -240,8 +239,6 @@ We tried. Each TTS family has fundamentally different I/O contracts:
 - **StyleTTS2** is an 8-stage CoreML graph (BERT → reference style →
   prosody → fused diffusion sampler → decoder), with per-token bucket
   variants for the BERT and sampler stages.
-- **Magpie** is a 4-graph autoregressive pipeline plus a Swift-side
-  1-layer "local transformer" to sample 8 codebook tokens per frame.
 
 A protocol that accepted all of them would either expose a useless
 lowest-common-denominator (`func synth(text:) -> [Float]`) or be a fat
@@ -472,7 +469,6 @@ points:
 | TTS (KokoroAne) | `KokoroAneManager`, `KokoroAneModelStore` | `TTS/KokoroAne/KokoroAneManager.swift:32` |
 | TTS (PocketTTS) | `PocketTtsModelStore`, `PocketTtsSynthesizer` | `TTS/PocketTTS/Pipeline/PocketTtsModelStore.swift:12` |
 | TTS (StyleTTS2) | `StyleTTS2Manager` | `TTS/StyleTTS2/StyleTTS2Manager.swift:37` |
-| TTS (Magpie) | `MagpieTtsManager` | `TTS/Magpie/MagpieTtsManager.swift:1` |
 | TTS (G2P) | `MultilingualG2PModel.shared` | `TTS/G2P/MultilingualG2PModel.swift:11` |
 | VAD | `VadManager` | `VAD/VadManager.swift:14` |
 | Diarization (online) | `DiarizerManager` | `Diarizer/Core/DiarizerManager.swift:6` |

@@ -41,7 +41,6 @@
 - [Kokoro ANE (7-stage)](TTS/KokoroAne.md)
 - [PocketTTS](TTS/PocketTTS.md)
 - [StyleTTS2](TTS/StyleTTS2.md)
-- [Magpie](TTS/Magpie.md)
 - [SSML](TTS/SSML.md)
 
 ## Developer Guides

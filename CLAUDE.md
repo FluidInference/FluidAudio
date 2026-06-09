@@ -146,7 +146,7 @@ FluidAudio/
 │   │   │   ├── Parakeet/    # Parakeet TDT (Decoder/, SlidingWindow/, Streaming/)
 │   │   │   └── Qwen3/       # Qwen3 ASR
 │   │   ├── Diarizer/        # Speaker diarization (segmentation, embedding, clustering)
-│   │   ├── TTS/             # Text-to-speech (KokoroAne, PocketTTS, StyleTTS2, Magpie)
+│   │   ├── TTS/             # Text-to-speech (KokoroAne, PocketTTS, StyleTTS2)
 │   │   ├── VAD/             # Voice Activity Detection (Silero VAD)
 │   │   └── Shared/          # Common utilities (audio conversion, model downloading)
 │   └── FluidAudioCLI/       # Command-line interface (macOS only)
@@ -170,7 +170,6 @@ FluidAudio/
 - **KokoroAneManager** (`TTS/KokoroAne/`): ANE-resident Kokoro 82M (7-stage CoreML chain) — English + Mandarin.
 - **PocketTtsSynthesizer** (`TTS/PocketTTS/`): PocketTTS streaming text-to-speech synthesis.
 - **StyleTTS2Manager** (`TTS/StyleTTS2/`): StyleTTS2 LibriTTS zero-shot voice cloning.
-- **MagpieManager** (`TTS/Magpie/`): Magpie multilingual TTS (experimental, RTFx < 1.0).
 
 ### Key Patterns
 - **Actor-based concurrency**: Thread-safe processing, no `@unchecked Sendable`

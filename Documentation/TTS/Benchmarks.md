@@ -11,7 +11,7 @@
 > by [MiniMax-Speech][mms], seed-tts-eval, and Gradium, so numbers
 > here are directly paper-comparable.
 > **Status:** Kokoro ANE (English + Mandarin), PocketTTS (English),
-> Magpie (English), and Supertonic-3 (English) all complete the full
+> and Supertonic-3 (English) all complete the full
 > 100-phrase MiniMax run on **M5 Pro** (Kokoro on its default M5-safe
 > routing). Only **StyleTTS2** is **M2-only** here — its bucketed BERT
 > assets ship without `model.mil`; that row carries its M2 numbers.
@@ -33,10 +33,9 @@ feel:
    the whole utterance is rendered". For one-shot / batch backends in
    this slice `ttft_ms == synth_ms`. **PocketTTS** is wired through
    its streaming API (`synthesizeStreaming`), so its `ttft_ms` is
-   honest first-frame latency. Magpie is batch-only — its `ttft_ms`
-   equals `synth_ms`.
-3. **Per-stage compute units** — Kokoro ANE / Magpie are pipelines of
-   6–7 graphs. Sometimes ANE is *slower per call* but more efficient.
+   honest first-frame latency.
+3. **Per-stage compute units** — Kokoro ANE is a pipeline of
+   7 graphs. Sometimes ANE is *slower per call* but more efficient.
    The "right" compute-unit choice differs per stage.
 4. **Memory footprint** — drives whether a backend is mobile-viable.
 5. **Quality** — RTFx alone tells you nothing about whether the model
@@ -62,7 +61,6 @@ Reference each language as `--corpus minimax-<lang>`:
 |-------------|--------------------|------------------------------------------------|
 | Kokoro ANE  | `minimax-english` | `english` (`af_heart`); Kokoro ANE also ships `chinese` (`--variant mandarin`, voice `zf_001`) |
 | PocketTTS   | `minimax-english`  | 6L packs: `english`, `german`, `italian`, `portuguese`, `spanish`. 24L packs: `french_24l`, `german_24l`, `italian_24l`, `portuguese_24l`, `spanish_24l` |
-| Magpie      | `minimax-english`  | `english`, `spanish`, `german`, `french`, `italian`, `vietnamese`, `chinese`, `hindi` |
 | StyleTTS2   | `minimax-english`  | `english` only (LibriTTS iteration_3, zero-shot from `--reference` audio) |
 | Supertonic-3 | `minimax-english` | 31 ISO codes minus `zh`: `english`, `korean`, `japanese`, `arabic`, `bulgarian`, `czech`, `danish`, `german`, `greek`, `spanish`, `estonian`, `finnish`, `french`, `hindi`, `croatian`, `hungarian`, `indonesian`, `italian`, `lithuanian`, `latvian`, `dutch`, `polish`, `portuguese`, `romanian`, `russian`, `slovak`, `slovenian`, `swedish`, `turkish`, `ukrainian`, `vietnamese`. Voice styling via `--voice-style <preset.json>` |
 
@@ -78,7 +76,7 @@ Per phrase:
   **PocketTTS** is benchmarked through `synthesizeStreaming`, so its
   `ttft_ms` is the timestamp of the first 80 ms audio frame (1920
   samples @ 24 kHz) — actually-perceptible TTFA. **Kokoro ANE,
-  Magpie, StyleTTS2** are batch / one-shot (`synthesize(...)` returns
+  StyleTTS2** are batch / one-shot (`synthesize(...)` returns
   the full waveform), so `ttft_ms == synth_ms == time-to-complete-wav`
   for those — interpret it as full-wav latency, not as TTFA.
 - `synth_ms` — total synth wall time.
@@ -86,7 +84,7 @@ Per phrase:
 - `rtfx` — `audio_ms / synth_ms`.
 - `wer`, `cer` — via Parakeet ASR roundtrip on the rendered WAV.
 - `stage_ms` — per-stage breakdown (backend-specific keys; populated
-  for Kokoro ANE; empty for / PocketTTS / Magpie /
+  for Kokoro ANE; empty for PocketTTS /
   StyleTTS2 / Supertonic-3 in this report).
 - Backend-specific extras: `encoder_tokens`, `acoustic_frames`,
   `chunk_count`, `frame_count`, `code_count`, `generated_token_count`,
@@ -166,7 +164,7 @@ Mandarin (or any of the 14 Cohere languages) against
 ### Per-backend top-line
 
 Reference machine: **Apple M5 Pro, 24 GB unified memory, macOS 26.5
-(`25F71`), on AC** for the Kokoro ANE, PocketTTS, Magpie, and
+(`25F71`), on AC** for the Kokoro ANE, PocketTTS, and
 Supertonic-3 rows. Only the **StyleTTS2** row is carried from the
 prior **MacBook Air, Apple M2 (2022), 8-core CPU / 8-core GPU /
 16-core Neural Engine, 16 GB, macOS 26** (`Mac14,2`) reference — it
@@ -175,7 +173,7 @@ bucketed BERT graphs — see footnote ˢ). All M5 rows use `--compute-units
 default`; for Kokoro ANE that default is now the M5-safe routing (tail
 iSTFT on GPU, RNN stages on ANE — see footnote ᴷ). 100 phrases per
 language. Voices are backend defaults (`af_heart` for Kokoro ANE en,
-`zf_001` for Kokoro ANE zh, `alba` for PocketTTS, `John` for Magpie,
+`zf_001` for Kokoro ANE zh, `alba` for PocketTTS,
 LibriTTS iteration_3 for StyleTTS2). English WER / CER via Parakeet
 TDT roundtrip; Mandarin CER via `whisper-large-v3-turbo`.
 
@@ -189,7 +187,6 @@ peak RSS, WER, CER) so there is a single source of truth.
 | Kokoro ANEᴷ | Apache-2.0 | en (`af_heart`)           | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **314 / 410 ms** | 314 / 410 ms     | **25.4×**ᴷ | 734 MB   | 10.33% | 3.72%  |
 | Kokoro ANEᴷ | Apache-2.0 | zh (`zf_001`)             | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **201 / 286 ms** | 201 / 286 ms     | 20.1×ᴷ     | 761 MB   | n/a‡   | 3.81%‡ |
 | PocketTTS (v2.1) | research   | en (`alba`, 6L pack)      | fp16 ~330 MB | 24 kHz      | 80 ms Mimi frame, streams until EOS (no fixed cap)               | Yes       | **26 / 27 ms** | 933 / 1233 ms    | **6.51×** | 761 MB   | 0.51%  | 0.08%  |
-| Magpie     | research   | en (`John`)               | ~1.3 GB                    | 22.05 kHz   | 256 NanoCodec frames / pass (≈11.9 s); sentence-split for longer | No        | 3765 / 12110 ms∥ | 3765 / 12110 ms∥ | 2.34×∥    | 832 MB∥  | 3.98%  | 2.44%  |
 | StyleTTS2 (M2)ˢ | research   | en (LibriTTS iteration_3) | ~0.67 GB¶                  | 24 kHz      | 256 tokens / pass (≈30 s of audio max)                           | No        | 1574 / 3088 ms    | 1574 / 3088 ms    | 4.59×     | 522 MB   | 9.4%   | 4.1%   |
 | Supertonic-3 (int4) | Apache-2.0 | en (`M1`, 31-lang)        | int4 ~0.10 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥70 char Latin / 57 CJK)   | No        | **81 / 120 ms** | 81 / 120 ms     | **94×** | 197 MB   | 1.02%ᶜ | 0.31%ᶜ |
 
@@ -224,7 +221,7 @@ quantization (fp16/int8/int6 all scored the same 6–7% band at maxLen
 110).
 
 \* TTFT for **PocketTTS** is first-frame emit through the streaming
-API (perceptual TTFA). **Kokoro ANE / Magpie / StyleTTS2** all run
+API (perceptual TTFA). **Kokoro ANE / StyleTTS2** both run
 one-shot per phrase (no streaming yield on `main`), so for those
 rows `ttft_ms == synth_ms == time-to-complete-wav`.
 
@@ -237,15 +234,6 @@ macOS 26.5)**, in line with the prior M2 baseline (4.01%). WER is
 omitted because Mandarin has no word boundaries and `WERCalculator`
 splits on whitespace — word-level WER reads near 100% and is
 meaningless.
-
-∥ Magpie: batch-only. `synthesize(...)` returns one
-`MagpieSynthesisResult` after the full AR + codec pipeline completes,
-so `ttft_ms == synth_ms`. Long inputs are sentence-split internally
-(NanoCodec 256-frame static cap) and AR(N+1) ‖ codec(N) chunk-level
-pipelining overlaps the next chunk's AR loop with the current chunk's
-codec pass — wallclock optimization, not incremental yield. The
-sub-1.5 s TTFA work referenced in issue #590 (fused sampler +
-24-frame cap) lives on `feat/magpie-lt-fusion`, not `main`.
 
 ¶ StyleTTS2 footprint is the sum of the shipped iteration_3 mlpackages
 (text encoder + bert + ref_encoder + post_albert + alignment + prosody
@@ -286,17 +274,6 @@ further per-stage compute-unit re-tuning.
 | `vocoder`     |  704.4  | 72.9%      |
 | `tail`        |   17.0  |  1.8%      |
 | **total**     |  965.9  | 100%       |
-
-### Magpie — per-stage breakdown
-
-Per-stage timings (`text_encoder`, `prefill`, `ar_loop`,
-`decoder_step`, `sampler`, `nanocodec`) are still populated on
-`MagpieSynthesisResult.timings` for callers that want them — see
-[`MagpieTypes.swift`](../../Sources/FluidAudio/TTS/Magpie/MagpieTypes.swift).
-This document does not currently re-publish the per-stage table on
-`main`: the AR loop dominates and its absolute numbers are
-in active flux on `feat/magpie-lt-fusion` (fused sampler + 24-frame
-NanoCodec cap). Republish here once that branch lands on `main`.
 
 ### Supertonic-3 — per-language breakdown (M2, default preset, `M1` voice)
 

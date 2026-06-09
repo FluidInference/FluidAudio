@@ -51,7 +51,6 @@ public enum Repo: String, CaseIterable, Sendable {
     case multilingualG2p = "FluidInference/charsiu-g2p-byt5-coreml"
     case parakeetTdtCtc110m = "FluidInference/parakeet-tdt-ctc-110m-coreml"
     case cohereTranscribeCoreml = "FluidInference/cohere-transcribe-03-2026-coreml/q8"
-    case magpieTts = "FluidInference/magpie-tts-multilingual-357m-coreml"
     /// StyleTTS2 LibriTTS — `iteration_3/compiled/` is the only directory
     /// with `.mlmodelc` artifacts; the parent repo also ships `packages/`
     /// (`.mlpackage` source) and `swift/` (a debug harness) that the Swift
@@ -129,8 +128,6 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-tdt-ctc-110m-coreml"
         case .cohereTranscribeCoreml:
             return "cohere-transcribe-03-2026-coreml/q8"
-        case .magpieTts:
-            return "magpie-tts-multilingual-357m-coreml"
         case .styletts2:
             return "StyleTTS-2-coreml/iteration_3/compiled"
         case .supertonic3:
@@ -255,8 +252,6 @@ public enum Repo: String, CaseIterable, Sendable {
             return "ls-eend/dih3"
         case .cohereTranscribeCoreml:
             return "cohere-transcribe/q8"
-        case .magpieTts:
-            return "magpie-tts"
         case .styletts2:
             return "styletts2"
         case .supertonic3:
@@ -853,50 +848,6 @@ public enum ModelNames {
         ]
     }
 
-    /// Magpie TTS Multilingual 357M model names.
-    ///
-    /// Four CoreML models + a `constants/` directory + a `tokenizer/` directory of
-    /// per-language lookup data. The `decoder_prefill` model is optional; when
-    /// absent the prefill runs step-by-step through `decoder_step`.
-    public enum Magpie {
-        public static let textEncoder = "text_encoder"
-        public static let decoderPrefill = "decoder_prefill"
-        public static let decoderStep = "decoder_step"
-        /// v1: T=256 monolithic, fp16, CPU. Legacy fallback (noisy + slow).
-        public static let nanocodecDecoder = "nanocodec_decoder"
-        /// v2: T_in=24 chunked, fp16. Fast (~43% ANE) but noisy on voiced speech.
-        public static let nanocodecDecoderV2 = "nanocodec_decoder_v2"
-        /// v3: T_in=24 chunked, fp32, CPU. Audibly clean (default).
-        public static let nanocodecDecoderV3 = "nanocodec_decoder_v3"
-        /// v4: T_in=24 chunked, fp32 compute + 8-bit kmeans palettized weights, CPU.
-        /// Acoustically transparent vs v3 (33.6 dB SNR on AR speech, identical
-        /// quiet floor) at ~4× smaller on disk (31 MB vs 121 MB) and ~11 %
-        /// lower peak RSS. Same recipe Kokoro Noise uses (`fp32 + int8pal`).
-        public static let nanocodecDecoderV4 = "nanocodec_decoder_v4"
-
-        public static let textEncoderFile = textEncoder + ".mlmodelc"
-        public static let decoderPrefillFile = decoderPrefill + ".mlmodelc"
-        public static let decoderStepFile = decoderStep + ".mlmodelc"
-        public static let nanocodecDecoderFile = nanocodecDecoder + ".mlmodelc"
-        public static let nanocodecDecoderV2File = nanocodecDecoderV2 + ".mlmodelc"
-        public static let nanocodecDecoderV3File = nanocodecDecoderV3 + ".mlmodelc"
-        public static let nanocodecDecoderV4File = nanocodecDecoderV4 + ".mlmodelc"
-
-        public static let constantsDir = "constants"
-        public static let tokenizerDir = "tokenizer"
-
-        /// Files required for English synthesis. Other languages append their own
-        /// lookup files on top (see `MagpieResourceDownloader`). Listing
-        /// `nanocodecDecoderV3File` ensures legacy v1-only caches get
-        /// re-downloaded and upgraded to the clean v3.
-        public static let requiredModels: Set<String> = [
-            textEncoderFile,
-            decoderStepFile,
-            nanocodecDecoderV3File,
-            constantsDir,
-        ]
-    }
-
     /// StyleTTS2 LibriTTS (iteration_3) — 8-stage CoreML pipeline + 6 bucket
     /// variants (T = 64 / 128 / 256) for the two stages that can't accept
     /// `RangeDim` on the token axis (`bert`, `fused_diffusion_sampler`).
@@ -1254,8 +1205,6 @@ public enum ModelNames {
             return ModelNames.MultilingualG2P.requiredModels
         case .cohereTranscribeCoreml:
             return ModelNames.CohereTranscribe.requiredModels
-        case .magpieTts:
-            return ModelNames.Magpie.requiredModels
         case .styletts2:
             // Sentinel variants:
             //   "all"     → 14 bundles (8 defaults + 6 buckets)
