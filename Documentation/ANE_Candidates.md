@@ -91,8 +91,16 @@ go/no-go gate, so future work starts from data instead of rediscovery.
   cascades inherent to fp16 fusion itself. Remaining ship condition:
   maintainer sign-off on the 4-outlier trade + the one-line RnntDecoder
   Swift change (documented in the EOU OPTIMIZATION.md).
-- Nemotron EN's loop (67 ms/utt) is the same shape — apply the lean fusion
-  there next.
+- SWIFT-MEASURED (2026-06-10, official benchmark, 160 ms, 400 files, 2×2
+  interleaved): **+7–9% e2e RTFx (14.4→15.5) with equal-or-better WER
+  (8.40→8.29%)** — the truncation outliers are fully absorbed by production
+  overlap chunking. The python 1.68×/step compresses to ~1.08× e2e because
+  the Swift host's per-chunk encoder + streaming logic dominate. Wiring on
+  FluidAudio branch feat/eou-fused-decoder (opt-in FLUID_EOU_FUSED=1,
+  default OFF). Lesson reinforced: decode-loop speedups must be priced at
+  the host level before ranking them.
+- Nemotron EN's loop (67 ms/utt) is the same shape — same lean fusion
+  applies, but price it at ~5–10% e2e, not the per-step number.
 
 ### 5. Supertonic VectorEstimator loop fusion — garnish
 - Today: 94% ANE but the host dispatches the 8-step denoising loop (8×3.8 ms).
