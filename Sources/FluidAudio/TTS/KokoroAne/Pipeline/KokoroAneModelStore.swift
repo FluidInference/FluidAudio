@@ -46,8 +46,10 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
         self.tail = tail
     }
 
-    /// Default — RNN stages on ANE, tail iSTFT on GPU. Runs on M2 + M5
-    /// (the old `all`-placement default crashed on M5/macOS 26.5). See #667.
+    /// Default — RNN stages on ANE, Noise + tail iSTFT on GPU (both are
+    /// fp32-only graphs the ANE cannot take). Runs on M2 + M5 (the old
+    /// `all`-placement default crashed on M5/macOS 26.5). See #667 and the
+    /// `noise:` parameter note above.
     /// Identical to ``aneTailGpu``.
     public static let `default` = KokoroAneComputeUnits()
 
