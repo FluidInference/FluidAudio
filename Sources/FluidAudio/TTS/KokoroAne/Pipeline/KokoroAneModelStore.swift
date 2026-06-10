@@ -28,7 +28,12 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
         postAlbert: MLComputeUnits = .cpuAndNeuralEngine,
         alignment: MLComputeUnits = .cpuAndNeuralEngine,
         prosody: MLComputeUnits = .cpuAndNeuralEngine,
-        noise: MLComputeUnits = .cpuAndNeuralEngine,
+        // Noise defaults to GPU: the stage is all-fp32 (its sin(cumsum)
+        // phase collapses in fp16), so the fp16-only ANE takes none of it
+        // and `.cpuAndNeuralEngine` degenerates to plain CPU — measured
+        // slower than `.cpuOnly`. It has zero RNN ops, so the #667 GPU ban
+        // never applied to it. Measurements in the `aneTailGpu` note.
+        noise: MLComputeUnits = .cpuAndGPU,
         vocoder: MLComputeUnits = .cpuAndNeuralEngine,
         tail: MLComputeUnits = .cpuAndGPU
     ) {

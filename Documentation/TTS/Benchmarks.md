@@ -184,7 +184,7 @@ peak RSS, WER, CER) so there is a single source of truth.
 
 | Backend    | License    | Language (voice)          | Footprint                  | Sample rate | Max chunk per pass                                               | Streaming | TTFT p50 / p95\*  | Synth p50 / p95   | Agg RTFx  | Peak RSS | WER    | CER    |
 |------------|------------|---------------------------|----------------------------|-------------|------------------------------------------------------------------|-----------|-------------------|-------------------|-----------|----------|--------|--------|
-| Kokoro ANEᴷ | Apache-2.0 | en (`af_heart`)           | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **314 / 410 ms** | 314 / 410 ms     | **25.4×**ᴷ | 734 MB   | 10.33% | 3.72%  |
+| Kokoro ANEᴷ | Apache-2.0 | en (`af_heart`)           | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **277 / 346 ms** | 277 / 346 ms     | **28.7×**ᴷ | 788 MB   | 10.38% | 3.72%  |
 | Kokoro ANEᴷ | Apache-2.0 | zh (`zf_001`)             | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **201 / 286 ms** | 201 / 286 ms     | 20.1×ᴷ     | 761 MB   | n/a‡   | 3.81%‡ |
 | PocketTTS (v2.1) | research   | en (`alba`, 6L pack)      | fp16 ~330 MB | 24 kHz      | 80 ms Mimi frame, streams until EOS (no fixed cap)               | Yes       | **26 / 27 ms** | 933 / 1233 ms    | **6.51×** | 761 MB   | 0.51%  | 0.08%  |
 | StyleTTS2 (M2)ˢ | research   | en (LibriTTS iteration_3) | ~0.67 GB¶                  | 24 kHz      | 256 tokens / pass (≈30 s of audio max)                           | No        | 1574 / 3088 ms    | 1574 / 3088 ms    | 4.59×     | 522 MB   | 9.4%   | 4.1%   |
@@ -199,8 +199,12 @@ supported'` on the prosody RNN on the GPU), and `all-ane`/`cpu-only`
 crash in `libBNNS` (SIGSEGV) on the tail iSTFT. Keeping the RNN off the
 GPU and the iSTFT off BNNS dodges both (the tail was always meant to run
 fp32 on CPU/GPU — ANE rejects the exp/sin/iSTFT — so this is faithful,
-not a hack). Quality matches the prior M2 baseline (en WER 10.33% vs
-10.8%; zh CER 3.81% vs 4.01%). The old `.all` default ran fine on M2 but
+not a hack). Quality matches the prior M2 baseline (en WER ~10.3% vs
+10.8%; zh CER 3.81% vs 4.01%). The en row was re-measured after the
+Noise→GPU routing fix (Noise is all-fp32, so `.cpuAndNeuralEngine`
+degenerated to plain CPU; it has no RNN ops, so the #667 GPU ban never
+applied): TTFT p50 317→277 ms, agg RTFx 25.1→28.7 (+14%), WER
+unchanged. The zh row predates the fix; expect a similar improvement. The old `.all` default ran fine on M2 but
 its M2 perf under the new default is not re-verified here. The underlying
 Apple bug is tracked in [#667][i667]; this routing is
 `TtsComputeUnitPreset.default` / `.aneTailGpu`.
