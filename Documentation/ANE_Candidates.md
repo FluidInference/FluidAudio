@@ -44,13 +44,13 @@ go/no-go gate, so future work starts from data instead of rediscovery.
   construct-blocked (fixable). Nobody has looked.
 - Note: even a "can't ANE" verdict may surface a routing win (Kokoro lesson).
 
-### 3. Parakeet TDT v3 decoder+joint — flagship model, untouched decode loop
+### 3. Parakeet TDT v3 decoder+joint — RESOLVED 2026-06-09 (LSTM-gated; fusion built)
 - Today: 100% CPU, ~32 ms/utt; the joint loop rivals the 28 ms encoder call.
 - Action: (a) LSTM check on the prediction network — go/no-go gate;
   (b) B1-style decoder+joint fusion regardless (+15% precedent on Nemotron);
   (c) rank-4 rewrite if the gate passes.
 
-### 4. Parakeet EOU decode loop — worst encoder/decoder imbalance
+### 4. Parakeet EOU decode loop — RESOLVED 2026-06-09 (LSTM-gated; fusion built, ship)
 - Today: encoder 6.5 ms/chunk (97% ANE) vs decoder+joint **58 ms/utt** on CPU
   (229 steps × ~0.13 ms). Nemotron EN's loop (67 ms/utt) is the same shape.
 - Action: same campaign as #3 — shared RnntDecoder machinery, same LSTM gate.
@@ -71,6 +71,7 @@ go/no-go gate, so future work starts from data instead of rediscovery.
 | Kokoro Noise | GPU (#677) | fp32 by necessity (`sin(cumsum)` phase overflows fp16); full-ANE hybrid ceiling 3–4.5% — declined |
 | Kokoro PostAlbert | CPU | `ios17.lstm` has no ANE kernel; GPU planner rejects its dynamic shapes; 1.2% of synth |
 | Kokoro Tail | GPU | fp32 iSTFT; ANE rejects exp/sin/iSTFT; BNNS segfaults (#667) |
+| Parakeet TDT v3 Decoder + EOU decoder | CPU forever | `ios17.lstm` in both prediction networks (no ANE kernel); fusion-only campaign run 2026-06-09 — fused decoder+joint 1.11×/utt (v3) and 1.21× (EOU), fp16 only (fp32 fused regresses on GPU units); see mobius feat/parakeet-decode-fusion OPTIMIZATION.md |
 | SenseVoice / Paraformer encoders | done | 97–99% ANE already |
 | Silero VAD, preprocessors, G2P, Supertonic DurationPredictor | CPU | under the ~50 MB transfer-overhead floor, or measured fastest on CPU |
 
