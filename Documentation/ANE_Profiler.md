@@ -128,6 +128,13 @@ fused `decoder_joint` (B1).
 | decoder | 0% | 0% | 100% | 19 | 29 MB | unused (B1 default) |
 
 > Unlike EN, the multilingual `joint` is fully ANE and `decoder_joint` is mixed (54% ANE).
+> Per-op diagnosis (2026-06-10): the 46% CPU partition is exactly the LSTM prediction network —
+> 2× `ios18.lstm` (640-hidden) plus its inseparable glue (embedding `gather`, h/c `split`/`stack`,
+> squeezes, IO casts). The joint half (3× `linear` + `relu` + `add`, incl. the 640→13088 logits
+> matmul) is already fully on ANE. `ios18.lstm` has no ANE kernel (categorical, same gate as
+> Parakeet TDT v3/EOU) — **54% is the ceiling for this graph**. The per-language variants
+> (latin/es/de, vocab 2829/2829/796) compile 100% CPU: their joint halves fall under the
+> ANE worth-it threshold once the big logits matmul shrinks.
 
 ---
 

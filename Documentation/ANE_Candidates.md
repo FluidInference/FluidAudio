@@ -29,13 +29,28 @@ go/no-go gate, so future work starts from data instead of rediscovery.
 
 ## Ranked candidates
 
-### 1. Nemotron Multilingual `decoder_joint` — strongest signal
-- Today: **54% ANE / 46% CPU** — the only mixed-placement graph in the
+### 1. Nemotron Multilingual `decoder_joint` — RESOLVED 2026-06-10 (LSTM-gated; 54% is the ceiling)
+- Was: **54% ANE / 46% CPU** — the only mixed-placement graph in the
   profiler doc. 79 ms/utt (168 calls), the biggest decode cost in that
   pipeline. Sibling `joint` model is already 100% ANE.
-- Action: per-op fallback dump (`ane_ops`) to identify the rejected
-  constructs; expect a narrow Trial-19-style fix.
-- Gate: none — diagnostic is read-only and cheap.
+- Diagnosis (`ane_ops` per-op dump): the CPU 46% is **exactly the RNN-T
+  prediction network** — 2× `ios18.lstm` (640-hidden) plus its inseparable
+  glue (embedding `gather`, h/c-state `split`/`stack`, squeezes, IO casts).
+  The joint half (3× `linear` + `relu` + `add`, incl. the 640→13088 logits
+  matmul) is already 100% ANE inside the fused graph — that's the 54%.
+  Categorical, not construct: `ios18.lstm` has no ANE kernel at any
+  precision (playbook item 4; same gate that settled Parakeet TDT v3/EOU).
+  No rank-5 / scatter / masked_fill / dynamic-shape constructs present.
+- Why the standalone models differ: standalone `joint` = only the
+  ANE-eligible half → 100% ANE; standalone `decoder` = only the prediction
+  network → 100% CPU. The fused B1 graph already achieves the best possible
+  split, and B1 fusion already banked the +15% from dispatch savings.
+- Side finding: the per-language `decoder_joint` variants (latin/es vocab
+  2829, de vocab 796 — vs 13088 multilingual) compile **100% CPU**: once
+  the logits matmul shrinks, the whole graph falls under the ANE worth-it
+  threshold. Expected to be the fast outcome for those sizes (transfer-floor
+  rule below); only revisit if a per-language decode shows up hot.
+- Verdict: as good as it gets. Moved to Settled.
 
 ### 2. Pyannote segmentation — biggest non-TTS prize, binary unknown
 - Today: 100% CPU, 55.4 ms/call — the heaviest warm stage in offline
@@ -72,6 +87,7 @@ go/no-go gate, so future work starts from data instead of rediscovery.
 | Kokoro PostAlbert | CPU | `ios17.lstm` has no ANE kernel; GPU planner rejects its dynamic shapes; 1.2% of synth |
 | Kokoro Tail | GPU | fp32 iSTFT; ANE rejects exp/sin/iSTFT; BNNS segfaults (#667) |
 | Parakeet TDT v3 Decoder + EOU decoder | CPU forever | `ios17.lstm` in both prediction networks (no ANE kernel); fusion-only campaign run 2026-06-09 — fused decoder+joint 1.11×/utt (v3) and 1.21× (EOU), fp16 only (fp32 fused regresses on GPU units); see mobius feat/parakeet-decode-fusion OPTIMIZATION.md |
+| Nemotron ML `decoder_joint` | 54% ANE is the ceiling | per-op dump 2026-06-10: CPU 46% = the LSTM prediction network (2× `ios18.lstm`, no ANE kernel) + inseparable state glue; the joint half (3 linears incl. 640→13088 logits) is already 100% ANE in the fused graph. No fixable constructs. Per-language variants (vocab ≤2829) are 100% CPU — under the worth-it floor, leave alone |
 | SenseVoice / Paraformer encoders | done | 97–99% ANE already |
 | Silero VAD, preprocessors, G2P, Supertonic DurationPredictor | CPU | under the ~50 MB transfer-overhead floor, or measured fastest on CPU |
 
