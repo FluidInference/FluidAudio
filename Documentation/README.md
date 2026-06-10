@@ -10,7 +10,6 @@
 - [Getting Started](ASR/GettingStarted.md)
 - [TDT-CTC 110M](ASR/TDT-CTC-110M.md)
 - [Nemotron](ASR/Nemotron.md)
-- [Qwen3 ASR](ASR/Qwen3-ASR.md)
 - [CTC Decoder Guide](CtcDecoderGuide.md)
 - [Custom Vocabulary](ASR/CustomVocabulary.md)
 - [Post-Processing (ITN)](ASR/PostProcessing.md)

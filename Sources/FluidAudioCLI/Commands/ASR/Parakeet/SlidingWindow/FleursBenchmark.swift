@@ -568,9 +568,7 @@ public class FLEURSBenchmark {
     /// the v3 script-filter enum (either the language isn't covered by v3, or it uses
     /// a script that doesn't need Latin/Cyrillic disambiguation — e.g. Arabic, CJK).
     ///
-    /// Other ASR engines have their own language enums and their own FLEURS mappings:
-    /// see `Qwen3AsrBenchmark.fleursToQwen3Language` for the Qwen3 multilingual enum
-    /// (30 languages, including CJK / Arabic / Indic that Parakeet v3 doesn't cover).
+    /// Other ASR engines have their own language enums and their own FLEURS mappings.
     private func mapToLanguageEnum(_ fleursCode: String) -> Language? {
         switch fleursCode {
         case "en_us": return .english
