@@ -16,6 +16,11 @@ public struct DecodeResult: Sendable {
 public final class RnntDecoder {
     private let decoderModel: MLModel
     private let jointModel: MLModel
+    /// Optional fused decoder+joint_decision model. When set, each RNNT step runs a single
+    /// `MLModel.prediction` with inputs `targets/h_in/c_in/encoder_step` and reads
+    /// `token_id/h_out/c_out`, instead of dispatching decoder and joint separately.
+    /// Opt-in via `FLUID_EOU_FUSED=1` (see `StreamingEouAsrManager.loadModels`).
+    private let fusedModel: MLModel?
 
     // Decoder State
     private var hState: MLMultiArray
@@ -29,29 +34,32 @@ public final class RnntDecoder {
     private let hiddenSize = 640
     private let layers = 1
 
-    public init(decoderModel: MLModel, jointModel: MLModel) {
+    public init(decoderModel: MLModel, jointModel: MLModel, fusedModel: MLModel? = nil) {
         self.decoderModel = decoderModel
         self.jointModel = jointModel
+        self.fusedModel = fusedModel
 
         // Initialize state
-        self.hState = try! MLMultiArray(
-            shape: [NSNumber(value: layers), NSNumber(value: 1), NSNumber(value: hiddenSize)], dataType: .float32)
-        self.cState = try! MLMultiArray(
-            shape: [NSNumber(value: layers), NSNumber(value: 1), NSNumber(value: hiddenSize)], dataType: .float32)
+        self.hState = Self.makeZeroState(layers: layers, hiddenSize: hiddenSize)
+        self.cState = Self.makeZeroState(layers: layers, hiddenSize: hiddenSize)
         self.lastToken = blankId
+    }
 
-        resetState()
+    private static func makeZeroState(layers: Int, hiddenSize: Int) -> MLMultiArray {
+        // Reallocating (instead of zeroing in place) keeps resetState() correct even when the
+        // state arrays were replaced by model outputs of a different scalar type (e.g. the
+        // fused model emits fp16 h_out/c_out).
+        let array = try! MLMultiArray(
+            shape: [NSNumber(value: layers), NSNumber(value: 1), NSNumber(value: hiddenSize)], dataType: .float32)
+        array.withUnsafeMutableBufferPointer(ofType: Float.self) { ptr, _ in
+            ptr.baseAddress?.update(repeating: 0, count: ptr.count)
+        }
+        return array
     }
 
     public func resetState() {
-        // Zero out states
-        let count = hState.count
-        hState.withUnsafeMutableBufferPointer(ofType: Float.self) { ptr, _ in
-            ptr.baseAddress?.update(repeating: 0, count: count)
-        }
-        cState.withUnsafeMutableBufferPointer(ofType: Float.self) { ptr, _ in
-            ptr.baseAddress?.update(repeating: 0, count: count)
-        }
+        hState = Self.makeZeroState(layers: layers, hiddenSize: hiddenSize)
+        cState = Self.makeZeroState(layers: layers, hiddenSize: hiddenSize)
         lastToken = blankId
     }
 
@@ -88,56 +96,27 @@ public final class RnntDecoder {
             var symbolsAdded = 0
 
             while symbolsAdded < maxSymbolsPerStep {
-                // 1. Run Decoder
-                let decoderInput = try prepareDecoderInput(lastToken: lastToken, h: hState, c: cState)
-                let decoderOutput = try decoderModel.prediction(from: decoderInput)
-
-                guard let decoderArray = decoderOutput.featureValue(for: "decoder")?.multiArrayValue else {
-                    throw RnntDecoderError.missingOutput("decoder")
-                }
-                var decoderStep = decoderArray
-                // Decoder outputs [1, 640, 2] - NeMo uses the LAST frame
-                if decoderStep.shape.count == 3 && decoderStep.shape[2].intValue > 1 {
-                    // Slice to keep only the last frame [1, 640, 1]
-                    decoderStep = try sliceDecoderStep(decoderStep)
+                let step: RnntStepResult
+                if let fusedModel {
+                    step = try runFusedStep(fusedModel, encoderStep: encoderStep)
+                } else {
+                    step = try runReferenceStep(encoderStep: encoderStep)
                 }
 
-                // 2. Run Joint
-                let jointInput = try MLDictionaryFeatureProvider(dictionary: [
-                    "encoder_step": MLFeatureValue(multiArray: encoderStep),
-                    "decoder_step": MLFeatureValue(multiArray: decoderStep),
-                ])
-
-                let jointOutput = try jointModel.prediction(from: jointInput)
-
-                // 3. Get Token ID
-                // Output "token_id" is [1, 1, 1] (argmax)
-                guard let tokenIdMultiArray = jointOutput.featureValue(for: "token_id")?.multiArrayValue else {
-                    throw RnntDecoderError.missingOutput("token_id")
-                }
-                let tokenId = tokenIdMultiArray[0].int32Value
-
-                if tokenId == blankId {
+                if step.tokenId == blankId {
                     break
-                } else if tokenId == eouId {
+                } else if step.tokenId == eouId {
                     // EOU detected - signal and stop processing
                     eouDetected = true
                     break outerLoop
                 } else {
-                    predictedIds.append(Int(tokenId))
+                    predictedIds.append(Int(step.tokenId))
                     predictedFrames.append(t)
-                    lastToken = tokenId
+                    lastToken = step.tokenId
 
-                    // Update State
-                    guard let newH = decoderOutput.featureValue(for: "h_out")?.multiArrayValue else {
-                        throw RnntDecoderError.missingOutput("h_out")
-                    }
-                    guard let newC = decoderOutput.featureValue(for: "c_out")?.multiArrayValue else {
-                        throw RnntDecoderError.missingOutput("c_out")
-                    }
-
-                    hState = newH
-                    cState = newC
+                    // Update State (only on non-blank emission, matching NeMo greedy RNNT)
+                    hState = step.hOut
+                    cState = step.cOut
 
                     symbolsAdded += 1
                 }
@@ -145,6 +124,82 @@ public final class RnntDecoder {
         }
 
         return DecodeResult(tokenIds: predictedIds, tokenFrames: predictedFrames, eouDetected: eouDetected)
+    }
+
+    /// Result of a single RNNT step: predicted token plus the post-LSTM decoder state.
+    /// The state is only committed to `hState`/`cState` when a non-blank token is emitted.
+    private struct RnntStepResult {
+        let tokenId: Int32
+        let hOut: MLMultiArray
+        let cOut: MLMultiArray
+    }
+
+    /// Reference path: two dispatches per step (decoder, then joint_decision).
+    private func runReferenceStep(encoderStep: MLMultiArray) throws -> RnntStepResult {
+        // 1. Run Decoder
+        let decoderInput = try prepareDecoderInput(lastToken: lastToken, h: hState, c: cState)
+        let decoderOutput = try decoderModel.prediction(from: decoderInput)
+
+        guard let decoderArray = decoderOutput.featureValue(for: "decoder")?.multiArrayValue else {
+            throw RnntDecoderError.missingOutput("decoder")
+        }
+        var decoderStep = decoderArray
+        // Decoder outputs [1, 640, 2] - NeMo uses the LAST frame
+        if decoderStep.shape.count == 3 && decoderStep.shape[2].intValue > 1 {
+            // Slice to keep only the last frame [1, 640, 1]
+            decoderStep = try sliceDecoderStep(decoderStep)
+        }
+
+        // 2. Run Joint
+        let jointInput = try MLDictionaryFeatureProvider(dictionary: [
+            "encoder_step": MLFeatureValue(multiArray: encoderStep),
+            "decoder_step": MLFeatureValue(multiArray: decoderStep),
+        ])
+
+        let jointOutput = try jointModel.prediction(from: jointInput)
+
+        // 3. Get Token ID
+        // Output "token_id" is [1, 1, 1] (argmax)
+        guard let tokenIdMultiArray = jointOutput.featureValue(for: "token_id")?.multiArrayValue else {
+            throw RnntDecoderError.missingOutput("token_id")
+        }
+        guard let hOut = decoderOutput.featureValue(for: "h_out")?.multiArrayValue else {
+            throw RnntDecoderError.missingOutput("h_out")
+        }
+        guard let cOut = decoderOutput.featureValue(for: "c_out")?.multiArrayValue else {
+            throw RnntDecoderError.missingOutput("c_out")
+        }
+
+        return RnntStepResult(tokenId: tokenIdMultiArray[0].int32Value, hOut: hOut, cOut: cOut)
+    }
+
+    /// Fused path: one dispatch per step. The fused graph internally performs the decoder LSTM
+    /// step (including the last-frame slice) and the joint+argmax, so the host only feeds the
+    /// previous token, LSTM state, and the current encoder frame.
+    private func runFusedStep(_ model: MLModel, encoderStep: MLMultiArray) throws -> RnntStepResult {
+        let targets = try MLMultiArray(shape: [1, 1], dataType: .int32)
+        targets[0] = NSNumber(value: lastToken)
+
+        let input = try MLDictionaryFeatureProvider(dictionary: [
+            "targets": MLFeatureValue(multiArray: targets),
+            "h_in": MLFeatureValue(multiArray: hState),
+            "c_in": MLFeatureValue(multiArray: cState),
+            "encoder_step": MLFeatureValue(multiArray: encoderStep),
+        ])
+
+        let output = try model.prediction(from: input)
+
+        guard let tokenIdMultiArray = output.featureValue(for: "token_id")?.multiArrayValue else {
+            throw RnntDecoderError.missingOutput("token_id")
+        }
+        guard let hOut = output.featureValue(for: "h_out")?.multiArrayValue else {
+            throw RnntDecoderError.missingOutput("h_out")
+        }
+        guard let cOut = output.featureValue(for: "c_out")?.multiArrayValue else {
+            throw RnntDecoderError.missingOutput("c_out")
+        }
+
+        return RnntStepResult(tokenId: tokenIdMultiArray[0].int32Value, hOut: hOut, cOut: cOut)
     }
 
     private func extractEncoderStep(
