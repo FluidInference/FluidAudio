@@ -241,7 +241,7 @@ public struct TTS {
                         pocketPlacement = parsed
                     } else {
                         logger.error(
-                            "Unknown PocketTTS placement '\(arguments[i + 1])'. Supported: gpu, ane"
+                            "Unknown PocketTTS placement '\(arguments[i + 1])'. Supported: gpu, ane, ane-state"
                         )
                         return
                     }
@@ -938,6 +938,9 @@ public struct TTS {
                                    portuguese, portuguese_24l, spanish, spanish_24l
                                    Note: French is 24-layer only (no 6-layer pack upstream)
               --seed N             Deterministic-mode seed (uses session API for fixed RNG)
+              --placement P        Model placement: gpu (default), ane (rank-4 ANE models),
+                                   ane-state (Trial 23 MLState multifunction pipeline;
+                                   macOS 15+/iOS 18+, requires pocket_state.mlmodelc)
 
             Voice Cloning examples:
               # Clone and synthesize in one step

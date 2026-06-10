@@ -171,4 +171,17 @@ public enum PocketTtsModelPlacement: String, Sendable, Hashable {
     /// Requires the `*_ane.mlmodelc` files in the language pack (fp16 only;
     /// `precision` is ignored for the FlowLM when this is selected).
     case ane
+    /// MLState multifunction pipeline (mobius Trial 23): ONE
+    /// `pocket_state.mlmodelc` package exposing `write_state` / `prefill` /
+    /// `generate` functions over a shared 12-buffer fp16 KV state that stays
+    /// resident on the ANE — the 24-tensor cache I/O of `.gpu`/`.ane` is
+    /// bypassed entirely, and the per-frame `generate` call fuses
+    /// flowlm_step + flow_decoder into one dispatch.
+    ///
+    /// Requires macOS 15+/iOS 18+ at RUNTIME (both `MLState` and
+    /// multifunction models); `loadIfNeeded` throws on older OSes. fp16 only
+    /// (`precision` is ignored). Python-measured −35.8%/utterance on the
+    /// flowlm+flow share vs the `.ane` IO pipeline (mobius TRIALS.md,
+    /// Trial 23); mimi decode is unchanged.
+    case aneState = "ane-state"
 }

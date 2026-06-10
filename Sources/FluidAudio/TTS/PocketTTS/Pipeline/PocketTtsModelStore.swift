@@ -19,6 +19,9 @@ public actor PocketTtsModelStore {
     private var flowDecoderModel: MLModel?
     private var mimiDecoderModel: MLModel?
     private var mimiEncoderModel: MLModel?
+    /// `.aneState` only: the prefill/generate function instances loaded from
+    /// the `pocket_state.mlmodelc` multifunction package (mobius Trial 23).
+    private var stateModelsStore: PocketTtsStateModels?
     private var constantsBundle: PocketTtsConstantsBundle?
     private var voiceCache: [String: PocketTtsVoiceData] = [:]
     private var languageRootDirectory: URL?
@@ -44,7 +47,9 @@ public actor PocketTtsModelStore {
     /// - Parameter placement: `.gpu` (default) loads the v2.1 rank-5 models;
     ///   `.ane` loads the rank-4 `_ane` variants with the FlowLM pinned to
     ///   `.cpuAndNeuralEngine` (see `PocketTtsModelPlacement`). `.ane`
-    ///   ignores `precision` for the FlowLM (fp16 only).
+    ///   ignores `precision` for the FlowLM (fp16 only). `.aneState` loads
+    ///   the Trial 23 `pocket_state.mlmodelc` multifunction package (MLState
+    ///   KV cache; macOS 15+/iOS 18+ at runtime, fp16 only).
     public init(
         language: PocketTtsLanguage = .english,
         directory: URL? = nil,
@@ -59,7 +64,7 @@ public actor PocketTtsModelStore {
 
     /// Load all four CoreML models and the constants bundle.
     public func loadIfNeeded() async throws {
-        guard condStepModel == nil else { return }
+        guard condStepModel == nil && stateModelsStore == nil else { return }
 
         let languageRoot = try await PocketTtsResourceDownloader.ensureModels(
             language: language,
@@ -72,6 +77,22 @@ public actor PocketTtsModelStore {
         logger.info(
             "Loading PocketTTS CoreML models (language=\(self.language.rawValue), precision=\(self.precision))..."
         )
+
+        if placement == .aneState {
+            // MLState + multifunction models need the macOS 15 / iOS 18
+            // CoreML runtime; the package itself still targets macOS 14, so
+            // this is a runtime gate rather than a compile-time one.
+            guard #available(macOS 15.0, iOS 18.0, *) else {
+                throw PocketTTSError.processingFailed(
+                    "PocketTTS `.aneState` placement requires macOS 15+/iOS 18+ "
+                        + "(MLState and multifunction CoreML models)."
+                )
+            }
+            try loadStatePipeline(languageRoot: languageRoot)
+            constantsBundle = try PocketTtsConstantsLoader.load(from: languageRoot)
+            logger.info("PocketTTS constants loaded")
+            return
+        }
 
         // Per-model compute units. The global `.cpuAndGPU` hammer was set to
         // stop the Mimi decoder beeping (its streaming-state fp16 feedback loop
@@ -181,6 +202,60 @@ public actor PocketTtsModelStore {
         // Load constants
         constantsBundle = try PocketTtsConstantsLoader.load(from: languageRoot)
         logger.info("PocketTTS constants loaded")
+    }
+
+    /// Load the `.aneState` model set: the prefill + generate function
+    /// instances of the ONE `pocket_state.mlmodelc` multifunction package,
+    /// plus the regular Mimi decoder.
+    ///
+    /// Compute units follow Trial 23's host recommendation: everything at
+    /// `.cpuAndNeuralEngine` — `generate` plans 100% ANE, and the stateful
+    /// prefill no longer round-trips ~100 MB of cache I/O so it doesn't need
+    /// the GPU escape hatch that the IO `cond_prefill` uses. Mimi stays
+    /// `.cpuOnly` (ANE fp16 feedback beep, mobius IOS_COREML_ISSUES.md #7).
+    @available(macOS 15.0, iOS 18.0, *)
+    private func loadStatePipeline(languageRoot: URL) throws {
+        let loadStart = Date()
+        let stateURL = languageRoot.appendingPathComponent(
+            ModelNames.PocketTTS.pocketStateFile)
+
+        func functionConfig(_ functionName: String) -> MLModelConfiguration {
+            let c = MLModelConfiguration()
+            c.computeUnits = .cpuAndNeuralEngine
+            c.functionName = functionName
+            return c
+        }
+
+        let prefill = try MLModel(
+            contentsOf: stateURL,
+            configuration: functionConfig(ModelNames.PocketTTS.StateFunction.prefill))
+        let generate = try MLModel(
+            contentsOf: stateURL,
+            configuration: functionConfig(ModelNames.PocketTTS.StateFunction.generate))
+        stateModelsStore = PocketTtsStateModels(prefill: prefill, generate: generate)
+        logger.info(
+            "Loaded \(ModelNames.PocketTTS.pocketStateFile) (functions: prefill, generate; computeUnits=cpuAndNeuralEngine)"
+        )
+
+        let mimiConfig = MLModelConfiguration()
+        mimiConfig.computeUnits = .cpuOnly
+        let mimiURL = languageRoot.appendingPathComponent(ModelNames.PocketTTS.mimiDecoderFile)
+        let mimi = try MLModel(contentsOf: mimiURL, configuration: mimiConfig)
+        mimiDecoderModel = mimi
+        mimiDecoderKeysCache = try PocketTtsMimiKeys.discover(from: mimi)
+        logger.info("Loaded \(ModelNames.PocketTTS.mimiDecoderFile) (computeUnits=cpuOnly)")
+
+        let elapsed = Date().timeIntervalSince(loadStart)
+        logger.info("PocketTTS state-pipeline models loaded in \(String(format: "%.2f", elapsed))s")
+    }
+
+    /// The `.aneState` multifunction model handles. Throws for other
+    /// placements (gate with `placement == .aneState`).
+    func stateModels() throws -> PocketTtsStateModels {
+        guard let models = stateModelsStore else {
+            throw PocketTTSError.modelNotFound("PocketTTS state models not loaded")
+        }
+        return models
     }
 
     /// The conditioning step model (KV cache prefill).

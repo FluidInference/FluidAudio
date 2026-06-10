@@ -810,8 +810,20 @@ public enum ModelNames {
         public static let flowlmStepAne = "flowlm_step_ane"
         /// Rank-4 ANE-eligible conditioning prefill (mobius Trial 20).
         public static let condPrefillAne = "cond_prefill_ane"
+        /// MLState multifunction package (mobius Trial 23): `write_state` /
+        /// `prefill` / `generate` functions over a shared fp16 KV state.
+        /// Replaces BOTH the conditioner and the FlowLM+flow-decoder pair
+        /// for `PocketTtsModelPlacement.aneState`. Requires macOS 15+/iOS 18+.
+        public static let pocketState = "pocket_state"
         public static let mimiDecoder = "mimi_decoder"
         public static let mimiEncoder = "mimi_encoderv2"
+
+        /// Function names inside the `pocket_state` multifunction package.
+        public enum StateFunction {
+            public static let writeState = "write_state"
+            public static let prefill = "prefill"
+            public static let generate = "generate"
+        }
 
         public static let condStepFile = condStep + ".mlmodelc"
         public static let condPrefillFile = condPrefill + ".mlmodelc"
@@ -821,6 +833,7 @@ public enum ModelNames {
         public static let flowDecoderFusedFile = flowDecoderFused + ".mlmodelc"
         public static let flowlmStepAneFile = flowlmStepAne + ".mlmodelc"
         public static let condPrefillAneFile = condPrefillAne + ".mlmodelc"
+        public static let pocketStateFile = pocketState + ".mlmodelc"
         public static let mimiDecoderFile = mimiDecoder + ".mlmodelc"
         public static let mimiEncoderFile = mimiEncoder + ".mlmodelc"
 
@@ -865,6 +878,14 @@ public enum ModelNames {
                     condPrefillAneFile,
                     flowlmStepAneFile,
                     flowDecoderFusedFile,
+                    mimiDecoderFile,
+                    constantsBinDir,
+                ]
+            case .aneState:
+                // The multifunction package fuses conditioner + FlowLM +
+                // flow decoder; only mimi stays a separate model.
+                return [
+                    pocketStateFile,
                     mimiDecoderFile,
                     constantsBinDir,
                 ]

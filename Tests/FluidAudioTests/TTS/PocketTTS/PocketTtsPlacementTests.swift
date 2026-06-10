@@ -28,6 +28,39 @@ final class PocketTtsPlacementTests: XCTestCase {
         XCTAssertTrue(ane.contains(ModelNames.PocketTTS.mimiDecoderFile))
     }
 
+    func testRequiredModelsAneStateIsMultifunctionPlusMimi() {
+        let state = ModelNames.PocketTTS.requiredModels(precision: .fp16, placement: .aneState)
+        XCTAssertEqual(
+            state,
+            [
+                ModelNames.PocketTTS.pocketStateFile,
+                ModelNames.PocketTTS.mimiDecoderFile,
+                ModelNames.PocketTTS.constantsBinDir,
+            ]
+        )
+        // The multifunction package fuses conditioner + FlowLM + flow
+        // decoder, so NONE of the IO model files belong in the set.
+        XCTAssertFalse(state.contains(ModelNames.PocketTTS.flowDecoderFusedFile))
+        XCTAssertFalse(state.contains(ModelNames.PocketTTS.flowlmStepAneFile))
+        XCTAssertFalse(state.contains(ModelNames.PocketTTS.condPrefillAneFile))
+        // Precision is ignored (fp16 only): the int8 FlowLM never appears.
+        XCTAssertEqual(
+            ModelNames.PocketTTS.requiredModels(precision: .int8, placement: .aneState),
+            state
+        )
+    }
+
+    func testAneStatePlacementRawValueRoundTrip() {
+        // The CLI parses `--placement ane-state` via the raw value.
+        XCTAssertEqual(PocketTtsModelPlacement(rawValue: "ane-state"), .aneState)
+        XCTAssertEqual(PocketTtsModelPlacement.aneState.rawValue, "ane-state")
+        XCTAssertEqual(
+            ModelNames.PocketTTS.pocketStateFile, "pocket_state.mlmodelc")
+        XCTAssertEqual(ModelNames.PocketTTS.StateFunction.writeState, "write_state")
+        XCTAssertEqual(ModelNames.PocketTTS.StateFunction.prefill, "prefill")
+        XCTAssertEqual(ModelNames.PocketTTS.StateFunction.generate, "generate")
+    }
+
     // MARK: - PocketTtsLayerKeys.aneKeys
 
     func testAneKeysExplicitNamesAndOrdering() {

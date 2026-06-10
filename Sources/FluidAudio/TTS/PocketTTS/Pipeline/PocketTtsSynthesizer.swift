@@ -222,6 +222,19 @@ public struct PocketTtsSynthesizer {
 
         logger.info("PocketTTS streaming synthesis with custom voice: '\(text)'")
 
+        // `.aneState` runs on the Trial 23 MLState pipeline (one shared KV
+        // state instead of 24-tensor cache I/O) via a one-shot session.
+        if store.placement == .aneState {
+            return try await synthesizeStreamingStateful(
+                text: text,
+                voiceData: voiceData,
+                temperature: temperature,
+                seed: seed,
+                maxTokensPerChunk: maxTokensPerChunk,
+                language: language
+            )
+        }
+
         let constants = try await store.constants()
         let chunks = chunkTextWithMetadata(
             text, tokenizer: constants.tokenizer,
@@ -283,6 +296,17 @@ public struct PocketTtsSynthesizer {
         language: PocketTtsLanguage = .english
     ) async throws -> PocketTtsSession {
         let store = try currentModelStore()
+
+        // `.aneState` sessions run on the Trial 23 MLState pipeline; none of
+        // the IO models below exist in that configuration.
+        if store.placement == .aneState {
+            return try await makeStateSession(
+                voiceData: voiceData,
+                temperature: temperature,
+                seed: seed,
+                language: language
+            )
+        }
 
         let constants = try await store.constants()
         let condModel = try await store.condStep()

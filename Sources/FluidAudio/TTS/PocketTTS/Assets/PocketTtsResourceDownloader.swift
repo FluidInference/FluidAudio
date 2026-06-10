@@ -95,6 +95,23 @@ public enum PocketTtsResourceDownloader {
         // don't need so disk usage matches the loaded models.
         removeUnusedFlowlmVariant(at: languageRoot, keeping: precision)
 
+        // The Trial 23 multifunction state package is not published on
+        // HuggingFace yet, so the subdir download above cannot provide it.
+        // Fail loudly with install instructions instead of letting the
+        // model load die with a bare file-not-found.
+        if placement == .aneState {
+            let statePath = languageRoot.appendingPathComponent(
+                ModelNames.PocketTTS.pocketStateFile)
+            guard FileManager.default.fileExists(atPath: statePath.path) else {
+                throw PocketTTSError.modelNotFound(
+                    "\(ModelNames.PocketTTS.pocketStateFile) is required for the "
+                        + "`.aneState` placement but is not published upstream. Install the "
+                        + "Trial 23 multifunction artifact (mobius bench_pipeline_mlstate.py, "
+                        + "pocket_flowlm_mf_state.mlmodelc) at \(statePath.path)."
+                )
+            }
+        }
+
         return languageRoot
     }
 
