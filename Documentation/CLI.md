@@ -33,9 +33,6 @@ swift run fluidaudiocli transcribe audio.wav
 # English-only run with higher accuracy
 swift run fluidaudiocli transcribe audio.wav --model-version v2
 
-# Transcribe with Qwen3 ASR
-swift run fluidaudiocli qwen3-transcribe audio.wav
-
 # Streaming ASR with Parakeet EOU
 swift run fluidaudiocli parakeet-eou --input audio.wav
 
@@ -50,9 +47,6 @@ swift run fluidaudiocli asr-benchmark --subset test-clean --max-files 50 --model
 
 # Multilingual ASR (FLEURS) benchmark
 swift run fluidaudiocli fleurs-benchmark --languages en_us,fr_fr --samples 10
-
-# Qwen3 ASR benchmark
-swift run fluidaudiocli qwen3-benchmark
 
 # CTC keyword spotting benchmark on Earnings22
 swift run fluidaudiocli ctc-earnings-benchmark

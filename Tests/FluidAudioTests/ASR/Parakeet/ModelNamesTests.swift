@@ -32,8 +32,6 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertEqual(Repo.parakeetEou160.subPath, "160ms")
         XCTAssertEqual(Repo.parakeetEou320.subPath, "320ms")
         XCTAssertEqual(Repo.parakeetEou1280.subPath, "1280ms")
-        XCTAssertEqual(Repo.qwen3Asr.subPath, "f32")
-        XCTAssertEqual(Repo.qwen3AsrInt8.subPath, "int8")
         XCTAssertNil(Repo.vad.subPath)
         XCTAssertNil(Repo.parakeetV3.subPath)
     }
@@ -107,11 +105,6 @@ final class ModelNamesTests: XCTestCase {
     func testVADModelNames() {
         XCTAssertEqual(ModelNames.VAD.requiredModels.count, 1)
         XCTAssertTrue(ModelNames.VAD.requiredModels.first!.hasSuffix(".mlmodelc"))
-    }
-
-    func testQwen3ASRRequiredModels() {
-        XCTAssertFalse(ModelNames.Qwen3ASR.requiredModels.isEmpty)
-        XCTAssertFalse(ModelNames.Qwen3ASR.requiredModelsFull.isEmpty)
     }
 
     // MARK: - TDT-CTC-110M Repo Tests

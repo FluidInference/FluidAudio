@@ -77,7 +77,7 @@ FluidAudio is a Swift framework for local, low-latency audio processing on Apple
 - **Indentation**: 4 spaces
 - **Import order**: Alphabetical preferred, but OrderedImports rule is disabled due to Swift 6.1 (GitHub Actions CI) vs 6.3 (local) formatter incompatibility. Swift 6.3 is unavailable in GitHub Actions runners.
 - **Naming**: lowerCamelCase for variables/functions, UpperCamelCase for types
-- **Error handling**: Proper Swift error handling, no force unwrapping in production. Per-module error enums conforming to `Error, LocalizedError` (e.g. `ASRError`, `VadError`, `OfflineDiarizationError`, `Qwen3AsrError`)
+- **Error handling**: Proper Swift error handling, no force unwrapping in production. Per-module error enums conforming to `Error, LocalizedError` (e.g. `ASRError`, `VadError`, `OfflineDiarizationError`)
 - **Logging**: Use `AppLogger(category:)` from `Shared/AppLogger.swift` — not `print()` in production code. One logger per component (e.g. `AppLogger(category: "VadManager")`)
 - **Documentation**: Triple-slash comments (`///`) for public APIs
 - **Control flow**: Prefer guard statements and early returns over nested if statements
@@ -110,7 +110,6 @@ swift package clean
 # Transcription
 swift run fluidaudiocli transcribe audio.wav
 swift run fluidaudiocli transcribe audio.wav --low-latency
-swift run fluidaudiocli qwen3-transcribe audio.wav
 swift run fluidaudiocli multi-stream audio1.wav audio2.wav
 
 # TTS
@@ -127,7 +126,6 @@ swift run fluidaudiocli diarization-benchmark --auto-download
 swift run fluidaudiocli vad-benchmark --num-files 40 --threshold 0.5
 swift run fluidaudiocli fleurs-benchmark --languages en_us,fr_fr --samples 10
 swift run fluidaudiocli sortformer-benchmark
-swift run fluidaudiocli qwen3-benchmark
 swift run fluidaudiocli ctc-earnings-benchmark
 swift run fluidaudiocli g2p-benchmark
 
@@ -143,8 +141,7 @@ FluidAudio/
 ├── Sources/
 │   ├── FluidAudio/           # Main library (single product)
 │   │   ├── ASR/             # Automatic Speech Recognition
-│   │   │   ├── Parakeet/    # Parakeet TDT (Decoder/, SlidingWindow/, Streaming/)
-│   │   │   └── Qwen3/       # Qwen3 ASR
+│   │   │   └── Parakeet/    # Parakeet TDT (Decoder/, SlidingWindow/, Streaming/)
 │   │   ├── Diarizer/        # Speaker diarization (segmentation, embedding, clustering)
 │   │   ├── TTS/             # Text-to-speech (KokoroAne, PocketTTS, StyleTTS2)
 │   │   ├── VAD/             # Voice Activity Detection (Silero VAD)
@@ -164,7 +161,6 @@ FluidAudio/
 - **AsrManager** (`ASR/Parakeet/`): Speech-to-text via TDT (Token Duration Transducer) decoding. Stateless per-chunk processing with automatic decoder state reset.
 - **SlidingWindowAsrManager** (`ASR/Parakeet/SlidingWindow/`): Real-time ASR with sliding window processing and cancellation support.
 - **StreamingAsrManager** (`ASR/Parakeet/Streaming/`): Protocol for true streaming ASR engines (EOU, Nemotron) with cache-aware encoders.
-- **Qwen3AsrManager** (`ASR/Qwen3/`): Qwen3-based ASR with Whisper mel spectrogram frontend.
 - **OfflineDiarizerManager** (`Diarizer/`): Speaker separation via segmentation, embedding extraction, and VBx clustering. 17.7% DER on AMI dataset.
 - **VadManager** (`VAD/`): Voice activity detection with CoreML models.
 - **KokoroAneManager** (`TTS/KokoroAne/`): ANE-resident Kokoro 82M (7-stage CoreML chain) — English + Mandarin.

@@ -45,8 +45,6 @@ public enum Repo: String, CaseIterable, Sendable {
     case lseendDihard2 = "FluidInference/ls-eend-coreml/optimized/dih2"
     case lseendDihard3 = "FluidInference/ls-eend-coreml/optimized/dih3"
     case pocketTts = "FluidInference/pocket-tts-coreml"
-    case qwen3Asr = "FluidInference/qwen3-asr-0.6b-coreml/f32"
-    case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
     case multilingualG2p = "FluidInference/charsiu-g2p-byt5-coreml"
     case parakeetTdtCtc110m = "FluidInference/parakeet-tdt-ctc-110m-coreml"
     case cohereTranscribeCoreml = "FluidInference/cohere-transcribe-03-2026-coreml/q8"
@@ -115,10 +113,6 @@ public enum Repo: String, CaseIterable, Sendable {
             return "ls-eend-coreml/optimized/dih3"
         case .pocketTts:
             return "pocket-tts-coreml"
-        case .qwen3Asr:
-            return "qwen3-asr-0.6b-coreml/f32"
-        case .qwen3AsrInt8:
-            return "qwen3-asr-0.6b-coreml/int8"
         case .multilingualG2p:
             return "charsiu-g2p-byt5-coreml"
         case .parakeetTdtCtc110m:
@@ -151,8 +145,6 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/diar-streaming-sortformer-coreml"
         case .lseendAmi, .lseendCallHome, .lseendDihard2, .lseendDihard3:
             return "FluidInference/ls-eend-coreml"
-        case .qwen3Asr, .qwen3AsrInt8:
-            return "FluidInference/qwen3-asr-0.6b-coreml"
         case .parakeetTdtCtc110m:
             return "FluidInference/parakeet-tdt-ctc-110m-coreml"
         case .cohereTranscribeCoreml:
@@ -177,10 +169,6 @@ public enum Repo: String, CaseIterable, Sendable {
             return "320ms"
         case .parakeetEou1280:
             return "1280ms"
-        case .qwen3Asr:
-            return "f32"
-        case .qwen3AsrInt8:
-            return "int8"
         case .nemotronStreaming2240:
             return "nemotron_coreml_2240ms"
         case .nemotronStreaming1120:
@@ -726,34 +714,6 @@ public enum ModelNames {
         }
     }
 
-    /// Qwen3-ASR model names
-    public enum Qwen3ASR {
-        public static let audioEncoderFile = "qwen3_asr_audio_encoder_v2.mlmodelc"
-        public static let embeddingFile = "qwen3_asr_embedding.mlmodelc"
-        public static let decoderStatefulFile = "qwen3_asr_decoder_stateful.mlmodelc"
-        public static let decoderFullFile = "qwen3_asr_decoder_full.mlmodelc"
-        public static let embeddingsFile = "qwen3_asr_embeddings.bin"
-
-        /// Legacy model names (lmHead is now fused into decoder_stateful)
-        public static let lmHeadFile = "qwen3_asr_lm_head.mlmodelc"
-        public static let decoderStackFile = "qwen3_asr_decoder_stack.mlmodelc"
-        public static let decoderPrefillFile = "qwen3_asr_decoder_prefill.mlmodelc"
-
-        /// Required models for 3-model pipeline (with embedding CoreML model)
-        public static let requiredModels: Set<String> = [
-            audioEncoderFile,
-            embeddingFile,
-            decoderStatefulFile,
-        ]
-
-        /// Required files for 2-model pipeline (with Swift-side embedding)
-        public static let requiredModelsFull: Set<String> = [
-            audioEncoderFile,
-            decoderStatefulFile,
-            embeddingsFile,
-        ]
-    }
-
     /// PocketTTS model names (flow-matching language model TTS)
     public enum PocketTTS {
         public static let condStep = "cond_step"
@@ -1168,8 +1128,6 @@ public enum ModelNames {
                 return [variant + ".mlmodelc"]
             }
             return ModelNames.LSEEND.requiredModels
-        case .qwen3Asr, .qwen3AsrInt8:
-            return ModelNames.Qwen3ASR.requiredModelsFull
         case .multilingualG2p:
             return ModelNames.MultilingualG2P.requiredModels
         case .cohereTranscribeCoreml:

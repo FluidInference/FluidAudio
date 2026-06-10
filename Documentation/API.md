@@ -318,22 +318,6 @@ NVIDIA Nemotron streaming ASR with encoder cache for low-latency processing.
 - Real-time factor: ~0.2x on Apple Silicon
 - Maintains encoder cache across chunks for efficiency
 
-### Qwen3AsrManager
-Qwen3-based speech recognition with Whisper mel spectrogram frontend.
-
-**Key Methods:**
-- `init(modelDir:configuration:) async throws`
-  - Initialize with model directory and CoreML configuration
-- `transcribe(_:) async throws -> String`
-  - Transcribe audio samples (16kHz mono Float32)
-- `transcribe(_:) async throws -> String`
-  - Transcribe from audio file URL
-
-**Features:**
-- Whisper-style mel spectrogram processing
-- Multi-language support
-- Experimental high-accuracy model
-
 ## Text-to-Speech (TTS)
 
 ### KokoroAneManager
