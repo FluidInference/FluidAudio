@@ -36,16 +36,21 @@ public actor PocketTtsManager {
     ///     matching upstream's on-disk weight format). `.int8` swaps
     ///     `flowlm_step` for the upstream `flowlm_stepv2` int8-quantized
     ///     variant per kyutai-labs/pocket-tts#147.
+    ///   - placement: `.gpu` (default) loads the v2.1 rank-5 models;
+    ///     `.ane` loads the rank-4 ANE-eligible variants (`flowlm_step_ane`,
+    ///     `cond_prefill_ane`) with the FlowLM pinned to the Neural Engine.
     public init(
         defaultVoice: String = PocketTtsConstants.defaultVoice,
         language: PocketTtsLanguage = .english,
         directory: URL? = nil,
-        precision: PocketTtsPrecision = .fp16
+        precision: PocketTtsPrecision = .fp16,
+        placement: PocketTtsModelPlacement = .gpu
     ) {
         self.modelStore = PocketTtsModelStore(
             language: language,
             directory: directory,
-            precision: precision
+            precision: precision,
+            placement: placement
         )
         self.defaultVoice = defaultVoice
         self.language = language

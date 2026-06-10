@@ -70,6 +70,7 @@ public struct TTS {
         var voiceFilePath: String? = nil
         var saveVoicePath: String? = nil
         var pocketLanguage: PocketTtsLanguage = .english
+        var pocketPlacement: PocketTtsModelPlacement = .gpu
         // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
         var pocketSeed: UInt64? = nil
         // StyleTTS2 zero-shot args.
@@ -233,6 +234,19 @@ public struct TTS {
                     saveVoicePath = arguments[i + 1]
                     i += 1
                 }
+            case "--placement":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1].lowercased()
+                    if let parsed = PocketTtsModelPlacement(rawValue: raw) {
+                        pocketPlacement = parsed
+                    } else {
+                        logger.error(
+                            "Unknown PocketTTS placement '\(arguments[i + 1])'. Supported: gpu, ane, ane-state"
+                        )
+                        return
+                    }
+                    i += 1
+                }
             case "--language":
                 if i + 1 < arguments.count {
                     let raw = arguments[i + 1].lowercased()
@@ -270,7 +284,8 @@ public struct TTS {
                 text: text, output: output, voice: voice, deEss: deEss,
                 metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
                 voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath,
-                language: pocketLanguage, seed: pocketSeed)
+                language: pocketLanguage, seed: pocketSeed,
+                placement: pocketPlacement)
         case .kokoroAne:
             await runKokoroAne(
                 text: text, output: output, voice: voice, metricsPath: metricsPath,
@@ -351,7 +366,8 @@ public struct TTS {
         metricsPath: String?, cloneVoicePath: String?,
         voiceFilePath: String?, saveVoicePath: String?,
         language: PocketTtsLanguage,
-        seed: UInt64? = nil
+        seed: UInt64? = nil,
+        placement: PocketTtsModelPlacement = .gpu
     ) async {
         do {
             let tStart = Date()
@@ -359,8 +375,9 @@ public struct TTS {
                 voice == TtsConstants.recommendedVoice
                 ? PocketTtsConstants.defaultVoice : voice
             let manager = PocketTtsManager(
-                defaultVoice: pocketVoice, language: language)
-            logger.info("PocketTTS language: \(language.rawValue)")
+                defaultVoice: pocketVoice, language: language, placement: placement)
+            logger.info(
+                "PocketTTS language: \(language.rawValue), placement: \(placement.rawValue)")
 
             let tLoad0 = Date()
             try await manager.initialize()
@@ -921,6 +938,9 @@ public struct TTS {
                                    portuguese, portuguese_24l, spanish, spanish_24l
                                    Note: French is 24-layer only (no 6-layer pack upstream)
               --seed N             Deterministic-mode seed (uses session API for fixed RNG)
+              --placement P        Model placement: gpu (default), ane (rank-4 ANE models),
+                                   ane-state (Trial 23 MLState multifunction pipeline;
+                                   macOS 15+/iOS 18+, requires pocket_state.mlmodelc)
 
             Voice Cloning examples:
               # Clone and synthesize in one step

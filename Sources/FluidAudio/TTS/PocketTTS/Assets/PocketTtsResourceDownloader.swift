@@ -38,6 +38,7 @@ public enum PocketTtsResourceDownloader {
         language: PocketTtsLanguage,
         directory: URL? = nil,
         precision: PocketTtsPrecision = .fp16,
+        placement: PocketTtsModelPlacement = .gpu,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
         let targetDir = try directory ?? cacheDirectory()
@@ -48,7 +49,8 @@ public enum PocketTtsResourceDownloader {
         let subdir = language.repoSubdirectory
         let languageRoot = repoDir.appendingPathComponent(subdir)
 
-        let required = ModelNames.PocketTTS.requiredModels(precision: precision)
+        let required = ModelNames.PocketTTS.requiredModels(
+            precision: precision, placement: placement)
         let allPresent = required.allSatisfy { model in
             FileManager.default.fileExists(
                 atPath: languageRoot.appendingPathComponent(model).path)
@@ -92,6 +94,23 @@ public enum PocketTtsResourceDownloader {
         // The HF subdir contains both FlowLM precisions; delete the one we
         // don't need so disk usage matches the loaded models.
         removeUnusedFlowlmVariant(at: languageRoot, keeping: precision)
+
+        // The Trial 23 multifunction state package is not published on
+        // HuggingFace yet, so the subdir download above cannot provide it.
+        // Fail loudly with install instructions instead of letting the
+        // model load die with a bare file-not-found.
+        if placement == .aneState {
+            let statePath = languageRoot.appendingPathComponent(
+                ModelNames.PocketTTS.pocketStateFile)
+            guard FileManager.default.fileExists(atPath: statePath.path) else {
+                throw PocketTTSError.modelNotFound(
+                    "\(ModelNames.PocketTTS.pocketStateFile) is required for the "
+                        + "`.aneState` placement but is not published upstream. Install the "
+                        + "Trial 23 multifunction artifact (mobius bench_pipeline_mlstate.py, "
+                        + "pocket_flowlm_mf_state.mlmodelc) at \(statePath.path)."
+                )
+            }
+        }
 
         return languageRoot
     }
