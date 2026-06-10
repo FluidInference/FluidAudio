@@ -552,49 +552,37 @@ public class DownloadUtils {
             let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedFilePath)
             let request = authorizedRequest(url: fileURL)
 
-            let tempFileURL: URL
-            let httpResponse: HTTPURLResponse
-
+            // Download with bounded retry on transient failures. A single TLS or
+            // timeout blip on one of many repo files must not abort the whole
+            // download — the per-file retry absorbs intermittent CDN errors so
+            // the caller doesn't have to restart from zero. See
+            // downloadFileWithRetry for the transient-vs-permanent classification.
+            let onProgress: (@Sendable (Int64, Int64) -> Void)?
             if let handler = progressHandler {
                 let baseBytes = completedBytes
                 let fileCount = filesToDownload.count
                 let totalBytesSnapshot = totalBytes
-                (tempFileURL, httpResponse) = try await downloadWithProgress(
-                    request: request,
-                    onProgress: { bytesWritten, _ in
-                        guard totalBytesSnapshot > 0 else { return }
-                        let current = baseBytes + bytesWritten
-                        // Download phase occupies 0.0–0.5 of the overall range.
-                        let fraction = 0.5 * Double(current) / Double(totalBytesSnapshot)
-                        handler(
-                            DownloadProgress(
-                                fractionCompleted: min(fraction, 0.5),
-                                phase: .downloading(completedFiles: index, totalFiles: fileCount)
-                            ))
-                    }
-                )
-            } else {
-                let (url, response) = try await sharedSession.download(for: request)
-                guard let resp = response as? HTTPURLResponse else {
-                    throw HuggingFaceDownloadError.invalidResponse
+                let fileIndex = index
+                onProgress = { bytesWritten, _ in
+                    guard totalBytesSnapshot > 0 else { return }
+                    let current = baseBytes + bytesWritten
+                    // Download phase occupies 0.0–0.5 of the overall range.
+                    let fraction = 0.5 * Double(current) / Double(totalBytesSnapshot)
+                    handler(
+                        DownloadProgress(
+                            fractionCompleted: min(fraction, 0.5),
+                            phase: .downloading(completedFiles: fileIndex, totalFiles: fileCount)
+                        ))
                 }
-                tempFileURL = url
-                httpResponse = resp
+            } else {
+                onProgress = nil
             }
 
-            // Validate response
-            if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
-                throw HuggingFaceDownloadError.rateLimited(
-                    statusCode: httpResponse.statusCode,
-                    message: "Rate limited while downloading \(file.path)")
-            }
-
-            guard (200..<300).contains(httpResponse.statusCode) else {
-                throw HuggingFaceDownloadError.downloadFailed(
-                    path: file.path,
-                    underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
-                )
-            }
+            let tempFileURL = try await downloadFileWithRetry(
+                request: request,
+                path: file.path,
+                onProgress: onProgress
+            )
 
             // Move downloaded file to destination
             if FileManager.default.fileExists(atPath: destPath.path) {
@@ -700,6 +688,111 @@ public class DownloadUtils {
         }
 
         return (tempURL, httpResponse)
+    }
+
+    // MARK: - Per-file download with bounded retry
+
+    /// Download a single repo file to a temporary URL, retrying transient
+    /// network failures with exponential backoff before validating the HTTP
+    /// status and returning the temp file.
+    ///
+    /// Transient (retried): URLSession timeout / TLS / connectivity errors and
+    /// HTTP 429/503/5xx. These are the intermittent CDN failures that otherwise
+    /// abort an entire multi-file repo download on the first blip.
+    ///
+    /// Permanent (fails fast, no backoff): 404 and other 4xx, invalid responses,
+    /// and any non-network error — a genuinely missing or misnamed file should
+    /// surface immediately rather than waste the backoff budget.
+    ///
+    /// - Parameters:
+    ///   - request: The file URLRequest to download.
+    ///   - path: Remote path, used for log/error context.
+    ///   - onProgress: Optional byte-progress callback. When non-nil, a delegate
+    ///     session is used; otherwise the shared session. On a retry the byte
+    ///     counter restarts for that file, so reported progress may briefly dip.
+    /// - Returns: The temporary file URL of a validated (2xx) download.
+    private static func downloadFileWithRetry(
+        request: URLRequest,
+        path: String,
+        onProgress: (@Sendable (Int64, Int64) -> Void)?,
+        maxAttempts: Int = 4,
+        minBackoff: TimeInterval = 1.0
+    ) async throws -> URL {
+        var lastError: Error?
+
+        for attempt in 1...maxAttempts {
+            do {
+                let tempURL: URL
+                let httpResponse: HTTPURLResponse
+
+                if let onProgress {
+                    (tempURL, httpResponse) = try await downloadWithProgress(
+                        request: request, onProgress: onProgress)
+                } else {
+                    let (url, response) = try await sharedSession.download(for: request)
+                    guard let resp = response as? HTTPURLResponse else {
+                        throw HuggingFaceDownloadError.invalidResponse
+                    }
+                    tempURL = url
+                    httpResponse = resp
+                }
+
+                if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
+                    throw HuggingFaceDownloadError.rateLimited(
+                        statusCode: httpResponse.statusCode,
+                        message: "Rate limited while downloading \(path)")
+                }
+
+                guard (200..<300).contains(httpResponse.statusCode) else {
+                    throw HuggingFaceDownloadError.downloadFailed(
+                        path: path,
+                        underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
+                    )
+                }
+
+                return tempURL
+            } catch {
+                lastError = error
+                guard attempt < maxAttempts, isRetryableDownloadError(error) else {
+                    throw error
+                }
+                let backoffSeconds = pow(2.0, Double(attempt - 1)) * minBackoff
+                logger.warning(
+                    "Download attempt \(attempt) for \(path) failed: \(error.localizedDescription). Retrying in \(String(format: "%.1f", backoffSeconds))s."
+                )
+                try await Task.sleep(nanoseconds: UInt64(backoffSeconds * 1_000_000_000))
+            }
+        }
+
+        throw lastError ?? HuggingFaceDownloadError.invalidResponse
+    }
+
+    /// Classify a per-file download error as transient (worth retrying) or
+    /// permanent. Transient: URLSession timeout / TLS / connectivity failures and
+    /// HTTP 429/503/5xx. Everything else (404/other 4xx, invalid response,
+    /// non-network errors) is permanent.
+    private static func isRetryableDownloadError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut, .cannotConnectToHost, .cannotFindHost,
+                .networkConnectionLost, .notConnectedToInternet,
+                .dnsLookupFailed, .secureConnectionFailed,
+                .resourceUnavailable:
+                return true
+            default:
+                return false
+            }
+        }
+
+        switch error {
+        case HuggingFaceDownloadError.rateLimited:
+            return true
+        case HuggingFaceDownloadError.downloadFailed(_, let underlying):
+            let nsError = underlying as NSError
+            return nsError.domain == "HTTP" && (500...599).contains(nsError.code)
+        default:
+            return false
+        }
     }
 
     /// Download a specific subdirectory from a HuggingFace repository.
