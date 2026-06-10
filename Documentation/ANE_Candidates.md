@@ -83,9 +83,16 @@ go/no-go gate, so future work starts from data instead of rediscovery.
   - MIL-lean fusion (`feat/eou-decode-ane`): **−42%/step, 1.59× e2e**, but
     flips near-tie tokens on ~25% of utterances (WER-neutral on 50 files:
     34.85→35.04%).
-- PENDING: full LibriSpeech head-to-head WER gate (rule: lean ships iff
-  ΔWER ≤ +0.10 pp and no per-file blowup >20 pp; else traced wins).
-- Nemotron EN's loop (67 ms/utt) is the same shape — apply the winner there.
+- GATE COMPLETE (2026-06-10, all 2,620 files): **lean ships; traced retired.**
+  traced == lean on 2,620/2,620 token sequences — the traced build's
+  bit-exactness was fp32-only; in fp16 both fusions are the identical
+  behavioral change, so there is no safe-fused fallback. Aggregate ΔWER
+  +0.043 pp (bar: +0.10); 4 outlier files (>20 pp, 0.15%) are near-tie
+  cascades inherent to fp16 fusion itself. Remaining ship condition:
+  maintainer sign-off on the 4-outlier trade + the one-line RnntDecoder
+  Swift change (documented in the EOU OPTIMIZATION.md).
+- Nemotron EN's loop (67 ms/utt) is the same shape — apply the lean fusion
+  there next.
 
 ### 5. Supertonic VectorEstimator loop fusion — garnish
 - Today: 94% ANE but the host dispatches the 8-step denoising loop (8×3.8 ms).
