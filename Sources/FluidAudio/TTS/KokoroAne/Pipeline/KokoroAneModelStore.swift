@@ -28,7 +28,12 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
         postAlbert: MLComputeUnits = .cpuAndNeuralEngine,
         alignment: MLComputeUnits = .cpuAndNeuralEngine,
         prosody: MLComputeUnits = .cpuAndNeuralEngine,
-        noise: MLComputeUnits = .cpuAndNeuralEngine,
+        // Noise defaults to GPU: the stage is all-fp32 (its sin(cumsum)
+        // phase collapses in fp16), so the fp16-only ANE takes none of it
+        // and `.cpuAndNeuralEngine` degenerates to plain CPU — measured
+        // slower than `.cpuOnly`. It has zero RNN ops, so the #667 GPU ban
+        // never applied to it. Measurements in the `aneTailGpu` note.
+        noise: MLComputeUnits = .cpuAndGPU,
         vocoder: MLComputeUnits = .cpuAndNeuralEngine,
         tail: MLComputeUnits = .cpuAndGPU
     ) {
@@ -41,8 +46,10 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
         self.tail = tail
     }
 
-    /// Default — RNN stages on ANE, tail iSTFT on GPU. Runs on M2 + M5
-    /// (the old `all`-placement default crashed on M5/macOS 26.5). See #667.
+    /// Default — RNN stages on ANE, Noise + tail iSTFT on GPU (both are
+    /// fp32-only graphs the ANE cannot take). Runs on M2 + M5 (the old
+    /// `all`-placement default crashed on M5/macOS 26.5). See #667 and the
+    /// `noise:` parameter note above.
     /// Identical to ``aneTailGpu``.
     public static let `default` = KokoroAneComputeUnits()
 
@@ -70,13 +77,23 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
     )
 
     /// M5 / macOS 26.5 stability: all stages `.cpuAndNeuralEngine` except the
-    /// tail (iSTFT) on `.cpuAndGPU`. Keeps the prosody RNN off the GPU (which
-    /// otherwise hits the `GPURNNOps` JIT assert) while keeping the iSTFT off
-    /// the CPU/BNNS path (which otherwise segfaults in `libBNNS`). See #667.
+    /// tail (iSTFT) and noise on `.cpuAndGPU`. Keeps the prosody RNN off the
+    /// GPU (which otherwise hits the `GPURNNOps` JIT assert) while keeping the
+    /// iSTFT off the CPU/BNNS path (which otherwise segfaults in `libBNNS`).
+    /// See #667.
+    ///
+    /// Noise is `.cpuAndGPU` deliberately: the stage is all-fp32 (its
+    /// `sin(cumsum)` phase math collapses in fp16), so the fp16-only ANE can
+    /// take none of it and `.cpuAndNeuralEngine` degenerates to plain CPU —
+    /// measured even slower than `.cpuOnly` (131.9 vs 116.8 ms at T2=800).
+    /// It contains zero RNN ops, so the #667 GPU ban never applied to it;
+    /// MLComputePlan places 239/239 ops on GPU at 1.9-3.3x the CPU speed
+    /// (28.9 vs 55.8 ms at T2=400), ~10% of en synth / ~15% of zh. Same
+    /// fp32 math, so output is unchanged.
     public static let aneTailGpu = KokoroAneComputeUnits(
         albert: .cpuAndNeuralEngine, postAlbert: .cpuAndNeuralEngine,
         alignment: .cpuAndNeuralEngine, prosody: .cpuAndNeuralEngine,
-        noise: .cpuAndNeuralEngine, vocoder: .cpuAndNeuralEngine,
+        noise: .cpuAndGPU, vocoder: .cpuAndNeuralEngine,
         tail: .cpuAndGPU
     )
 
