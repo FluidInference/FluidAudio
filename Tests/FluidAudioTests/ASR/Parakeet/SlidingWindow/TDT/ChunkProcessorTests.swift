@@ -591,6 +591,202 @@ final class ChunkProcessorTests: XCTestCase {
         XCTAssertNotNil(processor)
     }
 
+    // MARK: - Word Boundary Splice Tests (Issue #683)
+
+    /// Vocabulary for splice tests: tokens 21/22/25/26/28/50 are SentencePiece
+    /// continuation pieces (no `▁` prefix), the rest are word-initial.
+    private let spliceTestVocabulary: [Int: String] = [
+        10: "▁hello",
+        20: "▁wor",
+        21: "ld",
+        22: "ldo",
+        24: "▁Gre",
+        25: "nl",
+        26: "and",
+        27: "▁Green",
+        28: "andia",
+        30: "▁there",
+        40: "▁friend",
+        50: "ne",
+        60: "▁o",
+    ]
+
+    private var spliceTestSafeIds: Set<Int> {
+        ChunkProcessor.spliceSafeTokenIds(vocabulary: spliceTestVocabulary)!
+    }
+
+    func testPostMatchTailAdoptsRightSegmentationOfSeamWord() {
+        // Issue #683: the matched anchor lands mid-word ("nl") and the two
+        // windows segment the seam word differently. Splicing left's prefix
+        // onto right's suffix would decode a hybrid word ("▁Gre"+"nl"+
+        // "andia"). Since the right window heard the word from its start,
+        // the merge must adopt right's segmentation of the whole word.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),  // ▁hello
+            (token: 24, timestamp: 130, confidence: 0.97, duration: 1),  // ▁Gre
+            (token: 25, timestamp: 131, confidence: 0.96, duration: 1),  // nl (matched anchor)
+            (token: 26, timestamp: 132, confidence: 0.95, duration: 1),  // and
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 27, timestamp: 130, confidence: 0.97, duration: 1),  // ▁Green
+            (token: 25, timestamp: 131, confidence: 0.96, duration: 1),  // nl (matched anchor)
+            (token: 28, timestamp: 132, confidence: 0.95, duration: 1),  // andia (continuation)
+            (token: 30, timestamp: 134, confidence: 0.97, duration: 1),  // ▁there
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: spliceTestSafeIds
+        ).map(\.token)
+
+        // "▁hello ▁Green nl andia ▁there" — the seam word is segmented by
+        // the right window alone; left's truncated view of it is dropped.
+        XCTAssertEqual(merged, [10, 27, 25, 28, 30])
+    }
+
+    func testPostMatchTailKeepsLeftWordWhenRightCutMidWord() {
+        // Issue #683 glue repro: the right window's stream starts mid-word
+        // (utterance-initial, no `▁` piece before the anchor), so right
+        // never heard the word start. The merge must keep the left window's
+        // segmentation of the seam word and resume right at its next
+        // word-initial piece — never glue "and"-style continuations onto a
+        // different word.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),  // ▁hello
+            (token: 24, timestamp: 130, confidence: 0.97, duration: 1),  // ▁Gre
+            (token: 25, timestamp: 131, confidence: 0.96, duration: 1),  // nl (matched anchor)
+            (token: 26, timestamp: 132, confidence: 0.95, duration: 1),  // and
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 25, timestamp: 131, confidence: 0.96, duration: 1),  // nl (stream starts mid-word)
+            (token: 28, timestamp: 132, confidence: 0.95, duration: 1),  // andia (continuation)
+            (token: 30, timestamp: 134, confidence: 0.97, duration: 1),  // ▁there
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: spliceTestSafeIds
+        ).map(\.token)
+
+        // "▁hello ▁Gre nl and ▁there" — left's word completed from left,
+        // right's orphaned continuation skipped.
+        XCTAssertEqual(merged, [10, 24, 25, 26, 30])
+    }
+
+    func testPostMatchTailLegacyBehaviorWithoutVocabulary() {
+        // Without a vocabulary the merge must behave exactly as before:
+        // the tail is appended verbatim (this is the glued-word output).
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),
+            (token: 20, timestamp: 130, confidence: 0.97, duration: 1),
+            (token: 21, timestamp: 131, confidence: 0.96, duration: 1),
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 20, timestamp: 130, confidence: 0.97, duration: 1),
+            (token: 22, timestamp: 131, confidence: 0.95, duration: 1),
+            (token: 30, timestamp: 133, confidence: 0.97, duration: 1),
+            (token: 40, timestamp: 134, confidence: 0.98, duration: 1),
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(left: left, right: right).map(\.token)
+
+        XCTAssertEqual(merged, [10, 20, 22, 30, 40])
+    }
+
+    func testPostMatchTailKeepsWordInitialTailVerbatim() {
+        // When the right tail already starts at a word boundary the splice
+        // is untouched.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),
+            (token: 20, timestamp: 130, confidence: 0.97, duration: 1),
+            (token: 21, timestamp: 131, confidence: 0.96, duration: 1),
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 21, timestamp: 131, confidence: 0.97, duration: 1),  // ld (matched anchor)
+            (token: 30, timestamp: 133, confidence: 0.97, duration: 1),  // ▁there
+            (token: 40, timestamp: 134, confidence: 0.98, duration: 1),  // ▁friend
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: spliceTestSafeIds
+        ).map(\.token)
+
+        XCTAssertEqual(merged, [10, 20, 21, 30, 40])
+    }
+
+    func testMidpointMergeDoesNotCutWords() {
+        // No tokens match (disjoint IDs) so the merge falls back to the
+        // midpoint cutoff. The cutoff lands inside left's last word and the
+        // first right token past the cutoff is an orphaned continuation
+        // piece; both sides must be adjusted to word boundaries.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),  // ▁hello
+            (token: 20, timestamp: 133, confidence: 0.97, duration: 1),  // ▁wor
+            (token: 21, timestamp: 135, confidence: 0.96, duration: 1),  // ld (past cutoff)
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 60, timestamp: 134, confidence: 0.90, duration: 1),  // ▁o (before cutoff, trimmed)
+            (token: 50, timestamp: 136, confidence: 0.91, duration: 1),  // ne (orphaned continuation)
+            (token: 30, timestamp: 138, confidence: 0.97, duration: 1),  // ▁there
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: spliceTestSafeIds
+        ).map(\.token)
+
+        // "▁hello ▁wor ld ▁there" — left's word completed past the cutoff,
+        // right's headless continuation dropped.
+        XCTAssertEqual(merged, [10, 20, 21, 30])
+    }
+
+    func testMidpointMergeLegacyBehaviorWithoutVocabulary() {
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),
+            (token: 20, timestamp: 133, confidence: 0.97, duration: 1),
+            (token: 21, timestamp: 135, confidence: 0.96, duration: 1),
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 60, timestamp: 134, confidence: 0.90, duration: 1),
+            (token: 50, timestamp: 136, confidence: 0.91, duration: 1),
+            (token: 30, timestamp: 138, confidence: 0.97, duration: 1),
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(left: left, right: right).map(\.token)
+
+        // Pure time cutoff: left's "ld" trimmed, right's "ne" glued in.
+        XCTAssertEqual(merged, [10, 20, 50, 30])
+    }
+
+    func testSpliceSafePieceClassification() {
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece("▁word"))
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece("▁"))
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece(" word"))
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece(","))
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece("..."))
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece("?"))
+        XCTAssertFalse(ChunkProcessor.isSpliceSafePiece("ld"))
+        XCTAssertFalse(ChunkProcessor.isSpliceSafePiece("ня"))
+        XCTAssertFalse(ChunkProcessor.isSpliceSafePiece(""))
+        XCTAssertFalse(ChunkProcessor.isSpliceSafePiece("<unk>"))
+    }
+
+    func testSpliceSafeTokenIdsFromVocabulary() {
+        XCTAssertNil(ChunkProcessor.spliceSafeTokenIds(vocabulary: [:]))
+
+        let ids = ChunkProcessor.spliceSafeTokenIds(vocabulary: spliceTestVocabulary)
+        XCTAssertEqual(ids, [10, 20, 24, 27, 30, 40, 60])
+    }
+
     // MARK: - Chunk Count Prediction with Overlap
 
     func testPredictableChunkCountWithOverlap() {
