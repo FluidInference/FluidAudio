@@ -44,6 +44,9 @@ When reviewing long-form ASR output, check the transcript for:
 
 - boundary word drops, especially short function words or one-word clauses
 - duplicated words or partial BPE fragments around overlaps
+- glued words (two words joined without a space) or hybrid words stitched
+  from both windows' segmentation of the same seam word — `"worksks"`,
+  `"automoti"`, mid-word punctuation like `"ye,ah"` (issue #683)
 - missing clauses or full sentences after a boundary
 - wrong-language insertions in otherwise single-language audio
 - wrong-script bursts on multilingual v3 audio
@@ -309,6 +312,55 @@ When adding a new fixture, record the language, approximate duration, reference
 source, and the specific failure it is meant to catch. This makes future changes
 auditable instead of relying on memory of why a clip was added.
 
+### Seam Canary (required for boundary or merge changes)
+
+Any change to `ChunkProcessor`'s boundary search or overlap merge must be
+A/B'd against the baseline build on a seam-dense fixture before merging.
+Short-clip WER is not a substitute: the issue #683 fix repaired six seam
+artifacts in one hour of earnings audio while remaining exactly WER-neutral
+on FLEURS — a merge bug can be invisible to the aggregate metric and still
+make transcripts unusable.
+
+The procedure:
+
+1. Transcribe a long fixture with both builds. The cached
+   `earnings22-1h/earnings22_top4_1h.wav` (~1 h, ~277 seams) is the standard
+   choice; `swift run fluidaudiocli transcribe <file>` on each build.
+2. Word-diff the two transcripts (`diff <(tr ' ' '\n' < a.txt) <(tr ' ' '\n'
+   < b.txt)`). Inspect every diff individually — each one must be
+   explainable as an intended repair. Do not accept a net count.
+3. Scan both outputs for mechanical seam artifacts that need no reference
+   transcript: mid-word punctuation (`grep -oE '[a-z],[a-z]+'`), and any
+   diff hunk that concatenates two previously separate words.
+
+### Invariants Must Be Executable
+
+The history of this path is a caution: the overlap merge ladder shipped in
+PR #177 (2025-11) and its first token-stream tests arrived with PR #604
+(2026-05); issue #683's glued-word class survived that entire gap. The
+failure mode was even listed in this document while the Overlap Merge
+section asserted the matcher was safe — the claim was about the wrong
+layer, and nothing executable connected the two.
+
+The rules that follow from that:
+
+- A safety claim about the merge belongs in a test, not (only) in this
+  document. If a sentence here says the merger "cannot" do something,
+  there must be a unit test that fails when it does.
+- Merge unit tests must drive realistic token streams *with* a splice-safe
+  vocabulary set (`mergeTokenWindowsForTesting(left:right:spliceSafeTokenIds:)`).
+  Bare integer token IDs are structurally blind to word-level artifacts —
+  that blindness is exactly why #683 was untestable before PR #688.
+- Every seam-affecting invariant the code enforces today is listed here;
+  keep this list in sync when adding one:
+  - a splice from the right window never starts mid-word
+    (`spliceSafeTokenIds` gating, issue #683)
+  - the midpoint cutoff never strands a word's continuation pieces on the
+    wrong side of the seam (`mergeByMidpoint`, issue #683)
+  - chunk starts are always frame-aligned (`chunkLayout`)
+  - at least 6 encoder frames of seam overlap are preserved
+    (`silenceAlignedChunkStarts`)
+
 ## Relevant Code
 
 - `Sources/FluidAudio/Shared/ASRConstants.swift`
@@ -359,3 +411,8 @@ swift test --filter TdtRefactoredComponentsTests
 swift test --filter TdtDecoderV2Tests
 swift test --filter ASRConfigTests   # covers parallelChunkConcurrency default, clamping, override
 ```
+
+`ChunkProcessorTests` includes word-boundary splice tests that pass a
+splice-safe token set. When adding merge tests, do the same: a merge test
+without one exercises only the token-ID layer and cannot catch glued or
+hybrid words (see "Invariants Must Be Executable" above).
