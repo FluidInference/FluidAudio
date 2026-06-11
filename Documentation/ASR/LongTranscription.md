@@ -213,7 +213,7 @@ Notes for tuning:
 After each chunk decodes independently, `ChunkProcessor.mergeChunks` stitches
 adjacent chunks into a single token timeline. The merger never re-runs the
 decoder and never invents tokens; it only chooses which side of the overlap
-each token comes from. The strategy is a three-step ladder:
+each token comes from. The strategy is a four-step ladder:
 
 1. **Disjoint shortcut.** If the left chunk's last token ends before the
    right chunk's first token begins, concatenate without merging.
@@ -234,6 +234,35 @@ cannot collapse two different words that happen to share a substring, and it
 is robust to small per-chunk timestamp jitter. The contiguous-match path
 preserves order strictly; LCS is only entered when adjacent chunks disagree
 enough that a contiguous run would be dishonest.
+
+### Word-Boundary Splice Repair
+
+Matching alone does not make the *splice points* safe: the two windows
+tokenize the same seam audio independently, and the right window often
+segments its first word differently (frequently without the SentencePiece
+`▁` word-start prefix, since for that decoder the word is utterance-initial).
+Splicing a continuation piece from the right stream directly after a left
+token decodes as a glued or hybrid word — `"work" + "ks"` → `"worksks"`
+(issue #683).
+
+To prevent this, `mergeChunks` derives a set of *splice-safe* token IDs from
+the model vocabulary once per merge pass: pieces with a `▁`/space prefix or
+punctuation-only pieces. Splices are then repaired at word granularity:
+
+- **`mergeUsingMatches`** — when the post-match tail of the right stream
+  starts with a continuation piece, the merger adopts the right window's
+  segmentation of the entire seam word (the left chunk is typically the one
+  cut mid-word). Only when the right stream itself begins mid-word — the
+  construction that produced glued words — does the left window keep the
+  seam word, with the right stream resuming at its next word-initial piece.
+- **`mergeByMidpoint`** — the time cutoff is adjusted so the left stream
+  finishes the word it started, and orphaned continuation pieces (whose
+  word-initial piece was trimmed away) are dropped from the right stream's
+  head.
+
+The repair inspects only the tokenizer's own word-boundary marker, never
+transcript text, so it is language-agnostic. Without a vocabulary the merge
+is byte-for-byte unchanged.
 
 ## Streaming Threshold for Large Files
 
@@ -303,6 +332,8 @@ auditable instead of relying on memory of why a clip was added.
     gating
   - `mergeChunks(...)` / `mergeUsingMatches(...)` / `mergeByMidpoint(...)` —
     overlap merge ladder (contiguous → LCS → midpoint)
+  - `spliceSafeTokenIds(vocabulary:)` / `isSpliceSafePiece(...)` —
+    vocabulary-derived word-boundary gating for seam splices (issue #683)
   - `makeWorkerPool(...)` and the static `transcribeChunk(...)` task body
     used by the parallel dispatch loop
 - `Sources/FluidAudio/ASR/Parakeet/TokenDeduplication/SequenceMatcher.swift`
