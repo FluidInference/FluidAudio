@@ -50,6 +50,11 @@ public actor SlidingWindowAsrManager {
     private var startTime: Date?
     private var processedChunks: Int = 0
 
+    // Window-processing error tracking so total failure is surfaced by finish()
+    // instead of being silently absorbed by error recovery
+    private var failedWindowCount: Int = 0
+    private var lastWindowError: SlidingWindowAsrError?
+
     // Vocabulary boosting
     // These are initialized via configureVocabularyBoosting() before start()
     private var customVocabulary: CustomVocabularyContext?
@@ -152,8 +157,12 @@ public actor SlidingWindowAsrManager {
     /// Models must be loaded first via `loadModels()` or `loadModels(_:)`
     ///
     /// - Parameter source: The audio source to use (default: microphone)
-    /// - Throws: ASRError.notInitialized if models are not loaded
+    /// - Throws: `SlidingWindowAsrError.invalidConfiguration` if the configured window
+    ///   (left + chunk + right context) exceeds the model's maximum input size,
+    ///   `ASRError.notInitialized` if models are not loaded
     public func startStreaming(source: AudioSource = .microphone) async throws {
+        try config.validate()
+
         guard asrManager != nil else {
             throw ASRError.notInitialized
         }
@@ -171,6 +180,8 @@ public actor SlidingWindowAsrManager {
         segmentIndex = 0
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
+        failedWindowCount = 0
+        lastWindowError = nil
 
         startTime = Date()
 
@@ -242,6 +253,21 @@ public actor SlidingWindowAsrManager {
             throw error
         }
 
+        // Surface total failure: every window errored, so the transcript is empty
+        // or covers only a fraction of the audio. Silently returning it would be
+        // indistinguishable from silence in the input.
+        if processedChunks == 0, let windowError = lastWindowError {
+            logger.error(
+                "All \(self.failedWindowCount) window(s) failed to process; throwing last error instead of returning an empty transcript"
+            )
+            throw windowError
+        }
+        if failedWindowCount > 0 {
+            logger.warning(
+                "\(self.failedWindowCount) window(s) failed during streaming; transcript may be missing segments"
+            )
+        }
+
         let finalText: String
         if vocabBoostingEnabled {
             // Text-based reconstruction preserves rescored corrections from processWindow().
@@ -272,6 +298,8 @@ public actor SlidingWindowAsrManager {
         volatileTranscript = ""
         confirmedTranscript = ""
         processedChunks = 0
+        failedWindowCount = 0
+        lastWindowError = nil
         startTime = Date()
         sampleBuffer.removeAll(keepingCapacity: false)
         bufferStartIndex = 0
@@ -510,7 +538,11 @@ public actor SlidingWindowAsrManager {
                 return
             }
             let streamingError = SlidingWindowAsrError.modelProcessingFailed(error)
-            logger.error("Model processing error: \(streamingError.localizedDescription)")
+            failedWindowCount += 1
+            lastWindowError = streamingError
+            logger.error(
+                "Model processing error (window failure #\(self.failedWindowCount)): \(streamingError.localizedDescription)"
+            )
 
             // Attempt error recovery
             await attemptErrorRecovery(error: streamingError)
@@ -695,11 +727,13 @@ public struct SlidingWindowAsrConfig: Sendable {
     /// `AsrManager`'s internal blank-token auto-adaptation.
     public let tdtConfig: TdtConfig?
 
-    /// Default configuration aligned with previous API expectations
+    /// Default configuration using the proven 11+2+2 window layout.
+    /// The assembled window (left + chunk + right) must fit the model's fixed
+    /// 15 s input (`ASRConstants.maxModelSamples`); 2 + 11 + 2 = 15 s fits exactly.
     public static let `default` = SlidingWindowAsrConfig(
-        chunkSeconds: 15.0,
+        chunkSeconds: 11.0,
         hypothesisChunkSeconds: 2.0,
-        leftContextSeconds: 10.0,
+        leftContextSeconds: 2.0,
         rightContextSeconds: 2.0,
         minContextForConfirmation: 10.0,
         confirmationThreshold: 0.85
@@ -756,7 +790,7 @@ public struct SlidingWindowAsrConfig: Sendable {
         self.init(
             chunkSeconds: chunkDuration,
             hypothesisChunkSeconds: min(1.0, chunkDuration / 2.0),  // Default to half chunk duration
-            leftContextSeconds: 10.0,
+            leftContextSeconds: 2.0,
             rightContextSeconds: 2.0,
             minContextForConfirmation: 10.0,
             confirmationThreshold: confirmationThreshold
@@ -771,7 +805,7 @@ public struct SlidingWindowAsrConfig: Sendable {
         SlidingWindowAsrConfig(
             chunkSeconds: chunkDuration,
             hypothesisChunkSeconds: min(1.0, chunkDuration / 2.0),  // Default to half chunk duration
-            leftContextSeconds: 10.0,
+            leftContextSeconds: 2.0,
             rightContextSeconds: 2.0,
             minContextForConfirmation: 10.0,
             confirmationThreshold: confirmationThreshold
@@ -792,6 +826,25 @@ public struct SlidingWindowAsrConfig: Sendable {
     var leftContextSamples: Int { Int(leftContextSeconds * 16000) }
     var rightContextSamples: Int { Int(rightContextSeconds * 16000) }
     var minContextForConfirmationSamples: Int { Int(minContextForConfirmation * 16000) }
+
+    /// Total samples in an assembled window: left context + chunk + right context.
+    public var windowSamples: Int { leftContextSamples + chunkSamples + rightContextSamples }
+
+    /// Validates that the assembled window fits the model's fixed input size.
+    /// - Throws: `SlidingWindowAsrError.invalidConfiguration` if
+    ///   `leftContextSeconds + chunkSeconds + rightContextSeconds` exceeds the
+    ///   model's maximum input (`ASRConstants.maxModelSamples`, 15 s at 16 kHz).
+    public func validate() throws {
+        guard windowSamples <= ASRConstants.maxModelSamples else {
+            let windowSeconds = leftContextSeconds + chunkSeconds + rightContextSeconds
+            let maxSeconds = Double(ASRConstants.maxModelSamples) / 16000.0
+            throw SlidingWindowAsrError.invalidConfiguration(
+                "leftContextSeconds + chunkSeconds + rightContextSeconds = \(windowSeconds)s "
+                    + "(\(windowSamples) samples) exceeds the model's maximum input of "
+                    + "\(maxSeconds)s (\(ASRConstants.maxModelSamples) samples at 16 kHz)"
+            )
+        }
+    }
 
     // Backward-compat convenience for existing call-sites/tests
     var chunkDuration: TimeInterval { chunkSeconds }
