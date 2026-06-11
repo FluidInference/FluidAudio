@@ -84,6 +84,8 @@ struct FluidAudioCLI {
             await NemotronMultilingualMultiStreamBench.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-transcribe":
             await SenseVoiceTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "fsmn-vad-segment":
+            await FsmnVadSegmentCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-benchmark":
             await SenseVoiceBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "paraformer-transcribe":
