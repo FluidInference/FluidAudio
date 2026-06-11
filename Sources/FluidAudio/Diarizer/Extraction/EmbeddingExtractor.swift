@@ -41,8 +41,12 @@ public final class EmbeddingExtractor {
             }
         }
         // CAM++ fbank needs a minimum length; pad very short actives.
-        // CAM++ preprocessor RangeDim floor is 8000 samples (0.5 s).
-        if gathered.count < 8000 { return [Float](repeating: 0.0, count: 192) }
+        // CAM++ floors: preprocessor needs >= 8000 samples AND the model
+        // needs >= 64 fbank frames (~10,600 samples at 10 ms hop). Use a
+        // 12,000-sample (0.75 s) guard with margin; shorter actives return
+        // a zero embedding (skipped by clustering), matching the inactive
+        // path.
+        if gathered.count < 12_000 { return [Float](repeating: 0.0, count: 192) }
         return try embedder.embed(audio: gathered)
     }
 
