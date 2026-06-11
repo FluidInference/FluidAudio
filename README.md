@@ -28,6 +28,7 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
   <a href="https://snaply.ai"><img src="Documentation/assets/snaply.png" height="40" alt="Snaply"></a>
   <a href="https://github.com/yazinsai/OpenOats"><img src="Documentation/assets/openoats.png" height="40" alt="OpenOats"></a>
   <a href="https://talat.app"><img src="Documentation/assets/talat.png" height="40" alt="Talat"></a>
+  <a href="https://hedy.ai"><img src="Documentation/assets/hedy.png" height="40" alt="Hedy"></a>
 <!-- Add your app: submit logo via PR. The Fluid Inference team works to curate this and add new apps to the showcase section every couple of weeks. We appreciate your patience. -->
 </p>
 
@@ -112,6 +113,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Dettivo](https://dettivo.com)** | Local-first Mac app for private dictation, transcripts, and meeting workflows in one place, with developer tooling across CLI, MCP, REST, and app automation. Uses FluidAudio Parakeet TDT ASR and offline speaker diarization. |
 | **[Parleq](https://parleq.app/)** | Privacy-first macOS dictation — press a hotkey, speak, paste cleaned-up text. On-device Parakeet TDT v3 ASR with CTC vocabulary boosting (audio never leaves the Mac), provider-pluggable LLM cleanup (Gemini/Vertex, Bedrock, Azure), and reference windows that bring on-screen context into the cleanup. Open source. |
 | **[Local Narrator](https://www.localnarrator.app/)** | Privacy-first iOS audiobook reader that reads EPUB and PDF books aloud with on-device text-to-speech. Uses FluidAudio Kokoro TTS for local English and Spanish narration. |
+| **[Hedy](https://hedy.ai)** | Privacy-first AI meeting coach for iOS, macOS, Android, and Windows. Real-time, fully on-device transcription with speaker diarization and AI-powered conversation insights. Uses Parakeet and Nemotron streaming ASR and speaker diarization on the Apple Neural Engine. |
 
 ## Installation
 
