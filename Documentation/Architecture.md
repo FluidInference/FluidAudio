@@ -13,7 +13,6 @@ Every component that owns CoreML models exposes them through an `actor`
 (or, occasionally, a class that delegates mutable state to an inner actor).
 
 - ASR: `public actor AsrManager` — `Sources/FluidAudio/ASR/Parakeet/SlidingWindow/TDT/AsrManager.swift:6`
-- ASR: `public actor Qwen3AsrManager` — `Sources/FluidAudio/ASR/Qwen3/Qwen3AsrManager.swift:21`
 - TTS: `public actor PocketTtsModelStore` — `Sources/FluidAudio/TTS/PocketTTS/Pipeline/PocketTtsModelStore.swift:12`
 - TTS: `public actor MultilingualG2PModel` — `Sources/FluidAudio/TTS/G2P/MultilingualG2PModel.swift:11`
 - VAD: `public actor VadManager` — `Sources/FluidAudio/VAD/VadManager.swift:14`
@@ -68,7 +67,6 @@ by **measured precision**, not preference.
 | KokoroAne (7-stage split) | Per-stage tuning | Albert/Alignment/Vocoder on ANE; Prosody/Noise/Tail on `.all` |
 | PocketTTS (4 models) | `.cpuAndGPU` (forced) | Mimi decoder's streaming state feedback loop is FP16-sensitive; ANE introduces audible artifacts |
 | StyleTTS2 | `.cpuAndNeuralEngine` | 8-stage CoreML graph; ANE-resident for the heavy encoders |
-| Magpie | `.cpuAndNeuralEngine` | Throughput priority; experimental |
 | VAD (Silero) | `.cpuAndNeuralEngine` (default) | LSTM is small; ANE eliminates GPU contention |
 | Diarization | `.all` (CI: `.cpuAndNeuralEngine`) | Segmentation + embedding both ANE-friendly |
 
@@ -89,8 +87,7 @@ Pure Swift:
 - SSML parsing
 - Audio post-processing (de-essing biquad, padding, fade-in/out)
 - ODE / Euler integration glue between CoreML calls (PocketTTS)
-- Embedding lookups (`text_embed_table.bin` flat-file index — Qwen3 also
-  does this to eliminate one CoreML graph)
+- Embedding lookups (`text_embed_table.bin` flat-file index)
 - Clustering thresholds and state machines (VAD hysteresis, online
   diarizer cosine assignment)
 
@@ -110,18 +107,17 @@ we wrap it.
 
 ## 2. ASR
 
-ASR is the most internally diverse module because it hosts three model
-families with three different decoders. The shape comes from one core
+ASR is the most internally diverse module because it hosts multiple model
+families with different decoders. The shape comes from one core
 constraint: **each model family ships with its own streaming story**, and
 we expose them through compatible-but-not-identical entry points instead
 of forcing a single abstraction.
 
-### 2.1 Three Families, Three Decoders
+### 2.1 Model Families and Decoders
 
 | Family | Decoder | Frontend | Streaming model |
 |--------|---------|----------|-----------------|
 | Parakeet TDT (`ASR/Parakeet/`) | Token-and-Duration Transducer | `Preprocessor.mlmodelc` (mel + CMVN inside CoreML) | Stateless encoder + sliding window |
-| Qwen3 (`ASR/Qwen3/`) | Qwen2 LM, autoregressive | Whisper mel spectrogram (Swift) | Single-shot |
 | Cohere (`ASR/Cohere/`) | Encoder-decoder + repetition penalty | FilterbankFeatures-compatible mel | Single-shot |
 
 TDT (Parakeet) deserves its own note. RNN-T predicts a token per frame;
@@ -211,14 +207,6 @@ and capped at half of it, again rounded down to an encoder frame
 > `Documentation/API.md:279`, and
 > `Documentation/ASR/TDT-CTC-110M.md:113, 154, 298`.
 
-### 2.4 Qwen3 Eliminates an Embedding CoreML Graph
-
-`Qwen3AsrManager` does not load a separate embedding model. Token IDs
-index a flat-file embedding table from Swift, then feed the decoder.
-Same trick as PocketTTS uses for `text_embed_table.bin`. Eliminating one
-CoreML graph removes one async load and one ANE warm-up.
-File: `Sources/FluidAudio/ASR/Qwen3/Qwen3AsrManager.swift:8`.
-
 ---
 
 ## 3. TTS
@@ -240,8 +228,6 @@ We tried. Each TTS family has fundamentally different I/O contracts:
 - **StyleTTS2** is an 8-stage CoreML graph (BERT → reference style →
   prosody → fused diffusion sampler → decoder), with per-token bucket
   variants for the BERT and sampler stages.
-- **Magpie** is a 4-graph autoregressive pipeline plus a Swift-side
-  1-layer "local transformer" to sample 8 codebook tokens per frame.
 
 A protocol that accepted all of them would either expose a useless
 lowest-common-denominator (`func synth(text:) -> [Float]`) or be a fat
@@ -453,9 +439,8 @@ G2P, post-processors. We pull things into `Shared/` only when at least
 two unrelated modules need them.
 
 This is why, for example, `text_embed_table.bin` parsing lives in
-`TTS/PocketTTS/Assets/` even though Qwen3 ASR has its own version of
-the same trick — they have different on-disk layouts and different
-header conventions.
+`TTS/PocketTTS/Assets/` rather than `Shared/` — its on-disk layout and
+header conventions are specific to PocketTTS.
 
 ---
 
@@ -467,12 +452,10 @@ points:
 | Module | Manager | File |
 |---|---|---|
 | ASR (Parakeet TDT) | `AsrManager`, `SlidingWindowAsrManager` | `ASR/Parakeet/SlidingWindow/TDT/AsrManager.swift:6` |
-| ASR (Qwen3) | `Qwen3AsrManager` | `ASR/Qwen3/Qwen3AsrManager.swift:21` |
 | ASR (Cohere) | (via `CoherePipeline`) | `ASR/Cohere/CoherePipeline.swift:1` |
 | TTS (KokoroAne) | `KokoroAneManager`, `KokoroAneModelStore` | `TTS/KokoroAne/KokoroAneManager.swift:32` |
 | TTS (PocketTTS) | `PocketTtsModelStore`, `PocketTtsSynthesizer` | `TTS/PocketTTS/Pipeline/PocketTtsModelStore.swift:12` |
 | TTS (StyleTTS2) | `StyleTTS2Manager` | `TTS/StyleTTS2/StyleTTS2Manager.swift:37` |
-| TTS (Magpie) | `MagpieTtsManager` | `TTS/Magpie/MagpieTtsManager.swift:1` |
 | TTS (G2P) | `MultilingualG2PModel.shared` | `TTS/G2P/MultilingualG2PModel.swift:11` |
 | VAD | `VadManager` | `VAD/VadManager.swift:14` |
 | Diarization (online) | `DiarizerManager` | `Diarizer/Core/DiarizerManager.swift:6` |

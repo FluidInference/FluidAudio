@@ -16,12 +16,14 @@ public enum Supertonic3ResourceDownloader {
     @discardableResult
     public static func ensureModels(
         directory: URL? = nil,
+        veVariant: String? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = try directory ?? defaultCacheRoot()
         let repoDir = modelsRoot.appendingPathComponent(Repo.supertonic3.folderName)
 
-        let allPresent = ModelNames.Supertonic3.requiredFiles.allSatisfy { file in
+        let required = ModelNames.Supertonic3.requiredFiles(veVariant: veVariant)
+        let allPresent = required.allSatisfy { file in
             FileManager.default.fileExists(atPath: repoDir.appendingPathComponent(file).path)
         }
 
@@ -29,7 +31,8 @@ public enum Supertonic3ResourceDownloader {
             logger.info("Downloading Supertonic-3 CoreML assets from HuggingFace…")
             do {
                 try await DownloadUtils.downloadRepo(
-                    .supertonic3, to: modelsRoot, progressHandler: progressHandler)
+                    .supertonic3, to: modelsRoot, variant: veVariant,
+                    progressHandler: progressHandler)
             } catch {
                 throw Supertonic3Error.downloadFailed("\(error)")
             }

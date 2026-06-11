@@ -13,9 +13,9 @@ final class StreamingNemotronAsrManagerTests: XCTestCase {
         let manager = StreamingNemotronAsrManager()
 
         let config = await manager.config
-        // Should use default 1120ms config
-        XCTAssertEqual(config.chunkMs, 1120)
-        XCTAssertEqual(config.chunkMelFrames, 112)
+        // Should use the default 2240ms config
+        XCTAssertEqual(config.chunkMs, 2240)
+        XCTAssertEqual(config.chunkMelFrames, 224)
         XCTAssertEqual(config.vocabSize, 1024)
     }
 
@@ -104,7 +104,7 @@ final class StreamingNemotronAsrManagerTests: XCTestCase {
         // chunkSamples = chunkMelFrames * 160
         let expectedSamples = config.chunkMelFrames * 160
         XCTAssertEqual(config.chunkSamples, expectedSamples)
-        XCTAssertEqual(config.chunkSamples, 17920)  // 112 * 160 for 1120ms
+        XCTAssertEqual(config.chunkSamples, 35840)  // 224 * 160 for the default 2240ms
     }
 
     func testAudioBufferAccumulationWithSingleBuffer() async throws {

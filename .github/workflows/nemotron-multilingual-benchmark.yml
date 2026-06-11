@@ -1,0 +1,172 @@
+name: Nemotron Multilingual Benchmark (FLEURS)
+
+# Downloads BOTH shipped models and benchmarks each on the SAME English FLEURS
+# audio, so a break in either folder's download/decode is caught and the two
+# models are compared apples-to-apples on every relevant PR:
+#   - latin/        (Latin-script-pruned 2828 vocab) -> English WER
+#   - multilingual/ (full 13087 vocab)               -> English WER
+# `--model-variant latin|multilingual` forces which folder --auto-download
+# fetches, independent of --languages. Decode path is B1 fused; K=4 smart-spec
+# components are not published (the tokenizers carry duplicate <blank> tokens
+# that break K=4 recovery). Model is fetched from the gated HF repo using the
+# HF_NEMOTRON_V2_TOKEN secret.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Sources/FluidAudio/ASR/Parakeet/Streaming/Nemotron/**'
+      - 'Sources/FluidAudioCLI/Commands/ASR/Parakeet/Streaming/NemotronMultilingual*.swift'
+      - '.github/workflows/nemotron-multilingual-benchmark.yml'
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: 'FLEURS samples per language'
+        required: false
+        default: '100'
+      chunk_ms:
+        description: 'Chunk tier (560 / 1120 / 2240 / 4480)'
+        required: false
+        default: '2240'
+
+jobs:
+  nemotron-multilingual-benchmark:
+    name: Nemotron Multilingual Benchmark (FLEURS)
+    runs-on: macos-15
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      HF_TOKEN: ${{ secrets.HF_NEMOTRON_V2_TOKEN }}
+      SAMPLES: ${{ github.event.inputs.samples || '100' }}
+      CHUNK_MS: ${{ github.event.inputs.chunk_ms || '2240' }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Cache dependencies, models + datasets
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Application Support/FluidAudio
+          key: ${{ runner.os }}-nemotron-multi-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/ASR/Parakeet/Streaming/Nemotron/**', 'Sources/FluidAudio/ModelNames.swift') }}
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Benchmark — English on latin/
+        id: bench-latin
+        continue-on-error: true
+        run: |
+          echo "=== English FLEURS en_us, chunk ${CHUNK_MS}ms, ${SAMPLES} samples → latin/ ==="
+          .build/release/fluidaudiocli nemotron-multilingual-benchmark \
+            --auto-download \
+            --model-variant latin \
+            --languages en_us \
+            --chunk-ms "$CHUNK_MS" \
+            --dataset fleurs \
+            --samples "$SAMPLES" \
+            --output results-latin.json \
+            2>&1 | tee log-latin.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Benchmark — English on multilingual/
+        id: bench-multi
+        continue-on-error: true
+        run: |
+          echo "=== English FLEURS en_us, chunk ${CHUNK_MS}ms, ${SAMPLES} samples → multilingual/ ==="
+          .build/release/fluidaudiocli nemotron-multilingual-benchmark \
+            --auto-download \
+            --model-variant multilingual \
+            --languages en_us \
+            --chunk-ms "$CHUNK_MS" \
+            --dataset fleurs \
+            --samples "$SAMPLES" \
+            --output results-multi.json \
+            2>&1 | tee log-multi.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Extract results
+        if: always()
+        id: extract
+        run: |
+          read_metric() { jq -r ".summary.$2 // \"N/A\"" "$1" 2>/dev/null || echo "N/A"; }
+          pct() { [ "$1" = "N/A" ] && echo "N/A" || echo "$1 * 100" | bc -l | xargs printf "%.2f"; }
+          one() { [ "$1" = "N/A" ] && echo "N/A" || echo "$1" | xargs printf "%.1f"; }
+
+          LAT_WER=$(pct "$(read_metric results-latin.json averageWER)")
+          LAT_RTFX=$(one "$(read_metric results-latin.json averageRTFx)")
+          MUL_WER=$(pct "$(read_metric results-multi.json averageWER)")
+          MUL_RTFX=$(one "$(read_metric results-multi.json averageRTFx)")
+          SAMP=$(jq -r '.summary.totalSamples // "N/A"' results-latin.json 2>/dev/null || echo "N/A")
+
+          {
+            echo "lat_wer=$LAT_WER"; echo "lat_rtfx=$LAT_RTFX"
+            echo "mul_wer=$MUL_WER"; echo "mul_rtfx=$MUL_RTFX"
+            echo "samples=$SAMP"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "latin/        en  WER ${LAT_WER}%  RTFx ${LAT_RTFX}x"
+          echo "multilingual/ en  WER ${MUL_WER}%  RTFx ${MUL_RTFX}x"
+
+          # Fail if either model produced no usable RTFx (download / decode failure)
+          if [ "$LAT_RTFX" = "N/A" ] || [ "$LAT_RTFX" = "0.0" ] || [ "$MUL_RTFX" = "N/A" ] || [ "$MUL_RTFX" = "0.0" ]; then
+            echo "❌ A model produced RTFx 0/N/A — benchmark failed"
+            exit 1
+          fi
+
+      - name: Comment PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const o = ${{ toJSON(steps.extract.outputs) }};
+            const ok = '${{ steps.bench-latin.outcome }}' === 'success' && '${{ steps.bench-multi.outcome }}' === 'success';
+            const body = `## ${ok ? '✅' : '❌'} Nemotron Multilingual Benchmark — FLEURS
+
+            FLEURS \`en_us\`, chunk \`${{ env.CHUNK_MS }}ms\`, ${o.samples} samples, B1 fused decode path. Same English audio against both shipped models.
+
+            | Model | Language | WER | RTFx |
+            |---|---|---:|---:|
+            | \`latin/\` (pruned 2828) | English | ${o.lat_wer}% | ${o.lat_rtfx}x |
+            | \`multilingual/\` (full 13087) | English | ${o.mul_wer}% | ${o.mul_rtfx}x |
+
+            ${ok ? '' : '⚠️ One or both runs failed — see logs.'}
+
+            <details><summary>Logs (tail)</summary>
+
+            \`\`\`
+            [latin / English]
+            ${require('fs').existsSync('log-latin.txt') ? require('fs').readFileSync('log-latin.txt','utf8').slice(-1500) : '(no log)'}
+
+            [multilingual / English]
+            ${require('fs').existsSync('log-multi.txt') ? require('fs').readFileSync('log-multi.txt','utf8').slice(-1500) : '(no log)'}
+            \`\`\`
+            </details>`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nemotron-multilingual-benchmark-results
+          path: |
+            results-*.json
+            log-*.txt
+          retention-days: 30
+
+      - name: Fail if a run failed
+        if: steps.bench-latin.outcome == 'failure' || steps.bench-multi.outcome == 'failure'
+        run: |
+          echo "A benchmark run failed (see logs above)."
+          exit 1

@@ -35,9 +35,9 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 ## Highlights
 
-- **Automatic Speech Recognition (ASR)**: [Parakeet TDT v3](Documentation/Models.md#batch-transcription-near-real-time) (0.6b) and other TDT/CTC models for batch transcription supporting 25 European languages, Japanese, and Chinese; [Parakeet EOU](Documentation/Models.md#streaming-transcription-true-real-time) (120m) for streaming ASR with end-of-utterance detection (English only). See all [ASR models](Documentation/Models.md#asr-models).
+- **Automatic Speech Recognition (ASR)**: [Parakeet TDT v3](Documentation/Models.md#batch-transcription-near-real-time) (0.6b) and other TDT/CTC models for batch transcription supporting 25 European languages and Japanese, plus SenseVoice and Paraformer for Mandarin Chinese; [Parakeet EOU](Documentation/Models.md#streaming-transcription-true-real-time) (120m) for streaming ASR with end-of-utterance detection (English only). See all [ASR models](Documentation/Models.md#asr-models).
 - **Inverse Text Normalization (ITN)**: Post-process ASR output to convert spoken-form to written-form ("two hundred" → "200"). See [text-processing-rs](https://github.com/FluidInference/text-processing-rs)
-- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (EN, DE, ES, FR, IT, PT — 6L and 24L variants); **Magpie (357m, experimental)** autoregressive multilingual TTS with 5 speakers, `|…|` IPA override, and 8-language coverage (EN, ES, DE, FR, IT, VI, ZH, HI) — note: quite slow (~0.04 RTFx on Apple Silicon, ~25× slower than realtime) and needs further perf work, see [Magpie docs](Documentation/TTS/Magpie.md) before adopting
+- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (EN, DE, ES, FR, IT, PT — 6L and 24L variants)
 - **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
@@ -57,7 +57,6 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 | **[Parakeet EOU Ultra-Low Latency](https://x.com/y_earu/status/2038654262608064967)** | Real-time Parakeet EOU transcription on iOS demonstrating ultra-low latency speech-to-text |
 | **[Action Phrase Live Production Control](https://www.youtube.com/watch?v=ykcvdTHHmrk)** | Voice-controlled live production workflow using FluidAudio's ASR and speaker diarization to trigger cameras, graphics, and layouts with natural voice commands |
 | **[talat - VAD, ASR, Speaker ID](https://www.youtube.com/watch?v=OjP4Adrv9_E)** | A video demo showcasing FluidAudio's VAD, two different ASR models, and speaker diarization during a talat.app meeting recording |
-| **[MagpieTTS Multilingual on iPhone 17 Pro](https://x.com/sach1n/status/2030521943263436934)** | NVIDIA's MagpieTTS Multilingual model converted to CoreML and running on an iPhone 17 Pro |
 | **[Kyutai PocketTTS on ANE](https://x.com/sach1n/status/2051375097408360596)** | Kyutai labs PocketTTS in iOS running fast on the ANE & background-capable |
 | **[Supertonic-3 on iPhone 17 Pro ANE](https://x.com/sach1n/status/2056476851825250685)** | Supertonic-3 running on iPhone 17 Pro via ANE/CoreML with 2 minutes of audio generated in 3 seconds with low RAM & background support |
 
@@ -93,10 +92,10 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Snaply](https://snaply.ai)** |Free, Fast, 100% local AI dictation for Mac. |
 | **[OpenOats](https://github.com/yazinsai/OpenOats)** | Open-source meeting note-taker that transcribes conversations in real time and surfaces relevant notes from your knowledge base. Uses FluidAudio for local transcription. |
 | **[Enconvo](https://enconvo.com)** | AI Agent Launcher for macOS with voice input, live captions, and text-to-speech. Uses Parakeet ASR for local speech recognition. |
-| **[Meeting Transcriber](https://github.com/pasrom/meeting-transcriber)** | macOS menu bar app that auto-detects, records, and transcribes meetings (Teams, Zoom, Webex) with dual-track speaker diarization. Uses Parakeet ASR, Qwen3-ASR, and speaker diarization. |
+| **[Meeting Transcriber](https://github.com/pasrom/meeting-transcriber)** | macOS menu bar app that auto-detects, records, and transcribes meetings (Teams, Zoom, Webex) with dual-track speaker diarization. Uses Parakeet ASR and speaker diarization. |
 | **[Hitoku Draft](https://hitoku.me/draft)** | A local, private, voice writing assistant on your macOS menu bar. Uses Parakeet ASR. |
 | **[Audite](https://github.com/zachatrocity/audite)** | macOS menu-bar app that records meetings and transcribes them locally into Markdown notes for Obsidian. Uses Parakeet ASR via FluidAudio on the Apple Neural Engine. |
-| **[Muesli](https://github.com/pHequals7/muesli)** | Native macOS dictation and meeting transcription with ~0.13s latency. Captures microphone and system audio with automatic speaker diarization. Uses Parakeet TDT and Qwen3 ASR. |
+| **[Muesli](https://github.com/pHequals7/muesli)** | Native macOS dictation and meeting transcription with ~0.13s latency. Captures microphone and system audio with automatic speaker diarization. Uses Parakeet TDT ASR. |
 | **[NanoVoice](https://apps.apple.com/kz/app/nanovoice/id6760539688)** | Free iOS voice keyboard for fast, private dictation in any app. Uses Parakeet ASR. |
 | **[MiniWhisper](https://github.com/andyhtran/MiniWhisper)** | Open-source macOS menu bar for quick local voice-to-text with minimal setup. Pick a shortcut, start talking. Uses Parakeet ASR. |
 | **[Talat](https://talat.app)** | Privacy-focused AI meeting notes app. Records and transcribes meetings locally on your Mac with speaker identification and LLM-powered summaries. Featured in [TechCrunch](https://techcrunch.com/2026/03/24/talats-ai-meeting-notes-stay-on-your-machine-not-in-the-cloud/). Uses Parakeet ASR. |
@@ -112,6 +111,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Thoth](https://thoth-app.com)** | Privacy-first meeting recorder for Mac. Records both sides of any call with dual-channel audio, transcribes locally with speaker diarization, and summarizes with on-device AI or BYOK cloud. Available on the Mac App Store. Featured in [MacGeneration](https://www.macg.co/logiciels/2026/05/thoth-une-nouvelle-app-de-transcription-axee-sur-les-reunions-et-le-temps-reel-308471). Uses Parakeet EOU and Parakeet TDT ASR. |
 | **[Dettivo](https://dettivo.com)** | Local-first Mac app for private dictation, transcripts, and meeting workflows in one place, with developer tooling across CLI, MCP, REST, and app automation. Uses FluidAudio Parakeet TDT ASR and offline speaker diarization. |
 | **[Parleq](https://parleq.app/)** | Privacy-first macOS dictation — press a hotkey, speak, paste cleaned-up text. On-device Parakeet TDT v3 ASR with CTC vocabulary boosting (audio never leaves the Mac), provider-pluggable LLM cleanup (Gemini/Vertex, Bedrock, Azure), and reference windows that bring on-screen context into the cleanup. Open source. |
+| **[Local Narrator](https://www.localnarrator.app/)** | Privacy-first iOS audiobook reader that reads EPUB and PDF books aloud with on-device text-to-speech. Uses FluidAudio Kokoro TTS for local English and Spanish narration. |
 
 ## Installation
 
@@ -224,6 +224,30 @@ swift run fluidaudiocli transcribe audio.wav
 2. Go to **Environment Variables** tab
 3. Click `+` and add: `https_proxy` = `http://proxy.company.com:8080`
 4. FluidAudio will automatically route downloads through the proxy
+
+</details>
+
+<details>
+<summary><b>Offline-only mode</b> - Refuse every network fetch, bundle your own models</summary>
+
+If your application ships pre-downloaded model assets and never wants FluidAudio to reach HuggingFace at runtime (privacy-sensitive desktop apps, air-gapped deployments, kiosk builds), set the static `DownloadUtils.enforceOffline` flag at startup:
+
+```swift
+import FluidAudio
+
+// Set once before any FluidAudio loader runs.
+DownloadUtils.enforceOffline = true
+
+// Load via manual APIs that read from your bundled directory:
+let asr = try await AsrModels.load(from: bundledModelURL, configuration: config)
+```
+
+When the flag is on:
+- `fetchWithAuth`, `downloadRepo`, `downloadSubdirectory`, and `fetchHuggingFaceFile` throw `DownloadUtils.OfflineError.networkDisabled(operation:)` instead of touching the network.
+- `loadModels` short-circuits its retry-with-redownload fallback so a corrupt-detected `.mlmodelc` surfaces the original load error instead of silently re-fetching.
+- If `loadModels` is invoked but required files are missing from the local directory, `DownloadUtils.OfflineError.modelMissing(repo:missing:)` is thrown with the missing file list so the caller can ship a fix.
+
+The default is `false` — no behaviour change for existing callers. Combine with a custom `ModelRegistry.baseURL` only if you want offline-mode + a typed offline error rather than relying on a mirror URL.
 
 </details>
 
@@ -619,60 +643,6 @@ swift run fluidaudiocli tts "Hello from FluidAudio." --backend kokoroAne --outpu
 ```
 
 Model assets are cached under `~/.cache/fluidaudio/Models/kokoro/`.
-
-### Magpie (Multilingual) — experimental
-
-> ⚠️ **Quite slow on Apple Silicon — needs significant perf work; not for
-> real-time / latency-sensitive use.** First synth on a fresh process is
-> dominated by CoreML model load + first-call ANE compile (~30 s). Warm
-> synths run at **~96 s wall for an 8-word English sentence** on M-series
-> (RTFx ≈ **0.04**, i.e. ~25× slower than realtime). Output is
-> perceptually clean / ASR-clean across 4 of the 5 speakers; speaker 0
-> has a single trailing-word artifact attributable to fp16
-> sampler-trajectory drift (not a structural bug). Whether the throughput
-> ceiling is a model characteristic, a CoreML conversion limitation, or
-> both is still being investigated and is expected to improve in
-> subsequent iterations. **Use Kokoro (~20× RTFx) or PocketTTS
-> (~1.5–2× RTFx) for real-time use.** Magpie ships for multilingual
-> coverage and the 5 speaker contexts, not throughput.
-
-Magpie TTS Multilingual (357M) is NVIDIA's autoregressive encoder-decoder TTS with 8-codebook NanoCodec vocoder output at 22.05 kHz. It exposes 5 built-in speakers and supports 8 languages (English, Spanish, German, French, Italian, Vietnamese, Mandarin, Hindi) with a `|…|` IPA override that routes inline phoneme sequences directly to the tokenizer. Japanese is deferred pending OpenJTalk integration.
-
-```swift
-import FluidAudio
-
-Task {
-    let manager = try await MagpieTtsManager.downloadAndCreate(
-        languages: [.english, .spanish]
-    )
-    let result = try await manager.synthesize(
-        text: "Hello | ˈ n ɛ m o ʊ | from FluidAudio.",
-        speaker: .john,
-        language: .english
-    )
-    let wav = AudioWAV.data(from: result.samples, sampleRate: result.sampleRate)
-    try wav.write(to: URL(fileURLWithPath: "hello.wav"))
-}
-```
-
-```bash
-# Pre-download assets for selected languages
-swift run fluidaudiocli magpie download --languages en,es
-
-# Synthesize with IPA override enabled (default)
-swift run fluidaudiocli magpie text --text "Hello | ˈ n ɛ m o ʊ |." \
-    --speaker 0 --language en --output hello.wav
-
-# Classifier-free guidance and sampling controls
-swift run fluidaudiocli magpie text --text "Bonjour." --language fr \
-    --cfg 2.5 --temperature 0.6 --topk 80 --seed 42 --output bonjour.wav
-```
-
-Parity / probe / compute-plan tooling lives upstream in `mobius` (Python).
-
-Assets (4 CoreML models + `constants/` + per-language tokenizer files) are fetched from [`FluidInference/magpie-tts-multilingual-357m-coreml`](https://huggingface.co/FluidInference/magpie-tts-multilingual-357m-coreml) on first use. The 1-layer local transformer (256d, top-k + temperature sampling, forbidden-token mask) runs on CPU via Accelerate/BNNS; the 12-layer decoder KV cache is rolled stateful across steps.
-
-When `--seed N` is supplied, sampling is driven by a NumPy-compatible MT19937 RNG so the Swift output is bit-reproducible against the Python reference seeded with `np.random.seed(N)`.
 
 ## Continuous Integration
 

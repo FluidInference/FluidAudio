@@ -7,7 +7,6 @@ public enum Repo: String, CaseIterable, Sendable {
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
-    case parakeetCtcZhCn = "FluidInference/parakeet-ctc-0.6b-zh-cn-coreml"
     /// SenseVoiceSmall (FunASR) — non-autoregressive multilingual ASR (50+ langs).
     /// 3-stage: fp32 CPU preprocessor (waveform→560-d LFR feats) + fp16 ANE
     /// encoder+CTC (+ fp32 fallback) + host greedy-CTC decode. See ASR/SenseVoice.
@@ -25,10 +24,15 @@ public enum Repo: String, CaseIterable, Sendable {
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case parakeetEou1280 = "FluidInference/parakeet-realtime-eou-120m-coreml/1280ms"
+    case nemotronStreaming2240 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/2240ms"
     case nemotronStreaming1120 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/1120ms"
     case nemotronStreaming560 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/560ms"
-    case nemotronStreaming160 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/160ms"
-    case nemotronStreaming80 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/80ms"
+    /// Multilingual streaming model. The HF repo is organized as
+    /// `<lang>/<tier>ms/` subfolders (9 languages x 4 chunk tiers); the
+    /// specific variant subdirectory is supplied dynamically at download
+    /// time (see `StreamingNemotronMultilingualAsrManager.downloadAndPreloadShared`),
+    /// so this case carries no static subPath.
+    case nemotronMultilingual = "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     /// Root of the kokoro HF repo. The mono Kokoro TTS backend was removed in
     /// favor of `kokoroAne`/`kokoroAneZh`, but this case is kept because the
@@ -44,12 +48,9 @@ public enum Repo: String, CaseIterable, Sendable {
     case lseendDihard2 = "FluidInference/ls-eend-coreml/optimized/dih2"
     case lseendDihard3 = "FluidInference/ls-eend-coreml/optimized/dih3"
     case pocketTts = "FluidInference/pocket-tts-coreml"
-    case qwen3Asr = "FluidInference/qwen3-asr-0.6b-coreml/f32"
-    case qwen3AsrInt8 = "FluidInference/qwen3-asr-0.6b-coreml/int8"
     case multilingualG2p = "FluidInference/charsiu-g2p-byt5-coreml"
     case parakeetTdtCtc110m = "FluidInference/parakeet-tdt-ctc-110m-coreml"
     case cohereTranscribeCoreml = "FluidInference/cohere-transcribe-03-2026-coreml/q8"
-    case magpieTts = "FluidInference/magpie-tts-multilingual-357m-coreml"
     /// StyleTTS2 LibriTTS — `iteration_3/compiled/` is the only directory
     /// with `.mlmodelc` artifacts; the parent repo also ships `packages/`
     /// (`.mlpackage` source) and `swift/` (a debug harness) that the Swift
@@ -65,6 +66,8 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Repository slug (without owner)
     public var name: String {
         switch self {
+        case .nemotronMultilingual:
+            return "Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"
         case .vad:
             return "silero-vad-coreml"
         case .parakeetV3:
@@ -75,8 +78,6 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-ctc-110m-coreml"
         case .parakeetCtc06b:
             return "parakeet-ctc-0.6b-coreml"
-        case .parakeetCtcZhCn:
-            return "parakeet-ctc-0.6b-zh-cn-coreml"
         case .senseVoiceSmall:
             return "sensevoice-small-coreml"
         case .campPlus:
@@ -91,14 +92,12 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-realtime-eou-120m-coreml/320ms"
         case .parakeetEou1280:
             return "parakeet-realtime-eou-120m-coreml/1280ms"
+        case .nemotronStreaming2240:
+            return "nemotron-speech-streaming-en-0.6b-coreml/2240ms"
         case .nemotronStreaming1120:
             return "nemotron-speech-streaming-en-0.6b-coreml/1120ms"
         case .nemotronStreaming560:
             return "nemotron-speech-streaming-en-0.6b-coreml/560ms"
-        case .nemotronStreaming160:
-            return "nemotron-speech-streaming-en-0.6b-coreml/160ms"
-        case .nemotronStreaming80:
-            return "nemotron-speech-streaming-en-0.6b-coreml/80ms"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -119,18 +118,12 @@ public enum Repo: String, CaseIterable, Sendable {
             return "ls-eend-coreml/optimized/dih3"
         case .pocketTts:
             return "pocket-tts-coreml"
-        case .qwen3Asr:
-            return "qwen3-asr-0.6b-coreml/f32"
-        case .qwen3AsrInt8:
-            return "qwen3-asr-0.6b-coreml/int8"
         case .multilingualG2p:
             return "charsiu-g2p-byt5-coreml"
         case .parakeetTdtCtc110m:
             return "parakeet-tdt-ctc-110m-coreml"
         case .cohereTranscribeCoreml:
             return "cohere-transcribe-03-2026-coreml/q8"
-        case .magpieTts:
-            return "magpie-tts-multilingual-357m-coreml"
         case .styletts2:
             return "StyleTTS-2-coreml/iteration_3/compiled"
         case .supertonic3:
@@ -149,14 +142,14 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .kokoroAne, .kokoroAneZh:
             return "FluidInference/kokoro-82m-coreml"
-        case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
+        case .nemotronStreaming2240, .nemotronStreaming1120, .nemotronStreaming560:
             return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
+        case .nemotronMultilingual:
+            return "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"
         case .sortformer:
             return "FluidInference/diar-streaming-sortformer-coreml"
         case .lseendAmi, .lseendCallHome, .lseendDihard2, .lseendDihard3:
             return "FluidInference/ls-eend-coreml"
-        case .qwen3Asr, .qwen3AsrInt8:
-            return "FluidInference/qwen3-asr-0.6b-coreml"
         case .parakeetTdtCtc110m:
             return "FluidInference/parakeet-tdt-ctc-110m-coreml"
         case .cohereTranscribeCoreml:
@@ -181,18 +174,12 @@ public enum Repo: String, CaseIterable, Sendable {
             return "320ms"
         case .parakeetEou1280:
             return "1280ms"
-        case .qwen3Asr:
-            return "f32"
-        case .qwen3AsrInt8:
-            return "int8"
+        case .nemotronStreaming2240:
+            return "nemotron_coreml_2240ms"
         case .nemotronStreaming1120:
             return "nemotron_coreml_1120ms"
         case .nemotronStreaming560:
             return "nemotron_coreml_560ms"
-        case .nemotronStreaming160:
-            return "nemotron_coreml_160ms"
-        case .nemotronStreaming80:
-            return "nemotron_coreml_80ms"
         case .lseendAmi:
             return "optimized/ami"
         case .lseendCallHome:
@@ -225,22 +212,20 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-eou-streaming/320ms"
         case .parakeetEou1280:
             return "parakeet-eou-streaming/1280ms"
+        case .nemotronMultilingual:
+            return "nemotron-multilingual"
+        case .nemotronStreaming2240:
+            return "nemotron-streaming/2240ms"
         case .nemotronStreaming1120:
             return "nemotron-streaming/1120ms"
         case .nemotronStreaming560:
             return "nemotron-streaming/560ms"
-        case .nemotronStreaming160:
-            return "nemotron-streaming/160ms"
-        case .nemotronStreaming80:
-            return "nemotron-streaming/80ms"
         case .sortformer:
             return "sortformer"
         case .parakeetCtc110m:
             return "parakeet-ctc-110m-coreml"
         case .parakeetCtc06b:
             return "parakeet-ctc-0.6b-coreml"
-        case .parakeetCtcZhCn:
-            return "parakeet-ctc-zh-cn"
         case .parakeetJa:
             return "parakeet-ja"
         case .parakeetTdtCtc110m:
@@ -255,8 +240,6 @@ public enum Repo: String, CaseIterable, Sendable {
             return "ls-eend/dih3"
         case .cohereTranscribeCoreml:
             return "cohere-transcribe/q8"
-        case .magpieTts:
-            return "magpie-tts"
         case .styletts2:
             return "styletts2"
         case .supertonic3:
@@ -395,30 +378,6 @@ public enum ModelNames {
         public static let requiredModels: Set<String> = [
             melSpectrogramPath,
             audioEncoderPath,
-        ]
-    }
-
-    /// CTC zh-CN model names (full pipeline: Preprocessor + Encoder + CTC Decoder)
-    public enum CTCZhCn {
-        public static let preprocessor = "Preprocessor"
-        public static let encoder = "Encoder-v2-int8"  // Default to int8 quantized version
-        public static let encoderFp32 = "Encoder-v1-fp32"
-        public static let decoder = "Decoder"
-
-        public static let preprocessorFile = preprocessor + ".mlmodelc"
-        public static let encoderFile = encoder + ".mlmodelc"
-        public static let encoderFp32File = encoderFp32 + ".mlmodelc"
-        public static let decoderFile = decoder + ".mlmodelc"
-
-        // Vocabulary JSON path
-        public static let vocabularyFile = "vocab.json"
-
-        // Download both encoder variants (int8 and fp32) so users can choose at runtime
-        public static let requiredModels: Set<String> = [
-            preprocessorFile,
-            encoderFile,  // int8 encoder
-            encoderFp32File,  // fp32 encoder
-            decoderFile,
         ]
     }
 
@@ -567,6 +526,9 @@ public enum ModelNames {
         public static let encoderFile = encoder + ".mlmodelc"
         public static let decoderFile = decoder + ".mlmodelc"
         public static let jointFile = joint + ".mlmodelc"
+        /// Optional fused decoder+joint (B1). Present in tiers that ship the
+        /// merged inner-loop model (e.g. 2240ms); loaded only if the file exists.
+        public static let decoderJointFile = "decoder_joint.mlmodelc"
 
         // Encoder in subdirectory (int8 quantized only)
         public static let encoderInt8File = "encoder/encoder_int8.mlmodelc"
@@ -576,9 +538,41 @@ public enum ModelNames {
             encoderInt8File,
             decoderFile,
             jointFile,
+            decoderJointFile,
             tokenizer,
             metadata,
         ]
+    }
+
+    /// Nemotron Speech Streaming Multilingual 0.6B model names.
+    ///
+    /// Unlike the English variant, the multilingual build keeps all four
+    /// CoreML artifacts at the top level (no `encoder/` subdirectory), and
+    /// the encoder takes an extra `prompt_id` int32 input per chunk.
+    /// The model is local-path-only at the moment (no HuggingFace repo yet),
+    /// so there is no `Repo` enum case and no `requiredModels` set wired into
+    /// `getRequiredModelNames`.
+    public enum NemotronMultilingualStreaming {
+        public static let preprocessor = "preprocessor"
+        public static let encoder = "encoder"
+        public static let decoder = "decoder"
+        public static let joint = "joint"
+        public static let tokenizer = "tokenizer.json"
+        public static let metadata = "metadata.json"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+        public static let jointFile = joint + ".mlmodelc"
+
+        /// Same model names with the uncompiled `.mlpackage` extension that
+        /// `mobius/.../coreml/build_int8/` ships before CoreML compilation.
+        /// `StreamingNemotronMultilingualAsrManager` accepts either layout
+        /// (compiled `.mlmodelc` is preferred when both are present).
+        public static let preprocessorPackage = preprocessor + ".mlpackage"
+        public static let encoderPackage = encoder + ".mlpackage"
+        public static let decoderPackage = decoder + ".mlpackage"
+        public static let jointPackage = joint + ".mlpackage"
     }
 
     /// Sortformer streaming diarization model names
@@ -741,50 +735,31 @@ public enum ModelNames {
         }
     }
 
-    /// Qwen3-ASR model names
-    public enum Qwen3ASR {
-        public static let audioEncoderFile = "qwen3_asr_audio_encoder_v2.mlmodelc"
-        public static let embeddingFile = "qwen3_asr_embedding.mlmodelc"
-        public static let decoderStatefulFile = "qwen3_asr_decoder_stateful.mlmodelc"
-        public static let decoderFullFile = "qwen3_asr_decoder_full.mlmodelc"
-        public static let embeddingsFile = "qwen3_asr_embeddings.bin"
-
-        /// Legacy model names (lmHead is now fused into decoder_stateful)
-        public static let lmHeadFile = "qwen3_asr_lm_head.mlmodelc"
-        public static let decoderStackFile = "qwen3_asr_decoder_stack.mlmodelc"
-        public static let decoderPrefillFile = "qwen3_asr_decoder_prefill.mlmodelc"
-
-        /// Required models for 3-model pipeline (with embedding CoreML model)
-        public static let requiredModels: Set<String> = [
-            audioEncoderFile,
-            embeddingFile,
-            decoderStatefulFile,
-        ]
-
-        /// Required files for 2-model pipeline (with Swift-side embedding)
-        public static let requiredModelsFull: Set<String> = [
-            audioEncoderFile,
-            decoderStatefulFile,
-            embeddingsFile,
-        ]
-    }
-
     /// PocketTTS model names (flow-matching language model TTS)
     public enum PocketTTS {
         public static let condStep = "cond_step"
+        /// Optional one-shot conditioning prefill. Fills the whole voice+text
+        /// KV block in a single predict; when the file is absent the prefill
+        /// runs token-by-token through `cond_step` (same output schema).
+        public static let condPrefill = "cond_prefill"
         public static let flowlmStep = "flowlm_step"
         /// int8 variant of the FlowLM transformer published upstream alongside
         /// the default `flowlm_step`. Lives in the same `v2/<lang>/` directory
         /// and gets selected when the caller asks for `.int8` precision.
         public static let flowlmStepV2 = "flowlm_stepv2"
         public static let flowDecoder = "flow_decoder"
+        /// v2.1 fused flow decoder (8-step LSD unrolled, 100% ANE). Replaces
+        /// the per-step `flow_decoder` in v2.1 packs.
+        public static let flowDecoderFused = "flow_decoder_fused"
         public static let mimiDecoder = "mimi_decoder"
         public static let mimiEncoder = "mimi_encoderv2"
 
         public static let condStepFile = condStep + ".mlmodelc"
+        public static let condPrefillFile = condPrefill + ".mlmodelc"
         public static let flowlmStepFile = flowlmStep + ".mlmodelc"
         public static let flowlmStepV2File = flowlmStepV2 + ".mlmodelc"
         public static let flowDecoderFile = flowDecoder + ".mlmodelc"
+        public static let flowDecoderFusedFile = flowDecoderFused + ".mlmodelc"
         public static let mimiDecoderFile = mimiDecoder + ".mlmodelc"
         public static let mimiEncoderFile = mimiEncoder + ".mlmodelc"
 
@@ -806,9 +781,9 @@ public enum ModelNames {
         /// given precision. The set differs only in the FlowLM filename.
         public static func requiredModels(precision: PocketTtsPrecision) -> Set<String> {
             [
-                condStepFile,
+                condPrefillFile,
                 flowlmStepFile(precision: precision),
-                flowDecoderFile,
+                flowDecoderFusedFile,
                 mimiDecoderFile,
                 constantsBinDir,
             ]
@@ -817,55 +792,11 @@ public enum ModelNames {
         /// Required files for the default precision. Kept for callers that
         /// haven't been updated to pass a precision argument.
         public static let requiredModels: Set<String> = [
-            condStepFile,
+            condPrefillFile,
             flowlmStepFile,
-            flowDecoderFile,
+            flowDecoderFusedFile,
             mimiDecoderFile,
             constantsBinDir,
-        ]
-    }
-
-    /// Magpie TTS Multilingual 357M model names.
-    ///
-    /// Four CoreML models + a `constants/` directory + a `tokenizer/` directory of
-    /// per-language lookup data. The `decoder_prefill` model is optional; when
-    /// absent the prefill runs step-by-step through `decoder_step`.
-    public enum Magpie {
-        public static let textEncoder = "text_encoder"
-        public static let decoderPrefill = "decoder_prefill"
-        public static let decoderStep = "decoder_step"
-        /// v1: T=256 monolithic, fp16, CPU. Legacy fallback (noisy + slow).
-        public static let nanocodecDecoder = "nanocodec_decoder"
-        /// v2: T_in=24 chunked, fp16. Fast (~43% ANE) but noisy on voiced speech.
-        public static let nanocodecDecoderV2 = "nanocodec_decoder_v2"
-        /// v3: T_in=24 chunked, fp32, CPU. Audibly clean (default).
-        public static let nanocodecDecoderV3 = "nanocodec_decoder_v3"
-        /// v4: T_in=24 chunked, fp32 compute + 8-bit kmeans palettized weights, CPU.
-        /// Acoustically transparent vs v3 (33.6 dB SNR on AR speech, identical
-        /// quiet floor) at ~4× smaller on disk (31 MB vs 121 MB) and ~11 %
-        /// lower peak RSS. Same recipe Kokoro Noise uses (`fp32 + int8pal`).
-        public static let nanocodecDecoderV4 = "nanocodec_decoder_v4"
-
-        public static let textEncoderFile = textEncoder + ".mlmodelc"
-        public static let decoderPrefillFile = decoderPrefill + ".mlmodelc"
-        public static let decoderStepFile = decoderStep + ".mlmodelc"
-        public static let nanocodecDecoderFile = nanocodecDecoder + ".mlmodelc"
-        public static let nanocodecDecoderV2File = nanocodecDecoderV2 + ".mlmodelc"
-        public static let nanocodecDecoderV3File = nanocodecDecoderV3 + ".mlmodelc"
-        public static let nanocodecDecoderV4File = nanocodecDecoderV4 + ".mlmodelc"
-
-        public static let constantsDir = "constants"
-        public static let tokenizerDir = "tokenizer"
-
-        /// Files required for English synthesis. Other languages append their own
-        /// lookup files on top (see `MagpieResourceDownloader`). Listing
-        /// `nanocodecDecoderV3File` ensures legacy v1-only caches get
-        /// re-downloaded and upgraded to the clean v3.
-        public static let requiredModels: Set<String> = [
-            textEncoderFile,
-            decoderStepFile,
-            nanocodecDecoderV3File,
-            constantsDir,
         ]
     }
 
@@ -980,6 +911,60 @@ public enum ModelNames {
         /// Models + companion JSON files the downloader must fetch.
         public static let requiredFiles: Set<String> =
             requiredModels.union([configFile, unicodeIndexerFile])
+
+        // MARK: VectorEstimator variants
+
+        /// The three modules shared by every VectorEstimator variant.
+        public static let sharedModelFiles: Set<String> = [
+            textEncoderFile, durationPredictorFile, vocoderFile,
+        ]
+        public static let companionFiles: Set<String> = [configFile, unicodeIndexerFile]
+
+        /// Fixed latent buckets published for ANE residency (smallest ≥ chunk
+        /// length is selected at synthesis time).
+        public static let aneBuckets: [Int] = [128, 256, 512]
+
+        /// Quantized / fixed-length VectorEstimator builds live under this repo
+        /// subdirectory; the FP16 dynamic model + the 3 shared modules sit at
+        /// the repo root.
+        public static let variantsSubdir = "VectorEstimatorVariants"
+
+        /// Bundle (dir) name of a VectorEstimator build, e.g.
+        /// `VectorEstimator`, `VectorEstimator_int4`, `VectorEstimator_L256_int8`.
+        public static func vectorEstimatorName(precisionSuffix: String?, bucket: Int?) -> String {
+            var name = vectorEstimator
+            if let bucket { name += "_L\(bucket)" }
+            if let precisionSuffix { name += "_\(precisionSuffix)" }
+            return name
+        }
+
+        /// Repo-relative `.mlmodelc` path for a VectorEstimator build. FP16
+        /// dynamic stays at the root; every quantized/bucketed variant is under
+        /// `variantsSubdir`.
+        public static func vectorEstimatorFile(precisionSuffix: String?, bucket: Int?) -> String {
+            let base = vectorEstimatorName(precisionSuffix: precisionSuffix, bucket: bucket) + ".mlmodelc"
+            if precisionSuffix == nil && bucket == nil { return base }
+            return "\(variantsSubdir)/\(base)"
+        }
+
+        /// Files to fetch for a given VectorEstimator download variant token
+        /// (see `Supertonic3VectorEstimator.downloadVariant`). `nil` ⇒ the
+        /// historical FP16 dynamic model.
+        public static func requiredFiles(veVariant: String?) -> Set<String> {
+            var set = sharedModelFiles.union(companionFiles)
+            switch veVariant {
+            case .some(let v) where v.hasPrefix("dyn-"):
+                set.insert(vectorEstimatorFile(precisionSuffix: String(v.dropFirst(4)), bucket: nil))
+            case .some(let v) where v.hasPrefix("ane-"):
+                let q = String(v.dropFirst(4))
+                for b in aneBuckets {
+                    set.insert(vectorEstimatorFile(precisionSuffix: q, bucket: b))
+                }
+            default:
+                set.insert(vectorEstimatorFile)  // fp16 dynamic
+            }
+            return set
+        }
     }
 
     /// Multilingual G2P (CharsiuG2P ByT5) model names
@@ -1104,6 +1089,19 @@ public enum ModelNames {
 
     static func getRequiredModelNames(for repo: Repo, variant: String?) -> Set<String> {
         switch repo {
+        case .nemotronMultilingual:
+            // Compiled .mlmodelc component dirs. Download is normally driven by
+            // `downloadSubdirectory` (dynamic <lang>/<tier>ms path), which does
+            // not consult this set; provided for completeness / exhaustiveness.
+            return [
+                NemotronMultilingualStreaming.preprocessorFile,
+                NemotronMultilingualStreaming.encoderFile,
+                NemotronMultilingualStreaming.decoderFile,
+                NemotronMultilingualStreaming.jointFile,
+                "decoder_joint.mlmodelc",
+                "decoder_joint_noencproj.mlmodelc",
+                "joint_noencproj_batched.mlmodelc",
+            ]
         case .vad:
             return ModelNames.VAD.requiredModels
         case .parakeetV3:
@@ -1115,8 +1113,6 @@ public enum ModelNames {
             return ModelNames.ASR.requiredModelsFused
         case .parakeetCtc110m, .parakeetCtc06b:
             return ModelNames.CTC.requiredModels
-        case .parakeetCtcZhCn:
-            return ModelNames.CTCZhCn.requiredModels
         case .senseVoiceSmall:
             return ModelNames.SenseVoice.requiredModels
         case .campPlus:
@@ -1127,7 +1123,7 @@ public enum ModelNames {
             return ModelNames.TDTJa.requiredModels
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return ModelNames.ParakeetEOU.requiredModels
-        case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
+        case .nemotronStreaming2240, .nemotronStreaming1120, .nemotronStreaming560:
             return ModelNames.NemotronStreaming.requiredModels
         case .diarizer:
             if variant == "offline" {
@@ -1155,14 +1151,10 @@ public enum ModelNames {
                 return [variant + ".mlmodelc"]
             }
             return ModelNames.LSEEND.requiredModels
-        case .qwen3Asr, .qwen3AsrInt8:
-            return ModelNames.Qwen3ASR.requiredModelsFull
         case .multilingualG2p:
             return ModelNames.MultilingualG2P.requiredModels
         case .cohereTranscribeCoreml:
             return ModelNames.CohereTranscribe.requiredModels
-        case .magpieTts:
-            return ModelNames.Magpie.requiredModels
         case .styletts2:
             // Sentinel variants:
             //   "all"     → 14 bundles (8 defaults + 6 buckets)
@@ -1181,7 +1173,7 @@ public enum ModelNames {
                 return ModelNames.StyleTTS2.requiredModels
             }
         case .supertonic3:
-            return ModelNames.Supertonic3.requiredFiles
+            return ModelNames.Supertonic3.requiredFiles(veVariant: variant)
         }
     }
 }

@@ -30,8 +30,8 @@ final class StreamingAsrManagerTests: XCTestCase {
     // MARK: - StreamingModelVariant Tests
 
     func testAllVariantsCount() {
-        // 3 EOU + 2 Nemotron = 5 streaming variants
-        XCTAssertEqual(StreamingModelVariant.allCases.count, 5)
+        // 3 EOU + 3 Nemotron (2240/1120/560) = 6 streaming variants
+        XCTAssertEqual(StreamingModelVariant.allCases.count, 6)
     }
 
     func testAllVariantsHaveDisplayName() {
@@ -63,7 +63,7 @@ final class StreamingAsrManagerTests: XCTestCase {
         }
 
         XCTAssertEqual(eouVariants.count, 3, "Expected 3 EOU variants")
-        XCTAssertEqual(nemotronVariants.count, 2, "Expected 2 Nemotron variants")
+        XCTAssertEqual(nemotronVariants.count, 3, "Expected 3 Nemotron variants")
     }
 
     func testEouVariantsHaveChunkSize() {

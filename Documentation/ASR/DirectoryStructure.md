@@ -29,7 +29,7 @@ ASR/
 │   ├── TdtDecoderV2.swift
 │   ├── TdtDecoderV3.swift
 │   └── ...
-├── Streaming/
+└── Streaming/
 │   ├── StreamingAsrManager.swift
 │   ├── StreamingAsrSession.swift
 │   ├── StreamingEouAsrManager.swift
@@ -39,19 +39,15 @@ ASR/
 │   ├── NemotronStreamingConfig.swift
 │   ├── RnntDecoder.swift
 │   └── Tokenizer.swift
-└── Qwen3/
-    ├── Qwen3AsrManager.swift
-    ├── Qwen3AsrConfig.swift
-    └── ...
 ```
 
 ### Problems
 
-1. **Parakeet files at the ASR root.** Files like `AsrManager.swift`, `ChunkProcessor.swift`, and `AudioBuffer.swift` are Parakeet-specific but sit at the `ASR/` root as if they are shared infrastructure. Qwen3 has its own manager and models and shares none of this code.
+1. **Parakeet files at the ASR root.** Files like `AsrManager.swift`, `ChunkProcessor.swift`, and `AudioBuffer.swift` are Parakeet-specific but sit at the `ASR/` root as if they are shared infrastructure.
 
 2. **`Streaming/` conflates two different things.** `StreamingAsrManager` uses an offline encoder with overlapping sliding-window chunks — it is not true streaming. It lived alongside `StreamingEouAsrManager` and `StreamingNemotronAsrManager`, which are actual cache-aware streaming engines. The naming made it unclear which was which.
 
-3. **`CTC/` and `CustomVocabulary/` at the top level.** These are only used by the sliding-window pipeline, not by true streaming or Qwen3. Their placement suggested they were shared ASR utilities.
+3. **`CTC/` and `CustomVocabulary/` at the top level.** These are only used by the sliding-window pipeline, not by true streaming. Their placement suggested they were shared ASR utilities.
 
 4. **`TDT/` naming.** "TDT" refers to the Token-and-Duration Transducer algorithm, but the directory contains general decoder logic (hypothesis management, BLAS indexing, frame views) that isn't specific to TDT as a concept.
 
@@ -95,9 +91,7 @@ ASR/
 │   │   │   ├── ARPALanguageModel.swift
 │   │   │   ├── CtcDecoder.swift
 │   │   │   ├── CtcJaManager.swift       (Japanese)
-│   │   │   ├── CtcJaModels.swift
-│   │   │   ├── CtcZhCnManager.swift     (Chinese)
-│   │   │   └── CtcZhCnModels.swift
+│   │   │   └── CtcJaModels.swift
 │   │   │
 │   │   └── CustomVocabulary/
 │   │       ├── BKTree/
@@ -120,14 +114,6 @@ ASR/
 │   └── TokenDeduplication/
 │       ├── SequenceMatch.swift
 │       └── SequenceMatcher.swift
-│
-└── Qwen3/
-    ├── Qwen3AsrConfig.swift
-    ├── Qwen3AsrManager.swift
-    ├── Qwen3AsrModels.swift
-    ├── Qwen3RoPE.swift
-    ├── Qwen3StreamingManager.swift
-    └── WhisperMelSpectrogram.swift
 ```
 
 ### Algorithm-based organization: TDT/ vs CTC/
@@ -142,16 +128,15 @@ Batch processing managers are now grouped by decoding algorithm within `SlidingW
 **CTC (Connectionist Temporal Classification):**
 - `CtcDecoder` - Greedy CTC decoding with optional LM
 - `CtcJaManager` - Japanese CTC batch processing
-- `CtcZhCnManager` - Chinese CTC batch processing
 - `ARPALanguageModel` - ARPA LM support for CTC decoding
 
 Both algorithm families use the sliding-window approach (large overlapping chunks with offline encoder), distinguishing them from the true streaming engines in `Streaming/`.
 
 ## What Changed and Why
 
-### Model family split: `Parakeet/` vs `Qwen3/`
+### Model family split: `Parakeet/`
 
-Parakeet and Qwen3 share zero code. Parakeet uses a FastConformer encoder with TDT decoding. Qwen3 uses a Whisper-style encoder-decoder transformer. Grouping by model family makes ownership obvious — if you are working on Parakeet, everything you need is under `Parakeet/`.
+Parakeet uses a FastConformer encoder with TDT decoding. Grouping by model family makes ownership obvious — if you are working on Parakeet, everything you need is under `Parakeet/`.
 
 ### `TDT/` renamed to `Decoder/`
 
@@ -238,14 +223,12 @@ Sources/FluidAudioCLI/Commands/ASR/
 ├── Parakeet/
 │   ├── SlidingWindow/    (transcribe, benchmarks, multi-stream)
 │   └── Streaming/        (EOU command, Nemotron transcribe/benchmark)
-└── Qwen3/                (Qwen3 transcribe, benchmark)
 
 Tests/FluidAudioTests/ASR/
 ├── Parakeet/
 │   ├── SlidingWindow/
 │   │   ├── TDT/          (AsrManager, ChunkProcessor, TdtJa, Decoder tests)
-│   │   ├── CTC/          (CtcJa, CtcZhCn tests)
+│   │   ├── CTC/          (CtcJa tests)
 │   │   └── CustomVocabulary/ (BKTree, Rescorer, WordSpotting tests)
 │   └── Streaming/        (EOU, Nemotron, engine protocol tests)
-└── Qwen3/                (config, RoPE tests)
 ```

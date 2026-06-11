@@ -11,7 +11,7 @@ public class NemotronBenchmark {
         var maxFiles: Int?
         var subset: String = "test-clean"
         var modelDir: URL?
-        var chunkSize: NemotronChunkSize = .ms1120
+        var chunkSize: NemotronChunkSize = .ms2240
 
         public init() {}
     }
@@ -64,13 +64,12 @@ public class NemotronBenchmark {
                 i += 1
                 if i < arguments.count, let ms = Int(arguments[i]) {
                     switch ms {
+                    case 2240: config.chunkSize = .ms2240
                     case 1120: config.chunkSize = .ms1120
                     case 560: config.chunkSize = .ms560
-                    case 160: config.chunkSize = .ms160
-                    case 80: config.chunkSize = .ms80
                     default:
                         logger.warning(
-                            "Invalid chunk size: \(ms)ms. Valid options: 1120, 560, 160, or 80. Using default 1120ms.")
+                            "Invalid chunk size: \(ms)ms. Valid options: 2240, 1120, or 560. Using default 2240ms.")
                     }
                 }
             case "--help", "-h":
@@ -97,7 +96,7 @@ public class NemotronBenchmark {
                 --max-files, -n <count>   Maximum files to process (default: all)
                 --subset, -s <name>       LibriSpeech subset (default: test-clean)
                 --model-dir, -m <path>    Path to Nemotron CoreML models
-                --chunk, -c <ms>          Chunk size: 1120, 560, 160, or 80 (default: 1120)
+                --chunk, -c <ms>          Chunk size: 2240, 1120, or 560 (default: 2240)
                 --help, -h                Show this help
 
             Chunk Sizes:

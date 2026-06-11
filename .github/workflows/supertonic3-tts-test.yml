@@ -1,0 +1,148 @@
+name: Supertonic3 Smoke Test
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  supertonic3-smoke-test:
+    name: Supertonic3 Smoke Test
+    runs-on: macos-15
+    permissions:
+      contents: read
+      pull-requests: write
+
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Application Support/FluidAudio/Models/supertonic-3
+          key: ${{ runner.os }}-supertonic3-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/Supertonic3/**', 'Sources/FluidAudio/ModelNames.swift') }}
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Run Smoke Test
+        id: smoketest
+        run: |
+          BENCHMARK_START=$(date +%s)
+
+          echo "========================================="
+          echo "Supertonic3 smoke test (ANE-bucketed int4 VectorEstimator)"
+          echo "========================================="
+          echo ""
+          echo "NOTE: --ve-variant int4 selects the fixed-length, ANE-resident"
+          echo "VectorEstimator. CI VMs lack a physical Neural Engine, so Core ML"
+          echo "falls back to CPU here — this validates download + variant"
+          echo "resolution + the synthesis pipeline, not ANE residency itself."
+          echo ""
+
+          TEXT="The quick brown fox jumps over the lazy dog near the riverbank."
+
+          if .build/release/fluidaudiocli tts "$TEXT" \
+            --backend supertonic3 \
+            --ve-variant int4 \
+            --voice M1 \
+            --lang en \
+            --output supertonic3_output.wav 2>&1; then
+            echo "Smoke test PASSED - pipeline completed without crash"
+            echo "SMOKE_STATUS=PASSED" >> $GITHUB_OUTPUT
+          else
+            EXIT_CODE=$?
+            echo "Smoke test FAILED with exit code $EXIT_CODE"
+            echo "SMOKE_STATUS=FAILED" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -f supertonic3_output.wav ]; then
+            SIZE=$(stat -f%z supertonic3_output.wav 2>/dev/null || stat -c%s supertonic3_output.wav 2>/dev/null)
+            echo "Output file size: $SIZE bytes"
+            echo "FILE_SIZE=$SIZE" >> $GITHUB_OUTPUT
+          else
+            echo "FILE_SIZE=0" >> $GITHUB_OUTPUT
+          fi
+
+          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+
+          if [ ! -f supertonic3_output.wav ]; then
+            echo "❌ CRITICAL: Output WAV file not generated"
+            exit 1
+          fi
+
+          FILE_SIZE=$(stat -f%z supertonic3_output.wav 2>/dev/null || stat -c%s supertonic3_output.wav 2>/dev/null)
+          if [ "$FILE_SIZE" -eq 0 ]; then
+            echo "❌ CRITICAL: Output WAV file is empty (0 bytes)"
+            exit 1
+          fi
+
+      - name: Comment PR
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ steps.smoketest.outputs.SMOKE_STATUS }}';
+            const emoji = status === 'PASSED' ? '✅' : '❌';
+            const fileSize = '${{ steps.smoketest.outputs.FILE_SIZE }}';
+            const fileSizeKB = (parseInt(fileSize) / 1024).toFixed(1);
+
+            const body = `## Supertonic3 Smoke Test ${emoji}
+
+            | Check | Result |
+            |-------|--------|
+            | Build | ✅ |
+            | Model download (incl. \`VectorEstimatorVariants/\` int4 buckets) | ${emoji} |
+            | Model load | ${emoji} |
+            | Synthesis pipeline (\`--ve-variant int4\`) | ${emoji} |
+            | Output WAV | ${parseInt(fileSize) > 0 ? '✅' : '❌'} (${fileSizeKB} KB) |
+
+            <sub>Runtime: ${{ steps.smoketest.outputs.EXECUTION_TIME }}</sub>
+
+            <sub>**Note:** CI VMs lack a physical Neural Engine; the ANE-bucketed VectorEstimator falls back to CPU here. This validates download + variant resolution + synthesis, not ANE residency/perf.</sub>
+
+            <!-- fluidaudio-supertonic3-test -->`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.body.includes('<!-- fluidaudio-supertonic3-test -->')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Upload Output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supertonic3-output
+          path: supertonic3_output.wav
+          retention-days: 7

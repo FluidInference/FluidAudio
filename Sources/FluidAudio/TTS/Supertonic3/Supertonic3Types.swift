@@ -58,6 +58,66 @@ public struct Supertonic3Config: Codable, Sendable {
             latentDim: Supertonic3Constants.latentDim))
 }
 
+/// Weight-quantization level for the VectorEstimator stage. All three are
+/// post-training, weight-only compressions that leave placement and speed
+/// unchanged — they only shrink the on-disk / in-memory model:
+///   - `.int8` — linear per-channel symmetric int8 (≈64 MB, transparent).
+///   - `.int6` — 6-bit k-means palettization (≈48 MB, very good).
+///   - `.int4` — 4-bit k-means palettization (≈32 MB, perceptually clean).
+public enum Supertonic3Quantization: String, Sendable, Equatable, CaseIterable {
+    case int8
+    case int6
+    case int4
+}
+
+/// Selects which VectorEstimator build the pipeline downloads and runs.
+///
+/// VectorEstimator is the heaviest stage (run `totalSteps`× per utterance).
+/// Two independent axes — weight precision (size) and shape mode (compute
+/// device):
+///
+/// - `.fp16Dynamic` (default): the original FP16 RangeDim model. Dynamic
+///   shapes ⇒ CPU/GPU; preserves pre-existing behavior.
+/// - `.dynamic(q)`: a weight-quantized RangeDim model. Smaller download, same
+///   placement (dynamic shapes cannot use the ANE).
+/// - `.aneBucketed(q)`: fixed-length L∈{128,256,512} models that land ~94% on
+///   the Neural Engine (~2.7× faster end-to-end). The synthesizer pads each
+///   chunk's latent up to the smallest bucket ≥ its length. Per-chunk length is
+///   bounded by the text chunker, so the 128 bucket covers the common case.
+public enum Supertonic3VectorEstimator: Sendable, Equatable {
+    case fp16Dynamic
+    case dynamic(Supertonic3Quantization)
+    case aneBucketed(Supertonic3Quantization)
+
+    /// Default: ANE-bucketed int4 — ~94% on the ANE, ~2.7× faster end-to-end,
+    /// 4-bit k-means palettization that is perceptually clean. The historical
+    /// fp16 dynamic build stays available via `--ve-variant fp16`.
+    public static let `default`: Supertonic3VectorEstimator = .aneBucketed(.int4)
+
+    /// `nil` for FP16; the rawValue (`"int8"`/`"int6"`/`"int4"`) otherwise.
+    var precisionSuffix: String? {
+        switch self {
+        case .fp16Dynamic: return nil
+        case .dynamic(let q), .aneBucketed(let q): return q.rawValue
+        }
+    }
+
+    var isBucketed: Bool {
+        if case .aneBucketed = self { return true }
+        return false
+    }
+
+    /// Variant token passed to `DownloadUtils.downloadRepo` / `getRequiredModelNames`
+    /// so only the selected VectorEstimator file(s) are fetched.
+    var downloadVariant: String? {
+        switch self {
+        case .fp16Dynamic: return nil
+        case .dynamic(let q): return "dyn-\(q.rawValue)"
+        case .aneBucketed(let q): return "ane-\(q.rawValue)"
+        }
+    }
+}
+
 /// The 10 built-in Supertonic-3 voice styles published at
 /// `FluidInference/supertonic-3-coreml/voice_styles/`: female `f1`-`f5`,
 /// male `m1`-`m5`. Fetch one with

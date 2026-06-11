@@ -12,16 +12,25 @@ Nemotron Speech Streaming 0.6B is a FastConformer RNNT model optimized for strea
 
 ## Benchmark Results
 
-Tested on Apple M2 with LibriSpeech test-clean:
+Three tiers ship (Apple M5 Pro, LibriSpeech test-clean, 100 files, CPU+NE), all from one
+conversion with **B1 fusion** (`decoder_joint.mlmodelc` — decoder+joint merged into one
+CoreML call per RNN-T step, loaded automatically; argmax stays in Swift):
 
-| Chunk Size | WER | RTFx | Files |
-|------------|-----|------|-------|
-| 1120ms | 1.99% | 9.6x | 100 |
-| 560ms | 2.12% | 8.5x | 100 |
-| 160ms | ~10% | 3.5x | 20 |
-| 80ms | ~60% | 1.9x | 20 |
+| Tier | WER | RTFx | Δ vs 1120ms |
+|------|-----|------|-------------|
+| 560ms | 2.28% | 42.1 | −35% |
+| 1120ms | 2.28% | 65.0 | — |
+| **2240ms (default)** | **2.46%** | **93.6** | **+44%** |
 
-160ms and 80ms were only tested on 20 files.
+`.ms2240` is the default: doubling the streaming chunk (224 mel frames = 2× the trained
+14-encoder-frame chunk, so the chunked-attention mask still tiles cleanly) halves per-chunk
+fixed overhead for throughput, at ~1.1 s extra latency and no accuracy cost. Drop to `.ms1120`
+or `.ms560` for lower latency. B1 fusion contributes ~+15% on top of any tier.
+
+> Weights are a faithful conversion of the public `nvidia/nemotron-speech-streaming-en-0.6b`
+> checkpoint (decoder & joint match PyTorch at cos=1.0). WER parity against NVIDIA's internal
+> tuning of the same model is a tracked follow-up; the ladder above is internally consistent
+> (one conversion for all tiers) and reports the relative gains.
 
 ## Quick Start
 
@@ -33,8 +42,8 @@ import FluidAudio
 // Create manager
 let manager = StreamingNemotronAsrManager()
 
-// Load models (defaults to 1120ms chunk size)
-let modelDir = URL(fileURLWithPath: "~/.cache/fluidaudio/models/nemotron-streaming/1120ms")
+// Load models (defaults to the 2240ms tier + B1-fused decode)
+let modelDir = URL(fileURLWithPath: "~/.cache/fluidaudio/models/nemotron-streaming/2240ms")
 try await manager.loadModels(modelDir: modelDir)
 
 // Process audio buffer
@@ -112,10 +121,9 @@ try await manager.loadModels(modelDir: modelDir)
 
 | Chunk Size | mel_frames | pre_encode_cache | total_frames | samples |
 |------------|------------|------------------|--------------|---------|
+| 2240ms (default) | 224 | 9 | 233 | 35,840 |
 | 1120ms | 112 | 9 | 121 | 17,920 |
 | 560ms | 56 | 9 | 65 | 8,960 |
-| 160ms | 16 | 9 | 25 | 2,560 |
-| 80ms | 8 | 9 | 17 | 1,280 |
 
 **Formula:** `chunk_ms = mel_frames × 10ms` (10ms per mel frame)
 

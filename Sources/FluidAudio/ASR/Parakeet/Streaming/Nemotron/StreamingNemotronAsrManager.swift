@@ -15,6 +15,11 @@ public actor StreamingNemotronAsrManager {
     internal var encoder: MLModel?
     internal var decoder: MLModel?
     internal var joint: MLModel?
+    /// Optional fused decoder+joint model (B1). When present, the RNN-T inner
+    /// loop makes one CoreML call per step instead of two (decoder then joint),
+    /// halving per-step dispatch. Argmax stays in Swift. Mirrors the multilingual
+    /// manager's `decoderJoint` path. Falls back to separate decoder+joint when nil.
+    internal var decoderJoint: MLModel?
 
     // Components
     private let audioConverter = AudioConverter()
@@ -55,10 +60,13 @@ public actor StreamingNemotronAsrManager {
     public private(set) var mlConfiguration: MLModelConfiguration
 
     public init(
-        configuration: MLModelConfiguration = MLModelConfiguration(),
+        configuration: MLModelConfiguration? = nil,
         requestedChunkSize: NemotronChunkSize? = nil
     ) {
-        self.mlConfiguration = configuration
+        // Default to `.cpuAndNeuralEngine`: the int8 encoder is ANE-targeted.
+        // Under the bare `MLModelConfiguration()` default (which is `.all`),
+        // CoreML routes int8 ops to GPU and runs ~10× slower than the ANE path.
+        self.mlConfiguration = configuration ?? MLModelConfigurationUtils.defaultConfiguration()
         self.requestedChunkSize = requestedChunkSize
         self.config = NemotronStreamingConfig()
         self.lastToken = Int32(config.blankIdx)
@@ -72,6 +80,11 @@ public actor StreamingNemotronAsrManager {
     /// Load models from a directory containing preprocessor, encoder, decoder, joint, and tokenizer
     /// - Parameter directory: Directory containing the model files
     public func loadModels(from directory: URL) async throws {
+        guard SystemInfo.isAppleSilicon else {
+            throw ASRError.unsupportedPlatform(
+                "Nemotron int8 streaming models require Apple Silicon (ANE). Intel Macs are not supported."
+            )
+        }
         logger.info("Loading Nemotron CoreML models from \(directory.path)...")
 
         // Load config from metadata.json
@@ -96,6 +109,14 @@ public actor StreamingNemotronAsrManager {
         // Load joint
         let jointPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.jointFile)
         self.joint = try await MLModel.load(contentsOf: jointPath, configuration: mlConfiguration)
+
+        // Optional fused decoder+joint (B1). When the tier folder ships a
+        // `decoder_joint.mlmodelc`, prefer it in the inner loop (one call/step).
+        let fusedPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.decoderJointFile)
+        if FileManager.default.fileExists(atPath: fusedPath.path) {
+            self.decoderJoint = try await MLModel.load(contentsOf: fusedPath, configuration: mlConfiguration)
+            logger.info("Loaded fused decoder_joint (B1) — merged inner-loop path enabled")
+        }
 
         // Load tokenizer
         let tokenizerUrl = directory.appendingPathComponent(ModelNames.NemotronStreaming.tokenizer)
@@ -122,7 +143,7 @@ public actor StreamingNemotronAsrManager {
             self.mlConfiguration = configuration
         }
 
-        let chunkSize = requestedChunkSize ?? .ms1120
+        let chunkSize = requestedChunkSize ?? .ms2240
         let repo = chunkSize.repo
 
         let modelsBaseDir =
@@ -166,6 +187,7 @@ public actor StreamingNemotronAsrManager {
         encoder = nil
         decoder = nil
         joint = nil
+        decoderJoint = nil
         tokenizer = nil
         cacheChannel = nil
         cacheTime = nil

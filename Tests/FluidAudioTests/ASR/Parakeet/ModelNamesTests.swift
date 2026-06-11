@@ -32,8 +32,6 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertEqual(Repo.parakeetEou160.subPath, "160ms")
         XCTAssertEqual(Repo.parakeetEou320.subPath, "320ms")
         XCTAssertEqual(Repo.parakeetEou1280.subPath, "1280ms")
-        XCTAssertEqual(Repo.qwen3Asr.subPath, "f32")
-        XCTAssertEqual(Repo.qwen3AsrInt8.subPath, "int8")
         XCTAssertNil(Repo.vad.subPath)
         XCTAssertNil(Repo.parakeetV3.subPath)
     }
@@ -51,13 +49,7 @@ final class ModelNamesTests: XCTestCase {
         let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin"]
         let validDirectories: Set<String> = ["constants_bin"]
 
-        // `magpieTts` is intentionally excluded — it is the only repo that ships
-        // bare directory entries (`constants/`, `tokenizer/`) instead of files.
-        // It's a not-production-ready experimental backend; its directory layout
-        // is asserted in `MagpieConstantsTests` rather than the global whitelist.
-        let reposExcludedFromExtensionCheck: Set<Repo> = [.magpieTts]
-
-        for repo in Repo.allCases where !reposExcludedFromExtensionCheck.contains(repo) {
+        for repo in Repo.allCases {
             let models = ModelNames.getRequiredModelNames(for: repo, variant: nil)
             for model in models {
                 let hasValidExtension = validExtensions.contains(where: { model.hasSuffix($0) })
@@ -113,11 +105,6 @@ final class ModelNamesTests: XCTestCase {
     func testVADModelNames() {
         XCTAssertEqual(ModelNames.VAD.requiredModels.count, 1)
         XCTAssertTrue(ModelNames.VAD.requiredModels.first!.hasSuffix(".mlmodelc"))
-    }
-
-    func testQwen3ASRRequiredModels() {
-        XCTAssertFalse(ModelNames.Qwen3ASR.requiredModels.isEmpty)
-        XCTAssertFalse(ModelNames.Qwen3ASR.requiredModelsFull.isEmpty)
     }
 
     // MARK: - TDT-CTC-110M Repo Tests

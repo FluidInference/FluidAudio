@@ -73,16 +73,19 @@ public enum Supertonic3Constants {
     public static let defaultSilenceDuration: Float = 0.3
 
     /// Max characters per chunk when synthesizing long English/Latin text.
-    /// Sized to fit within `textTFixed = 128` after NFKD decomposition and
-    /// `<lang>…</lang>` wrapping (~10-char overhead, allowing 8-char tags
-    /// plus a small margin for diacritic expansion). Longer text is split
-    /// by `Supertonic3TextChunker` before reaching the encoder.
-    public static let maxChunkLengthLatin: Int = 110
+    /// Although `textTFixed = 128` would *fit* ~110 chars, the model's output
+    /// degrades as a chunk approaches that token window (a 105-char single
+    /// chunk scored 17.6% WER vs 0% at 71 chars), so the cap is held at 70 to
+    /// keep every chunk in the clean regime. Longer text is split by
+    /// `Supertonic3TextChunker` before reaching the encoder. See #669.
+    public static let maxChunkLengthLatin: Int = 70
 
-    /// Tighter chunk cap for Korean / Japanese. CJK uses more codepoints per
-    /// visible character after NFKD, so we leave additional headroom inside
-    /// the 128-token window.
-    public static let maxChunkLengthCJK: Int = 90
+    /// Tighter chunk cap for Korean / Japanese. CJK expands to more codepoints
+    /// per visible character after NFKD, so the same token-window budget holds
+    /// fewer CJK characters — kept proportionally below `maxChunkLengthLatin`
+    /// (same ~0.82 ratio as the original 90/110) to stay in the clean regime
+    /// and tighter than Latin. See #669.
+    public static let maxChunkLengthCJK: Int = 57
 
     // MARK: - Language whitelist (matches AVAILABLE_LANGS in the reference)
 
@@ -93,6 +96,6 @@ public enum Supertonic3Constants {
         "ru", "sk", "sl", "sv", "tr", "uk", "vi", "na",
     ]
 
-    /// Languages that should use the tighter `maxChunkLengthCJK` (90-char) chunker.
+    /// Languages that should use the tighter `maxChunkLengthCJK` (57-char) chunker.
     public static let cjkLanguages: Set<String> = ["ko", "ja"]
 }

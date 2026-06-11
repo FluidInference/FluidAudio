@@ -12,10 +12,10 @@ final class NemotronStreamingConfigTests: XCTestCase {
 
         XCTAssertEqual(config.sampleRate, 16000)
         XCTAssertEqual(config.melFeatures, 128)
-        XCTAssertEqual(config.chunkMelFrames, 112)
-        XCTAssertEqual(config.chunkMs, 1120)
+        XCTAssertEqual(config.chunkMelFrames, 224)
+        XCTAssertEqual(config.chunkMs, 2240)
         XCTAssertEqual(config.preEncodeCache, 9)
-        XCTAssertEqual(config.totalMelFrames, 121)
+        XCTAssertEqual(config.totalMelFrames, 233)
         XCTAssertEqual(config.vocabSize, 1024)
         XCTAssertEqual(config.blankIdx, 1024)
         XCTAssertEqual(config.encoderDim, 1024)
@@ -27,9 +27,9 @@ final class NemotronStreamingConfigTests: XCTestCase {
 
     func testChunkSamplesComputation() {
         let config = NemotronStreamingConfig()
-        // chunkSamples = chunkMelFrames * 160
-        XCTAssertEqual(config.chunkSamples, 112 * 160)
-        XCTAssertEqual(config.chunkSamples, 17920)
+        // chunkSamples = chunkMelFrames * 160 (default tier is 2240ms)
+        XCTAssertEqual(config.chunkSamples, 224 * 160)
+        XCTAssertEqual(config.chunkSamples, 35840)
     }
 
     // MARK: - P0: JSON Loading - Valid Cases

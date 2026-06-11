@@ -32,14 +32,15 @@ public struct NemotronStreamingConfig: Sendable {
     /// Audio samples per chunk
     public var chunkSamples: Int { chunkMelFrames * 160 }
 
-    /// Default config for 1120ms chunks (backward compatibility)
+    /// Default config for the 2240ms tier (the default chunk size). Overwritten
+    /// by `init(from:)` when a tier's metadata.json is loaded.
     public init() {
         self.sampleRate = 16000
         self.melFeatures = 128
-        self.chunkMelFrames = 112
-        self.chunkMs = 1120
+        self.chunkMelFrames = 224
+        self.chunkMs = 2240
         self.preEncodeCache = 9
-        self.totalMelFrames = 121
+        self.totalMelFrames = 233
         self.vocabSize = 1024
         self.blankIdx = 1024
         self.encoderDim = 1024

@@ -14,6 +14,18 @@ public enum MLModelConfigurationUtils {
         let config = MLModelConfiguration()
         config.allowLowPrecisionAccumulationOnGPU = true
         config.computeUnits = computeUnits
+        // ANE residency hints (iOS 17.4+ / macOS 14.4+). Tells the scheduler
+        // to fold shape work into the ANE program (reshapeFrequency =
+        // .infrequent) and bias compile toward ANE residency
+        // (specializationStrategy = .fastPrediction). Picks up the
+        // "scheduler chose CPU" shape-op residue without touching the model.
+        // NOTE: MLOptimizationHints (reshapeFrequency=.infrequent,
+        // specializationStrategy=.fastPrediction) was tested for this model
+        // and REGRESSED RTFx 126.6 → 93.3 (-26%) on a 1h LS test-clean
+        // bench. The hints trigger re-specialization that lands ops less
+        // optimally for our static-shape graph. Don't re-enable without
+        // re-benching. See /Users/hanweng/Documents/voicelink/results/
+        // for the full investigation.
         return config
     }
 
