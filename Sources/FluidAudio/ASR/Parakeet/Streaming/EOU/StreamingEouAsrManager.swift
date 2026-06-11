@@ -298,7 +298,23 @@ public actor StreamingEouAsrManager {
         let vocabUrl = directory.appendingPathComponent("vocab.json")
         self.tokenizer = try Tokenizer(vocabPath: vocabUrl)
 
-        self.rnntDecoder = RnntDecoder(decoderModel: self.decoder!, jointModel: self.joint!)
+        // Opt-in fused decoder+joint_decision path (single MLModel.prediction per RNNT step).
+        // Enabled only when FLUID_EOU_FUSED=1 AND the fused mlmodelc is present alongside the
+        // other models. Default OFF: the fused fp16 graph is not bit-exact with the two-model
+        // reference (low-margin argmax ties can flip), so it ships opt-in.
+        var fusedModel: MLModel?
+        let fusedRequested = ProcessInfo.processInfo.environment["FLUID_EOU_FUSED"] == "1"
+        let fusedUrl = directory.appendingPathComponent("decoder_joint_decision_fused.mlmodelc")
+        if fusedRequested, FileManager.default.fileExists(atPath: fusedUrl.path) {
+            fusedModel = try await MLModel.load(contentsOf: fusedUrl, configuration: self.configuration)
+            logger.info("FLUID_EOU_FUSED=1: using fused decoder+joint_decision (1 dispatch per RNNT step)")
+        } else if fusedRequested {
+            logger.warning(
+                "FLUID_EOU_FUSED=1 set but \(fusedUrl.lastPathComponent) not found in \(directory.path); using reference decoder+joint path"
+            )
+        }
+
+        self.rnntDecoder = RnntDecoder(decoderModel: self.decoder!, jointModel: self.joint!, fusedModel: fusedModel)
 
         // Initialize States
         try self.resetStates()
