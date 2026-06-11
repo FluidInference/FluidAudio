@@ -497,6 +497,25 @@ swift run -c release fluidaudiocli nemotron-multilingual-benchmark \
 
 Both offline and online versions use the community-1 model (via FluidInference/speaker-diarization-coreml).
 
+### CAM++ speaker embedding (`campplus-embed`)
+
+CoreML CAM++ (FunASR, ~7.2M) speaker-embedding extractor. Model: [FluidInference/campplus-coreml](https://huggingface.co/FluidInference/campplus-coreml). 2-stage: fbank80 preprocessor (fp32/CPU) → CAM++ (RangeDim, CPU/GPU) → 192-d L2-normalized embedding. Hardware: Apple M5 Pro.
+
+| Metric | Value |
+|--------|-------|
+| **AISHELL-1 EER** | **0.48%** |
+| Same-speaker cosine (mean) | 0.805 |
+| Different-speaker cosine (mean) | 0.256 |
+| Trial set | 20 speakers, 6000 same / 6000 different pairs |
+
+**Notes:**
+- EER on AISHELL-1 (clean, read Mandarin) — easier than the official CN-Celeb benchmark (~6–7%); this validates the CoreML embedding discriminates speakers (CoreML↔torch embedding cosine 0.9997–0.99999).
+- Speaker id parsed from the AISHELL `name` field (`BAC009S0764W...` → `S0764`).
+
+```bash
+swift run -c release fluidaudiocli campplus-embed a.wav b.wav   # cosine similarity
+```
+
 ### Offline diarization pipeline
 
 For slightly ~1.2% worse DER we default to a higher step ratio segmentation duration than the baseline community-1 pipeline. This allows us to get nearly ~2x the speed (as expected because we're processing 1/2 of the embeddings). For highly critical use cases, one may should use step ratio = 0.1 and minSegmentDurationSeconds = 0.0
