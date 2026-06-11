@@ -9,7 +9,8 @@ public struct SpeakerManager: Sendable {
     internal let logger = AppLogger(category: "SpeakerManager")
 
     // Constants
-    public static let embeddingSize = 256  // Standard embedding dimension for speaker models
+    public // EXPERIMENT (campplus-der-exp): 192 when CAM++ embeddings are active.
+    nonisolated(unsafe) static var embeddingSize = 256  // Standard embedding dimension for speaker models
 
     // Speaker database: ID -> Speaker
     internal var speakerDatabase: [String: Speaker] = [:]
@@ -69,7 +70,7 @@ public struct SpeakerManager: Sendable {
         var maxNumericId = 0
 
         for speaker in speakers {
-            guard speaker.currentEmbedding.count == Self.embeddingSize else {
+            guard speaker.currentEmbedding.count == Self.embeddingSize || speaker.currentEmbedding.count == 192 else {
                 logger.warning(
                     "Skipping speaker \(speaker.id) - invalid embedding size: \(speaker.currentEmbedding.count)")
                 continue
@@ -139,7 +140,9 @@ public struct SpeakerManager: Sendable {
         speakerThreshold: Float? = nil,
         newName: String? = nil
     ) -> Speaker? {
-        guard !embedding.isEmpty && embedding.count == Self.embeddingSize else {
+        guard !embedding.isEmpty,
+            embedding.count == Self.embeddingSize || embedding.count == 192  // EXPERIMENT: CAM++ 192-d
+        else {
             logger.error("Invalid embedding size: \(embedding.count)")
             return nil
         }
