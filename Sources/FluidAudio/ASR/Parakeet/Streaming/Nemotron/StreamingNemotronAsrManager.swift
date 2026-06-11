@@ -34,6 +34,18 @@ public actor StreamingNemotronAsrManager {
     // Accumulated token IDs
     internal var accumulatedTokenIds: [Int] = []
 
+    // Per-token absolute timings captured during the RNNT decode loop. Each
+    // token's startTime is its absolute encoder-frame index multiplied by
+    // ASRConstants.secondsPerEncoderFrame. Exposed via finishWithTokenTimings()
+    // so callers can derive word-level timestamps (e.g. for speaker attribution).
+    internal var accumulatedTokenTimings: [TokenTiming] = []
+    // Running encoder-frame base across processed chunks (advances by the chunk's
+    // encoder-frame count after each decode loop). Reset with the session.
+    internal var absoluteFrameBase: Int = 0
+    // Snapshot of token timings taken in finish() before the working buffers are
+    // cleared, so finishWithTokenTimings() can return them after finish() runs.
+    internal var lastFinishTokenTimings: [TokenTiming] = []
+
     // Encoder cache states
     internal var cacheChannel: MLMultiArray?
     internal var cacheTime: MLMultiArray?
@@ -174,6 +186,9 @@ public actor StreamingNemotronAsrManager {
             accumulatedTokenIds: &accumulatedTokenIds,
             processedChunks: &processedChunks
         )
+        accumulatedTokenTimings.removeAll()
+        absoluteFrameBase = 0
+        lastFinishTokenTimings.removeAll()
         do {
             try resetStates()
         } catch {
@@ -284,15 +299,36 @@ public actor StreamingNemotronAsrManager {
 
         // Decode accumulated tokens
         let transcript = tokenizer.decode(ids: accumulatedTokenIds)
+        // Snapshot timings before clearing so finishWithTokenTimings() can return
+        // them; finish() must clear the working buffers atomically with the ids.
+        lastFinishTokenTimings = accumulatedTokenTimings
         accumulatedTokenIds.removeAll()
+        accumulatedTokenTimings.removeAll()
 
         return transcript
+    }
+
+    /// Finish processing and return the final transcript together with per-token
+    /// timings (absolute seconds from the start of the fed audio). The timings
+    /// are aligned 1:1 with the decoded token stream; group them by the
+    /// SentencePiece word-boundary marker to obtain word-level timestamps.
+    public func finishWithTokenTimings() async throws -> (text: String, timings: [TokenTiming]) {
+        let text = try await finish()
+        return (text, lastFinishTokenTimings)
     }
 
     /// Get current partial transcript without finishing
     public func getPartialTranscript() -> String {
         guard let tokenizer = tokenizer else { return "" }
         return tokenizer.decode(ids: accumulatedTokenIds)
+    }
+
+    /// Get per-token timings accumulated so far without finishing. Aligned 1:1
+    /// with the tokens behind getPartialTranscript(). Use this when a caller must
+    /// salvage a partially-processed session that cannot safely call finish()
+    /// (e.g. after a mid-stream decode failure).
+    public func getTokenTimings() -> [TokenTiming] {
+        return accumulatedTokenTimings
     }
 }
 

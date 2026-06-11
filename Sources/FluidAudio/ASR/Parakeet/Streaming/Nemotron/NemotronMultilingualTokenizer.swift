@@ -67,6 +67,15 @@ public final class NemotronMultilingualTokenizer: Sendable {
         return String(piece.dropFirst().dropLast())
     }
 
+    /// Return the raw SentencePiece piece for a token id, INCLUDING the
+    /// `▁` word-boundary marker, or `nil` if the id is not in the vocab.
+    /// Unlike `decode(ids:)` / `tokenizerPiece`, this does NOT strip the marker
+    /// or filter lang-tag tokens — callers grouping tokens into words need the
+    /// original marker-bearing piece to detect word starts.
+    public func rawToken(for id: Int) -> String? {
+        return base.rawToken(for: id)
+    }
+
     /// Look up the token id for a language-tag piece (e.g. `"en-US"` →
     /// the id whose piece equals `"<en-US>"`). Returns `nil` if no
     /// matching tag is present in `langTagTokenIds`.

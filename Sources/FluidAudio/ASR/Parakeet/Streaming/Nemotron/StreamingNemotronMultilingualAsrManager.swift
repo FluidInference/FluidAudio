@@ -84,6 +84,21 @@ public actor StreamingNemotronMultilingualAsrManager {
     // Accumulated token IDs (raw, including any lang-tag tokens)
     internal var accumulatedTokenIds: [Int] = []
 
+    // Per-token absolute timings captured during the RNNT decode loop, parallel
+    // to the user-visible (lang-tag-stripped) token stream. Each token's
+    // startTime is its absolute encoder-frame index * secondsPerEncoderFrame.
+    // Exposed via finishWithTokenTimings() so callers can derive word-level
+    // timestamps (e.g. for speaker attribution). Lang-tag tokens are excluded
+    // (they are stripped from the decoded transcript), see appendTokenTiming.
+    internal var accumulatedTokenTimings: [TokenTiming] = []
+    // Running encoder-frame base across processed chunks (advances by the
+    // chunk's encoder-frame count after each decode loop, including VAD-skipped
+    // chunks so the timeline stays aligned to real audio). Reset with the session.
+    internal var absoluteFrameBase: Int = 0
+    // Snapshot of token timings taken in finish() before the working buffers are
+    // cleared, so finishWithTokenTimings() can return them after finish() runs.
+    internal var lastFinishTokenTimings: [TokenTiming] = []
+
     // First lang-tag piece encountered this session (without angle brackets).
     private var firstDetectedLanguage: String?
 
@@ -788,6 +803,9 @@ public actor StreamingNemotronMultilingualAsrManager {
             accumulatedTokenIds: &accumulatedTokenIds,
             processedChunks: &processedChunks
         )
+        accumulatedTokenTimings.removeAll()
+        absoluteFrameBase = 0
+        lastFinishTokenTimings.removeAll()
         audioBufferOffset = 0
         firstDetectedLanguage = nil
         do {
@@ -1011,7 +1029,11 @@ public actor StreamingNemotronMultilingualAsrManager {
         lastFinishTokenCount = accumulatedTokenIds.count
         lastFinishDetectedLanguage = firstDetectedLanguage ?? decoded.detectedLanguage
         lastFinishProcessedChunks = processedChunks
+        // Snapshot timings before clearing so finishWithTokenTimings() can return
+        // them; clear the working buffers atomically with the ids.
+        lastFinishTokenTimings = accumulatedTokenTimings
         accumulatedTokenIds.removeAll()
+        accumulatedTokenTimings.removeAll()
 
         if appendTerminalPunctuation {
             return Self.tidyTerminalPunctuation(
@@ -1053,6 +1075,26 @@ public actor StreamingNemotronMultilingualAsrManager {
             firstDetectedLanguage = decoded.detectedLanguage
         }
         return decoded.text
+    }
+
+    /// Finish processing and return the final transcript together with per-token
+    /// timings (absolute seconds from the start of the fed audio). The timings
+    /// are aligned 1:1 with the user-visible (lang-tag-stripped) token stream;
+    /// group them by the SentencePiece word-boundary marker to obtain word-level
+    /// timestamps. Note: when `appendTerminalPunctuation` is enabled the returned
+    /// text gains an untimed terminal mark, so callers that need strict
+    /// text/timing parity should leave that flag off (the default).
+    public func finishWithTokenTimings() async throws -> (text: String, timings: [TokenTiming]) {
+        let text = try await finish()
+        return (text, lastFinishTokenTimings)
+    }
+
+    /// Get per-token timings accumulated so far without finishing. Aligned 1:1
+    /// with the tokens behind getPartialTranscript(). Use this when a caller must
+    /// salvage a partially-processed session that cannot safely call finish()
+    /// (e.g. after a mid-stream decode failure).
+    public func getTokenTimings() -> [TokenTiming] {
+        return accumulatedTokenTimings
     }
 
     /// Internal getter for the current prompt id, used by the pipeline.
