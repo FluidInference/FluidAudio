@@ -71,6 +71,14 @@ public final class DiarizerManager {
     /// Accepts Speaker structs and adds them to the in-memory database.
     ///
     /// - Parameter speakers: Array of Speaker structs with embeddings and metadata
+    /// EXPERIMENT (campplus-der-exp): swap per-speaker embeddings to CAM++
+    /// (192-d, cosine clustering is embedder-agnostic). Injected by the
+    /// benchmark CLI when FLUID_CAMPP_EMBED=1; call after `initialize`.
+    public func setCampPlusEmbedder(_ embedder: CampPlusEmbedder) {
+        embeddingExtractor?.campPlus = embedder
+        logger.info("CAM++ embeddings active (192-d) for diarization")
+    }
+
     public func initializeKnownSpeakers(_ speakers: [Speaker]) {
         speakerManager.initializeKnownSpeakers(speakers)
     }

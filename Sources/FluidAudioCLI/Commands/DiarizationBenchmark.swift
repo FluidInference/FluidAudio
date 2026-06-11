@@ -671,6 +671,11 @@ enum StreamDiarizationBenchmark {
             let diarizerManager = DiarizerManager(config: config)
             diarizerManager.initialize(models: models)
 
+            // EXPERIMENT (campplus-der-exp): CAM++ embedding A/B via env flag.
+            if ProcessInfo.processInfo.environment["FLUID_CAMPP_EMBED"] == "1" {
+                diarizerManager.setCampPlusEmbedder(try await CampPlusEmbedder.load())
+            }
+
             // Configure streaming manager
             diarizerManager.speakerManager.speakerThreshold = assignmentThreshold
             diarizerManager.speakerManager.embeddingThreshold = updateThreshold

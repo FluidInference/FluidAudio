@@ -23,13 +23,15 @@ public actor CampPlusEmbedder {
     }
 
     /// 16 kHz mono file -> 192-d L2-normalized embedding.
-    public func embed(audioURL: URL) throws -> [Float] {
+    /// nonisolated: the actor's only state is the immutable `models` (MLModel
+    /// prediction is thread-safe), so these are safe from any context.
+    public nonisolated func embed(audioURL: URL) throws -> [Float] {
         let converter = AudioConverter(sampleRate: 16_000)
         return try embed(audio: try converter.resampleAudioFile(audioURL))
     }
 
     /// 16 kHz mono samples ([-1, 1]) -> 192-d L2-normalized embedding.
-    public func embed(audio: [Float]) throws -> [Float] {
+    public nonisolated func embed(audio: [Float]) throws -> [Float] {
         let n = audio.count
         let wav = try MLMultiArray(shape: [1, n as NSNumber], dataType: .float32)
         let p = wav.dataPointer.assumingMemoryBound(to: Float32.self)

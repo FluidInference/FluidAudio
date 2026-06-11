@@ -8,9 +8,41 @@ public final class EmbeddingExtractor {
     private let logger = AppLogger(category: "EmbeddingExtractor")
     private let memoryOptimizer = ANEMemoryOptimizer()
 
+    /// EXPERIMENT (campplus-der-exp): optional CAM++ embedder. When set
+    /// (via FLUID_CAMPP_EMBED=1 in the benchmark CLI), per-speaker
+    /// embeddings come from CAM++ run on the speaker's active audio
+    /// (mask-gathered samples; RangeDim handles the variable length)
+    /// instead of WeSpeaker(waveform, mask). 192-d vs 256-d — the cosine
+    /// clustering only needs within-run consistency.
+    public var campPlus: CampPlusEmbedder?
+
     public init(embeddingModel: MLModel) {
         self.wespeakerModel = embeddingModel
         logger.info("EmbeddingExtractor ready with ANE memory optimizer")
+    }
+
+    /// Gather the audio samples where this speaker's mask is active and
+    /// embed them with CAM++. Mask frame i covers audio samples
+    /// [i*audio.count/maskCount, (i+1)*audio.count/maskCount).
+    private func campPlusEmbedding<C>(
+        audio: C, mask: [Float], embedder: CampPlusEmbedder
+    ) throws -> [Float]
+    where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
+        let n = audio.count
+        let m = mask.count
+        var gathered: [Float] = []
+        gathered.reserveCapacity(n)
+        let base = audio.startIndex
+        for f in 0..<m where mask[f] > 0.5 {
+            let lo = f * n / m
+            let hi = min((f + 1) * n / m, n)
+            if lo < hi {
+                gathered.append(contentsOf: audio[(base + lo)..<(base + hi)])
+            }
+        }
+        // CAM++ fbank needs a minimum length; pad very short actives.
+        if gathered.count < 4000 { return [Float](repeating: 0.0, count: 192) }
+        return try embedder.embed(audio: gathered)
     }
 
     /// Extract speaker embeddings using the CoreML embedding model.
@@ -72,7 +104,15 @@ public final class EmbeddingExtractor {
 
             if speakerActivity < minActivityThreshold {
                 // For inactive speakers, return zero embedding
-                embeddings.append([Float](repeating: 0.0, count: 256))
+                embeddings.append([Float](repeating: 0.0, count: campPlus != nil ? 192 : 256))
+                continue
+            }
+
+            // EXPERIMENT: CAM++ path (see `campPlus` doc above).
+            if let embedder = campPlus {
+                embeddings.append(
+                    try campPlusEmbedding(
+                        audio: audio, mask: masks[speakerIdx], embedder: embedder))
                 continue
             }
 
