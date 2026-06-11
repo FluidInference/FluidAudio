@@ -112,6 +112,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Dettivo](https://dettivo.com)** | Local-first Mac app for private dictation, transcripts, and meeting workflows in one place, with developer tooling across CLI, MCP, REST, and app automation. Uses FluidAudio Parakeet TDT ASR and offline speaker diarization. |
 | **[Parleq](https://parleq.app/)** | Privacy-first macOS dictation — press a hotkey, speak, paste cleaned-up text. On-device Parakeet TDT v3 ASR with CTC vocabulary boosting (audio never leaves the Mac), provider-pluggable LLM cleanup (Gemini/Vertex, Bedrock, Azure), and reference windows that bring on-screen context into the cleanup. Open source. |
 | **[Local Narrator](https://www.localnarrator.app/)** | Privacy-first iOS audiobook reader that reads EPUB and PDF books aloud with on-device text-to-speech. Uses FluidAudio Kokoro TTS for local English and Spanish narration. |
+| **[TypeWhisper](https://www.typewhisper.com/)** | Speech-to-text and AI text processing for macOS. Uses FluidAudio's Parakeet ASR for local transcription. |
 
 ## Installation
 
