@@ -28,7 +28,7 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
   <a href="https://snaply.ai"><img src="Documentation/assets/snaply.png" height="40" alt="Snaply"></a>
   <a href="https://github.com/yazinsai/OpenOats"><img src="Documentation/assets/openoats.png" height="40" alt="OpenOats"></a>
   <a href="https://talat.app"><img src="Documentation/assets/talat.png" height="40" alt="Talat"></a>
-<!-- Add your app: submit logo via PR. The Fluid Inference team works to curate this and add new apps to the showcase section every couple of weeks. We appreciate your patience. -->
+<!-- Add your app: submit logo via PR. The Fluid Inference team works to curate this and add new apps to the showcase section, please do not add to this section if you're adding the app to the showcase section, but including a logo in your PR will help us when we update this section! We appreciate your patience. -->
 </p>
 
 Want to convert your own model? Check [möbius](https://github.com/FluidInference/mobius)
