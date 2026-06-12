@@ -273,6 +273,48 @@ public enum KokoroAneResourceDownloader {
         )
     }
 
+    /// Best-effort fetch of Kokoro's preprocessed Misaki lexicon cache
+    /// (`us_lexicon_cache.json`) into the shared kokoro cache directory
+    /// (next to the G2P CoreML assets — same file StyleTTS2 consumes via
+    /// `LexiconAssetCache`).
+    ///
+    /// Returns the kokoro cache directory when the file is resident
+    /// (pre-cached or freshly downloaded), or `nil` when it is missing
+    /// and could not be fetched — the English frontend then falls back
+    /// to BART-G2P-only phonemization. The lexicon is a pronunciation
+    /// quality booster (Misaki weak forms for function words, issue
+    /// #691), not a hard dependency.
+    public static func ensureEnglishLexicon(
+        directory: URL? = nil
+    ) async -> URL? {
+        let filename = "us_lexicon_cache.json"
+        do {
+            let modelsDirectory = try directory ?? defaultModelsDirectory()
+            let kokoroDir = modelsDirectory.appendingPathComponent(Repo.kokoro.folderName)
+            try FileManager.default.createDirectory(
+                at: kokoroDir, withIntermediateDirectories: true)
+
+            let localURL = kokoroDir.appendingPathComponent(filename)
+            if FileManager.default.fileExists(atPath: localURL.path) {
+                return kokoroDir
+            }
+
+            let remoteURL = try ModelRegistry.resolveModel(Repo.kokoro.remotePath, filename)
+            let descriptor = AssetDownloader.Descriptor(
+                description: filename,
+                remoteURL: remoteURL,
+                destinationURL: localURL
+            )
+            _ = try await AssetDownloader.ensure(descriptor, logger: logger)
+            return kokoroDir
+        } catch {
+            logger.warning(
+                "English lexicon cache unavailable (\(error.localizedDescription)) — "
+                    + "falling back to BART G2P only")
+            return nil
+        }
+    }
+
     /// Ensure a specific voice pack `.bin` file exists, downloading if missing.
     /// Default voice for each variant is included in `requiredModels(Zh)`; this
     /// helper covers any additional voice that ships separately.
