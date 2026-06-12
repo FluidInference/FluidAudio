@@ -312,8 +312,9 @@ extension ChunkProcessor {
         }
 
         if chunkOutputs.count > 1 {
+            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: await manager.vocabulary)
             for chunk in chunkOutputs.dropFirst() {
-                mergedTokens = mergeChunks(mergedTokens, chunk)
+                mergedTokens = mergeChunks(mergedTokens, chunk, spliceSafeTokenIds: spliceSafeTokenIds)
             }
         }
 

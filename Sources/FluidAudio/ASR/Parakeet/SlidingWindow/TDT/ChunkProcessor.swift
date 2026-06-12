@@ -375,9 +375,10 @@ struct ChunkProcessor {
 
     internal func mergeTokenWindowsForTesting(
         left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
-        right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)]
+        right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
+        spliceSafeTokenIds: Set<Int>? = nil
     ) -> [(token: Int, timestamp: Int, confidence: Float, duration: Int)] {
-        mergeChunks(left, right)
+        mergeChunks(left, right, spliceSafeTokenIds: spliceSafeTokenIds)
     }
     #endif
 
@@ -577,8 +578,9 @@ struct ChunkProcessor {
         }
 
         if orderedChunkOutputs.count > 1 {
+            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: await manager.vocabulary)
             for chunk in orderedChunkOutputs.dropFirst() {
-                mergedTokens = mergeChunks(mergedTokens, chunk)
+                mergedTokens = mergeChunks(mergedTokens, chunk, spliceSafeTokenIds: spliceSafeTokenIds)
             }
         }
 
@@ -672,9 +674,36 @@ struct ChunkProcessor {
         return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, hypothesis.tokenDurations)
     }
 
+    /// Token IDs whose vocabulary piece may safely start the portion spliced
+    /// in from the `right` window at a seam: SentencePiece word-initial pieces
+    /// (`▁` prefix) or punctuation-only pieces (which attach to the previous
+    /// word by design). Returns nil for an empty vocabulary so merge behavior
+    /// is unchanged when no vocabulary is available (issue #683).
+    static func spliceSafeTokenIds(vocabulary: [Int: String]) -> Set<Int>? {
+        guard !vocabulary.isEmpty else { return nil }
+        var ids = Set<Int>()
+        for (id, piece) in vocabulary where isSpliceSafePiece(piece) {
+            ids.insert(id)
+        }
+        return ids
+    }
+
+    /// A piece is splice-safe when decoding it right after another word does
+    /// not glue two words together: it either starts a new word (`▁`/space
+    /// prefix) or is pure punctuation/symbols.
+    static func isSpliceSafePiece(_ piece: String) -> Bool {
+        guard !piece.isEmpty else { return false }
+        if isWordBoundary(piece) { return true }
+        return piece.unicodeScalars.allSatisfy { scalar in
+            CharacterSet.punctuationCharacters.contains(scalar)
+                || CharacterSet.symbols.contains(scalar)
+        }
+    }
+
     func mergeChunks(
         _ left: [TokenWindow],
-        _ right: [TokenWindow]
+        _ right: [TokenWindow],
+        spliceSafeTokenIds: Set<Int>? = nil
     ) -> [TokenWindow] {
         if left.isEmpty { return right }
         if right.isEmpty { return left }
@@ -714,7 +743,7 @@ struct ChunkProcessor {
         guard overlapLeft.count >= 2 && overlapRight.count >= 2 else {
             return mergeByMidpoint(
                 left: left, right: right, leftEndTime: leftEndTime, rightStartTime: rightStartTime,
-                frameDuration: frameDuration)
+                frameDuration: frameDuration, spliceSafeTokenIds: spliceSafeTokenIds)
         }
 
         let minimumPairs = max(overlapLeft.count / 2, 1)
@@ -739,7 +768,8 @@ struct ChunkProcessor {
                 overlapLeft: overlapLeft,
                 overlapRight: overlapRight,
                 left: left,
-                right: right
+                right: right,
+                spliceSafeTokenIds: spliceSafeTokenIds
             )
         }
 
@@ -753,7 +783,7 @@ struct ChunkProcessor {
         guard !lcsMatches.isEmpty else {
             return mergeByMidpoint(
                 left: left, right: right, leftEndTime: leftEndTime, rightStartTime: rightStartTime,
-                frameDuration: frameDuration)
+                frameDuration: frameDuration, spliceSafeTokenIds: spliceSafeTokenIds)
         }
 
         // Map LCS matches directly to pairs (no consolidation)
@@ -765,7 +795,8 @@ struct ChunkProcessor {
             overlapLeft: overlapLeft,
             overlapRight: overlapRight,
             left: left,
-            right: right
+            right: right,
+            spliceSafeTokenIds: spliceSafeTokenIds
         )
     }
 
@@ -780,7 +811,8 @@ struct ChunkProcessor {
         overlapLeft: [IndexedToken],
         overlapRight: [IndexedToken],
         left: [TokenWindow],
-        right: [TokenWindow]
+        right: [TokenWindow],
+        spliceSafeTokenIds: Set<Int>?
     ) -> [TokenWindow] {
         let leftIndices = matches.map { overlapLeft[$0.0].index }
         let rightIndices = matches.map { overlapRight[$0.1].index }
@@ -813,10 +845,83 @@ struct ChunkProcessor {
         }
 
         if let lastRight = rightIndices.last, lastRight + 1 < right.count {
-            result.append(contentsOf: right[(lastRight + 1)...])
+            let tail = right[(lastRight + 1)...]
+            if let safeIds = spliceSafeTokenIds,
+                let firstTail = tail.first,
+                !safeIds.contains(firstTail.token)
+            {
+                // Issue #683: the splice lands mid-word — right's first
+                // post-match piece continues the word containing the matched
+                // anchor, so splicing here can decode a left-prefix +
+                // right-suffix hybrid or glue two words together. Re-splice
+                // at a word boundary so exactly one window segments the
+                // seam word.
+                if let wordStart = wordInitialIndex(in: right, endingAt: lastRight, safeIds: safeIds),
+                    popSeamWord(from: &result, safeIds: safeIds)
+                {
+                    // The right window heard the seam word from its start —
+                    // adopt its segmentation of the whole word. (The left
+                    // window's chunk often ends mid-word here, so its view
+                    // of the word is the truncated one.)
+                    result.append(contentsOf: right[wordStart...])
+                } else {
+                    // The right window was cut mid-word at its stream start
+                    // (no word-initial piece before the anchor): the left
+                    // window owns the seam word. Complete it with left's own
+                    // continuation pieces and resume right at its next
+                    // word-initial piece instead of gluing.
+                    if let lastLeft = leftIndices.last {
+                        var cursor = lastLeft + 1
+                        while cursor < left.count, !safeIds.contains(left[cursor].token) {
+                            result.append(left[cursor])
+                            cursor += 1
+                        }
+                    }
+                    if let resume = tail.firstIndex(where: { safeIds.contains($0.token) }) {
+                        result.append(contentsOf: tail[resume...])
+                    }
+                }
+            } else {
+                result.append(contentsOf: tail)
+            }
         }
 
         return result
+    }
+
+    /// Index of the word-initial (or punctuation) piece starting the word
+    /// that contains `anchor`, or nil when the stream begins mid-word.
+    private func wordInitialIndex(
+        in stream: [TokenWindow],
+        endingAt anchor: Int,
+        safeIds: Set<Int>
+    ) -> Int? {
+        var index = anchor
+        while index >= 0 {
+            if safeIds.contains(stream[index].token) { return index }
+            index -= 1
+        }
+        return nil
+    }
+
+    /// Remove the trailing seam word (continuation pieces plus its
+    /// word-initial piece) from `result` so the right window's segmentation
+    /// of the same word can replace it. Returns false — leaving `result`
+    /// untouched — when no word-initial piece exists within a plausible
+    /// word length.
+    private func popSeamWord(from result: inout [TokenWindow], safeIds: Set<Int>) -> Bool {
+        let maxPiecesPerWord = 12
+        var cursor = result.count - 1
+        var inspected = 0
+        while cursor >= 0, inspected < maxPiecesPerWord {
+            if safeIds.contains(result[cursor].token) {
+                result.removeLast(result.count - cursor)
+                return true
+            }
+            cursor -= 1
+            inspected += 1
+        }
+        return false
     }
 
     private func mergeByMidpoint(
@@ -824,11 +929,28 @@ struct ChunkProcessor {
         right: [TokenWindow],
         leftEndTime: Double,
         rightStartTime: Double,
-        frameDuration: Double
+        frameDuration: Double,
+        spliceSafeTokenIds: Set<Int>?
     ) -> [TokenWindow] {
         let cutoff = (leftEndTime + rightStartTime) / 2
-        let trimmedLeft = left.filter { Double($0.timestamp) * frameDuration < cutoff }
-        let trimmedRight = right.filter { Double($0.timestamp) * frameDuration >= cutoff }
-        return trimmedLeft + trimmedRight
+        // Token streams are emitted in timestamp order, so the cutoff filter
+        // is equivalent to a prefix/suffix split.
+        var leftEnd = left.firstIndex { Double($0.timestamp) * frameDuration >= cutoff } ?? left.count
+        var rightStart = right.firstIndex { Double($0.timestamp) * frameDuration >= cutoff } ?? right.count
+        if let safeIds = spliceSafeTokenIds {
+            // Issue #683: a pure time cutoff can split a word. Extend the
+            // left stream until the word it started is complete, and drop
+            // orphaned continuation pieces (whose word-initial piece was
+            // trimmed away) from the head of the right stream.
+            if leftEnd > 0 {
+                while leftEnd < left.count, !safeIds.contains(left[leftEnd].token) {
+                    leftEnd += 1
+                }
+            }
+            while rightStart < right.count, !safeIds.contains(right[rightStart].token) {
+                rightStart += 1
+            }
+        }
+        return Array(left[..<leftEnd]) + Array(right[rightStart...])
     }
 }
