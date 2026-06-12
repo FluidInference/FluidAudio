@@ -44,7 +44,57 @@ final class SlidingWindowAsrManagerTests: XCTestCase {
         // Test default config
         let defaultConfig = SlidingWindowAsrConfig.default
         XCTAssertEqual(defaultConfig.confirmationThreshold, 0.85)
-        XCTAssertEqual(defaultConfig.chunkDuration, 15.0)
+        XCTAssertEqual(defaultConfig.chunkDuration, 11.0)
+    }
+
+    func testPresetWindowsFitModelInput() throws {
+        // The assembled window (left + chunk + right) feeds a fixed-shape
+        // [1, 240000] preprocessor input — presets must never exceed it (issue #686)
+        for config in [SlidingWindowAsrConfig.default, SlidingWindowAsrConfig.streaming] {
+            XCTAssertLessThanOrEqual(config.windowSamples, ASRConstants.maxModelSamples)
+            XCTAssertNoThrow(try config.validate())
+        }
+    }
+
+    func testValidateThrowsForOversizedWindow() {
+        // The old default: 10 + 15 + 2 = 27s = 432,000 samples > 240,000
+        let oversized = SlidingWindowAsrConfig(
+            chunkSeconds: 15.0,
+            leftContextSeconds: 10.0,
+            rightContextSeconds: 2.0
+        )
+        XCTAssertThrowsError(try oversized.validate()) { error in
+            guard case SlidingWindowAsrError.invalidConfiguration = error else {
+                return XCTFail("Expected invalidConfiguration, got \(error)")
+            }
+        }
+    }
+
+    func testStartStreamingThrowsForOversizedWindow() async {
+        let oversized = SlidingWindowAsrConfig(
+            chunkSeconds: 15.0,
+            leftContextSeconds: 10.0,
+            rightContextSeconds: 2.0
+        )
+        let manager = SlidingWindowAsrManager(config: oversized)
+        do {
+            try await manager.startStreaming()
+            XCTFail("startStreaming should reject a window larger than the model input")
+        } catch {
+            guard case SlidingWindowAsrError.invalidConfiguration = error else {
+                return XCTFail("Expected invalidConfiguration, got \(error)")
+            }
+        }
+    }
+
+    func testConvenienceInitializersFitModelInput() throws {
+        // chunkDuration-based initializers must produce valid windows for
+        // any chunk up to the model limit minus their fixed contexts
+        let config = SlidingWindowAsrConfig(chunkDuration: 11.0)
+        XCTAssertNoThrow(try config.validate())
+
+        let custom = SlidingWindowAsrConfig.custom(chunkDuration: 11.0, confirmationThreshold: 0.8)
+        XCTAssertNoThrow(try custom.validate())
     }
 
     func testConfigCalculatedProperties() {
