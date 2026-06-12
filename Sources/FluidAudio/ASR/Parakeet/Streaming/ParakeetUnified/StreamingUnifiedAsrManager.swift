@@ -27,6 +27,7 @@ public actor StreamingUnifiedAsrManager {
     private var tokenizer: Tokenizer?
 
     public let config: UnifiedStreamingConfig
+    public let encoderPrecision: UnifiedEncoderPrecision
 
     // Rolling audio storage. `samples[0]` corresponds to global sample index
     // `samplesGlobalStart`; audio older than one window behind the consumed
@@ -48,10 +49,12 @@ public actor StreamingUnifiedAsrManager {
 
     public init(
         configuration: MLModelConfiguration? = nil,
-        config: UnifiedStreamingConfig = UnifiedStreamingConfig()
+        config: UnifiedStreamingConfig = UnifiedStreamingConfig(),
+        encoderPrecision: UnifiedEncoderPrecision = .int8
     ) {
         self.mlConfiguration = configuration ?? MLModelConfigurationUtils.defaultConfiguration()
         self.config = config
+        self.encoderPrecision = encoderPrecision
         self.windower = UnifiedStreamingWindower(config: config)
     }
 
@@ -71,9 +74,22 @@ public actor StreamingUnifiedAsrManager {
             contentsOf: directory.appendingPathComponent(names.preprocessorFile),
             configuration: cpuConfig
         )
+        // int8 encoders must not route to the GPU: under `.all` CoreML sends
+        // the quantized ops to MPSGraph, which fails its MLIR pass and
+        // aborts ("MPSGraphExecutable.mm: Error: MLIR pass manager failed").
+        // Coerce the known-bad default to CPU+ANE; explicit non-.all choices
+        // are respected.
+        let encoderConfig: MLModelConfiguration
+        if mlConfiguration.computeUnits == .all {
+            encoderConfig = MLModelConfiguration()
+            encoderConfig.computeUnits = .cpuAndNeuralEngine
+        } else {
+            encoderConfig = mlConfiguration
+        }
         self.encoder = try await MLModel.load(
-            contentsOf: directory.appendingPathComponent(names.streamingEncoderFile),
-            configuration: mlConfiguration
+            contentsOf: directory.appendingPathComponent(
+                names.streamingEncoderFile(precision: encoderPrecision)),
+            configuration: encoderConfig
         )
         self.decoder = try await MLModel.load(
             contentsOf: directory.appendingPathComponent(names.decoderFile),
@@ -111,11 +127,15 @@ public actor StreamingUnifiedAsrManager {
             .appendingPathComponent("Models", isDirectory: true)
 
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-        let encoderPath = cacheDir.appendingPathComponent(ModelNames.ParakeetUnified.streamingEncoderFile)
+        let encoderPath = cacheDir.appendingPathComponent(
+            ModelNames.ParakeetUnified.streamingEncoderFile(precision: encoderPrecision))
 
         if !FileManager.default.fileExists(atPath: encoderPath.path) {
             logger.info("Downloading Parakeet Unified models to \(modelsBaseDir.path)...")
-            try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir, progressHandler: progressHandler)
+            try await DownloadUtils.downloadRepo(
+                repo, to: modelsBaseDir,
+                variant: encoderPrecision == .fp16 ? "fp16" : nil,
+                progressHandler: progressHandler)
         } else {
             logger.info("Using cached Parakeet Unified models at \(cacheDir.path)")
         }

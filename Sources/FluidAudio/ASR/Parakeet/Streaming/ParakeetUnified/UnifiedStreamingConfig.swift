@@ -1,5 +1,16 @@
 import Foundation
 
+/// Encoder weight precision for Parakeet Unified 0.6B.
+///
+/// int8 (per-channel linear symmetric) is the default: identical LibriSpeech
+/// test-clean WER to fp16 (offline 1.83% vs 1.82%, streaming 2.14% vs 2.15%),
+/// identical ANE latency on M-series, and half the download/disk (~565 MB vs
+/// ~1.1 GB per encoder).
+public enum UnifiedEncoderPrecision: String, Sendable, CaseIterable {
+    case int8
+    case fp16
+}
+
 /// Configuration for Parakeet Unified 0.6B chunked-attention streaming.
 ///
 /// The unified model streams by re-running its stateless encoder over a

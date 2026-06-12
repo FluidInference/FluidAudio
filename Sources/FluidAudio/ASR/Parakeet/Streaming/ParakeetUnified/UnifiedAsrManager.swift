@@ -58,6 +58,7 @@ public actor UnifiedAsrManager {
 
     private let audioConverter = AudioConverter()
     public let config: UnifiedStreamingConfig
+    public let encoderPrecision: UnifiedEncoderPrecision
     private let layout: UnifiedBatchLayout
 
     // Buffered audio for the StreamingAsrManager conformance (batch-on-finish).
@@ -69,10 +70,12 @@ public actor UnifiedAsrManager {
 
     public init(
         configuration: MLModelConfiguration? = nil,
-        config: UnifiedStreamingConfig = UnifiedStreamingConfig()
+        config: UnifiedStreamingConfig = UnifiedStreamingConfig(),
+        encoderPrecision: UnifiedEncoderPrecision = .int8
     ) {
         self.mlConfiguration = configuration ?? MLModelConfigurationUtils.defaultConfiguration()
         self.config = config
+        self.encoderPrecision = encoderPrecision
         self.layout = UnifiedBatchLayout(config: config)
     }
 
@@ -91,9 +94,22 @@ public actor UnifiedAsrManager {
             contentsOf: directory.appendingPathComponent(names.preprocessorFile),
             configuration: cpuConfig
         )
+        // int8 encoders must not route to the GPU: under `.all` CoreML sends
+        // the quantized ops to MPSGraph, which fails its MLIR pass and
+        // aborts ("MPSGraphExecutable.mm: Error: MLIR pass manager failed").
+        // Coerce the known-bad default to CPU+ANE; explicit non-.all choices
+        // are respected.
+        let encoderConfig: MLModelConfiguration
+        if mlConfiguration.computeUnits == .all {
+            encoderConfig = MLModelConfiguration()
+            encoderConfig.computeUnits = .cpuAndNeuralEngine
+        } else {
+            encoderConfig = mlConfiguration
+        }
         self.encoder = try await MLModel.load(
-            contentsOf: directory.appendingPathComponent(names.offlineEncoderFile),
-            configuration: mlConfiguration
+            contentsOf: directory.appendingPathComponent(
+                names.offlineEncoderFile(precision: encoderPrecision)),
+            configuration: encoderConfig
         )
         self.decoder = try await MLModel.load(
             contentsOf: directory.appendingPathComponent(names.decoderFile),
@@ -133,12 +149,15 @@ public actor UnifiedAsrManager {
             .appendingPathComponent("Models", isDirectory: true)
 
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-        let encoderPath = cacheDir.appendingPathComponent(ModelNames.ParakeetUnified.offlineEncoderFile)
+        let encoderPath = cacheDir.appendingPathComponent(
+            ModelNames.ParakeetUnified.offlineEncoderFile(precision: encoderPrecision))
 
         if !FileManager.default.fileExists(atPath: encoderPath.path) {
             logger.info("Downloading Parakeet Unified offline models to \(modelsBaseDir.path)...")
             try await DownloadUtils.downloadRepo(
-                repo, to: modelsBaseDir, variant: "offline", progressHandler: progressHandler)
+                repo, to: modelsBaseDir,
+                variant: encoderPrecision == .fp16 ? "offline-fp16" : "offline",
+                progressHandler: progressHandler)
         } else {
             logger.info("Using cached Parakeet Unified offline models at \(cacheDir.path)")
         }
