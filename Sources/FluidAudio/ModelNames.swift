@@ -24,6 +24,11 @@ public enum Repo: String, CaseIterable, Sendable {
     case nemotronStreaming2240 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/2240ms"
     case nemotronStreaming1120 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/1120ms"
     case nemotronStreaming560 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/560ms"
+    /// Parakeet Unified 0.6B (FastConformer-RNNT). One checkpoint serves both
+    /// offline (15 s window) and streaming inference; streaming uses a
+    /// chunked-attention encoder re-run over a [left|chunk|right] window
+    /// (stateless — no encoder caches). See ASR/Parakeet/Streaming/ParakeetUnified.
+    case parakeetUnified = "FluidInference/parakeet-unified-en-0.6b-coreml"
     /// Multilingual streaming model. The HF repo is organized as
     /// `<lang>/<tier>ms/` subfolders (9 languages x 4 chunk tiers); the
     /// specific variant subdirectory is supplied dynamically at download
@@ -93,6 +98,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "nemotron-speech-streaming-en-0.6b-coreml/1120ms"
         case .nemotronStreaming560:
             return "nemotron-speech-streaming-en-0.6b-coreml/560ms"
+        case .parakeetUnified:
+            return "parakeet-unified-en-0.6b-coreml"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -519,6 +526,27 @@ public enum ModelNames {
             jointFile,
             decoderJointFile,
             tokenizer,
+            metadata,
+        ]
+    }
+
+    /// Parakeet Unified 0.6B (FastConformer-RNNT) model names.
+    /// Only the streaming inference path is wired up in Swift; the repo also
+    /// ships offline (15 s window) encoder bundles for future use.
+    public enum ParakeetUnified {
+        public static let preprocessorFile = "parakeet_unified_preprocessor.mlmodelc"
+        public static let streamingEncoderFile = "parakeet_unified_encoder_streaming_70_13_13.mlmodelc"
+        public static let decoderFile = "parakeet_unified_decoder.mlmodelc"
+        public static let jointDecisionFile = "parakeet_unified_joint_decision_single_step.mlmodelc"
+        public static let vocab = "vocab.json"
+        public static let metadata = "metadata.json"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            streamingEncoderFile,
+            decoderFile,
+            jointDecisionFile,
+            vocab,
             metadata,
         ]
     }
@@ -1152,6 +1180,8 @@ public enum ModelNames {
             return ModelNames.ParakeetEOU.requiredModels
         case .nemotronStreaming2240, .nemotronStreaming1120, .nemotronStreaming560:
             return ModelNames.NemotronStreaming.requiredModels
+        case .parakeetUnified:
+            return ModelNames.ParakeetUnified.requiredModels
         case .diarizer:
             if variant == "offline" {
                 return ModelNames.OfflineDiarizer.requiredModels

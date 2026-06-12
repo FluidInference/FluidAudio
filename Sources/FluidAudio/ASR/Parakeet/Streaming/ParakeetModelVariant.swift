@@ -30,6 +30,12 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
     /// Nemotron 0.6B with 560ms chunks (lowest-latency tier)
     case nemotron560ms = "nemotron-560ms"
 
+    // MARK: - Parakeet Unified (chunked-attention streaming, 0.6B params)
+
+    /// Parakeet Unified 0.6B, 2080ms latency (1.04s chunk + 1.04s right context).
+    /// Stateless encoder re-run per chunk — streamed output matches offline quality.
+    case parakeetUnified2080ms = "parakeet-unified-2080ms"
+
     /// Human-readable display name
     public var displayName: String {
         switch self {
@@ -39,6 +45,7 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case .nemotron2240ms: return "Nemotron 0.6B (2240ms)"
         case .nemotron1120ms: return "Nemotron 0.6B (1120ms)"
         case .nemotron560ms: return "Nemotron 0.6B (560ms)"
+        case .parakeetUnified2080ms: return "Parakeet Unified 0.6B (2080ms)"
         }
     }
 
@@ -51,6 +58,7 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case .nemotron2240ms: return .nemotronStreaming2240
         case .nemotron1120ms: return .nemotronStreaming1120
         case .nemotron560ms: return .nemotronStreaming560
+        case .parakeetUnified2080ms: return .parakeetUnified
         }
     }
 
@@ -61,6 +69,8 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
             return .parakeetEou
         case .nemotron2240ms, .nemotron1120ms, .nemotron560ms:
             return .nemotron
+        case .parakeetUnified2080ms:
+            return .parakeetUnified
         }
     }
 
@@ -105,6 +115,8 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case .nemotron:
             let chunkSize = nemotronChunkSize ?? .ms2240
             return StreamingNemotronAsrManager(configuration: mlConfig, requestedChunkSize: chunkSize)
+        case .parakeetUnified:
+            return StreamingUnifiedAsrManager(configuration: mlConfig)
         }
     }
 
@@ -114,5 +126,7 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case parakeetEou = "parakeet-eou"
         /// Nemotron: cache-aware streaming with encoder cache states
         case nemotron = "nemotron"
+        /// Parakeet Unified: chunked-attention streaming (stateless encoder re-runs)
+        case parakeetUnified = "parakeet-unified"
     }
 }
