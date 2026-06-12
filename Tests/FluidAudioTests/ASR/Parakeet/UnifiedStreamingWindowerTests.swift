@@ -156,6 +156,45 @@ struct UnifiedStreamingWindowerTests {
     }
 
     @Test
+    func batchLayoutQuantities() {
+        let layout = UnifiedBatchLayout(config: config)
+        #expect(layout.windowSamples == 240_000)  // 15 s
+        #expect(layout.chunkSamples % config.frameSamples == 0)
+        #expect(layout.chunkSamples <= layout.windowSamples)
+        #expect(layout.overlapSamples == 32_000)  // 2 s, frame-aligned (25 frames)
+        #expect(layout.strideSamples == layout.chunkSamples - layout.overlapSamples)
+    }
+
+    @Test
+    func batchChunkStartsCoverAllAudio() {
+        let layout = UnifiedBatchLayout(config: config)
+
+        // Short audio: single window.
+        #expect(layout.chunkStarts(totalSamples: 100_000) == [0])
+        #expect(layout.chunkStarts(totalSamples: 0) == [])
+
+        // Long audio: frame-aligned starts, full coverage, 2 s overlap.
+        let total = 60 * 16_000
+        let starts = layout.chunkStarts(totalSamples: total)
+        #expect(starts.first == 0)
+        for start in starts {
+            #expect(start % config.frameSamples == 0)
+        }
+        for (a, b) in zip(starts, starts.dropFirst()) {
+            #expect(b - a == layout.strideSamples)
+            // Adjacent windows overlap.
+            #expect(a + layout.chunkSamples > b)
+        }
+        // The last window reaches the end of the audio.
+        #expect(starts.last! + layout.chunkSamples >= total)
+        // No window is fully contained in the previous one (each adds samples).
+        for (a, b) in zip(starts, starts.dropFirst()) {
+            #expect(b + layout.overlapSamples < total || b == starts.last!)
+            _ = a
+        }
+    }
+
+    @Test
     func configDerivedQuantities() {
         #expect(config.windowSamples == 122_880)  // 96 frames × 1280
         #expect(config.chunkSamples == 16_640)

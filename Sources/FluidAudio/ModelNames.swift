@@ -531,11 +531,13 @@ public enum ModelNames {
     }
 
     /// Parakeet Unified 0.6B (FastConformer-RNNT) model names.
-    /// Only the streaming inference path is wired up in Swift; the repo also
-    /// ships offline (15 s window) encoder bundles for future use.
+    /// One checkpoint, two encoder exports: chunked-attention streaming
+    /// (default download) and full-attention offline 15 s window
+    /// (variant "offline" — used for overlapping-batch long-form transcription).
     public enum ParakeetUnified {
         public static let preprocessorFile = "parakeet_unified_preprocessor.mlmodelc"
         public static let streamingEncoderFile = "parakeet_unified_encoder_streaming_70_13_13.mlmodelc"
+        public static let offlineEncoderFile = "parakeet_unified_encoder.mlmodelc"
         public static let decoderFile = "parakeet_unified_decoder.mlmodelc"
         public static let jointDecisionFile = "parakeet_unified_joint_decision_single_step.mlmodelc"
         public static let vocab = "vocab.json"
@@ -544,6 +546,15 @@ public enum ModelNames {
         public static let requiredModels: Set<String> = [
             preprocessorFile,
             streamingEncoderFile,
+            decoderFile,
+            jointDecisionFile,
+            vocab,
+            metadata,
+        ]
+
+        public static let requiredModelsOffline: Set<String> = [
+            preprocessorFile,
+            offlineEncoderFile,
             decoderFile,
             jointDecisionFile,
             vocab,
@@ -1181,6 +1192,9 @@ public enum ModelNames {
         case .nemotronStreaming2240, .nemotronStreaming1120, .nemotronStreaming560:
             return ModelNames.NemotronStreaming.requiredModels
         case .parakeetUnified:
+            if variant == "offline" {
+                return ModelNames.ParakeetUnified.requiredModelsOffline
+            }
             return ModelNames.ParakeetUnified.requiredModels
         case .diarizer:
             if variant == "offline" {

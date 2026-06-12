@@ -35,10 +35,8 @@ public actor StreamingUnifiedAsrManager {
     private var samplesGlobalStart: Int = 0
     private var windower: UnifiedStreamingWindower
 
-    // RNNT decoder state (persists across chunks)
-    private var hState: MLMultiArray?
-    private var cState: MLMultiArray?
-    private var lastToken: Int32
+    // Greedy RNNT loop; its LSTM state persists across chunks.
+    private var rnntDecoder: UnifiedRnntDecoder?
 
     // Accumulated token IDs
     private var accumulatedTokenIds: [Int] = []
@@ -55,7 +53,6 @@ public actor StreamingUnifiedAsrManager {
         self.mlConfiguration = configuration ?? MLModelConfigurationUtils.defaultConfiguration()
         self.config = config
         self.windower = UnifiedStreamingWindower(config: config)
-        self.lastToken = Int32(config.blankIdx)
     }
 
     // MARK: - Loading
@@ -87,8 +84,10 @@ public actor StreamingUnifiedAsrManager {
             configuration: cpuConfig
         )
         self.tokenizer = try Tokenizer(vocabPath: directory.appendingPathComponent(names.vocab))
+        self.rnntDecoder = try UnifiedRnntDecoder(
+            decoderModel: decoder!, jointDecisionModel: jointDecision!, config: config
+        )
 
-        try resetDecoderState()
         logger.info("Parakeet Unified models loaded (latency \(config.latencyMs)ms).")
     }
 
@@ -124,22 +123,6 @@ public actor StreamingUnifiedAsrManager {
         try await loadModels(from: cacheDir)
     }
 
-    // MARK: - State
-
-    private func resetDecoderState() throws {
-        hState = try MLMultiArray(
-            shape: [NSNumber(value: config.decoderLayers), 1, NSNumber(value: config.decoderHidden)],
-            dataType: .float32
-        )
-        cState = try MLMultiArray(
-            shape: [NSNumber(value: config.decoderLayers), 1, NSNumber(value: config.decoderHidden)],
-            dataType: .float32
-        )
-        hState?.reset(to: 0)
-        cState?.reset(to: 0)
-        lastToken = Int32(config.blankIdx)
-    }
-
     // MARK: - Streaming API
 
     public func appendAudio(_ buffer: AVAudioPCMBuffer) throws {
@@ -170,7 +153,7 @@ public actor StreamingUnifiedAsrManager {
         windower.reset()
         accumulatedTokenIds.removeAll()
         processedChunks = 0
-        try resetDecoderState()
+        try rnntDecoder?.reset()
     }
 
     public func cleanup() async {
@@ -179,6 +162,7 @@ public actor StreamingUnifiedAsrManager {
         encoder = nil
         decoder = nil
         jointDecision = nil
+        rnntDecoder = nil
         tokenizer = nil
         logger.info("StreamingUnifiedAsrManager resources cleaned up")
     }
@@ -251,114 +235,21 @@ public actor StreamingUnifiedAsrManager {
 
         // 4. Greedy RNNT decode over the new frames only.
         let encoderLength = min(encodedLength[0].intValue, encoded.shape[2].intValue)
-        guard let range = windower.decodeRange(encoderLength: encoderLength, plan: plan) else {
+        guard let range = windower.decodeRange(encoderLength: encoderLength, plan: plan),
+            let rnntDecoder = rnntDecoder
+        else {
             processedChunks += 1
             return
         }
-        let newTokens = try await decodeFrames(encoded: encoded, range: range)
+        let emissions = try rnntDecoder.decode(
+            encoded: encoded, frameRange: range, globalFrameOffset: plan.bufferStartFrame
+        )
+        accumulatedTokenIds.append(contentsOf: emissions.map(\.token))
         processedChunks += 1
 
-        if !newTokens.isEmpty, let callback = partialCallback, let tokenizer = tokenizer {
+        if !emissions.isEmpty, let callback = partialCallback, let tokenizer = tokenizer {
             callback(tokenizer.decode(ids: accumulatedTokenIds))
         }
-    }
-
-    private func decodeFrames(encoded: MLMultiArray, range: Range<Int>) async throws -> [Int] {
-        guard let decoder = decoder, let jointDecision = jointDecision,
-            var currentH = hState, var currentC = cState
-        else {
-            throw ASRError.notInitialized
-        }
-        var currentToken = lastToken
-        var newTokens: [Int] = []
-
-        // Decoder output for the current token, lazily refreshed after each emission.
-        var decoderStep = try await runDecoder(
-            decoder, token: currentToken, h: currentH, c: currentC
-        )
-
-        for t in range {
-            let encStep = try extractEncoderStep(from: encoded, timeIndex: t)
-
-            for _ in 0..<config.maxSymbolsPerFrame {
-                let jointOutput = try await jointDecision.prediction(
-                    from: MLDictionaryFeatureProvider(dictionary: [
-                        "encoder_step": MLFeatureValue(multiArray: encStep),
-                        "decoder_step": MLFeatureValue(multiArray: decoderStep.output),
-                    ])
-                )
-                guard let tokenArray = jointOutput.featureValue(for: "token_id")?.multiArrayValue else {
-                    throw ASRError.processingFailed("Unified joint decision missing token_id")
-                }
-                let tokenId = tokenArray[0].int32Value
-
-                if tokenId == Int32(config.blankIdx) {
-                    break
-                }
-                newTokens.append(Int(tokenId))
-                accumulatedTokenIds.append(Int(tokenId))
-                currentToken = tokenId
-                currentH = decoderStep.h
-                currentC = decoderStep.c
-                decoderStep = try await runDecoder(
-                    decoder, token: currentToken, h: currentH, c: currentC
-                )
-            }
-        }
-
-        // Persist decoder state atomically after the chunk completes.
-        lastToken = currentToken
-        hState = currentH
-        cState = currentC
-        return newTokens
-    }
-
-    private struct DecoderStep {
-        let output: MLMultiArray
-        let h: MLMultiArray
-        let c: MLMultiArray
-    }
-
-    private func runDecoder(
-        _ decoder: MLModel, token: Int32, h: MLMultiArray, c: MLMultiArray
-    ) async throws -> DecoderStep {
-        let targets = try MLMultiArray(shape: [1, 1], dataType: .int32)
-        targets[0] = NSNumber(value: token)
-        let targetLength = try MLMultiArray(shape: [1], dataType: .int32)
-        targetLength[0] = 1
-
-        let output = try await decoder.prediction(
-            from: MLDictionaryFeatureProvider(dictionary: [
-                "targets": MLFeatureValue(multiArray: targets),
-                "target_length": MLFeatureValue(multiArray: targetLength),
-                "h_in": MLFeatureValue(multiArray: h),
-                "c_in": MLFeatureValue(multiArray: c),
-            ])
-        )
-        guard let decoderOut = output.featureValue(for: "decoder")?.multiArrayValue,
-            let hOut = output.featureValue(for: "h_out")?.multiArrayValue,
-            let cOut = output.featureValue(for: "c_out")?.multiArrayValue
-        else {
-            throw ASRError.processingFailed("Unified decoder failed")
-        }
-        // Decoder output is [1, 640, 1] (U=1 export); h/c become the state for
-        // the NEXT decoder call only after this token is accepted.
-        return DecoderStep(output: decoderOut, h: hOut, c: cOut)
-    }
-
-    private func extractEncoderStep(from encoded: MLMultiArray, timeIndex: Int) throws -> MLMultiArray {
-        let dim = encoded.shape[1].intValue
-        let step = try MLMultiArray(shape: [1, NSNumber(value: dim), 1], dataType: .float32)
-
-        let srcPtr = encoded.dataPointer.bindMemory(to: Float.self, capacity: encoded.count)
-        let dstPtr = step.dataPointer.bindMemory(to: Float.self, capacity: step.count)
-        let stride1 = encoded.strides[1].intValue
-        let stride2 = encoded.strides[2].intValue
-
-        for c in 0..<dim {
-            dstPtr[c] = srcPtr[c * stride1 + timeIndex * stride2]
-        }
-        return step
     }
 
     /// Drop audio that can no longer appear in any future window.
