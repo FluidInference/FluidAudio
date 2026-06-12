@@ -198,6 +198,88 @@ final class NemotronMultilingualTests: XCTestCase {
         XCTAssertEqual(ModelNames.NemotronMultilingualStreaming.metadata, "metadata.json")
     }
 
+    // MARK: - Corrupt tokenizer detection (issue #687)
+
+    /// Write a metadata.json + tokenizer.json pair into a fresh temp
+    /// directory and return their URLs. Caller removes the directory.
+    private func makeVariantDir(
+        blankIdx: Int,
+        vocab: [String: String]
+    ) throws -> (dir: URL, tokenizer: URL, metadata: URL) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("multilingual_variant_\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let metadata: [String: Any] = [
+            "vocab_size": blankIdx,
+            "blank_idx": blankIdx,
+            "prompt_dictionary": ["auto": 101],
+            "lang_tag_token_ids": [Int](),
+        ]
+        let metadataURL = dir.appendingPathComponent("metadata.json")
+        try JSONSerialization.data(withJSONObject: metadata).write(to: metadataURL)
+
+        let tokenizerURL = dir.appendingPathComponent("tokenizer.json")
+        try JSONSerialization.data(withJSONObject: vocab).write(to: tokenizerURL)
+        return (dir, tokenizerURL, metadataURL)
+    }
+
+    func testCorruptBlankEntryDetected() throws {
+        // Pre-2026-05-31 latin tokenizer: "<blank>" at id 2224 (should be
+        // "▁there") in addition to the legitimate blank at blank_idx 2828.
+        let (dir, tokenizer, metadata) = try makeVariantDir(
+            blankIdx: 2828,
+            vocab: ["0": "<unk>", "2224": "<blank>", "2828": "<blank>"]
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        XCTAssertTrue(
+            StreamingNemotronMultilingualAsrManager.tokenizerHasCorruptBlankEntry(
+                tokenizerPath: tokenizer, metadataPath: metadata))
+    }
+
+    func testHealthyTokenizerWithBlankAtBlankIdxPasses() throws {
+        // Fixed latin tokenizer: "▁there" restored at 2224, "<blank>" only
+        // at the blank index.
+        let (dir, tokenizer, metadata) = try makeVariantDir(
+            blankIdx: 2828,
+            vocab: ["0": "<unk>", "2224": "▁there", "2828": "<blank>"]
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        XCTAssertFalse(
+            StreamingNemotronMultilingualAsrManager.tokenizerHasCorruptBlankEntry(
+                tokenizerPath: tokenizer, metadataPath: metadata))
+    }
+
+    func testHealthyTokenizerWithoutBlankPiecePasses() throws {
+        // Full multilingual tokenizer ships no "<blank>" entry at all.
+        let (dir, tokenizer, metadata) = try makeVariantDir(
+            blankIdx: 13087,
+            vocab: ["0": "<unk>", "2224": "▁lahko"]
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        XCTAssertFalse(
+            StreamingNemotronMultilingualAsrManager.tokenizerHasCorruptBlankEntry(
+                tokenizerPath: tokenizer, metadataPath: metadata))
+    }
+
+    func testMissingTokenizerFileIsNotCorrupt() throws {
+        // Missing files are the normal-download path's job, not the
+        // repair pass's.
+        let (dir, tokenizer, metadata) = try makeVariantDir(
+            blankIdx: 2828,
+            vocab: ["0": "<unk>"]
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.removeItem(at: tokenizer)
+
+        XCTAssertFalse(
+            StreamingNemotronMultilingualAsrManager.tokenizerHasCorruptBlankEntry(
+                tokenizerPath: tokenizer, metadataPath: metadata))
+    }
+
     // MARK: - Helpers
 
     private func makeConfig(
