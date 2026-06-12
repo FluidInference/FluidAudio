@@ -11,11 +11,12 @@ import Foundation
 /// Constraints:
 ///   * Single voice per variant (`af_heart.bin` for English).
 ///   * IPA input capped at 512 tokens — chunk longer prompts upstream.
-///   * No runtime custom-lexicon API.
 ///   * Loads from HF path `kokoro-82m-coreml/ANE/`.
 ///
 /// Pipeline:
-///   * Text → IPA via the existing `G2PModel` (per-word, joined with " ")
+///   * Text → IPA via ``KokoroAneEnglishPhonemizer`` (Misaki lexicon first
+///     — weak function-word forms, vocab punctuation kept as prosody
+///     tokens — with per-word BART `G2PModel` fallback for OOV words)
 ///   * IPA → input ids via `KokoroAneVocab`
 ///   * Voice pack slice via `KokoroAneVoicePack`
 ///   * 7 stages via `KokoroAneSynthesizer`
@@ -30,6 +31,14 @@ public actor KokoroAneManager {
     private let store: KokoroAneModelStore
     private let variant: KokoroAneVariant
     private var defaultVoice: String
+
+    /// English frontend: Misaki lexicon + custom overrides + punctuation
+    /// pass-through. Built lazily (needs the chain vocab + lexicon asset);
+    /// cached only after a successful lexicon load so a transient download
+    /// failure doesn't pin the degraded G2P-only path for the session.
+    private var englishPhonemizer: KokoroAneEnglishPhonemizer?
+    private var englishCustomLexicon: [String: String] = [:]
+    private let englishLexiconCache = LexiconAssetCache()
 
     public init(
         variant: KokoroAneVariant = .english,
@@ -73,6 +82,10 @@ public actor KokoroAneManager {
         if variant == .english {
             try await KokoroAneResourceDownloader.ensureG2PAssets(directory: nil)
             try await G2PModel.shared.ensureModelsAvailable()
+            // Best-effort pre-fetch of the Misaki lexicon cache (weak
+            // function-word forms, issue #691). Missing lexicon degrades
+            // to the BART-G2P-only path rather than failing initialize.
+            _ = await KokoroAneResourceDownloader.ensureEnglishLexicon(directory: nil)
         }
         if let voices = preloadVoices {
             for voice in voices {
@@ -107,9 +120,26 @@ public actor KokoroAneManager {
         await store.setMandarinCustomLexicon(lexicon)
     }
 
+    /// Install (or clear) a user-supplied English pronunciation override.
+    ///
+    /// Entries map a word to a Misaki-style IPA string (e.g.
+    /// `["to": "tə", "GIF": "ʤˈɪf"]`). The exact spelling is checked
+    /// first, then the lower-cased form, before the bundled Misaki
+    /// lexicon and the BART G2P fallback. Pass `[:]` to clear.
+    ///
+    /// Only meaningful for ``KokoroAneVariant/english`` — calling on the
+    /// Mandarin variant stores the value but has no synthesis effect
+    /// (use ``setMandarinCustomLexicon(_:)`` there).
+    public func setEnglishCustomLexicon(_ entries: [String: String]) {
+        englishCustomLexicon = entries
+        // Rebuild the cached frontend with the new overrides on next use.
+        englishPhonemizer = nil
+    }
+
     /// Drop loaded mlmodelcs + voice packs. The store reloads on next call.
     public func cleanup() async {
         await store.cleanup()
+        englishPhonemizer = nil
     }
 
     // MARK: - Synthesis
@@ -139,23 +169,33 @@ public actor KokoroAneManager {
         voice: String? = nil,
         speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> KokoroAneSynthesisResult {
-        let phonemes: String
+        let resolved = try await phonemes(for: text)
+        return try await runChain(phonemes: resolved, voice: voice, speed: speed)
+    }
+
+    /// Resolve the exact phoneme string ``synthesize(text:voice:speed:)``
+    /// would feed the 7-stage chain — for diagnostics, tests, and
+    /// caller-side phoneme caching (issue #691).
+    ///
+    /// English: Misaki-lexicon-first with BART G2P fallback. Mandarin:
+    /// the ``MandarinG2P`` pipeline for Hanzi input, pass-through for
+    /// strings that already look like phonemes.
+    public func phonemes(for text: String) async throws -> String {
         switch variant {
         case .english:
-            phonemes = try await phonemize(text: text)
+            return try await phonemize(text: text)
         case .mandarin:
             try await store.loadIfNeeded()
             if MandarinG2P.looksLikeHanzi(text) {
                 let g2p = try await store.mandarinG2PPipeline()
-                phonemes = try await g2p.phonemize(text)
+                return try await g2p.phonemize(text)
             } else {
                 // No Hanzi present → caller already supplied bopomofo /
                 // ASCII punctuation. Pass through so power users can
                 // still override pronunciation manually.
-                phonemes = text
+                return text
             }
         }
-        return try await runChain(phonemes: phonemes, voice: voice, speed: speed)
     }
 
     /// Bypass G2P; feed an already-IPA phoneme string directly.
@@ -208,41 +248,62 @@ public actor KokoroAneManager {
         )
     }
 
-    /// Whitespace-split, per-word G2P, joined with " ". Punctuation is
-    /// stripped because the laishere vocab is IPA-only — punctuation chars
-    /// would just be dropped at `KokoroAneVocab.encode` anyway.
+    /// English text → Misaki-style IPA. Lexicon-first resolution (weak
+    /// function-word forms — `to` → `tu`, not the stressed BART citation
+    /// form `tˈO`, issue #691), per-word BART G2P fallback for OOV words,
+    /// and vocab-supported punctuation kept as prosody/pause tokens.
     private func phonemize(text: String) async throws -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw KokoroAneError.inputProcessingFailed("(empty input)")
+        let phonemizer = await ensureEnglishPhonemizer()
+        return try await phonemizer.phonemize(text) { word in
+            try await G2PModel.shared.phonemize(word: word)
         }
+    }
 
-        let words = trimmed.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-        var parts: [String] = []
-        parts.reserveCapacity(words.count)
+    /// Build (and cache) the English frontend: chain vocab → allowed
+    /// token/punctuation sets, Misaki lexicon cache → weak-form maps.
+    /// On any failure returns a transient G2P-only frontend (current
+    /// pre-#691 behavior) without caching it, so the lexicon is retried
+    /// on the next call.
+    private func ensureEnglishPhonemizer() async -> KokoroAneEnglishPhonemizer {
+        if let cached = englishPhonemizer { return cached }
 
-        for word in words {
-            let cleaned = word.trimmingCharacters(in: .punctuationCharacters).lowercased()
-            guard !cleaned.isEmpty else { continue }
-            do {
-                if let ipa = try await G2PModel.shared.phonemize(word: cleaned) {
-                    parts.append(ipa.joined())
-                } else {
-                    logger.warning("G2P returned nil for word '\(cleaned)' — skipping")
-                }
-            } catch {
-                logger.warning(
-                    "G2P failed on word '\(cleaned)': \(error.localizedDescription)")
-                throw error
+        var lower: [String: [String]] = [:]
+        var caseSensitive: [String: [String]] = [:]
+        var punctuation: Set<Character> = []
+        var lexiconLoaded = false
+
+        do {
+            try await store.loadIfNeeded()
+            let vocab = try await store.vocabulary()
+            // Stress/length marks (ˈ ˌ ː) are Unicode modifier letters, so
+            // `isLetter` keeps them out of the punctuation set.
+            punctuation = Set(
+                vocab.map.keys.filter { !$0.isLetter && !$0.isNumber && !$0.isWhitespace })
+
+            if let kokoroDir = await KokoroAneResourceDownloader.ensureEnglishLexicon(directory: nil) {
+                let allowedTokens = Set(vocab.map.keys.map(String.init))
+                try await englishLexiconCache.ensureLoaded(
+                    kokoroDirectory: kokoroDir, allowedTokens: allowedTokens)
+                let maps = await englishLexiconCache.lexicons()
+                lower = maps.word
+                caseSensitive = maps.caseSensitive
+                lexiconLoaded = true
             }
+        } catch {
+            logger.warning(
+                "English lexicon unavailable (\(error.localizedDescription)); using BART G2P only")
         }
 
-        let joined = parts.joined(separator: " ")
-        if joined.isEmpty {
-            throw KokoroAneError.inputProcessingFailed(
-                "G2P produced no phonemes for input '\(trimmed)'")
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            wordToPhonemes: lower,
+            caseSensitiveWordToPhonemes: caseSensitive,
+            customLexicon: englishCustomLexicon,
+            allowedPunctuation: punctuation
+        )
+        if lexiconLoaded {
+            englishPhonemizer = phonemizer
         }
-        return joined
+        return phonemizer
     }
 
     private func wavData(from result: KokoroAneSynthesisResult) throws -> Data {
