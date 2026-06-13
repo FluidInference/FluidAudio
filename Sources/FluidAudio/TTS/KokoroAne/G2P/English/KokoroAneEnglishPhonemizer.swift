@@ -145,9 +145,9 @@ struct KokoroAneEnglishPhonemizer: Sendable {
 
     // MARK: - Word splitter
 
-    /// Emit runs of letters/digits (apostrophes and hyphens stay inside
-    /// words: `don't`, `twenty-one`), single punctuation chars as their
-    /// own tokens, and drop whitespace. Same shape as the StyleTTS2
+    /// Emit runs of letters/digits (internal apostrophes and hyphens stay
+    /// inside words: `don't`, `twenty-one`), single punctuation chars as
+    /// their own tokens, and drop whitespace. Same shape as the StyleTTS2
     /// frontend's imitation of `nltk.word_tokenize`.
     static func splitWords(_ text: String) -> [String] {
         var out: [String] = []
@@ -160,10 +160,21 @@ struct KokoroAneEnglishPhonemizer: Sendable {
             }
         }
 
-        for ch in text {
+        for index in text.indices {
+            let ch = text[index]
             if ch.isWhitespace {
                 flushCurrent()
-            } else if ch.isLetter || ch.isNumber || ch == "'" || ch == "-" {
+            } else if ch == "'" {
+                let nextIndex = text.index(after: index)
+                let nextIsWord = nextIndex < text.endIndex
+                    && (text[nextIndex].isLetter || text[nextIndex].isNumber)
+                if !current.isEmpty && nextIsWord {
+                    current.append(ch)
+                } else {
+                    flushCurrent()
+                    out.append(String(ch))
+                }
+            } else if ch.isLetter || ch.isNumber || ch == "-" {
                 current.append(ch)
             } else {
                 flushCurrent()
