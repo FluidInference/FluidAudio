@@ -62,6 +62,23 @@ final class ModelNamesTests: XCTestCase {
         }
     }
 
+    func testParakeetUnifiedVariants() {
+        let streaming = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: nil)
+        let offline = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: "offline")
+        let streamingFp16 = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: "fp16")
+        let offlineFp16 = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: "offline-fp16")
+
+        // int8 encoders are the default; fp16 selected by variant suffix.
+        XCTAssertTrue(streaming.contains(ModelNames.ParakeetUnified.streamingEncoderInt8File))
+        XCTAssertTrue(offline.contains(ModelNames.ParakeetUnified.offlineEncoderInt8File))
+        XCTAssertTrue(streamingFp16.contains(ModelNames.ParakeetUnified.streamingEncoderFp16File))
+        XCTAssertTrue(offlineFp16.contains(ModelNames.ParakeetUnified.offlineEncoderFp16File))
+        // Exactly one encoder per variant set.
+        for set in [streaming, offline, streamingFp16, offlineFp16] {
+            XCTAssertEqual(set.filter { $0.contains("encoder") }.count, 1)
+        }
+    }
+
     func testDiarizerOfflineVariant() {
         let offlineModels = ModelNames.getRequiredModelNames(for: .diarizer, variant: "offline")
         let onlineModels = ModelNames.getRequiredModelNames(for: .diarizer, variant: nil)
