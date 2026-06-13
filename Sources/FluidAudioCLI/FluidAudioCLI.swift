@@ -36,6 +36,8 @@ struct FluidAudioCLI {
             await VadAnalyzeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "asr-benchmark":
             await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
+        case "unified-benchmark":
+            await UnifiedBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "fleurs-benchmark":
             await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "transcribe":

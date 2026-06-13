@@ -30,8 +30,13 @@ final class StreamingAsrManagerTests: XCTestCase {
     // MARK: - StreamingModelVariant Tests
 
     func testAllVariantsCount() {
-        // 3 EOU + 3 Nemotron (2240/1120/560) = 6 streaming variants
-        XCTAssertEqual(StreamingModelVariant.allCases.count, 6)
+        // Every variant must belong to exactly one engine family; the total
+        // is the sum of the family groups (avoids a magic number that breaks
+        // whenever a family gains a variant).
+        let byFamily = Dictionary(grouping: StreamingModelVariant.allCases, by: \.engineFamily)
+        let familySum = byFamily.values.reduce(0) { $0 + $1.count }
+        XCTAssertEqual(StreamingModelVariant.allCases.count, familySum)
+        XCTAssertFalse(byFamily.isEmpty)
     }
 
     func testAllVariantsHaveDisplayName() {
@@ -61,9 +66,13 @@ final class StreamingAsrManagerTests: XCTestCase {
         let nemotronVariants = StreamingModelVariant.allCases.filter {
             $0.engineFamily == .nemotron
         }
+        let unifiedVariants = StreamingModelVariant.allCases.filter {
+            $0.engineFamily == .parakeetUnified
+        }
 
         XCTAssertEqual(eouVariants.count, 3, "Expected 3 EOU variants")
         XCTAssertEqual(nemotronVariants.count, 3, "Expected 3 Nemotron variants")
+        XCTAssertEqual(unifiedVariants.count, 2, "Expected 2 Parakeet Unified variants (streaming + offline batch)")
     }
 
     func testEouVariantsHaveChunkSize() {
@@ -92,6 +101,13 @@ final class StreamingAsrManagerTests: XCTestCase {
         }
     }
 
+    func testUnifiedVariantsHaveNoForeignChunkSizes() {
+        for variant in StreamingModelVariant.allCases where variant.engineFamily == .parakeetUnified {
+            XCTAssertNil(variant.eouChunkSize)
+            XCTAssertNil(variant.nemotronChunkSize)
+        }
+    }
+
     // MARK: - Factory Tests
 
     func testFactoryCreatesEouEngine() async {
@@ -102,6 +118,14 @@ final class StreamingAsrManagerTests: XCTestCase {
     func testFactoryCreatesNemotronEngine() async {
         let engine = StreamingModelVariant.nemotron1120ms.createManager()
         XCTAssertTrue(engine is StreamingNemotronAsrManager)
+    }
+
+    func testFactoryCreatesUnifiedEngines() async {
+        let streaming = StreamingModelVariant.parakeetUnified2080ms.createManager()
+        XCTAssertTrue(streaming is StreamingUnifiedAsrManager)
+        // The offline batch variant maps to the batch-on-finish manager.
+        let offline = StreamingModelVariant.parakeetUnifiedOffline15s.createManager()
+        XCTAssertTrue(offline is UnifiedAsrManager)
     }
 
     func testFactoryCreatesAllVariants() async {
@@ -122,6 +146,12 @@ final class StreamingAsrManagerTests: XCTestCase {
 
     func testNemotronEngineInitialState() async {
         let engine = StreamingModelVariant.nemotron560ms.createManager()
+        let partial = await engine.getPartialTranscript()
+        XCTAssertEqual(partial, "")
+    }
+
+    func testUnifiedEngineInitialState() async {
+        let engine = StreamingModelVariant.parakeetUnified2080ms.createManager()
         let partial = await engine.getPartialTranscript()
         XCTAssertEqual(partial, "")
     }

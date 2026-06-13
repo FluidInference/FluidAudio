@@ -41,4 +41,10 @@ public final class Tokenizer: Sendable {
     public func piece(forId id: Int) -> String? {
         return idToToken[id]
     }
+
+    /// Full id → piece mapping. Used by overlap-merge logic that needs to
+    /// classify pieces (e.g. `ChunkProcessor.spliceSafeTokenIds`).
+    public var vocabulary: [Int: String] {
+        idToToken
+    }
 }

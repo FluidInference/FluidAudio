@@ -536,7 +536,7 @@ This feature is **beta**. The CTC head produces identical keyword detection resu
 
 - **Model:** [FluidInference/parakeet-tdt-ctc-110m-coreml](https://huggingface.co/FluidInference/parakeet-tdt-ctc-110m-coreml)
 - **CTC Head model:** [FluidInference/parakeet-ctc-110m-coreml](https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml) (includes CtcHead.mlmodelc)
-- **Benchmark results:** See `benchmarks.md`
+- **Benchmark results:** See [Documentation/Benchmarks.md](../Benchmarks.md)
 - **PR:** [#433 - Add TDT-CTC-110M support](https://github.com/FluidInference/FluidAudio/pull/433)
 - **CTC Head PR:** [#450 - Add standalone CTC head for custom vocabulary](https://github.com/FluidInference/FluidAudio/pull/450)
 - **Original NVIDIA model:** [nvidia/parakeet-tdt-1.1b](https://huggingface.co/nvidia/parakeet-tdt-1.1b)
