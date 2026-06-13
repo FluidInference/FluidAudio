@@ -109,3 +109,49 @@ swift build -c release
 | int4 linear/ch    | 285 MB  | 3.76%   | 1.59%   | 43.1×        | 139 MB   |
 
 Apple M2, `.cpuAndNeuralEngine`. Decoder/joint/preprocessor fp16 in both. Models: [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml).
+
+---
+
+# Parakeet Unified 0.6B Benchmark Results
+
+Unified FastConformer-RNNT — one checkpoint serves both offline batch and
+chunked-attention streaming. English, with punctuation and capitalization.
+
+## LibriSpeech test-clean (Full Dataset, 2,620 files, ~5.4 h audio)
+
+| Mode      | Avg WER | Aggregate WER | Median WER | Overall RTFx | Median RTFx | Long files (>15s) |
+|-----------|--------:|--------------:|-----------:|-------------:|------------:|------------------:|
+| Batch     | 2.15%   | 1.68%         | 0.00%      | 123.3×       | 111.5×      | 238               |
+| Streaming | 2.21%   | 1.79%         | 0.00%      | 29.1×        | 53.1×       | 238               |
+
+- **Avg WER** is the mean of per-file WER (matches `asr-benchmark`'s "Average WER"); **Aggregate WER** is total errors ÷ total words.
+- Long files (> 15 s) are not skipped: batch uses overlapping 15 s windows merged on a 2 s overlap; streaming runs them as one continuous session.
+- Streaming's overall RTFx falls below its median because it re-encodes a 7.68 s window per 1.04 s chunk (the latency tax); long files amortize that poorly. Batch only re-encodes the 2 s overlap, so throughput stays flat.
+
+## Configuration
+
+- Model: Parakeet Unified 0.6B (CoreML)
+- Architecture: Unified FastConformer-RNNT (`chunked_limited_with_rc` attention); greedy RNNT, no TDT duration head
+- Encoder variant: int8 (per-channel linear symmetric) — WER-lossless vs fp16, half the size
+- Platform: Apple Silicon (M5 Pro), `.cpuAndNeuralEngine`
+- Date: June 12, 2026
+
+## Running the Benchmark
+
+```bash
+# Build release
+swift build -c release
+
+# Run full benchmark (batch + streaming; auto-downloads dataset and models)
+.build/release/fluidaudiocli unified-benchmark --mode both
+
+# Single mode, limited files, or fp16 encoder
+.build/release/fluidaudiocli unified-benchmark --mode streaming --max-files 100
+.build/release/fluidaudiocli unified-benchmark --mode batch --precision fp16
+```
+
+## Notes
+
+- Same harness and `TextNormalizer` as `asr-benchmark`, so directly comparable: Parakeet TDT v3 = 2.6% Avg WER / 110× RTFx (multilingual, no punctuation). For English files, Unified batch wins on WER, throughput, and punctuation; TDT v3 remains the multilingual option.
+- Batch and streaming share the same greedy RNNT decoder; they differ only in the encoder window (offline 15 s full-attention vs streaming 7.68 s chunked).
+- Models available at: [FluidInference/parakeet-unified-en-0.6b-coreml](https://huggingface.co/FluidInference/parakeet-unified-en-0.6b-coreml)
