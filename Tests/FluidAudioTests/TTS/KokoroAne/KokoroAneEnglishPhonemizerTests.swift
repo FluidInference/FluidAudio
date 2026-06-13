@@ -12,11 +12,15 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
     /// lexicon carries the unstressed weak form while BART G2P returns
     /// the stressed citation form `tˈO`.
     private let lexicon: [String: [String]] = [
+        "'em": ["ə", "m"],
+        "'til": ["t", "ˈ", "I", "l"],
+        "'twas": ["t", "w", "ˈ", "ɑ", "z"],
         "to": ["t", "u"],
         "i": ["ˈ", "I"],
         "want": ["w", "ˈ", "ɑ", "n", "t"],
         "go": ["ɡ", "ˈ", "O"],
         "hello": ["h", "ə", "l", "ˈ", "O"],
+        "there's": ["ð", "ɛ", "ɹ", "z"],
         "world": ["w", "ˈ", "ɜ", "ɹ", "l", "d"],
     ]
 
@@ -100,7 +104,7 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         XCTAssertEqual(weak, "tə")
     }
 
-    // MARK: - Punctuation
+    // MARK: - Punctuation and quote delimiters
 
     func testSupportedPunctuationAttachesToPrecedingWord() async throws {
         let result = try await makePhonemizer().phonemize("Hello, world!") { _ in nil }
@@ -120,6 +124,35 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         )
         let result = try await phonemizer.phonemize("don't") { _ in nil }
         XCTAssertEqual(result, "dˈOnt")
+    }
+
+    func testSingleQuotesAreDelimitersNotPartOfLexiconKey() async throws {
+        let recorder = FallbackRecorder()
+        let result = try await makePhonemizer().phonemize("'to'") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "tu")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty)
+    }
+
+    func testQuotedSentenceKeepsContractionsIntact() async throws {
+        let recorder = FallbackRecorder()
+        let result = try await makePhonemizer().phonemize("'there's to'") {
+            await recorder.g2p($0)
+        }
+        XCTAssertEqual(result, "ðɛɹz tu")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty)
+    }
+
+    func testKnownLeadingApostropheWordsStayIntactForLexiconLookup() async throws {
+        let recorder = FallbackRecorder()
+        let result = try await makePhonemizer().phonemize("'twas 'em 'til 'to'") {
+            await recorder.g2p($0)
+        }
+
+        XCTAssertEqual(result, "twˈɑz əm tˈIl tu")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty)
     }
 
     // MARK: - Degraded paths

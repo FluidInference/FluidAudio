@@ -145,9 +145,13 @@ struct KokoroAneEnglishPhonemizer: Sendable {
 
     // MARK: - Word splitter
 
-    /// Emit runs of letters/digits (apostrophes and hyphens stay inside
-    /// words: `don't`, `twenty-one`), single punctuation chars as their
-    /// own tokens, and drop whitespace. Same shape as the StyleTTS2
+    private static let knownLeadingApostropheWords: Set<String> = [
+        "'cause", "'em", "'til", "'tis", "'twas", "'twere",
+    ]
+
+    /// Emit runs of letters/digits (internal apostrophes and hyphens stay
+    /// inside words: `don't`, `twenty-one`), single punctuation chars as
+    /// their own tokens, and drop whitespace. Same shape as the StyleTTS2
     /// frontend's imitation of `nltk.word_tokenize`.
     static func splitWords(_ text: String) -> [String] {
         var out: [String] = []
@@ -160,10 +164,24 @@ struct KokoroAneEnglishPhonemizer: Sendable {
             }
         }
 
-        for ch in text {
+        for index in text.indices {
+            let ch = text[index]
             if ch.isWhitespace {
                 flushCurrent()
-            } else if ch.isLetter || ch.isNumber || ch == "'" || ch == "-" {
+            } else if ch == "'" {
+                let nextIndex = text.index(after: index)
+                let nextIsWord =
+                    nextIndex < text.endIndex
+                    && (text[nextIndex].isLetter || text[nextIndex].isNumber)
+                if !current.isEmpty && nextIsWord {
+                    current.append(ch)
+                } else if current.isEmpty && Self.startsKnownLeadingApostropheWord(in: text, at: index) {
+                    current.append(ch)
+                } else {
+                    flushCurrent()
+                    out.append(String(ch))
+                }
+            } else if ch.isLetter || ch.isNumber || ch == "-" {
                 current.append(ch)
             } else {
                 flushCurrent()
@@ -172,5 +190,23 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         }
         flushCurrent()
         return out
+    }
+
+    private static func startsKnownLeadingApostropheWord(
+        in text: String,
+        at apostropheIndex: String.Index
+    ) -> Bool {
+        let nextIndex = text.index(after: apostropheIndex)
+        guard nextIndex < text.endIndex, text[nextIndex].isLetter else {
+            return false
+        }
+
+        var endIndex = nextIndex
+        while endIndex < text.endIndex, text[endIndex].isLetter {
+            endIndex = text.index(after: endIndex)
+        }
+
+        let candidate = "'" + text[nextIndex..<endIndex].lowercased()
+        return knownLeadingApostropheWords.contains(candidate)
     }
 }
