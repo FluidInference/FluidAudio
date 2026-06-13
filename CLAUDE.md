@@ -21,11 +21,11 @@ FluidAudio is a Swift framework for local, low-latency audio processing on Apple
 - Always use the actual models required by the code
 - If model authentication is required, inform the user rather than creating dummy versions
 
-### NEVER UPLOAD TO HUGGINGFACE
+### HUGGINGFACE UPLOADS
 
-- Do not upload models, datasets, or any files to HuggingFace
-- Do not create HuggingFace repos
-- Prepare files locally and let the user handle all HF uploads themselves
+- Uploading models, datasets, and files to HuggingFace is allowed
+- Creating HuggingFace repos is allowed
+- Confirm the target repo with the user before uploading
 
 ### MODEL OPERATIONS - CONSULT BEFORE IMPLEMENTING
 
