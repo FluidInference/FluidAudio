@@ -12,6 +12,9 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
     /// lexicon carries the unstressed weak form while BART G2P returns
     /// the stressed citation form `tˈO`.
     private let lexicon: [String: [String]] = [
+        "'em": ["ə", "m"],
+        "'til": ["t", "ˈ", "I", "l"],
+        "'twas": ["t", "w", "ˈ", "ɑ", "z"],
         "to": ["t", "u"],
         "i": ["ˈ", "I"],
         "want": ["w", "ˈ", "ɑ", "n", "t"],
@@ -137,6 +140,17 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
             await recorder.g2p($0)
         }
         XCTAssertEqual(result, "ðɛɹz tu")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty)
+    }
+
+    func testKnownLeadingApostropheWordsStayIntactForLexiconLookup() async throws {
+        let recorder = FallbackRecorder()
+        let result = try await makePhonemizer().phonemize("'twas 'em 'til 'to'") {
+            await recorder.g2p($0)
+        }
+
+        XCTAssertEqual(result, "twˈɑz əm tˈIl tu")
         let recorded = await recorder.words
         XCTAssertTrue(recorded.isEmpty)
     }

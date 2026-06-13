@@ -145,6 +145,10 @@ struct KokoroAneEnglishPhonemizer: Sendable {
 
     // MARK: - Word splitter
 
+    private static let knownLeadingApostropheWords: Set<String> = [
+        "'cause", "'em", "'til", "'tis", "'twas", "'twere",
+    ]
+
     /// Emit runs of letters/digits (internal apostrophes and hyphens stay
     /// inside words: `don't`, `twenty-one`), single punctuation chars as
     /// their own tokens, and drop whitespace. Same shape as the StyleTTS2
@@ -166,9 +170,12 @@ struct KokoroAneEnglishPhonemizer: Sendable {
                 flushCurrent()
             } else if ch == "'" {
                 let nextIndex = text.index(after: index)
-                let nextIsWord = nextIndex < text.endIndex
+                let nextIsWord =
+                    nextIndex < text.endIndex
                     && (text[nextIndex].isLetter || text[nextIndex].isNumber)
                 if !current.isEmpty && nextIsWord {
+                    current.append(ch)
+                } else if current.isEmpty && Self.startsKnownLeadingApostropheWord(in: text, at: index) {
                     current.append(ch)
                 } else {
                     flushCurrent()
@@ -183,5 +190,23 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         }
         flushCurrent()
         return out
+    }
+
+    private static func startsKnownLeadingApostropheWord(
+        in text: String,
+        at apostropheIndex: String.Index
+    ) -> Bool {
+        let nextIndex = text.index(after: apostropheIndex)
+        guard nextIndex < text.endIndex, text[nextIndex].isLetter else {
+            return false
+        }
+
+        var endIndex = nextIndex
+        while endIndex < text.endIndex, text[endIndex].isLetter {
+            endIndex = text.index(after: endIndex)
+        }
+
+        let candidate = "'" + text[nextIndex..<endIndex].lowercased()
+        return knownLeadingApostropheWords.contains(candidate)
     }
 }
