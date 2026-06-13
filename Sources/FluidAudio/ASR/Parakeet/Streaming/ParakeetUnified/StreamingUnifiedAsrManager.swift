@@ -39,8 +39,12 @@ public actor StreamingUnifiedAsrManager {
     // Greedy RNNT loop; its LSTM state persists across chunks.
     private var rnntDecoder: UnifiedRnntDecoder?
 
-    // Accumulated token IDs
+    // Accumulated token IDs and the incrementally built transcript.
+    // The transcript is appended per chunk instead of re-decoding the full
+    // token history (which would be O(n^2) over a long session — this
+    // engine is intended to run for hours).
     private var accumulatedTokenIds: [Int] = []
+    private var transcriptCache: String = ""
 
     private var partialCallback: (@Sendable (String) -> Void)?
     private var processedChunks: Int = 0
@@ -157,14 +161,13 @@ public actor StreamingUnifiedAsrManager {
 
     /// Flush remaining audio and return the final transcript.
     public func finish() async throws -> String {
-        guard let tokenizer = tokenizer else { throw ASRError.notInitialized }
+        guard tokenizer != nil else { throw ASRError.notInitialized }
         try await processAvailableWindows(isFinal: true)
-        return tokenizer.decode(ids: accumulatedTokenIds)
+        return currentTranscript()
     }
 
     public func getPartialTranscript() -> String {
-        guard let tokenizer = tokenizer else { return "" }
-        return tokenizer.decode(ids: accumulatedTokenIds)
+        currentTranscript()
     }
 
     public func reset() async throws {
@@ -172,6 +175,7 @@ public actor StreamingUnifiedAsrManager {
         samplesGlobalStart = 0
         windower.reset()
         accumulatedTokenIds.removeAll()
+        transcriptCache = ""
         processedChunks = 0
         try rnntDecoder?.reset()
     }
@@ -265,11 +269,22 @@ public actor StreamingUnifiedAsrManager {
             encoded: encoded, frameRange: range, globalFrameOffset: plan.bufferStartFrame
         )
         accumulatedTokenIds.append(contentsOf: emissions.map(\.token))
+        if let tokenizer = tokenizer {
+            for emission in emissions {
+                if let piece = tokenizer.piece(forId: emission.token) {
+                    transcriptCache += piece.replacingOccurrences(of: "\u{2581}", with: " ")
+                }
+            }
+        }
         processedChunks += 1
 
-        if !emissions.isEmpty, let callback = partialCallback, let tokenizer = tokenizer {
-            callback(tokenizer.decode(ids: accumulatedTokenIds))
+        if !emissions.isEmpty, let callback = partialCallback {
+            callback(currentTranscript())
         }
+    }
+
+    private func currentTranscript() -> String {
+        transcriptCache.trimmingCharacters(in: .whitespaces)
     }
 
     /// Drop audio that can no longer appear in any future window.
