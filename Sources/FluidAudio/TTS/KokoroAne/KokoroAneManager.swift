@@ -3,15 +3,21 @@ import Foundation
 /// High-level facade for the Kokoro 82M 7-stage CoreML chain
 /// (ANE-resident, derived from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml)).
 ///
-/// Splits the model so ANE-friendly layers (Albert / PostAlbert / Alignment /
-/// Vocoder) stay resident on the Neural Engine while Prosody / Noise / Tail
-/// run on CPU+GPU. Yields **3-11× RTFx** on Apple Silicon vs. a single-graph
-/// CPU+GPU Kokoro implementation.
+/// Splits the model into 7 CoreML graphs with per-stage compute-unit
+/// placement (``KokoroAneComputeUnits``). The default routing keeps the
+/// RNN-bearing stages (Albert / PostAlbert / Alignment / Prosody / Vocoder)
+/// resident on the Neural Engine and sends the all-fp32 stages
+/// (Noise + Tail iSTFT) to the GPU — the only placement that runs on every
+/// Apple Silicon generation (see #667). Multi-graph splitting yields a large
+/// RTFx win over a single-graph CPU+GPU Kokoro implementation.
 ///
 /// Constraints:
-///   * Single voice per variant (`af_heart.bin` for English).
+///   * One default voice per variant (`af_heart` for English, `zf_001` for
+///     Mandarin); additional voices download on demand via ``setDefaultVoice``
+///     / `voice:` / `initialize(preloadVoices:)`.
 ///   * IPA input capped at 512 tokens — chunk longer prompts upstream.
-///   * Loads from HF path `kokoro-82m-coreml/ANE/`.
+///   * Loads from HF path `kokoro-82m-coreml/ANE/` (English) or
+///     `ANE-zh/` (Mandarin).
 ///
 /// Pipeline:
 ///   * Text → IPA via ``KokoroAneEnglishPhonemizer`` (Misaki lexicon first

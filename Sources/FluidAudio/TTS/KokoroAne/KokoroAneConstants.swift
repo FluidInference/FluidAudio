@@ -26,7 +26,9 @@ public enum KokoroAneConstants {
     public static let maxPhonemeLength = 510
 
     /// Voice pack rows × columns. The pack is stored flat as `[510, 256]` fp32:
-    ///   * row index = `min(max(T_enc - 1, 0), 509)` (utterance-length bucket)
+    ///   * row index = `min(max(phonemeCount - 1, 0), 509)` — bucketed by the
+    ///     raw phoneme-string length (BOS/EOS excluded), matching
+    ///     `convert.py:get_ref_data`.
     ///   * cols `[0..<128]`   = `style_timbre` (→ Noise + Vocoder)
     ///   * cols `[128..<256]` = `style_s`      (→ PostAlbert + Prosody)
     public static let voicePackRows = 510
