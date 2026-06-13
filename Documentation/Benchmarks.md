@@ -80,6 +80,43 @@ iPhone 16 Pro Max run, and only for models that were reloaded during the session
 | Decoder       |                       88.49 |                        8.11 |              146.01 | MLComputeUnits(rawValue: 1) |
 | JointDecision |                       48.46 |                        7.97 |               71.85 | MLComputeUnits(rawValue: 1) |
 
+## Parakeet Unified (English, batch + streaming)
+
+Unified FastConformer-RNNT — one checkpoint serves both offline batch and chunked-attention
+streaming, English with punctuation and capitalization. Greedy RNNT decode (no TDT duration
+head); batch and streaming share the same decoder and differ only in the encoder window
+(offline 15 s full-attention vs streaming 7.68 s chunked).
+
+Model: [FluidInference/parakeet-unified-en-0.6b-coreml](https://huggingface.co/FluidInference/parakeet-unified-en-0.6b-coreml)
+
+Hardware: Apple M5 Pro, macOS 26. Encoder int8 on ANE (`.cpuAndNeuralEngine`).
+
+### LibriSpeech test-clean (2620 files, 5.40h audio)
+
+| Mode      | WER (Avg) | Aggregate WER | Median WER | Overall RTFx | Median RTFx | Long files (>15s) |
+|-----------|-----------|---------------|------------|--------------|-------------|-------------------|
+| Batch     | 2.15%     | 1.68%         | 0.00%      | 123.3x       | 111.5x      | 238               |
+| Streaming | 2.21%     | 1.79%         | 0.00%      | 29.1x        | 53.1x       | 238               |
+
+Same harness and `TextNormalizer` as `asr-benchmark`, so directly comparable to the
+Transcription numbers above: Parakeet TDT v3 = 2.6% Avg WER / 110x RTFx (multilingual, no
+punctuation). For English files, Unified batch wins on WER, throughput, and punctuation; TDT v3
+remains the multilingual option.
+
+- **Avg WER** is the mean of per-file WER (matches `asr-benchmark`); **Aggregate WER** is total errors ÷ total words.
+- Long files (> 15 s) are not skipped — batch uses overlapping 15 s windows merged on a 2 s overlap; streaming runs them as one continuous session.
+- Streaming's overall RTFx falls below its median because it re-encodes a 7.68 s window per 1.04 s chunk (the latency tax) — long files amortize that poorly. Batch only re-encodes the 2 s overlap, so throughput stays flat. **Use batch for files, streaming for live audio.**
+- int8 encoder is WER-lossless vs fp16 (within noise) at half the size.
+
+```bash
+# Full benchmark, both modes (auto-downloads dataset + models)
+swift run -c release fluidaudiocli unified-benchmark --mode both
+
+# Single mode, limited files, or fp16 encoder
+swift run -c release fluidaudiocli unified-benchmark --mode streaming --max-files 100
+swift run -c release fluidaudiocli unified-benchmark --mode batch --precision fp16
+```
+
 ## Transcription with Keyword Boosting
 
 CTC-based custom vocabulary boosting system, which enables accurate recognition of domain-specific terms (company names, technical jargon, proper nouns) without retraining the ASR model.
