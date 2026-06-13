@@ -97,10 +97,10 @@ public actor UnifiedAsrManager {
         // int8 encoders must not route to the GPU: under `.all` CoreML sends
         // the quantized ops to MPSGraph, which fails its MLIR pass and
         // aborts ("MPSGraphExecutable.mm: Error: MLIR pass manager failed").
-        // Coerce the known-bad default to CPU+ANE; explicit non-.all choices
-        // are respected.
+        // Coerce the known-bad int8 default to CPU+ANE; fp16 runs fine on the
+        // GPU, so its `.all` choice is left untouched.
         let encoderConfig: MLModelConfiguration
-        if mlConfiguration.computeUnits == .all {
+        if encoderPrecision == .int8, mlConfiguration.computeUnits == .all {
             encoderConfig = MLModelConfiguration()
             encoderConfig.computeUnits = .cpuAndNeuralEngine
         } else {
