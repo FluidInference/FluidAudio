@@ -20,7 +20,7 @@ final class UnifiedRnntDecoder {
 
     private let decoderModel: MLModel
     private let jointDecisionModel: MLModel
-    private let config: UnifiedStreamingConfig
+    private let config: UnifiedConfig
 
     // RNNT prediction-network state: (h, c) are the LSTM state BEFORE
     // `lastToken` is consumed; the first decoder call of a decode pass
@@ -29,7 +29,7 @@ final class UnifiedRnntDecoder {
     private var cState: MLMultiArray
     private var lastToken: Int32
 
-    init(decoderModel: MLModel, jointDecisionModel: MLModel, config: UnifiedStreamingConfig) throws {
+    init(decoderModel: MLModel, jointDecisionModel: MLModel, config: UnifiedConfig) throws {
         self.decoderModel = decoderModel
         self.jointDecisionModel = jointDecisionModel
         self.config = config
@@ -38,7 +38,7 @@ final class UnifiedRnntDecoder {
         self.lastToken = Int32(config.blankIdx)
     }
 
-    private static func zeroState(config: UnifiedStreamingConfig) throws -> MLMultiArray {
+    private static func zeroState(config: UnifiedConfig) throws -> MLMultiArray {
         let state = try MLMultiArray(
             shape: [NSNumber(value: config.decoderLayers), 1, NSNumber(value: config.decoderHidden)],
             dataType: .float32

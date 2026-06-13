@@ -2,12 +2,13 @@ import Testing
 
 @testable import FluidAudio
 
-/// Tests for the pure window/frame bookkeeping behind Parakeet Unified
-/// chunked-attention streaming. Mirrors the Python reference loop validated
-/// against NeMo in mobius models/stt/parakeet-unified-en-0.6b/coreml.
-struct UnifiedStreamingWindowerTests {
+/// Tests for the pure window/frame bookkeeping behind Parakeet Unified:
+/// the streaming `UnifiedStreamingWindower` and the offline `UnifiedBatchLayout`.
+/// Mirrors the Python reference loop validated against NeMo in mobius
+/// models/stt/parakeet-unified-en-0.6b/coreml.
+struct UnifiedWindowingTests {
 
-    private let config = UnifiedStreamingConfig()  // [70, 13, 13], 1280 samples/frame
+    private let config = UnifiedConfig()  // [70, 13, 13], 1280 samples/frame
 
     /// Encoder frames for a given valid sample count (ceil(samples/1280) capped at window).
     private func encoderLength(forBufferSamples samples: Int) -> Int {

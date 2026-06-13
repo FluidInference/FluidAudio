@@ -27,7 +27,7 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Parakeet Unified 0.6B (FastConformer-RNNT). One checkpoint serves both
     /// offline (15 s window) and streaming inference; streaming uses a
     /// chunked-attention encoder re-run over a [left|chunk|right] window
-    /// (stateless — no encoder caches). See ASR/Parakeet/Streaming/ParakeetUnified.
+    /// (stateless — no encoder caches). See ASR/Parakeet/Unified.
     case parakeetUnified = "FluidInference/parakeet-unified-en-0.6b-coreml"
     /// Multilingual streaming model. The HF repo is organized as
     /// `<lang>/<tier>ms/` subfolders (9 languages x 4 chunk tiers); the

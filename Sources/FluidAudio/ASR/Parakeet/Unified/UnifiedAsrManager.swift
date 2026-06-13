@@ -9,7 +9,7 @@ import Foundation
 /// `ChunkProcessor.mergeChunks` (the same overlap-dedup machinery the TDT
 /// pipeline uses).
 struct UnifiedBatchLayout {
-    let config: UnifiedStreamingConfig
+    let config: UnifiedConfig
 
     /// Fixed encoder window (15 s @ 16 kHz).
     var windowSamples: Int { 15 * config.sampleRate }
@@ -57,7 +57,7 @@ public actor UnifiedAsrManager {
     private var tokenizer: Tokenizer?
 
     private let audioConverter = AudioConverter()
-    public let config: UnifiedStreamingConfig
+    public let config: UnifiedConfig
     public let encoderPrecision: UnifiedEncoderPrecision
     private let layout: UnifiedBatchLayout
 
@@ -70,7 +70,7 @@ public actor UnifiedAsrManager {
 
     public init(
         configuration: MLModelConfiguration? = nil,
-        config: UnifiedStreamingConfig = UnifiedStreamingConfig(),
+        config: UnifiedConfig = UnifiedConfig(),
         encoderPrecision: UnifiedEncoderPrecision = .int8
     ) {
         self.mlConfiguration = configuration ?? MLModelConfigurationUtils.defaultConfiguration()

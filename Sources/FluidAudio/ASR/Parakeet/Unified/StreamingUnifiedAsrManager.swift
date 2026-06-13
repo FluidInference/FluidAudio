@@ -26,7 +26,7 @@ public actor StreamingUnifiedAsrManager {
     private let audioConverter = AudioConverter()
     private var tokenizer: Tokenizer?
 
-    public let config: UnifiedStreamingConfig
+    public let config: UnifiedConfig
     public let encoderPrecision: UnifiedEncoderPrecision
 
     // Rolling audio storage. `samples[0]` corresponds to global sample index
@@ -53,7 +53,7 @@ public actor StreamingUnifiedAsrManager {
 
     public init(
         configuration: MLModelConfiguration? = nil,
-        config: UnifiedStreamingConfig = UnifiedStreamingConfig(),
+        config: UnifiedConfig = UnifiedConfig(),
         encoderPrecision: UnifiedEncoderPrecision = .int8
     ) {
         self.mlConfiguration = configuration ?? MLModelConfigurationUtils.defaultConfiguration()
