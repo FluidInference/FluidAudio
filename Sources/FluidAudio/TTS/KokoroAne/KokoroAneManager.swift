@@ -185,7 +185,9 @@ public actor KokoroAneManager {
     ///
     /// English: Misaki-lexicon-first with BART G2P fallback. Mandarin:
     /// the ``MandarinG2P`` pipeline for Hanzi input, pass-through for
-    /// strings that already look like phonemes.
+    /// strings that already look like phonemes. Japanese: no text frontend
+    /// — throws (use ``synthesizeFromPhonemes(_:voice:speed:)`` with
+    /// pre-computed IPA, issue #698).
     public func phonemes(for text: String) async throws -> String {
         switch variant {
         case .english:
@@ -201,6 +203,14 @@ public actor KokoroAneManager {
                 // still override pronunciation manually.
                 return text
             }
+        case .japanese:
+            // The Japanese variant ships no in-process kana/kanji → IPA
+            // frontend. Text synthesis isn't supported; callers feed
+            // pre-computed IPA via synthesizeFromPhonemes(_:voice:speed:),
+            // which bypasses phonemes(for:) entirely.
+            throw KokoroAneError.inputProcessingFailed(
+                "Japanese variant has no text G2P frontend; call "
+                    + "synthesizeFromPhonemes(_:voice:speed:) with pre-computed IPA (see #698).")
         }
     }
 
@@ -314,9 +324,14 @@ public actor KokoroAneManager {
 
     private func wavData(from result: KokoroAneSynthesisResult) throws -> Data {
         do {
+            // Japanese writes at the model's native level (no peak-normalization)
+            // so the output matches the PyTorch reference instead of being
+            // slammed to 0 dBFS. English/Mandarin keep peak-normalization until
+            // their tails get the same COLA-corrected iSTFT (#698 follow-up).
             return try AudioWAV.data(
                 from: result.samples,
-                sampleRate: Double(result.sampleRate))
+                sampleRate: Double(result.sampleRate),
+                normalize: variant != .japanese)
         } catch {
             throw KokoroAneError.audioConversionFailed(error.localizedDescription)
         }

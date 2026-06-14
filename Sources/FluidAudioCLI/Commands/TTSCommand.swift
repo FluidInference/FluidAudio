@@ -64,6 +64,11 @@ public struct TTS {
         var kokoroAneVariant: KokoroAneVariant = .english
         var lexiconPath: String? = nil
         var text: String? = nil
+        // KokoroAne: treat the positional/`--text` value as a pre-computed
+        // phoneme string (IPA for en/ja, Bopomofo+tone for zh) and bypass
+        // G2P via synthesizeFromPhonemes. Required for `.japanese`, which
+        // ships no text frontend (issue #698).
+        var treatAsPhonemes = false
         var deEss = true
         var backend: TtsBackend = .kokoroAne
         var cloneVoicePath: String? = nil
@@ -113,6 +118,8 @@ public struct TTS {
                     metricsPath = arguments[i + 1]
                     i += 1
                 }
+            case "--phonemes":
+                treatAsPhonemes = true
             case "--variant", "--model-variant":
                 if i + 1 < arguments.count {
                     let value = arguments[i + 1].lowercased()
@@ -121,6 +128,8 @@ public struct TTS {
                         kokoroAneVariant = .english
                     case "zh", "mandarin", "zh-cn", "zh_cn":
                         kokoroAneVariant = .mandarin
+                    case "ja", "japanese", "jp":
+                        kokoroAneVariant = .japanese
                     default:
                         logger.warning("Unknown variant preference '\(arguments[i + 1])'; ignoring")
                     }
@@ -289,7 +298,8 @@ public struct TTS {
         case .kokoroAne:
             await runKokoroAne(
                 text: text, output: output, voice: voice, metricsPath: metricsPath,
-                variant: kokoroAneVariant, lexiconPath: lexiconPath)
+                variant: kokoroAneVariant, lexiconPath: lexiconPath,
+                treatAsPhonemes: treatAsPhonemes)
         case .styletts2:
             await runStyleTTS2(
                 text: text, ipa: styletts2Ipa,
@@ -512,7 +522,7 @@ public struct TTS {
 
     private static func runKokoroAne(
         text: String, output: String, voice: String, metricsPath: String?,
-        variant: KokoroAneVariant, lexiconPath: String?
+        variant: KokoroAneVariant, lexiconPath: String?, treatAsPhonemes: Bool
     ) async {
         do {
             let tStart = Date()
@@ -534,10 +544,10 @@ public struct TTS {
                     if let lex = try loadMandarinLexicon(from: lexiconPath) {
                         await manager.setMandarinCustomLexicon(lex)
                     }
-                case .english:
+                case .english, .japanese:
                     logger.warning(
-                        "--lexicon ignored: KokoroAne English variant has "
-                            + "no custom lexicon support yet (only Mandarin does).")
+                        "--lexicon ignored: only the KokoroAne Mandarin variant "
+                            + "supports a custom lexicon.")
                 }
             }
 
@@ -546,14 +556,22 @@ public struct TTS {
             let tLoad1 = Date()
 
             let tSynth0 = Date()
-            // synthesizeDetailed handles both variants: English routes
-            // through G2PModel, Mandarin routes Hanzi through MandarinG2P
-            // (and passes through pre-computed Bopomofo verbatim).
-            let detailed = try await manager.synthesizeDetailed(
-                text: text, voice: resolvedVoice, speed: 1.0)
+            // synthesizeDetailed handles English (G2PModel) and Mandarin
+            // (MandarinG2P, with pass-through for pre-computed Bopomofo).
+            // With --phonemes, or for Japanese (no text frontend), bypass
+            // G2P and feed the input as a pre-computed phoneme string.
+            let detailed: KokoroAneSynthesisResult
+            if treatAsPhonemes || variant == .japanese {
+                detailed = try await manager.synthesizeFromPhonemesDetailed(
+                    text, voice: resolvedVoice, speed: 1.0)
+            } else {
+                detailed = try await manager.synthesizeDetailed(
+                    text: text, voice: resolvedVoice, speed: 1.0)
+            }
             let wav = try AudioWAV.data(
                 from: detailed.samples,
-                sampleRate: Double(detailed.sampleRate))
+                sampleRate: Double(detailed.sampleRate),
+                normalize: variant != .japanese)
             let tSynth1 = Date()
 
             let outURL = resolveInputURL(output)
