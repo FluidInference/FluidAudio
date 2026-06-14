@@ -29,6 +29,8 @@ public enum KokoroAneResourceDownloader {
             required = ModelNames.KokoroAne.requiredModels
         case .mandarin:
             required = ModelNames.KokoroAne.requiredModelsZh
+        case .japanese:
+            required = ModelNames.KokoroAne.requiredModelsJa
         }
         let allPresent = required.allSatisfy { name in
             FileManager.default.fileExists(atPath: repoDir.appendingPathComponent(name).path)

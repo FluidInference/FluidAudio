@@ -121,6 +121,8 @@ public struct TTS {
                         kokoroAneVariant = .english
                     case "zh", "mandarin", "zh-cn", "zh_cn":
                         kokoroAneVariant = .mandarin
+                    case "ja", "japanese", "jp":
+                        kokoroAneVariant = .japanese
                     default:
                         logger.warning("Unknown variant preference '\(arguments[i + 1])'; ignoring")
                     }
@@ -534,10 +536,10 @@ public struct TTS {
                     if let lex = try loadMandarinLexicon(from: lexiconPath) {
                         await manager.setMandarinCustomLexicon(lex)
                     }
-                case .english:
+                case .english, .japanese:
                     logger.warning(
-                        "--lexicon ignored: KokoroAne English variant has "
-                            + "no custom lexicon support yet (only Mandarin does).")
+                        "--lexicon ignored: only the KokoroAne Mandarin variant "
+                            + "supports a custom lexicon.")
                 }
             }
 
