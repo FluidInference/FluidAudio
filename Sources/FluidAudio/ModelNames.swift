@@ -1123,7 +1123,10 @@ public enum ModelNames {
         public static let postAlbert = "KokoroPostAlbert.mlmodelc"
         public static let alignment = "KokoroAlignment.mlmodelc"
         public static let prosody = "KokoroProsody.mlmodelc"
-        public static let noise = "KokoroNoise.mlmodelc"
+        // v2: atan2 phase-correction in the noise-source STFT (removes broad-spectrum
+        // HF noise / "sharpness"). Renamed (not overwritten) so cached clients
+        // re-download. See mobius laishere-coreml docs/trials-and-errors.md.
+        public static let noise = "KokoroNoise_v2.mlmodelc"
         public static let vocoder = "KokoroVocoder.mlmodelc"
         public static let tail = "KokoroTail.mlmodelc"
 
