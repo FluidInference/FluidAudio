@@ -186,11 +186,15 @@ public struct MandarinG2P: Sendable {
     /// Bopomofo)?
     public static func looksLikeHanzi(_ text: String) -> Bool {
         for scalar in text.unicodeScalars {
-            // CJK Unified Ideographs (U+4E00…U+9FFF) +
-            // Extension A (U+3400…U+4DBF). Anything in those ranges is
-            // a hanzi the model can't speak directly without G2P.
+            // Any Han ideograph the acoustic model can't speak without G2P.
             let v = scalar.value
-            if (0x4E00...0x9FFF).contains(v) || (0x3400...0x4DBF).contains(v) {
+            if (0x4E00...0x9FFF).contains(v)  // CJK Unified Ideographs (URO)
+                || (0x3400...0x4DBF).contains(v)  // Extension A
+                || (0xF900...0xFAFF).contains(v)  // Compatibility Ideographs
+                || (0x20000...0x2FA1F).contains(v)  // Extensions B–F + Compat Supplement
+                || (0x30000...0x3134F).contains(v)  // Extension G
+                || v == 0x3007  // 〇 ideographic number zero
+            {
                 return true
             }
         }
