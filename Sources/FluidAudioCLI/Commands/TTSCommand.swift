@@ -570,7 +570,8 @@ public struct TTS {
             }
             let wav = try AudioWAV.data(
                 from: detailed.samples,
-                sampleRate: Double(detailed.sampleRate))
+                sampleRate: Double(detailed.sampleRate),
+                normalize: variant != .japanese)
             let tSynth1 = Date()
 
             let outURL = resolveInputURL(output)
