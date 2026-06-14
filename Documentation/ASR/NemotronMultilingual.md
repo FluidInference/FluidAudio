@@ -123,6 +123,7 @@ WER% for spaced scripts, CER% for ja_jp (segmentation-free). Full `google/fleurs
 - **int8 vs fp16 is a wash.** Average WER is identical at all three chunk sizes; per-language drift is within ±1 pp. Ship int8 for the 50% size win and ANE residency.
 - **Two independent latency axes.** NVIDIA's published modes (`att_context_size = [56,0] / [56,3] / [56,6] / [56,13]` → ~80 / 320 / 560 / 1120 ms architectural lookahead) control right-context inside the encoder. Our `320 / 560 / 1120 ms` build labels refer to `chunk_mel_frames` (processing chunk size), not lookahead. All FluidAudio builds currently ship `[56,0]` (no lookahead).
 - **CJK languages** use character-level edit rate as the "WER" field by convention; whitespace tokenization is meaningless for ja/ko/zh/th.
+- **Punctuation density drops at small chunk sizes** ([#687](https://github.com/FluidInference/FluidAudio/issues/687)). On long continuous speech the 560 ms build starts punctuating normally, then commas/periods become increasingly sparse as the session continues; 1120 ms and 2240 ms retain noticeably more punctuation on the same audio, and a session reset restores it. The words themselves are unaffected (WER-neutral) — only punctuation marks thin out. Cause is model-side: shorter chunks give the encoder less right context at sentence boundaries than the published builds' `att_context_size` assumes, and greedy RNN-T decoding compounds the miss over the session. If punctuation matters for your use case, ship 1120 ms or larger, or segment long streams (e.g. reset on VAD silence).
 
 ## See Also
 
