@@ -277,6 +277,35 @@ Peak memory usage (process-wide): 1.503 GB
 Model is nearly identical to the base model in terms of quality, performance wise we see an up to ~3.5x improvement compared to the silero Pytorch VAD model with the 256ms batch model (8 chunks of 32ms)
 
 ![VAD/speed.png](VAD/speed.png)
+
+### FSMN-VAD (`fsmn-vad-segment`)
+
+CoreML FSMN-VAD (FunASR, ~5.2M), an alternative to silero-vad. Model: [FluidInference/fsmn-vad-coreml](https://huggingface.co/FluidInference/fsmn-vad-coreml). 2-stage: fbank80+LFR preprocessor (fp32/CPU) → FSMN scorer (fp16/ANE, enumerated buckets) → host decision (port of FunASR `FsmnVADStreaming`). Hardware: Apple M5 Pro.
+
+Evaluated on the **mini50** labeled set via the standard `vad-benchmark` harness (per-clip speech/non-speech), same metric as the silero baseline:
+
+| Backend | Accuracy | Precision | Recall | F1 | RTFx |
+|---------|----------|-----------|--------|----|------|
+| silero (baseline) | 82.0% | 73.5% | 100% | 84.7% | 1408× |
+| **FSMN-VAD** | **98.0%** | **96.2%** | 100% | **98.0%** | 640× |
+
+FSMN-VAD is far more precise (96.2% vs 73.5%) at the same 100% recall — many fewer false speech detections — at ~640× real-time. Fidelity vs FunASR's own segments: frame F1 97.4%, boundaries within ~50 ms (`vad_bench.py` in the conversion repo).
+
+Full [FluidInference/musan](https://huggingface.co/datasets/FluidInference/musan) noise set (774 noise clips) — noise rejection / specificity (correctly classified non-speech):
+
+| Backend | Noise rejected (specificity) | False-positive rate | RTFx |
+|---------|------------------------------|---------------------|------|
+| silero | 69.8% | 30.2% | 1341× |
+| **FSMN-VAD** | **81.9%** | **18.1%** | 571× |
+
+On the full MUSAN noise set FSMN-VAD rejects 12 pp more noise as non-speech (18% vs 30% false positives) — consistently more precise than silero on both the balanced (mini50) and noise-heavy (full MUSAN) evaluations.
+
+Long audio is processed in ~30 s chunks (the FSMN's dilated conv needs fixed shapes; RangeDim is rejected by the ANE/BNNS compiler).
+
+```bash
+swift run -c release fluidaudiocli vad-benchmark --dataset mini50 --backend fsmn
+swift run -c release fluidaudiocli fsmn-vad-segment audio.wav
+```
 ![VAD/correlation.png](VAD/correlation.png)
 
 Dataset: https://github.com/Lab41/VOiCES-subset

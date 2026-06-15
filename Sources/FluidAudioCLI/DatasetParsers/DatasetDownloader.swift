@@ -980,46 +980,60 @@ struct DatasetDownloader {
             task.waitUntilExit()
 
             if task.terminationStatus == 0 {
-                // Move the audio files to our cache structure
-                let sourceCleanDir = cloneDir.appendingPathComponent("clean")
-                let sourceNoisyDir = cloneDir.appendingPathComponent("noisy")
-
                 // Create destination directories
                 try FileManager.default.createDirectory(
                     at: cleanDir, withIntermediateDirectories: true)
                 try FileManager.default.createDirectory(
                     at: noisyDir, withIntermediateDirectories: true)
 
-                // Move clean files
-                var cleanCount = 0
-                var noisyCount = 0
-                if FileManager.default.fileExists(atPath: sourceCleanDir.path) {
-                    let cleanFiles = try FileManager.default.contentsOfDirectory(
-                        at: sourceCleanDir, includingPropertiesForKeys: nil)
-                    for file in cleanFiles where file.pathExtension == "wav" {
-                        let destination = cleanDir.appendingPathComponent(
-                            file.lastPathComponent)
-                        try FileManager.default.moveItem(at: file, to: destination)
-                        cleanCount += 1
-                    }
+                // The repo ships its audio inside `VOiCES_90_*.tar` archives (deeply
+                // nested), not as loose `clean/`+`noisy/` wavs. Extract every tar into
+                // a scratch dir, then classify each wav by the noise tag in its name:
+                //   Lab41-SRI-VOiCES-rmX-<cond>-...  ->  "none" = clean, else noisy.
+                // (All VOiCES clips are speech; the split only affects logging/balance.)
+                let extractDir = cloneDir.appendingPathComponent("_extract")
+                try? FileManager.default.removeItem(at: extractDir)
+                try FileManager.default.createDirectory(
+                    at: extractDir, withIntermediateDirectories: true)
+
+                let cloneContents =
+                    (try? FileManager.default.contentsOfDirectory(
+                        at: cloneDir, includingPropertiesForKeys: nil)) ?? []
+                for archive in cloneContents where archive.pathExtension.lowercased() == "tar" {
+                    let untar = Process()
+                    untar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+                    untar.arguments = ["xf", archive.path, "-C", extractDir.path]
+                    try? untar.run()
+                    untar.waitUntilExit()
                 }
 
-                // Move noisy files
-                if FileManager.default.fileExists(atPath: sourceNoisyDir.path) {
-                    let noisyFiles = try FileManager.default.contentsOfDirectory(
-                        at: sourceNoisyDir, includingPropertiesForKeys: nil)
-                    for file in noisyFiles where file.pathExtension == "wav" {
-                        let destination = noisyDir.appendingPathComponent(
-                            file.lastPathComponent)
+                // Recursively collect every extracted wav and sort it by filename tag.
+                var cleanCount = 0
+                var noisyCount = 0
+                if let enumerator = FileManager.default.enumerator(
+                    at: extractDir, includingPropertiesForKeys: nil)
+                {
+                    while let file = enumerator.nextObject() as? URL {
+                        guard file.pathExtension.lowercased() == "wav" else { continue }
+                        let name = file.lastPathComponent
+                        let isClean = name.contains("-none-")
+                        let destination =
+                            (isClean ? cleanDir : noisyDir).appendingPathComponent(name)
+                        try? FileManager.default.removeItem(at: destination)
                         try FileManager.default.moveItem(at: file, to: destination)
-                        noisyCount += 1
+                        if isClean { cleanCount += 1 } else { noisyCount += 1 }
                     }
                 }
 
                 // Clean up clone directory
                 try? FileManager.default.removeItem(at: cloneDir)
 
-                logger.info("VOiCES subset ready: \(cleanCount) clean, \(noisyCount) noisy")
+                if cleanCount + noisyCount == 0 {
+                    logger.error(
+                        "VOiCES clone contained no extractable wavs (repo layout changed?)")
+                } else {
+                    logger.info("VOiCES subset ready: \(cleanCount) clean, \(noisyCount) noisy")
+                }
 
             } else {
                 logger.error("Git clone failed")

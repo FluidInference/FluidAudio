@@ -31,6 +31,7 @@ struct VadBenchmark {
         var dataset = "mini50"
         var debugMode = false
         var computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+        var backend = "silero"  // silero | fsmn
 
         logger.info("Parsing arguments...")
 
@@ -59,6 +60,11 @@ struct VadBenchmark {
             case "--dataset":
                 if i + 1 < arguments.count {
                     dataset = arguments[i + 1]
+                    i += 1
+                }
+            case "--backend":
+                if i + 1 < arguments.count {
+                    backend = arguments[i + 1]
                     i += 1
                 }
             case "--output":
@@ -90,6 +96,14 @@ struct VadBenchmark {
         logger.info("VAD threshold: \(vadThreshold)")
         logger.info("Activity threshold: \(activityThreshold)")
         logger.info("Debug mode: \(debugMode)")
+
+        if backend == "fsmn" {
+            logger.warning(
+                "FSMN-VAD is a beta/experimental backend (over-triggers on music); silero-vad is the default.")
+            try await runFsmnVadBenchmark(
+                dataset: dataset, count: useAllFiles ? -1 : numFiles, activityThreshold: activityThreshold)
+            return
+        }
 
         let vadManager = try await VadManager(
             config: VadConfig(
@@ -166,6 +180,65 @@ struct VadBenchmark {
             """
         fputs(usage, stderr)
         fflush(stderr)
+    }
+
+    /// FSMN-VAD backend: same dataset + per-file metric as silero, for apples-to-apples.
+    /// Per-file prediction = (speech duration / file duration) >= activityThreshold.
+    static func runFsmnVadBenchmark(dataset: String, count: Int, activityThreshold: Float) async throws {
+        let vad = try await FsmnVadManager.load()
+        let testFiles = try await downloadVadTestFiles(count: count, dataset: dataset)
+        logger.info("Running FSMN-VAD benchmark on \(testFiles.count) files...")
+        var predictions: [Int] = []
+        var groundTruth: [Int] = []
+        var audioSec = 0.0
+        var procSec = 0.0
+        for (idx, f) in testFiles.enumerated() {
+            do {
+                let af = try AVAudioFile(forReading: f.url)
+                let dur = Double(af.length) / af.processingFormat.sampleRate
+                audioSec += dur
+                let t0 = Date()
+                let segs = try await vad.detect(audioURL: f.url)
+                procSec += Date().timeIntervalSince(t0)
+                let speechMs = segs.reduce(0) { $0 + max(0, $1.endMs - $1.startMs) }
+                let ratio = dur > 0 ? Float(speechMs) / Float(dur * 1000.0) : 0
+                predictions.append(ratio >= activityThreshold ? 1 : 0)
+            } catch {
+                logger.warning("Error on \(f.name): \(error)")
+                predictions.append(0)
+            }
+            groundTruth.append(f.expectedLabel)
+            if (idx + 1) % 10 == 0 { logger.info("  \(idx + 1)/\(testFiles.count)") }
+        }
+        let m = calculateVadMetrics(predictions: predictions, groundTruth: groundTruth)
+        let rtfx = procSec > 0 ? audioSec / procSec : 0
+        logger.info("FSMN-VAD Benchmark Results (dataset=\(dataset), n=\(testFiles.count)):")
+        logger.info("Accuracy: \(String(format: "%.1f", m.accuracy))%")
+        logger.info("Precision: \(String(format: "%.1f", m.precision))%")
+        logger.info("Recall: \(String(format: "%.1f", m.recall))%")
+        logger.info("F1-Score: \(String(format: "%.1f", m.f1Score))%")
+        logger.info("RTFx: \(String(format: "%.0f", rtfx))x")
+
+        // Persist to JSON so results survive release-mode logging (info -> os_log only).
+        let resultJSON: [String: Any] = [
+            "test_name": "FSMN_VAD_\(dataset)_\(testFiles.count)_Files",
+            "backend": "fsmn",
+            "dataset": dataset,
+            "accuracy": m.accuracy,
+            "precision": m.precision,
+            "recall": m.recall,
+            "f1_score": m.f1Score,
+            "rtfx": rtfx,
+            "total_files": testFiles.count,
+            "total_audio_duration_seconds": audioSec,
+            "processing_time_seconds": procSec,
+        ]
+        if let data = try? JSONSerialization.data(
+            withJSONObject: resultJSON, options: [.prettyPrinted, .sortedKeys])
+        {
+            try? data.write(to: URL(fileURLWithPath: "fsmn_vad_results.json"))
+            logger.info("Results saved to: fsmn_vad_results.json")
+        }
     }
 
     static func downloadVadTestFiles(
@@ -611,28 +684,34 @@ struct VadBenchmark {
         let cleanDir = voicesDir.appendingPathComponent("clean")
         let noisyDir = voicesDir.appendingPathComponent("noisy")
 
-        let requestedSpeechCount = count == -1 ? 25 : count / 2
+        // count == -1 means "--all-files": load every VOiCES speech clip. Otherwise
+        // split the budget evenly across clean + noisy speech (count / 4 each).
+        let allFiles = count == -1
+        let perSideSpeech = allFiles ? Int.max : max(1, count / 4)
 
         if FileManager.default.fileExists(atPath: cleanDir.path) {
             let cleanFiles = try loadAudioFiles(
-                from: cleanDir, expectedLabel: 1, maxCount: requestedSpeechCount / 2)
+                from: cleanDir, expectedLabel: 1, maxCount: perSideSpeech)
             testFiles.append(contentsOf: cleanFiles)
             logger.info("Loaded \(cleanFiles.count) clean speech files")
         }
 
         if FileManager.default.fileExists(atPath: noisyDir.path) {
             let noisyFiles = try loadAudioFiles(
-                from: noisyDir, expectedLabel: 1, maxCount: requestedSpeechCount / 2)
+                from: noisyDir, expectedLabel: 1, maxCount: perSideSpeech)
             testFiles.append(contentsOf: noisyFiles)
             logger.info("Loaded \(noisyFiles.count) noisy speech files")
         }
 
+        let speechCount = testFiles.count
         logger.info("Loading non-speech samples from MUSAN...")
         let vadCacheDir = appSupport.appendingPathComponent("FluidAudio/vadDataset")
         let noiseDir = vadCacheDir.appendingPathComponent("noise")
 
         if FileManager.default.fileExists(atPath: noiseDir.path) {
-            let requestedNoiseCount = count == -1 ? 25 : count - testFiles.count
+            // Balance the negatives to the speech count when loading everything,
+            // otherwise fill the remainder of the requested budget.
+            let requestedNoiseCount = allFiles ? speechCount : max(0, count - speechCount)
             let noiseFiles = try loadAudioFiles(
                 from: noiseDir, expectedLabel: 0, maxCount: requestedNoiseCount)
             testFiles.append(contentsOf: noiseFiles)
