@@ -45,6 +45,14 @@ public actor StreamingUnifiedAsrManager {
     // engine is intended to run for hours).
     private var accumulatedTokenIds: [Int] = []
     private var transcriptCache: String = ""
+    // Per-token timings (start/end in seconds) since the last `consumeTokenTimings()`.
+    // The greedy RNNT decoder already reports each emission's global encoder frame;
+    // surfacing it lets downstream consumers do word→speaker attribution without
+    // re-decoding. RNNT tokens are emitted AT a frame (no intrinsic duration), so
+    // each token's `endTime` is back-filled to the next token's start; the frontier
+    // token gets a provisional one-frame end until the next emission arrives.
+    // Drained by `consumeTokenTimings()` so it stays bounded over hour-long streams.
+    private var pendingTokenTimings: [TokenTiming] = []
 
     private var partialCallback: (@Sendable (String) -> Void)?
     private var processedChunks: Int = 0
@@ -170,12 +178,25 @@ public actor StreamingUnifiedAsrManager {
         currentTranscript()
     }
 
+    /// Returns the per-token timings (start/end in seconds) accumulated since the
+    /// previous call and clears them, so the buffer stays bounded over long
+    /// streams. Call after `processBufferedAudio()` / `finish()` to drain the
+    /// timings for the audio decoded so far. Each `TokenTiming` carries the global
+    /// encoder frame the RNNT decoder records per emission, for downstream
+    /// word→speaker attribution. The final token of a drained batch may carry a
+    /// provisional one-frame `endTime` (the next emission's start is not yet known).
+    public func consumeTokenTimings() -> [TokenTiming] {
+        defer { pendingTokenTimings.removeAll(keepingCapacity: true) }
+        return pendingTokenTimings
+    }
+
     public func reset() async throws {
         samples.removeAll()
         samplesGlobalStart = 0
         windower.reset()
         accumulatedTokenIds.removeAll()
         transcriptCache = ""
+        pendingTokenTimings.removeAll()
         processedChunks = 0
         try rnntDecoder?.reset()
     }
@@ -270,10 +291,32 @@ public actor StreamingUnifiedAsrManager {
         )
         accumulatedTokenIds.append(contentsOf: emissions.map(\.token))
         if let tokenizer = tokenizer {
+            let secondsPerFrame = Double(config.frameSamples) / Double(config.sampleRate)
             for emission in emissions {
-                if let piece = tokenizer.piece(forId: emission.token) {
-                    transcriptCache += piece.replacingOccurrences(of: "\u{2581}", with: " ")
+                guard let piece = tokenizer.piece(forId: emission.token) else { continue }
+                let text = piece.replacingOccurrences(of: "\u{2581}", with: " ")
+                transcriptCache += text
+                let start = Double(emission.frame) * secondsPerFrame
+                // RNNT tokens have no intrinsic duration — back-fill the previous
+                // token's end to this token's start so durations reflect real gaps.
+                if let last = pendingTokenTimings.indices.last, pendingTokenTimings[last].endTime > start {
+                    let prev = pendingTokenTimings[last]
+                    pendingTokenTimings[last] = TokenTiming(
+                        token: prev.token, tokenId: prev.tokenId,
+                        startTime: prev.startTime, endTime: max(prev.startTime, start),
+                        confidence: prev.confidence
+                    )
                 }
+                // Frontier token: provisional one-frame end until the next emission.
+                pendingTokenTimings.append(
+                    TokenTiming(
+                        token: text,
+                        tokenId: emission.token,
+                        startTime: start,
+                        endTime: start + secondsPerFrame,
+                        confidence: emission.prob
+                    )
+                )
             }
         }
         processedChunks += 1
