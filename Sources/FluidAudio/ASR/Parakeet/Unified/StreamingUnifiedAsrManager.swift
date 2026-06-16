@@ -192,6 +192,15 @@ public actor StreamingUnifiedAsrManager {
         return pendingTokenTimings
     }
 
+    /// Word-level timings since the previous call, draining the same buffer as
+    /// `consumeTokenTimings()` (call one or the other per cycle). Sub-word tokens
+    /// are grouped on their `▁` / leading-space boundaries; each word spans its
+    /// first sub-word's start to its last sub-word's end. Useful for streaming
+    /// diarized ASR (word→speaker attribution).
+    public func consumeWordTimings() -> [WordTiming] {
+        buildWordTimings(from: consumeTokenTimings())
+    }
+
     public func reset() async throws {
         samples.removeAll()
         samplesGlobalStart = 0
