@@ -457,10 +457,18 @@ final public class AudioConverter: Sendable {
 // MARK: - WAV Utilities (shared by TTS/ASR)
 public enum AudioWAV {
     /// Convert float samples to 16-bit PCM mono WAV at the given sample rate.
-    public static func data(from samples: [Float], sampleRate: Double) throws -> Data {
-        // Normalize to [-1, 1]
+    ///
+    /// - Parameter normalize: when `true` (default) the samples are peak-scaled
+    ///   to ±1.0 before quantization (consistent loudness). Pass `false` to
+    ///   write the samples at their native level — used by backends whose
+    ///   model output is already correctly leveled (e.g. KokoroAne, which
+    ///   matches the PyTorch reference level) so the output isn't slammed to
+    ///   0 dBFS. Out-of-range samples are still clamped to [-1, 1].
+    public static func data(
+        from samples: [Float], sampleRate: Double, normalize: Bool = true
+    ) throws -> Data {
         let maxVal = samples.map { abs($0) }.max() ?? 1.0
-        let norm = maxVal > 0 ? samples.map { $0 / maxVal } : samples
+        let norm = (normalize && maxVal > 0) ? samples.map { $0 / maxVal } : samples
 
         // Convert to 16-bit PCM
         var pcm = Data()
