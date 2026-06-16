@@ -400,12 +400,23 @@ public enum ModelNames {
         public static let encoderFp32File = encoderFp32 + ".mlmodelc"
         public static let vocabularyFile = "vocab.json"
 
-        public static let requiredModels: Set<String> = [
-            preprocessorFile,
-            encoderFile,
-            encoderInt8File,
-            encoderFp32File,
-        ]
+        public static func requiredModels(precision: String? = nil) -> Set<String> {
+            let encoder: String
+            switch precision {
+            case "int8":
+                encoder = encoderInt8File
+            case "fp32":
+                encoder = encoderFp32File
+            default:
+                encoder = encoderFile
+            }
+            return [
+                preprocessorFile,
+                encoder,
+            ]
+        }
+
+        public static let requiredModels: Set<String> = requiredModels()
     }
 
     /// Paraformer-large (zh) model names. 4 CoreML stages + host CIF:
@@ -1198,7 +1209,7 @@ public enum ModelNames {
         case .parakeetCtc110m, .parakeetCtc06b:
             return ModelNames.CTC.requiredModels
         case .senseVoiceSmall:
-            return ModelNames.SenseVoice.requiredModels
+            return ModelNames.SenseVoice.requiredModels(precision: variant)
         case .paraformerLargeZh:
             return ModelNames.ParaformerZh.requiredModels
         case .parakeetJa:

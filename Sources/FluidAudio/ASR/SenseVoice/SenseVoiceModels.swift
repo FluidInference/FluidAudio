@@ -73,7 +73,12 @@ public struct SenseVoiceModels: Sendable {
         if force { try? FileManager.default.removeItem(at: targetDir) }
 
         logger.info("Downloading SenseVoice models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(.senseVoiceSmall, to: modelsRoot, progressHandler: progressHandler)
+        try await DownloadUtils.downloadRepo(
+            .senseVoiceSmall,
+            to: modelsRoot,
+            variant: precision.rawValue,
+            progressHandler: progressHandler
+        )
         logger.info("Successfully downloaded SenseVoice models")
         return targetDir
     }
