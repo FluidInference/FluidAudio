@@ -587,17 +587,18 @@ public enum ModelNames {
             let isOffline = variant?.hasPrefix("offline") == true
             let isFp16 = variant?.hasSuffix("fp16") == true
             let precision: UnifiedEncoderPrecision = isFp16 ? .fp16 : .int8
-            let encoder =
-                isOffline
-                ? offlineEncoderFile(precision: precision)
-                : streamingEncoderFile(precision: precision)
-            return [
-                encoder,
-                decoderFile,
-                jointDecisionFile,
-                vocab,
-                metadata,
-            ]
+            // Context-independent shared files.
+            var models: Set<String> = [decoderFile, jointDecisionFile, vocab, metadata]
+            // The streaming encoder is context-specific — each [L,C,R] latency
+            // tier bakes its attention mask into a distinct bundle — so the
+            // streaming manager passes its exact encoder via downloadRepo's
+            // `additionalModelNames` instead of pulling a fixed default here
+            // (which would over-fetch the 70_13_13 encoder for every tier). The
+            // offline encoder is fixed, so it stays in the base set.
+            if isOffline {
+                models.insert(offlineEncoderFile(precision: precision))
+            }
+            return models
         }
     }
 
