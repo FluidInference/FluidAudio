@@ -20,6 +20,30 @@ Encoder precision: **int8**. Run with `swift run -c release fluidaudiocli unifie
   Mel features are computed natively in Swift (`AudioMelSpectrogram` + NeMo per_feature
   normalization); there is no CoreML preprocessor stage.
 
+## Streaming latency tiers
+
+The streaming encoder bakes a `[left, chunk, right]` chunked-attention window (in 80 ms
+encoder frames) at conversion time, so each latency tier is a distinct encoder selected by
+`--parakeet-variant`. **Latency = (chunk + right) × 80 ms.** The checkpoint is multi-context
+trained, so every tier is the same weights re-exported with a different mask.
+
+| Variant | `[L,C,R]` | Latency | WER | RTFx | Notes |
+|---------|-----------|---------|-----|------|-------|
+| `parakeet-unified-320ms` | 70,2,2 | 0.32 s | 2.37% | 10x | lowest latency |
+| `parakeet-unified-640ms` | 70,7,1 | 0.64 s | 2.40% | 27x | efficiency — same WER as 320ms, big chunk re-encodes less often |
+| `parakeet-unified-1120ms` | 70,7,7 | 1.12 s | 2.25% | 33x | best streaming WER |
+| `parakeet-unified-2080ms` (default) | 70,13,13 | 2.08 s | 2.47% | 54x | default |
+
+Numbers above are **aggregate WER on a 150-file `test-clean` sweep** (identical files across tiers,
+so the *relative* ordering is what matters); the default tier's full-2620 streaming WER is 1.79%
+aggregate (table above). Two rules of thumb from the sweep:
+
+- **Look-ahead (right context) drives WER; chunk size drives RTFx.** A big chunk re-encodes less
+  often (higher RTFx) but adds latency; more right context improves WER but also adds latency.
+- **Look-ahead saturates around right≈2 frames** — beyond that you pay latency without WER gain,
+  and `right=0` (no look-ahead) tanks WER. Intermediate tiers like 0.48 s (`70,2,4`) are therefore
+  dominated and not shipped.
+
 ## Comparison vs Parakeet TDT v3 (same harness)
 
 Parakeet TDT v3 measured via `asr-benchmark --subset test-clean --model-version v3` on the same
