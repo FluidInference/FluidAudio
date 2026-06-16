@@ -49,12 +49,15 @@ struct UnifiedBatchLayout {
 public actor UnifiedAsrManager {
     private let logger = AppLogger(category: "UnifiedOffline")
 
-    private var preprocessor: MLModel?
     private var encoder: MLModel?
     private var decoder: MLModel?
     private var jointDecision: MLModel?
     private var rnntDecoder: UnifiedRnntDecoder?
     private var tokenizer: Tokenizer?
+
+    // Log-mel features are computed natively in Swift (`AudioMelSpectrogram` +
+    // NeMo per_feature normalization); the model ships no CoreML preprocessor.
+    private var swiftMel: UnifiedMelExtractor?
 
     private let audioConverter = AudioConverter()
     public let config: UnifiedConfig
@@ -86,14 +89,10 @@ public actor UnifiedAsrManager {
         logger.info("Loading Parakeet Unified offline CoreML models from \(directory.path)...")
 
         let names = ModelNames.ParakeetUnified.self
-        // See StreamingUnifiedAsrManager: RangeDim preprocessor and per-token
-        // decoder/joint stay on CPU; only the encoder uses ANE/GPU.
+        // See StreamingUnifiedAsrManager: per-token decoder/joint stay on CPU;
+        // only the encoder uses ANE/GPU. Mel is computed in Swift.
         let cpuConfig = MLModelConfiguration()
         cpuConfig.computeUnits = .cpuOnly
-        self.preprocessor = try await MLModel.load(
-            contentsOf: directory.appendingPathComponent(names.preprocessorFile),
-            configuration: cpuConfig
-        )
         // int8 encoders must not route to the GPU: under `.all` CoreML sends
         // the quantized ops to MPSGraph, which fails its MLIR pass and
         // aborts ("MPSGraphExecutable.mm: Error: MLIR pass manager failed").
@@ -123,6 +122,7 @@ public actor UnifiedAsrManager {
         self.rnntDecoder = try UnifiedRnntDecoder(
             decoderModel: decoder!, jointDecisionModel: jointDecision!, config: config
         )
+        self.swiftMel = UnifiedMelExtractor(windowSamples: layout.windowSamples, nMels: config.melFeatures)
 
         logger.info("Parakeet Unified offline models loaded (15 s window, 2 s overlap).")
     }
@@ -200,35 +200,21 @@ public actor UnifiedAsrManager {
     private func transcribeWindow(
         samples: [Float], chunkStart: Int, chunkEnd: Int
     ) async throws -> [ChunkProcessor.TokenWindow] {
-        guard let preprocessor = preprocessor, let encoder = encoder, let rnntDecoder = rnntDecoder
+        guard let swiftMel = swiftMel, let encoder = encoder, let rnntDecoder = rnntDecoder
         else {
             throw ASRError.notInitialized
         }
 
         let validCount = chunkEnd - chunkStart
-        let window = try MLMultiArray(
-            shape: [1, NSNumber(value: layout.windowSamples)], dataType: .float32
-        )
-        window.reset(to: 0)
-        window.withUnsafeMutableBufferPointer(ofType: Float.self) { ptr, _ in
-            samples.withUnsafeBufferPointer { src in
-                ptr.baseAddress!.update(from: src.baseAddress! + chunkStart, count: validCount)
+
+        // Window → mel (native Swift `AudioMelSpectrogram` + per_feature norm).
+        var buffer = [Float](repeating: 0, count: layout.windowSamples)
+        samples.withUnsafeBufferPointer { src in
+            buffer.withUnsafeMutableBufferPointer { dst in
+                dst.baseAddress!.update(from: src.baseAddress! + chunkStart, count: validCount)
             }
         }
-        let audioLength = try MLMultiArray(shape: [1], dataType: .int32)
-        audioLength[0] = NSNumber(value: validCount)
-
-        let preprocOutput = try await preprocessor.prediction(
-            from: MLDictionaryFeatureProvider(dictionary: [
-                "audio_signal": MLFeatureValue(multiArray: window),
-                "audio_length": MLFeatureValue(multiArray: audioLength),
-            ])
-        )
-        guard let mel = preprocOutput.featureValue(for: "mel")?.multiArrayValue,
-            let melLength = preprocOutput.featureValue(for: "mel_length")?.multiArrayValue
-        else {
-            throw ASRError.processingFailed("Unified preprocessor failed to produce mel output")
-        }
+        let (mel, melLength) = try swiftMel.features(window: buffer, validCount: validCount)
 
         let encoderOutput = try await encoder.prediction(
             from: MLDictionaryFeatureProvider(dictionary: [
@@ -264,11 +250,11 @@ public actor UnifiedAsrManager {
 
     public func cleanup() async {
         try? await reset()
-        preprocessor = nil
         encoder = nil
         decoder = nil
         jointDecision = nil
         rnntDecoder = nil
+        swiftMel = nil
         tokenizer = nil
         logger.info("UnifiedAsrManager resources cleaned up")
     }

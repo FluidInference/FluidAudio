@@ -553,7 +553,9 @@ public enum ModelNames {
     /// (default download) and full-attention offline 15 s window
     /// (variant "offline" — used for overlapping-batch long-form transcription).
     public enum ParakeetUnified {
-        public static let preprocessorFile = "parakeet_unified_preprocessor.mlmodelc"
+        // Mel features are computed natively in Swift (`UnifiedMelExtractor` /
+        // `AudioMelSpectrogram` + NeMo per_feature normalization), so the CoreML
+        // preprocessor bundle is neither downloaded nor loaded.
         /// Encoders ship in two precisions. int8 (per-channel linear symmetric
         /// weights) is the default: identical test-clean WER to fp16
         /// (1.83%/2.14% vs 1.82%/2.15%), same ANE latency, half the download.
@@ -566,8 +568,15 @@ public enum ModelNames {
         public static let vocab = "vocab.json"
         public static let metadata = "metadata.json"
 
-        public static func streamingEncoderFile(precision: UnifiedEncoderPrecision) -> String {
-            precision == .int8 ? streamingEncoderInt8File : streamingEncoderFp16File
+        /// Streaming encoder bundle name. The `[left, chunk, right]` attention
+        /// context is baked into the encoder at conversion time and encoded in
+        /// the filename suffix (e.g. `70_13_13`), so each latency tier is a
+        /// distinct file. Defaults to the shipped `70_13_13` (2.08 s) config.
+        public static func streamingEncoderFile(
+            precision: UnifiedEncoderPrecision, contextSuffix: String = "70_13_13"
+        ) -> String {
+            let base = "parakeet_unified_encoder_streaming_\(contextSuffix)"
+            return precision == .int8 ? "\(base)_int8.mlmodelc" : "\(base).mlmodelc"
         }
 
         public static func offlineEncoderFile(precision: UnifiedEncoderPrecision) -> String {
@@ -583,7 +592,6 @@ public enum ModelNames {
                 ? offlineEncoderFile(precision: precision)
                 : streamingEncoderFile(precision: precision)
             return [
-                preprocessorFile,
                 encoder,
                 decoderFile,
                 jointDecisionFile,

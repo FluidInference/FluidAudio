@@ -77,6 +77,10 @@ final class ModelNamesTests: XCTestCase {
         for set in [streaming, offline, streamingFp16, offlineFp16] {
             XCTAssertEqual(set.filter { $0.contains("encoder") }.count, 1)
         }
+        // Mel is computed in Swift; the CoreML preprocessor is never required.
+        for set in [streaming, offline, streamingFp16, offlineFp16] {
+            XCTAssertFalse(set.contains { $0.contains("preprocessor") })
+        }
     }
 
     func testDiarizerOfflineVariant() {
