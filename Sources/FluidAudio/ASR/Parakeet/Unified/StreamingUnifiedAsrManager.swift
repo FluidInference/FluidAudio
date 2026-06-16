@@ -141,14 +141,19 @@ public actor StreamingUnifiedAsrManager {
             .appendingPathComponent("Models", isDirectory: true)
 
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-        let encoderPath = cacheDir.appendingPathComponent(
-            ModelNames.ParakeetUnified.streamingEncoderFile(precision: encoderPrecision))
+        // Each [L,C,R] tier is a distinct encoder bundle (the attention mask is
+        // baked in at conversion), so the cache check and download both target
+        // this config's specific encoder rather than the default 70_13_13.
+        let encoderFile = ModelNames.ParakeetUnified.streamingEncoderFile(
+            precision: encoderPrecision, contextSuffix: config.contextSuffix)
+        let encoderPath = cacheDir.appendingPathComponent(encoderFile)
 
         if !FileManager.default.fileExists(atPath: encoderPath.path) {
             logger.info("Downloading Parakeet Unified models to \(modelsBaseDir.path)...")
             try await DownloadUtils.downloadRepo(
                 repo, to: modelsBaseDir,
                 variant: encoderPrecision == .fp16 ? "fp16" : nil,
+                additionalModelNames: [encoderFile],
                 progressHandler: progressHandler)
         } else {
             logger.info("Using cached Parakeet Unified models at \(cacheDir.path)")
