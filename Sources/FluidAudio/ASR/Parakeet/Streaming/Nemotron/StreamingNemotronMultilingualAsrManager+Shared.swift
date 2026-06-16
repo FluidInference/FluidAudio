@@ -341,6 +341,9 @@ extension StreamingNemotronMultilingualAsrManager {
     ///     "auto"/"multilingual" for the full-vocab model. Per-language ships
     ///     are vocab-pruned (faster); the multilingual ship covers 100+ langs.
     ///   - chunkMs: Chunk size tier — 560, 1120, 2240 (recommended), or 4480.
+    ///     Note: on long continuous sessions the 560 ms tier emits increasingly
+    ///     sparse punctuation (words are unaffected); prefer 1120 ms+ when
+    ///     punctuation matters, or reset the session on silence. See issue #687.
     ///   - directory: Model cache root (default: Application Support/FluidAudio/Models).
     public static func downloadAndPreloadShared(
         languageCode: String = "auto",
@@ -382,7 +385,43 @@ extension StreamingNemotronMultilingualAsrManager {
             ModelNames.NemotronMultilingualStreaming.metadata)
 
         if FileManager.default.fileExists(atPath: metadataPath.path) {
-            logger.info("Using cached multilingual variant at \(variantDir.path)")
+            // Repair pass for variants cached before 2026-05-31: the latin
+            // tokenizer.json shipped with a corrupt entry — id 2224 read
+            // "<blank>" (duplicating the real blank at 2828) instead of
+            // "▁there", so every "there" in a transcript decoded as the
+            // literal text "<blank>". The repo file is fixed upstream;
+            // re-fetch the tokenizer when the cached copy still has the
+            // corruption (https://github.com/FluidInference/FluidAudio/issues/687).
+            let tokenizerPath = variantDir.appendingPathComponent(
+                ModelNames.NemotronMultilingualStreaming.tokenizer)
+            if Self.tokenizerHasCorruptBlankEntry(tokenizerPath: tokenizerPath, metadataPath: metadataPath) {
+                logger.warning(
+                    "Cached tokenizer.json at \(tokenizerPath.path) has a corrupt duplicate '<blank>' entry — re-downloading the fixed file"
+                )
+                // Move the corrupt file aside so downloadSubdirectory re-fetches
+                // it; restore on failure so offline users keep a working variant.
+                let backupPath = tokenizerPath.appendingPathExtension("corrupt")
+                try? FileManager.default.removeItem(at: backupPath)
+                try FileManager.default.moveItem(at: tokenizerPath, to: backupPath)
+                do {
+                    try await DownloadUtils.downloadSubdirectory(
+                        .nemotronMultilingual,
+                        subdirectory: subdirectory,
+                        to: repoCacheDir,
+                        progressHandler: progressHandler,
+                        shouldSkip: { $0.contains(".mlpackage") }
+                    )
+                    try? FileManager.default.removeItem(at: backupPath)
+                    logger.info("Repaired tokenizer.json for \(subdirectory)")
+                } catch {
+                    try? FileManager.default.moveItem(at: backupPath, to: tokenizerPath)
+                    logger.warning(
+                        "Could not re-download tokenizer.json (\(error.localizedDescription)); keeping the cached copy"
+                    )
+                }
+            } else {
+                logger.info("Using cached multilingual variant at \(variantDir.path)")
+            }
         } else {
             logger.info("Downloading multilingual variant \(subdirectory) (.mlmodelc only)...")
             try await DownloadUtils.downloadSubdirectory(
@@ -394,6 +433,25 @@ extension StreamingNemotronMultilingualAsrManager {
             )
         }
         return variantDir
+    }
+
+    /// Detect the known tokenizer.json corruption shipped with latin variants
+    /// before 2026-05-31: a "<blank>" piece at an id other than the blank
+    /// index (id 2224, which should be "▁there", duplicated the real blank
+    /// entry at the blank index). A healthy tokenizer maps every id below
+    /// `blank_idx` to a real piece — "<blank>" may only appear at `blank_idx`.
+    ///
+    /// Returns `false` when either file is missing or unreadable; missing
+    /// files are handled by the normal download path.
+    internal static func tokenizerHasCorruptBlankEntry(tokenizerPath: URL, metadataPath: URL) -> Bool {
+        guard let config = try? NemotronMultilingualStreamingConfig(from: metadataPath),
+            let data = try? Data(contentsOf: tokenizerPath),
+            let vocab = try? JSONSerialization.jsonObject(with: data) as? [String: String]
+        else { return false }
+        return vocab.contains { entry in
+            guard entry.value == "<blank>", let id = Int(entry.key) else { return false }
+            return id != config.blankIdx
+        }
     }
 
     /// Compile-if-needed + load helper for required model files.
