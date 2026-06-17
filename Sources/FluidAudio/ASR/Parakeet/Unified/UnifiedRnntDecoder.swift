@@ -74,7 +74,7 @@ final class UnifiedRnntDecoder {
                 let jointOutput = try jointDecisionModel.prediction(
                     from: UnifiedJointDecisionFeatureProvider(
                         encoderStep: encStep,
-                        decoderStep: decoderStep.output,
+                        decoderStep: decoderStep.output
                     )
                 )
                 guard let tokenArray = jointOutput.featureValue(for: "token_id")?.multiArrayValue else {
