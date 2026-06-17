@@ -267,10 +267,7 @@ public actor StreamingUnifiedAsrManager {
 
         // 3. Streaming encoder (chunked attention mask baked in)
         let encoderOutput = try await encoder.prediction(
-            from: MLDictionaryFeatureProvider(dictionary: [
-                "mel": MLFeatureValue(multiArray: mel),
-                "mel_length": MLFeatureValue(multiArray: melLength),
-            ])
+            from: UnifiedEncoderFeatureProvider(mel: mel, melLength: melLength)
         )
         guard let encoded = encoderOutput.featureValue(for: "encoder")?.multiArrayValue,
             let encodedLength = encoderOutput.featureValue(for: "encoder_length")?.multiArrayValue
