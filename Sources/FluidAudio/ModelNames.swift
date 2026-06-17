@@ -553,7 +553,9 @@ public enum ModelNames {
     /// (default download) and full-attention offline 15 s window
     /// (variant "offline" — used for overlapping-batch long-form transcription).
     public enum ParakeetUnified {
-        public static let preprocessorFile = "parakeet_unified_preprocessor.mlmodelc"
+        // Mel features are computed natively in Swift (`UnifiedMelExtractor` /
+        // `AudioMelSpectrogram` + NeMo per_feature normalization), so the CoreML
+        // preprocessor bundle is neither downloaded nor loaded.
         /// Encoders ship in two precisions. int8 (per-channel linear symmetric
         /// weights) is the default: identical test-clean WER to fp16
         /// (1.83%/2.14% vs 1.82%/2.15%), same ANE latency, half the download.
@@ -566,8 +568,15 @@ public enum ModelNames {
         public static let vocab = "vocab.json"
         public static let metadata = "metadata.json"
 
-        public static func streamingEncoderFile(precision: UnifiedEncoderPrecision) -> String {
-            precision == .int8 ? streamingEncoderInt8File : streamingEncoderFp16File
+        /// Streaming encoder bundle name. The `[left, chunk, right]` attention
+        /// context is baked into the encoder at conversion time and encoded in
+        /// the filename suffix (e.g. `70_13_13`), so each latency tier is a
+        /// distinct file. Defaults to the shipped `70_13_13` (2.08 s) config.
+        public static func streamingEncoderFile(
+            precision: UnifiedEncoderPrecision, contextSuffix: String = "70_13_13"
+        ) -> String {
+            let base = "parakeet_unified_encoder_streaming_\(contextSuffix)"
+            return precision == .int8 ? "\(base)_int8.mlmodelc" : "\(base).mlmodelc"
         }
 
         public static func offlineEncoderFile(precision: UnifiedEncoderPrecision) -> String {
@@ -578,18 +587,18 @@ public enum ModelNames {
             let isOffline = variant?.hasPrefix("offline") == true
             let isFp16 = variant?.hasSuffix("fp16") == true
             let precision: UnifiedEncoderPrecision = isFp16 ? .fp16 : .int8
-            let encoder =
-                isOffline
-                ? offlineEncoderFile(precision: precision)
-                : streamingEncoderFile(precision: precision)
-            return [
-                preprocessorFile,
-                encoder,
-                decoderFile,
-                jointDecisionFile,
-                vocab,
-                metadata,
-            ]
+            // Context-independent shared files.
+            var models: Set<String> = [decoderFile, jointDecisionFile, vocab, metadata]
+            // The streaming encoder is context-specific — each [L,C,R] latency
+            // tier bakes its attention mask into a distinct bundle — so the
+            // streaming manager passes its exact encoder via downloadRepo's
+            // `additionalModelNames` instead of pulling a fixed default here
+            // (which would over-fetch the 70_13_13 encoder for every tier). The
+            // offline encoder is fixed, so it stays in the base set.
+            if isOffline {
+                models.insert(offlineEncoderFile(precision: precision))
+            }
+            return models
         }
     }
 
