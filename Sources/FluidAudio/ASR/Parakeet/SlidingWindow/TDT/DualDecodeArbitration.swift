@@ -312,13 +312,22 @@ extension ChunkProcessor {
         }
 
         if chunkOutputs.count > 1 {
-            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: await manager.vocabulary)
+            let vocabulary = await manager.vocabulary
+            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
+            let caseVariantIds = Self.caseVariantCanonicalIds(vocabulary: vocabulary)
             for chunk in chunkOutputs.dropFirst() {
-                mergedTokens = mergeChunks(mergedTokens, chunk, spliceSafeTokenIds: spliceSafeTokenIds)
+                mergedTokens = mergeChunks(
+                    mergedTokens,
+                    chunk,
+                    spliceSafeTokenIds: spliceSafeTokenIds,
+                    caseVariantIds: caseVariantIds
+                )
             }
-        }
-
-        if mergedTokens.count > 1 {
+            if mergedTokens.count > 1 {
+                mergedTokens.sort { $0.timestamp < $1.timestamp }
+            }
+            mergedTokens = collapseSeamWordDuplicates(mergedTokens, vocabulary: vocabulary)
+        } else if mergedTokens.count > 1 {
             mergedTokens.sort { $0.timestamp < $1.timestamp }
         }
 

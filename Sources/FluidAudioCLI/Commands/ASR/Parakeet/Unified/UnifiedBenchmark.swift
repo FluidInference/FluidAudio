@@ -33,10 +33,18 @@ enum UnifiedBenchmark {
         var modes: [String] = ["batch", "streaming"]
         var precision: UnifiedEncoderPrecision = .int8
         var mdPath = "Sources/FluidAudio/ASR/Parakeet/Unified/benchmark.md"
+        var inputFile: String?
+        var longformDir: String?
 
         var i = 0
         while i < arguments.count {
             switch arguments[i] {
+            case "--input":
+                inputFile = arguments[safe: i + 1]
+                i += 1
+            case "--longform-dir":
+                longformDir = arguments[safe: i + 1]
+                i += 1
             case "--subset":
                 subset = arguments[safe: i + 1] ?? subset
                 i += 1
@@ -56,6 +64,16 @@ enum UnifiedBenchmark {
             default: break
             }
             i += 1
+        }
+
+        if let inputFile {
+            await runSeamComparison(path: inputFile, precision: precision)
+            return
+        }
+
+        if let longformDir {
+            await runLongformBenchmark(dir: longformDir, precision: precision, maxFiles: maxFiles)
+            return
         }
 
         let bench = ASRBenchmark()
@@ -244,6 +262,247 @@ enum UnifiedBenchmark {
             punctuation/capitalization. TDT v3 remains the choice for non-English audio.
             """
         try? md.write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - Single-File Seam Comparison (Issue #706)
+
+    /// Transcribe one (typically long) file with Unified batch and Parakeet TDT
+    /// v3, then count the chunk-merge seam artifacts #706 is about: adjacent
+    /// case-only duplicate words ("meeting Meeting") and mid-sentence
+    /// capitalized words. No reference transcript is needed — the metric is the
+    /// artifact, and TDT v3 (which already silence-aligns its chunks) is the
+    /// quality baseline.
+    private static func runSeamComparison(path: String, precision: UnifiedEncoderPrecision) async {
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            logger.error("Input file not found: \(path)")
+            return
+        }
+
+        do {
+            let converter = AudioConverter()
+            let samples = try converter.resampleAudioFile(url)
+            let audioSeconds = Double(samples.count) / 16000.0
+            logger.info(
+                "Seam comparison on \(url.lastPathComponent): \(String(format: "%.1f", audioSeconds))s of audio")
+
+            // Unified batch (silence-aligned chunks + case-folded merge).
+            let batch = UnifiedAsrManager(encoderPrecision: precision)
+            try await batch.loadModels()
+            let unifiedStart = Date()
+            let unifiedText = try await batch.transcribe(samples)
+            let unifiedSeconds = Date().timeIntervalSince(unifiedStart)
+
+            // Parakeet TDT v3 (sliding-window reference).
+            let tdtModels = try await AsrModels.downloadAndLoad(version: .v3)
+            let asr = AsrManager(config: .default)
+            try await asr.loadModels(tdtModels)
+            var decoderState = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
+            let tdtStart = Date()
+            let tdtResult = try await asr.transcribe(samples, decoderState: &decoderState)
+            let tdtSeconds = Date().timeIntervalSince(tdtStart)
+
+            let unifiedArtifacts = seamArtifacts(in: unifiedText)
+            let tdtArtifacts = seamArtifacts(in: tdtResult.text)
+
+            let unifiedOut = url.deletingPathExtension().lastPathComponent + ".unified.txt"
+            let tdtOut = url.deletingPathExtension().lastPathComponent + ".tdtv3.txt"
+            try? unifiedText.write(toFile: unifiedOut, atomically: true, encoding: .utf8)
+            try? tdtResult.text.write(toFile: tdtOut, atomically: true, encoding: .utf8)
+
+            print("\n" + String(repeating: "=", count: 64))
+            print("SEAM ARTIFACT COMPARISON — \(url.lastPathComponent)")
+            print(String(repeating: "=", count: 64))
+            print(String(format: "Audio: %.1fs", audioSeconds))
+            print("")
+            printArtifactRow(
+                label: "Unified batch",
+                artifacts: unifiedArtifacts,
+                seconds: unifiedSeconds,
+                audioSeconds: audioSeconds)
+            printArtifactRow(
+                label: "Parakeet TDT v3",
+                artifacts: tdtArtifacts,
+                seconds: tdtSeconds,
+                audioSeconds: audioSeconds)
+            print("")
+            print("Transcripts written to:\n  \(unifiedOut)\n  \(tdtOut)")
+            if !unifiedArtifacts.examples.isEmpty {
+                print("\nUnified seam examples (up to 10):")
+                for ex in unifiedArtifacts.examples.prefix(10) { print("  • \(ex)") }
+            }
+            print(String(repeating: "=", count: 64))
+        } catch {
+            logger.error("Seam comparison failed: \(error)")
+        }
+    }
+
+    // MARK: - Long-Form WER Benchmark (Earnings-22)
+
+    /// Transcribe every `{id}.wav` (with sibling `{id}.txt` reference) in a
+    /// directory of full-length recordings with both Unified batch and Parakeet
+    /// TDT v3, scoring long-form WER (normalized like `asr-benchmark`) plus the
+    /// seam case-duplicate count. This exercises chunk merging end-to-end —
+    /// each file spans many 15 s windows — which the short LibriSpeech /
+    /// earnings22-kws clips cannot.
+    private static func runLongformBenchmark(dir: String, precision: UnifiedEncoderPrecision, maxFiles: Int?) async {
+        let dirURL = URL(fileURLWithPath: dir)
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(at: dirURL, includingPropertiesForKeys: nil) else {
+            logger.error("Long-form directory not found: \(dir)")
+            return
+        }
+        var wavs = entries.filter { $0.pathExtension.lowercased() == "wav" }.sorted { $0.path < $1.path }
+        if let maxFiles { wavs = Array(wavs.prefix(maxFiles)) }
+        guard !wavs.isEmpty else {
+            logger.error("No .wav files in \(dir)")
+            return
+        }
+
+        do {
+            let converter = AudioConverter()
+            let batch = UnifiedAsrManager(encoderPrecision: precision)
+            try await batch.loadModels()
+            let tdtModels = try await AsrModels.downloadAndLoad(version: .v3)
+            let asr = AsrManager(config: .default)
+            try await asr.loadModels(tdtModels)
+
+            var rows: [(id: String, words: Int, uniWer: Double, tdtWer: Double)] = []
+            var uniErrors = 0
+            var tdtErrors = 0
+            var refWords = 0
+            var uniAudio = 0.0
+            var tdtAudio = 0.0
+            var uniProc = 0.0
+            var tdtProc = 0.0
+            var uniDupes = 0
+            var tdtDupes = 0
+
+            for wav in wavs {
+                let id = wav.deletingPathExtension().lastPathComponent
+                let refURL = wav.deletingPathExtension().appendingPathExtension("txt")
+                guard let reference = try? String(contentsOf: refURL, encoding: .utf8) else {
+                    logger.info("Skipping \(id): no reference .txt")
+                    continue
+                }
+                let samples = try converter.resampleAudioFile(wav)
+                let seconds = Double(samples.count) / 16000.0
+
+                let uniStart = Date()
+                let uniText = try await batch.transcribe(samples)
+                uniProc += Date().timeIntervalSince(uniStart)
+
+                var decoderState = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
+                let tdtStart = Date()
+                let tdtText = try await asr.transcribe(samples, decoderState: &decoderState).text
+                tdtProc += Date().timeIntervalSince(tdtStart)
+
+                let uni = WERCalculator.calculateWERMetrics(hypothesis: uniText, reference: reference)
+                let tdt = WERCalculator.calculateWERMetrics(hypothesis: tdtText, reference: reference)
+
+                uniErrors += uni.insertions + uni.deletions + uni.substitutions
+                tdtErrors += tdt.insertions + tdt.deletions + tdt.substitutions
+                refWords += uni.totalWords
+                uniAudio += seconds
+                tdtAudio += seconds
+                uniDupes += seamArtifacts(in: uniText).caseDuplicates
+                tdtDupes += seamArtifacts(in: tdtText).caseDuplicates
+                rows.append((id, uni.totalWords, uni.wer, tdt.wer))
+
+                print(
+                    String(
+                        format: "%-22@  %.1fs  ref=%5d  Unified WER %.2f%%   TDT v3 WER %.2f%%",
+                        id as NSString, seconds, uni.totalWords, uni.wer * 100, tdt.wer * 100))
+            }
+
+            guard !rows.isEmpty else {
+                logger.error("No scorable files (missing references).")
+                return
+            }
+
+            let uniAvg = rows.map(\.uniWer).reduce(0, +) / Double(rows.count) * 100
+            let tdtAvg = rows.map(\.tdtWer).reduce(0, +) / Double(rows.count) * 100
+            let uniAgg = refWords > 0 ? Double(uniErrors) / Double(refWords) * 100 : 0
+            let tdtAgg = refWords > 0 ? Double(tdtErrors) / Double(refWords) * 100 : 0
+
+            print("\n" + String(repeating: "=", count: 72))
+            print("EARNINGS-22 LONG-FORM WER — \(rows.count) files, \(String(format: "%.1f", uniAudio / 60))min audio")
+            print(String(repeating: "=", count: 72))
+            print(
+                String(
+                    format: "Unified batch     Avg WER %.2f%%   Aggregate WER %.2f%%   case-dupes %d   %.0fx",
+                    uniAvg, uniAgg, uniDupes, uniProc > 0 ? uniAudio / uniProc : 0))
+            print(
+                String(
+                    format: "Parakeet TDT v3   Avg WER %.2f%%   Aggregate WER %.2f%%   case-dupes %d   %.0fx",
+                    tdtAvg, tdtAgg, tdtDupes, tdtProc > 0 ? tdtAudio / tdtProc : 0))
+            print(String(repeating: "=", count: 72))
+        } catch {
+            logger.error("Long-form benchmark failed: \(error)")
+        }
+    }
+
+    private struct SeamArtifacts {
+        var caseDuplicates: Int
+        var midSentenceCaps: Int
+        var examples: [String]
+    }
+
+    private static func printArtifactRow(
+        label: String, artifacts: SeamArtifacts, seconds: Double, audioSeconds: Double
+    ) {
+        let rtfx = seconds > 0 ? audioSeconds / seconds : 0
+        let padded = label.padding(toLength: 18, withPad: " ", startingAt: 0)
+        print(
+            padded
+                + String(
+                    format: "case-dupes: %3d   mid-sentence caps: %4d   (%.1fs, %.0fx)",
+                    artifacts.caseDuplicates, artifacts.midSentenceCaps, seconds, rtfx))
+    }
+
+    /// Count seam artifacts in a transcript. `caseDuplicates` are adjacent words
+    /// equal up to case ("meeting Meeting"); `midSentenceCaps` are capitalized
+    /// words that don't follow sentence-ending punctuation (excluding the
+    /// pronoun "I" and all-caps acronyms).
+    private static func seamArtifacts(in text: String) -> SeamArtifacts {
+        let rawWords = text.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }).map(String.init)
+        var caseDuplicates = 0
+        var midSentenceCaps = 0
+        var examples: [String] = []
+
+        func core(_ w: String) -> String {
+            w.trimmingCharacters(in: CharacterSet.punctuationCharacters)
+        }
+        func endsSentence(_ w: String) -> Bool {
+            guard let last = w.last else { return false }
+            return last == "." || last == "?" || last == "!" || last == ":"
+        }
+
+        for index in 1..<max(rawWords.count, 1) {
+            let prev = core(rawWords[index - 1])
+            let cur = core(rawWords[index])
+            guard !cur.isEmpty, !prev.isEmpty else { continue }
+
+            if cur != prev, cur.lowercased() == prev.lowercased(),
+                cur.first?.isLetter == true
+            {
+                caseDuplicates += 1
+                if examples.count < 20 {
+                    examples.append("…\(rawWords[index - 1]) \(rawWords[index])… (case duplicate)")
+                }
+            }
+
+            if let first = cur.first, first.isUppercase, first.isLetter,
+                cur != "I", cur != cur.uppercased(),  // skip ALL-CAPS acronyms
+                !endsSentence(rawWords[index - 1])
+            {
+                midSentenceCaps += 1
+                if examples.count < 20 {
+                    examples.append("…\(rawWords[index - 1]) \(rawWords[index])… (mid-sentence cap)")
+                }
+            }
+        }
+        return SeamArtifacts(caseDuplicates: caseDuplicates, midSentenceCaps: midSentenceCaps, examples: examples)
     }
 }
 
