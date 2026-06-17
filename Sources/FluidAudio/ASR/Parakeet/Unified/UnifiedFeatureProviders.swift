@@ -1,12 +1,5 @@
-//
-//  File.swift
-//  FluidAudio
-//
-//  Created by Benjamin Lee on 6/17/26.
-//
-
-import Foundation
 @preconcurrency import CoreML
+import Foundation
 
 /// Hyperoptimized Mel Feature Provider
 final class UnifiedEncoderFeatureProvider: MLFeatureProvider {
