@@ -163,13 +163,15 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         XCTAssertTrue(recorded.isEmpty, "override fall-through must use the lexicon, not G2P")
     }
 
-    func testLongAllCapsWordIsNotSpelled() async throws {
-        // Outside the 2-5 length range → not an initialism candidate.
-        XCTAssertFalse(KokoroAneEnglishPhonemizer.isInitialismCandidate("ABCDEF"))
-        XCTAssertFalse(KokoroAneEnglishPhonemizer.isInitialismCandidate("A"))
-        XCTAssertTrue(KokoroAneEnglishPhonemizer.isInitialismCandidate("FBI"))
-        // Digits/hyphens disqualify it (`COVID-19`, `MP3`).
-        XCTAssertFalse(KokoroAneEnglishPhonemizer.isInitialismCandidate("MP3"))
+    func testLongAllCapsWordIsNotSpelledButReachesG2P() async throws {
+        // Outside the 2-5 length range → not an initialism; reaches G2P
+        // instead of being spelled letter by letter. (Candidate boundaries
+        // are unit-tested in EnglishInitialismsTests.)
+        let recorder = FallbackRecorder()
+        let result = try await makePhonemizer().phonemize("ABCDEF") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "<g2p:abcdef>")
+        let recorded = await recorder.words
+        XCTAssertEqual(recorded, ["abcdef"])
     }
 
     func testOOVWordFallsBackToG2PWithNormalizedSpelling() async throws {

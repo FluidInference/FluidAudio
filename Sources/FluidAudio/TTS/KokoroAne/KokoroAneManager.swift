@@ -264,13 +264,17 @@ public actor KokoroAneManager {
         )
     }
 
-    /// English text → Misaki-style IPA. Lexicon-first resolution (weak
-    /// function-word forms — `to` → `tu`, not the stressed BART citation
-    /// form `tˈO`, issue #691), per-word BART G2P fallback for OOV words,
-    /// and vocab-supported punctuation kept as prosody/pause tokens.
+    /// English text → Misaki-style IPA. A conservative normalization pass
+    /// first rewrites strict standalone numbers, ordinals, decimals, and
+    /// 12-hour times into spoken words (issue #711), then lexicon-first
+    /// resolution applies (weak function-word forms — `to` → `tu`, not the
+    /// stressed BART citation form `tˈO`, issue #691), with per-word BART
+    /// G2P fallback for OOV words and vocab-supported punctuation kept as
+    /// prosody/pause tokens.
     private func phonemize(text: String) async throws -> String {
+        let normalized = EnglishTextNormalizer.normalize(text)
         let phonemizer = await ensureEnglishPhonemizer()
-        return try await phonemizer.phonemize(text) { word in
+        return try await phonemizer.phonemize(normalized) { word in
             try await G2PModel.shared.phonemize(word: word)
         }
     }

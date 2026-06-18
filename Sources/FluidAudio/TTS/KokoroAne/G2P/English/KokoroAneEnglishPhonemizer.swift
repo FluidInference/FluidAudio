@@ -123,7 +123,7 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         // before consulting the lexicon so they sound like `A I` / `U S`
         // (issue #710). Lowercase `us`/`ai` are untouched — the override
         // only matches the exact uppercase spelling.
-        if Self.letterNameOverrides.contains(word) {
+        if EnglishInitialisms.letterNameOverrides.contains(word) {
             if let spelled = spellAsLetterNames(word) {
                 return spelled
             }
@@ -149,7 +149,7 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         // instead of letting BART G2P sound them out as a word (issue #710).
         // Known acronyms (`NASA`, `FIFA`, `OK`, `COVID`) keep their bundled
         // pronunciations because they're resolved above as lexicon hits.
-        if Self.isInitialismCandidate(word), let spelled = spellAsLetterNames(word) {
+        if EnglishInitialisms.isCandidate(word), let spelled = spellAsLetterNames(word) {
             return spelled
         }
 
@@ -168,40 +168,13 @@ struct KokoroAneEnglishPhonemizer: Sendable {
 
     // MARK: - Letter-name initialisms (issue #710)
 
-    /// Exact uppercase spellings whose bundled lexicon entry is not the
-    /// letter-name reading callers expect. These bypass the Misaki lexicon
-    /// and are spelled out from the per-letter entries instead.
-    private static let letterNameOverrides: Set<String> = ["AI", "US"]
-
-    /// Length bounds for spelling unknown all-caps tokens as letter names.
-    private static let initialismLengthRange = 2...5
-
-    /// A strict ASCII all-caps token (`FBI`, `ATP`) within the length range
-    /// — the only shape we spell out after a lexicon miss. Anything with a
-    /// digit, hyphen, apostrophe, or non-ASCII letter is excluded so brand
-    /// and proper-name pronunciations aren't disturbed.
-    static func isInitialismCandidate(_ word: String) -> Bool {
-        guard Self.initialismLengthRange.contains(word.count) else { return false }
-        return word.allSatisfy { $0.isASCII && $0.isUppercase && $0.isLetter }
-    }
-
-    /// Spell a token as a sequence of letter names, reading each uppercase
-    /// letter's pronunciation from the case-sensitive lexicon and joining
-    /// them with spaces so each letter is its own prosodic unit (`FBI` →
-    /// `ˈɛf bˈi ˈI`). Returns `nil` if any letter is missing from the
-    /// lexicon (e.g. the G2P-only degraded path) so the caller falls
-    /// through to its normal fallback rather than emitting a partial word.
+    /// Spell a token as a sequence of letter names using the per-letter
+    /// entries in the case-sensitive lexicon (`FBI` → `ˈɛf bˈi ˈI`). See
+    /// ``EnglishInitialisms/spell(_:letterTokens:render:separator:)`` —
+    /// returns `nil` if any letter is missing so the caller falls through
+    /// to its normal fallback rather than emitting a partial word.
     private func spellAsLetterNames(_ word: String) -> String? {
-        var letters: [String] = []
-        letters.reserveCapacity(word.count)
-        for ch in word {
-            guard let phonemes = caseSensitiveWordToPhonemes[String(ch)], !phonemes.isEmpty else {
-                return nil
-            }
-            letters.append(phonemes.joined())
-        }
-        guard !letters.isEmpty else { return nil }
-        return letters.joined(separator: " ")
+        EnglishInitialisms.spell(word) { caseSensitiveWordToPhonemes[$0] }
     }
 
     /// Lowercase + strip non-letter/digit/apostrophe chars so we hit the
