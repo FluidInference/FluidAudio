@@ -17,10 +17,15 @@ public actor StreamingUnifiedAsrManager {
     private let logger = AppLogger(category: "UnifiedStreaming")
 
     // Models
-    private var preprocessor: MLModel?
     private var encoder: MLModel?
     private var decoder: MLModel?
     private var jointDecision: MLModel?
+
+    // Log-mel features are computed natively in Swift (`AudioMelSpectrogram` +
+    // NeMo per_feature normalization); the model ships no CoreML preprocessor.
+    // WER-equivalent to the original traced preprocessor on test-clean, ~17-21%
+    // faster, and avoids the forced-CPU RangeDim mel stage.
+    private var swiftMel: UnifiedMelExtractor?
 
     // Components
     private let audioConverter = AudioConverter()
@@ -77,15 +82,11 @@ public actor StreamingUnifiedAsrManager {
         logger.info("Loading Parakeet Unified CoreML models from \(directory.path)...")
 
         let names = ModelNames.ParakeetUnified.self
-        // Decoder/joint run tiny per-token steps and the variable-length
-        // (RangeDim) preprocessor trips E5RT shape inference on the ANE —
-        // all three stay on CPU. Only the encoder benefits from ANE/GPU.
+        // Decoder/joint run tiny per-token steps that stay on CPU; only the
+        // encoder benefits from ANE/GPU. Mel is computed in Swift (no CoreML
+        // preprocessor bundle).
         let cpuConfig = MLModelConfiguration()
         cpuConfig.computeUnits = .cpuOnly
-        self.preprocessor = try await MLModel.load(
-            contentsOf: directory.appendingPathComponent(names.preprocessorFile),
-            configuration: cpuConfig
-        )
         // int8 encoders must not route to the GPU: under `.all` CoreML sends
         // the quantized ops to MPSGraph, which fails its MLIR pass and
         // aborts ("MPSGraphExecutable.mm: Error: MLIR pass manager failed").
@@ -100,7 +101,7 @@ public actor StreamingUnifiedAsrManager {
         }
         self.encoder = try await MLModel.load(
             contentsOf: directory.appendingPathComponent(
-                names.streamingEncoderFile(precision: encoderPrecision)),
+                names.streamingEncoderFile(precision: encoderPrecision, contextSuffix: config.contextSuffix)),
             configuration: encoderConfig
         )
         self.decoder = try await MLModel.load(
@@ -115,6 +116,7 @@ public actor StreamingUnifiedAsrManager {
         self.rnntDecoder = try UnifiedRnntDecoder(
             decoderModel: decoder!, jointDecisionModel: jointDecision!, config: config
         )
+        self.swiftMel = UnifiedMelExtractor(windowSamples: config.windowSamples, nMels: config.melFeatures)
 
         logger.info("Parakeet Unified models loaded (latency \(config.latencyMs)ms).")
     }
@@ -139,14 +141,19 @@ public actor StreamingUnifiedAsrManager {
             .appendingPathComponent("Models", isDirectory: true)
 
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-        let encoderPath = cacheDir.appendingPathComponent(
-            ModelNames.ParakeetUnified.streamingEncoderFile(precision: encoderPrecision))
+        // Each [L,C,R] tier is a distinct encoder bundle (the attention mask is
+        // baked in at conversion), so the cache check and download both target
+        // this config's specific encoder rather than the default 70_13_13.
+        let encoderFile = ModelNames.ParakeetUnified.streamingEncoderFile(
+            precision: encoderPrecision, contextSuffix: config.contextSuffix)
+        let encoderPath = cacheDir.appendingPathComponent(encoderFile)
 
         if !FileManager.default.fileExists(atPath: encoderPath.path) {
             logger.info("Downloading Parakeet Unified models to \(modelsBaseDir.path)...")
             try await DownloadUtils.downloadRepo(
                 repo, to: modelsBaseDir,
                 variant: encoderPrecision == .fp16 ? "fp16" : nil,
+                additionalModelNames: [encoderFile],
                 progressHandler: progressHandler)
         } else {
             logger.info("Using cached Parakeet Unified models at \(cacheDir.path)")
@@ -190,6 +197,15 @@ public actor StreamingUnifiedAsrManager {
         return pendingTokenTimings
     }
 
+    /// Word-level timings since the previous call, draining the same buffer as
+    /// `consumeTokenTimings()` (call one or the other per cycle). Sub-word tokens
+    /// are grouped on their `▁` / leading-space boundaries; each word spans its
+    /// first sub-word's start to its last sub-word's end. Useful for streaming
+    /// diarized ASR (word→speaker attribution).
+    public func consumeWordTimings() -> [WordTiming] {
+        buildWordTimings(from: consumeTokenTimings())
+    }
+
     public func reset() async throws {
         samples.removeAll()
         samplesGlobalStart = 0
@@ -203,19 +219,19 @@ public actor StreamingUnifiedAsrManager {
 
     public func cleanup() async {
         try? await reset()
-        preprocessor = nil
         encoder = nil
         decoder = nil
         jointDecision = nil
         rnntDecoder = nil
         tokenizer = nil
+        swiftMel = nil
         logger.info("StreamingUnifiedAsrManager resources cleaned up")
     }
 
     // MARK: - Pipeline
 
     private func processAvailableWindows(isFinal: Bool) async throws {
-        guard preprocessor != nil, encoder != nil, decoder != nil, jointDecision != nil else {
+        guard swiftMel != nil, encoder != nil, decoder != nil, jointDecision != nil else {
             throw ASRError.notInitialized
         }
 
@@ -228,42 +244,26 @@ public actor StreamingUnifiedAsrManager {
     }
 
     private func processWindow(_ plan: UnifiedStreamingWindower.WindowPlan) async throws {
-        guard let preprocessor = preprocessor, let encoder = encoder else {
+        guard let swiftMel = swiftMel, let encoder = encoder else {
             throw ASRError.notInitialized
         }
 
         // 1. Assemble the zero-padded encoder window from the rolling buffer.
-        let window = try MLMultiArray(
-            shape: [1, NSNumber(value: config.windowSamples)], dataType: .float32
-        )
-        window.reset(to: 0)
         let localStart = plan.bufferStart - samplesGlobalStart
         let localEnd = plan.bufferEnd - samplesGlobalStart
         guard localStart >= 0, localEnd <= samples.count else {
             throw ASRError.processingFailed("Streaming window out of range (trimmed too aggressively)")
         }
         let validCount = localEnd - localStart
-        window.withUnsafeMutableBufferPointer(ofType: Float.self) { ptr, _ in
-            samples.withUnsafeBufferPointer { src in
-                ptr.baseAddress!.update(from: src.baseAddress! + localStart, count: validCount)
+
+        // 2. Window → mel (native Swift `AudioMelSpectrogram` + per_feature norm).
+        var buffer = [Float](repeating: 0, count: config.windowSamples)
+        samples.withUnsafeBufferPointer { src in
+            buffer.withUnsafeMutableBufferPointer { dst in
+                dst.baseAddress!.update(from: src.baseAddress! + localStart, count: validCount)
             }
         }
-
-        let audioLength = try MLMultiArray(shape: [1], dataType: .int32)
-        audioLength[0] = NSNumber(value: validCount)
-
-        // 2. Preprocessor: window → mel
-        let preprocOutput = try await preprocessor.prediction(
-            from: MLDictionaryFeatureProvider(dictionary: [
-                "audio_signal": MLFeatureValue(multiArray: window),
-                "audio_length": MLFeatureValue(multiArray: audioLength),
-            ])
-        )
-        guard let mel = preprocOutput.featureValue(for: "mel")?.multiArrayValue,
-            let melLength = preprocOutput.featureValue(for: "mel_length")?.multiArrayValue
-        else {
-            throw ASRError.processingFailed("Unified preprocessor failed to produce mel output")
-        }
+        let (mel, melLength) = try swiftMel.features(window: buffer, validCount: validCount)
 
         // 3. Streaming encoder (chunked attention mask baked in)
         let encoderOutput = try await encoder.prediction(

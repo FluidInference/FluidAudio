@@ -72,7 +72,9 @@ final class StreamingAsrManagerTests: XCTestCase {
 
         XCTAssertEqual(eouVariants.count, 3, "Expected 3 EOU variants")
         XCTAssertEqual(nemotronVariants.count, 3, "Expected 3 Nemotron variants")
-        XCTAssertEqual(unifiedVariants.count, 2, "Expected 2 Parakeet Unified variants (streaming + offline batch)")
+        XCTAssertEqual(
+            unifiedVariants.count, 5,
+            "Expected 5 Parakeet Unified variants (2080/1120/640/320ms streaming + offline batch)")
     }
 
     func testEouVariantsHaveChunkSize() {

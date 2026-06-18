@@ -69,13 +69,21 @@ final class ModelNamesTests: XCTestCase {
         let offlineFp16 = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: "offline-fp16")
 
         // int8 encoders are the default; fp16 selected by variant suffix.
-        XCTAssertTrue(streaming.contains(ModelNames.ParakeetUnified.streamingEncoderInt8File))
+        // The offline encoder is fixed, so it's in the required set...
         XCTAssertTrue(offline.contains(ModelNames.ParakeetUnified.offlineEncoderInt8File))
-        XCTAssertTrue(streamingFp16.contains(ModelNames.ParakeetUnified.streamingEncoderFp16File))
         XCTAssertTrue(offlineFp16.contains(ModelNames.ParakeetUnified.offlineEncoderFp16File))
-        // Exactly one encoder per variant set.
-        for set in [streaming, offline, streamingFp16, offlineFp16] {
+        // ...but the streaming encoder is context-specific ([L,C,R] tier), so it
+        // is NOT in the base set — the streaming manager adds its exact encoder
+        // via downloadRepo(additionalModelNames:), avoiding a default over-fetch.
+        for set in [streaming, streamingFp16] {
+            XCTAssertEqual(set.filter { $0.contains("encoder") }.count, 0)
+        }
+        for set in [offline, offlineFp16] {
             XCTAssertEqual(set.filter { $0.contains("encoder") }.count, 1)
+        }
+        // Mel is computed in Swift; the CoreML preprocessor is never required.
+        for set in [streaming, offline, streamingFp16, offlineFp16] {
+            XCTAssertFalse(set.contains { $0.contains("preprocessor") })
         }
     }
 

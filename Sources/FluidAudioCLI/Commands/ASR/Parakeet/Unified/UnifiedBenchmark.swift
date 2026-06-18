@@ -35,6 +35,12 @@ enum UnifiedBenchmark {
         var mdPath = "Sources/FluidAudio/ASR/Parakeet/Unified/benchmark.md"
         var inputFile: String?
         var longformDir: String?
+        // Streaming attention context [left, chunk, right] in encoder frames.
+        // Defaults to the shipped 70,13,13. Used to evaluate lower-latency tiers.
+        var streamingContext = UnifiedConfig()
+        // Optional local model directory (skips the HuggingFace download) — for
+        // testing encoders that aren't published yet.
+        var modelsDir: URL?
 
         var i = 0
         while i < arguments.count {
@@ -57,6 +63,16 @@ enum UnifiedBenchmark {
                 i += 1
             case "--precision":
                 precision = UnifiedEncoderPrecision(rawValue: arguments[safe: i + 1] ?? "") ?? .int8
+                i += 1
+            case "--context":
+                let parts = (arguments[safe: i + 1] ?? "").split(separator: ",").compactMap { Int($0) }
+                if parts.count == 3 {
+                    streamingContext = UnifiedConfig(
+                        leftFrames: parts[0], chunkFrames: parts[1], rightFrames: parts[2])
+                }
+                i += 1
+            case "--models-dir":
+                modelsDir = (arguments[safe: i + 1]).map { URL(fileURLWithPath: $0) }
                 i += 1
             case "--write-md":
                 mdPath = arguments[safe: i + 1] ?? mdPath
@@ -83,12 +99,14 @@ enum UnifiedBenchmark {
             var files = try collectFiles(from: dir)
             if let maxFiles { files = Array(files.prefix(maxFiles)) }
             logger.info(
-                "Parakeet Unified benchmark: \(files.count) files from LibriSpeech \(subset) (encoder \(precision.rawValue))"
+                "Parakeet Unified benchmark: \(files.count) files from LibriSpeech \(subset) (encoder \(precision.rawValue), streaming context \(streamingContext.contextSuffix), latency \(streamingContext.latencyMs)ms)"
             )
 
             var stats: [ModeStats] = []
             for mode in modes {
-                let s = try await runMode(mode: mode, files: files, precision: precision, bench: bench)
+                let s = try await runMode(
+                    mode: mode, files: files, precision: precision,
+                    streamingContext: streamingContext, modelsDir: modelsDir, bench: bench)
                 stats.append(s)
                 logSummary(s)
             }
@@ -102,17 +120,22 @@ enum UnifiedBenchmark {
     }
 
     private static func runMode(
-        mode: String, files: [LibriSpeechFile], precision: UnifiedEncoderPrecision, bench: ASRBenchmark
+        mode: String, files: [LibriSpeechFile], precision: UnifiedEncoderPrecision,
+        streamingContext: UnifiedConfig, modelsDir: URL?, bench: ASRBenchmark
     ) async throws -> ModeStats {
         let batch = UnifiedAsrManager(encoderPrecision: precision)
-        let streaming = StreamingUnifiedAsrManager(encoderPrecision: precision)
+        let streaming = StreamingUnifiedAsrManager(config: streamingContext, encoderPrecision: precision)
         let converter = AudioConverter()
         let windowSamples = 15 * 16000
 
         if mode == "batch" {
-            try await batch.loadModels()
+            if let modelsDir { try await batch.loadModels(from: modelsDir) } else { try await batch.loadModels() }
         } else {
-            try await streaming.loadModels()
+            if let modelsDir {
+                try await streaming.loadModels(from: modelsDir)
+            } else {
+                try await streaming.loadModels()
+            }
         }
 
         var wers: [Double] = []
@@ -245,7 +268,9 @@ enum UnifiedBenchmark {
               or as one continuous session (streaming) — none are skipped. Streaming's overall RTFx drops on
               long files because it re-encodes a 7.68 s window per 1.04 s chunk (the latency tax); batch only
               re-encodes the 2 s overlap, so its throughput stays flat.
-            - RTFx is end-to-end per file (preprocess + encode + greedy RNNT decode) on the run machine.
+            - RTFx is end-to-end per file (Swift mel + encode + greedy RNNT decode) on the run machine.
+              Mel features are computed natively in Swift (`AudioMelSpectrogram` + NeMo per_feature
+              normalization); there is no CoreML preprocessor stage.
 
             ## Comparison vs Parakeet TDT v3 (same harness)
 
@@ -255,8 +280,8 @@ enum UnifiedBenchmark {
             | Model | Mode | Avg WER | Overall RTFx | Punctuation/caps | Languages |
             |-------|------|---------|--------------|------------------|-----------|
             | Parakeet TDT v3 | batch (sliding window) | 2.6% | 110 | no | 25 + Japanese |
-            | Parakeet Unified | batch | 2.15% | 123 | yes | English |
-            | Parakeet Unified | streaming | 2.21% | 29 | yes | English |
+            | Parakeet Unified | batch | 2.16% | 144 | yes | English |
+            | Parakeet Unified | streaming | 2.21% | 66 | yes | English |
 
             For English file transcription, Unified batch beats TDT v3 on both WER and throughput and adds
             punctuation/capitalization. TDT v3 remains the choice for non-English audio.

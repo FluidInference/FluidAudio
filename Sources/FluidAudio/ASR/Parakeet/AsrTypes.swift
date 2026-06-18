@@ -158,6 +158,64 @@ public struct TokenTiming: Codable, Sendable {
     }
 }
 
+/// Word-level timing, aggregated from a sequence of `TokenTiming`s by grouping
+/// SentencePiece sub-word tokens on their word-boundary markers (`▁` / leading space).
+public struct WordTiming: Codable, Sendable {
+    public let word: String
+    public let startTime: TimeInterval
+    public let endTime: TimeInterval
+
+    public init(word: String, startTime: TimeInterval, endTime: TimeInterval) {
+        self.word = word
+        self.startTime = startTime
+        self.endTime = endTime
+    }
+}
+
+/// Build word-level timings from token timings (e.g. from
+/// `StreamingUnifiedAsrManager.consumeTokenTimings()`).
+///
+/// Tokens whose raw piece starts with a word-boundary marker (`▁` or a leading
+/// space) begin a new word; the rest are appended to the current word. The
+/// resulting word spans from the first sub-word token's `startTime` to the last
+/// sub-word token's `endTime`.
+public func buildWordTimings(from tokenTimings: [TokenTiming]) -> [WordTiming] {
+    var wordTimings: [WordTiming] = []
+    var currentWord = ""
+    var wordStart: TimeInterval = 0
+    var wordEnd: TimeInterval = 0
+
+    func flush() {
+        let trimmed = currentWord.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        wordTimings.append(WordTiming(word: trimmed, startTime: wordStart, endTime: wordEnd))
+    }
+
+    for timing in tokenTimings {
+        let token = timing.token
+        if token.isEmpty || token == "<blank>" || token == "<pad>" {
+            continue
+        }
+
+        let startsNewWord = isWordBoundary(token) || currentWord.isEmpty
+        if startsNewWord && !currentWord.isEmpty {
+            flush()
+            currentWord = ""
+        }
+
+        if startsNewWord {
+            currentWord = stripWordBoundaryPrefix(token)
+            wordStart = timing.startTime
+        } else {
+            currentWord += token
+        }
+        wordEnd = timing.endTime
+    }
+
+    flush()
+    return wordTimings
+}
+
 // MARK: - Errors
 
 public enum ASRError: Error, LocalizedError {

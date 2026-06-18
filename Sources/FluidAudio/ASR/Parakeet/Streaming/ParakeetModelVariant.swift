@@ -35,6 +35,16 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
     /// Parakeet Unified 0.6B, 2080ms latency (1.04s chunk + 1.04s right context).
     /// Stateless encoder re-run per chunk — streamed output matches offline quality.
     case parakeetUnified2080ms = "parakeet-unified-2080ms"
+    /// Parakeet Unified 0.6B, 1120ms latency ([70,7,7]: 0.56s chunk + 0.56s right
+    /// context). Lower latency *and* better WER than the 2080ms tier on test-clean.
+    case parakeetUnified1120ms = "parakeet-unified-1120ms"
+    /// Parakeet Unified 0.6B, 320ms latency ([70,2,2]: 0.16s chunk + 0.16s right
+    /// context). Lowest-latency tier; keeps look-ahead so WER stays near the best.
+    case parakeetUnified320ms = "parakeet-unified-320ms"
+    /// Parakeet Unified 0.6B, 640ms latency ([70,7,1]: 0.56s chunk + 0.08s right
+    /// context). Efficiency tier — same WER as 320ms at ~2.5x the RTFx (the large
+    /// chunk re-encodes far less often), trading latency for throughput.
+    case parakeetUnified640ms = "parakeet-unified-640ms"
     /// Parakeet Unified 0.6B offline batch: full-attention 15s windows with 2s
     /// overlap, merged on the seams. Best WER; transcribes only at finish().
     case parakeetUnifiedOffline15s = "parakeet-unified-offline-15s"
@@ -49,6 +59,9 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case .nemotron1120ms: return "Nemotron 0.6B (1120ms)"
         case .nemotron560ms: return "Nemotron 0.6B (560ms)"
         case .parakeetUnified2080ms: return "Parakeet Unified 0.6B (2080ms)"
+        case .parakeetUnified1120ms: return "Parakeet Unified 0.6B (1120ms)"
+        case .parakeetUnified320ms: return "Parakeet Unified 0.6B (320ms)"
+        case .parakeetUnified640ms: return "Parakeet Unified 0.6B (640ms)"
         case .parakeetUnifiedOffline15s: return "Parakeet Unified 0.6B (offline 15s batch)"
         }
     }
@@ -62,7 +75,9 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case .nemotron2240ms: return .nemotronStreaming2240
         case .nemotron1120ms: return .nemotronStreaming1120
         case .nemotron560ms: return .nemotronStreaming560
-        case .parakeetUnified2080ms, .parakeetUnifiedOffline15s: return .parakeetUnified
+        case .parakeetUnified2080ms, .parakeetUnified1120ms, .parakeetUnified320ms,
+            .parakeetUnified640ms, .parakeetUnifiedOffline15s:
+            return .parakeetUnified
         }
     }
 
@@ -73,8 +88,22 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
             return .parakeetEou
         case .nemotron2240ms, .nemotron1120ms, .nemotron560ms:
             return .nemotron
-        case .parakeetUnified2080ms, .parakeetUnifiedOffline15s:
+        case .parakeetUnified2080ms, .parakeetUnified1120ms, .parakeetUnified320ms,
+            .parakeetUnified640ms, .parakeetUnifiedOffline15s:
             return .parakeetUnified
+        }
+    }
+
+    /// The streaming attention context for Parakeet Unified variants (nil otherwise).
+    /// The encoder bakes `[left, chunk, right]` into its attention mask at conversion
+    /// time, so each tier loads a distinct encoder by `UnifiedConfig.contextSuffix`.
+    public var unifiedConfig: UnifiedConfig? {
+        switch self {
+        case .parakeetUnified2080ms: return UnifiedConfig(leftFrames: 70, chunkFrames: 13, rightFrames: 13)
+        case .parakeetUnified1120ms: return UnifiedConfig(leftFrames: 70, chunkFrames: 7, rightFrames: 7)
+        case .parakeetUnified320ms: return UnifiedConfig(leftFrames: 70, chunkFrames: 2, rightFrames: 2)
+        case .parakeetUnified640ms: return UnifiedConfig(leftFrames: 70, chunkFrames: 7, rightFrames: 1)
+        default: return nil
         }
     }
 
@@ -123,7 +152,8 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
             if self == .parakeetUnifiedOffline15s {
                 return UnifiedAsrManager(configuration: mlConfig)
             }
-            return StreamingUnifiedAsrManager(configuration: mlConfig)
+            return StreamingUnifiedAsrManager(
+                configuration: mlConfig, config: unifiedConfig ?? UnifiedConfig())
         }
     }
 
