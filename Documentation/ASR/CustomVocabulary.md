@@ -430,6 +430,66 @@ minimum string similarity before the acoustic-only rescue path may fire
 (higher for multi-word spans, which are the most error-prone). Tune these for
 short-keyword KWS; leave them off for distinctive-name vocabularies.
 
+#### When to enable
+
+Turn these on when **all** of the following hold; otherwise leave them off:
+
+- the vocabulary is small and made of **short** terms (≤ ~5 chars / a few
+  CTC tokens), and
+- those terms **collide acoustically with ordinary English** (brand names,
+  acronyms, function-word homophones), and
+- you observe ordinary words being replaced by keywords that were not spoken.
+
+For vocabularies of long, distinctive names (company/drug names, the
+earnings22 profile) leave them **off** — enabling them costs KWS recall
+(see below).
+
+#### Enabling
+
+```bash
+# CLI (batch) — recommended short-vocab settings
+fluidaudio transcribe audio.wav \
+    --custom-vocab short_terms.txt \
+    --vocab-short-term-taper-pivot 5 \
+    --vocab-spotter-min-sim 0.30 \
+    --vocab-spotter-min-sim-multi 0.50
+```
+
+```swift
+// API — pass an opt-in Config to the rescorer
+let config = VocabularyRescorer.Config(
+    shortTermCbwTaperPivot: 5,            // taper boost for terms < 5 tokens
+    spotterRescueMinSimilarity: 0.30,     // single-word acoustic-rescue floor
+    spotterRescueMultiWordMinSimilarity: 0.50  // multi-word floor
+)
+let rescorer = try await VocabularyRescorer.create(
+    spotter: ctcSpotter,
+    vocabulary: vocabulary,
+    config: config
+)
+```
+
+```bash
+# Env overrides (handy for parameter sweeps; apply to any entry point)
+export FLUID_CBW_TAPER_PIVOT=5
+export FLUID_SPOTTER_MIN_SIM=0.30
+export FLUID_SPOTTER_MIN_SIM_MULTI=0.50
+```
+
+#### Measured effect
+
+Repro: 8 short brand/acronym distractors (none spoken) over one minute of
+ordinary speech, plus the earnings22-kws KWS set (200 files) as the recall
+guard.
+
+| Setting | distractor false positives | earnings22 recall |
+|---|---|---|
+| **off (default)** | 12 | 95.7% |
+| recommended opt-in (pivot 5, floors 0.30 / 0.50) | **0** | (lower — only enable for short-vocab KWS) |
+
+The defaults are byte-for-byte identical to the pre-#702 behavior; the floors
+and taper only change scoring when explicitly enabled.
+
 ## Usage Example
 
 ```swift
