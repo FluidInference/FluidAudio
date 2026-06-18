@@ -19,14 +19,30 @@ extension VocabularyRescorer {
     /// - Parameters:
     ///   - normalizedWord: The normalized TDT word
     ///   - adjacentNormalized: Array of normalized adjacent words (for compound detection)
-    ///   - minSimilarity: Minimum similarity threshold
+    ///   - minSimilarity: Vocabulary-level fallback similarity threshold. Each
+    ///     candidate is filtered against its own `term.minSimilarity` when set,
+    ///     otherwise against this value.
+    ///   - searchFloor: Lowest threshold across the vocabulary, used to widen
+    ///     the BK-tree edit-distance bound so per-term overrides are not pruned
+    ///     before filtering. Defaults to `minSimilarity` when omitted.
     /// - Returns: Array of candidate matches sorted by similarity (descending)
     func findCandidateTermsForWord(
         normalizedWord: String,
         adjacentNormalized: [String],
-        minSimilarity: Float
+        minSimilarity: Float,
+        searchFloor: Float? = nil
     ) -> [CandidateMatch] {
         guard !normalizedWord.isEmpty else { return [] }
+
+        // Distance bound uses the most permissive threshold so a low per-term
+        // override still surfaces from the BK-tree; per-candidate filtering
+        // applies each term's own threshold below.
+        let distanceFloor = min(searchFloor ?? minSimilarity, minSimilarity)
+
+        // Effective per-candidate threshold (term override or vocab fallback).
+        func threshold(for term: CustomVocabularyTerm) -> Float {
+            term.minSimilarity ?? minSimilarity
+        }
 
         var candidates: [CandidateMatch] = []
 
@@ -35,12 +51,12 @@ extension VocabularyRescorer {
 
             // 1. Single word query
             let maxLen1 = max(normalizedWord.count, 3)
-            let maxDist1 = min(bkTreeMaxDistance, Int((1.0 - minSimilarity) * Float(maxLen1)))
+            let maxDist1 = min(bkTreeMaxDistance, Int((1.0 - distanceFloor) * Float(maxLen1)))
             let results1 = tree.search(query: normalizedWord, maxDistance: maxDist1)
 
             for result in results1 {
                 let similarity = Self.stringSimilarity(normalizedWord, result.normalizedText)
-                if similarity >= minSimilarity {
+                if similarity >= threshold(for: result.term) {
                     candidates.append(
                         CandidateMatch(
                             term: result.term,
@@ -54,13 +70,13 @@ extension VocabularyRescorer {
             if !adjacentNormalized.isEmpty, let word2 = adjacentNormalized.first, !word2.isEmpty {
                 let compound2 = normalizedWord + word2
                 let maxLen2 = max(compound2.count, 3)
-                let maxDist2 = min(bkTreeMaxDistance, Int((1.0 - minSimilarity) * Float(maxLen2)))
+                let maxDist2 = min(bkTreeMaxDistance, Int((1.0 - distanceFloor) * Float(maxLen2)))
                 let results2 = tree.search(query: compound2, maxDistance: maxDist2)
 
                 for result in results2 {
                     // Use length-penalized similarity to prevent prefix/suffix mismatches
                     let similarity = Self.lengthPenalizedSimilarity(compound2, result.normalizedText)
-                    if similarity >= minSimilarity {
+                    if similarity >= threshold(for: result.term) {
                         candidates.append(
                             CandidateMatch(
                                 term: result.term,
@@ -80,13 +96,13 @@ extension VocabularyRescorer {
                 // Only search for 3-word compounds if the compound is long enough
                 if compound3.count >= 6 {
                     let maxLen3 = compound3.count
-                    let maxDist3 = min(bkTreeMaxDistance, Int((1.0 - minSimilarity) * Float(maxLen3)))
+                    let maxDist3 = min(bkTreeMaxDistance, Int((1.0 - distanceFloor) * Float(maxLen3)))
                     let results3 = tree.search(query: compound3, maxDistance: maxDist3)
 
                     for result in results3 {
                         // Use length-penalized similarity to prevent prefix/suffix mismatches
                         let similarity = Self.lengthPenalizedSimilarity(compound3, result.normalizedText)
-                        if similarity >= minSimilarity {
+                        if similarity >= threshold(for: result.term) {
                             candidates.append(
                                 CandidateMatch(
                                     term: result.term,
@@ -107,12 +123,12 @@ extension VocabularyRescorer {
                     let phrase = phraseWords.joined(separator: " ")
                     let maxLenPhrase = max(phrase.count, 3)
                     let maxDistPhrase = min(
-                        bkTreeMaxDistance + 1, Int((1.0 - minSimilarity) * Float(maxLenPhrase)))
+                        bkTreeMaxDistance + 1, Int((1.0 - distanceFloor) * Float(maxLenPhrase)))
                     let resultsPhrase = tree.search(query: phrase, maxDistance: maxDistPhrase)
 
                     for result in resultsPhrase {
                         let similarity = Self.stringSimilarity(phrase, result.normalizedText)
-                        if similarity >= minSimilarity {
+                        if similarity >= threshold(for: result.term) {
                             candidates.append(
                                 CandidateMatch(
                                     term: result.term,
@@ -132,10 +148,12 @@ extension VocabularyRescorer {
 
                 let termWordCount = termNormalized.split(separator: " ").count
 
+                let termThreshold = threshold(for: term)
+
                 if termWordCount == 1 {
                     // Single word term - check single word and compounds
                     let similarity1 = Self.stringSimilarity(normalizedWord, termNormalized)
-                    if similarity1 >= minSimilarity {
+                    if similarity1 >= termThreshold {
                         candidates.append(
                             CandidateMatch(
                                 term: term,
@@ -149,7 +167,7 @@ extension VocabularyRescorer {
                         let compound2 = normalizedWord + word2
                         // Use length-penalized similarity to prevent prefix/suffix mismatches
                         let similarity2 = Self.lengthPenalizedSimilarity(compound2, termNormalized)
-                        if similarity2 >= minSimilarity {
+                        if similarity2 >= termThreshold {
                             candidates.append(
                                 CandidateMatch(
                                     term: term,
@@ -168,7 +186,7 @@ extension VocabularyRescorer {
                             if compound3.count >= 6 {
                                 // Use length-penalized similarity to prevent prefix/suffix mismatches
                                 let similarity3 = Self.lengthPenalizedSimilarity(compound3, termNormalized)
-                                if similarity3 >= minSimilarity {
+                                if similarity3 >= termThreshold {
                                     candidates.append(
                                         CandidateMatch(
                                             term: term,
@@ -187,7 +205,7 @@ extension VocabularyRescorer {
                             let phraseWords = [normalizedWord] + Array(adjacentNormalized.prefix(spanLen - 1))
                             let phrase = phraseWords.joined(separator: " ")
                             let similarity = Self.stringSimilarity(phrase, termNormalized)
-                            if similarity >= minSimilarity {
+                            if similarity >= termThreshold {
                                 candidates.append(
                                     CandidateMatch(
                                         term: term,
