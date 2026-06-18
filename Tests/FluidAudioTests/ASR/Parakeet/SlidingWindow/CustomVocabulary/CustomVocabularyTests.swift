@@ -13,6 +13,7 @@ final class CustomVocabularyTests: XCTestCase {
         XCTAssertNil(term.aliases)
         XCTAssertNil(term.tokenIds)
         XCTAssertNil(term.ctcTokenIds)
+        XCTAssertNil(term.minSimilarity)
     }
 
     func testTermFullInit() {
@@ -21,13 +22,25 @@ final class CustomVocabularyTests: XCTestCase {
             weight: 5.0,
             aliases: ["boz", "boss"],
             tokenIds: [100, 200],
-            ctcTokenIds: [50, 60]
+            ctcTokenIds: [50, 60],
+            minSimilarity: 0.45
         )
         XCTAssertEqual(term.text, "Bose")
         XCTAssertEqual(term.weight, 5.0)
         XCTAssertEqual(term.aliases, ["boz", "boss"])
         XCTAssertEqual(term.tokenIds, [100, 200])
         XCTAssertEqual(term.ctcTokenIds, [50, 60])
+        XCTAssertEqual(term.minSimilarity ?? -1, 0.45, accuracy: 0.001)
+    }
+
+    // MARK: - Per-Term minSimilarity (#647)
+
+    func testTermMinSimilarityClampedToRange() {
+        XCTAssertEqual(
+            CustomVocabularyTerm(text: "Caivex", minSimilarity: -0.5).minSimilarity ?? -1, 0.0, accuracy: 0.001)
+        XCTAssertEqual(
+            CustomVocabularyTerm(text: "Andre", minSimilarity: 1.7).minSimilarity ?? -1, 1.0, accuracy: 0.001)
+        XCTAssertEqual(CustomVocabularyTerm(text: "Mid", minSimilarity: 0.6).minSimilarity ?? -1, 0.6, accuracy: 0.001)
     }
 
     func testTextLowercased() {
@@ -47,7 +60,8 @@ final class CustomVocabularyTests: XCTestCase {
             weight: 3.0,
             aliases: ["tensor-rt"],
             tokenIds: [10, 20],
-            ctcTokenIds: [30, 40]
+            ctcTokenIds: [30, 40],
+            minSimilarity: 0.52
         )
 
         let data = try JSONEncoder().encode(original)
@@ -58,6 +72,7 @@ final class CustomVocabularyTests: XCTestCase {
         XCTAssertEqual(decoded.aliases, original.aliases)
         XCTAssertEqual(decoded.tokenIds, original.tokenIds)
         XCTAssertEqual(decoded.ctcTokenIds, original.ctcTokenIds)
+        XCTAssertEqual(decoded.minSimilarity ?? -1, 0.52, accuracy: 0.001)
         XCTAssertEqual(decoded.textLowercased, "tensorrt")
     }
 
@@ -71,6 +86,15 @@ final class CustomVocabularyTests: XCTestCase {
         XCTAssertNil(decoded.aliases)
         XCTAssertNil(decoded.tokenIds)
         XCTAssertNil(decoded.ctcTokenIds)
+        XCTAssertNil(decoded.minSimilarity)
+    }
+
+    func testTermDecodeMinSimilarityFromJSON() throws {
+        let json = """
+            {"text": "Caivex", "minSimilarity": 0.42}
+            """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(CustomVocabularyTerm.self, from: json)
+        XCTAssertEqual(decoded.minSimilarity ?? -1, 0.42, accuracy: 0.001)
     }
 
     func testTermDecodeSetsLowercased() throws {
@@ -116,6 +140,34 @@ final class CustomVocabularyTests: XCTestCase {
     func testContextMinTermLengthDefault() {
         let context = CustomVocabularyContext(terms: [])
         XCTAssertEqual(context.minTermLength, 3)
+    }
+
+    // MARK: - load(from:) Per-Term minSimilarity
+
+    func testLoadPreservesPerTermMinSimilarity() throws {
+        let json = """
+            {
+              "terms": [
+                {"text": "Caivex", "minSimilarity": 0.40, "ctcTokenIds": [1, 2, 3]},
+                {"text": "Andre", "minSimilarity": 0.80, "ctcTokenIds": [4, 5]},
+                {"text": "Mobius", "ctcTokenIds": [6, 7]}
+              ]
+            }
+            """
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vocab-647-\(UUID().uuidString).json")
+        try json.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let context = try CustomVocabularyContext.load(from: url)
+        XCTAssertEqual(context.terms.count, 3)
+
+        let byText = Dictionary(uniqueKeysWithValues: context.terms.map { ($0.text, $0) })
+        XCTAssertEqual(byText["Caivex"]?.minSimilarity ?? -1, 0.40, accuracy: 0.001)
+        XCTAssertEqual(byText["Andre"]?.minSimilarity ?? -1, 0.80, accuracy: 0.001)
+        // Term without an override keeps nil → falls back to vocabulary-level threshold.
+        let mobius = try XCTUnwrap(byText["Mobius"])
+        XCTAssertNil(mobius.minSimilarity)
     }
 
     // MARK: - Edge Cases

@@ -272,6 +272,12 @@ extension VocabularyRescorer {
         // Build normalized vocabulary set for guard checks
         let vocabularyNormalizedSet = buildVocabularyNormalizedSet()
 
+        // Lowest per-term similarity across the vocabulary. The BK-tree search
+        // bound is derived from this floor so that terms with a lower per-term
+        // `minSimilarity` are not pruned before per-candidate filtering applies
+        // each term's own threshold.
+        let searchFloor = vocabulary.terms.reduce(minSimilarity) { min($0, $1.minSimilarity ?? minSimilarity) }
+
         // Pre-compute normalized words for all timings
         let normalizedWords = wordTimings.map { Self.normalizeForSimilarity($0.word) }
 
@@ -299,11 +305,15 @@ extension VocabularyRescorer {
                 }
             }
 
-            // Find candidate vocabulary terms using BK-tree or linear scan
+            // Find candidate vocabulary terms using BK-tree or linear scan.
+            // `searchFloor` widens the BK-tree edit-distance bound to cover the
+            // most permissive per-term override; each candidate is then filtered
+            // against its own threshold inside the helper.
             let candidates = findCandidateTermsForWord(
                 normalizedWord: normalizedWord,
                 adjacentNormalized: adjacentNormalized,
-                minSimilarity: minSimilarity
+                minSimilarity: minSimilarity,
+                searchFloor: searchFloor
             )
 
             if !candidates.isEmpty {
@@ -359,9 +369,12 @@ extension VocabularyRescorer {
                     continue
                 }
 
-                // Apply similarity threshold adjustments
+                // Apply similarity threshold adjustments. Per-term override
+                // falls back to the vocabulary-level threshold; guards below
+                // still clamp it upward for short/stopword spans.
+                let termMinSimilarity = term.minSimilarity ?? minSimilarity
                 var minSimilarityForSpan = requiredSimilarity(
-                    minSimilarity: minSimilarity,
+                    minSimilarity: termMinSimilarity,
                     spanLength: spanLength
                 )
 
@@ -477,6 +490,11 @@ extension VocabularyRescorer {
         for term in vocabulary.terms {
             let vocabTerm = term.text
 
+            // Per-term similarity override (falls back to the vocabulary-level
+            // threshold). Safety guards in requiredSimilarity/checkStopwordRules/
+            // checkLengthRatioRules still clamp this upward for short/stopword spans.
+            let termMinSimilarity = term.minSimilarity ?? minSimilarity
+
             // Skip short vocabulary terms (per NeMo CTC-WS paper)
             guard vocabTerm.count >= vocabulary.minTermLength else {
                 debugLog(
@@ -546,7 +564,7 @@ extension VocabularyRescorer {
 
                         // Use adaptive similarity threshold
                         let minSimilarityForSpan = requiredSimilarity(
-                            minSimilarity: minSimilarity,
+                            minSimilarity: termMinSimilarity,
                             spanLength: spanLength
                         )
                         if bestSimilarity < minSimilarityForSpan { continue }
@@ -680,7 +698,7 @@ extension VocabularyRescorer {
 
                     // Use adaptive similarity threshold
                     var minSimilarityForSpan = requiredSimilarity(
-                        minSimilarity: minSimilarity,
+                        minSimilarity: termMinSimilarity,
                         spanLength: matchedSpanLength
                     )
 

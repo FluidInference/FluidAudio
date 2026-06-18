@@ -13,12 +13,23 @@ public struct CustomVocabularyTerm: Codable, Sendable {
     /// the Parakeet TDT token IDs above.
     public let ctcTokenIds: [Int]?
 
+    /// Optional per-term minimum string similarity for CTC rescoring.
+    ///
+    /// Overrides the vocabulary-level `CustomVocabularyContext.minSimilarity`
+    /// for this term only. Lower values widen recall (more aggressive
+    /// correction); higher values demand a closer match (fewer false
+    /// replacements). When `nil`, the vocabulary-level / size-aware default is
+    /// used. Vocabulary-wide safety guards (short-word, stopword-span, and
+    /// length-ratio floors) still apply on top of this value, so a per-term
+    /// override can only loosen matching down to those guards.
+    public let minSimilarity: Float?
+
     /// Pre-computed lowercased text for efficient comparison (not serialized).
     public let textLowercased: String
 
     // Only encode/decode the original properties, not the cached ones
     private enum CodingKeys: String, CodingKey {
-        case text, weight, aliases, tokenIds, ctcTokenIds
+        case text, weight, aliases, tokenIds, ctcTokenIds, minSimilarity
     }
 
     /// Create a custom vocabulary term.
@@ -28,18 +39,22 @@ public struct CustomVocabularyTerm: Codable, Sendable {
     ///   - aliases: Optional alternative spellings
     ///   - tokenIds: Optional pre-tokenized Parakeet TDT token IDs
     ///   - ctcTokenIds: Optional pre-tokenized CTC token IDs
+    ///   - minSimilarity: Optional per-term minimum string similarity override
+    ///     (falls back to the vocabulary-level threshold when `nil`)
     public init(
         text: String,
         weight: Float? = nil,
         aliases: [String]? = nil,
         tokenIds: [Int]? = nil,
-        ctcTokenIds: [Int]? = nil
+        ctcTokenIds: [Int]? = nil,
+        minSimilarity: Float? = nil
     ) {
         self.text = text
         self.weight = weight
         self.aliases = aliases
         self.tokenIds = tokenIds
         self.ctcTokenIds = ctcTokenIds
+        self.minSimilarity = minSimilarity.map { Self.clampSimilarity($0) }
         self.textLowercased = text.lowercased()
     }
 
@@ -50,7 +65,15 @@ public struct CustomVocabularyTerm: Codable, Sendable {
         aliases = try container.decodeIfPresent([String].self, forKey: .aliases)
         tokenIds = try container.decodeIfPresent([Int].self, forKey: .tokenIds)
         ctcTokenIds = try container.decodeIfPresent([Int].self, forKey: .ctcTokenIds)
+        minSimilarity = try container.decodeIfPresent(Float.self, forKey: .minSimilarity)
+            .map { Self.clampSimilarity($0) }
         textLowercased = text.lowercased()
+    }
+
+    /// Clamp a similarity threshold into the valid [0, 1] range so malformed
+    /// config values cannot disable or invert the rescoring gate.
+    private static func clampSimilarity(_ value: Float) -> Float {
+        min(1.0, max(0.0, value))
     }
 }
 
@@ -138,7 +161,8 @@ public struct CustomVocabularyContext: Sendable {
                 weight: term.weight,
                 aliases: sanitizedAliases?.isEmpty == true ? nil : sanitizedAliases,
                 tokenIds: term.tokenIds,
-                ctcTokenIds: term.ctcTokenIds
+                ctcTokenIds: term.ctcTokenIds,
+                minSimilarity: term.minSimilarity
             )
             validatedTerms.append(sanitizedTerm)
         }
@@ -267,7 +291,8 @@ public struct CustomVocabularyContext: Sendable {
                 weight: term.weight,
                 aliases: term.aliases,
                 tokenIds: nil,
-                ctcTokenIds: tokenIds
+                ctcTokenIds: tokenIds,
+                minSimilarity: term.minSimilarity
             )
         }
 
