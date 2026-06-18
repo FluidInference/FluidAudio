@@ -72,10 +72,10 @@ final class UnifiedRnntDecoder {
 
             for _ in 0..<config.maxSymbolsPerFrame {
                 let jointOutput = try jointDecisionModel.prediction(
-                    from: MLDictionaryFeatureProvider(dictionary: [
-                        "encoder_step": MLFeatureValue(multiArray: encStep),
-                        "decoder_step": MLFeatureValue(multiArray: decoderStep.output),
-                    ])
+                    from: UnifiedJointDecisionFeatureProvider(
+                        encoderStep: encStep,
+                        decoderStep: decoderStep.output
+                    )
                 )
                 guard let tokenArray = jointOutput.featureValue(for: "token_id")?.multiArrayValue else {
                     throw ASRError.processingFailed("Unified joint decision missing token_id")
@@ -116,12 +116,12 @@ final class UnifiedRnntDecoder {
         targetLength[0] = 1
 
         let output = try decoderModel.prediction(
-            from: MLDictionaryFeatureProvider(dictionary: [
-                "targets": MLFeatureValue(multiArray: targets),
-                "target_length": MLFeatureValue(multiArray: targetLength),
-                "h_in": MLFeatureValue(multiArray: h),
-                "c_in": MLFeatureValue(multiArray: c),
-            ])
+            from: UnifiedDecoderFeatureProvider(
+                targets: targets,
+                targetLength: targetLength,
+                hIn: h,
+                cIn: c
+            )
         )
         guard let decoderOut = output.featureValue(for: "decoder")?.multiArrayValue,
             let hOut = output.featureValue(for: "h_out")?.multiArrayValue,
