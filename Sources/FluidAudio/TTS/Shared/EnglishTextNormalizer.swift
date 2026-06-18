@@ -54,8 +54,11 @@ enum EnglishTextNormalizer {
     // MARK: - Compiled patterns
 
     /// `1:49 PM`, `1:49 p.m.` — hour 1-12, minute 00-59, explicit meridiem.
+    /// The `m` half is an explicit alternation (`.m`/`.m.` for the dotted
+    /// form, bare `m` otherwise) so a sentence period after `PM` is left as
+    /// punctuation instead of being swallowed (`1:49 PM.`).
     private static let meridiemTimeRegex = regex(
-        leadBoundary + #"(1[0-2]|[1-9]):([0-5][0-9])\s*([AaPp])\.?[Mm]\.?"# + #"(?![A-Za-z])"#)
+        leadBoundary + #"(1[0-2]|[1-9]):([0-5][0-9])\s*([AaPp])(?:\.[Mm]\.?|[Mm])"# + #"(?![A-Za-z])"#)
 
     /// `3.14` — integer and fractional parts, not part of a version string.
     private static let decimalRegex = regex(
