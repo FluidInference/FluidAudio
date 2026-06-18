@@ -58,15 +58,16 @@ final class StyleTTS2PhonemizerTests: XCTestCase {
     // MARK: - Case-sensitive precedence
 
     func testCaseSensitiveOriginalSpellingWinsOverLower() async throws {
-        // "AI" exists case-sensitively as a proper noun pronunciation.
-        // The lower-case map has a different (wrong) pronunciation. The
-        // resolver must hit the case-sensitive entry first.
+        // "Read" (past tense, /rɛd/) exists case-sensitively; the lower-case
+        // map has the present tense /riːd/. The resolver must hit the
+        // case-sensitive entry first. (A non-acronym word avoids the #710
+        // initialism path.)
         let phonemizer = StyleTTS2Phonemizer(
-            wordToPhonemes: ["ai": ["a", "i"]],
-            caseSensitiveWordToPhonemes: ["AI": ["e", "ɪ", "a", "ɪ"]]
+            wordToPhonemes: ["read": ["r", "i", "d"]],
+            caseSensitiveWordToPhonemes: ["Read": ["r", "ˈ", "ɛ", "d"]]
         )
-        let phonemes = try await phonemizer.phonemize("AI")
-        XCTAssertEqual(phonemes, "eɪaɪ")
+        let phonemes = try await phonemizer.phonemize("Read")
+        XCTAssertEqual(phonemes, "rˈɛd")
     }
 
     func testCaseSensitiveNormalizedFallback() async throws {
@@ -149,6 +150,85 @@ final class StyleTTS2PhonemizerTests: XCTestCase {
         )
         let phonemes = try await phonemizer.phonemize("foo")
         XCTAssertEqual(phonemes, "foo")
+    }
+
+    // MARK: - Letter-name initialisms (issue #710)
+
+    /// Single-letter entries carry Misaki shorthand (`A`→/eɪ/, `I`→/aɪ/),
+    /// expanded on output like every other lexicon hit; plus the blended
+    /// `AI`/`US` shapes the overrides bypass and a lexicon-backed acronym.
+    private func makeInitialismPhonemizer() -> StyleTTS2Phonemizer {
+        StyleTTS2Phonemizer(
+            wordToPhonemes: ["us": ["ˌ", "ʌ", "s"]],
+            caseSensitiveWordToPhonemes: [
+                "AI": ["e", "ɪ", "a", "ɪ"],
+                "US": ["ˌ", "ʌ", "s"],
+                "A": ["ˈ", "A"],
+                "I": ["ˈ", "I"],
+                "U": ["j", "ˈ", "u"],
+                "S": ["ˈ", "ɛ", "s"],
+                "F": ["ˈ", "ɛ", "f"],
+                "B": ["b", "ˈ", "i"],
+                "NASA": ["n", "ˈ", "a", "s", "ə"],
+            ]
+        )
+    }
+
+    func testAIOverrideSpellsLetterNames() async throws {
+        let phonemes = try await makeInitialismPhonemizer().phonemize("AI")
+        XCTAssertEqual(phonemes, "ˈeɪ ˈaɪ")
+    }
+
+    func testUSOverrideSpellsLetterNamesNotPronoun() async throws {
+        let phonemes = try await makeInitialismPhonemizer().phonemize("US")
+        XCTAssertEqual(phonemes, "jˈu ˈɛs")
+    }
+
+    func testLowercaseUsStaysPronoun() async throws {
+        let phonemes = try await makeInitialismPhonemizer().phonemize("us")
+        XCTAssertEqual(phonemes, "ˌʌs")
+    }
+
+    func testUnknownAllCapsInitialismSpelledAsLetterNames() async throws {
+        // `FBI` misses the lexicon → spelled letter by letter, `I`→/aɪ/.
+        let phonemes = try await makeInitialismPhonemizer().phonemize("FBI")
+        XCTAssertEqual(phonemes, "ˈɛf bˈi ˈaɪ")
+    }
+
+    func testKnownAcronymStaysLexiconBacked() async throws {
+        let phonemes = try await makeInitialismPhonemizer().phonemize("NASA")
+        XCTAssertEqual(phonemes, "nˈasə")
+    }
+
+    func testOverrideFallsBackToLexiconWhenLettersMissing() async throws {
+        // No per-letter entries → override can't spell `AI`, falls through to
+        // the bundled blended shape (logged, never dropped).
+        let phonemizer = StyleTTS2Phonemizer(
+            caseSensitiveWordToPhonemes: ["AI": ["e", "ɪ", "a", "ɪ"]]
+        )
+        let phonemes = try await phonemizer.phonemize("AI")
+        XCTAssertEqual(phonemes, "eɪaɪ")
+    }
+
+    // MARK: - Raw-text number normalization (issue #711)
+
+    func testStandaloneNumberIsNormalizedBeforeLexicon() async throws {
+        // `26` → `twenty six` before tokenization, then each word resolves.
+        let phonemizer = StyleTTS2Phonemizer(
+            wordToPhonemes: ["twenty": ["t"], "six": ["s"]]
+        )
+        let phonemes = try await phonemizer.phonemize("26")
+        XCTAssertEqual(phonemes, "t s")
+    }
+
+    func testEmbeddedDigitsAreNotNormalized() async throws {
+        // `word26` is ambiguous → left intact; reaches G2P/grapheme path as
+        // one token (no "twenty six" split).
+        let phonemizer = StyleTTS2Phonemizer(
+            wordToPhonemes: ["word26": ["w"]]
+        )
+        let phonemes = try await phonemizer.phonemize("word26")
+        XCTAssertEqual(phonemes, "w")
     }
 
     // MARK: - OOV without G2P model raises (only-resolved-token check)

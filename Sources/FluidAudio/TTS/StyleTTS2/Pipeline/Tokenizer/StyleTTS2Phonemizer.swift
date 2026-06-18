@@ -8,12 +8,19 @@ import Foundation
 /// vocabulary at load time, so anything that comes back is directly
 /// encodable by `StyleTTS2TextCleaner`.
 ///
-/// Resolution order:
-///   1. case-sensitive lexicon hit on the original spelling (proper nouns,
-///      abbreviations like `AI`, `NATO`)
-///   2. case-sensitive lexicon hit on the normalized lower-case form
-///   3. lower-case lexicon hit
-///   4. BART grapheme-to-phoneme CoreML model
+/// Raw text is first passed through `EnglishTextNormalizer` (strict
+/// standalone numbers / ordinals / decimals / 12-hour times → words, #711).
+///
+/// Per-word resolution order:
+///   1. letter-name overrides for bundled entries that don't read as letter
+///      names (`AI`, `US`) — spelled from per-letter entries (#710)
+///   2. case-sensitive lexicon hit on the original spelling (proper nouns,
+///      abbreviations like `NATO`)
+///   3. case-sensitive lexicon hit on the normalized lower-case form
+///   4. lower-case lexicon hit
+///   5. strict ASCII all-caps initialisms (`FBI`, `ATP`) spelled as letter
+///      names after a full lexicon miss (#710)
+///   6. BART grapheme-to-phoneme CoreML model
 ///      (`G2PEncoder.mlmodelc` / `G2PDecoder.mlmodelc`, fetched from the
 ///      kokoro repo) — last resort for OOV words.
 ///
@@ -62,7 +69,13 @@ public struct StyleTTS2Phonemizer: Sendable {
             return ""
         }
 
-        let words = splitWords(trimmed)
+        // Conservative raw-text normalization first (issue #711): strict
+        // standalone numbers, ordinals, decimals, and 12-hour times become
+        // spoken words before tokenization. Ambiguous/structured forms are
+        // left untouched. Shared with KokoroAne via `EnglishTextNormalizer`.
+        let normalized = EnglishTextNormalizer.normalize(trimmed)
+
+        let words = splitWords(normalized)
         var ipaParts: [String] = []
         ipaParts.reserveCapacity(words.count)
 
@@ -82,7 +95,24 @@ public struct StyleTTS2Phonemizer: Sendable {
                 continue
             }
 
-            // 1. Misaki lexicon-cache lookup (Kokoro pattern).
+            // 1. Letter-name overrides for bundled entries that don't read
+            //    as letter names (`AI` → blended, `US` → pronoun shape).
+            //    Spell from the per-letter entries before the lexicon so they
+            //    sound like `A I` / `U S` (issue #710). Lowercase `us`/`ai`
+            //    are untouched — the override is exact-uppercase only.
+            if EnglishInitialisms.letterNameOverrides.contains(word) {
+                if let spelled = spellAsLetterNames(word) {
+                    ipaParts.append(spelled)
+                    anyResolved = true
+                    lexiconHits += 1
+                    continue
+                }
+                logger.notice(
+                    "Letter-name override '\(word)' unspellable (missing per-letter lexicon "
+                        + "entries); falling back to the bundled pronunciation")
+            }
+
+            // 2. Misaki lexicon-cache lookup (Kokoro pattern).
             if let phonemes = lookupLexicon(word: word), !phonemes.isEmpty {
                 ipaParts.append(Self.expandMisakiShorthand(phonemes.joined()))
                 anyResolved = true
@@ -90,7 +120,18 @@ public struct StyleTTS2Phonemizer: Sendable {
                 continue
             }
 
-            // 2. BART G2P CoreML fallback for OOV words (Kokoro's
+            // 3. Strict ASCII all-caps initialisms (`FBI`, `ATP`) spelled as
+            //    letter names after a full lexicon miss, before G2P sounds
+            //    them out as a word (issue #710). Lexicon-backed acronyms
+            //    (`NASA`, `FIFA`) keep their bundled pronunciation above.
+            if EnglishInitialisms.isCandidate(word), let spelled = spellAsLetterNames(word) {
+                ipaParts.append(spelled)
+                anyResolved = true
+                lexiconHits += 1
+                continue
+            }
+
+            // 4. BART G2P CoreML fallback for OOV words (Kokoro's
             //    `G2PEncoder.mlmodelc` + `G2PDecoder.mlmodelc`).
             do {
                 let phonemes = try await G2PModel.shared.phonemize(word: word)
@@ -155,6 +196,22 @@ public struct StyleTTS2Phonemizer: Sendable {
             }
         }
         return out
+    }
+
+    // MARK: - Letter-name initialisms (issue #710)
+
+    /// Spell `word` as a sequence of letter names using the per-letter
+    /// entries in the case-sensitive lexicon (`FBI` → `ˈɛf bˈi ˈaɪ`). The
+    /// single-letter entries carry Misaki shorthand (`I` for /aɪ/), so each
+    /// letter is run through ``expandMisakiShorthand(_:)`` like every other
+    /// lexicon hit. Returns `nil` if any letter is missing so the caller
+    /// falls through rather than emitting a partial word.
+    private func spellAsLetterNames(_ word: String) -> String? {
+        EnglishInitialisms.spell(
+            word,
+            letterTokens: { caseSensitiveWordToPhonemes[$0] },
+            render: { Self.expandMisakiShorthand($0.joined()) }
+        )
     }
 
     // MARK: - Lexicon lookup
