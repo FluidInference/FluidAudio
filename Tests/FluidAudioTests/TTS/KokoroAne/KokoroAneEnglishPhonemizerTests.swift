@@ -148,6 +148,21 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         XCTAssertEqual(recorded, ["fbi"])
     }
 
+    func testOverrideFallsBackToLexiconWhenLettersMissing() async throws {
+        // Degraded lexicon: `US` is present but the per-letter entries are
+        // not, so the override can't spell it and falls through to the
+        // bundled shape (logged, never silently dropped or sent to G2P).
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            caseSensitiveWordToPhonemes: ["US": ["ˌ", "ʌ", "s"]],
+            allowedPunctuation: punctuation
+        )
+        let recorder = FallbackRecorder()
+        let result = try await phonemizer.phonemize("US") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "ˌʌs")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty, "override fall-through must use the lexicon, not G2P")
+    }
+
     func testLongAllCapsWordIsNotSpelled() async throws {
         // Outside the 2-5 length range → not an initialism candidate.
         XCTAssertFalse(KokoroAneEnglishPhonemizer.isInitialismCandidate("ABCDEF"))

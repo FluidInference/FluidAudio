@@ -123,8 +123,17 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         // before consulting the lexicon so they sound like `A I` / `U S`
         // (issue #710). Lowercase `us`/`ai` are untouched — the override
         // only matches the exact uppercase spelling.
-        if Self.letterNameOverrides.contains(word), let spelled = spellAsLetterNames(word) {
-            return spelled
+        if Self.letterNameOverrides.contains(word) {
+            if let spelled = spellAsLetterNames(word) {
+                return spelled
+            }
+            // Per-letter entries should always be present when the full
+            // lexicon is loaded; if they aren't (e.g. a letter was filtered
+            // out of the cache) the override below silently becomes the
+            // blended shape it was meant to bypass — log so it isn't silent.
+            Self.logger.warning(
+                "Letter-name override '\(word)' unspellable (missing per-letter lexicon entries); "
+                    + "falling back to the bundled pronunciation")
         }
 
         if let phonemes = caseSensitiveWordToPhonemes[word]
