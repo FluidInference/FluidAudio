@@ -400,6 +400,96 @@ The thresholds, the size buckets (`largeVocabThreshold = 10`,
 `extraLargeVocabThreshold = 100`), and the dispatch logic live in
 `ContextBiasingConstants.rescorerConfig(forVocabSize:)`.
 
+### Short-Term Over-Fire Controls (opt-in, #702)
+
+The blank-aware DP score is a per-token average log-prob. A **short** keyword
+(few tokens) can free-start align to its single best-matching frame-run and
+score close to zero per token, so it can beat a correctly transcribed common
+word. With vocabularies of short terms that collide acoustically with ordinary
+English (`CRAN`~"ran", `Snyk`~"sync", a 3-letter acronym ~ a function word),
+the rescorer over-fires — replacing ordinary words that are none of the
+keywords.
+
+Benchmarking shows the over-fire and the genuine KWS recall on
+distinctive-name vocabularies (earnings22) come from the *same* mechanisms
+(the flat `cbw` boost and the acoustic spotter-rescue), and neither string
+similarity nor token length separates them — gating hard enough to suppress
+the false positives also costs recall. These controls are therefore **opt-in
+and default to disabled (no behavior change)**:
+
+| `VocabularyRescorer.Config` field | CLI flag | Env | Default | Recommended (short-vocab) |
+|---|---|---|---|---|
+| `shortTermCbwTaperPivot` | `--vocab-short-term-taper-pivot` | `FLUID_CBW_TAPER_PIVOT` | `1` (off) | `5` |
+| `shortTermCbwTaperExponent` | — | `FLUID_CBW_TAPER_EXP` | `2.0` | `2.0` |
+| `spotterRescueMinSimilarity` | `--vocab-spotter-min-sim` | `FLUID_SPOTTER_MIN_SIM` | `0.0` (off) | `0.30` |
+| `spotterRescueMultiWordMinSimilarity` | `--vocab-spotter-min-sim-multi` | `FLUID_SPOTTER_MIN_SIM_MULTI` | `0.0` (off) | `0.50` |
+
+The taper scales the `cbw` boost down for terms with fewer than `pivot` tokens
+(`cbw * (tokenCount / pivot) ** exponent`). The spotter floors require a
+minimum string similarity before the acoustic-only rescue path may fire
+(higher for multi-word spans, which are the most error-prone). Tune these for
+short-keyword KWS; leave them off for distinctive-name vocabularies.
+
+#### When to enable
+
+Turn these on when **all** of the following hold; otherwise leave them off:
+
+- the vocabulary is small and made of **short** terms (≤ ~5 chars / a few
+  CTC tokens), and
+- those terms **collide acoustically with ordinary English** (brand names,
+  acronyms, function-word homophones), and
+- you observe ordinary words being replaced by keywords that were not spoken.
+
+For vocabularies of long, distinctive names (company/drug names, the
+earnings22 profile) leave them **off** — enabling them costs KWS recall
+(see below).
+
+#### Enabling
+
+```bash
+# CLI (batch) — recommended short-vocab settings
+fluidaudio transcribe audio.wav \
+    --custom-vocab short_terms.txt \
+    --vocab-short-term-taper-pivot 5 \
+    --vocab-spotter-min-sim 0.30 \
+    --vocab-spotter-min-sim-multi 0.50
+```
+
+```swift
+// API — pass an opt-in Config to the rescorer
+let config = VocabularyRescorer.Config(
+    shortTermCbwTaperPivot: 5,            // taper boost for terms < 5 tokens
+    spotterRescueMinSimilarity: 0.30,     // single-word acoustic-rescue floor
+    spotterRescueMultiWordMinSimilarity: 0.50  // multi-word floor
+)
+let rescorer = try await VocabularyRescorer.create(
+    spotter: ctcSpotter,
+    vocabulary: vocabulary,
+    config: config
+)
+```
+
+```bash
+# Env overrides (handy for parameter sweeps; apply to any entry point)
+export FLUID_CBW_TAPER_PIVOT=5
+export FLUID_SPOTTER_MIN_SIM=0.30
+export FLUID_SPOTTER_MIN_SIM_MULTI=0.50
+```
+
+#### Measured effect
+
+Repro: 8 short brand/acronym distractors (none spoken) over one minute of
+ordinary speech, plus the earnings22-kws KWS set (200 files) as the recall
+guard.
+
+| Setting | distractor false positives | earnings22 recall |
+|---|---|---|
+| **off (default)** | 12 | 95.7% |
+| recommended opt-in (pivot 5, floors 0.30 / 0.50) | **0** | (lower — only enable for short-vocab KWS) |
+
+The defaults are byte-for-byte identical to the pre-#702 behavior; the floors
+and taper only change scoring when explicitly enabled.
+
 ## Usage Example
 
 ```swift

@@ -287,6 +287,62 @@ public enum ContextBiasingConstants {
     /// - Used in: `VocabularyRescorer.Config.default` and init
     public static let defaultReferenceTokenCount: Int = 3
 
+    // MARK: - Short-Term Over-Fire Controls (#702, opt-in)
+    //
+    // The blank-aware DP score is a per-token average log-prob. A short
+    // keyword (few tokens) can free-start align to its single best-matching
+    // frame-run and score close to zero per token, so it can beat a correctly
+    // transcribed common word — short distractors over-fire (`ran` → `CRAN`,
+    // `Hall of Q4.` → `Snyk`). Benchmarking shows that gating this hard enough
+    // to suppress short-vocab false positives also costs KWS recall on
+    // distinctive-name vocabularies (earnings22), because the same mechanisms
+    // produce both. These controls therefore DEFAULT TO DISABLED (no behavior
+    // change) and are opt-in for short-keyword KWS via `VocabularyRescorer.Config`,
+    // the `transcribe` CLI flags, or the `FLUID_*` env overrides below.
+    //
+    // Recommended short-vocab opt-in values: taper pivot 5 / exponent 2.0,
+    // spotter floors 0.30 (single) / 0.50 (multi-word).
+
+    /// Default token-count pivot for the short-term cbw taper. A value `<= 1`
+    /// disables the taper (the default). When enabled (e.g. 5), terms with
+    /// fewer tokens than the pivot have their boost scaled by
+    /// `(tokenCount / pivot) ** exponent`. Env: `FLUID_CBW_TAPER_PIVOT`.
+    public static var defaultShortTermCbwTaperPivot: Int {
+        envInt("FLUID_CBW_TAPER_PIVOT") ?? 1
+    }
+
+    /// Default exponent for the short-term cbw taper. Higher = more
+    /// conservative on short terms. Env: `FLUID_CBW_TAPER_EXP`.
+    public static var defaultShortTermCbwTaperExponent: Float {
+        envFloat("FLUID_CBW_TAPER_EXP") ?? 2.0
+    }
+
+    /// Default minimum string similarity for a single-word spotter-anchored
+    /// rescue. `0.0` disables the floor (the default), preserving the
+    /// acoustic-only rescue. Env: `FLUID_SPOTTER_MIN_SIM`.
+    public static var defaultSpotterRescueMinSimilarity: Float {
+        envFloat("FLUID_SPOTTER_MIN_SIM") ?? 0.0
+    }
+
+    /// Default minimum string similarity for a multi-word spotter-anchored
+    /// rescue (replacing several words with one term is more error-prone).
+    /// `0.0` disables. Env: `FLUID_SPOTTER_MIN_SIM_MULTI`.
+    public static var defaultSpotterRescueMultiWordMinSimilarity: Float {
+        envFloat("FLUID_SPOTTER_MIN_SIM_MULTI") ?? 0.0
+    }
+
+    /// Read a `Float` tuning override from the environment, if present and valid.
+    private static func envFloat(_ name: String) -> Float? {
+        guard let raw = ProcessInfo.processInfo.environment[name], let value = Float(raw) else { return nil }
+        return value
+    }
+
+    /// Read an `Int` tuning override from the environment, if present and valid.
+    private static func envInt(_ name: String) -> Int? {
+        guard let raw = ProcessInfo.processInfo.environment[name], let value = Int(raw) else { return nil }
+        return value
+    }
+
     /// Default setting for adaptive thresholds.
     ///
     /// When enabled, similarity thresholds scale based on token count,

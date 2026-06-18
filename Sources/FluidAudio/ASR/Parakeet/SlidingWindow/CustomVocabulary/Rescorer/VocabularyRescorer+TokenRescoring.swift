@@ -917,24 +917,31 @@ extension VocabularyRescorer {
                 if allStopwords { continue }
             }
 
-            // Compute similarity for ranking only — the gate is CTC
-            // evidence, not similarity.
+            // Compute similarity (best over canonical + aliases).
             var bestSimilarity: Float = 0
             for form in normalizedForms {
                 bestSimilarity = max(bestSimilarity, Self.stringSimilarity(normalizedPhrase, form.normalized))
             }
 
-            // Honor an EXPLICIT per-term similarity override even on this
-            // acoustic rescue path. A term that opts into a stricter threshold
-            // (issue #647 — e.g. a short/common-sounding name) should not be
-            // force-replaced over a low-similarity span purely on spotter
-            // evidence. Terms without an override keep the prior behavior
-            // (similarity is for ranking only).
-            if let termMinSimilarity = term.minSimilarity, bestSimilarity < termMinSimilarity {
+            // SIMILARITY FLOOR for the acoustic rescue path. The spotter
+            // rescue is acoustic-evidence driven and otherwise ignores
+            // similarity, which lets it force-replace low-similarity spans.
+            // The effective floor is the stricter of:
+            //   - the term's EXPLICIT per-term override (#647), and
+            //   - the opt-in span-aware config floor (#702; higher for
+            //     multi-word spans, which are the most error-prone).
+            // Both sources default to disabled, so by default this is a no-op
+            // and similarity stays "for ranking only".
+            let configSpotterFloor =
+                span.count >= 2
+                ? config.spotterRescueMultiWordMinSimilarity
+                : config.spotterRescueMinSimilarity
+            let spotterSimFloor = max(term.minSimilarity ?? 0, configSpotterFloor)
+            if bestSimilarity < spotterSimFloor {
                 debugLog(
-                    "  [SPOTTER-RESCUE] Skipping '\(vocabTerm)': similarity "
-                        + "\(String(format: "%.2f", bestSimilarity)) < per-term min "
-                        + "\(String(format: "%.2f", termMinSimilarity))")
+                    "  [SPOTTER-RESCUE] Skipping '\(vocabTerm)' over '\(originalPhrase)': "
+                        + "similarity \(String(format: "%.2f", bestSimilarity)) < floor "
+                        + "\(String(format: "%.2f", spotterSimFloor)) (span=\(span.count))")
                 continue
             }
 

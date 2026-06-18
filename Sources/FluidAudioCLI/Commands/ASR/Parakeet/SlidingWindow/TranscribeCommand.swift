@@ -228,6 +228,10 @@ enum TranscribeCommand {
         var vocabMinSimilarity: Float?
         var vocabCbw: Float?
         var vocabMargin: Double?
+        // #702 opt-in short-term over-fire controls (nil = library default = disabled).
+        var vocabShortTermTaperPivot: Int?
+        var vocabSpotterMinSim: Float?
+        var vocabSpotterMinSimMulti: Float?
     }
 
     private static func parseArguments(_ args: [String]) -> ParsedArgs? {
@@ -367,6 +371,21 @@ enum TranscribeCommand {
                     parsed.vocabMargin = Double(args[i + 1])
                     i += 1
                 }
+            case "--vocab-short-term-taper-pivot":
+                if i + 1 < args.count {
+                    parsed.vocabShortTermTaperPivot = Int(args[i + 1])
+                    i += 1
+                }
+            case "--vocab-spotter-min-sim":
+                if i + 1 < args.count {
+                    parsed.vocabSpotterMinSim = Float(args[i + 1])
+                    i += 1
+                }
+            case "--vocab-spotter-min-sim-multi":
+                if i + 1 < args.count {
+                    parsed.vocabSpotterMinSimMulti = Float(args[i + 1])
+                    i += 1
+                }
 
             default:
                 fputs("WARNING: Unknown option: \(args[i])\n", stderr)
@@ -482,7 +501,16 @@ enum TranscribeCommand {
                     let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
 
                     let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: customVocab.terms.count)
-                    let rescorerConfig = VocabularyRescorer.Config.default
+                    // #702: opt-in short-term over-fire controls. Each flag
+                    // falls back to the library default (disabled) when unset.
+                    let rescorerConfig = VocabularyRescorer.Config(
+                        shortTermCbwTaperPivot: args.vocabShortTermTaperPivot
+                            ?? ContextBiasingConstants.defaultShortTermCbwTaperPivot,
+                        spotterRescueMinSimilarity: args.vocabSpotterMinSim
+                            ?? ContextBiasingConstants.defaultSpotterRescueMinSimilarity,
+                        spotterRescueMultiWordMinSimilarity: args.vocabSpotterMinSimMulti
+                            ?? ContextBiasingConstants.defaultSpotterRescueMultiWordMinSimilarity
+                    )
 
                     let rescorer = try await VocabularyRescorer.create(
                         spotter: spotter,
@@ -986,6 +1014,13 @@ enum TranscribeCommand {
                 --vocab-min-similarity <0-1>     Minimum string similarity for replacement (default: auto)
                 --vocab-cbw <float>              Context-biasing weight boost (default: auto)
                 --vocab-margin <sec>             CTC frame alignment margin (default: 0.5)
+
+              Short-term over-fire controls (#702, opt-in; default off — these
+              improve precision on SHORT keyword vocabularies at some recall
+              cost on distinctive-name vocabularies):
+                --vocab-short-term-taper-pivot <n>   Reduce boost for terms with < n tokens (e.g. 5)
+                --vocab-spotter-min-sim <0-1>        Min similarity for acoustic single-word rescue (e.g. 0.30)
+                --vocab-spotter-min-sim-multi <0-1>  Min similarity for multi-word rescue (e.g. 0.50)
 
             PARAKEET VARIANT MODE (--parakeet-variant):
                 --parakeet-variant <variant>     Engine: parakeet-eou-160ms, nemotron-560ms, …

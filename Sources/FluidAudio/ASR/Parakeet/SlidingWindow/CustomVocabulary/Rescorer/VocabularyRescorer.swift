@@ -34,38 +34,86 @@ public struct VocabularyRescorer: Sendable {
         /// Reference token count for adaptive scaling (tokens beyond this get adjusted thresholds)
         public let referenceTokenCount: Int
 
-        public static let `default` = Config(
-            useAdaptiveThresholds: ContextBiasingConstants.defaultUseAdaptiveThresholds,
-            referenceTokenCount: ContextBiasingConstants.defaultReferenceTokenCount
-        )
+        /// Token-count pivot for the short-term cbw taper (#702, opt-in).
+        /// A value `<= 1` disables the taper (default). When enabled (e.g. 5),
+        /// terms with fewer tokens than the pivot get a reduced boost so they
+        /// can't beat a correctly transcribed common word on the flat boost
+        /// alone. Trades short-vocab precision for some recall on
+        /// distinctive-name vocabularies — see #702.
+        public let shortTermCbwTaperPivot: Int
+
+        /// Exponent for the short-term cbw taper. Higher = more conservative.
+        public let shortTermCbwTaperExponent: Float
+
+        /// Minimum string similarity for a single-word spotter-anchored rescue
+        /// (#702, opt-in). `0.0` disables (default), preserving the
+        /// acoustic-only rescue; a positive value (e.g. 0.30) suppresses
+        /// near-zero-similarity over-fires at some recall cost.
+        public let spotterRescueMinSimilarity: Float
+
+        /// Minimum string similarity for a multi-word spotter-anchored rescue.
+        /// `0.0` disables (default). Recommended opt-in: 0.50.
+        public let spotterRescueMultiWordMinSimilarity: Float
+
+        public static let `default` = Config()
 
         public init(
             useAdaptiveThresholds: Bool = ContextBiasingConstants.defaultUseAdaptiveThresholds,
-            referenceTokenCount: Int = ContextBiasingConstants.defaultReferenceTokenCount
+            referenceTokenCount: Int = ContextBiasingConstants.defaultReferenceTokenCount,
+            shortTermCbwTaperPivot: Int = ContextBiasingConstants.defaultShortTermCbwTaperPivot,
+            shortTermCbwTaperExponent: Float = ContextBiasingConstants.defaultShortTermCbwTaperExponent,
+            spotterRescueMinSimilarity: Float = ContextBiasingConstants.defaultSpotterRescueMinSimilarity,
+            spotterRescueMultiWordMinSimilarity: Float = ContextBiasingConstants
+                .defaultSpotterRescueMultiWordMinSimilarity
         ) {
             self.useAdaptiveThresholds = useAdaptiveThresholds
             self.referenceTokenCount = referenceTokenCount
+            self.shortTermCbwTaperPivot = shortTermCbwTaperPivot
+            self.shortTermCbwTaperExponent = shortTermCbwTaperExponent
+            self.spotterRescueMinSimilarity = spotterRescueMinSimilarity
+            self.spotterRescueMultiWordMinSimilarity = spotterRescueMultiWordMinSimilarity
         }
 
         // MARK: - Adaptive Threshold Functions
 
         /// Compute adaptive context-biasing weight based on token count.
-        /// Longer keywords need more boost to compensate for accumulated scoring error.
         ///
-        /// Formula: `cbw * (1 + log2(tokenCount / referenceTokenCount) * 0.3)`
-        /// - 3 tokens: cbw * 1.0 (reference)
-        /// - 6 tokens: cbw * 1.3
-        /// - 12 tokens: cbw * 1.6
+        /// Longer keywords need more boost to compensate for accumulated
+        /// scoring error; shorter keywords need *less* boost because their
+        /// per-token DP score is inflated by free-start alignment (#702).
+        ///
+        /// - Long terms (`tokenCount > referenceTokenCount`):
+        ///   `cbw * (1 + log2(tokenCount / referenceTokenCount) * 0.3)`
+        ///   - 6 tokens: cbw * 1.3, 12 tokens: cbw * 1.6
+        /// - Reference length (`== referenceTokenCount`): `cbw` unchanged.
+        /// - Short terms (`tokenCount < referenceTokenCount`):
+        ///   `cbw * (tokenCount / referenceTokenCount) ** shortTermCbwTaperExponent`,
+        ///   tapering the boost toward zero so a short keyword cannot beat a
+        ///   correctly transcribed common word on the flat boost alone — it
+        ///   must earn the margin from acoustic evidence.
         ///
         /// - Parameters:
         ///   - baseCbw: Base context-biasing weight
         ///   - tokenCount: Number of tokens in the vocabulary term
         /// - Returns: Adjusted context-biasing weight
         public func adaptiveCbw(baseCbw: Float, tokenCount: Int) -> Float {
-            guard useAdaptiveThresholds, tokenCount > referenceTokenCount else { return baseCbw }
+            guard useAdaptiveThresholds else { return baseCbw }
+
+            // Short-term taper (#702, opt-in): below the pivot, scale the
+            // boost down toward zero so a short keyword cannot beat a correctly
+            // transcribed common word on the flat boost alone. Disabled when
+            // pivot <= 1 (default), which leaves the original behavior intact.
+            let pivot = shortTermCbwTaperPivot
+            if pivot > 1 && tokenCount < pivot {
+                let ratio = Float(max(1, tokenCount)) / Float(pivot)
+                return baseCbw * pow(ratio, shortTermCbwTaperExponent)
+            }
+
+            // Long terms: boost grows to compensate for accumulated per-token
+            // scoring error.
+            guard tokenCount > referenceTokenCount else { return baseCbw }
             let ratio = Float(tokenCount) / Float(referenceTokenCount)
-            let scaleFactor = 1.0 + log2(ratio) * 0.3
-            return baseCbw * scaleFactor
+            return baseCbw * (1.0 + log2(ratio) * 0.3)
         }
     }
 
