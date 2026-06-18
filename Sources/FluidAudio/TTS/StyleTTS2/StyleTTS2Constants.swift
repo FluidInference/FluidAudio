@@ -27,6 +27,13 @@ public enum StyleTTS2Constants {
     /// loader can pick the smallest bucket that fits.
     public static let bucketTokenSizes: [Int] = [64, 128, 256]
 
+    /// Max phoneme-string characters per chunk for the high-level text
+    /// API's auto-chunking (#712). `StyleTTS2TextCleaner.encode` prepends
+    /// one pad token and maps each kept character to at most one token, so
+    /// staying one under the largest bucket keeps the encoded sequence
+    /// within `resolveBucket`'s ceiling without overflowing.
+    public static let maxPhonemeChunkChars: Int = (bucketTokenSizes.max() ?? 256) - 1
+
     // MARK: - Reference-audio mel filterbank
     /// `torchaudio.transforms.MelSpectrogram` argument set used at training
     /// time. Note: the upstream `make_preprocess()` does **not** override
