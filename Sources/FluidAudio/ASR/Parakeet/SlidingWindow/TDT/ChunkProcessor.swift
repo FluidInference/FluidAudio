@@ -376,9 +376,10 @@ struct ChunkProcessor {
     internal func mergeTokenWindowsForTesting(
         left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
         right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
-        spliceSafeTokenIds: Set<Int>? = nil
+        spliceSafeTokenIds: Set<Int>? = nil,
+        caseVariantIds: [Int: Int]? = nil
     ) -> [(token: Int, timestamp: Int, confidence: Float, duration: Int)] {
-        mergeChunks(left, right, spliceSafeTokenIds: spliceSafeTokenIds)
+        mergeChunks(left, right, spliceSafeTokenIds: spliceSafeTokenIds, caseVariantIds: caseVariantIds)
     }
     #endif
 
@@ -578,13 +579,22 @@ struct ChunkProcessor {
         }
 
         if orderedChunkOutputs.count > 1 {
-            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: await manager.vocabulary)
+            let vocabulary = await manager.vocabulary
+            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
+            let caseVariantIds = Self.caseVariantCanonicalIds(vocabulary: vocabulary)
             for chunk in orderedChunkOutputs.dropFirst() {
-                mergedTokens = mergeChunks(mergedTokens, chunk, spliceSafeTokenIds: spliceSafeTokenIds)
+                mergedTokens = mergeChunks(
+                    mergedTokens,
+                    chunk,
+                    spliceSafeTokenIds: spliceSafeTokenIds,
+                    caseVariantIds: caseVariantIds
+                )
             }
-        }
-
-        if mergedTokens.count > 1 {
+            if mergedTokens.count > 1 {
+                mergedTokens.sort { $0.timestamp < $1.timestamp }
+            }
+            mergedTokens = collapseSeamWordDuplicates(mergedTokens, vocabulary: vocabulary)
+        } else if mergedTokens.count > 1 {
             mergedTokens.sort { $0.timestamp < $1.timestamp }
         }
 
@@ -688,6 +698,139 @@ struct ChunkProcessor {
         return ids
     }
 
+    /// Maps every token ID that has a case-only twin in the vocabulary to a
+    /// shared canonical ID, so the overlap matcher can treat e.g. `▁Meeting`
+    /// and `▁meeting` as the same word (issue #706).
+    ///
+    /// A window that begins mid-sentence biases the RNNT decoder to capitalize
+    /// its first word as if it started a sentence. In the 2 s overlap the
+    /// previous (left) window already heard that word lower-cased with real
+    /// left context, but the exact-ID matcher misses the seam pair because the
+    /// IDs differ — so the word survives in both windows and decodes twice,
+    /// the second copy spuriously capitalized ("the meeting Meeting was").
+    /// Folding case at match time lets the seam word anchor and collapse to the
+    /// left window's contextually-correct casing.
+    ///
+    /// Only IDs that actually share a folded piece with another ID are
+    /// included, so the map stays small and exact-ID matching is unchanged for
+    /// every token without a case twin. Returns nil for an empty vocabulary so
+    /// behavior is unchanged when no vocabulary is available.
+    static func caseVariantCanonicalIds(vocabulary: [Int: String]) -> [Int: Int]? {
+        guard !vocabulary.isEmpty else { return nil }
+        var groups: [String: [Int]] = [:]
+        for (id, piece) in vocabulary {
+            groups[piece.lowercased(), default: []].append(id)
+        }
+        var canon: [Int: Int] = [:]
+        for (folded, ids) in groups where ids.count > 1 {
+            // Only groups with a genuine case twin survive; pure-lowercase,
+            // punctuation and numeric pieces are unique and stay singletons.
+            // Make the all-lower-case variant the canonical ID so a later
+            // collapse can tell which copy of a seam duplicate to keep.
+            let canonical = ids.first { vocabulary[$0] == folded } ?? ids.min()!
+            for id in ids { canon[id] = canonical }
+        }
+        return canon.isEmpty ? nil : canon
+    }
+
+    /// Issue #706: drop an adjacent case-only duplicate of a seam *word* left by
+    /// a window that re-emitted the seam word as a false sentence start — e.g.
+    /// the previous window ended `...we don't have` and the next emitted
+    /// `Have a...`, leaving `we don't have Have a`. Works at the word level
+    /// (reconstructing SentencePiece words from the token stream) so it catches
+    /// multi-token words too — essential for the small Unified subword vocab,
+    /// where whole words like `have`/`Have` are several pieces and a token-level
+    /// check never sees them as a unit.
+    ///
+    /// A pair collapses only when the two words are equal up to case, differ in
+    /// case, start within the overlap window, and the earlier word does not end
+    /// a sentence — so genuine repeats (`that that`), same-case duplicates, and
+    /// legitimate sentence boundaries (`...thank you. You said...`) are left
+    /// alone. The lower-cased copy is kept (it is the one with real left
+    /// context); if neither is lower-case the earlier copy wins.
+    func collapseSeamWordDuplicates(
+        _ tokens: [TokenWindow],
+        vocabulary: [Int: String]
+    ) -> [TokenWindow] {
+        guard !vocabulary.isEmpty, tokens.count > 1 else { return tokens }
+        let overlapFrames = Int((overlapSeconds / ASRConstants.secondsPerEncoderFrame).rounded())
+
+        func piece(_ id: Int) -> String { vocabulary[id] ?? "" }
+        func startsWord(_ id: Int) -> Bool {
+            let p = piece(id)
+            return p.hasPrefix(ASRConstants.sentencePieceWordBoundary) || p.hasPrefix(" ")
+        }
+
+        struct Word {
+            var tokens: [TokenWindow]
+            var core: String
+            var startTimestamp: Int
+            var endsSentence: Bool
+        }
+
+        // Segment the token stream into words on word-initial pieces.
+        var words: [Word] = []
+        for token in tokens {
+            if words.isEmpty || startsWord(token.token) {
+                words.append(Word(tokens: [token], core: "", startTimestamp: token.timestamp, endsSentence: false))
+            } else {
+                words[words.count - 1].tokens.append(token)
+            }
+        }
+
+        let strippable = CharacterSet.punctuationCharacters.union(.whitespaces)
+        for index in words.indices {
+            var text = ""
+            for token in words[index].tokens {
+                text += stripWordBoundaryPrefix(piece(token.token))
+            }
+            words[index].core = text.trimmingCharacters(in: strippable)
+            if let last = text.last { words[index].endsSentence = ".?!:".contains(last) }
+        }
+
+        var keep = [Bool](repeating: true, count: words.count)
+        var lastKept = -1
+        for index in words.indices {
+            guard lastKept >= 0 else {
+                lastKept = index
+                continue
+            }
+            let previous = words[lastKept]
+            let current = words[index]
+            let previousCore = previous.core
+            let currentCore = current.core
+
+            let isSeamDuplicate =
+                !previousCore.isEmpty && !currentCore.isEmpty
+                && previousCore != currentCore
+                && previousCore.lowercased() == currentCore.lowercased()
+                && currentCore.first?.isLetter == true
+                && !previous.endsSentence
+                && current.startTimestamp - previous.startTimestamp <= overlapFrames
+
+            guard isSeamDuplicate else {
+                lastKept = index
+                continue
+            }
+
+            // Keep the lower-cased copy; if neither is lower-case keep the
+            // earlier (left-context) one.
+            if currentCore == currentCore.lowercased(), previousCore != previousCore.lowercased() {
+                keep[lastKept] = false
+                lastKept = index
+            } else {
+                keep[index] = false
+            }
+        }
+
+        var result: [TokenWindow] = []
+        result.reserveCapacity(tokens.count)
+        for index in words.indices where keep[index] {
+            result.append(contentsOf: words[index].tokens)
+        }
+        return result
+    }
+
     /// A piece is splice-safe when decoding it right after another word does
     /// not glue two words together: it either starts a new word (`▁`/space
     /// prefix) or is pure punctuation/symbols.
@@ -703,7 +846,8 @@ struct ChunkProcessor {
     func mergeChunks(
         _ left: [TokenWindow],
         _ right: [TokenWindow],
-        spliceSafeTokenIds: Set<Int>? = nil
+        spliceSafeTokenIds: Set<Int>? = nil,
+        caseVariantIds: [Int: Int]? = nil
     ) -> [TokenWindow] {
         if left.isEmpty { return right }
         if right.isEmpty { return left }
@@ -750,7 +894,7 @@ struct ChunkProcessor {
 
         // EXTRACTED: Contiguous matching using SequenceMatcher
         let timeTolerantMatcher: (IndexedToken, IndexedToken) -> Bool = { [self] l, r in
-            tokensMatch(l, r, tolerance: halfOverlapWindow)
+            tokensMatch(l, r, tolerance: halfOverlapWindow, caseVariantIds: caseVariantIds)
         }
 
         let contiguousMatches = SequenceMatcher.findContiguousMatches(
@@ -800,10 +944,29 @@ struct ChunkProcessor {
         )
     }
 
-    private func tokensMatch(_ left: IndexedToken, _ right: IndexedToken, tolerance: Double) -> Bool {
-        guard left.token.token == right.token.token else { return false }
+    private func tokensMatch(
+        _ left: IndexedToken,
+        _ right: IndexedToken,
+        tolerance: Double,
+        caseVariantIds: [Int: Int]? = nil
+    ) -> Bool {
+        guard tokenIdsMatch(left.token.token, right.token.token, caseVariantIds: caseVariantIds) else {
+            return false
+        }
         let timeDifference = abs(left.start - right.start)
         return timeDifference < tolerance
+    }
+
+    /// Two token IDs match when they are equal, or — issue #706 — when they are
+    /// case-only variants of the same vocabulary piece (e.g. `▁Meeting`/
+    /// `▁meeting`), so a seam word the right window capitalized as a false
+    /// sentence start still anchors against the left window's lower-cased copy.
+    private func tokenIdsMatch(_ left: Int, _ right: Int, caseVariantIds: [Int: Int]?) -> Bool {
+        if left == right { return true }
+        guard let caseVariantIds, let lhs = caseVariantIds[left], let rhs = caseVariantIds[right] else {
+            return false
+        }
+        return lhs == rhs
     }
 
     private func mergeUsingMatches(

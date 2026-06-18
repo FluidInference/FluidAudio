@@ -5,13 +5,18 @@ import Foundation
 /// Word resolution order (mirrors `StyleTTS2Phonemizer` and Kokoro's
 /// Misaki frontend):
 ///   1. caller-supplied custom lexicon (case-sensitive, then lower-cased)
-///   2. case-sensitive Misaki lexicon hit on the original spelling
-///      (proper nouns, abbreviations like `AI`, `NATO`)
-///   3. case-sensitive hit on the normalized lower-case form
-///   4. lower-cased Misaki lexicon hit — this is what gives function
+///   2. letter-name overrides for bundled entries that don't read as
+///      letter names (`AI`, `US`) — spelled out from per-letter entries
+///      (issue #710)
+///   3. case-sensitive Misaki lexicon hit on the original spelling
+///      (proper nouns, abbreviations like `NATO`)
+///   4. case-sensitive hit on the normalized lower-case form
+///   5. lower-cased Misaki lexicon hit — this is what gives function
 ///      words their weak forms (`to` → `tu`), instead of the BART G2P
 ///      citation form (`tˈO`) that over-stresses them (issue #691)
-///   5. BART G2P CoreML fallback for OOV words (injected by the caller)
+///   6. strict ASCII all-caps initialisms (`FBI`, `ATP`) spelled as
+///      letter names after a full lexicon miss (issue #710)
+///   7. BART G2P CoreML fallback for OOV words (injected by the caller)
 ///
 /// Punctuation supported by the chain's `vocab.json` (`, . ! ? ; …` etc.)
 /// is preserved and attached to the preceding word — Kokoro treats those
@@ -112,12 +117,40 @@ struct KokoroAneEnglishPhonemizer: Sendable {
             return custom
         }
 
+        // A few bundled case-sensitive entries don't read as letter names
+        // even though uppercase callers expect them to (`AI` → blended
+        // `ˈAˌI`, `US` → the lowercase-pronoun `ʌs` shape). Spell those out
+        // before consulting the lexicon so they sound like `A I` / `U S`
+        // (issue #710). Lowercase `us`/`ai` are untouched — the override
+        // only matches the exact uppercase spelling.
+        if EnglishInitialisms.letterNameOverrides.contains(word) {
+            if let spelled = spellAsLetterNames(word) {
+                return spelled
+            }
+            // Per-letter entries should always be present when the full
+            // lexicon is loaded; if they aren't (e.g. a letter was filtered
+            // out of the cache) the override below silently becomes the
+            // blended shape it was meant to bypass — log so it isn't silent.
+            Self.logger.warning(
+                "Letter-name override '\(word)' unspellable (missing per-letter lexicon entries); "
+                    + "falling back to the bundled pronunciation")
+        }
+
         if let phonemes = caseSensitiveWordToPhonemes[word]
             ?? caseSensitiveWordToPhonemes[normalized]
             ?? wordToPhonemes[normalized],
             !phonemes.isEmpty
         {
             return phonemes.joined()
+        }
+
+        // After a full lexicon miss, read strict ASCII all-caps tokens of a
+        // small length range as letter-name initialisms (`FBI`, `ATP`)
+        // instead of letting BART G2P sound them out as a word (issue #710).
+        // Known acronyms (`NASA`, `FIFA`, `OK`, `COVID`) keep their bundled
+        // pronunciations because they're resolved above as lexicon hits.
+        if EnglishInitialisms.isCandidate(word), let spelled = spellAsLetterNames(word) {
+            return spelled
         }
 
         guard !normalized.isEmpty else { return nil }
@@ -131,6 +164,17 @@ struct KokoroAneEnglishPhonemizer: Sendable {
             Self.logger.warning("G2P failed on word '\(normalized)': \(error.localizedDescription)")
             throw error
         }
+    }
+
+    // MARK: - Letter-name initialisms (issue #710)
+
+    /// Spell a token as a sequence of letter names using the per-letter
+    /// entries in the case-sensitive lexicon (`FBI` → `ˈɛf bˈi ˈI`). See
+    /// ``EnglishInitialisms/spell(_:letterTokens:render:separator:)`` —
+    /// returns `nil` if any letter is missing so the caller falls through
+    /// to its normal fallback rather than emitting a partial word.
+    private func spellAsLetterNames(_ word: String) -> String? {
+        EnglishInitialisms.spell(word) { caseSensitiveWordToPhonemes[$0] }
     }
 
     /// Lowercase + strip non-letter/digit/apostrophe chars so we hit the

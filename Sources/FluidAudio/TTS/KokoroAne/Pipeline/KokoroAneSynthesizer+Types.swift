@@ -16,6 +16,18 @@ public struct KokoroAneStageTimings: Sendable, Equatable {
     }
 
     public init() {}
+
+    /// Accumulate another call's per-stage timings into this one — used when
+    /// a long prompt is synthesized in several chunks (issue #712).
+    mutating func add(_ other: KokoroAneStageTimings) {
+        albert += other.albert
+        postAlbert += other.postAlbert
+        alignment += other.alignment
+        prosody += other.prosody
+        noise += other.noise
+        vocoder += other.vocoder
+        tail += other.tail
+    }
 }
 
 /// Detailed result of a `KokoroAneManager.synthesizeDetailed` call.

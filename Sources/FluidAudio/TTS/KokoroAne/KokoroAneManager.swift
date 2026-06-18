@@ -15,7 +15,11 @@ import Foundation
 ///   * One default voice per variant (`af_heart` for English, `zf_001` for
 ///     Mandarin); additional voices download on demand via ``setDefaultVoice``
 ///     / `voice:` / `initialize(preloadVoices:)`.
-///   * IPA input capped at 512 tokens — chunk longer prompts upstream.
+///   * IPA input capped at 512 tokens. The high-level text API
+///     (``synthesize(text:voice:speed:)`` / ``synthesizeDetailed(text:voice:speed:)``)
+///     auto-chunks longer prompts at whitespace / pause punctuation (#712);
+///     the low-level ``synthesizeFromPhonemes(_:voice:speed:)`` stays strict
+///     and throws ``KokoroAneError/phonemeSequenceTooLong(_:)`` past the cap.
 ///   * Loads from HF path `kokoro-82m-coreml/ANE/` (English) or
 ///     `ANE-zh/` (Mandarin).
 ///
@@ -176,7 +180,52 @@ public actor KokoroAneManager {
         speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> KokoroAneSynthesisResult {
         let resolved = try await phonemes(for: text)
-        return try await runChain(phonemes: resolved, voice: voice, speed: speed)
+
+        // High-level text API owns chunking: if the resolved phoneme string
+        // exceeds the chain's input cap, split it at whitespace / pause
+        // punctuation and synthesize each chunk, instead of throwing and
+        // making every caller write its own chunker (issue #712). The
+        // low-level `synthesizeFromPhonemes(_:)` stays strict. Chunking runs
+        // on the resolved phonemes, so normalization / G2P already happened.
+        let chunks = PhonemeChunker.chunk(resolved, maxLength: KokoroAneConstants.maxPhonemeLength)
+        guard chunks.count > 1 else {
+            return try await runChain(phonemes: resolved, voice: voice, speed: speed)
+        }
+        return try await synthesizeChunks(chunks, voice: voice, speed: speed)
+    }
+
+    /// Synthesize each chunk and concatenate into one result. Samples are
+    /// joined in order; per-stage timings and token/frame counts are summed.
+    /// Per-variant audio normalization is unchanged — it runs once over the
+    /// concatenated samples at WAV conversion (``wavData(from:)``), so levels
+    /// stay consistent across the join rather than being normalized per chunk.
+    private func synthesizeChunks(
+        _ chunks: [String],
+        voice: String?,
+        speed: Float
+    ) async throws -> KokoroAneSynthesisResult {
+        var samples: [Float] = []
+        var sampleRate = KokoroAneConstants.sampleRate
+        var encoderTokens = 0
+        var acousticFrames = 0
+        var timings = KokoroAneStageTimings()
+
+        for chunk in chunks {
+            let result = try await runChain(phonemes: chunk, voice: voice, speed: speed)
+            samples.append(contentsOf: result.samples)
+            sampleRate = result.sampleRate
+            encoderTokens += result.encoderTokens
+            acousticFrames += result.acousticFrames
+            timings.add(result.timings)
+        }
+
+        return KokoroAneSynthesisResult(
+            samples: samples,
+            sampleRate: sampleRate,
+            encoderTokens: encoderTokens,
+            acousticFrames: acousticFrames,
+            timings: timings
+        )
     }
 
     /// Resolve the exact phoneme string ``synthesize(text:voice:speed:)``
@@ -264,13 +313,17 @@ public actor KokoroAneManager {
         )
     }
 
-    /// English text → Misaki-style IPA. Lexicon-first resolution (weak
-    /// function-word forms — `to` → `tu`, not the stressed BART citation
-    /// form `tˈO`, issue #691), per-word BART G2P fallback for OOV words,
-    /// and vocab-supported punctuation kept as prosody/pause tokens.
+    /// English text → Misaki-style IPA. A conservative normalization pass
+    /// first rewrites strict standalone numbers, ordinals, decimals, and
+    /// 12-hour times into spoken words (issue #711), then lexicon-first
+    /// resolution applies (weak function-word forms — `to` → `tu`, not the
+    /// stressed BART citation form `tˈO`, issue #691), with per-word BART
+    /// G2P fallback for OOV words and vocab-supported punctuation kept as
+    /// prosody/pause tokens.
     private func phonemize(text: String) async throws -> String {
+        let normalized = EnglishTextNormalizer.normalize(text)
         let phonemizer = await ensureEnglishPhonemizer()
-        return try await phonemizer.phonemize(text) { word in
+        return try await phonemizer.phonemize(normalized) { word in
             try await G2PModel.shared.phonemize(word: word)
         }
     }

@@ -173,9 +173,15 @@ public actor UnifiedAsrManager {
         guard let tokenizer = tokenizer else { throw ASRError.notInitialized }
 
         var merged: [ChunkProcessor.TokenWindow] = []
-        let merger = ChunkProcessor(audioSamples: [])
+        // Reuse the TDT overlap merger to dedupe adjacent windows.
+        let merger = ChunkProcessor(audioSamples: samples)
         let spliceSafeTokenIds = ChunkProcessor.spliceSafeTokenIds(vocabulary: tokenizer.vocabulary)
+        let caseVariantIds = ChunkProcessor.caseVariantCanonicalIds(vocabulary: tokenizer.vocabulary)
 
+        // Fixed-stride 15 s / 2 s grid. Silence-aligned starts were measured to
+        // cost ~1 WER point on the 15 s offline encoder (Earnings-22 long-form)
+        // with no artifact benefit, so the seam artifacts (#706) are handled
+        // purely by the merge: case-folded matching + word-level collapse below.
         for chunkStart in layout.chunkStarts(totalSamples: samples.count) {
             let chunkEnd = min(chunkStart + layout.chunkSamples, samples.count)
             let windowTokens = try await transcribeWindow(
@@ -184,10 +190,16 @@ public actor UnifiedAsrManager {
             merged =
                 merged.isEmpty
                 ? windowTokens
-                : merger.mergeChunks(merged, windowTokens, spliceSafeTokenIds: spliceSafeTokenIds)
+                : merger.mergeChunks(
+                    merged,
+                    windowTokens,
+                    spliceSafeTokenIds: spliceSafeTokenIds,
+                    caseVariantIds: caseVariantIds
+                )
         }
 
         merged.sort { $0.timestamp < $1.timestamp }
+        merged = merger.collapseSeamWordDuplicates(merged, vocabulary: tokenizer.vocabulary)
         return tokenizer.decode(ids: merged.map(\.token))
     }
 
