@@ -38,12 +38,93 @@ public actor CanaryManager {
     }
 
     /// Transcribe 16 kHz mono float samples (in [-1, 1]).
+    ///
+    /// Audio within the 15 s window is decoded in one pass. Longer audio is split
+    /// into overlapping 15 s windows (hop = 15 s − `chunkOverlapSeconds`), decoded
+    /// independently, and stitched at the seams via token-level
+    /// longest-common-substring (`mergeTokenStreams`). No model change — each
+    /// window still sees the fixed 15 s contract and the decoder is reset per window.
     public func transcribe(audio: [Float]) throws -> String {
+        let maxN = CanaryConfig.maxSamples
+        if audio.count <= maxN {
+            return detokenize(try transcribeWindow(audio: audio))
+        }
+
+        let hop = maxN - CanaryConfig.chunkOverlapSamples
+        var merged: [Int] = []
+        var start = 0
+        var chunkIndex = 0
+        while start < audio.count {
+            let end = min(start + maxN, audio.count)
+            // Don't decode a final tail that is pure overlap — the previous window
+            // already covered it.
+            if chunkIndex > 0, (end - start) <= (maxN - hop) { break }
+
+            let tokens = try transcribeWindow(audio: Array(audio[start..<end]))
+            merged = Self.mergeTokenStreams(prefix: merged, suffix: tokens)
+
+            chunkIndex += 1
+            if end >= audio.count { break }
+            start += hop
+        }
+        return detokenize(merged)
+    }
+
+    /// Run the 4-stage pipeline over a single ≤15 s window; returns generated
+    /// token ids (prompt stripped, EOS excluded).
+    private func transcribeWindow(audio: [Float]) throws -> [Int] {
         let (mel, melLength) = try runPreprocessor(audio: audio)
         let (encoder, encoderLength) = try runEncoder(mel: mel, melLength: melLength)
         let (embeddings, encoderMask) = try makeDecoderContext(encoder: encoder, encoderLength: encoderLength)
-        let tokens = try greedyDecode(embeddings: embeddings, encoderMask: encoderMask)
-        return detokenize(tokens)
+        return try greedyDecode(embeddings: embeddings, encoderMask: encoderMask)
+    }
+
+    /// Merge two adjacent window token streams using longest-common-substring.
+    ///
+    /// Both windows transcribe `chunkOverlapSeconds` of identical audio at their
+    /// seam, so their token ids share a common substring near the prefix's tail /
+    /// the suffix's head. Search a bounded window (`windowTokens` at the boundary)
+    /// for the longest common substring of length ≥ `minMatch`. On a hit, drop the
+    /// suffix's matched head so the seam is not duplicated; on a miss, concatenate
+    /// plainly — better to duplicate a few tokens than to lose content.
+    static func mergeTokenStreams(
+        prefix: [Int],
+        suffix: [Int],
+        windowTokens: Int = 32,
+        minMatch: Int = 4
+    ) -> [Int] {
+        if prefix.isEmpty { return suffix }
+        if suffix.isEmpty { return prefix }
+
+        let pTail = Array(prefix.suffix(windowTokens))
+        let sHead = Array(suffix.prefix(windowTokens))
+        let m = pTail.count
+        let n = sHead.count
+        if m == 0 || n == 0 { return prefix + suffix }
+
+        // Classic LCS-substring DP (O(m·n), m,n ≤ windowTokens).
+        var dp = [Int](repeating: 0, count: n + 1)
+        var bestLen = 0
+        var bestSEnd = 0  // index in sHead (exclusive) where the match ends
+        for i in 1...m {
+            var prev = 0
+            for j in 1...n {
+                let temp = dp[j]
+                if pTail[i - 1] == sHead[j - 1] {
+                    dp[j] = prev + 1
+                    if dp[j] > bestLen {
+                        bestLen = dp[j]
+                        bestSEnd = j
+                    }
+                } else {
+                    dp[j] = 0
+                }
+                prev = temp
+            }
+        }
+
+        guard bestLen >= minMatch else { return prefix + suffix }
+        return prefix + Array(suffix.dropFirst(bestSEnd))
     }
 
     // MARK: - Pipeline

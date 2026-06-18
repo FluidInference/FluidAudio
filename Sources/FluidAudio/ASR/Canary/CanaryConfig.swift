@@ -40,6 +40,11 @@ public enum CanaryConfig {
     public static let sampleRate = 16000
     /// 15 s window — the preprocessor input is fixed at this sample count.
     public static let maxSamples = 240_000
+    /// Overlap between adjacent windows when chunking audio longer than 15 s.
+    /// 3 s (~19 tokens) gives the seam LCS-merge enough shared context to align
+    /// reliably while wasting little recompute. Hop = maxSamples − this.
+    public static let chunkOverlapSeconds = 3.0
+    public static let chunkOverlapSamples = 48_000
     public static let melDim = 128
     public static let melFrames = 1501
     public static let encoderHidden = 1024
