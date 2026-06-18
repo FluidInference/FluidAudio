@@ -400,6 +400,36 @@ The thresholds, the size buckets (`largeVocabThreshold = 10`,
 `extraLargeVocabThreshold = 100`), and the dispatch logic live in
 `ContextBiasingConstants.rescorerConfig(forVocabSize:)`.
 
+### Short-Term Over-Fire Controls (opt-in, #702)
+
+The blank-aware DP score is a per-token average log-prob. A **short** keyword
+(few tokens) can free-start align to its single best-matching frame-run and
+score close to zero per token, so it can beat a correctly transcribed common
+word. With vocabularies of short terms that collide acoustically with ordinary
+English (`CRAN`~"ran", `Snyk`~"sync", a 3-letter acronym ~ a function word),
+the rescorer over-fires — replacing ordinary words that are none of the
+keywords.
+
+Benchmarking shows the over-fire and the genuine KWS recall on
+distinctive-name vocabularies (earnings22) come from the *same* mechanisms
+(the flat `cbw` boost and the acoustic spotter-rescue), and neither string
+similarity nor token length separates them — gating hard enough to suppress
+the false positives also costs recall. These controls are therefore **opt-in
+and default to disabled (no behavior change)**:
+
+| `VocabularyRescorer.Config` field | CLI flag | Env | Default | Recommended (short-vocab) |
+|---|---|---|---|---|
+| `shortTermCbwTaperPivot` | `--vocab-short-term-taper-pivot` | `FLUID_CBW_TAPER_PIVOT` | `1` (off) | `5` |
+| `shortTermCbwTaperExponent` | — | `FLUID_CBW_TAPER_EXP` | `2.0` | `2.0` |
+| `spotterRescueMinSimilarity` | `--vocab-spotter-min-sim` | `FLUID_SPOTTER_MIN_SIM` | `0.0` (off) | `0.30` |
+| `spotterRescueMultiWordMinSimilarity` | `--vocab-spotter-min-sim-multi` | `FLUID_SPOTTER_MIN_SIM_MULTI` | `0.0` (off) | `0.50` |
+
+The taper scales the `cbw` boost down for terms with fewer than `pivot` tokens
+(`cbw * (tokenCount / pivot) ** exponent`). The spotter floors require a
+minimum string similarity before the acoustic-only rescue path may fire
+(higher for multi-word spans, which are the most error-prone). Tune these for
+short-keyword KWS; leave them off for distinctive-name vocabularies.
+
 ## Usage Example
 
 ```swift

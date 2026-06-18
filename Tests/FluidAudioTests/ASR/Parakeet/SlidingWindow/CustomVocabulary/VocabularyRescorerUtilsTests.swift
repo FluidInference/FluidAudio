@@ -118,6 +118,42 @@ final class VocabularyRescorerUtilsTests: XCTestCase {
         XCTAssertEqual(config.adaptiveCbw(baseCbw: 3.0, tokenCount: 10), 3.0, accuracy: 0.01)
     }
 
+    // MARK: - Short-Term cbw Taper (#702, opt-in)
+
+    func testShortTermTaperDisabledByDefault() {
+        // Default config must NOT taper short terms (zero behavior change).
+        let config = VocabularyRescorer.Config.default
+        XCTAssertEqual(config.shortTermCbwTaperPivot <= 1, true, "taper disabled by default")
+        XCTAssertEqual(config.adaptiveCbw(baseCbw: 4.5, tokenCount: 1), 4.5, accuracy: 0.01)
+        XCTAssertEqual(config.adaptiveCbw(baseCbw: 4.5, tokenCount: 2), 4.5, accuracy: 0.01)
+        XCTAssertEqual(config.adaptiveCbw(baseCbw: 4.5, tokenCount: 3), 4.5, accuracy: 0.01)
+    }
+
+    func testShortTermTaperWhenEnabled() {
+        // pivot=5, exponent=2: terms below 5 tokens get a quadratic-tapered
+        // boost. referenceTokenCount=5 too, so tokenCount=5 is the clean
+        // boundary (full boost, no long-term scale-up).
+        let config = VocabularyRescorer.Config(
+            referenceTokenCount: 5,
+            shortTermCbwTaperPivot: 5,
+            shortTermCbwTaperExponent: 2.0
+        )
+        // tokenCount=1: (1/5)^2 = 0.04 → 4.5 * 0.04 = 0.18
+        XCTAssertEqual(config.adaptiveCbw(baseCbw: 4.5, tokenCount: 1), 0.18, accuracy: 0.01)
+        // tokenCount=3: (3/5)^2 = 0.36 → 4.5 * 0.36 = 1.62
+        XCTAssertEqual(config.adaptiveCbw(baseCbw: 4.5, tokenCount: 3), 1.62, accuracy: 0.01)
+        // tokenCount=4: (4/5)^2 = 0.64 → 4.5 * 0.64 = 2.88
+        XCTAssertEqual(config.adaptiveCbw(baseCbw: 4.5, tokenCount: 4), 2.88, accuracy: 0.01)
+        // At the pivot (== reference) the full boost applies.
+        XCTAssertEqual(config.adaptiveCbw(baseCbw: 4.5, tokenCount: 5), 4.5, accuracy: 0.01)
+    }
+
+    func testSpotterRescueFloorsDisabledByDefault() {
+        let config = VocabularyRescorer.Config.default
+        XCTAssertEqual(config.spotterRescueMinSimilarity, 0.0, accuracy: 0.0001)
+        XCTAssertEqual(config.spotterRescueMultiWordMinSimilarity, 0.0, accuracy: 0.0001)
+    }
+
     // MARK: - Config Defaults
 
     func testConfigDefaultValues() {
