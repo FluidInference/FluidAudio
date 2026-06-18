@@ -170,6 +170,64 @@ final class CustomVocabularyTests: XCTestCase {
         XCTAssertNil(mobius.minSimilarity)
     }
 
+    // MARK: - loadVocabularyFile Format Detection (JSON vs simple text)
+
+    func testLoadVocabularyFileDetectsJSON() throws {
+        let json = """
+            {
+              "minSimilarity": 0.6,
+              "terms": [
+                {"text": "Caivex", "minSimilarity": 0.40},
+                {"text": "Andre"}
+              ]
+            }
+            """
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vocab-647-json-\(UUID().uuidString).json")
+        try json.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let context = try CustomVocabularyContext.loadVocabularyFile(at: url)
+        XCTAssertEqual(context.terms.count, 2)
+        // Vocabulary-level threshold from JSON is honored.
+        XCTAssertEqual(context.minSimilarity, 0.6, accuracy: 0.001)
+        let byText = Dictionary(uniqueKeysWithValues: context.terms.map { ($0.text, $0) })
+        XCTAssertEqual(byText["Caivex"]?.minSimilarity ?? -1, 0.40, accuracy: 0.001)
+        XCTAssertNil(try XCTUnwrap(byText["Andre"]).minSimilarity)
+    }
+
+    func testLoadVocabularyFileDetectsJSONWithLeadingWhitespace() throws {
+        let json = "\n\n   {\"terms\": [{\"text\": \"Caivex\", \"minSimilarity\": 0.4}]}"
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vocab-647-ws-\(UUID().uuidString).json")
+        try json.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let context = try CustomVocabularyContext.loadVocabularyFile(at: url)
+        XCTAssertEqual(context.terms.count, 1)
+        XCTAssertEqual(context.terms.first?.minSimilarity ?? -1, 0.4, accuracy: 0.001)
+    }
+
+    func testLoadVocabularyFileDetectsSimpleText() throws {
+        let text = """
+            # comment line
+            NVIDIA
+            Bose: boz, boss
+            """
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vocab-647-txt-\(UUID().uuidString).txt")
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let context = try CustomVocabularyContext.loadVocabularyFile(at: url)
+        XCTAssertEqual(context.terms.count, 2)
+        let byText = Dictionary(uniqueKeysWithValues: context.terms.map { ($0.text, $0) })
+        XCTAssertNotNil(byText["NVIDIA"])
+        XCTAssertEqual(byText["Bose"]?.aliases, ["boz", "boss"])
+        // Simple text format has no per-term threshold field.
+        XCTAssertNil(try XCTUnwrap(byText["NVIDIA"]).minSimilarity)
+    }
+
     // MARK: - Edge Cases
 
     func testTermWithEmptyAliases() {

@@ -924,6 +924,20 @@ extension VocabularyRescorer {
                 bestSimilarity = max(bestSimilarity, Self.stringSimilarity(normalizedPhrase, form.normalized))
             }
 
+            // Honor an EXPLICIT per-term similarity override even on this
+            // acoustic rescue path. A term that opts into a stricter threshold
+            // (issue #647 — e.g. a short/common-sounding name) should not be
+            // force-replaced over a low-similarity span purely on spotter
+            // evidence. Terms without an override keep the prior behavior
+            // (similarity is for ranking only).
+            if let termMinSimilarity = term.minSimilarity, bestSimilarity < termMinSimilarity {
+                debugLog(
+                    "  [SPOTTER-RESCUE] Skipping '\(vocabTerm)': similarity "
+                        + "\(String(format: "%.2f", bestSimilarity)) < per-term min "
+                        + "\(String(format: "%.2f", termMinSimilarity))")
+                continue
+            }
+
             let firstIdx = span.first!
             let lastIdx = span.last!
             let candidate = CTCMatchCandidate(

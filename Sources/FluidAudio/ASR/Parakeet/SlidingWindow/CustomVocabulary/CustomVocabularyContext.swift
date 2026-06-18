@@ -258,11 +258,15 @@ public struct CustomVocabularyContext: Sendable {
 
     /// Load vocabulary from file and tokenize with CTC tokenizer.
     ///
-    /// This is a convenience method that combines loading vocabulary from a simple text file
-    /// and tokenizing each term with the CTC tokenizer for use with vocabulary boosting.
+    /// This is a convenience method that loads a vocabulary file and tokenizes
+    /// each term with the CTC tokenizer for use with vocabulary boosting. The
+    /// file may be either the structured JSON config (which supports per-term
+    /// `minSimilarity` and vocabulary-level thresholds, see ``load(from:)``) or
+    /// the simple one-term-per-line text format (see ``loadFromSimpleFormat(from:)``).
+    /// The format is detected from the file contents.
     ///
     /// - Parameters:
-    ///   - path: Path to the vocabulary file (one term per line)
+    ///   - path: Path to the vocabulary file (JSON config or simple text list)
     ///   - ctcVariant: CTC model variant to use for tokenization (default: .ctc110m)
     /// - Returns: Tuple of tokenized vocabulary context and loaded CTC models
     /// - Throws: Error if vocabulary file cannot be read or CTC models fail to load
@@ -273,16 +277,16 @@ public struct CustomVocabularyContext: Sendable {
         // Load CTC models
         let ctcModels = try await CtcModels.downloadAndLoad(variant: ctcVariant)
 
-        // Load vocabulary from file
+        // Load vocabulary from file (JSON config or simple text list).
         let vocabURL = URL(fileURLWithPath: path)
-        let loadedVocab = try loadFromSimpleFormat(from: vocabURL)
+        let loadedVocab = try loadVocabularyFile(at: vocabURL)
 
         // Load CTC tokenizer
         let ctcTokenizer = try await CtcTokenizer.load(
             from: CtcModels.defaultCacheDirectory(for: ctcVariant)
         )
 
-        // Tokenize each term with CTC tokenizer
+        // Tokenize each term with CTC tokenizer, preserving per-term settings.
         let tokenizedTerms = loadedVocab.terms.compactMap { term -> CustomVocabularyTerm? in
             let tokenIds = ctcTokenizer.encode(term.text)
             guard !tokenIds.isEmpty else { return nil }
@@ -296,7 +300,31 @@ public struct CustomVocabularyContext: Sendable {
             )
         }
 
-        let tokenizedVocab = CustomVocabularyContext(terms: tokenizedTerms)
+        // Preserve vocabulary-level thresholds parsed from the JSON config so
+        // a structured file is honored end-to-end (the simple-text path keeps
+        // the defaults it always used).
+        let tokenizedVocab = CustomVocabularyContext(
+            terms: tokenizedTerms,
+            alpha: loadedVocab.alpha,
+            minCtcScore: loadedVocab.minCtcScore,
+            minSimilarity: loadedVocab.minSimilarity,
+            minCombinedConfidence: loadedVocab.minCombinedConfidence,
+            minTermLength: loadedVocab.minTermLength
+        )
         return (tokenizedVocab, ctcModels)
+    }
+
+    /// Load a vocabulary file, auto-detecting the structured JSON config vs the
+    /// simple one-term-per-line text format. JSON config files begin with `{`
+    /// (after optional leading whitespace); anything else is treated as simple
+    /// text.
+    static func loadVocabularyFile(at url: URL) throws -> CustomVocabularyContext {
+        let data = try Data(contentsOf: url)
+        let whitespace: Set<UInt8> = [0x20, 0x09, 0x0a, 0x0d]  // space, tab, LF, CR
+        let firstMeaningfulByte = data.first { !whitespace.contains($0) }
+        if firstMeaningfulByte == UInt8(ascii: "{") {
+            return try load(from: url)
+        }
+        return try loadFromSimpleFormat(from: url)
     }
 }

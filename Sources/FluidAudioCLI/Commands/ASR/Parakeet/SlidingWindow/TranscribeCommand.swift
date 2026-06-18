@@ -491,8 +491,12 @@ enum TranscribeCommand {
                         ctcModelDirectory: ctcModelDir
                     )
 
-                    // Vocabulary-size-aware defaults, overridable via CLI
-                    let minSimilarity: Float = args.vocabMinSimilarity ?? vocabConfig.minSimilarity
+                    // Vocabulary-size-aware defaults, overridable via CLI.
+                    // Honor a vocabulary-level minSimilarity from a JSON config
+                    // as a floor (mirrors SlidingWindowAsrManager); per-term
+                    // overrides are applied inside the rescorer regardless.
+                    let minSimilarity: Float =
+                        args.vocabMinSimilarity ?? max(vocabConfig.minSimilarity, customVocab.minSimilarity)
                     let cbw: Float = args.vocabCbw ?? vocabConfig.cbw
                     let marginSeconds: Double = args.vocabMargin ?? ContextBiasingConstants.defaultMarginSeconds
 
