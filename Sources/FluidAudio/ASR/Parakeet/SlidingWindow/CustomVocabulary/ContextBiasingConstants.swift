@@ -340,7 +340,7 @@ public enum ContextBiasingConstants {
     /// ~94 to ~19 (the pre-#634 / 0.14.5 level) with no loss of biasing recall
     /// on distinctive-name vocabularies. Set to `false` for short-vocab KWS
     /// where the acoustic rescue costs more than it recovers. Env:
-    /// `FLUID_SPOTTER_RESCUE` (`0`/`false`/`no` disables).
+    /// `FLUID_SPOTTER_RESCUE` (`0`/`false`/`no`/`off` disables).
     public static var defaultSpotterRescueEnabled: Bool {
         envBool("FLUID_SPOTTER_RESCUE") ?? true
     }
@@ -352,7 +352,8 @@ public enum ContextBiasingConstants {
     }
 
     /// Read a `Bool` tuning override from the environment. Accepts
-    /// `1/0`, `true/false`, `yes/no` (case-insensitive); nil if absent/invalid.
+    /// `1/0`, `true/false`, `yes/no`, `on/off` (case-insensitive); nil if
+    /// absent/invalid.
     private static func envBool(_ name: String) -> Bool? {
         guard let raw = ProcessInfo.processInfo.environment[name]?.lowercased() else { return nil }
         switch raw {

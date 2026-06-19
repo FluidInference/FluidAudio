@@ -514,8 +514,9 @@ enum TranscribeCommand {
                             ?? ContextBiasingConstants.defaultSpotterRescueMinSimilarity,
                         spotterRescueMultiWordMinSimilarity: args.vocabSpotterMinSimMulti
                             ?? ContextBiasingConstants.defaultSpotterRescueMultiWordMinSimilarity,
-                        // #724: `--vocab-disable-spotter-rescue` turns off the acoustic
-                        // rescue pass entirely; otherwise use the library default (on).
+                        // #724: `--vocab-disable-spotter-rescue` forces the acoustic
+                        // rescue pass off; otherwise follow the library/env default
+                        // (on unless `FLUID_SPOTTER_RESCUE` disables it).
                         spotterRescueEnabled: args.vocabDisableSpotterRescue
                             ? false : ContextBiasingConstants.defaultSpotterRescueEnabled
                     )
