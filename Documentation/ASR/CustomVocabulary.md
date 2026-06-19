@@ -490,6 +490,53 @@ guard.
 The defaults are byte-for-byte identical to the pre-#702 behavior; the floors
 and taper only change scoring when explicitly enabled.
 
+### Disabling the Acoustic Spotter-Rescue (opt-in, #724)
+
+The biggest single lever for short-keyword over-firing is the **spotter-anchored
+acoustic rescue** — a pass that proposes a vocabulary term when the CTC keyword
+spotter detects it acoustically, even if string similarity to the transcript is
+low (it exists to recover brand names TDT mangles past the similarity gate, e.g.
+`DiaSorin` → `the solar`). On short terms that collide with common English it is
+the dominant false-positive source. It was added on top of the pre-0.14.5
+pipeline; turning it off reproduces the older, much-lower over-fire behavior.
+
+| `VocabularyRescorer.Config` field | CLI flag | Env | Default |
+|---|---|---|---|
+| `spotterRescueEnabled` | `--vocab-disable-spotter-rescue` | `FLUID_SPOTTER_RESCUE` (`0` disables) | `true` (on) |
+
+```swift
+// Disable the acoustic rescue for short-keyword KWS:
+let config = VocabularyRescorer.Config(spotterRescueEnabled: false)
+```
+
+```bash
+fluidaudio transcribe audio.wav --custom-vocab short_terms.txt \
+    --vocab-disable-spotter-rescue
+```
+
+**When to disable:** small vocabularies of short terms that collide with ordinary
+English (brand names, acronyms). **When to keep on (default):** distinctive-name
+vocabularies (company/drug names) where the acoustic rescue recovers
+heavily-mangled terms that string matching misses.
+
+#### Measured effect
+
+Repro: 8 short brand/acronym distractors (none spoken) across a 90-clip,
+3-voice ordinary-speech set, plus a 100-pair distinctive-name biasing set as the
+recall guard.
+
+| Setting | distractor false positives | biasing recall |
+|---|---|---|
+| **on (default)** | ~94 | 0.92 |
+| `spotterRescueEnabled = false` | **~19** | **0.97** |
+
+For short colliding vocabularies, disabling the rescue both **lowers over-fire**
+and (because spurious replacements no longer clobber correct words) **raises**
+recall — it reproduces the pre-rescue scoring. This is a bigger, cleaner lever
+than the per-term floors above for the short-vocab case; the floors remain useful
+when you want to *keep* the rescue but gate its lowest-similarity firings. The
+default is unchanged, so existing distinctive-name setups are unaffected.
+
 ## Usage Example
 
 ```swift

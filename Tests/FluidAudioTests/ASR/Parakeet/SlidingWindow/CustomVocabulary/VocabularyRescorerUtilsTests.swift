@@ -154,6 +154,13 @@ final class VocabularyRescorerUtilsTests: XCTestCase {
         XCTAssertEqual(config.spotterRescueMultiWordMinSimilarity, 0.0, accuracy: 0.0001)
     }
 
+    func testSpotterRescueEnabledByDefault() {
+        // The acoustic rescue pass must run by default (zero behavior change);
+        // disabling it is opt-in for short-vocab KWS (#724).
+        XCTAssertTrue(VocabularyRescorer.Config.default.spotterRescueEnabled)
+        XCTAssertFalse(VocabularyRescorer.Config(spotterRescueEnabled: false).spotterRescueEnabled)
+    }
+
     // MARK: - Config Defaults
 
     func testConfigDefaultValues() {

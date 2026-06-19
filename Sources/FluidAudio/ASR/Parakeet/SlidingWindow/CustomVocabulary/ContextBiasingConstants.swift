@@ -331,10 +331,35 @@ public enum ContextBiasingConstants {
         envFloat("FLUID_SPOTTER_MIN_SIM_MULTI") ?? 0.0
     }
 
+    /// Whether the spotter-anchored acoustic rescue pass runs at all (#724).
+    /// `true` (default) preserves current behavior. The acoustic rescue is the
+    /// mechanism #634 added on top of the pre-0.14.5 pipeline; it recovers
+    /// brand names TDT mangles past the string-similarity gate, but it is also
+    /// the dominant source of short-keyword over-firing (#702) — on a 90-clip
+    /// short-distractor set, disabling it drops false-positive insertions from
+    /// ~94 to ~19 (the pre-#634 / 0.14.5 level) with no loss of biasing recall
+    /// on distinctive-name vocabularies. Set to `false` for short-vocab KWS
+    /// where the acoustic rescue costs more than it recovers. Env:
+    /// `FLUID_SPOTTER_RESCUE` (`0`/`false`/`no` disables).
+    public static var defaultSpotterRescueEnabled: Bool {
+        envBool("FLUID_SPOTTER_RESCUE") ?? true
+    }
+
     /// Read a `Float` tuning override from the environment, if present and valid.
     private static func envFloat(_ name: String) -> Float? {
         guard let raw = ProcessInfo.processInfo.environment[name], let value = Float(raw) else { return nil }
         return value
+    }
+
+    /// Read a `Bool` tuning override from the environment. Accepts
+    /// `1/0`, `true/false`, `yes/no` (case-insensitive); nil if absent/invalid.
+    private static func envBool(_ name: String) -> Bool? {
+        guard let raw = ProcessInfo.processInfo.environment[name]?.lowercased() else { return nil }
+        switch raw {
+        case "1", "true", "yes", "on": return true
+        case "0", "false", "no", "off": return false
+        default: return nil
+        }
     }
 
     /// Read an `Int` tuning override from the environment, if present and valid.

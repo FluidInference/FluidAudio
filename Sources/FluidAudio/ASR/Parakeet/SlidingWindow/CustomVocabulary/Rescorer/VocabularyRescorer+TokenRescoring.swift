@@ -792,7 +792,12 @@ extension VocabularyRescorer {
         // `and` → `Evenity`. The TDT-anchored path above already covers
         // those cases via Levenshtein matching against the larger
         // distractor pool.
-        if vocabulary.terms.count <= ContextBiasingConstants.largeVocabThreshold {
+        // Opt-out (#724): `spotterRescueEnabled = false` skips the acoustic
+        // rescue entirely (pre-#634 / 0.14.5 behavior) for short-vocab KWS
+        // where it over-fires more than it recovers.
+        if config.spotterRescueEnabled,
+            vocabulary.terms.count <= ContextBiasingConstants.largeVocabThreshold
+        {
             collectSpotterAnchoredCandidates(
                 wordTimings: wordTimings,
                 logProbs: logProbs,
