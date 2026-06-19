@@ -232,6 +232,8 @@ enum TranscribeCommand {
         var vocabShortTermTaperPivot: Int?
         var vocabSpotterMinSim: Float?
         var vocabSpotterMinSimMulti: Float?
+        // #724: disable the acoustic spotter-rescue pass (pre-#634 behavior).
+        var vocabDisableSpotterRescue: Bool = false
     }
 
     private static func parseArguments(_ args: [String]) -> ParsedArgs? {
@@ -386,6 +388,8 @@ enum TranscribeCommand {
                     parsed.vocabSpotterMinSimMulti = Float(args[i + 1])
                     i += 1
                 }
+            case "--vocab-disable-spotter-rescue":
+                parsed.vocabDisableSpotterRescue = true
 
             default:
                 fputs("WARNING: Unknown option: \(args[i])\n", stderr)
@@ -509,7 +513,12 @@ enum TranscribeCommand {
                         spotterRescueMinSimilarity: args.vocabSpotterMinSim
                             ?? ContextBiasingConstants.defaultSpotterRescueMinSimilarity,
                         spotterRescueMultiWordMinSimilarity: args.vocabSpotterMinSimMulti
-                            ?? ContextBiasingConstants.defaultSpotterRescueMultiWordMinSimilarity
+                            ?? ContextBiasingConstants.defaultSpotterRescueMultiWordMinSimilarity,
+                        // #724: `--vocab-disable-spotter-rescue` forces the acoustic
+                        // rescue pass off; otherwise follow the library/env default
+                        // (on unless `FLUID_SPOTTER_RESCUE` disables it).
+                        spotterRescueEnabled: args.vocabDisableSpotterRescue
+                            ? false : ContextBiasingConstants.defaultSpotterRescueEnabled
                     )
 
                     let rescorer = try await VocabularyRescorer.create(
@@ -1021,6 +1030,8 @@ enum TranscribeCommand {
                 --vocab-short-term-taper-pivot <n>   Reduce boost for terms with < n tokens (e.g. 5)
                 --vocab-spotter-min-sim <0-1>        Min similarity for acoustic single-word rescue (e.g. 0.30)
                 --vocab-spotter-min-sim-multi <0-1>  Min similarity for multi-word rescue (e.g. 0.50)
+                --vocab-disable-spotter-rescue       Turn the acoustic rescue OFF entirely (#724; pre-#634
+                                                     behavior — biggest over-fire reduction for short vocabs)
 
             PARAKEET VARIANT MODE (--parakeet-variant):
                 --parakeet-variant <variant>     Engine: parakeet-eou-160ms, nemotron-560ms, …

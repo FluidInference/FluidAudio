@@ -55,6 +55,16 @@ public struct VocabularyRescorer: Sendable {
         /// `0.0` disables (default). Recommended opt-in: 0.50.
         public let spotterRescueMultiWordMinSimilarity: Float
 
+        /// Whether the spotter-anchored acoustic rescue pass runs at all (#724).
+        /// `true` (default) = current behavior. Setting `false` skips the
+        /// acoustic rescue entirely, reproducing the pre-#634 (0.14.5) behavior
+        /// — far fewer short-keyword over-fires (#702) at no recall cost on
+        /// distinctive-name vocabularies, but loses recovery of brand names TDT
+        /// mangles past the string-similarity gate. Prefer this for short-vocab
+        /// KWS. (Composes with `spotterRescueMinSimilarity`: this is the on/off
+        /// switch, that is the in-between similarity floor.)
+        public let spotterRescueEnabled: Bool
+
         public static let `default` = Config()
 
         public init(
@@ -64,7 +74,8 @@ public struct VocabularyRescorer: Sendable {
             shortTermCbwTaperExponent: Float = ContextBiasingConstants.defaultShortTermCbwTaperExponent,
             spotterRescueMinSimilarity: Float = ContextBiasingConstants.defaultSpotterRescueMinSimilarity,
             spotterRescueMultiWordMinSimilarity: Float = ContextBiasingConstants
-                .defaultSpotterRescueMultiWordMinSimilarity
+                .defaultSpotterRescueMultiWordMinSimilarity,
+            spotterRescueEnabled: Bool = ContextBiasingConstants.defaultSpotterRescueEnabled
         ) {
             self.useAdaptiveThresholds = useAdaptiveThresholds
             self.referenceTokenCount = referenceTokenCount
@@ -72,6 +83,7 @@ public struct VocabularyRescorer: Sendable {
             self.shortTermCbwTaperExponent = shortTermCbwTaperExponent
             self.spotterRescueMinSimilarity = spotterRescueMinSimilarity
             self.spotterRescueMultiWordMinSimilarity = spotterRescueMultiWordMinSimilarity
+            self.spotterRescueEnabled = spotterRescueEnabled
         }
 
         // MARK: - Adaptive Threshold Functions

@@ -154,6 +154,21 @@ final class VocabularyRescorerUtilsTests: XCTestCase {
         XCTAssertEqual(config.spotterRescueMultiWordMinSimilarity, 0.0, accuracy: 0.0001)
     }
 
+    func testSpotterRescueEnabledByDefault() {
+        // The acoustic rescue pass must run by default (zero behavior change);
+        // disabling it is opt-in for short-vocab KWS (#724). Clear the env
+        // override first so the assertion reflects the code default regardless
+        // of the ambient environment (a freshly constructed Config reads the
+        // env at init, unlike the cached `Config.default` static).
+        let saved = ProcessInfo.processInfo.environment["FLUID_SPOTTER_RESCUE"]
+        unsetenv("FLUID_SPOTTER_RESCUE")
+        defer {
+            if let saved { setenv("FLUID_SPOTTER_RESCUE", saved, 1) }
+        }
+        XCTAssertTrue(VocabularyRescorer.Config().spotterRescueEnabled)
+        XCTAssertFalse(VocabularyRescorer.Config(spotterRescueEnabled: false).spotterRescueEnabled)
+    }
+
     // MARK: - Config Defaults
 
     func testConfigDefaultValues() {
