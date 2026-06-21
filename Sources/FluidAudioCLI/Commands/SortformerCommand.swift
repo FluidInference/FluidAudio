@@ -41,6 +41,7 @@ enum SortformerCommand {
         var weakBoostRate: Float?
         var minPosScoresRate: Float?
         var spkcacheSilFramesPerSpk: Int?
+        var configName = "default"
 
         // Parse remaining arguments
         var i = 1
@@ -88,6 +89,11 @@ enum SortformerCommand {
                     modelPath = arguments[i + 1]
                     i += 1
                 }
+            case "--config":
+                if i + 1 < arguments.count {
+                    configName = arguments[i + 1].lowercased()
+                    i += 1
+                }
             case "--threshold":
                 if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
                     predScoreThreshold = v
@@ -132,8 +138,20 @@ enum SortformerCommand {
         print("Sortformer Streaming Diarization")
         print("   Audio: \(audioFile)")
 
-        // Initialize Sortformer with default config (NVIDIA low latency: 1.04s)
-        var config = SortformerConfig.default
+        // Select config (default = NVIDIA low latency ~1.04s). `--config efficient` = chunk_len=25 (~2s, higher throughput).
+        var config: SortformerConfig
+        switch configName {
+        case "efficient":
+            config = .efficientV2_1
+        case "fast", "fastv2_1":
+            config = .fastV2_1
+        case "low", "balanced":
+            config = .balancedV2_1
+        case "high", "highcontext":
+            config = .highContextV2_1
+        default:
+            config = .default
+        }
         var postConfig = DiarizerTimelineConfig.sortformerDefault
         config.debugMode = debugMode
         if let v = predScoreThreshold { config.predScoreThreshold = v }

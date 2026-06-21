@@ -156,6 +156,52 @@ extension SortformerModels {
     }
 }
 
+// MARK: - Embedded Configuration
+
+extension SortformerModels {
+
+    /// The model-shape-defining streaming parameters the converter embeds in the CoreML model
+    /// metadata. These determine the input tensor shapes and must match the host config.
+    ///
+    /// Note: `spkcache_update_period` is intentionally excluded — `SortformerConfig.init` clamps
+    /// it host-side (`max(min(period, fifoLen+chunkLen), chunkLen)`), so the host value legitimately
+    /// differs from the raw value baked into the model and is not a compatibility signal.
+    public struct EmbeddedConfig: Equatable, Sendable {
+        public let chunkLen: Int
+        public let chunkLeftContext: Int
+        public let chunkRightContext: Int
+        public let fifoLen: Int
+        public let spkcacheLen: Int
+    }
+
+    /// The variant-defining streaming parameters the converter writes into the CoreML model
+    /// metadata. Returns `nil` for older exports that don't carry them. Used to detect a
+    /// `SortformerConfig` that doesn't match the model — a mismatch yields incorrect and much
+    /// slower diarization (issue #726).
+    public var embeddedConfig: EmbeddedConfig? {
+        guard let meta = mainModel.modelDescription.metadata[.creatorDefinedKey] as? [String: String] else {
+            return nil
+        }
+        func value(_ key: String) -> Int? { meta[key].flatMap(Int.init) }
+        guard
+            let chunkLen = value("chunk_len"),
+            let chunkLeftContext = value("chunk_left_context"),
+            let chunkRightContext = value("chunk_right_context"),
+            let fifoLen = value("fifo_len"),
+            let spkcacheLen = value("spkcache_len")
+        else {
+            return nil
+        }
+        return EmbeddedConfig(
+            chunkLen: chunkLen,
+            chunkLeftContext: chunkLeftContext,
+            chunkRightContext: chunkRightContext,
+            fifoLen: fifoLen,
+            spkcacheLen: spkcacheLen
+        )
+    }
+}
+
 // MARK: - Main Model Inference
 
 extension SortformerModels {

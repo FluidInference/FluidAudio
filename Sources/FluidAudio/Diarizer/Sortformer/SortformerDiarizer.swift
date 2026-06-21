@@ -108,6 +108,8 @@ public final class SortformerDiarizer: Diarizer {
             mainModelPath: mainModelPath
         )
 
+        validateConfigMatch(loadedModels)
+
         // Use withLock helper to avoid direct NSLock usage in async context
         withLock {
             self._models = loadedModels
@@ -115,6 +117,34 @@ public final class SortformerDiarizer: Diarizer {
             self.resetBuffersLocked()
         }
         logger.info("Sortformer initialized in \(String(format: "%.2f", loadedModels.compilationDuration))s")
+    }
+
+    /// Warn loudly if the diarizer's `config` does not match the streaming parameters baked
+    /// into the loaded model. A mismatch (e.g. a `.default` config against a `highContextV2_1`
+    /// model) runs but produces incorrect and much slower results — issue #726.
+    private func validateConfigMatch(_ models: SortformerModels) {
+        guard let embedded = models.embeddedConfig else { return }
+        let current = SortformerModels.EmbeddedConfig(
+            chunkLen: config.chunkLen,
+            chunkLeftContext: config.chunkLeftContext,
+            chunkRightContext: config.chunkRightContext,
+            fifoLen: config.fifoLen,
+            spkcacheLen: config.spkcacheLen
+        )
+        guard current != embedded else { return }
+        logger.error(
+            """
+            Sortformer config mismatch — diarizer config does not match the loaded model. \
+            This produces incorrect and much slower diarization (issue #726). \
+            diarizer(chunkLen=\(current.chunkLen), leftCtx=\(current.chunkLeftContext), \
+            rightCtx=\(current.chunkRightContext), fifoLen=\(current.fifoLen), \
+            spkcacheLen=\(current.spkcacheLen)) \
+            vs model(chunkLen=\(embedded.chunkLen), leftCtx=\(embedded.chunkLeftContext), \
+            rightCtx=\(embedded.chunkRightContext), fifoLen=\(embedded.fifoLen), \
+            spkcacheLen=\(embedded.spkcacheLen)). \
+            Construct SortformerDiarizer with the SortformerConfig matching the model variant.
+            """
+        )
     }
 
     /// Execute a closure while holding the lock
@@ -126,6 +156,8 @@ public final class SortformerDiarizer: Diarizer {
 
     /// Initialize with pre-loaded models.
     public func initialize(models: SortformerModels) {
+        validateConfigMatch(models)
+
         lock.lock()
         defer { lock.unlock() }
 

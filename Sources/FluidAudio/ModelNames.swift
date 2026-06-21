@@ -642,6 +642,9 @@ public enum ModelNames {
             case balancedV2_1
             case highContextV2
             case highContextV2_1
+            /// Higher-throughput streaming: larger chunk (~2s output latency) for ~4x the
+            /// real-time factor of `fastV2_1` at near-identical per-inference cost.
+            case efficientV2_1
 
             public var name: String {
                 switch self {
@@ -657,6 +660,8 @@ public enum ModelNames {
                     return "SortformerNvidiaHigh_v2"
                 case .highContextV2_1:
                     return "SortformerNvidiaHigh_v2.1"
+                case .efficientV2_1:
+                    return "SortformerEfficient_v2.1"
                 }
             }
 
@@ -674,17 +679,25 @@ public enum ModelNames {
                     return .highContextV2
                 case .highContextV2_1:
                     return .highContextV2_1
+                case .efficientV2_1:
+                    return .efficientV2_1
                 }
             }
 
             public var fileName: String {
-                return "\(name).mlmodelc"
+                return "\(Sortformer.modelsSubdirectory)/\(name).mlmodelc"
             }
 
             public func isCompatible(with config: SortformerConfig) -> Bool {
                 defaultConfiguration.isCompatible(with: config)
             }
         }
+
+        /// Repo subdirectory holding the active model set. `v3/fp16` is the BNNS-fixed rebuild
+        /// (the older root-level models hit a "tensor as both input and output" graph-compile
+        /// crash on newer BNNS — issue #726). Use `v3/palettized` for the 6-bit, ~2.5x-smaller
+        /// set (fixes RAM-driven crashes on older devices at ~+0.9pp DER).
+        public static let modelsSubdirectory = "v3/fp16"
 
         /// Lowest latency for streaming
         public static let defaultVariant: Variant = .fastV2_1

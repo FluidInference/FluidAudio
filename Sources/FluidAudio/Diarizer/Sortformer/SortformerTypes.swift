@@ -194,6 +194,21 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 300
     )
 
+    /// Higher-throughput streaming config with Sortformer v2.1 weights (~2s output latency).
+    /// Same context as `fastV2_1` but a larger 25-frame chunk: per-inference cost is dominated
+    /// by the static speaker-cache + FIFO context, so a bigger chunk advances ~4x more audio per
+    /// call at near-identical latency (~4x real-time factor vs `fastV2_1`). Use when ~2s latency
+    /// is acceptable and throughput matters.
+    public static let efficientV2_1 = SortformerConfig(
+        modelVariant: .efficientV2_1,
+        chunkLen: 25,
+        chunkLeftContext: 1,
+        chunkRightContext: 7,
+        fifoLen: 40,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 31
+    )
+
     /// - Warning: If you don't use one of the default configurations, you must use a local model converted with that configuration.
     public init(
         modelVariant: ModelVariant? = .fastV2_1,

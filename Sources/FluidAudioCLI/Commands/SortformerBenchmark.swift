@@ -68,6 +68,9 @@ enum SortformerBenchmark {
         var singleFile: String?
         var maxFiles: Int?
         var threshold: Float = 0.5
+        var collarSeconds: Double = 0
+        var onsetThreshold: Float?
+        var offsetThreshold: Float?
         var modelPath: String?
         var outputFile: String?
         var verbose = false
@@ -114,6 +117,21 @@ enum SortformerBenchmark {
             case "--threshold":
                 if i + 1 < arguments.count {
                     threshold = Float(arguments[i + 1]) ?? 0.5
+                    i += 1
+                }
+            case "--collar":
+                if i + 1 < arguments.count {
+                    collarSeconds = Double(arguments[i + 1]) ?? 0
+                    i += 1
+                }
+            case "--onset":
+                if i + 1 < arguments.count {
+                    onsetThreshold = Float(arguments[i + 1])
+                    i += 1
+                }
+            case "--offset":
+                if i + 1 < arguments.count {
+                    offsetThreshold = Float(arguments[i + 1])
                     i += 1
                 }
             case "--model":
@@ -294,7 +312,19 @@ enum SortformerBenchmark {
         if let v = weakBoostRate { config.weakBoostRate = v }
         if let v = minPosScoresRate { config.minPosScoresRate = v }
         if let v = spkcacheSilFramesPerSpk { config.spkcacheSilFramesPerSpk = v }
-        let diarizer = SortformerDiarizer(config: config)
+        // Allow overriding the timeline binarization thresholds (sortformerDefault = 0.5/0.5).
+        let diarizer: SortformerDiarizer
+        if onsetThreshold != nil || offsetThreshold != nil {
+            let timeline = DiarizerTimelineConfig(
+                numSpeakers: config.numSpeakers,
+                frameDurationSeconds: Float(config.frameDurationSeconds),
+                onsetThreshold: onsetThreshold ?? 0.5,
+                offsetThreshold: offsetThreshold ?? onsetThreshold ?? 0.5
+            )
+            diarizer = SortformerDiarizer(config: config, timelineConfig: timeline)
+        } else {
+            diarizer = SortformerDiarizer(config: config)
+        }
 
         do {
             if useHuggingFace {
@@ -340,6 +370,7 @@ enum SortformerBenchmark {
                 diarizer: diarizer,
                 modelLoadTime: modelLoadTime,
                 threshold: threshold,
+                collarSeconds: collarSeconds,
                 verbose: verbose
             )
 
@@ -381,6 +412,7 @@ enum SortformerBenchmark {
         diarizer: SortformerDiarizer,
         modelLoadTime: Double,
         threshold: Float,
+        collarSeconds: Double,
         verbose: Bool
     ) async -> BenchmarkResult? {
 
@@ -484,7 +516,7 @@ enum SortformerBenchmark {
                 ref: referenceSegments,
                 hyp: hypothesisSegments,
                 frameStep: derFrameStepSeconds,
-                collar: 0
+                collar: collarSeconds
             )
             let totalRefSpeech = max(derResult.totalRefSpeech, .leastNonzeroMagnitude)
             let derPercent = Float(derResult.der * 100)
