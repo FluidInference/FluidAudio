@@ -1086,8 +1086,8 @@ public class DiarizerTimeline {
     ) -> DiarizerSpeaker? {
         lock.lock()
         defer { lock.unlock() }
-        guard config.storeSegments else { return nil }
-        // Ensure index is within bounds
+        // Speaker identity registration is independent of `storeSegments` (mirrors the
+        // `named:` overload) so enrollment can register a speaker even in emit-only mode.
         let index = index ?? (0..<speakerCapacity).first { _speakers[$0] == nil }
 
         guard let index, index >= 0, index < speakerCapacity else {
