@@ -407,6 +407,45 @@ final class SpeakerEnrollmentTests: XCTestCase {
         }
     }
 
+    /// Enrollment resets the visible timeline to frame 0, but must not shift the
+    /// streaming timeline relative to real audio. Regression test for the
+    /// right-context (convDelay) offset: an enrolled stream must finalize the same
+    /// number of frames as a baseline stream of identical live audio. Before the
+    /// fix, the enrolled stream skipped the convDelay output strip on its first
+    /// live chunk and ran convDelay frames long, shifting every reported timestamp
+    /// later by the right-context lag.
+    func testLseendEnrollmentDoesNotOffsetStreamingTimeline() async throws {
+        let model = try await loadLseendModelForTest()
+        let chunkSizes = [977, 1231, 1607]
+
+        // Baseline: stream live audio with no enrollment.
+        let baseline = try LSEENDDiarizer(model: model)
+        let sampleRate = baseline.targetSampleRate ?? 16_000
+        let liveAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: sampleRate, startSeconds: 3.0, durationSeconds: 3.0)
+        for chunk in DiarizationTestFixtures.chunk(liveAudio, sizes: chunkSizes) {
+            _ = try baseline.process(samples: chunk, sourceSampleRate: nil)
+        }
+        _ = try baseline.finalizeSession()
+        let baselineFrames = baseline.timeline.numFinalizedFrames
+        XCTAssertGreaterThan(baselineFrames, 0)
+
+        // Enrolled: enroll a speaker, then stream the identical live audio.
+        let enrolled = try LSEENDDiarizer(model: model)
+        let enrollmentAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: sampleRate, startSeconds: 0.0, durationSeconds: 3.0)
+        _ = try enrolled.enrollSpeaker(
+            withAudio: enrollmentAudio, sourceSampleRate: nil, named: "Alice")
+        for chunk in DiarizationTestFixtures.chunk(liveAudio, sizes: chunkSizes) {
+            _ = try enrolled.process(samples: chunk, sourceSampleRate: nil)
+        }
+        _ = try enrolled.finalizeSession()
+
+        XCTAssertEqual(
+            enrolled.timeline.numFinalizedFrames, baselineFrames,
+            "Enrollment must not offset the streaming timeline by the right-context lag")
+    }
+
     func testLseendMultipleEnrollmentsRetainNamedSpeakersAndSession() async throws {
         let model = try await loadLseendModelForTest()
         let diarizer = try LSEENDDiarizer(model: model)

@@ -298,6 +298,7 @@ public final class LSEENDDiarizer: Diarizer {
 
         let sessionSnapshot = try session.takeSnapshot()
         let timelineSnapshot = timeline.takeSnapshot()
+        let framesFedSnapshot = framesFedToModel
         let isNamed = name != nil
 
         let requireNewSpeaker = isNamed && !overwriteAssignedSpeakerName
@@ -334,6 +335,7 @@ public final class LSEENDDiarizer: Diarizer {
         else {
             session.rollback(to: sessionSnapshot)
             timeline.rollback(to: timelineSnapshot)
+            framesFedToModel = framesFedSnapshot
             return nil
         }
 
@@ -360,12 +362,19 @@ public final class LSEENDDiarizer: Diarizer {
         else {
             session.rollback(to: sessionSnapshot)
             timeline.rollback(to: timelineSnapshot)
+            framesFedToModel = framesFedSnapshot
             return nil
         }
 
         // Rename speaker and report success
         enrolledSpeaker.name = name
         timeline.reset(keepingSpeakers: true)
+
+        // Re-arm the right-context warmup strip for the live stream. The timeline
+        // origin is now frame 0, but the encoder's convDelay look-ahead still holds
+        // the enrollment drain silence; resetting the counter makes the first live
+        // chunk strip those frames so reported timestamps stay aligned to real time.
+        framesFedToModel = 0
 
         return enrolledSpeaker
     }
