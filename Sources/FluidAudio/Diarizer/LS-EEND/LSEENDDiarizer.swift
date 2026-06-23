@@ -342,7 +342,7 @@ public final class LSEENDDiarizer: Diarizer {
         // Get the new/unnamed speaker with the most speech if any exist.
         // Fallback to old speaker with the most speech if overwrites are allowed.
         var speechActivities: [Int: Float] = [:]
-        for segment in update.finalizedSegments {
+        for segment in update.finalizedSegments + update.tentativeSegments {
             speechActivities[segment.speakerIndex, default: 0] += segment.activity * Float(segment.length)
         }
 
@@ -359,8 +359,6 @@ public final class LSEENDDiarizer: Diarizer {
         guard let bestSlot,
             !requireNewSpeaker || !oldSlots.contains(bestSlot),
             // Register the enrolled speaker at the slot identified from the update.
-            // Derived from the update rather than persisted timeline segments, so it
-            // works even when the timeline is configured not to store segments.
             let enrolledSpeaker = timeline.upsertSpeaker(named: name, atIndex: bestSlot)
         else {
             session.rollback(to: sessionSnapshot)
@@ -371,10 +369,7 @@ public final class LSEENDDiarizer: Diarizer {
 
         timeline.reset(keepingSpeakers: true)
 
-        // Re-arm the right-context warmup strip for the live stream. The timeline
-        // origin is now frame 0, but the encoder's convDelay look-ahead still holds
-        // the enrollment drain silence; resetting the counter makes the first live
-        // chunk strip those frames so reported timestamps stay aligned to real time.
+        // Re-arm the right-context warmup strip for the live stream to timestamp drift.
         framesFedToModel = 0
 
         return enrolledSpeaker
