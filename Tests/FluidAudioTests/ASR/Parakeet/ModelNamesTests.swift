@@ -119,6 +119,38 @@ final class ModelNamesTests: XCTestCase {
         )
     }
 
+    func testSortformerPrecisionSubdirectories() {
+        XCTAssertEqual(ModelNames.Sortformer.ModelPrecision.fp16.subdirectory, "v3/fp16")
+        XCTAssertEqual(ModelNames.Sortformer.ModelPrecision.palettized.subdirectory, "v3/palettized")
+        // Default subdirectory must track the fp16 precision.
+        XCTAssertEqual(
+            ModelNames.Sortformer.modelsSubdirectory, ModelNames.Sortformer.ModelPrecision.fp16.subdirectory)
+    }
+
+    func testSortformerBundleHonorsPrecision() {
+        for variant in ModelNames.Sortformer.Variant.allCases {
+            let fp16 = ModelNames.Sortformer.bundle(for: variant, precision: .fp16)
+            let palettized = ModelNames.Sortformer.bundle(for: variant, precision: .palettized)
+            XCTAssertTrue(fp16.hasPrefix("v3/fp16/"), "fp16 bundle '\(fp16)' should live under v3/fp16/")
+            XCTAssertTrue(
+                palettized.hasPrefix("v3/palettized/"),
+                "palettized bundle '\(palettized)' should live under v3/palettized/")
+            // Default (no precision) bundle must equal the fp16 path.
+            XCTAssertEqual(ModelNames.Sortformer.bundle(for: variant), fp16)
+        }
+    }
+
+    func testSortformerConfigPrecisionDrivesBundle() {
+        var config = SortformerConfig.highContextV2_1
+        XCTAssertEqual(config.precision, .fp16, "precision should default to fp16")
+        XCTAssertEqual(ModelNames.Sortformer.bundle(for: config), config.modelVariant?.fileName(precision: .fp16))
+
+        config.precision = .palettized
+        XCTAssertEqual(
+            ModelNames.Sortformer.bundle(for: config), config.modelVariant?.fileName(precision: .palettized),
+            "Flipping config.precision must redirect the bundle to the palettized set")
+    }
+
     // MARK: - Specific Model Names
 
     func testASRModelNamesEndInMlmodelc() {

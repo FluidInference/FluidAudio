@@ -58,12 +58,14 @@ extension SortformerModels {
     /// - Parameters:
     ///   - preprocessorPath: Path to SortformerPreprocessor.mlpackage
     ///   - mainModelPath: Path to Sortformer.mlpackage
-    ///   - configuration: Optional MLModel configuration
+    ///   - computeUnits: CoreML compute units. Pass `nil` (default) to auto-resolve via
+    ///     `recommendedComputeUnits(for:)`, which avoids the multi-minute ANE compile hang on
+    ///     RAM-constrained devices for the large fp16 high-context variants (issue #726).
     /// - Returns: Loaded SortformerModels
     public static func load(
         config: SortformerConfig,
         mainModelPath: URL,
-        configuration: MLModelConfiguration? = nil
+        computeUnits: MLComputeUnits? = nil
     ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from local paths (combined pipeline mode)")
 
@@ -73,11 +75,10 @@ extension SortformerModels {
         logger.info("Compiling main model...")
         let compiledMainModelURL = try await MLModel.compileModel(at: mainModelPath)
 
-        // Load main model - .all lets CoreML pick optimal compute units
         let mainConfig = MLModelConfiguration()
-        mainConfig.computeUnits = .all
+        mainConfig.computeUnits = computeUnits ?? recommendedComputeUnits(for: config)
         let mainModel = try MLModel(contentsOf: compiledMainModelURL, configuration: mainConfig)
-        logger.info("Loaded main Sortformer model")
+        logger.info("Loaded main Sortformer model (computeUnits=\(mainConfig.computeUnits.rawValue))")
 
         let duration = Date().timeIntervalSince(startTime)
         logger.info("Models loaded in \(String(format: "%.2f", duration))s")
@@ -95,18 +96,49 @@ extension SortformerModels {
         return MLModelConfigurationUtils.defaultConfiguration(computeUnits: isCI ? .cpuAndNeuralEngine : .all)
     }
 
+    /// Memory (GiB) below which the large fp16 high-context head is loaded on CPU only.
+    /// A14-class devices ship ~4GB; iPhone 14 has 6GB. 8GB cleanly separates those from
+    /// Apple Silicon Macs / recent iPads that compile the ANE program without hanging.
+    private static let highContextAneRamThresholdGiB: Double = 8
+
+    /// Pick CoreML compute units for `config`, defaulting to `.all` but avoiding a known
+    /// load-time pathology: the ~2.4GB fp16 high-context head triggers a multi-minute ANE
+    /// program-compile hang on RAM-constrained devices (A14, ~4GB), which `.cpuOnly` avoids
+    /// (issue #726). The palettized high-context head (~330MB) loads fine on ANE, so it keeps
+    /// `.all`; only the large fp16 high-context variants on low-RAM devices fall back.
+    public static func recommendedComputeUnits(for config: SortformerConfig) -> MLComputeUnits {
+        let isLargeHighContext =
+            (config.modelVariant == .highContextV2 || config.modelVariant == .highContextV2_1)
+            && config.precision == .fp16
+        guard isLargeHighContext else { return .all }
+
+        let physicalGiB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+        guard physicalGiB < highContextAneRamThresholdGiB else { return .all }
+
+        logger.warning(
+            """
+            Loading large fp16 \(config.modelVariant.map(String.init(describing:)) ?? "high-context") \
+            head on a \(String(format: "%.1f", physicalGiB))GB device with .cpuOnly to avoid the \
+            multi-minute ANE compile hang (issue #726). Use SortformerConfig.precision = .palettized \
+            for an ANE-friendly ~330MB build, or pass computeUnits explicitly to override.
+            """
+        )
+        return .cpuOnly
+    }
+
     /// Load Sortformer models from HuggingFace.
     ///
     /// Downloads models from FluidInference/diar-streaming-sortformer-coreml if not cached.
     ///
     /// - Parameters:
     ///   - cacheDirectory: Directory to cache downloaded models (defaults to app support)
-    ///   - computeUnits: CoreML compute units to use (default: cpuOnly for consistency)
+    ///   - computeUnits: CoreML compute units. Pass `nil` (default) to auto-resolve via
+    ///     `recommendedComputeUnits(for:)` (issue #726).
     /// - Returns: Loaded SortformerModels
     public static func loadFromHuggingFace(
         config: SortformerConfig,
         cacheDirectory: URL? = nil,
-        computeUnits: MLComputeUnits = .all,
+        computeUnits: MLComputeUnits? = nil,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from HuggingFace...")
@@ -131,11 +163,13 @@ extension SortformerModels {
 
         // Download models if needed
 
+        let resolvedComputeUnits = computeUnits ?? recommendedComputeUnits(for: config)
+
         let models = try await DownloadUtils.loadModels(
             .sortformer,
             modelNames: [bundle],
             directory: directory,
-            computeUnits: computeUnits,
+            computeUnits: resolvedComputeUnits,
             variant: bundle,
             progressHandler: progressHandler
         )

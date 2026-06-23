@@ -98,14 +98,18 @@ public final class SortformerDiarizer: Diarizer {
     ///
     /// - Parameters:
     ///   - mainModelPath: Path to Sortformer.mlpackage
+    ///   - computeUnits: CoreML compute units. Pass `nil` (default) to auto-resolve — large fp16
+    ///     high-context variants fall back to `.cpuOnly` on RAM-constrained devices (issue #726).
     public func initialize(
-        mainModelPath: URL
+        mainModelPath: URL,
+        computeUnits: MLComputeUnits? = nil
     ) async throws {
         logger.info("Initializing Sortformer diarizer (combined pipeline mode)")
 
         let loadedModels = try await SortformerModels.load(
             config: config,
-            mainModelPath: mainModelPath
+            mainModelPath: mainModelPath,
+            computeUnits: computeUnits
         )
 
         validateConfigMatch(loadedModels)

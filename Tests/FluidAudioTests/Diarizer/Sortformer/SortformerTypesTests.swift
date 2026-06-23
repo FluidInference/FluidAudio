@@ -1,3 +1,4 @@
+import CoreML
 import Foundation
 import XCTest
 
@@ -183,5 +184,36 @@ final class SortformerTypesTests: XCTestCase {
             XCTAssertNotNil(error.errorDescription, "\(error) should have a description")
             XCTAssertFalse(error.errorDescription!.isEmpty)
         }
+    }
+
+    // MARK: - Compute-Unit Resolution (issue #726)
+
+    func testRecommendedComputeUnitsDefaultsToAllForNonHighContext() {
+        // Only the large fp16 high-context variants ever fall back; everything else keeps .all
+        // regardless of device RAM.
+        let variants: [SortformerConfig] = [.fastV2_1, .balancedV2_1, .efficientV2_1, .default]
+        for config in variants {
+            XCTAssertEqual(
+                SortformerModels.recommendedComputeUnits(for: config), .all,
+                "\(String(describing: config.modelVariant)) should keep .all")
+        }
+    }
+
+    func testRecommendedComputeUnitsKeepsAllForPalettizedHighContext() {
+        // The palettized high-context head (~330MB) loads fine on ANE, so it must NOT fall back
+        // even on RAM-constrained devices.
+        var config = SortformerConfig.highContextV2_1
+        config.precision = .palettized
+        XCTAssertEqual(SortformerModels.recommendedComputeUnits(for: config), .all)
+    }
+
+    func testRecommendedComputeUnitsForFp16HighContextIsRamDependent() {
+        // The fp16 high-context fallback is gated on physical RAM (< 8GB → .cpuOnly to dodge the
+        // multi-minute ANE compile hang). Assert it resolves to one of the two valid outcomes and
+        // matches the RAM gate on this machine.
+        let config = SortformerConfig.highContextV2_1
+        let units = SortformerModels.recommendedComputeUnits(for: config)
+        let physicalGiB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+        XCTAssertEqual(units, physicalGiB < 8 ? .cpuOnly : .all)
     }
 }

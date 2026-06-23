@@ -42,6 +42,7 @@ enum SortformerCommand {
         var minPosScoresRate: Float?
         var spkcacheSilFramesPerSpk: Int?
         var configName = "default"
+        var palettized = false
 
         // Parse remaining arguments
         var i = 1
@@ -94,6 +95,8 @@ enum SortformerCommand {
                     configName = arguments[i + 1].lowercased()
                     i += 1
                 }
+            case "--palettized":
+                palettized = true
             case "--threshold":
                 if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
                     predScoreThreshold = v
@@ -154,6 +157,7 @@ enum SortformerCommand {
         }
         var postConfig = DiarizerTimelineConfig.sortformerDefault
         config.debugMode = debugMode
+        if palettized { config.precision = .palettized }
         if let v = predScoreThreshold { config.predScoreThreshold = v }
         if let v = silenceThreshold { config.silenceThreshold = v }
         if let v = scoresBoostLatest { config.scoresBoostLatest = v }
