@@ -41,6 +41,24 @@ enum KokoroAneArrays {
         }
     }
 
+    /// True when logical linear indexing matches the raw `dataPointer`
+    /// layout. CoreML may return strided outputs; raw pointer copies are only
+    /// valid for compact row-major arrays.
+    private static func isContiguous(_ array: MLMultiArray) -> Bool {
+        let shape = array.shape.map(\.intValue)
+        let strides = array.strides.map(\.intValue)
+        guard shape.count == strides.count else { return false }
+
+        var expectedStride = 1
+        for (dimension, stride) in zip(shape.reversed(), strides.reversed()) {
+            if dimension > 1, stride != expectedStride {
+                return false
+            }
+            expectedStride *= max(dimension, 1)
+        }
+        return true
+    }
+
     // MARK: - Float16 (UInt16-backed) builders
 
     /// Build a Float16 MLMultiArray and fill it from a Float32 source.
@@ -60,22 +78,23 @@ enum KokoroAneArrays {
 
     /// Build a Float16 MLMultiArray, copying from a Float16-backed source array.
     static func float16Array(shape: [Int], from source: MLMultiArray) throws -> MLMultiArray {
-        // Same shape + same dtype → just copy bytes.
         let total = shape.reduce(1, *)
         let nsShape = shape.map { NSNumber(value: $0) }
         let dst = try MLMultiArray(shape: nsShape, dataType: .float16)
         precondition(
             source.count == total,
             "float16Array(from MLMultiArray): source has \(source.count) elements, shape implies \(total)")
-        if source.dataType == .float16 {
-            memcpy(dst.dataPointer, source.dataPointer, total * MemoryLayout<UInt16>.size)
-            return dst
-        }
-        if source.dataType == .float32 {
-            let f32 = source.dataPointer.bindMemory(to: Float.self, capacity: total)
-            let dstU16 = dst.dataPointer.bindMemory(to: UInt16.self, capacity: total)
-            convertF32toF16(src: f32, dst: dstU16, count: total)
-            return dst
+        if isContiguous(source), isContiguous(dst) {
+            if source.dataType == .float16 {
+                memcpy(dst.dataPointer, source.dataPointer, total * MemoryLayout<UInt16>.size)
+                return dst
+            }
+            if source.dataType == .float32 {
+                let f32 = source.dataPointer.bindMemory(to: Float.self, capacity: total)
+                let dstU16 = dst.dataPointer.bindMemory(to: UInt16.self, capacity: total)
+                convertF32toF16(src: f32, dst: dstU16, count: total)
+                return dst
+            }
         }
         genericCopy(source, into: dst, count: total)
         return dst
@@ -105,15 +124,17 @@ enum KokoroAneArrays {
         precondition(
             source.count == total,
             "float32Array(from MLMultiArray): source has \(source.count) elements, shape implies \(total)")
-        if source.dataType == .float32 {
-            memcpy(dst.dataPointer, source.dataPointer, total * MemoryLayout<Float>.size)
-            return dst
-        }
-        if source.dataType == .float16 {
-            let srcU16 = source.dataPointer.bindMemory(to: UInt16.self, capacity: total)
-            let dstF = dst.dataPointer.bindMemory(to: Float.self, capacity: total)
-            convertF16toF32(src: srcU16, dst: dstF, count: total)
-            return dst
+        if isContiguous(source), isContiguous(dst) {
+            if source.dataType == .float32 {
+                memcpy(dst.dataPointer, source.dataPointer, total * MemoryLayout<Float>.size)
+                return dst
+            }
+            if source.dataType == .float16 {
+                let srcU16 = source.dataPointer.bindMemory(to: UInt16.self, capacity: total)
+                let dstF = dst.dataPointer.bindMemory(to: Float.self, capacity: total)
+                convertF16toF32(src: srcU16, dst: dstF, count: total)
+                return dst
+            }
         }
         genericCopy(source, into: dst, count: total)
         return dst
@@ -145,19 +166,20 @@ enum KokoroAneArrays {
     /// Read a Float32 MLMultiArray output into a Swift `[Float]` (flat).
     static func readFloats(_ arr: MLMultiArray) -> [Float] {
         let count = arr.count
-        if arr.dataType == .float32 {
-            let p = arr.dataPointer.bindMemory(to: Float.self, capacity: count)
-            return Array(UnsafeBufferPointer(start: p, count: count))
-        }
-        if arr.dataType == .float16 {
-            let p = arr.dataPointer.bindMemory(to: UInt16.self, capacity: count)
-            var out = [Float](repeating: 0, count: count)
-            out.withUnsafeMutableBufferPointer { outBuf in
-                convertF16toF32(src: p, dst: outBuf.baseAddress!, count: count)
+        if isContiguous(arr) {
+            if arr.dataType == .float32 {
+                let p = arr.dataPointer.bindMemory(to: Float.self, capacity: count)
+                return Array(UnsafeBufferPointer(start: p, count: count))
             }
-            return out
+            if arr.dataType == .float16 {
+                let p = arr.dataPointer.bindMemory(to: UInt16.self, capacity: count)
+                var out = [Float](repeating: 0, count: count)
+                out.withUnsafeMutableBufferPointer { outBuf in
+                    convertF16toF32(src: p, dst: outBuf.baseAddress!, count: count)
+                }
+                return out
+            }
         }
-        // Generic fallback.
-        return (0..<count).map { Float(truncating: arr[$0]) }
+        return (0..<arr.count).map { Float(truncating: arr[$0]) }
     }
 }
