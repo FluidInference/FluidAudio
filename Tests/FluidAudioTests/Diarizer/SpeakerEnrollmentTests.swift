@@ -328,6 +328,38 @@ final class SpeakerEnrollmentTests: XCTestCase {
         XCTAssertEqual(namedSpeakerNames(in: diarizer.timeline), ["Alice"])
     }
 
+    func testSortformerEnrollmentWorksWhenTimelineDoesNotStoreSegments() async throws {
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
+
+        let config = SortformerConfig.default
+        let models = try await loadSortformerModelsForTest(config: config)
+        let enrollmentAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 0.0, durationSeconds: 5.0)
+
+        // Control: confirm the fixture yields a confident speaker with storage on.
+        let control = SortformerDiarizer(config: config)
+        control.initialize(models: models)
+        let controlSpeaker = try control.enrollSpeaker(withAudio: enrollmentAudio, named: "Alice")
+        try XCTSkipIf(
+            controlSpeaker == nil, "Fixture did not produce a confident Sortformer speaker segment on this host.")
+
+        // Timeline configured NOT to store segments: enrollment must still succeed by
+        // temporarily storing segments, then fall back to the configured value.
+        let diarizer = SortformerDiarizer(
+            config: config, timelineConfig: DiarizerTimelineConfig(storeSegments: false))
+        diarizer.initialize(models: models)
+        XCTAssertFalse(diarizer.timeline.config.storeSegments)
+
+        let speaker = try diarizer.enrollSpeaker(withAudio: enrollmentAudio, named: "Alice")
+
+        XCTAssertNotNil(
+            speaker, "Enrollment must work even when the timeline is configured not to store segments")
+        XCTAssertEqual(speaker?.name, "Alice")
+        XCTAssertFalse(
+            diarizer.timeline.config.storeSegments,
+            "store-segments must fall back to its configured value after enrollment")
+    }
+
     // MARK: - LS-EEND enrollSpeaker: Error Cases
 
     func testLseendEnrollSpeakerThrowsWhenNotInitialized() {
@@ -444,6 +476,35 @@ final class SpeakerEnrollmentTests: XCTestCase {
         XCTAssertEqual(
             enrolled.timeline.numFinalizedFrames, baselineFrames,
             "Enrollment must not offset the streaming timeline by the right-context lag")
+    }
+
+    func testLseendEnrollmentWorksWhenTimelineDoesNotStoreSegments() async throws {
+        let model = try await loadLseendModelForTest()
+
+        // Control: with segment storage on (default), confirm the fixture yields a
+        // confident speaker on this host; otherwise the host can't exercise enrollment.
+        let control = try LSEENDDiarizer(model: model)
+        let sampleRate = control.targetSampleRate ?? 16_000
+        let enrollmentAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: sampleRate, startSeconds: 0.0, durationSeconds: 3.0)
+        let controlSpeaker = try control.enrollSpeaker(withAudio: enrollmentAudio, named: "Alice")
+        try XCTSkipIf(
+            controlSpeaker == nil, "Fixture did not produce a confident LS-EEND speaker segment on this host.")
+
+        // Timeline configured NOT to store segments: enrollment must still succeed by
+        // temporarily storing segments, then fall back to the configured value.
+        let config = DiarizerTimelineConfig(storeSegments: false)
+        let diarizer = try LSEENDDiarizer(model: model, timelineConfig: config)
+        XCTAssertFalse(diarizer.timeline.config.storeSegments)
+
+        let speaker = try diarizer.enrollSpeaker(withAudio: enrollmentAudio, named: "Alice")
+
+        XCTAssertNotNil(
+            speaker, "Enrollment must work even when the timeline is configured not to store segments")
+        XCTAssertEqual(speaker?.name, "Alice")
+        XCTAssertFalse(
+            diarizer.timeline.config.storeSegments,
+            "store-segments must fall back to its configured value after enrollment")
     }
 
     func testLseendMultipleEnrollmentsRetainNamedSpeakersAndSession() async throws {

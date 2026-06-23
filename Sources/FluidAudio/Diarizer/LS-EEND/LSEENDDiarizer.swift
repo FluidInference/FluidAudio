@@ -299,6 +299,13 @@ public final class LSEENDDiarizer: Diarizer {
         let sessionSnapshot = try session.takeSnapshot()
         let timelineSnapshot = timeline.takeSnapshot()
         let framesFedSnapshot = framesFedToModel
+
+        // Enrollment identifies the new speaker by reading it back from the timeline,
+        // which requires segments to be stored. Force storage on for the duration and
+        // restore the configured value when finished (the caller may have disabled it).
+        let storeSegmentsSnapshot = timeline.setStoreSegments(true)
+        defer { timeline.setStoreSegments(storeSegmentsSnapshot) }
+
         let isNamed = name != nil
 
         let requireNewSpeaker = isNamed && !overwriteAssignedSpeakerName

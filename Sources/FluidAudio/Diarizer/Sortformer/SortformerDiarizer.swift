@@ -244,6 +244,12 @@ public final class SortformerDiarizer: Diarizer {
                 throw SortformerError.notInitialized
             }
 
+            // Enrollment identifies the new speaker by reading it back from the timeline,
+            // which requires segments to be stored. Force storage on for the duration and
+            // restore the configured value when finished (the caller may have disabled it).
+            let storeSegmentsSnapshot = _timeline.setStoreSegments(true)
+            defer { _timeline.setStoreSegments(storeSegmentsSnapshot) }
+
             if _timeline.hasSegments {
                 logger.warning("Trying to enroll a speaker while timeline has segments; timeline will be reset")
             }

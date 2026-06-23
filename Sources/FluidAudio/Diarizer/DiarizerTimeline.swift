@@ -667,7 +667,7 @@ public class DiarizerTimeline {
     private let lock = NSLock()
 
     /// Post-processing configuration
-    public let config: DiarizerTimelineConfig
+    public private(set) var config: DiarizerTimelineConfig
 
     /// Finalized frame-wise speaker predictions.
     /// Flat array of shape [numFrames, numSpeakers].
@@ -930,6 +930,21 @@ public class DiarizerTimeline {
             }
         } else {
             _speakers.removeAll(keepingCapacity: true)
+        }
+    }
+
+    // MARK: - Configuration
+
+    /// Temporarily override whether committed segments are persisted on speakers,
+    /// returning the previous value. Enrollment forces this on because it must read
+    /// the detected speaker back from the timeline to map it to a slot; callers are
+    /// responsible for restoring the configured value when finished.
+    @discardableResult
+    public func setStoreSegments(_ enabled: Bool) -> Bool {
+        lock.withLock {
+            let previous = config.storeSegments
+            config.storeSegments = enabled
+            return previous
         }
     }
 
