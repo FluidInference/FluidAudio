@@ -298,6 +298,7 @@ public final class LSEENDDiarizer: Diarizer {
 
         let sessionSnapshot = try session.takeSnapshot()
         let timelineSnapshot = timeline.takeSnapshot()
+        let framesFedSnapshot = framesFedToModel
         let isNamed = name != nil
 
         let requireNewSpeaker = isNamed && !overwriteAssignedSpeakerName
@@ -334,13 +335,14 @@ public final class LSEENDDiarizer: Diarizer {
         else {
             session.rollback(to: sessionSnapshot)
             timeline.rollback(to: timelineSnapshot)
+            framesFedToModel = framesFedSnapshot
             return nil
         }
 
         // Get the new/unnamed speaker with the most speech if any exist.
         // Fallback to old speaker with the most speech if overwrites are allowed.
         var speechActivities: [Int: Float] = [:]
-        for segment in update.finalizedSegments {
+        for segment in update.finalizedSegments + update.tentativeSegments {
             speechActivities[segment.speakerIndex, default: 0] += segment.activity * Float(segment.length)
         }
 
@@ -355,17 +357,20 @@ public final class LSEENDDiarizer: Diarizer {
         }?.key
 
         guard let bestSlot,
-            let enrolledSpeaker = timeline.speakers[bestSlot],
-            !requireNewSpeaker || !oldSlots.contains(bestSlot)
+            !requireNewSpeaker || !oldSlots.contains(bestSlot),
+            // Register the enrolled speaker at the slot identified from the update.
+            let enrolledSpeaker = timeline.upsertSpeaker(named: name, atIndex: bestSlot)
         else {
             session.rollback(to: sessionSnapshot)
             timeline.rollback(to: timelineSnapshot)
+            framesFedToModel = framesFedSnapshot
             return nil
         }
 
-        // Rename speaker and report success
-        enrolledSpeaker.name = name
         timeline.reset(keepingSpeakers: true)
+
+        // Re-arm the right-context warmup strip for the live stream to timestamp drift.
+        framesFedToModel = 0
 
         return enrolledSpeaker
     }

@@ -262,8 +262,19 @@ public final class SortformerDiarizer: Diarizer {
 
             preprocessAudioToFeaturesLocked()
 
+            // Accumulate per-slot speech frames from the diarizer updates rather than
+            // from persisted timeline segments, so enrollment works even when the
+            // timeline is configured not to store segments.
+            var speechFrames: [Int: Int] = [:]
+            var lastUpdate: DiarizerTimelineUpdate?
             var didProcess: Bool = false
-            while let _ = try processLocked(updateTimeline: true) { didProcess = true }
+            while let update = try processLocked(updateTimeline: true) {
+                didProcess = true
+                for segment in update.finalizedSegments {
+                    speechFrames[segment.speakerIndex, default: 0] += segment.length
+                }
+                lastUpdate = update
+            }
 
             guard didProcess else {
                 let minDuration = Float(config.chunkLen + config.chunkRightContext) * config.frameDurationSeconds
@@ -273,15 +284,20 @@ public final class SortformerDiarizer: Diarizer {
                 return nil
             }
 
-            let speaker = _timeline.speakers.values.max { $0.numSpeechFrames < $1.numSpeechFrames }
+            // Include the trailing still-open (tentative) segment from the final update.
+            for segment in lastUpdate?.tentativeSegments ?? [] {
+                speechFrames[segment.speakerIndex, default: 0] += segment.length
+            }
+
+            let bestSlot = speechFrames.max { $0.value < $1.value }?.key
             let enrolledSpeaker: DiarizerSpeaker?
-            if let speaker, speaker.hasSegments {
+            if let bestSlot, (speechFrames[bestSlot] ?? 0) > 0 {
                 // Provide warnings if the diarizer failed to recognize this person as a new speaker
-                if let oldName = speaker.name {
+                if let oldName = _timeline.speakers[bestSlot]?.name {
                     guard overwriteAssignedSpeakerName else {
                         logger.warning(
                             "Failed to enroll speaker \(description): diarizer matched existing speaker '\(oldName)' "
-                                + "at index \(speaker.index) and overwritingAssignedSpeakerName=false"
+                                + "at index \(bestSlot) and overwritingAssignedSpeakerName=false"
                         )
                         _timeline.reset(keepingSpeakersWhere: { occupiedIndices.contains($0.index) })
                         _numFramesProcessed = 0
@@ -294,12 +310,15 @@ public final class SortformerDiarizer: Diarizer {
                         return nil
                     }
                     logger.warning(
-                        "Newly-enrolled speaker \(description) will overwrite the old one named \(oldName) at index \(speaker.index)"
+                        "Newly-enrolled speaker \(description) will overwrite the old one named \(oldName) at index \(bestSlot)"
                     )
                 }
-                speaker.name = name
-                occupiedIndices.insert(speaker.index)
-                enrolledSpeaker = speaker
+                // Register the enrolled speaker at the chosen slot regardless of whether
+                // segments are persisted; the slot came from the updates above.
+                enrolledSpeaker = _timeline.upsertSpeaker(named: name, atIndex: bestSlot)
+                if enrolledSpeaker != nil {
+                    occupiedIndices.insert(bestSlot)
+                }
             } else {
                 logger.warning("Failed to enroll speaker \(description) because no speech detected")
                 enrolledSpeaker = nil

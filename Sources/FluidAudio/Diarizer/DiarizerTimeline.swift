@@ -1039,7 +1039,11 @@ public class DiarizerTimeline {
 
     // MARK: - Timeline Speaker Management
 
-    /// Add a speaker to the timeline at a given slot, or update their name if one already exists
+    /// Add a speaker to the timeline at a given slot, or update their name if one already exists.
+    ///
+    /// Registers speaker *identity* and is intentionally independent of
+    /// `config.storeSegments`: enrollment derives the slot from a `DiarizerTimelineUpdate`
+    /// and must be able to persist the named speaker even when segments aren't stored.
     /// - Parameters:
     ///   - name: The speaker's name
     ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
@@ -1051,7 +1055,6 @@ public class DiarizerTimeline {
     ) -> DiarizerSpeaker? {
         lock.lock()
         defer { lock.unlock() }
-        guard config.storeSegments else { return nil }
         let index = index ?? (0..<speakerCapacity).first { _speakers[$0] == nil }
 
         // Ensure index is within bounds
@@ -1083,8 +1086,8 @@ public class DiarizerTimeline {
     ) -> DiarizerSpeaker? {
         lock.lock()
         defer { lock.unlock() }
-        guard config.storeSegments else { return nil }
-        // Ensure index is within bounds
+        // Speaker identity registration is independent of `storeSegments` (mirrors the
+        // `named:` overload) so enrollment can register a speaker even in emit-only mode.
         let index = index ?? (0..<speakerCapacity).first { _speakers[$0] == nil }
 
         guard let index, index >= 0, index < speakerCapacity else {
