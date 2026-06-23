@@ -667,7 +667,7 @@ public class DiarizerTimeline {
     private let lock = NSLock()
 
     /// Post-processing configuration
-    public private(set) var config: DiarizerTimelineConfig
+    public let config: DiarizerTimelineConfig
 
     /// Finalized frame-wise speaker predictions.
     /// Flat array of shape [numFrames, numSpeakers].
@@ -933,21 +933,6 @@ public class DiarizerTimeline {
         }
     }
 
-    // MARK: - Configuration
-
-    /// Temporarily override whether committed segments are persisted on speakers,
-    /// returning the previous value. Enrollment forces this on because it must read
-    /// the detected speaker back from the timeline to map it to a slot; callers are
-    /// responsible for restoring the configured value when finished.
-    @discardableResult
-    public func setStoreSegments(_ enabled: Bool) -> Bool {
-        lock.withLock {
-            let previous = config.storeSegments
-            config.storeSegments = enabled
-            return previous
-        }
-    }
-
     // MARK: - Rebuild Timeline
 
     /// Rebuild the timeline from initial predictions. This is equivalent to reinitializing the timeline.
@@ -1054,7 +1039,11 @@ public class DiarizerTimeline {
 
     // MARK: - Timeline Speaker Management
 
-    /// Add a speaker to the timeline at a given slot, or update their name if one already exists
+    /// Add a speaker to the timeline at a given slot, or update their name if one already exists.
+    ///
+    /// Registers speaker *identity* and is intentionally independent of
+    /// `config.storeSegments`: enrollment derives the slot from a `DiarizerTimelineUpdate`
+    /// and must be able to persist the named speaker even when segments aren't stored.
     /// - Parameters:
     ///   - name: The speaker's name
     ///   - index: The diarizer index of the speaker. If left as `nil`, the first unused index will be chosen.
@@ -1066,7 +1055,6 @@ public class DiarizerTimeline {
     ) -> DiarizerSpeaker? {
         lock.lock()
         defer { lock.unlock() }
-        guard config.storeSegments else { return nil }
         let index = index ?? (0..<speakerCapacity).first { _speakers[$0] == nil }
 
         // Ensure index is within bounds

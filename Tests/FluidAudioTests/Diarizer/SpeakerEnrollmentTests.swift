@@ -355,9 +355,10 @@ final class SpeakerEnrollmentTests: XCTestCase {
         XCTAssertNotNil(
             speaker, "Enrollment must work even when the timeline is configured not to store segments")
         XCTAssertEqual(speaker?.name, "Alice")
-        XCTAssertFalse(
-            diarizer.timeline.config.storeSegments,
-            "store-segments must fall back to its configured value after enrollment")
+        // The enrolled speaker identity persists (derived from the update, not stored
+        // segments) and the configured store-segments value is left untouched.
+        XCTAssertEqual(namedSpeakerNames(in: diarizer.timeline), ["Alice"])
+        XCTAssertFalse(diarizer.timeline.config.storeSegments)
     }
 
     // MARK: - LS-EEND enrollSpeaker: Error Cases
@@ -502,9 +503,10 @@ final class SpeakerEnrollmentTests: XCTestCase {
         XCTAssertNotNil(
             speaker, "Enrollment must work even when the timeline is configured not to store segments")
         XCTAssertEqual(speaker?.name, "Alice")
-        XCTAssertFalse(
-            diarizer.timeline.config.storeSegments,
-            "store-segments must fall back to its configured value after enrollment")
+        // The enrolled speaker identity persists (derived from the update, not stored
+        // segments) and the configured store-segments value is left untouched.
+        XCTAssertEqual(namedSpeakerNames(in: diarizer.timeline), ["Alice"])
+        XCTAssertFalse(diarizer.timeline.config.storeSegments)
     }
 
     func testLseendMultipleEnrollmentsRetainNamedSpeakersAndSession() async throws {

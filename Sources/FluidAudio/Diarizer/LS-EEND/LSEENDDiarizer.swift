@@ -299,13 +299,6 @@ public final class LSEENDDiarizer: Diarizer {
         let sessionSnapshot = try session.takeSnapshot()
         let timelineSnapshot = timeline.takeSnapshot()
         let framesFedSnapshot = framesFedToModel
-
-        // Enrollment identifies the new speaker by reading it back from the timeline,
-        // which requires segments to be stored. Force storage on for the duration and
-        // restore the configured value when finished (the caller may have disabled it).
-        let storeSegmentsSnapshot = timeline.setStoreSegments(true)
-        defer { timeline.setStoreSegments(storeSegmentsSnapshot) }
-
         let isNamed = name != nil
 
         let requireNewSpeaker = isNamed && !overwriteAssignedSpeakerName
@@ -364,8 +357,11 @@ public final class LSEENDDiarizer: Diarizer {
         }?.key
 
         guard let bestSlot,
-            let enrolledSpeaker = timeline.speakers[bestSlot],
-            !requireNewSpeaker || !oldSlots.contains(bestSlot)
+            !requireNewSpeaker || !oldSlots.contains(bestSlot),
+            // Register the enrolled speaker at the slot identified from the update.
+            // Derived from the update rather than persisted timeline segments, so it
+            // works even when the timeline is configured not to store segments.
+            let enrolledSpeaker = timeline.upsertSpeaker(named: name, atIndex: bestSlot)
         else {
             session.rollback(to: sessionSnapshot)
             timeline.rollback(to: timelineSnapshot)
@@ -373,8 +369,6 @@ public final class LSEENDDiarizer: Diarizer {
             return nil
         }
 
-        // Rename speaker and report success
-        enrolledSpeaker.name = name
         timeline.reset(keepingSpeakers: true)
 
         // Re-arm the right-context warmup strip for the live stream. The timeline
