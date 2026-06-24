@@ -474,13 +474,17 @@ Argmax's 3-model offline chain (see [Benchmarks](#benchmarks)). The model ships 
 `v3/fp16/SortformerOffline_v2.1.mlmodelc` and `v3/palettized/SortformerOffline_v2.1.mlmodelc`.
 
 This differs from `SortformerDiarizer.processComplete(...)`, which runs the *streaming* model over
-all chunks (still threading speaker-cache state) — accurate but slower. Use the offline diarizer
-when you have the whole file and want maximum throughput.
+all chunks (threading speaker-cache state). Use the offline diarizer when you have the whole file and
+want maximum throughput on short or few-speaker audio.
 
-**Long audio** is tiled into overlapping 30.72 s windows. Because each window is diarized
-independently (no speaker cache), the per-window speaker columns are in an arbitrary order;
-`SortformerSpeakerStitcher` recovers the permutation that best matches speaker activity over the
-inter-window overlap (default ~8 s) so speaker IDs stay globally consistent across the file.
+**Scope — short clips / few speakers / throughput.** Each 30.72 s window is diarized independently
+with no speaker cache, so long multi-speaker audio accumulates large speaker confusion: on AMI-SDM
+the offline path scores ~56% DER vs ~26% for the streaming `highContextV2_1` (voice detection is
+identical — the gap is entirely speaker confusion the `spkcache` prevents). Cross-window re-stitching
+can't recover it because the confusion is generated within each window. **For accurate long-form
+multi-speaker diarization use the streaming variants; reach for offline for ≤ ~30 s clips,
+few-speaker audio, or throughput-bound batch jobs.** Longer inputs are tiled into 30.72 s windows
+(`overlapOutputFrames` controls the overlap) with activity-based stitching across boundaries.
 
 ```swift
 let diarizer = OfflineSortformerDiarizer(config: .offlineV2_1)

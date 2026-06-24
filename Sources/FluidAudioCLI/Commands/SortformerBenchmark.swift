@@ -80,6 +80,8 @@ enum SortformerBenchmark {
         var useNvidiaHighLatency = false
         var useHuggingFace = true
         var useLocalModels = false
+        var offline = false
+        var palettized = false
         var progressFile: String = ".sortformer_progress.json"
         var resumeFromProgress = false
         var dataset: Dataset = .ami
@@ -198,6 +200,10 @@ enum SortformerBenchmark {
                 useHuggingFace = true
             case "--local":
                 useLocalModels = true
+            case "--offline":
+                offline = true
+            case "--palettized":
+                palettized = true
             case "--help":
                 printUsage()
                 return
@@ -291,6 +297,24 @@ enum SortformerBenchmark {
         }
         print("")
         fflush(stdout)
+
+        // Offline (whole-file fused model) path — no streaming state, one fused call per window.
+        if offline {
+            await runOfflineBenchmark(
+                filesToProcess: filesToProcess,
+                completedResults: completedResults,
+                completedMeetings: completedMeetings,
+                dataset: dataset,
+                palettized: palettized,
+                modelPath: modelPath,
+                useHuggingFace: useHuggingFace,
+                threshold: threshold,
+                collarSeconds: collarSeconds,
+                verbose: verbose,
+                progressFile: progressFile,
+                outputFile: outputFile)
+            return
+        }
 
         // Initialize Sortformer
         print("Loading Sortformer models...")
@@ -406,10 +430,92 @@ enum SortformerBenchmark {
         }
     }
 
+    /// Whole-file offline benchmark over the dataset using the fused offline Sortformer model.
+    private static func runOfflineBenchmark(
+        filesToProcess: [String],
+        completedResults: [BenchmarkResult],
+        completedMeetings: Set<String>,
+        dataset: Dataset,
+        palettized: Bool,
+        modelPath: String?,
+        useHuggingFace: Bool,
+        threshold: Float,
+        collarSeconds: Double,
+        verbose: Bool,
+        progressFile: String,
+        outputFile: String?
+    ) async {
+        print("Loading offline Sortformer model...")
+        fflush(stdout)
+        let modelLoadStart = Date()
+
+        var offlineConfig = OfflineSortformerConfig.offlineV2_1
+        if palettized { offlineConfig.precision = .palettized }
+        let diarizer = OfflineSortformerDiarizer(config: offlineConfig)
+
+        do {
+            if let modelPath = modelPath, !useHuggingFace {
+                try await diarizer.initialize(modelPath: URL(fileURLWithPath: modelPath))
+            } else {
+                try await diarizer.initializeFromHuggingFace()
+            }
+        } catch {
+            print("Failed to initialize offline Sortformer: \(error)")
+            return
+        }
+        let modelLoadTime = Date().timeIntervalSince(modelLoadStart)
+        print(
+            "Model loaded in \(String(format: "%.2f", modelLoadTime))s (precision: \(offlineConfig.precision.rawValue))\n"
+        )
+        fflush(stdout)
+
+        var allResults: [BenchmarkResult] = completedResults
+        for (fileIndex, meetingName) in filesToProcess.enumerated() {
+            if completedMeetings.contains(meetingName) {
+                print("[\(fileIndex + 1)/\(filesToProcess.count)] Skipping (already done): \(meetingName)")
+                continue
+            }
+            print(String(repeating: "=", count: 60))
+            print("[\(fileIndex + 1)/\(filesToProcess.count)] Processing (offline): \(meetingName)")
+            print(String(repeating: "=", count: 60))
+            fflush(stdout)
+
+            let result = await processMeeting(
+                meetingName: meetingName,
+                dataset: dataset,
+                diarizer: nil,
+                offlineDiarizer: diarizer,
+                modelLoadTime: modelLoadTime,
+                threshold: threshold,
+                collarSeconds: collarSeconds,
+                verbose: verbose)
+
+            if let result = result {
+                allResults.append(result)
+                print("Results for \(meetingName):")
+                print("   DER: \(String(format: "%.1f", result.der))%")
+                print("   RTFx: \(String(format: "%.1f", result.rtfx))x")
+                print("   Speakers: \(result.detectedSpeakers) detected / \(result.groundTruthSpeakers) truth")
+                DiarizationBenchmarkUtils.saveProgress(results: allResults, to: progressFile)
+            }
+            fflush(stdout)
+        }
+
+        DiarizationBenchmarkUtils.printFinalSummary(
+            results: allResults,
+            title: "SORTFORMER OFFLINE BENCHMARK SUMMARY",
+            derTargets: [15, 20])
+
+        if let outputPath = outputFile {
+            DiarizationBenchmarkUtils.saveJSONResults(results: allResults, to: outputPath)
+        }
+    }
+
     private static func processMeeting(
         meetingName: String,
         dataset: Dataset,
-        diarizer: SortformerDiarizer,
+        diarizer: SortformerDiarizer?,
+        offlineDiarizer: OfflineSortformerDiarizer? = nil,
         modelLoadTime: Double,
         threshold: Float,
         collarSeconds: Double,
@@ -440,20 +546,29 @@ enum SortformerBenchmark {
             // Process with progress reporting
             let startTime = Date()
             var lastProgressPrint = Date()
-            let result = try diarizer.processComplete(audioSamples) { processed, total, chunks in
-                // Print progress every 2 seconds
-                let now = Date()
-                if now.timeIntervalSince(lastProgressPrint) >= 2.0 {
-                    let percent = Float(processed) / Float(total) * 100
-                    let elapsed = now.timeIntervalSince(startTime)
-                    let processedSeconds = Float(processed) / 16000.0
-                    let currentRtfx = processedSeconds / Float(elapsed)
-                    print(
-                        "   Progress: \(String(format: "%.1f", percent))% | Chunks: \(chunks) | RTFx: \(String(format: "%.1f", currentRtfx))x"
-                    )
-                    fflush(stdout)
-                    lastProgressPrint = now
+            let result: DiarizerTimeline
+            if let offlineDiarizer = offlineDiarizer {
+                // Offline: one fused call per window, no streaming progress callback.
+                result = try offlineDiarizer.processComplete(audioSamples)
+            } else if let diarizer = diarizer {
+                result = try diarizer.processComplete(audioSamples) { processed, total, chunks in
+                    // Print progress every 2 seconds
+                    let now = Date()
+                    if now.timeIntervalSince(lastProgressPrint) >= 2.0 {
+                        let percent = Float(processed) / Float(total) * 100
+                        let elapsed = now.timeIntervalSince(startTime)
+                        let processedSeconds = Float(processed) / 16000.0
+                        let currentRtfx = processedSeconds / Float(elapsed)
+                        print(
+                            "   Progress: \(String(format: "%.1f", percent))% | Chunks: \(chunks) | RTFx: \(String(format: "%.1f", currentRtfx))x"
+                        )
+                        fflush(stdout)
+                        lastProgressPrint = now
+                    }
                 }
+            } else {
+                print("No diarizer provided")
+                return nil
             }
             let processingTime = Date().timeIntervalSince(startTime)
 
