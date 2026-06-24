@@ -460,8 +460,7 @@ explicitly to override. On A14 the recommended path is `precision = .palettized`
 
 ### Benchmarks
 
-Streaming DER/RTFx and the offline-throughput head-to-head vs Argmax (FluidAudio's fused offline
-graph is 1.3–1.4× faster) live in
+Streaming DER/RTFx and offline-throughput numbers live in
 [Documentation/Benchmarks.md](../Benchmarks.md#sortformer-streaming-diarization).
 
 ## Offline (whole-file) mode
@@ -469,8 +468,8 @@ graph is 1.3–1.4× faster) live in
 When the entire audio is available up front, `OfflineSortformerDiarizer` runs the **fused offline
 model** — a single graph `mel -> speaker_preds` over a fixed 30.72 s window (3072 mel → 384 output
 frames) with **no streaming state** (no spkcache/FIFO threaded across calls). One CoreML call per
-window makes it the fastest path for batch diarization; on M5 Pro it benchmarks 1.3–1.4× faster than
-Argmax's 3-model offline chain (see [Benchmarks](#benchmarks)). The model ships at both precisions:
+window makes it the fastest path for batch diarization (~2880× RTFx model-exec on M5 Pro; see
+[Benchmarks](#benchmarks)). The model ships at both precisions:
 `v3/fp16/SortformerOffline_v2.1.mlmodelc` and `v3/palettized/SortformerOffline_v2.1.mlmodelc`.
 
 This differs from `SortformerDiarizer.processComplete(...)`, which runs the *streaming* model over
