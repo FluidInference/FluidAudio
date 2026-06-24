@@ -745,6 +745,37 @@ AVERAGE          31.7     21.5      0.5      9.7         -     126.7
 ======================================================================
 ```
 
+### Offline throughput vs Argmax (M5 Pro)
+
+Argmax's Sortformer (used in their v2 Playground) is an **offline batch** model — fixed 30.72 s
+windows with no streaming state — so it is not comparable to FluidAudio's *streaming* variants
+above. Exported a single fused offline graph (`mel[1,128,3072] → speaker_preds`, 30.72 s window)
+via the NeMo offline path and benchmarked head-to-head against Argmax's 3-model chain (interleaved
+A/B, median of 120 runs after 12 warmup, ComputeUnit.ALL, M5 Pro):
+
+| Stage | ms | RTFx |
+|-------|---:|-----:|
+| Argmax MelSpectrogram | 1.84 | 16698 |
+| Argmax AudioConformerPreEncoder | 2.37 | 12961 |
+| Argmax SortformerFullEncoder | 12.20 | 2517 |
+| **FluidAudio fused offline (fp16)** | **10.65** | **2884** |
+| FluidAudio fused offline (6-bit palettized) | 10.93 | 2809 |
+
+| | model-exec (mel → preds) | end-to-end (incl. mel) |
+|---|---|---|
+| Argmax (3 predict calls) | 14.57 ms · 2108× | 16.41 ms · 1872× |
+| **FluidAudio (1 fused call)** | **10.65 ms · 2884×** | **12.49 ms · 2459×** |
+
+**FluidAudio is 1.3–1.4× faster offline.** The whole fused model (10.65 ms) beats Argmax's
+`SortformerFullEncoder` stage *alone* (12.20 ms) — one fused GPU graph vs their split that pays
+per-call dispatch plus an ANE→GPU handoff between the ANE pre-encoder and GPU encoder. Numerical
+parity vs the PyTorch reference: speaker-argmax agreement 100%.
+
+The ">10× faster" figure sometimes cited for Argmax compares their offline model against
+FluidAudio's `highContextV2_1` *streaming* config (the slowest, largest variant) — apples-to-oranges.
+For low-latency streaming throughput use `.efficientV2_1` (chunk_len 25, ~2 s latency, ~215× RTFx).
+Argmax does not ship a streaming Sortformer. Repro: mobius `offline_argmax_bench.py`.
+
 ## LS-EEND Streaming Diarization
 A research prototype from Westlake University for streaming speaker diarization.
 

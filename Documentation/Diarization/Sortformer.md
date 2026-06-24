@@ -415,15 +415,54 @@ let config = DiarizerTimelineConfig(
 
 ## Model Variants
 
-Three CoreML models are available on HuggingFace:
+CoreML models live on HuggingFace under
+[FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml),
+in `v3/fp16/` (default) and `v3/palettized/` (see [Precision](#precision-fp16-vs-palettized)).
+The `v3/` set is the BNNS-fixed rebuild — the older root-level models hit a
+"tensor as both input and output" graph-compile crash on newer BNNS ([#726](https://github.com/FluidInference/FluidAudio/issues/726)).
 
-| Variant | File | Config |
-|---------|------|--------|
-| Default | `Sortformer.mlmodelc` | `SortformerConfig.default` |
-| Balanced | `SortformerNvidiaLow.mlmodelc` | `SortformerConfig.balancedV2_1` |
-| High Context | `SortformerNvidiaHigh.mlmodelc` | `SortformerConfig.highContextV2_1` |
+| Variant | Config | File (under `v3/<precision>/`) | Output latency |
+|---------|--------|-------------------------------|----------------|
+| Fast (v2.1) | `.fastV2_1` | `Sortformer_v2.1.mlmodelc` | ~1.04 s |
+| Balanced (v2.1) | `.balancedV2_1` | `SortformerNvidiaLow_v2.1.mlmodelc` | ~1.5 s |
+| High Context (v2.1) | `.highContextV2_1` | `SortformerNvidiaHigh_v2.1.mlmodelc` | ~3.5 s |
+| Efficient (v2.1) | `.efficientV2_1` | `SortformerEfficient_v2.1.mlmodelc` | ~2.0 s (highest throughput) |
+
+(The `v2` weight variants — `.fastV2`, `.balancedV2`, `.highContextV2` — ship alongside each `v2.1`.)
 
 **Important:** Each model has baked-in static shapes. You must use the matching configuration.
+The diarizer logs a loud config-mismatch error at `initialize()` if the `SortformerConfig` does
+not match the streaming parameters embedded in the model (issue [#726](https://github.com/FluidInference/FluidAudio/issues/726)).
+
+### Precision: fp16 vs palettized
+
+Each variant is built at two weight precisions, selected via `SortformerConfig.precision`:
+
+| Precision | Head weights | `highContextV2_1` RAM | DER impact | When |
+|-----------|--------------|----------------------|------------|------|
+| `.fp16` (default) | full | ~2.4 GB | baseline | Best accuracy; Apple Silicon Macs, recent iPhones/iPads |
+| `.palettized` | 6-bit k-means LUT | ~330 MB | +0.9 pp avg (streaming); larger on high-context | RAM-constrained / older devices |
+
+```swift
+var config = SortformerConfig.highContextV2_1
+config.precision = .palettized   // ~2.4 GB -> ~330 MB
+```
+
+Palettization is **opt-in**, not the default, because 6-bit perturbs the embeddings and the
+streaming speaker-cache cascades that drift over time (worse on the high-context variant). For
+offline/batch or RAM-limited devices it's a good trade; for best streaming DER keep `.fp16`.
+
+**Old-device compute units.** The ~2.4 GB fp16 high-context head triggers a multi-minute ANE
+program-compile hang on RAM-constrained devices (A14, ~4 GB). `recommendedComputeUnits(for:)`
+auto-falls-back those variants to `.cpuOnly` on <8 GB devices; everything else (including the
+~330 MB palettized high-context head, which loads fine on ANE) keeps `.all`. Pass `computeUnits:`
+explicitly to override. On A14 the recommended path is `precision = .palettized`.
+
+### Benchmarks
+
+Streaming DER/RTFx and the offline-throughput head-to-head vs Argmax (FluidAudio's fused offline
+graph is 1.3–1.4× faster) live in
+[Documentation/Benchmarks.md](../Benchmarks.md#sortformer-streaming-diarization).
 
 ## Usage Examples
 
