@@ -464,6 +464,41 @@ Streaming DER/RTFx and the offline-throughput head-to-head vs Argmax (FluidAudio
 graph is 1.3–1.4× faster) live in
 [Documentation/Benchmarks.md](../Benchmarks.md#sortformer-streaming-diarization).
 
+## Offline (whole-file) mode
+
+When the entire audio is available up front, `OfflineSortformerDiarizer` runs the **fused offline
+model** — a single graph `mel -> speaker_preds` over a fixed 30.72 s window (3072 mel → 384 output
+frames) with **no streaming state** (no spkcache/FIFO threaded across calls). One CoreML call per
+window makes it the fastest path for batch diarization; on M5 Pro it benchmarks 1.3–1.4× faster than
+Argmax's 3-model offline chain (see [Benchmarks](#benchmarks)). The model ships at both precisions:
+`v3/fp16/SortformerOffline_v2.1.mlmodelc` and `v3/palettized/SortformerOffline_v2.1.mlmodelc`.
+
+This differs from `SortformerDiarizer.processComplete(...)`, which runs the *streaming* model over
+all chunks (still threading speaker-cache state) — accurate but slower. Use the offline diarizer
+when you have the whole file and want maximum throughput.
+
+**Long audio** is tiled into overlapping 30.72 s windows. Because each window is diarized
+independently (no speaker cache), the per-window speaker columns are in an arbitrary order;
+`SortformerSpeakerStitcher` recovers the permutation that best matches speaker activity over the
+inter-window overlap (default ~8 s) so speaker IDs stay globally consistent across the file.
+
+```swift
+let diarizer = OfflineSortformerDiarizer(config: .offlineV2_1)
+try await diarizer.initializeFromHuggingFace()              // or initialize(modelPath:)
+
+let timeline = try diarizer.processComplete(audioSamples, sourceSampleRate: 16_000)
+// Or load + resample a file directly:
+let fileTimeline = try diarizer.processComplete(audioFileURL: audioURL)
+
+for (index, speaker) in timeline.speakers {
+    for segment in speaker.finalizedSegments {
+        print("Speaker \(index): \(segment.startTime)s - \(segment.endTime)s")
+    }
+}
+```
+
+CLI: `fluidaudio sortformer audio.wav --offline` (add `--palettized` for the 6-bit set).
+
 ## Usage Examples
 
 ### Real-time Streaming

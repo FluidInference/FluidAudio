@@ -757,6 +757,18 @@ public enum ModelNames {
         public static var requiredModels: Set<String> {
             Set(Variant.allCases.map(\.fileName))
         }
+
+        // MARK: - Offline (whole-window) model
+
+        /// Fused offline model name (v2.1 weights). Unlike the streaming variants this is a single
+        /// graph `mel -> speaker_preds` over a fixed 30.72s window (3072 mel -> 384 output frames),
+        /// with no spkcache/FIFO state — see ``OfflineSortformerDiarizer``.
+        public static let offlineModelName = "SortformerOffline_v2.1"
+
+        /// Compiled-model path for the offline model at the given precision.
+        public static func offlineBundle(precision: ModelPrecision = .fp16) -> String {
+            return "\(precision.subdirectory)/\(offlineModelName).mlmodelc"
+        }
     }
 
     /// LS-EEND streaming diarization model names

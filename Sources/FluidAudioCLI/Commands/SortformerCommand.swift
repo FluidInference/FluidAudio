@@ -43,6 +43,7 @@ enum SortformerCommand {
         var spkcacheSilFramesPerSpk: Int?
         var configName = "default"
         var palettized = false
+        var offline = false
 
         // Parse remaining arguments
         var i = 1
@@ -95,6 +96,8 @@ enum SortformerCommand {
                     configName = arguments[i + 1].lowercased()
                     i += 1
                 }
+            case "--offline":
+                offline = true
             case "--palettized":
                 palettized = true
             case "--threshold":
@@ -136,6 +139,23 @@ enum SortformerCommand {
                 logger.warning("Unknown option: \(arguments[i])")
             }
             i += 1
+        }
+
+        if offline {
+            var postConfig = DiarizerTimelineConfig.sortformerDefault
+            if let v = onset { postConfig.onsetThreshold = v }
+            if let v = offset { postConfig.offsetThreshold = v }
+            if let v = padOnset { postConfig.onsetPadSeconds = v }
+            if let v = padOffset { postConfig.offsetPadSeconds = v }
+            if let v = minDurationOn { postConfig.minDurationOn = v }
+            if let v = minDurationOff { postConfig.minDurationOff = v }
+            await runOffline(
+                audioFile: audioFile,
+                modelPath: modelPath,
+                palettized: palettized,
+                outputFile: outputFile,
+                postConfig: postConfig)
+            return
         }
 
         print("Sortformer Streaming Diarization")
@@ -311,6 +331,95 @@ enum SortformerCommand {
         }
     }
 
+    /// Whole-file diarization via the fused offline Sortformer model (no streaming state).
+    private static func runOffline(
+        audioFile: String,
+        modelPath: String?,
+        palettized: Bool,
+        outputFile: String?,
+        postConfig: DiarizerTimelineConfig
+    ) async {
+        print("Sortformer Offline Diarization")
+        print("   Audio: \(audioFile)")
+
+        var offlineConfig = OfflineSortformerConfig.offlineV2_1
+        if palettized { offlineConfig.precision = .palettized }
+        let diarizer = OfflineSortformerDiarizer(config: offlineConfig, timelineConfig: postConfig)
+
+        do {
+            let loadStart = Date()
+            if let modelPath = modelPath {
+                print("Loading offline model from local path: \(modelPath)")
+                try await diarizer.initialize(modelPath: URL(fileURLWithPath: modelPath))
+            } else {
+                print("Loading offline model from HuggingFace...")
+                try await diarizer.initializeFromHuggingFace(computeUnits: .all)
+            }
+            print("Model loaded in \(String(format: "%.2f", Date().timeIntervalSince(loadStart)))s")
+        } catch {
+            print("ERROR: Failed to initialize offline Sortformer: \(error)")
+            exit(1)
+        }
+
+        do {
+            print("Loading audio...")
+            let audioSamples = try AudioConverter().resampleAudioFile(path: audioFile)
+            let duration = Float(audioSamples.count) / 16000.0
+            print("Loaded \(audioSamples.count) samples (\(String(format: "%.1f", duration))s)")
+
+            print("Processing...")
+            fflush(stdout)
+            let startTime = Date()
+            let result = try diarizer.processComplete(audioSamples)
+            let processingTime = Date().timeIntervalSince(startTime)
+            let rtfx = duration / Float(processingTime)
+
+            print("Processing completed in \(String(format: "%.2f", processingTime))s")
+            print("   Real-time factor (RTFx): \(String(format: "%.1f", rtfx))x")
+            print("   Total frames: \(result.numFinalizedFrames)")
+
+            let segments = result.speakers.values.flatMap { $0.finalizedSegments }
+            print("   Found \(segments.count) segments")
+            print("\n--- Speaker Segments ---")
+            for segment in segments.sorted() {
+                let start = String(format: "%.2f", segment.startTime)
+                let end = String(format: "%.2f", segment.endTime)
+                let dur = String(format: "%.2f", segment.duration)
+                print("\(segment.speakerLabel): \(start)s - \(end)s (\(dur)s)")
+            }
+
+            if let outputFile = outputFile {
+                var segmentDicts: [[String: Any]] = []
+                for segment in segments.sorted() {
+                    segmentDicts.append([
+                        "speaker": segment.speakerLabel,
+                        "speakerIndex": segment.speakerIndex,
+                        "startTimeSeconds": segment.startTime,
+                        "endTimeSeconds": segment.endTime,
+                        "durationSeconds": segment.duration,
+                    ])
+                }
+                let output: [String: Any] = [
+                    "audioFile": audioFile,
+                    "mode": "offline",
+                    "durationSeconds": duration,
+                    "processingTimeSeconds": processingTime,
+                    "rtfx": rtfx,
+                    "totalFrames": result.numFinalizedFrames,
+                    "segmentCount": segments.count,
+                    "segments": segmentDicts,
+                ]
+                let jsonData = try JSONSerialization.data(
+                    withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
+                try jsonData.write(to: URL(fileURLWithPath: outputFile))
+                print("Results saved to: \(outputFile)")
+            }
+        } catch {
+            print("ERROR: Failed to process audio: \(error)")
+            exit(1)
+        }
+    }
+
     private static func printUsage() {
         let usage = """
 
@@ -319,6 +428,8 @@ enum SortformerCommand {
 
             Options:
                 --model-path <path>         Path to local CoreML model (.mlpackage or .mlmodelc)
+                --offline                   Whole-file mode: fused offline model (no streaming state)
+                --palettized                Use the 6-bit palettized model set (~2.5x smaller)
                 --debug                     Enable debug mode
                 --output <file>             Save results to JSON file
                 --onset <value>             Onset threshold for speech detection (default: 0.5)
@@ -341,6 +452,9 @@ enum SortformerCommand {
 
                 # With local model path
                 fluidaudio sortformer audio.wav --model-path ./coreml_models/SortformerPipeline.mlpackage
+
+                # Offline whole-file mode (fused model, fastest when the full audio is available)
+                fluidaudio sortformer audio.wav --offline
 
                 # Tune streaming parameters
                 fluidaudio sortformer audio.wav --threshold 0.3 --silence-threshold 0.15
