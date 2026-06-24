@@ -776,6 +776,29 @@ FluidAudio's `highContextV2_1` *streaming* config (the slowest, largest variant)
 For low-latency streaming throughput use `.efficientV2_1` (chunk_len 25, ~2 s latency, ~215× RTFx).
 Argmax does not ship a streaming Sortformer. Repro: mobius `offline_argmax_bench.py`.
 
+### Offline diarizer (whole-file, Swift)
+
+`OfflineSortformerDiarizer` ships the fused offline model end-to-end: mel extraction → fused graph
+per 30.72 s window (no streaming state) → cross-window speaker stitching → timeline. Long audio is
+tiled into overlapping windows (~8 s overlap) and `SortformerSpeakerStitcher` realigns each window's
+speaker columns so IDs stay globally consistent. Run with `fluidaudio sortformer <file> --offline`
+(`--palettized` for the 6-bit set).
+
+Representative run (CLI `--offline`, fp16, 288.6 s 2-speaker clip):
+
+| | value |
+|---|---|
+| Windows (30.72 s, ~8 s overlap) | 13 |
+| Output frames | 3608 |
+| Processing time | 1.02 s |
+| **RTFx (processing)** | **~283×** |
+
+RTFx excludes the one-time model load (a ~230 MB fp16 / ~88 MB palettized `.mlmodelc`, downloaded
+from HF on first use). Speaker labels stay consistent across every window boundary. Models:
+`FluidInference/diar-streaming-sortformer-coreml` `v3/{fp16,palettized}/SortformerOffline_v2.1.mlmodelc`;
+NeMo-reference parity = 100% speaker-argmax (fp16), 96.4% (6-bit palettized). Use the offline
+diarizer for batch/whole-file work; use the streaming variants for live audio.
+
 ## LS-EEND Streaming Diarization
 A research prototype from Westlake University for streaming speaker diarization.
 
