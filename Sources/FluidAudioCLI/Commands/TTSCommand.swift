@@ -92,6 +92,7 @@ public struct TTS {
         var supertonicVoiceStylePath: String? = nil
         var supertonicTotalSteps: Int = Supertonic3Constants.defaultTotalSteps
         var supertonicSpeed: Float = Supertonic3Constants.defaultSpeed
+        var supertonicSilence: Float = Supertonic3Constants.defaultSilenceDuration
         // VectorEstimator build: fp16 | int8/int6/int4 (ANE-bucketed) |
         // dyn-int8/dyn-int6/dyn-int4 (dynamic CPU/GPU). Default fp16.
         var supertonicVE: Supertonic3VectorEstimator = .aneBucketed(.int4)
@@ -187,6 +188,11 @@ public struct TTS {
             case "--speed":
                 if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
                     supertonicSpeed = v
+                    i += 1
+                }
+            case "--silence":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    supertonicSilence = v
                     i += 1
                 }
             case "--alpha":
@@ -314,6 +320,7 @@ public struct TTS {
                 text: text, output: output, language: supertonicLanguage,
                 voiceStylePath: supertonicVoiceStylePath, voiceName: voice,
                 totalSteps: supertonicTotalSteps, speed: supertonicSpeed,
+                silenceDuration: supertonicSilence,
                 vectorEstimator: supertonicVE,
                 metricsPath: metricsPath, cpuOnly: cpuOnly)
         }
@@ -803,6 +810,7 @@ public struct TTS {
         text: String, output: String, language: String,
         voiceStylePath: String?, voiceName: String,
         totalSteps: Int, speed: Float,
+        silenceDuration: Float,
         vectorEstimator: Supertonic3VectorEstimator,
         metricsPath: String?, cpuOnly: Bool
     ) async {
@@ -844,7 +852,8 @@ public struct TTS {
             let tSynth0 = Date()
             let result = try await manager.synthesize(
                 text: text, language: language, style: style,
-                totalSteps: totalSteps, speed: speed)
+                totalSteps: totalSteps, speed: speed,
+                silenceDuration: silenceDuration)
             let tSynth1 = Date()
 
             let outURL = resolveInputURL(output)
@@ -925,6 +934,7 @@ public struct TTS {
                                      --lang en                  ISO-639-1 language code (default en)
                                      --total-steps 8            denoising step count (default 8)
                                      --speed 1.05               duration multiplier (default 1.05)
+                                     --silence 0.05             inter-chunk silence seconds (default 0.05)
                                      --cpu-only                 disable Neural Engine
               --lexicon, -l        Custom pronunciation lexicon file (KokoroAne --variant zh only):
                                      word  pinyin1 pinyin2   (e.g. zi4 jie2)
