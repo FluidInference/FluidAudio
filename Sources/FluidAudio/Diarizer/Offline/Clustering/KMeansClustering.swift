@@ -61,7 +61,7 @@ struct KMeansClustering {
             return (Array(0..<count), embeddings)
         }
 
-        var rng = SeededRNG(seed: seed ?? UInt64.random(in: 0...UInt64.max))
+        var rng = SeededRNG(seed: seed ?? 0)
         let normalized = normalizeEmbeddings(embeddings)
         var centroids = initializeCentroids(from: normalized, k: k, rng: &rng)
         var assignments = [Int](repeating: 0, count: count)
@@ -87,6 +87,45 @@ struct KMeansClustering {
         }
 
         return (assignments, centroids)
+    }
+
+    /// Runs K-Means `nInit` times with deterministic seeds (baseSeed, baseSeed+1, …) and returns
+    /// the lowest-inertia result (sklearn-style `n_init`). Single random-seed init is both
+    /// non-deterministic and fragile: it collapses small/边界 speakers run-to-run (ICT 4-spk
+    /// 小牧 が kept↔collapse で揺れ、~10%↔~30% を実証)。Best-of-N with fixed seeds makes the
+    /// re-clustering both reproducible and robust.
+    static func clusterWithCentroidsNInit(
+        embeddings: [[Double]],
+        numClusters: Int,
+        maxIterations: Int = 300,
+        nInit: Int = 10,
+        baseSeed: UInt64 = 0
+    ) -> (clusters: [Int], centroids: [[Double]]) {
+        guard embeddings.count > numClusters, nInit > 1 else {
+            return clusterWithCentroids(
+                embeddings: embeddings, numClusters: numClusters,
+                maxIterations: maxIterations, seed: baseSeed)
+        }
+        let normalized = normalizeEmbeddings(embeddings)
+        var best: (clusters: [Int], centroids: [[Double]])?
+        var bestInertia = Double.greatestFiniteMagnitude
+        for i in 0..<nInit {
+            let result = clusterWithCentroids(
+                embeddings: embeddings, numClusters: numClusters,
+                maxIterations: maxIterations, seed: baseSeed &+ UInt64(i))
+            // inertia = Σ ‖normalized(emb) − assignedCentroid‖²(centroids も normalized 空間)
+            var inertia: Double = 0
+            for (idx, c) in result.clusters.enumerated() where c >= 0 && c < result.centroids.count {
+                inertia += euclideanDistanceSquared(normalized[idx], result.centroids[c])
+            }
+            if inertia < bestInertia {
+                bestInertia = inertia
+                best = result
+            }
+        }
+        return best ?? clusterWithCentroids(
+            embeddings: embeddings, numClusters: numClusters,
+            maxIterations: maxIterations, seed: baseSeed)
     }
 
     private static func normalizeEmbeddings(_ embeddings: [[Double]]) -> [[Double]] {
