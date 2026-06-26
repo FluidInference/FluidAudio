@@ -107,7 +107,8 @@ public actor Supertonic3Manager {
     ///   - speed: Speech-rate multiplier (default 1.05). Divides the
     ///     predicted duration vector.
     ///   - silenceDuration: Silence inserted between chunks when the text
-    ///     is split into multiple chunks. Default 0.3 s.
+    ///     is split into multiple chunks. Default 0.05 s — see
+    ///     `Supertonic3Constants.defaultSilenceDuration`.
     public func synthesize(
         text: String,
         language: String,
