@@ -491,6 +491,10 @@ public final class SortformerDiarizer: Diarizer {
 
         // Step 1: Run preprocessor on available audio
         while let (chunkFeatures, chunkLengths) = getNextChunkFeaturesLocked() {
+            // Cooperative cancellation: throws `CancellationError` if the enclosing Swift
+            // `Task` was cancelled, before the next (expensive) inference call.
+            try Task.checkCancellation()
+
             let output = try models.runMainModel(
                 chunk: chunkFeatures,
                 chunkLength: chunkLengths,
@@ -618,8 +622,10 @@ public final class SortformerDiarizer: Diarizer {
     ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
     ///   - keepSpeakers: Whether to keep pre-enrolled speakers. If `nil`, it will keep the speakers if no audio has been added.
     ///   - finalizeOnCompletion: Whether to finalize the timeline after completing the processing
-    ///   - progressCallback: Optional callback for progress updates
+    ///   - progressCallback: Optional callback for progress updates `(processedSamples, totalSamples, chunksProcessed)`.
     /// - Returns: Complete diarization timeline
+    /// - Throws: `CancellationError` if the enclosing Swift `Task` is cancelled mid-processing.
+    ///   Run this inside a `Task` and call `cancel()` on it to stop early.
     public func processComplete(
         _ samples: [Float],
         sourceSampleRate: Double? = nil,
@@ -722,6 +728,10 @@ public final class SortformerDiarizer: Diarizer {
             let coreFrames = config.chunkLen * config.subsamplingFactor  // 48 mel frames core
 
             while let (chunkFeatures, chunkLength, leftOffset, rightOffset) = featureProvider.next() {
+                // Cooperative cancellation: when `processComplete` runs inside a Swift `Task`,
+                // cancelling that task throws `CancellationError` here before the next inference.
+                try Task.checkCancellation()
+
                 // Run main model
                 let output = try models.runMainModel(
                     chunk: chunkFeatures,

@@ -141,9 +141,13 @@ extension OfflineSortformerModels {
     private static let logger = AppLogger(category: "OfflineSortformerModels")
 
     /// Load from a local compiled/`.mlpackage` model.
+    ///
+    /// - Parameter computeUnits: CoreML compute units to use (default `.all`). On RAM-constrained
+    ///   or pre-M1 devices (e.g. A14) where `.all` is slow or incompatible, pass `.cpuOnly`.
     public static func load(
         config: OfflineSortformerConfig = .offlineV2_1,
-        modelPath: URL
+        modelPath: URL,
+        computeUnits: MLComputeUnits = .all
     ) async throws -> OfflineSortformerModels {
         let start = Date()
         let compiledURL: URL
@@ -153,10 +157,12 @@ extension OfflineSortformerModels {
             compiledURL = try await MLModel.compileModel(at: modelPath)
         }
         let mlConfig = MLModelConfiguration()
-        mlConfig.computeUnits = .all
+        mlConfig.computeUnits = computeUnits
         let model = try MLModel(contentsOf: compiledURL, configuration: mlConfig)
         let duration = Date().timeIntervalSince(start)
-        logger.info("Loaded offline Sortformer model in \(String(format: "%.2f", duration))s")
+        logger.info(
+            "Loaded offline Sortformer model in \(String(format: "%.2f", duration))s "
+                + "(computeUnits=\(mlConfig.computeUnits.rawValue))")
         return try OfflineSortformerModels(config: config, main: model, compilationDuration: duration)
     }
 
@@ -240,8 +246,12 @@ public final class OfflineSortformerDiarizer {
     }
 
     /// Initialize from a local model path.
-    public func initialize(modelPath: URL) async throws {
-        let models = try await OfflineSortformerModels.load(config: config, modelPath: modelPath)
+    ///
+    /// - Parameter computeUnits: CoreML compute units to use (default `.all`). Pass `.cpuOnly`
+    ///   on RAM-constrained or pre-M1 devices (e.g. A14) where `.all` is slow or incompatible.
+    public func initialize(modelPath: URL, computeUnits: MLComputeUnits = .all) async throws {
+        let models = try await OfflineSortformerModels.load(
+            config: config, modelPath: modelPath, computeUnits: computeUnits)
         withLock { _models = models }
     }
 

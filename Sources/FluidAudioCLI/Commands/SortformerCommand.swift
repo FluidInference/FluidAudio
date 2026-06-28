@@ -1,4 +1,5 @@
 #if os(macOS)
+import CoreML
 import FluidAudio
 import Foundation
 
@@ -44,6 +45,7 @@ enum SortformerCommand {
         var configName = "default"
         var palettized = false
         var offline = false
+        var computeUnitsName: String?
 
         // Parse remaining arguments
         var i = 1
@@ -100,6 +102,11 @@ enum SortformerCommand {
                 offline = true
             case "--palettized":
                 palettized = true
+            case "--compute-units":
+                if i + 1 < arguments.count {
+                    computeUnitsName = arguments[i + 1].lowercased()
+                    i += 1
+                }
             case "--threshold":
                 if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
                     predScoreThreshold = v
@@ -153,6 +160,7 @@ enum SortformerCommand {
                 audioFile: audioFile,
                 modelPath: modelPath,
                 palettized: palettized,
+                computeUnits: parseComputeUnits(computeUnitsName),
                 outputFile: outputFile,
                 postConfig: postConfig)
             return
@@ -197,13 +205,15 @@ enum SortformerCommand {
         do {
             let loadStart = Date()
             let models: SortformerModels
+            let computeUnits = Self.parseComputeUnits(computeUnitsName)
             if let modelPath = modelPath {
                 print("Loading models from local path: \(modelPath)")
                 models = try await SortformerModels.load(
-                    config: config, mainModelPath: URL(fileURLWithPath: modelPath))
+                    config: config, mainModelPath: URL(fileURLWithPath: modelPath), computeUnits: computeUnits)
             } else {
                 print("Loading models from HuggingFace...")
-                models = try await SortformerModels.loadFromHuggingFace(config: config, computeUnits: .cpuOnly)
+                models = try await SortformerModels.loadFromHuggingFace(
+                    config: config, computeUnits: computeUnits ?? .cpuOnly)
             }
             print("Initializing...")
             diarizer.initialize(models: models)
@@ -336,6 +346,7 @@ enum SortformerCommand {
         audioFile: String,
         modelPath: String?,
         palettized: Bool,
+        computeUnits: MLComputeUnits?,
         outputFile: String?,
         postConfig: DiarizerTimelineConfig
     ) async {
@@ -350,10 +361,11 @@ enum SortformerCommand {
             let loadStart = Date()
             if let modelPath = modelPath {
                 print("Loading offline model from local path: \(modelPath)")
-                try await diarizer.initialize(modelPath: URL(fileURLWithPath: modelPath))
+                try await diarizer.initialize(
+                    modelPath: URL(fileURLWithPath: modelPath), computeUnits: computeUnits ?? .all)
             } else {
                 print("Loading offline model from HuggingFace...")
-                try await diarizer.initializeFromHuggingFace(computeUnits: .all)
+                try await diarizer.initializeFromHuggingFace(computeUnits: computeUnits ?? .all)
             }
             print("Model loaded in \(String(format: "%.2f", Date().timeIntervalSince(loadStart)))s")
         } catch {
@@ -430,6 +442,9 @@ enum SortformerCommand {
                 --model-path <path>         Path to local CoreML model (.mlpackage or .mlmodelc)
                 --offline                   Whole-file mode: fused offline model (no streaming state)
                 --palettized                Use the 6-bit palettized model set (~2.5x smaller)
+                --compute-units <units>     CoreML compute units: cpu | cpuAndGPU | ane | all.
+                                            Default auto-selects; use cpu on pre-M1 devices
+                                            (e.g. A14) where .all is slow or incompatible.
                 --debug                     Enable debug mode
                 --output <file>             Save results to JSON file
                 --onset <value>             Onset threshold for speech detection (default: 0.5)
@@ -461,9 +476,29 @@ enum SortformerCommand {
 
                 # Save results to file
                 fluidaudio sortformer audio.wav --output results.json
+
+                # Smaller, CPU-only load for older devices (e.g. A14)
+                fluidaudio sortformer audio.wav --palettized --compute-units cpu
             """
         fputs(usage, stderr)
         fflush(stderr)
+    }
+
+    /// Map a `--compute-units` CLI value to `MLComputeUnits`. Returns `nil` for unknown/absent
+    /// input so callers fall back to their own per-path default.
+    private static func parseComputeUnits(_ name: String?) -> MLComputeUnits? {
+        switch name {
+        case "cpu", "cpuonly":
+            return .cpuOnly
+        case "cpuandgpu", "cpugpu":
+            return .cpuAndGPU
+        case "cpuandneuralengine", "cpuane", "ane":
+            return .cpuAndNeuralEngine
+        case "all":
+            return .all
+        default:
+            return nil
+        }
     }
 }
 #endif
