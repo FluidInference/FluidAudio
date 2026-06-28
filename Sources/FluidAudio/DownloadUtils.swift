@@ -100,12 +100,55 @@ public class DownloadUtils {
         }
     }
 
+    static func looksLikeHTML(_ data: Data) -> Bool {
+        let prefix = data.prefix(512)
+        let text = String(data: prefix, encoding: .utf8) ?? String(decoding: prefix, as: UTF8.self)
+        let lowered = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return lowered.hasPrefix("<!doctype html") || lowered.hasPrefix("<html") || lowered.hasPrefix("<?xml")
+    }
+
+    static func validateDownloadedArtifact(
+        at tempURL: URL,
+        response: HTTPURLResponse,
+        path: String,
+        expectedSize: Int
+    ) throws {
+        if let contentType = response.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
+            contentType.contains("text/html")
+        {
+            throw HuggingFaceDownloadError.invalidArtifact(
+                path: path, reason: "server returned Content-Type: \(contentType)")
+        }
+
+        let actualSize =
+            ((try? FileManager.default.attributesOfItem(atPath: tempURL.path))?[.size] as? Int) ?? 0
+        if actualSize == 0 {
+            throw HuggingFaceDownloadError.invalidArtifact(path: path, reason: "empty file")
+        }
+
+        if let handle = try? FileHandle(forReadingFrom: tempURL) {
+            defer { try? handle.close() }
+            if looksLikeHTML(handle.readData(ofLength: 512)) {
+                throw HuggingFaceDownloadError.invalidArtifact(
+                    path: path, reason: "response body begins with HTML markup")
+            }
+        }
+
+        // HuggingFace reports the exact (LFS-resolved) object size; a short body is truncation.
+        if expectedSize > 0 && actualSize != expectedSize {
+            throw HuggingFaceDownloadError.invalidArtifact(
+                path: path,
+                reason: "size mismatch (expected \(expectedSize) bytes, got \(actualSize))")
+        }
+    }
+
     public enum HuggingFaceDownloadError: LocalizedError {
         case invalidResponse
         case rateLimited(statusCode: Int, message: String)
         case downloadFailed(path: String, underlying: Error)
         case modelNotFound(path: String)
         case htmlErrorResponse(path: String, snippet: String)
+        case invalidArtifact(path: String, reason: String)
 
         public var errorDescription: String? {
             switch self {
@@ -119,6 +162,8 @@ public class DownloadUtils {
                 return "HuggingFace returned HTML instead of JSON for \(path) (rate limit or server issue): \(snippet)"
             case .modelNotFound(let path):
                 return "Model file not found: \(path)"
+            case .invalidArtifact(let path, let reason):
+                return "Downloaded artifact for \(path) is invalid (\(reason)); refusing to cache it."
             }
         }
     }
@@ -581,6 +626,7 @@ public class DownloadUtils {
             let tempFileURL = try await downloadFileWithRetry(
                 request: request,
                 path: file.path,
+                expectedSize: file.size,
                 onProgress: onProgress
             )
 
@@ -714,6 +760,7 @@ public class DownloadUtils {
     private static func downloadFileWithRetry(
         request: URLRequest,
         path: String,
+        expectedSize: Int,
         onProgress: (@Sendable (Int64, Int64) -> Void)?,
         maxAttempts: Int = 4,
         minBackoff: TimeInterval = 1.0
@@ -749,6 +796,10 @@ public class DownloadUtils {
                         underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
                     )
                 }
+
+                // Validate before the caller moves the temp file into the cache.
+                try validateDownloadedArtifact(
+                    at: tempURL, response: httpResponse, path: path, expectedSize: expectedSize)
 
                 return tempURL
             } catch {
@@ -786,6 +837,9 @@ public class DownloadUtils {
 
         switch error {
         case HuggingFaceDownloadError.rateLimited:
+            return true
+        case HuggingFaceDownloadError.invalidArtifact:
+            // Usually a transient unhealthy network path (proxy, mirror 5xx) — retry.
             return true
         case HuggingFaceDownloadError.downloadFailed(_, let underlying):
             let nsError = underlying as NSError
@@ -916,6 +970,10 @@ public class DownloadUtils {
                     underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
                 )
             }
+
+            // Reject HTML error pages / truncated bodies before caching.
+            try validateDownloadedArtifact(
+                at: tempURL, response: httpResponse, path: file.path, expectedSize: file.size)
 
             if FileManager.default.fileExists(atPath: destPath.path) {
                 try? FileManager.default.removeItem(at: destPath)
