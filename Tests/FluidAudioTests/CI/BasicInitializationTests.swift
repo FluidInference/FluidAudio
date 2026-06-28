@@ -348,6 +348,30 @@ extension CoreMLDiarizerTests {
 
         XCTAssertEqual(models.embeddingModel.configuration.computeUnits, customConfig.computeUnits)
     }
+
+    /// Tests that the OFFLINE diarizer model loader honors a user-specified
+    /// configuration's compute units. This is parity with
+    /// `testModelLoadingCustomConfig` above (the streaming `DiarizerModels`
+    /// loader already honored it); `OfflineDiarizerModels.load(configuration:)`
+    /// previously accepted the parameter but ignored it and always loaded `.all`.
+    func testOfflineModelLoadingCustomConfig() async throws {
+
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
+
+        let customConfig = MLModelConfiguration()
+        customConfig.computeUnits = .cpuOnly
+
+        let models = try await OfflineDiarizerModels.load(configuration: customConfig)
+
+        // Segmentation, embedding, and PLDA-rho models load with the requested
+        // compute units; the fbank front-end intentionally stays on `.cpuOnly`.
+        XCTAssertEqual(
+            models.segmentationModel.configuration.computeUnits, customConfig.computeUnits)
+        XCTAssertEqual(
+            models.embeddingModel.configuration.computeUnits, customConfig.computeUnits)
+        XCTAssertEqual(
+            models.pldaRhoModel.configuration.computeUnits, customConfig.computeUnits)
+    }
 }
 
 // MARK: - CoreML Backend Specific Test
