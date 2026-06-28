@@ -2,11 +2,8 @@ import XCTest
 
 @testable import FluidAudio
 
-/// Validation of downloaded model artifacts before they are committed to the
-/// cache (issue #740). An unhealthy network path — captive portal, corporate
-/// proxy, mirror 5xx — can return an HTML error page or a truncated body under
-/// the model's filename. `DownloadUtils.validateDownloadedArtifact` rejects
-/// those so a later CoreML load does not surface a confusing, far-removed error.
+/// `DownloadUtils.validateDownloadedArtifact` rejects HTML error pages and
+/// truncated bodies before they reach the cache (issue #740).
 final class DownloadArtifactValidationTests: XCTestCase {
 
     private var tempDir: URL!
@@ -77,8 +74,8 @@ final class DownloadArtifactValidationTests: XCTestCase {
     }
 
     func testLooksLikeHTMLAllowsBinaryWeights() {
-        // A CoreML weight blob starts with arbitrary bytes, not markup.
-        let binary = Data([0x00, 0x01, 0x02, 0xFF, 0xFE, 0x3C, 0x68])  // contains '<h' mid-stream
+        // Markup-like bytes mid-stream ('<h') must not trip the leading-byte check.
+        let binary = Data([0x00, 0x01, 0x02, 0xFF, 0xFE, 0x3C, 0x68])
         XCTAssertFalse(DownloadUtils.looksLikeHTML(binary))
     }
 
@@ -99,7 +96,6 @@ final class DownloadArtifactValidationTests: XCTestCase {
 
     func testValidArtifactWithUnknownSizeSkipsSizeCheck() throws {
         let url = try writeTemp(Data(repeating: 0x01, count: 50))
-        // expectedSize <= 0 means "unknown" — must not reject on size.
         XCTAssertNoThrow(
             try DownloadUtils.validateDownloadedArtifact(
                 at: url, response: response(), path: "file.json", expectedSize: -1))
@@ -123,8 +119,6 @@ final class DownloadArtifactValidationTests: XCTestCase {
     }
 
     func testRejectsHTMLBodyServedAsBinaryContentType() throws {
-        // Proxy/captive-portal page served with a 200 and a non-HTML content
-        // type but an HTML body — the body sniff must still catch it.
         let html = Data("<!DOCTYPE html>\n<html><body>Proxy error</body></html>".utf8)
         let url = try writeTemp(html)
         assertInvalid(
@@ -135,7 +129,6 @@ final class DownloadArtifactValidationTests: XCTestCase {
     }
 
     func testRejectsTruncatedBody() throws {
-        // Body shorter than the size HuggingFace reported → truncation.
         let url = try writeTemp(Data(repeating: 0x7F, count: 500))
         assertInvalid(
             try DownloadUtils.validateDownloadedArtifact(
@@ -145,7 +138,6 @@ final class DownloadArtifactValidationTests: XCTestCase {
     }
 
     func testRejectsOversizedBody() throws {
-        // An over-long body is also a mismatch (e.g. error page padded out).
         let url = try writeTemp(Data(repeating: 0x7F, count: 2000))
         assertInvalid(
             try DownloadUtils.validateDownloadedArtifact(

@@ -100,50 +100,25 @@ public class DownloadUtils {
         }
     }
 
-    /// True if `data` begins with HTML markup (after leading whitespace / BOM).
-    /// Catches captive-portal and proxy error pages served as a normal 200 body
-    /// under the requested filename.
+    /// True if `data` begins with HTML/XML markup (proxy / captive-portal error
+    /// page served as a normal 200 body under the requested filename).
     static func looksLikeHTML(_ data: Data) -> Bool {
-        // Only the leading bytes matter; decode lossily so a binary tail can't
-        // hide an HTML preamble.
         let prefix = data.prefix(512)
-        guard var text = String(data: prefix, encoding: .utf8) else {
-            // Try lossy ASCII for bodies with a stray non-UTF8 byte further in.
-            let ascii = String(decoding: prefix, as: UTF8.self)
-            return htmlPrefixMatch(ascii)
-        }
-        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return htmlPrefixMatch(text)
-    }
-
-    private static func htmlPrefixMatch(_ text: String) -> Bool {
+        let text = String(data: prefix, encoding: .utf8) ?? String(decoding: prefix, as: UTF8.self)
         let lowered = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        return lowered.hasPrefix("<!doctype html")
-            || lowered.hasPrefix("<html")
-            || lowered.hasPrefix("<?xml")  // proxy SOAP/XML error envelopes
+        return lowered.hasPrefix("<!doctype html") || lowered.hasPrefix("<html") || lowered.hasPrefix("<?xml")
     }
 
-    /// Validate a freshly-downloaded artifact at `tempURL` *before* it is moved
-    /// into the cache. Rejects HTML/error-page bodies (captive portals, proxies,
-    /// HF rate-limit pages served with 200) and truncated files (size mismatch
-    /// vs. the size HuggingFace reported for the object). Throws
-    /// `HuggingFaceDownloadError.invalidArtifact` on failure so a transient bad
-    /// fetch is retried and never poisons the cache directory.
-    ///
-    /// - Parameters:
-    ///   - tempURL: Location of the just-downloaded temporary file.
-    ///   - response: The HTTP response, for the `Content-Type` check.
-    ///   - path: Remote path, used for log/error context.
-    ///   - expectedSize: Size HuggingFace reported (the LFS object size for large
-    ///     weights). `<= 0` means unknown — the exact-size check is skipped.
+    /// Validate a downloaded artifact at `tempURL` before it is moved into the
+    /// cache. Rejects HTML error pages and truncated bodies, throwing
+    /// `HuggingFaceDownloadError.invalidArtifact` (retryable) so a bad fetch
+    /// never poisons the cache. `expectedSize <= 0` skips the size check.
     static func validateDownloadedArtifact(
         at tempURL: URL,
         response: HTTPURLResponse,
         path: String,
         expectedSize: Int
     ) throws {
-        // 1. Content-Type: model artifacts are binary octet-streams. An HTML
-        //    content type means the body is an error page, not the file.
         if let contentType = response.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
             contentType.contains("text/html")
         {
@@ -151,29 +126,21 @@ public class DownloadUtils {
                 path: path, reason: "server returned Content-Type: \(contentType)")
         }
 
-        let fm = FileManager.default
-        let actualSize = ((try? fm.attributesOfItem(atPath: tempURL.path))?[.size] as? Int) ?? 0
-
-        // 2. Empty body — a download that produced no bytes is never valid.
+        let actualSize =
+            ((try? FileManager.default.attributesOfItem(atPath: tempURL.path))?[.size] as? Int) ?? 0
         if actualSize == 0 {
             throw HuggingFaceDownloadError.invalidArtifact(path: path, reason: "empty file")
         }
 
-        // 3. Sniff the leading bytes for HTML markup — a 200 OK proxy / captive
-        //    portal error page is served under the model's filename.
         if let handle = try? FileHandle(forReadingFrom: tempURL) {
             defer { try? handle.close() }
-            let head = handle.readData(ofLength: 512)
-            if looksLikeHTML(head) {
+            if looksLikeHTML(handle.readData(ofLength: 512)) {
                 throw HuggingFaceDownloadError.invalidArtifact(
                     path: path, reason: "response body begins with HTML markup")
             }
         }
 
-        // 4. Truncation: HuggingFace's tree listing reports the exact byte size
-        //    for each file (the resolved LFS object size for large weights). A
-        //    short body means a dropped connection or proxy truncation. Require
-        //    an exact match when the expected size is known.
+        // HuggingFace reports the exact (LFS-resolved) object size; a short body is truncation.
         if expectedSize > 0 && actualSize != expectedSize {
             throw HuggingFaceDownloadError.invalidArtifact(
                 path: path,
@@ -187,12 +154,9 @@ public class DownloadUtils {
         case downloadFailed(path: String, underlying: Error)
         case modelNotFound(path: String)
         case htmlErrorResponse(path: String, snippet: String)
-        /// A downloaded artifact failed validation before being cached — e.g. an
-        /// HTML error page (captive portal / proxy / HF rate-limit page served
-        /// with 200), an empty body, or a truncated file whose size does not
-        /// match the size HuggingFace reported. The bad bytes are discarded
-        /// rather than written under the model's filename, so the cache is never
-        /// poisoned and a later load does not surface a confusing CoreML error.
+        /// A downloaded artifact failed validation before being cached (HTML
+        /// error page, empty body, or size mismatch). The bad bytes are
+        /// discarded so the cache is never poisoned.
         case invalidArtifact(path: String, reason: String)
 
         public var errorDescription: String? {
@@ -842,10 +806,7 @@ public class DownloadUtils {
                     )
                 }
 
-                // Validate the body before handing the temp file back to be
-                // cached. A bad fetch (HTML error page, truncation) throws
-                // `invalidArtifact`, which is retryable, so a transient proxy
-                // hiccup is retried instead of poisoning the cache.
+                // Validate before the caller moves the temp file into the cache.
                 try validateDownloadedArtifact(
                     at: tempURL, response: httpResponse, path: path, expectedSize: expectedSize)
 
@@ -887,9 +848,7 @@ public class DownloadUtils {
         case HuggingFaceDownloadError.rateLimited:
             return true
         case HuggingFaceDownloadError.invalidArtifact:
-            // HTML error pages / truncation are usually a transient unhealthy
-            // network path (captive portal, proxy, mirror 5xx) — retry rather
-            // than fail the whole repo download on the first blip.
+            // Usually a transient unhealthy network path (proxy, mirror 5xx) — retry.
             return true
         case HuggingFaceDownloadError.downloadFailed(_, let underlying):
             let nsError = underlying as NSError
