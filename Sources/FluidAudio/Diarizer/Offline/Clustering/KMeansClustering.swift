@@ -123,9 +123,10 @@ struct KMeansClustering {
                 best = result
             }
         }
-        return best ?? clusterWithCentroids(
-            embeddings: embeddings, numClusters: numClusters,
-            maxIterations: maxIterations, seed: baseSeed)
+        return best
+            ?? clusterWithCentroids(
+                embeddings: embeddings, numClusters: numClusters,
+                maxIterations: maxIterations, seed: baseSeed)
     }
 
     private static func normalizeEmbeddings(_ embeddings: [[Double]]) -> [[Double]] {
