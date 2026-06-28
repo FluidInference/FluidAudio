@@ -227,6 +227,7 @@ public enum ASRError: Error, LocalizedError {
     case unsupportedPlatform(String)
     case streamingConversionFailed(Error)
     case fileAccessFailed(URL, Error)
+    case encoderInstantiationFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -246,6 +247,8 @@ public enum ASRError: Error, LocalizedError {
             return "Streaming audio conversion failed: \(error.localizedDescription)"
         case .fileAccessFailed(let url, let error):
             return "Failed to access audio file at \(url.path): \(error.localizedDescription)"
+        case .encoderInstantiationFailed(let message):
+            return "Encoder ANE program failed to instantiate: \(message)"
         }
     }
 }

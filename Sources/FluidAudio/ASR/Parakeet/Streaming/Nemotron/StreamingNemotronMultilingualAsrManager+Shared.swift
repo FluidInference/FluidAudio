@@ -13,7 +13,8 @@ import Foundation
 /// melCache, prediction output backings) stays inside the manager
 /// actor.
 public struct SharedNemotronMultilingualModels: Sendable {
-    public let preprocessor: MLModel
+    // The mel front-end is computed natively in Swift per manager
+    // (`NemotronMelExtractor`); no CoreML preprocessor is shared.
     public let encoder: MLModel
     /// Bare prediction LSTM. Optional: a lean ship may omit it when B1
     /// (`decoderJoint`) covers the standard path and no smart-spec (K=4)
@@ -40,7 +41,6 @@ public struct SharedNemotronMultilingualModels: Sendable {
     public let mlConfiguration: MLModelConfiguration
 
     fileprivate init(
-        preprocessor: MLModel,
         encoder: MLModel,
         decoder: MLModel?,
         joint: MLModel?,
@@ -53,7 +53,6 @@ public struct SharedNemotronMultilingualModels: Sendable {
         tokenizer: NemotronMultilingualTokenizer,
         mlConfiguration: MLModelConfiguration
     ) {
-        self.preprocessor = preprocessor
         self.encoder = encoder
         self.decoder = decoder
         self.joint = joint
@@ -104,13 +103,6 @@ extension StreamingNemotronMultilingualAsrManager {
         let config = try NemotronMultilingualStreamingConfig(from: metadataPath)
         logger.info(
             "Loaded multilingual config: \(config.chunkMs)ms chunks, vocab=\(config.vocabSize), \(config.numPrompts) prompts"
-        )
-
-        let preprocessor = try await Self.loadShared(
-            directory: directory,
-            compiledName: ModelNames.NemotronMultilingualStreaming.preprocessorFile,
-            packageName: ModelNames.NemotronMultilingualStreaming.preprocessorPackage,
-            configuration: mlConfiguration
         )
 
         let encoder = try await Self.loadShared(
@@ -225,7 +217,6 @@ extension StreamingNemotronMultilingualAsrManager {
         logger.info("Shared models preload complete — ready for N consumers")
 
         return SharedNemotronMultilingualModels(
-            preprocessor: preprocessor,
             encoder: encoder,
             decoder: decoder,
             joint: joint,
@@ -254,8 +245,12 @@ extension StreamingNemotronMultilingualAsrManager {
         self.lastToken = Int32(config.blankIdx)
         self.currentPromptId = Int32(config.defaultPromptId)
 
+        // Each manager builds its own (non-thread-safe) mel extractors; only
+        // the heavyweight MLModel handles are shared across streams.
+        self.melExtractor = NemotronMelExtractor(nMels: shared.config.melFeatures)
+        self.prefetchMelExtractor = NemotronMelExtractor(nMels: shared.config.melFeatures)
+
         // Adopt shared MLModel references
-        self.preprocessor = shared.preprocessor
         self.encoder = shared.encoder
         self.decoder = shared.decoder
         self.joint = shared.joint
