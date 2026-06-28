@@ -100,8 +100,6 @@ public class DownloadUtils {
         }
     }
 
-    /// True if `data` begins with HTML/XML markup (proxy / captive-portal error
-    /// page served as a normal 200 body under the requested filename).
     static func looksLikeHTML(_ data: Data) -> Bool {
         let prefix = data.prefix(512)
         let text = String(data: prefix, encoding: .utf8) ?? String(decoding: prefix, as: UTF8.self)
@@ -109,10 +107,6 @@ public class DownloadUtils {
         return lowered.hasPrefix("<!doctype html") || lowered.hasPrefix("<html") || lowered.hasPrefix("<?xml")
     }
 
-    /// Validate a downloaded artifact at `tempURL` before it is moved into the
-    /// cache. Rejects HTML error pages and truncated bodies, throwing
-    /// `HuggingFaceDownloadError.invalidArtifact` (retryable) so a bad fetch
-    /// never poisons the cache. `expectedSize <= 0` skips the size check.
     static func validateDownloadedArtifact(
         at tempURL: URL,
         response: HTTPURLResponse,
@@ -154,9 +148,6 @@ public class DownloadUtils {
         case downloadFailed(path: String, underlying: Error)
         case modelNotFound(path: String)
         case htmlErrorResponse(path: String, snippet: String)
-        /// A downloaded artifact failed validation before being cached (HTML
-        /// error page, empty body, or size mismatch). The bad bytes are
-        /// discarded so the cache is never poisoned.
         case invalidArtifact(path: String, reason: String)
 
         public var errorDescription: String? {
