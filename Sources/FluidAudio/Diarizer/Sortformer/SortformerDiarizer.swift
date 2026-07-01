@@ -98,15 +98,21 @@ public final class SortformerDiarizer: Diarizer {
     ///
     /// - Parameters:
     ///   - mainModelPath: Path to Sortformer.mlpackage
+    ///   - computeUnits: CoreML compute units. Pass `nil` (default) to auto-resolve — large fp16
+    ///     high-context variants fall back to `.cpuOnly` on RAM-constrained devices (issue #726).
     public func initialize(
-        mainModelPath: URL
+        mainModelPath: URL,
+        computeUnits: MLComputeUnits? = nil
     ) async throws {
         logger.info("Initializing Sortformer diarizer (combined pipeline mode)")
 
         let loadedModels = try await SortformerModels.load(
             config: config,
-            mainModelPath: mainModelPath
+            mainModelPath: mainModelPath,
+            computeUnits: computeUnits
         )
+
+        validateConfigMatch(loadedModels)
 
         // Use withLock helper to avoid direct NSLock usage in async context
         withLock {
@@ -115,6 +121,34 @@ public final class SortformerDiarizer: Diarizer {
             self.resetBuffersLocked()
         }
         logger.info("Sortformer initialized in \(String(format: "%.2f", loadedModels.compilationDuration))s")
+    }
+
+    /// Warn loudly if the diarizer's `config` does not match the streaming parameters baked
+    /// into the loaded model. A mismatch (e.g. a `.default` config against a `highContextV2_1`
+    /// model) runs but produces incorrect and much slower results — issue #726.
+    private func validateConfigMatch(_ models: SortformerModels) {
+        guard let embedded = models.embeddedConfig else { return }
+        let current = SortformerModels.EmbeddedConfig(
+            chunkLen: config.chunkLen,
+            chunkLeftContext: config.chunkLeftContext,
+            chunkRightContext: config.chunkRightContext,
+            fifoLen: config.fifoLen,
+            spkcacheLen: config.spkcacheLen
+        )
+        guard current != embedded else { return }
+        logger.error(
+            """
+            Sortformer config mismatch — diarizer config does not match the loaded model. \
+            This produces incorrect and much slower diarization (issue #726). \
+            diarizer(chunkLen=\(current.chunkLen), leftCtx=\(current.chunkLeftContext), \
+            rightCtx=\(current.chunkRightContext), fifoLen=\(current.fifoLen), \
+            spkcacheLen=\(current.spkcacheLen)) \
+            vs model(chunkLen=\(embedded.chunkLen), leftCtx=\(embedded.chunkLeftContext), \
+            rightCtx=\(embedded.chunkRightContext), fifoLen=\(embedded.fifoLen), \
+            spkcacheLen=\(embedded.spkcacheLen)). \
+            Construct SortformerDiarizer with the SortformerConfig matching the model variant.
+            """
+        )
     }
 
     /// Execute a closure while holding the lock
@@ -126,6 +160,8 @@ public final class SortformerDiarizer: Diarizer {
 
     /// Initialize with pre-loaded models.
     public func initialize(models: SortformerModels) {
+        validateConfigMatch(models)
+
         lock.lock()
         defer { lock.unlock() }
 
@@ -455,6 +491,10 @@ public final class SortformerDiarizer: Diarizer {
 
         // Step 1: Run preprocessor on available audio
         while let (chunkFeatures, chunkLengths) = getNextChunkFeaturesLocked() {
+            // Cooperative cancellation: throws `CancellationError` if the enclosing Swift
+            // `Task` was cancelled, before the next (expensive) inference call.
+            try Task.checkCancellation()
+
             let output = try models.runMainModel(
                 chunk: chunkFeatures,
                 chunkLength: chunkLengths,
@@ -582,8 +622,10 @@ public final class SortformerDiarizer: Diarizer {
     ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
     ///   - keepSpeakers: Whether to keep pre-enrolled speakers. If `nil`, it will keep the speakers if no audio has been added.
     ///   - finalizeOnCompletion: Whether to finalize the timeline after completing the processing
-    ///   - progressCallback: Optional callback for progress updates
+    ///   - progressCallback: Optional callback for progress updates `(processedSamples, totalSamples, chunksProcessed)`.
     /// - Returns: Complete diarization timeline
+    /// - Throws: `CancellationError` if the enclosing Swift `Task` is cancelled mid-processing.
+    ///   Run this inside a `Task` and call `cancel()` on it to stop early.
     public func processComplete(
         _ samples: [Float],
         sourceSampleRate: Double? = nil,
@@ -686,6 +728,10 @@ public final class SortformerDiarizer: Diarizer {
             let coreFrames = config.chunkLen * config.subsamplingFactor  // 48 mel frames core
 
             while let (chunkFeatures, chunkLength, leftOffset, rightOffset) = featureProvider.next() {
+                // Cooperative cancellation: when `processComplete` runs inside a Swift `Task`,
+                // cancelling that task throws `CancellationError` here before the next inference.
+                try Task.checkCancellation()
+
                 // Run main model
                 let output = try models.runMainModel(
                     chunk: chunkFeatures,

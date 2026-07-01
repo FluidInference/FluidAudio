@@ -13,6 +13,12 @@ public struct SortformerConfig: Sendable {
 
     public let modelVariant: ModelVariant?
 
+    /// Weight-precision build to download for `modelVariant`. `.fp16` (default) gives the best
+    /// DER; `.palettized` is the 6-bit, ~2.5x-smaller set for RAM-constrained devices (issue #726).
+    /// Mutable post-construction (e.g. `var c = .highContextV2_1; c.precision = .palettized`) since
+    /// it does not affect tensor shapes and has no bearing on `isCompatible`.
+    public var precision: ModelNames.Sortformer.ModelPrecision
+
     /// Number of speaker slots (fixed at 4 for current model)
     public let numSpeakers: Int = 4
 
@@ -194,9 +200,25 @@ public struct SortformerConfig: Sendable {
         spkcacheUpdatePeriod: 300
     )
 
+    /// Higher-throughput streaming config with Sortformer v2.1 weights (~2s output latency).
+    /// Same context as `fastV2_1` but a larger 25-frame chunk: per-inference cost is dominated
+    /// by the static speaker-cache + FIFO context, so a bigger chunk advances ~4x more audio per
+    /// call at near-identical latency (~4x real-time factor vs `fastV2_1`). Use when ~2s latency
+    /// is acceptable and throughput matters.
+    public static let efficientV2_1 = SortformerConfig(
+        modelVariant: .efficientV2_1,
+        chunkLen: 25,
+        chunkLeftContext: 1,
+        chunkRightContext: 7,
+        fifoLen: 40,
+        spkcacheLen: 188,
+        spkcacheUpdatePeriod: 31
+    )
+
     /// - Warning: If you don't use one of the default configurations, you must use a local model converted with that configuration.
     public init(
         modelVariant: ModelVariant? = .fastV2_1,
+        precision: ModelNames.Sortformer.ModelPrecision = .fp16,
         chunkLen: Int = 6,
         chunkLeftContext: Int = 1,
         chunkRightContext: Int = 7,
@@ -213,6 +235,7 @@ public struct SortformerConfig: Sendable {
         debugMode: Bool = false
     ) {
         self.modelVariant = modelVariant
+        self.precision = precision
         self.chunkLen = max(1, chunkLen)
         self.chunkLeftContext = chunkLeftContext
         self.chunkRightContext = chunkRightContext

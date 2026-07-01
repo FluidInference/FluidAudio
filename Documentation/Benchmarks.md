@@ -745,6 +745,46 @@ AVERAGE          31.7     21.5      0.5      9.7         -     126.7
 ======================================================================
 ```
 
+### Offline throughput (M5 Pro)
+
+A single fused offline graph (`mel[1,128,3072] → speaker_preds`, 30.72 s window) exported via the
+NeMo offline path — one CoreML call per window, no streaming state. ComputeUnit.ALL, median of 120
+runs after 12 warmup:
+
+| variant | model-exec (mel → preds) | RTFx |
+|---|---:|---:|
+| **fp16** | **10.65 ms** | **2884×** |
+| 6-bit palettized | 10.93 ms | 2809× |
+
+End-to-end incl. mel (fp16): 12.49 ms · 2459×. One fused GPU graph — no per-call dispatch or
+ANE→GPU handoff. Numerical parity vs the PyTorch reference: 100% speaker-argmax agreement (fp16).
+
+### Offline diarizer (whole-file, Swift)
+
+`OfflineSortformerDiarizer` runs the fused offline model end-to-end: mel extraction → fused graph
+per 30.72 s window (no streaming state) → timeline. Run with `fluidaudio sortformer <file> --offline`
+(`--palettized` for the 6-bit set). Models: `FluidInference/diar-streaming-sortformer-coreml`
+`v3/{fp16,palettized}/SortformerOffline_v2.1.mlmodelc`; NeMo-reference parity = 100% speaker-argmax
+(fp16), 96.4% (6-bit palettized).
+
+**Throughput** is excellent — ~1000–1400× RTFx (one fused call per window, no per-chunk state). Voice
+detection matches streaming exactly (identical Miss/FA on AMI).
+
+**Quality caveat — not for long multi-speaker audio.** Each 30.72 s window diarizes independently
+with no speaker cache, so on long meetings with several speakers it produces large speaker confusion.
+AMI-SDM (collar 0.25, full test set), same harness:
+
+| | DER | Miss | FA | Speaker confusion | RTFx |
+|---|---|---|---|---|---|
+| Streaming (`highContextV2_1`) | **26.4%** | 23.4 | 0.6 | **2.4** | 835× |
+| Offline (whole-file) | 56.7% | 23.4 | 0.6 | **32.7** | 1418× |
+
+Detection is identical; the entire gap is speaker confusion the streaming `spkcache` avoids by
+construction (accumulating speaker profiles across the whole history). Cross-window re-stitching does
+not recover it — the confusion is generated *within* each window — so **use offline for short clips
+(≤ ~30 s), few-speaker audio, or throughput-bound batch jobs, and use the streaming variants for
+accurate long-form multi-speaker diarization.**
+
 ## LS-EEND Streaming Diarization
 A research prototype from Westlake University for streaming speaker diarization.
 

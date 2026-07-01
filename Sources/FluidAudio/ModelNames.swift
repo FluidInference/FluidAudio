@@ -635,6 +635,26 @@ public enum ModelNames {
 
     /// Sortformer streaming diarization model names
     public enum Sortformer {
+        /// Selects which weight-precision build of the model set to download.
+        ///
+        /// Both sets are the BNNS-fixed v3 rebuild (issue #726); they differ only in head weights:
+        /// - `.fp16`: full-precision head. Default. Best DER.
+        /// - `.palettized`: 6-bit k-means LUT head, ~2.5x smaller on disk and ~330MB RAM
+        ///   (vs ~2.4GB for `highContextV2_1` fp16), at ~+0.9pp DER. Use on RAM-constrained
+        ///   devices where the fp16 set crashes (older iPhones).
+        public enum ModelPrecision: String, Sendable, CaseIterable {
+            case fp16
+            case palettized
+
+            /// Repo subdirectory holding this precision's model set.
+            public var subdirectory: String {
+                switch self {
+                case .fp16: return "v3/fp16"
+                case .palettized: return "v3/palettized"
+                }
+            }
+        }
+
         public enum Variant: CaseIterable, Sendable {
             case fastV2
             case fastV2_1
@@ -642,6 +662,9 @@ public enum ModelNames {
             case balancedV2_1
             case highContextV2
             case highContextV2_1
+            /// Higher-throughput streaming: larger chunk (~2s output latency) for ~4x the
+            /// real-time factor of `fastV2_1` at near-identical per-inference cost.
+            case efficientV2_1
 
             public var name: String {
                 switch self {
@@ -657,6 +680,8 @@ public enum ModelNames {
                     return "SortformerNvidiaHigh_v2"
                 case .highContextV2_1:
                     return "SortformerNvidiaHigh_v2.1"
+                case .efficientV2_1:
+                    return "SortformerEfficient_v2.1"
                 }
             }
 
@@ -674,11 +699,19 @@ public enum ModelNames {
                     return .highContextV2
                 case .highContextV2_1:
                     return .highContextV2_1
+                case .efficientV2_1:
+                    return .efficientV2_1
                 }
             }
 
+            /// Compiled-model path for this variant at the default (`.fp16`) precision.
             public var fileName: String {
-                return "\(name).mlmodelc"
+                return fileName(precision: .fp16)
+            }
+
+            /// Compiled-model path for this variant at the given weight precision.
+            public func fileName(precision: ModelPrecision) -> String {
+                return "\(precision.subdirectory)/\(name).mlmodelc"
             }
 
             public func isCompatible(with config: SortformerConfig) -> Bool {
@@ -686,21 +719,33 @@ public enum ModelNames {
             }
         }
 
+        /// Repo subdirectory holding the default (`.fp16`) model set. Both v3 sets are the
+        /// BNNS-fixed rebuild (the older root-level models hit a "tensor as both input and output"
+        /// graph-compile crash on newer BNNS — issue #726). Select the 6-bit, ~2.5x-smaller set
+        /// via `SortformerConfig.precision = .palettized` (fixes RAM-driven crashes on older
+        /// devices at ~+0.9pp DER).
+        public static let modelsSubdirectory = ModelPrecision.fp16.subdirectory
+
         /// Lowest latency for streaming
         public static let defaultVariant: Variant = .fastV2_1
 
-        /// Bundle name for a specific variant
+        /// Bundle name for a specific variant at the default (`.fp16`) precision
         public static func bundle(for variant: Variant) -> String {
             return variant.fileName
         }
 
-        /// Bundle name for a given configuration
+        /// Bundle name for a specific variant at the given precision
+        public static func bundle(for variant: Variant, precision: ModelPrecision) -> String {
+            return variant.fileName(precision: precision)
+        }
+
+        /// Bundle name for a given configuration (honors `config.precision`)
         public static func bundle(for config: SortformerConfig) -> String? {
             guard let variant = config.modelVariant else {
                 return nil
             }
             assert(variant.isCompatible(with: config), "ERROR: Model variant and configuration are not compatible.")
-            return variant.fileName
+            return variant.fileName(precision: config.precision)
         }
 
         /// Default bundle name
@@ -711,6 +756,18 @@ public enum ModelNames {
         /// All Sortformer bundle models required by the downloader
         public static var requiredModels: Set<String> {
             Set(Variant.allCases.map(\.fileName))
+        }
+
+        // MARK: - Offline (whole-window) model
+
+        /// Fused offline model name (v2.1 weights). Unlike the streaming variants this is a single
+        /// graph `mel -> speaker_preds` over a fixed 30.72s window (3072 mel -> 384 output frames),
+        /// with no spkcache/FIFO state — see ``OfflineSortformerDiarizer``.
+        public static let offlineModelName = "SortformerOffline_v2.1"
+
+        /// Compiled-model path for the offline model at the given precision.
+        public static func offlineBundle(precision: ModelPrecision = .fp16) -> String {
+            return "\(precision.subdirectory)/\(offlineModelName).mlmodelc"
         }
     }
 
