@@ -231,6 +231,15 @@ public class DownloadUtils {
                 throw error
             }
 
+            // Cancellation is not corruption. A cancelled first load (app
+            // teardown, user abort) must never wipe a valid cache — deleting
+            // here threw away fully-downloaded multi-hundred-MB repos.
+            if isCancellationError(error) {
+                logger.info(
+                    "Load cancelled; preserving model cache. \(error.localizedDescription)")
+                throw error
+            }
+
             logger.warning("First load failed: \(error.localizedDescription)")
             logger.info("Deleting cache and re-downloading…")
             let repoPath = directory.appendingPathComponent(repo.folderName)
@@ -256,6 +265,32 @@ public class DownloadUtils {
                 directory: directory, computeUnits: computeUnits, variant: variant,
                 progressHandler: progressHandler)
         }
+    }
+
+    /// `true` when `error` represents cancellation rather than a corrupted
+    /// cache: Swift `CancellationError`, `NSURLErrorCancelled` (-999), or
+    /// `NSUserCancelledError` — checked on the error itself and on the
+    /// `NSUnderlyingErrorKey` chain. The walk is depth-capped at 8 links as
+    /// cycle protection (real-world wrapping is 1–2 levels deep).
+    ///
+    /// Used by ``loadModels(_:modelNames:directory:computeUnits:variant:progressHandler:)``
+    /// to skip the delete-cache-and-redownload fallback for cancelled loads.
+    static func isCancellationError(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+
+        var current: NSError? = error as NSError
+        var depth = 0
+        while let nsError = current, depth < 8 {
+            if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
+                return true
+            }
+            if nsError.domain == NSCocoaErrorDomain, nsError.code == NSUserCancelledError {
+                return true
+            }
+            current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+            depth += 1
+        }
+        return false
     }
 
     public static func clearModelCache(forRepo repo: Repo, directory: URL) {
