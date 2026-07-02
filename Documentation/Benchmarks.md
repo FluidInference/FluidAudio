@@ -117,6 +117,38 @@ swift run -c release fluidaudiocli unified-benchmark --mode streaming --max-file
 swift run -c release fluidaudiocli unified-benchmark --mode batch --precision fp16
 ```
 
+## Nemotron Speech Streaming 0.6B (English)
+
+Cache-aware FastConformer-RNNT streaming, English. Mel features are computed **natively in
+Swift** (`NemotronMelExtractor` → `AudioMelSpectrogram`, NeMo `normalize: NA` raw log-mel) —
+there is no CoreML preprocessor stage. It was removed in the issue #739 fix: the preprocessor's
+flexible `RangeDim` audio input was the source of the `ios17.slice_by_index: zero shape error`
+("Skipped adding default_function to entry point: main") ANE warning behind the iPadOS
+cold-start empty-transcript failure. Encoder int8 on ANE (`.cpuAndNeuralEngine`).
+
+Model: [FluidInference/nemotron-speech-streaming-en-0.6b-coreml](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml)
+
+### LibriSpeech test-clean (2620 files, 53,120 words, ~5.4h audio)
+
+| Chunk tier | Aggregate WER | RTFx | Errors / words |
+|------------|---------------|------|----------------|
+| 560 ms (lowest latency) | 2.71%     | 40.7x | 1442 / 53120 |
+| 1120 ms (trained chunk) | **2.58%** | 24.3x | 1369 / 53120 |
+| 2240 ms (default)       | 2.64%     | 87.4x | 1403 / 53120 |
+
+- **WER** is aggregate (total errors ÷ total words across all 2620 files).
+- **RTFx** is end-to-end single-stream (Swift mel + int8 ANE encode + greedy RNN-T), release
+  build, Apple Silicon; absolute RTFx is machine/load-dependent, relative ordering is stable.
+- Accuracy is essentially flat across tiers (2.58–2.71%). 1120 ms has the best WER but lowest
+  throughput; 2240 ms (default) is the throughput sweet spot, within ~0.06 pp of the best WER.
+- Parity: `NemotronMelExtractor` matches NeMo PyTorch raw log-mel to max |Δ| ≈ 9e-3 — the WER
+  here confirms end-to-end correctness (a wrong mel front-end would collapse WER).
+- Multilingual FLEURS results: see [NemotronMultilingual.md](ASR/NemotronMultilingual.md).
+
+```bash
+swift run -c release fluidaudiocli nemotron-benchmark --subset test-clean --chunk <560|1120|2240>
+```
+
 ## Transcription with Keyword Boosting
 
 CTC-based custom vocabulary boosting system, which enables accurate recognition of domain-specific terms (company names, technical jargon, proper nouns) without retraining the ASR model.
