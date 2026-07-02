@@ -96,6 +96,10 @@ struct FluidAudioCLI {
             await CohereTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "cohere-benchmark":
             await CohereBenchmark.run(arguments: Array(arguments.dropFirst(2)))
+        case "canary-transcribe":
+            await CanaryTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "canary-earnings-benchmark":
+            await CanaryEarningsBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
