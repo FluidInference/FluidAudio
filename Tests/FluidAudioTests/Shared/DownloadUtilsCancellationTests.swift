@@ -68,13 +68,26 @@ final class DownloadUtilsCancellationTests: XCTestCase {
         XCTAssertFalse(DownloadUtils.isCancellationError(error))
     }
 
-    func testUnderlyingChainCycleTerminates() {
-        // Self-referential underlying chain must not loop forever; the
-        // walker is depth-capped.
+    func testNonCancellationUnderlyingChainNotClassified() {
+        // A wrapped chain with no cancellation anywhere stays classified
+        // as a genuine failure.
         let inner = NSError(domain: "com.example.a", code: 1)
         let outer = NSError(
             domain: "com.example.b", code: 2,
             userInfo: [NSUnderlyingErrorKey: inner])
         XCTAssertFalse(DownloadUtils.isCancellationError(outer))
+    }
+
+    func testDepthCapTerminatesLongChain() {
+        // Chains deeper than the 8-link cap must terminate (cycle
+        // protection) — cancellation buried beyond the cap is not found,
+        // and the walk returns rather than recursing indefinitely.
+        var error = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        for i in 0..<12 {
+            error = NSError(
+                domain: "com.example.wrap\(i)", code: i,
+                userInfo: [NSUnderlyingErrorKey: error])
+        }
+        XCTAssertFalse(DownloadUtils.isCancellationError(error))
     }
 }

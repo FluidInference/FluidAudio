@@ -269,8 +269,9 @@ public class DownloadUtils {
 
     /// `true` when `error` represents cancellation rather than a corrupted
     /// cache: Swift `CancellationError`, `NSURLErrorCancelled` (-999), or
-    /// `NSUserCancelledError` — including anywhere in the underlying-error
-    /// chain (`NSUnderlyingErrorKey`).
+    /// `NSUserCancelledError` — checked on the error itself and on the
+    /// `NSUnderlyingErrorKey` chain. The walk is depth-capped at 8 links as
+    /// cycle protection (real-world wrapping is 1–2 levels deep).
     ///
     /// Used by ``loadModels(_:modelNames:directory:computeUnits:variant:progressHandler:)``
     /// to skip the delete-cache-and-redownload fallback for cancelled loads.
