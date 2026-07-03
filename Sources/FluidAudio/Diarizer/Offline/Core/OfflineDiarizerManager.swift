@@ -321,11 +321,34 @@ public final class OfflineDiarizerManager {
             logger.debug("Clustering completed in \(clusteringTime)s with no assignments")
         }
 
+        // Zero-vote runs carry no clustering evidence, so reconstruction re-embeds their
+        // exact audio span to pick a speaker. Extraction needs models + audio, which the
+        // reconstruction helper doesn't own — hand it a closure instead.
+        let spanEmbedder: ((Double, Double) -> [Float]?)?
+        if config.zeroVoteReembed.enabled, !centroids.isEmpty {
+            let extractor = OfflineEmbeddingExtractor(
+                fbankModel: models.fbankModel,
+                embeddingModel: models.embeddingModel,
+                pldaTransform: pldaTransform,
+                config: config
+            )
+            spanEmbedder = { startSeconds, endSeconds in
+                try? extractor.embedSpan(
+                    audioSource: audioSource,
+                    startSeconds: startSeconds,
+                    endSeconds: endSeconds
+                )
+            }
+        } else {
+            spanEmbedder = nil
+        }
+
         let reconstruction = OfflineReconstruction(config: config)
         let segments = reconstruction.buildSegments(
             segmentation: segmentation,
             hardClusters: chunkAssignments,
-            centroids: centroids
+            centroids: centroids,
+            spanEmbedder: spanEmbedder
         )
 
         let speakerDatabase = reconstruction.buildSpeakerDatabase(segments: segments)
