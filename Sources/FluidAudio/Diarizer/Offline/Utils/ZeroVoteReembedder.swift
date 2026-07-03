@@ -53,8 +53,11 @@ enum ZeroVoteReembedder {
         var runStart: Int? = nil
 
         for frame in 0..<frameCount {
+            // Single-speaker frames only: an overlap frame (2+ active speakers) with zero
+            // votes must keep the existing behavior — re-embedding would collapse the
+            // overlap to one speaker and silently change overlap semantics.
             let isZeroVote =
-                speakerCountPerFrame[frame] > 0
+                speakerCountPerFrame[frame] == 1
                 && activationSums[frame].allSatisfy { $0 == 0 }
 
             if isZeroVote {

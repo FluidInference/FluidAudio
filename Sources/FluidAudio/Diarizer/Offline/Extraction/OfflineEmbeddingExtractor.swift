@@ -228,7 +228,8 @@ struct OfflineEmbeddingExtractor {
 
     /// Extract a single raw 256-dim embedding over an exact time span of the audio.
     ///
-    /// Used by the short-segment relabel post-pass: the span's samples are placed at the
+    /// Used by span re-embedding post-passes (zero-vote re-embed; the fork's
+    /// short-segment relabel): the span's samples are placed at the
     /// start of a zero-padded model window and an all-active weight mask covering only the
     /// span's frames is applied, so the embedding reflects the span's speaker exclusively
     /// (neighboring audio never leaks in through the mask).
@@ -256,7 +257,11 @@ struct OfflineEmbeddingExtractor {
 
         var buffer = [Float](repeating: 0, count: config.samplesPerWindow)
         try buffer.withUnsafeMutableBufferPointer { pointer in
-            guard let baseAddress = pointer.baseAddress else { return }
+            guard let baseAddress = pointer.baseAddress else {
+                throw OfflineDiarizationError.processingFailed(
+                    "embedSpan: failed to access span buffer"
+                )
+            }
             try audioSource.copySamples(
                 into: baseAddress,
                 offset: startSample,

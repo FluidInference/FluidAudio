@@ -233,10 +233,7 @@ struct OfflineReconstruction {
         }
 
         let merged = mergeSegments(rawSegments, gapThreshold: gapThreshold)
-        let output = sanitize(segments: merged)
-
-
-        return output
+        return sanitize(segments: merged)
     }
 
     /// Zero-vote re-embed post-pass over the aggregated frame timeline.

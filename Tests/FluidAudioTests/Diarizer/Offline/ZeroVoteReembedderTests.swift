@@ -32,6 +32,26 @@ final class ZeroVoteReembedderTests: XCTestCase {
         XCTAssertEqual(runs, [2..<7])
     }
 
+    func testOverlapFramesAreNeverDetectedAsZeroVoteRuns() {
+        // Frames 2-6 have zero votes but 2+ active speakers (overlap): re-embedding would
+        // collapse the overlap to one speaker, so they must keep the existing tie-break.
+        let speakerCount = [1, 1, 2, 2, 2, 2, 2, 1]
+        let sums: [[Double]] = [
+            [0.9, 0], [0.8, 0],
+            [0, 0], [0, 0], [0, 0], [0, 0], [0, 0],
+            [0.7, 0],
+        ]
+
+        let runs = ZeroVoteReembedder.detectRuns(
+            speakerCountPerFrame: speakerCount,
+            activationSums: sums,
+            frameDuration: 0.1,
+            minDurationSeconds: 0.4
+        )
+
+        XCTAssertEqual(runs, [])
+    }
+
     func testDetectsRunBoundedByNonSpeechGaps() {
         // Non-speech frames (speakerCount 0) delimit the run even with zero sums everywhere.
         let speakerCount = [0, 1, 1, 1, 1, 1, 0, 0]
