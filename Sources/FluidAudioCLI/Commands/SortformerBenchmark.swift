@@ -608,7 +608,7 @@ enum SortformerBenchmark {
             // Fall back to AMI word-aligned annotations if no RTTM available (AMI only)
             if groundTruth.isEmpty && dataset == .ami {
                 print("   [RTTM] No RTTM file, falling back to AMI word-aligned annotations")
-                groundTruth = await AMIParser.loadWordAlignedGroundTruth(
+                groundTruth = try AMIParser.loadWordAlignedGroundTruth(
                     for: meetingName,
                     duration: duration
                 )

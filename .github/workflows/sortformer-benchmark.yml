@@ -44,6 +44,12 @@ jobs:
           path: ~/FluidAudioDatasets/ami_official
           key: ${{ runner.os }}-ami-dataset
 
+      - name: Cache AMI annotations
+        uses: actions/cache@v4
+        with:
+          path: Datasets/ami_public_1.6.2
+          key: ${{ runner.os }}-ami-annotations-1.6.2
+
       - name: Build package
         run: swift build -c release
 

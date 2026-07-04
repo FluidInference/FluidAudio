@@ -44,6 +44,12 @@ jobs:
           path: ~/FluidAudioDatasets/ami_official
           key: ${{ runner.os }}-ami-dataset-${{ hashFiles('Sources/FluidAudioCLI/DatasetParsers/DatasetDownloader.swift') }}
 
+      - name: Cache AMI annotations
+        uses: actions/cache@v4
+        with:
+          path: Datasets/ami_public_1.6.2
+          key: ${{ runner.os }}-ami-annotations-1.6.2
+
       - name: Build package
         run: swift build -c release
 
@@ -123,7 +129,9 @@ jobs:
           fi
 
       - name: Comment PR with Benchmark Results
-        if: always()
+        # Only comment when metrics were actually extracted — a failed run must
+        # show up as a red check, not a comment with garbage numbers (issue #752)
+        if: steps.extract.outcome == 'success'
         uses: actions/github-script@v7
         with:
           script: |

@@ -191,14 +191,27 @@ struct DatasetDownloader {
             return
         }
 
-        // Download and extract AMI manual annotations v1.6.2
+        // Download and extract AMI manual annotations v1.6.2.
+        // The Edinburgh server is occasionally flaky, so retry with backoff —
+        // a single transient failure here once poisoned a CI benchmark run
+        // with placeholder ground truth (issue #752).
         let zipURL =
             "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip"
         let zipFile = annotationsDir.appendingPathComponent("ami_public_manual_1.6.2.zip")
-        let zipSuccess = await downloadAnnotationFile(from: zipURL, to: zipFile)
+
+        var zipSuccess = false
+        let maxAttempts = 3
+        for attempt in 1...maxAttempts {
+            zipSuccess = await downloadAnnotationFile(from: zipURL, to: zipFile)
+            if zipSuccess { break }
+            logger.warning("Annotation download attempt \(attempt)/\(maxAttempts) failed")
+            if attempt < maxAttempts {
+                try? await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
+            }
+        }
 
         if !zipSuccess {
-            logger.error("Failed to download AMI annotations")
+            logger.error("Failed to download AMI annotations after \(maxAttempts) attempts")
             return
         }
 

@@ -69,6 +69,53 @@ final class AMIParserTests: XCTestCase {
         XCTAssertEqual(segments[2].end, 1.02, accuracy: 0.0001)
     }
 
+    func testLoadAMIGroundTruthThrowsWhenAnnotationsMissing() throws {
+        let missingRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        XCTAssertThrowsError(
+            try AMIParser.loadAMIGroundTruth(
+                for: "ES2004a",
+                duration: 30,
+                searchRoots: [missingRoot]
+            )
+        ) { error in
+            guard case AMIParserError.annotationsNotFound(let subdirectory) = error else {
+                return XCTFail("Expected annotationsNotFound, got \(error)")
+            }
+            XCTAssertEqual(subdirectory, "segments")
+        }
+    }
+
+    func testLoadWordAlignedGroundTruthThrowsWhenAnnotationsMissing() throws {
+        let missingRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        XCTAssertThrowsError(
+            try AMIParser.loadWordAlignedGroundTruth(
+                for: "ES2004a",
+                duration: 30,
+                searchRoots: [missingRoot]
+            )
+        ) { error in
+            guard case AMIParserError.annotationsNotFound(let subdirectory) = error else {
+                return XCTFail("Expected annotationsNotFound, got \(error)")
+            }
+            XCTAssertEqual(subdirectory, "words")
+        }
+    }
+
+    func testSearchBasedLoadersResolveFixtureRoot() throws {
+        let fixture = try makeAMIFixture()
+
+        let segments = try AMIParser.loadWordAlignedGroundTruth(
+            for: "ES2004a",
+            duration: 30,
+            searchRoots: [fixture]
+        )
+        XCTAssertEqual(segments.count, 2)
+    }
+
     private func makeAMIFixture() throws -> URL {
         let baseURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
