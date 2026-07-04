@@ -267,19 +267,19 @@ public class DownloadUtils {
         }
     }
 
-    /// Guards the `NSUnderlyingErrorKey` walk against pathological or cyclic
-    /// error chains; real-world wrapping is 1–2 levels deep.
-    private static let maxUnderlyingErrorDepth = 8
-
     /// `true` when `error` represents cancellation (Swift `CancellationError`,
     /// `NSURLErrorCancelled`, or `NSUserCancelledError`, at any depth of the
     /// underlying-error chain) rather than a corrupted cache.
+    ///
+    /// The `NSUnderlyingErrorKey` chain is walked to its end. Visited errors
+    /// are tracked by identity so a self-referential chain terminates without
+    /// an arbitrary depth cap.
     static func isCancellationError(_ error: Error) -> Bool {
         if error is CancellationError { return true }
 
         var current: NSError? = error as NSError
-        var depth = 0
-        while let nsError = current, depth < maxUnderlyingErrorDepth {
+        var visited: Set<ObjectIdentifier> = []
+        while let nsError = current, visited.insert(ObjectIdentifier(nsError)).inserted {
             if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
                 return true
             }
@@ -287,7 +287,6 @@ public class DownloadUtils {
                 return true
             }
             current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
-            depth += 1
         }
         return false
     }

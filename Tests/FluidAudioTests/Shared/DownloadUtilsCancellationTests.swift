@@ -78,16 +78,32 @@ final class DownloadUtilsCancellationTests: XCTestCase {
         XCTAssertFalse(DownloadUtils.isCancellationError(outer))
     }
 
-    func testDepthCapTerminatesLongChain() {
-        // Chains deeper than the 8-link cap must terminate (cycle
-        // protection) — cancellation buried beyond the cap is not found,
-        // and the walk returns rather than recursing indefinitely.
+    func testDeeplyBuriedCancellationDetected() {
+        // Cancellation wrapped far deeper than any realistic chain is still
+        // found: the walk has no depth cap, and detecting cancellation
+        // anywhere is the safe direction (never wipe a good cache).
         var error = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
         for i in 0..<12 {
             error = NSError(
                 domain: "com.example.wrap\(i)", code: i,
                 userInfo: [NSUnderlyingErrorKey: error])
         }
-        XCTAssertFalse(DownloadUtils.isCancellationError(error))
+        XCTAssertTrue(DownloadUtils.isCancellationError(error))
     }
+
+    func testSelfReferentialChainTerminates() {
+        // A genuinely cyclic chain must terminate rather than loop forever.
+        // Plain `NSError` can't form a cycle (its `userInfo` is fixed at
+        // init), so a subclass whose underlying error is itself is the only
+        // honest way to construct one. No cancellation on the cycle → false.
+        XCTAssertFalse(DownloadUtils.isCancellationError(SelfReferentialError()))
+    }
+}
+
+/// `NSError` whose `NSUnderlyingErrorKey` points back at itself, used to
+/// prove the identity-tracked walk terminates on a cycle.
+private final class SelfReferentialError: NSError, @unchecked Sendable {
+    init() { super.init(domain: "com.example.cycle", code: 1, userInfo: nil) }
+    required init?(coder: NSCoder) { super.init(coder: coder) }
+    override var userInfo: [String: Any] { [NSUnderlyingErrorKey: self] }
 }
