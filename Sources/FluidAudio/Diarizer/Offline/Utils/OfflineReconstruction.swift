@@ -297,7 +297,6 @@ struct OfflineReconstruction {
     /// Debug-only dump of the aggregated global frame timeline (post-window-aggregation,
     /// post cluster assignment). No-op unless FLUID_OFFLINE_POSTERIOR_DUMP is set.
 
-
     func buildSpeakerDatabase(
         segments: [TimedSpeakerSegment]
     ) -> [String: [Float]] {
