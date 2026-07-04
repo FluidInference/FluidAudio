@@ -267,20 +267,19 @@ public class DownloadUtils {
         }
     }
 
-    /// `true` when `error` represents cancellation rather than a corrupted
-    /// cache: Swift `CancellationError`, `NSURLErrorCancelled` (-999), or
-    /// `NSUserCancelledError` — checked on the error itself and on the
-    /// `NSUnderlyingErrorKey` chain. The walk is depth-capped at 8 links as
-    /// cycle protection (real-world wrapping is 1–2 levels deep).
-    ///
-    /// Used by ``loadModels(_:modelNames:directory:computeUnits:variant:progressHandler:)``
-    /// to skip the delete-cache-and-redownload fallback for cancelled loads.
+    /// Guards the `NSUnderlyingErrorKey` walk against pathological or cyclic
+    /// error chains; real-world wrapping is 1–2 levels deep.
+    private static let maxUnderlyingErrorDepth = 8
+
+    /// `true` when `error` represents cancellation (Swift `CancellationError`,
+    /// `NSURLErrorCancelled`, or `NSUserCancelledError`, at any depth of the
+    /// underlying-error chain) rather than a corrupted cache.
     static func isCancellationError(_ error: Error) -> Bool {
         if error is CancellationError { return true }
 
         var current: NSError? = error as NSError
         var depth = 0
-        while let nsError = current, depth < 8 {
+        while let nsError = current, depth < maxUnderlyingErrorDepth {
             if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
                 return true
             }
