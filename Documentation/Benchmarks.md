@@ -311,6 +311,17 @@ Model is nearly identical to the base model in terms of quality, performance wis
 ![VAD/speed.png](VAD/speed.png)
 ![VAD/correlation.png](VAD/correlation.png)
 
+Silero VAD v6.2.1 Core ML preflight benchmark on an Apple M1 MacBook Air (`macOS 26.5.1`), using the same `mini50` dataset and threshold as the VAD CI workflow:
+
+```text
+swift run -c release fluidaudiocli vad-benchmark --dataset mini50 --all-files --threshold 0.5 --output musan_vad_results.json
+```
+
+| Model | Accuracy | Precision | Recall | F1-Score | Total time | RTFx |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Upstream baseline | 92.0% | 86.2% | 100.0% | 92.6% | 2.19s | 1117.2x |
+| Silero VAD v6.2.1 | 94.0% | 89.3% | 100.0% | 94.3% | 2.27s | 1077.9x |
+
 Dataset: https://github.com/Lab41/VOiCES-subset
 
 ```text

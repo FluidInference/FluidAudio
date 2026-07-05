@@ -48,7 +48,7 @@ The bundle lives in the `FluidInference/silero-vad-coreml` repo. Keep the folder
         └── ...
 ```
 
-Clone with Git LFS, download the archive from the HuggingFace UI, or copy from a machine that already initialized `VadManager()` (cache path: `~/Library/Application Support/FluidAudio/Models/silero-vad-coreml`).
+Clone with Git LFS, download the archive from the HuggingFace UI, or copy from a machine that already initialized `VadManager()` (default cache path: `~/Library/Application Support/FluidAudio/Models/silero-vad`).
 
 ### Loading without downloads
 
