@@ -1276,22 +1276,55 @@ struct ChunkProcessor {
                 // Edge dedupe: the probe can re-hear the word bordering the
                 // gap at a slightly shifted frame (sometimes with different
                 // capitalisation, i.e. a different token id — "▁for" vs
-                // "▁For"); keep the merged stream's copy, not both.
+                // "▁For"); keep the merged stream's copy, not both. The
+                // comparison must skip punctuation pieces on the merged
+                // stream's side ("else." decodes as ▁else + .), else the
+                // recovered ▁else is compared against "." and slips through.
+                // The tolerance is deliberately tight (0.48s): genuine
+                // stutters ("I I") re-heard by the probe sit further apart.
                 let edgeToleranceFrames = 6
                 func samePiece(_ a: Int, _ b: Int) -> Bool {
                     if a == b { return true }
                     guard let pieceA = vocabulary[a], let pieceB = vocabulary[b] else { return false }
                     return pieceA.lowercased() == pieceB.lowercased()
                 }
-                while let first = candidate.first, samePiece(first.token, current.token),
-                    abs(first.timestamp - current.timestamp) <= edgeToleranceFrames
+                func isPunctuationPiece(_ id: Int) -> Bool {
+                    guard let piece = vocabulary[id], !piece.isEmpty else { return false }
+                    return piece.unicodeScalars.allSatisfy { scalar in
+                        CharacterSet.punctuationCharacters.contains(scalar)
+                            || CharacterSet.symbols.contains(scalar)
+                    }
+                }
+                var leadNeighborIndex = index
+                while leadNeighborIndex > 0, isPunctuationPiece(working[leadNeighborIndex].token) {
+                    leadNeighborIndex -= 1
+                }
+                let leadNeighbor = working[leadNeighborIndex]
+                var tailNeighborIndex = index + 1
+                while tailNeighborIndex < working.count - 1, isPunctuationPiece(working[tailNeighborIndex].token) {
+                    tailNeighborIndex += 1
+                }
+                let tailNeighbor = working[tailNeighborIndex]
+                while let first = candidate.first,
+                    samePiece(first.token, leadNeighbor.token),
+                    abs(first.timestamp - leadNeighbor.timestamp) <= edgeToleranceFrames
                 {
                     candidate.removeFirst()
                 }
-                while let last = candidate.last, samePiece(last.token, next.token),
-                    abs(next.timestamp - last.timestamp) <= edgeToleranceFrames
+                while let last = candidate.last,
+                    samePiece(last.token, tailNeighbor.token),
+                    abs(tailNeighbor.timestamp - last.timestamp) <= edgeToleranceFrames
                 {
                     candidate.removeLast()
+                }
+                // Removing an edge token can expose continuation pieces (or
+                // orphaned punctuation) at the head — re-trim.
+                if let safeIds = spliceSafeTokenIds {
+                    while let first = candidate.first,
+                        !safeIds.contains(first.token) || isPunctuationPiece(first.token)
+                    {
+                        candidate.removeFirst()
+                    }
                 }
 
                 if !candidate.isEmpty {
