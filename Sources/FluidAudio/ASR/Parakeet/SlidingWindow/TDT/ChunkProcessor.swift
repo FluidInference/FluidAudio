@@ -598,6 +598,24 @@ struct ChunkProcessor {
             mergedTokens.sort { $0.timestamp < $1.timestamp }
         }
 
+        // Issue #758: the merge above can deterministically drop multi-second
+        // spans of clear speech at a chunk seam. Detect suspicious gaps and
+        // re-decode each with a fresh window centred on the gap, where the
+        // seam does not exist.
+        if orderedChunkOutputs.count > 1, mergedTokens.count > 1, await manager.seamGapRepair {
+            let vocabulary = await manager.vocabulary
+            mergedTokens = try await repairSeamGaps(
+                in: mergedTokens,
+                using: workers[0],
+                decoderLayers: decoderLayers,
+                maxModelSamples: maxModelSamples,
+                minGapSeconds: await manager.seamGapRepairMinGapSeconds,
+                spliceSafeTokenIds: Self.spliceSafeTokenIds(vocabulary: vocabulary),
+                vocabulary: vocabulary,
+                language: language
+            )
+        }
+
         let allTokens = mergedTokens.map { $0.token }
         let allTimestamps = mergedTokens.map { $0.timestamp }
         let allConfidences = mergedTokens.map { $0.confidence }
@@ -1115,5 +1133,207 @@ struct ChunkProcessor {
             }
         }
         return Array(left[..<leftEnd]) + Array(right[rightStart...])
+    }
+
+    // MARK: - Seam-gap repair (issue #758)
+
+    /// Maximum number of gap probes per file — a backstop against
+    /// pathological inputs (e.g. hours of intermittent noise). A half-hour
+    /// conference recording with applause breaks legitimately probes ~12
+    /// gaps, and iteration over residual gaps needs headroom beyond that.
+    private var maxSeamGapRepairs: Int { 32 }
+
+    /// Per-frame RMS above this counts as speech-like energy inside a gap.
+    /// Comfortably above the library's quiet threshold (0.003 in
+    /// `shouldUseWarmupPrefix`) so room tone and hiss do not trigger probes.
+    private var seamGapSpeechRmsThreshold: Float { 0.008 }
+
+    /// Minimum cumulative speech-like audio inside a gap before it is
+    /// probed. Genuine pauses with a stray cough stay untouched.
+    private var seamGapMinSpeechSeconds: Double { 0.5 }
+
+    /// Detect inter-token gaps that plausibly contain dropped speech and
+    /// re-decode each with a single fresh window centred on the gap. Because
+    /// the window is decoded from silence-free state with no seam inside it,
+    /// it recovers spans the chunk merger dropped (issue #758). Only tokens
+    /// strictly inside the gap are spliced in, starting at a word-initial
+    /// piece; a gap of genuine silence produces no in-gap tokens and the
+    /// stream is returned unchanged.
+    private func repairSeamGaps(
+        in tokens: [TokenWindow],
+        using manager: AsrManager,
+        decoderLayers: Int,
+        maxModelSamples: Int,
+        minGapSeconds: Double,
+        spliceSafeTokenIds: Set<Int>?,
+        vocabulary: [Int: String],
+        language: Language?
+    ) async throws -> [TokenWindow] {
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        let frameDuration = ASRConstants.secondsPerEncoderFrame
+        let minGapFrames = max(2, Int(minGapSeconds / frameDuration))
+        // Same frame-aligned usable window size the chunker uses (no context
+        // reservation — the repair window is decoded standalone).
+        let windowSamples = max(
+            frameSamples,
+            (maxModelSamples - ASRConstants.melHopSize) / frameSamples * frameSamples
+        )
+
+        var working = tokens
+        var probes = 0
+        var probedGapStarts = Set<Int>()
+        // A successful repair can leave a residual gap (e.g. recovered
+        // speech, then applause, then more dropped speech): iterate so the
+        // residual — whose start has moved — gets its own probe. Gaps that
+        // yielded nothing keep the same start and are skipped via the memo.
+        for _ in 0..<3 {
+            var inserts: [TokenWindow] = []
+
+            for index in 0..<(working.count - 1) {
+                guard probes < maxSeamGapRepairs else { break }
+
+                let current = working[index]
+                let next = working[index + 1]
+                // Conservative end of the current token: its decoded duration
+                // when present, else one frame (mirrors mergeChunks).
+                let gapStartFrame = current.timestamp + max(1, current.duration)
+                let gapEndFrame = next.timestamp
+                guard gapEndFrame - gapStartFrame >= minGapFrames else { continue }
+                guard !probedGapStarts.contains(gapStartFrame) else { continue }
+
+                let gapStartSample = gapStartFrame * frameSamples
+                let gapEndSample = min(gapEndFrame * frameSamples, totalSamples)
+                guard gapEndSample > gapStartSample else { continue }
+
+                let speechSeconds = try speechLikeSeconds(from: gapStartSample, to: gapEndSample)
+                guard speechSeconds >= seamGapMinSpeechSeconds else { continue }
+                probedGapStarts.insert(gapStartFrame)
+                probes += 1
+
+            // Probe placement matters: the merger dropped this span because
+            // the decoder blanks after low-SNR audio, and a probe window that
+            // replays the same pre-gap audio can blank the same way. Start
+            // the fresh window AT the gap (the decoder cold-starts directly
+            // on the dropped speech, without the noise history); fall back
+            // to a gap-centred window for spans the first placement misses.
+            let gapCenterSample = (gapStartSample + gapEndSample) / 2
+            let placements = [gapStartSample, gapCenterSample - windowSamples / 2]
+            var recovered: [TokenWindow] = []
+
+            for placement in placements {
+                var windowStart = max(0, min(placement, totalSamples - windowSamples))
+                windowStart = windowStart / frameSamples * frameSamples
+                let windowEnd = min(windowStart + windowSamples, totalSamples)
+                guard windowEnd > windowStart else { continue }
+
+                var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
+                decoderState.reset()
+                let windowAudio = try readSamples(offset: windowStart, count: windowEnd - windowStart)
+                let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
+                    try await Self.transcribeChunk(
+                        samples: windowAudio,
+                        contextSamples: 0,
+                        chunkStart: windowStart,
+                        isLastChunk: windowEnd >= totalSamples,
+                        using: manager,
+                        decoderState: &decoderState,
+                        maxModelSamples: maxModelSamples,
+                        language: language
+                    )
+
+                guard windowTokens.count == windowTimestamps.count,
+                    windowTokens.count == windowConfidences.count
+                else { continue }
+                let durations =
+                    windowDurations.count == windowTokens.count
+                    ? windowDurations : Array(repeating: 0, count: windowTokens.count)
+
+                // Keep only tokens strictly inside the gap (one-frame margins)
+                // so words the merged stream already has are never duplicated.
+                var candidate: [TokenWindow] = []
+                for tokenIndex in 0..<windowTokens.count {
+                    let timestamp = windowTimestamps[tokenIndex]
+                    guard timestamp > gapStartFrame, timestamp < gapEndFrame - 1 else { continue }
+                    candidate.append(
+                        (
+                            token: windowTokens[tokenIndex],
+                            timestamp: timestamp,
+                            confidence: windowConfidences[tokenIndex],
+                            duration: durations[tokenIndex]
+                        )
+                    )
+                }
+
+                // Never splice in mid-word: drop leading continuation pieces
+                // so the recovered run starts at a word-initial (or
+                // punctuation) piece (same rule as the seam merge, #683).
+                if let safeIds = spliceSafeTokenIds {
+                    while let first = candidate.first, !safeIds.contains(first.token) {
+                        candidate.removeFirst()
+                    }
+                }
+
+                // Edge dedupe: the probe can re-hear the word bordering the
+                // gap at a slightly shifted frame (sometimes with different
+                // capitalisation, i.e. a different token id — "▁for" vs
+                // "▁For"); keep the merged stream's copy, not both.
+                let edgeToleranceFrames = 6
+                func samePiece(_ a: Int, _ b: Int) -> Bool {
+                    if a == b { return true }
+                    guard let pieceA = vocabulary[a], let pieceB = vocabulary[b] else { return false }
+                    return pieceA.lowercased() == pieceB.lowercased()
+                }
+                while let first = candidate.first, samePiece(first.token, current.token),
+                    abs(first.timestamp - current.timestamp) <= edgeToleranceFrames
+                {
+                    candidate.removeFirst()
+                }
+                while let last = candidate.last, samePiece(last.token, next.token),
+                    abs(next.timestamp - last.timestamp) <= edgeToleranceFrames
+                {
+                    candidate.removeLast()
+                }
+
+                if !candidate.isEmpty {
+                    recovered = candidate
+                    break
+                }
+            }
+
+                guard !recovered.isEmpty else { continue }
+                logger.info(
+                    "Seam-gap repair: recovered \(recovered.count) tokens in "
+                        + String(format: "%.2fs", Double(gapStartFrame) * frameDuration) + "–"
+                        + String(format: "%.2fs", Double(gapEndFrame) * frameDuration) + " gap"
+                )
+                inserts.append(contentsOf: recovered)
+            }
+
+            guard !inserts.isEmpty else { break }
+            working.append(contentsOf: inserts)
+            working.sort { $0.timestamp < $1.timestamp }
+        }
+
+        return working
+    }
+
+    /// Cumulative duration of speech-like audio (per-frame RMS above
+    /// `seamGapSpeechRmsThreshold`) between two sample offsets.
+    private func speechLikeSeconds(from startSample: Int, to endSample: Int) throws -> Double {
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        var speechFrames = 0
+        var offset = startSample
+        while offset + frameSamples <= endSample {
+            let samples = try readSamples(offset: offset, count: frameSamples)
+            var sum: Float = 0
+            for sample in samples {
+                sum += sample * sample
+            }
+            if sqrt(sum / Float(samples.count)) > seamGapSpeechRmsThreshold {
+                speechFrames += 1
+            }
+            offset += frameSamples
+        }
+        return Double(speechFrames) * ASRConstants.secondsPerEncoderFrame
     }
 }
