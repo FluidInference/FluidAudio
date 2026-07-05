@@ -1042,6 +1042,13 @@ struct ChunkProcessor {
                     }
                     if let resume = tail.firstIndex(where: { safeIds.contains($0.token) }) {
                         result.append(contentsOf: tail[resume...])
+                    } else {
+                        // No word-initial piece anywhere in the tail — the
+                        // right window simply ended mid-word. Keep its
+                        // continuation pieces verbatim rather than silently
+                        // dropping real content (a possible glue beats
+                        // dropping a word).
+                        result.append(contentsOf: tail)
                     }
                 }
             } else {
@@ -1070,19 +1077,18 @@ struct ChunkProcessor {
     /// Remove the trailing seam word (continuation pieces plus its
     /// word-initial piece) from `result` so the right window's segmentation
     /// of the same word can replace it. Returns false — leaving `result`
-    /// untouched — when no word-initial piece exists within a plausible
-    /// word length.
+    /// untouched — when no word-initial piece exists in `result` at all.
+    /// Bounded only by the start of `result`, symmetric with the unbounded
+    /// backward search `wordInitialIndex` does on the `right` side — a fixed
+    /// per-word piece cap would false-negative on long seam words.
     private func popSeamWord(from result: inout [TokenWindow], safeIds: Set<Int>) -> Bool {
-        let maxPiecesPerWord = 12
         var cursor = result.count - 1
-        var inspected = 0
-        while cursor >= 0, inspected < maxPiecesPerWord {
+        while cursor >= 0 {
             if safeIds.contains(result[cursor].token) {
                 result.removeLast(result.count - cursor)
                 return true
             }
             cursor -= 1
-            inspected += 1
         }
         return false
     }
@@ -1110,8 +1116,17 @@ struct ChunkProcessor {
                     leftEnd += 1
                 }
             }
-            while rightStart < right.count, !safeIds.contains(right[rightStart].token) {
-                rightStart += 1
+            // Scan into a temporary index first: only adopt the advanced
+            // cutoff if a splice-safe token was actually found ahead of it.
+            // If none exists, the loop would otherwise walk `rightStart` all
+            // the way to `right.count`, discarding the entire right window —
+            // fall back to the original cutoff-based split instead.
+            var scanIndex = rightStart
+            while scanIndex < right.count, !safeIds.contains(right[scanIndex].token) {
+                scanIndex += 1
+            }
+            if scanIndex < right.count {
+                rightStart = scanIndex
             }
         }
         return Array(left[..<leftEnd]) + Array(right[rightStart...])
