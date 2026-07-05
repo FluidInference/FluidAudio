@@ -1152,6 +1152,118 @@ struct ChunkProcessor {
     /// probed. Genuine pauses with a stray cough stay untouched.
     private var seamGapMinSpeechSeconds: Double { 0.5 }
 
+    /// A piece consisting solely of punctuation/symbol scalars (e.g. the
+    /// "." in "else." = ▁else + .). Skipped when resolving the word bordering
+    /// a gap for edge dedupe.
+    static func isPunctuationOnlyPiece(_ id: Int, vocabulary: [Int: String]) -> Bool {
+        guard let piece = vocabulary[id], !piece.isEmpty else { return false }
+        return piece.unicodeScalars.allSatisfy { scalar in
+            CharacterSet.punctuationCharacters.contains(scalar)
+                || CharacterSet.symbols.contains(scalar)
+        }
+    }
+
+    /// The token of the word bordering a gap, walking past punctuation-only
+    /// pieces (`step` -1 walks left from the token before the gap, +1 walks
+    /// right from the token after it).
+    static func wordNeighbor(
+        in stream: [TokenWindow],
+        from index: Int,
+        step: Int,
+        vocabulary: [Int: String]
+    ) -> TokenWindow {
+        var neighborIndex = index
+        while neighborIndex + step >= 0,
+            neighborIndex + step < stream.count,
+            isPunctuationOnlyPiece(stream[neighborIndex].token, vocabulary: vocabulary)
+        {
+            neighborIndex += step
+        }
+        return stream[neighborIndex]
+    }
+
+    /// Filter a probe window's decoded tokens down to the run that may be
+    /// spliced into a gap:
+    ///
+    /// - only tokens strictly inside the gap (one-frame margins), so words
+    ///   the merged stream already has are never duplicated;
+    /// - never splice in mid-word — the run starts at a word-initial (or
+    ///   punctuation) piece (same rule as the seam merge, #683);
+    /// - edge dedupe: the probe can re-hear the word bordering the gap at a
+    ///   slightly shifted frame, sometimes with different capitalisation
+    ///   ("▁for" vs "▁For") — keep the merged stream's copy, not both. The
+    ///   tolerance is deliberately tight (6 frames = 0.48s): genuine
+    ///   stutters ("I I") re-heard by the probe sit at or beyond it.
+    static func spliceCandidate(
+        windowTokens: [Int],
+        windowTimestamps: [Int],
+        windowConfidences: [Float],
+        windowDurations: [Int],
+        gapStartFrame: Int,
+        gapEndFrame: Int,
+        leadNeighbor: TokenWindow,
+        tailNeighbor: TokenWindow,
+        spliceSafeTokenIds: Set<Int>?,
+        vocabulary: [Int: String]
+    ) -> [TokenWindow] {
+        let edgeToleranceFrames = 6
+        func samePiece(_ a: Int, _ b: Int) -> Bool {
+            if a == b { return true }
+            guard let pieceA = vocabulary[a], let pieceB = vocabulary[b] else { return false }
+            return pieceA.lowercased() == pieceB.lowercased()
+        }
+
+        var candidate: [TokenWindow] = []
+        for tokenIndex in 0..<windowTokens.count {
+            let timestamp = windowTimestamps[tokenIndex]
+            guard timestamp > gapStartFrame, timestamp < gapEndFrame - 1 else { continue }
+            candidate.append(
+                (
+                    token: windowTokens[tokenIndex],
+                    timestamp: timestamp,
+                    confidence: windowConfidences[tokenIndex],
+                    duration: windowDurations[tokenIndex]
+                )
+            )
+        }
+
+        if let safeIds = spliceSafeTokenIds {
+            while let first = candidate.first, !safeIds.contains(first.token) {
+                candidate.removeFirst()
+            }
+        }
+
+        while let first = candidate.first,
+            samePiece(first.token, leadNeighbor.token),
+            abs(first.timestamp - leadNeighbor.timestamp) <= edgeToleranceFrames
+        {
+            candidate.removeFirst()
+        }
+        while let last = candidate.last,
+            samePiece(last.token, tailNeighbor.token),
+            abs(tailNeighbor.timestamp - last.timestamp) <= edgeToleranceFrames
+        {
+            candidate.removeLast()
+        }
+        // Removing an edge token can expose continuation pieces (or orphaned
+        // punctuation) at the head — re-trim.
+        if let safeIds = spliceSafeTokenIds {
+            while let first = candidate.first,
+                !safeIds.contains(first.token) || isPunctuationOnlyPiece(first.token, vocabulary: vocabulary)
+            {
+                candidate.removeFirst()
+            }
+        }
+
+        return candidate
+    }
+
+    #if DEBUG
+    internal func speechLikeSecondsForTesting(from startSample: Int, to endSample: Int) throws -> Double {
+        try speechLikeSeconds(from: startSample, to: endSample)
+    }
+    #endif
+
     /// Detect inter-token gaps that plausibly contain dropped speech and
     /// re-decode each with a single fresh window centred on the gap. Because
     /// the window is decoded from silence-free state with no seam inside it,
@@ -1248,84 +1360,18 @@ struct ChunkProcessor {
                         windowDurations.count == windowTokens.count
                         ? windowDurations : Array(repeating: 0, count: windowTokens.count)
 
-                    // Keep only tokens strictly inside the gap (one-frame margins)
-                    // so words the merged stream already has are never duplicated.
-                    var candidate: [TokenWindow] = []
-                    for tokenIndex in 0..<windowTokens.count {
-                        let timestamp = windowTimestamps[tokenIndex]
-                        guard timestamp > gapStartFrame, timestamp < gapEndFrame - 1 else { continue }
-                        candidate.append(
-                            (
-                                token: windowTokens[tokenIndex],
-                                timestamp: timestamp,
-                                confidence: windowConfidences[tokenIndex],
-                                duration: durations[tokenIndex]
-                            )
-                        )
-                    }
-
-                    // Never splice in mid-word: drop leading continuation pieces
-                    // so the recovered run starts at a word-initial (or
-                    // punctuation) piece (same rule as the seam merge, #683).
-                    if let safeIds = spliceSafeTokenIds {
-                        while let first = candidate.first, !safeIds.contains(first.token) {
-                            candidate.removeFirst()
-                        }
-                    }
-
-                    // Edge dedupe: the probe can re-hear the word bordering the
-                    // gap at a slightly shifted frame (sometimes with different
-                    // capitalisation, i.e. a different token id — "▁for" vs
-                    // "▁For"); keep the merged stream's copy, not both. The
-                    // comparison must skip punctuation pieces on the merged
-                    // stream's side ("else." decodes as ▁else + .), else the
-                    // recovered ▁else is compared against "." and slips through.
-                    // The tolerance is deliberately tight (0.48s): genuine
-                    // stutters ("I I") re-heard by the probe sit further apart.
-                    let edgeToleranceFrames = 6
-                    func samePiece(_ a: Int, _ b: Int) -> Bool {
-                        if a == b { return true }
-                        guard let pieceA = vocabulary[a], let pieceB = vocabulary[b] else { return false }
-                        return pieceA.lowercased() == pieceB.lowercased()
-                    }
-                    func isPunctuationPiece(_ id: Int) -> Bool {
-                        guard let piece = vocabulary[id], !piece.isEmpty else { return false }
-                        return piece.unicodeScalars.allSatisfy { scalar in
-                            CharacterSet.punctuationCharacters.contains(scalar)
-                                || CharacterSet.symbols.contains(scalar)
-                        }
-                    }
-                    var leadNeighborIndex = index
-                    while leadNeighborIndex > 0, isPunctuationPiece(working[leadNeighborIndex].token) {
-                        leadNeighborIndex -= 1
-                    }
-                    let leadNeighbor = working[leadNeighborIndex]
-                    var tailNeighborIndex = index + 1
-                    while tailNeighborIndex < working.count - 1, isPunctuationPiece(working[tailNeighborIndex].token) {
-                        tailNeighborIndex += 1
-                    }
-                    let tailNeighbor = working[tailNeighborIndex]
-                    while let first = candidate.first,
-                        samePiece(first.token, leadNeighbor.token),
-                        abs(first.timestamp - leadNeighbor.timestamp) <= edgeToleranceFrames
-                    {
-                        candidate.removeFirst()
-                    }
-                    while let last = candidate.last,
-                        samePiece(last.token, tailNeighbor.token),
-                        abs(tailNeighbor.timestamp - last.timestamp) <= edgeToleranceFrames
-                    {
-                        candidate.removeLast()
-                    }
-                    // Removing an edge token can expose continuation pieces (or
-                    // orphaned punctuation) at the head — re-trim.
-                    if let safeIds = spliceSafeTokenIds {
-                        while let first = candidate.first,
-                            !safeIds.contains(first.token) || isPunctuationPiece(first.token)
-                        {
-                            candidate.removeFirst()
-                        }
-                    }
+                    let candidate = Self.spliceCandidate(
+                        windowTokens: windowTokens,
+                        windowTimestamps: windowTimestamps,
+                        windowConfidences: windowConfidences,
+                        windowDurations: durations,
+                        gapStartFrame: gapStartFrame,
+                        gapEndFrame: gapEndFrame,
+                        leadNeighbor: Self.wordNeighbor(in: working, from: index, step: -1, vocabulary: vocabulary),
+                        tailNeighbor: Self.wordNeighbor(in: working, from: index + 1, step: 1, vocabulary: vocabulary),
+                        spliceSafeTokenIds: spliceSafeTokenIds,
+                        vocabulary: vocabulary
+                    )
 
                     if !candidate.isEmpty {
                         recovered = candidate
