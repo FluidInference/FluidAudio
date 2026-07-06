@@ -1,5 +1,6 @@
 import CoreML
 import Foundation
+import os
 
 /// HuggingFace model downloader using URLSession
 public class DownloadUtils {
@@ -747,7 +748,8 @@ public class DownloadUtils {
     ///   - request: The URLRequest to download.
     ///   - onProgress: Called with `(totalBytesWritten, totalBytesExpected)` as data arrives.
     /// - Returns: The temporary file URL and HTTP response.
-    private static func downloadWithProgress(
+    /// Internal (not private) so a network-gated test can assert progress fires.
+    static func downloadWithProgress(
         request: URLRequest,
         onProgress: @escaping @Sendable (Int64, Int64) -> Void
     ) async throws -> (URL, HTTPURLResponse) {
@@ -760,13 +762,16 @@ public class DownloadUtils {
         )
         defer { session.finishTasksAndInvalidate() }
 
-        let (tempURL, response) = try await session.download(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw HuggingFaceDownloadError.invalidResponse
+        // Explicit download task (not `download(for:)`) so the delegate reports byte progress (#756).
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let task = session.downloadTask(with: request)
+                delegate.attach(continuation: continuation, task: task)
+                task.resume()
+            }
+        } onCancel: {
+            delegate.cancel()
         }
-
-        return (tempURL, httpResponse)
     }
 
     // MARK: - Per-file download with bounded retry
@@ -1077,12 +1082,38 @@ public class DownloadUtils {
 
 // MARK: - URLSession download delegate for byte-level progress
 
-/// Lightweight delegate that forwards `didWriteData` callbacks to a closure.
+/// `URLSessionDownloadTask` → async/await bridge that forwards byte progress (#756).
 private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, Sendable {
+    private struct State {
+        var continuation: CheckedContinuation<(URL, HTTPURLResponse), Error>?
+        var task: URLSessionDownloadTask?
+        var movedURL: URL?
+        var moveError: Error?
+        var finished = false
+    }
+
     private let onProgress: @Sendable (Int64, Int64) -> Void
+    // Holds the non-Sendable continuation; the lock (not `@unchecked`) makes the
+    // delegate Sendable as URLSession requires.
+    private let state = OSAllocatedUnfairLock<State>(uncheckedState: State())
 
     init(onProgress: @escaping @Sendable (Int64, Int64) -> Void) {
         self.onProgress = onProgress
+    }
+
+    /// Register the continuation and task before the task starts.
+    func attach(
+        continuation: CheckedContinuation<(URL, HTTPURLResponse), Error>,
+        task: URLSessionDownloadTask
+    ) {
+        state.withLockUnchecked {
+            $0.continuation = continuation
+            $0.task = task
+        }
+    }
+
+    func cancel() {
+        state.withLockUnchecked { $0.task }?.cancel()
     }
 
     func urlSession(
@@ -1100,6 +1131,44 @@ private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelega
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        // Required by protocol — the async download(for:) API handles the file.
+        // URLSession deletes `location` once this returns; move it somewhere
+        // durable now and hand the moved URL back at completion.
+        let durable = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        do {
+            try FileManager.default.moveItem(at: location, to: durable)
+            state.withLockUnchecked { $0.movedURL = durable }
+        } catch {
+            state.withLockUnchecked { $0.moveError = error }
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        let response = task.response as? HTTPURLResponse
+        // Extract the resume action under the lock, run it after releasing.
+        let resume = state.withLockUnchecked { st -> (() -> Void)? in
+            guard !st.finished, let continuation = st.continuation else { return nil }
+            st.finished = true
+            st.continuation = nil
+            st.task = nil
+            let movedURL = st.movedURL
+            let moveError = st.moveError
+            return {
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let moveError {
+                    continuation.resume(throwing: moveError)
+                } else if let movedURL, let response {
+                    continuation.resume(returning: (movedURL, response))
+                } else {
+                    continuation.resume(throwing: DownloadUtils.HuggingFaceDownloadError.invalidResponse)
+                }
+            }
+        }
+        resume?()
     }
 }
