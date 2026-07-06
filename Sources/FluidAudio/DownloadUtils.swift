@@ -633,14 +633,9 @@ public class DownloadUtils {
             let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedFilePath)
             let request = authorizedRequest(url: fileURL)
 
-            // Download with bounded retry on transient failures. A single TLS or
-            // timeout blip on one of many repo files must not abort the whole
-            // download — the per-file retry absorbs intermittent CDN errors so
-            // the caller doesn't have to restart from zero. Bytes stream into a
-            // persistent `<dest>.partial` file, so a retry (or a whole new run)
-            // resumes a partially-downloaded file with an HTTP Range request
-            // instead of restarting it from byte 0 (#757). See
-            // downloadFileWithRetry for the transient-vs-permanent classification.
+            // Bounded retry on transient failures, with byte-range resume via a
+            // persistent `<dest>.partial` file so retries and re-runs continue a
+            // partially-downloaded file instead of restarting it (#757).
             let onProgress: (@Sendable (Int64, Int64) -> Void)?
             if let handler = progressHandler {
                 let baseBytes = completedBytes
@@ -745,28 +740,19 @@ public class DownloadUtils {
 
     // MARK: - Streaming download to a persistent file
 
-    /// Stream a download directly into `destination`, so bytes already received
-    /// survive a mid-transfer connection drop and a later attempt can resume
-    /// with an HTTP `Range` request instead of restarting from byte 0 (#757).
-    ///
-    /// This is a pure transport helper — the caller is responsible for setting
-    /// resume headers, validating the HTTP status, and moving `destination` to
-    /// its final location. Body bytes are written only for 2xx responses:
-    /// appended after `resumeOffset` on 206, from byte 0 on any other 2xx.
+    /// Stream a download directly into `destination` so received bytes survive
+    /// a mid-transfer drop (#757). Pure transport: the caller sets resume
+    /// headers and validates the HTTP status. Body bytes are written only for
+    /// 2xx — appended after `resumeOffset` on 206, from byte 0 otherwise.
     ///
     /// - Parameters:
-    ///   - request: The URLRequest to download.
-    ///   - destination: File the body is streamed into (created if missing).
-    ///   - resumeOffset: Local byte count a 206 response appends after; also the
-    ///     base added to progress callbacks so resumed progress never dips.
-    ///   - configuration: Session configuration override (tests inject a stub
-    ///     `URLProtocol` here); defaults to the shared session's configuration.
-    ///   - onProgress: Called with `(totalBytesWritten, totalBytesExpected)`
-    ///     as data arrives, including `resumeOffset` in both values.
-    ///   - onResponse: Called once with the HTTP response before any body byte
-    ///     is written — the resume path persists the response validator here so
-    ///     it survives a drop mid-body.
-    /// - Returns: The HTTP response (delegate reports byte progress, #756).
+    ///   - resumeOffset: Byte count a 206 appends after; also the base for
+    ///     progress callbacks so resumed progress never dips.
+    ///   - configuration: Session configuration override for tests.
+    ///   - onProgress: `(totalBytesWritten, totalBytesExpected)`, both
+    ///     including `resumeOffset`. Delegate-driven byte progress (#756).
+    ///   - onResponse: Fires before any body byte is written — the resume path
+    ///     persists the validator here so it survives a drop mid-body.
     /// Internal (not private) so download-resume tests can drive it directly.
     static func streamDownload(
         request: URLRequest,
@@ -803,9 +789,8 @@ public class DownloadUtils {
 
     // MARK: - Per-file download with bounded retry and byte-range resume
 
-    /// Sidecar path storing the HTTP validator (ETag or Last-Modified) of the
-    /// response a partial file came from. Written at response time so a drop
-    /// mid-body still leaves the validator on disk for the next attempt or run.
+    /// Sidecar storing the HTTP validator (ETag/Last-Modified) a partial file
+    /// came from; written at response time so it survives a drop mid-body.
     static func resumeValidatorURL(for partialFileURL: URL) -> URL {
         partialFileURL.appendingPathExtension("etag")
     }
@@ -820,11 +805,9 @@ public class DownloadUtils {
         try? FileManager.default.removeItem(at: resumeValidatorURL(for: partialFileURL))
     }
 
-    /// Pick a resume validator from a fresh (200) response: a strong ETag, else
-    /// Last-Modified. Weak ETags (`W/...`) are unusable for `If-Range` (RFC
-    /// 9110 §13.1.5), and with no validator at all a resume could splice bytes
-    /// from two different versions of the file — so return nil and restart
-    /// from 0 in that case.
+    /// Resume validator for `If-Range`: a strong ETag, else Last-Modified.
+    /// Weak ETags are unusable for `If-Range` (RFC 9110 §13.1.5); nil means
+    /// resume is unsafe and the file restarts from 0.
     private static func resumeValidator(from response: HTTPURLResponse) -> String? {
         if let etag = response.value(forHTTPHeaderField: "ETag"), !etag.hasPrefix("W/") {
             return etag
@@ -832,36 +815,21 @@ public class DownloadUtils {
         return response.value(forHTTPHeaderField: "Last-Modified")
     }
 
-    /// Download a single repo file, retrying transient network failures with
-    /// exponential backoff before validating the HTTP status and returning the
-    /// downloaded file.
+    /// Download a single repo file with bounded exponential-backoff retry on
+    /// transient failures (timeout/TLS/connectivity, HTTP 429/503/5xx; 4xx and
+    /// non-network errors fail fast — see `isRetryableDownloadError`).
     ///
-    /// Transient (retried): URLSession timeout / TLS / connectivity errors and
-    /// HTTP 429/503/5xx. These are the intermittent CDN failures that otherwise
-    /// abort an entire multi-file repo download on the first blip.
-    ///
-    /// Permanent (fails fast, no backoff): 404 and other 4xx, invalid responses,
-    /// and any non-network error — a genuinely missing or misnamed file should
-    /// surface immediately rather than waste the backoff budget.
-    ///
-    /// Resume (#757): bytes are streamed into `partialFileURL` as they arrive,
-    /// so a mid-transfer drop keeps them. A retry sends
-    /// `Range: bytes=<partialSize>-` guarded by `If-Range: <validator>`; the
-    /// server appends via 206 or, if it ignored the range or the remote file
-    /// changed, replies 200 and the file restarts from 0 — never splicing
-    /// mixed-version bytes. Because the partial file and its validator sidecar
-    /// persist on disk, resume also works across process restarts. Progress
-    /// callbacks include the resumed offset, so reported bytes never dip.
+    /// Resume (#757): bytes stream into `partialFileURL`, so a retry — or a new
+    /// process — continues with `Range`/`If-Range` instead of restarting from
+    /// byte 0. A 200 (range ignored / remote changed) restarts the file rather
+    /// than splicing mixed-version bytes.
     ///
     /// - Parameters:
-    ///   - request: The file URLRequest to download.
-    ///   - path: Remote path, used for log/error context.
     ///   - partialFileURL: Where in-flight bytes live (e.g. `<dest>.partial`).
     ///     Pass nil for a unique temp location (in-run resume only).
-    ///   - onProgress: Optional byte-progress callback.
     ///   - configuration: Session configuration override for tests.
-    /// - Returns: The URL of a validated (2xx) download — `partialFileURL`
-    ///   fully written; the caller moves it into the cache.
+    /// - Returns: The URL of a validated (2xx) fully-written download; the
+    ///   caller moves it into the cache.
     /// Internal (not private) so download-resume tests can drive it directly.
     static func downloadFileWithRetry(
         request: URLRequest,
