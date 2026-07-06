@@ -541,8 +541,50 @@ extension AsrModels {
             )
         }
 
+        // The compiled-model download above doesn't cover the vocab JSON that
+        // `load()` needs; guarantee it here (#748).
+        try await ensureVocabularyDownloaded(
+            version: version, encoderPrecision: encoderPrecision, targetDir: targetDir)
+
         logger.info("Successfully downloaded ASR models")
         return targetDir
+    }
+
+    /// On-disk location of the version's vocabulary JSON in a cache rooted at `targetDir`.
+    static func vocabularyFileURL(
+        version: AsrModelVersion,
+        encoderPrecision: ParakeetEncoderPrecision,
+        targetDir: URL
+    ) -> URL {
+        let vocabularyFileName = getModelFileNames(
+            version: version, encoderPrecision: encoderPrecision
+        ).vocabulary
+        return repoPath(from: targetDir, version: version)
+            .appendingPathComponent(vocabularyFileName)
+    }
+
+    /// Fetch the vocabulary JSON from HuggingFace if missing; no-op when already on disk (#748).
+    static func ensureVocabularyDownloaded(
+        version: AsrModelVersion,
+        encoderPrecision: ParakeetEncoderPrecision,
+        targetDir: URL
+    ) async throws {
+        let vocabURL = vocabularyFileURL(
+            version: version, encoderPrecision: encoderPrecision, targetDir: targetDir)
+        let vocabularyFileName = vocabURL.lastPathComponent
+
+        if FileManager.default.fileExists(atPath: vocabURL.path) {
+            return
+        }
+
+        logger.info("Vocabulary \(vocabularyFileName) missing after model download; fetching directly")
+        let remoteURL = try ModelRegistry.resolveModel(version.repo.remotePath, vocabularyFileName)
+        let data = try await DownloadUtils.fetchHuggingFaceFile(
+            from: remoteURL, description: vocabularyFileName)
+        try FileManager.default.createDirectory(
+            at: vocabURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: vocabURL, options: [.atomic])
+        logger.info("Downloaded vocabulary \(vocabularyFileName) (\(data.count / 1024) KB)")
     }
 
     public static func downloadAndLoad(
