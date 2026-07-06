@@ -855,7 +855,10 @@ public class DownloadUtils {
     /// permanent. Transient: URLSession timeout / TLS / connectivity failures and
     /// HTTP 429/503/5xx. Everything else (404/other 4xx, invalid response,
     /// non-network errors) is permanent.
-    private static func isRetryableDownloadError(_ error: Error) -> Bool {
+    ///
+    /// Internal (not private) so retry-policy characterization tests can pin this
+    /// classification ahead of the #765 refactor.
+    static func isRetryableDownloadError(_ error: Error) -> Bool {
         if let urlError = error as? URLError {
             switch urlError.code {
             case .timedOut, .cannotConnectToHost, .cannotFindHost,
