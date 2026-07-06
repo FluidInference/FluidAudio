@@ -440,4 +440,66 @@ final class AsrModelsTests: XCTestCase {
             "Cache check must treat caller-requested model names as required."
         )
     }
+
+    // MARK: - Issue #748: vocabulary must ship with a downloaded ASR cache
+
+    /// A v3 cache with every bundle but no vocab must report incomplete (#748).
+    func testModelsExistTreatsMissingVocabularyAsIncomplete() throws {
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory
+            .appendingPathComponent("AsrModelsTests-#748-\(UUID().uuidString)")
+            .appendingPathComponent(Repo.parakeetV3.folderName)
+        defer { try? fm.removeItem(at: tempDir.deletingLastPathComponent()) }
+
+        let repoDir = tempDir.deletingLastPathComponent()
+            .appendingPathComponent(Repo.parakeetV3.folderName)
+        for name in ModelNames.ASR.requiredModelsV3(precision: .int8) {
+            let modelDir = repoDir.appendingPathComponent(name)
+            try fm.createDirectory(at: modelDir, withIntermediateDirectories: true)
+            try Data().write(to: modelDir.appendingPathComponent("coremldata.bin"))
+        }
+
+        // All bundles present but vocab absent -> cache is incomplete.
+        XCTAssertFalse(
+            AsrModels.modelsExist(at: tempDir, version: .v3, encoderPrecision: .int8),
+            "Cache with bundles but no vocab must be treated as incomplete (#748)."
+        )
+
+        // Adding the vocab alongside the bundles completes the cache.
+        let vocabURL = AsrModels.vocabularyFileURL(
+            version: .v3, encoderPrecision: .int8, targetDir: tempDir)
+        XCTAssertEqual(vocabURL.deletingLastPathComponent().path, repoDir.path)
+        XCTAssertEqual(vocabURL.lastPathComponent, ModelNames.ASR.vocabularyFile)
+        try Data("{}".utf8).write(to: vocabURL)
+
+        XCTAssertTrue(
+            AsrModels.modelsExist(at: tempDir, version: .v3, encoderPrecision: .int8),
+            "Cache with bundles and vocab must be treated as complete."
+        )
+    }
+
+    /// `ensureVocabularyDownloaded` no-ops without overwriting an existing vocab (#748).
+    func testEnsureVocabularyDownloadedNoopsWhenPresent() async throws {
+        let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory
+            .appendingPathComponent("AsrModelsTests-#748-present-\(UUID().uuidString)")
+            .appendingPathComponent(Repo.parakeetV3.folderName)
+        defer { try? fm.removeItem(at: tempDir.deletingLastPathComponent()) }
+
+        let vocabURL = AsrModels.vocabularyFileURL(
+            version: .v3, encoderPrecision: .int8, targetDir: tempDir)
+        try fm.createDirectory(
+            at: vocabURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let sentinel = Data(#"{"already":"here"}"#.utf8)
+        try sentinel.write(to: vocabURL)
+
+        // Present vocab -> returns without attempting any network fetch.
+        try await AsrModels.ensureVocabularyDownloaded(
+            version: .v3, encoderPrecision: .int8, targetDir: tempDir)
+
+        XCTAssertEqual(
+            try Data(contentsOf: vocabURL), sentinel,
+            "Existing vocab must not be overwritten by the guarantee step."
+        )
+    }
 }
