@@ -85,11 +85,6 @@ public struct OfflineDiarizerModels: Sendable {
         logger.info("Loading offline diarization models from \(modelsDirectory.path)")
 
         let loadStart = Date()
-        // Honor a caller-supplied compute-units choice (the `configuration:`
-        // parameter was previously accepted but ignored here). Defaults to `.all`,
-        // so existing callers are unaffected; callers that need CPU/GPU-only
-        // inference (e.g. to avoid cross-device ANE numeric variance in the
-        // embeddings) can now pass `MLModelConfiguration(computeUnits:)`.
         let inferenceComputeUnits: MLComputeUnits = configuration?.computeUnits ?? .all
 
         let segmentationAndEmbeddingNames: [String] = [
