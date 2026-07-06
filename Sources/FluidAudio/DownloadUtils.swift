@@ -985,6 +985,20 @@ public class DownloadUtils {
         }
     }
 
+    static func subdirectoryProgressFraction(
+        completedBytes: Int64,
+        totalBytes: Int64,
+        completedFiles: Int,
+        totalFiles: Int
+    ) -> Double {
+        guard totalFiles > 0 else { return 1.0 }
+        guard totalBytes > 0 else {
+            return min(Double(completedFiles) / Double(totalFiles), 1.0)
+        }
+
+        return min(Double(completedBytes) / Double(totalBytes), 1.0)
+    }
+
     /// Download a specific subdirectory from a HuggingFace repository.
     ///
     /// Use this for optional model components that aren't part of the required model set
@@ -1049,18 +1063,35 @@ public class DownloadUtils {
         try await listFiles(at: subdirectory)
         let totalFiles = filesToDownload.count
         logger.info("Found \(totalFiles) files in \(subdirectory)")
+
+        // Compute total known bytes for byte-weighted progress.
+        // Files with unknown sizes (size == -1) are treated as 0 for weighting.
+        let totalBytes: Int64 = filesToDownload.reduce(0) { $0 + Int64(max(0, $1.size)) }
+        var completedBytes: Int64 = 0
+
         progressHandler?(
             DownloadProgress(
-                fractionCompleted: totalFiles == 0 ? 1.0 : 0.0,
+                fractionCompleted: subdirectoryProgressFraction(
+                    completedBytes: completedBytes,
+                    totalBytes: totalBytes,
+                    completedFiles: 0,
+                    totalFiles: totalFiles
+                ),
                 phase: .downloading(completedFiles: 0, totalFiles: totalFiles)))
 
         for (index, file) in filesToDownload.enumerated() {
             let destPath = repoDirectory.appendingPathComponent(file.path)
 
             if FileManager.default.fileExists(atPath: destPath.path) {
+                completedBytes += Int64(max(0, file.size))
                 progressHandler?(
                     DownloadProgress(
-                        fractionCompleted: Double(index + 1) / Double(totalFiles),
+                        fractionCompleted: subdirectoryProgressFraction(
+                            completedBytes: completedBytes,
+                            totalBytes: totalBytes,
+                            completedFiles: index + 1,
+                            totalFiles: totalFiles
+                        ),
                         phase: .downloading(
                             completedFiles: index + 1, totalFiles: totalFiles)))
                 continue
@@ -1073,9 +1104,15 @@ public class DownloadUtils {
 
             if file.size == 0 {
                 FileManager.default.createFile(atPath: destPath.path, contents: Data())
+                completedBytes += Int64(max(0, file.size))
                 progressHandler?(
                     DownloadProgress(
-                        fractionCompleted: Double(index + 1) / Double(totalFiles),
+                        fractionCompleted: subdirectoryProgressFraction(
+                            completedBytes: completedBytes,
+                            totalBytes: totalBytes,
+                            completedFiles: index + 1,
+                            totalFiles: totalFiles
+                        ),
                         phase: .downloading(
                             completedFiles: index + 1, totalFiles: totalFiles)))
                 if (index + 1) % 5 == 0 || index == totalFiles - 1 {
@@ -1089,36 +1126,61 @@ public class DownloadUtils {
             let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedPath)
             let request = authorizedRequest(url: fileURL)
 
-            let (tempURL, response) = try await sharedSession.download(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw HuggingFaceDownloadError.invalidResponse
+            let onProgress: (@Sendable (Int64, Int64) -> Void)?
+            // Only stream live byte progress for files with a known size: an
+            // unknown-size file (-1) carries zero weight in totalBytes, so its
+            // real bytesWritten would inflate the fraction mid-file and snap
+            // back at the boundary. Boundary emits keep progress monotonic.
+            if let handler = progressHandler, file.size > 0 {
+                let baseBytes = completedBytes
+                let totalBytesSnapshot = totalBytes
+                let fileIndex = index
+                let fileCount = totalFiles
+                onProgress = { bytesWritten, _ in
+                    guard totalBytesSnapshot > 0 else { return }
+                    let currentBytes = baseBytes + bytesWritten
+                    let fraction = subdirectoryProgressFraction(
+                        completedBytes: currentBytes,
+                        totalBytes: totalBytesSnapshot,
+                        completedFiles: fileIndex,
+                        totalFiles: fileCount
+                    )
+                    handler(
+                        DownloadProgress(
+                            fractionCompleted: fraction,
+                            phase: .downloading(completedFiles: fileIndex, totalFiles: fileCount)
+                        ))
+                }
+            } else {
+                onProgress = nil
             }
 
-            if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
-                throw HuggingFaceDownloadError.rateLimited(
-                    statusCode: httpResponse.statusCode,
-                    message: "Rate limited while downloading \(file.path)")
-            }
-
-            guard (200..<300).contains(httpResponse.statusCode) else {
-                throw HuggingFaceDownloadError.downloadFailed(
-                    path: file.path,
-                    underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
-                )
-            }
-
-            // Reject HTML error pages / truncated bodies before caching.
-            try validateDownloadedArtifact(
-                at: tempURL, response: httpResponse, path: file.path, expectedSize: file.size)
+            // downloadFileWithRetry validates the artifact (HTML error pages,
+            // truncated bodies) internally, and the persistent `.partial` file
+            // gives retries and re-runs byte-range resume, same as downloadRepo.
+            let tempURL = try await downloadFileWithRetry(
+                request: request,
+                path: file.path,
+                expectedSize: file.size,
+                partialFileURL: destPath.appendingPathExtension("partial"),
+                onProgress: onProgress
+            )
 
             if FileManager.default.fileExists(atPath: destPath.path) {
                 try? FileManager.default.removeItem(at: destPath)
             }
             try FileManager.default.moveItem(at: tempURL, to: destPath)
 
+            completedBytes += Int64(max(0, file.size))
+
             progressHandler?(
                 DownloadProgress(
-                    fractionCompleted: Double(index + 1) / Double(totalFiles),
+                    fractionCompleted: subdirectoryProgressFraction(
+                        completedBytes: completedBytes,
+                        totalBytes: totalBytes,
+                        completedFiles: index + 1,
+                        totalFiles: totalFiles
+                    ),
                     phase: .downloading(
                         completedFiles: index + 1, totalFiles: totalFiles)))
 
