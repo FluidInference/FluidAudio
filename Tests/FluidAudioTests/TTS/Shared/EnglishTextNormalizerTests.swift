@@ -64,6 +64,12 @@ final class EnglishTextNormalizerTests: XCTestCase {
         XCTAssertEqual(normalize("1995s"), "1995s")
     }
 
+    func testAllZeroDecadeUnchanged() {
+        // `'00s`/`00s` has no century to anchor it and must not read as "zeros".
+        XCTAssertEqual(normalize("music from the '00s"), "music from the '00s")
+        XCTAssertEqual(normalize("the 00s"), "the 00s")
+    }
+
     func testBareYear() {
         XCTAssertEqual(normalize("it began in 1770"), "it began in seventeen seventy")
         XCTAssertEqual(normalize("the year 2026"), "the year twenty twenty six")

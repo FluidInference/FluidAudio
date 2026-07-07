@@ -105,8 +105,11 @@ enum EnglishTextNormalizer {
 
     private static func spellDecade(_ groups: [String]) -> String? {
         // Only conventional decades (`1770s`, `90s`) — the number must end in 0.
+        // An all-zero base (`'00s`, `0000s`) is skipped: it has no century to
+        // anchor it (`'00s` is ambiguous between the 1900s and 2000s) and would
+        // cardinal-read as a misleading "zeros", so leave it for the frontend.
         let digits = groups[1]
-        guard digits.last == "0" else { return nil }
+        guard digits.last == "0", let value = Int(digits), value != 0 else { return nil }
         // 4-digit decades read year-style (`1770` → `seventeen seventy`),
         // 2-digit decades as a bare cardinal (`90` → `ninety`); the trailing
         // `s` then pluralizes the last word (`seventy` → `seventies`).
