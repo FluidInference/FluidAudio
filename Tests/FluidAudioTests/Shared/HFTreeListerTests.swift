@@ -6,8 +6,6 @@ import XCTest
 /// Unit tests for the unified tree lister (#765 Wave 3): recursive walking,
 /// include-based pruning, Link-header pagination (confirmed against the live
 /// HF API in Wave 0), and typed errors for rate-limit/HTML/malformed pages.
-/// The repo-specific filter *rules* are pinned separately by
-/// `DownloadFilterCharacterizationTests` through `ModelHub.download`.
 final class HFTreeListerTests: XCTestCase {
 
     private static let repo = "FluidInference/test-repo"

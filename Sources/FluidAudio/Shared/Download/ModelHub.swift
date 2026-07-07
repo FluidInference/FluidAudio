@@ -217,9 +217,10 @@ public enum ModelHub {
     }
 
     /// Internal seam: `configuration` overrides the session used for tree
-    /// listing and per-file downloads so characterization tests can drive the
-    /// full listing/filtering/download pipeline with a stub `URLProtocol`
-    /// (#765 Wave 1). `nil` (the public path) uses the shared session.
+    /// listing and per-file downloads so tests can drive the full
+    /// listing/filtering/download pipeline with a stub `URLProtocol`
+    /// (see `DownloadResumeTests`, `HFTreeListerTests`). `nil` (the public
+    /// path) uses the shared session.
     static func download(
         _ repo: Repo,
         to directory: URL,
@@ -254,8 +255,7 @@ public enum ModelHub {
         }
 
         // File selection rules for repo downloads (subPath scoping, required-
-        // model patterns, metadata-extension allowances);
-        // DownloadFilterCharacterizationTests pins them.
+        // model patterns, metadata-extension allowances).
         let include: (String, Bool) -> Bool = { itemPath, isDirectory in
             if isDirectory {
                 // For subPath repos, only process paths within the subPath

@@ -4,11 +4,9 @@ import os
 
 @testable import FluidAudio
 
-/// Unit tests for the extracted retry primitive (#765 Wave 2). Classification
-/// itself is characterized by `DownloadClassifierTests` (which now runs
-/// through the `RetryPolicy.isRetryable` forward); these tests
-/// pin the loop mechanics: attempt counting, fail-fast on permanent errors,
-/// and error propagation.
+/// Unit tests for the extracted retry primitive (#765 Wave 2). These pin the
+/// loop mechanics: attempt counting, fail-fast on permanent errors, and error
+/// propagation.
 final class RetryPolicyTests: XCTestCase {
 
     private final class Counter: Sendable {
