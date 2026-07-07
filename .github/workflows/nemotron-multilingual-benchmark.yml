@@ -54,7 +54,7 @@ jobs:
           path: |
             .build
             ~/Library/Application Support/FluidAudio
-          key: ${{ runner.os }}-nemotron-multi-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/ASR/Parakeet/Streaming/Nemotron/**', 'Sources/FluidAudio/ModelNames.swift') }}
+          key: ${{ runner.os }}-nemotron-multi-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/ASR/Parakeet/Streaming/Nemotron/**', 'Sources/FluidAudio/ModelNames.swift', 'Sources/FluidAudio/DownloadUtils.swift', 'Sources/FluidAudio/Shared/Download/**') }}
 
       - name: Build
         run: swift build -c release

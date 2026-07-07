@@ -28,7 +28,7 @@ jobs:
           path: |
             .build
             ~/.cache/fluidaudio/Models/pocket-tts
-          key: ${{ runner.os }}-pocket-tts-v2.1-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/PocketTTS/**', 'Sources/FluidAudio/ModelNames.swift') }}
+          key: ${{ runner.os }}-pocket-tts-v2.1-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/PocketTTS/**', 'Sources/FluidAudio/ModelNames.swift', 'Sources/FluidAudio/DownloadUtils.swift', 'Sources/FluidAudio/Shared/Download/**') }}
 
       - name: Build
         run: swift build -c release

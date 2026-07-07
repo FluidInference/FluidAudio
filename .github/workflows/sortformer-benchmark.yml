@@ -36,7 +36,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/Library/Application Support/FluidAudio/Models/diar-streaming-sortformer-coreml
-          key: ${{ runner.os }}-sortformer-models-high-latency
+          key: ${{ runner.os }}-sortformer-models-high-latency-${{ hashFiles('Sources/FluidAudio/DownloadUtils.swift', 'Sources/FluidAudio/Shared/Download/**') }}
 
       - name: Cache AMI dataset
         uses: actions/cache@v4
