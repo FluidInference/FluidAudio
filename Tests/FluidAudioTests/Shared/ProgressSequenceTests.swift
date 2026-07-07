@@ -33,7 +33,7 @@ final class ProgressSequenceTests: XCTestCase {
     }
 
     func testRepoDownloadProgressIsMonotonicWithinZeroToHalf() async throws {
-        let model = "silero-vad-unified-256ms-v6.0.0.mlmodelc"
+        let model = ModelNames.VAD.sileroVadFile
         TreeStubURLProtocol.trees = [
             "": [["path": model, "type": "directory"]],
             model: [
@@ -76,7 +76,7 @@ final class ProgressSequenceTests: XCTestCase {
     }
 
     func testFileCountersNeverExceedTotalsAndReachTotal() async throws {
-        let model = "silero-vad-unified-256ms-v6.0.0.mlmodelc"
+        let model = ModelNames.VAD.sileroVadFile
         TreeStubURLProtocol.trees = [
             "": [["path": model, "type": "directory"]],
             model: [

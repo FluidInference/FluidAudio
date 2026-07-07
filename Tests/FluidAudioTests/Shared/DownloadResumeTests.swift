@@ -98,24 +98,27 @@ final class DownloadResumeTests: XCTestCase {
             .init(
                 status: 200, headers: ["ETag": "\"v1\""],
                 chunks: [Data(head), Data(tail)], failAfterChunks: 1))
-        // Attempt 2: server honors the range with a 206 for the remainder.
+        // Attempt 2: a range-capable server. Whether the head bytes survived
+        // the drop is racy at the URLProtocol layer (data delivery may be
+        // discarded on failure), so the stub answers both shapes: 206 tail if
+        // the client resumed, 200 full if it restarted. Either way the final
+        // file must be complete and unspliced. The deterministic
+        // resume-append path is covered by the seeded-partial tests below.
         ResumeStubURLProtocol.enqueue(
-            .init(
-                status: 206,
-                headers: [
-                    "ETag": "\"v1\"",
-                    "Content-Range": "bytes \(splitAt)-\(Self.fullBody.count - 1)/\(Self.fullBody.count)",
-                ],
-                chunks: [Data(tail)]))
+            .init(status: 200, headers: ["ETag": "\"v1\""], chunks: [], rangeAwareBody: Self.fullBody))
 
         let body = try await download()
 
-        XCTAssertEqual(body, Self.fullBody, "resumed file must equal head + tail with no gap")
+        XCTAssertEqual(body, Self.fullBody, "post-drop download must produce the complete file")
         let requests = ResumeStubURLProtocol.recordedRequests()
         XCTAssertEqual(requests.count, 2)
         XCTAssertNil(requests[0].value(forHTTPHeaderField: "Range"))
-        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "Range"), "bytes=\(splitAt)-")
-        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "If-Range"), "\"v1\"")
+        if let range = requests[1].value(forHTTPHeaderField: "Range") {
+            // Bytes reached disk before the drop → a true resume from whatever
+            // offset survived, guarded by the validator captured on attempt 1.
+            XCTAssertTrue(range.hasPrefix("bytes="), "got: \(range)")
+            XCTAssertEqual(requests[1].value(forHTTPHeaderField: "If-Range"), "\"v1\"")
+        }
     }
 
     func testServerIgnoringRangeReplacesPartialInsteadOfSplicing() async throws {
@@ -253,6 +256,12 @@ final class ResumeStubURLProtocol: URLProtocol {
         let chunks: [Data]
         /// Deliver this many chunks, then fail with `.networkConnectionLost`.
         var failAfterChunks: Int? = nil
+        /// When set, respond like a real range-capable server instead of using
+        /// `status`/`chunks`: 206 + the slice from the request's `Range` offset
+        /// when the header is present, else 200 + the full body. Lets tests
+        /// stay deterministic when a prior scripted drop races URLProtocol
+        /// data delivery (the partial may or may not contain the bytes).
+        var rangeAwareBody: Data? = nil
     }
 
     private static let lock = NSLock()
@@ -291,6 +300,11 @@ final class ResumeStubURLProtocol: URLProtocol {
     override func startLoading() {
         guard let script = Self.dequeue(recording: request), let url = request.url else {
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+
+        if let body = script.rangeAwareBody {
+            respondRangeAware(url: url, body: body, headers: script.headers)
             return
         }
 
@@ -333,6 +347,41 @@ final class ResumeStubURLProtocol: URLProtocol {
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { [self] in
             client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
         }
+    }
+
+    /// Behave like a real range-capable server for `body`: 206 + slice when
+    /// the request carries `Range: bytes=N-`, else 200 + the full body.
+    private func respondRangeAware(url: URL, body: Data, headers: [String: String]) {
+        var offset = 0
+        if let range = request.value(forHTTPHeaderField: "Range"),
+            range.hasPrefix("bytes="), range.hasSuffix("-"),
+            let start = Int(range.dropFirst("bytes=".count).dropLast()),
+            start > 0, start < body.count
+        {
+            offset = start
+        }
+
+        var responseHeaders = headers
+        let payload = body.suffix(from: offset)
+        responseHeaders["Content-Length"] = String(payload.count)
+        let status: Int
+        if offset > 0 {
+            status = 206
+            responseHeaders["Content-Range"] = "bytes \(offset)-\(body.count - 1)/\(body.count)"
+        } else {
+            status = 200
+        }
+        guard
+            let response = HTTPURLResponse(
+                url: url, statusCode: status, httpVersion: "HTTP/1.1",
+                headerFields: responseHeaders)
+        else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(payload))
+        client?.urlProtocolDidFinishLoading(self)
     }
 
     override func stopLoading() {}

@@ -63,8 +63,8 @@ final class DownloadFilterCharacterizationTests: XCTestCase {
     // MARK: - Plain repo (patterns + root metadata-extension allowances)
 
     func testPlainRepoSelectsRequiredModelDirsAndRootJsonTxt() async throws {
-        // .vad requires silero-vad-unified-256ms-v6.0.0.mlmodelc
-        let model = "silero-vad-unified-256ms-v6.0.0.mlmodelc"
+        // .vad requires exactly ModelNames.VAD.sileroVadFile
+        let model = ModelNames.VAD.sileroVadFile
         TreeStubURLProtocol.trees = [
             "": [
                 ["path": model, "type": "directory"],
@@ -96,7 +96,7 @@ final class DownloadFilterCharacterizationTests: XCTestCase {
                 "config.json",
                 "\(model)/coremldata.bin",
                 "\(model)/weights/weight.bin",
-            ]
+            ].sorted()
         )
     }
 
@@ -106,29 +106,33 @@ final class DownloadFilterCharacterizationTests: XCTestCase {
         // .parakeetEou160: subPath "160ms", requires 3 .mlmodelc dirs + vocab.json.
         // vocab.json lives at the repo ROOT (the #649 shape), not under 160ms/.
         let sub = "160ms"
+        let encoder = ModelNames.ParakeetEOU.encoderFile
+        let decoder = ModelNames.ParakeetEOU.decoderFile
+        let joint = ModelNames.ParakeetEOU.jointFile
+        let vocab = ModelNames.ParakeetEOU.vocab
         TreeStubURLProtocol.trees = [
             sub: [
-                ["path": "\(sub)/streaming_encoder.mlmodelc", "type": "directory"],
-                ["path": "\(sub)/decoder.mlmodelc", "type": "directory"],
-                ["path": "\(sub)/joint_decision.mlmodelc", "type": "directory"],
+                ["path": "\(sub)/\(encoder)", "type": "directory"],
+                ["path": "\(sub)/\(decoder)", "type": "directory"],
+                ["path": "\(sub)/\(joint)", "type": "directory"],
                 // Pinned: under a subPath the metadata allowance is .json/.model/.bin
                 ["path": "\(sub)/config.json", "type": "file", "size": 10],
                 ["path": "\(sub)/tokenizer.model", "type": "file", "size": 10],
                 ["path": "\(sub)/stats.bin", "type": "file", "size": 10],
                 ["path": "\(sub)/README.txt", "type": "file", "size": 10],
             ],
-            "\(sub)/streaming_encoder.mlmodelc": [
-                ["path": "\(sub)/streaming_encoder.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            "\(sub)/\(encoder)": [
+                ["path": "\(sub)/\(encoder)/coremldata.bin", "type": "file", "size": 10]
             ],
-            "\(sub)/decoder.mlmodelc": [
-                ["path": "\(sub)/decoder.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            "\(sub)/\(decoder)": [
+                ["path": "\(sub)/\(decoder)/coremldata.bin", "type": "file", "size": 10]
             ],
-            "\(sub)/joint_decision.mlmodelc": [
-                ["path": "\(sub)/joint_decision.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            "\(sub)/\(joint)": [
+                ["path": "\(sub)/\(joint)/coremldata.bin", "type": "file", "size": 10]
             ],
             // Root listing used by the #649 fallback for required non-bundle files.
             "": [
-                ["path": "vocab.json", "type": "file", "size": 10],
+                ["path": vocab, "type": "file", "size": 10],
                 ["path": "160ms", "type": "directory"],
                 ["path": "320ms", "type": "directory"],
             ],
@@ -145,13 +149,13 @@ final class DownloadFilterCharacterizationTests: XCTestCase {
             try downloadedFiles(repoFolder: Repo.parakeetEou160.folderName),
             [
                 "config.json",
-                "decoder.mlmodelc/coremldata.bin",
-                "joint_decision.mlmodelc/coremldata.bin",
+                "\(decoder)/coremldata.bin",
+                "\(joint)/coremldata.bin",
                 "stats.bin",
-                "streaming_encoder.mlmodelc/coremldata.bin",
+                "\(encoder)/coremldata.bin",
                 "tokenizer.model",
-                "vocab.json",
-            ]
+                vocab,
+            ].sorted()
         )
     }
 
@@ -194,7 +198,7 @@ final class DownloadFilterCharacterizationTests: XCTestCase {
                 "AudioEncoder.mlmodelc/coremldata.bin",
                 "CtcHead.mlmodelc/coremldata.bin",
                 "MelSpectrogram.mlmodelc/coremldata.bin",
-            ]
+            ].sorted()
         )
     }
 }
