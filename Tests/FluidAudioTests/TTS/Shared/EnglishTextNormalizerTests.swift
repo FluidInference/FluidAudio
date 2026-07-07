@@ -42,6 +42,42 @@ final class EnglishTextNormalizerTests: XCTestCase {
         XCTAssertEqual(normalize("3:05 pm"), "three oh five p m")
     }
 
+    func testDecadeForms() {
+        // 4-digit decades read year-style then pluralize the last word.
+        XCTAssertEqual(normalize("in the 1770s it began"), "in the seventeen seventies it began")
+        XCTAssertEqual(normalize("the 1990s"), "the nineteen nineties")
+        XCTAssertEqual(normalize("the 2020s"), "the twenty twenties")
+        // Round centuries pluralize `hundred`/`thousand`.
+        XCTAssertEqual(normalize("the 1900s"), "the nineteen hundreds")
+        XCTAssertEqual(normalize("the 2000s"), "the two thousands")
+        // 2-digit decades, with and without a leading apostrophe.
+        XCTAssertEqual(normalize("music from the '90s"), "music from the nineties")
+        XCTAssertEqual(normalize("the 80s sound"), "the eighties sound")
+    }
+
+    func testDecadeTrailingPunctuationPreserved() {
+        XCTAssertEqual(normalize("born in the 1980s."), "born in the nineteen eighties.")
+    }
+
+    func testNonZeroDecadeUnchanged() {
+        // Only decades ending in 0 are rewritten.
+        XCTAssertEqual(normalize("1995s"), "1995s")
+    }
+
+    func testBareYear() {
+        XCTAssertEqual(normalize("it began in 1770"), "it began in seventeen seventy")
+        XCTAssertEqual(normalize("the year 2026"), "the year twenty twenty six")
+        XCTAssertEqual(normalize("back in 1905"), "back in nineteen oh five")
+        XCTAssertEqual(normalize("since 2005"), "since two thousand five")
+        XCTAssertEqual(normalize("in 2000"), "in two thousand")
+    }
+
+    func testFourDigitOutsideYearRangeUsesCardinal() {
+        // Below 1000 / above 2099 fall through to the cardinal rule.
+        XCTAssertEqual(normalize("2100"), "two thousand one hundred")
+        XCTAssertEqual(normalize("9999"), "nine thousand nine hundred ninety nine")
+    }
+
     func testMultipleFormsInOneSentence() {
         XCTAssertEqual(
             normalize("At 1:49 PM on the 13th I scored 3.14 in 26 tries."),

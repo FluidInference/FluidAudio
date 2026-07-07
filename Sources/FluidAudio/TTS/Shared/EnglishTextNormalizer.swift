@@ -19,6 +19,8 @@ import Foundation
 ///   * leading-zero digit strings — `007` → `zero zero seven`
 ///   * decimals — `3.14` → `three point one four`
 ///   * 12-hour meridiem times — `1:49 PM` → `one forty nine p m`
+///   * decade forms — `1770s`/`'90s` → `seventeen seventies`/`nineties` (issue #776)
+///   * bare 4-digit years (1000–2099) — `1770` → `seventeen seventy` (issue #776)
 ///
 /// Left unchanged (ambiguous / structured): version strings (`1.2.3`),
 /// grouped numbers (`1,234`), embedded digits (`word26`, `26word`), loose
@@ -33,9 +35,11 @@ enum EnglishTextNormalizer {
     static func normalize(_ text: String) -> String {
         var result = text
         result = apply(Self.meridiemTimeRegex, to: result, transform: Self.spellMeridiemTime)
+        result = apply(Self.decadeRegex, to: result, transform: Self.spellDecade)
         result = apply(Self.decimalRegex, to: result, transform: Self.spellDecimal)
         result = apply(Self.ordinalRegex, to: result, transform: Self.spellOrdinal)
         result = apply(Self.leadingZeroRegex, to: result, transform: Self.spellLeadingZero)
+        result = apply(Self.yearRegex, to: result, transform: Self.spellYear)
         result = apply(Self.cardinalRegex, to: result, transform: Self.spellCardinal)
         return result
     }
@@ -60,6 +64,13 @@ enum EnglishTextNormalizer {
     private static let meridiemTimeRegex = regex(
         leadBoundary + #"(1[0-2]|[1-9]):([0-5][0-9])\s*([AaPp])(?:\.[Mm]\.?|[Mm])"# + #"(?![A-Za-z])"#)
 
+    /// `1770s`, `'90s`, `1900s` — a decade written as a 2- or 4-digit number
+    /// with a trailing `s` (issue #776). An optional leading apostrophe is
+    /// absorbed (`'90s`). The 4-digit alternative is listed first so the full
+    /// number wins over its leading two digits (`1770s` → `1770`, not `17`).
+    private static let decadeRegex = regex(
+        leadBoundary + #"'?([0-9]{4}|[0-9]{2})s"# + #"(?![A-Za-z0-9])"#)
+
     /// `3.14` — integer and fractional parts, not part of a version string.
     private static let decimalRegex = regex(
         leadBoundary + #"([0-9]+)\.([0-9]+)"# + trailBoundary)
@@ -71,6 +82,12 @@ enum EnglishTextNormalizer {
     /// `007` — leading zero forces a digit-by-digit reading.
     private static let leadingZeroRegex = regex(
         leadBoundary + #"(0[0-9]+)"# + trailBoundary)
+
+    /// `1770` — a standalone 4-digit integer read year-style (issue #776).
+    /// The range is narrowed to 1000–2099 in ``spellYear`` so only plausible
+    /// years are rewritten; everything else falls through to ``cardinalRegex``.
+    private static let yearRegex = regex(
+        leadBoundary + #"([0-9]{4})"# + trailBoundary)
 
     /// `26` — a plain standalone integer.
     private static let cardinalRegex = regex(
@@ -84,6 +101,27 @@ enum EnglishTextNormalizer {
         guard !containsDigit(spoken) else { return nil }
         let meridiem = groups[3].lowercased() == "p" ? "p m" : "a m"
         return "\(spoken) \(meridiem)"
+    }
+
+    private static func spellDecade(_ groups: [String]) -> String? {
+        // Only conventional decades (`1770s`, `90s`) — the number must end in 0.
+        let digits = groups[1]
+        guard digits.last == "0" else { return nil }
+        // 4-digit decades read year-style (`1770` → `seventeen seventy`),
+        // 2-digit decades as a bare cardinal (`90` → `ninety`); the trailing
+        // `s` then pluralizes the last word (`seventy` → `seventies`).
+        let interpretAs = digits.count == 4 ? "year" : "cardinal"
+        let base = spaced(SayAsInterpreter.interpret(content: digits, interpretAs: interpretAs, format: nil))
+        guard !base.isEmpty, !containsDigit(base) else { return nil }
+        return pluralizeLastWord(base)
+    }
+
+    private static func spellYear(_ groups: [String]) -> String? {
+        // Only rewrite plausible years; other 4-digit integers fall through
+        // to the cardinal rule.
+        guard let year = Int(groups[1]), (1000...2099).contains(year) else { return nil }
+        let spoken = spaced(SayAsInterpreter.interpret(content: groups[1], interpretAs: "year", format: nil))
+        return containsDigit(spoken) ? nil : spoken
     }
 
     private static func spellDecimal(_ groups: [String]) -> String? {
@@ -134,6 +172,17 @@ enum EnglishTextNormalizer {
 
     private static func spaced(_ text: String) -> String {
         text.replacingOccurrences(of: "-", with: " ")
+    }
+
+    /// Pluralize the final word of a spelled decade base: a `-y` ending
+    /// becomes `-ies` (`seventy` → `seventies`), otherwise `s` is appended
+    /// (`hundred` → `hundreds`, `thousand` → `thousands`, `ten` → `tens`).
+    private static func pluralizeLastWord(_ text: String) -> String {
+        var words = text.split(separator: " ").map(String.init)
+        guard let last = words.last else { return text }
+        let plural = last.hasSuffix("y") ? String(last.dropLast()) + "ies" : last + "s"
+        words[words.count - 1] = plural
+        return words.joined(separator: " ")
     }
 
     private static func containsDigit(_ text: String) -> Bool {
