@@ -98,6 +98,35 @@ final class FetchHuggingFaceFileTests: XCTestCase {
         }
     }
 
+    func testHTMLPageIsRetryableAndRecovers() async throws {
+        // Pinned: invalidArtifact classifies as transient — an HTML body is
+        // usually a passing rate-limit/proxy page, so the next attempt can
+        // succeed. (A persistent page still burns the budget; accepted.)
+        FetchStubURLProtocol.enqueue(
+            status: 200, body: Data("<!DOCTYPE html><html>moment</html>".utf8))
+        FetchStubURLProtocol.enqueue(status: 200, body: Data("real content".utf8))
+
+        let data = try await fetch(maxAttempts: 2)
+        XCTAssertEqual(data, Data("real content".utf8))
+        XCTAssertEqual(FetchStubURLProtocol.requestCount, 2)
+    }
+
+    func testTextHTMLContentTypeIsRejectedWithoutSniffablePrefix() async {
+        // A 200 error page whose body lacks a doctype/html prefix is still
+        // caught via the Content-Type header (mirrors the file path's check).
+        FetchStubURLProtocol.enqueue(
+            status: 200, body: Data("<h1>502 Bad Gateway</h1>".utf8),
+            headers: ["Content-Type": "text/html; charset=utf-8"])
+        do {
+            _ = try await fetch(maxAttempts: 1)
+            XCTFail("expected invalidArtifact")
+        } catch HFDownload.DownloadError.invalidArtifact(_, let reason) {
+            XCTAssertTrue(reason.contains("text/html"), "got: \(reason)")
+        } catch {
+            XCTFail("expected invalidArtifact, got \(error)")
+        }
+    }
+
     func testRetryAfterPacesBackoffAndEnvelopeNeverEscapes() async {
         // 429 with a 0.3s Retry-After (>> the 0.01s minBackoff), then success.
         FetchStubURLProtocol.enqueue(

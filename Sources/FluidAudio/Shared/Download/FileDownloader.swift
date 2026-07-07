@@ -118,21 +118,8 @@ enum FileDownloader {
         }
     }
 
-    // MARK: - Streaming download to a persistent file
+    // MARK: - Small-file fetch with converged policy (#765 Wave 5)
 
-    /// Stream a download directly into `destination` so received bytes survive
-    /// a mid-transfer drop (#757). Pure transport: the caller sets resume
-    /// headers and validates the HTTP status. Body bytes are written only for
-    /// 2xx — appended after `resumeOffset` on 206, from byte 0 otherwise.
-    ///
-    /// - Parameters:
-    ///   - resumeOffset: Byte count a 206 appends after; also the base for
-    ///     progress callbacks so resumed progress never dips.
-    ///   - configuration: Session configuration override for tests.
-    ///   - onProgress: `(totalBytesWritten, totalBytesExpected)`, both
-    ///     including `resumeOffset`. Delegate-driven byte progress (#756).
-    ///   - onResponse: Fires before any body byte is written — the resume path
-    ///     persists the validator here so it survives a drop mid-body.
     /// Fetch a small file into memory with the converged policy (#765 Wave 5):
     /// classified retry (permanent 4xx fails fast, 5xx/rate-limits retry with
     /// Retry-After pacing) and artifact validation (HTML error pages and empty
@@ -157,7 +144,8 @@ enum FileDownloader {
             // Re-check per attempt, matching download(): flipping
             // enforceOffline mid-operation stops at the next request.
             guard !DownloadUtils.enforceOffline else {
-                throw DownloadUtils.OfflineError.networkDisabled(operation: "fetchData(\(description))")
+                throw DownloadUtils.OfflineError.networkDisabled(
+                    operation: "fetchHuggingFaceFile(\(description))")
             }
 
             let (data, response) = try await session.data(for: request)
@@ -176,6 +164,14 @@ enum FileDownloader {
 
             // Reject bodies that are error pages or truncated-to-nothing —
             // a 200 carrying HTML must never be cached as content (#748).
+            // Content-Type check mirrors validateDownloadedArtifact's, so a
+            // text/html page without a sniffable prefix is caught here too.
+            if let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
+                contentType.contains("text/html")
+            {
+                throw HFDownload.DownloadError.invalidArtifact(
+                    path: description, reason: "server returned Content-Type: \(contentType)")
+            }
             if data.isEmpty {
                 throw HFDownload.DownloadError.invalidArtifact(
                     path: description, reason: "empty file")
@@ -189,6 +185,21 @@ enum FileDownloader {
         }
     }
 
+    // MARK: - Streaming download to a persistent file
+
+    /// Stream a download directly into `destination` so received bytes survive
+    /// a mid-transfer drop (#757). Pure transport: the caller sets resume
+    /// headers and validates the HTTP status. Body bytes are written only for
+    /// 2xx — appended after `resumeOffset` on 206, from byte 0 otherwise.
+    ///
+    /// - Parameters:
+    ///   - resumeOffset: Byte count a 206 appends after; also the base for
+    ///     progress callbacks so resumed progress never dips.
+    ///   - configuration: Session configuration override for tests.
+    ///   - onProgress: `(totalBytesWritten, totalBytesExpected)`, both
+    ///     including `resumeOffset`. Delegate-driven byte progress (#756).
+    ///   - onResponse: Fires before any body byte is written — the resume path
+    ///     persists the validator here so it survives a drop mid-body.
     /// Coverage flows through the `DownloadUtils.downloadFileWithRetry`
     /// forward (DownloadResumeTests); no test drives this directly.
     static func streamDownload(

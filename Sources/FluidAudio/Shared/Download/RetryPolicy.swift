@@ -46,14 +46,23 @@ enum RetryPolicy {
             do {
                 return try await operation(attempt)
             } catch {
-                guard attempt < maxAttempts, isRetryable(error) else {
-                    throw error
+                // Unwrap a Retry-After envelope: the hint paces the sleep, the
+                // underlying error drives classification and is what callers
+                // see — the envelope never escapes this function.
+                let hint = error as? RetryAfterHint
+                let underlying = hint?.underlying ?? error
+
+                guard attempt < maxAttempts, isRetryable(underlying) else {
+                    throw underlying
                 }
                 let backoffSeconds = pow(2.0, Double(attempt - 1)) * minBackoff
+                let serverPause = min(hint?.retryAfter ?? 0, maxHonoredRetryAfter)
+                let pauseSeconds = max(backoffSeconds, serverPause)
+                let pacedNote = serverPause > backoffSeconds ? " (server Retry-After)" : ""
                 logger.warning(
-                    "Download attempt \(attempt) for \(label) failed: \(error.localizedDescription). Retrying in \(String(format: "%.1f", backoffSeconds))s."
+                    "Download attempt \(attempt) for \(label) failed: \(underlying.localizedDescription). Retrying in \(String(format: "%.1f", pauseSeconds))s\(pacedNote)."
                 )
-                try await Task.sleep(nanoseconds: UInt64(backoffSeconds * 1_000_000_000))
+                try await Task.sleep(nanoseconds: UInt64(pauseSeconds * 1_000_000_000))
             }
         }
 
