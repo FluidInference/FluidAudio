@@ -1,6 +1,5 @@
 import CoreML
 import Foundation
-import os
 
 /// HuggingFace model downloader using URLSession
 public class DownloadUtils {
@@ -421,32 +420,27 @@ public class DownloadUtils {
             }
             let destPath = repoPath.appendingPathComponent(localPath)
 
-            let onBytes: (@Sendable (Int64, Int64) -> Void)?
-            if progressHandler != nil {
-                let baseBytes = completedBytes
-                let fileCount = filesToDownload.count
-                let totalBytesSnapshot = totalBytes
-                let fileIndex = index
-                onBytes = { bytesWritten, _ in
-                    reporter.liveBytes(
-                        completedBytes: baseBytes + bytesWritten,
-                        totalBytes: totalBytesSnapshot,
-                        fileIndex: fileIndex,
-                        totalFiles: fileCount)
-                }
-            } else {
-                onBytes = nil
-            }
+            let onBytes = reporter.liveBytesCallback(
+                baseBytes: completedBytes,
+                totalBytes: totalBytes,
+                fileIndex: index,
+                totalFiles: filesToDownload.count)
 
+            // Repo caches keep the historical corrupt-recovery behavior:
+            // a regular file blocking a path component is replaced.
             let outcome = try await FileDownloader.ensure(
                 file: file,
                 from: repo.remotePath,
                 at: destPath,
+                recoveringBlockedPaths: true,
                 configuration: configuration,
                 onBytes: onBytes
             )
             completedBytes += Int64(max(0, file.size))
 
+            // Pinned asymmetry vs downloadSubdirectory: cached/empty files
+            // emit no boundary here (the pre-#765 behavior ProgressSequence
+            // relies on); the subdirectory loop emits for every outcome.
             guard outcome == .downloaded else { continue }
 
             if (index + 1) % 10 == 0 || index == filesToDownload.count - 1 {
@@ -466,7 +460,7 @@ public class DownloadUtils {
         logger.info("Downloaded all required models for \(repo.folderName)")
     }
 
-    // MARK: - Helper Functions
+    // MARK: - Test-pinned forwards (#765)
 
     /// Forwards to the Wave 4 primitives — kept because the download-resume,
     /// artifact-validation, and retry characterization suites pin these
@@ -567,31 +561,27 @@ public class DownloadUtils {
         for (index, file) in filesToDownload.enumerated() {
             let destPath = repoDirectory.appendingPathComponent(file.path)
 
-            let onBytes: (@Sendable (Int64, Int64) -> Void)?
             // Only stream live byte progress for files with a known size: an
             // unknown-size file (-1) carries zero weight in totalBytes, so its
             // real bytesWritten would inflate the fraction mid-file and snap
             // back at the boundary. Boundary emits keep progress monotonic.
-            if progressHandler != nil, file.size > 0 {
-                let baseBytes = completedBytes
-                let totalBytesSnapshot = totalBytes
-                let fileIndex = index
-                let fileCount = totalFiles
-                onBytes = { bytesWritten, _ in
-                    reporter.liveBytes(
-                        completedBytes: baseBytes + bytesWritten,
-                        totalBytes: totalBytesSnapshot,
-                        fileIndex: fileIndex,
-                        totalFiles: fileCount)
-                }
-            } else {
-                onBytes = nil
-            }
+            let onBytes =
+                file.size > 0
+                ? reporter.liveBytesCallback(
+                    baseBytes: completedBytes,
+                    totalBytes: totalBytes,
+                    fileIndex: index,
+                    totalFiles: totalFiles)
+                : nil
 
+            // Fail loudly on blocked paths: subdirectory downloads land in
+            // caller-provided directories, so a regular file where a directory
+            // belongs is surfaced, never silently deleted.
             let outcome = try await FileDownloader.ensure(
                 file: file,
                 from: repo.remotePath,
                 at: destPath,
+                recoveringBlockedPaths: false,
                 onBytes: onBytes
             )
             completedBytes += Int64(max(0, file.size))

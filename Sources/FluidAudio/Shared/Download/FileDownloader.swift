@@ -7,7 +7,10 @@ import os
 /// cache. Used by both `downloadRepo` and `downloadSubdirectory`.
 enum FileDownloader {
 
-    private static let logger = AppLogger(category: "FileDownloader")
+    /// Historical category kept so existing log predicates keep capturing the
+    /// whole download trail across the #765 refactor; Wave 6 renames it
+    /// deliberately alongside the API cutover.
+    private static let logger = AppLogger(category: "DownloadUtils")
 
     /// What `ensure(file:from:at:)` did for a file.
     enum Outcome {
@@ -23,11 +26,18 @@ enum FileDownloader {
     /// present, create empties locally, otherwise download with retry +
     /// byte-range resume (via `<destination>.partial`), validate, and move
     /// atomically into place.
+    ///
+    /// - Parameter recoveringBlockedPaths: When true, a regular file blocking
+    ///   a parent-directory component is DELETED and replaced (the repo-cache
+    ///   corrupt-recovery behavior). When false, a blocked path fails loudly
+    ///   with the thrown filesystem error — callers outside the managed model
+    ///   cache must not silently destroy user files.
     @discardableResult
     static func ensure(
         file: RemoteFile,
         from repoRemotePath: String,
         at destination: URL,
+        recoveringBlockedPaths: Bool,
         configuration: URLSessionConfiguration? = nil,
         onBytes: (@Sendable (Int64, Int64) -> Void)? = nil
     ) async throws -> Outcome {
@@ -35,8 +45,14 @@ enum FileDownloader {
             return .alreadyPresent
         }
 
-        // Create parent directory, removing any conflicting files in the path.
-        try ModelCache.createDirectoryRobustly(at: destination.deletingLastPathComponent())
+        let parentDir = destination.deletingLastPathComponent()
+        if recoveringBlockedPaths {
+            // Create parent directory, removing any conflicting files in the path.
+            try ModelCache.createDirectoryRobustly(at: parentDir)
+        } else {
+            try FileManager.default.createDirectory(
+                at: parentDir, withIntermediateDirectories: true)
+        }
 
         // HuggingFace returns 500 for 0-byte files — create empty file locally.
         if file.size == 0 {
@@ -117,7 +133,8 @@ enum FileDownloader {
     ///     including `resumeOffset`. Delegate-driven byte progress (#756).
     ///   - onResponse: Fires before any body byte is written — the resume path
     ///     persists the validator here so it survives a drop mid-body.
-    /// Internal (not private) so download-resume tests can drive it directly.
+    /// Coverage flows through the `DownloadUtils.downloadFileWithRetry`
+    /// forward (DownloadResumeTests); no test drives this directly.
     static func streamDownload(
         request: URLRequest,
         to destination: URL,
@@ -133,6 +150,8 @@ enum FileDownloader {
             onResponse: onResponse
         )
         // Dedicated session with delegate — one per download to avoid cross-talk.
+        // DownloadUtils still owns the shared session (public API); ownership
+        // moves to the new surface in the Wave 6 cutover.
         let session = URLSession(
             configuration: configuration ?? DownloadUtils.sharedSession.configuration,
             delegate: delegate,
@@ -194,7 +213,8 @@ enum FileDownloader {
     ///   - configuration: Session configuration override for tests.
     /// - Returns: The URL of a validated (2xx) fully-written download; the
     ///   caller moves it into the cache.
-    /// Internal (not private) so download-resume tests can drive it directly.
+    /// Pinned via the `DownloadUtils.downloadFileWithRetry` forward
+    /// (DownloadResumeTests drives resume/splice/416 behavior through it).
     static func download(
         request: URLRequest,
         path: String,
@@ -214,6 +234,11 @@ enum FileDownloader {
         return try await RetryPolicy.withRetry(
             label: path, maxAttempts: maxAttempts, minBackoff: minBackoff, logger: logger
         ) { attempt in
+            // Re-check per attempt, matching HFTreeLister.fetch: flipping
+            // enforceOffline mid-operation stops the walk at the next request.
+            guard !DownloadUtils.enforceOffline else {
+                throw DownloadUtils.OfflineError.networkDisabled(operation: "download(\(path))")
+            }
             var attemptRequest = request
             var resumeOffset: Int64 = 0
 
@@ -447,7 +472,7 @@ private final class StreamingDownloadDelegate: NSObject, URLSessionDataDelegate,
                 } else if let response {
                     continuation.resume(returning: response)
                 } else {
-                    continuation.resume(throwing: DownloadUtils.HuggingFaceDownloadError.invalidResponse)
+                    continuation.resume(throwing: HFDownload.DownloadError.invalidResponse)
                 }
             }
         }

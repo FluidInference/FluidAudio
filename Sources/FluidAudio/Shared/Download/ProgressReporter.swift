@@ -43,10 +43,28 @@ struct ProgressReporter: Sendable {
         completedBytes: Int64, totalBytes: Int64, fileIndex: Int, totalFiles: Int
     ) {
         guard totalBytes > 0 else { return }
-        let fraction = downloadPhaseWeight * Double(completedBytes) / Double(totalBytes)
-        emit(
-            min(fraction, downloadPhaseWeight),
-            .downloading(completedFiles: fileIndex, totalFiles: totalFiles))
+        let fraction =
+            downloadPhaseWeight
+            * Self.downloadFraction(
+                completedBytes: completedBytes, totalBytes: totalBytes,
+                completedFiles: fileIndex, totalFiles: totalFiles)
+        emit(fraction, .downloading(completedFiles: fileIndex, totalFiles: totalFiles))
+    }
+
+    /// Factory for the per-file live-bytes callback both download loops hand
+    /// to FileDownloader; nil when there is no handler (skip the closure
+    /// allocation and delegate churn entirely).
+    func liveBytesCallback(
+        baseBytes: Int64, totalBytes: Int64, fileIndex: Int, totalFiles: Int
+    ) -> (@Sendable (Int64, Int64) -> Void)? {
+        guard handler != nil else { return nil }
+        return { bytesWritten, _ in
+            self.liveBytes(
+                completedBytes: baseBytes + bytesWritten,
+                totalBytes: totalBytes,
+                fileIndex: fileIndex,
+                totalFiles: totalFiles)
+        }
     }
 
     /// A file boundary (downloaded, skipped, or created empty).
@@ -66,8 +84,10 @@ struct ProgressReporter: Sendable {
         emit(downloadPhaseWeight, .downloading(completedFiles: 0, totalFiles: 0))
     }
 
-    /// Compiling model `index` of `count`.
+    /// Compiling model `index` of `count`. No emission for an empty set —
+    /// dividing by zero would hand the handler a NaN fraction.
     func compiling(name: String, index: Int, count: Int) {
+        guard count > 0 else { return }
         let compileWeight = 1.0 - downloadPhaseWeight
         emit(
             downloadPhaseWeight + compileWeight * Double(index) / Double(count),

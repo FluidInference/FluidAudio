@@ -6,7 +6,10 @@ import Foundation
 /// public API.
 enum ModelCache {
 
-    private static let logger = AppLogger(category: "ModelCache")
+    /// Historical category kept so existing log predicates keep capturing the
+    /// whole download trail across the #765 refactor; Wave 6 renames it
+    /// deliberately alongside the API cutover.
+    private static let logger = AppLogger(category: "DownloadUtils")
 
     /// Robustly create a directory, removing any conflicting files in the path.
     ///
@@ -17,6 +20,14 @@ enum ModelCache {
     /// - Throws: Errors from FileManager if directory creation fails after cleanup
     static func createDirectoryRobustly(at url: URL) throws {
         let fm = FileManager.default
+
+        // Hot path: the directory usually already exists (one stat instead of
+        // one per ancestor component on every per-file call).
+        var isDirectory: ObjCBool = false
+        if fm.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
+            return
+        }
+
         var pathComponents = url.pathComponents
 
         // Remove leading "/" if present
@@ -49,9 +60,7 @@ enum ModelCache {
 
     /// `true` when every model in `models` exists under `repoPath`.
     static func allModelsExist(at repoPath: URL, models: Set<String>) -> Bool {
-        models.allSatisfy { model in
-            FileManager.default.fileExists(atPath: repoPath.appendingPathComponent(model).path)
-        }
+        missingModels(at: repoPath, models: models).isEmpty
     }
 
     /// The subset of `models` missing under `repoPath`, sorted for stable
@@ -62,14 +71,11 @@ enum ModelCache {
         }.sorted()
     }
 
-    /// Throw `modelNotFound` for the first required model absent under
-    /// `repoPath` (the post-download verify pass).
+    /// Throw `modelNotFound` for the (deterministically first, sorted)
+    /// required model absent under `repoPath` — the post-download verify pass.
     static func verifyModelsPresent(at repoPath: URL, models: Set<String>) throws {
-        for model in models {
-            let modelPath = repoPath.appendingPathComponent(model)
-            guard FileManager.default.fileExists(atPath: modelPath.path) else {
-                throw HFDownload.DownloadError.modelNotFound(path: model)
-            }
+        if let missing = missingModels(at: repoPath, models: models).first {
+            throw HFDownload.DownloadError.modelNotFound(path: missing)
         }
     }
 
@@ -112,6 +118,10 @@ enum ModelCache {
 
     /// Delete a corrupted repo cache, tolerating an already-missing path
     /// (robust directory creation handles any remnants on re-download).
+    ///
+    /// Callers MUST check `RetryPolicy.isCancellation` first: cancellation is
+    /// not corruption, and purging on a cancelled load threw away valid
+    /// multi-hundred-MB caches before the guard existed (see loadModels).
     static func purgeCorruptedCache(at repoPath: URL) {
         do {
             try FileManager.default.removeItem(at: repoPath)
