@@ -3,7 +3,7 @@ import XCTest
 
 @testable import FluidAudio
 
-/// Characterization tests for `downloadRepo`'s file-selection rules (#765
+/// Characterization tests for `ModelHub.download`'s file-selection rules (#765
 /// Wave 1). These pin CURRENT behavior — quirks included — so the Wave 3
 /// lister extraction can prove the rules moved verbatim. They are not a
 /// statement of what the rules *should* be; deliberate changes belong in a

@@ -1,8 +1,10 @@
 import Foundation
 
-/// Errors thrown by the model-download stack (#765 Wave 6: one merged,
-/// top-level error domain — absorbs the pre-0.16 `DownloadUtils.
-/// DownloadError` and `DownloadError`).
+/// Errors thrown by the model-download stack: one merged, top-level error
+/// domain. Absorbs the two pre-0.16 nested enums — `DownloadUtils
+/// .HuggingFaceDownloadError` (the six download cases) and `DownloadUtils
+/// .OfflineError` (`networkDisabled`/`modelMissing`) — with all case names
+/// preserved, so catch-pattern migration is a prefix swap.
 public enum DownloadError: LocalizedError {
     case invalidResponse
     case rateLimited(statusCode: Int, message: String)

@@ -4,12 +4,12 @@ import os
 /// The one per-file download unit for the download stack (#765 Wave 4):
 /// bounded retry (RetryPolicy) around the streaming byte-range-resume
 /// transport (#757), artifact validation, and atomic placement into the
-/// cache. Used by both `downloadRepo` and `downloadSubdirectory`.
+/// cache. Used by both `ModelHub.download` and `download(subdirectory:)`.
 enum FileDownloader {
 
-    /// Historical category kept so existing log predicates keep capturing the
-    /// whole download trail across the #765 refactor; Wave 6 renames it
-    /// deliberately alongside the API cutover.
+    /// Historical log category retained deliberately across the 0.16 rename so
+    /// existing `category == "DownloadUtils"` predicates keep capturing the
+    /// whole download trail; renaming it is a separate, opt-in decision.
     private static let logger = AppLogger(category: "DownloadUtils")
 
     /// What `ensure(file:from:at:)` did for a file.
@@ -124,7 +124,7 @@ enum FileDownloader {
     /// classified retry (permanent 4xx fails fast, 5xx/rate-limits retry with
     /// Retry-After pacing) and artifact validation (HTML error pages and empty
     /// bodies are rejected, never returned as content). Replaces
-    /// `fetchHuggingFaceFile`'s historical retry-everything loop.
+    /// `fetchFile`'s historical retry-everything loop.
     static func fetchData(
         from url: URL,
         description: String,
@@ -133,7 +133,7 @@ enum FileDownloader {
         configuration: URLSessionConfiguration? = nil
     ) async throws -> Data {
         let request = HFClient.authorizedRequest(url: url)
-        let session = configuration.map { URLSession(configuration: $0) } ?? ModelHub.session
+        let session = configuration.map { URLSession(configuration: $0) } ?? HFClient.session
         defer {
             if configuration != nil { session.finishTasksAndInvalidate() }
         }
@@ -142,8 +142,8 @@ enum FileDownloader {
             label: description, maxAttempts: maxAttempts, minBackoff: minBackoff, logger: logger
         ) { _ in
             // Re-check per attempt, matching download(): flipping
-            // enforceOffline mid-operation stops at the next request.
-            guard !ModelHub.offlineMode else {
+            // offlineMode mid-operation stops at the next request.
+            guard !HFClient.offlineMode else {
                 throw DownloadError.networkDisabled(
                     operation: "fetchFile(\(description))")
             }
@@ -217,10 +217,10 @@ enum FileDownloader {
             onResponse: onResponse
         )
         // Dedicated session with delegate — one per download to avoid cross-talk.
-        // DownloadUtils still owns the shared session (public API); ownership
-        // moves to the new surface in the Wave 6 cutover.
+        // One session per download to avoid delegate cross-talk; the
+        // configuration comes from the shared HFClient session.
         let session = URLSession(
-            configuration: configuration ?? ModelHub.session.configuration,
+            configuration: configuration ?? HFClient.session.configuration,
             delegate: delegate,
             delegateQueue: nil
         )
@@ -302,8 +302,8 @@ enum FileDownloader {
             label: path, maxAttempts: maxAttempts, minBackoff: minBackoff, logger: logger
         ) { attempt in
             // Re-check per attempt, matching HFTreeLister.fetch: flipping
-            // enforceOffline mid-operation stops the walk at the next request.
-            guard !ModelHub.offlineMode else {
+            // offlineMode mid-operation stops the walk at the next request.
+            guard !HFClient.offlineMode else {
                 throw DownloadError.networkDisabled(operation: "download(\(path))")
             }
             var attemptRequest = request

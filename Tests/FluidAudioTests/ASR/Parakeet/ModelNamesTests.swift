@@ -74,7 +74,7 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertTrue(offlineFp16.contains(ModelNames.ParakeetUnified.offlineEncoderFp16File))
         // ...but the streaming encoder is context-specific ([L,C,R] tier), so it
         // is NOT in the base set — the streaming manager adds its exact encoder
-        // via downloadRepo(additionalModelNames:), avoiding a default over-fetch.
+        // via ModelHub.download(additionalModelNames:), avoiding a default over-fetch.
         for set in [streaming, streamingFp16] {
             XCTAssertEqual(set.filter { $0.contains("encoder") }.count, 0)
         }

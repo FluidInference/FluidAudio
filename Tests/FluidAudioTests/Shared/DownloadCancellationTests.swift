@@ -10,7 +10,7 @@ import XCTest
 ///
 /// These tests validate the `isCancellationError` classifier that gates
 /// the delete-and-redownload fallback.
-final class DownloadUtilsCancellationTests: XCTestCase {
+final class DownloadCancellationTests: XCTestCase {
 
     // MARK: - cancellation shapes that must be detected
 

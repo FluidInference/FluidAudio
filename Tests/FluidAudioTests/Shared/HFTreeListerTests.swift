@@ -7,7 +7,7 @@ import XCTest
 /// include-based pruning, Link-header pagination (confirmed against the live
 /// HF API in Wave 0), and typed errors for rate-limit/HTML/malformed pages.
 /// The repo-specific filter *rules* are pinned separately by
-/// `DownloadFilterCharacterizationTests` through `downloadRepo`.
+/// `DownloadFilterCharacterizationTests` through `ModelHub.download`.
 final class HFTreeListerTests: XCTestCase {
 
     private static let repo = "FluidInference/test-repo"
@@ -175,7 +175,7 @@ final class HFTreeListerTests: XCTestCase {
 
     // MARK: - Pagination through the real fetch path
 
-    /// End-to-end: downloadRepo → configuration seam → HFTreeLister.fetch →
+    /// End-to-end: ModelHub.download → configuration seam → HFTreeLister.fetch →
     /// URLSession → Link cursor. The unit tests above bypass the session via
     /// an injected Fetch; this pins the production wiring.
     func testDownloadRepoFollowsPaginationThroughRealFetchPath() async throws {

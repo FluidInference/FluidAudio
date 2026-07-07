@@ -393,7 +393,7 @@ extension StreamingNemotronMultilingualAsrManager {
                 logger.warning(
                     "Cached tokenizer.json at \(tokenizerPath.path) has a corrupt duplicate '<blank>' entry — re-downloading the fixed file"
                 )
-                // Move the corrupt file aside so downloadSubdirectory re-fetches
+                // Move the corrupt file aside so download(subdirectory:) re-fetches
                 // it; restore on failure so offline users keep a working variant.
                 let backupPath = tokenizerPath.appendingPathExtension("corrupt")
                 try? FileManager.default.removeItem(at: backupPath)

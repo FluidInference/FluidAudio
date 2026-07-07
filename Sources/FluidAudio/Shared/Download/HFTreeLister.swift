@@ -8,8 +8,8 @@ struct RemoteFile: Equatable, Sendable {
 }
 
 /// The one tree-listing implementation for the download stack (#765 Wave 3),
-/// replacing the two divergent recursive walkers in `downloadRepo` and
-/// `downloadSubdirectory`. Follows the HF tree API's `Link` pagination cursor,
+/// replacing the two divergent recursive walkers in `ModelHub.download` and
+/// `download(subdirectory:)`. Follows the HF tree API's `Link` pagination cursor,
 /// so directories with more entries than one API page (1,000 by default) no
 /// longer silently drop files.
 enum HFTreeLister {
@@ -21,13 +21,13 @@ enum HFTreeLister {
     typealias Fetch = (URL) async throws -> (Data, HTTPURLResponse)
 
     /// Production fetch: authorized request on `session`, re-checking
-    /// `enforceOffline` per request so flipping the flag mid-listing stops the
+    /// `offlineMode` per request so flipping the flag mid-listing stops the
     /// walk at the next fetch. Non-HTTP responses are rejected as
     /// `invalidResponse` — an explicit decision; the old listers silently
     /// skipped the rate-limit check on non-HTTP responses.
     static func fetch(using session: URLSession) -> Fetch {
         { url in
-            guard !ModelHub.offlineMode else {
+            guard !HFClient.offlineMode else {
                 throw DownloadError.networkDisabled(operation: "listTree(\(url.path))")
             }
             let request = HFClient.authorizedRequest(url: url)

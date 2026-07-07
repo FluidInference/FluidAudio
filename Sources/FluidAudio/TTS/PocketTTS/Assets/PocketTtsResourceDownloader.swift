@@ -142,7 +142,7 @@ public enum PocketTtsResourceDownloader {
 
     /// Backfill `constants_bin/bos_before_voice.bin` for cached language packs
     /// that were downloaded before the FluidAudio #592 fix. New downloads pick
-    /// it up via `downloadSubdirectory` — this helper exists only to upgrade
+    /// it up via `download(subdirectory:)` — this helper exists only to upgrade
     /// older caches without a full re-download.
     private static func ensureBosBeforeVoice(
         language: PocketTtsLanguage,

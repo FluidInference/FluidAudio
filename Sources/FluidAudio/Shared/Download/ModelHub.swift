@@ -5,27 +5,37 @@ import Foundation
 /// model repos from HuggingFace into the local cache, targeted subdirectory
 /// and single-file fetches, offline enforcement, and cache management.
 ///
-/// Replaces the pre-0.16 `DownloadUtils` class — see the 0.16.0 migration
+/// Replaces the pre-0.16 `ModelHub` class — see the 0.16.0 migration
 /// table for the mechanical old→new spellings.
 public enum ModelHub {
 
+    /// Historical log category retained deliberately across the 0.16 rename:
+    /// existing `log stream --predicate 'category == "ModelHub"'`
+    /// diagnostics keep capturing the whole download trail. Renaming the
+    /// category is a separate, opt-in decision.
     private static let logger = AppLogger(category: "DownloadUtils")
 
     /// Shared URLSession with registry and proxy configuration. Advanced
     /// plumbing — exposed for tooling (the FluidAudio CLI's dataset
     /// downloads); apps normally never touch it.
-    public static let session: URLSession = ModelRegistry.configuredSession()
+    public static var session: URLSession { HFClient.session }
 
-    /// Offline-only mode. When true, every download surface and the
-    /// `loadModels` retry-with-redownload fallback throws
-    /// `DownloadError.networkDisabled` / `.modelMissing` instead of touching
-    /// the network. Set once at startup before any FluidAudio loaders are
-    /// touched (`nonisolated(unsafe)` is acceptable under that contract).
-    nonisolated(unsafe) public static var offlineMode: Bool = false
+    /// Offline-only mode. When true, every download surface (`fetchWithAuth`,
+    /// `download`, `fetchFile`) and the `loadModels` retry-with-redownload
+    /// fallback throws `DownloadError.networkDisabled` / `.modelMissing`
+    /// instead of touching the network. Applications that bundle their own
+    /// model assets should set this once at startup and route loading through
+    /// manual APIs (e.g. `MLModel(contentsOf:)`, `VadManager(config:vadModel:)`)
+    /// so a corrupt-detected `.mlmodelc` never silently re-downloads at
+    /// runtime. Set before any FluidAudio loaders are touched.
+    public static var offlineMode: Bool {
+        get { HFClient.offlineMode }
+        set { HFClient.offlineMode = newValue }
+    }
 
     /// Throws `DownloadError.networkDisabled` if `offlineMode` is on.
     /// Call this at the top of any path that would touch the network.
-    static func ensureOnlineAllowed(_ operation: String) throws {
+    private static func ensureOnlineAllowed(_ operation: String) throws {
         if offlineMode {
             throw DownloadError.networkDisabled(operation: operation)
         }
@@ -36,8 +46,7 @@ public enum ModelHub {
     /// higher rate limits); prefer `fetchFile` for content.
     public static func fetchWithAuth(from url: URL) async throws -> (Data, URLResponse) {
         try ensureOnlineAllowed("fetchWithAuth(\(url.absoluteString))")
-        let request = HFClient.authorizedRequest(url: url)
-        return try await session.data(for: request)
+        return try await HFClient.fetchWithAuth(from: url)
     }
 
     public static func clearCache(for repo: Repo, directory: URL) {
@@ -45,8 +54,10 @@ public enum ModelHub {
         try? FileManager.default.removeItem(at: repoPath)
     }
 
-    /// Remove all downloaded models and caches (ASR/VAD/diarization models
-    /// under Application Support, and the shared TTS cache root).
+    /// Remove all downloaded models and caches. Clears both cache locations:
+    /// `~/Library/Application Support/FluidAudio/Models/` (ASR, VAD,
+    /// Diarization) and the shared TTS root — `~/.cache/fluidaudio/` on
+    /// macOS, `Application Support/fluidaudio/` on iOS.
     public static func clearAllCaches() {
         let fm = FileManager.default
 
@@ -347,7 +358,7 @@ public enum ModelHub {
             )
             completedBytes += Int64(max(0, file.size))
 
-            // Pinned asymmetry vs downloadSubdirectory: cached/empty files
+            // Pinned asymmetry vs download(subdirectory:): cached/empty files
             // emit no boundary here (the pre-#765 behavior ProgressSequence
             // relies on); the subdirectory loop emits for every outcome.
             guard outcome == .downloaded else { continue }

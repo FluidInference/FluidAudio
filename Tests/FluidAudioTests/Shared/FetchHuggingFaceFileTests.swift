@@ -4,7 +4,7 @@ import os
 
 @testable import FluidAudio
 
-/// Wave 5 behavior tests (#765): `fetchHuggingFaceFile` converges onto the
+/// Wave 5 behavior tests (#765): `fetchFile` converges onto the
 /// shared retry policy and artifact validation. These pin the DELIBERATE
 /// behavior changes this wave introduces:
 ///   - permanent errors (404) fail fast instead of consuming the backoff budget

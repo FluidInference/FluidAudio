@@ -1,12 +1,26 @@
 import Foundation
 
-/// HuggingFace HTTP plumbing for the DownloadUtils download paths, converging
-/// here across the #765 waves: token resolution, authorized request building,
-/// and the single place where rate-limit (429/503) responses become typed
-/// errors. (`fetchHuggingFaceFile` keeps its divergent retry loop until
-/// Wave 5; `AssetDownloader` and the CLI's `DatasetDownloader` are not yet in
-/// scope.)
+/// HuggingFace HTTP plumbing for the download stack: the shared configured
+/// session, offline-mode storage, token resolution, authorized request
+/// building, and the single place where rate-limit (429/503) responses
+/// become typed errors. `ModelHub` is the public surface over this.
 enum HFClient {
+
+    /// Shared URLSession with registry and proxy configuration; created
+    /// lazily on first use. `ModelHub.session` is the public spelling.
+    static let session: URLSession = ModelRegistry.configuredSession()
+
+    /// Offline-mode storage; `ModelHub.offlineMode` is the public spelling.
+    /// Set once at startup before any loaders are touched
+    /// (`nonisolated(unsafe)` is acceptable under that contract).
+    nonisolated(unsafe) static var offlineMode: Bool = false
+
+    /// Authenticated data fetch (`ModelHub.fetchWithAuth` is the public
+    /// spelling): authorized request on the shared session.
+    static func fetchWithAuth(from url: URL) async throws -> (Data, URLResponse) {
+        let request = authorizedRequest(url: url)
+        return try await session.data(for: request)
+    }
 
     /// HuggingFace token from the environment, if available. Supports the env
     /// vars used by the official CLI (`HF_TOKEN`), the Python `huggingface_hub`

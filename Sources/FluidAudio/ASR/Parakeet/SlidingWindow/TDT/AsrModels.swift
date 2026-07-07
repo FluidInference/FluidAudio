@@ -623,7 +623,7 @@ extension AsrModels {
         let fileManager = FileManager.default
         let requiredFiles = getRequiredModels(version: version, encoderPrecision: encoderPrecision)
 
-        // Check in the DownloadUtils repo structure
+        // Check in the ModelHub repo structure
         let repoPath = repoPath(from: directory, version: version)
 
         let modelsPresent = requiredFiles.allSatisfy { fileName in

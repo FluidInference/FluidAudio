@@ -4,7 +4,7 @@ import os
 
 @testable import FluidAudio
 
-/// Characterization tests for `downloadRepo`'s progress emissions (#765
+/// Characterization tests for `ModelHub.download`'s progress emissions (#765
 /// Wave 1). Pins the CURRENT convention that UIs depend on: the download
 /// phase of a repo operation occupies `fractionCompleted` 0.0–0.5 (compile
 /// occupies 0.5–1.0 and needs real models, so it is pinned by inspection,

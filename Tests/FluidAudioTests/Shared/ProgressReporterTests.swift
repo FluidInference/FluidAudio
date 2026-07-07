@@ -2,7 +2,7 @@ import XCTest
 
 @testable import FluidAudio
 
-final class DownloadUtilsProgressTests: XCTestCase {
+final class ProgressReporterTests: XCTestCase {
 
     func testSubdirectoryProgressUsesByteWeightingDuringLargeFile() {
         let fraction = ProgressReporter.downloadFraction(

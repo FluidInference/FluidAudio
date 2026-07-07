@@ -194,7 +194,7 @@ struct ParakeetEouCommand {
         print("Fetching \(chunkSize.modelSubdirectory) models from \(repo.remotePath)...")
         fflush(stdout)
 
-        // Use DownloadUtils to download - handles auth, rate limiting, retries
+        // Use ModelHub to download - handles auth, rate limiting, retries
         // Downloads to: directory/repo.folderName (e.g., .../parakeet-eou-streaming/160ms)
         let modelsDir = destination.deletingLastPathComponent().deletingLastPathComponent()
         try await ModelHub.download(repo, to: modelsDir)

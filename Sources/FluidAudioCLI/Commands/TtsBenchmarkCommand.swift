@@ -1065,7 +1065,7 @@ public enum TtsBenchmarkCommand {
         let appSupport = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask, appropriateFor: nil, create: true)
-        // `downloadRepo` appends `repo.folderName` (cohere-transcribe/q8), so
+        // `ModelHub.download` appends `repo.folderName` (cohere-transcribe/q8), so
         // pass the Models base dir and let it land the bundle at `target`.
         let modelsBase = appSupport.appendingPathComponent("FluidAudio/Models")
         let target = modelsBase.appendingPathComponent("cohere-transcribe/q8")

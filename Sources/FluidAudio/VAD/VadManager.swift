@@ -127,7 +127,7 @@ public actor VadManager {
     ) async throws {
         let baseDirectory = directory ?? getDefaultBaseDirectory()
 
-        // Use DownloadUtils to load the model (handles downloading if needed)
+        // Use ModelHub to load the model (handles downloading if needed)
         let models = try await ModelHub.loadModels(
             .vad,
             modelNames: Array(ModelNames.VAD.requiredModels),

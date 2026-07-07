@@ -591,7 +591,7 @@ public enum ModelNames {
             var models: Set<String> = [decoderFile, jointDecisionFile, vocab, metadata]
             // The streaming encoder is context-specific — each [L,C,R] latency
             // tier bakes its attention mask into a distinct bundle — so the
-            // streaming manager passes its exact encoder via downloadRepo's
+            // streaming manager passes its exact encoder via ModelHub.download's
             // `additionalModelNames` instead of pulling a fixed default here
             // (which would over-fetch the 70_13_13 encoder for every tier). The
             // offline encoder is fixed, so it stays in the base set.
@@ -1273,7 +1273,7 @@ public enum ModelNames {
         switch repo {
         case .nemotronMultilingual:
             // Compiled .mlmodelc component dirs. Download is normally driven by
-            // `downloadSubdirectory` (dynamic <lang>/<tier>ms path), which does
+            // `download(subdirectory:)` (dynamic <lang>/<tier>ms path), which does
             // not consult this set; provided for completeness / exhaustiveness.
             return [
                 NemotronMultilingualStreaming.preprocessorFile,
