@@ -426,101 +426,41 @@ public class DownloadUtils {
             }
         }
 
-        // Get all files recursively using HuggingFace API
-        var filesToDownload: [(path: String, size: Int)] = []
-
-        func listDirectory(path: String) async throws {
-            let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
-            let dirURL = try ModelRegistry.apiModels(repo.remotePath, apiPath)
-            let request = authorizedRequest(url: dirURL)
-
-            let (dirData, response) = try await listingSession.data(for: request)
-
-            if let httpResponse = response as? HTTPURLResponse {
-                try HFClient.checkRateLimit(httpResponse, context: "listing files")
-            }
-
-            // Validate that response is JSON, not HTML error page
-            try HFClient.validateJSONResponse(dirData, path: path)
-
-            guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
-                throw HuggingFaceDownloadError.invalidResponse
-            }
-
-            for item in items {
-                guard let itemPath = item["path"] as? String,
-                    let itemType = item["type"] as? String
-                else { continue }
-
-                if itemType == "directory" {
-                    // For subPath repos, only process paths within the subPath
-                    let shouldProcess: Bool
-                    if let sub = subPath {
-                        shouldProcess =
-                            itemPath == sub || itemPath.hasPrefix("\(sub)/")
-                            || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
-                    } else {
-                        shouldProcess =
-                            patterns.isEmpty
-                            || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
-                    }
-                    if shouldProcess {
-                        try await listDirectory(path: itemPath)
-                    }
-                } else if itemType == "file" {
-                    // For subPath repos, only include files within the subPath
-                    let shouldInclude: Bool
-                    if let sub = subPath {
-                        let isInSubPath = itemPath.hasPrefix("\(sub)/")
-                        let matchesPattern =
-                            patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
-                        let isMetadata =
-                            itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model") || itemPath.hasSuffix(".bin")
-                        shouldInclude = isInSubPath && (matchesPattern || isMetadata)
-                    } else {
-                        shouldInclude =
-                            patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
-                            || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
-                    }
-                    if shouldInclude {
-                        let fileSize = item["size"] as? Int ?? -1
-                        filesToDownload.append((path: itemPath, size: fileSize))
-                    }
+        // File selection rules, moved verbatim from the pre-#765 inline listers;
+        // DownloadFilterCharacterizationTests pins them.
+        let include: (String, Bool) -> Bool = { itemPath, isDirectory in
+            if isDirectory {
+                // For subPath repos, only process paths within the subPath
+                if let sub = subPath {
+                    return itemPath == sub || itemPath.hasPrefix("\(sub)/")
+                        || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
                 }
+                return patterns.isEmpty
+                    || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
             }
-        }
-
-        // Pull root-level files whose basename is in `names`. Some subPath repos
-        // keep shared auxiliary files at the repo root rather than inside the
-        // precision subdirectory, so a subPath-only traversal misses them.
-        func listRootFiles(matching names: Set<String>) async throws {
-            let dirURL = try ModelRegistry.apiModels(repo.remotePath, "tree/main")
-            let request = authorizedRequest(url: dirURL)
-            let (dirData, response) = try await listingSession.data(for: request)
-
-            if let httpResponse = response as? HTTPURLResponse {
-                try HFClient.checkRateLimit(httpResponse, context: "listing root files")
+            // For subPath repos, only include files within the subPath
+            if let sub = subPath {
+                let isInSubPath = itemPath.hasPrefix("\(sub)/")
+                let matchesPattern =
+                    patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+                let isMetadata =
+                    itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model") || itemPath.hasSuffix(".bin")
+                return isInSubPath && (matchesPattern || isMetadata)
             }
-
-            try HFClient.validateJSONResponse(dirData, path: "")
-
-            guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
-                throw HuggingFaceDownloadError.invalidResponse
-            }
-
-            for item in items {
-                guard let itemPath = item["path"] as? String,
-                    item["type"] as? String == "file",
-                    names.contains((itemPath as NSString).lastPathComponent)
-                else { continue }
-                let fileSize = item["size"] as? Int ?? -1
-                filesToDownload.append((path: itemPath, size: fileSize))
-            }
+            return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+                || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
         }
 
         // Start listing from subPath if specified, otherwise from root
         progressHandler?(DownloadProgress(fractionCompleted: 0.0, phase: .listing))
-        try await listDirectory(path: subPath ?? "")
+        let treeFetch = HFTreeLister.fetch(using: listingSession)
+        var filesToDownload: [(path: String, size: Int)] =
+            try await HFTreeLister.listTree(
+                repoRemotePath: repo.remotePath,
+                startingAt: subPath ?? "",
+                include: include,
+                fetch: treeFetch
+            ).map { (path: $0.path, size: $0.size) }
 
         // Some subPath repos keep shared auxiliary files (e.g. vocab.json) at the
         // repo *root* rather than inside the precision subdirectory — the bundled
@@ -537,7 +477,17 @@ public class DownloadUtils {
                     && !collected.contains((model as NSString).lastPathComponent)
             }
             if !missingAux.isEmpty {
-                try await listRootFiles(matching: Set(missingAux))
+                // Root-level pass only: directories are pruned, files match by
+                // basename (moved verbatim from the old listRootFiles).
+                let names = Set(missingAux.map { ($0 as NSString).lastPathComponent })
+                filesToDownload +=
+                    try await HFTreeLister.listTree(
+                        repoRemotePath: repo.remotePath,
+                        include: { itemPath, isDirectory in
+                            !isDirectory && names.contains((itemPath as NSString).lastPathComponent)
+                        },
+                        fetch: treeFetch
+                    ).map { (path: $0.path, size: $0.size) }
             }
         }
 
@@ -930,40 +880,13 @@ public class DownloadUtils {
     ) async throws {
         try ensureOnlineAllowed("downloadSubdirectory(\(repo.folderName)/\(subdirectory))")
         progressHandler?(DownloadProgress(fractionCompleted: 0.0, phase: .listing))
-        var filesToDownload: [(path: String, size: Int)] = []
-
-        func listFiles(at path: String) async throws {
-            let dirURL = try ModelRegistry.apiModels(repo.remotePath, "tree/main/\(path)")
-            let (dirData, response) = try await fetchWithAuth(from: dirURL)
-            if let httpResponse = response as? HTTPURLResponse {
-                try HFClient.checkRateLimit(httpResponse, context: "listing files in \(path)")
-            }
-
-            // Validate that response is JSON, not HTML error page
-            try HFClient.validateJSONResponse(dirData, path: path)
-
-            guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
-                throw HuggingFaceDownloadError.invalidResponse
-            }
-            for item in items {
-                guard let itemPath = item["path"] as? String,
-                    let itemType = item["type"] as? String
-                else { continue }
-
-                if shouldSkip?(itemPath) == true {
-                    continue
-                }
-
-                if itemType == "directory" {
-                    try await listFiles(at: itemPath)
-                } else if itemType == "file" {
-                    let fileSize = item["size"] as? Int ?? -1
-                    filesToDownload.append((path: itemPath, size: fileSize))
-                }
-            }
-        }
-
-        try await listFiles(at: subdirectory)
+        let filesToDownload: [(path: String, size: Int)] =
+            try await HFTreeLister.listTree(
+                repoRemotePath: repo.remotePath,
+                startingAt: subdirectory,
+                include: { itemPath, _ in shouldSkip?(itemPath) != true },
+                fetch: HFTreeLister.fetch(using: sharedSession)
+            ).map { (path: $0.path, size: $0.size) }
         let totalFiles = filesToDownload.count
         logger.info("Found \(totalFiles) files in \(subdirectory)")
 
