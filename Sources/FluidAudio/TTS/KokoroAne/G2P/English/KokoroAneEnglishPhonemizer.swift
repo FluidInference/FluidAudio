@@ -73,9 +73,13 @@ struct KokoroAneEnglishPhonemizer: Sendable {
             throw KokoroAneError.inputProcessingFailed("(empty input)")
         }
 
+        // Fold typographic apostrophes to ASCII so in-word smart-quote
+        // contractions (`we’re`) survive tokenization intact (issue #774).
+        let prepared = Self.normalizeApostrophes(trimmed)
+
         var parts: [String] = []
 
-        for token in Self.splitWords(trimmed) {
+        for token in Self.splitWords(prepared) {
             if token.isEmpty { continue }
 
             // Punctuation token (single non-word char from the splitter).
@@ -112,6 +116,10 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         fallback: (String) async throws -> [String]?
     ) async throws -> String? {
         let normalized = Self.normalizeKey(word)
+        // Raw lower-cased spelling with hyphens intact. `normalizeKey` strips
+        // hyphens, so this is the only form that can reach the lexicon's 3,459
+        // hyphenated keys (`twenty-one`, `a-frame`, …) (issue #775).
+        let lowered = word.lowercased()
 
         if let custom = customLexicon[word] ?? customLexicon[normalized] {
             return custom
@@ -138,6 +146,7 @@ struct KokoroAneEnglishPhonemizer: Sendable {
 
         if let phonemes = caseSensitiveWordToPhonemes[word]
             ?? caseSensitiveWordToPhonemes[normalized]
+            ?? wordToPhonemes[lowered]
             ?? wordToPhonemes[normalized],
             !phonemes.isEmpty
         {
@@ -153,6 +162,17 @@ struct KokoroAneEnglishPhonemizer: Sendable {
             return spelled
         }
 
+        // A hyphenated compound that missed every lexicon as a whole
+        // (`tales-to-amaze`) — resolve each part and join, so it reads as
+        // `tales to amaze` instead of BART G2P on the glued `talestoamaze`
+        // (issue #775). Real lexicon compounds (`twenty-one`) already returned
+        // above, so only genuine misses reach here.
+        if word.contains("-"),
+            let compound = try await resolveHyphenatedCompound(word, fallback: fallback)
+        {
+            return compound
+        }
+
         guard !normalized.isEmpty else { return nil }
         do {
             if let phonemes = try await fallback(normalized), !phonemes.isEmpty {
@@ -166,6 +186,30 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         }
     }
 
+    /// Resolve a hyphenated compound that missed the lexicon by splitting on
+    /// hyphens and resolving each part, joining the phoneme strings with a
+    /// space (word boundary). Returns `nil` if the token isn't a multi-part
+    /// compound or any part is unresolvable, so the caller falls back to
+    /// whole-word G2P (issue #775). Parts contain no hyphens, so this does not
+    /// recurse back into itself.
+    private func resolveHyphenatedCompound(
+        _ word: String,
+        fallback: (String) async throws -> [String]?
+    ) async throws -> String? {
+        let parts = word.split(separator: "-", omittingEmptySubsequences: true).map(String.init)
+        guard parts.count >= 2 else { return nil }
+
+        var resolved: [String] = []
+        resolved.reserveCapacity(parts.count)
+        for part in parts {
+            guard let ipa = try await resolveWord(part, fallback: fallback), !ipa.isEmpty else {
+                return nil
+            }
+            resolved.append(ipa)
+        }
+        return resolved.joined(separator: " ")
+    }
+
     // MARK: - Letter-name initialisms (issue #710)
 
     /// Spell a token as a sequence of letter names using the per-letter
@@ -175,6 +219,20 @@ struct KokoroAneEnglishPhonemizer: Sendable {
     /// to its normal fallback rather than emitting a partial word.
     private func spellAsLetterNames(_ word: String) -> String? {
         EnglishInitialisms.spell(word) { caseSensitiveWordToPhonemes[$0] }
+    }
+
+    /// Typographic apostrophes that iOS smart punctuation and web/ebook
+    /// content use in place of the ASCII `'` (issue #774).
+    private static let smartApostrophes: Set<Character> = ["\u{2019}", "\u{2018}", "\u{02BC}"]
+
+    /// Fold typographic apostrophes (`’` `‘` `ʼ`) to the ASCII apostrophe so
+    /// `splitWords` and `normalizeKey` — which keep only U+0027 word-internal
+    /// — don't split contractions like `we’re` into `we` + `re` (issue #774).
+    static func normalizeApostrophes(_ text: String) -> String {
+        guard text.contains(where: { smartApostrophes.contains($0) }) else {
+            return text
+        }
+        return String(text.map { smartApostrophes.contains($0) ? "'" : $0 })
     }
 
     /// Lowercase + strip non-letter/digit/apostrophe chars so we hit the
