@@ -73,6 +73,29 @@ final class RetryPolicyTests: XCTestCase {
         XCTAssertEqual(counter.count, 3)
     }
 
+    func testRetryAfterHintUnwrapsToUnderlyingAndRespectsClassification() async {
+        // A permanent error inside the envelope must fail fast AND surface as
+        // the underlying error — the envelope never escapes withRetry.
+        let counter = Counter()
+        do {
+            let _: Never = try await RetryPolicy.withRetry(
+                label: "hinted-permanent", maxAttempts: 4, minBackoff: 0.01
+            ) { _ in
+                _ = counter.increment()
+                throw RetryPolicy.RetryAfterHint(
+                    underlying: DownloadUtils.HuggingFaceDownloadError.downloadFailed(
+                        path: "missing.bin", underlying: NSError(domain: "HTTP", code: 404)),
+                    retryAfter: 60)
+            }
+            XCTFail("expected error")
+        } catch DownloadUtils.HuggingFaceDownloadError.downloadFailed(let path, _) {
+            XCTAssertEqual(path, "missing.bin")
+        } catch {
+            XCTFail("envelope escaped or wrong error: \(error)")
+        }
+        XCTAssertEqual(counter.count, 1, "hint must not make a permanent error retryable")
+    }
+
     func testCancellationPropagatesWithoutRetry() async {
         let counter = Counter()
         do {

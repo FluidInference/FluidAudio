@@ -600,45 +600,34 @@ public class DownloadUtils {
         logger.info("Downloaded \(subdirectory) from \(repo.folderName)")
     }
 
-    /// Fetch a single file from HuggingFace with retry
+    /// Fetch a single file from HuggingFace with the converged retry policy
+    /// (#765 Wave 5): permanent errors (404s) fail fast instead of consuming
+    /// the backoff budget, 5xx/rate-limits retry with Retry-After pacing, and
+    /// HTML/empty bodies are rejected instead of returned as content.
     public static func fetchHuggingFaceFile(
         from url: URL,
         description: String,
         maxAttempts: Int = 4,
         minBackoff: TimeInterval = 1.0
     ) async throws -> Data {
+        try await fetchHuggingFaceFile(
+            from: url, description: description,
+            maxAttempts: maxAttempts, minBackoff: minBackoff,
+            configuration: nil)
+    }
+
+    /// Internal seam: `configuration` lets tests stub the transport.
+    static func fetchHuggingFaceFile(
+        from url: URL,
+        description: String,
+        maxAttempts: Int = 4,
+        minBackoff: TimeInterval = 1.0,
+        configuration: URLSessionConfiguration?
+    ) async throws -> Data {
         try ensureOnlineAllowed("fetchHuggingFaceFile(\(description))")
-        var lastError: Error?
-        let request = authorizedRequest(url: url)
-
-        for attempt in 1...maxAttempts {
-            do {
-                let (data, response) = try await sharedSession.data(for: request)
-
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw HuggingFaceDownloadError.invalidResponse
-                }
-
-                try HFClient.checkRateLimit(httpResponse, context: "fetching \(description)")
-
-                guard (200..<300).contains(httpResponse.statusCode) else {
-                    throw HuggingFaceDownloadError.invalidResponse
-                }
-
-                return data
-
-            } catch {
-                lastError = error
-                if attempt < maxAttempts {
-                    let backoffSeconds = pow(2.0, Double(attempt - 1)) * minBackoff
-                    logger.warning(
-                        "Download attempt \(attempt) for \(description) failed: \(error.localizedDescription). Retrying in \(String(format: "%.1f", backoffSeconds))s."
-                    )
-                    try await Task.sleep(nanoseconds: UInt64(backoffSeconds * 1_000_000_000))
-                }
-            }
-        }
-
-        throw lastError ?? HuggingFaceDownloadError.invalidResponse
+        return try await FileDownloader.fetchData(
+            from: url, description: description,
+            maxAttempts: maxAttempts, minBackoff: minBackoff,
+            configuration: configuration)
     }
 }

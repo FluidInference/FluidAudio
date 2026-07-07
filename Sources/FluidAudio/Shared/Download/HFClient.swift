@@ -43,6 +43,25 @@ enum HFClient {
             message: "Rate limited while \(context()) (HTTP \(response.statusCode))")
     }
 
+    /// `checkRateLimit` for call sites inside `RetryPolicy.withRetry`: when
+    /// the response carries `Retry-After`, the thrown `rateLimited` error is
+    /// wrapped in `RetryPolicy.RetryAfterHint` so backoff honors the server's
+    /// pacing (#765 Wave 5). Never use outside a retry operation — the
+    /// envelope must not escape to callers (unpaced sites like the tree
+    /// lister keep plain `checkRateLimit`).
+    static func checkRateLimitForRetry(
+        _ response: HTTPURLResponse, context: @autoclosure () -> String
+    ) throws {
+        do {
+            try checkRateLimit(response, context: context())
+        } catch {
+            if let delay = retryAfter(from: response) {
+                throw RetryPolicy.RetryAfterHint(underlying: error, retryAfter: delay)
+            }
+            throw error
+        }
+    }
+
     /// Typed `Retry-After` from a response: delay-seconds, or an HTTP-date
     /// converted to seconds-from-now. Nil when absent or unparsable.
     static func retryAfter(from response: HTTPURLResponse) -> TimeInterval? {

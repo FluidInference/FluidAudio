@@ -8,6 +8,21 @@ enum RetryPolicy {
 
     private static let defaultLogger = AppLogger(category: "RetryPolicy")
 
+    /// Longest server-requested pause `withRetry` will honor. Rate-limited
+    /// endpoints occasionally send hour-scale `Retry-After` values; waiting
+    /// that long inside a download call would look like a hang.
+    static let maxHonoredRetryAfter: TimeInterval = 30
+
+    /// Internal envelope carrying a typed `Retry-After` hint alongside the
+    /// real error (#765 Wave 5). Thrown ONLY inside `withRetry` operations
+    /// (see `HFClient.checkRateLimitForRetry`); `withRetry` unwraps it for
+    /// pacing and always rethrows the underlying error, so the envelope never
+    /// escapes to callers or tests.
+    struct RetryAfterHint: Error {
+        let underlying: Error
+        let retryAfter: TimeInterval
+    }
+
     /// Run `operation`, retrying transient failures (per `isRetryable`) with
     /// exponential backoff. Permanent errors and the final attempt's error are
     /// rethrown unchanged. The closure receives the 1-based attempt number
