@@ -60,6 +60,46 @@ enum HFClient {
         return nil
     }
 
+    /// Parse a pagination cursor from a `Link` header's `rel="next"` entry
+    /// (the HF APIs paginate this way; verified live in #765 Wave 0).
+    ///
+    /// Tolerates the RFC 8288 shapes a naive split breaks on: target URLs
+    /// containing `,`/`;` (legal inside `<…>`), unquoted `rel=next`, and
+    /// multi-value `rel="next last"`. Returns nil when there is no next page.
+    static func nextPageURL(from response: HTTPURLResponse) -> URL? {
+        guard let link = response.value(forHTTPHeaderField: "Link") else { return nil }
+
+        var rest = Substring(link)
+        while let start = rest.firstIndex(of: "<") {
+            guard let end = rest[start...].firstIndex(of: ">") else { return nil }
+            let target = rest[rest.index(after: start)..<end]
+
+            // Parameters run from after the target to the next top-level comma
+            // (commas inside a later <…> can't be reached: we stop at the first).
+            let afterTarget = rest[rest.index(after: end)...]
+            let paramsEnd = afterTarget.firstIndex(of: ",") ?? afterTarget.endIndex
+            let params = afterTarget[..<paramsEnd].lowercased()
+
+            if let relRange = params.range(of: "rel=") {
+                var value = params[relRange.upperBound...]
+                if let paramBreak = value.firstIndex(of: ";") {
+                    value = value[..<paramBreak]
+                }
+                let relations =
+                    value
+                    .trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                    .split(separator: " ")
+                if relations.contains("next") {
+                    return URL(string: String(target))
+                }
+            }
+
+            rest = afterTarget[paramsEnd...].dropFirst()
+        }
+        return nil
+    }
+
     /// `true` when `data` begins with HTML/XML markup — the single HTML
     /// sniffer for the download stack (error pages served with 200s).
     static func looksLikeHTML(_ data: Data) -> Bool {

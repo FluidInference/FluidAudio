@@ -14,15 +14,22 @@ struct RemoteFile: Equatable, Sendable {
 /// longer silently drop files.
 enum HFTreeLister {
 
+    private static let logger = AppLogger(category: "HFTreeLister")
+
     /// Executes one listing request; injectable so fixtures can serve canned
     /// pages. Returns the final HTTP response (headers carry the cursor).
     typealias Fetch = (URL) async throws -> (Data, HTTPURLResponse)
 
-    /// Production fetch: authorized request on `session`. Non-HTTP responses
-    /// are rejected as `invalidResponse` — an explicit decision; the old
-    /// listers silently skipped the rate-limit check on non-HTTP responses.
+    /// Production fetch: authorized request on `session`, re-checking
+    /// `enforceOffline` per request so flipping the flag mid-listing stops the
+    /// walk at the next fetch. Non-HTTP responses are rejected as
+    /// `invalidResponse` — an explicit decision; the old listers silently
+    /// skipped the rate-limit check on non-HTTP responses.
     static func fetch(using session: URLSession) -> Fetch {
         { url in
+            guard !DownloadUtils.enforceOffline else {
+                throw DownloadUtils.OfflineError.networkDisabled(operation: "listTree(\(url.path))")
+            }
             let request = HFClient.authorizedRequest(url: url)
             let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
@@ -42,14 +49,24 @@ enum HFTreeLister {
     static func listTree(
         repoRemotePath: String,
         startingAt path: String = "",
-        include: (_ itemPath: String, _ isDirectory: Bool) -> Bool = { _, _ in true },
+        include: (_ itemPath: String, _ isDirectory: Bool) -> Bool,
         fetch: Fetch
     ) async throws -> [RemoteFile] {
         var files: [RemoteFile] = []
         let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
         var pageURL: URL? = try ModelRegistry.apiModels(repoRemotePath, apiPath)
+        // Guards the walk against a server echoing a cursor it already served
+        // (the old one-request-per-directory walkers could not loop).
+        var visitedPages: Set<URL> = []
 
         while let url = pageURL {
+            guard visitedPages.insert(url).inserted else {
+                logger.warning(
+                    "Pagination cursor for \(path.isEmpty ? "repo root" : path) repeats \(url.absoluteString); stopping after \(visitedPages.count) page(s)."
+                )
+                break
+            }
+
             let (data, response) = try await fetch(url)
             try HFClient.checkRateLimit(
                 response,
@@ -78,30 +95,8 @@ enum HFTreeLister {
                 }
             }
 
-            pageURL = nextPageURL(from: response)
+            pageURL = HFClient.nextPageURL(from: response)
         }
         return files
-    }
-
-    /// Parse the HF tree API's pagination cursor from a
-    /// `Link: <url>; rel="next"` header (verified against the live API in
-    /// #765 Wave 0). Returns nil when there is no next page.
-    static func nextPageURL(from response: HTTPURLResponse) -> URL? {
-        guard let link = response.value(forHTTPHeaderField: "Link") else { return nil }
-        // A Link header may carry multiple comma-separated entries.
-        for entry in link.split(separator: ",") {
-            let parts = entry.split(separator: ";")
-            guard
-                parts.dropFirst().contains(where: {
-                    $0.trimmingCharacters(in: .whitespaces) == "rel=\"next\""
-                }),
-                let target = parts.first,
-                let start = target.firstIndex(of: "<"),
-                let end = target.firstIndex(of: ">"),
-                start < end
-            else { continue }
-            return URL(string: String(target[target.index(after: start)..<end]))
-        }
-        return nil
     }
 }

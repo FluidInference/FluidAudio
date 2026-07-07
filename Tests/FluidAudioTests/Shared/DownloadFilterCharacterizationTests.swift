@@ -159,6 +159,61 @@ final class DownloadFilterCharacterizationTests: XCTestCase {
         )
     }
 
+    // MARK: - Root fallback matches full names only
+
+    /// The #649 root fallback pulls a root file only when its name equals a
+    /// missing required aux file's FULL name. A slash-containing required
+    /// path (KokoroAne-zh's `voices/zf_001.bin`) must never match a
+    /// same-basename root file — that would download wrong-variant content
+    /// to the wrong local path instead of failing loudly with modelNotFound.
+    func testRootFallbackNeverMatchesSlashContainingAuxByBasename() async throws {
+        let sub = "ANE-zh"
+        let voice = ModelNames.KokoroAne.defaultVoiceFileZh  // "voices/zf_001.bin"
+        XCTAssertTrue(voice.contains("/"), "fixture requires a slash-containing aux model")
+        let decoyName = (voice as NSString).lastPathComponent
+
+        // Serve every required model EXCEPT the voice; plant a same-basename
+        // decoy at the repo root.
+        var subItems: [[String: Any]] = [
+            ["path": "\(sub)/\(ModelNames.KokoroAne.vocab)", "type": "file", "size": 10],
+            ["path": "\(sub)/g2pw", "type": "directory"],
+        ]
+        var trees: [String: [[String: Any]]] = [:]
+        for model in ModelNames.KokoroAne.requiredCoreMLModels {
+            subItems.append(["path": "\(sub)/\(model)", "type": "directory"])
+            trees["\(sub)/\(model)"] = [
+                ["path": "\(sub)/\(model)/coremldata.bin", "type": "file", "size": 10]
+            ]
+        }
+        let g2pw = ModelNames.KokoroAne.g2pwModelZh  // "g2pw/g2pw.mlmodelc"
+        trees["\(sub)/g2pw"] = [["path": "\(sub)/\(g2pw)", "type": "directory"]]
+        trees["\(sub)/\(g2pw)"] = [
+            ["path": "\(sub)/\(g2pw)/coremldata.bin", "type": "file", "size": 10]
+        ]
+        trees[sub] = subItems
+        trees[""] = [
+            ["path": decoyName, "type": "file", "size": 10],
+            ["path": sub, "type": "directory"],
+        ]
+        TreeStubURLProtocol.trees = trees
+        TreeStubURLProtocol.fileBody = body(10)
+
+        do {
+            try await DownloadUtils.downloadRepo(
+                .kokoroAneZh, to: workDir, configuration: stubConfiguration)
+            XCTFail("expected modelNotFound for the missing voice")
+        } catch DownloadUtils.HuggingFaceDownloadError.modelNotFound(let path) {
+            XCTAssertEqual(path, voice)
+        }
+
+        // Pinned: the decoy must NOT have been downloaded to the repo root.
+        let repoPath = workDir.appendingPathComponent(Repo.kokoroAneZh.folderName)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: repoPath.appendingPathComponent(decoyName).path),
+            "a same-basename root file must not satisfy a slash-containing required path")
+    }
+
     // MARK: - additionalModelNames (#524)
 
     func testAdditionalModelNamesAreUnionedIntoSelection() async throws {

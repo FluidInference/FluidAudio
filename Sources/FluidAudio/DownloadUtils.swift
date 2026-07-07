@@ -426,7 +426,8 @@ public class DownloadUtils {
             }
         }
 
-        // File selection rules, moved verbatim from the pre-#765 inline listers;
+        // File selection rules for repo downloads (subPath scoping, required-
+        // model patterns, metadata-extension allowances);
         // DownloadFilterCharacterizationTests pins them.
         let include: (String, Bool) -> Bool = { itemPath, isDirectory in
             if isDirectory {
@@ -454,13 +455,12 @@ public class DownloadUtils {
         // Start listing from subPath if specified, otherwise from root
         progressHandler?(DownloadProgress(fractionCompleted: 0.0, phase: .listing))
         let treeFetch = HFTreeLister.fetch(using: listingSession)
-        var filesToDownload: [(path: String, size: Int)] =
-            try await HFTreeLister.listTree(
-                repoRemotePath: repo.remotePath,
-                startingAt: subPath ?? "",
-                include: include,
-                fetch: treeFetch
-            ).map { (path: $0.path, size: $0.size) }
+        var filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
+            repoRemotePath: repo.remotePath,
+            startingAt: subPath ?? "",
+            include: include,
+            fetch: treeFetch
+        )
 
         // Some subPath repos keep shared auxiliary files (e.g. vocab.json) at the
         // repo *root* rather than inside the precision subdirectory — the bundled
@@ -477,17 +477,20 @@ public class DownloadUtils {
                     && !collected.contains((model as NSString).lastPathComponent)
             }
             if !missingAux.isEmpty {
-                // Root-level pass only: directories are pruned, files match by
-                // basename (moved verbatim from the old listRootFiles).
-                let names = Set(missingAux.map { ($0 as NSString).lastPathComponent })
-                filesToDownload +=
-                    try await HFTreeLister.listTree(
-                        repoRemotePath: repo.remotePath,
-                        include: { itemPath, isDirectory in
-                            !isDirectory && names.contains((itemPath as NSString).lastPathComponent)
-                        },
-                        fetch: treeFetch
-                    ).map { (path: $0.path, size: $0.size) }
+                // Root-level pass only: directories are pruned; a root file is
+                // pulled when its name equals a missing required aux file's
+                // FULL name. Slash-containing required paths (e.g.
+                // voices/zf_001.bin) therefore never match a root file — a
+                // same-named root file would land at the wrong local path, so
+                // the loud modelNotFound from the verify pass is preferable.
+                let names = Set(missingAux)
+                filesToDownload += try await HFTreeLister.listTree(
+                    repoRemotePath: repo.remotePath,
+                    include: { itemPath, isDirectory in
+                        !isDirectory && names.contains((itemPath as NSString).lastPathComponent)
+                    },
+                    fetch: treeFetch
+                )
             }
         }
 
@@ -880,13 +883,12 @@ public class DownloadUtils {
     ) async throws {
         try ensureOnlineAllowed("downloadSubdirectory(\(repo.folderName)/\(subdirectory))")
         progressHandler?(DownloadProgress(fractionCompleted: 0.0, phase: .listing))
-        let filesToDownload: [(path: String, size: Int)] =
-            try await HFTreeLister.listTree(
-                repoRemotePath: repo.remotePath,
-                startingAt: subdirectory,
-                include: { itemPath, _ in shouldSkip?(itemPath) != true },
-                fetch: HFTreeLister.fetch(using: sharedSession)
-            ).map { (path: $0.path, size: $0.size) }
+        let filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
+            repoRemotePath: repo.remotePath,
+            startingAt: subdirectory,
+            include: { itemPath, _ in shouldSkip?(itemPath) != true },
+            fetch: HFTreeLister.fetch(using: sharedSession)
+        )
         let totalFiles = filesToDownload.count
         logger.info("Found \(totalFiles) files in \(subdirectory)")
 
