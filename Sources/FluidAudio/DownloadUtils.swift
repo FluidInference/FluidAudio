@@ -81,43 +81,6 @@ public class DownloadUtils {
         HFClient.looksLikeHTML(data)
     }
 
-    /// `response` is nil when re-validating a fully-downloaded partial file from
-    /// a previous run (no live response to check Content-Type against).
-    static func validateDownloadedArtifact(
-        at tempURL: URL,
-        response: HTTPURLResponse?,
-        path: String,
-        expectedSize: Int
-    ) throws {
-        if let contentType = response?.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
-            contentType.contains("text/html")
-        {
-            throw HuggingFaceDownloadError.invalidArtifact(
-                path: path, reason: "server returned Content-Type: \(contentType)")
-        }
-
-        let actualSize =
-            ((try? FileManager.default.attributesOfItem(atPath: tempURL.path))?[.size] as? Int) ?? 0
-        if actualSize == 0 {
-            throw HuggingFaceDownloadError.invalidArtifact(path: path, reason: "empty file")
-        }
-
-        if let handle = try? FileHandle(forReadingFrom: tempURL) {
-            defer { try? handle.close() }
-            if looksLikeHTML(handle.readData(ofLength: 512)) {
-                throw HuggingFaceDownloadError.invalidArtifact(
-                    path: path, reason: "response body begins with HTML markup")
-            }
-        }
-
-        // HuggingFace reports the exact (LFS-resolved) object size; a short body is truncation.
-        if expectedSize > 0 && actualSize != expectedSize {
-            throw HuggingFaceDownloadError.invalidArtifact(
-                path: path,
-                reason: "size mismatch (expected \(expectedSize) bytes, got \(actualSize))")
-        }
-    }
-
     /// Moved to `FluidAudio.HuggingFaceDownloadError` (Shared/Download/DownloadTypes.swift)
     /// so the extracted download primitives don't depend back on this class
     /// (#765 Wave 2). The nested spelling stays source-compatible.
@@ -193,21 +156,7 @@ public class DownloadUtils {
             logger.info("Deleting cache and re-downloading…")
             let repoPath = directory.appendingPathComponent(repo.folderName)
 
-            // Try to delete the corrupted cache
-            do {
-                try FileManager.default.removeItem(at: repoPath)
-                logger.info("Successfully deleted corrupted cache at \(repoPath.path)")
-            } catch {
-                // If deletion fails (excluding "file not found"), log the error but continue
-                // Robust directory creation will handle any remaining files
-                let nsError = error as NSError
-                if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileNoSuchFileError {
-                    // File already doesn't exist - this is fine
-                } else {
-                    logger.warning("Failed to delete cache: \(error.localizedDescription)")
-                    logger.info("Will attempt to overwrite during re-download")
-                }
-            }
+            ModelCache.purgeCorruptedCache(at: repoPath)
 
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
@@ -279,18 +228,13 @@ public class DownloadUtils {
         // every model the caller actually needs.
         let extraModelNames = Set(modelNames).subtracting(requiredModels)
         let effectiveModels = requiredModels.union(extraModelNames)
-        let allModelsExist = effectiveModels.allSatisfy { model in
-            let modelPath = repoPath.appendingPathComponent(model)
-            return FileManager.default.fileExists(atPath: modelPath.path)
-        }
+        let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 0.5)
 
-        if !allModelsExist {
+        if !ModelCache.allModelsExist(at: repoPath, models: effectiveModels) {
             // In offline mode surface a typed error listing the
             // missing files instead of attempting a HuggingFace fetch.
             if enforceOffline {
-                let missing = effectiveModels.filter { name in
-                    !FileManager.default.fileExists(atPath: repoPath.appendingPathComponent(name).path)
-                }.sorted()
+                let missing = ModelCache.missingModels(at: repoPath, models: effectiveModels)
                 logger.error(
                     "Offline mode: required models missing at \(repoPath.path): \(missing)"
                 )
@@ -303,8 +247,7 @@ public class DownloadUtils {
                 progressHandler: progressHandler)
         } else {
             logger.info("Found \(repo.folderName) locally, no download needed")
-            progressHandler?(
-                DownloadProgress(fractionCompleted: 0.5, phase: .downloading(completedFiles: 0, totalFiles: 0)))
+            reporter.cachedModelsAvailable()
         }
 
         let config = MLModelConfiguration()
@@ -314,44 +257,9 @@ public class DownloadUtils {
         var models: [String: MLModel] = [:]
         for (index, name) in modelNames.enumerated() {
             let modelPath = repoPath.appendingPathComponent(name)
-            guard FileManager.default.fileExists(atPath: modelPath.path) else {
-                throw CocoaError(
-                    .fileNoSuchFile,
-                    userInfo: [
-                        NSFilePathErrorKey: modelPath.path,
-                        NSLocalizedDescriptionKey: "Model file not found: \(name)",
-                    ])
-            }
+            try ModelCache.validateCompiledModelLayout(at: modelPath, name: name)
 
-            var isDirectory: ObjCBool = false
-            guard
-                FileManager.default.fileExists(atPath: modelPath.path, isDirectory: &isDirectory),
-                isDirectory.boolValue
-            else {
-                throw CocoaError(
-                    .fileReadCorruptFile,
-                    userInfo: [
-                        NSFilePathErrorKey: modelPath.path,
-                        NSLocalizedDescriptionKey: "Model path is not a directory: \(name)",
-                    ])
-            }
-
-            let coremlDataPath = modelPath.appendingPathComponent("coremldata.bin")
-            guard FileManager.default.fileExists(atPath: coremlDataPath.path) else {
-                logger.error("Missing coremldata.bin in \(name)")
-                throw CocoaError(
-                    .fileReadCorruptFile,
-                    userInfo: [
-                        NSFilePathErrorKey: coremlDataPath.path,
-                        NSLocalizedDescriptionKey: "Missing coremldata.bin in model: \(name)",
-                    ])
-            }
-
-            progressHandler?(
-                DownloadProgress(
-                    fractionCompleted: 0.5 + 0.5 * Double(index) / Double(modelNames.count),
-                    phase: .compiling(modelName: name)
-                ))
+            reporter.compiling(name: name, index: index, count: modelNames.count)
 
             let start = Date()
             let model = try MLModel(contentsOf: modelPath, configuration: config)
@@ -364,7 +272,7 @@ public class DownloadUtils {
             logger.info("Compiled model \(name) in \(formatted) ms :: \(SystemInfo.summary())")
         }
 
-        progressHandler?(DownloadProgress(fractionCompleted: 1.0, phase: .compiling(modelName: "")))
+        reporter.finished()
         return models
     }
 
@@ -452,8 +360,11 @@ public class DownloadUtils {
                 || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
         }
 
+        // Repo loads: download occupies 0-0.5, CoreML compile 0.5-1.0.
+        let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 0.5)
+
         // Start listing from subPath if specified, otherwise from root
-        progressHandler?(DownloadProgress(fractionCompleted: 0.0, phase: .listing))
+        reporter.listing()
         let treeFetch = HFTreeLister.fetch(using: listingSession)
         var filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
             repoRemotePath: repo.remotePath,
@@ -510,227 +421,74 @@ public class DownloadUtils {
             }
             let destPath = repoPath.appendingPathComponent(localPath)
 
-            // Skip if already exists
-            if FileManager.default.fileExists(atPath: destPath.path) {
-                completedBytes += Int64(max(0, file.size))
-                continue
-            }
-
-            // Create parent directory, removing any conflicting files in the path
-            let parentDir = destPath.deletingLastPathComponent()
-            try createDirectoryRobustly(at: parentDir)
-
-            // HuggingFace returns 500 for 0-byte files — create empty file locally
-            if file.size == 0 {
-                FileManager.default.createFile(atPath: destPath.path, contents: Data())
-                continue
-            }
-
-            // Download file (use original path for HuggingFace URL)
-            let encodedFilePath =
-                file.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file.path
-            let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedFilePath)
-            let request = authorizedRequest(url: fileURL)
-
-            // Bounded retry on transient failures, with byte-range resume via a
-            // persistent `<dest>.partial` file so retries and re-runs continue a
-            // partially-downloaded file instead of restarting it (#757).
-            let onProgress: (@Sendable (Int64, Int64) -> Void)?
-            if let handler = progressHandler {
+            let onBytes: (@Sendable (Int64, Int64) -> Void)?
+            if progressHandler != nil {
                 let baseBytes = completedBytes
                 let fileCount = filesToDownload.count
                 let totalBytesSnapshot = totalBytes
                 let fileIndex = index
-                onProgress = { bytesWritten, _ in
-                    guard totalBytesSnapshot > 0 else { return }
-                    let current = baseBytes + bytesWritten
-                    // Download phase occupies 0.0–0.5 of the overall range.
-                    let fraction = 0.5 * Double(current) / Double(totalBytesSnapshot)
-                    handler(
-                        DownloadProgress(
-                            fractionCompleted: min(fraction, 0.5),
-                            phase: .downloading(completedFiles: fileIndex, totalFiles: fileCount)
-                        ))
+                onBytes = { bytesWritten, _ in
+                    reporter.liveBytes(
+                        completedBytes: baseBytes + bytesWritten,
+                        totalBytes: totalBytesSnapshot,
+                        fileIndex: fileIndex,
+                        totalFiles: fileCount)
                 }
             } else {
-                onProgress = nil
+                onBytes = nil
             }
 
-            let tempFileURL = try await downloadFileWithRetry(
-                request: request,
-                path: file.path,
-                expectedSize: file.size,
-                partialFileURL: destPath.appendingPathExtension("partial"),
-                onProgress: onProgress,
-                configuration: configuration
+            let outcome = try await FileDownloader.ensure(
+                file: file,
+                from: repo.remotePath,
+                at: destPath,
+                configuration: configuration,
+                onBytes: onBytes
             )
-
-            // Move downloaded file to destination
-            if FileManager.default.fileExists(atPath: destPath.path) {
-                try? FileManager.default.removeItem(at: destPath)
-            }
-            try FileManager.default.moveItem(at: tempFileURL, to: destPath)
-
             completedBytes += Int64(max(0, file.size))
+
+            guard outcome == .downloaded else { continue }
 
             if (index + 1) % 10 == 0 || index == filesToDownload.count - 1 {
                 logger.info("Downloaded \(index + 1)/\(filesToDownload.count) files")
             }
 
-            progressHandler?(
-                DownloadProgress(
-                    fractionCompleted: totalBytes > 0
-                        ? 0.5 * Double(completedBytes) / Double(totalBytes)
-                        : 0.5 * Double(index + 1) / Double(filesToDownload.count),
-                    phase: .downloading(completedFiles: index + 1, totalFiles: filesToDownload.count)
-                ))
+            reporter.fileBoundary(
+                completedBytes: completedBytes,
+                totalBytes: totalBytes,
+                completedFiles: index + 1,
+                totalFiles: filesToDownload.count)
         }
 
         // Verify required models are present
-        for model in requiredModels {
-            let modelPath = repoPath.appendingPathComponent(model)
-            guard FileManager.default.fileExists(atPath: modelPath.path) else {
-                throw HuggingFaceDownloadError.modelNotFound(path: model)
-            }
-        }
+        try ModelCache.verifyModelsPresent(at: repoPath, models: requiredModels)
 
         logger.info("Downloaded all required models for \(repo.folderName)")
     }
 
     // MARK: - Helper Functions
 
-    /// Robustly create a directory, removing any conflicting files in the path.
-    ///
-    /// This handles cases where a file exists where a directory should be, which can happen
-    /// during corrupted cache recovery when partial deletion leaves files in place of directories.
-    ///
-    /// - Parameter url: The directory path to create
-    /// - Throws: Errors from FileManager if directory creation fails after cleanup
-    private static func createDirectoryRobustly(at url: URL) throws {
-        let fm = FileManager.default
-        var pathComponents = url.pathComponents
-
-        // Remove leading "/" if present
-        if pathComponents.first == "/" {
-            pathComponents.removeFirst()
-        }
-
-        // Build path incrementally, checking each component
-        var currentPath = "/"
-        for component in pathComponents {
-            currentPath = (currentPath as NSString).appendingPathComponent(component)
-            let componentURL = URL(fileURLWithPath: currentPath)
-
-            var isDirectory: ObjCBool = false
-            if fm.fileExists(atPath: currentPath, isDirectory: &isDirectory) {
-                if !isDirectory.boolValue {
-                    // A file exists where a directory should be - remove it
-                    logger.warning("Removing file blocking directory creation: \(currentPath)")
-                    try fm.removeItem(at: componentURL)
-                    try fm.createDirectory(at: componentURL, withIntermediateDirectories: false)
-                }
-                // If it's already a directory, continue
-            } else {
-                // Path doesn't exist, create remaining path with intermediate directories
-                try fm.createDirectory(at: url, withIntermediateDirectories: true)
-                return
-            }
-        }
+    /// Forwards to the Wave 4 primitives — kept because the download-resume,
+    /// artifact-validation, and retry characterization suites pin these
+    /// symbols on DownloadUtils.
+    static func isRetryableDownloadError(_ error: Error) -> Bool {
+        RetryPolicy.isRetryable(error)
     }
 
-    // MARK: - Streaming download to a persistent file
-
-    /// Stream a download directly into `destination` so received bytes survive
-    /// a mid-transfer drop (#757). Pure transport: the caller sets resume
-    /// headers and validates the HTTP status. Body bytes are written only for
-    /// 2xx — appended after `resumeOffset` on 206, from byte 0 otherwise.
-    ///
-    /// - Parameters:
-    ///   - resumeOffset: Byte count a 206 appends after; also the base for
-    ///     progress callbacks so resumed progress never dips.
-    ///   - configuration: Session configuration override for tests.
-    ///   - onProgress: `(totalBytesWritten, totalBytesExpected)`, both
-    ///     including `resumeOffset`. Delegate-driven byte progress (#756).
-    ///   - onResponse: Fires before any body byte is written — the resume path
-    ///     persists the validator here so it survives a drop mid-body.
-    /// Internal (not private) so download-resume tests can drive it directly.
-    static func streamDownload(
-        request: URLRequest,
-        to destination: URL,
-        resumeOffset: Int64 = 0,
-        configuration: URLSessionConfiguration? = nil,
-        onProgress: (@Sendable (Int64, Int64) -> Void)? = nil,
-        onResponse: (@Sendable (HTTPURLResponse) -> Void)? = nil
-    ) async throws -> HTTPURLResponse {
-        let delegate = StreamingDownloadDelegate(
-            destination: destination,
-            resumeOffset: resumeOffset,
-            onProgress: onProgress,
-            onResponse: onResponse
-        )
-        // Dedicated session with delegate — one per download to avoid cross-talk.
-        let session = URLSession(
-            configuration: configuration ?? sharedSession.configuration,
-            delegate: delegate,
-            delegateQueue: nil
-        )
-        defer { session.finishTasksAndInvalidate() }
-
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                let task = session.dataTask(with: request)
-                delegate.attach(continuation: continuation, task: task)
-                task.resume()
-            }
-        } onCancel: {
-            delegate.cancel()
-        }
+    static func validateDownloadedArtifact(
+        at tempURL: URL,
+        response: HTTPURLResponse?,
+        path: String,
+        expectedSize: Int
+    ) throws {
+        try FileDownloader.validateDownloadedArtifact(
+            at: tempURL, response: response, path: path, expectedSize: expectedSize)
     }
 
-    // MARK: - Per-file download with bounded retry and byte-range resume
-
-    /// Sidecar storing the HTTP validator (ETag/Last-Modified) a partial file
-    /// came from; written at response time so it survives a drop mid-body.
     static func resumeValidatorURL(for partialFileURL: URL) -> URL {
-        partialFileURL.appendingPathExtension("etag")
+        FileDownloader.resumeValidatorURL(for: partialFileURL)
     }
 
-    private static func fileSize(at url: URL) -> Int64 {
-        ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64) ?? 0
-    }
-
-    /// Remove a partial download and its validator sidecar.
-    private static func clearPartialDownload(_ partialFileURL: URL) {
-        try? FileManager.default.removeItem(at: partialFileURL)
-        try? FileManager.default.removeItem(at: resumeValidatorURL(for: partialFileURL))
-    }
-
-    /// Resume validator for `If-Range`: a strong ETag, else Last-Modified.
-    /// Weak ETags are unusable for `If-Range` (RFC 9110 §13.1.5); nil means
-    /// resume is unsafe and the file restarts from 0.
-    private static func resumeValidator(from response: HTTPURLResponse) -> String? {
-        if let etag = response.value(forHTTPHeaderField: "ETag"), !etag.hasPrefix("W/") {
-            return etag
-        }
-        return response.value(forHTTPHeaderField: "Last-Modified")
-    }
-
-    /// Download a single repo file with bounded exponential-backoff retry on
-    /// transient failures (timeout/TLS/connectivity, HTTP 429/503/5xx; 4xx and
-    /// non-network errors fail fast — see `isRetryableDownloadError`).
-    ///
-    /// Resume (#757): bytes stream into `partialFileURL`, so a retry — or a new
-    /// process — continues with `Range`/`If-Range` instead of restarting from
-    /// byte 0. A 200 (range ignored / remote changed) restarts the file rather
-    /// than splicing mixed-version bytes.
-    ///
-    /// - Parameters:
-    ///   - partialFileURL: Where in-flight bytes live (e.g. `<dest>.partial`).
-    ///     Pass nil for a unique temp location (in-run resume only).
-    ///   - configuration: Session configuration override for tests.
-    /// - Returns: The URL of a validated (2xx) fully-written download; the
-    ///   caller moves it into the cache.
-    /// Internal (not private) so download-resume tests can drive it directly.
     static func downloadFileWithRetry(
         request: URLRequest,
         path: String,
@@ -741,122 +499,23 @@ public class DownloadUtils {
         minBackoff: TimeInterval = 1.0,
         configuration: URLSessionConfiguration? = nil
     ) async throws -> URL {
-        let defaultPartialURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension("partial")
-        let partialURL = partialFileURL ?? defaultPartialURL
-        let validatorURL = resumeValidatorURL(for: partialURL)
-
-        return try await RetryPolicy.withRetry(
-            label: path, maxAttempts: maxAttempts, minBackoff: minBackoff, logger: logger
-        ) { attempt in
-            var attemptRequest = request
-            var resumeOffset: Int64 = 0
-
-            let partialSize = fileSize(at: partialURL)
-            let validator = (try? String(contentsOf: validatorURL, encoding: .utf8))?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if partialSize > 0, let validator, !validator.isEmpty {
-                if expectedSize > 0 && partialSize >= Int64(expectedSize) {
-                    // A previous run finished the body but didn't get to move
-                    // the file. Validate and reuse it instead of re-fetching.
-                    if (try? validateDownloadedArtifact(
-                        at: partialURL, response: nil, path: path, expectedSize: expectedSize))
-                        != nil
-                    {
-                        try? FileManager.default.removeItem(at: validatorURL)
-                        return partialURL
-                    }
-                    clearPartialDownload(partialURL)
-                } else {
-                    attemptRequest.setValue("bytes=\(partialSize)-", forHTTPHeaderField: "Range")
-                    attemptRequest.setValue(validator, forHTTPHeaderField: "If-Range")
-                    resumeOffset = partialSize
-                    logger.info(
-                        "Resuming \(path) from byte \(partialSize) (attempt \(attempt))")
-                }
-            } else if partialSize > 0 {
-                // Partial bytes with no validator can't be safely resumed.
-                clearPartialDownload(partialURL)
-            }
-
-            let httpResponse = try await streamDownload(
-                request: attemptRequest,
-                to: partialURL,
-                resumeOffset: resumeOffset,
-                configuration: configuration,
-                onProgress: onProgress,
-                onResponse: { response in
-                    // Persist the validator as soon as the fresh body starts, so
-                    // a drop mid-body still leaves it for the next attempt. A 206
-                    // keeps the validator of the response it is extending.
-                    guard response.statusCode != 206, (200..<300).contains(response.statusCode)
-                    else { return }
-                    if let validator = resumeValidator(from: response) {
-                        try? validator.write(to: validatorURL, atomically: true, encoding: .utf8)
-                    } else {
-                        try? FileManager.default.removeItem(at: validatorURL)
-                    }
-                }
-            )
-
-            try HFClient.checkRateLimit(httpResponse, context: "downloading \(path)")
-
-            if httpResponse.statusCode == 416 {
-                // Range not satisfiable — the partial is bogus (or the remote
-                // shrank). Restart from 0 on the next attempt.
-                clearPartialDownload(partialURL)
-                throw HuggingFaceDownloadError.invalidArtifact(
-                    path: path, reason: "server rejected resume range (416)")
-            }
-
-            guard (200..<300).contains(httpResponse.statusCode) else {
-                throw HuggingFaceDownloadError.downloadFailed(
-                    path: path,
-                    underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
-                )
-            }
-
-            // Validate before the caller moves the file into the cache.
-            do {
-                try validateDownloadedArtifact(
-                    at: partialURL, response: httpResponse, path: path,
-                    expectedSize: expectedSize)
-            } catch {
-                // A completed-but-invalid body must not be resumed from.
-                clearPartialDownload(partialURL)
-                throw error
-            }
-
-            try? FileManager.default.removeItem(at: validatorURL)
-            return partialURL
-        }
+        try await FileDownloader.download(
+            request: request, path: path, expectedSize: expectedSize,
+            partialFileURL: partialFileURL, onProgress: onProgress,
+            maxAttempts: maxAttempts, minBackoff: minBackoff,
+            configuration: configuration)
     }
 
-    /// Classify a per-file download error as transient (worth retrying) or
-    /// permanent. Transient: URLSession timeout / TLS / connectivity failures and
-    /// HTTP 429/503/5xx. Everything else (404/other 4xx, invalid response,
-    /// non-network errors) is permanent.
-    ///
-    /// Internal (not private) so retry-policy characterization tests can pin this
-    /// classification ahead of the #765 refactor.
-    static func isRetryableDownloadError(_ error: Error) -> Bool {
-        RetryPolicy.isRetryable(error)
-    }
-
+    /// Forward to ProgressReporter (kept: DownloadUtilsProgressTests pins it).
     static func subdirectoryProgressFraction(
         completedBytes: Int64,
         totalBytes: Int64,
         completedFiles: Int,
         totalFiles: Int
     ) -> Double {
-        guard totalFiles > 0 else { return 1.0 }
-        guard totalBytes > 0 else {
-            return min(Double(completedFiles) / Double(totalFiles), 1.0)
-        }
-
-        return min(Double(completedBytes) / Double(totalBytes), 1.0)
+        ProgressReporter.downloadFraction(
+            completedBytes: completedBytes, totalBytes: totalBytes,
+            completedFiles: completedFiles, totalFiles: totalFiles)
     }
 
     /// Download a specific subdirectory from a HuggingFace repository.
@@ -882,7 +541,9 @@ public class DownloadUtils {
         shouldSkip: (@Sendable (String) -> Bool)? = nil
     ) async throws {
         try ensureOnlineAllowed("downloadSubdirectory(\(repo.folderName)/\(subdirectory))")
-        progressHandler?(DownloadProgress(fractionCompleted: 0.0, phase: .listing))
+        // Subdirectory downloads have no compile phase: download spans 0-1.
+        let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 1.0)
+        reporter.listing()
         let filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
             repoRemotePath: repo.remotePath,
             startingAt: subdirectory,
@@ -897,122 +558,51 @@ public class DownloadUtils {
         let totalBytes: Int64 = filesToDownload.reduce(0) { $0 + Int64(max(0, $1.size)) }
         var completedBytes: Int64 = 0
 
-        progressHandler?(
-            DownloadProgress(
-                fractionCompleted: subdirectoryProgressFraction(
-                    completedBytes: completedBytes,
-                    totalBytes: totalBytes,
-                    completedFiles: 0,
-                    totalFiles: totalFiles
-                ),
-                phase: .downloading(completedFiles: 0, totalFiles: totalFiles)))
+        reporter.fileBoundary(
+            completedBytes: completedBytes,
+            totalBytes: totalBytes,
+            completedFiles: 0,
+            totalFiles: totalFiles)
 
         for (index, file) in filesToDownload.enumerated() {
             let destPath = repoDirectory.appendingPathComponent(file.path)
 
-            if FileManager.default.fileExists(atPath: destPath.path) {
-                completedBytes += Int64(max(0, file.size))
-                progressHandler?(
-                    DownloadProgress(
-                        fractionCompleted: subdirectoryProgressFraction(
-                            completedBytes: completedBytes,
-                            totalBytes: totalBytes,
-                            completedFiles: index + 1,
-                            totalFiles: totalFiles
-                        ),
-                        phase: .downloading(
-                            completedFiles: index + 1, totalFiles: totalFiles)))
-                continue
-            }
-
-            try FileManager.default.createDirectory(
-                at: destPath.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-
-            if file.size == 0 {
-                FileManager.default.createFile(atPath: destPath.path, contents: Data())
-                completedBytes += Int64(max(0, file.size))
-                progressHandler?(
-                    DownloadProgress(
-                        fractionCompleted: subdirectoryProgressFraction(
-                            completedBytes: completedBytes,
-                            totalBytes: totalBytes,
-                            completedFiles: index + 1,
-                            totalFiles: totalFiles
-                        ),
-                        phase: .downloading(
-                            completedFiles: index + 1, totalFiles: totalFiles)))
-                if (index + 1) % 5 == 0 || index == totalFiles - 1 {
-                    logger.info("Downloaded \(index + 1)/\(totalFiles) \(subdirectory) files")
-                }
-                continue
-            }
-
-            let encodedPath =
-                file.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file.path
-            let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedPath)
-            let request = authorizedRequest(url: fileURL)
-
-            let onProgress: (@Sendable (Int64, Int64) -> Void)?
+            let onBytes: (@Sendable (Int64, Int64) -> Void)?
             // Only stream live byte progress for files with a known size: an
             // unknown-size file (-1) carries zero weight in totalBytes, so its
             // real bytesWritten would inflate the fraction mid-file and snap
             // back at the boundary. Boundary emits keep progress monotonic.
-            if let handler = progressHandler, file.size > 0 {
+            if progressHandler != nil, file.size > 0 {
                 let baseBytes = completedBytes
                 let totalBytesSnapshot = totalBytes
                 let fileIndex = index
                 let fileCount = totalFiles
-                onProgress = { bytesWritten, _ in
-                    guard totalBytesSnapshot > 0 else { return }
-                    let currentBytes = baseBytes + bytesWritten
-                    let fraction = subdirectoryProgressFraction(
-                        completedBytes: currentBytes,
+                onBytes = { bytesWritten, _ in
+                    reporter.liveBytes(
+                        completedBytes: baseBytes + bytesWritten,
                         totalBytes: totalBytesSnapshot,
-                        completedFiles: fileIndex,
-                        totalFiles: fileCount
-                    )
-                    handler(
-                        DownloadProgress(
-                            fractionCompleted: fraction,
-                            phase: .downloading(completedFiles: fileIndex, totalFiles: fileCount)
-                        ))
+                        fileIndex: fileIndex,
+                        totalFiles: fileCount)
                 }
             } else {
-                onProgress = nil
+                onBytes = nil
             }
 
-            // downloadFileWithRetry validates the artifact (HTML error pages,
-            // truncated bodies) internally, and the persistent `.partial` file
-            // gives retries and re-runs byte-range resume, same as downloadRepo.
-            let tempURL = try await downloadFileWithRetry(
-                request: request,
-                path: file.path,
-                expectedSize: file.size,
-                partialFileURL: destPath.appendingPathExtension("partial"),
-                onProgress: onProgress
+            let outcome = try await FileDownloader.ensure(
+                file: file,
+                from: repo.remotePath,
+                at: destPath,
+                onBytes: onBytes
             )
-
-            if FileManager.default.fileExists(atPath: destPath.path) {
-                try? FileManager.default.removeItem(at: destPath)
-            }
-            try FileManager.default.moveItem(at: tempURL, to: destPath)
-
             completedBytes += Int64(max(0, file.size))
 
-            progressHandler?(
-                DownloadProgress(
-                    fractionCompleted: subdirectoryProgressFraction(
-                        completedBytes: completedBytes,
-                        totalBytes: totalBytes,
-                        completedFiles: index + 1,
-                        totalFiles: totalFiles
-                    ),
-                    phase: .downloading(
-                        completedFiles: index + 1, totalFiles: totalFiles)))
+            reporter.fileBoundary(
+                completedBytes: completedBytes,
+                totalBytes: totalBytes,
+                completedFiles: index + 1,
+                totalFiles: totalFiles)
 
-            if (index + 1) % 5 == 0 || index == totalFiles - 1 {
+            if outcome != .alreadyPresent, (index + 1) % 5 == 0 || index == totalFiles - 1 {
                 logger.info("Downloaded \(index + 1)/\(totalFiles) \(subdirectory) files")
             }
         }
@@ -1060,161 +650,5 @@ public class DownloadUtils {
         }
 
         throw lastError ?? HuggingFaceDownloadError.invalidResponse
-    }
-}
-
-// MARK: - URLSession download delegate for byte-level progress
-
-/// `URLSessionDownloadTask` → async/await bridge that forwards byte progress (#756).
-/// Streams response bytes straight into a destination file so partial content
-/// survives connection drops (#757). Appends after `resumeOffset` on HTTP 206;
-/// truncates and writes from 0 on any other 2xx; discards the body otherwise.
-private final class StreamingDownloadDelegate: NSObject, URLSessionDataDelegate, Sendable {
-    private struct State {
-        var continuation: CheckedContinuation<HTTPURLResponse, Error>?
-        var task: URLSessionDataTask?
-        var handle: FileHandle?
-        var bytesWritten: Int64 = 0
-        var expectedTotal: Int64 = -1
-        var writeError: Error?
-        var finished = false
-    }
-
-    private let destination: URL
-    private let resumeOffset: Int64
-    private let onProgress: (@Sendable (Int64, Int64) -> Void)?
-    private let onResponse: (@Sendable (HTTPURLResponse) -> Void)?
-    // Holds the non-Sendable continuation and file handle; the lock (not
-    // `@unchecked`) makes the delegate Sendable as URLSession requires.
-    private let state = OSAllocatedUnfairLock<State>(uncheckedState: State())
-
-    init(
-        destination: URL,
-        resumeOffset: Int64,
-        onProgress: (@Sendable (Int64, Int64) -> Void)?,
-        onResponse: (@Sendable (HTTPURLResponse) -> Void)?
-    ) {
-        self.destination = destination
-        self.resumeOffset = resumeOffset
-        self.onProgress = onProgress
-        self.onResponse = onResponse
-    }
-
-    /// Register the continuation and task before the task starts.
-    func attach(
-        continuation: CheckedContinuation<HTTPURLResponse, Error>,
-        task: URLSessionDataTask
-    ) {
-        state.withLockUnchecked {
-            $0.continuation = continuation
-            $0.task = task
-        }
-    }
-
-    func cancel() {
-        state.withLockUnchecked { $0.task }?.cancel()
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        dataTask: URLSessionDataTask,
-        didReceive response: URLResponse,
-        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
-    ) {
-        guard let http = response as? HTTPURLResponse else {
-            completionHandler(.cancel)
-            return
-        }
-        onResponse?(http)
-
-        // Only 2xx bodies are file content worth keeping; error bodies are
-        // discarded so a 503 page can never overwrite resumable bytes.
-        if (200..<300).contains(http.statusCode) {
-            let appending = http.statusCode == 206
-            do {
-                if !FileManager.default.fileExists(atPath: destination.path) {
-                    FileManager.default.createFile(atPath: destination.path, contents: nil)
-                }
-                let handle = try FileHandle(forWritingTo: destination)
-                if appending {
-                    try handle.seekToEnd()
-                } else {
-                    try handle.truncate(atOffset: 0)
-                }
-                let base = appending ? resumeOffset : 0
-                // Content-Range carries the full object size on a 206; a plain
-                // 200 reports the full size via expectedContentLength.
-                let expectedTotal: Int64
-                if let contentRange = http.value(forHTTPHeaderField: "Content-Range"),
-                    let totalPart = contentRange.split(separator: "/").last,
-                    let total = Int64(totalPart)
-                {
-                    expectedTotal = total
-                } else if http.expectedContentLength >= 0 {
-                    expectedTotal = base + http.expectedContentLength
-                } else {
-                    expectedTotal = -1
-                }
-                state.withLockUnchecked {
-                    $0.handle = handle
-                    $0.bytesWritten = base
-                    $0.expectedTotal = expectedTotal
-                }
-            } catch {
-                state.withLockUnchecked { $0.writeError = error }
-                completionHandler(.cancel)
-                return
-            }
-        }
-        completionHandler(.allow)
-    }
-
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        let progress: (written: Int64, expected: Int64)? = state.withLockUnchecked { st in
-            guard let handle = st.handle, st.writeError == nil else { return nil }
-            do {
-                try handle.write(contentsOf: data)
-                st.bytesWritten += Int64(data.count)
-                return (st.bytesWritten, st.expectedTotal)
-            } catch {
-                st.writeError = error
-                return nil
-            }
-        }
-        if let progress {
-            onProgress?(progress.written, progress.expected)
-        } else if state.withLockUnchecked({ $0.writeError }) != nil {
-            cancel()
-        }
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        didCompleteWithError error: Error?
-    ) {
-        let response = task.response as? HTTPURLResponse
-        // Extract the resume action under the lock, run it after releasing.
-        let resume = state.withLockUnchecked { st -> (() -> Void)? in
-            guard !st.finished, let continuation = st.continuation else { return nil }
-            st.finished = true
-            st.continuation = nil
-            st.task = nil
-            try? st.handle?.close()
-            st.handle = nil
-            let writeError = st.writeError
-            return {
-                if let writeError {
-                    continuation.resume(throwing: writeError)
-                } else if let error {
-                    continuation.resume(throwing: error)
-                } else if let response {
-                    continuation.resume(returning: response)
-                } else {
-                    continuation.resume(throwing: DownloadUtils.HuggingFaceDownloadError.invalidResponse)
-                }
-            }
-        }
-        resume?()
     }
 }
