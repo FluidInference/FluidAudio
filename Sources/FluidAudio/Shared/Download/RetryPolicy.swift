@@ -1,27 +1,36 @@
 import Foundation
 
-/// The single retry policy for download paths (#765 Wave 2): bounded
-/// exponential backoff on transient failures, fail-fast on permanent ones.
+/// The retry policy the DownloadUtils download paths converge on across the
+/// #765 waves (#765 Wave 2): bounded exponential backoff on transient
+/// failures, fail-fast on permanent ones. `fetchHuggingFaceFile` still runs
+/// its historical retry-everything loop and converges in Wave 5.
 enum RetryPolicy {
 
-    private static let logger = AppLogger(category: "RetryPolicy")
+    private static let defaultLogger = AppLogger(category: "RetryPolicy")
 
     /// Run `operation`, retrying transient failures (per `isRetryable`) with
     /// exponential backoff. Permanent errors and the final attempt's error are
     /// rethrown unchanged. The closure receives the 1-based attempt number
     /// (for logging/resume diagnostics).
+    ///
+    /// - Parameters:
+    ///   - maxAttempts: Total attempts including the first; must be >= 1.
+    ///   - logger: Where per-attempt retry warnings go. Pass the calling
+    ///     component's logger so one operation's log trail stays in one
+    ///     category.
     static func withRetry<T>(
         label: String,
         maxAttempts: Int = 4,
         minBackoff: TimeInterval = 1.0,
+        logger: AppLogger = defaultLogger,
         operation: (_ attempt: Int) async throws -> T
     ) async throws -> T {
-        var lastError: Error?
+        precondition(maxAttempts >= 1, "maxAttempts must be >= 1 (got \(maxAttempts))")
+
         for attempt in 1...maxAttempts {
             do {
                 return try await operation(attempt)
             } catch {
-                lastError = error
                 guard attempt < maxAttempts, isRetryable(error) else {
                     throw error
                 }
@@ -32,7 +41,10 @@ enum RetryPolicy {
                 try await Task.sleep(nanoseconds: UInt64(backoffSeconds * 1_000_000_000))
             }
         }
-        throw lastError ?? DownloadUtils.HuggingFaceDownloadError.invalidResponse
+
+        // The final attempt's catch always rethrows (attempt < maxAttempts
+        // fails), so the loop cannot complete normally.
+        preconditionFailure("unreachable: the final attempt rethrows in the catch guard")
     }
 
     /// Classify an error as transient (worth retrying) or permanent.
@@ -53,12 +65,12 @@ enum RetryPolicy {
         }
 
         switch error {
-        case DownloadUtils.HuggingFaceDownloadError.rateLimited:
+        case HFDownload.DownloadError.rateLimited:
             return true
-        case DownloadUtils.HuggingFaceDownloadError.invalidArtifact:
+        case HFDownload.DownloadError.invalidArtifact:
             // Usually a transient unhealthy network path (proxy, mirror 5xx) — retry.
             return true
-        case DownloadUtils.HuggingFaceDownloadError.downloadFailed(_, let underlying):
+        case HFDownload.DownloadError.downloadFailed(_, let underlying):
             let nsError = underlying as NSError
             return nsError.domain == "HTTP" && (500...599).contains(nsError.code)
         default:

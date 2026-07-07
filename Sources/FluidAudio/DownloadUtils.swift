@@ -75,11 +75,10 @@ public class DownloadUtils {
         return try await sharedSession.data(for: request)
     }
 
+    /// Forward — the single HTML sniffer lives in HFClient (#765 Wave 2);
+    /// kept here because DownloadArtifactValidationTests pins this symbol.
     static func looksLikeHTML(_ data: Data) -> Bool {
-        let prefix = data.prefix(512)
-        let text = String(data: prefix, encoding: .utf8) ?? String(decoding: prefix, as: UTF8.self)
-        let lowered = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        return lowered.hasPrefix("<!doctype html") || lowered.hasPrefix("<html") || lowered.hasPrefix("<?xml")
+        HFClient.looksLikeHTML(data)
     }
 
     /// `response` is nil when re-validating a fully-downloaded partial file from
@@ -119,31 +118,10 @@ public class DownloadUtils {
         }
     }
 
-    public enum HuggingFaceDownloadError: LocalizedError {
-        case invalidResponse
-        case rateLimited(statusCode: Int, message: String)
-        case downloadFailed(path: String, underlying: Error)
-        case modelNotFound(path: String)
-        case htmlErrorResponse(path: String, snippet: String)
-        case invalidArtifact(path: String, reason: String)
-
-        public var errorDescription: String? {
-            switch self {
-            case .invalidResponse:
-                return "Received an invalid response from Hugging Face."
-            case .rateLimited(_, let message):
-                return "Hugging Face rate limit encountered: \(message)"
-            case .downloadFailed(let path, let underlying):
-                return "Failed to download \(path): \(underlying.localizedDescription)"
-            case .htmlErrorResponse(let path, let snippet):
-                return "HuggingFace returned HTML instead of JSON for \(path) (rate limit or server issue): \(snippet)"
-            case .modelNotFound(let path):
-                return "Model file not found: \(path)"
-            case .invalidArtifact(let path, let reason):
-                return "Downloaded artifact for \(path) is invalid (\(reason)); refusing to cache it."
-            }
-        }
-    }
+    /// Moved to `FluidAudio.HuggingFaceDownloadError` (Shared/Download/DownloadTypes.swift)
+    /// so the extracted download primitives don't depend back on this class
+    /// (#765 Wave 2). The nested spelling stays source-compatible.
+    public typealias HuggingFaceDownloadError = HFDownload.DownloadError
 
     /// Phase of a model download operation.
     public enum DownloadPhase: Sendable {
@@ -174,15 +152,9 @@ public class DownloadUtils {
     /// the main actor inside your handler.
     public typealias ProgressHandler = @Sendable (DownloadProgress) -> Void
 
-    public struct DownloadConfig: Sendable {
-        public let timeout: TimeInterval
-
-        public init(timeout: TimeInterval = 1800) {  // 30 minutes for large models
-            self.timeout = timeout
-        }
-
-        public static let `default` = DownloadConfig()
-    }
+    /// Moved to `FluidAudio.DownloadConfig` (Shared/Download/DownloadTypes.swift);
+    /// nested spelling stays source-compatible.
+    public typealias DownloadConfig = HFDownload.Config
 
     public static func loadModels(
         _ repo: Repo,
@@ -244,13 +216,8 @@ public class DownloadUtils {
         }
     }
 
-    /// `true` when `error` represents cancellation (Swift `CancellationError`,
-    /// `NSURLErrorCancelled`, or `NSUserCancelledError`, at any depth of the
-    /// underlying-error chain) rather than a corrupted cache.
-    ///
-    /// The `NSUnderlyingErrorKey` chain is walked to its end. Visited errors
-    /// are tracked by identity so a self-referential chain terminates without
-    /// an arbitrary depth cap.
+    /// Forward to `RetryPolicy.isCancellation` (see there for the chain-walk
+    /// semantics); kept because DownloadUtilsCancellationTests pins this symbol.
     static func isCancellationError(_ error: Error) -> Bool {
         RetryPolicy.isCancellation(error)
     }
@@ -828,7 +795,7 @@ public class DownloadUtils {
         let validatorURL = resumeValidatorURL(for: partialURL)
 
         return try await RetryPolicy.withRetry(
-            label: path, maxAttempts: maxAttempts, minBackoff: minBackoff
+            label: path, maxAttempts: maxAttempts, minBackoff: minBackoff, logger: logger
         ) { attempt in
             var attemptRequest = request
             var resumeOffset: Int64 = 0
