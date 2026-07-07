@@ -333,7 +333,7 @@ public actor StreamingEouAsrManager {
     public func loadModels(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         if let configuration {
             self.configuration = configuration
@@ -358,7 +358,7 @@ public actor StreamingEouAsrManager {
 
         if !modelsExist {
             logger.info("Downloading Parakeet EOU models to \(modelsRoot.path)...")
-            try await DownloadUtils.downloadRepo(repo, to: modelsRoot, progressHandler: progressHandler)
+            try await ModelHub.download(repo, to: modelsRoot, progressHandler: progressHandler)
         } else {
             logger.info("Using cached Parakeet EOU models at \(modelDir.path)")
         }

@@ -1056,7 +1056,7 @@ public enum TtsBenchmarkCommand {
     ///
     /// `Repo.cohereTranscribeCoreml` ships `vocab.json` in `requiredModels`, and
     /// that file lives at the repo root rather than under the `q8/` subPath.
-    /// `DownloadUtils.downloadRepo` now sweeps the repo root for required
+    /// `ModelHub.download` now sweeps the repo root for required
     /// auxiliary files (issue #649), so auto-download resolves it correctly.
     private static func resolveCohereModelDir(_ override: String?) async throws -> URL {
         if let override {
@@ -1081,7 +1081,7 @@ public enum TtsBenchmarkCommand {
             }
         }
         if !missingFiles().isEmpty {
-            try await DownloadUtils.downloadRepo(.cohereTranscribeCoreml, to: modelsBase)
+            try await ModelHub.download(.cohereTranscribeCoreml, to: modelsBase)
         }
         let missing = missingFiles()
         guard missing.isEmpty else {

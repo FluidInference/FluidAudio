@@ -10,7 +10,7 @@ import XCTest
 /// verdicts, so they are locked in against the current behavior first.
 final class DownloadClassifierTests: XCTestCase {
 
-    typealias HFError = DownloadUtils.HuggingFaceDownloadError
+    typealias HFError = DownloadError
 
     // MARK: - isRetryableDownloadError: transient (retry)
 
@@ -21,28 +21,28 @@ final class DownloadClassifierTests: XCTestCase {
         ]
         for code in transient {
             XCTAssertTrue(
-                DownloadUtils.isRetryableDownloadError(URLError(code)),
+                RetryPolicy.isRetryable(URLError(code)),
                 "URLError.\(code) should be retryable")
         }
     }
 
     func testRateLimitedIsRetryable() {
         XCTAssertTrue(
-            DownloadUtils.isRetryableDownloadError(HFError.rateLimited(statusCode: 429, message: "x")))
+            RetryPolicy.isRetryable(HFError.rateLimited(statusCode: 429, message: "x")))
         XCTAssertTrue(
-            DownloadUtils.isRetryableDownloadError(HFError.rateLimited(statusCode: 503, message: "x")))
+            RetryPolicy.isRetryable(HFError.rateLimited(statusCode: 503, message: "x")))
     }
 
     func testInvalidArtifactIsRetryable() {
         // An HTML error page / truncated body is usually a transient bad network path.
         XCTAssertTrue(
-            DownloadUtils.isRetryableDownloadError(HFError.invalidArtifact(path: "p", reason: "html")))
+            RetryPolicy.isRetryable(HFError.invalidArtifact(path: "p", reason: "html")))
     }
 
     func testDownloadFailedWith5xxIsRetryable() {
         for code in [500, 502, 503, 599] {
             let err = HFError.downloadFailed(path: "p", underlying: NSError(domain: "HTTP", code: code))
-            XCTAssertTrue(DownloadUtils.isRetryableDownloadError(err), "HTTP \(code) should be retryable")
+            XCTAssertTrue(RetryPolicy.isRetryable(err), "HTTP \(code) should be retryable")
         }
     }
 
@@ -51,7 +51,7 @@ final class DownloadClassifierTests: XCTestCase {
     func testPermanentURLErrorsAreNotRetryable() {
         for code in [URLError.Code.badURL, .unsupportedURL, .badServerResponse, .cancelled, .fileDoesNotExist] {
             XCTAssertFalse(
-                DownloadUtils.isRetryableDownloadError(URLError(code)),
+                RetryPolicy.isRetryable(URLError(code)),
                 "URLError.\(code) should not be retryable")
         }
     }
@@ -59,7 +59,7 @@ final class DownloadClassifierTests: XCTestCase {
     func testDownloadFailedWith4xxIsNotRetryable() {
         for code in [400, 401, 403, 404, 410] {
             let err = HFError.downloadFailed(path: "p", underlying: NSError(domain: "HTTP", code: code))
-            XCTAssertFalse(DownloadUtils.isRetryableDownloadError(err), "HTTP \(code) should not retry")
+            XCTAssertFalse(RetryPolicy.isRetryable(err), "HTTP \(code) should not retry")
         }
     }
 
@@ -67,48 +67,48 @@ final class DownloadClassifierTests: XCTestCase {
         // Only the synthetic "HTTP" domain drives the 5xx rule; a 5xx code in some
         // other domain must not be mistaken for a retryable status.
         let err = HFError.downloadFailed(path: "p", underlying: NSError(domain: "Other", code: 500))
-        XCTAssertFalse(DownloadUtils.isRetryableDownloadError(err))
+        XCTAssertFalse(RetryPolicy.isRetryable(err))
     }
 
     func testOtherErrorsAreNotRetryable() {
-        XCTAssertFalse(DownloadUtils.isRetryableDownloadError(HFError.invalidResponse))
-        XCTAssertFalse(DownloadUtils.isRetryableDownloadError(HFError.modelNotFound(path: "p")))
+        XCTAssertFalse(RetryPolicy.isRetryable(HFError.invalidResponse))
+        XCTAssertFalse(RetryPolicy.isRetryable(HFError.modelNotFound(path: "p")))
         XCTAssertFalse(
-            DownloadUtils.isRetryableDownloadError(HFError.htmlErrorResponse(path: "p", snippet: "s")))
-        XCTAssertFalse(DownloadUtils.isRetryableDownloadError(CancellationError()))
-        XCTAssertFalse(DownloadUtils.isRetryableDownloadError(NSError(domain: "x", code: 1)))
+            RetryPolicy.isRetryable(HFError.htmlErrorResponse(path: "p", snippet: "s")))
+        XCTAssertFalse(RetryPolicy.isRetryable(CancellationError()))
+        XCTAssertFalse(RetryPolicy.isRetryable(NSError(domain: "x", code: 1)))
     }
 
     // MARK: - isCancellationError
 
     func testRecognizesCancellation() {
-        XCTAssertTrue(DownloadUtils.isCancellationError(CancellationError()))
-        XCTAssertTrue(DownloadUtils.isCancellationError(URLError(.cancelled)))
+        XCTAssertTrue(RetryPolicy.isCancellation(CancellationError()))
+        XCTAssertTrue(RetryPolicy.isCancellation(URLError(.cancelled)))
         XCTAssertTrue(
-            DownloadUtils.isCancellationError(NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)))
+            RetryPolicy.isCancellation(NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)))
         XCTAssertTrue(
-            DownloadUtils.isCancellationError(NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError)))
+            RetryPolicy.isCancellation(NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError)))
     }
 
     func testRecognizesCancellationNestedInUnderlyingError() {
         let wrapped = NSError(
             domain: "Wrapper", code: 1,
             userInfo: [NSUnderlyingErrorKey: URLError(.cancelled) as NSError])
-        XCTAssertTrue(DownloadUtils.isCancellationError(wrapped))
+        XCTAssertTrue(RetryPolicy.isCancellation(wrapped))
     }
 
     func testNonCancellationErrorsAreNotCancellation() {
-        XCTAssertFalse(DownloadUtils.isCancellationError(URLError(.timedOut)))
-        XCTAssertFalse(DownloadUtils.isCancellationError(NSError(domain: "x", code: 1)))
+        XCTAssertFalse(RetryPolicy.isCancellation(URLError(.timedOut)))
+        XCTAssertFalse(RetryPolicy.isCancellation(NSError(domain: "x", code: 1)))
         XCTAssertFalse(
-            DownloadUtils.isCancellationError(HFError.downloadFailed(path: "p", underlying: URLError(.timedOut))))
+            RetryPolicy.isCancellation(HFError.downloadFailed(path: "p", underlying: URLError(.timedOut))))
     }
 
     // MARK: - Cross-check: a cancelled download is neither retryable nor treated as corruption
 
     func testCancellationIsNotRetryableButIsCancellation() {
         let cancelled = URLError(.cancelled)
-        XCTAssertFalse(DownloadUtils.isRetryableDownloadError(cancelled))
-        XCTAssertTrue(DownloadUtils.isCancellationError(cancelled))
+        XCTAssertFalse(RetryPolicy.isRetryable(cancelled))
+        XCTAssertTrue(RetryPolicy.isCancellation(cancelled))
     }
 }

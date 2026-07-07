@@ -2,7 +2,7 @@ import XCTest
 
 @testable import FluidAudio
 
-/// `DownloadUtils.loadModels` treats a failed first load as a corrupted
+/// `ModelHub.loadModels` treats a failed first load as a corrupted
 /// cache and deletes the repo folder before re-downloading. Cancellation
 /// (task cancelled during app teardown, user abort mid-load) must NOT be
 /// classified as corruption — a cancelled load once wiped a fully
@@ -15,21 +15,21 @@ final class DownloadUtilsCancellationTests: XCTestCase {
     // MARK: - cancellation shapes that must be detected
 
     func testSwiftCancellationErrorDetected() {
-        XCTAssertTrue(DownloadUtils.isCancellationError(CancellationError()))
+        XCTAssertTrue(RetryPolicy.isCancellation(CancellationError()))
     }
 
     func testURLErrorCancelledDetected() {
-        XCTAssertTrue(DownloadUtils.isCancellationError(URLError(.cancelled)))
+        XCTAssertTrue(RetryPolicy.isCancellation(URLError(.cancelled)))
     }
 
     func testRawNSURLErrorCancelledDetected() {
         let error = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
-        XCTAssertTrue(DownloadUtils.isCancellationError(error))
+        XCTAssertTrue(RetryPolicy.isCancellation(error))
     }
 
     func testCocoaUserCancelledDetected() {
         let error = NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError)
-        XCTAssertTrue(DownloadUtils.isCancellationError(error))
+        XCTAssertTrue(RetryPolicy.isCancellation(error))
     }
 
     func testUnderlyingCancellationDetected() {
@@ -37,7 +37,7 @@ final class DownloadUtilsCancellationTests: XCTestCase {
         let wrapper = NSError(
             domain: "com.example.wrapper", code: 1,
             userInfo: [NSUnderlyingErrorKey: underlying])
-        XCTAssertTrue(DownloadUtils.isCancellationError(wrapper))
+        XCTAssertTrue(RetryPolicy.isCancellation(wrapper))
     }
 
     func testDeeplyNestedCancellationDetected() {
@@ -48,24 +48,24 @@ final class DownloadUtilsCancellationTests: XCTestCase {
         let top = NSError(
             domain: "com.example.top", code: 3,
             userInfo: [NSUnderlyingErrorKey: mid])
-        XCTAssertTrue(DownloadUtils.isCancellationError(top))
+        XCTAssertTrue(RetryPolicy.isCancellation(top))
     }
 
     // MARK: - genuine failures must NOT be classified as cancellation
 
     func testTimeoutNotCancellation() {
-        XCTAssertFalse(DownloadUtils.isCancellationError(URLError(.timedOut)))
+        XCTAssertFalse(RetryPolicy.isCancellation(URLError(.timedOut)))
     }
 
     func testGenericCocoaErrorNotCancellation() {
         let error = NSError(domain: NSCocoaErrorDomain, code: NSFileReadCorruptFileError)
-        XCTAssertFalse(DownloadUtils.isCancellationError(error))
+        XCTAssertFalse(RetryPolicy.isCancellation(error))
     }
 
     func testMatchingCodeWrongDomainNotCancellation() {
         // -999 only means "cancelled" inside NSURLErrorDomain.
         let error = NSError(domain: "com.example.custom", code: NSURLErrorCancelled)
-        XCTAssertFalse(DownloadUtils.isCancellationError(error))
+        XCTAssertFalse(RetryPolicy.isCancellation(error))
     }
 
     func testNonCancellationUnderlyingChainNotClassified() {
@@ -75,7 +75,7 @@ final class DownloadUtilsCancellationTests: XCTestCase {
         let outer = NSError(
             domain: "com.example.b", code: 2,
             userInfo: [NSUnderlyingErrorKey: inner])
-        XCTAssertFalse(DownloadUtils.isCancellationError(outer))
+        XCTAssertFalse(RetryPolicy.isCancellation(outer))
     }
 
     func testDeeplyBuriedCancellationDetected() {
@@ -88,7 +88,7 @@ final class DownloadUtilsCancellationTests: XCTestCase {
                 domain: "com.example.wrap\(i)", code: i,
                 userInfo: [NSUnderlyingErrorKey: error])
         }
-        XCTAssertTrue(DownloadUtils.isCancellationError(error))
+        XCTAssertTrue(RetryPolicy.isCancellation(error))
     }
 
     func testSelfReferentialChainTerminates() {
@@ -96,7 +96,7 @@ final class DownloadUtilsCancellationTests: XCTestCase {
         // Plain `NSError` can't form a cycle (its `userInfo` is fixed at
         // init), so a subclass whose underlying error is itself is the only
         // honest way to construct one. No cancellation on the cycle → false.
-        XCTAssertFalse(DownloadUtils.isCancellationError(SelfReferentialError()))
+        XCTAssertFalse(RetryPolicy.isCancellation(SelfReferentialError()))
     }
 }
 

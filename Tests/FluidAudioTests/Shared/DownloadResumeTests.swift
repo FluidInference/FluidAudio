@@ -48,7 +48,7 @@ final class DownloadResumeTests: XCTestCase {
         partial: URL? = nil,
         maxAttempts: Int = 3
     ) async throws -> Data {
-        let url = try await DownloadUtils.downloadFileWithRetry(
+        let url = try await FileDownloader.download(
             request: request,
             path: "model.bin",
             expectedSize: expectedSize,
@@ -65,7 +65,7 @@ final class DownloadResumeTests: XCTestCase {
         try data.write(to: partialURL())
         if let validator {
             try validator.write(
-                to: DownloadUtils.resumeValidatorURL(for: partialURL()),
+                to: FileDownloader.resumeValidatorURL(for: partialURL()),
                 atomically: true, encoding: .utf8)
         }
     }
@@ -85,7 +85,7 @@ final class DownloadResumeTests: XCTestCase {
         // Validator sidecar is cleaned up after a completed download.
         XCTAssertFalse(
             FileManager.default.fileExists(
-                atPath: DownloadUtils.resumeValidatorURL(for: partialURL()).path))
+                atPath: FileDownloader.resumeValidatorURL(for: partialURL()).path))
     }
 
     func testMidStreamDropResumesWithRangeAndAppends() async throws {
@@ -223,7 +223,7 @@ final class DownloadResumeTests: XCTestCase {
                 chunks: [Data(Self.fullBody.dropFirst(splitAt))]))
 
         let recorded = ProgressRecorder()
-        _ = try await DownloadUtils.downloadFileWithRetry(
+        _ = try await FileDownloader.download(
             request: request,
             path: "model.bin",
             expectedSize: Self.fullBody.count,

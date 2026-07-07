@@ -398,7 +398,7 @@ public class NemotronBenchmark {
 
         // Download models (downloadRepo appends folderName internally)
         logger.info("Downloading Nemotron \(config.chunkSize.rawValue)ms models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir)
+        try await ModelHub.download(repo, to: modelsBaseDir)
 
         return cacheDir
     }

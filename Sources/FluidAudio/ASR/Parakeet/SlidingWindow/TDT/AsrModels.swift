@@ -232,7 +232,7 @@ extension AsrModels {
         version: AsrModelVersion = .v3,
         encoderPrecision: ParakeetEncoderPrecision = .int8,
         encoderComputeUnits: MLComputeUnits? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
         logger.info("Loading ASR models from: \(directory.path)")
 
@@ -247,7 +247,7 @@ extension AsrModels {
         var loadedModels: [String: MLModel] = [:]
 
         for spec in specs {
-            let models = try await DownloadUtils.loadModels(
+            let models = try await ModelHub.loadModels(
                 version.repo,
                 modelNames: [spec.fileName],
                 directory: parentDirectory,
@@ -275,7 +275,7 @@ extension AsrModels {
         }
 
         // Load decoder first
-        let decoderModels = try await DownloadUtils.loadModels(
+        let decoderModels = try await ModelHub.loadModels(
             version.repo,
             modelNames: [fileNames.decoder],
             directory: parentDirectory,
@@ -291,7 +291,7 @@ extension AsrModels {
         // Load the joint model. For v3 this is JointDecisionv3.mlmodelc (with
         // top-K outputs); for v2 / 110m / tdtJa it is the version-specific
         // JointDecision.mlmodelc.
-        let jointModels = try await DownloadUtils.loadModels(
+        let jointModels = try await ModelHub.loadModels(
             version.repo,
             modelNames: [fileNames.joint],
             directory: parentDirectory,
@@ -332,7 +332,7 @@ extension AsrModels {
             // v2: Fall back to downloading from parakeet-ctc-110m HF repo
             if ctcHeadModel == nil {
                 do {
-                    let ctcModels = try await DownloadUtils.loadModels(
+                    let ctcModels = try await ModelHub.loadModels(
                         .parakeetCtc110m,
                         modelNames: [Names.ctcHeadFile],
                         directory: parentDirectory,
@@ -412,7 +412,7 @@ extension AsrModels {
         configuration: MLModelConfiguration? = nil,
         version: AsrModelVersion = .v3,
         encoderComputeUnits: MLComputeUnits? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
         let cacheDir = defaultCacheDirectory(for: version)
         return try await load(
@@ -426,7 +426,7 @@ extension AsrModels {
         from directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
         encoderComputeUnits: MLComputeUnits? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
         let targetDir = directory ?? defaultCacheDirectory()
         return try await load(
@@ -485,7 +485,7 @@ extension AsrModels {
         force: Bool = false,
         version: AsrModelVersion = .v3,
         encoderPrecision: ParakeetEncoderPrecision = .int8,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory(for: version)
         logger.info("Downloading ASR models to: \(targetDir.path)")
@@ -531,7 +531,7 @@ extension AsrModels {
         }
 
         for spec in specs {
-            _ = try await DownloadUtils.loadModels(
+            _ = try await ModelHub.loadModels(
                 version.repo,
                 modelNames: [spec.fileName],
                 directory: parentDir,
@@ -579,7 +579,7 @@ extension AsrModels {
 
         logger.info("Vocabulary \(vocabularyFileName) missing after model download; fetching directly")
         let remoteURL = try ModelRegistry.resolveModel(version.repo.remotePath, vocabularyFileName)
-        let data = try await DownloadUtils.fetchHuggingFaceFile(
+        let data = try await ModelHub.fetchFile(
             from: remoteURL, description: vocabularyFileName)
         try FileManager.default.createDirectory(
             at: vocabURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -593,7 +593,7 @@ extension AsrModels {
         version: AsrModelVersion = .v3,
         encoderPrecision: ParakeetEncoderPrecision = .int8,
         encoderComputeUnits: MLComputeUnits? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
         let targetDir = try await download(
             to: directory,

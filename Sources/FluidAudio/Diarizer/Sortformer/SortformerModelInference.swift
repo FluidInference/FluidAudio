@@ -139,7 +139,7 @@ extension SortformerModels {
         config: SortformerConfig,
         cacheDirectory: URL? = nil,
         computeUnits: MLComputeUnits? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from HuggingFace...")
 
@@ -165,7 +165,7 @@ extension SortformerModels {
 
         let resolvedComputeUnits = computeUnits ?? recommendedComputeUnits(for: config)
 
-        let models = try await DownloadUtils.loadModels(
+        let models = try await ModelHub.loadModels(
             .sortformer,
             modelNames: [bundle],
             directory: directory,

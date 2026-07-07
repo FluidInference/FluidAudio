@@ -26,7 +26,7 @@ public enum StyleTTS2ResourceDownloader {
     @discardableResult
     public static func ensureDefaultModels(
         directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = try directory ?? defaultCacheRoot()
         let repoDir = modelsRoot.appendingPathComponent(Repo.styletts2.folderName)
@@ -38,7 +38,7 @@ public enum StyleTTS2ResourceDownloader {
         if !allDefaultsPresent {
             logger.info("Downloading StyleTTS2 LibriTTS models (iteration_3) from HuggingFace…")
             do {
-                try await DownloadUtils.downloadRepo(
+                try await ModelHub.download(
                     .styletts2, to: modelsRoot, progressHandler: progressHandler)
             } catch {
                 throw StyleTTS2Error.downloadFailed("\(error)")
@@ -90,7 +90,7 @@ public enum StyleTTS2ResourceDownloader {
     /// `G2PModelError.vocabLoadFailed` the first time the OOV path is hit.
     public static func ensureG2PAssets(
         directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         let modelsRoot = try directory ?? defaultCacheRoot()
         let kokoroDir = modelsRoot.appendingPathComponent(Repo.kokoro.folderName)
@@ -102,7 +102,7 @@ public enum StyleTTS2ResourceDownloader {
         }
         logger.info("Downloading kokoro G2P CoreML assets (g2p-only variant) from HuggingFace…")
         do {
-            try await DownloadUtils.downloadRepo(
+            try await ModelHub.download(
                 .kokoro,
                 to: modelsRoot,
                 variant: "g2p-only",
@@ -132,7 +132,7 @@ public enum StyleTTS2ResourceDownloader {
         logger.info("Fetching StyleTTS2 bucket T=\(t) (\(missing.count) bundles)")
         for fileName in missing {
             do {
-                try await DownloadUtils.downloadSubdirectory(
+                try await ModelHub.download(
                     .styletts2,
                     subdirectory: fileName,
                     to: repoDir

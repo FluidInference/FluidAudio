@@ -5,7 +5,7 @@ import XCTest
 final class DownloadUtilsProgressTests: XCTestCase {
 
     func testSubdirectoryProgressUsesByteWeightingDuringLargeFile() {
-        let fraction = DownloadUtils.subdirectoryProgressFraction(
+        let fraction = ProgressReporter.downloadFraction(
             completedBytes: 399,
             totalBytes: 665,
             completedFiles: 9,
@@ -18,37 +18,37 @@ final class DownloadUtilsProgressTests: XCTestCase {
 
     func testSubdirectoryProgressIsMonotonicForRealisticSequence() {
         let progress = [
-            DownloadUtils.subdirectoryProgressFraction(
+            ProgressReporter.downloadFraction(
                 completedBytes: 0,
                 totalBytes: 665,
                 completedFiles: 0,
                 totalFiles: 22
             ),
-            DownloadUtils.subdirectoryProgressFraction(
+            ProgressReporter.downloadFraction(
                 completedBytes: 40,
                 totalBytes: 665,
                 completedFiles: 4,
                 totalFiles: 22
             ),
-            DownloadUtils.subdirectoryProgressFraction(
+            ProgressReporter.downloadFraction(
                 completedBytes: 120,
                 totalBytes: 665,
                 completedFiles: 9,
                 totalFiles: 22
             ),
-            DownloadUtils.subdirectoryProgressFraction(
+            ProgressReporter.downloadFraction(
                 completedBytes: 399,
                 totalBytes: 665,
                 completedFiles: 9,
                 totalFiles: 22
             ),
-            DownloadUtils.subdirectoryProgressFraction(
+            ProgressReporter.downloadFraction(
                 completedBytes: 565,
                 totalBytes: 665,
                 completedFiles: 10,
                 totalFiles: 22
             ),
-            DownloadUtils.subdirectoryProgressFraction(
+            ProgressReporter.downloadFraction(
                 completedBytes: 665,
                 totalBytes: 665,
                 completedFiles: 22,
@@ -60,7 +60,7 @@ final class DownloadUtilsProgressTests: XCTestCase {
     }
 
     func testSubdirectoryProgressClampsToOne() {
-        let fraction = DownloadUtils.subdirectoryProgressFraction(
+        let fraction = ProgressReporter.downloadFraction(
             completedBytes: 700,
             totalBytes: 665,
             completedFiles: 22,
@@ -71,7 +71,7 @@ final class DownloadUtilsProgressTests: XCTestCase {
     }
 
     func testSubdirectoryProgressFallsBackToFileCountWhenTotalBytesUnknown() {
-        let fraction = DownloadUtils.subdirectoryProgressFraction(
+        let fraction = ProgressReporter.downloadFraction(
             completedBytes: 0,
             totalBytes: 0,
             completedFiles: 9,
@@ -82,7 +82,7 @@ final class DownloadUtilsProgressTests: XCTestCase {
     }
 
     func testSubdirectoryProgressIsCompleteWhenThereAreNoFiles() {
-        let fraction = DownloadUtils.subdirectoryProgressFraction(
+        let fraction = ProgressReporter.downloadFraction(
             completedBytes: 0,
             totalBytes: 0,
             completedFiles: 0,

@@ -20,7 +20,7 @@ enum HFClient {
 
     /// Create a URLRequest with optional auth header and timeout.
     static func authorizedRequest(
-        url: URL, timeout: TimeInterval = HFDownload.Config.default.timeout
+        url: URL, timeout: TimeInterval = DownloadConfig.default.timeout
     ) -> URLRequest {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         if let token = huggingFaceToken {
@@ -30,7 +30,7 @@ enum HFClient {
     }
 
     /// The one place 429/503 responses are turned into
-    /// `HFDownload.DownloadError.rateLimited`. The message is deterministic
+    /// `DownloadError.rateLimited`. The message is deterministic
     /// ("Rate limited while <context> (HTTP <code>)"); the machine-readable
     /// `Retry-After` hint stays available via `retryAfter(from:)` for the
     /// retry layer to honor (Wave 5) rather than being flattened into text.
@@ -38,7 +38,7 @@ enum HFClient {
         _ response: HTTPURLResponse, context: @autoclosure () -> String
     ) throws {
         guard response.statusCode == 429 || response.statusCode == 503 else { return }
-        throw HFDownload.DownloadError.rateLimited(
+        throw DownloadError.rateLimited(
             statusCode: response.statusCode,
             message: "Rate limited while \(context()) (HTTP \(response.statusCode))")
     }
@@ -137,7 +137,7 @@ enum HFClient {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed?.hasPrefix("<") == true || looksLikeHTML(data) {
             let snippet = String((trimmed ?? "").prefix(100))
-            throw HFDownload.DownloadError.htmlErrorResponse(path: path, snippet: snippet)
+            throw DownloadError.htmlErrorResponse(path: path, snippet: snippet)
         }
     }
 }

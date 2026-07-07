@@ -17,7 +17,7 @@ public enum Supertonic3ResourceDownloader {
     public static func ensureModels(
         directory: URL? = nil,
         veVariant: String? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = try directory ?? defaultCacheRoot()
         let repoDir = modelsRoot.appendingPathComponent(Repo.supertonic3.folderName)
@@ -30,7 +30,7 @@ public enum Supertonic3ResourceDownloader {
         if !allPresent {
             logger.info("Downloading Supertonic-3 CoreML assets from HuggingFace…")
             do {
-                try await DownloadUtils.downloadRepo(
+                try await ModelHub.download(
                     .supertonic3, to: modelsRoot, variant: veVariant,
                     progressHandler: progressHandler)
             } catch {
@@ -51,7 +51,7 @@ public enum Supertonic3ResourceDownloader {
     public static func downloadVoiceStyle(
         _ voice: Supertonic3Voice,
         directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = try directory ?? defaultCacheRoot()
         let repoDir = modelsRoot.appendingPathComponent(Repo.supertonic3.folderName)
@@ -66,7 +66,7 @@ public enum Supertonic3ResourceDownloader {
         do {
             // The HF tree API only lists directories, so pull the single file
             // out of voice_styles/ by skipping every other entry.
-            try await DownloadUtils.downloadSubdirectory(
+            try await ModelHub.download(
                 .supertonic3,
                 subdirectory: "voice_styles",
                 to: repoDir,
@@ -88,7 +88,7 @@ public enum Supertonic3ResourceDownloader {
     public static func loadVoiceStyle(
         _ voice: Supertonic3Voice,
         directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> Supertonic3VoiceStyle {
         let url = try await downloadVoiceStyle(
             voice, directory: directory, progressHandler: progressHandler)

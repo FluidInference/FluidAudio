@@ -20,7 +20,7 @@ final class DownloadSmokeTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         // Cold: no cache exists at `dir`, so this exercises the full pipeline.
-        let models = try await DownloadUtils.loadModels(
+        let models = try await ModelHub.loadModels(
             .vad,
             modelNames: [ModelNames.VAD.sileroVadFile],
             directory: dir,

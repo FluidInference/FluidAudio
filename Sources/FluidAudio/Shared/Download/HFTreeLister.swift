@@ -27,13 +27,13 @@ enum HFTreeLister {
     /// skipped the rate-limit check on non-HTTP responses.
     static func fetch(using session: URLSession) -> Fetch {
         { url in
-            guard !DownloadUtils.enforceOffline else {
-                throw DownloadUtils.OfflineError.networkDisabled(operation: "listTree(\(url.path))")
+            guard !ModelHub.offlineMode else {
+                throw DownloadError.networkDisabled(operation: "listTree(\(url.path))")
             }
             let request = HFClient.authorizedRequest(url: url)
             let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
-                throw HFDownload.DownloadError.invalidResponse
+                throw DownloadError.invalidResponse
             }
             return (data, httpResponse)
         }
@@ -73,7 +73,7 @@ enum HFTreeLister {
                 context: path.isEmpty ? "listing files" : "listing files in \(path)")
             try HFClient.validateJSONResponse(data, path: path)
             guard let items = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-                throw HFDownload.DownloadError.invalidResponse
+                throw DownloadError.invalidResponse
             }
 
             for item in items {

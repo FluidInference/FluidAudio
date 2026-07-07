@@ -171,7 +171,7 @@ extension OfflineSortformerModels {
         config: OfflineSortformerConfig = .offlineV2_1,
         cacheDirectory: URL? = nil,
         computeUnits: MLComputeUnits = .all,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> OfflineSortformerModels {
         let start = Date()
 
@@ -186,7 +186,7 @@ extension OfflineSortformerModels {
         let bundle = ModelNames.Sortformer.offlineBundle(precision: config.precision)
         logger.info("Downloading offline Sortformer model: \(bundle)...")
 
-        let models = try await DownloadUtils.loadModels(
+        let models = try await ModelHub.loadModels(
             .sortformer,
             modelNames: [bundle],
             directory: directory,
@@ -258,7 +258,7 @@ public final class OfflineSortformerDiarizer {
     /// Initialize from HuggingFace.
     public func initializeFromHuggingFace(
         computeUnits: MLComputeUnits = .all,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         let models = try await OfflineSortformerModels.loadFromHuggingFace(
             config: config, computeUnits: computeUnits, progressHandler: progressHandler)

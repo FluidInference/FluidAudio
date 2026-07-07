@@ -133,7 +133,7 @@ public actor UnifiedAsrManager {
     public func loadModels(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         if let configuration {
             self.mlConfiguration = configuration
@@ -154,7 +154,7 @@ public actor UnifiedAsrManager {
 
         if !FileManager.default.fileExists(atPath: encoderPath.path) {
             logger.info("Downloading Parakeet Unified offline models to \(modelsBaseDir.path)...")
-            try await DownloadUtils.downloadRepo(
+            try await ModelHub.download(
                 repo, to: modelsBaseDir,
                 variant: encoderPrecision == .fp16 ? "offline-fp16" : "offline",
                 progressHandler: progressHandler)

@@ -158,7 +158,7 @@ extension CtcModels {
             ModelNames.CTC.audioEncoderPath,
         ]
 
-        let models = try await DownloadUtils.loadModels(
+        let models = try await ModelHub.loadModels(
             variant.repo,
             modelNames: modelNames,
             directory: parentDirectory,
@@ -221,7 +221,7 @@ extension CtcModels {
         ]
 
         for name in modelNames {
-            _ = try await DownloadUtils.loadModels(
+            _ = try await ModelHub.loadModels(
                 variant.repo,
                 modelNames: [name],
                 directory: parentDir

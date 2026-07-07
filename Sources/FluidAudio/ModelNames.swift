@@ -1237,7 +1237,7 @@ public enum ModelNames {
         /// trip. The two auxiliary text files (`vocab.txt`,
         /// `POLYPHONIC_CHARS.txt`) ship via the lazy
         /// `KokoroAneResourceDownloader.ensureMandarinG2pw` helper because
-        /// `DownloadUtils.downloadRepo` does not whitelist `.txt` for
+        /// `ModelHub.download` does not whitelist `.txt` for
         /// subPath repos and a manual fetch keeps the bulk-grab matcher
         /// idempotent.
         public static let g2pwModelZh = "g2pw/g2pw.mlmodelc"

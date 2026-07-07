@@ -234,22 +234,22 @@ swift run fluidaudiocli transcribe audio.wav
 <details>
 <summary><b>Offline-only mode</b> - Refuse every network fetch, bundle your own models</summary>
 
-If your application ships pre-downloaded model assets and never wants FluidAudio to reach HuggingFace at runtime (privacy-sensitive desktop apps, air-gapped deployments, kiosk builds), set the static `DownloadUtils.enforceOffline` flag at startup:
+If your application ships pre-downloaded model assets and never wants FluidAudio to reach HuggingFace at runtime (privacy-sensitive desktop apps, air-gapped deployments, kiosk builds), set the static `ModelHub.offlineMode` flag at startup:
 
 ```swift
 import FluidAudio
 
 // Set once before any FluidAudio loader runs.
-DownloadUtils.enforceOffline = true
+ModelHub.offlineMode = true
 
 // Load via manual APIs that read from your bundled directory:
 let asr = try await AsrModels.load(from: bundledModelURL, configuration: config)
 ```
 
 When the flag is on:
-- `fetchWithAuth`, `downloadRepo`, `downloadSubdirectory`, and `fetchHuggingFaceFile` throw `DownloadUtils.OfflineError.networkDisabled(operation:)` instead of touching the network.
+- `fetchWithAuth`, `download`, and `fetchFile` throw `DownloadError.networkDisabled(operation:)` instead of touching the network.
 - `loadModels` short-circuits its retry-with-redownload fallback so a corrupt-detected `.mlmodelc` surfaces the original load error instead of silently re-fetching.
-- If `loadModels` is invoked but required files are missing from the local directory, `DownloadUtils.OfflineError.modelMissing(repo:missing:)` is thrown with the missing file list so the caller can ship a fix.
+- If `loadModels` is invoked but required files are missing from the local directory, `DownloadError.modelMissing(repo:missing:)` is thrown with the missing file list so the caller can ship a fix.
 
 The default is `false` — no behaviour change for existing callers. Combine with a custom `ModelRegistry.baseURL` only if you want offline-mode + a typed offline error rather than relying on a mirror URL.
 

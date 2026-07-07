@@ -45,7 +45,7 @@ final class ProgressSequenceTests: XCTestCase {
         TreeStubURLProtocol.fileBody = Data(String(repeating: "x", count: 40).utf8)
 
         let recorder = ProgressStreamRecorder()
-        try await DownloadUtils.downloadRepo(
+        try await ModelHub.download(
             .vad, to: workDir,
             progressHandler: { recorder.append($0) },
             configuration: stubConfiguration)
@@ -88,7 +88,7 @@ final class ProgressSequenceTests: XCTestCase {
         TreeStubURLProtocol.fileBody = Data(String(repeating: "x", count: 10).utf8)
 
         let recorder = ProgressStreamRecorder()
-        try await DownloadUtils.downloadRepo(
+        try await ModelHub.download(
             .vad, to: workDir,
             progressHandler: { recorder.append($0) },
             configuration: stubConfiguration)
@@ -107,13 +107,13 @@ final class ProgressSequenceTests: XCTestCase {
 
 /// Lock-guarded recorder for progress emissions (tests only).
 final class ProgressStreamRecorder: Sendable {
-    private let events = OSAllocatedUnfairLock<[DownloadUtils.DownloadProgress]>(initialState: [])
+    private let events = OSAllocatedUnfairLock<[DownloadProgress]>(initialState: [])
 
-    func append(_ event: DownloadUtils.DownloadProgress) {
+    func append(_ event: DownloadProgress) {
         events.withLock { $0.append(event) }
     }
 
-    func snapshot() -> [DownloadUtils.DownloadProgress] {
+    func snapshot() -> [DownloadProgress] {
         events.withLock { $0 }
     }
 }

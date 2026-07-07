@@ -47,7 +47,7 @@ public struct SenseVoiceModels: Sendable {
     ///   `.int8` ~half size on ANE, `.fp32` fallback for non-ANE hardware).
     public static func downloadAndLoad(
         precision: SenseVoiceEncoderPrecision = .fp16,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> SenseVoiceModels {
         let directory = try await download(precision: precision, progressHandler: progressHandler)
         return try load(from: directory, precision: precision)
@@ -57,11 +57,11 @@ public struct SenseVoiceModels: Sendable {
     ///
     /// `precision` ensures the requested encoder variant is present — a cache that
     /// predates a variant (e.g. fp16-only) re-fetches just the missing file
-    /// (`DownloadUtils.downloadRepo` skips files already on disk).
+    /// (`ModelHub.download` skips files already on disk).
     public static func download(
         precision: SenseVoiceEncoderPrecision = .fp16,
         force: Bool = false,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = modelsRootDirectory()
         let targetDir = modelsRoot.appendingPathComponent(Repo.senseVoiceSmall.folderName, isDirectory: true)
@@ -73,7 +73,7 @@ public struct SenseVoiceModels: Sendable {
         if force { try? FileManager.default.removeItem(at: targetDir) }
 
         logger.info("Downloading SenseVoice models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(
+        try await ModelHub.download(
             .senseVoiceSmall,
             to: modelsRoot,
             variant: precision.rawValue,

@@ -132,7 +132,7 @@ struct DatasetDownloader {
             }
 
             do {
-                let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
+                let (data, response) = try await ModelHub.session.data(from: url)
 
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
@@ -254,7 +254,7 @@ struct DatasetDownloader {
         }
 
         do {
-            let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
+            let (data, response) = try await ModelHub.session.data(from: url)
 
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 200 {
@@ -603,7 +603,7 @@ struct DatasetDownloader {
                 userInfo: [NSLocalizedDescriptionKey: "Invalid API URL"])
         }
 
-        let (data, _) = try await DownloadUtils.sharedSession.data(from: url)
+        let (data, _) = try await ModelHub.session.data(from: url)
 
         // Parse the JSON response to extract file names
         if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
@@ -658,7 +658,7 @@ struct DatasetDownloader {
         )
 
         // Download using URLSession
-        let (data, _) = try await DownloadUtils.sharedSession.data(from: url)
+        let (data, _) = try await ModelHub.session.data(from: url)
         try data.write(to: destination)
 
         // Verify it's valid audio
@@ -717,7 +717,7 @@ struct DatasetDownloader {
 
         do {
             // Download the tar.gz file
-            let (downloadURL, response) = try await DownloadUtils.sharedSession.download(
+            let (downloadURL, response) = try await ModelHub.session.download(
                 from: URL(string: musanURL)!)
 
             // Check response
@@ -874,7 +874,7 @@ struct DatasetDownloader {
             }
 
             do {
-                let (data, response) = try await DownloadUtils.sharedSession.data(from: apiURL)
+                let (data, response) = try await ModelHub.session.data(from: apiURL)
 
                 guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -906,7 +906,7 @@ struct DatasetDownloader {
                         continue
                     }
 
-                    let (audioData, audioResponse) = try await DownloadUtils.sharedSession.data(from: audioURL)
+                    let (audioData, audioResponse) = try await ModelHub.session.data(from: audioURL)
                     guard let audioHTTP = audioResponse as? HTTPURLResponse, audioHTTP.statusCode == 200 else {
                         logger.warning("Failed to download audio for \(fileId)")
                         continue

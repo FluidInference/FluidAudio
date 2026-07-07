@@ -125,7 +125,7 @@ public actor StreamingUnifiedAsrManager {
     public func loadModels(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         if let configuration {
             self.mlConfiguration = configuration
@@ -150,7 +150,7 @@ public actor StreamingUnifiedAsrManager {
 
         if !FileManager.default.fileExists(atPath: encoderPath.path) {
             logger.info("Downloading Parakeet Unified models to \(modelsBaseDir.path)...")
-            try await DownloadUtils.downloadRepo(
+            try await ModelHub.download(
                 repo, to: modelsBaseDir,
                 variant: encoderPrecision == .fp16 ? "fp16" : nil,
                 additionalModelNames: [encoderFile],

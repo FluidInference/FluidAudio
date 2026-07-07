@@ -101,7 +101,7 @@ public final class LSEENDDiarizer: Diarizer {
         stepSize: LSEENDStepSize = .step100ms,
         cacheDirectory: URL? = nil,
         computeUnits: MLComputeUnits = .cpuOnly,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         let model = try await LSEENDModel.loadFromHuggingFace(
             variant: variant,

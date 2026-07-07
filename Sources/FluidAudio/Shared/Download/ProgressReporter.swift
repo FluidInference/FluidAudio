@@ -8,12 +8,12 @@ import Foundation
 /// loads declare `downloadPhaseWeight: 0.5` (compile occupies the rest);
 /// subdirectory downloads declare `1.0`.
 struct ProgressReporter: Sendable {
-    let handler: DownloadUtils.ProgressHandler?
+    let handler: ProgressHandler?
     /// Fraction of the overall operation the download phase occupies.
     let downloadPhaseWeight: Double
 
-    private func emit(_ fraction: Double, _ phase: DownloadUtils.DownloadPhase) {
-        handler?(DownloadUtils.DownloadProgress(fractionCompleted: fraction, phase: phase))
+    private func emit(_ fraction: Double, _ phase: DownloadPhase) {
+        handler?(DownloadProgress(fractionCompleted: fraction, phase: phase))
     }
 
     /// Byte-weighted fraction of the download phase: bytes when total bytes

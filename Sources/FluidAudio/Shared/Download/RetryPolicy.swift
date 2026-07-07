@@ -89,12 +89,12 @@ enum RetryPolicy {
         }
 
         switch error {
-        case HFDownload.DownloadError.rateLimited:
+        case DownloadError.rateLimited:
             return true
-        case HFDownload.DownloadError.invalidArtifact:
+        case DownloadError.invalidArtifact:
             // Usually a transient unhealthy network path (proxy, mirror 5xx) — retry.
             return true
-        case HFDownload.DownloadError.downloadFailed(_, let underlying):
+        case DownloadError.downloadFailed(_, let underlying):
             let nsError = underlying as NSError
             return nsError.domain == "HTTP" && (500...599).contains(nsError.code)
         default:

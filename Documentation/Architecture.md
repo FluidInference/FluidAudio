@@ -429,7 +429,7 @@ characteristics in ways the diarizer's clustering wasn't tuned for.
   component.
 - `MLModelConfigurationUtils` — default `MLComputeUnits` selection,
   CI overrides.
-- `DownloadUtils` — HuggingFace fetch + caching + token resolution.
+- `ModelHub` (+ `Shared/Download/` primitives: HFClient, RetryPolicy, HFTreeLister, FileDownloader, ModelCache, ProgressReporter) — HuggingFace fetch + caching + token resolution.
 
 ### Per-Module
 

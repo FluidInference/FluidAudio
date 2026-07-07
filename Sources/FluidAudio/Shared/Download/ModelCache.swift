@@ -75,7 +75,7 @@ enum ModelCache {
     /// required model absent under `repoPath` — the post-download verify pass.
     static func verifyModelsPresent(at repoPath: URL, models: Set<String>) throws {
         if let missing = missingModels(at: repoPath, models: models).first {
-            throw HFDownload.DownloadError.modelNotFound(path: missing)
+            throw DownloadError.modelNotFound(path: missing)
         }
     }
 

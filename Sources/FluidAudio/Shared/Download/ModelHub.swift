@@ -1,122 +1,75 @@
 import CoreML
 import Foundation
 
-/// HuggingFace model downloader using URLSession
-public class DownloadUtils {
+/// The model-download surface for FluidAudio (#765 Wave 6): loading CoreML
+/// model repos from HuggingFace into the local cache, targeted subdirectory
+/// and single-file fetches, offline enforcement, and cache management.
+///
+/// Replaces the pre-0.16 `DownloadUtils` class — see the 0.16.0 migration
+/// table for the mechanical old→new spellings.
+public enum ModelHub {
 
     private static let logger = AppLogger(category: "DownloadUtils")
 
-    /// Shared URLSession with registry and proxy configuration
-    public static let sharedSession: URLSession = ModelRegistry.configuredSession()
+    /// Shared URLSession with registry and proxy configuration. Advanced
+    /// plumbing — exposed for tooling (the FluidAudio CLI's dataset
+    /// downloads); apps normally never touch it.
+    public static let session: URLSession = ModelRegistry.configuredSession()
 
-    /// Offline-only mode. When true, every public download surface
-    /// (`fetchWithAuth`, `downloadRepo`, `downloadSubdirectory`,
-    /// `fetchHuggingFaceFile`) and the `loadModels` retry-with-redownload
-    /// fallback throws `DownloadUtils.OfflineError` instead of touching
-    /// the network. Applications that bundle their own model assets
-    /// should set this once at startup and route loading through manual
-    /// APIs (e.g. `MLModel(contentsOf:)`, `VadManager(config:vadModel:)`)
-    /// so a corrupt-detected `.mlmodelc` never silently re-downloads at
-    /// runtime.
-    ///
-    /// Defaults to `false`. `nonisolated(unsafe)` is acceptable because
-    /// the flag is set once at startup before any FluidAudio loaders
-    /// are touched and is read-only thereafter.
-    nonisolated(unsafe) public static var enforceOffline: Bool = false
+    /// Offline-only mode. When true, every download surface and the
+    /// `loadModels` retry-with-redownload fallback throws
+    /// `DownloadError.networkDisabled` / `.modelMissing` instead of touching
+    /// the network. Set once at startup before any FluidAudio loaders are
+    /// touched (`nonisolated(unsafe)` is acceptable under that contract).
+    nonisolated(unsafe) public static var offlineMode: Bool = false
 
-    /// Errors thrown when `enforceOffline` is on and FluidAudio would
-    /// otherwise attempt a network fetch or a cache rebuild that
-    /// requires network. Sibling to `HuggingFaceDownloadError`.
-    public enum OfflineError: LocalizedError {
-        /// A code path that would have hit the network was blocked.
-        /// `operation` is the short tag of the blocked entry point
-        /// (e.g. `"downloadRepo(parakeet-tdt-0.6b-v3-coreml)"`).
-        case networkDisabled(operation: String)
-
-        /// `loadModels` was invoked but one or more required files are
-        /// missing from the local cache. Caller bundled assets but the
-        /// bundle was incomplete; surfacing the missing list lets the
-        /// caller decide whether to ship a fix or fail loudly.
-        case modelMissing(repo: String, missing: [String])
-
-        public var errorDescription: String? {
-            switch self {
-            case .networkDisabled(let operation):
-                return "FluidAudio offline mode: \(operation) blocked"
-            case .modelMissing(let repo, let missing):
-                return
-                    "FluidAudio offline mode: required models missing for \(repo): \(missing.joined(separator: ", "))"
-            }
-        }
-    }
-
-    /// Throws `OfflineError.networkDisabled` if `enforceOffline` is on.
+    /// Throws `DownloadError.networkDisabled` if `offlineMode` is on.
     /// Call this at the top of any path that would touch the network.
-    private static func ensureOnlineAllowed(_ operation: String) throws {
-        if enforceOffline {
-            throw OfflineError.networkDisabled(operation: operation)
+    static func ensureOnlineAllowed(_ operation: String) throws {
+        if offlineMode {
+            throw DownloadError.networkDisabled(operation: operation)
         }
     }
 
-    /// Create a URLRequest with optional auth header and timeout (HFClient owns
-    /// token resolution and header shape — #765 Wave 2).
-    private static func authorizedRequest(
-        url: URL, timeout: TimeInterval = DownloadConfig.default.timeout
-    ) -> URLRequest {
-        HFClient.authorizedRequest(url: url, timeout: timeout)
-    }
-
-    /// Fetch data from a URL with HuggingFace authentication if available
-    /// Use this for API calls that need auth tokens for private repos or higher rate limits
+    /// Fetch data from a URL with HuggingFace authentication if available.
+    /// Advanced plumbing for API calls needing auth tokens (private repos,
+    /// higher rate limits); prefer `fetchFile` for content.
     public static func fetchWithAuth(from url: URL) async throws -> (Data, URLResponse) {
         try ensureOnlineAllowed("fetchWithAuth(\(url.absoluteString))")
-        let request = authorizedRequest(url: url)
-        return try await sharedSession.data(for: request)
+        let request = HFClient.authorizedRequest(url: url)
+        return try await session.data(for: request)
     }
 
-    /// Forward — the single HTML sniffer lives in HFClient (#765 Wave 2);
-    /// kept here because DownloadArtifactValidationTests pins this symbol.
-    static func looksLikeHTML(_ data: Data) -> Bool {
-        HFClient.looksLikeHTML(data)
+    public static func clearCache(for repo: Repo, directory: URL) {
+        let repoPath = directory.appendingPathComponent(repo.folderName)
+        try? FileManager.default.removeItem(at: repoPath)
     }
 
-    /// Moved to `FluidAudio.HuggingFaceDownloadError` (Shared/Download/DownloadTypes.swift)
-    /// so the extracted download primitives don't depend back on this class
-    /// (#765 Wave 2). The nested spelling stays source-compatible.
-    public typealias HuggingFaceDownloadError = HFDownload.DownloadError
+    /// Remove all downloaded models and caches (ASR/VAD/diarization models
+    /// under Application Support, and the shared TTS cache root).
+    public static func clearAllCaches() {
+        let fm = FileManager.default
 
-    /// Phase of a model download operation.
-    public enum DownloadPhase: Sendable {
-        /// Listing files from the remote repository.
-        case listing
-        /// Downloading model files. `completedFiles` / `totalFiles` track per-file progress.
-        case downloading(completedFiles: Int, totalFiles: Int)
-        /// Compiling CoreML models after download.
-        case compiling(modelName: String)
-    }
-
-    /// Progress snapshot passed to ``ProgressHandler`` closures.
-    public struct DownloadProgress: Sendable {
-        /// Fraction complete in [0, 1].
-        public let fractionCompleted: Double
-        /// Current phase of the operation.
-        public let phase: DownloadPhase
-
-        public init(fractionCompleted: Double, phase: DownloadPhase) {
-            self.fractionCompleted = fractionCompleted
-            self.phase = phase
+        // ASR, VAD, Diarization models
+        if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let modelsDir = appSupport.appendingPathComponent("FluidAudio/Models")
+            try? fm.removeItem(at: modelsDir)
         }
+
+        // TTS models (Kokoro, PocketTTS, Supertonic3, StyleTTS2).
+        #if os(macOS)
+        let home = fm.homeDirectoryForCurrentUser
+        let ttsCache = home.appendingPathComponent(".cache/fluidaudio")
+        try? fm.removeItem(at: ttsCache)
+        #else
+        if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let ttsCache = appSupport.appendingPathComponent("fluidaudio")
+            try? fm.removeItem(at: ttsCache)
+        }
+        #endif
+
+        logger.info("All model caches cleared")
     }
-
-    /// Callback type for download progress reporting.
-    ///
-    /// Called on an unspecified queue. If you need to update UI, dispatch to
-    /// the main actor inside your handler.
-    public typealias ProgressHandler = @Sendable (DownloadProgress) -> Void
-
-    /// Moved to `FluidAudio.DownloadConfig` (Shared/Download/DownloadTypes.swift);
-    /// nested spelling stays source-compatible.
-    public typealias DownloadConfig = HFDownload.Config
 
     public static func loadModels(
         _ repo: Repo,
@@ -135,7 +88,7 @@ public class DownloadUtils {
         } catch {
             // In offline mode never delete cache + re-download. Surface
             // the original load failure so the caller can decide.
-            if enforceOffline {
+            if offlineMode {
                 logger.warning(
                     "Offline mode: load failed and re-download blocked. \(error.localizedDescription)"
                 )
@@ -145,7 +98,7 @@ public class DownloadUtils {
             // Cancellation is not corruption. A cancelled first load (app
             // teardown, user abort) must never wipe a valid cache — deleting
             // here threw away fully-downloaded multi-hundred-MB repos.
-            if isCancellationError(error) {
+            if RetryPolicy.isCancellation(error) {
                 logger.info(
                     "Load cancelled; preserving model cache. \(error.localizedDescription)")
                 throw error
@@ -163,50 +116,6 @@ public class DownloadUtils {
                 progressHandler: progressHandler)
         }
     }
-
-    /// Forward to `RetryPolicy.isCancellation` (see there for the chain-walk
-    /// semantics); kept because DownloadUtilsCancellationTests pins this symbol.
-    static func isCancellationError(_ error: Error) -> Bool {
-        RetryPolicy.isCancellation(error)
-    }
-
-    public static func clearModelCache(forRepo repo: Repo, directory: URL) {
-        let repoPath = directory.appendingPathComponent(repo.folderName)
-        try? FileManager.default.removeItem(at: repoPath)
-    }
-
-    /// Remove all downloaded models and caches.
-    ///
-    /// Clears both cache locations:
-    /// - `~/Library/Application Support/FluidAudio/Models/` (ASR, VAD, Diarization)
-    /// - the shared TTS root: `~/.cache/fluidaudio/` on macOS,
-    ///   `Application Support/fluidaudio/` on iOS (matches `TtsCacheDirectory`).
-    public static func clearAllModelCaches() {
-        let fm = FileManager.default
-
-        // ASR, VAD, Diarization models
-        if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let modelsDir = appSupport.appendingPathComponent("FluidAudio/Models")
-            try? fm.removeItem(at: modelsDir)
-        }
-
-        // TTS models (Kokoro, PocketTTS, Supertonic3, StyleTTS2).
-        // Remove the whole `fluidaudio/` root so every backend subdirectory
-        // (Models/, voice packs, etc.) is cleared, not just `Models/`.
-        #if os(macOS)
-        let home = fm.homeDirectoryForCurrentUser
-        let ttsCache = home.appendingPathComponent(".cache/fluidaudio")
-        try? fm.removeItem(at: ttsCache)
-        #else
-        if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let ttsCache = appSupport.appendingPathComponent("fluidaudio")
-            try? fm.removeItem(at: ttsCache)
-        }
-        #endif
-
-        logger.info("All model caches cleared")
-    }
-
     private static func loadModelsOnce(
         _ repo: Repo,
         modelNames: [String],
@@ -232,15 +141,15 @@ public class DownloadUtils {
         if !ModelCache.allModelsExist(at: repoPath, models: effectiveModels) {
             // In offline mode surface a typed error listing the
             // missing files instead of attempting a HuggingFace fetch.
-            if enforceOffline {
+            if offlineMode {
                 let missing = ModelCache.missingModels(at: repoPath, models: effectiveModels)
                 logger.error(
                     "Offline mode: required models missing at \(repoPath.path): \(missing)"
                 )
-                throw OfflineError.modelMissing(repo: repo.folderName, missing: missing)
+                throw DownloadError.modelMissing(repo: repo.folderName, missing: missing)
             }
             logger.info("Models not found in cache at \(repoPath.path)")
-            try await downloadRepo(
+            try await download(
                 repo, to: directory, variant: variant,
                 additionalModelNames: extraModelNames,
                 progressHandler: progressHandler)
@@ -282,14 +191,14 @@ public class DownloadUtils {
     ///   `ModelNames.getRequiredModelNames(...)` set. Used by `loadModels` to
     ///   forward caller-requested files that are not part of the repo's
     ///   baseline required set.
-    public static func downloadRepo(
+    public static func download(
         _ repo: Repo,
         to directory: URL,
         variant: String? = nil,
         additionalModelNames: Set<String> = [],
         progressHandler: ProgressHandler? = nil
     ) async throws {
-        try await downloadRepo(
+        try await download(
             repo, to: directory, variant: variant,
             additionalModelNames: additionalModelNames,
             progressHandler: progressHandler,
@@ -300,7 +209,7 @@ public class DownloadUtils {
     /// listing and per-file downloads so characterization tests can drive the
     /// full listing/filtering/download pipeline with a stub `URLProtocol`
     /// (#765 Wave 1). `nil` (the public path) uses the shared session.
-    static func downloadRepo(
+    static func download(
         _ repo: Repo,
         to directory: URL,
         variant: String? = nil,
@@ -308,10 +217,10 @@ public class DownloadUtils {
         progressHandler: ProgressHandler? = nil,
         configuration: URLSessionConfiguration?
     ) async throws {
-        try ensureOnlineAllowed("downloadRepo(\(repo.folderName))")
+        try ensureOnlineAllowed("download(\(repo.folderName))")
         logger.info("Downloading \(repo.folderName) from HuggingFace...")
 
-        let listingSession = configuration.map { URLSession(configuration: $0) } ?? sharedSession
+        let listingSession = configuration.map { URLSession(configuration: $0) } ?? session
         defer {
             if configuration != nil { listingSession.finishTasksAndInvalidate() }
         }
@@ -460,58 +369,6 @@ public class DownloadUtils {
         logger.info("Downloaded all required models for \(repo.folderName)")
     }
 
-    // MARK: - Test-pinned forwards (#765)
-
-    /// Forwards to the Wave 4 primitives — kept because the download-resume,
-    /// artifact-validation, and retry characterization suites pin these
-    /// symbols on DownloadUtils.
-    static func isRetryableDownloadError(_ error: Error) -> Bool {
-        RetryPolicy.isRetryable(error)
-    }
-
-    static func validateDownloadedArtifact(
-        at tempURL: URL,
-        response: HTTPURLResponse?,
-        path: String,
-        expectedSize: Int
-    ) throws {
-        try FileDownloader.validateDownloadedArtifact(
-            at: tempURL, response: response, path: path, expectedSize: expectedSize)
-    }
-
-    static func resumeValidatorURL(for partialFileURL: URL) -> URL {
-        FileDownloader.resumeValidatorURL(for: partialFileURL)
-    }
-
-    static func downloadFileWithRetry(
-        request: URLRequest,
-        path: String,
-        expectedSize: Int,
-        partialFileURL: URL? = nil,
-        onProgress: (@Sendable (Int64, Int64) -> Void)?,
-        maxAttempts: Int = 4,
-        minBackoff: TimeInterval = 1.0,
-        configuration: URLSessionConfiguration? = nil
-    ) async throws -> URL {
-        try await FileDownloader.download(
-            request: request, path: path, expectedSize: expectedSize,
-            partialFileURL: partialFileURL, onProgress: onProgress,
-            maxAttempts: maxAttempts, minBackoff: minBackoff,
-            configuration: configuration)
-    }
-
-    /// Forward to ProgressReporter (kept: DownloadUtilsProgressTests pins it).
-    static func subdirectoryProgressFraction(
-        completedBytes: Int64,
-        totalBytes: Int64,
-        completedFiles: Int,
-        totalFiles: Int
-    ) -> Double {
-        ProgressReporter.downloadFraction(
-            completedBytes: completedBytes, totalBytes: totalBytes,
-            completedFiles: completedFiles, totalFiles: totalFiles)
-    }
-
     /// Download a specific subdirectory from a HuggingFace repository.
     ///
     /// Use this for optional model components that aren't part of the required model set
@@ -527,14 +384,14 @@ public class DownloadUtils {
     ///     or, for directories, skips the whole subtree without recursing.
     ///     Used to avoid pulling redundant artifacts (e.g. `.mlpackage`
     ///     sources next to compiled `.mlmodelc`).
-    public static func downloadSubdirectory(
+    public static func download(
         _ repo: Repo,
         subdirectory: String,
         to repoDirectory: URL,
         progressHandler: ProgressHandler? = nil,
         shouldSkip: (@Sendable (String) -> Bool)? = nil
     ) async throws {
-        try ensureOnlineAllowed("downloadSubdirectory(\(repo.folderName)/\(subdirectory))")
+        try ensureOnlineAllowed("download(\(repo.folderName)/\(subdirectory))")
         // Subdirectory downloads have no compile phase: download spans 0-1.
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 1.0)
         reporter.listing()
@@ -542,7 +399,7 @@ public class DownloadUtils {
             repoRemotePath: repo.remotePath,
             startingAt: subdirectory,
             include: { itemPath, _ in shouldSkip?(itemPath) != true },
-            fetch: HFTreeLister.fetch(using: sharedSession)
+            fetch: HFTreeLister.fetch(using: session)
         )
         let totalFiles = filesToDownload.count
         logger.info("Found \(totalFiles) files in \(subdirectory)")
@@ -604,27 +461,27 @@ public class DownloadUtils {
     /// (#765 Wave 5): permanent errors (404s) fail fast instead of consuming
     /// the backoff budget, 5xx/rate-limits retry with Retry-After pacing, and
     /// HTML/empty bodies are rejected instead of returned as content.
-    public static func fetchHuggingFaceFile(
+    public static func fetchFile(
         from url: URL,
         description: String,
         maxAttempts: Int = 4,
         minBackoff: TimeInterval = 1.0
     ) async throws -> Data {
-        try await fetchHuggingFaceFile(
+        try await fetchFile(
             from: url, description: description,
             maxAttempts: maxAttempts, minBackoff: minBackoff,
             configuration: nil)
     }
 
     /// Internal seam: `configuration` lets tests stub the transport.
-    static func fetchHuggingFaceFile(
+    static func fetchFile(
         from url: URL,
         description: String,
         maxAttempts: Int = 4,
         minBackoff: TimeInterval = 1.0,
         configuration: URLSessionConfiguration?
     ) async throws -> Data {
-        try ensureOnlineAllowed("fetchHuggingFaceFile(\(description))")
+        try ensureOnlineAllowed("fetchFile(\(description))")
         return try await FileDownloader.fetchData(
             from: url, description: description,
             maxAttempts: maxAttempts, minBackoff: minBackoff,

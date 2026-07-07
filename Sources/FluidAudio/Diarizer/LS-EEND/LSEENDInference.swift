@@ -46,7 +46,7 @@ public class LSEENDModel {
         stepSize: LSEENDStepSize = .step100ms,
         cacheDirectory: URL? = nil,
         computeUnits: MLComputeUnits = .cpuOnly,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> LSEENDModel {
         let directory =
             cacheDirectory
@@ -67,7 +67,7 @@ public class LSEENDModel {
             // Narrow to just the one mlmodelc — listing the whole step dir
             // is fine here since each step dir contains only its own mlmodelc.
             logger.info("Models not found in cache at \(modelURL.path); downloading \(fullRelPath)…")
-            try await DownloadUtils.downloadSubdirectory(
+            try await ModelHub.download(
                 repo, subdirectory: fullRelPath, to: repoPath
             )
         }

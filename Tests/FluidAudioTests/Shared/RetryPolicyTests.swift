@@ -6,7 +6,7 @@ import os
 
 /// Unit tests for the extracted retry primitive (#765 Wave 2). Classification
 /// itself is characterized by `DownloadClassifierTests` (which now runs
-/// through the `DownloadUtils.isRetryableDownloadError` forward); these tests
+/// through the `RetryPolicy.isRetryable` forward); these tests
 /// pin the loop mechanics: attempt counting, fail-fast on permanent errors,
 /// and error propagation.
 final class RetryPolicyTests: XCTestCase {
@@ -47,7 +47,7 @@ final class RetryPolicyTests: XCTestCase {
                 label: "permanent", maxAttempts: 4, minBackoff: 0.01
             ) { _ in
                 _ = counter.increment()
-                throw DownloadUtils.HuggingFaceDownloadError.downloadFailed(
+                throw DownloadError.downloadFailed(
                     path: "missing.bin", underlying: NSError(domain: "HTTP", code: 404))
             }
             XCTFail("expected error")
@@ -64,7 +64,7 @@ final class RetryPolicyTests: XCTestCase {
         ) { attempt -> Int in
             XCTAssertEqual(attempt, counter.increment(), "closure must receive the 1-based attempt")
             if attempt < 3 {
-                throw DownloadUtils.HuggingFaceDownloadError.rateLimited(
+                throw DownloadError.rateLimited(
                     statusCode: 503, message: "busy")
             }
             return attempt
@@ -83,12 +83,12 @@ final class RetryPolicyTests: XCTestCase {
             ) { _ in
                 _ = counter.increment()
                 throw RetryPolicy.RetryAfterHint(
-                    underlying: DownloadUtils.HuggingFaceDownloadError.downloadFailed(
+                    underlying: DownloadError.downloadFailed(
                         path: "missing.bin", underlying: NSError(domain: "HTTP", code: 404)),
                     retryAfter: 60)
             }
             XCTFail("expected error")
-        } catch DownloadUtils.HuggingFaceDownloadError.downloadFailed(let path, _) {
+        } catch DownloadError.downloadFailed(let path, _) {
             XCTAssertEqual(path, "missing.bin")
         } catch {
             XCTFail("envelope escaped or wrong error: \(error)")

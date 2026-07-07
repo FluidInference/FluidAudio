@@ -41,7 +41,7 @@ final class HFTreeListerTests: XCTestCase {
             { url in
                 self.requested.append(url.absoluteString)
                 guard let page = self.pages[url.absoluteString] else {
-                    throw HFDownload.DownloadError.invalidResponse
+                    throw DownloadError.invalidResponse
                 }
                 return page
             }
@@ -205,7 +205,7 @@ final class HFTreeListerTests: XCTestCase {
 
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [LinkedTreeStubURLProtocol.self]
-        try await DownloadUtils.downloadRepo(.vad, to: workDir, configuration: config)
+        try await ModelHub.download(.vad, to: workDir, configuration: config)
 
         let repoPath = workDir.appendingPathComponent(Repo.vad.folderName)
         XCTAssertTrue(
@@ -227,7 +227,7 @@ final class HFTreeListerTests: XCTestCase {
             _ = try await HFTreeLister.listTree(
                 repoRemotePath: Self.repo, include: { _, _ in true }, fetch: server.fetch)
             XCTFail("expected rateLimited")
-        } catch HFDownload.DownloadError.rateLimited(let statusCode, _) {
+        } catch DownloadError.rateLimited(let statusCode, _) {
             XCTAssertEqual(statusCode, 429)
         }
     }
@@ -240,7 +240,7 @@ final class HFTreeListerTests: XCTestCase {
             _ = try await HFTreeLister.listTree(
                 repoRemotePath: Self.repo, include: { _, _ in true }, fetch: server.fetch)
             XCTFail("expected htmlErrorResponse")
-        } catch HFDownload.DownloadError.htmlErrorResponse {
+        } catch DownloadError.htmlErrorResponse {
             // expected
         }
     }
@@ -253,7 +253,7 @@ final class HFTreeListerTests: XCTestCase {
             _ = try await HFTreeLister.listTree(
                 repoRemotePath: Self.repo, include: { _, _ in true }, fetch: server.fetch)
             XCTFail("expected invalidResponse")
-        } catch HFDownload.DownloadError.invalidResponse {
+        } catch DownloadError.invalidResponse {
             // expected
         }
     }

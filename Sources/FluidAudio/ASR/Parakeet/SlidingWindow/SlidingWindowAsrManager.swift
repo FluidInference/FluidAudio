@@ -130,7 +130,7 @@ public actor SlidingWindowAsrManager {
     ///   - progressHandler: Optional download progress callback
     public func loadModels(
         to directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         logger.info("Loading ASR models...")
         let models = try await AsrModels.downloadAndLoad(

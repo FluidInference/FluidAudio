@@ -197,7 +197,7 @@ struct ParakeetEouCommand {
         // Use DownloadUtils to download - handles auth, rate limiting, retries
         // Downloads to: directory/repo.folderName (e.g., .../parakeet-eou-streaming/160ms)
         let modelsDir = destination.deletingLastPathComponent().deletingLastPathComponent()
-        try await DownloadUtils.downloadRepo(repo, to: modelsDir)
+        try await ModelHub.download(repo, to: modelsDir)
         print("Models downloaded to \(destination.path)")
     }
 

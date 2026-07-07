@@ -2,7 +2,7 @@ import XCTest
 
 @testable import FluidAudio
 
-/// `DownloadUtils.validateDownloadedArtifact` rejects HTML error pages and
+/// `FileDownloader.validateDownloadedArtifact` rejects HTML error pages and
 /// truncated bodies before they reach the cache (issue #740).
 final class DownloadArtifactValidationTests: XCTestCase {
 
@@ -48,7 +48,7 @@ final class DownloadArtifactValidationTests: XCTestCase {
         do {
             try body()
             XCTFail("expected invalidArtifact to be thrown", file: file, line: line)
-        } catch let DownloadUtils.HuggingFaceDownloadError.invalidArtifact(_, reason) {
+        } catch let DownloadError.invalidArtifact(_, reason) {
             XCTAssertTrue(
                 reason.lowercased().contains(reasonContains.lowercased()),
                 "reason \"\(reason)\" should mention \"\(reasonContains)\"",
@@ -62,25 +62,25 @@ final class DownloadArtifactValidationTests: XCTestCase {
     // MARK: - looksLikeHTML
 
     func testLooksLikeHTMLDetectsDoctype() {
-        XCTAssertTrue(DownloadUtils.looksLikeHTML(Data("<!DOCTYPE html><html></html>".utf8)))
+        XCTAssertTrue(HFClient.looksLikeHTML(Data("<!DOCTYPE html><html></html>".utf8)))
     }
 
     func testLooksLikeHTMLDetectsLeadingWhitespaceAndCasing() {
-        XCTAssertTrue(DownloadUtils.looksLikeHTML(Data("\n\n   <HTML lang=\"en\">".utf8)))
+        XCTAssertTrue(HFClient.looksLikeHTML(Data("\n\n   <HTML lang=\"en\">".utf8)))
     }
 
     func testLooksLikeHTMLDetectsXMLProxyEnvelope() {
-        XCTAssertTrue(DownloadUtils.looksLikeHTML(Data("<?xml version=\"1.0\"?><error/>".utf8)))
+        XCTAssertTrue(HFClient.looksLikeHTML(Data("<?xml version=\"1.0\"?><error/>".utf8)))
     }
 
     func testLooksLikeHTMLAllowsBinaryWeights() {
         // Markup-like bytes mid-stream ('<h') must not trip the leading-byte check.
         let binary = Data([0x00, 0x01, 0x02, 0xFF, 0xFE, 0x3C, 0x68])
-        XCTAssertFalse(DownloadUtils.looksLikeHTML(binary))
+        XCTAssertFalse(HFClient.looksLikeHTML(binary))
     }
 
     func testLooksLikeHTMLAllowsJSON() {
-        XCTAssertFalse(DownloadUtils.looksLikeHTML(Data("{\"vocab\": 1}".utf8)))
+        XCTAssertFalse(HFClient.looksLikeHTML(Data("{\"vocab\": 1}".utf8)))
     }
 
     // MARK: - validateDownloadedArtifact
@@ -89,7 +89,7 @@ final class DownloadArtifactValidationTests: XCTestCase {
         let payload = Data(repeating: 0xAB, count: 1024)
         let url = try writeTemp(payload)
         XCTAssertNoThrow(
-            try DownloadUtils.validateDownloadedArtifact(
+            try FileDownloader.validateDownloadedArtifact(
                 at: url, response: response(), path: "Model.mlmodelc/weights/weight.bin",
                 expectedSize: 1024))
     }
@@ -97,14 +97,14 @@ final class DownloadArtifactValidationTests: XCTestCase {
     func testValidArtifactWithUnknownSizeSkipsSizeCheck() throws {
         let url = try writeTemp(Data(repeating: 0x01, count: 50))
         XCTAssertNoThrow(
-            try DownloadUtils.validateDownloadedArtifact(
+            try FileDownloader.validateDownloadedArtifact(
                 at: url, response: response(), path: "file.json", expectedSize: -1))
     }
 
     func testRejectsHTMLContentType() throws {
         let url = try writeTemp(Data(repeating: 0xAB, count: 1024))
         assertInvalid(
-            try DownloadUtils.validateDownloadedArtifact(
+            try FileDownloader.validateDownloadedArtifact(
                 at: url, response: response(contentType: "text/html; charset=utf-8"),
                 path: "Model.mlmodelc/coremldata.bin", expectedSize: 1024),
             reasonContains: "content-type")
@@ -113,7 +113,7 @@ final class DownloadArtifactValidationTests: XCTestCase {
     func testRejectsEmptyBody() throws {
         let url = try writeTemp(Data())
         assertInvalid(
-            try DownloadUtils.validateDownloadedArtifact(
+            try FileDownloader.validateDownloadedArtifact(
                 at: url, response: response(), path: "file.bin", expectedSize: 0),
             reasonContains: "empty")
     }
@@ -122,7 +122,7 @@ final class DownloadArtifactValidationTests: XCTestCase {
         let html = Data("<!DOCTYPE html>\n<html><body>Proxy error</body></html>".utf8)
         let url = try writeTemp(html)
         assertInvalid(
-            try DownloadUtils.validateDownloadedArtifact(
+            try FileDownloader.validateDownloadedArtifact(
                 at: url, response: response(contentType: "application/octet-stream"),
                 path: "Model.mlmodelc/weights/weight.bin", expectedSize: -1),
             reasonContains: "html")
@@ -131,7 +131,7 @@ final class DownloadArtifactValidationTests: XCTestCase {
     func testRejectsTruncatedBody() throws {
         let url = try writeTemp(Data(repeating: 0x7F, count: 500))
         assertInvalid(
-            try DownloadUtils.validateDownloadedArtifact(
+            try FileDownloader.validateDownloadedArtifact(
                 at: url, response: response(), path: "Model.mlmodelc/weights/weight.bin",
                 expectedSize: 1000),
             reasonContains: "size mismatch")
@@ -140,7 +140,7 @@ final class DownloadArtifactValidationTests: XCTestCase {
     func testRejectsOversizedBody() throws {
         let url = try writeTemp(Data(repeating: 0x7F, count: 2000))
         assertInvalid(
-            try DownloadUtils.validateDownloadedArtifact(
+            try FileDownloader.validateDownloadedArtifact(
                 at: url, response: response(), path: "file.bin", expectedSize: 1000),
             reasonContains: "size mismatch")
     }
@@ -148,7 +148,7 @@ final class DownloadArtifactValidationTests: XCTestCase {
     // MARK: - error description
 
     func testInvalidArtifactErrorDescription() {
-        let err = DownloadUtils.HuggingFaceDownloadError.invalidArtifact(
+        let err = DownloadError.invalidArtifact(
             path: "Encoder.mlmodelc/weights/weight.bin", reason: "empty file")
         XCTAssertEqual(
             err.errorDescription,

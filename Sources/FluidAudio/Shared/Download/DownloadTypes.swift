@@ -1,49 +1,85 @@
 import Foundation
 
-/// Namespace for the canonical download-stack types (#765 Wave 2).
-///
-/// These live outside `DownloadUtils` so the Shared/Download primitives
-/// (HFClient, RetryPolicy, and later extractions) don't depend back on the
-/// class they were extracted from. The long-standing nested spellings
-/// (`DownloadUtils.HuggingFaceDownloadError`, `DownloadUtils.DownloadConfig`)
-/// remain source-compatible via typealiases.
-public enum HFDownload {
+/// Errors thrown by the model-download stack (#765 Wave 6: one merged,
+/// top-level error domain — absorbs the pre-0.16 `DownloadUtils.
+/// DownloadError` and `DownloadError`).
+public enum DownloadError: LocalizedError {
+    case invalidResponse
+    case rateLimited(statusCode: Int, message: String)
+    case downloadFailed(path: String, underlying: Error)
+    case modelNotFound(path: String)
+    case htmlErrorResponse(path: String, snippet: String)
+    case invalidArtifact(path: String, reason: String)
 
-    /// Errors thrown by the HuggingFace download stack.
-    public enum DownloadError: LocalizedError {
-        case invalidResponse
-        case rateLimited(statusCode: Int, message: String)
-        case downloadFailed(path: String, underlying: Error)
-        case modelNotFound(path: String)
-        case htmlErrorResponse(path: String, snippet: String)
-        case invalidArtifact(path: String, reason: String)
+    /// A code path that would have hit the network was blocked by
+    /// `ModelHub.offlineMode`. `operation` is the short tag of the blocked
+    /// entry point (e.g. `"download(parakeet-tdt-0.6b-v3-coreml)"`).
+    case networkDisabled(operation: String)
 
-        public var errorDescription: String? {
-            switch self {
-            case .invalidResponse:
-                return "Received an invalid response from Hugging Face."
-            case .rateLimited(_, let message):
-                return "Hugging Face rate limit encountered: \(message)"
-            case .downloadFailed(let path, let underlying):
-                return "Failed to download \(path): \(underlying.localizedDescription)"
-            case .htmlErrorResponse(let path, let snippet):
-                return "HuggingFace returned HTML instead of JSON for \(path) (rate limit or server issue): \(snippet)"
-            case .modelNotFound(let path):
-                return "Model file not found: \(path)"
-            case .invalidArtifact(let path, let reason):
-                return "Downloaded artifact for \(path) is invalid (\(reason)); refusing to cache it."
-            }
+    /// `loadModels` was invoked in offline mode but one or more required
+    /// files are missing from the local cache; the missing list lets the
+    /// caller decide whether to ship a fix or fail loudly.
+    case modelMissing(repo: String, missing: [String])
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "Received an invalid response from Hugging Face."
+        case .rateLimited(_, let message):
+            return "Hugging Face rate limit encountered: \(message)"
+        case .downloadFailed(let path, let underlying):
+            return "Failed to download \(path): \(underlying.localizedDescription)"
+        case .htmlErrorResponse(let path, let snippet):
+            return "HuggingFace returned HTML instead of JSON for \(path) (rate limit or server issue): \(snippet)"
+        case .modelNotFound(let path):
+            return "Model file not found: \(path)"
+        case .invalidArtifact(let path, let reason):
+            return "Downloaded artifact for \(path) is invalid (\(reason)); refusing to cache it."
+        case .networkDisabled(let operation):
+            return "FluidAudio offline mode: \(operation) blocked"
+        case .modelMissing(let repo, let missing):
+            return
+                "FluidAudio offline mode: required models missing for \(repo): \(missing.joined(separator: ", "))"
         }
-    }
-
-    /// Download configuration shared by the download stack.
-    public struct Config: Sendable {
-        public let timeout: TimeInterval
-
-        public init(timeout: TimeInterval = 1800) {  // 30 minutes for large models
-            self.timeout = timeout
-        }
-
-        public static let `default` = Config()
     }
 }
+
+/// Download configuration shared by the download stack.
+public struct DownloadConfig: Sendable {
+    public let timeout: TimeInterval
+
+    public init(timeout: TimeInterval = 1800) {  // 30 minutes for large models
+        self.timeout = timeout
+    }
+
+    public static let `default` = DownloadConfig()
+}
+
+/// Phase of a model download operation.
+public enum DownloadPhase: Sendable {
+    /// Listing files from the remote repository.
+    case listing
+    /// Downloading model files. `completedFiles` / `totalFiles` track per-file progress.
+    case downloading(completedFiles: Int, totalFiles: Int)
+    /// Compiling CoreML models after download.
+    case compiling(modelName: String)
+}
+
+/// Progress snapshot passed to ``ProgressHandler`` closures.
+public struct DownloadProgress: Sendable {
+    /// Fraction complete in [0, 1].
+    public let fractionCompleted: Double
+    /// Current phase of the operation.
+    public let phase: DownloadPhase
+
+    public init(fractionCompleted: Double, phase: DownloadPhase) {
+        self.fractionCompleted = fractionCompleted
+        self.phase = phase
+    }
+}
+
+/// Callback type for download progress reporting.
+///
+/// Called on an unspecified queue. If you need to update UI, dispatch to
+/// the main actor inside your handler.
+public typealias ProgressHandler = @Sendable (DownloadProgress) -> Void

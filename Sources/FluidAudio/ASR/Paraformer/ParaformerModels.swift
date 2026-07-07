@@ -45,7 +45,7 @@ public struct ParaformerModels: Sendable {
 
     public static func downloadAndLoad(
         precision: ParaformerPrecision = .fp16,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> ParaformerModels {
         let directory = try await download(precision: precision, progressHandler: progressHandler)
         return try load(from: directory, precision: precision)
@@ -53,7 +53,7 @@ public struct ParaformerModels: Sendable {
 
     public static func download(
         precision: ParaformerPrecision = .fp16,
-        force: Bool = false, progressHandler: DownloadUtils.ProgressHandler? = nil
+        force: Bool = false, progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = modelsRootDirectory()
         let targetDir = modelsRoot.appendingPathComponent(Repo.paraformerLargeZh.folderName, isDirectory: true)
@@ -63,7 +63,7 @@ public struct ParaformerModels: Sendable {
         }
         if force { try? FileManager.default.removeItem(at: targetDir) }
         logger.info("Downloading Paraformer models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(.paraformerLargeZh, to: modelsRoot, progressHandler: progressHandler)
+        try await ModelHub.download(.paraformerLargeZh, to: modelsRoot, progressHandler: progressHandler)
         logger.info("Successfully downloaded Paraformer models")
         return targetDir
     }

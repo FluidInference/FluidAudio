@@ -345,7 +345,7 @@ extension StreamingNemotronMultilingualAsrManager {
         chunkMs: Int = 2240,
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> SharedNemotronMultilingualModels {
         let variantDir = try await downloadVariant(
             languageCode: languageCode, chunkMs: chunkMs,
@@ -360,7 +360,7 @@ extension StreamingNemotronMultilingualAsrManager {
         languageCode: String = "auto",
         chunkMs: Int = 2240,
         to directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let logger = AppLogger(category: "NemotronMultilingualStreaming")
         let langDir = languageDirectory(for: languageCode)
@@ -399,7 +399,7 @@ extension StreamingNemotronMultilingualAsrManager {
                 try? FileManager.default.removeItem(at: backupPath)
                 try FileManager.default.moveItem(at: tokenizerPath, to: backupPath)
                 do {
-                    try await DownloadUtils.downloadSubdirectory(
+                    try await ModelHub.download(
                         .nemotronMultilingual,
                         subdirectory: subdirectory,
                         to: repoCacheDir,
@@ -419,7 +419,7 @@ extension StreamingNemotronMultilingualAsrManager {
             }
         } else {
             logger.info("Downloading multilingual variant \(subdirectory) (.mlmodelc only)...")
-            try await DownloadUtils.downloadSubdirectory(
+            try await ModelHub.download(
                 .nemotronMultilingual,
                 subdirectory: subdirectory,
                 to: repoCacheDir,

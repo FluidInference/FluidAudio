@@ -92,27 +92,27 @@ enum FileDownloader {
         if let contentType = response?.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
             contentType.contains("text/html")
         {
-            throw HFDownload.DownloadError.invalidArtifact(
+            throw DownloadError.invalidArtifact(
                 path: path, reason: "server returned Content-Type: \(contentType)")
         }
 
         let actualSize =
             ((try? FileManager.default.attributesOfItem(atPath: tempURL.path))?[.size] as? Int) ?? 0
         if actualSize == 0 {
-            throw HFDownload.DownloadError.invalidArtifact(path: path, reason: "empty file")
+            throw DownloadError.invalidArtifact(path: path, reason: "empty file")
         }
 
         if let handle = try? FileHandle(forReadingFrom: tempURL) {
             defer { try? handle.close() }
             if HFClient.looksLikeHTML(handle.readData(ofLength: 512)) {
-                throw HFDownload.DownloadError.invalidArtifact(
+                throw DownloadError.invalidArtifact(
                     path: path, reason: "response body begins with HTML markup")
             }
         }
 
         // HuggingFace reports the exact (LFS-resolved) object size; a short body is truncation.
         if expectedSize > 0 && actualSize != expectedSize {
-            throw HFDownload.DownloadError.invalidArtifact(
+            throw DownloadError.invalidArtifact(
                 path: path,
                 reason: "size mismatch (expected \(expectedSize) bytes, got \(actualSize))")
         }
@@ -133,7 +133,7 @@ enum FileDownloader {
         configuration: URLSessionConfiguration? = nil
     ) async throws -> Data {
         let request = HFClient.authorizedRequest(url: url)
-        let session = configuration.map { URLSession(configuration: $0) } ?? DownloadUtils.sharedSession
+        let session = configuration.map { URLSession(configuration: $0) } ?? ModelHub.session
         defer {
             if configuration != nil { session.finishTasksAndInvalidate() }
         }
@@ -143,20 +143,20 @@ enum FileDownloader {
         ) { _ in
             // Re-check per attempt, matching download(): flipping
             // enforceOffline mid-operation stops at the next request.
-            guard !DownloadUtils.enforceOffline else {
-                throw DownloadUtils.OfflineError.networkDisabled(
-                    operation: "fetchHuggingFaceFile(\(description))")
+            guard !ModelHub.offlineMode else {
+                throw DownloadError.networkDisabled(
+                    operation: "fetchFile(\(description))")
             }
 
             let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
-                throw HFDownload.DownloadError.invalidResponse
+                throw DownloadError.invalidResponse
             }
 
             try HFClient.checkRateLimitForRetry(httpResponse, context: "fetching \(description)")
 
             guard (200..<300).contains(httpResponse.statusCode) else {
-                throw HFDownload.DownloadError.downloadFailed(
+                throw DownloadError.downloadFailed(
                     path: description,
                     underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
                 )
@@ -169,15 +169,15 @@ enum FileDownloader {
             if let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
                 contentType.contains("text/html")
             {
-                throw HFDownload.DownloadError.invalidArtifact(
+                throw DownloadError.invalidArtifact(
                     path: description, reason: "server returned Content-Type: \(contentType)")
             }
             if data.isEmpty {
-                throw HFDownload.DownloadError.invalidArtifact(
+                throw DownloadError.invalidArtifact(
                     path: description, reason: "empty file")
             }
             if HFClient.looksLikeHTML(data) {
-                throw HFDownload.DownloadError.invalidArtifact(
+                throw DownloadError.invalidArtifact(
                     path: description, reason: "response body begins with HTML markup")
             }
 
@@ -200,7 +200,7 @@ enum FileDownloader {
     ///     including `resumeOffset`. Delegate-driven byte progress (#756).
     ///   - onResponse: Fires before any body byte is written — the resume path
     ///     persists the validator here so it survives a drop mid-body.
-    /// Coverage flows through the `DownloadUtils.downloadFileWithRetry`
+    /// Coverage flows through the `FileDownloader.download`
     /// forward (DownloadResumeTests); no test drives this directly.
     static func streamDownload(
         request: URLRequest,
@@ -220,7 +220,7 @@ enum FileDownloader {
         // DownloadUtils still owns the shared session (public API); ownership
         // moves to the new surface in the Wave 6 cutover.
         let session = URLSession(
-            configuration: configuration ?? DownloadUtils.sharedSession.configuration,
+            configuration: configuration ?? ModelHub.session.configuration,
             delegate: delegate,
             delegateQueue: nil
         )
@@ -280,7 +280,7 @@ enum FileDownloader {
     ///   - configuration: Session configuration override for tests.
     /// - Returns: The URL of a validated (2xx) fully-written download; the
     ///   caller moves it into the cache.
-    /// Pinned via the `DownloadUtils.downloadFileWithRetry` forward
+    /// Pinned via the `FileDownloader.download` forward
     /// (DownloadResumeTests drives resume/splice/416 behavior through it).
     static func download(
         request: URLRequest,
@@ -303,8 +303,8 @@ enum FileDownloader {
         ) { attempt in
             // Re-check per attempt, matching HFTreeLister.fetch: flipping
             // enforceOffline mid-operation stops the walk at the next request.
-            guard !DownloadUtils.enforceOffline else {
-                throw DownloadUtils.OfflineError.networkDisabled(operation: "download(\(path))")
+            guard !ModelHub.offlineMode else {
+                throw DownloadError.networkDisabled(operation: "download(\(path))")
             }
             var attemptRequest = request
             var resumeOffset: Int64 = 0
@@ -363,12 +363,12 @@ enum FileDownloader {
                 // Range not satisfiable — the partial is bogus (or the remote
                 // shrank). Restart from 0 on the next attempt.
                 clearPartialDownload(partialURL)
-                throw HFDownload.DownloadError.invalidArtifact(
+                throw DownloadError.invalidArtifact(
                     path: path, reason: "server rejected resume range (416)")
             }
 
             guard (200..<300).contains(httpResponse.statusCode) else {
-                throw HFDownload.DownloadError.downloadFailed(
+                throw DownloadError.downloadFailed(
                     path: path,
                     underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
                 )
@@ -539,7 +539,7 @@ private final class StreamingDownloadDelegate: NSObject, URLSessionDataDelegate,
                 } else if let response {
                     continuation.resume(returning: response)
                 } else {
-                    continuation.resume(throwing: HFDownload.DownloadError.invalidResponse)
+                    continuation.resume(throwing: DownloadError.invalidResponse)
                 }
             }
         }

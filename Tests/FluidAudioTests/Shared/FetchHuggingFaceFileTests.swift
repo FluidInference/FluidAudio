@@ -32,7 +32,7 @@ final class FetchHuggingFaceFileTests: XCTestCase {
     }
 
     private func fetch(maxAttempts: Int = 4) async throws -> Data {
-        try await DownloadUtils.fetchHuggingFaceFile(
+        try await ModelHub.fetchFile(
             from: url, description: "vocab.json",
             maxAttempts: maxAttempts, minBackoff: 0.01,
             configuration: stubConfiguration)
@@ -50,7 +50,7 @@ final class FetchHuggingFaceFileTests: XCTestCase {
         do {
             _ = try await fetch()
             XCTFail("expected downloadFailed")
-        } catch HFDownload.DownloadError.downloadFailed(let path, let underlying) {
+        } catch DownloadError.downloadFailed(let path, let underlying) {
             XCTAssertEqual(path, "vocab.json")
             XCTAssertEqual((underlying as NSError).code, 404)
         } catch {
@@ -78,7 +78,7 @@ final class FetchHuggingFaceFileTests: XCTestCase {
         do {
             _ = try await fetch(maxAttempts: 1)
             XCTFail("expected invalidArtifact")
-        } catch HFDownload.DownloadError.invalidArtifact(_, let reason) {
+        } catch DownloadError.invalidArtifact(_, let reason) {
             XCTAssertTrue(reason.contains("HTML"), "got: \(reason)")
         } catch {
             XCTFail("expected invalidArtifact, got \(error)")
@@ -91,7 +91,7 @@ final class FetchHuggingFaceFileTests: XCTestCase {
         do {
             _ = try await fetch(maxAttempts: 1)
             XCTFail("expected invalidArtifact")
-        } catch HFDownload.DownloadError.invalidArtifact(_, let reason) {
+        } catch DownloadError.invalidArtifact(_, let reason) {
             XCTAssertEqual(reason, "empty file")
         } catch {
             XCTFail("expected invalidArtifact, got \(error)")
@@ -120,7 +120,7 @@ final class FetchHuggingFaceFileTests: XCTestCase {
         do {
             _ = try await fetch(maxAttempts: 1)
             XCTFail("expected invalidArtifact")
-        } catch HFDownload.DownloadError.invalidArtifact(_, let reason) {
+        } catch DownloadError.invalidArtifact(_, let reason) {
             XCTAssertTrue(reason.contains("text/html"), "got: \(reason)")
         } catch {
             XCTFail("expected invalidArtifact, got \(error)")
@@ -155,7 +155,7 @@ final class FetchHuggingFaceFileTests: XCTestCase {
         do {
             _ = try await fetch(maxAttempts: 2)
             XCTFail("expected rateLimited")
-        } catch HFDownload.DownloadError.rateLimited(let statusCode, let message) {
+        } catch DownloadError.rateLimited(let statusCode, let message) {
             XCTAssertEqual(statusCode, 429)
             XCTAssertTrue(message.contains("fetching vocab.json"), "got: \(message)")
         } catch {

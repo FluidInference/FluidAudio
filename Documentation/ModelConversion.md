@@ -159,7 +159,7 @@ Also update `getRequiredModelNames(for:variant:)` to return the new model's requ
 
 The manager:
 - Is an `actor` (thread safety, no `@unchecked Sendable`)
-- Downloads models via `DownloadUtils.loadModels()`
+- Downloads models via `ModelHub.loadModels()`
 - Exposes a public inference API
 
 ```swift
@@ -168,7 +168,7 @@ public actor MyModelManager {
     private var decoder: MLModel?
 
     public init(config: MyModelConfig = .default) async throws {
-        let models = try await DownloadUtils.loadModels(
+        let models = try await ModelHub.loadModels(
             .myModel,
             modelNames: Array(ModelNames.MyModel.requiredModels),
             directory: cacheDir,

@@ -28,7 +28,7 @@ jobs:
           path: |
             .build
             ~/Library/Application Support/FluidAudio/Models/supertonic-3
-          key: ${{ runner.os }}-supertonic3-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/Supertonic3/**', 'Sources/FluidAudio/ModelNames.swift', 'Sources/FluidAudio/DownloadUtils.swift', 'Sources/FluidAudio/Shared/Download/**') }}
+          key: ${{ runner.os }}-supertonic3-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/TTS/Supertonic3/**', 'Sources/FluidAudio/ModelNames.swift', 'Sources/FluidAudio/Shared/Download/**') }}
 
       - name: Build
         run: swift build -c release

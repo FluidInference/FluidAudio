@@ -169,7 +169,7 @@ public actor StreamingNemotronAsrManager {
     public func loadModels(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         if let configuration {
             self.mlConfiguration = configuration
@@ -191,7 +191,7 @@ public actor StreamingNemotronAsrManager {
 
         if !FileManager.default.fileExists(atPath: encoderInt8Path.path) {
             logger.info("Downloading Nemotron models to \(modelsBaseDir.path)...")
-            try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir, progressHandler: progressHandler)
+            try await ModelHub.download(repo, to: modelsBaseDir, progressHandler: progressHandler)
         } else {
             logger.info("Using cached Nemotron models at \(cacheDir.path)")
         }
