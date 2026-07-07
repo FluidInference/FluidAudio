@@ -59,26 +59,12 @@ public class DownloadUtils {
         }
     }
 
-    /// Get HuggingFace token from environment if available.
-    /// Supports multiple env vars for compatibility with different HuggingFace tools:
-    /// - HF_TOKEN: Official HuggingFace CLI
-    /// - HUGGING_FACE_HUB_TOKEN: Python huggingface_hub library
-    /// - HUGGINGFACEHUB_API_TOKEN: LangChain and older integrations
-    private static var huggingFaceToken: String? {
-        ProcessInfo.processInfo.environment["HF_TOKEN"]
-            ?? ProcessInfo.processInfo.environment["HUGGING_FACE_HUB_TOKEN"]
-            ?? ProcessInfo.processInfo.environment["HUGGINGFACEHUB_API_TOKEN"]
-    }
-
-    /// Create a URLRequest with optional auth header and timeout
+    /// Create a URLRequest with optional auth header and timeout (HFClient owns
+    /// token resolution and header shape — #765 Wave 2).
     private static func authorizedRequest(
         url: URL, timeout: TimeInterval = DownloadConfig.default.timeout
     ) -> URLRequest {
-        var request = URLRequest(url: url, timeoutInterval: timeout)
-        if let token = huggingFaceToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        return request
+        HFClient.authorizedRequest(url: url, timeout: timeout)
     }
 
     /// Fetch data from a URL with HuggingFace authentication if available
@@ -87,18 +73,6 @@ public class DownloadUtils {
         try ensureOnlineAllowed("fetchWithAuth(\(url.absoluteString))")
         let request = authorizedRequest(url: url)
         return try await sharedSession.data(for: request)
-    }
-
-    /// Validate that response data is JSON, not HTML error page
-    /// HuggingFace sometimes returns 200 OK with HTML error pages during rate limiting/timeouts
-    private static func validateJSONResponse(_ data: Data, path: String) throws {
-        // Check if response starts with HTML markers
-        if let responseString = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
-            if responseString.hasPrefix("<") || responseString.lowercased().contains("<!doctype html") {
-                let snippet = String(responseString.prefix(100))
-                throw HuggingFaceDownloadError.htmlErrorResponse(path: path, snippet: snippet)
-            }
-        }
     }
 
     static func looksLikeHTML(_ data: Data) -> Bool {
@@ -278,20 +252,7 @@ public class DownloadUtils {
     /// are tracked by identity so a self-referential chain terminates without
     /// an arbitrary depth cap.
     static func isCancellationError(_ error: Error) -> Bool {
-        if error is CancellationError { return true }
-
-        var current: NSError? = error as NSError
-        var visited: Set<ObjectIdentifier> = []
-        while let nsError = current, visited.insert(ObjectIdentifier(nsError)).inserted {
-            if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
-                return true
-            }
-            if nsError.domain == NSCocoaErrorDomain, nsError.code == NSUserCancelledError {
-                return true
-            }
-            current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
-        }
-        return false
+        RetryPolicy.isCancellation(error)
     }
 
     public static func clearModelCache(forRepo repo: Repo, directory: URL) {
@@ -509,14 +470,11 @@ public class DownloadUtils {
             let (dirData, response) = try await listingSession.data(for: request)
 
             if let httpResponse = response as? HTTPURLResponse {
-                if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
-                    throw HuggingFaceDownloadError.rateLimited(
-                        statusCode: httpResponse.statusCode, message: "Rate limited while listing files")
-                }
+                try HFClient.checkRateLimit(httpResponse, context: "listing files")
             }
 
             // Validate that response is JSON, not HTML error page
-            try validateJSONResponse(dirData, path: path)
+            try HFClient.validateJSONResponse(dirData, path: path)
 
             guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
                 throw HuggingFaceDownloadError.invalidResponse
@@ -573,14 +531,11 @@ public class DownloadUtils {
             let request = authorizedRequest(url: dirURL)
             let (dirData, response) = try await listingSession.data(for: request)
 
-            if let httpResponse = response as? HTTPURLResponse,
-                httpResponse.statusCode == 429 || httpResponse.statusCode == 503
-            {
-                throw HuggingFaceDownloadError.rateLimited(
-                    statusCode: httpResponse.statusCode, message: "Rate limited while listing root files")
+            if let httpResponse = response as? HTTPURLResponse {
+                try HFClient.checkRateLimit(httpResponse, context: "listing root files")
             }
 
-            try validateJSONResponse(dirData, path: "")
+            try HFClient.validateJSONResponse(dirData, path: "")
 
             guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
                 throw HuggingFaceDownloadError.invalidResponse
@@ -871,109 +826,92 @@ public class DownloadUtils {
             .appendingPathExtension("partial")
         let partialURL = partialFileURL ?? defaultPartialURL
         let validatorURL = resumeValidatorURL(for: partialURL)
-        var lastError: Error?
 
-        for attempt in 1...maxAttempts {
-            do {
-                var attemptRequest = request
-                var resumeOffset: Int64 = 0
+        return try await RetryPolicy.withRetry(
+            label: path, maxAttempts: maxAttempts, minBackoff: minBackoff
+        ) { attempt in
+            var attemptRequest = request
+            var resumeOffset: Int64 = 0
 
-                let partialSize = fileSize(at: partialURL)
-                let validator = (try? String(contentsOf: validatorURL, encoding: .utf8))?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            let partialSize = fileSize(at: partialURL)
+            let validator = (try? String(contentsOf: validatorURL, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
 
-                if partialSize > 0, let validator, !validator.isEmpty {
-                    if expectedSize > 0 && partialSize >= Int64(expectedSize) {
-                        // A previous run finished the body but didn't get to move
-                        // the file. Validate and reuse it instead of re-fetching.
-                        if (try? validateDownloadedArtifact(
-                            at: partialURL, response: nil, path: path, expectedSize: expectedSize))
-                            != nil
-                        {
-                            try? FileManager.default.removeItem(at: validatorURL)
-                            return partialURL
-                        }
-                        clearPartialDownload(partialURL)
-                    } else {
-                        attemptRequest.setValue("bytes=\(partialSize)-", forHTTPHeaderField: "Range")
-                        attemptRequest.setValue(validator, forHTTPHeaderField: "If-Range")
-                        resumeOffset = partialSize
-                        logger.info(
-                            "Resuming \(path) from byte \(partialSize) (attempt \(attempt))")
+            if partialSize > 0, let validator, !validator.isEmpty {
+                if expectedSize > 0 && partialSize >= Int64(expectedSize) {
+                    // A previous run finished the body but didn't get to move
+                    // the file. Validate and reuse it instead of re-fetching.
+                    if (try? validateDownloadedArtifact(
+                        at: partialURL, response: nil, path: path, expectedSize: expectedSize))
+                        != nil
+                    {
+                        try? FileManager.default.removeItem(at: validatorURL)
+                        return partialURL
                     }
-                } else if partialSize > 0 {
-                    // Partial bytes with no validator can't be safely resumed.
                     clearPartialDownload(partialURL)
+                } else {
+                    attemptRequest.setValue("bytes=\(partialSize)-", forHTTPHeaderField: "Range")
+                    attemptRequest.setValue(validator, forHTTPHeaderField: "If-Range")
+                    resumeOffset = partialSize
+                    logger.info(
+                        "Resuming \(path) from byte \(partialSize) (attempt \(attempt))")
                 }
-
-                let httpResponse = try await streamDownload(
-                    request: attemptRequest,
-                    to: partialURL,
-                    resumeOffset: resumeOffset,
-                    configuration: configuration,
-                    onProgress: onProgress,
-                    onResponse: { response in
-                        // Persist the validator as soon as the fresh body starts, so
-                        // a drop mid-body still leaves it for the next attempt. A 206
-                        // keeps the validator of the response it is extending.
-                        guard response.statusCode != 206, (200..<300).contains(response.statusCode)
-                        else { return }
-                        if let validator = resumeValidator(from: response) {
-                            try? validator.write(to: validatorURL, atomically: true, encoding: .utf8)
-                        } else {
-                            try? FileManager.default.removeItem(at: validatorURL)
-                        }
-                    }
-                )
-
-                if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
-                    throw HuggingFaceDownloadError.rateLimited(
-                        statusCode: httpResponse.statusCode,
-                        message: "Rate limited while downloading \(path)")
-                }
-
-                if httpResponse.statusCode == 416 {
-                    // Range not satisfiable — the partial is bogus (or the remote
-                    // shrank). Restart from 0 on the next attempt.
-                    clearPartialDownload(partialURL)
-                    throw HuggingFaceDownloadError.invalidArtifact(
-                        path: path, reason: "server rejected resume range (416)")
-                }
-
-                guard (200..<300).contains(httpResponse.statusCode) else {
-                    throw HuggingFaceDownloadError.downloadFailed(
-                        path: path,
-                        underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
-                    )
-                }
-
-                // Validate before the caller moves the file into the cache.
-                do {
-                    try validateDownloadedArtifact(
-                        at: partialURL, response: httpResponse, path: path,
-                        expectedSize: expectedSize)
-                } catch {
-                    // A completed-but-invalid body must not be resumed from.
-                    clearPartialDownload(partialURL)
-                    throw error
-                }
-
-                try? FileManager.default.removeItem(at: validatorURL)
-                return partialURL
-            } catch {
-                lastError = error
-                guard attempt < maxAttempts, isRetryableDownloadError(error) else {
-                    throw error
-                }
-                let backoffSeconds = pow(2.0, Double(attempt - 1)) * minBackoff
-                logger.warning(
-                    "Download attempt \(attempt) for \(path) failed: \(error.localizedDescription). Retrying in \(String(format: "%.1f", backoffSeconds))s."
-                )
-                try await Task.sleep(nanoseconds: UInt64(backoffSeconds * 1_000_000_000))
+            } else if partialSize > 0 {
+                // Partial bytes with no validator can't be safely resumed.
+                clearPartialDownload(partialURL)
             }
-        }
 
-        throw lastError ?? HuggingFaceDownloadError.invalidResponse
+            let httpResponse = try await streamDownload(
+                request: attemptRequest,
+                to: partialURL,
+                resumeOffset: resumeOffset,
+                configuration: configuration,
+                onProgress: onProgress,
+                onResponse: { response in
+                    // Persist the validator as soon as the fresh body starts, so
+                    // a drop mid-body still leaves it for the next attempt. A 206
+                    // keeps the validator of the response it is extending.
+                    guard response.statusCode != 206, (200..<300).contains(response.statusCode)
+                    else { return }
+                    if let validator = resumeValidator(from: response) {
+                        try? validator.write(to: validatorURL, atomically: true, encoding: .utf8)
+                    } else {
+                        try? FileManager.default.removeItem(at: validatorURL)
+                    }
+                }
+            )
+
+            try HFClient.checkRateLimit(httpResponse, context: "downloading \(path)")
+
+            if httpResponse.statusCode == 416 {
+                // Range not satisfiable — the partial is bogus (or the remote
+                // shrank). Restart from 0 on the next attempt.
+                clearPartialDownload(partialURL)
+                throw HuggingFaceDownloadError.invalidArtifact(
+                    path: path, reason: "server rejected resume range (416)")
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                throw HuggingFaceDownloadError.downloadFailed(
+                    path: path,
+                    underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
+                )
+            }
+
+            // Validate before the caller moves the file into the cache.
+            do {
+                try validateDownloadedArtifact(
+                    at: partialURL, response: httpResponse, path: path,
+                    expectedSize: expectedSize)
+            } catch {
+                // A completed-but-invalid body must not be resumed from.
+                clearPartialDownload(partialURL)
+                throw error
+            }
+
+            try? FileManager.default.removeItem(at: validatorURL)
+            return partialURL
+        }
     }
 
     /// Classify a per-file download error as transient (worth retrying) or
@@ -984,30 +922,7 @@ public class DownloadUtils {
     /// Internal (not private) so retry-policy characterization tests can pin this
     /// classification ahead of the #765 refactor.
     static func isRetryableDownloadError(_ error: Error) -> Bool {
-        if let urlError = error as? URLError {
-            switch urlError.code {
-            case .timedOut, .cannotConnectToHost, .cannotFindHost,
-                .networkConnectionLost, .notConnectedToInternet,
-                .dnsLookupFailed, .secureConnectionFailed,
-                .resourceUnavailable:
-                return true
-            default:
-                return false
-            }
-        }
-
-        switch error {
-        case HuggingFaceDownloadError.rateLimited:
-            return true
-        case HuggingFaceDownloadError.invalidArtifact:
-            // Usually a transient unhealthy network path (proxy, mirror 5xx) — retry.
-            return true
-        case HuggingFaceDownloadError.downloadFailed(_, let underlying):
-            let nsError = underlying as NSError
-            return nsError.domain == "HTTP" && (500...599).contains(nsError.code)
-        default:
-            return false
-        }
+        RetryPolicy.isRetryable(error)
     }
 
     static func subdirectoryProgressFraction(
@@ -1053,16 +968,12 @@ public class DownloadUtils {
         func listFiles(at path: String) async throws {
             let dirURL = try ModelRegistry.apiModels(repo.remotePath, "tree/main/\(path)")
             let (dirData, response) = try await fetchWithAuth(from: dirURL)
-            if let httpResponse = response as? HTTPURLResponse,
-                httpResponse.statusCode == 429 || httpResponse.statusCode == 503
-            {
-                throw HuggingFaceDownloadError.rateLimited(
-                    statusCode: httpResponse.statusCode,
-                    message: "Rate limited while listing files in \(path)")
+            if let httpResponse = response as? HTTPURLResponse {
+                try HFClient.checkRateLimit(httpResponse, context: "listing files in \(path)")
             }
 
             // Validate that response is JSON, not HTML error page
-            try validateJSONResponse(dirData, path: path)
+            try HFClient.validateJSONResponse(dirData, path: path)
 
             guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
                 throw HuggingFaceDownloadError.invalidResponse
@@ -1236,12 +1147,7 @@ public class DownloadUtils {
                     throw HuggingFaceDownloadError.invalidResponse
                 }
 
-                if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
-                    throw HuggingFaceDownloadError.rateLimited(
-                        statusCode: httpResponse.statusCode,
-                        message: "HTTP \(httpResponse.statusCode)"
-                    )
-                }
+                try HFClient.checkRateLimit(httpResponse, context: "fetching \(description)")
 
                 guard (200..<300).contains(httpResponse.statusCode) else {
                     throw HuggingFaceDownloadError.invalidResponse
