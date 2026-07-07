@@ -1,0 +1,280 @@
+import Foundation
+import XCTest
+
+@testable import FluidAudio
+
+/// Characterization tests for `downloadRepo`'s file-selection rules (#765
+/// Wave 1). These pin CURRENT behavior — quirks included — so the Wave 3
+/// lister extraction can prove the rules moved verbatim. They are not a
+/// statement of what the rules *should* be; deliberate changes belong in a
+/// later wave with these fixtures edited in the same diff.
+///
+/// Covered history: the subPath prefix rules, the differing metadata-extension
+/// allowances at root (`.json`/`.txt`) vs under a subPath
+/// (`.json`/`.model`/`.bin`), the #649 root-level auxiliary fallback, and the
+/// #524 `additionalModelNames` union.
+final class DownloadFilterCharacterizationTests: XCTestCase {
+
+    private var workDir: URL!
+
+    override func setUpWithError() throws {
+        workDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FilterCharacterization-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+        TreeStubURLProtocol.reset()
+    }
+
+    override func tearDownWithError() throws {
+        TreeStubURLProtocol.reset()
+        try? FileManager.default.removeItem(at: workDir)
+    }
+
+    private var stubConfiguration: URLSessionConfiguration {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [TreeStubURLProtocol.self]
+        return config
+    }
+
+    /// Every downloaded file relative to the repo directory, sorted.
+    private func downloadedFiles(repoFolder: String) throws -> [String] {
+        let repoPath = workDir.appendingPathComponent(repoFolder)
+        guard
+            let enumerator = FileManager.default.enumerator(
+                at: repoPath, includingPropertiesForKeys: [.isRegularFileKey])
+        else { return [] }
+        var files: [String] = []
+        for case let url as URL in enumerator {
+            if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+                files.append(
+                    url.path.replacingOccurrences(of: repoPath.path + "/", with: ""))
+            }
+        }
+        return files.sorted()
+    }
+
+    private func body(_ size: Int) -> Data {
+        Data(String(repeating: "x", count: size).utf8)
+    }
+
+    // MARK: - Plain repo (patterns + root metadata-extension allowances)
+
+    func testPlainRepoSelectsRequiredModelDirsAndRootJsonTxt() async throws {
+        // .vad requires silero-vad-unified-256ms-v6.0.0.mlmodelc
+        let model = "silero-vad-unified-256ms-v6.0.0.mlmodelc"
+        TreeStubURLProtocol.trees = [
+            "": [
+                ["path": model, "type": "directory"],
+                ["path": "config.json", "type": "file", "size": 10],
+                ["path": "NOTES.txt", "type": "file", "size": 10],
+                ["path": "README.md", "type": "file", "size": 10],
+                ["path": "stray.bin", "type": "file", "size": 10],
+                ["path": "unrelated.mlmodelc", "type": "directory"],
+            ],
+            model: [
+                ["path": "\(model)/coremldata.bin", "type": "file", "size": 10],
+                ["path": "\(model)/weights/weight.bin", "type": "file", "size": 10],
+            ],
+            "unrelated.mlmodelc": [
+                ["path": "unrelated.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            ],
+        ]
+        TreeStubURLProtocol.fileBody = body(10)
+
+        try await DownloadUtils.downloadRepo(
+            .vad, to: workDir, configuration: stubConfiguration)
+
+        // Pinned: required-model subtree + root .json/.txt come down;
+        // README.md, stray .bin at root, and non-required model dirs do not.
+        XCTAssertEqual(
+            try downloadedFiles(repoFolder: Repo.vad.folderName),
+            [
+                "NOTES.txt",
+                "config.json",
+                "\(model)/coremldata.bin",
+                "\(model)/weights/weight.bin",
+            ]
+        )
+    }
+
+    // MARK: - subPath repo (prefix stripping, subPath metadata rules, #649 fallback)
+
+    func testSubPathRepoStripsPrefixAppliesMetadataRulesAndFallsBackToRootAux() async throws {
+        // .parakeetEou160: subPath "160ms", requires 3 .mlmodelc dirs + vocab.json.
+        // vocab.json lives at the repo ROOT (the #649 shape), not under 160ms/.
+        let sub = "160ms"
+        TreeStubURLProtocol.trees = [
+            sub: [
+                ["path": "\(sub)/streaming_encoder.mlmodelc", "type": "directory"],
+                ["path": "\(sub)/decoder.mlmodelc", "type": "directory"],
+                ["path": "\(sub)/joint_decision.mlmodelc", "type": "directory"],
+                // Pinned: under a subPath the metadata allowance is .json/.model/.bin
+                ["path": "\(sub)/config.json", "type": "file", "size": 10],
+                ["path": "\(sub)/tokenizer.model", "type": "file", "size": 10],
+                ["path": "\(sub)/stats.bin", "type": "file", "size": 10],
+                ["path": "\(sub)/README.txt", "type": "file", "size": 10],
+            ],
+            "\(sub)/streaming_encoder.mlmodelc": [
+                ["path": "\(sub)/streaming_encoder.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            ],
+            "\(sub)/decoder.mlmodelc": [
+                ["path": "\(sub)/decoder.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            ],
+            "\(sub)/joint_decision.mlmodelc": [
+                ["path": "\(sub)/joint_decision.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            ],
+            // Root listing used by the #649 fallback for required non-bundle files.
+            "": [
+                ["path": "vocab.json", "type": "file", "size": 10],
+                ["path": "160ms", "type": "directory"],
+                ["path": "320ms", "type": "directory"],
+            ],
+        ]
+        TreeStubURLProtocol.fileBody = body(10)
+
+        try await DownloadUtils.downloadRepo(
+            .parakeetEou160, to: workDir, configuration: stubConfiguration)
+
+        // Pinned: subPath prefix is stripped locally; .json/.model/.bin under the
+        // subPath come down, .txt under the subPath does NOT (root-vs-subPath
+        // asymmetry); root vocab.json arrives via the #649 fallback.
+        XCTAssertEqual(
+            try downloadedFiles(repoFolder: Repo.parakeetEou160.folderName),
+            [
+                "config.json",
+                "decoder.mlmodelc/coremldata.bin",
+                "joint_decision.mlmodelc/coremldata.bin",
+                "stats.bin",
+                "streaming_encoder.mlmodelc/coremldata.bin",
+                "tokenizer.model",
+                "vocab.json",
+            ]
+        )
+    }
+
+    // MARK: - additionalModelNames (#524)
+
+    func testAdditionalModelNamesAreUnionedIntoSelection() async throws {
+        // .parakeetCtc110m requires MelSpectrogram + AudioEncoder; the TDT-CTC
+        // manager additionally requests CtcHead.mlmodelc (#524).
+        TreeStubURLProtocol.trees = [
+            "": [
+                ["path": "MelSpectrogram.mlmodelc", "type": "directory"],
+                ["path": "AudioEncoder.mlmodelc", "type": "directory"],
+                ["path": "CtcHead.mlmodelc", "type": "directory"],
+                ["path": "OtherHead.mlmodelc", "type": "directory"],
+            ],
+            "MelSpectrogram.mlmodelc": [
+                ["path": "MelSpectrogram.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            ],
+            "AudioEncoder.mlmodelc": [
+                ["path": "AudioEncoder.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            ],
+            "CtcHead.mlmodelc": [
+                ["path": "CtcHead.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            ],
+            "OtherHead.mlmodelc": [
+                ["path": "OtherHead.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            ],
+        ]
+        TreeStubURLProtocol.fileBody = body(10)
+
+        try await DownloadUtils.downloadRepo(
+            .parakeetCtc110m, to: workDir,
+            additionalModelNames: ["CtcHead.mlmodelc"],
+            configuration: stubConfiguration)
+
+        // Pinned: the extra model is selected; non-required siblings are not.
+        XCTAssertEqual(
+            try downloadedFiles(repoFolder: Repo.parakeetCtc110m.folderName),
+            [
+                "AudioEncoder.mlmodelc/coremldata.bin",
+                "CtcHead.mlmodelc/coremldata.bin",
+                "MelSpectrogram.mlmodelc/coremldata.bin",
+            ]
+        )
+    }
+}
+
+// MARK: - Tree-serving URLProtocol stub
+
+/// Serves canned HF `tree/main` JSON per path and a fixed body for every
+/// `resolve/main` file request. Thread-safe via a lock; keyed on URL shape.
+final class TreeStubURLProtocol: URLProtocol {
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var _trees: [String: [[String: Any]]] = [:]
+    nonisolated(unsafe) private static var _fileBody = Data()
+
+    static var trees: [String: [[String: Any]]] {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _trees
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _trees = newValue
+        }
+    }
+
+    static var fileBody: Data {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _fileBody
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _fileBody = newValue
+        }
+    }
+
+    static func reset() {
+        trees = [:]
+        fileBody = Data()
+    }
+
+    override static func canInit(with request: URLRequest) -> Bool { true }
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+        let path = url.path
+
+        let payload: Data
+        if let treeRange = path.range(of: "/tree/main") {
+            // Listing request: key is everything after "tree/main/" ("" for root).
+            var key = String(path[treeRange.upperBound...])
+            if key.hasPrefix("/") { key.removeFirst() }
+            guard let items = Self.trees[key],
+                let json = try? JSONSerialization.data(withJSONObject: items)
+            else {
+                respond(status: 404, data: Data("[]".utf8))
+                return
+            }
+            payload = json
+        } else if path.contains("/resolve/main/") {
+            payload = Self.fileBody
+        } else {
+            respond(status: 404, data: Data())
+            return
+        }
+        respond(status: 200, data: payload)
+    }
+
+    override func stopLoading() {}
+
+    private func respond(status: Int, data: Data) {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Length": String(data.count)])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}

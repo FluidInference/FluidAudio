@@ -1,0 +1,43 @@
+name: Download Smoke Test
+
+# Live end-to-end download check for every PR that touches download code
+# (#765 Wave 1). Cold-downloads the smallest real repo (silero-vad, ~2 MB)
+# from the HF CDN with no cache and loads it with CoreML, so each refactor
+# wave gets a genuine network round-trip through its version of the stack.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Sources/FluidAudio/DownloadUtils.swift"
+      - "Sources/FluidAudio/Shared/Download/**"
+      - "Sources/FluidAudio/ModelRegistry.swift"
+      - ".github/workflows/download-smoke.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Cold download + CoreML load
+    runs-on: macos-15
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Cache Swift packages and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-download-smoke-${{ hashFiles('Package.swift') }}
+
+      - name: Run smoke test (no model cache, live HF)
+        run: FLUID_NETWORK_TESTS=1 swift test --filter DownloadSmokeTests

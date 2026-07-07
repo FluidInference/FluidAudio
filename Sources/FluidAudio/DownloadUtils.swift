@@ -454,8 +454,32 @@ public class DownloadUtils {
         additionalModelNames: Set<String> = [],
         progressHandler: ProgressHandler? = nil
     ) async throws {
+        try await downloadRepo(
+            repo, to: directory, variant: variant,
+            additionalModelNames: additionalModelNames,
+            progressHandler: progressHandler,
+            configuration: nil)
+    }
+
+    /// Internal seam: `configuration` overrides the session used for tree
+    /// listing and per-file downloads so characterization tests can drive the
+    /// full listing/filtering/download pipeline with a stub `URLProtocol`
+    /// (#765 Wave 1). `nil` (the public path) uses the shared session.
+    static func downloadRepo(
+        _ repo: Repo,
+        to directory: URL,
+        variant: String? = nil,
+        additionalModelNames: Set<String> = [],
+        progressHandler: ProgressHandler? = nil,
+        configuration: URLSessionConfiguration?
+    ) async throws {
         try ensureOnlineAllowed("downloadRepo(\(repo.folderName))")
         logger.info("Downloading \(repo.folderName) from HuggingFace...")
+
+        let listingSession = configuration.map { URLSession(configuration: $0) } ?? sharedSession
+        defer {
+            if configuration != nil { listingSession.finishTasksAndInvalidate() }
+        }
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
@@ -482,7 +506,7 @@ public class DownloadUtils {
             let dirURL = try ModelRegistry.apiModels(repo.remotePath, apiPath)
             let request = authorizedRequest(url: dirURL)
 
-            let (dirData, response) = try await sharedSession.data(for: request)
+            let (dirData, response) = try await listingSession.data(for: request)
 
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
@@ -547,7 +571,7 @@ public class DownloadUtils {
         func listRootFiles(matching names: Set<String>) async throws {
             let dirURL = try ModelRegistry.apiModels(repo.remotePath, "tree/main")
             let request = authorizedRequest(url: dirURL)
-            let (dirData, response) = try await sharedSession.data(for: request)
+            let (dirData, response) = try await listingSession.data(for: request)
 
             if let httpResponse = response as? HTTPURLResponse,
                 httpResponse.statusCode == 429 || httpResponse.statusCode == 503
@@ -662,7 +686,8 @@ public class DownloadUtils {
                 path: file.path,
                 expectedSize: file.size,
                 partialFileURL: destPath.appendingPathExtension("partial"),
-                onProgress: onProgress
+                onProgress: onProgress,
+                configuration: configuration
             )
 
             // Move downloaded file to destination

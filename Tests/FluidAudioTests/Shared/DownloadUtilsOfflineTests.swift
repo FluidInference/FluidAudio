@@ -52,6 +52,59 @@ final class DownloadUtilsOfflineTests: XCTestCase {
         }
     }
 
+    func testDownloadRepoThrowsNetworkDisabledInOfflineMode() async {
+        DownloadUtils.enforceOffline = true
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("offline-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        do {
+            try await DownloadUtils.downloadRepo(.vad, to: dir)
+            XCTFail("expected OfflineError.networkDisabled")
+        } catch let DownloadUtils.OfflineError.networkDisabled(operation) {
+            XCTAssertTrue(operation.hasPrefix("downloadRepo("), "got: \(operation)")
+        } catch {
+            XCTFail("expected OfflineError.networkDisabled, got: \(error)")
+        }
+    }
+
+    func testDownloadSubdirectoryThrowsNetworkDisabledInOfflineMode() async {
+        DownloadUtils.enforceOffline = true
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("offline-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        do {
+            try await DownloadUtils.downloadSubdirectory(
+                .vad, subdirectory: "anything", to: dir)
+            XCTFail("expected OfflineError.networkDisabled")
+        } catch let DownloadUtils.OfflineError.networkDisabled(operation) {
+            XCTAssertTrue(operation.hasPrefix("downloadSubdirectory("), "got: \(operation)")
+        } catch {
+            XCTFail("expected OfflineError.networkDisabled, got: \(error)")
+        }
+    }
+
+    func testLoadModelsSurfacesTypedMissingModelsInOfflineMode() async {
+        DownloadUtils.enforceOffline = true
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("offline-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        do {
+            _ = try await DownloadUtils.loadModels(
+                .vad, modelNames: [ModelNames.VAD.sileroVadFile], directory: dir)
+            XCTFail("expected OfflineError.modelMissing")
+        } catch let DownloadUtils.OfflineError.modelMissing(repo, missing) {
+            // Pinned: offline + empty cache surfaces the typed error with the
+            // missing file list — it must NOT attempt a download or purge.
+            XCTAssertEqual(repo, Repo.vad.folderName)
+            XCTAssertEqual(missing, [ModelNames.VAD.sileroVadFile])
+        } catch {
+            XCTFail("expected OfflineError.modelMissing, got: \(error)")
+        }
+    }
+
     func testDefaultBehaviourDoesNotShortCircuit() async {
         // Flag defaults to false. We do not exercise the real network here
         // (the unit-test environment has no offline guarantees about HF
