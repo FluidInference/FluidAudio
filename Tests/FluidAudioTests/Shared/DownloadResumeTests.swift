@@ -311,16 +311,28 @@ final class ResumeStubURLProtocol: URLProtocol {
 
         for (index, chunk) in script.chunks.enumerated() {
             if let failAfter = script.failAfterChunks, index >= failAfter {
-                client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+                failAfterFlush()
                 return
             }
             client?.urlProtocol(self, didLoad: chunk)
         }
         if let failAfter = script.failAfterChunks, failAfter >= script.chunks.count {
-            client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+            failAfterFlush()
             return
         }
         client?.urlProtocolDidFinishLoading(self)
+    }
+
+    /// Deliver the scripted connection drop only after already-loaded chunks
+    /// have had time to reach the data task's delegate. Failing immediately
+    /// after `didLoad` races the URL loading system's internal buffer and can
+    /// drop the delivered bytes, which breaks resume tests that rely on the
+    /// partial surviving the drop (seen flaky on CI runners).
+    private func failAfterFlush() {
+        let client = self.client
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { [self] in
+            client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+        }
     }
 
     override func stopLoading() {}

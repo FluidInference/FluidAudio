@@ -36,8 +36,11 @@ final class DownloadFilterCharacterizationTests: XCTestCase {
     }
 
     /// Every downloaded file relative to the repo directory, sorted.
+    /// Symlinks are resolved on both sides: on macOS `temporaryDirectory` is
+    /// `/var/...` while the enumerator returns `/private/var/...`.
     private func downloadedFiles(repoFolder: String) throws -> [String] {
-        let repoPath = workDir.appendingPathComponent(repoFolder)
+        let repoPath = workDir.appendingPathComponent(repoFolder).resolvingSymlinksInPath()
+        let basePrefix = repoPath.path + "/"
         guard
             let enumerator = FileManager.default.enumerator(
                 at: repoPath, includingPropertiesForKeys: [.isRegularFileKey])
@@ -45,8 +48,9 @@ final class DownloadFilterCharacterizationTests: XCTestCase {
         var files: [String] = []
         for case let url as URL in enumerator {
             if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
-                files.append(
-                    url.path.replacingOccurrences(of: repoPath.path + "/", with: ""))
+                let path = url.resolvingSymlinksInPath().path
+                XCTAssertTrue(path.hasPrefix(basePrefix), "unexpected path \(path)")
+                files.append(String(path.dropFirst(basePrefix.count)))
             }
         }
         return files.sorted()
