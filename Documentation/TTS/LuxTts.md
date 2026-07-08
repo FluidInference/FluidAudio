@@ -35,36 +35,37 @@ total, ≤ 555 generated frames (~5.9 s per call; chunking is phase 2).
 
 ```bash
 swift run fluidaudiocli tts \
-  "ðə kwˈɪk bɹˈaʊn fˈɑːks dʒˈʌmps ˌoʊvɚ ðə lˈeɪzi dˈɑːɡ, ænd ˈɑːnɪstli, ɪt fˈɛlt ɡɹˈeɪt." \
-  --phonemes \
+  "The quick brown fox jumps over the lazy dog, and honestly, it felt great." \
   --backend luxtts \
   --prompt-audio prompt_clip.wav \
-  --prompt-text "kwˈɪk bɹˈaʊn fˈɑːks dʒˈʌmps ˌoʊvɚ ðə lˈeɪzi dˈɑːɡ ænd ˈɑːnɪstli ɪt fˈɛlt ɡɹˈeɪt." \
+  --prompt-text "quick brown fox jumps over the lazy dog and honestly it felt great." \
   --seed 42 \
   --output out.wav
 ```
 
-`--prompt-audio` (voice to clone; first 5 s used) and `--prompt-text`
-(the prompt's transcript) are required. In phase 1 `--phonemes` is also
-required: both the positional text and `--prompt-text` must be espeak
-IPA (`en-us`) — see G2P status below.
+`--prompt-audio` (voice to clone; first 5 s used) is required. Text and
+`--prompt-text` are plain English — phonemized in-process by the
+espeak-parity G2P (see below). If `--prompt-text` is omitted, the prompt
+clip is transcribed with the built-in Parakeet ASR (models download on
+first use; TTS-only runs never pay that cost). `--phonemes` bypasses the
+G2P: both the text and `--prompt-text` are then espeak IPA (`en-us`).
 
 ### Swift API
 
 ```swift
 let manager = try await LuxTtsManager.downloadAndCreate()
 let result = try await manager.synthesize(
-    phonemes: "ðə kwˈɪk bɹˈaʊn fˈɑːks…",
+    text: "The quick brown fox jumps over the lazy dog.",
     promptAudio: promptURL,          // any format/rate; 24 kHz mono internally
-    promptPhonemes: "kwˈɪk bɹˈaʊn…",
+    promptText: "The transcript of the prompt clip.",
     speed: 1.0,
     seed: 42)
 // result.samples: 48 kHz mono Float32, prompt-matched loudness
 ```
 
-A token-ids overload (`synthesize(tokenIds:promptAudio:promptTokenIds:…)`)
-is available for callers running their own espeak frontend against
-`tokens.txt`.
+Phoneme overloads remain for callers running their own espeak frontend:
+`synthesize(phonemes:promptAudio:promptPhonemes:…)` and
+`synthesize(tokenIds:promptAudio:promptTokenIds:…)` (raw `tokens.txt` ids).
 
 ## Usage notes
 
@@ -84,39 +85,80 @@ is available for callers running their own espeak frontend against
   from the Python pipeline while duration/loudness match (fixture-gated:
   frame accounting exact, RMS within 1 dB).
 
-## G2P status (phase 1)
+## G2P (phase 2): espeak-parity English frontend
 
-There is **no built-in text→phoneme frontend**: `synthesize(text:…)`
-throws `LuxTtsError.g2pUnavailable`. The model was trained on espeak
-(`en-us`) phonemes via EmiliaTokenizer. The in-repo Kokoro/StyleTTS2
-Misaki frontend was evaluated and does **not** map cleanly onto
-`tokens.txt`: Misaki drops espeak length marks (`ː`), emits ligatures
-(`ʤ`) and diphthong shorthands (`A O I Y W`) and different weak forms —
-on the fixture sentence it produces 78 tokens vs espeak's 85, shifting
-both pronunciation and the duration estimate. Feeding raw graphemes is
-out-of-distribution for the model and is not offered.
+The model was trained on espeak-ng (`en-us`) phonemes via
+EmiliaTokenizer, so `LuxTtsG2p` reproduces **espeak**, not a generic
+G2P. It is a lexicon + rules engine, fully offline:
 
-Until phase 2, produce phonemes with espeak-ng / piper-phonemize
-(`en-us`); OOV scalars are skipped with a warning, matching upstream.
+- **Lexicon**: 139k words × up to 7 espeak-probed context variants
+  (mid-clause / clause-final / before-only-unstressed / before-vowel /
+  before-pause-word / clause-initial / before-r), harvested offline from
+  espeak-ng via piper_phonemize. Bundled as a 0.94 MB raw-DEFLATE
+  resource (3.7 MB expanded) + 36 KB aux tables — no downloads.
+- **Clause rules** (ported from espeak's `translate.c`/`dictionary.c`
+  semantics): multi-word merge entries (`in the` → `ɪnðə`, `did not` →
+  `dɪdnˌɑːt`), `$strend2` stress resolution (right-to-left), homograph
+  verb/noun/past selection via `expect_verb/noun/past` counters
+  (`to record` → `ɹᵻkˈoːɹd` vs `the record` → `ɹˈɛkɚd`), position-aware
+  `$pause` handling (blocks liaison/flapping), linking-r, `the/to/a/an`
+  vowel-context forms, capital-sensitive rows (`I` pronoun vs `i`
+  letter, Polish/polish), all-caps spell-out (`FBI` → `ˌɛfbˌiːˈaɪ`),
+  camelCase splitting (`FluidAudio` → `flˈuːɪd ˈɔːdɪˌoʊ`).
+- **Normalization**: faithful port of the upstream ZipVoice
+  `EnglishTextNormalizer` (abbreviations + inflect-parity numbers:
+  `$12.50` → `twelve dollars, fifty cents`, `1855` → `eighteen
+  fifty-five`, `21st` → `twenty-first`) — hyphens preserved because
+  espeak merges them without a space.
+
+**Measured against the espeak oracle** (1,000-sentence corpus:
+conversational + LibriSpeech + numbers/dates/currency + names;
+regenerate + score via `mobius/models/tts/zipvoice/coreml/g2p/`):
+
+| Approach | Sentence exact match | Token edit rate |
+|---|---|---|
+| **Lexicon + rules (shipped)** | **99.6%** (gate ≥ 90%) | **0.01%** (gate ≤ 2%) |
+| naive word-by-word lexicon | 3.8% | 5.72% |
+| Misaki + symbol mapping (rejected) | 0.5% | 9.75% |
+
+The Misaki mapping layer was measured corpus-wide and rejected: the
+divergence from espeak is lexical (different vowel choices, stress
+positions, missing length marks), not just symbolic, so no mapping can
+close it. The gate is reproducible:
+
+```bash
+swift run fluidaudiocli luxtts-g2p-dump --corpus corpus_en_1000.txt \
+  --tokens tokens.txt --out swift_dump.jsonl
+# in mobius/models/tts/zipvoice:
+python -m coreml.g2p.validate score --oracle coreml/g2p/oracle_tokens.jsonl \
+  --swift swift_dump.jsonl
+```
+
+OOV words fall back to possessive/plural suffix rules, camelCase/all-caps
+handling, then letter spell-out; OOV token-id scalars are skipped with a
+warning, matching upstream.
 
 ## Tests
 
 ```bash
-swift test --filter LuxTts                        # tokenizer/solver/mel parity (fixtures)
+swift test --filter LuxTts                        # tokenizer/solver/mel/G2P (fixtures)
 FLUIDAUDIO_RUN_LUXTTS_E2E=1 swift test --filter LuxTtsE2ETests   # model-dependent e2e
 ```
 
 Fixtures are generated by
 `mobius/models/tts/zipvoice/coreml/dump_swift_fixtures.py` and live in
-`Tests/FluidAudioTests/TTS/LuxTts/Resources/`.
+`Tests/FluidAudioTests/TTS/LuxTts/Resources/`. G2P expectations in
+`LuxTtsG2pTests` are espeak-oracle outputs from
+`mobius/models/tts/zipvoice/coreml/g2p/validate.py dump-oracle`; the
+corpus-level gate is scored with `luxtts-g2p-dump` + `validate.py score`
+(see the G2P section above).
 
-## Phase 2 TODOs
+## Remaining TODOs
 
-- espeak-parity English G2P (text → IPA) so `synthesize(text:…)` works.
 - Long-input chunking across multiple vocoder windows (> 555 generated
   frames currently errors; mel truncation is not allowed).
 - iOS `ane/` graph host wiring (input names differ from `gpu/`, may take
   pre-concatenated `(1, 300, 1, 1024)` inputs) + device validation.
-- Prompt transcription via built-in ASR (drop the `--prompt-text`
-  requirement).
 - Optional VAD-based automatic prompt-silence trimming.
+- Non-English text (the G2P is `en-us` only; Mandarin pinyin tokens
+  exist in `tokens.txt` but have no frontend).

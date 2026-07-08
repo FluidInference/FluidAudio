@@ -26,7 +26,10 @@ let package = Package(
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
             ],
-            path: "Sources/FluidAudio"
+            path: "Sources/FluidAudio",
+            resources: [
+                .copy("TTS/LuxTts/G2p/Resources")
+            ]
         ),
         .target(
             name: "FastClusterWrapper",

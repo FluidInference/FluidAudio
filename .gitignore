@@ -107,6 +107,9 @@ Resources/
 !Tests/FluidAudioTests/TTS/LuxTts/Resources/
 !Tests/FluidAudioTests/TTS/LuxTts/Resources/**
 Tests/FluidAudioTests/TTS/LuxTts/Resources/*.wav
+# LuxTts bundled G2P lexicon (probe_lexicon.py in mobius zipvoice)
+!Sources/FluidAudio/TTS/LuxTts/G2p/Resources/
+!Sources/FluidAudio/TTS/LuxTts/G2p/Resources/**
 scripts/
 !Scripts/parakeet_subset_benchmark.sh
 !Scripts/diarizer_subset_benchmark.sh

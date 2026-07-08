@@ -66,19 +66,20 @@ final class LuxTtsE2ETests: XCTestCase {
         await manager.cleanup()
     }
 
-    func testRawTextSynthesisThrowsG2pUnavailable() async throws {
-        // No models needed: the phase-1 raw-text overload must fail loudly
-        // before touching the pipeline.
+    func testRawTextSynthesisRequiresInitialize() async throws {
+        // No models needed: the raw-text overload phonemizes in-process
+        // (bundled G2P, no download) and must still fail loudly with
+        // `.notInitialized` before touching the pipeline.
         let manager = LuxTtsManager()
         do {
             _ = try await manager.synthesize(
                 text: "hello",
                 promptAudio: URL(fileURLWithPath: "/nonexistent.wav"),
                 promptText: "hello")
-            XCTFail("expected g2pUnavailable")
+            XCTFail("expected notInitialized")
         } catch let error as LuxTtsError {
-            guard case .g2pUnavailable = error else {
-                XCTFail("expected g2pUnavailable, got \(error)")
+            guard case .notInitialized = error else {
+                XCTFail("expected notInitialized, got \(error)")
                 return
             }
         }

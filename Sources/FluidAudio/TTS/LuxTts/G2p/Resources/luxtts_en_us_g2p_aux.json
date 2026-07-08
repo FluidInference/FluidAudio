@@ -1,0 +1,2251 @@
+{
+ "phrases": {
+  "bon voyage": {
+   "mid": "bˌɑːn vɔɪˈɑːʒ",
+   "final": "bˌɑːn vɔɪˈɑːʒ",
+   "vowel": "bˌɑːn vɔɪˈɑːʒ",
+   "flags": []
+  },
+  "bow down": {
+   "mid": "bˌaʊ dˈaʊn",
+   "final": "bˌaʊ dˈaʊn",
+   "vowel": "bˌaʊ dˈaʊn",
+   "flags": []
+  },
+  "coup de grace": {
+   "mid": "kˌuːdə ɡɹˈɑː",
+   "final": "kˌuːdə ɡɹˈɑː",
+   "vowel": "kˌuːdə ɡɹˈɑː",
+   "flags": []
+  },
+  "cum laude": {
+   "mid": "kʊmlˈaʊdi",
+   "final": "kʊmlˈaʊdi",
+   "vowel": "kʊmlˈaʊdi",
+   "flags": []
+  },
+  "de gallo": {
+   "mid": "dəɡˈaɪoʊ",
+   "final": "dəɡˈaɪoʊ",
+   "vowel": "dəɡˈaɪoʊ",
+   "flags": []
+  },
+  "de jure": {
+   "mid": "deɪdʒˈʊɹɹi",
+   "final": "deɪdʒˈʊɹɹi",
+   "vowel": "deɪdʒˈʊɹɹi",
+   "flags": []
+  },
+  "en masse": {
+   "mid": "ɑːn mˈæs",
+   "final": "ɑːn mˈæs",
+   "vowel": "ɑːn mˈæs",
+   "flags": []
+  },
+  "en route": {
+   "mid": "ɑːn ɹˈuːt",
+   "final": "ɑːn ɹˈuːt",
+   "vowel": "ɑːn ɹˈuːt",
+   "flags": []
+  },
+  "faux pas": {
+   "mid": "fˌoʊ pˈɑː",
+   "final": "fˌoʊ pˈɑː",
+   "vowel": "fˌoʊ pˈɑː",
+   "flags": []
+  },
+  "hors d'oeuvres": {
+   "mid": "ɔːɹdˈɜːvz",
+   "final": "ɔːɹdˈɜːvz",
+   "vowel": "ɔːɹdˈɜːvz",
+   "flags": []
+  },
+  "inter alia": {
+   "mid": "ˌɪntɚɹ ˈeɪliə",
+   "final": "ˌɪntɚɹ ˈeɪliə",
+   "vowel": "ˌɪntɚɹ ˈeɪliə",
+   "flags": []
+  },
+  "je ne sais": {
+   "mid": "ʒənəsˈeɪ",
+   "final": "ʒənəsˈeɪ",
+   "vowel": "ʒənəsˈeɪ",
+   "flags": []
+  },
+  "je t'aime": {
+   "mid": "ʒətˈɛm",
+   "final": "ʒətˈɛm",
+   "vowel": "ʒətˈɛm",
+   "flags": []
+  },
+  "la vie": {
+   "mid": "læ vˈiː",
+   "final": "læ vˈiː",
+   "vowel": "læ vˈiː",
+   "flags": []
+  },
+  "live in": {
+   "mid": "lˈɪv ɪn",
+   "final": "lˈɪv ɪn",
+   "vowel": "lˈɪv ɪn",
+   "flags": []
+  },
+  "main st": {
+   "mid": "mˈeɪnstɹˌiːt",
+   "final": "mˈeɪnstɹˌiːt",
+   "vowel": "mˈeɪnstɹˌiːt",
+   "flags": []
+  },
+  "su se": {
+   "mid": "sˈuːsə",
+   "final": "sˈuːsə",
+   "vowel": "sˈuːsə",
+   "r": "sˈuːsɚ",
+   "flags": []
+  },
+  "tae kwon do": {
+   "mid": "tˈaɪkwɑːndˈoʊ",
+   "final": "tˈaɪkwɑːndˈoʊ",
+   "vowel": "tˈaɪkwɑːndˈoʊ",
+   "flags": []
+  },
+  "tai chi": {
+   "mid": "taɪtʃˈiː",
+   "final": "taɪtʃˈiː",
+   "vowel": "taɪtʃˈiː",
+   "flags": []
+  },
+  "tear apart": {
+   "mid": "tˌɛɹ ɐpˈɑːɹt",
+   "final": "tˌɛɹ ɐpˈɑːɹt",
+   "vowel": "tˌɛɹ ɐpˈɑːɹt",
+   "flags": []
+  },
+  "tear off": {
+   "mid": "tˈɛɹ ˈɑːf",
+   "final": "tˈɛɹ ˈɑːf",
+   "vowel": "tˈɛɹ ˈɑːf",
+   "flags": []
+  },
+  "van den": {
+   "mid": "vˈændɛn",
+   "final": "vˈændɛn",
+   "vowel": "vˈændɛn",
+   "flags": []
+  },
+  "van der": {
+   "mid": "vˈændɜː",
+   "final": "vˈændɜː",
+   "vowel": "vˈændɜːɹ",
+   "flags": []
+  },
+  "vis a vis": {
+   "mid": "vˌiːzɐvˈiː",
+   "final": "vˌiːzɐvˈiː",
+   "vowel": "vˌiːzɐvˈiː",
+   "flags": []
+  },
+  "wall st": {
+   "mid": "wˈɔːlstɹˌiːt",
+   "final": "wˈɔːlstɹˌiːt",
+   "vowel": "wˈɔːlstɹˌiːt",
+   "flags": []
+  },
+  "wear and tear": {
+   "mid": "wˈɛɹ ɐnd tˈɛɹ",
+   "final": "wˈɛɹ ɐnd tˈɛɹ",
+   "vowel": "wˈɛɹ ɐnd tˈɛɹ",
+   "flags": []
+  },
+  "wind up": {
+   "mid": "wˈaɪnd ˈʌp",
+   "final": "wˈaɪnd ˈʌp",
+   "vowel": "wˈaɪnd ˈʌp",
+   "flags": []
+  },
+  "winds down": {
+   "mid": "wˈaɪndz dˈaʊn",
+   "final": "wˈaɪndz dˈaʊn",
+   "vowel": "wˈaɪndz dˈaʊn",
+   "flags": []
+  },
+  "winds up": {
+   "mid": "wˈaɪndz ˈʌp",
+   "final": "wˈaɪndz ˈʌp",
+   "vowel": "wˈaɪndz ˈʌp",
+   "flags": []
+  },
+  "wound down": {
+   "mid": "wˌaʊnd dˈaʊn",
+   "final": "wˌaʊnd dˈaʊn",
+   "vowel": "wˌaʊnd dˈaʊn",
+   "flags": []
+  },
+  "wound up": {
+   "mid": "wˌaʊnd ˈʌp",
+   "final": "wˌaʊnd ˈʌp",
+   "vowel": "wˌaʊnd ˈʌp",
+   "flags": []
+  },
+  "baton rouge": {
+   "mid": "bˌætən ɹˈuːʒ",
+   "final": "bˌætən ɹˈuːʒ",
+   "vowel": "bˌætən ɹˈuːʒ",
+   "flags": []
+  },
+  "dehra dun": {
+   "mid": "dˌɛɹɐdˈuːn",
+   "final": "dˌɛɹɐdˈuːn",
+   "vowel": "dˌɛɹɐdˈuːn",
+   "flags": []
+  },
+  "des moines": {
+   "mid": "dəmˈɔɪn",
+   "final": "dəmˈɔɪn",
+   "vowel": "dəmˈɔɪn",
+   "flags": []
+  },
+  "grand saline": {
+   "mid": "ɡɹˈændsəlˈiːn",
+   "final": "ɡɹˈændsəlˈiːn",
+   "vowel": "ɡɹˈændsəlˈiːn",
+   "flags": []
+  },
+  "la jolla": {
+   "mid": "lɐhˈɔɪə",
+   "final": "lɐhˈɔɪə",
+   "vowel": "lɐhˈɔɪə",
+   "r": "lɐhˈɔɪɚ",
+   "flags": []
+  },
+  "la quinta": {
+   "mid": "ləkˈiːntə",
+   "final": "ləkˈiːntə",
+   "vowel": "ləkˈiːntə",
+   "r": "ləkˈiːntɚ",
+   "flags": []
+  },
+  "tel aviv": {
+   "mid": "tˌɛl ɐvˈiːv",
+   "final": "tˌɛl ɐvˈiːv",
+   "vowel": "tˌɛl ɐvˈiːv",
+   "flags": []
+  },
+  "le ann": {
+   "mid": "liːˈæn",
+   "final": "liːˈæn",
+   "vowel": "liːˈæn",
+   "flags": []
+  },
+  "santa claus": {
+   "mid": "sˈæntə klˈɔːz",
+   "final": "sˈæntə klˈɔːz",
+   "vowel": "sˈæntə klˈɔːz",
+   "flags": []
+  },
+  "da vinci": {
+   "mid": "dɐvˈɪntʃi",
+   "final": "dɐvˈɪntʃi",
+   "vowel": "dɐvˈɪntʃi",
+   "flags": []
+  },
+  "di maggio": {
+   "mid": "dᵻmˈɑːʒɪˌoʊ",
+   "final": "dᵻmˈɑːʒɪˌoʊ",
+   "vowel": "dᵻmˈɑːʒɪˌoʊ",
+   "flags": []
+  },
+  "mc namara": {
+   "mid": "mˌæknəmˈɑːɹɹə",
+   "final": "mˌæknəmˈɑːɹɹə",
+   "vowel": "mˌæknəmˈɑːɹɹə",
+   "r": "mˌæknəmˈɑːɹɹɚ",
+   "flags": []
+  },
+  "each of": {
+   "mid": "ˈiːtʃ əv",
+   "final": "ˈiːtʃ əv",
+   "vowel": "ˈiːtʃ əv",
+   "flags": [
+    "$pause"
+   ]
+  },
+  "far more": {
+   "mid": "fˈɑːɹmˌoːɹ",
+   "final": "fˈɑːɹmˌoːɹ",
+   "vowel": "fˈɑːɹmˌoːɹ",
+   "flags": []
+  },
+  "few more": {
+   "mid": "fjˈuːmˌoːɹ",
+   "final": "fjˈuːmˌoːɹ",
+   "vowel": "fjˈuːmˌoːɹ",
+   "flags": []
+  },
+  "here and there": {
+   "mid": "hˈɪɹ ɐnd ðˈɛɹ",
+   "final": "hˈɪɹ ɐnd ðˈɛɹ",
+   "vowel": "hˈɪɹ ɐnd ðˈɛɹ",
+   "flags": []
+  },
+  "most of": {
+   "mid": "mˈoʊst əv",
+   "final": "mˈoʊst əv",
+   "vowel": "mˈoʊst əv",
+   "flags": []
+  },
+  "such as": {
+   "mid": "sˈʌtʃ ɐz",
+   "final": "sˈʌtʃ ɐz",
+   "vowel": "sˈʌtʃ ɐz",
+   "flags": [
+    "$pause"
+   ]
+  },
+  "too few": {
+   "mid": "tˈuː fjuː",
+   "final": "tˈuː fjuː",
+   "vowel": "tˈuː fjuː",
+   "flags": []
+  },
+  "too many": {
+   "mid": "tˈuː mɛni",
+   "final": "tˈuː mɛni",
+   "vowel": "tˈuː mɛni",
+   "flags": []
+  },
+  "too much": {
+   "mid": "tˈuː mʌtʃ",
+   "final": "tˈuː mʌtʃ",
+   "vowel": "tˈuː mʌtʃ",
+   "flags": []
+  },
+  "no one": {
+   "mid": "nˈoʊwˈʌn",
+   "final": "nˈoʊwˈʌn",
+   "vowel": "nˈoʊwˈʌn",
+   "flags": []
+  },
+  "no longer": {
+   "mid": "nˌoʊ lˈɑːŋɡɚ",
+   "final": "nˌoʊ lˈɑːŋɡɚ",
+   "vowel": "nˌoʊ lˈɑːŋɡɚɹ",
+   "flags": []
+  },
+  "no more": {
+   "mid": "nˈoʊmˌoːɹ",
+   "final": "nˈoʊmˌoːɹ",
+   "vowel": "nˈoʊmˌoːɹ",
+   "flags": []
+  },
+  "so far": {
+   "mid": "sˈoʊ fˌɑːɹ",
+   "final": "sˈoʊ fˌɑːɹ",
+   "vowel": "sˈoʊ fˌɑːɹ",
+   "flags": [
+    "$strend2"
+   ]
+  },
+  "so much": {
+   "mid": "sˈoʊ mˌʌtʃ",
+   "final": "sˈoʊ mˌʌtʃ",
+   "vowel": "sˈoʊ mˌʌtʃ",
+   "flags": []
+  },
+  "of a": {
+   "mid": "əvə",
+   "final": "əvə",
+   "vowel": "əvə",
+   "r": "əvɚ",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "of an": {
+   "mid": "əvən",
+   "final": "əvən",
+   "vowel": "əvən",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "of which": {
+   "mid": "ʌvwˈɪtʃ",
+   "final": "ʌvwˈɪtʃ",
+   "vowel": "ʌvwˈɪtʃ",
+   "flags": [
+    "$2",
+    "$pause"
+   ]
+  },
+  "of the": {
+   "mid": "ʌvðə",
+   "final": "ʌvðə",
+   "vowel": "ʌvðɪ",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "for a": {
+   "mid": "fɚɹə",
+   "final": "fɚɹə",
+   "vowel": "fɚɹə",
+   "r": "fɚɹɚ",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "for an": {
+   "mid": "fɚɹən",
+   "final": "fɚɹən",
+   "vowel": "fɚɹən",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "for the": {
+   "mid": "fɚðə",
+   "final": "fɚðə",
+   "vowel": "fɚðɪ",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "for a while": {
+   "mid": "fɚɹə wˈaɪl",
+   "final": "fɚɹə wˈaɪl",
+   "vowel": "fɚɹə wˈaɪl",
+   "flags": []
+  },
+  "for one": {
+   "final": "fɔːɹwˈʌn",
+   "flags": [
+    "$2",
+    "$atend"
+   ]
+  },
+  "to be": {
+   "mid": "təbi",
+   "vowel": "təbi",
+   "flags": [
+    "$atend",
+    "$pastf"
+   ]
+  },
+  "to to": {
+   "mid": "tʊtə",
+   "final": "tʊtʊ",
+   "vowel": "tʊtʊ",
+   "flags": [
+    "$verbf"
+   ]
+  },
+  "to and fro": {
+   "mid": "tˌuːəndfɹˈoʊ",
+   "final": "tˌuːəndfɹˈoʊ",
+   "vowel": "tˌuːəndfɹˈoʊ",
+   "flags": []
+  },
+  "at a": {
+   "mid": "æɾə",
+   "final": "æɾə",
+   "vowel": "æɾə",
+   "r": "æɾɚ",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "at it": {
+   "mid": "æɾ ɪt",
+   "final": "ˈæɾɪt",
+   "vowel": "æɾ ɪɾ",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "at once": {
+   "mid": "ɐtwˈʌns",
+   "final": "ɐtwˈʌns",
+   "vowel": "ɐtwˈʌns",
+   "flags": []
+  },
+  "at will": {
+   "mid": "ɐtwˈɪl",
+   "final": "ɐtwˈɪl",
+   "vowel": "ɐtwˈɪl",
+   "flags": []
+  },
+  "with the": {
+   "mid": "wɪððə",
+   "final": "wɪððə",
+   "vowel": "wɪððɪ",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "in the": {
+   "mid": "ɪnðə",
+   "final": "ɪnðə",
+   "vowel": "ɪnðɪ",
+   "flags": []
+  },
+  "in which": {
+   "mid": "ɪnwˌɪtʃ",
+   "final": "ɪnwˌɪtʃ",
+   "vowel": "ɪnwˌɪtʃ",
+   "flags": [
+    "$pause",
+    "$u2"
+   ]
+  },
+  "in a row": {
+   "mid": "ˌɪnɐ ɹˈoʊ",
+   "final": "ˌɪnɐ ɹˈoʊ",
+   "vowel": "ˌɪnɐ ɹˈoʊ",
+   "flags": []
+  },
+  "on the": {
+   "mid": "ɔnðə",
+   "final": "ɔnðə",
+   "vowel": "ɔnðɪ",
+   "flags": []
+  },
+  "out of": {
+   "mid": "ˌaʊɾəv",
+   "final": "ˌaʊɾəv",
+   "vowel": "ˌaʊɾəv",
+   "flags": []
+  },
+  "from the": {
+   "mid": "fɹʌmðə",
+   "final": "fɹʌmðə",
+   "vowel": "fɹʌmðɪ",
+   "flags": []
+  },
+  "from where": {
+   "mid": "fɹʌm wˈɛɹ",
+   "vowel": "fɹʌm wˈɛɹ",
+   "flags": [
+    "$pause"
+   ]
+  },
+  "from which": {
+   "mid": "fɹʌm wˈɪtʃ",
+   "vowel": "fɹʌm wˈɪtʃ",
+   "flags": [
+    "$pause"
+   ]
+  },
+  "per cent": {
+   "mid": "pɚ sˈɛnt",
+   "final": "pɚ sˈɛnt",
+   "vowel": "pɚ sˈɛnt",
+   "flags": []
+  },
+  "per se": {
+   "mid": "pˌɜː sˈeɪ",
+   "final": "pˌɜː sˈeɪ",
+   "vowel": "pˌɜː sˈeɪ",
+   "flags": []
+  },
+  "was a": {
+   "mid": "wʌzɐ",
+   "final": "wʌzɐ",
+   "vowel": "wʌzɐ",
+   "flags": []
+  },
+  "was the": {
+   "mid": "wʌzðə",
+   "final": "wʌzðə",
+   "vowel": "wʌzðɪ",
+   "flags": []
+  },
+  "will to": {
+   "mid": "wˈɪltə",
+   "final": "wˈɪltʊ",
+   "vowel": "wˈɪltʊ",
+   "flags": []
+  },
+  "would have": {
+   "mid": "wʊdhɐv",
+   "final": "wˈʊdhæv",
+   "vowel": "wʊdhɐv",
+   "flags": [
+    "$atend",
+    "$pastf"
+   ]
+  },
+  "would have to": {
+   "mid": "wʊdhˌævtə",
+   "final": "wʊdhˈævtʊ",
+   "vowel": "wʊdhˌævtʊ",
+   "flags": [
+    "$strend2",
+    "$u2",
+    "$verbf"
+   ]
+  },
+  "wouldn't have": {
+   "mid": "wˌʊdəntəv",
+   "final": "wˈʊdəntəv",
+   "vowel": "wˌʊdəntəv",
+   "flags": [
+    "$pastf",
+    "$strend2",
+    "$u1"
+   ]
+  },
+  "wouldn't have to": {
+   "mid": "wˌʊdəntævtə",
+   "final": "wˈʊdəntævtʊ",
+   "vowel": "wˌʊdəntævtʊ",
+   "flags": [
+    "$strend2",
+    "$verbf"
+   ]
+  },
+  "won't have": {
+   "mid": "wˌoʊntɐv",
+   "final": "wˈoʊnthæv",
+   "vowel": "wˌoʊntɐv",
+   "flags": [
+    "$atend",
+    "$pastf",
+    "$u1"
+   ]
+  },
+  "won't have it": {
+   "mid": "woʊnthˌævɪt",
+   "final": "woʊnthˈævɪt",
+   "vowel": "woʊnthˌævɪt",
+   "flags": [
+    "$u2+"
+   ]
+  },
+  "won't have to": {
+   "mid": "wˈoʊntævtə",
+   "final": "wˈoʊntævtʊ",
+   "vowel": "wˈoʊntævtʊ",
+   "flags": [
+    "$strend2",
+    "$verbf"
+   ]
+  },
+  "must have": {
+   "mid": "mˈʌstɐv",
+   "final": "mˈʌsthæv",
+   "vowel": "mˈʌstɐv",
+   "flags": [
+    "$1",
+    "$atend",
+    "$pastf"
+   ]
+  },
+  "must have to": {
+   "mid": "mˌʌstævtə",
+   "final": "mˌʌstævtʊ",
+   "vowel": "mˌʌstævtʊ",
+   "flags": [
+    "$pastf"
+   ]
+  },
+  "mustn't have": {
+   "mid": "mˌʌsənthɐv",
+   "final": "mˈʌsənthɐv",
+   "vowel": "mˌʌsənthɐv",
+   "flags": [
+    "$pastf",
+    "$u1+"
+   ]
+  },
+  "mustn't have to": {
+   "mid": "mˈʌsənthævtə",
+   "final": "mˈʌsənthævtʊ",
+   "vowel": "mˈʌsənthævtʊ",
+   "flags": [
+    "$pastf"
+   ]
+  },
+  "should have": {
+   "mid": "ʃˌʊdəv",
+   "final": "ʃˈʊdhæv",
+   "vowel": "ʃˌʊdəv",
+   "flags": [
+    "$atend",
+    "$pastf",
+    "$u1+"
+   ]
+  },
+  "should have it": {
+   "mid": "ʃʊdhˌævɪt",
+   "final": "ʃʊdhˈævɪt",
+   "vowel": "ʃʊdhˌævɪt",
+   "flags": [
+    "$u2+"
+   ]
+  },
+  "should have to": {
+   "mid": "ʃʊdhˌævtə",
+   "final": "ʃʊdhˈævtʊ",
+   "vowel": "ʃʊdhˌævtʊ",
+   "flags": [
+    "$strend2",
+    "$u2",
+    "$verbf"
+   ]
+  },
+  "shouldn't have": {
+   "mid": "ʃˌʊdənthəv",
+   "final": "ʃˈʊdənthəv",
+   "vowel": "ʃˌʊdənthəv",
+   "flags": [
+    "$pastf",
+    "$u1+"
+   ]
+  },
+  "shouldn't have to": {
+   "mid": "ʃˈʊdəntævtə",
+   "final": "ʃˈʊdəntævtʊ",
+   "vowel": "ʃˈʊdəntævtʊ",
+   "flags": [
+    "$strend2",
+    "$verbf"
+   ]
+  },
+  "can't have": {
+   "mid": "kˈæntɐv",
+   "final": "kˈæntɐv",
+   "vowel": "kˈæntɐv",
+   "flags": [
+    "$pastf"
+   ]
+  },
+  "can't have to": {
+   "mid": "kˈæntɐv tə",
+   "final": "kˌæntˈævtʊ",
+   "vowel": "kˈæntɐv tʊ",
+   "flags": [
+    "$atend",
+    "$verbf"
+   ]
+  },
+  "could have": {
+   "mid": "kˌʊdɐv",
+   "final": "kˈʊdhæv",
+   "vowel": "kˌʊdɐv",
+   "flags": [
+    "$atend",
+    "$pastf"
+   ]
+  },
+  "could have to": {
+   "mid": "kʊdhˌævtə",
+   "final": "kʊdhˈævtʊ",
+   "vowel": "kʊdhˌævtʊ",
+   "flags": [
+    "$strend2",
+    "$u2",
+    "$verbf"
+   ]
+  },
+  "could have it": {
+   "mid": "kʊdhˈævɪt",
+   "final": "kʊdhˈævɪt",
+   "vowel": "kʊdhˈævɪt",
+   "flags": []
+  },
+  "couldn't have": {
+   "mid": "kˌʊdəntəv",
+   "final": "kˈʊdəntəv",
+   "vowel": "kˌʊdəntəv",
+   "flags": [
+    "$pastf",
+    "$u1+"
+   ]
+  },
+  "couldn't have to": {
+   "mid": "kˈʊdəntævtə",
+   "final": "kˈʊdəntævtʊ",
+   "vowel": "kˈʊdəntævtʊ",
+   "flags": [
+    "$strend2",
+    "$verbf"
+   ]
+  },
+  "may have": {
+   "mid": "mˌeɪhɐv",
+   "final": "mˈeɪhɐv",
+   "vowel": "mˌeɪhɐv",
+   "flags": [
+    "$pastf",
+    "$u1+"
+   ]
+  },
+  "may have to": {
+   "mid": "mˌeɪhɐv tə",
+   "final": "mˌeɪhˈævtʊ",
+   "vowel": "mˌeɪhɐv tʊ",
+   "flags": [
+    "$atend",
+    "$verbf"
+   ]
+  },
+  "might have": {
+   "mid": "mˌaɪthɐv",
+   "final": "mˈaɪthɐv",
+   "vowel": "mˌaɪthɐv",
+   "flags": [
+    "$pastf",
+    "$u1+"
+   ]
+  },
+  "might have to": {
+   "mid": "mˌaɪthɐv tə",
+   "final": "mˌaɪthˈævtʊ",
+   "vowel": "mˌaɪthɐv tʊ",
+   "flags": [
+    "$atend",
+    "$verbf"
+   ]
+  },
+  "have been": {
+   "mid": "hɐvbɪn",
+   "final": "hɐvbɪn",
+   "vowel": "hɐvbɪn",
+   "flags": [
+    "$pastf"
+   ]
+  },
+  "have not": {
+   "mid": "hɐvnˌɑːt",
+   "final": "hɐvnˈɑːt",
+   "vowel": "hɐvnˌɑːt",
+   "flags": [
+    "$atend",
+    "$pastf"
+   ]
+  },
+  "has been": {
+   "mid": "hˈæzbiːn",
+   "final": "hˈæzbiːn",
+   "vowel": "hˈæzbiːn",
+   "flags": [
+    "$pastf"
+   ]
+  },
+  "has to": {
+   "final": "hˈæztuː",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "has not": {
+   "mid": "həznɑːt",
+   "final": "hɐznˈɑːt",
+   "vowel": "həznɑːt",
+   "flags": [
+    "$atend",
+    "$pastf"
+   ]
+  },
+  "has it": {
+   "final": "hˌæzɪt",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "had to": {
+   "mid": "hædtə",
+   "final": "hˈædtuː",
+   "vowel": "hædtʊ",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "had been": {
+   "mid": "hɐdbɪn",
+   "final": "hɐdbɪn",
+   "vowel": "hɐdbɪn",
+   "flags": [
+    "$pastf"
+   ]
+  },
+  "had it": {
+   "mid": "hˌædɪt",
+   "final": "hˌædɪt",
+   "vowel": "hˌædɪt",
+   "flags": []
+  },
+  "had them": {
+   "mid": "hˌædðɛm",
+   "final": "hˌædðɛm",
+   "vowel": "hˌædðɛm",
+   "flags": []
+  },
+  "had one": {
+   "final": "hˈædwʌn",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "had any": {
+   "mid": "hˌæd ˌɛni",
+   "final": "hˌæd ˌɛni",
+   "vowel": "hˌæd ˌɛni",
+   "flags": []
+  },
+  "had some": {
+   "mid": "hˌæd sʌm",
+   "final": "hˌæd sʌm",
+   "vowel": "hˌæd sʌm",
+   "flags": []
+  },
+  "do not": {
+   "mid": "duːnˌɑːt",
+   "final": "duːnˈɑːt",
+   "vowel": "duːnˌɑːt",
+   "flags": [
+    "$u2+",
+    "$verbf"
+   ]
+  },
+  "does not": {
+   "mid": "dʌznˌɑːt",
+   "final": "dʌznˈɑːt",
+   "vowel": "dʌznˌɑːt",
+   "flags": [
+    "$u2+",
+    "$verbf"
+   ]
+  },
+  "did not": {
+   "mid": "dɪdnˌɑːt",
+   "final": "dɪdnˈɑːt",
+   "vowel": "dɪdnˌɑːt",
+   "flags": [
+    "$u2+",
+    "$verbf"
+   ]
+  },
+  "that's it": {
+   "mid": "ðætsˈɪt",
+   "final": "ðætsˈɪt",
+   "vowel": "ðætsˈɪt",
+   "flags": []
+  },
+  "i've had": {
+   "mid": "aɪvhˌæd",
+   "final": "aɪvhˈæd",
+   "vowel": "aɪvhˌæd",
+   "flags": [
+    "$u2+"
+   ]
+  },
+  "you've had": {
+   "mid": "juːvhˌæd",
+   "final": "juːvhˈæd",
+   "vowel": "juːvhˌæd",
+   "flags": [
+    "$u2+"
+   ]
+  },
+  "he's had": {
+   "mid": "hiːzhˌæd",
+   "final": "hiːzhˈæd",
+   "vowel": "hiːzhˌæd",
+   "flags": [
+    "$u2+"
+   ]
+  },
+  "she's had": {
+   "mid": "ʃiːzhˌæd",
+   "final": "ʃiːzhˈæd",
+   "vowel": "ʃiːzhˌæd",
+   "flags": [
+    "$u2+"
+   ]
+  },
+  "it's had": {
+   "mid": "ɪtshˌæd",
+   "final": "ɪtshˈæd",
+   "vowel": "ɪtshˌæd",
+   "flags": [
+    "$u2+"
+   ]
+  },
+  "we've had": {
+   "mid": "wiːvhˌæd",
+   "final": "wiːvhˈæd",
+   "vowel": "wiːvhˌæd",
+   "flags": [
+    "$u2+"
+   ]
+  },
+  "they've had": {
+   "mid": "ðeɪvhˌæd",
+   "final": "ðeɪvhˈæd",
+   "vowel": "ðeɪvhˌæd",
+   "flags": [
+    "$u2+"
+   ]
+  },
+  "i am": {
+   "midcap": "aɪɐm",
+   "startcap": "aɪɐm",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "i shall": {
+   "midcap": "aɪʃˌɐl",
+   "startcap": "aɪʃˌɐl",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "it is": {
+   "mid": "ɪɾ ɪz",
+   "final": "ɪɾ ˈɪz",
+   "vowel": "ɪɾ ɪz",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "it was": {
+   "final": "ɪt wˈʌz",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "we shall": {
+   "mid": "wiːʃˌɐl",
+   "final": "wiːʃˈæl",
+   "vowel": "wiːʃˌɐl",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "i had": {
+   "final": "aɪ hˈæd",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "he had": {
+   "final": "hiː hˈæd",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "as is": {
+   "mid": "ˌæzˌɪz",
+   "final": "ˌæzˌɪz",
+   "vowel": "ˌæzˌɪz",
+   "flags": [
+    "$pause"
+   ]
+  },
+  "as it is": {
+   "mid": "ˌæzɪtˌɪz",
+   "final": "ˌæzɪtˈɪz",
+   "vowel": "ˌæzɪtˌɪz",
+   "flags": [
+    "$u+"
+   ]
+  },
+  "do so": {
+   "final": "dˈuː soʊ",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "not have": {
+   "mid": "nˌɑːɾɐv",
+   "final": "nˈɑːthæv",
+   "vowel": "nˌɑːɾɐv",
+   "flags": [
+    "$atend",
+    "$pastf",
+    "$u1"
+   ]
+  },
+  "not have to": {
+   "mid": "nˌɑːthævtə",
+   "final": "nˈɑːthævtʊ",
+   "vowel": "nˌɑːthævtʊ",
+   "flags": [
+    "$pastf",
+    "$strend"
+   ]
+  },
+  "not a": {
+   "mid": "nˌɑːɾə",
+   "final": "nˌɑːɾə",
+   "vowel": "nˌɑːɾə",
+   "r": "nˌɑːɾɚ",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "many of": {
+   "mid": "mˈɛnɪəv",
+   "final": "mˈɛnɪəv",
+   "vowel": "mˈɛnɪəv",
+   "flags": []
+  },
+  "some one": {
+   "mid": "sˈʌmwʌn",
+   "final": "sˈʌmwʌn",
+   "vowel": "sˈʌmwʌn",
+   "flags": []
+  },
+  "this one": {
+   "mid": "ðˈɪswˌʌn",
+   "final": "ðˈɪswˌʌn",
+   "vowel": "ðˈɪswˌʌn",
+   "flags": [
+    "$verbsf"
+   ]
+  },
+  "that a": {
+   "mid": "ðˌæɾə",
+   "final": "ðˌæɾə",
+   "vowel": "ðˌæɾə",
+   "r": "ðˌæɾɚ",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "that it": {
+   "mid": "ðˌɐɾɪt",
+   "final": "ðætˈɪt",
+   "vowel": "ðˌɐɾɪt",
+   "flags": [
+    "$atend",
+    "$verbsf"
+   ]
+  },
+  "that is": {
+   "final": "ðæt ˈɪz",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "that was": {
+   "final": "ðɐt wˈʌz",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "that one": {
+   "mid": "ðˈætwˌʌn",
+   "final": "ðˈætwˌʌn",
+   "vowel": "ðˈætwˌʌn",
+   "flags": []
+  },
+  "that the": {
+   "mid": "ðætðə",
+   "final": "ðætðə",
+   "vowel": "ðætðɪ",
+   "flags": []
+  },
+  "that has been": {
+   "mid": "ðɐthɐzbˌɪn",
+   "final": "ðɐthɐzbˈɪn",
+   "vowel": "ðɐthɐzbˌɪn",
+   "flags": [
+    "$u+"
+   ]
+  },
+  "that's been": {
+   "mid": "ðɐtsbˌɪn",
+   "final": "ðɐtsbˈɪn",
+   "vowel": "ðɐtsbˌɪn",
+   "flags": [
+    "$u+"
+   ]
+  },
+  "there are": {
+   "mid": "ðɛɹˌɑːɹ",
+   "final": "ðɛɹˈɑːɹ",
+   "vowel": "ðɛɹˌɑːɹ",
+   "flags": [
+    "$strend"
+   ]
+  },
+  "there is": {
+   "final": "ðɛɹˈɪz",
+   "flags": [
+    "$atend"
+   ]
+  },
+  "there be": {
+   "mid": "ðɛɹbˈiː",
+   "final": "ðɛɹbˈiː",
+   "vowel": "ðɛɹbˈiː",
+   "flags": []
+  },
+  "there was": {
+   "mid": "ðɛɹwˌʌz",
+   "final": "ðɛɹwˈʌz",
+   "vowel": "ðɛɹwˌʌz",
+   "flags": [
+    "$strend"
+   ]
+  },
+  "there were": {
+   "mid": "ðɛɹwˌɜː",
+   "final": "ðɛɹwˈɜː",
+   "vowel": "ðɛɹwˌɜːɹ",
+   "flags": [
+    "$strend"
+   ]
+  },
+  "than a": {
+   "mid": "ðˌænə",
+   "final": "ðˌænə",
+   "vowel": "ðˌænə",
+   "r": "ðˌænɚ",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "than an": {
+   "mid": "ðˌænən",
+   "final": "ðˌænən",
+   "vowel": "ðˌænən",
+   "flags": [
+    "$nounf"
+   ]
+  },
+  "a la": {
+   "mid": "ˌɑːlæ",
+   "final": "ˌɑːlæ",
+   "vowel": "ˌɑːlæ",
+   "flags": []
+  },
+  "a while": {
+   "mid": "ɐ wˈaɪl",
+   "vowel": "ɐ wˈaɪl",
+   "flags": []
+  },
+  "the while": {
+   "mid": "ðə wˈaɪl",
+   "vowel": "ðə wˈaɪl",
+   "flags": []
+  }
+ },
+ "homographs": {
+  "absent": {
+   "verb": "æbsˈɛnt"
+  },
+  "absently": {
+   "verb": "æbsˈɛntli"
+  },
+  "absentness": {
+   "verb": "æbsˈɛntnəs"
+  },
+  "abstract": {
+   "verb": "ɐbstɹˈækt"
+  },
+  "abuse": {
+   "verb": "ɐbjˈuːz"
+  },
+  "abusedly": {
+   "verb": "ɐbjˈuːzᵻdli"
+  },
+  "advert": {
+   "verb": "ɐdvˈɜːt"
+  },
+  "alternate": {
+   "verb": "ˈɔːltɚnˌeɪt"
+  },
+  "am": {
+   "verb": "ɐm",
+   "noun": "ɐm",
+   "past": "ɐm"
+  },
+  "analyses": {
+   "noun": "ɐnˈæləsˌiːz"
+  },
+  "appropriate": {
+   "verb": "ɐpɹˈoʊpɹɪˌeɪt"
+  },
+  "appropriately": {
+   "verb": "ɐpɹˈoʊpɹɪˌeɪtli"
+  },
+  "appropriateness": {
+   "verb": "ɐpɹˈoʊpɹɪˌeɪtnəs"
+  },
+  "approximate": {
+   "verb": "ɐpɹˈɑːksɪmˌeɪt"
+  },
+  "attribute": {
+   "verb": "ɐtɹˈɪbjuːt"
+  },
+  "bow": {
+   "verb": "bˈaʊ"
+  },
+  "bowhead": {
+   "verb": "bˈaʊhɛd"
+  },
+  "bowheads": {
+   "verb": "bˈaʊhɛdz"
+  },
+  "bowless": {
+   "verb": "bˈaʊləs"
+  },
+  "bowly": {
+   "verb": "bˈaʊli"
+  },
+  "breath": {
+   "verb": "bɹˈiːð"
+  },
+  "buffet": {
+   "noun": "bˈʌfeɪ"
+  },
+  "buffeted": {
+   "noun": "bˈʌfeɪᵻd"
+  },
+  "buffeting": {
+   "noun": "bˈʌfeɪɪŋ"
+  },
+  "buffetings": {
+   "noun": "bˈʌfeɪɪŋz"
+  },
+  "buffets": {
+   "noun": "bˈʌfeɪs"
+  },
+  "close": {
+   "verb": "klˈoʊz"
+  },
+  "cloth": {
+   "verb": "klˈoʊð"
+  },
+  "compound": {
+   "verb": "kɑːmpˈaʊnd"
+  },
+  "concert": {
+   "verb": "kənsˈɜːt"
+  },
+  "conduct": {
+   "verb": "kəndˈʌkt"
+  },
+  "conflict": {
+   "verb": "kənflˈɪkt"
+  },
+  "conscript": {
+   "verb": "kɑːnskɹˈɪpt"
+  },
+  "console": {
+   "verb": "kənsˈoʊl"
+  },
+  "consolement": {
+   "verb": "kənsˈoʊlmənt"
+  },
+  "consort": {
+   "verb": "kənsˈɔːɹt"
+  },
+  "construct": {
+   "verb": "kənstɹˈʌkt"
+  },
+  "content": {
+   "verb": "kəntˈɛnt",
+   "past": "kəntˈɛnt"
+  },
+  "contents": {
+   "past": "kəntˈɛnts"
+  },
+  "contest": {
+   "verb": "kəntˈɛst"
+  },
+  "contract": {
+   "verb": "kəntɹˈækt"
+  },
+  "contrast": {
+   "verb": "kəntɹˈæst"
+  },
+  "converse": {
+   "verb": "kənvˈɜːs"
+  },
+  "convert": {
+   "noun": "kˈɑːnvɜːt"
+  },
+  "converts": {
+   "noun": "kˈɑːnvɜːts"
+  },
+  "convict": {
+   "verb": "kənvˈɪkt"
+  },
+  "coordinate": {
+   "verb": "koʊˈɔːɹdɪnˌeɪt"
+  },
+  "coordinately": {
+   "verb": "koʊˈɔːɹdɪnˌeɪtli"
+  },
+  "defect": {
+   "verb": "dᵻfˈɛkt"
+  },
+  "degenerate": {
+   "noun": "dᵻdʒˈɛnɚɹət"
+  },
+  "degenerates": {
+   "noun": "dᵻdʒˈɛnɚɹəts"
+  },
+  "deliberate": {
+   "verb": "dᵻlˈɪbɚɹˌeɪt"
+  },
+  "deliberately": {
+   "verb": "dᵻlˈɪbɚɹˌeɪtli"
+  },
+  "deliberateness": {
+   "verb": "dᵻlˈɪbɚɹˌeɪtnəs"
+  },
+  "desert": {
+   "verb": "dᵻzˈɜːt"
+  },
+  "digest": {
+   "noun": "dˈaɪdʒɛst"
+  },
+  "digests": {
+   "noun": "dˈaɪdʒɛsts"
+  },
+  "disabuse": {
+   "verb": "dˌɪsɐbjˈuːz"
+  },
+  "disappropriate": {
+   "verb": "dɪsɐpɹˈoʊpɹɪˌeɪt"
+  },
+  "discontents": {
+   "past": "dɪskəntˈɛnts"
+  },
+  "dove": {
+   "verb": "dˈoʊv",
+   "past": "dˈoʊv"
+  },
+  "dovelike": {
+   "verb": "dˈoʊvlaɪk",
+   "past": "dˈoʊvlaɪk"
+  },
+  "doves": {
+   "past": "dˈoʊvz"
+  },
+  "egress": {
+   "verb": "ɪɡɹˈɛs"
+  },
+  "elaborate": {
+   "noun": "ᵻlˈæbɚɹət"
+  },
+  "ennis": {
+   "verb": "əniz",
+   "noun": "əniz",
+   "past": "əniz"
+  },
+  "entrance": {
+   "verb": "ɛntɹˈæns"
+  },
+  "entrancement": {
+   "verb": "ɛntɹˈænsmənt"
+  },
+  "entrancements": {
+   "verb": "ɛntɹˈænsmənts"
+  },
+  "envelope": {
+   "verb": "ɛnvˈɛləp"
+  },
+  "escort": {
+   "verb": "ɛskˈɔːɹt"
+  },
+  "estimate": {
+   "verb": "ˈɛstᵻmˌeɪt"
+  },
+  "exploit": {
+   "verb": "ɛksplˈɔɪt"
+  },
+  "export": {
+   "verb": "ɛkspˈoːɹt"
+  },
+  "extract": {
+   "verb": "ɛkstɹˈækt"
+  },
+  "filtrate": {
+   "verb": "fɪltɹˈeɪt"
+  },
+  "finance": {
+   "verb": "faɪnˈæns"
+  },
+  "fragment": {
+   "verb": "fɹæɡmˈɛnt"
+  },
+  "graduate": {
+   "verb": "ɡɹˈædjuːˌeɪt"
+  },
+  "house": {
+   "verb": "hˈaʊz"
+  },
+  "houseful": {
+   "verb": "hˈaʊzfəl"
+  },
+  "housefuls": {
+   "verb": "hˈaʊzfəlz"
+  },
+  "household": {
+   "verb": "hˈaʊzhoʊld"
+  },
+  "households": {
+   "verb": "hˈaʊzhoʊldz"
+  },
+  "houseless": {
+   "verb": "hˈaʊzləs"
+  },
+  "houselessness": {
+   "verb": "hˈaʊzləsnəs"
+  },
+  "housework": {
+   "verb": "hˈaʊzwɜːk"
+  },
+  "hydrate": {
+   "verb": "haɪdɹˈeɪt"
+  },
+  "implant": {
+   "verb": "ɪmplˈænt"
+  },
+  "incense": {
+   "verb": "ɪnsˈɛns"
+  },
+  "increase": {
+   "verb": "ɪŋkɹˈiːs"
+  },
+  "inseparate": {
+   "verb": "ɪnsˈɛpɚɹˌeɪt"
+  },
+  "insert": {
+   "verb": "ɪnsˈɜːt"
+  },
+  "internment": {
+   "noun": "ˈɪntɜːnmənt"
+  },
+  "internments": {
+   "noun": "ˈɪntɜːnmənts"
+  },
+  "internship": {
+   "noun": "ˈɪntɜːnʃˌɪp"
+  },
+  "internships": {
+   "noun": "ˈɪntɜːnʃˌɪps"
+  },
+  "interrupt": {
+   "verb": "ˌɪntɚɹˈʌpt"
+  },
+  "interwind": {
+   "verb": "ˌɪntɚwˈaɪnd"
+  },
+  "inwind": {
+   "verb": "ɪnwˈaɪnd"
+  },
+  "lactate": {
+   "verb": "læktˈeɪt"
+  },
+  "learned": {
+   "noun": "lˈɜːnᵻd"
+  },
+  "learnedness": {
+   "noun": "lˈɜːnᵻdnəs"
+  },
+  "live": {
+   "verb": "lˈɪv"
+  },
+  "liveness": {
+   "verb": "lˈɪvnəs"
+  },
+  "mandate": {
+   "verb": "mændˈeɪt"
+  },
+  "misappropriate": {
+   "verb": "mɪsɐpɹˈoʊpɹɪˌeɪt"
+  },
+  "misconduct": {
+   "verb": "mɪskəndˈʌkt"
+  },
+  "misestimate": {
+   "verb": "mɪsˈɛstᵻmˌeɪt"
+  },
+  "misuse": {
+   "verb": "mɪsjˈuːz"
+  },
+  "moderate": {
+   "verb": "mˈɑːdɚɹˌeɪt"
+  },
+  "moderately": {
+   "verb": "mˈɑːdɚɹˌeɪtli"
+  },
+  "object": {
+   "verb": "ɑːbdʒˈɛkt"
+  },
+  "overestimate": {
+   "verb": "ˌoʊvɚɹˈɛstᵻmˌeɪt"
+  },
+  "overlearned": {
+   "noun": "ˌoʊvɚlˈɜːnᵻd"
+  },
+  "overlive": {
+   "verb": "ˌoʊvɚlˈɪv"
+  },
+  "overuse": {
+   "verb": "ˌoʊvɚjˈuːz"
+  },
+  "overwind": {
+   "verb": "ˌoʊvɚwˈaɪnd"
+  },
+  "perfect": {
+   "verb": "pɚfˈɛkt"
+  },
+  "permit": {
+   "verb": "pɚmˈɪt"
+  },
+  "pervert": {
+   "noun": "pˈɜːvɚt"
+  },
+  "pervertedly": {
+   "noun": "pˈɜːvɚɾᵻdli"
+  },
+  "perverts": {
+   "noun": "pˈɜːvɚts"
+  },
+  "predigest": {
+   "noun": "pɹiːdˈaɪdʒɛst"
+  },
+  "predigests": {
+   "noun": "pɹiːdˈaɪdʒɛsts"
+  },
+  "present": {
+   "verb": "pɹɪzˈɛnt"
+  },
+  "produce": {
+   "noun": "pɹˈɑːduːs"
+  },
+  "progress": {
+   "verb": "pɹəɡɹˈɛs"
+  },
+  "project": {
+   "verb": "pɹədʒˈɛkt"
+  },
+  "prostrate": {
+   "verb": "pɹɑːstɹˈeɪt"
+  },
+  "protest": {
+   "verb": "pɹətˈɛst"
+  },
+  "read": {
+   "past": "ɹˈɛd"
+  },
+  "reappropriate": {
+   "verb": "ɹˌiːɐpɹˈoʊpɹɪˌeɪt"
+  },
+  "rebel": {
+   "verb": "ɹᵻbˈɛl"
+  },
+  "recall": {
+   "verb": "ɹᵻkˈɔːl"
+  },
+  "reconduct": {
+   "verb": "ɹˌiːkəndˈʌkt"
+  },
+  "reconvert": {
+   "noun": "ɹˌiːkˈɑːnvɜːt"
+  },
+  "reconverts": {
+   "noun": "ɹˌiːkˈɑːnvɜːts"
+  },
+  "reconvict": {
+   "verb": "ɹˌiːkənvˈɪkt"
+  },
+  "record": {
+   "verb": "ɹᵻkˈoːɹd"
+  },
+  "reentrance": {
+   "verb": "ɹiːɛntɹˈæns"
+  },
+  "refund": {
+   "noun": "ɹˈiːfʌnd"
+  },
+  "refunds": {
+   "noun": "ɹˈiːfʌndz"
+  },
+  "refuse": {
+   "noun": "ɹˈɛfjuːs"
+  },
+  "reimplant": {
+   "verb": "ɹˌiːɪmplˈænt"
+  },
+  "remit": {
+   "verb": "ɹiːmˈɪt"
+  },
+  "remitter": {
+   "verb": "ɹiːmˈɪɾɚ"
+  },
+  "resent": {
+   "past": "ɹiːsˈɛnt"
+  },
+  "resented": {
+   "past": "ɹiːsˈɛntᵻd"
+  },
+  "resentful": {
+   "past": "ɹiːsˈɛntfəl"
+  },
+  "resentfulness": {
+   "past": "ɹiːsˈɛntfəlnəs"
+  },
+  "resenting": {
+   "past": "ɹiːsˈɛntɪŋ"
+  },
+  "resentment": {
+   "past": "ɹiːsˈɛntmənt"
+  },
+  "resentments": {
+   "past": "ɹiːsˈɛntmənts"
+  },
+  "resents": {
+   "past": "ɹiːsˈɛnts"
+  },
+  "separate": {
+   "verb": "sˈɛpɚɹˌeɪt"
+  },
+  "separately": {
+   "verb": "sˈɛpɚɹˌeɪtli"
+  },
+  "separateness": {
+   "verb": "sˈɛpɚɹˌeɪtnəs"
+  },
+  "slaver": {
+   "verb": "slˈævɚ"
+  },
+  "slough": {
+   "verb": "slˈʌf"
+  },
+  "some": {
+   "past": "sʌm"
+  },
+  "subordinate": {
+   "verb": "sʌbˈoːɹdᵻnˌeɪt"
+  },
+  "survey": {
+   "verb": "sɚvˈeɪ"
+  },
+  "suspect": {
+   "verb": "səspˈɛkt"
+  },
+  "tear": {
+   "verb": "tˈɛɹ"
+  },
+  "tearful": {
+   "verb": "tˈɛɹfəl"
+  },
+  "tearfulness": {
+   "verb": "tˈɛɹfəlnəs"
+  },
+  "tearless": {
+   "verb": "tˈɛɹləs"
+  },
+  "torment": {
+   "verb": "toːɹmˈɛnt"
+  },
+  "tormentful": {
+   "verb": "toːɹmˈɛntfəl"
+  },
+  "transf": {
+   "verb": "tɹɐnsf",
+   "noun": "tɹɐnsf",
+   "past": "tɹɐnsf"
+  },
+  "transfer": {
+   "verb": "tɹænsfˈɜː"
+  },
+  "transl": {
+   "verb": "tɹɐnsəl",
+   "noun": "tɹɐnsəl",
+   "past": "tɹɐnsəl"
+  },
+  "transp": {
+   "verb": "tɹɐnsp",
+   "noun": "tɹɐnsp",
+   "past": "tɹɐnsp"
+  },
+  "transport": {
+   "verb": "tɹænspˈoːɹt"
+  },
+  "triplicate": {
+   "verb": "tɹˈɪplᵻkˌeɪt"
+  },
+  "unappropriate": {
+   "verb": "ʌnɐpɹˈoʊpɹɪˌeɪt"
+  },
+  "unbow": {
+   "verb": "ʌnbˈaʊ"
+  },
+  "unconvert": {
+   "noun": "ʌŋkˈɑːnvɜːt"
+  },
+  "undeliberate": {
+   "verb": "ˌʌndᵻlˈɪbɚɹˌeɪt"
+  },
+  "undercloth": {
+   "verb": "ˌʌndɚklˈoʊð"
+  },
+  "underestimate": {
+   "verb": "ˌʌndɚɹˈɛstᵻmˌeɪt"
+  },
+  "undergraduate": {
+   "verb": "ˌʌndɚɡɹˈædjuːˌeɪt"
+  },
+  "underground": {
+   "noun": "ˈʌndɚɡɹˌaʊnd"
+  },
+  "undergrounds": {
+   "noun": "ˈʌndɚɡɹˌaʊndz"
+  },
+  "unlearned": {
+   "noun": "ʌnlˈɜːnᵻd"
+  },
+  "unlive": {
+   "verb": "ʌnlˈɪv"
+  },
+  "unn": {
+   "verb": "ənn",
+   "noun": "ənn",
+   "past": "ənn"
+  },
+  "unresented": {
+   "past": "ˌʌnɹiːsˈɛntᵻd"
+  },
+  "unseparate": {
+   "verb": "ʌnsˈɛpɚɹˌeɪt"
+  },
+  "unuse": {
+   "verb": "ʌnjˈuːz"
+  },
+  "upbring": {
+   "verb": "əpbɹɪŋ",
+   "noun": "əpbɹɪŋ",
+   "past": "əpbɹɪŋ"
+  },
+  "upbringing": {
+   "verb": "əpbɹɪŋɪŋ",
+   "noun": "əpbɹɪŋɪŋ",
+   "past": "əpbɹɪŋɪŋ"
+  },
+  "update": {
+   "verb": "ʌpdˈeɪt"
+  },
+  "upgrade": {
+   "verb": "ʌpɡɹˈeɪd"
+  },
+  "upset": {
+   "noun": "ˈʌpsɛt"
+  },
+  "upsetment": {
+   "noun": "ˈʌpsɛtmənt"
+  },
+  "upsets": {
+   "noun": "ˈʌpsɛts"
+  },
+  "upsetters": {
+   "noun": "ˈʌpsɛɾɚz"
+  },
+  "use": {
+   "verb": "jˈuːz"
+  },
+  "usehold": {
+   "verb": "jˈuːzhoʊld"
+  },
+  "useless": {
+   "verb": "jˈuːzləs"
+  },
+  "uselessly": {
+   "verb": "jˈuːzləsli"
+  },
+  "uselessness": {
+   "verb": "jˈuːzləsnəs"
+  },
+  "while": {
+   "noun": "wˈaɪl"
+  },
+  "wind": {
+   "verb": "wˈaɪnd"
+  },
+  "windless": {
+   "verb": "wˈaɪndləs"
+  },
+  "windlike": {
+   "verb": "wˈaɪndlaɪk"
+  },
+  "wound": {
+   "past": "wˈaʊnd"
+  }
+ },
+ "flag_sets": {
+  "verbf": [
+   "absolutely",
+   "already",
+   "alternately",
+   "amply",
+   "busily",
+   "can",
+   "can't",
+   "closely",
+   "could",
+   "couldn't",
+   "did",
+   "didn't",
+   "do",
+   "does",
+   "doesn't",
+   "doesnt",
+   "don't",
+   "he'll",
+   "i",
+   "i'll",
+   "just",
+   "may",
+   "might",
+   "must",
+   "mustn't",
+   "never",
+   "nobly",
+   "now",
+   "preferably",
+   "presently",
+   "severely",
+   "shall",
+   "shalln't",
+   "shalt",
+   "shan't",
+   "she'll",
+   "should",
+   "shouldn't",
+   "shrilly",
+   "singly",
+   "soon",
+   "still",
+   "subtly",
+   "then",
+   "there'll",
+   "they",
+   "they'll",
+   "to",
+   "truely",
+   "we",
+   "we'll",
+   "which",
+   "who",
+   "will",
+   "won't",
+   "would",
+   "you",
+   "you'll"
+  ],
+  "verbsf": [
+   "he",
+   "it",
+   "she",
+   "that",
+   "this"
+  ],
+  "nounf": [
+   "a",
+   "an",
+   "another",
+   "any",
+   "at",
+   "every",
+   "her",
+   "his",
+   "in",
+   "its",
+   "many",
+   "my",
+   "one",
+   "our",
+   "some",
+   "that",
+   "the",
+   "their",
+   "these",
+   "this",
+   "those",
+   "transports",
+   "your"
+  ],
+  "pastf": [
+   "are",
+   "aren't",
+   "be",
+   "been",
+   "being",
+   "get",
+   "getting",
+   "got",
+   "had",
+   "hadn't",
+   "has",
+   "hasn't",
+   "hath",
+   "have",
+   "haven't",
+   "havent",
+   "having",
+   "he's",
+   "i've",
+   "is",
+   "isn't",
+   "she's",
+   "they've",
+   "was",
+   "wasn't",
+   "wast",
+   "we'd",
+   "we've",
+   "were",
+   "weren't",
+   "you've"
+  ],
+  "verbextend": [
+   "not",
+   "only"
+  ],
+  "pause": [
+   "although",
+   "and",
+   "because",
+   "but",
+   "despite",
+   "furthermore",
+   "ie",
+   "if",
+   "instead",
+   "nor",
+   "once",
+   "or",
+   "regardless",
+   "since",
+   "thus",
+   "whatever",
+   "whenever",
+   "where",
+   "which",
+   "whilst",
+   "who",
+   "whose"
+  ],
+  "brk": [
+   "while",
+   "within"
+  ],
+  "allcaps": [
+   "ado",
+   "all",
+   "c",
+   "dr",
+   "eg",
+   "gi",
+   "has",
+   "it",
+   "la",
+   "mit",
+   "no",
+   "not",
+   "now",
+   "to",
+   "un",
+   "us",
+   "usd"
+  ],
+  "abbrev": [
+   "aaa",
+   "abc",
+   "ac",
+   "acsi",
+   "adf",
+   "adhd",
+   "ado",
+   "adsl",
+   "ae",
+   "aes",
+   "afk",
+   "agm",
+   "agpl",
+   "ai",
+   "aitb",
+   "aj",
+   "amd",
+   "aol",
+   "aph",
+   "api",
+   "asap",
+   "aspca",
+   "astm",
+   "ati",
+   "atk",
+   "atm",
+   "atsc",
+   "atv",
+   "avc",
+   "avg",
+   "bsod",
+   "byod",
+   "c",
+   "ceo",
+   "ces",
+   "cet",
+   "cia",
+   "cio",
+   "ctia",
+   "diy",
+   "dmca",
+   "doj",
+   "dr",
+   "echr",
+   "edst",
+   "edt",
+   "eff",
+   "efi",
+   "eg",
+   "ept",
+   "espn",
+   "esrb",
+   "est",
+   "eu",
+   "evga",
+   "ewmh",
+   "exe",
+   "ftaa",
+   "fyi",
+   "gi",
+   "hiv",
+   "ibm",
+   "ibmtts",
+   "icmp",
+   "ieee",
+   "ietf",
+   "iidc",
+   "iis",
+   "iiuc",
+   "imo",
+   "inlb",
+   "ios",
+   "ip",
+   "ipa",
+   "ipcc",
+   "iptv",
+   "irc",
+   "irs",
+   "isbn",
+   "isp",
+   "it",
+   "itx",
+   "la",
+   "lapd",
+   "lbs",
+   "lotr",
+   "mit",
+   "mmorpg",
+   "motd",
+   "mpaa",
+   "msaa",
+   "mya",
+   "ncis",
+   "ntia",
+   "ny",
+   "nypd",
+   "nypsd",
+   "nyse",
+   "nyt",
+   "ocd",
+   "ocr",
+   "odf",
+   "oecd",
+   "oic",
+   "ok",
+   "olpc",
+   "omg",
+   "os",
+   "osx",
+   "otoh",
+   "otr",
+   "pcie",
+   "pcmcia",
+   "psa",
+   "psu",
+   "riaa",
+   "rnib",
+   "rtos",
+   "sae",
+   "sla",
+   "ssid",
+   "ssip",
+   "suv",
+   "ucl",
+   "ucla",
+   "ucs",
+   "udp",
+   "ueb",
+   "uefi",
+   "ufo",
+   "ui",
+   "uia",
+   "uk",
+   "umts",
+   "un",
+   "unhcr",
+   "upc",
+   "upnp",
+   "url",
+   "us",
+   "usa",
+   "usaf",
+   "usb",
+   "usd",
+   "usda",
+   "ussr",
+   "utc",
+   "utf",
+   "uucp",
+   "uuid",
+   "uv",
+   "vi",
+   "wuxga",
+   "xl",
+   "xxx",
+   "xy",
+   "yd"
+  ]
+ },
+ "letters": {
+  "a": "ˈeɪ",
+  "b": "bˈiː",
+  "c": "sˈiː",
+  "d": "dˈiː",
+  "e": "ˈiː",
+  "f": "ˈɛf",
+  "g": "dʒˈiː",
+  "h": "ˈeɪtʃ",
+  "i": "ˈaɪ",
+  "j": "dʒˈeɪ",
+  "k": "kˈeɪ",
+  "l": "ˈɛl",
+  "m": "ˈɛm",
+  "n": "ˈɛn",
+  "o": "ˈoʊ",
+  "p": "pˈiː",
+  "q": "kjˈuː",
+  "r": "ˈɑːɹ",
+  "s": "ˈɛs",
+  "t": "tˈiː",
+  "u": "jˈuː",
+  "v": "vˈiː",
+  "w": "dˈʌbəljˌuː",
+  "x": "ˈɛks",
+  "y": "wˈaɪ",
+  "z": "zˈiː"
+ }
+}

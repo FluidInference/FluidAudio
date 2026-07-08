@@ -353,11 +353,12 @@ public struct TTS {
         }
     }
 
-    /// Run LuxTTS zero-shot voice cloning. Requires `--prompt-audio` and
-    /// `--prompt-text`. Phase 1 ships no text→espeak-IPA frontend, so
-    /// `--phonemes` is required: both the positional text and
-    /// `--prompt-text` are interpreted as espeak IPA (en-us) phoneme
-    /// strings from the `tokens.txt` token set.
+    /// Run LuxTTS zero-shot voice cloning. Requires `--prompt-audio`.
+    /// Text mode (default): the positional text and `--prompt-text` are
+    /// raw English, phonemized in-process (`LuxTtsG2p`). If `--prompt-text`
+    /// is omitted the prompt clip is transcribed with Parakeet ASR (models
+    /// download on first use). With `--phonemes`, both the text and
+    /// `--prompt-text` are espeak IPA (en-us) from the `tokens.txt` set.
     private static func runLuxTts(
         text: String, output: String,
         promptAudioPath: String?, promptText: String?,
@@ -369,17 +370,10 @@ public struct TTS {
             logger.error("luxtts backend requires --prompt-audio <clip.wav>")
             exit(1)
         }
-        guard let promptText else {
+        if treatAsPhonemes && promptText == nil {
             logger.error(
-                "luxtts backend requires --prompt-text (the prompt clip's transcript)")
-            exit(1)
-        }
-        guard treatAsPhonemes else {
-            logger.error(
-                "luxtts phase 1 has no text→espeak-IPA frontend: pass --phonemes and "
-                    + "provide espeak IPA (en-us) for both the text and --prompt-text "
-                    + "(e.g. via `espeak-ng`/piper-phonemize against the LuxTTS tokens.txt "
-                    + "set). Raw-text G2P is phase 2.")
+                "luxtts --phonemes requires --prompt-text (espeak IPA of the prompt "
+                    + "clip); ASR prompt transcription is only available in text mode")
             exit(1)
         }
         do {
@@ -395,13 +389,30 @@ public struct TTS {
             logger.info(
                 "LuxTTS speed=\(String(format: "%.2f", speed)) seed=\(seed)")
 
+            let resolvedPromptText: String
+            if let promptText {
+                resolvedPromptText = promptText
+            } else {
+                resolvedPromptText = try await transcribeLuxTtsPrompt(promptURL)
+            }
+
             let tSynth0 = Date()
-            let result = try await manager.synthesize(
-                phonemes: text,
-                promptAudio: promptURL,
-                promptPhonemes: promptText,
-                speed: speed,
-                seed: seed)
+            let result: LuxTtsSynthesisResult
+            if treatAsPhonemes {
+                result = try await manager.synthesize(
+                    phonemes: text,
+                    promptAudio: promptURL,
+                    promptPhonemes: resolvedPromptText,
+                    speed: speed,
+                    seed: seed)
+            } else {
+                result = try await manager.synthesize(
+                    text: text,
+                    promptAudio: promptURL,
+                    promptText: resolvedPromptText,
+                    speed: speed,
+                    seed: seed)
+            }
             let tSynth1 = Date()
 
             let outURL = resolveInputURL(output)
@@ -472,6 +483,27 @@ public struct TTS {
             print("LuxTTS failed: \(error)")
             exit(1)
         }
+    }
+
+    /// Transcribe the LuxTTS prompt clip with Parakeet ASR (only invoked
+    /// when `--prompt-text` is omitted, so TTS-only users never pay the
+    /// ASR model download).
+    private static func transcribeLuxTtsPrompt(_ promptURL: URL) async throws -> String {
+        logger.info("--prompt-text not provided; transcribing prompt with Parakeet ASR…")
+        let models = try await AsrModels.downloadAndLoad()
+        let asrManager = AsrManager(config: .default)
+        try await asrManager.loadModels(models)
+        var decoderState = TdtDecoderState.make(
+            decoderLayers: await asrManager.decoderLayerCount)
+        let result = try await asrManager.transcribe(promptURL, decoderState: &decoderState)
+        let transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !transcript.isEmpty else {
+            throw LuxTtsError.invalidPromptAudio(
+                "ASR produced an empty transcript for \(promptURL.path); "
+                    + "pass --prompt-text explicitly")
+        }
+        logger.info("Prompt transcript: \(transcript)")
+        return transcript
     }
 
     /// Run PocketTTS in deterministic-seed mode through the session API,
@@ -1086,9 +1118,11 @@ public struct TTS {
                                      --cpu-only                 disable Neural Engine
                                    LuxTTS (zero-shot voice cloning, 48 kHz):
                                      --prompt-audio <clip.wav>  required — voice prompt (<= 5 s used)
-                                     --prompt-text "…"          required — prompt transcript as espeak IPA
-                                     --phonemes                 required in phase 1: text and --prompt-text
-                                                                are espeak IPA (en-us) phoneme strings
+                                     --prompt-text "…"          prompt transcript (English text); if
+                                                                omitted, the clip is transcribed with
+                                                                Parakeet ASR (downloads ASR models)
+                                     --phonemes                 bypass the built-in G2P: text and
+                                                                --prompt-text are espeak IPA (en-us)
                                      --speed 1.0                speech-rate divisor (default 1.0)
                                      --seed N                   flow-matching noise seed (default 42)
               --lexicon, -l        Custom pronunciation lexicon file (KokoroAne --variant zh only):

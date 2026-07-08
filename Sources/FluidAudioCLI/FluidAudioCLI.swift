@@ -48,6 +48,8 @@ struct FluidAudioCLI {
             await TTS.run(arguments: Array(arguments.dropFirst(2)))
         case "tts-asr-verify":
             await TTSAsrVerifyCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "luxtts-g2p-dump":
+            await LuxTtsG2pDumpCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "tts-benchmark":
             await TtsBenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "minimax-corpus":

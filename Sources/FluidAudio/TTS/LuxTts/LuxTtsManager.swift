@@ -10,23 +10,19 @@ import Foundation
 ///   2. `LuxTtsTokenizer`    — espeak-IPA phoneme string → token ids.
 ///   3. `LuxTtsSynthesizer`  — flow-matching host loop (see its docs).
 ///
-/// Phase 1 input contract: **pre-phonemized espeak IPA** (`en-us`, the token
-/// set in `tokens.txt`). There is no in-process text→IPA frontend yet:
-/// the model was trained on espeak phonemes, and the KokoroAne/StyleTTS2
-/// Misaki frontend output does not map onto them cleanly (Misaki drops
-/// espeak length marks `ː`, uses `ʤ`/`ʧ` ligatures and different weak
-/// forms — measured 78 vs 85 tokens on the same sentence), which would
-/// shift both pronunciation and the ratio-based duration estimate.
-/// `synthesize(text:...)` therefore throws `LuxTtsError.g2pUnavailable`
-/// until the phase-2 espeak-parity G2P lands.
+/// Text input runs through `LuxTtsG2p` (espeak-parity English G2P from a
+/// bundled lexicon — the model was trained on espeak `en-us` phonemes via
+/// EmiliaTokenizer, and Misaki-style frontends do not map onto that token
+/// set). Pre-phonemized espeak IPA is still accepted via
+/// `synthesize(phonemes:...)`.
 ///
 /// Usage:
 /// ```swift
 /// let manager = try await LuxTtsManager.downloadAndCreate()
 /// let result = try await manager.synthesize(
-///     phonemes: "ðə kwˈɪk bɹˈaʊn fˈɑːks...",
+///     text: "The quick brown fox jumps over the lazy dog.",
 ///     promptAudio: promptWavURL,
-///     promptPhonemes: "kwˈɪk bɹˈaʊn fˈɑːks...")
+///     promptText: "The transcript of the prompt clip.")
 /// // result.samples is 48 kHz mono Float32 PCM.
 /// ```
 public actor LuxTtsManager {
@@ -39,6 +35,7 @@ public actor LuxTtsManager {
 
     private var store: LuxTtsModelStore?
     private var synthesizer: LuxTtsSynthesizer?
+    private var g2p: LuxTtsG2p?
 
     /// - Parameters:
     ///   - directory: Model cache root override (default: shared TTS cache).
@@ -91,9 +88,12 @@ public actor LuxTtsManager {
 
     // MARK: - Synthesis
 
-    /// Synthesize from raw text. **Phase 1: always throws
-    /// `LuxTtsError.g2pUnavailable`** — see the type-level discussion.
-    /// Use `synthesize(phonemes:promptAudio:promptPhonemes:...)`.
+    /// Synthesize from raw English text (espeak-parity G2P, see `LuxTtsG2p`).
+    ///
+    /// - Parameters:
+    ///   - text: English text to speak.
+    ///   - promptAudio: Prompt clip (see `synthesize(phonemes:...)`).
+    ///   - promptText: Transcript of the prompt clip (raw text).
     public func synthesize(
         text: String,
         promptAudio: URL,
@@ -101,8 +101,22 @@ public actor LuxTtsManager {
         speed: Float = LuxTtsConstants.defaultSpeed,
         seed: UInt64 = LuxTtsConstants.defaultSeed
     ) async throws -> LuxTtsSynthesisResult {
-        _ = (text, promptAudio, promptText, speed, seed)
-        throw LuxTtsError.g2pUnavailable
+        let g2p = try englishG2p()
+        return try await synthesize(
+            phonemes: g2p.phonemize(text: text),
+            promptAudio: promptAudio,
+            promptPhonemes: g2p.phonemize(text: promptText),
+            speed: speed,
+            seed: seed)
+    }
+
+    /// The bundled espeak-parity English G2P (loaded lazily; ~4 MB of
+    /// lexicon tables, no network access).
+    public func englishG2p() throws -> LuxTtsG2p {
+        if let g2p { return g2p }
+        let g2p = try LuxTtsG2p()
+        self.g2p = g2p
+        return g2p
     }
 
     /// Synthesize from espeak-IPA phoneme strings (the `tokens.txt` set;

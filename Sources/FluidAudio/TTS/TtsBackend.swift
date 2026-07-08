@@ -32,8 +32,8 @@ public enum TtsBackend: Sendable {
     /// (`TextEncoder → FmDecoder ×4 anchor-Euler steps → fixed-shape Vocos
     /// vocoder`), 48 kHz mono output.
     ///
-    /// > Note: Phase 1 has no text frontend — input must be pre-phonemized
-    /// > espeak IPA (`LuxTtsManager.synthesize(phonemes:...)`); raw-text
-    /// > `synthesize(text:...)` throws `LuxTtsError.g2pUnavailable`.
+    /// English text input runs through the bundled espeak-parity G2P
+    /// (`LuxTtsG2p`); pre-phonemized espeak IPA is accepted via
+    /// `LuxTtsManager.synthesize(phonemes:...)`.
     case luxtts
 }
