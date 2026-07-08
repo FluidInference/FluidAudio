@@ -29,8 +29,15 @@ public enum LuxTtsSolver {
     /// `prepare_avg_tokens_durations` + `get_tokens_index`: every token gets
     /// `featuresLength / tokensCount` frames and the remainder frames map to
     /// index `tokensCount` — the appended pad-slot embedding row.
-    public static func tokensIndex(tokensCount: Int, featuresLength: Int) -> [Int] {
+    public static func tokensIndex(tokensCount: Int, featuresLength: Int) throws -> [Int] {
         let avg = featuresLength / tokensCount
+        // avg < 1 collapses every real token to zero frames: the whole
+        // sequence maps to the pad slot and synthesis is silent. Fail loudly
+        // instead of emitting garbage.
+        guard avg >= 1 else {
+            throw LuxTtsError.degenerateDuration(
+                featuresLength: featuresLength, tokensCount: tokensCount)
+        }
         var index = [Int](repeating: tokensCount, count: featuresLength)
         var frame = 0
         for token in 0..<tokensCount {

@@ -37,7 +37,7 @@ final class LuxTtsSolverTests: XCTestCase {
         let fixtures = try LuxTtsFixtures.load()
         for text in fixtures.texts {
             let expansion = text.expansion
-            let index = LuxTtsSolver.tokensIndex(
+            let index = try LuxTtsSolver.tokensIndex(
                 tokensCount: expansion.tokensLen,
                 featuresLength: expansion.featuresLen)
             XCTAssertEqual(index.count, expansion.tokensIndexLen)
@@ -45,6 +45,25 @@ final class LuxTtsSolverTests: XCTestCase {
             // Remainder frames must point at the appended pad-slot row.
             XCTAssertEqual(index.last, expansion.tokensLen)
         }
+    }
+
+    func testTokensIndexThrowsOnDegenerateDuration() {
+        // featuresLength < tokensCount ⇒ avg < 1 ⇒ every real token gets zero
+        // frames and the whole sequence collapses to the pad slot. Must throw
+        // rather than silently return an all-pad (silent) index.
+        XCTAssertThrowsError(
+            try LuxTtsSolver.tokensIndex(tokensCount: 10, featuresLength: 5)
+        ) { error in
+            guard case LuxTtsError.degenerateDuration(let fl, let tc) = error else {
+                XCTFail("expected degenerateDuration, got \(error)")
+                return
+            }
+            XCTAssertEqual(fl, 5)
+            XCTAssertEqual(tc, 10)
+        }
+        // Boundary: avg == 1 (featuresLength == tokensCount) must NOT throw.
+        XCTAssertNoThrow(
+            try LuxTtsSolver.tokensIndex(tokensCount: 4, featuresLength: 4))
     }
 
     func testAnchorEulerMiniTrajectoryMatchesFixture() throws {

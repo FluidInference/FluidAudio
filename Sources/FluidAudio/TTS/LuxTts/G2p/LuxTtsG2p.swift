@@ -178,7 +178,7 @@ public struct LuxTtsG2p: Sendable {
         let start: Int  // scalar offset
         let end: Int
         var isWordish: Bool {
-            let c = text.unicodeScalars.first!
+            guard let c = text.unicodeScalars.first else { return false }
             return CharacterSet.letters.contains(c) || CharacterSet.decimalDigits.contains(c)
         }
     }

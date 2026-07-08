@@ -101,6 +101,9 @@ public actor LuxTtsManager {
         speed: Float = LuxTtsConstants.defaultSpeed,
         seed: UInt64 = LuxTtsConstants.defaultSeed
     ) async throws -> LuxTtsSynthesisResult {
+        // Fail fast before the (potentially expensive) G2P lexicon load and
+        // phonemization; the phonemes path guards on the same store below.
+        guard store != nil else { throw LuxTtsError.notInitialized }
         let g2p = try englishG2p()
         return try await synthesize(
             phonemes: g2p.phonemize(text: text),

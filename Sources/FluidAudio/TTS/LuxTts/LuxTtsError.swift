@@ -9,6 +9,7 @@ public enum LuxTtsError: Error, LocalizedError {
     case tokenizerFailed(String)
     case invalidPromptAudio(String)
     case inputTooLong(String)
+    case degenerateDuration(featuresLength: Int, tokensCount: Int)
     case inferenceFailed(stage: String, underlying: String)
 
     public var errorDescription: String? {
@@ -27,6 +28,11 @@ public enum LuxTtsError: Error, LocalizedError {
             return "LuxTTS prompt audio invalid: \(detail)"
         case .inputTooLong(let detail):
             return "LuxTTS input exceeds the fixed CoreML shape bucket: \(detail)"
+        case .degenerateDuration(let featuresLength, let tokensCount):
+            return
+                "LuxTTS duration estimate is degenerate: features length \(featuresLength) < "
+                + "token count \(tokensCount) yields < 1 frame per token, which would collapse "
+                + "every frame onto the pad slot (prompt too short or too many tokens)"
         case .inferenceFailed(let stage, let underlying):
             return "LuxTTS inference failed at \(stage): \(underlying)"
         }

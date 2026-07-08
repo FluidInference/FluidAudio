@@ -380,21 +380,31 @@ public struct TTS {
             let tStart = Date()
             let manager = LuxTtsManager()
 
-            let tLoad0 = Date()
-            try await manager.initialize()
-            let tLoad1 = Date()
-
             let promptURL = resolveInputURL(promptAudioPath)
             logger.info("LuxTTS prompt audio: \(promptURL.path)")
             logger.info(
                 "LuxTTS speed=\(String(format: "%.2f", speed)) seed=\(seed)")
 
+            // Prompt transcription (ASR) is independent of the TTS models and
+            // only needs the prompt URL, so resolve it before loading the
+            // synthesis stages. On failure, point the user at --prompt-text so
+            // they can skip ASR entirely.
             let resolvedPromptText: String
             if let promptText {
                 resolvedPromptText = promptText
             } else {
-                resolvedPromptText = try await transcribeLuxTtsPrompt(promptURL)
+                do {
+                    resolvedPromptText = try await transcribeLuxTtsPrompt(promptURL)
+                } catch {
+                    logger.error(
+                        "Prompt transcription failed; pass --prompt-text to skip ASR: \(error)")
+                    throw error
+                }
             }
+
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
 
             let tSynth0 = Date()
             let result: LuxTtsSynthesisResult

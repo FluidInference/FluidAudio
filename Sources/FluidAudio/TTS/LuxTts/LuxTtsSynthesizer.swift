@@ -33,10 +33,14 @@ public struct LuxTtsSynthesisResult: Sendable {
 ///      samples and clipped to [-1, 1].
 ///   6. If the prompt RMS was below `targetRms`, scale the waveform back
 ///      down by `promptRms / targetRms` (upstream `rms_norm` contract).
-struct LuxTtsSynthesizer {
+actor LuxTtsSynthesizer {
 
     private let logger = AppLogger(category: "LuxTtsSynthesizer")
     private let store: LuxTtsModelStore
+    /// Call-independent (precomputed Hann window, mel filterbank, DFT setup),
+    /// so it is built once and reused across every synthesis call. Held on the
+    /// actor (a non-Sendable class, mirroring `StyleTTS2Synthesizer`).
+    private let extractor = LuxTtsMelExtractor()
 
     init(store: LuxTtsModelStore) {
         self.store = store
@@ -83,7 +87,6 @@ struct LuxTtsSynthesizer {
             vDSP_vsmul(prompt, 1, &gain, &prompt, 1, vDSP_Length(prompt.count))
         }
 
-        let extractor = LuxTtsMelExtractor()
         let promptMel = extractor.extract(audio: prompt)  // [T][100], unscaled
         let promptFrames = promptMel.count
         guard promptFrames > 0 else {
@@ -150,12 +153,11 @@ struct LuxTtsSynthesizer {
             stage: "TextEncoder")
 
         // --- Stage 2: expansion + conditions (fixed 1 × 1024 × 100) ---
-        let frameCapacity = maxFrames * featDim
         let textCondition = try makeArray(shape: [1, maxFrames, featDim], dataType: .float32)
         let speechCondition = try makeArray(shape: [1, maxFrames, featDim], dataType: .float32)
         let frameMask = try makeArray(shape: [1, maxFrames], dataType: .float32)
 
-        let tokensIndex = LuxTtsSolver.tokensIndex(
+        let tokensIndex = try LuxTtsSolver.tokensIndex(
             tokensCount: tokenCount, featuresLength: featuresLength)
         textCondition.withUnsafeMutableBufferPointer(ofType: Float.self) { out, _ in
             for frame in 0..<featuresLength {
@@ -192,6 +194,8 @@ struct LuxTtsSynthesizer {
 
         var x0p = [Float](repeating: 0, count: activeCount)
         var x1p = [Float](repeating: 0, count: activeCount)
+        // Reused across all 4 steps (copyRows writes every element each step).
+        var v = [Float](repeating: 0, count: activeCount)
 
         for step in 0..<LuxTtsConstants.numSteps {
             let tCur = Float(timeSteps[step])
@@ -200,10 +204,11 @@ struct LuxTtsSynthesizer {
 
             tArray[0] = NSNumber(value: tCur)
             xArray.withUnsafeMutableBufferPointer(ofType: Float.self) { buf, _ in
+                // The tail past activeCount stays zero from makeArray's
+                // reset(to: 0); only the active prefix is ever written here.
                 x.withUnsafeBufferPointer { src in
                     buf.baseAddress!.update(from: src.baseAddress!, count: activeCount)
                 }
-                for i in activeCount..<frameCapacity { buf[i] = 0 }
             }
 
             let out = try predict(
@@ -221,8 +226,8 @@ struct LuxTtsSynthesizer {
                 throw LuxTtsError.inferenceFailed(
                     stage: "FmDecoder step \(step)", underlying: "no v output")
             }
-            let v = try copyRows(
-                from: vArray, rowCount: featuresLength, rowLength: featDim,
+            try copyRows(
+                from: vArray, into: &v, rowCount: featuresLength, rowLength: featDim,
                 stage: "FmDecoder step \(step)")
 
             // x1p = x + (1 - t)·v ; x0p = x - t·v ;
@@ -300,6 +305,19 @@ struct LuxTtsSynthesizer {
     private func copyRows(
         from array: MLMultiArray, rowCount: Int, rowLength: Int, stage: String
     ) throws -> [Float] {
+        var out = [Float](repeating: 0, count: rowCount * rowLength)
+        try copyRows(from: array, into: &out, rowCount: rowCount, rowLength: rowLength, stage: stage)
+        return out
+    }
+
+    /// `copyRows` variant that writes into a caller-owned buffer (reused
+    /// across the flow-matching steps to avoid a per-step allocation). `out`
+    /// must hold at least `rowCount * rowLength` floats.
+    private func copyRows(
+        from array: MLMultiArray, into out: inout [Float],
+        rowCount: Int, rowLength: Int, stage: String
+    ) throws {
+        precondition(out.count >= rowCount * rowLength, "copyRows destination too small")
         let dims = array.shape.count
         guard array.dataType == .float32, dims >= 2,
             array.strides[dims - 1].intValue == 1,
@@ -313,7 +331,6 @@ struct LuxTtsSynthesizer {
                     + "dtype \(array.dataType.rawValue) for \(rowCount)×\(rowLength) read")
         }
         let rowStride = array.strides[dims - 2].intValue
-        var out = [Float](repeating: 0, count: rowCount * rowLength)
         array.withUnsafeBufferPointer(ofType: Float.self) { src in
             out.withUnsafeMutableBufferPointer { dst in
                 for row in 0..<rowCount {
@@ -322,7 +339,6 @@ struct LuxTtsSynthesizer {
                 }
             }
         }
-        return out
     }
 
     private func makeArray(shape: [Int], dataType: MLMultiArrayDataType) throws -> MLMultiArray {

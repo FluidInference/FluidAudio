@@ -21,7 +21,8 @@ public final class LuxTtsMelExtractor {
 
     private let hannWindow: [Float]
     private let melFilterbankFlat: [Float]  // [nMels x (nFFT/2+1)] row-major
-    private var fftSetup: vDSP_DFT_Setup?
+    // Immutable after init (only read in extract, freed in deinit).
+    private let fftSetup: vDSP_DFT_Setup?
 
     public init() {
         self.hannWindow = Self.periodicHannWindow(length: nFFT)
@@ -69,6 +70,9 @@ public final class LuxTtsMelExtractor {
         var magnitude = [Float](repeating: 0, count: bins)
         var imagSq = [Float](repeating: 0, count: bins)
         var melFrame = [Float](repeating: 0, count: nMels)
+        var logMel = [Float](repeating: 0, count: nMels)
+        var floor = LuxTtsConstants.logMelFloor
+        var melCount = Int32(nMels)
 
         var frames: [[Float]] = []
         frames.reserveCapacity(targetFrames)
@@ -108,7 +112,11 @@ public final class LuxTtsMelExtractor {
                 }
             }
 
-            frames.append(melFrame.map { log(max($0, LuxTtsConstants.logMelFloor)) })
+            // log(max(mel, floor)) vectorized: clamp to the floor (vDSP_vthr)
+            // then natural log (vvlogf) into the reused logMel buffer.
+            vDSP_vthr(melFrame, 1, &floor, &logMel, 1, vDSP_Length(nMels))
+            vvlogf(&logMel, logMel, &melCount)
+            frames.append(logMel)
         }
 
         // lhotse alignment: replicate the last frame if the STFT produced
