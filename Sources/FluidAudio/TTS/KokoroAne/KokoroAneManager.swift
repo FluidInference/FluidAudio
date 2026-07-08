@@ -321,7 +321,7 @@ public actor KokoroAneManager {
     /// G2P fallback for OOV words and vocab-supported punctuation kept as
     /// prosody/pause tokens.
     private func phonemize(text: String) async throws -> String {
-        let normalized = EnglishTextNormalizer.normalize(text)
+        let normalized = EnglishTextNormalizer.normalizeForFrontend(text)
         let phonemizer = await ensureEnglishPhonemizer()
         return try await phonemizer.phonemize(normalized) { word in
             try await G2PModel.shared.phonemize(word: word)

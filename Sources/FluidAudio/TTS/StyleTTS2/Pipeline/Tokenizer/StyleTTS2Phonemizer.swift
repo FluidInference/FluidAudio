@@ -69,11 +69,11 @@ public struct StyleTTS2Phonemizer: Sendable {
             return ""
         }
 
-        // Conservative raw-text normalization first (issue #711): strict
-        // standalone numbers, ordinals, decimals, and 12-hour times become
-        // spoken words before tokenization. Ambiguous/structured forms are
-        // left untouched. Shared with KokoroAne via `EnglishTextNormalizer`.
-        let normalized = EnglishTextNormalizer.normalize(trimmed)
+        // Raw-text normalization first: the native NeMo TN pass when the host
+        // links `libtext_processing_rs`, else the conservative always-on
+        // baseline (issue #711). Shared with KokoroAne via
+        // ``EnglishTextNormalizer/normalizeForFrontend(_:)``.
+        let normalized = EnglishTextNormalizer.normalizeForFrontend(trimmed)
 
         let words = splitWords(normalized)
         var ipaParts: [String] = []

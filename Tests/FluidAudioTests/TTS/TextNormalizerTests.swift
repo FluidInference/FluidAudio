@@ -398,4 +398,30 @@ final class TextNormalizerTests: XCTestCase {
         let result = normalizer.normalizeSentence(input, maxSpanTokens: 8)
         XCTAssertEqual(result, input)
     }
+
+    // MARK: - TN (written → spoken) surface
+
+    func testTnPassthroughWithoutNativeLib() {
+        let normalizer = TextNormalizer()
+        guard !normalizer.isNativeAvailable else { return }
+
+        // No native library linked → TN unavailable and inputs pass through.
+        XCTAssertFalse(normalizer.isTnAvailable)
+        XCTAssertEqual(normalizer.tnNormalize("$5.50"), "$5.50")
+        XCTAssertEqual(normalizer.tnNormalizeSentence("I paid $5"), "I paid $5")
+    }
+
+    /// When the native TN surface is unavailable (the default), the shared TTS
+    /// entry point must equal the conservative baseline so spoken output is
+    /// unchanged.
+    func testFrontendNormalizationFallsBackToBaseline() {
+        guard !TextNormalizer.shared.isTnAvailable else { return }
+
+        for input in ["I am 26 years old.", "The score is 3.14.", "Agent 007", "hello world"] {
+            XCTAssertEqual(
+                EnglishTextNormalizer.normalizeForFrontend(input),
+                EnglishTextNormalizer.normalize(input),
+                "frontend normalization should match the baseline without the native lib")
+        }
+    }
 }

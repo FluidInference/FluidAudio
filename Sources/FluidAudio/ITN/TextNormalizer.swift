@@ -47,6 +47,14 @@ public final class TextNormalizer: Sendable {
         (
             @convention(c) (UnsafePointer<CChar>?, UInt32) -> UnsafeMutablePointer<CChar>?
         )?
+    private let nemoTnNormalize:
+        (
+            @convention(c) (UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
+        )?
+    private let nemoTnNormalizeSentence:
+        (
+            @convention(c) (UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
+        )?
     private let nemoFreeString:
         (
             @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
@@ -78,6 +86,8 @@ public final class TextNormalizer: Sendable {
             self.nemoNormalize = nil
             self.nemoNormalizeSentence = nil
             self.nemoNormalizeSentenceMaxSpan = nil
+            self.nemoTnNormalize = nil
+            self.nemoTnNormalizeSentence = nil
             self.nemoFreeString = nil
             self.nemoAddRule = nil
             self.nemoRemoveRule = nil
@@ -95,6 +105,8 @@ public final class TextNormalizer: Sendable {
             self.nemoNormalize = nil
             self.nemoNormalizeSentence = nil
             self.nemoNormalizeSentenceMaxSpan = nil
+            self.nemoTnNormalize = nil
+            self.nemoTnNormalizeSentence = nil
             self.nemoFreeString = nil
             self.nemoAddRule = nil
             self.nemoRemoveRule = nil
@@ -134,6 +146,27 @@ public final class TextNormalizer: Sendable {
             )
         } else {
             self.nemoNormalizeSentenceMaxSpan = nil
+        }
+
+        // Text-normalization (written → spoken) functions — optional; present
+        // only when the linked library exposes the TN surface (issue #711
+        // follow-up). Used by the TTS frontends for richer normalization.
+        if let tnPtr = dlsym(handle, "nemo_tn_normalize") {
+            self.nemoTnNormalize = unsafeBitCast(
+                tnPtr,
+                to: (@convention(c) (UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?).self
+            )
+        } else {
+            self.nemoTnNormalize = nil
+        }
+
+        if let tnSentencePtr = dlsym(handle, "nemo_tn_normalize_sentence") {
+            self.nemoTnNormalizeSentence = unsafeBitCast(
+                tnSentencePtr,
+                to: (@convention(c) (UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?).self
+            )
+        } else {
+            self.nemoTnNormalizeSentence = nil
         }
 
         // Custom rules functions (optional)
@@ -194,6 +227,43 @@ public final class TextNormalizer: Sendable {
             return input
         }
 
+        defer { freeFn(resultPtr) }
+        return String(cString: resultPtr)
+    }
+
+    // MARK: - Text Normalization (written → spoken)
+
+    /// Whether the linked library exposes the TN (written→spoken) surface used
+    /// by the TTS frontends. False when no native library is linked or it only
+    /// provides the ITN symbols.
+    public var isTnAvailable: Bool {
+        isNativeAvailable && nemoTnNormalizeSentence != nil
+    }
+
+    /// Normalize written-form text to spoken form (single expression), e.g.
+    /// `"$5.50"` → `"five dollars fifty cents"`. Returns the input unchanged
+    /// when the native TN surface is unavailable.
+    public func tnNormalize(_ input: String) -> String {
+        guard let tnFn = nemoTnNormalize, let freeFn = nemoFreeString else {
+            return input
+        }
+        guard let resultPtr = input.withCString({ tnFn($0) }) else {
+            return input
+        }
+        defer { freeFn(resultPtr) }
+        return String(cString: resultPtr)
+    }
+
+    /// Normalize a full sentence to spoken form, rewriting written-form spans
+    /// in place (`"I paid $5"` → `"I paid five dollars"`). Returns the input
+    /// unchanged when the native TN surface is unavailable.
+    public func tnNormalizeSentence(_ input: String) -> String {
+        guard let tnFn = nemoTnNormalizeSentence, let freeFn = nemoFreeString else {
+            return input
+        }
+        guard let resultPtr = input.withCString({ tnFn($0) }) else {
+            return input
+        }
         defer { freeFn(resultPtr) }
         return String(cString: resultPtr)
     }

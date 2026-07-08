@@ -40,6 +40,16 @@ enum EnglishTextNormalizer {
         return result
     }
 
+    /// TTS-frontend entry point shared by KokoroAne and StyleTTS2. Prefers the
+    /// native NeMo TN pass (`text-processing-rs`, much richer: currency,
+    /// measures, dates, ranges, fractions, …) when the host app has linked
+    /// `libtext_processing_rs`; otherwise falls back to the conservative
+    /// always-available baseline in ``normalize(_:)``.
+    static func normalizeForFrontend(_ text: String) -> String {
+        let normalizer = TextNormalizer.shared
+        return normalizer.isTnAvailable ? normalizer.tnNormalizeSentence(text) : normalize(text)
+    }
+
     // MARK: - Boundaries
     //
     // A standalone number must not be glued to a letter, another digit, or
