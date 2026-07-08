@@ -27,4 +27,13 @@ public enum TtsBackend: Sendable {
     /// (31 languages), 44.1 kHz mono output. Voice styling via per-voice
     /// JSON (`style_ttl` / `style_dp` tensors).
     case supertonic3
+    /// LuxTTS (ZipVoice-Distill) — zero-shot voice cloning conditioned on a
+    /// short prompt clip + transcript. 3-stage CoreML pipeline
+    /// (`TextEncoder → FmDecoder ×4 anchor-Euler steps → fixed-shape Vocos
+    /// vocoder`), 48 kHz mono output.
+    ///
+    /// > Note: Phase 1 has no text frontend — input must be pre-phonemized
+    /// > espeak IPA (`LuxTtsManager.synthesize(phonemes:...)`); raw-text
+    /// > `synthesize(text:...)` throws `LuxTtsError.g2pUnavailable`.
+    case luxtts
 }

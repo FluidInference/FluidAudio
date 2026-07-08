@@ -52,6 +52,9 @@ let package = Package(
             dependencies: [
                 "FluidAudio",
                 "FluidAudioCLI",
+            ],
+            resources: [
+                .copy("TTS/LuxTts/Resources")
             ]
         ),
     ],
