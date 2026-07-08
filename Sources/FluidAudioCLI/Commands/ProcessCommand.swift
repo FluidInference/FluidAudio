@@ -149,6 +149,10 @@ enum ProcessCommand {
                 )
             }
 
+            if args.useNMESC {
+                offlineConfig.clustering.algorithm = .nmesc
+            }
+
             let modelDir = OfflineDiarizerModels.defaultModelsDirectory()
             let manager = OfflineDiarizerManager(config: offlineConfig)
 
@@ -245,6 +249,7 @@ enum ProcessCommand {
         var debug = false
         var rttmFile: String?
         var embeddingExportPath: String?
+        var useNMESC = false
 
         // Streaming-mode params
         var thresholdS: Float = 0.7045655  // matches pyannote speaker-diarization-3.1 config.yaml
@@ -446,6 +451,11 @@ enum ProcessCommand {
             case "--num-speakers":
                 if i + 1 < args.count {
                     parsed.numSpeakers = Int(args[i + 1])
+                    i += 1
+                }
+            case "--clustering":
+                if i + 1 < args.count {
+                    parsed.useNMESC = args[i + 1].lowercased() == "nmesc"
                     i += 1
                 }
             case "--export-embeddings":

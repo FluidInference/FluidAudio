@@ -246,16 +246,35 @@ public final class OfflineDiarizerManager {
 
         let initialClusters: [Int]
         if trainingEmbeddings.count >= 2 {
-            initialClusters = AHCClustering().cluster(
-                embeddingFeatures: trainingEmbeddings,
-                threshold: config.clusteringThreshold
-            )
+            switch config.clustering.algorithm {
+            case .ahc:
+                initialClusters = AHCClustering().cluster(
+                    embeddingFeatures: trainingEmbeddings,
+                    threshold: config.clusteringThreshold
+                )
+            case .nmesc:
+                initialClusters = NMESCClustering(
+                    maxSpeakers: config.clustering.maxSpeakers ?? 8
+                ).cluster(embeddingFeatures: trainingEmbeddings)
+            }
         } else {
             initialClusters = Array(repeating: 0, count: trainingEmbeddings.count)
         }
 
         let vbxOutput: VBxOutput
-        if !trainingRho.isEmpty, !initialClusters.isEmpty {
+        if config.clustering.algorithm == .nmesc {
+            // NME-SC's assignment is final: VBx's PLDA warm start assumes an
+            // AHC-shaped initialization and can re-fuse spectrally separated
+            // clusters, so the pipeline uses the spectral labels directly.
+            vbxOutput = VBxOutput(
+                gamma: [],
+                pi: [],
+                hardClusters: [initialClusters],
+                centroids: [],
+                numClusters: initialClusters.max().map { $0 + 1 } ?? 0,
+                elbos: []
+            )
+        } else if !trainingRho.isEmpty, !initialClusters.isEmpty {
             let hasConstraints =
                 config.clustering.numSpeakers != nil
                 || config.clustering.minSpeakers != nil

@@ -118,6 +118,19 @@ public struct OfflineDiarizerConfig: Sendable {
     }
 
     public struct Clustering: Sendable {
+        /// Initial clustering algorithm. `.ahc` (default) cuts a centroid-linkage
+        /// dendrogram at `threshold`; `.nmesc` estimates the cluster count per
+        /// recording via the normalized maximum eigengap (no threshold) and is
+        /// robust to the bridge-chunk chaining that fuses AHC on meeting audio.
+        /// NME-SC bypasses VBx refinement (VBx's warm start assumes AHC-shaped
+        /// initialization; NME-SC's assignment is used directly).
+        public enum Algorithm: String, Sendable {
+            case ahc
+            case nmesc
+        }
+
+        public var algorithm: Algorithm = .ahc
+
         /// Euclidean distance threshold for unit-normalized embeddings.
         public var threshold: Double
 
