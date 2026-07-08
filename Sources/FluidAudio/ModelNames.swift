@@ -1154,12 +1154,33 @@ public enum ModelNames {
         public static let aneVariant = "ane"
 
         /// Platform default graph variant: `gpu/` on macOS, `ane/` elsewhere.
+        ///
+        /// The `FLUIDAUDIO_LUXTTS_VARIANT` environment variable overrides this
+        /// (accepts `gpu` / `ane`). It exists so the iOS `ane/` path can be
+        /// exercised on macOS — the M-series ANE runs the `ane/` graph under
+        /// `.cpuAndNeuralEngine` exactly as an iPhone would, so the override
+        /// is the on-device validation seam without an `#if os(iOS)` fork.
         public static var defaultVariant: String {
+            if let override = variantOverride { return override }
             #if os(macOS)
             return gpuVariant
             #else
             return aneVariant
             #endif
+        }
+
+        /// `gpu` / `ane` parsed from `FLUIDAUDIO_LUXTTS_VARIANT`, or `nil` when
+        /// unset/unrecognized (falls back to the platform default).
+        static var variantOverride: String? {
+            guard
+                let raw = ProcessInfo.processInfo.environment["FLUIDAUDIO_LUXTTS_VARIANT"]?
+                    .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            else { return nil }
+            switch raw {
+            case gpuVariant: return gpuVariant
+            case aneVariant: return aneVariant
+            default: return nil
+            }
         }
 
         public static let tokensFile = "tokens.txt"

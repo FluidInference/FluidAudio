@@ -56,10 +56,22 @@ public enum LuxTtsResourceDownloader {
 ///   - macOS loads the `gpu/` graphs with `.cpuAndGPU`. The original graph
 ///     must NOT run on the ANE (rel-pos attention loses precision there and
 ///     corrupts audio).
-///   - iOS loads the `ane/` graphs with `.cpuAndNeuralEngine` (100% ANE
-///     placement, ~25 MB jetsam-visible footprint).
+///   - iOS loads the `ane/` graphs with `.cpuAndNeuralEngine` (FmDecoder
+///     100% ANE-resident, TextEncoder 99%; ~25 MB jetsam-visible footprint).
 ///   - The vocoder runs with `.cpuAndGPU` everywhere (ISTFT + resample +
-///     crossover in-graph, ~2.3 ms on GPU).
+///     crossover in-graph, ~2.3 ms on GPU). It is only ~72% ANE-placeable
+///     and CPU_AND_NE compilation is flaky, so it never goes on the ANE.
+///
+/// The `ane/` and `gpu/` graphs share an IDENTICAL external I/O contract —
+/// same input/output names, shapes and fp32 dtype (TextEncoder:
+/// `tokens (1,256) i32` + `padding_mask (1,256)` → `token_embeds (1,256,100)`;
+/// FmDecoder: `x`/`text_condition`/`speech_condition (1,1024,100)` +
+/// `t`/`guidance_scale (1)` + `padding_mask (1,1024)` → `v (1,1024,100)`).
+/// The "ANE-canonical" rewrite (channel-axis pre-concat, `(1,C,1,S)` working
+/// layout) lives entirely INSIDE the MIL and transposes back before output,
+/// so `LuxTtsSynthesizer` drives both variants with the same tensor packing —
+/// no host-side adapter is required. Select the variant via `variant` (and
+/// the `FLUIDAUDIO_LUXTTS_VARIANT` override folded into `defaultVariant`).
 public actor LuxTtsModelStore {
 
     private let logger = AppLogger(category: "LuxTtsModelStore")
@@ -85,12 +97,20 @@ public actor LuxTtsModelStore {
     }
 
     private var encoderDecoderComputeUnits: MLComputeUnits {
-        if let override = computeUnitsOverride { return override }
-        return variant == ModelNames.LuxTts.aneVariant ? .cpuAndNeuralEngine : .cpuAndGPU
+        Self.encoderDecoderComputeUnits(variant: variant, override: computeUnitsOverride)
     }
 
     private var vocoderComputeUnits: MLComputeUnits {
         computeUnitsOverride ?? .cpuAndGPU
+    }
+
+    /// Encoder/decoder compute-unit policy (pure; unit-tested). `ane/` → ANE,
+    /// everything else → GPU. An explicit `computeUnitsOverride` wins.
+    static func encoderDecoderComputeUnits(
+        variant: String, override: MLComputeUnits?
+    ) -> MLComputeUnits {
+        if let override { return override }
+        return variant == ModelNames.LuxTts.aneVariant ? .cpuAndNeuralEngine : .cpuAndGPU
     }
 
     // MARK: - Loading
