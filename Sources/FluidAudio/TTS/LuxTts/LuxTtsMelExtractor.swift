@@ -25,9 +25,13 @@ public final class LuxTtsMelExtractor {
     private let fftSetup: vDSP_DFT_Setup?
 
     public init() {
-        self.hannWindow = Self.periodicHannWindow(length: nFFT)
-        self.melFilterbankFlat = Self.htkMelFilterbank(
-            nFFT: nFFT, nMels: nMels, sampleRate: sampleRate)
+        // The window/filterbank are call-independent pure-value tables; pull
+        // them from a process-wide Sendable cache so repeated construction
+        // (the synthesizer builds one extractor per call to stay Sendable)
+        // only pays for the cheap vDSP DFT setup, not the table math.
+        let tables = Self.sharedTables
+        self.hannWindow = tables.hannWindow
+        self.melFilterbankFlat = tables.melFilterbankFlat
         self.fftSetup = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(nFFT), .FORWARD)
     }
 
@@ -128,6 +132,22 @@ public final class LuxTtsMelExtractor {
     }
 
     // MARK: - Static tables
+
+    /// Call-independent tables shared across every extractor instance.
+    private struct Tables: Sendable {
+        let hannWindow: [Float]
+        let melFilterbankFlat: [Float]
+    }
+
+    /// Built once per process (pure `[Float]` values, immutable → Sendable).
+    private static let sharedTables: Tables = {
+        let nFFT = LuxTtsConstants.nFFT
+        return Tables(
+            hannWindow: periodicHannWindow(length: nFFT),
+            melFilterbankFlat: htkMelFilterbank(
+                nFFT: nFFT, nMels: LuxTtsConstants.nMels,
+                sampleRate: LuxTtsConstants.melSampleRate))
+    }()
 
     private static func periodicHannWindow(length: Int) -> [Float] {
         (0..<length).map { i in

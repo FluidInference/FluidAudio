@@ -92,7 +92,10 @@ final class LuxTtsG2pTests: XCTestCase {
     }
 
     func testAllCapsSpellOut() {
-        assertPhonemes("the FBI called", "ðə ˌɛfbˌiːˈaɪ kˈɔːld")
+        // "FBI" spells out to ˌɛfbˌiːˈaɪ; the leading vowel of the F=ɛf letter
+        // triggers the before-vowel weak form of "the" (ðɪ, not ðə) — matching
+        // the espeak oracle (piper_phonemize en-us via EmiliaTokenizer).
+        assertPhonemes("the FBI called", "ðɪ ˌɛfbˌiːˈaɪ kˈɔːld")
     }
 
     func testPossessiveFallback() {

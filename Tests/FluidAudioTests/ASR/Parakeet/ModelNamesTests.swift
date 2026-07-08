@@ -46,7 +46,9 @@ final class ModelNamesTests: XCTestCase {
     }
 
     func testModelFileExtensions() {
-        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin"]
+        // `.txt` covers vocab/token text files (e.g. LuxTTS `tokens.txt`),
+        // which are legitimate model artifacts.
+        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin", ".txt"]
         let validDirectories: Set<String> = ["constants_bin"]
 
         for repo in Repo.allCases {

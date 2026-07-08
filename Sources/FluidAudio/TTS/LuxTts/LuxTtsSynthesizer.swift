@@ -33,14 +33,10 @@ public struct LuxTtsSynthesisResult: Sendable {
 ///      samples and clipped to [-1, 1].
 ///   6. If the prompt RMS was below `targetRms`, scale the waveform back
 ///      down by `promptRms / targetRms` (upstream `rms_norm` contract).
-actor LuxTtsSynthesizer {
+struct LuxTtsSynthesizer {
 
     private let logger = AppLogger(category: "LuxTtsSynthesizer")
     private let store: LuxTtsModelStore
-    /// Call-independent (precomputed Hann window, mel filterbank, DFT setup),
-    /// so it is built once and reused across every synthesis call. Held on the
-    /// actor (a non-Sendable class, mirroring `StyleTTS2Synthesizer`).
-    private let extractor = LuxTtsMelExtractor()
 
     init(store: LuxTtsModelStore) {
         self.store = store
@@ -87,6 +83,13 @@ actor LuxTtsSynthesizer {
             vDSP_vsmul(prompt, 1, &gain, &prompt, 1, vDSP_Length(prompt.count))
         }
 
+        // The extractor holds a non-Sendable vDSP DFT setup; keeping it a
+        // per-call local (rather than a stored property) keeps the whole
+        // synthesizer `struct` `Sendable`, so this async method can be called
+        // across `LuxTtsManager`'s actor boundary without tripping the
+        // region-based isolation / sending checker. Its precomputed tables are
+        // pulled from a shared cache, so construction is cheap.
+        let extractor = LuxTtsMelExtractor()
         let promptMel = extractor.extract(audio: prompt)  // [T][100], unscaled
         let promptFrames = promptMel.count
         guard promptFrames > 0 else {
