@@ -137,6 +137,50 @@ public final class OfflineDiarizerManager {
         audioLoadingSeconds: TimeInterval,
         progressCallback: (@Sendable (Int, Int) -> Void)? = nil
     ) async throws -> DiarizationResult {
+        let prepared = try await prepare(
+            audioSource: audioSource,
+            audioLoadingSeconds: audioLoadingSeconds,
+            progressCallback: progressCallback
+        )
+        return try cluster(prepared)
+    }
+
+    // MARK: - Two-Phase API (prepare + cluster)
+
+    /// Phase 1 of the two-phase pipeline: run deterministic segmentation + embedding
+    /// extraction over `audio` and return a cacheable ``PreparedDiarization``.
+    ///
+    /// Pass the result to ``cluster(_:)`` — as many times as needed — to run the clustering +
+    /// reconstruction stage without re-running model inference. `process(audio:)` is exactly
+    /// `prepare(audio:)` followed by one `cluster(_:)`.
+    ///
+    /// - Parameters:
+    ///   - audio: Mono audio samples at the model's target sample rate.
+    ///   - progressCallback: Optional callback receiving `(chunksProcessed, totalChunks)` after each segmentation chunk.
+    public func prepare(
+        audio: [Float],
+        progressCallback: (@Sendable (Int, Int) -> Void)? = nil
+    ) async throws -> PreparedDiarization {
+        try await prepare(
+            audioSource: ArrayAudioSampleSource(samples: audio),
+            audioLoadingSeconds: 0,
+            progressCallback: progressCallback
+        )
+    }
+
+    /// Phase 1 of the two-phase pipeline: run deterministic segmentation + embedding
+    /// extraction over `audioSource` and return a cacheable ``PreparedDiarization``.
+    ///
+    /// - Parameters:
+    ///   - audioSource: Audio sample source to process. Retained by the returned value for
+    ///     clustering post-passes that re-embed exact audio spans.
+    ///   - audioLoadingSeconds: Time spent loading/converting the audio, included in timing logs.
+    ///   - progressCallback: Optional callback receiving `(chunksProcessed, totalChunks)` after each segmentation chunk.
+    public func prepare(
+        audioSource: AudioSampleSource,
+        audioLoadingSeconds: TimeInterval = 0,
+        progressCallback: (@Sendable (Int, Int) -> Void)? = nil
+    ) async throws -> PreparedDiarization {
         try config.validate()
         if models == nil {
             try await prepareModels()
@@ -146,7 +190,7 @@ public final class OfflineDiarizerManager {
             throw OfflineDiarizationError.modelNotLoaded("offline-diarizer")
         }
 
-        let totalStart = Date()
+        let prepareStart = Date()
         let totalChunks = max(
             1, (audioSource.sampleCount + config.samplesPerStep - 1) / config.samplesPerStep)
 
@@ -222,6 +266,40 @@ public final class OfflineDiarizerManager {
 
         let (timedEmbeddings, embeddingTime) = embeddingResult
         logger.debug("Embedding extraction produced \(timedEmbeddings.count) vectors in \(embeddingTime)s (async)")
+
+        return PreparedDiarization(
+            audioSource: audioSource,
+            segmentation: segmentation,
+            timedEmbeddings: timedEmbeddings,
+            audioLoadingSeconds: audioLoadingSeconds,
+            segmentationSeconds: segmentationTime,
+            embeddingExtractionSeconds: embeddingTime,
+            prepareWallSeconds: Date().timeIntervalSince(prepareStart)
+        )
+    }
+
+    /// Phase 2 of the two-phase pipeline: clustering + reconstruction over a
+    /// ``PreparedDiarization``.
+    ///
+    /// Runs AHC + VBx clustering, centroid assignment, segment reconstruction, and the
+    /// configured post-passes (zero-vote re-embed, short-segment relabel). Safe to call any
+    /// number of times on the same prepared value — the deterministic inference stages are
+    /// never re-run, so each call costs only the clustering + reconstruction stage.
+    ///
+    /// - Parameter prepared: Output of ``prepare(audioSource:audioLoadingSeconds:progressCallback:)``.
+    /// - Returns: Diarization result with speaker segments.
+    /// - Throws: `OfflineDiarizationError.modelNotLoaded` if the models were released since
+    ///   `prepare`, or `OfflineDiarizationError.noSpeechDetected` if `prepared` contains no
+    ///   embeddings.
+    public func cluster(_ prepared: PreparedDiarization) throws -> DiarizationResult {
+        guard let models else {
+            throw OfflineDiarizationError.modelNotLoaded("offline-diarizer")
+        }
+
+        let clusterPhaseStart = Date()
+        let audioSource = prepared.audioSource
+        let segmentation = prepared.segmentation
+        let timedEmbeddings = prepared.timedEmbeddings
 
         let pldaTransform = PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi)
 
@@ -370,14 +448,20 @@ public final class OfflineDiarizerManager {
             )
             : nil
 
-        let totalProcessing = Date().timeIntervalSince(totalStart)
+        // Total pipeline wall time: the prepare phase plus this cluster phase. When called
+        // back-to-back via `process(...)` this equals the pre-split single-call measurement.
+        let totalProcessing = prepared.prepareWallSeconds + Date().timeIntervalSince(clusterPhaseStart)
         let timings = PipelineTimings(
             modelCompilationSeconds: models.compilationDuration,
-            audioLoadingSeconds: audioLoadingSeconds,
-            segmentationSeconds: segmentationTime,
-            embeddingExtractionSeconds: embeddingTime,
+            audioLoadingSeconds: prepared.audioLoadingSeconds,
+            segmentationSeconds: prepared.segmentationSeconds,
+            embeddingExtractionSeconds: prepared.embeddingExtractionSeconds,
             speakerClusteringSeconds: clusteringTime,
-            postProcessingSeconds: max(0, totalProcessing - segmentationTime - embeddingTime - clusteringTime)
+            postProcessingSeconds: max(
+                0,
+                totalProcessing - prepared.segmentationSeconds - prepared.embeddingExtractionSeconds
+                    - clusteringTime
+            )
         )
 
         return DiarizationResult(
