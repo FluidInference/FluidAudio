@@ -40,6 +40,34 @@ final class SlidingWindowAsrManagerTests: XCTestCase {
 
     // MARK: - Configuration Tests
 
+    func testConfigDefaultsToNilLanguage() {
+        XCTAssertNil(SlidingWindowAsrConfig.default.language)
+        XCTAssertNil(SlidingWindowAsrConfig.streaming.language)
+        XCTAssertNil(SlidingWindowAsrConfig().language)
+    }
+
+    func testConfigCarriesLanguageHint() {
+        let config = SlidingWindowAsrConfig(language: .german)
+        XCTAssertEqual(config.language, .german)
+    }
+
+    func testApplyingLanguageKeepsOtherFields() {
+        let base = SlidingWindowAsrConfig.streaming
+        let localized = base.applying(language: .polish)
+
+        XCTAssertEqual(localized.language, .polish)
+        XCTAssertEqual(localized.chunkSeconds, base.chunkSeconds)
+        XCTAssertEqual(localized.leftContextSeconds, base.leftContextSeconds)
+        XCTAssertEqual(localized.rightContextSeconds, base.rightContextSeconds)
+        XCTAssertEqual(localized.confirmationThreshold, base.confirmationThreshold)
+    }
+
+    func testApplyingTdtConfigKeepsLanguage() {
+        let base = SlidingWindowAsrConfig(language: .german)
+        let adapted = base.applying(tdtConfig: TdtConfig())
+        XCTAssertEqual(adapted.language, .german)
+    }
+
     func testConfigPresets() {
         // Test default config
         let defaultConfig = SlidingWindowAsrConfig.default

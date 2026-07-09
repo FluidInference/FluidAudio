@@ -445,7 +445,8 @@ public actor SlidingWindowAsrManager {
                     windowSamples,
                     decoderState: &state,
                     previousTokens: accumulatedTokens,
-                    isLastChunk: isLastChunk
+                    isLastChunk: isLastChunk,
+                    language: config.language
                 )
             else { return }
 
@@ -727,6 +728,16 @@ public struct SlidingWindowAsrConfig: Sendable {
     /// `AsrManager`'s internal blank-token auto-adaptation.
     public let tdtConfig: TdtConfig?
 
+    /// Optional language hint for script-aware token filtering (v3 joint decoder only).
+    ///
+    /// Streaming windows carry much less acoustic context than offline chunks, which
+    /// makes the multilingual v3 model prone to emitting wrong-script tokens (e.g.
+    /// Cyrillic while transcribing German — see issue #512). Batch transcription
+    /// already accepts a `language` hint via `AsrManager.transcribe(_:language:)`;
+    /// this extends the same filter to the sliding-window path. Ignored by v2 and
+    /// tdtJa models (same behavior as the batch API).
+    public let language: Language?
+
     /// Default configuration using the proven 11+2+2 window layout.
     /// The assembled window (left + chunk + right) must fit the model's fixed
     /// 15 s input (`ASRConstants.maxModelSamples`); 2 + 11 + 2 = 15 s fits exactly.
@@ -758,7 +769,8 @@ public struct SlidingWindowAsrConfig: Sendable {
         rightContextSeconds: TimeInterval = 2.0,
         minContextForConfirmation: TimeInterval = 10.0,
         confirmationThreshold: Double = 0.85,
-        tdtConfig: TdtConfig? = nil
+        tdtConfig: TdtConfig? = nil,
+        language: Language? = nil
     ) {
         self.chunkSeconds = chunkSeconds
         self.hypothesisChunkSeconds = hypothesisChunkSeconds
@@ -767,6 +779,7 @@ public struct SlidingWindowAsrConfig: Sendable {
         self.minContextForConfirmation = minContextForConfirmation
         self.confirmationThreshold = confirmationThreshold
         self.tdtConfig = tdtConfig
+        self.language = language
     }
 
     /// Returns a copy of this config with the given TDT configuration applied.
@@ -778,7 +791,22 @@ public struct SlidingWindowAsrConfig: Sendable {
             rightContextSeconds: rightContextSeconds,
             minContextForConfirmation: minContextForConfirmation,
             confirmationThreshold: confirmationThreshold,
-            tdtConfig: tdtConfig
+            tdtConfig: tdtConfig,
+            language: language
+        )
+    }
+
+    /// Returns a copy of this config with the given language hint applied.
+    public func applying(language: Language?) -> SlidingWindowAsrConfig {
+        SlidingWindowAsrConfig(
+            chunkSeconds: chunkSeconds,
+            hypothesisChunkSeconds: hypothesisChunkSeconds,
+            leftContextSeconds: leftContextSeconds,
+            rightContextSeconds: rightContextSeconds,
+            minContextForConfirmation: minContextForConfirmation,
+            confirmationThreshold: confirmationThreshold,
+            tdtConfig: tdtConfig,
+            language: language
         )
     }
 
