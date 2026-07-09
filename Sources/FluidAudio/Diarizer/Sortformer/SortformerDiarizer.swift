@@ -8,10 +8,34 @@ import OSLog
 /// Sortformer provides end-to-end streaming diarization with 4 fixed speaker slots,
 /// achieving ~11% DER on DI-HARD III in real-time.
 ///
-/// - Important: This class is **not** thread-safe.
-public final class SortformerDiarizer: Diarizer {
+/// ## Thread safety
+/// Every public entry point acquires the internal `NSLock`, so individual calls are atomic
+/// and the class is safe to reference across isolation domains (`@unchecked Sendable`).
+/// Interleaving order between concurrent callers is still unspecified — for deterministic
+/// output, drive a given instance from one caller at a time (or use the `*Async` variants,
+/// which serialize on a dedicated FIFO queue).
+///
+/// ## Blocking vs async
+/// The synchronous `process*` methods run CoreML inference inline on the calling thread with
+/// no suspension point. When called from a Swift-concurrency actor this pins a shared
+/// cooperative-pool thread for the whole forward pass (hundreds of ms), starving every other
+/// actor in the process. Prefer the `processAsync`/`finalizeSessionAsync` variants from async
+/// contexts — they run the same code on the diarizer's own serial queue while the calling
+/// task suspends.
+public final class SortformerDiarizer: Diarizer, @unchecked Sendable {
     /// Lock for thread-safe access to mutable state
     private let lock = NSLock()
+
+    /// Dedicated serial queue for the async inference path.
+    ///
+    /// The `*Async` variants hop onto this queue so the calling task suspends (returning its
+    /// cooperative-pool thread) while CoreML inference runs. Serial + FIFO by construction:
+    /// async submissions execute in exactly the order they were enqueued, so the async path
+    /// produces byte-identical output to the equivalent sequence of synchronous calls.
+    internal let inferenceQueue = DispatchQueue(
+        label: "com.fluidaudio.sortformer.inference",
+        qos: .userInitiated
+    )
 
     /// Accumulated results
     public var timeline: DiarizerTimeline {
