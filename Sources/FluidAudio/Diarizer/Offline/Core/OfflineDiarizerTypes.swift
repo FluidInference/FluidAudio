@@ -92,6 +92,17 @@ public struct OfflineDiarizerConfig: Sendable {
     }
 
     public struct Embedding: Sendable {
+        /// Embedding extractor backend. `.wespeaker` (default) = the bundled
+        /// masked WeSpeaker path. `.titanet10s` = TitaNet-large via the 10 s
+        /// mask-input CoreML pair (requires `titanetModelDirectory` and
+        /// `clustering.algorithm == .nmesc` — 192-d has no PLDA/VBx space).
+        public enum Backend: String, Sendable {
+            case wespeaker
+            case titanet10s
+        }
+
+        public var backend: Backend = .wespeaker
+
         public var batchSize: Int
         public var excludeOverlap: Bool
         public var minSegmentDurationSeconds: Double
@@ -240,6 +251,11 @@ public struct OfflineDiarizerConfig: Sendable {
     /// mask source for offline experimentation (`--dump-masks` in the CLI).
     public var segmentationDumpPath: String?
 
+    /// Directory containing TitaNet10s_frontenc_fp16.mlmodelc and
+    /// TitaNet10s_maskdec_fp16.mlmodelc. Required when
+    /// `embedding.backend == .titanet10s`.
+    public var titanetModelDirectory: URL?
+
     public init(
         segmentation: Segmentation = .community,
         embedding: Embedding = .community,
@@ -323,6 +339,16 @@ public struct OfflineDiarizerConfig: Sendable {
 
     /// Validate configuration values and throw if they fall outside expected ranges.
     public func validate() throws {
+        if embedding.backend == .titanet10s {
+            guard clustering.algorithm == .nmesc else {
+                throw OfflineDiarizationError.invalidConfiguration(
+                    "titanet10s backend requires clustering.algorithm == .nmesc (no PLDA/VBx for 192-d)")
+            }
+            guard titanetModelDirectory != nil else {
+                throw OfflineDiarizationError.invalidConfiguration(
+                    "titanet10s backend requires titanetModelDirectory")
+            }
+        }
         let maxClusteringThreshold = sqrt(2.0)
         guard clustering.threshold > 0, clustering.threshold <= maxClusteringThreshold else {
             throw OfflineDiarizationError.invalidConfiguration(
