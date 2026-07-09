@@ -235,6 +235,11 @@ public struct OfflineDiarizerConfig: Sendable {
     /// PLDA payload) for callers that don't need them.
     public var exposeChunkEmbeddings: Bool
 
+    /// When set, the manager writes the raw segmentation output (per-chunk
+    /// speaker weights + offsets) to this JSON path after processing — the
+    /// mask source for offline experimentation (`--dump-masks` in the CLI).
+    public var segmentationDumpPath: String?
+
     public init(
         segmentation: Segmentation = .community,
         embedding: Embedding = .community,

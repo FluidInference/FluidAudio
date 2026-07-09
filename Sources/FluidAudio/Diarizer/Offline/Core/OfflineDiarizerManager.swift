@@ -357,6 +357,10 @@ public final class OfflineDiarizerManager {
             )
         }
 
+        if let dumpPath = config.segmentationDumpPath {
+            try exportSegmentation(segmentation, path: dumpPath)
+        }
+
         let publicChunkEmbeddings: [ChunkEmbedding]? =
             config.exposeChunkEmbeddings
             ? Self.buildPublicChunkEmbeddings(
@@ -815,6 +819,43 @@ public final class OfflineDiarizerManager {
         }
 
         return matrix
+    }
+
+    private func exportSegmentation(_ segmentation: SegmentationOutput, path: String) throws {
+        struct ChunkPayload: Codable {
+            let chunkIndex: Int
+            let offsetSeconds: Double
+            let speakerWeights: [[Float]]
+        }
+        struct Payload: Codable {
+            let frameDuration: Double
+            let numChunks: Int
+            let numFrames: Int
+            let numSpeakers: Int
+            let chunks: [ChunkPayload]
+        }
+        var chunks: [ChunkPayload] = []
+        chunks.reserveCapacity(segmentation.numChunks)
+        for index in 0..<segmentation.numChunks {
+            chunks.append(
+                ChunkPayload(
+                    chunkIndex: index,
+                    offsetSeconds: index < segmentation.chunkOffsets.count
+                        ? segmentation.chunkOffsets[index] : 0,
+                    speakerWeights: index < segmentation.speakerWeights.count
+                        ? segmentation.speakerWeights[index] : []
+                )
+            )
+        }
+        let payload = Payload(
+            frameDuration: segmentation.frameDuration,
+            numChunks: segmentation.numChunks,
+            numFrames: segmentation.numFrames,
+            numSpeakers: segmentation.numSpeakers,
+            chunks: chunks
+        )
+        try JSONEncoder().encode(payload).write(to: URL(fileURLWithPath: path))
+        logger.info("Segmentation dump written to \(path)")
     }
 
     private func exportEmbeddings(

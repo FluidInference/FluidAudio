@@ -152,6 +152,7 @@ enum ProcessCommand {
             if args.useNMESC {
                 offlineConfig.clustering.algorithm = .nmesc
             }
+            offlineConfig.segmentationDumpPath = args.segmentationDumpPath
 
             let modelDir = OfflineDiarizerModels.defaultModelsDirectory()
             let manager = OfflineDiarizerManager(config: offlineConfig)
@@ -249,6 +250,7 @@ enum ProcessCommand {
         var debug = false
         var rttmFile: String?
         var embeddingExportPath: String?
+        var segmentationDumpPath: String?
         var useNMESC = false
 
         // Streaming-mode params
@@ -461,6 +463,11 @@ enum ProcessCommand {
             case "--export-embeddings":
                 if i + 1 < args.count {
                     parsed.embeddingExportPath = args[i + 1]
+                    i += 1
+                }
+            case "--dump-masks":
+                if i + 1 < args.count {
+                    parsed.segmentationDumpPath = args[i + 1]
                     i += 1
                 }
 
