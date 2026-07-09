@@ -48,6 +48,17 @@ public enum ASRConstants {
     /// Standard overlap in encoder frames (2.0s = 25 frames at 0.08s per frame)
     public static let standardOverlapFrames: Int = 25
 
+    /// Maximum global-frame gap between two token occurrences for them to be
+    /// treated as the *same* acoustic event during sliding-window token dedup.
+    ///
+    /// A genuine chunk-boundary duplicate lands at nearly identical global audio
+    /// time in both overlapping windows (difference ~0, plus a few frames of
+    /// cross-window emission jitter). A coincidental subword-prefix match between
+    /// two *different* words spoken seconds apart is far outside this bound, so
+    /// gating on it prevents false-positive dedup that drops real tokens.
+    /// See issue #787.
+    public static let duplicateFrameTolerance: Int = standardOverlapFrames  // 25 frames = 2.0s
+
     /// Minimum confidence score (for empty or very uncertain transcriptions)
     public static let minConfidence: Float = 0.1
 

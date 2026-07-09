@@ -58,6 +58,8 @@ extension AsrManager {
         _ chunkSamples: [Float],
         decoderState: inout TdtDecoderState,
         previousTokens: [Int] = [],
+        previousTokenTimestamps: [Int]? = nil,
+        globalFrameOffset: Int = 0,
         isLastChunk: Bool = false,
         language: Language? = nil
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
@@ -76,8 +78,14 @@ extension AsrManager {
 
         // Apply token deduplication if previous tokens are provided
         if !previousTokens.isEmpty && hypothesis.hasTokens {
+            // Convert this chunk's local frame timestamps into the same global frame
+            // space as `previousTokenTimestamps` so dedup can require temporal adjacency.
+            let currentGlobalTimestamps: [Int]? =
+                previousTokenTimestamps != nil ? hypothesis.timestamps.map { $0 + globalFrameOffset } : nil
             let (deduped, removedCount) = removeDuplicateTokenSequence(
-                previous: previousTokens, current: hypothesis.ySequence)
+                previous: previousTokens, current: hypothesis.ySequence,
+                previousTimestamps: previousTokenTimestamps,
+                currentTimestamps: currentGlobalTimestamps)
             let adjustedTimestamps =
                 removedCount > 0 ? Array(hypothesis.timestamps.dropFirst(removedCount)) : hypothesis.timestamps
             let adjustedConfidences =
