@@ -72,8 +72,16 @@ public struct ASRConfig: Sendable {
     /// strictly inside the gap are spliced in, starting at a word-initial
     /// piece. Genuine silence yields no in-gap tokens and is left untouched.
     ///
+    /// The same flag also enables trailing-drop repair (issue #747): on quiet
+    /// long-form audio the final window can decode to all-blank, silently
+    /// dropping the last few words. That span sits past the last emitted token
+    /// (no seam gap surrounds it), so it is recovered separately by re-decoding
+    /// the tail with a context-free window when it still carries speech-level
+    /// energy.
+    ///
     /// Cost: one extra window decode per probed gap (typically 0–3 per
-    /// half-hour file). Applies to the stateless chunked batch path only.
+    /// half-hour file) plus at most one for the trailing tail. Applies to the
+    /// stateless chunked batch path only.
     public let seamGapRepair: Bool
 
     /// Minimum inter-token gap, in seconds, that triggers a seam-gap repair

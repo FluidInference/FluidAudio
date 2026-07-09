@@ -598,19 +598,42 @@ struct ChunkProcessor {
             mergedTokens.sort { $0.timestamp < $1.timestamp }
         }
 
-        // Issue #758: the merge above can deterministically drop multi-second
-        // spans of clear speech at a chunk seam. Detect suspicious gaps and
-        // re-decode each with a fresh window centred on the gap, where the
-        // seam does not exist.
-        if orderedChunkOutputs.count > 1, mergedTokens.count > 1, await manager.seamGapRepair {
+        // The merge above can drop clear speech in two ways that both leave
+        // no error and high confidence. Repair passes re-decode the affected
+        // span with a fresh, seam-free window (issues #758 and #747).
+        if orderedChunkOutputs.count > 1, !mergedTokens.isEmpty, await manager.seamGapRepair {
             let vocabulary = await manager.vocabulary
-            mergedTokens = try await repairSeamGaps(
+            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
+            let minGapSeconds = await manager.seamGapRepairMinGapSeconds
+
+            // Issue #758: multi-second spans of clear speech dropped at a chunk
+            // seam when the overlap region is low-SNR. Re-decode each suspicious
+            // inter-token gap with a window centred on it, where the seam does
+            // not exist.
+            if mergedTokens.count > 1 {
+                mergedTokens = try await repairSeamGaps(
+                    in: mergedTokens,
+                    using: workers[0],
+                    decoderLayers: decoderLayers,
+                    maxModelSamples: maxModelSamples,
+                    minGapSeconds: minGapSeconds,
+                    spliceSafeTokenIds: spliceSafeTokenIds,
+                    vocabulary: vocabulary,
+                    language: language
+                )
+            }
+
+            // Issue #747: the FINAL window can blank out entirely on quiet
+            // long-form audio, silently dropping the trailing words. That span
+            // sits past the last token, so `repairSeamGaps` (which walks gaps
+            // BETWEEN tokens) never sees it — handle it separately.
+            mergedTokens = try await repairTrailingDrop(
                 in: mergedTokens,
                 using: workers[0],
                 decoderLayers: decoderLayers,
                 maxModelSamples: maxModelSamples,
-                minGapSeconds: await manager.seamGapRepairMinGapSeconds,
-                spliceSafeTokenIds: Self.spliceSafeTokenIds(vocabulary: vocabulary),
+                minTailSeconds: minGapSeconds,
+                spliceSafeTokenIds: spliceSafeTokenIds,
                 vocabulary: vocabulary,
                 language: language
             )
@@ -1409,6 +1432,168 @@ struct ChunkProcessor {
         }
 
         return working
+    }
+
+    // MARK: - Trailing-drop repair (issue #747)
+
+    /// The tail to re-decode when the final window may have blanked out:
+    /// frame-aligned probe window starts plus the shared window size.
+    struct TrailingTailProbe: Equatable {
+        /// Frame-aligned window start samples, in priority order.
+        let placements: [Int]
+        /// Usable window size in samples (model input is padded to this).
+        let windowSamples: Int
+        /// First frame past the last emitted token — the drop boundary.
+        let tailStartFrame: Int
+    }
+
+    /// Decide whether the untranscribed tail (past the last emitted token)
+    /// carries enough speech-level energy to be a silent trailing drop worth
+    /// re-decoding, and if so where to place the probe window(s). Returns nil
+    /// for a short tail or genuine trailing silence — pure so it is unit
+    /// testable without the CoreML models.
+    func trailingTailProbe(
+        lastTokenTimestamp: Int,
+        lastTokenDuration: Int,
+        minTailSeconds: Double,
+        maxModelSamples: Int
+    ) throws -> TrailingTailProbe? {
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        let frameDuration = ASRConstants.secondsPerEncoderFrame
+        let minTailFrames = max(2, Int(minTailSeconds / frameDuration))
+
+        // Conservative end of the last token: its decoded duration when
+        // present, else one frame (mirrors mergeChunks / repairSeamGaps).
+        let tailStartFrame = lastTokenTimestamp + max(1, lastTokenDuration)
+        let tailStartSample = tailStartFrame * frameSamples
+        guard totalSamples - tailStartSample >= minTailFrames * frameSamples else { return nil }
+
+        let speechSeconds = try speechLikeSeconds(from: tailStartSample, to: totalSamples)
+        guard speechSeconds >= seamGapMinSpeechSeconds else { return nil }
+
+        let windowSamples = max(
+            frameSamples,
+            (maxModelSamples - ASRConstants.melHopSize) / frameSamples * frameSamples
+        )
+        // (1) Isolated tail — the window cold-starts AT the drop; the audio is
+        //     shorter than one window and padded to model size, so the decoder
+        //     never sees the mel-context prepend or the noisy pre-gap history
+        //     that blanked the original window (issue #747 signal 1).
+        // (2) Full final window ending at the audio, decoded with no context
+        //     prepend — the `melChunkContext = false` recovery for that window
+        //     (signal 2) — as a fallback when the cold start misses.
+        let endAlignedStart = max(0, totalSamples - windowSamples) / frameSamples * frameSamples
+        var placements = [tailStartSample]
+        if endAlignedStart != tailStartSample { placements.append(endAlignedStart) }
+
+        return TrailingTailProbe(
+            placements: placements, windowSamples: windowSamples, tailStartFrame: tailStartFrame)
+    }
+
+    /// Recover trailing words dropped when the FINAL sliding window blanks out.
+    ///
+    /// On quiet long-form audio the last window — short, heavily zero-padded and
+    /// carrying the 80ms mel-context prepend — can decode to all-blank even
+    /// though its audio holds clear speech, ending the transcript several words
+    /// early with no error and high confidence (issue #747). The dropped span
+    /// sits AFTER the last emitted token, so `repairSeamGaps` (which walks gaps
+    /// BETWEEN tokens) never examines it.
+    ///
+    /// If speech-level energy remains past the last token, re-decode the tail
+    /// with a fresh, context-free window and splice in the tokens that fall past
+    /// that token, starting at a word-initial piece and edge-deduping the
+    /// re-heard last word. Genuine trailing silence yields no tokens and the
+    /// stream is returned unchanged.
+    private func repairTrailingDrop(
+        in tokens: [TokenWindow],
+        using manager: AsrManager,
+        decoderLayers: Int,
+        maxModelSamples: Int,
+        minTailSeconds: Double,
+        spliceSafeTokenIds: Set<Int>?,
+        vocabulary: [Int: String],
+        language: Language?
+    ) async throws -> [TokenWindow] {
+        guard let last = tokens.last else { return tokens }
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        let frameDuration = ASRConstants.secondsPerEncoderFrame
+
+        guard
+            let probe = try trailingTailProbe(
+                lastTokenTimestamp: last.timestamp,
+                lastTokenDuration: last.duration,
+                minTailSeconds: minTailSeconds,
+                maxModelSamples: maxModelSamples
+            )
+        else { return tokens }
+
+        // No token after the tail exists, so there is no tail neighbor to
+        // dedupe against; pass the last emitted token, which sits far enough in
+        // time from the recovered end tokens that the tail edge-dedupe never
+        // trims them (the tail is >= `minTailSeconds` long). The lead neighbor
+        // is the last real word, so a re-heard copy at the tail head collapses.
+        let leadNeighbor = Self.wordNeighbor(
+            in: tokens, from: tokens.count - 1, step: -1, vocabulary: vocabulary)
+        let lastAudioFrame = max(0, (totalSamples - 1) / frameSamples)
+
+        for windowStart in probe.placements {
+            let windowEnd = min(windowStart + probe.windowSamples, totalSamples)
+            guard windowEnd > windowStart else { continue }
+
+            var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
+            decoderState.reset()
+            let windowAudio = try readSamples(offset: windowStart, count: windowEnd - windowStart)
+            let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
+                try await Self.transcribeChunk(
+                    samples: windowAudio,
+                    contextSamples: 0,
+                    chunkStart: windowStart,
+                    isLastChunk: windowEnd >= totalSamples,
+                    using: manager,
+                    decoderState: &decoderState,
+                    maxModelSamples: maxModelSamples,
+                    language: language
+                )
+
+            guard windowTokens.count == windowTimestamps.count,
+                windowTokens.count == windowConfidences.count
+            else { continue }
+            let durations =
+                windowDurations.count == windowTokens.count
+                ? windowDurations : Array(repeating: 0, count: windowTokens.count)
+
+            // Keep only tokens strictly past the last emitted token (so the
+            // recovery extends the transcript), starting at a word-initial
+            // piece. `gapEndFrame` is one past the final audio frame so no real
+            // trailing token is filtered out.
+            let candidate = Self.spliceCandidate(
+                windowTokens: windowTokens,
+                windowTimestamps: windowTimestamps,
+                windowConfidences: windowConfidences,
+                windowDurations: durations,
+                gapStartFrame: last.timestamp,
+                gapEndFrame: lastAudioFrame + 2,
+                leadNeighbor: leadNeighbor,
+                tailNeighbor: last,
+                spliceSafeTokenIds: spliceSafeTokenIds,
+                vocabulary: vocabulary
+            )
+
+            guard !candidate.isEmpty else { continue }
+            logger.info(
+                "Trailing-drop repair: recovered \(candidate.count) tokens after "
+                    + String(format: "%.2fs", Double(probe.tailStartFrame) * frameDuration)
+                    + " (audio ends at "
+                    + String(format: "%.2fs", Double(totalSamples) / Double(ASRConstants.sampleRate))
+                    + ")"
+            )
+            var working = tokens
+            working.append(contentsOf: candidate)
+            working.sort { $0.timestamp < $1.timestamp }
+            return working
+        }
+
+        return tokens
     }
 
     /// Cumulative duration of speech-like audio (per-frame RMS above
