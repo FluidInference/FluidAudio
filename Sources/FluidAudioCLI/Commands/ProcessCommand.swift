@@ -152,6 +152,12 @@ enum ProcessCommand {
             if args.useNMESC {
                 offlineConfig.clustering.algorithm = .nmesc
             }
+            if args.useTitaNet {
+                offlineConfig.embedding.backend = .titanet10s
+                if let dir = args.titanetDir {
+                    offlineConfig.titanetModelDirectory = URL(fileURLWithPath: dir)
+                }
+            }
             offlineConfig.segmentationDumpPath = args.segmentationDumpPath
 
             let modelDir = OfflineDiarizerModels.defaultModelsDirectory()
@@ -252,6 +258,8 @@ enum ProcessCommand {
         var embeddingExportPath: String?
         var segmentationDumpPath: String?
         var useNMESC = false
+        var useTitaNet = false
+        var titanetDir: String?
 
         // Streaming-mode params
         var thresholdS: Float = 0.7045655  // matches pyannote speaker-diarization-3.1 config.yaml
@@ -468,6 +476,16 @@ enum ProcessCommand {
             case "--dump-masks":
                 if i + 1 < args.count {
                     parsed.segmentationDumpPath = args[i + 1]
+                    i += 1
+                }
+            case "--embedder":
+                if i + 1 < args.count {
+                    parsed.useTitaNet = args[i + 1].lowercased() == "titanet10s"
+                    i += 1
+                }
+            case "--titanet-dir":
+                if i + 1 < args.count {
+                    parsed.titanetDir = args[i + 1]
                     i += 1
                 }
 

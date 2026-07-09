@@ -189,17 +189,32 @@ public final class OfflineDiarizerManager {
 
         let embeddingTask = Task.detached(priority: .userInitiated) {
             [capturedModels, capturedConfig] () throws -> ([TimedEmbedding], TimeInterval) in
-            let extractor = OfflineEmbeddingExtractor(
-                fbankModel: capturedModels.fbankModel,
-                embeddingModel: capturedModels.embeddingModel,
-                pldaTransform: PLDATransform(pldaRhoModel: capturedModels.pldaRhoModel, psi: capturedModels.pldaPsi),
-                config: capturedConfig
-            )
             let start = Date()
-            let embeddings = try await extractor.extractEmbeddings(
-                audioSource: audioSource,
-                segmentationStream: chunkStream
-            )
+            let embeddings: [TimedEmbedding]
+            switch capturedConfig.embedding.backend {
+            case .titanet10s:
+                guard let directory = capturedConfig.titanetModelDirectory else {
+                    throw OfflineDiarizationError.invalidConfiguration(
+                        "titanet10s backend requires titanetModelDirectory")
+                }
+                let extractor = try await TitaNetMaskedExtractor(
+                    directory: directory, config: capturedConfig)
+                embeddings = try await extractor.extractEmbeddings(
+                    audioSource: audioSource,
+                    segmentationStream: chunkStream
+                )
+            case .wespeaker:
+                let extractor = OfflineEmbeddingExtractor(
+                    fbankModel: capturedModels.fbankModel,
+                    embeddingModel: capturedModels.embeddingModel,
+                    pldaTransform: PLDATransform(pldaRhoModel: capturedModels.pldaRhoModel, psi: capturedModels.pldaPsi),
+                    config: capturedConfig
+                )
+                embeddings = try await extractor.extractEmbeddings(
+                    audioSource: audioSource,
+                    segmentationStream: chunkStream
+                )
+            }
             return (embeddings, Date().timeIntervalSince(start))
         }
 
@@ -486,13 +501,6 @@ public final class OfflineDiarizerManager {
     }
 
     private func prewarmEmbeddingStack(models: OfflineDiarizerModels) async throws {
-        let extractor = OfflineEmbeddingExtractor(
-            fbankModel: models.fbankModel,
-            embeddingModel: models.embeddingModel,
-            pldaTransform: PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi),
-            config: config
-        )
-
         let dummyAudio = [Float](repeating: 0, count: config.samplesPerWindow)
         let dummySegmentation = SegmentationOutput(
             logProbs: [[[0]]],
@@ -504,10 +512,29 @@ public final class OfflineDiarizerManager {
             frameDuration: max(1e-3, config.windowDuration)
         )
 
-        _ = try await extractor.extractEmbeddings(
-            audio: dummyAudio,
-            segmentation: dummySegmentation
-        )
+        switch config.embedding.backend {
+        case .titanet10s:
+            guard let directory = config.titanetModelDirectory else {
+                throw OfflineDiarizationError.invalidConfiguration(
+                    "titanet10s backend requires titanetModelDirectory")
+            }
+            let extractor = try await TitaNetMaskedExtractor(directory: directory, config: config)
+            _ = try await extractor.extractEmbeddings(
+                audio: dummyAudio,
+                segmentation: dummySegmentation
+            )
+        case .wespeaker:
+            let extractor = OfflineEmbeddingExtractor(
+                fbankModel: models.fbankModel,
+                embeddingModel: models.embeddingModel,
+                pldaTransform: PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi),
+                config: config
+            )
+            _ = try await extractor.extractEmbeddings(
+                audio: dummyAudio,
+                segmentation: dummySegmentation
+            )
+        }
     }
 
     private func selectTrainingEmbeddings(
