@@ -34,7 +34,11 @@ struct TitaNetMaskedExtractor {
     /// Mirrors OfflineEmbeddingExtractor's minActiveRatio guard.
     private static let minActiveRatio: Float = 0.2
 
-    private static let frontName = "TitaNet10s_front_fp16"
+    // The front MUST stay fp32: at fp16 its power-spectrum/log-mel math
+    // underflows on quiet far-field windows (embedding cosine vs fp32 drops
+    // to 0.21). It is ~570K of DSP, so fp32 costs nothing; only the heavy
+    // encoder benefits from fp16/ANE.
+    private static let frontName = "TitaNet10s_front_fp32"
     private static let encoderName = "TitaNet10s_encoder_fp16"
     private static let maskdecName = "TitaNet10s_maskdec_fp16"
 
