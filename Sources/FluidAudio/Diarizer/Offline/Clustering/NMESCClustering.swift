@@ -102,7 +102,43 @@ struct NMESCClustering {
             nInit: 10,
             baseSeed: 0
         )
-        return labels
+        return collapseIfSingleVoice(labels: labels, features: embeddingFeatures)
+    }
+
+    // MARK: - Single-voice collapse
+
+    /// All-pairs centroid-similarity collapse: the eigengap search never
+    /// hypothesizes k=1 (it starts at 2), so a solo voice is force-split into
+    /// pure sub-clusters of the SAME speaker. If every pair of cluster
+    /// centroids exceeds this cosine, the split is within-voice — collapse.
+    private let singleVoiceCentroidCosine = 0.80
+
+    private func collapseIfSingleVoice(labels: [Int], features: [[Double]]) -> [Int] {
+        let ids = Set(labels)
+        guard ids.count > 1, let dim = features.first?.count else { return labels }
+        var centroids: [[Double]] = []
+        for id in ids.sorted() {
+            var sum = [Double](repeating: 0, count: dim)
+            var count = 0
+            for (i, lab) in labels.enumerated() where lab == id {
+                for j in 0..<dim { sum[j] += features[i][j] }
+                count += 1
+            }
+            guard count > 0 else { continue }
+            var norm = 0.0
+            for v in sum { norm += v * v }
+            norm = norm.squareRoot()
+            centroids.append(norm > 0 ? sum.map { $0 / norm } : sum)
+        }
+        for i in 0..<centroids.count {
+            for j in (i + 1)..<centroids.count {
+                var dot = 0.0
+                for d in 0..<centroids[i].count { dot += centroids[i][d] * centroids[j][d] }
+                if dot < singleVoiceCentroidCosine { return labels }  // a genuinely distinct pair exists
+            }
+        }
+        logger.debug("NME-SC single-voice collapse: \(ids.count) clusters -> 1")
+        return [Int](repeating: 0, count: labels.count)
     }
 
     // MARK: - Affinity construction
