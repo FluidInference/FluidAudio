@@ -286,11 +286,21 @@ public final class OfflineDiarizerManager {
     /// number of times on the same prepared value — the deterministic inference stages are
     /// never re-run, so each call costs only the clustering + reconstruction stage.
     ///
+    /// `prepared` does not have to come from this instance: the receiving instance's own
+    /// models and configuration drive this stage, so a `PreparedDiarization` may be handed
+    /// to a different `OfflineDiarizerManager` (for example to re-cluster with different
+    /// clustering constraints without re-running inference). Unlike
+    /// ``prepare(audio:progressCallback:)``, this method never loads models on demand — the
+    /// receiving instance must already have models loaded via
+    /// ``prepareModels(directory:configuration:forceRedownload:)``, ``initialize(models:)``,
+    /// or a prior `prepare`.
+    ///
     /// - Parameter prepared: Output of ``prepare(audioSource:audioLoadingSeconds:progressCallback:)``.
     /// - Returns: Diarization result with speaker segments.
-    /// - Throws: `OfflineDiarizationError.modelNotLoaded` if the models were released since
-    ///   `prepare`, or `OfflineDiarizationError.noSpeechDetected` if `prepared` contains no
-    ///   embeddings.
+    /// - Throws: `OfflineDiarizationError.modelNotLoaded` if the receiving instance has no
+    ///   loaded models (regardless of which instance produced `prepared`; on the instance
+    ///   that ran `prepare` successfully this cannot occur, as models are never released),
+    ///   or `OfflineDiarizationError.noSpeechDetected` if `prepared` contains no embeddings.
     public func cluster(_ prepared: PreparedDiarization) throws -> DiarizationResult {
         guard let models else {
             throw OfflineDiarizationError.modelNotLoaded("offline-diarizer")
