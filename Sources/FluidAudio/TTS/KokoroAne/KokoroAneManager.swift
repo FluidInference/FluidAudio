@@ -191,9 +191,10 @@ public actor KokoroAneManager {
     public func phonemes(for text: String) async throws -> String {
         switch variant {
         case .english:
-            // Byte-exact NeMo TN before G2P: "$5" → "five dollars", "2024" →
-            // "twenty twenty four", etc. No-op for plain text.
-            let normalized = NemoTextNormalizer.normalize(text, language: .english)
+            // Byte-exact NeMo TN before G2P via the shared frontend entry
+            // point: "$5" → "five dollars", "2024" → "twenty twenty four".
+            // No-op for plain prose.
+            let normalized = EnglishTextNormalizer.normalizeForFrontend(text)
             return try await phonemize(text: normalized)
         case .mandarin:
             try await store.loadIfNeeded()

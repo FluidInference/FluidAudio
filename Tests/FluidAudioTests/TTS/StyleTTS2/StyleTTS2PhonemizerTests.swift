@@ -221,14 +221,15 @@ final class StyleTTS2PhonemizerTests: XCTestCase {
         XCTAssertEqual(phonemes, "t s")
     }
 
-    func testEmbeddedDigitsAreNotNormalized() async throws {
-        // `word26` is ambiguous → left intact; reaches G2P/grapheme path as
-        // one token (no "twenty six" split).
+    func testEmbeddedDigitsAreNormalized() async throws {
+        // The frontend now applies byte-exact NeMo TN, which normalizes
+        // embedded digits: "word26" → "word twenty six" (three tokens) before
+        // phonemization.
         let phonemizer = StyleTTS2Phonemizer(
-            wordToPhonemes: ["word26": ["w"]]
+            wordToPhonemes: ["word": ["w"], "twenty": ["w"], "six": ["w"]]
         )
         let phonemes = try await phonemizer.phonemize("word26")
-        XCTAssertEqual(phonemes, "w")
+        XCTAssertEqual(phonemes, "w w w")
     }
 
     // MARK: - OOV without G2P model raises (only-resolved-token check)

@@ -44,14 +44,17 @@ enum EnglishTextNormalizer {
         return result
     }
 
-    /// TTS-frontend entry point shared by KokoroAne and StyleTTS2. Prefers the
-    /// native NeMo TN pass (`text-processing-rs`, much richer: currency,
-    /// measures, dates, ranges, fractions, …) when the host app has linked
-    /// `libtext_processing_rs`; otherwise falls back to the conservative
-    /// always-available baseline in ``normalize(_:)``.
+    /// TTS-frontend entry point shared by KokoroAne and StyleTTS2.
+    ///
+    /// Uses the bundled byte-exact NeMo TN via the compiled-FST engine
+    /// (``NemoTextNormalizer``) — much richer than the baseline: currency,
+    /// measures, dates, ranges, fractions, embedded digits, … The conservative
+    /// always-available baseline in ``normalize(_:)`` is used only if the FST
+    /// engine leaves the text unchanged (e.g. plain prose, or a build without
+    /// the `fst-engine` feature).
     static func normalizeForFrontend(_ text: String) -> String {
-        let normalizer = TextNormalizer.shared
-        return normalizer.isTnAvailable ? normalizer.tnNormalizeSentence(text) : normalize(text)
+        let fst = NemoTextNormalizer.normalize(text, language: .english)
+        return fst == text ? normalize(text) : fst
     }
 
     // MARK: - Boundaries
