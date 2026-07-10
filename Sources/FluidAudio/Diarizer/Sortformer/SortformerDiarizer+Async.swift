@@ -42,19 +42,22 @@ extension SortformerDiarizer {
     /// Async variant of ``process(samples:sourceSampleRate:)``: adds and processes a chunk of
     /// audio on the diarizer's serial inference queue while the calling task suspends.
     ///
+    /// `samples` must be `Sendable` because the collection crosses to the inference queue.
+    /// It is forwarded as-is — no intermediate `Array` materialization — so an `[Float]`
+    /// caller pays only the same buffer-append copy the synchronous path performs.
+    ///
     /// - Parameters:
     ///   - samples: Mono audio samples to process.
     ///   - sourceSampleRate: Sample rate of `samples`, or `nil` if already at the model rate.
     /// - Returns: New chunk results if enough audio was processed, `nil` otherwise.
     @discardableResult
-    public func processAsync(
-        samples: some Collection<Float>,
+    public func processAsync<C: Collection & Sendable>(
+        samples: C,
         sourceSampleRate: Double? = nil
-    ) async throws -> DiarizerTimelineUpdate? {
+    ) async throws -> DiarizerTimelineUpdate? where C.Element == Float {
         try Task.checkCancellation()
-        let buffered = Array(samples)
         return try await runOnInferenceQueue { diarizer in
-            try diarizer.process(samples: buffered, sourceSampleRate: sourceSampleRate)
+            try diarizer.process(samples: samples, sourceSampleRate: sourceSampleRate)
         }
     }
 
