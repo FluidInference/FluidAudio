@@ -9,8 +9,12 @@ import OSLog
 /// achieving ~11% DER on DI-HARD III in real-time.
 ///
 /// ## Thread safety
-/// Every public entry point acquires the internal `NSLock`, so individual calls are atomic
-/// and the class is safe to reference across isolation domains (`@unchecked Sendable`).
+/// Every public entry point acquires the internal `NSLock`, so individual calls are atomic.
+/// The class is deliberately **not** `Sendable`: instead of a blanket `@unchecked Sendable`
+/// promise covering every current and future stored property, the async entry points carry
+/// the instance across the concurrency boundary through a single documented
+/// `@unchecked Sendable` choke point (`QueueConfinedBox` in `SortformerDiarizer+Async.swift`),
+/// keeping the compiler's data-race checking intact everywhere else.
 /// Interleaving order between concurrent callers is still unspecified — for deterministic
 /// output, drive a given instance from one caller at a time (or use the `*Async` variants,
 /// which serialize on a dedicated FIFO queue).
@@ -22,7 +26,7 @@ import OSLog
 /// actor in the process. Prefer the `processAsync`/`finalizeSessionAsync` variants from async
 /// contexts — they run the same code on the diarizer's own serial queue while the calling
 /// task suspends.
-public final class SortformerDiarizer: Diarizer, @unchecked Sendable {
+public final class SortformerDiarizer: Diarizer {
     /// Lock for thread-safe access to mutable state
     private let lock = NSLock()
 

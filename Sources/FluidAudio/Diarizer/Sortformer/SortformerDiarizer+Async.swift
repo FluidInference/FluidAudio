@@ -72,15 +72,36 @@ extension SortformerDiarizer {
 
     // MARK: - Queue Hop
 
+    /// The async path's single, documented unsafety choke point.
+    ///
+    /// `SortformerDiarizer` is intentionally **not** `Sendable`, so `self` cannot be captured
+    /// directly by the `@Sendable` closure dispatched onto `inferenceQueue`. This box is the
+    /// one place that promise is made instead, confining the `@unchecked Sendable` surface to
+    /// a single field with a checkable invariant — every other spot where the diarizer crosses
+    /// an isolation boundary stays under full compiler data-race checking.
+    ///
+    /// Safety invariant: the wrapped instance is only ever dereferenced on the diarizer's
+    /// serial `inferenceQueue`, and every method invoked on it acquires the diarizer's
+    /// internal lock exactly like the synchronous API.
+    private final class QueueConfinedBox: @unchecked Sendable {
+        /// Only dereference on `inferenceQueue`.
+        let diarizer: SortformerDiarizer
+
+        init(_ diarizer: SortformerDiarizer) {
+            self.diarizer = diarizer
+        }
+    }
+
     /// Runs `work` on the diarizer's serial inference queue, suspending the calling task until
-    /// it completes. `SortformerDiarizer` is `@unchecked Sendable` (all mutable state is
-    /// lock-guarded), so handing `self` to the queue closure is safe.
+    /// it completes. `self` crosses the queue boundary inside a ``QueueConfinedBox`` — see its
+    /// documented safety invariant.
     private func runOnInferenceQueue<T: Sendable>(
         _ work: @escaping @Sendable (SortformerDiarizer) throws -> T
     ) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            inferenceQueue.async { [self] in
-                continuation.resume(with: Result { try work(self) })
+        let box = QueueConfinedBox(self)
+        return try await withCheckedThrowingContinuation { continuation in
+            inferenceQueue.async {
+                continuation.resume(with: Result { try work(box.diarizer) })
             }
         }
     }
