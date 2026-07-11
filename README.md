@@ -116,6 +116,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Parakey](https://github.com/rcourtman/parakey)** | Open-source (MIT) menu-bar push-to-talk dictation for macOS — hold a key, speak, release; the transcript pastes at the cursor in about 100 ms. Uses Parakeet TDT v3 ASR on the Apple Neural Engine via FluidAudio. |
 | **[TypeWhisper](https://www.typewhisper.com/)** | Speech-to-text and AI text processing for macOS. Uses FluidAudio's Parakeet ASR for local transcription. |
 | **[evoglyph](https://evoglyph.com)** | Lightweight, privacy-first macOS menu-bar dictation — press a hotkey, speak, and cleaned-up text is injected at your cursor. Fully local: Parakeet TDT ASR with CTC vocabulary boosting and Silero VAD via FluidAudio on the Apple Neural Engine, plus on-device LLM cleanup. Audio never leaves the Mac. |
+| **[echo99](https://www.echo99.app)** | Private call recorder for macOS. Menu-bar app that records the mic and system audio as separate tracks and transcribes them entirely on-device. |
 
 ## Installation
 
