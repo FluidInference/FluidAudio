@@ -8,38 +8,12 @@ import OSLog
 /// Sortformer provides end-to-end streaming diarization with 4 fixed speaker slots,
 /// achieving ~11% DER on DI-HARD III in real-time.
 ///
-/// ## Thread safety
-/// Every public entry point acquires the internal `NSLock`, so individual calls are atomic.
-/// The class is deliberately **not** `Sendable`: instead of a blanket `@unchecked Sendable`
-/// promise covering every current and future stored property, the async entry points carry
-/// the instance across the concurrency boundary through a single documented
-/// `@unchecked Sendable` choke point (`QueueConfinedBox` in `SortformerDiarizer+Async.swift`),
-/// keeping the compiler's data-race checking intact everywhere else.
-/// Interleaving order between concurrent callers is still unspecified — for deterministic
-/// output, drive a given instance from one caller at a time (or use the `*Async` variants,
-/// which serialize on a dedicated FIFO queue).
-///
-/// ## Blocking vs async
-/// The synchronous `process*` methods run CoreML inference inline on the calling thread with
-/// no suspension point. When called from a Swift-concurrency actor this pins a shared
-/// cooperative-pool thread for the whole forward pass (hundreds of ms), starving every other
-/// actor in the process. Prefer the `processAsync`/`finalizeSessionAsync` variants from async
-/// contexts — they run the same code on the diarizer's own serial queue while the calling
-/// task suspends.
+/// - Important: This class is **not** thread-safe or Sendable. Drive an instance from one
+///   synchronous caller. From Swift concurrency, use ``SortformerDiarizerActor`` instead; it
+///   owns its diarizer behind actor isolation and a dedicated serial executor.
 public final class SortformerDiarizer: Diarizer {
     /// Lock for thread-safe access to mutable state
     private let lock = NSLock()
-
-    /// Dedicated serial queue for the async inference path.
-    ///
-    /// The `*Async` variants hop onto this queue so the calling task suspends (returning its
-    /// cooperative-pool thread) while CoreML inference runs. Serial + FIFO by construction:
-    /// async submissions execute in exactly the order they were enqueued, so the async path
-    /// produces byte-identical output to the equivalent sequence of synchronous calls.
-    internal let inferenceQueue = DispatchQueue(
-        label: "com.fluidaudio.sortformer.inference",
-        qos: .userInitiated
-    )
 
     /// Accumulated results
     public var timeline: DiarizerTimeline {

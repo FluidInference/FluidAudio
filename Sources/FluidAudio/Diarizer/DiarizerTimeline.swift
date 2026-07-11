@@ -217,7 +217,7 @@ public struct DiarizerChunkResult: Sendable {
 // MARK: - Speaker
 
 public class DiarizerSpeaker: Identifiable {
-    public struct Snapshot {
+    public struct Snapshot: Sendable {
         public let name: String?
         public let index: Int
         public let finalizedSegments: [DiarizerSegment]
@@ -625,12 +625,12 @@ public enum DiarizerActivityType: Sendable {
 /// Generalizes `SortformerTimeline` for any frame-based diarizer. Works with
 /// both Sortformer (fixed 4 speakers) and LS-EEND (variable speaker count).
 public class DiarizerTimeline {
-    public struct ConfiguredSnapshot {
+    public struct ConfiguredSnapshot: Sendable {
         let config: DiarizerTimelineConfig
         let snapshot: Snapshot
     }
 
-    public struct Snapshot {
+    public struct Snapshot: Sendable {
         public let speakers: [Int: DiarizerSpeaker.Snapshot]
         public let finalizedPredictions: [Float]
         public let tentativePredictions: [Float]
@@ -646,7 +646,7 @@ public class DiarizerTimeline {
         case speakersWithSegments
     }
 
-    internal struct SegmentScratch {
+    internal struct SegmentScratch: Sendable {
         var speaking: Bool = false
         var hasSegment: Bool = false
         var startFrame: Int = .min

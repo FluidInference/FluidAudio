@@ -5,10 +5,9 @@ import XCTest
 // Note: Import order is not alphabetical due to Swift 6.1 (CI) vs 6.3 (local) formatter incompatibility.
 // OrderedImports rule is disabled in .swift-format until GitHub Actions supports Swift 6.3.
 
-/// Integration tests for the async Sortformer entry points
-/// (`processAsync()`, `processAsync(samples:sourceSampleRate:)`, `finalizeSessionAsync()`).
+/// Integration tests for the actor-isolated Sortformer entry points.
 ///
-/// The async variants are documented to produce byte-identical output to the same sequence
+/// The actor path is documented to produce byte-identical output to the same sequence
 /// of synchronous calls; the equivalence test pins that down chunk by chunk. Model loading
 /// follows the same convention as `SortformerStreamingIntegrationTests` and skips cleanly
 /// when models are unavailable.
@@ -28,7 +27,7 @@ final class SortformerAsyncIntegrationTests: XCTestCase {
 
     /// Feeding the same chunk sequence through the async path must produce results identical
     /// to the sync path, chunk for chunk (same values, same ordering) — including the
-    /// buffered-drain variant (`processAsync()`) and finalization (`finalizeSessionAsync()`).
+    /// buffered-drain call (`process()`) and finalization (`finalizeSession()`).
     func testAsyncPathMatchesSyncPathChunkForChunk() async throws {
         let config = SortformerConfig.default
         let models: SortformerModels
@@ -49,14 +48,14 @@ final class SortformerAsyncIntegrationTests: XCTestCase {
         let syncDrain = try syncDiarizer.process()
         let syncFinal = try syncDiarizer.finalizeSession()
 
-        let asyncDiarizer = SortformerDiarizer(config: config)
-        asyncDiarizer.initialize(models: models)
+        let asyncDiarizer = SortformerDiarizerActor(config: config)
+        try await asyncDiarizer.initializeFromHuggingFace(computeUnits: .cpuOnly)
         var asyncUpdates: [DiarizerTimelineUpdate?] = []
         for chunk in chunks {
-            asyncUpdates.append(try await asyncDiarizer.processAsync(samples: chunk))
+            asyncUpdates.append(try await asyncDiarizer.process(samples: chunk))
         }
-        let asyncDrain = try await asyncDiarizer.processAsync()
-        let asyncFinal = try await asyncDiarizer.finalizeSessionAsync()
+        let asyncDrain = try await asyncDiarizer.process()
+        let asyncFinal = try await asyncDiarizer.finalizeSession()
 
         XCTAssertEqual(syncUpdates.count, asyncUpdates.count)
         for (index, (syncUpdate, asyncUpdate)) in zip(syncUpdates, asyncUpdates).enumerated() {
@@ -65,25 +64,19 @@ final class SortformerAsyncIntegrationTests: XCTestCase {
         assertUpdatesEqual(syncDrain, asyncDrain, context: "buffered drain")
         assertUpdatesEqual(syncFinal, asyncFinal, context: "finalize")
 
-        XCTAssertEqual(
-            syncDiarizer.timeline.numFinalizedFrames,
-            asyncDiarizer.timeline.numFinalizedFrames,
-            "finalized frame counts must match")
-        XCTAssertEqual(
-            syncDiarizer.timeline.numTentativeFrames,
-            asyncDiarizer.timeline.numTentativeFrames,
-            "tentative frame counts must match")
+        let asyncTimeline = await asyncDiarizer.timelineSnapshot()
+        XCTAssertEqual(syncDiarizer.timeline.numFinalizedFrames, asyncTimeline.numFinalizedFrames)
         XCTAssertEqual(
             syncDiarizer.timeline.finalizedPredictions,
-            asyncDiarizer.timeline.finalizedPredictions,
+            asyncTimeline.finalizedPredictions,
             "final prediction buffers must be byte-identical")
         XCTAssertEqual(
             syncDiarizer.timeline.tentativePredictions,
-            asyncDiarizer.timeline.tentativePredictions,
+            asyncTimeline.tentativePredictions,
             "final tentative buffers must be byte-identical")
 
         let syncSpeakers = syncDiarizer.timeline.speakers
-        let asyncSpeakers = asyncDiarizer.timeline.speakers
+        let asyncSpeakers = asyncTimeline.speakers
         XCTAssertEqual(Set(syncSpeakers.keys), Set(asyncSpeakers.keys), "speaker slots must match")
         for (slot, syncSpeaker) in syncSpeakers {
             XCTAssertEqual(
@@ -97,16 +90,16 @@ final class SortformerAsyncIntegrationTests: XCTestCase {
         }
     }
 
-    /// The async variants check `Task.checkCancellation()` before enqueueing any work, so a
+    /// The actor entry points check `Task.checkCancellation()` before running any work, so a
     /// cancelled task must observe `CancellationError` — not `SortformerError.notInitialized`,
-    /// which is what the uninitialized diarizer would throw if the call reached the queue.
+    /// which is what the uninitialized diarizer would throw if inference were attempted.
     /// (No model gating needed: the call must fail before touching diarizer state.)
     ///
     /// Mid-inference cancellation is intentionally not asserted here: once a forward pass has
     /// started on the queue it runs to completion (CoreML predictions are not interruptible),
     /// so there is no cheap, deterministic observation point for it.
-    func testProcessAsyncThrowsCancellationErrorBeforeEnqueueing() async throws {
-        let diarizer = SortformerDiarizer()
+    func testActorProcessThrowsCancellationErrorBeforeInference() async throws {
+        let diarizer = SortformerDiarizerActor()
 
         let task = Task {
             // Ensure the body observes cancellation deterministically even if it starts
@@ -114,7 +107,7 @@ final class SortformerAsyncIntegrationTests: XCTestCase {
             while !Task.isCancelled {
                 await Task.yield()
             }
-            return try await diarizer.processAsync(samples: [Float](repeating: 0, count: 1_600))
+            return try await diarizer.process(samples: [Float](repeating: 0, count: 1_600))
         }
         task.cancel()
 
@@ -122,7 +115,7 @@ final class SortformerAsyncIntegrationTests: XCTestCase {
             _ = try await task.value
             XCTFail("Expected CancellationError from a cancelled task")
         } catch is CancellationError {
-            // Expected: cancellation is detected before the queue hop.
+            // Expected: cancellation is detected before inference begins.
         } catch {
             XCTFail("Expected CancellationError, got \(error)")
         }
