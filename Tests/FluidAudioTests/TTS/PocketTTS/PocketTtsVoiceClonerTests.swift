@@ -267,7 +267,7 @@ final class PocketTtsVoiceClonerTests: XCTestCase {
 
         XCTAssertEqual(out.count, frames * d)
         for i in 0..<out.count {
-            XCTAssertEqual(out[i], ref[i], accuracy: 1e-2, "mismatch at \(i)")
+            XCTAssertEqual(out[i], ref[i], accuracy: 1e-3, "mismatch at \(i)")
         }
     }
 

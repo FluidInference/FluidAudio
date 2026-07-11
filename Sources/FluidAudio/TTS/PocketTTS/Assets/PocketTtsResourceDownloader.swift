@@ -77,8 +77,14 @@ public enum PocketTtsResourceDownloader {
                         + "until this file is available; shipped snapshot voices are unaffected."
                 )
             }
-            await ensureSpeakerProjWeight(language: language, languageRoot: languageRoot)
-            await tryEnsureEncoderRecoverPinv(repoDir: repoDir)
+            // The voice-clone reprojection assets are only published for — and
+            // only usable by — the 24-layer packs (English and the 6-layer
+            // non-English packs don't use them, #793). Gating here avoids a
+            // fetch that would 404 on every load for those packs.
+            if language.transformerLayers == 24 {
+                await ensureSpeakerProjWeight(language: language, languageRoot: languageRoot)
+                await tryEnsureEncoderRecoverPinv(repoDir: repoDir)
+            }
             return languageRoot
         }
 
@@ -114,7 +120,10 @@ public enum PocketTtsResourceDownloader {
             }
         }
 
-        await tryEnsureEncoderRecoverPinv(repoDir: repoDir)
+        // Voice-clone reprojection assets are only for the 24-layer packs (#793).
+        if language.transformerLayers == 24 {
+            await tryEnsureEncoderRecoverPinv(repoDir: repoDir)
+        }
         return languageRoot
     }
 
