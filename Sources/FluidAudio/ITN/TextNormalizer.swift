@@ -281,8 +281,8 @@ public final class TextNormalizer: Sendable {
             return input
         }
 
-        let filtered = filterAmbiguousWords(in: input)
-        return callNormalizeSentence(filtered)
+        let (masked, restore) = maskAmbiguousWords(in: input)
+        return restoreMaskedWords(callNormalizeSentence(masked), restore)
     }
 
     /// Normalize a full sentence with a configurable max span size.
@@ -296,8 +296,9 @@ public final class TextNormalizer: Sendable {
             return input
         }
 
-        let filtered = filterAmbiguousWords(in: input)
-        return callNormalizeSentenceWithMaxSpan(filtered, maxSpanTokens: maxSpanTokens)
+        let (masked, restore) = maskAmbiguousWords(in: input)
+        return restoreMaskedWords(
+            callNormalizeSentenceWithMaxSpan(masked, maxSpanTokens: maxSpanTokens), restore)
     }
 
     /// Normalize an ASR result, returning a new result with normalized text.
@@ -390,7 +391,15 @@ public final class TextNormalizer: Sendable {
     ///
     /// - Parameter input: The raw sentence
     /// - Returns: Sentence with ambiguous natural-language words preserved
-    private func filterAmbiguousWords(in input: String) -> String {
+    /// Mask ambiguous words that NLTagger identifies as natural language, so the
+    /// native normalizer can't rewrite them (e.g. the noun "period" → ".").
+    ///
+    /// Each protected word is replaced with a unique Private-Use-Area sentinel
+    /// character; the native normalizer passes those through unchanged, and the
+    /// caller restores them via the returned map. Returns the (possibly)
+    /// rewritten string and a sentinel→original map (empty when nothing was
+    /// masked).
+    private func maskAmbiguousWords(in input: String) -> (masked: String, restore: [Character: String]) {
         let words = input.split(separator: " ", omittingEmptySubsequences: true)
 
         // Quick check: are there any ambiguous words at all?
@@ -398,13 +407,17 @@ public final class TextNormalizer: Sendable {
             Self.ambiguousWords.contains(word.lowercased())
         }
         guard hasAmbiguous else {
-            return input
+            return (input, [:])
         }
 
         let tagger = NLTagger(tagSchemes: [.lexicalClass])
         tagger.string = input
 
         var result: [String] = []
+        var restore: [Character: String] = [:]
+        // Private Use Area (U+E000…) — never appears in real ASR text and is
+        // passed through untouched by the native normalizer.
+        var nextSentinel: UInt32 = 0xE000
         for word in words {
             let wordLower = word.lowercased()
 
@@ -421,21 +434,33 @@ public final class TextNormalizer: Sendable {
 
             let tag = tagger.tag(at: wordRange.lowerBound, unit: .word, scheme: .lexicalClass).0
 
-            // If NLTagger identifies it as a noun, verb, adjective, or adverb,
-            // it's being used as natural language — keep it as-is.
-            // If it's "other" or unrecognized, treat it as a potential punctuation command.
+            // A noun/verb/adjective/adverb in a multi-word sentence is being used
+            // as natural language — mask it so the normalizer leaves it alone.
+            // Standalone or "other" usage is a potential punctuation command;
+            // leave it for the normalizer to process.
             let isNaturalLanguage = tag == .noun || tag == .verb || tag == .adjective || tag == .adverb
 
-            if isNaturalLanguage && words.count > 1 {
-                // Keep the original word — don't let the normalizer touch it
-                result.append(String(word))
+            if isNaturalLanguage && words.count > 1, let scalar = UnicodeScalar(nextSentinel) {
+                let sentinel = Character(scalar)
+                nextSentinel += 1
+                restore[sentinel] = String(word)
+                result.append(String(sentinel))
             } else {
-                // Standalone or non-NL usage — let normalizer process it
                 result.append(String(word))
             }
         }
 
-        return result.joined(separator: " ")
+        return (result.joined(separator: " "), restore)
+    }
+
+    /// Restore sentinel characters produced by ``maskAmbiguousWords(in:)``.
+    private func restoreMaskedWords(_ text: String, _ restore: [Character: String]) -> String {
+        guard !restore.isEmpty else { return text }
+        var out = text
+        for (sentinel, original) in restore {
+            out = out.replacingOccurrences(of: String(sentinel), with: original)
+        }
+        return out
     }
 
     // MARK: - Private FFI Helpers

@@ -334,16 +334,28 @@ final class TextNormalizerTests: XCTestCase {
         XCTAssertEqual(result, input)
     }
 
-    func testFilterWithAmbiguousWordInSentence() throws {
+    func testFilterWithAmbiguousWordInSentence() {
         let normalizer = TextNormalizer()
-        // Fallback path: "period" (a noun) passes through unchanged.
-        // NOTE: when the native ITN lib is linked, "period" is currently reduced
-        // to "." — the NLTagger ambiguous-word guard does not yet cover the
-        // native ITN path (tracked as a separate ITN fix), so skip here.
-        try XCTSkipIf(normalizer.isNativeAvailable, "native ITN reduces the noun 'period' to '.'")
-        let input = "the period of growth was remarkable"
-        let result = normalizer.normalizeSentence(input)
-        XCTAssertEqual(result, input)
+        // Ambiguous words used as natural language (nouns) must survive
+        // normalization: the native ITN would otherwise rewrite "period" → ".",
+        // "dash" → "-". Passes with the native lib (masked + restored) and
+        // without it (fallback returns the input unchanged).
+        let unchanged = [
+            "the period of growth was remarkable",
+            "add a period here",
+            "the dash between them",
+        ]
+        for input in unchanged {
+            XCTAssertEqual(normalizer.normalizeSentence(input), input)
+        }
+    }
+
+    func testStandaloneAmbiguousWordStillNormalizes() throws {
+        let normalizer = TextNormalizer()
+        // The mask only protects natural-language usage; a standalone spoken
+        // command still normalizes when the native lib is linked.
+        try XCTSkipIf(!normalizer.isNativeAvailable, "requires the native normalizer")
+        XCTAssertEqual(normalizer.normalizeSentence("period"), ".")
     }
 
     func testFilterWithStandalonePunctuationWord() {
