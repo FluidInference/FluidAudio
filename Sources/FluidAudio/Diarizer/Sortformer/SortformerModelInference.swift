@@ -61,11 +61,14 @@ extension SortformerModels {
     ///   - computeUnits: CoreML compute units. Pass `nil` (default) to auto-resolve via
     ///     `recommendedComputeUnits(for:)`, which avoids the multi-minute ANE compile hang on
     ///     RAM-constrained devices for the large fp16 high-context variants (issue #726).
+    ///   - isolation: Caller isolation inherited by default so the non-Sendable model container
+    ///     never crosses a concurrency domain.
     /// - Returns: Loaded SortformerModels
     public static func load(
         config: SortformerConfig,
         mainModelPath: URL,
-        computeUnits: MLComputeUnits? = nil
+        computeUnits: MLComputeUnits? = nil,
+        isolation: isolated (any Actor)? = #isolation
     ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from local paths (combined pipeline mode)")
 
@@ -134,12 +137,15 @@ extension SortformerModels {
     ///   - cacheDirectory: Directory to cache downloaded models (defaults to app support)
     ///   - computeUnits: CoreML compute units. Pass `nil` (default) to auto-resolve via
     ///     `recommendedComputeUnits(for:)` (issue #726).
+    ///   - isolation: Caller isolation inherited by default so the non-Sendable model container
+    ///     never crosses a concurrency domain.
     /// - Returns: Loaded SortformerModels
     public static func loadFromHuggingFace(
         config: SortformerConfig,
         cacheDirectory: URL? = nil,
         computeUnits: MLComputeUnits? = nil,
-        progressHandler: ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil,
+        isolation: isolated (any Actor)? = #isolation
     ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from HuggingFace...")
 
@@ -171,7 +177,8 @@ extension SortformerModels {
             directory: directory,
             computeUnits: resolvedComputeUnits,
             variant: bundle,
-            progressHandler: progressHandler
+            progressHandler: progressHandler,
+            isolation: isolation
         )
 
         guard let sortformer = models[bundle]

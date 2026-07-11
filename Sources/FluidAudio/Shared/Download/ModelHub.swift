@@ -82,20 +82,26 @@ public enum ModelHub {
         logger.info("All model caches cleared")
     }
 
+    /// Loads CoreML models while preserving the caller's actor isolation.
+    ///
+    /// `isolation` defaults to `#isolation` so the non-Sendable `MLModel` values are created
+    /// and returned within the caller's concurrency domain instead of crossing from the generic
+    /// executor. Callers should normally omit it.
     public static func loadModels(
         _ repo: Repo,
         modelNames: [String],
         directory: URL,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
         variant: String? = nil,
-        progressHandler: ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil,
+        isolation: isolated (any Actor)? = #isolation
     ) async throws -> [String: MLModel] {
         await SystemInfo.logOnce(using: logger)
         do {
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
                 directory: directory, computeUnits: computeUnits, variant: variant,
-                progressHandler: progressHandler)
+                progressHandler: progressHandler, isolation: isolation)
         } catch {
             // In offline mode never delete cache + re-download. Surface
             // the original load failure so the caller can decide.
@@ -124,16 +130,18 @@ public enum ModelHub {
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
                 directory: directory, computeUnits: computeUnits, variant: variant,
-                progressHandler: progressHandler)
+                progressHandler: progressHandler, isolation: isolation)
         }
     }
+
     private static func loadModelsOnce(
         _ repo: Repo,
         modelNames: [String],
         directory: URL,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
         variant: String? = nil,
-        progressHandler: ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil,
+        isolation: isolated (any Actor)? = #isolation
     ) async throws -> [String: MLModel] {
         await SystemInfo.logOnce(using: logger)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
