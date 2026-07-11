@@ -911,6 +911,19 @@ public enum ModelNames {
         /// Directory containing binary constants, tokenizer, and voice data.
         public static let constantsBinDir = "constants_bin"
 
+        /// Per-language speaker projection weight (`flow_lm.speaker_proj_weight`,
+        /// `[1024, 32]` row-major F32), stored in each pack's `constants_bin/`.
+        /// Live voice cloning re-projects the shared encoder's (English) output
+        /// into the target language's conditioning space with this (see #793).
+        public static let speakerProjWeightFile = "speaker_proj_weight.bin"
+
+        /// Pseudo-inverse of the shared `mimi_encoderv2`'s baked (English)
+        /// speaker projection (`[1024, 32]` row-major F32), stored at the repo
+        /// root next to the encoder. Recovers the 32-d latents from the
+        /// encoder's English-projected conditioning so they can be re-projected
+        /// per language (#793).
+        public static let encoderRecoverPinvFile = "encoder_recover_pinv.bin"
+
         /// FlowLM filename for a given precision. Both variants ship in the
         /// same `v2/<lang>/` directory upstream; only the FlowLM transformer
         /// has an int8 variant — `cond_step`, `flow_decoder`, and
