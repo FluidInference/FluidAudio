@@ -118,6 +118,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[evoglyph](https://evoglyph.com)** | Lightweight, privacy-first macOS menu-bar dictation — press a hotkey, speak, and cleaned-up text is injected at your cursor. Fully local: Parakeet TDT ASR with CTC vocabulary boosting and Silero VAD via FluidAudio on the Apple Neural Engine, plus on-device LLM cleanup. Audio never leaves the Mac. |
 | **[echo99](https://www.echo99.app)** | Private call recorder for macOS. Menu-bar app that records the mic and system audio as separate tracks and transcribes them entirely on-device. |
 | **[Presspeech](https://github.com/rcourtman/presspeech)** | Open-source (MIT) menu-bar push-to-talk dictation for macOS — hold a key, speak, release; the transcript pastes at the cursor in about 100 ms. Uses Parakeet TDT v3 ASR on the Apple Neural Engine via FluidAudio. |
+| **[Better Voice](https://voice.baselinemakes.com)** | macOS menu-bar app for on-device dictation and meeting notes that save to Apple Notes. Everything runs locally. Uses speaker diarization. |
 
 ## Installation
 
