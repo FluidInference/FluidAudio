@@ -276,6 +276,50 @@ public final class OfflineDiarizerManager {
             initialClusters = Array(repeating: 0, count: trainingEmbeddings.count)
         }
 
+        // DEV: dump every clustered window embedding to the console for offline
+        // analysis (UMAP / cluster inspection / merge-threshold sweeps). Gated on
+        // the opt-in `debugDumpEmbeddings` flag (the CLI sets it via
+        // `--dump-embeddings`; the app never does) so release builds stay silent.
+        // Uses print so the 192-d vector lines are not truncated by unified logging.
+        if config.debugDumpEmbeddings {
+            let k = (initialClusters.max() ?? -1) + 1
+            print("[[EMB-DUMP-START]] count=\(trainingIndices.count) dim=\(embeddingFeatures.first?.count ?? 0) k=\(k)")
+            for (j, idx) in trainingIndices.enumerated() where idx < timedEmbeddings.count {
+                let te = timedEmbeddings[idx]
+                let cl = j < initialClusters.count ? initialClusters[j] : -1
+                let v = te.embedding256.map { String(format: "%.6f", $0) }.joined(separator: ",")
+                print(
+                    "[[EMB]] {\"j\":\(j),\"chunk\":\(te.chunkIndex),\"spk\":\(te.speakerIndex),"
+                        + "\"t0\":\(String(format: "%.3f", te.startTime)),\"t1\":\(String(format: "%.3f", te.endTime)),"
+                        + "\"cl\":\(cl),\"v\":[\(v)]}")
+            }
+            print("[[EMB-DUMP-END]]")
+        }
+
+        // Collapse NME-SC's temporal over-split of a single speaker: greedily
+        // fold clusters whose centroids are ≥ mergeThreshold cosine (opt-in via
+        // `clustering.mergeEnabled`). The [[EMB]] dump above intentionally keeps
+        // the RAW spectral labels (for offline threshold sweeps); this relabels
+        // the assignment used by every downstream stage.
+        let clusters: [Int]
+        if config.clustering.mergeEnabled {
+            clusters = SpeakerClusterMerge.mergedLabels(
+                embeddings: trainingEmbeddings,
+                labels: initialClusters,
+                threshold: config.clustering.mergeThreshold
+            )
+            let before = (initialClusters.max() ?? -1) + 1
+            let after = (clusters.max() ?? -1) + 1
+            logger.info(
+                "Cluster merge (thr=\(config.clustering.mergeThreshold)): \(before) → \(after) clusters"
+            )
+            if config.debugDumpEmbeddings {
+                print("[[MERGE]] thr=\(config.clustering.mergeThreshold) before=\(before) after=\(after)")
+            }
+        } else {
+            clusters = initialClusters
+        }
+
         let vbxOutput: VBxOutput
         if config.clustering.algorithm == .nmesc {
             // NME-SC's assignment is final: VBx's PLDA warm start assumes an
@@ -284,12 +328,12 @@ public final class OfflineDiarizerManager {
             vbxOutput = VBxOutput(
                 gamma: [],
                 pi: [],
-                hardClusters: [initialClusters],
+                hardClusters: [clusters],
                 centroids: [],
-                numClusters: initialClusters.max().map { $0 + 1 } ?? 0,
+                numClusters: clusters.max().map { $0 + 1 } ?? 0,
                 elbos: []
             )
-        } else if !trainingRho.isEmpty, !initialClusters.isEmpty {
+        } else if !trainingRho.isEmpty, !clusters.isEmpty {
             let hasConstraints =
                 config.clustering.numSpeakers != nil
                 || config.clustering.minSpeakers != nil
@@ -308,16 +352,16 @@ public final class OfflineDiarizerManager {
             vbxOutput = VBxClustering(config: config, pldaTransform: pldaTransform).refineWithConstraints(
                 rhoFeatures: trainingRho,
                 trainingEmbeddings: trainingEmbeddings,
-                initialClusters: initialClusters,
+                initialClusters: clusters,
                 constraints: constraints
             )
         } else {
             vbxOutput = VBxOutput(
                 gamma: [],
                 pi: [],
-                hardClusters: [initialClusters],
+                hardClusters: [clusters],
                 centroids: [],
-                numClusters: initialClusters.max().map { $0 + 1 } ?? 0,
+                numClusters: clusters.max().map { $0 + 1 } ?? 0,
                 elbos: []
             )
         }
@@ -325,7 +369,7 @@ public final class OfflineDiarizerManager {
         let centroidComputation = computeCentroids(
             trainingEmbeddings: trainingEmbeddings,
             vbxOutput: vbxOutput,
-            initialClusters: initialClusters
+            initialClusters: clusters
         )
         var centroids = centroidComputation.centroids
         if centroids.isEmpty {

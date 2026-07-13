@@ -103,6 +103,46 @@ public struct OfflineDiarizerConfig: Sendable {
 
         public var backend: Backend = .wespeaker
 
+        /// TitaNet pooling mode (only consulted when `backend == .titanet10s`).
+        /// `.maskedFull` runs the encoder ONCE per window and pools it with the
+        /// per-speaker mask. `.cleanRegion` crops clean single-speaker mel frames
+        /// BEFORE the encoder and pools with a contiguous mask (spec-style — the
+        /// encoder never convolves over overlap). `.cleanWaveform` (default) is
+        /// the reference-faithful fix — see below.
+        ///
+        /// The 3-file BundledAMI A/B (2026-07-10) is decisive: `.cleanRegion`
+        /// over-splits badly (avg DER 37.7% vs 14.6%, Speaker-Error ~29% vs ~7%),
+        /// because the per-(window,speaker) encoder pass over spliced/packed mel
+        /// injects variance the unchanged NME-SC reads as extra speakers. Kept
+        /// behind the flag only for the per-turn-aggregation rescue experiment.
+        ///
+        /// `.cleanWaveform` is the reference-faithful fix for that over-split
+        /// (2026-07-10 forensics): instead of cropping full-window MEL columns
+        /// (which inherit full-window mean/std normalization + STFT bleed at the
+        /// overlap boundary), it crops the clean single-speaker WAVEFORM and
+        /// re-featurizes each crop on its own (clean-only normalization, no
+        /// cross-talk in any STFT window), drops one edge mel frame per crop
+        /// (`joinFrameDrop`), concatenates in the feature domain, then runs the
+        /// encoder once. On the w0 slice this collapses the over-split back to
+        /// k=4 (matching WeSpeaker/masked) where `.cleanRegion` gave k=7; masked
+        /// still wins overall, so this stays behind the flag too.
+        public enum TitaNetPooling: String, Sendable {
+            case maskedFull
+            case cleanRegion
+            case cleanWaveform
+        }
+
+        public var titanetPooling: TitaNetPooling = .cleanWaveform
+
+        /// Clean-region extraction parameters (titanet10s + `.cleanRegion`), in
+        /// milliseconds at the 100 fps mel-frame grid. First-pass defaults from
+        /// PIPELINE_SPEC §5; all tunable.
+        public var collarLeadMs: Int = 50
+        public var collarTrailMs: Int = 50
+        public var regionMinMs: Int = 500
+        public var embedMinMs: Int = 2000
+        public var embedTargetMs: Int = 3000
+
         public var batchSize: Int
         public var excludeOverlap: Bool
         public var minSegmentDurationSeconds: Double
@@ -158,6 +198,21 @@ public struct OfflineDiarizerConfig: Sendable {
         /// Exact number of speakers. Overrides `minSpeakers` and `maxSpeakers` when set.
         public var numSpeakers: Int?
 
+        /// Agglomerative post-merge of over-split clusters. NME-SC's eigengap
+        /// `k`-selection tends to slice a single speaker into several temporal
+        /// sub-clusters (voice drifts slowly over a recording). When `true`, the
+        /// pipeline greedily folds clusters whose L2-normalized centroids are ≥
+        /// `mergeThreshold` cosine, recovering the real speaker count without
+        /// touching well-separated speakers. Default `false` (opt-in); the app's
+        /// TitaNet arm enables it. See `SpeakerClusterMerge`.
+        public var mergeEnabled: Bool = false
+
+        /// Merge while the most-similar surviving centroid pair has cosine ≥ this.
+        /// ~0.75 sits in the gap between within-speaker drift (~0.85–0.96) and true
+        /// cross-speaker cosine (~0.15–0.55) on near-field capture. Only consulted
+        /// when `mergeEnabled`.
+        public var mergeThreshold: Float = 0.75
+
         public static let community = Clustering(
             threshold: 0.6,
             warmStartFa: 0.07,
@@ -173,7 +228,9 @@ public struct OfflineDiarizerConfig: Sendable {
             warmStartFb: Double,
             minSpeakers: Int? = nil,
             maxSpeakers: Int? = nil,
-            numSpeakers: Int? = nil
+            numSpeakers: Int? = nil,
+            mergeEnabled: Bool = false,
+            mergeThreshold: Float = 0.75
         ) {
             self.threshold = threshold
             self.warmStartFa = warmStartFa
@@ -181,6 +238,8 @@ public struct OfflineDiarizerConfig: Sendable {
             self.minSpeakers = minSpeakers
             self.maxSpeakers = maxSpeakers
             self.numSpeakers = numSpeakers
+            self.mergeEnabled = mergeEnabled
+            self.mergeThreshold = mergeThreshold
         }
     }
 
@@ -250,6 +309,13 @@ public struct OfflineDiarizerConfig: Sendable {
     /// speaker weights + offsets) to this JSON path after processing — the
     /// mask source for offline experimentation (`--dump-masks` in the CLI).
     public var segmentationDumpPath: String?
+
+    /// DEV/experimentation only: when true, the manager `print`s the raw
+    /// per-window embeddings (`[[EMB]]`) and merge result (`[[MERGE]]`) to
+    /// stdout for offline analysis / merge-threshold sweeps. The CLI opts in via
+    /// `--dump-embeddings`; the app never sets it, so release builds stay silent.
+    /// Defaulted so existing initializers need not set it.
+    public var debugDumpEmbeddings: Bool = false
 
     /// Directory containing TitaNet10s_frontenc_fp16.mlmodelc and
     /// TitaNet10s_maskdec_fp16.mlmodelc. Required when

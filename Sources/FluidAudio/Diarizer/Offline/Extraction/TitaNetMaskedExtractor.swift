@@ -133,6 +133,11 @@ struct TitaNetMaskedExtractor {
         var fallbackMaskCount = 0
         var windowCount = 0
 
+        // `.cleanWaveform` re-featurizes each clean crop on CPU (vDSP); build the
+        // featurizer (with its FFT setup) once per extraction, only when needed.
+        let waveCropFeaturizer: TitaNetWaveCropFeaturizer? =
+            config.embedding.titanetPooling == .cleanWaveform ? TitaNetWaveCropFeaturizer() : nil
+
         for try await chunk in segmentationStream {
             try Task.checkCancellation()
 
@@ -168,7 +173,31 @@ struct TitaNetMaskedExtractor {
                 }
             }
 
-            var encoderOutput: MLMultiArray?  // computed lazily, once per window
+            var frontFeats: MLMultiArray?  // audio → mel, computed lazily once per window
+            var maskedWindowEnc: MLMultiArray?  // full-window enc, .maskedFull only
+            var windowAudio: [Float]?  // available window samples, .cleanWaveform only
+
+            func ensureFrontFeats() throws -> MLMultiArray {
+                if let feats = frontFeats { return feats }
+                let feats = try runFront(
+                    audioSource: audioSource,
+                    chunkOffsetSeconds: chunkOffsetSeconds,
+                    totalSamples: totalSamples)
+                frontFeats = feats
+                windowCount += 1
+                return feats
+            }
+
+            func ensureWindowAudio() throws -> [Float] {
+                if let audio = windowAudio { return audio }
+                let audio = try readWindowSamples(
+                    audioSource: audioSource,
+                    chunkOffsetSeconds: chunkOffsetSeconds,
+                    totalSamples: totalSamples)
+                windowAudio = audio
+                windowCount += 1
+                return audio
+            }
 
             for speakerIndex in 0..<speakerCount {
                 var baseMask = [Float](repeating: 0, count: frameCount)
@@ -187,44 +216,127 @@ struct TitaNetMaskedExtractor {
                     emptyMaskCount += 1
                     continue
                 }
-                let maskToUse: [Float]
-                if cleanSum >= Float(minFramesForEmbedding) {
-                    maskToUse = cleanMask
+
+                let embedding: [Float]
+                let metaMask: [Float]  // drives frameWeights metadata (+ timing fallback)
+                // Explicit frame bounds for segment timing; only .cleanWaveform sets
+                // it (its clean frames use a 0.5 threshold, not metaMask's soft one).
+                var explicitBounds: (first: Int, last: Int)?
+
+                switch config.embedding.titanetPooling {
+                case .cleanWaveform:
+                    // Reference-faithful path: crop the clean single-speaker
+                    // WAVEFORM, re-featurize each crop on its own (clean-only
+                    // normalization, no cross-talk in any STFT window), drop the
+                    // edge frames, concat in the feature domain, encode once.
+                    guard let featurizer = waveCropFeaturizer else {
+                        emptyMaskCount += 1
+                        continue
+                    }
+                    let sr = config.sampleRate
+                    let audio = try ensureWindowAudio()
+                    guard
+                        let selection = CleanRegionSelector.selectCleanSampleRegions(
+                            weights: weights,
+                            speaker: speakerIndex,
+                            availableSamples: audio.count,
+                            regionMinSamples: Self.sampleCount(ms: config.embedding.regionMinMs, sampleRate: sr),
+                            targetSamples: Self.sampleCount(ms: config.embedding.embedTargetMs, sampleRate: sr),
+                            embedMinSamples: Self.sampleCount(ms: config.embedding.embedMinMs, sampleRate: sr),
+                            threshold: 0.5)
+                    else {
+                        emptyMaskCount += 1
+                        continue
+                    }
+                    var cols: [(feats: [Float], frames: Int)] = []
+                    for region in selection.regions {
+                        let crop = Array(audio[region.start..<region.end])
+                        if let featured = featurizer.featurize(crop: crop) { cols.append(featured) }
+                    }
+                    let packedFlat = CleanRegionSelector.packConcatFeatures(
+                        columns: cols, melBins: TitaNetWaveCropFeaturizer.melBins,
+                        dstFrames: Self.melFrames)
+                    guard packedFlat.usedFrames > 0 else {
+                        emptyMaskCount += 1
+                        continue
+                    }
+                    let packed = try makeFeats(flat: packedFlat.feats)
+                    let enc = try runEncoder(feats: packed)
+                    var contiguousMask = [Float](repeating: 0, count: Self.melFrames)
+                    for p in 0..<min(packedFlat.usedFrames, Self.melFrames) { contiguousMask[p] = 1 }
+                    embedding = try runMaskDecoder(encoded: enc, mask: contiguousMask)
+                    metaMask = cleanMask
+                    explicitBounds = (selection.firstFrame, selection.lastFrame)
+
+                case .cleanRegion:
+                    // Resample the OVERLAP-EXCLUDED mask onto the mel grid, pick the
+                    // clean frames, and pack them contiguously so the encoder never
+                    // convolves over overlap (spec §3.2). Encoder runs per speaker.
+                    let cleanMel = WeightInterpolation.resample(cleanMask, to: Self.melFrames)
+                    guard
+                        let frames = CleanRegionSelector.selectCleanMelFrames(
+                            cleanMaskMel: cleanMel,
+                            collarLead: Self.frameCount(ms: config.embedding.collarLeadMs),
+                            collarTrail: Self.frameCount(ms: config.embedding.collarTrailMs),
+                            regionMin: Self.frameCount(ms: config.embedding.regionMinMs),
+                            embedMin: Self.frameCount(ms: config.embedding.embedMinMs),
+                            embedTarget: Self.frameCount(ms: config.embedding.embedTargetMs))
+                    else {
+                        emptyMaskCount += 1
+                        continue
+                    }
+                    let feats = try ensureFrontFeats()
+                    let packed = try packCleanFeats(feats: feats, frames: frames)
+                    let enc = try runEncoder(feats: packed)
+                    var contiguousMask = [Float](repeating: 0, count: Self.melFrames)
+                    for p in 0..<min(frames.count, Self.melFrames) { contiguousMask[p] = 1 }
+                    embedding = try runMaskDecoder(encoded: enc, mask: contiguousMask)
+                    metaMask = cleanMask
+
+                case .maskedFull:
+                    let maskToUse: [Float]
+                    if cleanSum >= Float(minFramesForEmbedding) {
+                        maskToUse = cleanMask
+                    } else {
+                        maskToUse = baseMask
+                        fallbackMaskCount += 1
+                    }
+                    let resampledMask = WeightInterpolation.resample(maskToUse, to: Self.melFrames)
+                    // Hard guard: the maskdec clamps its pool denominator for fp16
+                    // safety, so a near-zero mask returns finite garbage, not NaN.
+                    if VDSPOperations.sum(resampledMask) <= 0 {
+                        emptyMaskCount += 1
+                        continue
+                    }
+                    let feats = try ensureFrontFeats()
+                    if maskedWindowEnc == nil {
+                        maskedWindowEnc = try runEncoder(feats: feats)
+                    }
+                    guard let enc = maskedWindowEnc else {
+                        emptyMaskCount += 1
+                        continue
+                    }
+                    embedding = try runMaskDecoder(encoded: enc, mask: resampledMask)
+                    metaMask = maskToUse
+                }
+
+                let firstActive: Int
+                let lastActive: Int
+                if let bounds = explicitBounds {
+                    firstActive = bounds.first
+                    lastActive = bounds.last
                 } else {
-                    maskToUse = baseMask
-                    fallbackMaskCount += 1
+                    firstActive = metaMask.firstIndex(where: { $0 > Self.overlapThreshold }) ?? 0
+                    lastActive =
+                        metaMask.lastIndex(where: { $0 > Self.overlapThreshold }) ?? firstActive
                 }
-
-                let resampledMask = WeightInterpolation.resample(maskToUse, to: Self.melFrames)
-                // Hard guard: the maskdec clamps its pool denominator for fp16
-                // safety, so a near-zero mask returns finite garbage, not NaN.
-                if VDSPOperations.sum(resampledMask) <= 0 {
-                    emptyMaskCount += 1
-                    continue
-                }
-
-                if encoderOutput == nil {
-                    encoderOutput = try encodeWindow(
-                        audioSource: audioSource,
-                        chunkOffsetSeconds: chunkOffsetSeconds,
-                        totalSamples: totalSamples
-                    )
-                    windowCount += 1
-                }
-                guard let encoded = encoderOutput else { break }
-
-                let embedding = try runMaskDecoder(encoded: encoded, mask: resampledMask)
-
-                let firstActive = maskToUse.firstIndex(where: { $0 > Self.overlapThreshold }) ?? 0
-                let lastActive =
-                    maskToUse.lastIndex(where: { $0 > Self.overlapThreshold }) ?? firstActive
                 embeddings.append(
                     TimedEmbedding(
                         chunkIndex: chunk.chunkIndex,
                         speakerIndex: speakerIndex,
                         startFrame: firstActive,
                         endFrame: lastActive,
-                        frameWeights: maskToUse,
+                        frameWeights: metaMask,
                         startTime: chunkOffsetSeconds + Double(firstActive) * frameDuration,
                         endTime: chunkOffsetSeconds + Double(lastActive + 1) * frameDuration,
                         embedding256: embedding,
@@ -241,8 +353,8 @@ struct TitaNetMaskedExtractor {
 
     // MARK: - Model stages
 
-    /// audio window → front (mel features) → encoder frames. Runs once per window.
-    private func encodeWindow(
+    /// audio window → front (mel features `[1, mel, melFrames]`). Runs once per window.
+    private func runFront(
         audioSource: AudioSampleSource,
         chunkOffsetSeconds: Double,
         totalSamples: Int
@@ -270,11 +382,17 @@ struct TitaNetMaskedExtractor {
         guard let features = frontOutput.featureValue(for: "feats")?.multiArrayValue else {
             throw OfflineDiarizationError.processingFailed("TitaNet front missing feats output")
         }
+        return features
+    }
 
-        features.prefetchToNeuralEngine()
+    /// mel features `[1, mel, melFrames]` → encoder frames `[1, C, melFrames]`.
+    /// `.maskedFull` runs this once per window; `.cleanRegion` once per (window, speaker).
+    private func runEncoder(feats: MLMultiArray) throws -> MLMultiArray {
+        let options = MLPredictionOptions()
+        feats.prefetchToNeuralEngine()
         let encoderResult = try encoderModel.prediction(
             from: ZeroCopyDiarizerFeatureProvider(features: [
-                "feats": MLFeatureValue(multiArray: features)
+                "feats": MLFeatureValue(multiArray: feats)
             ]),
             options: options
         )
@@ -282,6 +400,89 @@ struct TitaNetMaskedExtractor {
             throw OfflineDiarizationError.processingFailed("TitaNet encoder missing enc output")
         }
         return encoded
+    }
+
+    /// Packs the selected mel frames of `feats` (`[1, mel, melFrames]`) contiguously
+    /// into a fresh zero-padded `[1, mel, melFrames]` buffer, so the encoder's
+    /// convolutions only ever span clean, overlap-free frames (spec §3.2, §5
+    /// `concat_domain = feature`).
+    private func packCleanFeats(feats: MLMultiArray, frames: [Int]) throws -> MLMultiArray {
+        let shape = feats.shape.map { $0.intValue }
+        guard shape.count == 3, shape[2] == Self.melFrames else {
+            throw OfflineDiarizationError.processingFailed(
+                "TitaNet front feats shape \(shape) is not [1, mel, \(Self.melFrames)]")
+        }
+        let melBins = shape[1]
+        let strides = feats.strides.map { $0.intValue }
+        let binStride = strides[1]
+        let frameStride = strides[2]
+
+        // Read feats into a contiguous [melBins, melFrames] buffer (handles any
+        // CoreML output striding once), then pack via the unit-tested core.
+        let src = feats.dataPointer.assumingMemoryBound(to: Float.self)
+        var flat = [Float](repeating: 0, count: melBins * Self.melFrames)
+        for c in 0..<melBins {
+            let srcRow = c * binStride
+            let dstRow = c * Self.melFrames
+            for t in 0..<Self.melFrames { flat[dstRow + t] = src[srcRow + t * frameStride] }
+        }
+        let packedFlat = CleanRegionSelector.packColumns(
+            src: flat, melBins: melBins, srcFrames: Self.melFrames,
+            dstFrames: Self.melFrames, frames: frames)
+
+        let packed = try MLMultiArray(shape: feats.shape, dataType: .float32)
+        let dst = packed.dataPointer.assumingMemoryBound(to: Float.self)
+        packedFlat.withUnsafeBufferPointer { buffer in
+            dst.update(from: buffer.baseAddress!, count: packedFlat.count)
+        }
+        return packed
+    }
+
+    /// Milliseconds → mel-frame count on the 100 fps grid (melFrames over the 10 s window).
+    private static func frameCount(ms: Int) -> Int {
+        let windowSeconds = Double(windowSamples) / 16_000.0
+        return max(0, Int((Double(ms) * Double(melFrames) / (windowSeconds * 1000.0)).rounded()))
+    }
+
+    /// Milliseconds → sample count at the given sample rate (for `.cleanWaveform`
+    /// region thresholds, which operate at sample resolution).
+    private static func sampleCount(ms: Int, sampleRate: Int) -> Int {
+        max(0, ms * sampleRate / 1000)
+    }
+
+    /// Reads the window's available samples (≤ windowSamples, NOT zero-padded) as a
+    /// `[Float]` for `.cleanWaveform` cropping. Runs once per window.
+    private func readWindowSamples(
+        audioSource: AudioSampleSource,
+        chunkOffsetSeconds: Double,
+        totalSamples: Int
+    ) throws -> [Float] {
+        let estimatedStartSample = Int((chunkOffsetSeconds * Double(config.sampleRate)).rounded())
+        let startSample = max(0, min(estimatedStartSample, totalSamples))
+        let available = max(0, min(Self.windowSamples, totalSamples - startSample))
+        guard available > 0 else { return [] }
+        var buffer = [Float](repeating: 0, count: available)
+        try buffer.withUnsafeMutableBufferPointer { pointer in
+            try audioSource.copySamples(
+                into: pointer.baseAddress!, offset: startSample, count: available)
+        }
+        return buffer
+    }
+
+    /// Wraps a mel-major `[melBins * melFrames]` buffer as an encoder `feats`
+    /// `[1, melBins, melFrames]` MLMultiArray (`.cleanWaveform` path).
+    private func makeFeats(flat: [Float]) throws -> MLMultiArray {
+        let arr = try MLMultiArray(
+            shape: [
+                1, NSNumber(value: TitaNetWaveCropFeaturizer.melBins),
+                NSNumber(value: Self.melFrames),
+            ],
+            dataType: .float32)
+        let dst = arr.dataPointer.assumingMemoryBound(to: Float.self)
+        flat.withUnsafeBufferPointer { buffer in
+            dst.update(from: buffer.baseAddress!, count: min(flat.count, arr.count))
+        }
+        return arr
     }
 
     /// encoder frames + per-speaker mask → 192-d embedding. Runs once per speaker.

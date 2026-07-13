@@ -157,7 +157,20 @@ enum ProcessCommand {
                 if let dir = args.titanetDir {
                     offlineConfig.titanetModelDirectory = URL(fileURLWithPath: dir)
                 }
+                switch args.titanetPooling {
+                case "maskedfull", "masked", "full":
+                    offlineConfig.embedding.titanetPooling = .maskedFull
+                case "cleanregion", "melcrop":
+                    offlineConfig.embedding.titanetPooling = .cleanRegion
+                default:  // cleanwaveform / wavecrop / waveform (default)
+                    offlineConfig.embedding.titanetPooling = .cleanWaveform
+                }
             }
+            offlineConfig.clustering.mergeEnabled = args.mergeEnabled
+            if let mt = args.mergeThreshold {
+                offlineConfig.clustering.mergeThreshold = mt
+            }
+            offlineConfig.debugDumpEmbeddings = args.dumpEmbeddings
             offlineConfig.segmentationDumpPath = args.segmentationDumpPath
 
             let modelDir = OfflineDiarizerModels.defaultModelsDirectory()
@@ -260,6 +273,10 @@ enum ProcessCommand {
         var useNMESC = false
         var useTitaNet = false
         var titanetDir: String?
+        var titanetPooling: String = "maskedfull"  // maskedfull (default) | cleanregion | cleanwaveform
+        var mergeEnabled = false  // --merge : agglomerative post-merge of over-split clusters
+        var mergeThreshold: Float?  // --merge-threshold <cosine> (default 0.75)
+        var dumpEmbeddings = false  // --dump-embeddings : print raw [[EMB]]/[[MERGE]] to stdout
 
         // Streaming-mode params
         var thresholdS: Float = 0.7045655  // matches pyannote speaker-diarization-3.1 config.yaml
@@ -488,6 +505,20 @@ enum ProcessCommand {
                     parsed.titanetDir = args[i + 1]
                     i += 1
                 }
+            case "--titanet-pooling":
+                if i + 1 < args.count {
+                    parsed.titanetPooling = args[i + 1].lowercased()
+                    i += 1
+                }
+            case "--merge":
+                parsed.mergeEnabled = true
+            case "--merge-threshold":
+                if i + 1 < args.count {
+                    parsed.mergeThreshold = Float(args[i + 1])
+                    i += 1
+                }
+            case "--dump-embeddings":
+                parsed.dumpEmbeddings = true
 
             default:
                 logger.warning("Unknown option: \(args[i])")
