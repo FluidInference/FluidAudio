@@ -465,31 +465,31 @@ enum TranscribeCommand {
             logger.info("ASR Manager initialized successfully")
 
             let audioFileURL = URL(fileURLWithPath: audioFile)
-            let audioFileHandle = try AVAudioFile(forReading: audioFileURL)
-            let format = audioFileHandle.processingFormat
-            let frameCount = AVAudioFrameCount(audioFileHandle.length)
-
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
-            else {
-                logger.error("Failed to create audio buffer")
-                return
-            }
-
-            try audioFileHandle.read(into: buffer)
-
-            let samples = try AudioConverter().resampleAudioFile(path: audioFile)
-            let duration = Double(audioFileHandle.length) / format.sampleRate
-            logger.info("Processing \(String(format: "%.2f", duration))s of audio (\(samples.count) samples)\n")
-
             logger.info("Transcribing file: \(audioFileURL) ...")
             var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
             let startTime = Date()
-            var result = try await asrManager.transcribe(
-                audioFileURL, decoderState: &decoderState, language: args.language)
+
+            let customVocabularySamples: [Float]?
+            var result: ASRResult
+            if args.customVocabPath != nil {
+                let samples = try AudioConverter().resampleAudioFile(audioFileURL)
+                customVocabularySamples = samples
+                result = try await asrManager.transcribe(
+                    samples,
+                    decoderState: &decoderState,
+                    language: args.language
+                )
+            } else {
+                customVocabularySamples = nil
+                result = try await asrManager.transcribe(
+                    audioFileURL, decoderState: &decoderState, language: args.language)
+            }
             let processingTime = Date().timeIntervalSince(startTime)
+            let duration = result.duration
+            logger.info("Processed \(String(format: "%.2f", duration))s of audio\n")
 
             // Apply vocabulary rescoring if custom vocab is provided
-            if let vocabPath = args.customVocabPath {
+            if let vocabPath = args.customVocabPath, let samples = customVocabularySamples {
                 logger.info("Applying vocabulary boosting from: \(vocabPath)")
 
                 let (customVocab, ctcModels) = try await CustomVocabularyContext.loadWithCtcTokens(from: vocabPath)

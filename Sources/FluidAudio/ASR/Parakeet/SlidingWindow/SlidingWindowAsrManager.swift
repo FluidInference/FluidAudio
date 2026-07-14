@@ -470,7 +470,7 @@ public actor SlidingWindowAsrManager {
                     timestamps: adjustedTimestamps,
                     confidences: confidences,
                     encoderSequenceLength: 0,
-                    audioSamples: windowSamples,
+                    audioSampleCount: windowSamples.count,
                     processingTime: processingTime
                 )
             else { return }
@@ -498,7 +498,7 @@ public actor SlidingWindowAsrManager {
                     timestamps: timestamps,  // Original chunk-local timestamps (not adjusted)
                     confidences: confidences,
                     encoderSequenceLength: 0,
-                    audioSamples: windowSamples,
+                    audioSampleCount: windowSamples.count,
                     processingTime: processingTime
                 )
             {

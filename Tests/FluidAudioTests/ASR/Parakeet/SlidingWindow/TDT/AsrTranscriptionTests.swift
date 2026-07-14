@@ -90,7 +90,7 @@ final class AsrTranscriptionTests: XCTestCase {
             tokenIds: tokenIds,
             confidences: [0.63, 0.63, 0.63, 0.63, 0.63],  // Mean 0.63 (pure model confidence)
             encoderSequenceLength: 100,
-            audioSamples: audioSamples,
+            audioSampleCount: audioSamples.count,
             processingTime: processingTime
         )
 
@@ -113,7 +113,7 @@ final class AsrTranscriptionTests: XCTestCase {
             timestamps: timestamps,
             confidences: confidences,
             encoderSequenceLength: 150,
-            audioSamples: audioSamples,
+            audioSampleCount: audioSamples.count,
             processingTime: 1.2
         )
 
@@ -134,7 +134,7 @@ final class AsrTranscriptionTests: XCTestCase {
             timestamps: timestamps,
             confidences: [0.51, 0.51, 0.51],  // Mean 0.51 (pure model confidence)
             encoderSequenceLength: 100,
-            audioSamples: audioSamples,
+            audioSampleCount: audioSamples.count,
             processingTime: processingTime
         )
 

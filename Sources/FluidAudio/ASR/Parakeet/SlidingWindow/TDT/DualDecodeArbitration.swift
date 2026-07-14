@@ -96,7 +96,7 @@ extension ChunkProcessor {
                 timestamps: [],
                 confidences: [],
                 encoderSequenceLength: 0,
-                audioSamples: [],
+                audioSampleCount: totalSamples,
                 processingTime: Date().timeIntervalSince(startTime)
             )
         }
@@ -306,7 +306,7 @@ extension ChunkProcessor {
                 timestamps: [],
                 confidences: [],
                 encoderSequenceLength: 0,
-                audioSamples: [],
+                audioSampleCount: totalSamples,
                 processingTime: Date().timeIntervalSince(startTime)
             )
         }
@@ -342,7 +342,7 @@ extension ChunkProcessor {
             confidences: allConfidences,
             tokenDurations: allDurations,
             encoderSequenceLength: 0,
-            audioSamples: [],
+            audioSampleCount: totalSamples,
             processingTime: Date().timeIntervalSince(startTime)
         )
     }

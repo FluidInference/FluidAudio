@@ -30,7 +30,7 @@ extension AsrManager {
                 confidences: hypothesis.tokenConfidences,
                 tokenDurations: hypothesis.tokenDurations,
                 encoderSequenceLength: encoderSequenceLength,
-                audioSamples: audioSamples,
+                audioSampleCount: audioSamples.count,
                 processingTime: Date().timeIntervalSince(startTime)
             )
 
@@ -96,12 +96,12 @@ extension AsrManager {
         confidences: [Float] = [],
         tokenDurations: [Int] = [],
         encoderSequenceLength: Int,
-        audioSamples: [Float],
+        audioSampleCount: Int,
         processingTime: TimeInterval
     ) -> ASRResult {
 
         let text = convertTokensToText(tokenIds)
-        let duration = TimeInterval(audioSamples.count) / TimeInterval(config.sampleRate)
+        let duration = TimeInterval(audioSampleCount) / TimeInterval(config.sampleRate)
 
         let resultTimings = createTokenTimings(
             from: tokenIds, timestamps: timestamps, confidences: confidences, tokenDurations: tokenDurations)

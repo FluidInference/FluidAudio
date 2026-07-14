@@ -573,7 +573,7 @@ struct ChunkProcessor {
                 timestamps: [],
                 confidences: [],
                 encoderSequenceLength: 0,
-                audioSamples: [],
+                audioSampleCount: totalSamples,
                 processingTime: Date().timeIntervalSince(startTime)
             )
         }
@@ -627,7 +627,7 @@ struct ChunkProcessor {
             confidences: allConfidences,
             tokenDurations: allDurations,
             encoderSequenceLength: 0,  // Not relevant for chunk processing
-            audioSamples: [],
+            audioSampleCount: totalSamples,
             processingTime: Date().timeIntervalSince(startTime)
         )
     }
