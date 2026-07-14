@@ -145,14 +145,7 @@ public final class OfflineDiarizerManager {
         return try cluster(prepared)
     }
 
-    // MARK: - Two-Phase API (prepare + cluster)
-
-    /// Phase 1 of the two-phase pipeline: run deterministic segmentation + embedding
-    /// extraction over `audio` and return a cacheable ``PreparedDiarization``.
-    ///
-    /// Pass the result to ``cluster(_:)`` — as many times as needed — to run the clustering +
-    /// reconstruction stage without re-running model inference. `process(audio:)` is exactly
-    /// `prepare(audio:)` followed by one `cluster(_:)`.
+    /// Runs deterministic segmentation and embedding extraction over `audio`.
     ///
     /// - Parameters:
     ///   - audio: Mono audio samples at the model's target sample rate.
@@ -168,14 +161,7 @@ public final class OfflineDiarizerManager {
         )
     }
 
-    /// Phase 1 of the two-phase pipeline: run deterministic segmentation + embedding
-    /// extraction over `audioSource` and return a cacheable ``PreparedDiarization``.
-    ///
-    /// - Parameters:
-    ///   - audioSource: Audio sample source to process. Retained by the returned value for
-    ///     clustering post-passes that re-embed exact audio spans.
-    ///   - audioLoadingSeconds: Time spent loading/converting the audio, included in timing logs.
-    ///   - progressCallback: Optional callback receiving `(chunksProcessed, totalChunks)` after each segmentation chunk.
+    /// Runs deterministic segmentation and embedding extraction over `audioSource`.
     public func prepare(
         audioSource: AudioSampleSource,
         audioLoadingSeconds: TimeInterval = 0,
@@ -198,7 +184,6 @@ public final class OfflineDiarizerManager {
         let chunkStream = streamPair.stream
         let chunkContinuation = streamPair.continuation
 
-        // Capture models for concurrent tasks
         let capturedModels = models
         let capturedConfig = config
 
@@ -278,29 +263,10 @@ public final class OfflineDiarizerManager {
         )
     }
 
-    /// Phase 2 of the two-phase pipeline: clustering + reconstruction over a
-    /// ``PreparedDiarization``.
+    /// Clusters and reconstructs a prepared diarization without repeating model inference.
     ///
-    /// Runs AHC + VBx clustering, centroid assignment, segment reconstruction, and the
-    /// configured post-passes (zero-vote re-embed, short-segment relabel). Safe to call any
-    /// number of times on the same prepared value — the deterministic inference stages are
-    /// never re-run, so each call costs only the clustering + reconstruction stage.
-    ///
-    /// `prepared` does not have to come from this instance: the receiving instance's own
-    /// models and configuration drive this stage, so a `PreparedDiarization` may be handed
-    /// to a different `OfflineDiarizerManager` (for example to re-cluster with different
-    /// clustering constraints without re-running inference). Unlike
-    /// ``prepare(audio:progressCallback:)``, this method never loads models on demand — the
-    /// receiving instance must already have models loaded via
-    /// ``prepareModels(directory:configuration:forceRedownload:)``, ``initialize(models:)``,
-    /// or a prior `prepare`.
-    ///
-    /// - Parameter prepared: Output of ``prepare(audioSource:audioLoadingSeconds:progressCallback:)``.
-    /// - Returns: Diarization result with speaker segments.
-    /// - Throws: `OfflineDiarizationError.modelNotLoaded` if the receiving instance has no
-    ///   loaded models (regardless of which instance produced `prepared`; on the instance
-    ///   that ran `prepare` successfully this cannot occur, as models are never released),
-    ///   or `OfflineDiarizationError.noSpeechDetected` if `prepared` contains no embeddings.
+    /// The receiving instance supplies its models and configuration, and must already be
+    /// initialized. Reusing a prepared value is supported.
     public func cluster(_ prepared: PreparedDiarization) throws -> DiarizationResult {
         guard let models else {
             throw OfflineDiarizationError.modelNotLoaded("offline-diarizer")

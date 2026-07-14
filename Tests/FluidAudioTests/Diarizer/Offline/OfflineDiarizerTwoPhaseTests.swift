@@ -2,18 +2,8 @@ import XCTest
 
 @testable import FluidAudio
 
-/// Tests for the public two-phase API (`prepare(audio:)` + `cluster(_:)`) added alongside
-/// the single-call `process(audio:)`.
-///
-/// Both tests run real model inference, so they gate on local model availability the same
-/// way `OfflineDiarizerManagerProgressTests` does and skip cleanly when models are absent.
 @available(macOS 14.0, iOS 17.0, *)
 final class OfflineDiarizerTwoPhaseTests: XCTestCase {
-
-    // MARK: - process == prepare + cluster
-
-    /// `process(audio:)` is documented as exactly `prepare(audio:)` followed by one
-    /// `cluster(_:)`. Verify the two call paths produce bit-identical results.
     func testProcessMatchesPrepareThenCluster() async throws {
         try requireOfflineDiarizerModels()
 
@@ -27,10 +17,6 @@ final class OfflineDiarizerTwoPhaseTests: XCTestCase {
         assertBitIdentical(singleCall, twoPhase, context: "process vs prepare+cluster")
     }
 
-    // MARK: - cluster determinism
-
-    /// `cluster(_:)` is documented as safe to call any number of times on the same
-    /// `PreparedDiarization`. Verify repeated calls are deterministic (identical outputs).
     func testClusterIsDeterministicAcrossRepeatedCalls() async throws {
         try requireOfflineDiarizerModels()
 
@@ -46,11 +32,6 @@ final class OfflineDiarizerTwoPhaseTests: XCTestCase {
         }
     }
 
-    // MARK: - Helpers
-
-    /// Skips the test when the offline diarizer models are not cached locally
-    /// (same gating convention as `OfflineDiarizerManagerProgressTests`, resolved
-    /// against the repo cache folder `ModelHub` actually downloads into).
     private func requireOfflineDiarizerModels() throws {
         let repoDir = OfflineDiarizerModels.defaultModelsDirectory()
             .appendingPathComponent(Repo.diarizer.folderName, isDirectory: true)
