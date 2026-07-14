@@ -3,7 +3,6 @@ import Foundation
 
 /// HuggingFace model downloader using URLSession
 public class DownloadUtils {
-
     private static let logger = AppLogger(category: "DownloadUtils")
 
     /// Shared URLSession with registry and proxy configuration
@@ -22,7 +21,7 @@ public class DownloadUtils {
     /// Defaults to `false`. `nonisolated(unsafe)` is acceptable because
     /// the flag is set once at startup before any FluidAudio loaders
     /// are touched and is read-only thereafter.
-    nonisolated(unsafe) public static var enforceOffline: Bool = false
+    public nonisolated(unsafe) static var enforceOffline: Bool = false
 
     /// Errors thrown when `enforceOffline` is on and FluidAudio would
     /// otherwise attempt a network fetch or a cache rebuild that
@@ -41,9 +40,9 @@ public class DownloadUtils {
 
         public var errorDescription: String? {
             switch self {
-            case .networkDisabled(let operation):
+            case let .networkDisabled(operation):
                 return "FluidAudio offline mode: \(operation) blocked"
-            case .modelMissing(let repo, let missing):
+            case let .modelMissing(repo, missing):
                 return
                     "FluidAudio offline mode: required models missing for \(repo): \(missing.joined(separator: ", "))"
             }
@@ -111,13 +110,13 @@ public class DownloadUtils {
             switch self {
             case .invalidResponse:
                 return "Received an invalid response from Hugging Face."
-            case .rateLimited(_, let message):
+            case let .rateLimited(_, message):
                 return "Hugging Face rate limit encountered: \(message)"
-            case .downloadFailed(let path, let underlying):
+            case let .downloadFailed(path, underlying):
                 return "Failed to download \(path): \(underlying.localizedDescription)"
-            case .htmlErrorResponse(let path, let snippet):
+            case let .htmlErrorResponse(path, snippet):
                 return "HuggingFace returned HTML instead of JSON for \(path) (rate limit or server issue): \(snippet)"
-            case .modelNotFound(let path):
+            case let .modelNotFound(path):
                 return "Model file not found: \(path)"
             }
         }
@@ -155,7 +154,7 @@ public class DownloadUtils {
     public struct DownloadConfig: Sendable {
         public let timeout: TimeInterval
 
-        public init(timeout: TimeInterval = 1800) {  // 30 minutes for large models
+        public init(timeout: TimeInterval = 1800) { // 30 minutes for large models
             self.timeout = timeout
         }
 
@@ -175,7 +174,8 @@ public class DownloadUtils {
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
                 directory: directory, computeUnits: computeUnits, variant: variant,
-                progressHandler: progressHandler)
+                progressHandler: progressHandler
+            )
         } catch {
             // In offline mode never delete cache + re-download. Surface
             // the original load failure so the caller can decide.
@@ -198,7 +198,7 @@ public class DownloadUtils {
                 // If deletion fails (excluding "file not found"), log the error but continue
                 // Robust directory creation will handle any remaining files
                 let nsError = error as NSError
-                if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileNoSuchFileError {
+                if nsError.domain == NSCocoaErrorDomain, nsError.code == NSFileNoSuchFileError {
                     // File already doesn't exist - this is fine
                 } else {
                     logger.warning("Failed to delete cache: \(error.localizedDescription)")
@@ -209,7 +209,8 @@ public class DownloadUtils {
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
                 directory: directory, computeUnits: computeUnits, variant: variant,
-                progressHandler: progressHandler)
+                progressHandler: progressHandler
+            )
         }
     }
 
@@ -237,14 +238,14 @@ public class DownloadUtils {
         // Remove the whole `fluidaudio/` root so every backend subdirectory
         // (Models/, voice packs, etc.) is cleared, not just `Models/`.
         #if os(macOS)
-        let home = fm.homeDirectoryForCurrentUser
-        let ttsCache = home.appendingPathComponent(".cache/fluidaudio")
-        try? fm.removeItem(at: ttsCache)
-        #else
-        if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let ttsCache = appSupport.appendingPathComponent("fluidaudio")
+            let home = fm.homeDirectoryForCurrentUser
+            let ttsCache = home.appendingPathComponent(".cache/fluidaudio")
             try? fm.removeItem(at: ttsCache)
-        }
+        #else
+            if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+                let ttsCache = appSupport.appendingPathComponent("fluidaudio")
+                try? fm.removeItem(at: ttsCache)
+            }
         #endif
 
         logger.info("All model caches cleared")
@@ -291,11 +292,13 @@ public class DownloadUtils {
             try await downloadRepo(
                 repo, to: directory, variant: variant,
                 additionalModelNames: extraModelNames,
-                progressHandler: progressHandler)
+                progressHandler: progressHandler
+            )
         } else {
             logger.info("Found \(repo.folderName) locally, no download needed")
             progressHandler?(
-                DownloadProgress(fractionCompleted: 0.5, phase: .downloading(completedFiles: 0, totalFiles: 0)))
+                DownloadProgress(fractionCompleted: 0.5, phase: .downloading(completedFiles: 0, totalFiles: 0))
+            )
         }
 
         let config = MLModelConfiguration()
@@ -311,7 +314,8 @@ public class DownloadUtils {
                     userInfo: [
                         NSFilePathErrorKey: modelPath.path,
                         NSLocalizedDescriptionKey: "Model file not found: \(name)",
-                    ])
+                    ]
+                )
             }
 
             var isDirectory: ObjCBool = false
@@ -324,7 +328,8 @@ public class DownloadUtils {
                     userInfo: [
                         NSFilePathErrorKey: modelPath.path,
                         NSLocalizedDescriptionKey: "Model path is not a directory: \(name)",
-                    ])
+                    ]
+                )
             }
 
             let coremlDataPath = modelPath.appendingPathComponent("coremldata.bin")
@@ -335,14 +340,16 @@ public class DownloadUtils {
                     userInfo: [
                         NSFilePathErrorKey: coremlDataPath.path,
                         NSLocalizedDescriptionKey: "Missing coremldata.bin in model: \(name)",
-                    ])
+                    ]
+                )
             }
 
             progressHandler?(
                 DownloadProgress(
                     fractionCompleted: 0.5 + 0.5 * Double(index) / Double(modelNames.count),
                     phase: .compiling(modelName: name)
-                ))
+                )
+            )
 
             let start = Date()
             let model = try MLModel(contentsOf: modelPath, configuration: config)
@@ -374,14 +381,14 @@ public class DownloadUtils {
         progressHandler: ProgressHandler? = nil
     ) async throws {
         try ensureOnlineAllowed("downloadRepo(\(repo.folderName))")
-        logger.info("Downloading \(repo.folderName) from HuggingFace...")
+        logger.info("Downloading \(repo.folderName) from \(ModelRegistry.baseURL)")
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
         let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
             .union(additionalModelNames)
-        let subPath = repo.subPath  // e.g., "160ms" for parakeetEou160
+        let subPath = repo.subPath // e.g., "160ms" for parakeetEou160
 
         // Build patterns for filtering (relative to subPath if present)
         var patterns: [String] = []
@@ -406,7 +413,8 @@ public class DownloadUtils {
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
                     throw HuggingFaceDownloadError.rateLimited(
-                        statusCode: httpResponse.statusCode, message: "Rate limited while listing files")
+                        statusCode: httpResponse.statusCode, message: "Rate limited while listing files"
+                    )
                 }
             }
 
@@ -419,7 +427,7 @@ public class DownloadUtils {
 
             for item in items {
                 guard let itemPath = item["path"] as? String,
-                    let itemType = item["type"] as? String
+                      let itemType = item["type"] as? String
                 else { continue }
 
                 if itemType == "directory" {
@@ -428,11 +436,11 @@ public class DownloadUtils {
                     if let sub = subPath {
                         shouldProcess =
                             itemPath == sub || itemPath.hasPrefix("\(sub)/")
-                            || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
+                                || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
                     } else {
                         shouldProcess =
                             patterns.isEmpty
-                            || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
+                                || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
                     }
                     if shouldProcess {
                         try await listDirectory(path: itemPath)
@@ -450,7 +458,7 @@ public class DownloadUtils {
                     } else {
                         shouldInclude =
                             patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
-                            || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
+                                || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
                     }
                     if shouldInclude {
                         let fileSize = item["size"] as? Int ?? -1
@@ -460,19 +468,20 @@ public class DownloadUtils {
             }
         }
 
-        // Pull root-level files whose basename is in `names`. Some subPath repos
-        // keep shared auxiliary files at the repo root rather than inside the
-        // precision subdirectory, so a subPath-only traversal misses them.
+        /// Pull root-level files whose basename is in `names`. Some subPath repos
+        /// keep shared auxiliary files at the repo root rather than inside the
+        /// precision subdirectory, so a subPath-only traversal misses them.
         func listRootFiles(matching names: Set<String>) async throws {
             let dirURL = try ModelRegistry.apiModels(repo.remotePath, "tree/main")
             let request = authorizedRequest(url: dirURL)
             let (dirData, response) = try await sharedSession.data(for: request)
 
             if let httpResponse = response as? HTTPURLResponse,
-                httpResponse.statusCode == 429 || httpResponse.statusCode == 503
+               httpResponse.statusCode == 429 || httpResponse.statusCode == 503
             {
                 throw HuggingFaceDownloadError.rateLimited(
-                    statusCode: httpResponse.statusCode, message: "Rate limited while listing root files")
+                    statusCode: httpResponse.statusCode, message: "Rate limited while listing root files"
+                )
             }
 
             try validateJSONResponse(dirData, path: "")
@@ -483,8 +492,8 @@ public class DownloadUtils {
 
             for item in items {
                 guard let itemPath = item["path"] as? String,
-                    item["type"] as? String == "file",
-                    names.contains((itemPath as NSString).lastPathComponent)
+                      item["type"] as? String == "file",
+                      names.contains((itemPath as NSString).lastPathComponent)
                 else { continue }
                 let fileSize = item["size"] as? Int ?? -1
                 filesToDownload.append((path: itemPath, size: fileSize))
@@ -572,7 +581,8 @@ public class DownloadUtils {
                         DownloadProgress(
                             fractionCompleted: min(fraction, 0.5),
                             phase: .downloading(completedFiles: fileIndex, totalFiles: fileCount)
-                        ))
+                        )
+                    )
                 }
             } else {
                 onProgress = nil
@@ -602,7 +612,8 @@ public class DownloadUtils {
                         ? 0.5 * Double(completedBytes) / Double(totalBytes)
                         : 0.5 * Double(index + 1) / Double(filesToDownload.count),
                     phase: .downloading(completedFiles: index + 1, totalFiles: filesToDownload.count)
-                ))
+                )
+            )
         }
 
         // Verify required models are present
@@ -720,14 +731,15 @@ public class DownloadUtils {
     ) async throws -> URL {
         var lastError: Error?
 
-        for attempt in 1...maxAttempts {
+        for attempt in 1 ... maxAttempts {
             do {
                 let tempURL: URL
                 let httpResponse: HTTPURLResponse
 
                 if let onProgress {
                     (tempURL, httpResponse) = try await downloadWithProgress(
-                        request: request, onProgress: onProgress)
+                        request: request, onProgress: onProgress
+                    )
                 } else {
                     let (url, response) = try await sharedSession.download(for: request)
                     guard let resp = response as? HTTPURLResponse else {
@@ -740,10 +752,11 @@ public class DownloadUtils {
                 if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
                     throw HuggingFaceDownloadError.rateLimited(
                         statusCode: httpResponse.statusCode,
-                        message: "Rate limited while downloading \(path)")
+                        message: "Rate limited while downloading \(path)"
+                    )
                 }
 
-                guard (200..<300).contains(httpResponse.statusCode) else {
+                guard (200 ..< 300).contains(httpResponse.statusCode) else {
                     throw HuggingFaceDownloadError.downloadFailed(
                         path: path,
                         underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
@@ -775,9 +788,9 @@ public class DownloadUtils {
         if let urlError = error as? URLError {
             switch urlError.code {
             case .timedOut, .cannotConnectToHost, .cannotFindHost,
-                .networkConnectionLost, .notConnectedToInternet,
-                .dnsLookupFailed, .secureConnectionFailed,
-                .resourceUnavailable:
+                 .networkConnectionLost, .notConnectedToInternet,
+                 .dnsLookupFailed, .secureConnectionFailed,
+                 .resourceUnavailable:
                 return true
             default:
                 return false
@@ -787,9 +800,9 @@ public class DownloadUtils {
         switch error {
         case HuggingFaceDownloadError.rateLimited:
             return true
-        case HuggingFaceDownloadError.downloadFailed(_, let underlying):
+        case let HuggingFaceDownloadError.downloadFailed(_, underlying):
             let nsError = underlying as NSError
-            return nsError.domain == "HTTP" && (500...599).contains(nsError.code)
+            return nsError.domain == "HTTP" && (500 ... 599).contains(nsError.code)
         default:
             return false
         }
@@ -825,11 +838,12 @@ public class DownloadUtils {
             let dirURL = try ModelRegistry.apiModels(repo.remotePath, "tree/main/\(path)")
             let (dirData, response) = try await fetchWithAuth(from: dirURL)
             if let httpResponse = response as? HTTPURLResponse,
-                httpResponse.statusCode == 429 || httpResponse.statusCode == 503
+               httpResponse.statusCode == 429 || httpResponse.statusCode == 503
             {
                 throw HuggingFaceDownloadError.rateLimited(
                     statusCode: httpResponse.statusCode,
-                    message: "Rate limited while listing files in \(path)")
+                    message: "Rate limited while listing files in \(path)"
+                )
             }
 
             // Validate that response is JSON, not HTML error page
@@ -840,7 +854,7 @@ public class DownloadUtils {
             }
             for item in items {
                 guard let itemPath = item["path"] as? String,
-                    let itemType = item["type"] as? String
+                      let itemType = item["type"] as? String
                 else { continue }
 
                 if shouldSkip?(itemPath) == true {
@@ -862,7 +876,9 @@ public class DownloadUtils {
         progressHandler?(
             DownloadProgress(
                 fractionCompleted: totalFiles == 0 ? 1.0 : 0.0,
-                phase: .downloading(completedFiles: 0, totalFiles: totalFiles)))
+                phase: .downloading(completedFiles: 0, totalFiles: totalFiles)
+            )
+        )
 
         for (index, file) in filesToDownload.enumerated() {
             let destPath = repoDirectory.appendingPathComponent(file.path)
@@ -872,7 +888,10 @@ public class DownloadUtils {
                     DownloadProgress(
                         fractionCompleted: Double(index + 1) / Double(totalFiles),
                         phase: .downloading(
-                            completedFiles: index + 1, totalFiles: totalFiles)))
+                            completedFiles: index + 1, totalFiles: totalFiles
+                        )
+                    )
+                )
                 continue
             }
 
@@ -887,7 +906,10 @@ public class DownloadUtils {
                     DownloadProgress(
                         fractionCompleted: Double(index + 1) / Double(totalFiles),
                         phase: .downloading(
-                            completedFiles: index + 1, totalFiles: totalFiles)))
+                            completedFiles: index + 1, totalFiles: totalFiles
+                        )
+                    )
+                )
                 if (index + 1) % 5 == 0 || index == totalFiles - 1 {
                     logger.info("Downloaded \(index + 1)/\(totalFiles) \(subdirectory) files")
                 }
@@ -907,10 +929,11 @@ public class DownloadUtils {
             if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
                 throw HuggingFaceDownloadError.rateLimited(
                     statusCode: httpResponse.statusCode,
-                    message: "Rate limited while downloading \(file.path)")
+                    message: "Rate limited while downloading \(file.path)"
+                )
             }
 
-            guard (200..<300).contains(httpResponse.statusCode) else {
+            guard (200 ..< 300).contains(httpResponse.statusCode) else {
                 throw HuggingFaceDownloadError.downloadFailed(
                     path: file.path,
                     underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
@@ -926,7 +949,10 @@ public class DownloadUtils {
                 DownloadProgress(
                     fractionCompleted: Double(index + 1) / Double(totalFiles),
                     phase: .downloading(
-                        completedFiles: index + 1, totalFiles: totalFiles)))
+                        completedFiles: index + 1, totalFiles: totalFiles
+                    )
+                )
+            )
 
             if (index + 1) % 5 == 0 || index == totalFiles - 1 {
                 logger.info("Downloaded \(index + 1)/\(totalFiles) \(subdirectory) files")
@@ -947,7 +973,7 @@ public class DownloadUtils {
         var lastError: Error?
         let request = authorizedRequest(url: url)
 
-        for attempt in 1...maxAttempts {
+        for attempt in 1 ... maxAttempts {
             do {
                 let (data, response) = try await sharedSession.data(for: request)
 
@@ -962,7 +988,7 @@ public class DownloadUtils {
                     )
                 }
 
-                guard (200..<300).contains(httpResponse.statusCode) else {
+                guard (200 ..< 300).contains(httpResponse.statusCode) else {
                     throw HuggingFaceDownloadError.invalidResponse
                 }
 
@@ -995,9 +1021,9 @@ private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelega
     }
 
     func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didWriteData bytesWritten: Int64,
+        _: URLSession,
+        downloadTask _: URLSessionDownloadTask,
+        didWriteData _: Int64,
         totalBytesWritten: Int64,
         totalBytesExpectedToWrite: Int64
     ) {
@@ -1005,9 +1031,9 @@ private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelega
     }
 
     func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didFinishDownloadingTo location: URL
+        _: URLSession,
+        downloadTask _: URLSessionDownloadTask,
+        didFinishDownloadingTo _: URL
     ) {
         // Required by protocol — the async download(for:) API handles the file.
     }

@@ -8,9 +8,9 @@ public final class OfflineDiarizerManager {
     private let logger = AppLogger(category: "OfflineDiarizer")
     private let config: OfflineDiarizerConfig
 
-    // CoreML models are not Sendable but are used read-only after initialization.
-    // We manage the safety ourselves by only writing during initialization.
-    nonisolated(unsafe) private var models: OfflineDiarizerModels?
+    /// CoreML models are not Sendable but are used read-only after initialization.
+    /// We manage the safety ourselves by only writing during initialization.
+    private nonisolated(unsafe) var models: OfflineDiarizerModels?
 
     public init(config: OfflineDiarizerConfig = .default) {
         self.config = config
@@ -38,51 +38,58 @@ public final class OfflineDiarizerManager {
 
         let targetDirectory =
             directory?.standardizedFileURL
-            ?? OfflineDiarizerModels.defaultModelsDirectory().standardizedFileURL
+                ?? OfflineDiarizerModels.defaultModelsDirectory().standardizedFileURL
 
         if forceRedownload {
             do {
                 try purgeDiarizerRepo(at: targetDirectory)
             } catch {
                 logger.warning(
-                    "Failed to purge diarizer cache during forced reload: \(error.localizedDescription)")
+                    "Failed to purge diarizer cache during forced reload: \(error.localizedDescription)"
+                )
             }
         }
 
         do {
             let loadedModels = try await OfflineDiarizerModels.load(
                 from: targetDirectory,
-                configuration: configuration
+                configuration: configuration,
+                backend: config.embedding.backend
             )
             initialize(models: loadedModels)
             await prewarmModelsIfNeeded(loadedModels)
             logger.info("Offline diarizer models loaded from \(targetDirectory.path)")
         } catch {
             logger.error(
-                "Initial offline diarizer model load failed: \(error.localizedDescription)")
+                "Initial offline diarizer model load failed: \(error.localizedDescription)"
+            )
             logger.info("Attempting fallback download and compilation")
 
             do {
                 try purgeDiarizerRepo(at: targetDirectory)
             } catch {
                 logger.warning(
-                    "Failed to remove cached diarizer repo before fallback: \(error.localizedDescription)")
+                    "Failed to remove cached diarizer repo before fallback: \(error.localizedDescription)"
+                )
             }
 
             do {
                 let reloadedModels = try await OfflineDiarizerModels.load(
                     from: targetDirectory,
-                    configuration: configuration
+                    configuration: configuration,
+                    backend: config.embedding.backend
                 )
                 initialize(models: reloadedModels)
                 await prewarmModelsIfNeeded(reloadedModels)
 
                 let durationText = String(format: "%.2f", reloadedModels.compilationDuration)
                 logger.info(
-                    "Fallback download + compile completed in \(durationText)s at \(targetDirectory.path)")
+                    "Fallback download + compile completed in \(durationText)s at \(targetDirectory.path)"
+                )
             } catch {
                 logger.error(
-                    "Fallback offline diarizer model load failed: \(error.localizedDescription)")
+                    "Fallback offline diarizer model load failed: \(error.localizedDescription)"
+                )
                 throw error
             }
         }
@@ -148,7 +155,8 @@ public final class OfflineDiarizerManager {
 
         let totalStart = Date()
         let totalChunks = max(
-            1, (audioSource.sampleCount + config.samplesPerStep - 1) / config.samplesPerStep)
+            1, (audioSource.sampleCount + config.samplesPerStep - 1) / config.samplesPerStep
+        )
 
         let streamPair = AsyncThrowingStream<SegmentationChunk, Error>.makeStream()
         let chunkStream = streamPair.stream
@@ -195,19 +203,29 @@ public final class OfflineDiarizerManager {
             case .titanet10s:
                 guard let directory = capturedConfig.titanetModelDirectory else {
                     throw OfflineDiarizationError.invalidConfiguration(
-                        "titanet10s backend requires titanetModelDirectory")
+                        "titanet10s backend requires titanetModelDirectory"
+                    )
                 }
                 let extractor = try await TitaNetMaskedExtractor(
-                    directory: directory, config: capturedConfig)
+                    directory: directory, config: capturedConfig
+                )
                 embeddings = try await extractor.extractEmbeddings(
                     audioSource: audioSource,
                     segmentationStream: chunkStream
                 )
             case .wespeaker:
+                guard let fbankModel = capturedModels.fbankModel,
+                      let embeddingModel = capturedModels.embeddingModel,
+                      let pldaRhoModel = capturedModels.pldaRhoModel
+                else {
+                    throw OfflineDiarizationError.modelNotLoaded(
+                        "wespeaker offline embedder (models not loaded for this backend)"
+                    )
+                }
                 let extractor = OfflineEmbeddingExtractor(
-                    fbankModel: capturedModels.fbankModel,
-                    embeddingModel: capturedModels.embeddingModel,
-                    pldaTransform: PLDATransform(pldaRhoModel: capturedModels.pldaRhoModel, psi: capturedModels.pldaPsi),
+                    fbankModel: fbankModel,
+                    embeddingModel: embeddingModel,
+                    pldaTransform: PLDATransform(pldaRhoModel: pldaRhoModel, psi: capturedModels.pldaPsi),
                     config: capturedConfig
                 )
                 embeddings = try await extractor.extractEmbeddings(
@@ -238,7 +256,11 @@ public final class OfflineDiarizerManager {
         let (timedEmbeddings, embeddingTime) = embeddingResult
         logger.debug("Embedding extraction produced \(timedEmbeddings.count) vectors in \(embeddingTime)s (async)")
 
-        let pldaTransform = PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi)
+        // Only needed on the WeSpeaker/VBx (.ahc) path; nil under TitaNet+NME-SC,
+        // which never scores with PLDA (and doesn't load the PLDA model).
+        let pldaTransform = models.pldaRhoModel.map {
+            PLDATransform(pldaRhoModel: $0, psi: models.pldaPsi)
+        }
 
         guard !timedEmbeddings.isEmpty else {
             throw OfflineDiarizationError.noSpeechDetected
@@ -291,7 +313,8 @@ public final class OfflineDiarizerManager {
                 print(
                     "[[EMB]] {\"j\":\(j),\"chunk\":\(te.chunkIndex),\"spk\":\(te.speakerIndex),"
                         + "\"t0\":\(String(format: "%.3f", te.startTime)),\"t1\":\(String(format: "%.3f", te.endTime)),"
-                        + "\"cl\":\(cl),\"v\":[\(v)]}")
+                        + "\"cl\":\(cl),\"v\":[\(v)]}"
+                )
             }
             print("[[EMB-DUMP-END]]")
         }
@@ -333,21 +356,21 @@ public final class OfflineDiarizerManager {
                 numClusters: clusters.max().map { $0 + 1 } ?? 0,
                 elbos: []
             )
-        } else if !trainingRho.isEmpty, !clusters.isEmpty {
+        } else if let pldaTransform, !trainingRho.isEmpty, !clusters.isEmpty {
             let hasConstraints =
                 config.clustering.numSpeakers != nil
-                || config.clustering.minSpeakers != nil
-                || config.clustering.maxSpeakers != nil
+                    || config.clustering.minSpeakers != nil
+                    || config.clustering.maxSpeakers != nil
 
             let constraints: SpeakerCountConstraints? =
                 hasConstraints
-                ? SpeakerCountConstraints.resolve(
-                    numEmbeddings: trainingEmbeddings.count,
-                    numSpeakers: config.clustering.numSpeakers,
-                    minSpeakers: config.clustering.minSpeakers,
-                    maxSpeakers: config.clustering.maxSpeakers
-                )
-                : nil
+                    ? SpeakerCountConstraints.resolve(
+                        numEmbeddings: trainingEmbeddings.count,
+                        numSpeakers: config.clustering.numSpeakers,
+                        minSpeakers: config.clustering.minSpeakers,
+                        maxSpeakers: config.clustering.maxSpeakers
+                    )
+                    : nil
 
             vbxOutput = VBxClustering(config: config, pldaTransform: pldaTransform).refineWithConstraints(
                 rhoFeatures: trainingRho,
@@ -422,12 +445,12 @@ public final class OfflineDiarizerManager {
 
         let publicChunkEmbeddings: [ChunkEmbedding]? =
             config.exposeChunkEmbeddings
-            ? Self.buildPublicChunkEmbeddings(
-                timedEmbeddings: timedEmbeddings,
-                assignments: assignments,
-                logger: logger
-            )
-            : nil
+                ? Self.buildPublicChunkEmbeddings(
+                    timedEmbeddings: timedEmbeddings,
+                    assignments: assignments,
+                    logger: logger
+                )
+                : nil
 
         let totalProcessing = Date().timeIntervalSince(totalStart)
         let timings = PipelineTimings(
@@ -560,7 +583,8 @@ public final class OfflineDiarizerManager {
         case .titanet10s:
             guard let directory = config.titanetModelDirectory else {
                 throw OfflineDiarizationError.invalidConfiguration(
-                    "titanet10s backend requires titanetModelDirectory")
+                    "titanet10s backend requires titanetModelDirectory"
+                )
             }
             let extractor = try await TitaNetMaskedExtractor(directory: directory, config: config)
             _ = try await extractor.extractEmbeddings(
@@ -568,10 +592,14 @@ public final class OfflineDiarizerManager {
                 segmentation: dummySegmentation
             )
         case .wespeaker:
+            guard let fbankModel = models.fbankModel,
+                  let embeddingModel = models.embeddingModel,
+                  let pldaRhoModel = models.pldaRhoModel
+            else { return }
             let extractor = OfflineEmbeddingExtractor(
-                fbankModel: models.fbankModel,
-                embeddingModel: models.embeddingModel,
-                pldaTransform: PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi),
+                fbankModel: fbankModel,
+                embeddingModel: embeddingModel,
+                pldaTransform: PLDATransform(pldaRhoModel: pldaRhoModel, psi: models.pldaPsi),
                 config: config
             )
             _ = try await extractor.extractEmbeddings(
@@ -616,7 +644,7 @@ public final class OfflineDiarizerManager {
         // use the K-Means centroids directly instead of computing from gamma/pi
         if vbxOutput.wasAdjusted, !vbxOutput.centroids.isEmpty {
             let mapping = Dictionary(
-                uniqueKeysWithValues: (0..<vbxOutput.centroids.count).map { ($0, $0) }
+                uniqueKeysWithValues: (0 ..< vbxOutput.centroids.count).map { ($0, $0) }
             )
             return (vbxOutput.centroids, mapping)
         }
@@ -639,7 +667,7 @@ public final class OfflineDiarizerManager {
                     var denominator = 0.0
                     let frameLimit = min(gamma.count, trainingEmbeddings.count)
 
-                    for frameIdx in 0..<frameLimit {
+                    for frameIdx in 0 ..< frameLimit {
                         let weight = gamma[frameIdx][speakerIdx]
                         guard weight > 0 else { continue }
                         denominator += weight
@@ -691,10 +719,13 @@ public final class OfflineDiarizerManager {
             return ([], [:])
         }
 
-        var grouped: [Int: (sum: [Double], count: Int)] = [:]
+        // Tuple element is named `n` (not `count`) so swiftformat's type-unaware
+        // `isEmpty` rule can't rewrite `entry.count > 0` into `!entry.isEmpty`
+        // (a tuple has no `isEmpty`).
+        var grouped: [Int: (sum: [Double], n: Int)] = [:]
         for (embedding, cluster) in zip(embeddings, clusters) {
             if grouped[cluster] == nil {
-                grouped[cluster] = (sum: [Double](repeating: 0, count: embedding.count), count: 0)
+                grouped[cluster] = (sum: [Double](repeating: 0, count: embedding.count), n: 0)
             }
             precondition(
                 embedding.count == grouped[cluster]!.sum.count,
@@ -717,7 +748,7 @@ public final class OfflineDiarizerManager {
                     )
                 }
             }
-            entry.count += 1
+            entry.n += 1
             grouped[cluster] = entry
         }
 
@@ -728,8 +759,8 @@ public final class OfflineDiarizerManager {
         for (newIndex, key) in sortedKeys.enumerated() {
             mapping[key] = newIndex
             let entry = grouped[key]!
-            if entry.count > 0 {
-                centroids.append(entry.sum.map { $0 / Double(entry.count) })
+            if entry.n > 0 {
+                centroids.append(entry.sum.map { $0 / Double(entry.n) })
             } else {
                 centroids.append(entry.sum)
             }
@@ -907,7 +938,7 @@ public final class OfflineDiarizerManager {
         }
         var chunks: [ChunkPayload] = []
         chunks.reserveCapacity(segmentation.numChunks)
-        for index in 0..<segmentation.numChunks {
+        for index in 0 ..< segmentation.numChunks {
             chunks.append(
                 ChunkPayload(
                     chunkIndex: index,
@@ -951,7 +982,7 @@ public final class OfflineDiarizerManager {
         for (index, embedding) in embeddings.enumerated() {
             let cluster =
                 assignments.indices.contains(index)
-                ? assignments[index] : -1
+                    ? assignments[index] : -1
             payload.append(
                 ExportPayload(
                     chunkIndex: embedding.chunkIndex,

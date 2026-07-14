@@ -276,7 +276,6 @@ public enum ParakeetEncoderPrecision: String, Sendable, CaseIterable {
 
 /// Centralized model names for all FluidAudio components
 public enum ModelNames {
-
     /// Diarizer model names
     public enum Diarizer {
         public static let segmentation = "pyannote_segmentation"
@@ -316,6 +315,15 @@ public enum ModelNames {
             pldaRhoPath,
             pldaParameters,
         ]
+
+        /// Files needed when the offline pipeline runs the TitaNet-10s embedder
+        /// with NME-SC clustering — only segmentation. The WeSpeaker embedder,
+        /// FBANK frontend, and PLDA/VBx artifacts are unused on that path (see
+        /// `OfflineDiarizerModels.load(backend:)`), so they are neither
+        /// downloaded nor compiled.
+        public static let titanetRequiredModels: Set<String> = [
+            segmentationPath,
+        ]
     }
 
     /// ASR model names
@@ -326,7 +334,7 @@ public enum ModelNames {
         public static let joint = "JointDecision"
         public static let ctcHead = "CtcHead"
 
-        // Shared vocabulary file across all model versions
+        /// Shared vocabulary file across all model versions
         public static let vocabularyFile = "parakeet_vocab.json"
 
         public static let preprocessorFile = preprocessor + ".mlmodelc"
@@ -367,7 +375,7 @@ public enum ModelNames {
         ]
 
         /// Get vocabulary filename for specific model version
-        public static func vocabulary(for repo: Repo) -> String {
+        public static func vocabulary(for _: Repo) -> String {
             // All Parakeet models use the same vocabulary file (format varies: dict for v2/v3, array for 110m)
             return vocabularyFile
         }
@@ -381,7 +389,7 @@ public enum ModelNames {
         public static let melSpectrogramPath = melSpectrogram + ".mlmodelc"
         public static let audioEncoderPath = audioEncoder + ".mlmodelc"
 
-        // Vocabulary JSON path (shared by Python/Nemo and CoreML exports).
+        /// Vocabulary JSON path (shared by Python/Nemo and CoreML exports).
         public static let vocabularyPath = "vocab.json"
 
         public static let requiredModels: Set<String> = [
@@ -397,9 +405,9 @@ public enum ModelNames {
     /// Plus `vocab.json` (25055 SentencePiece tokens, auto-fetched as a root file).
     public enum SenseVoice {
         public static let preprocessor = "SenseVoicePreprocessor"
-        public static let encoder = "SenseVoiceSmall"  // fp16, runs on ANE (default)
-        public static let encoderInt8 = "SenseVoiceSmall_int8"  // int8 weights, ANE, ~half size
-        public static let encoderFp32 = "SenseVoiceSmall_fp32"  // fp32 fallback (non-ANE)
+        public static let encoder = "SenseVoiceSmall" // fp16, runs on ANE (default)
+        public static let encoderInt8 = "SenseVoiceSmall_int8" // int8 weights, ANE, ~half size
+        public static let encoderFp32 = "SenseVoiceSmall_fp32" // fp32 fallback (non-ANE)
 
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
@@ -435,10 +443,10 @@ public enum ModelNames {
     public enum ParaformerZh {
         public static let preprocessor = "ParaformerPreprocessor"
         public static let encoder = "ParaformerEncoder"
-        public static let encoderInt8 = "ParaformerEncoder_int8"  // ~half size, ANE
+        public static let encoderInt8 = "ParaformerEncoder_int8" // ~half size, ANE
         public static let cifAlphas = "ParaformerCifAlphas"
         public static let decoder = "ParaformerDecoder"
-        public static let decoderInt8 = "ParaformerDecoder_int8"  // ~half size, ANE
+        public static let decoderInt8 = "ParaformerDecoder_int8" // ~half size, ANE
 
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
@@ -493,7 +501,7 @@ public enum ModelNames {
         public static let sileroVadFile = sileroVad + ".mlmodelc"
 
         public static let requiredModels: Set<String> = [
-            sileroVadFile
+            sileroVadFile,
         ]
     }
 
@@ -534,7 +542,7 @@ public enum ModelNames {
         /// merged inner-loop model (e.g. 2240ms); loaded only if the file exists.
         public static let decoderJointFile = "decoder_joint.mlmodelc"
 
-        // Encoder in subdirectory (int8 quantized only)
+        /// Encoder in subdirectory (int8 quantized only)
         public static let encoderInt8File = "encoder/encoder_int8.mlmodelc"
 
         public static let requiredModels: Set<String> = [
@@ -744,7 +752,9 @@ public enum ModelNames {
                 }
             }
 
-            public var description: String { name }
+            public var description: String {
+                name
+            }
 
             public func name(forStep step: StepSize) -> String {
                 "\(name)_\(step)"
@@ -1061,15 +1071,15 @@ public enum ModelNames {
         public static func requiredFiles(veVariant: String?) -> Set<String> {
             var set = sharedModelFiles.union(companionFiles)
             switch veVariant {
-            case .some(let v) where v.hasPrefix("dyn-"):
+            case let .some(v) where v.hasPrefix("dyn-"):
                 set.insert(vectorEstimatorFile(precisionSuffix: String(v.dropFirst(4)), bucket: nil))
-            case .some(let v) where v.hasPrefix("ane-"):
+            case let .some(v) where v.hasPrefix("ane-"):
                 let q = String(v.dropFirst(4))
                 for b in aneBuckets {
                     set.insert(vectorEstimatorFile(precisionSuffix: q, bucket: b))
                 }
             default:
-                set.insert(vectorEstimatorFile)  // fp16 dynamic
+                set.insert(vectorEstimatorFile) // fp16 dynamic
             }
             return set
         }
@@ -1252,6 +1262,11 @@ public enum ModelNames {
             // Variants: nil/"fp16" (streaming), "offline"/"offline-fp16" (batch).
             return ModelNames.ParakeetUnified.requiredModels(variant: variant)
         case .diarizer:
+            if variant == "offline-titanet" {
+                // TitaNet-10s + NME-SC needs only segmentation on disk; the
+                // download gate must not pull the WeSpeaker/FBANK/PLDA files.
+                return ModelNames.OfflineDiarizer.titanetRequiredModels
+            }
             if variant == "offline" {
                 return ModelNames.OfflineDiarizer.requiredModels
             }

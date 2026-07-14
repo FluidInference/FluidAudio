@@ -5,9 +5,13 @@ import OSLog
 @available(macOS 14.0, iOS 17.0, *)
 public struct OfflineDiarizerModels: Sendable {
     public let segmentationModel: MLModel
-    public let fbankModel: MLModel
-    public let embeddingModel: MLModel
-    public let pldaRhoModel: MLModel
+    /// WeSpeaker embedder stack — `nil` when the models are loaded for the
+    /// TitaNet-10s backend. NME-SC needs only segmentation; the 192-d TitaNet
+    /// embedder and its clustering never touch FBANK/WeSpeaker/PLDA, so those
+    /// files are neither downloaded nor compiled on the TitaNet path.
+    public let fbankModel: MLModel?
+    public let embeddingModel: MLModel?
+    public let pldaRhoModel: MLModel?
     public let pldaPsi: [Double]
 
     public let compilationDuration: TimeInterval
@@ -53,10 +57,10 @@ public struct OfflineDiarizerModels: Sendable {
 
     public init(
         segmentationModel: MLModel,
-        fbankModel: MLModel,
-        embeddingModel: MLModel,
-        pldaRhoModel: MLModel,
-        pldaPsi: [Double],
+        fbankModel: MLModel? = nil,
+        embeddingModel: MLModel? = nil,
+        pldaRhoModel: MLModel? = nil,
+        pldaPsi: [Double] = [],
         compilationDuration: TimeInterval
     ) {
         self.segmentationModel = segmentationModel
@@ -77,38 +81,68 @@ public struct OfflineDiarizerModels: Sendable {
 
     public static func load(
         from directory: URL? = nil,
-        configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        configuration _: MLModelConfiguration? = nil,
+        progressHandler: DownloadUtils.ProgressHandler? = nil,
+        backend: OfflineDiarizerConfig.Embedding.Backend = .wespeaker
     ) async throws -> OfflineDiarizerModels {
         let modelsDirectory = directory ?? defaultModelsDirectory()
         let logger = Self.logger
-        logger.info("Loading offline diarization models from \(modelsDirectory.path)")
+        logger.info(
+            "Loading offline diarization models from \(modelsDirectory.path) (backend: \(backend.rawValue))"
+        )
 
         let loadStart = Date()
         let inferenceComputeUnits: MLComputeUnits = .cpuAndNeuralEngine
 
-        let segmentationAndEmbeddingNames: [String] = [
-            ModelNames.OfflineDiarizer.segmentationPath,
+        // Segmentation is always required — it drives VAD + the per-speaker
+        // masks consumed by BOTH the WeSpeaker and TitaNet embedders. The variant
+        // controls the DOWNLOAD gate: `.titanet10s` uses "offline-titanet" so
+        // `downloadRepo` fetches ONLY Segmentation (not the WeSpeaker/FBANK/PLDA
+        // files), while `.wespeaker` keeps "offline" (full 5-file set).
+        let segmentationVariant = backend == .titanet10s ? "offline-titanet" : "offline"
+        let segmentationModels = try await DownloadUtils.loadModels(
+            .diarizer,
+            modelNames: [ModelNames.OfflineDiarizer.segmentationPath],
+            directory: modelsDirectory,
+            computeUnits: inferenceComputeUnits,
+            variant: segmentationVariant,
+            progressHandler: progressHandler
+        )
+        guard let segmentation = segmentationModels[ModelNames.OfflineDiarizer.segmentationPath] else {
+            throw OfflineDiarizationError.modelNotLoaded(ModelNames.OfflineDiarizer.segmentation)
+        }
+
+        // TitaNet-10s (NME-SC) uses only segmentation; the WeSpeaker embedder,
+        // FBANK frontend, and PLDA/VBx artifacts are never touched at inference,
+        // so skip downloading + compiling them entirely.
+        if backend == .titanet10s {
+            let compilationDuration = Date().timeIntervalSince(loadStart)
+            logger.info(
+                "Offline diarization models ready (TitaNet: segmentation only, compile: \(String(format: "%.3f", compilationDuration))s)"
+            )
+            return OfflineDiarizerModels(
+                segmentationModel: segmentation,
+                compilationDuration: compilationDuration
+            )
+        }
+
+        // WeSpeaker path — full stack: embedding + PLDA (rho) + FBANK + psi.
+        let embeddingAndPldaNames: [String] = [
             ModelNames.OfflineDiarizer.embeddingPath,
             ModelNames.OfflineDiarizer.pldaRhoPath,
         ]
-
-        let segmentationEmbeddingModels = try await DownloadUtils.loadModels(
+        let embeddingAndPldaModels = try await DownloadUtils.loadModels(
             .diarizer,
-            modelNames: segmentationAndEmbeddingNames,
+            modelNames: embeddingAndPldaNames,
             directory: modelsDirectory,
             computeUnits: inferenceComputeUnits,
             variant: "offline",
             progressHandler: progressHandler
         )
-
-        guard let segmentation = segmentationEmbeddingModels[ModelNames.OfflineDiarizer.segmentationPath] else {
-            throw OfflineDiarizationError.modelNotLoaded(ModelNames.OfflineDiarizer.segmentation)
-        }
-        guard let embedding = segmentationEmbeddingModels[ModelNames.OfflineDiarizer.embeddingPath] else {
+        guard let embedding = embeddingAndPldaModels[ModelNames.OfflineDiarizer.embeddingPath] else {
             throw OfflineDiarizationError.modelNotLoaded(ModelNames.OfflineDiarizer.embedding)
         }
-        guard let plda = segmentationEmbeddingModels[ModelNames.OfflineDiarizer.pldaRhoPath] else {
+        guard let plda = embeddingAndPldaModels[ModelNames.OfflineDiarizer.pldaRhoPath] else {
             throw OfflineDiarizationError.modelNotLoaded(ModelNames.OfflineDiarizer.pldaRho)
         }
 
@@ -143,8 +177,8 @@ public struct OfflineDiarizerModels: Sendable {
     }
 }
 
-extension MLComputeUnits {
-    fileprivate var label: String {
+private extension MLComputeUnits {
+    var label: String {
         switch self {
         case .cpuOnly:
             return ".cpuOnly"
