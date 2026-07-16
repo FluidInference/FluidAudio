@@ -101,37 +101,30 @@ struct ChunkProcessor {
         return max(defaultWarmupSamples, min(available, fill))
     }
 
-    /// Snap a window end back past any trailing run of frames whose RMS
-    /// sits below `speechRmsFloor` — below the quietest real speech, so
-    /// nothing transcribable is excluded. A window that ends inside a
-    /// dead-silence run *within its declared audio length* decodes
-    /// degenerately (zero padding beyond the length is masked and safe) —
-    /// see "End-Aligned Final Window" in LongTranscription.md. Returns a
-    /// value in `lowerBound...end`; `lowerBound` when the whole span is
-    /// sub-floor.
-    func speechAlignedEnd(before end: Int, stopAt lowerBound: Int) throws -> Int {
+    /// Last speech-bearing sample of the recording: `totalSamples` minus
+    /// the trailing run of frames whose RMS sits below `speechRmsFloor` —
+    /// below the quietest real speech, so nothing transcribable is
+    /// excluded. A window that ends inside a dead-silence run *within its
+    /// declared audio length* decodes degenerately (zero padding beyond
+    /// the length is masked and safe) — see "End-Aligned Final Window" in
+    /// LongTranscription.md. Returns `totalSamples` for an all-sub-floor
+    /// file (leave the layout untouched).
+    func speechEndSamples() throws -> Int {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
-        var current = min(end, totalSamples)
-        while current > lowerBound {
-            let frameStart = max(lowerBound, current - frameSamples)
-            let samples = try readSamples(offset: frameStart, count: current - frameStart)
+        var end = totalSamples
+        while end > 0 {
+            let frameStart = max(0, end - frameSamples)
+            let samples = try readSamples(offset: frameStart, count: end - frameStart)
             var sum: Float = 0
             for sample in samples {
                 sum += sample * sample
             }
             if sqrt(sum / Float(samples.count)) >= Self.speechRmsFloor {
-                return current
+                return end
             }
-            current = frameStart
+            end = frameStart
         }
-        return lowerBound
-    }
-
-    /// Last speech-bearing sample of the whole recording; `totalSamples`
-    /// when the entire file is sub-floor (leave the layout untouched).
-    func speechEndSamples() throws -> Int {
-        let end = try speechAlignedEnd(before: totalSamples, stopAt: 0)
-        return end > 0 ? end : totalSamples
+        return totalSamples
     }
 
     /// Prefix suppression (`emitTokensAfterGlobalFrame`) is a V3-decoder
