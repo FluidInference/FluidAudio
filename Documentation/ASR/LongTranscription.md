@@ -70,7 +70,7 @@ phrase at the wrong point.
 | v3 no-mel | `ASRConfig.melChunkContext = false`, CLI `--no-mel-context` | Parakeet TDT v3 batch long audio | Avoids the v3 multilingual drift introduced by prepending mel context at chunk boundaries. |
 | v3 dual-decode arbitration | `melChunkContext = false` plus `ASRConfig.dualDecodeArbitration = true`, CLI `--no-mel-context --dual-decode-arbitration` | Parakeet TDT v3 no-mel batch long audio | Opt-in quality mode for files where one boundary strategy is clearly safer than another. |
 | Parallel chunk workers | `ASRConfig.parallelChunkConcurrency` (default `4`, clamped to `>= 1`) | Stateless chunked batch TDT (all of the above) | Decodes independent chunks concurrently across a worker pool of cloned `AsrManager` instances. |
-| Post-merge repair passes | `ASRConfig.seamGapRepair = true` (default), CLI `--no-seam-gap-repair` | Multi-chunk batch TDT (all of the above) | Re-decodes suspicious inter-token gaps and an untranscribed speech tail with fresh seam-free windows, splicing recovered tokens in. See "Post-Merge Repair Passes". |
+| Post-merge repair pass | `ASRConfig.seamGapRepair = true` (default), CLI `--no-seam-gap-repair` | Multi-chunk batch TDT (all of the above) | Re-decodes suspicious inter-token gaps with fresh seam-free windows, splicing recovered tokens in. See "Post-Merge Repair Pass". |
 
 The dual-decode path probes the first few non-first chunks with three strategies:
 
@@ -78,13 +78,18 @@ The dual-decode path probes the first few non-first chunks with three strategies
 - silence-aligned boundaries with a hidden short real-audio warmup prefix
 - regular fixed-stride boundaries without warmup
 
-After the probe, the whole file commits to one strategy. That keeps the overlap
-merger from stitching together adjacent chunks decoded under different boundary
-rules, which was one source of mid-word artifacts and clause loss.
+After the probe, the whole file commits to one strategy; probe ties go to the
+warmup-free path (the content-safer default). Per-file commitment keeps the
+overlap merger from stitching together adjacent chunks decoded under different
+boundary rules, which was one source of mid-word artifacts and clause loss.
 
 The choice is based on decoder confidence, emitted-token counts, and agreement
 between probe paths. It is meant to decide between chunking strategies, not to
-rewrite transcript text.
+rewrite transcript text. The mechanism is language-agnostic (no text
+inspection, no vocabulary/script/token filtering, no language hints).
+Off by default: the wins are quality-tier rather than correctness-tier, and
+the probe adds a modest constant overhead (≈1.1–1.5× depending on file
+length) over the regular `melChunkContext = false` path.
 
 ## Boundary Search
 
