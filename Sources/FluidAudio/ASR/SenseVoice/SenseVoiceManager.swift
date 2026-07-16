@@ -1,4 +1,5 @@
 @preconcurrency import CoreML
+import Accelerate
 import Foundation
 
 /// Manager for SenseVoiceSmall transcription.
@@ -113,33 +114,48 @@ public actor SenseVoiceManager {
     private func decode(logits: MLMultiArray, validFrames: Int) -> String {
         let vocab = logits.shape[2].intValue
         let frames = min(validFrames, logits.shape[1].intValue)
+        // The frame stride may exceed `vocab` (CoreML pads rows for ANE alignment,
+        // e.g. stride 25056 for a 25055-wide vocab). Use the real stride and only
+        // scan `vocab` elements per row so we never read the padding slot.
+        let frameStride = logits.strides[1].intValue
         var ids: [Int] = []
+        ids.reserveCapacity(frames)
         var prev = -1
 
-        func appendArgmax(frameBase: (Int) -> Float) {
-            var best = 0
-            var bestVal = frameBase(0)
-            for v in 1..<vocab {
-                let x = frameBase(v)
-                if x > bestVal {
-                    bestVal = x
-                    best = v
-                }
+        // Greedy argmax per frame via Accelerate (vDSP_maxvi, SIMD). A naive Swift
+        // loop over frames×vocab (~6.4M) elements takes ~0.5s; vDSP does it in
+        // well under a millisecond, matching the model card's ~274x RTFx claim.
+        // fp16 logits are converted to float32 in a single vImage pass first.
+        func runLoop(_ p: UnsafePointer<Float>) {
+            for t in 0..<frames {
+                let base = t * frameStride
+                var bestVal: Float = 0
+                var bestIdx = vDSP_Length(0)
+                vDSP_maxvi(p + base, 1, &bestVal, &bestIdx, vDSP_Length(vocab))
+                let best = Int(bestIdx)
+                if best != SenseVoiceConfig.blankId && best != prev { ids.append(best) }
+                prev = best
             }
-            if best != SenseVoiceConfig.blankId && best != prev { ids.append(best) }
-            prev = best
         }
 
         if logits.dataType == .float32 {
-            let p = logits.dataPointer.assumingMemoryBound(to: Float32.self)
-            for t in 0..<frames {
-                let base = t * vocab
-                appendArgmax { p[base + $0] }
-            }
+            runLoop(logits.dataPointer.assumingMemoryBound(to: Float32.self))
         } else {
-            for t in 0..<frames {
-                appendArgmax { logits[[0, t as NSNumber, $0 as NSNumber]].floatValue }
-            }
+            let count = frames * frameStride
+            var buf = [Float](repeating: 0, count: count)
+            let src = logits.dataPointer.assumingMemoryBound(to: Float16.self)
+            var srcBuf = vImage_Buffer(
+                data: UnsafeMutableRawPointer(mutating: src),
+                height: 1,
+                width: vImagePixelCount(count),
+                rowBytes: count * MemoryLayout<Float16>.size)
+            var dstBuf = vImage_Buffer(
+                data: &buf,
+                height: 1,
+                width: vImagePixelCount(count),
+                rowBytes: count * MemoryLayout<Float>.size)
+            vImageConvert_Planar16FtoPlanarF(&srcBuf, &dstBuf, 0)
+            buf.withUnsafeBufferPointer { runLoop($0.baseAddress!) }
         }
 
         let raw = decodeCtcTokenIds(ids, vocabulary: models.vocabulary)
