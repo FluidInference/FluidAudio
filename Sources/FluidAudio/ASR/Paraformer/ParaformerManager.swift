@@ -1,6 +1,25 @@
 @preconcurrency import CoreML
 import Foundation
 
+/// A recognized token together with its time span (seconds) in the source audio.
+///
+/// Mirrors the per-character word-level timestamp JSON produced by FunASR's
+/// Paraformer (`ts_prediction_lfr6_standard`), e.g. `m4ai/audio/x-cut.words.json`:
+/// `startTime`, `endTime`, `text`. (Silence `<sil>` and the SentencePiece
+/// word-boundary token `▁` are *not* emitted — segments with empty `text` are
+/// skipped during decoding.)
+public struct TimestampedSegment: Sendable {
+    public let startTime: Double
+    public let endTime: Double
+    public let text: String
+
+    public init(startTime: Double, endTime: Double, text: String) {
+        self.startTime = startTime
+        self.endTime = endTime
+        self.text = text
+    }
+}
+
 /// Manager for Paraformer-large (zh) transcription.
 ///
 /// Pipeline: waveform -> [Preprocessor fp32/CPU] -> features
@@ -52,6 +71,285 @@ public actor ParaformerManager {
         // 4) decoder -> logits, then greedy decode
         let logits = try runDecoder(encRows: encRows, validLen: T, embeds: embeds, tokenCount: L)
         return decode(logits: logits, tokenCount: L, dim: dim)
+    }
+
+    // MARK: - Timestamps
+
+    /// Transcribe with per-token timestamps (seconds). CIF integrate-and-fire
+    /// gives each token's acoustic centroid; an energy-based refinement then
+    /// snaps the spans to the true waveform onset/offset (see
+    /// `decodeWithTimestamps`).
+    public func transcribeWithTimestamps(audioURL: URL) throws -> [TimestampedSegment] {
+        let converter = AudioConverter(sampleRate: Double(ParaformerConfig.sampleRate))
+        return try transcribeWithTimestamps(audio: try converter.resampleAudioFile(audioURL))
+    }
+
+    public func transcribeWithTimestamps(audio: [Float]) throws -> [TimestampedSegment] {
+        let dim = ParaformerConfig.encoderDim
+        // 1) preprocessor: waveform -> features [1, T, 560]
+        let features = try runPreprocessor(audio: audio)
+        var T = features.shape[1].intValue
+        if T > ParaformerConfig.decoderEncFrames {
+            Self.logger.warning("audio too long (\(T) frames); truncating to \(ParaformerConfig.decoderEncFrames)")
+            T = ParaformerConfig.decoderEncFrames
+        }
+
+        // 2) encoder (padded to bucket) -> enc_out
+        let bucket = ParaformerConfig.pickEncoderBucket(forFrames: T)
+        let encOut = try runEncoder(features: features, validLen: T, bucket: bucket)
+
+        // 3) CIF alphas (CoreML) + host integrate-and-fire (decoder embeddings)
+        let alphas = try runCifAlphas(encOut: encOut, validLen: T)
+        let encRows = rows(of: encOut, count: T, dim: dim)
+        let embeds = ParaformerCif.integrateAndFire(encRows: encRows, alphas: alphas)
+        let tokenCount = min(embeds.count, ParaformerConfig.decoderMaxTokens)
+        if tokenCount == 0 { return [] }
+
+        // 4) decoder -> logits, then decode tokens + timestamps
+        let logits = try runDecoder(
+            encRows: encRows, validLen: T,
+            embeds: Array(embeds.prefix(tokenCount)), tokenCount: tokenCount)
+        return decodeWithTimestamps(
+            logits: logits, tokenCount: tokenCount, alphas: alphas, audio: audio)
+    }
+
+    /// Greedy-decode the logits into tokens, then assign each a `[start, end]` time
+    /// span by faithfully porting FunASR's `ts_prediction_lfr6_standard`, with an
+    /// additional **energy-based boundary refinement** so the emitted spans line up
+    /// with the visible waveform (e.g. CapCut/剪映) instead of the CIF acoustic
+    /// centroids:
+    ///
+    ///   * `alphas` are **upsampled 3×** (FunASR `repeat_interleave`), then
+    ///     `cif_wo_hidden` integrates them at the 20 ms resolution that yields
+    ///     `pre_peak_index` — these are the per-token acoustic *centroids*.
+    ///   * CIF gives the *relative* token order/spacing (centroids); the 16 kHz
+    ///     RMS energy envelope (smoothed) gives the *absolute* onset/offset. We
+    ///     walk tokens left to right, each starting where the previous ended (this
+    ///     absorbs the CIF drift), and snap its span to the energy "on" run whose
+    ///     centre is nearest the centroid. This removes the systematic half-token
+    ///     shift of CIF and the heuristic `force_time_shift` used by FunASR.
+    ///   * BPE continuations (`cu@@`+`t` → `cut`) are merged; the `▁` boundary
+    ///     and inter-token silence are NOT emitted.
+    private func decodeWithTimestamps(
+        logits: MLMultiArray, tokenCount: Int, alphas: [Float], audio: [Float]
+    ) -> [TimestampedSegment] {
+        let vocabSize = logits.shape[2].intValue
+        let upsampleRate = 3
+        let timeRate = 10.0 * 6.0 / 1000.0 / Double(upsampleRate) // 0.02 s
+        let cifThreshold: Float = 1.0 - 1e-4
+
+        // 1) Greedy decode every decoder position; ids stay 1:1 with the acoustic
+        //    fire frames.
+        var tokenIds: [Int] = []
+        let useFast = logits.dataType == .float32
+        let p = useFast ? logits.dataPointer.assumingMemoryBound(to: Float32.self) : nil
+        for t in 0..<tokenCount {
+            var best = 0
+            var bestVal: Float = -.infinity
+            for v in 0..<vocabSize {
+                let x = useFast
+                    ? p![t * vocabSize + v]
+                    : logits[[0, t as NSNumber, v as NSNumber]].floatValue
+                if x > bestVal { bestVal = x; best = v }
+            }
+            tokenIds.append(best)
+        }
+
+        // 2) char_list: drop <blank>/<s>/</s> (keep ▁ if present).
+        var charList: [String] = []
+        for id in tokenIds {
+            if id == ParaformerConfig.blankId
+                || id == ParaformerConfig.sosId
+                || id == ParaformerConfig.eosId { continue }
+            guard let tok = models.vocabulary[id], !tok.isEmpty else { continue }
+            charList.append(tok)
+        }
+        guard charList.count >= 1 else { return [] }
+
+        // 3) Upsample alphas 3× and run `cif_wo_hidden` to obtain the 20 ms-
+        //    resolution fire frames (FunASR `pre_peak_index`). A CIF tail alpha is
+        //    appended so the final boundary fire is produced.
+        var usAlphas: [Float] = []
+        usAlphas.reserveCapacity(alphas.count * upsampleRate + 1)
+        for a in alphas { usAlphas.append(contentsOf: Array(repeating: a, count: upsampleRate)) }
+        usAlphas.append(ParaformerConfig.cifTailThreshold)
+        var fireIndices = Self.cifWoHiddenFireIndices(alphas: usAlphas, threshold: cifThreshold)
+
+        // 4) Fallback (mirrors FunASR): if the fire count doesn't line up with the
+        //    token count, renormalise the alphas so their sum equals
+        //    len(charList)+1 and recompute. Otherwise keep the true acoustic fires
+        //    (best match for the leading word, which carries no ▁ boundary).
+        if fireIndices.count != charList.count + 1 {
+            let target = Float(charList.count + 1)
+            let sum = usAlphas.reduce(0, +)
+            let scale = target / max(sum, 1e-6)
+            usAlphas = usAlphas.map { $0 * scale }
+            fireIndices = Self.cifWoHiddenFireIndices(alphas: usAlphas, threshold: cifThreshold)
+        }
+        guard fireIndices.count >= 2 else { return [] }
+
+        let audioEnd = Double(audio.count) / Double(ParaformerConfig.sampleRate)
+        let timeOf: (Double) -> Double = { $0 * timeRate }
+        // Acoustic centroids in seconds (no force_time_shift — energy refinement
+        // replaces it).
+        let centroids: [Double] = fireIndices.map { timeOf(Double($0)) }
+
+        // 5) Build the token layout via sequential energy forced-alignment.
+        //    CIF gives the *relative* token order and spacing (centroids); the 16 kHz
+        //    RMS envelope (smoothed) gives the *absolute* onset/offset. We walk
+        //    tokens left to right, each starting where the previous ended (this
+        //    absorbs the CIF drift), and snap its span to the energy "on" run whose
+        //    centre is nearest the centroid. No silence entries are emitted.
+        let rawEnv = Self.energyEnvelope(audio: audio, sampleRate: Double(ParaformerConfig.sampleRate), hopSec: 0.01)
+        let env = Self.smooth(rawEnv, window: 3)
+        let floor = env.isEmpty ? 0 : Self.percentile(env, q: 0.1)
+        let energyThreshold = max(floor * 2.5, 1e-4)
+        let minRun = 3 // frames (~30 ms) — reject single-frame noise spikes
+        let n = min(charList.count, centroids.count - 1)
+        var raw: [(text: String, start: Double, end: Double)] = []
+        var cursor: Double = 0.0
+        for i in 0..<n {
+            let dur = (i < n - 1) ? (centroids[i + 1] - centroids[i]) : (audioEnd - centroids[i])
+            let searchEnd = min(audioEnd, centroids[i] + dur * 1.5 + 0.15)
+            let span = Self.energySpan(
+                from: cursor, to: searchEnd, centroid: centroids[i],
+                env: env, hopSec: 0.01, threshold: energyThreshold, minRun: minRun)
+            let (s, e): (Double, Double)
+            if let span {
+                s = span.0; e = span.1
+            } else {
+                // No energy run found (very quiet token): advance by the expected
+                // duration so we don't get stuck, and keep a plausible span.
+                s = cursor
+                e = min(audioEnd, cursor + max(dur, 0.1))
+            }
+            cursor = e
+            raw.append((text: charList[i], start: s, end: e))
+        }
+
+        // 6) Emit, merging BPE continuations and stripping the `▁` boundary.
+        //    Empty-text (`▁` / silence) segments are skipped entirely.
+        var segments: [TimestampedSegment] = []
+        var i = 0
+        while i < raw.count {
+            let item = raw[i]
+            var text = item.text
+            var end = item.end
+            while text.hasSuffix("@@") {
+                text = String(text.dropLast(2))
+                i += 1
+                if i < raw.count {
+                    let piece = raw[i].text.hasPrefix(ASRConstants.sentencePieceWordBoundary)
+                        ? String(raw[i].text.dropFirst()) : raw[i].text
+                    text += piece
+                    end = raw[i].end
+                }
+            }
+            if text.hasPrefix(ASRConstants.sentencePieceWordBoundary) {
+                text = String(text.dropFirst())
+            }
+            if !text.isEmpty {
+                segments.append(
+                    TimestampedSegment(startTime: max(0, item.start), endTime: end, text: text))
+            }
+            i += 1
+        }
+        return segments
+    }
+
+    /// CIF integrate-and-fire *without* a hidden state (FunASR `cif_wo_hidden`):
+    /// returns every frame index at which the running sum of `alphas` crosses
+    /// `threshold`. Operates on the upsampled (20 ms) alphas.
+    private static func cifWoHiddenFireIndices(alphas: [Float], threshold: Float) -> [Int] {
+        var integrate: Float = 0
+        var fires: [Int] = []
+        for t in 0..<alphas.count {
+            integrate += alphas[t]
+            if integrate >= threshold {
+                fires.append(t)
+                integrate -= 1.0
+            }
+        }
+        return fires
+    }
+
+    /// RMS energy envelope of `audio` at `hopSec` resolution (seconds). Used to
+    /// snap token boundaries to the visible waveform onset/offset.
+    private static func energyEnvelope(audio: [Float], sampleRate: Double, hopSec: Double) -> [Float] {
+        let hop = max(1, Int(hopSec * sampleRate))
+        guard audio.count > hop else { return [] }
+        var env: [Float] = []
+        env.reserveCapacity(audio.count / hop + 1)
+        var idx = 0
+        while idx + hop <= audio.count {
+            var sum: Float = 0
+            for j in 0..<hop { let s = audio[idx + j]; sum += s * s }
+            env.append(sqrt(sum / Float(hop)))
+            idx += hop
+        }
+        return env
+    }
+
+    /// `q`-th percentile (0..1) of `values`, used to estimate a noise floor.
+    private static func percentile(_ values: [Float], q: Float) -> Float {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let pos = max(0, min(sorted.count - 1, Int(Float(sorted.count - 1) * q)))
+        return sorted[pos]
+    }
+
+    /// Moving-average smoothing of `x` (window frames, centred).
+    private static func smooth(_ x: [Float], window: Int) -> [Float] {
+        guard window > 1, x.count > window else { return x }
+        var out = x
+        let half = window / 2
+        for i in 0..<x.count {
+            let lo = max(0, i - half)
+            let hi = min(x.count - 1, i + half)
+            var sum: Float = 0
+            for k in lo...hi { sum += x[k] }
+            out[i] = sum / Float(hi - lo + 1)
+        }
+        return out
+    }
+
+    /// Within `[from, to]`, find every RMS-energy "on" run (consecutive frames
+    /// above `threshold`, length >= `minRun`) and return the `(start, end)` of the
+    /// run whose centre is nearest `centroid`. Returns `nil` if no run qualifies.
+    /// Used for sequential forced-alignment of token boundaries to the waveform.
+    private static func energySpan(
+        from: Double, to: Double, centroid: Double, env: [Float],
+        hopSec: Double, threshold: Float, minRun: Int
+    ) -> (Double, Double)? {
+        guard !env.isEmpty, hopSec > 0, to > from, minRun > 0 else { return nil }
+        let i0 = max(0, Int(from / hopSec))
+        let i1 = min(env.count - 1, max(i0, Int(to / hopSec)))
+        guard i1 >= i0 else { return nil }
+
+        // Collect qualifying runs.
+        var runs: [(Int, Int)] = []
+        var j = i0
+        while j <= i1 {
+            if env[j] > threshold {
+                var k = j
+                while k <= i1, env[k] > threshold { k += 1 }
+                if k - j >= minRun { runs.append((j, k - 1)) }
+                j = k
+            } else {
+                j += 1
+            }
+        }
+        guard !runs.isEmpty else { return nil }
+
+        // Pick the run whose centre is closest to the centroid.
+        let ci = Int(centroid / hopSec)
+        var best = runs[0]
+        var bestD = abs((runs[0].0 + runs[0].1) - 2 * ci)
+        for r in runs[1...] {
+            let d = abs((r.0 + r.1) - 2 * ci)
+            if d < bestD { bestD = d; best = r }
+        }
+        return (Double(best.0) * hopSec, Double(best.1) * hopSec)
     }
 
     // MARK: - Stages
