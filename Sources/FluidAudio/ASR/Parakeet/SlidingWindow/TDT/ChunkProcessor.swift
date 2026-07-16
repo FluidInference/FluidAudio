@@ -1178,19 +1178,37 @@ struct ChunkProcessor {
     /// gaps, and iteration over residual gaps needs headroom beyond that.
     private var maxSeamGapRepairs: Int { 32 }
 
-    /// Clamp bounds for the adaptive speech threshold. See "Adaptive
-    /// Speech-Energy Gate" in Documentation/ASR/LongTranscription.md.
-    private var speechRmsCeiling: Float { 0.008 }
-    private var speechRmsFloor: Float { 0.0005 }
+    // Adaptive speech-gate constants. Value rationale in "Adaptive
+    // Speech-Energy Gate" (Documentation/ASR/LongTranscription.md).
+
+    /// Ceiling (~-42 dBFS): the pre-adaptive fixed gate, tuned on
+    /// normal-level recordings — clamping to it keeps those byte-identical.
+    static let speechRmsCeiling: Float = 0.008
+
+    /// Floor (~-66 dBFS): above 16-bit dither and quiet room tone, below
+    /// the quietest validated speech (#747 reproducer tail, RMS ≈ 0.001).
+    static let speechRmsFloor: Float = 0.0005
+
+    /// Gate at ~-10.5 dB under the speech reference: trailing syllables and
+    /// fricatives decay 6–12 dB below voiced level, noise floors sit 20+ dB
+    /// below — the scale parks the threshold between the two.
+    static let speechRmsReferenceScale: Float = 0.3
+
+    /// Reference percentile of per-frame RMS. p50 lands on silence in
+    /// pause-heavy files; p90+ converges on the max and is skewed by
+    /// plosives/clipping. Assumes speech fills ≥25% of frames — whole-file,
+    /// so a loud-body/quiet-tail recording defeats it (Known Limitations).
+    static let speechRmsReferencePercentile = 0.75
 
     /// Speech-energy threshold scaled to the recording's own level — an
     /// absolute gate can never fire on quiet audio, the class that blanks
     /// out (issue #747).
     static func adaptiveSpeechRmsThreshold(referenceRms: Float, floor: Float, ceiling: Float) -> Float {
-        min(ceiling, max(floor, referenceRms * 0.3))
+        min(ceiling, max(floor, referenceRms * speechRmsReferenceScale))
     }
 
-    /// Recording-level threshold from the 75th-percentile per-frame RMS.
+    /// Recording-level threshold from the `speechRmsReferencePercentile`
+    /// per-frame RMS.
     private func adaptiveSpeechRmsThreshold() throws -> Float {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         var frameRms: [Float] = []
@@ -1205,11 +1223,14 @@ struct ChunkProcessor {
             frameRms.append(sqrt(sum / Float(samples.count)))
             offset += frameSamples
         }
-        guard !frameRms.isEmpty else { return speechRmsCeiling }
+        guard !frameRms.isEmpty else { return Self.speechRmsCeiling }
         frameRms.sort()
-        let referenceRms = frameRms[min(frameRms.count - 1, (frameRms.count * 3) / 4)]
+        let referenceIndex = min(
+            frameRms.count - 1,
+            Int(Double(frameRms.count) * Self.speechRmsReferencePercentile))
+        let referenceRms = frameRms[referenceIndex]
         return Self.adaptiveSpeechRmsThreshold(
-            referenceRms: referenceRms, floor: speechRmsFloor, ceiling: speechRmsCeiling)
+            referenceRms: referenceRms, floor: Self.speechRmsFloor, ceiling: Self.speechRmsCeiling)
     }
 
     /// Minimum cumulative speech-like audio inside a gap before it is

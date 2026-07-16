@@ -412,6 +412,24 @@ digital silence. A room-tone-only tail can now trigger a probe that
 recovers nothing; the cost is one wasted window decode and the stream is
 unchanged.
 
+The constants live on `ChunkProcessor` (`speechRms*`):
+
+| Constant | Value | ≈ dBFS | Why this value |
+|---|---|---|---|
+| `speechRmsCeiling` | `0.008` | −42 | The pre-adaptive fixed gate, tuned on normal-level recordings. Clamping to it keeps every file loud enough to reach it byte-identical to the pre-#747 behavior (verified: 20-file LibriSpeech test-clean matches stock). The adaptive terms can only *lower* the bar, never raise it. |
+| `speechRmsReferenceScale` | `0.3` | −10.5 below reference | Speech's internal dynamic range: trailing syllables, fricatives, and sentence-final decay sit ~6–12 dB below the voiced-vowel level the reference lands on, while noise floors sit 20–40 dB below it. 0.3 parks the gate in the valley between the two — low enough to admit a fading last word, high enough that room tone never passes. |
+| `speechRmsFloor` | `0.0005` | −66 | Bounds the mostly-silence failure mode where the percentile itself lands on noise and `reference × scale` collapses toward zero. Sits above 16-bit dither/quantization (RMS ~1e-5–1e-4) and quiet room tone (< 3e-4), and below the quietest validated speech (#747 reproducer tail, RMS ≈ 0.001 — 2× headroom, the tightest margin in the formula). |
+| `speechRmsReferencePercentile` | `0.75` | — | p50 lands on silence whenever pauses fill over half the file; p90+ converges on the max and is skewed by plosives, clicks, and clipping. p75 is the highest transient-robust percentile, assuming speech fills ≥ 25 % of frames. |
+
+None of these were swept over a corpus; they are dB-scale engineering
+estimates validated by regression (reproducer recovers byte-exact,
+normal-level corpus unchanged, clamp boundaries pinned by unit tests). The
+design bet is that the clamp structure makes a wrong constant fail
+*conservative*: the worst case is the repair not firing (pre-#747
+behavior), never a new false positive on audio that already worked.
+Crossover for reference: a file clamps to the ceiling once its p75 frame
+RMS exceeds `0.008 / 0.3 ≈ 0.027`.
+
 ### Cost and Known Limitations
 
 - Probes are extra window decodes: ~25–30 on a 30-minute applause-heavy
@@ -423,6 +441,9 @@ unchanged.
   artifact class and rate the merger already produces. Deliberately not
   deduped harder: genuine stutters sit at the same time separations, so a
   wider net would delete real speech.
+- The adaptive gate's reference level is whole-file: a loud-body/quiet-tail
+  recording clamps to the ceiling, so its quiet tail is gated exactly as
+  before #747. A tail-local reference window would close this.
 - Repair validation corpora are English conference and quiet dictation
   audio; multilingual and music-heavy content is less exercised.
 
