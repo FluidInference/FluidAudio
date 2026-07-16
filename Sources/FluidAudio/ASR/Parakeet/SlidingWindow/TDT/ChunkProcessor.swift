@@ -598,18 +598,14 @@ struct ChunkProcessor {
             mergedTokens.sort { $0.timestamp < $1.timestamp }
         }
 
-        // The merge above can drop clear speech in two ways that both leave
-        // no error and high confidence. Repair passes re-decode the affected
-        // span with a fresh, seam-free window (issues #758 and #747).
+        // Post-merge repair passes re-decode spans the decoder blanked on
+        // (issues #758 and #747) — see "Post-Merge Repair Passes" in
+        // Documentation/ASR/LongTranscription.md.
         if orderedChunkOutputs.count > 1, !mergedTokens.isEmpty, await manager.seamGapRepair {
             let vocabulary = await manager.vocabulary
             let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
             let minGapSeconds = await manager.seamGapRepairMinGapSeconds
 
-            // Issue #758: multi-second spans of clear speech dropped at a chunk
-            // seam when the overlap region is low-SNR. Re-decode each suspicious
-            // inter-token gap with a window centred on it, where the seam does
-            // not exist.
             if mergedTokens.count > 1 {
                 mergedTokens = try await repairSeamGaps(
                     in: mergedTokens,
@@ -623,10 +619,7 @@ struct ChunkProcessor {
                 )
             }
 
-            // Issue #747: the FINAL window can blank out entirely on quiet
-            // long-form audio, silently dropping the trailing words. That span
-            // sits past the last token, so `repairSeamGaps` (which walks gaps
-            // BETWEEN tokens) never sees it — handle it separately.
+            // The tail past the last token is invisible to the gap walk above.
             mergedTokens = try await repairTrailingDrop(
                 in: mergedTokens,
                 using: workers[0],
@@ -1181,29 +1174,19 @@ struct ChunkProcessor {
     /// gaps, and iteration over residual gaps needs headroom beyond that.
     private var maxSeamGapRepairs: Int { 32 }
 
-    /// Per-frame RMS ceiling above which audio always counts as speech-like
-    /// energy inside a gap. Comfortably above the library's quiet threshold
-    /// (0.003 in `shouldUseWarmupPrefix`) so room tone and hiss do not trigger
-    /// probes on normal-level recordings.
+    /// Clamp bounds for the adaptive speech threshold. See "Adaptive
+    /// Speech-Energy Gate" in Documentation/ASR/LongTranscription.md.
     private var speechRmsCeiling: Float { 0.008 }
-
-    /// Absolute floor for the adaptive speech threshold so dither and digital
-    /// silence never count as speech, however quiet the recording.
     private var speechRmsFloor: Float { 0.0005 }
 
-    /// Speech-energy threshold adapted to the recording's own level. A fixed
-    /// gate can never fire on genuinely quiet recordings (the issue #747
-    /// reproducer peaks below 2% FS, tail-speech RMS ≈ 0.001–0.003) — exactly
-    /// the audio class whose final window blanks out. Scale by the reference
-    /// RMS, clamped so normal-level audio keeps the fixed ceiling gate and
-    /// silence keeps the floor.
+    /// Speech-energy threshold scaled to the recording's own level — an
+    /// absolute gate can never fire on quiet audio, the class that blanks
+    /// out (issue #747).
     static func adaptiveSpeechRmsThreshold(referenceRms: Float, floor: Float, ceiling: Float) -> Float {
         min(ceiling, max(floor, referenceRms * 0.3))
     }
 
-    /// The recording-level speech threshold: 75th-percentile per-frame RMS as
-    /// the level reference (robust to long pauses dominating the median),
-    /// passed through `adaptiveSpeechRmsThreshold`.
+    /// Recording-level threshold from the 75th-percentile per-frame RMS.
     private func adaptiveSpeechRmsThreshold() throws -> Float {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         var frameRms: [Float] = []
@@ -1480,9 +1463,9 @@ struct ChunkProcessor {
     }
 
     // MARK: - Trailing-drop repair (issue #747)
+    // See "Trailing-Drop Repair" in Documentation/ASR/LongTranscription.md.
 
-    /// The tail to re-decode when the final window may have blanked out:
-    /// frame-aligned probe window starts plus the shared window size.
+    /// The tail to re-decode when the final window may have blanked out.
     struct TrailingTailProbe: Equatable {
         /// Frame-aligned window start samples, in priority order.
         let placements: [Int]
@@ -1492,10 +1475,9 @@ struct ChunkProcessor {
         let tailStartFrame: Int
     }
 
-    /// Decide whether the untranscribed tail (past the last emitted token)
-    /// carries enough speech-level energy to be a silent trailing drop worth
-    /// re-decoding, and if so where to place the probe window(s). Returns nil
-    /// for a short tail or genuine trailing silence — pure so it is unit
+    /// Probe decision: does the untranscribed tail look like a silent
+    /// trailing drop, and where should the re-decode window(s) sit? Returns
+    /// nil for a short tail or genuine trailing silence. Pure — unit
     /// testable without the CoreML models.
     func trailingTailProbe(
         lastTokenTimestamp: Int,
@@ -1521,13 +1503,7 @@ struct ChunkProcessor {
             frameSamples,
             (maxModelSamples - ASRConstants.melHopSize) / frameSamples * frameSamples
         )
-        // (1) Isolated tail — the window cold-starts AT the drop; the audio is
-        //     shorter than one window and padded to model size, so the decoder
-        //     never sees the mel-context prepend or the noisy pre-gap history
-        //     that blanked the original window (issue #747 signal 1).
-        // (2) Full final window ending at the audio, decoded with no context
-        //     prepend — the `melChunkContext = false` recovery for that window
-        //     (signal 2) — as a fallback when the cold start misses.
+        // Cold-start at the drop first, end-aligned full window as fallback.
         let endAlignedStart = max(0, totalSamples - windowSamples) / frameSamples * frameSamples
         var placements = [tailStartSample]
         if endAlignedStart != tailStartSample { placements.append(endAlignedStart) }
@@ -1536,20 +1512,10 @@ struct ChunkProcessor {
             placements: placements, windowSamples: windowSamples, tailStartFrame: tailStartFrame)
     }
 
-    /// Recover trailing words dropped when the FINAL sliding window blanks out.
-    ///
-    /// On quiet long-form audio the last window — short, heavily zero-padded and
-    /// carrying the 80ms mel-context prepend — can decode to all-blank even
-    /// though its audio holds clear speech, ending the transcript several words
-    /// early with no error and high confidence (issue #747). The dropped span
-    /// sits AFTER the last emitted token, so `repairSeamGaps` (which walks gaps
-    /// BETWEEN tokens) never examines it.
-    ///
-    /// If speech-level energy remains past the last token, re-decode the tail
-    /// with a fresh, context-free window and splice in the tokens that fall past
-    /// that token, starting at a word-initial piece and edge-deduping the
-    /// re-heard last word. Genuine trailing silence yields no tokens and the
-    /// stream is returned unchanged.
+    /// Recover trailing words dropped when the FINAL window blanks out on
+    /// quiet audio (issue #747): the drop sits past the last emitted token,
+    /// so `repairSeamGaps` never sees it. Genuine trailing silence splices
+    /// nothing and the stream is returned unchanged.
     private func repairTrailingDrop(
         in tokens: [TokenWindow],
         using manager: AsrManager,
@@ -1573,11 +1539,10 @@ struct ChunkProcessor {
             )
         else { return tokens }
 
-        // No token after the tail exists, so there is no tail neighbor to
-        // dedupe against; pass the last emitted token, which sits far enough in
-        // time from the recovered end tokens that the tail edge-dedupe never
-        // trims them (the tail is >= `minTailSeconds` long). The lead neighbor
-        // is the last real word, so a re-heard copy at the tail head collapses.
+        // No token exists after the tail, so the last emitted token serves as
+        // both neighbors: lead dedupe collapses a re-heard copy of the last
+        // word, and it sits too far from the recovered end tokens for the
+        // tail dedupe to ever trim them.
         let leadNeighbor = Self.wordNeighbor(
             in: tokens, from: tokens.count - 1, step: -1, vocabulary: vocabulary)
         let lastAudioFrame = max(0, (totalSamples - 1) / frameSamples)
@@ -1608,10 +1573,9 @@ struct ChunkProcessor {
                 windowDurations.count == windowTokens.count
                 ? windowDurations : Array(repeating: 0, count: windowTokens.count)
 
-            // Keep only tokens strictly past the last emitted token (so the
-            // recovery extends the transcript), starting at a word-initial
-            // piece. `gapEndFrame` is one past the final audio frame so no real
-            // trailing token is filtered out.
+            // Keep only tokens strictly past the last emitted token, starting
+            // at a word-initial piece; `gapEndFrame` is one past the final
+            // audio frame so no real trailing token is filtered out.
             let candidate = Self.spliceCandidate(
                 windowTokens: windowTokens,
                 windowTimestamps: windowTimestamps,
@@ -1643,16 +1607,11 @@ struct ChunkProcessor {
         return tokens
     }
 
-    /// Sentence-final punctuation pieces the blanked window can hallucinate
-    /// onto its last emitted word when the audio actually continues.
     private static let sentenceFinalPunctuation: Set<Character> = [".", "?", "!", "。", "？", "！"]
 
-    /// When the recovered tail continues the sentence (its first piece starts
-    /// with a lowercase letter), the truncated decode's sentence-final
-    /// punctuation on the old last token is a window-end artifact — "without
-    /// me." + "as long as…" — and is trimmed before splicing. A tail that
-    /// starts a new sentence (capitalized, or non-Latin script) leaves the
-    /// stream untouched.
+    /// Trim the blanked window's hallucinated sentence-final punctuation
+    /// when the recovered tail continues the sentence (first spliced piece
+    /// is lowercase). Capitalized or caseless-script tails are untouched.
     static func trimmingStaleSentenceEnd(
         from tokens: [TokenWindow],
         beforeSplicing candidate: [TokenWindow],

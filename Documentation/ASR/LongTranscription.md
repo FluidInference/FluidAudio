@@ -52,6 +52,11 @@ When reviewing long-form ASR output, check the transcript for:
 - wrong-script bursts on multilingual v3 audio
 - sentence breaks or punctuation that move far enough to change readability
 - real mixed-language switches being removed or delayed
+- multi-second spans of clear speech missing at a seam whose overlap region
+  is low-SNR — crosstalk, applause, soft speech (issue #758)
+- trailing words missing entirely when the *final* window decodes to
+  all-blank on quiet recordings — ends early with high confidence and no
+  error (issue #747)
 
 Aggregate WER can hide these problems. A transcript with a good average score
 may still be unusable if a seam drops a sentence or inserts a wrong-language
@@ -65,6 +70,7 @@ phrase at the wrong point.
 | v3 no-mel | `ASRConfig.melChunkContext = false`, CLI `--no-mel-context` | Parakeet TDT v3 batch long audio | Avoids the v3 multilingual drift introduced by prepending mel context at chunk boundaries. |
 | v3 dual-decode arbitration | `melChunkContext = false` plus `ASRConfig.dualDecodeArbitration = true`, CLI `--no-mel-context --dual-decode-arbitration` | Parakeet TDT v3 no-mel batch long audio | Opt-in quality mode for files where one boundary strategy is clearly safer than another. |
 | Parallel chunk workers | `ASRConfig.parallelChunkConcurrency` (default `4`, clamped to `>= 1`) | Stateless chunked batch TDT (all of the above) | Decodes independent chunks concurrently across a worker pool of cloned `AsrManager` instances. |
+| Post-merge repair passes | `ASRConfig.seamGapRepair = true` (default), CLI `--no-seam-gap-repair` | Multi-chunk batch TDT (all of the above) | Re-decodes suspicious inter-token gaps and an untranscribed speech tail with fresh seam-free windows, splicing recovered tokens in. See "Post-Merge Repair Passes". |
 
 The dual-decode path probes the first few non-first chunks with three strategies:
 
@@ -238,6 +244,29 @@ is robust to small per-chunk timestamp jitter. The contiguous-match path
 preserves order strictly; LCS is only entered when adjacent chunks disagree
 enough that a contiguous run would be dishonest.
 
+### Case-Folded Matching and Seam Word Duplicates
+
+A window that begins mid-sentence biases the decoder to capitalize its first
+word as a false sentence start. Exact-token-ID matching cannot align
+`Meeting` with the previous window's `meeting`, which left duplicated,
+mis-cased words at seams — `…the meeting Meeting was…` (issue #706). Two
+merge-level fixes (PR #708, shared with the Unified path):
+
+- **Case-folded overlap matching** — `caseVariantCanonicalIds` maps case-only
+  token twins to one canonical ID so `tokenIdsMatch` aligns them at the
+  seam; the word collapses to the left window's contextually correct casing.
+- **`collapseSeamWordDuplicates`** — reconstructs SentencePiece *words* from
+  the token stream and drops an adjacent case-only duplicate inside the
+  overlap window. Word-level reconstruction matters for small subword
+  vocabularies where a whole word spans several tokens. Genuine repeats
+  ("that that"), same-case duplicates, and real sentence boundaries
+  ("…thank you. You said…") are left untouched.
+
+Silence-aligned chunk starts were prototyped for this artifact class and
+dropped: on the 15 s offline encoder they measured as a ~1 WER point
+regression (Earnings-22 long-form) with no artifact benefit — the fix
+belongs in the merge, not the chunk grid.
+
 ### Word-Boundary Splice Repair
 
 Matching alone does not make the *splice points* safe: the two windows
@@ -266,6 +295,135 @@ punctuation-only pieces. Splices are then repaired at word granularity:
 The repair inspects only the tokenizer's own word-boundary marker, never
 transcript text, so it is language-agnostic. Without a vocabulary the merge
 is byte-for-byte unchanged.
+
+A follow-up (PR #759) closed three residual *drop* paths in these repairs,
+where a seam with no splice-safe token available could silently discard
+content instead of gluing it:
+
+- the `mergeUsingMatches` tail fallback now appends the remaining
+  continuation pieces when no word-initial resume point exists — a possible
+  glue is strictly better than a lost word;
+- `popSeamWord` no longer caps the seam-word scan at 12 pieces (the cap
+  false-negatived on long agglutinative/Cyrillic BPE words, forcing the
+  drop path above);
+- the `mergeByMidpoint` right-scan no longer discards the entire right
+  window when no safe token exists past the cutoff.
+
+The rule those three share: **a seam may produce a glued word in the worst
+case, but it must never delete real content.**
+
+## Post-Merge Repair Passes
+
+Every fix in the previous section operates on tokens that *exist* in at
+least one chunk's stream. Two failure classes survive all of them because
+the dropped content never decodes into either chunk: the decoder itself
+emits blank for audible speech. Both leave no error and high confidence —
+the transcript simply has a hole. After the merge, `ChunkProcessor` runs
+two repair passes that re-decode the suspect audio with a fresh window in
+which the seam does not exist (issues #758 and #747).
+
+| Field | Default | Notes |
+|---|---|---|
+| `ASRConfig.seamGapRepair` | `true` | Gates both passes. CLI: `--no-seam-gap-repair` for A/B measurement. |
+| `ASRConfig.seamGapRepairMinGapSeconds` | `1.5` (clamped to `>= 0.5`) | Minimum inter-token gap (and minimum untranscribed tail) worth probing. |
+
+Both passes run only for multi-chunk files (`chunkCount > 1`); a
+single-window clip is never repaired.
+
+### Seam-Gap Repair (issue #758, PR #761)
+
+The merger can deterministically drop multi-second spans of clearly audible
+speech at a seam when the overlap region is low-SNR (crosstalk, applause,
+soft speech). Which seams fail depends on decoder state and shifts with
+model recompilation — the same file drops *different* spans after an
+e5rt/ANE recompile — so no chunk-layout or config change fixes the class
+(`melChunkContext` relocates the failures rather than eliminating them).
+
+`repairSeamGaps` walks inter-token gaps longer than the threshold whose
+audio carries speech-level energy and re-decodes each with a single fresh
+window:
+
+- **Placement matters.** A window centred on the gap can blank the same way
+  the original chunk did, because it replays the same pre-gap noise
+  history. The probe window starts **at the gap** — the decoder cold-starts
+  directly on the dropped speech — with a gap-centred placement as
+  fallback; each placement recovers spans the other misses.
+- Only tokens strictly inside the gap are spliced in (`spliceCandidate`),
+  starting at a word-initial piece (same rule as the seam merge, #683),
+  with punctuation-aware, case-insensitive edge dedupe against the words
+  bordering the gap.
+- The scan iterates (max 3 rounds) so a partial recovery's residual gap
+  gets its own probe; a probed-gap memo prevents re-probing silent pauses
+  and a 32-probe budget (`maxSeamGapRepairs`) bounds pathological inputs.
+- Genuine silence yields no in-gap tokens by construction and is left
+  untouched.
+
+### Trailing-Drop Repair (issue #747)
+
+On quiet long-form audio the **final** window — short, heavily zero-padded,
+and carrying the 80 ms mel-context prepend — can decode to all-blank even
+though its audio holds clear speech. The transcript ends several words
+early. The dropped span sits *after* the last emitted token, so the
+seam-gap pass (which walks gaps *between* tokens) never examines it.
+
+`repairTrailingDrop` runs after the gap pass, under the same flag. The pure
+probe decision (`trailingTailProbe`) fires when at least
+`seamGapRepairMinGapSeconds` of untranscribed audio remains past the last
+token's decoded end and at least 0.5 s of it is speech-like. The re-decode
+tries two placements, mirroring the two recoveries documented in the issue:
+
+1. **Isolated tail** — the window cold-starts at the drop; the audio is
+   shorter than one window and padded to model size, so the decoder never
+   sees the mel-context prepend or the pre-gap history that blanked the
+   original window.
+2. **End-aligned full window** decoded with no context prepend — the
+   `melChunkContext = false` recovery for that window — as fallback.
+
+Recovered tokens past the last emitted token are spliced in via the same
+`spliceCandidate` rules (word-initial start, edge dedupe of the re-heard
+last word). Because the blanked window tends to hallucinate sentence-final
+punctuation onto its last word ("…without me**.**"), the splice also trims
+that stale punctuation when the recovered tail continues the sentence —
+detected by the first spliced piece starting with a lowercase letter
+(`trimmingStaleSentenceEnd`). Capitalized or caseless-script continuations
+leave the stream untouched rather than risk deleting a real sentence
+boundary.
+
+### Adaptive Speech-Energy Gate
+
+Both passes gate probes on the same per-frame RMS speech test
+(`speechLikeSeconds`). The original gate was a fixed threshold (0.008),
+which turned out to be structurally dead for the trailing-drop case: the
+#747 reproducer peaks below 2% FS with tail-speech RMS around 0.001–0.003,
+and *quiet audio is the class whose final window blanks out* — the gate
+could never fire on exactly the audio it guarded. The threshold now adapts
+to the recording's own level:
+
+```
+threshold = min(0.008, max(0.0005, p75FrameRms × 0.3))
+```
+
+where `p75FrameRms` is the 75th-percentile per-frame RMS over the whole
+file (robust to long pauses dominating the median). Normal-level speech
+clamps to the previous 0.008 ceiling — behavior there is unchanged — while
+quiet recordings scale down to a floor that still excludes dither and
+digital silence. A room-tone-only tail can now trigger a probe that
+recovers nothing; the cost is one wasted window decode and the stream is
+unchanged.
+
+### Cost and Known Limitations
+
+- Probes are extra window decodes: ~25–30 on a 30-minute applause-heavy
+  conference file (~20% over baseline), near zero on clean audio.
+- Seam **garbles** ("language in" → "languag ines") leave no token gap and
+  are invisible to both passes — they need a fix in the merger itself.
+- Edge re-hearings with different tokenization can occasionally duplicate a
+  boundary word (~1 per 15–20 min of dense conference speech) — the same
+  artifact class and rate the merger already produces. Deliberately not
+  deduped harder: genuine stutters sit at the same time separations, so a
+  wider net would delete real speech.
+- Repair validation corpora are English conference and quiet dictation
+  audio; multilingual and music-heavy content is less exercised.
 
 ## Streaming Threshold for Large Files
 
@@ -357,9 +515,49 @@ The rules that follow from that:
     (`spliceSafeTokenIds` gating, issue #683)
   - the midpoint cutoff never strands a word's continuation pieces on the
     wrong side of the seam (`mergeByMidpoint`, issue #683)
+  - a seam never *deletes* real content when no splice-safe token exists —
+    the fallbacks glue rather than drop (PR #759)
   - chunk starts are always frame-aligned (`chunkLayout`)
   - at least 6 encoder frames of seam overlap are preserved
     (`silenceAlignedChunkStarts`)
+  - repair passes only ever *extend* the token stream inside a probed gap
+    or past the last token; they never rewrite existing tokens
+    (`spliceCandidate` filtering, issues #758/#747)
+  - genuine silence yields no spliced tokens — probe placement plus in-gap
+    filtering, exercised by `SeamGapRepairTests` and
+    `TrailingDropRepairTests`
+
+## How This Path Evolved
+
+The long-form batch path accreted through a specific sequence of failures.
+The commit history (`git log --follow -- …/TDT/ChunkProcessor.swift`) is the
+authoritative record; the milestones:
+
+| When | Change | Failure it addressed |
+|---|---|---|
+| 2025-08 (#77, #83) | v3 support; first overlap dedupe at chunk borders | duplicated words at seams. #83's PR text already flags the final chunk "may not have enough context and gets transcribed as blank" — the earliest sighting of what became #747, fixed eleven months later. |
+| 2025-11 (#177) | Stateless per-chunk decoding; overlap merge ladder | decoder state corruption across chunks; enabled batching (and later parallelism). First merge token-stream tests only arrived with #604 (2026-05) — see the caution above. |
+| 2025-12 (#212 → #223) | Frame-aligned 14.96 s chunks | integer-division remainder silently skipped audio between chunks on long files. |
+| 2026-01 (#257) | Disk-backed streaming reads | memory blowup on hour-scale files. |
+| 2026-01 (#264) | 80 ms mel-context prepend | non-first chunks decoding blank for their first frames (encoder convolutions lacked left context). |
+| 2026-04 (#507) | Parallel chunk workers | wall-clock; required the statelessness from #177 — an earlier persistent-state fix (`eb9c19f7`) had to be abandoned for it. |
+| 2026-04/05 (#594 → #604) | v3 no-mel path, silence-aligned boundaries, dual-decode arbitration | the #264 prepend shifting v3's first-frame distribution into English-prior drift at seams. |
+| 2026-06 (#683 → #688) | Word-boundary-safe splices (`spliceSafeTokenIds`) | glued/hybrid seam words ("worksks", "ye,ah") from splicing mid-word. |
+| 2026-06 (#706 → #708) | Case-folded matching + seam word-duplicate collapse | "…the meeting Meeting was…" false-sentence-start duplicates. |
+| 2026-07 (#758 → #761) | Seam-gap repair pass | multi-second speech spans dropped at low-SNR seams — unfixable at the merge layer because the tokens never existed. |
+| 2026-07 (#759) | Bound-safe fallbacks in merge repairs | three residual paths that dropped content when no splice-safe token existed. |
+| 2026-07 (#747) | Trailing-drop repair + adaptive speech gate | final-window blank-out on quiet audio; absolute energy gates being structurally dead on the quiet-audio class. |
+
+Two recurring lessons in that table:
+
+- **Fixes migrate down the stack.** Duplicates and glued words were merge
+  bugs; dropped spans were decode bugs the merge could never see. When a
+  transcript hole survives a merge-layer fix, suspect the decoder emitted
+  blank and reach for a repair-pass-shaped fix instead.
+- **Absolute thresholds age badly.** The frame-energy boundary search
+  (#604) and the repair speech gate (#747) both started as fixed constants
+  and both had to become adaptive (median-relative, p75-relative) the first
+  time genuinely quiet or noisy field audio hit them.
 
 ## Relevant Code
 
@@ -370,6 +568,7 @@ The rules that follow from that:
   - `ASRConfig.melChunkContext`
   - `ASRConfig.dualDecodeArbitration`
   - `ASRConfig.parallelChunkConcurrency`
+  - `ASRConfig.seamGapRepair` / `ASRConfig.seamGapRepairMinGapSeconds`
   - `ASRConfig.streamingEnabled` / `ASRConfig.streamingThreshold`
 - `Sources/FluidAudio/ASR/Parakeet/AsrManager.swift`
   - `parallelChunkConcurrency` actor-isolated accessor
@@ -386,6 +585,13 @@ The rules that follow from that:
     overlap merge ladder (contiguous → LCS → midpoint)
   - `spliceSafeTokenIds(vocabulary:)` / `isSpliceSafePiece(...)` —
     vocabulary-derived word-boundary gating for seam splices (issue #683)
+  - `caseVariantCanonicalIds(...)` / `collapseSeamWordDuplicates(...)` —
+    case-folded matching and seam word-duplicate collapse (issue #706)
+  - `repairSeamGaps(...)` — post-merge gap re-decode pass (issue #758)
+  - `repairTrailingDrop(...)` / `trailingTailProbe(...)` /
+    `trimmingStaleSentenceEnd(...)` — final-window tail recovery (issue #747)
+  - `spliceCandidate(...)` / `speechLikeSeconds(...)` /
+    `adaptiveSpeechRmsThreshold(...)` — shared repair-pass machinery
   - `makeWorkerPool(...)` and the static `transcribeChunk(...)` task body
     used by the parallel dispatch loop
 - `Sources/FluidAudio/ASR/Parakeet/TokenDeduplication/SequenceMatcher.swift`
@@ -407,6 +613,9 @@ Useful focused checks:
 
 ```bash
 swift test --filter ChunkProcessorTests
+swift test --filter ChunkProcessorSeamResidualTests   # PR #759 drop-path fallbacks
+swift test --filter SeamGapRepairTests                # issue #758 gap splice + energy gate
+swift test --filter TrailingDropRepairTests           # issue #747 probe + tail splice + trim
 swift test --filter TdtRefactoredComponentsTests
 swift test --filter TdtDecoderV2Tests
 swift test --filter ASRConfigTests   # covers parallelChunkConcurrency default, clamping, override
