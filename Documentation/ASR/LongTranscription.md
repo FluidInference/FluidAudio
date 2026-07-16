@@ -312,22 +312,51 @@ content instead of gluing it:
 The rule those three share: **a seam may produce a glued word in the worst
 case, but it must never delete real content.**
 
-## Post-Merge Repair Passes
+## End-Aligned Final Window (issue #747)
 
-Every fix in the previous section operates on tokens that *exist* in at
-least one chunk's stream. Two failure classes survive all of them because
+On quiet long-form audio the **final** window used to decode to all-blank
+even though its audio held clear speech: a short trailing chunk was
+zero-padded up to the model window, so the encoder saw a frame distribution
+dominated by digital silence — on speech that is already near the noise
+floor (the #747 reproducer peaks below 2 % FS), that was enough to push
+every emission to blank. The transcript ended several words early with high
+confidence and no error.
+
+The fix is structural, not a repair: the final chunk **fills its window
+backwards with real audio instead of zeros**
+(`ChunkProcessor.lastChunkWarmupSamples`). The backfilled prefix rides the
+existing warmup mechanics — decoded from frame 0, tokens before the
+original chunk-start frame suppressed — so the emitted coverage, and
+therefore the merge overlap with the previous chunk, is byte-identical to
+the old layout. The model simply never sees a degenerate window. The
+prepend also gives the final chunk real left acoustic context, replacing
+the 80 ms mel-context prepend on that window.
+
+Files shorter than one window are unaffected: they are the whole-file
+single-chunk decode, where padding is unavoidable (and harmless — the
+window is the file).
+
+The backfill requires prefix suppression (`emitTokensAfterGlobalFrame`),
+which only the V3 decoder implements — v3 and tdtJa models get the
+end-aligned window; v2/tdtCtc110m keep the zero-padded layout
+(`supportsSuppressedPrefix`).
+
+## Post-Merge Repair Pass
+
+Every fix in the earlier sections operates on tokens that *exist* in at
+least one chunk's stream. One failure class survives all of them because
 the dropped content never decodes into either chunk: the decoder itself
-emits blank for audible speech. Both leave no error and high confidence —
-the transcript simply has a hole. After the merge, `ChunkProcessor` runs
-two repair passes that re-decode the suspect audio with a fresh window in
-which the seam does not exist (issues #758 and #747).
+emits blank for audible speech at a seam. It leaves no error and high
+confidence — the transcript simply has a hole. After the merge,
+`ChunkProcessor` re-decodes the suspect audio with a fresh window in which
+the seam does not exist (issue #758).
 
 | Field | Default | Notes |
 |---|---|---|
-| `ASRConfig.seamGapRepair` | `true` | Gates both passes. CLI: `--no-seam-gap-repair` for A/B measurement. |
-| `ASRConfig.seamGapRepairMinGapSeconds` | `1.5` (clamped to `>= 0.5`) | Minimum inter-token gap (and minimum untranscribed tail) worth probing. |
+| `ASRConfig.seamGapRepair` | `true` | Gates the pass. CLI: `--no-seam-gap-repair` for A/B measurement. |
+| `ASRConfig.seamGapRepairMinGapSeconds` | `1.5` (clamped to `>= 0.5`) | Minimum inter-token gap worth probing. |
 
-Both passes run only for multi-chunk files (`chunkCount > 1`); a
+The pass runs only for multi-chunk files (`chunkCount > 1`); a
 single-window clip is never repaired.
 
 ### Seam-Gap Repair (issue #758, PR #761)
@@ -358,45 +387,13 @@ window:
 - Genuine silence yields no in-gap tokens by construction and is left
   untouched.
 
-### Trailing-Drop Repair (issue #747)
-
-On quiet long-form audio the **final** window — short, heavily zero-padded,
-and carrying the 80 ms mel-context prepend — can decode to all-blank even
-though its audio holds clear speech. The transcript ends several words
-early. The dropped span sits *after* the last emitted token, so the
-seam-gap pass (which walks gaps *between* tokens) never examines it.
-
-`repairTrailingDrop` runs after the gap pass, under the same flag. The pure
-probe decision (`trailingTailProbe`) fires when at least
-`seamGapRepairMinGapSeconds` of untranscribed audio remains past the last
-token's decoded end and at least 0.5 s of it is speech-like. The re-decode
-tries two placements, mirroring the two recoveries documented in the issue:
-
-1. **Isolated tail** — the window cold-starts at the drop; the audio is
-   shorter than one window and padded to model size, so the decoder never
-   sees the mel-context prepend or the pre-gap history that blanked the
-   original window.
-2. **End-aligned full window** decoded with no context prepend — the
-   `melChunkContext = false` recovery for that window — as fallback.
-
-Recovered tokens past the last emitted token are spliced in via the same
-`spliceCandidate` rules (word-initial start, edge dedupe of the re-heard
-last word). Because the blanked window tends to hallucinate sentence-final
-punctuation onto its last word ("…without me**.**"), the splice also trims
-that stale punctuation when the recovered tail continues the sentence —
-detected by the first spliced piece starting with a lowercase letter
-(`trimmingStaleSentenceEnd`). Capitalized or caseless-script continuations
-leave the stream untouched rather than risk deleting a real sentence
-boundary.
-
 ### Adaptive Speech-Energy Gate
 
-Both passes gate probes on the same per-frame RMS speech test
+The pass gates probes on a per-frame RMS speech test
 (`speechLikeSeconds`). The original gate was a fixed threshold (0.008),
-which turned out to be structurally dead for the trailing-drop case: the
-#747 reproducer peaks below 2% FS with tail-speech RMS around 0.001–0.003,
-and *quiet audio is the class whose final window blanks out* — the gate
-could never fire on exactly the audio it guarded. The threshold now adapts
+which is structurally dead for quiet recordings: the #747 reproducer peaks
+below 2% FS with tail-speech RMS around 0.001–0.003 — a gate tuned on
+normal levels can never fire on quiet gaps. The threshold adapts
 to the recording's own level:
 
 ```
@@ -405,10 +402,10 @@ threshold = min(0.008, max(0.0005, p75FrameRms × 0.3))
 
 where `p75FrameRms` is the 75th-percentile per-frame RMS over the whole
 file (robust to long pauses dominating the median), computed once per
-transcription and shared by both passes. Normal-level speech
+transcription. Normal-level speech
 clamps to the previous 0.008 ceiling — behavior there is unchanged — while
 quiet recordings scale down to a floor that still excludes dither and
-digital silence. A room-tone-only tail can now trigger a probe that
+digital silence. A room-tone-only gap can trigger a probe that
 recovers nothing; the cost is one wasted window decode and the stream is
 unchanged.
 
@@ -435,15 +432,15 @@ RMS exceeds `0.008 / 0.3 ≈ 0.027`.
 - Probes are extra window decodes: ~25–30 on a 30-minute applause-heavy
   conference file (~20% over baseline), near zero on clean audio.
 - Seam **garbles** ("language in" → "languag ines") leave no token gap and
-  are invisible to both passes — they need a fix in the merger itself.
+  are invisible to the pass — they need a fix in the merger itself.
 - Edge re-hearings with different tokenization can occasionally duplicate a
   boundary word (~1 per 15–20 min of dense conference speech) — the same
   artifact class and rate the merger already produces. Deliberately not
   deduped harder: genuine stutters sit at the same time separations, so a
   wider net would delete real speech.
-- The adaptive gate's reference level is whole-file: a loud-body/quiet-tail
-  recording clamps to the ceiling, so its quiet tail is gated exactly as
-  before #747. A tail-local reference window would close this.
+- The adaptive gate's reference level is whole-file: a loud-body recording
+  with a quiet gap clamps to the ceiling, so that gap is gated as if the
+  whole file were loud. A gap-local reference window would close this.
 - Repair validation corpora are English conference and quiet dictation
   audio; multilingual and music-heavy content is less exercised.
 
@@ -542,12 +539,14 @@ The rules that follow from that:
   - chunk starts are always frame-aligned (`chunkLayout`)
   - at least 6 encoder frames of seam overlap are preserved
     (`silenceAlignedChunkStarts`)
-  - repair passes only ever *extend* the token stream inside a probed gap
-    or past the last token; they never rewrite existing tokens
-    (`spliceCandidate` filtering, issues #758/#747)
+  - the repair pass only ever *extends* the token stream inside a probed
+    gap; it never rewrites existing tokens
+    (`spliceCandidate` filtering, issue #758)
   - genuine silence yields no spliced tokens — probe placement plus in-gap
-    filtering, exercised by `SeamGapRepairTests` and
-    `TrailingDropRepairTests`
+    filtering, exercised by `SeamGapRepairTests`
+  - the final window is never zero-pad-dominated: a short last chunk
+    backfills with real audio decoded as a suppressed prefix
+    (`lastChunkWarmupSamples`, issue #747)
 
 ## How This Path Evolved
 
@@ -568,7 +567,7 @@ authoritative record; the milestones:
 | 2026-06 (#706 → #708) | Case-folded matching + seam word-duplicate collapse | "…the meeting Meeting was…" false-sentence-start duplicates. |
 | 2026-07 (#758 → #761) | Seam-gap repair pass | multi-second speech spans dropped at low-SNR seams — unfixable at the merge layer because the tokens never existed. |
 | 2026-07 (#759) | Bound-safe fallbacks in merge repairs | three residual paths that dropped content when no splice-safe token existed. |
-| 2026-07 (#747) | Trailing-drop repair + adaptive speech gate | final-window blank-out on quiet audio; absolute energy gates being structurally dead on the quiet-audio class. |
+| 2026-07 (#747) | End-aligned final window + adaptive speech gate | final-window blank-out on quiet audio — a short last chunk zero-padded to the model window is a degenerate input; fixed structurally by backfilling with real audio. The adaptive gate replaced an absolute energy gate that was structurally dead on the quiet-audio class. |
 
 Two recurring lessons in that table:
 
@@ -610,10 +609,9 @@ Two recurring lessons in that table:
   - `caseVariantCanonicalIds(...)` / `collapseSeamWordDuplicates(...)` —
     case-folded matching and seam word-duplicate collapse (issue #706)
   - `repairSeamGaps(...)` — post-merge gap re-decode pass (issue #758)
-  - `repairTrailingDrop(...)` / `trailingTailProbe(...)` /
-    `trimmingStaleSentenceEnd(...)` — final-window tail recovery (issue #747)
+  - `lastChunkWarmupSamples(...)` — end-aligned final window (issue #747)
   - `spliceCandidate(...)` / `speechLikeSeconds(...)` /
-    `adaptiveSpeechRmsThreshold(...)` — shared repair-pass machinery
+    `adaptiveSpeechRmsThreshold(...)` — repair-pass machinery
   - `makeWorkerPool(...)` and the static `transcribeChunk(...)` task body
     used by the parallel dispatch loop
 - `Sources/FluidAudio/ASR/Parakeet/TokenDeduplication/SequenceMatcher.swift`
@@ -637,7 +635,7 @@ Useful focused checks:
 swift test --filter ChunkProcessorTests
 swift test --filter ChunkProcessorSeamResidualTests   # PR #759 drop-path fallbacks
 swift test --filter SeamGapRepairTests                # issue #758 gap splice + energy gate
-swift test --filter TrailingDropRepairTests           # issue #747 probe + tail splice + trim
+swift test --filter EndAlignedFinalWindowTests        # issue #747 final-window backfill
 swift test --filter TdtRefactoredComponentsTests
 swift test --filter TdtDecoderV2Tests
 swift test --filter ASRConfigTests   # covers parallelChunkConcurrency default, clamping, override

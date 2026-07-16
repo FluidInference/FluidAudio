@@ -79,6 +79,40 @@ struct ChunkProcessor {
         return raw / ASRConstants.samplesPerEncoderFrame * ASRConstants.samplesPerEncoderFrame
     }
 
+    /// End-align the final window (issue #747). A short final chunk zero-padded
+    /// to the model window is the degenerate input that decodes to all-blank on
+    /// quiet audio. Instead, grow the warmup prefix backwards with real audio
+    /// until the window is full: the prefix is decoded and its tokens suppressed
+    /// (the existing warmup mechanics), so the emitted coverage — and therefore
+    /// the merge overlap — is exactly what the zero-padded layout produced.
+    /// Returns `defaultWarmupSamples` unchanged when the remaining audio already
+    /// fills the window or nothing precedes the chunk (single-chunk files).
+    static func lastChunkWarmupSamples(
+        chunkStart: Int,
+        defaultWarmupSamples: Int,
+        chunkSamples: Int,
+        totalSamples: Int
+    ) -> Int {
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        let remaining = totalSamples - chunkStart
+        guard remaining > 0, chunkStart > 0 else { return defaultWarmupSamples }
+        // Frame-aligned so the suppression boundary maps to an exact frame.
+        let fill = (chunkSamples - remaining) / frameSamples * frameSamples
+        guard fill > 0 else { return defaultWarmupSamples }
+        let available = chunkStart / frameSamples * frameSamples
+        return max(defaultWarmupSamples, min(available, fill))
+    }
+
+    /// Prefix suppression (`emitTokensAfterGlobalFrame`) is a V3-decoder
+    /// feature; `TdtDecoderV2` ignores it, which would emit the backfilled
+    /// prefix twice. V2-family models keep the zero-padded final window.
+    static func supportsSuppressedPrefix(_ version: AsrModelVersion?) -> Bool {
+        switch version {
+        case .v3, .tdtJa: return true
+        default: return false
+        }
+    }
+
     func chunkLayout(
         melChunkContext: Bool,
         modelVersion: AsrModelVersion?
@@ -457,15 +491,29 @@ struct ChunkProcessor {
         try await withThrowingTaskGroup(of: TaskResult.self) { group in
             while chunkStart < totalSamples {
                 try Task.checkCancellation()
-                let warmupSamples =
+                let defaultWarmupSamples =
                     chunkIndex > 0 && chunkDecision.useWarmupPrefix
                     ? min(warmupPrefixSamples, chunkStart) : 0
+                let defaultVisibleSamples = max(
+                    ASRConstants.samplesPerEncoderFrame,
+                    chunkSamples - defaultWarmupSamples
+                )
+                let isLastChunk = chunkStart + defaultVisibleSamples >= totalSamples
+                // A short final chunk fills its window backwards with real
+                // audio instead of zero padding (issue #747).
+                let warmupSamples =
+                    isLastChunk && Self.supportsSuppressedPrefix(modelVersion)
+                    ? Self.lastChunkWarmupSamples(
+                        chunkStart: chunkStart,
+                        defaultWarmupSamples: defaultWarmupSamples,
+                        chunkSamples: chunkSamples,
+                        totalSamples: totalSamples)
+                    : defaultWarmupSamples
                 let visibleChunkSamples = max(
                     ASRConstants.samplesPerEncoderFrame,
                     chunkSamples - warmupSamples
                 )
                 let candidateEnd = chunkStart + visibleChunkSamples
-                let isLastChunk = candidateEnd >= totalSamples
                 let chunkEnd = isLastChunk ? totalSamples : candidateEnd
 
                 if chunkEnd <= chunkStart {
@@ -598,37 +646,21 @@ struct ChunkProcessor {
             mergedTokens.sort { $0.timestamp < $1.timestamp }
         }
 
-        // Post-merge repair passes re-decode spans the decoder blanked on
-        // (issues #758 and #747) — see "Post-Merge Repair Passes" in
+        // Post-merge repair pass re-decodes seam gaps the merger dropped
+        // (issue #758) — see "Post-Merge Repair Passes" in
         // Documentation/ASR/LongTranscription.md.
-        if orderedChunkOutputs.count > 1, !mergedTokens.isEmpty, await manager.seamGapRepair {
+        if orderedChunkOutputs.count > 1, mergedTokens.count > 1, await manager.seamGapRepair {
             let vocabulary = await manager.vocabulary
             let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
             let minGapSeconds = await manager.seamGapRepairMinGapSeconds
-            // One full-file scan, shared by both repair passes.
             let speechRmsThreshold = try adaptiveSpeechRmsThreshold()
 
-            if mergedTokens.count > 1 {
-                mergedTokens = try await repairSeamGaps(
-                    in: mergedTokens,
-                    using: workers[0],
-                    decoderLayers: decoderLayers,
-                    maxModelSamples: maxModelSamples,
-                    minGapSeconds: minGapSeconds,
-                    speechRmsThreshold: speechRmsThreshold,
-                    spliceSafeTokenIds: spliceSafeTokenIds,
-                    vocabulary: vocabulary,
-                    language: language
-                )
-            }
-
-            // The tail past the last token is invisible to the gap walk above.
-            mergedTokens = try await repairTrailingDrop(
+            mergedTokens = try await repairSeamGaps(
                 in: mergedTokens,
                 using: workers[0],
                 decoderLayers: decoderLayers,
                 maxModelSamples: maxModelSamples,
-                minTailSeconds: minGapSeconds,
+                minGapSeconds: minGapSeconds,
                 speechRmsThreshold: speechRmsThreshold,
                 spliceSafeTokenIds: spliceSafeTokenIds,
                 vocabulary: vocabulary,
@@ -1484,184 +1516,6 @@ struct ChunkProcessor {
             working.sort { $0.timestamp < $1.timestamp }
         }
 
-        return working
-    }
-
-    // MARK: - Trailing-drop repair (issue #747)
-    // See "Trailing-Drop Repair" in Documentation/ASR/LongTranscription.md.
-
-    /// The tail to re-decode when the final window may have blanked out.
-    struct TrailingTailProbe: Equatable {
-        /// Frame-aligned window start samples, in priority order.
-        let placements: [Int]
-        /// Usable window size in samples (model input is padded to this).
-        let windowSamples: Int
-        /// First frame past the last emitted token — the drop boundary.
-        let tailStartFrame: Int
-    }
-
-    /// Probe decision: does the untranscribed tail look like a silent
-    /// trailing drop, and where should the re-decode window(s) sit? Returns
-    /// nil for a short tail or genuine trailing silence. Pure — unit
-    /// testable without the CoreML models.
-    func trailingTailProbe(
-        lastTokenTimestamp: Int,
-        lastTokenDuration: Int,
-        minTailSeconds: Double,
-        maxModelSamples: Int,
-        speechRmsThreshold: Float
-    ) throws -> TrailingTailProbe? {
-        let frameSamples = ASRConstants.samplesPerEncoderFrame
-        let frameDuration = ASRConstants.secondsPerEncoderFrame
-        let minTailFrames = max(2, Int(minTailSeconds / frameDuration))
-
-        // Conservative end of the last token: its decoded duration when
-        // present, else one frame (mirrors mergeChunks / repairSeamGaps).
-        let tailStartFrame = lastTokenTimestamp + max(1, lastTokenDuration)
-        let tailStartSample = tailStartFrame * frameSamples
-        guard totalSamples - tailStartSample >= minTailFrames * frameSamples else { return nil }
-
-        let speechSeconds = try speechLikeSeconds(
-            from: tailStartSample, to: totalSamples, threshold: speechRmsThreshold)
-        guard speechSeconds >= seamGapMinSpeechSeconds else { return nil }
-
-        let windowSamples = max(
-            frameSamples,
-            (maxModelSamples - ASRConstants.melHopSize) / frameSamples * frameSamples
-        )
-        // Cold-start at the drop first, end-aligned full window as fallback.
-        let endAlignedStart = max(0, totalSamples - windowSamples) / frameSamples * frameSamples
-        var placements = [tailStartSample]
-        if endAlignedStart != tailStartSample { placements.append(endAlignedStart) }
-
-        return TrailingTailProbe(
-            placements: placements, windowSamples: windowSamples, tailStartFrame: tailStartFrame)
-    }
-
-    /// Recover trailing words dropped when the FINAL window blanks out on
-    /// quiet audio (issue #747): the drop sits past the last emitted token,
-    /// so `repairSeamGaps` never sees it. Genuine trailing silence splices
-    /// nothing and the stream is returned unchanged.
-    private func repairTrailingDrop(
-        in tokens: [TokenWindow],
-        using manager: AsrManager,
-        decoderLayers: Int,
-        maxModelSamples: Int,
-        minTailSeconds: Double,
-        speechRmsThreshold: Float,
-        spliceSafeTokenIds: Set<Int>?,
-        vocabulary: [Int: String],
-        language: Language?
-    ) async throws -> [TokenWindow] {
-        guard let last = tokens.last else { return tokens }
-        let frameSamples = ASRConstants.samplesPerEncoderFrame
-        let frameDuration = ASRConstants.secondsPerEncoderFrame
-
-        guard
-            let probe = try trailingTailProbe(
-                lastTokenTimestamp: last.timestamp,
-                lastTokenDuration: last.duration,
-                minTailSeconds: minTailSeconds,
-                maxModelSamples: maxModelSamples,
-                speechRmsThreshold: speechRmsThreshold
-            )
-        else { return tokens }
-
-        // No token exists after the tail, so the last emitted token serves as
-        // both neighbors: lead dedupe collapses a re-heard copy of the last
-        // word, and it sits too far from the recovered end tokens for the
-        // tail dedupe to ever trim them.
-        let leadNeighbor = Self.wordNeighbor(
-            in: tokens, from: tokens.count - 1, step: -1, vocabulary: vocabulary)
-        let lastAudioFrame = max(0, (totalSamples - 1) / frameSamples)
-
-        for windowStart in probe.placements {
-            let windowEnd = min(windowStart + probe.windowSamples, totalSamples)
-            guard windowEnd > windowStart else { continue }
-
-            var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-            decoderState.reset()
-            let windowAudio = try readSamples(offset: windowStart, count: windowEnd - windowStart)
-            let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
-                try await Self.transcribeChunk(
-                    samples: windowAudio,
-                    contextSamples: 0,
-                    chunkStart: windowStart,
-                    isLastChunk: windowEnd >= totalSamples,
-                    using: manager,
-                    decoderState: &decoderState,
-                    maxModelSamples: maxModelSamples,
-                    language: language
-                )
-
-            guard windowTokens.count == windowTimestamps.count,
-                windowTokens.count == windowConfidences.count
-            else { continue }
-            let durations =
-                windowDurations.count == windowTokens.count
-                ? windowDurations : Array(repeating: 0, count: windowTokens.count)
-
-            // Keep only tokens strictly past the last token's decoded END
-            // (same boundary as the probe and the seam pass), starting at a
-            // word-initial piece; `gapEndFrame` is one past the final audio
-            // frame so no real trailing token is filtered out.
-            let candidate = Self.spliceCandidate(
-                windowTokens: windowTokens,
-                windowTimestamps: windowTimestamps,
-                windowConfidences: windowConfidences,
-                windowDurations: durations,
-                gapStartFrame: probe.tailStartFrame,
-                gapEndFrame: lastAudioFrame + 2,
-                leadNeighbor: leadNeighbor,
-                tailNeighbor: last,
-                spliceSafeTokenIds: spliceSafeTokenIds,
-                vocabulary: vocabulary
-            )
-
-            guard !candidate.isEmpty else { continue }
-            logger.info(
-                "Trailing-drop repair: recovered \(candidate.count) tokens after "
-                    + String(format: "%.2fs", Double(probe.tailStartFrame) * frameDuration)
-                    + " (audio ends at "
-                    + String(format: "%.2fs", Double(totalSamples) / Double(ASRConstants.sampleRate))
-                    + ")"
-            )
-            var working = Self.trimmingStaleSentenceEnd(
-                from: tokens, beforeSplicing: candidate, vocabulary: vocabulary)
-            working.append(contentsOf: candidate)
-            working.sort { $0.timestamp < $1.timestamp }
-            return working
-        }
-
-        return tokens
-    }
-
-    private static let sentenceFinalPunctuation: Set<Character> = [".", "?", "!", "。", "？", "！"]
-
-    /// Trim the blanked window's hallucinated sentence-final punctuation
-    /// when the recovered tail continues the sentence (first spliced piece
-    /// is lowercase). Capitalized or caseless-script tails are untouched.
-    static func trimmingStaleSentenceEnd(
-        from tokens: [TokenWindow],
-        beforeSplicing candidate: [TokenWindow],
-        vocabulary: [Int: String]
-    ) -> [TokenWindow] {
-        guard let firstPiece = candidate.first.flatMap({ vocabulary[$0.token] }) else { return tokens }
-        // Word-initial pieces carry a "▁" (raw SentencePiece) or " " (decoded
-        // vocabulary) boundary marker.
-        let boundaryMarker = Character(ASRConstants.sentencePieceWordBoundary)
-        let firstWord = firstPiece.drop(while: { $0 == boundaryMarker || $0 == " " })
-        guard let firstCharacter = firstWord.first, firstCharacter.isLowercase else { return tokens }
-
-        // The hallucinated sentence end is a single token; trim at most one so
-        // a genuine punctuation run ("?!", "...") is never fully consumed.
-        var working = tokens
-        if let lastPiece = working.last.flatMap({ vocabulary[$0.token] }),
-            !lastPiece.isEmpty,
-            lastPiece.allSatisfy({ sentenceFinalPunctuation.contains($0) })
-        {
-            working.removeLast()
-        }
         return working
     }
 
