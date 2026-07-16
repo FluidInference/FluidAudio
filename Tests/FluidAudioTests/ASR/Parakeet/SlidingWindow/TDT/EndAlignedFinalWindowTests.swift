@@ -33,7 +33,8 @@ final class EndAlignedFinalWindowTests: XCTestCase {
             chunkStart: chunkStart,
             defaultWarmupSamples: 0,
             chunkSamples: chunkSamples,
-            totalSamples: totalSamples
+            totalSamples: totalSamples,
+            speechEndSamples: totalSamples
         )
 
         // Window is full up to frame rounding, prefix never crosses sample 0.
@@ -53,7 +54,8 @@ final class EndAlignedFinalWindowTests: XCTestCase {
             chunkStart: chunkStart,
             defaultWarmupSamples: 0,
             chunkSamples: chunkSamples,
-            totalSamples: totalSamples
+            totalSamples: totalSamples,
+            speechEndSamples: totalSamples
         )
 
         XCTAssertEqual(warmup, 0)
@@ -66,10 +68,57 @@ final class EndAlignedFinalWindowTests: XCTestCase {
             chunkStart: 0,
             defaultWarmupSamples: 0,
             chunkSamples: chunkSamples,
-            totalSamples: chunkSamples / 2
+            totalSamples: chunkSamples / 2,
+            speechEndSamples: chunkSamples / 2
         )
 
         XCTAssertEqual(warmup, 0)
+    }
+
+    func testTrailingSilenceGrowsTheBackfill() {
+        // The window ends at the last speech-bearing frame, so a recorded
+        // silent tail is replaced by more real prefix audio.
+        let chunkStart = chunkSamples
+        let totalSamples = chunkStart + chunkSamples / 2
+        let speechEnd = totalSamples - 40 * frameSamples  // ~3.2s silent tail
+
+        let warmupToEof = ChunkProcessor.lastChunkWarmupSamples(
+            chunkStart: chunkStart,
+            defaultWarmupSamples: 0,
+            chunkSamples: chunkSamples,
+            totalSamples: totalSamples,
+            speechEndSamples: totalSamples
+        )
+        let warmupTrimmed = ChunkProcessor.lastChunkWarmupSamples(
+            chunkStart: chunkStart,
+            defaultWarmupSamples: 0,
+            chunkSamples: chunkSamples,
+            totalSamples: totalSamples,
+            speechEndSamples: speechEnd
+        )
+
+        XCTAssertEqual(warmupTrimmed, warmupToEof + 40 * frameSamples)
+        // Window [chunkStart - warmup, speechEnd] is full up to frame rounding.
+        XCTAssertGreaterThanOrEqual(
+            warmupTrimmed + (speechEnd - chunkStart), chunkSamples - frameSamples)
+    }
+
+    func testSpeechEndSamplesTrimsTrailingSilence() throws {
+        // 2s of tone, then 2s of digital silence: the scan must stop at the
+        // tone's end (within one frame).
+        var samples = [Float](repeating: 0.0, count: sampleRate * 4)
+        for i in 0..<(sampleRate * 2) {
+            samples[i] = 0.05 * sin(Float(i) * 0.1)
+        }
+        let processor = ChunkProcessor(audioSamples: samples)
+        let end = try processor.speechEndSamples()
+        XCTAssertGreaterThanOrEqual(end, sampleRate * 2 - frameSamples)
+        XCTAssertLessThanOrEqual(end, sampleRate * 2 + frameSamples)
+    }
+
+    func testSpeechEndSamplesLeavesAllSilentFileUntouched() throws {
+        let processor = ChunkProcessor(audioSamples: [Float](repeating: 0.0, count: sampleRate))
+        XCTAssertEqual(try processor.speechEndSamples(), sampleRate)
     }
 
     func testFillIsCappedByPrecedingAudio() {
@@ -82,7 +131,8 @@ final class EndAlignedFinalWindowTests: XCTestCase {
             chunkStart: chunkStart,
             defaultWarmupSamples: 0,
             chunkSamples: chunkSamples,
-            totalSamples: totalSamples
+            totalSamples: totalSamples,
+            speechEndSamples: totalSamples
         )
 
         XCTAssertEqual(warmup, chunkStart)
@@ -99,7 +149,8 @@ final class EndAlignedFinalWindowTests: XCTestCase {
             chunkStart: chunkStart,
             defaultWarmupSamples: defaultWarmup,
             chunkSamples: chunkSamples,
-            totalSamples: totalSamples
+            totalSamples: totalSamples,
+            speechEndSamples: totalSamples
         )
 
         XCTAssertEqual(warmup, defaultWarmup)
@@ -116,7 +167,8 @@ final class EndAlignedFinalWindowTests: XCTestCase {
             chunkStart: chunkStart,
             defaultWarmupSamples: defaultWarmup,
             chunkSamples: chunkSamples,
-            totalSamples: totalSamples
+            totalSamples: totalSamples,
+            speechEndSamples: totalSamples
         )
 
         XCTAssertGreaterThanOrEqual(warmup, defaultWarmup)
@@ -131,7 +183,8 @@ final class EndAlignedFinalWindowTests: XCTestCase {
             chunkStart: chunkStart,
             defaultWarmupSamples: 0,
             chunkSamples: chunkSamples,
-            totalSamples: totalSamples
+            totalSamples: totalSamples,
+            speechEndSamples: totalSamples
         )
 
         XCTAssertEqual(warmup % frameSamples, 0)

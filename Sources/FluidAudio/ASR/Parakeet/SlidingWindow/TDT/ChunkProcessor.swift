@@ -76,26 +76,62 @@ struct ChunkProcessor {
 
     /// End-align the final window (issue #747): fill a short last chunk
     /// backwards with real audio (decoded as a suppressed warmup prefix)
-    /// instead of zero-padding — emitted coverage is unchanged. See
-    /// "End-Aligned Final Window" in Documentation/ASR/LongTranscription.md.
+    /// instead of zero-padding, ending at `speechEndSamples` — the last
+    /// speech-bearing frame, not EOF, because a window that ends in an
+    /// extended dead-silence run decodes degenerately. See "End-Aligned
+    /// Final Window" in Documentation/ASR/LongTranscription.md.
     /// Non-final chunks, already-full windows, and single-chunk files pass
     /// `defaultWarmupSamples` through unchanged.
     static func lastChunkWarmupSamples(
         chunkStart: Int,
         defaultWarmupSamples: Int,
         chunkSamples: Int,
-        totalSamples: Int
+        totalSamples: Int,
+        speechEndSamples: Int
     ) -> Int {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         let defaultVisible = max(frameSamples, chunkSamples - defaultWarmupSamples)
         let isLastChunk = chunkStart + defaultVisible >= totalSamples
-        let remaining = totalSamples - chunkStart
+        let remaining = min(speechEndSamples, totalSamples) - chunkStart
         guard isLastChunk, remaining > 0, chunkStart > 0 else { return defaultWarmupSamples }
         // Frame-aligned so the suppression boundary maps to an exact frame.
         let fill = (chunkSamples - remaining) / frameSamples * frameSamples
         guard fill > 0 else { return defaultWarmupSamples }
         let available = chunkStart / frameSamples * frameSamples
         return max(defaultWarmupSamples, min(available, fill))
+    }
+
+    /// Snap a window end back past any trailing run of frames whose RMS
+    /// sits below `speechRmsFloor` — below the quietest real speech, so
+    /// nothing transcribable is excluded. A window that ends inside a
+    /// dead-silence run *within its declared audio length* decodes
+    /// degenerately (zero padding beyond the length is masked and safe) —
+    /// see "End-Aligned Final Window" in LongTranscription.md. Returns a
+    /// value in `lowerBound...end`; `lowerBound` when the whole span is
+    /// sub-floor.
+    func speechAlignedEnd(before end: Int, stopAt lowerBound: Int) throws -> Int {
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        var current = min(end, totalSamples)
+        while current > lowerBound {
+            let frameStart = max(lowerBound, current - frameSamples)
+            let samples = try readSamples(offset: frameStart, count: current - frameStart)
+            var sum: Float = 0
+            for sample in samples {
+                sum += sample * sample
+            }
+            if sqrt(sum / Float(samples.count)) >= Self.speechRmsFloor {
+                return current
+            }
+            current = frameStart
+        }
+        return lowerBound
+    }
+
+    /// Last speech-bearing sample of the whole recording; `totalSamples`
+    /// when the entire file is sub-floor (leave the layout untouched).
+    func speechEndSamples() throws -> Int {
+        let end = try speechAlignedEnd(before: totalSamples, stopAt: 0)
+        return end > 0 ? end : totalSamples
     }
 
     /// Prefix suppression (`emitTokensAfterGlobalFrame`) is a V3-decoder
@@ -472,6 +508,10 @@ struct ChunkProcessor {
         var chunkDecision = chunkStarts.first ?? ChunkStartDecision(start: 0, useWarmupPrefix: false)
         var chunkStart = chunkDecision.start
         var chunkIndex = 0
+        let endAligned = Self.supportsSuppressedPrefix(modelVersion)
+        // The final window must end at the last speech-bearing frame, not
+        // EOF — see `speechEndSamples()`.
+        let speechEnd = endAligned ? try speechEndSamples() : totalSamples
 
         func collectNextResult(
             _ group: inout ThrowingTaskGroup<TaskResult, Error>
@@ -493,12 +533,13 @@ struct ChunkProcessor {
                 // audio instead of zero padding (issue #747); V2-family
                 // decoders can't suppress the prefix and keep the old layout.
                 let warmupSamples =
-                    Self.supportsSuppressedPrefix(modelVersion)
+                    endAligned
                     ? Self.lastChunkWarmupSamples(
                         chunkStart: chunkStart,
                         defaultWarmupSamples: defaultWarmupSamples,
                         chunkSamples: chunkSamples,
-                        totalSamples: totalSamples)
+                        totalSamples: totalSamples,
+                        speechEndSamples: speechEnd)
                     : defaultWarmupSamples
                 let visibleChunkSamples = max(
                     ASRConstants.samplesPerEncoderFrame,
@@ -511,6 +552,13 @@ struct ChunkProcessor {
                 if chunkEnd <= chunkStart {
                     break
                 }
+                // The final window's audio stops at the last speech-bearing
+                // frame — a window ending inside a dead-silence run decodes
+                // degenerately. A pure-silence tail has nothing to decode.
+                let audioEnd = isLastChunk && endAligned ? min(chunkEnd, speechEnd) : chunkEnd
+                if audioEnd <= chunkStart {
+                    break
+                }
 
                 // In the default path, contextSamples means mel/STFT context
                 // and is skipped by the decoder. In v3/no-mel mode, the
@@ -518,7 +566,7 @@ struct ChunkProcessor {
                 // tokens are suppressed.
                 let contextSamples = warmupSamples > 0 ? 0 : (chunkIndex > 0 ? melContextSamples : 0)
                 let contextStart = chunkStart - max(warmupSamples, contextSamples)
-                let chunkLengthWithContext = chunkEnd - contextStart
+                let chunkLengthWithContext = audioEnd - contextStart
                 let chunkSamplesArray = try readSamples(offset: contextStart, count: chunkLengthWithContext)
                 let emitTokensAfterFrame =
                     warmupSamples > 0 ? chunkStart / ASRConstants.samplesPerEncoderFrame : nil

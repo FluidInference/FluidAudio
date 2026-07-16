@@ -341,6 +341,21 @@ the old layout. The model simply never sees a degenerate window. The
 prepend also gives the final chunk real left acoustic context, replacing
 the 80 ms mel-context prepend on that window.
 
+The window ends at the **last speech-bearing frame**
+(`speechEndSamples()`: EOF minus the trailing run of frames with RMS below
+`speechRmsFloor`), not at EOF. Recordings often end in operator silence or
+digital zeros, and the degenerate-decode pathology is not specific to
+*padding*: a window that ends in an extended dead-silence run decodes
+degenerately even when the silence is recorded. Measured on an Earnings-22
+call whose recording ends with ~3 s of digital zeros: the 12 s-speech
+window decoded perfectly alone, lost its first half with 1 s of the silent
+tail appended, and decoded to **empty** with all 3 s — while the same
+window trimmed to the last speech frame recovers everything, including the
+"you may now disconnect" closer that the EOF-aligned window dropped.
+Nothing transcribable is excluded: the trim threshold is the same
+below-any-real-speech floor the repair gate uses. A final chunk whose
+remaining audio is entirely sub-floor is skipped outright.
+
 Files shorter than one window are unaffected: they are the whole-file
 single-chunk decode, where padding is unavoidable (and harmless — the
 window is the file).
@@ -463,6 +478,13 @@ RMS exceeds `0.008 / 0.3 ≈ 0.027`.
 - The adaptive gate's reference level is whole-file: a loud-body recording
   with a quiet gap clamps to the ceiling, so that gap is gated as if the
   whole file were loud. A gap-local reference window would close this.
+- The dead-silence-at-window-end pathology also afflicts **mid-file**
+  windows whose fixed-stride end lands inside a silence run (observed: a
+  LibriVox recording whose quiet outro credit falls in such a window loses
+  it — on `main` and on this branch alike). Snapping *every* window end to
+  the last speech-bearing frame was tried and reverted: it perturbs dozens
+  of mid-file windows per hour of audio for a net-neutral WER change. A
+  targeted fix needs its own issue and regression run.
 - Repair validation corpora are English conference and quiet dictation
   audio; multilingual and music-heavy content is less exercised.
 
