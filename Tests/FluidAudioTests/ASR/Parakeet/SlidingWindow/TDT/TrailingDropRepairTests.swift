@@ -62,6 +62,32 @@ final class TrailingDropRepairTests: XCTestCase {
         XCTAssertGreaterThan(unwrapped.placements[0], unwrapped.placements[1])
     }
 
+    func testQuietSpeechTailTriggersProbe() throws {
+        // Regression for the issue #747 reproducer: the recording peaks below
+        // 2% FS, so tail-speech RMS (≈ 0.001–0.003) never crosses an absolute
+        // 0.008 gate — the very audio class whose final window blanks out. The
+        // adaptive threshold must scale down and still fire the probe.
+        let total = 720_000
+        let tailStartFrame = 485
+        let tailStartSample = tailStartFrame * frameSamples
+        var samples = [Float](repeating: 0, count: total)
+        for i in 0..<tailStartSample {
+            samples[i] = 0.005 * sin(Float(i) * 0.1)  // quiet transcribed speech
+        }
+        for i in tailStartSample..<total {
+            samples[i] = 0.003 * sin(Float(i) * 0.1)  // even quieter dropped tail
+        }
+        let processor = ChunkProcessor(audioSamples: samples)
+
+        let probe = try processor.trailingTailProbe(
+            lastTokenTimestamp: 484,
+            lastTokenDuration: 1,
+            minTailSeconds: 1.5,
+            maxModelSamples: maxModelSamples
+        )
+        XCTAssertNotNil(probe)
+    }
+
     func testSilentTailDoesNotTriggerProbe() throws {
         let total = 720_000
         // Entirely silent audio: the tail carries no speech energy.
@@ -161,6 +187,61 @@ final class TrailingDropRepairTests: XCTestCase {
         // The re-heard last word is dropped; the dropped span survives.
         XCTAssertEqual(candidate.map { $0.token }, [5, 7, 10])
         XCTAssertEqual(candidate.map { $0.timestamp }, [500, 520, 540])
+    }
+
+    // MARK: - Stale sentence-end trim
+
+    /// Decoded-vocabulary form: word-initial pieces carry a " " marker (the
+    /// raw SentencePiece "▁" form is covered separately below).
+    private let trimVocabulary: [Int: String] = [
+        2: " me",
+        3: ".",
+        5: " as",
+        6: " Also",
+    ]
+
+    private func window(_ token: Int, _ timestamp: Int) -> ChunkProcessor.TokenWindow {
+        (token: token, timestamp: timestamp, confidence: 0.9, duration: 1)
+    }
+
+    func testLowercaseContinuationTrimsHallucinatedPeriod() {
+        // "…without me." + recovered "as long as…": the period was a
+        // window-end artifact and must go.
+        let trimmed = ChunkProcessor.trimmingStaleSentenceEnd(
+            from: [window(2, 480), window(3, 482)],
+            beforeSplicing: [window(5, 500)],
+            vocabulary: trimVocabulary
+        )
+        XCTAssertEqual(trimmed.map { $0.token }, [2])
+    }
+
+    func testCapitalizedContinuationKeepsSentenceEnd() {
+        // "…without me." + recovered "Also, …": a genuine sentence boundary.
+        let trimmed = ChunkProcessor.trimmingStaleSentenceEnd(
+            from: [window(2, 480), window(3, 482)],
+            beforeSplicing: [window(6, 500)],
+            vocabulary: trimVocabulary
+        )
+        XCTAssertEqual(trimmed.map { $0.token }, [2, 3])
+    }
+
+    func testNoTrailingPunctuationLeavesStreamUntouched() {
+        let trimmed = ChunkProcessor.trimmingStaleSentenceEnd(
+            from: [window(2, 480)],
+            beforeSplicing: [window(5, 500)],
+            vocabulary: trimVocabulary
+        )
+        XCTAssertEqual(trimmed.map { $0.token }, [2])
+    }
+
+    func testLowercaseContinuationTrimsWithSentencePieceMarker() {
+        // Same trim with a raw "▁"-marked vocabulary.
+        let trimmed = ChunkProcessor.trimmingStaleSentenceEnd(
+            from: [window(2, 480), window(3, 482)],
+            beforeSplicing: [window(5, 500)],
+            vocabulary: [2: "▁me", 3: ".", 5: "▁as"]
+        )
+        XCTAssertEqual(trimmed.map { $0.token }, [2])
     }
 
     func testTailSpliceEmptyWhenProbeOnlyRehearsLastWord() {

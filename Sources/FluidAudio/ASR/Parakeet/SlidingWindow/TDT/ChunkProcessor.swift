@@ -1181,10 +1181,49 @@ struct ChunkProcessor {
     /// gaps, and iteration over residual gaps needs headroom beyond that.
     private var maxSeamGapRepairs: Int { 32 }
 
-    /// Per-frame RMS above this counts as speech-like energy inside a gap.
-    /// Comfortably above the library's quiet threshold (0.003 in
-    /// `shouldUseWarmupPrefix`) so room tone and hiss do not trigger probes.
-    private var seamGapSpeechRmsThreshold: Float { 0.008 }
+    /// Per-frame RMS ceiling above which audio always counts as speech-like
+    /// energy inside a gap. Comfortably above the library's quiet threshold
+    /// (0.003 in `shouldUseWarmupPrefix`) so room tone and hiss do not trigger
+    /// probes on normal-level recordings.
+    private var speechRmsCeiling: Float { 0.008 }
+
+    /// Absolute floor for the adaptive speech threshold so dither and digital
+    /// silence never count as speech, however quiet the recording.
+    private var speechRmsFloor: Float { 0.0005 }
+
+    /// Speech-energy threshold adapted to the recording's own level. A fixed
+    /// gate can never fire on genuinely quiet recordings (the issue #747
+    /// reproducer peaks below 2% FS, tail-speech RMS ≈ 0.001–0.003) — exactly
+    /// the audio class whose final window blanks out. Scale by the reference
+    /// RMS, clamped so normal-level audio keeps the fixed ceiling gate and
+    /// silence keeps the floor.
+    static func adaptiveSpeechRmsThreshold(referenceRms: Float, floor: Float, ceiling: Float) -> Float {
+        min(ceiling, max(floor, referenceRms * 0.3))
+    }
+
+    /// The recording-level speech threshold: 75th-percentile per-frame RMS as
+    /// the level reference (robust to long pauses dominating the median),
+    /// passed through `adaptiveSpeechRmsThreshold`.
+    private func adaptiveSpeechRmsThreshold() throws -> Float {
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        var frameRms: [Float] = []
+        frameRms.reserveCapacity(totalSamples / frameSamples + 1)
+        var offset = 0
+        while offset + frameSamples <= totalSamples {
+            let samples = try readSamples(offset: offset, count: frameSamples)
+            var sum: Float = 0
+            for sample in samples {
+                sum += sample * sample
+            }
+            frameRms.append(sqrt(sum / Float(samples.count)))
+            offset += frameSamples
+        }
+        guard !frameRms.isEmpty else { return speechRmsCeiling }
+        frameRms.sort()
+        let referenceRms = frameRms[min(frameRms.count - 1, (frameRms.count * 3) / 4)]
+        return Self.adaptiveSpeechRmsThreshold(
+            referenceRms: referenceRms, floor: speechRmsFloor, ceiling: speechRmsCeiling)
+    }
 
     /// Minimum cumulative speech-like audio inside a gap before it is
     /// probed. Genuine pauses with a stray cough stay untouched.
@@ -1298,7 +1337,11 @@ struct ChunkProcessor {
 
     #if DEBUG
     internal func speechLikeSecondsForTesting(from startSample: Int, to endSample: Int) throws -> Double {
-        try speechLikeSeconds(from: startSample, to: endSample)
+        try speechLikeSeconds(from: startSample, to: endSample, threshold: adaptiveSpeechRmsThreshold())
+    }
+
+    internal func adaptiveSpeechRmsThresholdForTesting() throws -> Float {
+        try adaptiveSpeechRmsThreshold()
     }
     #endif
 
@@ -1332,6 +1375,7 @@ struct ChunkProcessor {
         var working = tokens
         var probes = 0
         var probedGapStarts = Set<Int>()
+        let speechThreshold = try adaptiveSpeechRmsThreshold()
         // A successful repair can leave a residual gap (e.g. recovered
         // speech, then applause, then more dropped speech): iterate so the
         // residual — whose start has moved — gets its own probe. Gaps that
@@ -1355,7 +1399,8 @@ struct ChunkProcessor {
                 let gapEndSample = min(gapEndFrame * frameSamples, totalSamples)
                 guard gapEndSample > gapStartSample else { continue }
 
-                let speechSeconds = try speechLikeSeconds(from: gapStartSample, to: gapEndSample)
+                let speechSeconds = try speechLikeSeconds(
+                    from: gapStartSample, to: gapEndSample, threshold: speechThreshold)
                 guard speechSeconds >= seamGapMinSpeechSeconds else { continue }
                 probedGapStarts.insert(gapStartFrame)
                 probes += 1
@@ -1468,7 +1513,8 @@ struct ChunkProcessor {
         let tailStartSample = tailStartFrame * frameSamples
         guard totalSamples - tailStartSample >= minTailFrames * frameSamples else { return nil }
 
-        let speechSeconds = try speechLikeSeconds(from: tailStartSample, to: totalSamples)
+        let speechSeconds = try speechLikeSeconds(
+            from: tailStartSample, to: totalSamples, threshold: adaptiveSpeechRmsThreshold())
         guard speechSeconds >= seamGapMinSpeechSeconds else { return nil }
 
         let windowSamples = max(
@@ -1587,7 +1633,8 @@ struct ChunkProcessor {
                     + String(format: "%.2fs", Double(totalSamples) / Double(ASRConstants.sampleRate))
                     + ")"
             )
-            var working = tokens
+            var working = Self.trimmingStaleSentenceEnd(
+                from: tokens, beforeSplicing: candidate, vocabulary: vocabulary)
             working.append(contentsOf: candidate)
             working.sort { $0.timestamp < $1.timestamp }
             return working
@@ -1596,9 +1643,40 @@ struct ChunkProcessor {
         return tokens
     }
 
-    /// Cumulative duration of speech-like audio (per-frame RMS above
-    /// `seamGapSpeechRmsThreshold`) between two sample offsets.
-    private func speechLikeSeconds(from startSample: Int, to endSample: Int) throws -> Double {
+    /// Sentence-final punctuation pieces the blanked window can hallucinate
+    /// onto its last emitted word when the audio actually continues.
+    private static let sentenceFinalPunctuation: Set<Character> = [".", "?", "!", "。", "？", "！"]
+
+    /// When the recovered tail continues the sentence (its first piece starts
+    /// with a lowercase letter), the truncated decode's sentence-final
+    /// punctuation on the old last token is a window-end artifact — "without
+    /// me." + "as long as…" — and is trimmed before splicing. A tail that
+    /// starts a new sentence (capitalized, or non-Latin script) leaves the
+    /// stream untouched.
+    static func trimmingStaleSentenceEnd(
+        from tokens: [TokenWindow],
+        beforeSplicing candidate: [TokenWindow],
+        vocabulary: [Int: String]
+    ) -> [TokenWindow] {
+        guard let firstPiece = candidate.first.flatMap({ vocabulary[$0.token] }) else { return tokens }
+        // Word-initial pieces carry a "▁" (raw SentencePiece) or " " (decoded
+        // vocabulary) boundary marker.
+        let firstWord = firstPiece.drop(while: { $0 == "▁" || $0 == " " })
+        guard let firstCharacter = firstWord.first, firstCharacter.isLowercase else { return tokens }
+
+        var working = tokens
+        while let lastPiece = working.last.flatMap({ vocabulary[$0.token] }),
+            !lastPiece.isEmpty,
+            lastPiece.allSatisfy({ sentenceFinalPunctuation.contains($0) })
+        {
+            working.removeLast()
+        }
+        return working
+    }
+
+    /// Cumulative duration of speech-like audio (per-frame RMS above the
+    /// given adaptive threshold) between two sample offsets.
+    private func speechLikeSeconds(from startSample: Int, to endSample: Int, threshold: Float) throws -> Double {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         var speechFrames = 0
         var offset = startSample
@@ -1608,7 +1686,7 @@ struct ChunkProcessor {
             for sample in samples {
                 sum += sample * sample
             }
-            if sqrt(sum / Float(samples.count)) > seamGapSpeechRmsThreshold {
+            if sqrt(sum / Float(samples.count)) > threshold {
                 speechFrames += 1
             }
             offset += frameSamples
