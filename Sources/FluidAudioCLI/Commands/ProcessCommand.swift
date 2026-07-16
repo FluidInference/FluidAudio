@@ -488,7 +488,7 @@ enum ProcessCommand {
 
             OFFLINE MODE OPTIONS (VBx clustering, all optional):
                 --rttm <file>                   Compute DER/JER against RTTM annotations
-                --threshold <0-√2>              Euclidean clustering threshold (default: 0.6)
+                --threshold <0-2>               AHC cut distance, higher = fewer speakers (default: 0.6)
                 --fa <float>                    VBx warm-start precision (default: 0.07)
                 --fb <float>                    VBx warm-start recall (default: 0.8)
                 --window-duration <sec>         Segmentation window size (default: 10.0)

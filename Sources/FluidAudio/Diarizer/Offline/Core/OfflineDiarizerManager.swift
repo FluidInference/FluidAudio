@@ -351,10 +351,28 @@ public final class OfflineDiarizerManager {
         if centroids.isEmpty {
             centroids = computeFallbackCentroids(from: embeddingFeatures)
         }
-        let assignments = assignEmbeddings(
-            embeddingFeatures: embeddingFeatures,
-            centroids: centroids
-        )
+        // pyannote parity: constrain co-chunk speakers to distinct clusters, but
+        // not when the count was forced via K-Means — the constraint can then
+        // artificially inflate the number of speakers.
+        let useConstrainedAssignment =
+            config.clustering.constrainedAssignment
+            && !vbxOutput.wasAdjusted
+            && centroids.count > 1
+        let assignments: [Int]
+        if useConstrainedAssignment {
+            assignments = ConstrainedClusterAssignment.assign(
+                scores: centroidScores(
+                    embeddingFeatures: embeddingFeatures,
+                    centroids: centroids
+                ),
+                chunkIndices: timedEmbeddings.map(\.chunkIndex)
+            )
+        } else {
+            assignments = assignEmbeddings(
+                embeddingFeatures: embeddingFeatures,
+                centroids: centroids
+            )
+        }
 
         let chunkAssignments = buildChunkAssignments(
             segmentation: segmentation,
@@ -767,6 +785,18 @@ public final class OfflineDiarizerManager {
         return [accumulator]
     }
 
+    /// Cosine similarity of every embedding against every centroid.
+    private func centroidScores(
+        embeddingFeatures: [[Double]],
+        centroids: [[Double]]
+    ) -> [[Double]] {
+        let normalizedCentroids = centroids.map(normalize)
+        return embeddingFeatures.map { embedding in
+            let normalizedEmbedding = normalize(embedding)
+            return normalizedCentroids.map { dot(normalizedEmbedding, $0) }
+        }
+    }
+
     private func assignEmbeddings(
         embeddingFeatures: [[Double]],
         centroids: [[Double]]
@@ -776,17 +806,16 @@ public final class OfflineDiarizerManager {
             return Array(repeating: 0, count: embeddingFeatures.count)
         }
 
-        let normalizedCentroids = centroids.map(normalize)
-        return embeddingFeatures.map { embedding in
-            let normalizedEmbedding = normalize(embedding)
+        let scores = centroidScores(
+            embeddingFeatures: embeddingFeatures,
+            centroids: centroids
+        )
+        return scores.map { row in
             var bestIndex = 0
             var bestScore = -Double.infinity
-            for (index, centroid) in normalizedCentroids.enumerated() {
-                let score = dot(normalizedEmbedding, centroid)
-                if score > bestScore {
-                    bestScore = score
-                    bestIndex = index
-                }
+            for (index, score) in row.enumerated() where score > bestScore {
+                bestScore = score
+                bestIndex = index
             }
             return bestIndex
         }

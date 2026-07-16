@@ -21,7 +21,7 @@ final class OfflineDiarizerConfigTests: XCTestCase {
     }
 
     func testValidateThrowsForInvalidClusteringThreshold() {
-        let config = OfflineDiarizerConfig(clusteringThreshold: 1.5)
+        let config = OfflineDiarizerConfig(clusteringThreshold: 2.5)
 
         XCTAssertThrowsError(try config.validate()) { error in
             guard case OfflineDiarizationError.invalidConfiguration(let message) = error else {

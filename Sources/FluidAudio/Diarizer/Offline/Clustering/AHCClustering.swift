@@ -54,7 +54,7 @@ struct AHCClustering {
             return Array(0..<count)
         }
 
-        let distanceThreshold = convertThresholdToDistance(threshold)
+        let distanceThreshold = clampDistanceThreshold(threshold)
         let assignments = assignmentsFromDendrogram(
             dendrogram,
             count: count,
@@ -104,14 +104,20 @@ struct AHCClustering {
         return normalized
     }
 
-    // MARK: - Similarity-to-Distance Conversion
-    private func convertThresholdToDistance(_ similarity: Double) -> Double {
-        guard !similarity.isNaN else { return Double.infinity }
-        if similarity < -1.0 || similarity > 1.0 {
-            logger.debug("Clustering threshold \(similarity) outside cosine range; clamping to [-1, 1]")
+    // MARK: - Distance Threshold Validation
+    // The threshold is a Euclidean cut distance on unit-normalized embeddings,
+    // applied directly to the dendrogram like pyannote's
+    // `fcluster(dendrogram, threshold, criterion="distance")`. Valid range is
+    // [0, 2]; larger values merge more aggressively (fewer clusters).
+    private func clampDistanceThreshold(_ threshold: Double) -> Double {
+        guard !threshold.isNaN else {
+            logger.warning("Clustering threshold is NaN; disabling AHC merging")
+            return 0
         }
-        let clamped = max(-1.0, min(1.0, similarity))
-        return sqrt(max(0, 2.0 - 2.0 * clamped))
+        if threshold < 0 || threshold > 2.0 {
+            logger.warning("Clustering threshold \(threshold) outside [0, 2]; clamping")
+        }
+        return max(0, min(2.0, threshold))
     }
 
     // MARK: - Dendrogram Parsing & Threshold-Based Cluster Assignment

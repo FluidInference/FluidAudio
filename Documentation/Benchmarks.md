@@ -634,7 +634,7 @@ AVERAGE          10.6     17.4       5.4      2.0      3.3      -        323.2
 
 12/16 meetings detect the correct speaker count. Average DER 10.62% matches published pyannote-community-1 offline numbers on this split (~11-12%). Results are fully deterministic (two consecutive runs produce bit-identical metrics).
 
-**Clustering threshold matters on this split.** The table above uses `--threshold 0.7`. Since #616 the CLI default is the community-1 preset (0.6), which merges clusters more aggressively and undercounts speakers on 4 meetings (EN2002a 2/4 → 41.9% DER, ES2004d 3/4 → 34.8%, EN2002b 19.0%, IS1009d 16.4%), degrading the average to 15.5% DER. Pass `--threshold 0.7` (or set `clusteringThreshold: 0.7` in `OfflineDiarizerConfig`) for AMI-SDM-like meeting audio.
+**Clustering threshold matters on this split.** The table above predates #801 and uses `--threshold 0.7` under the old (inverted) threshold semantics. Since #801 the threshold is a Euclidean cut distance applied directly to the AHC dendrogram (pyannote parity): **larger values merge more aggressively and yield fewer speakers**. Old values map to new ones via `sqrt(2 − 2·old)` — the old default 0.6 behaved like a cut at 0.894, and the old `--threshold 0.7` from this table behaves like `--threshold 0.775` today. The CLI default remains the community-1 preset value (0.6), now interpreted as pyannote does.
 
 ### Streaming/online Diarization
 

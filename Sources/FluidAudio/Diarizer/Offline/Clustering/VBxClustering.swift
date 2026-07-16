@@ -688,13 +688,18 @@ struct VBxClustering {
         initialClusters: [Int],
         constraints: SpeakerCountConstraints?
     ) -> VBxOutput {
-        var output = refine(rhoFeatures: rhoFeatures, initialClusters: initialClusters)
+        let output = refine(rhoFeatures: rhoFeatures, initialClusters: initialClusters)
 
         guard let constraints = constraints else {
             return output
         }
 
-        let detectedCount = output.numClusters
+        // Compare against the clusters VBx actually kept (pi above epsilon), not the
+        // AHC warm-start count: VBx collapses unused warm-start clusters, and that
+        // collapsed count is what the pipeline reports as the detected speaker count.
+        // Checking the warm-start count re-clusters even when VBx already agrees
+        // with the requested count, replacing its partition with K-Means (#801).
+        let detectedCount = output.activeClusterCount
         guard constraints.needsAdjustment(detectedCount: detectedCount) else {
             return output
         }

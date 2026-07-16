@@ -9,6 +9,7 @@ final class OfflineConfigTests: XCTestCase {
         XCTAssertNil(clustering.minSpeakers)
         XCTAssertNil(clustering.maxSpeakers)
         XCTAssertNil(clustering.numSpeakers)
+        XCTAssertTrue(clustering.constrainedAssignment)
     }
 
     func testClusteringAcceptsSpeakerConstraints() {

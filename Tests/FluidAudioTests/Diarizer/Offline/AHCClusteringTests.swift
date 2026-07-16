@@ -36,8 +36,10 @@ final class AHCClusteringTests: XCTestCase {
 
     // MARK: - Orthogonal Embeddings
 
-    func testOrthogonalEmbeddingsSeparateAtHighThreshold() {
-        // Two groups: pointing in very different directions
+    func testOrthogonalGroupsSeparateWhenThresholdBelowGroupDistance() {
+        // Two groups: pointing in very different directions. Unit-normalized,
+        // the inter-group Euclidean distance is ~sqrt(2) ≈ 1.414, so a cut at
+        // 0.8 merges within groups but not across them.
         let group1: [[Double]] = [
             [1.0, 0.0, 0.0],
             [0.9, 0.1, 0.0],
@@ -65,6 +67,24 @@ final class AHCClusteringTests: XCTestCase {
         )
     }
 
+    func testLargerThresholdMergesMore() {
+        // pyannote semantics: the threshold is the dendrogram cut distance,
+        // so raising it can only reduce the number of clusters.
+        let embeddings: [[Double]] = [
+            [1.0, 0.0, 0.0],
+            [0.9, 0.1, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.9, 0.1],
+        ]
+
+        let tight = Set(clustering.cluster(embeddingFeatures: embeddings, threshold: 0.5)).count
+        let loose = Set(clustering.cluster(embeddingFeatures: embeddings, threshold: 1.5)).count
+
+        XCTAssertEqual(tight, 2, "Cut below the inter-group distance should keep two clusters")
+        XCTAssertEqual(loose, 1, "Cut above the inter-group distance should merge everything")
+        XCTAssertLessThanOrEqual(loose, tight)
+    }
+
     // MARK: - Cluster ID Properties
 
     func testClusterIdsAreContiguousFromZero() {
@@ -84,19 +104,32 @@ final class AHCClusteringTests: XCTestCase {
         }
     }
 
-    // MARK: - Low Threshold
+    // MARK: - Threshold Extremes
 
-    func testLowThresholdMergesAll() {
-        // At a very low threshold (cosine similarity), everything should merge into one cluster
+    func testMaxThresholdMergesAll() {
+        // 2.0 is the largest possible distance between unit vectors, so
+        // everything should merge into one cluster.
         let embeddings: [[Double]] = [
             [1.0, 0.0, 0.0],
             [0.0, 1.0, 0.0],
             [0.0, 0.0, 1.0],
         ]
 
-        let result = clustering.cluster(embeddingFeatures: embeddings, threshold: -1.0)
+        let result = clustering.cluster(embeddingFeatures: embeddings, threshold: 2.0)
         let uniqueClusters = Set(result)
-        XCTAssertEqual(uniqueClusters.count, 1, "Very low threshold should merge all into one cluster")
+        XCTAssertEqual(uniqueClusters.count, 1, "Maximum threshold should merge all into one cluster")
+    }
+
+    func testZeroThresholdKeepsDistinctEmbeddingsApart() {
+        let embeddings: [[Double]] = [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+
+        let result = clustering.cluster(embeddingFeatures: embeddings, threshold: 0.0)
+        let uniqueClusters = Set(result)
+        XCTAssertEqual(uniqueClusters.count, 3, "Zero threshold should not merge distinct embeddings")
     }
 
     // MARK: - Zero Vector
