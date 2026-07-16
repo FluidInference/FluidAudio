@@ -404,7 +404,8 @@ threshold = min(0.008, max(0.0005, p75FrameRms × 0.3))
 ```
 
 where `p75FrameRms` is the 75th-percentile per-frame RMS over the whole
-file (robust to long pauses dominating the median). Normal-level speech
+file (robust to long pauses dominating the median), computed once per
+transcription and shared by both passes. Normal-level speech
 clamps to the previous 0.008 ceiling — behavior there is unchanged — while
 quiet recordings scale down to a floor that still excludes dither and
 digital silence. A room-tone-only tail can now trigger a probe that

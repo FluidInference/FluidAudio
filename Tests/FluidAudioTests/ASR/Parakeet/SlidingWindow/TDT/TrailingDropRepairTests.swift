@@ -22,6 +22,21 @@ final class TrailingDropRepairTests: XCTestCase {
         )
     }
 
+    /// Probe with the processor's own adaptive threshold, as production does.
+    private func probeTail(
+        _ processor: ChunkProcessor,
+        timestamp: Int,
+        duration: Int = 1
+    ) throws -> ChunkProcessor.TrailingTailProbe? {
+        try processor.trailingTailProbe(
+            lastTokenTimestamp: timestamp,
+            lastTokenDuration: duration,
+            minTailSeconds: 1.5,
+            maxModelSamples: maxModelSamples,
+            speechRmsThreshold: processor.adaptiveSpeechRmsThresholdForTesting()
+        )
+    }
+
     /// Build `totalSamples`-long audio that is silent except for a
     /// speech-level tone across `[loudStart, loudEnd)`.
     private func audio(total: Int, loud: Range<Int>? = nil) -> [Float] {
@@ -44,12 +59,7 @@ final class TrailingDropRepairTests: XCTestCase {
         let tailStartSample = tailStartFrame * frameSamples
         let processor = ChunkProcessor(audioSamples: audio(total: total, loud: tailStartSample..<total))
 
-        let probe = try processor.trailingTailProbe(
-            lastTokenTimestamp: 484,
-            lastTokenDuration: 1,
-            minTailSeconds: 1.5,
-            maxModelSamples: maxModelSamples
-        )
+        let probe = try probeTail(processor, timestamp: 484)
 
         let unwrapped = try XCTUnwrap(probe)
         XCTAssertEqual(unwrapped.tailStartFrame, tailStartFrame)
@@ -79,13 +89,7 @@ final class TrailingDropRepairTests: XCTestCase {
         }
         let processor = ChunkProcessor(audioSamples: samples)
 
-        let probe = try processor.trailingTailProbe(
-            lastTokenTimestamp: 484,
-            lastTokenDuration: 1,
-            minTailSeconds: 1.5,
-            maxModelSamples: maxModelSamples
-        )
-        XCTAssertNotNil(probe)
+        XCTAssertNotNil(try probeTail(processor, timestamp: 484))
     }
 
     func testSilentTailDoesNotTriggerProbe() throws {
@@ -93,13 +97,7 @@ final class TrailingDropRepairTests: XCTestCase {
         // Entirely silent audio: the tail carries no speech energy.
         let processor = ChunkProcessor(audioSamples: audio(total: total))
 
-        let probe = try processor.trailingTailProbe(
-            lastTokenTimestamp: 484,
-            lastTokenDuration: 1,
-            minTailSeconds: 1.5,
-            maxModelSamples: maxModelSamples
-        )
-        XCTAssertNil(probe)
+        XCTAssertNil(try probeTail(processor, timestamp: 484))
     }
 
     func testShortTailBelowMinimumDoesNotTriggerProbe() throws {
@@ -110,13 +108,7 @@ final class TrailingDropRepairTests: XCTestCase {
         let tailStartSample = (lastTimestamp + 1) * frameSamples
         let processor = ChunkProcessor(audioSamples: audio(total: total, loud: tailStartSample..<total))
 
-        let probe = try processor.trailingTailProbe(
-            lastTokenTimestamp: lastTimestamp,
-            lastTokenDuration: 1,
-            minTailSeconds: 1.5,
-            maxModelSamples: maxModelSamples
-        )
-        XCTAssertNil(probe)
+        XCTAssertNil(try probeTail(processor, timestamp: lastTimestamp))
     }
 
     func testTailWithSubThresholdSpeechDoesNotTriggerProbe() throws {
@@ -129,13 +121,7 @@ final class TrailingDropRepairTests: XCTestCase {
         let loud = tailStartSample..<(tailStartSample + loudFrames * frameSamples)
         let processor = ChunkProcessor(audioSamples: audio(total: total, loud: loud))
 
-        let probe = try processor.trailingTailProbe(
-            lastTokenTimestamp: 484,
-            lastTokenDuration: 1,
-            minTailSeconds: 1.5,
-            maxModelSamples: maxModelSamples
-        )
-        XCTAssertNil(probe)
+        XCTAssertNil(try probeTail(processor, timestamp: 484))
     }
 
     func testLongerLastTokenDurationMovesTheTailBoundary() throws {
@@ -144,14 +130,7 @@ final class TrailingDropRepairTests: XCTestCase {
         let total = 720_000
         let processor = ChunkProcessor(audioSamples: audio(total: total, loud: 0..<total))
 
-        let probe = try XCTUnwrap(
-            try processor.trailingTailProbe(
-                lastTokenTimestamp: 480,
-                lastTokenDuration: 5,
-                minTailSeconds: 1.5,
-                maxModelSamples: maxModelSamples
-            )
-        )
+        let probe = try XCTUnwrap(try probeTail(processor, timestamp: 480, duration: 5))
         XCTAssertEqual(probe.tailStartFrame, 485)
         XCTAssertEqual(probe.placements[0], 485 * frameSamples)
     }
@@ -165,18 +144,19 @@ final class TrailingDropRepairTests: XCTestCase {
     ]
 
     func testTailSpliceKeepsWordsPastLastTokenAndDedupesRehearing() {
-        // Merged stream ends "…▁science" at frame 484. The tail probe re-hears
-        // "▁science" at 485 (an echo of the last word) then the dropped words.
+        // Merged stream ends "…▁science" at frame 484 (duration 1, so the
+        // tail starts at 485). The tail probe re-hears "▁science" at 486 (an
+        // echo of the last word) then the dropped words.
         let total = 720_000
         let lastAudioFrame = (total - 1) / frameSamples
         let last: ChunkProcessor.TokenWindow = (token: 7, timestamp: 484, confidence: 0.9, duration: 1)
 
         let candidate = ChunkProcessor.spliceCandidate(
             windowTokens: [7, 5, 7, 10],
-            windowTimestamps: [485, 500, 520, 540],
+            windowTimestamps: [486, 500, 520, 540],
             windowConfidences: [0.9, 0.9, 0.9, 0.9],
             windowDurations: [1, 1, 1, 1],
-            gapStartFrame: last.timestamp,
+            gapStartFrame: last.timestamp + 1,
             gapEndFrame: lastAudioFrame + 2,
             leadNeighbor: last,
             tailNeighbor: last,
@@ -256,7 +236,7 @@ final class TrailingDropRepairTests: XCTestCase {
             windowTimestamps: [486],
             windowConfidences: [0.9],
             windowDurations: [1],
-            gapStartFrame: last.timestamp,
+            gapStartFrame: last.timestamp + 1,
             gapEndFrame: lastAudioFrame + 2,
             leadNeighbor: last,
             tailNeighbor: last,

@@ -605,6 +605,8 @@ struct ChunkProcessor {
             let vocabulary = await manager.vocabulary
             let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
             let minGapSeconds = await manager.seamGapRepairMinGapSeconds
+            // One full-file scan, shared by both repair passes.
+            let speechRmsThreshold = try adaptiveSpeechRmsThreshold()
 
             if mergedTokens.count > 1 {
                 mergedTokens = try await repairSeamGaps(
@@ -613,6 +615,7 @@ struct ChunkProcessor {
                     decoderLayers: decoderLayers,
                     maxModelSamples: maxModelSamples,
                     minGapSeconds: minGapSeconds,
+                    speechRmsThreshold: speechRmsThreshold,
                     spliceSafeTokenIds: spliceSafeTokenIds,
                     vocabulary: vocabulary,
                     language: language
@@ -626,6 +629,7 @@ struct ChunkProcessor {
                 decoderLayers: decoderLayers,
                 maxModelSamples: maxModelSamples,
                 minTailSeconds: minGapSeconds,
+                speechRmsThreshold: speechRmsThreshold,
                 spliceSafeTokenIds: spliceSafeTokenIds,
                 vocabulary: vocabulary,
                 language: language
@@ -1341,6 +1345,7 @@ struct ChunkProcessor {
         decoderLayers: Int,
         maxModelSamples: Int,
         minGapSeconds: Double,
+        speechRmsThreshold: Float,
         spliceSafeTokenIds: Set<Int>?,
         vocabulary: [Int: String],
         language: Language?
@@ -1358,7 +1363,6 @@ struct ChunkProcessor {
         var working = tokens
         var probes = 0
         var probedGapStarts = Set<Int>()
-        let speechThreshold = try adaptiveSpeechRmsThreshold()
         // A successful repair can leave a residual gap (e.g. recovered
         // speech, then applause, then more dropped speech): iterate so the
         // residual — whose start has moved — gets its own probe. Gaps that
@@ -1383,7 +1387,7 @@ struct ChunkProcessor {
                 guard gapEndSample > gapStartSample else { continue }
 
                 let speechSeconds = try speechLikeSeconds(
-                    from: gapStartSample, to: gapEndSample, threshold: speechThreshold)
+                    from: gapStartSample, to: gapEndSample, threshold: speechRmsThreshold)
                 guard speechSeconds >= seamGapMinSpeechSeconds else { continue }
                 probedGapStarts.insert(gapStartFrame)
                 probes += 1
@@ -1483,7 +1487,8 @@ struct ChunkProcessor {
         lastTokenTimestamp: Int,
         lastTokenDuration: Int,
         minTailSeconds: Double,
-        maxModelSamples: Int
+        maxModelSamples: Int,
+        speechRmsThreshold: Float
     ) throws -> TrailingTailProbe? {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         let frameDuration = ASRConstants.secondsPerEncoderFrame
@@ -1496,7 +1501,7 @@ struct ChunkProcessor {
         guard totalSamples - tailStartSample >= minTailFrames * frameSamples else { return nil }
 
         let speechSeconds = try speechLikeSeconds(
-            from: tailStartSample, to: totalSamples, threshold: adaptiveSpeechRmsThreshold())
+            from: tailStartSample, to: totalSamples, threshold: speechRmsThreshold)
         guard speechSeconds >= seamGapMinSpeechSeconds else { return nil }
 
         let windowSamples = max(
@@ -1522,6 +1527,7 @@ struct ChunkProcessor {
         decoderLayers: Int,
         maxModelSamples: Int,
         minTailSeconds: Double,
+        speechRmsThreshold: Float,
         spliceSafeTokenIds: Set<Int>?,
         vocabulary: [Int: String],
         language: Language?
@@ -1535,7 +1541,8 @@ struct ChunkProcessor {
                 lastTokenTimestamp: last.timestamp,
                 lastTokenDuration: last.duration,
                 minTailSeconds: minTailSeconds,
-                maxModelSamples: maxModelSamples
+                maxModelSamples: maxModelSamples,
+                speechRmsThreshold: speechRmsThreshold
             )
         else { return tokens }
 
@@ -1573,15 +1580,16 @@ struct ChunkProcessor {
                 windowDurations.count == windowTokens.count
                 ? windowDurations : Array(repeating: 0, count: windowTokens.count)
 
-            // Keep only tokens strictly past the last emitted token, starting
-            // at a word-initial piece; `gapEndFrame` is one past the final
-            // audio frame so no real trailing token is filtered out.
+            // Keep only tokens strictly past the last token's decoded END
+            // (same boundary as the probe and the seam pass), starting at a
+            // word-initial piece; `gapEndFrame` is one past the final audio
+            // frame so no real trailing token is filtered out.
             let candidate = Self.spliceCandidate(
                 windowTokens: windowTokens,
                 windowTimestamps: windowTimestamps,
                 windowConfidences: windowConfidences,
                 windowDurations: durations,
-                gapStartFrame: last.timestamp,
+                gapStartFrame: probe.tailStartFrame,
                 gapEndFrame: lastAudioFrame + 2,
                 leadNeighbor: leadNeighbor,
                 tailNeighbor: last,
@@ -1620,11 +1628,14 @@ struct ChunkProcessor {
         guard let firstPiece = candidate.first.flatMap({ vocabulary[$0.token] }) else { return tokens }
         // Word-initial pieces carry a "▁" (raw SentencePiece) or " " (decoded
         // vocabulary) boundary marker.
-        let firstWord = firstPiece.drop(while: { $0 == "▁" || $0 == " " })
+        let boundaryMarker = Character(ASRConstants.sentencePieceWordBoundary)
+        let firstWord = firstPiece.drop(while: { $0 == boundaryMarker || $0 == " " })
         guard let firstCharacter = firstWord.first, firstCharacter.isLowercase else { return tokens }
 
+        // The hallucinated sentence end is a single token; trim at most one so
+        // a genuine punctuation run ("?!", "...") is never fully consumed.
         var working = tokens
-        while let lastPiece = working.last.flatMap({ vocabulary[$0.token] }),
+        if let lastPiece = working.last.flatMap({ vocabulary[$0.token] }),
             !lastPiece.isEmpty,
             lastPiece.allSatisfy({ sentenceFinalPunctuation.contains($0) })
         {
