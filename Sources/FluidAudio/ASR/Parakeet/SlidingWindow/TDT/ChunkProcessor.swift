@@ -27,15 +27,10 @@ struct ChunkProcessor {
     // - 2.0s overlap (frame-aligned) to give the decoder slack when merging windows
     let overlapSeconds: Double = 2.0
 
-    /// Context samples prepended from previous chunk for mel spectrogram stability (80ms = 1 encoder frame).
-    /// The FastConformer encoder's depthwise convolutions need left context for stable output.
-    /// Without this, the first frames of a chunk may produce features that cause all-blank predictions.
-    ///
-    /// Issue #594: on `parakeet-tdt-0.6b-v3-coreml` multilingual long-form
-    /// audio this prepend can shift the encoder's first-frame distribution
-    /// enough to make the SOS-primed decoder drift to its English-biased prior.
-    /// Callers can opt out via `ASRConfig.melChunkContext = false` to
-    /// use the v3/no-mel boundary warmup path below.
+    /// 80ms prepend from the previous chunk so the encoder's convolutions
+    /// have left context (blank-first-frames fix, PR #264). Opt out via
+    /// `ASRConfig.melChunkContext` for v3 multilingual drift (issue #594) —
+    /// see "Current Paths" in Documentation/ASR/LongTranscription.md.
     private let melContextSamples: Int = ASRConstants.samplesPerEncoderFrame  // 1280 samples = 80ms
 
     /// Default v3/no-mel path warmup size. v42 intentionally keeps the
@@ -79,14 +74,12 @@ struct ChunkProcessor {
         return raw / ASRConstants.samplesPerEncoderFrame * ASRConstants.samplesPerEncoderFrame
     }
 
-    /// End-align the final window (issue #747). A short final chunk zero-padded
-    /// to the model window is the degenerate input that decodes to all-blank on
-    /// quiet audio. Instead, grow the warmup prefix backwards with real audio
-    /// until the window is full: the prefix is decoded and its tokens suppressed
-    /// (the existing warmup mechanics), so the emitted coverage — and therefore
-    /// the merge overlap — is exactly what the zero-padded layout produced.
-    /// Returns `defaultWarmupSamples` unchanged when the remaining audio already
-    /// fills the window or nothing precedes the chunk (single-chunk files).
+    /// End-align the final window (issue #747): fill a short last chunk
+    /// backwards with real audio (decoded as a suppressed warmup prefix)
+    /// instead of zero-padding — emitted coverage is unchanged. See
+    /// "End-Aligned Final Window" in Documentation/ASR/LongTranscription.md.
+    /// Non-final chunks, already-full windows, and single-chunk files pass
+    /// `defaultWarmupSamples` through unchanged.
     static func lastChunkWarmupSamples(
         chunkStart: Int,
         defaultWarmupSamples: Int,
@@ -94,8 +87,10 @@ struct ChunkProcessor {
         totalSamples: Int
     ) -> Int {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
+        let defaultVisible = max(frameSamples, chunkSamples - defaultWarmupSamples)
+        let isLastChunk = chunkStart + defaultVisible >= totalSamples
         let remaining = totalSamples - chunkStart
-        guard remaining > 0, chunkStart > 0 else { return defaultWarmupSamples }
+        guard isLastChunk, remaining > 0, chunkStart > 0 else { return defaultWarmupSamples }
         // Frame-aligned so the suppression boundary maps to an exact frame.
         let fill = (chunkSamples - remaining) / frameSamples * frameSamples
         guard fill > 0 else { return defaultWarmupSamples }
@@ -494,15 +489,11 @@ struct ChunkProcessor {
                 let defaultWarmupSamples =
                     chunkIndex > 0 && chunkDecision.useWarmupPrefix
                     ? min(warmupPrefixSamples, chunkStart) : 0
-                let defaultVisibleSamples = max(
-                    ASRConstants.samplesPerEncoderFrame,
-                    chunkSamples - defaultWarmupSamples
-                )
-                let isLastChunk = chunkStart + defaultVisibleSamples >= totalSamples
                 // A short final chunk fills its window backwards with real
-                // audio instead of zero padding (issue #747).
+                // audio instead of zero padding (issue #747); V2-family
+                // decoders can't suppress the prefix and keep the old layout.
                 let warmupSamples =
-                    isLastChunk && Self.supportsSuppressedPrefix(modelVersion)
+                    Self.supportsSuppressedPrefix(modelVersion)
                     ? Self.lastChunkWarmupSamples(
                         chunkStart: chunkStart,
                         defaultWarmupSamples: defaultWarmupSamples,
@@ -514,6 +505,7 @@ struct ChunkProcessor {
                     chunkSamples - warmupSamples
                 )
                 let candidateEnd = chunkStart + visibleChunkSamples
+                let isLastChunk = candidateEnd >= totalSamples
                 let chunkEnd = isLastChunk ? totalSamples : candidateEnd
 
                 if chunkEnd <= chunkStart {
@@ -754,11 +746,8 @@ struct ChunkProcessor {
         return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, hypothesis.tokenDurations)
     }
 
-    /// Token IDs whose vocabulary piece may safely start the portion spliced
-    /// in from the `right` window at a seam: SentencePiece word-initial pieces
-    /// (`▁` prefix) or punctuation-only pieces (which attach to the previous
-    /// word by design). Returns nil for an empty vocabulary so merge behavior
-    /// is unchanged when no vocabulary is available (issue #683).
+    /// Token IDs that may safely start a seam splice: word-initial (`▁`) or
+    /// punctuation-only pieces (issue #683). Nil for an empty vocabulary.
     static func spliceSafeTokenIds(vocabulary: [Int: String]) -> Set<Int>? {
         guard !vocabulary.isEmpty else { return nil }
         var ids = Set<Int>()
@@ -768,23 +757,10 @@ struct ChunkProcessor {
         return ids
     }
 
-    /// Maps every token ID that has a case-only twin in the vocabulary to a
-    /// shared canonical ID, so the overlap matcher can treat e.g. `▁Meeting`
-    /// and `▁meeting` as the same word (issue #706).
-    ///
-    /// A window that begins mid-sentence biases the RNNT decoder to capitalize
-    /// its first word as if it started a sentence. In the 2 s overlap the
-    /// previous (left) window already heard that word lower-cased with real
-    /// left context, but the exact-ID matcher misses the seam pair because the
-    /// IDs differ — so the word survives in both windows and decodes twice,
-    /// the second copy spuriously capitalized ("the meeting Meeting was").
-    /// Folding case at match time lets the seam word anchor and collapse to the
-    /// left window's contextually-correct casing.
-    ///
-    /// Only IDs that actually share a folded piece with another ID are
-    /// included, so the map stays small and exact-ID matching is unchanged for
-    /// every token without a case twin. Returns nil for an empty vocabulary so
-    /// behavior is unchanged when no vocabulary is available.
+    /// Maps token IDs with a case-only twin to a shared canonical ID so the
+    /// overlap matcher aligns `▁Meeting`/`▁meeting` at seams (issue #706) —
+    /// see "Case-Folded Matching" in Documentation/ASR/LongTranscription.md.
+    /// Nil for an empty vocabulary.
     static func caseVariantCanonicalIds(vocabulary: [Int: String]) -> [Int: Int]? {
         guard !vocabulary.isEmpty else { return nil }
         var groups: [String: [Int]] = [:]
@@ -793,31 +769,18 @@ struct ChunkProcessor {
         }
         var canon: [Int: Int] = [:]
         for (folded, ids) in groups where ids.count > 1 {
-            // Only groups with a genuine case twin survive; pure-lowercase,
-            // punctuation and numeric pieces are unique and stay singletons.
-            // Make the all-lower-case variant the canonical ID so a later
-            // collapse can tell which copy of a seam duplicate to keep.
+            // Lower-case variant is canonical so the collapse knows which
+            // copy of a seam duplicate to keep.
             let canonical = ids.first { vocabulary[$0] == folded } ?? ids.min()!
             for id in ids { canon[id] = canonical }
         }
         return canon.isEmpty ? nil : canon
     }
 
-    /// Issue #706: drop an adjacent case-only duplicate of a seam *word* left by
-    /// a window that re-emitted the seam word as a false sentence start — e.g.
-    /// the previous window ended `...we don't have` and the next emitted
-    /// `Have a...`, leaving `we don't have Have a`. Works at the word level
-    /// (reconstructing SentencePiece words from the token stream) so it catches
-    /// multi-token words too — essential for the small Unified subword vocab,
-    /// where whole words like `have`/`Have` are several pieces and a token-level
-    /// check never sees them as a unit.
-    ///
-    /// A pair collapses only when the two words are equal up to case, differ in
-    /// case, start within the overlap window, and the earlier word does not end
-    /// a sentence — so genuine repeats (`that that`), same-case duplicates, and
-    /// legitimate sentence boundaries (`...thank you. You said...`) are left
-    /// alone. The lower-cased copy is kept (it is the one with real left
-    /// context); if neither is lower-case the earlier copy wins.
+    /// Drops an adjacent case-only duplicate of a seam word ("…have Have a…")
+    /// left by a false sentence start, at word granularity (issue #706) — see
+    /// "Case-Folded Matching" in Documentation/ASR/LongTranscription.md for
+    /// the collapse conditions and what is deliberately left alone.
     func collapseSeamWordDuplicates(
         _ tokens: [TokenWindow],
         vocabulary: [Int: String]
@@ -1027,10 +990,8 @@ struct ChunkProcessor {
         return timeDifference < tolerance
     }
 
-    /// Two token IDs match when they are equal, or — issue #706 — when they are
-    /// case-only variants of the same vocabulary piece (e.g. `▁Meeting`/
-    /// `▁meeting`), so a seam word the right window capitalized as a false
-    /// sentence start still anchors against the left window's lower-cased copy.
+    /// Token IDs match when equal or case-only variants of the same piece
+    /// (issue #706), so a falsely capitalized seam word still anchors.
     private func tokenIdsMatch(_ left: Int, _ right: Int, caseVariantIds: [Int: Int]?) -> Bool {
         if left == right { return true }
         guard let caseVariantIds, let lhs = caseVariantIds[left], let rhs = caseVariantIds[right] else {
@@ -1083,26 +1044,18 @@ struct ChunkProcessor {
                 let firstTail = tail.first,
                 !safeIds.contains(firstTail.token)
             {
-                // Issue #683: the splice lands mid-word — right's first
-                // post-match piece continues the word containing the matched
-                // anchor, so splicing here can decode a left-prefix +
-                // right-suffix hybrid or glue two words together. Re-splice
-                // at a word boundary so exactly one window segments the
-                // seam word.
+                // Issue #683: the splice lands mid-word — re-splice at a word
+                // boundary so exactly one window segments the seam word. See
+                // "Word-Boundary Splice Repair" in LongTranscription.md.
                 if let wordStart = wordInitialIndex(in: right, endingAt: lastRight, safeIds: safeIds),
                     popSeamWord(from: &result, safeIds: safeIds)
                 {
-                    // The right window heard the seam word from its start —
-                    // adopt its segmentation of the whole word. (The left
-                    // window's chunk often ends mid-word here, so its view
-                    // of the word is the truncated one.)
+                    // Right heard the seam word from its start — adopt its
+                    // segmentation of the whole word.
                     result.append(contentsOf: right[wordStart...])
                 } else {
-                    // The right window was cut mid-word at its stream start
-                    // (no word-initial piece before the anchor): the left
-                    // window owns the seam word. Complete it with left's own
-                    // continuation pieces and resume right at its next
-                    // word-initial piece instead of gluing.
+                    // Right begins mid-word: left owns the seam word; resume
+                    // right at its next word-initial piece instead of gluing.
                     if let lastLeft = leftIndices.last {
                         var cursor = lastLeft + 1
                         while cursor < left.count, !safeIds.contains(left[cursor].token) {
@@ -1113,11 +1066,8 @@ struct ChunkProcessor {
                     if let resume = tail.firstIndex(where: { safeIds.contains($0.token) }) {
                         result.append(contentsOf: tail[resume...])
                     } else {
-                        // No word-initial piece anywhere in the tail — the
-                        // right window simply ended mid-word. Keep its
-                        // continuation pieces verbatim rather than silently
-                        // dropping real content (a possible glue beats
-                        // dropping a word).
+                        // No word-initial piece in the tail: keep it verbatim
+                        // — a possible glue beats dropping a word (PR #759).
                         result.append(contentsOf: tail)
                     }
                 }
@@ -1144,13 +1094,10 @@ struct ChunkProcessor {
         return nil
     }
 
-    /// Remove the trailing seam word (continuation pieces plus its
-    /// word-initial piece) from `result` so the right window's segmentation
-    /// of the same word can replace it. Returns false — leaving `result`
-    /// untouched — when no word-initial piece exists in `result` at all.
-    /// Bounded only by the start of `result`, symmetric with the unbounded
-    /// backward search `wordInitialIndex` does on the `right` side — a fixed
-    /// per-word piece cap would false-negative on long seam words.
+    /// Remove the trailing seam word from `result` so the right window's
+    /// segmentation can replace it; false (untouched) when `result` has no
+    /// word-initial piece. Unbounded scan — a piece cap false-negatives on
+    /// long seam words (PR #759).
     private func popSeamWord(from result: inout [TokenWindow], safeIds: Set<Int>) -> Bool {
         var cursor = result.count - 1
         while cursor >= 0 {
@@ -1177,20 +1124,16 @@ struct ChunkProcessor {
         var leftEnd = left.firstIndex { Double($0.timestamp) * frameDuration >= cutoff } ?? left.count
         var rightStart = right.firstIndex { Double($0.timestamp) * frameDuration >= cutoff } ?? right.count
         if let safeIds = spliceSafeTokenIds {
-            // Issue #683: a pure time cutoff can split a word. Extend the
-            // left stream until the word it started is complete, and drop
-            // orphaned continuation pieces (whose word-initial piece was
-            // trimmed away) from the head of the right stream.
+            // Issue #683: a pure time cutoff can split a word — let left
+            // finish its word, drop orphaned continuation pieces from right.
             if leftEnd > 0 {
                 while leftEnd < left.count, !safeIds.contains(left[leftEnd].token) {
                     leftEnd += 1
                 }
             }
-            // Scan into a temporary index first: only adopt the advanced
-            // cutoff if a splice-safe token was actually found ahead of it.
-            // If none exists, the loop would otherwise walk `rightStart` all
-            // the way to `right.count`, discarding the entire right window —
-            // fall back to the original cutoff-based split instead.
+            // Adopt the advanced cutoff only if a splice-safe token exists
+            // ahead — otherwise the whole right window would be discarded
+            // (PR #759); fall back to the cutoff-based split.
             var scanIndex = rightStart
             while scanIndex < right.count, !safeIds.contains(right[scanIndex].token) {
                 scanIndex += 1
@@ -1204,49 +1147,35 @@ struct ChunkProcessor {
 
     // MARK: - Seam-gap repair (issue #758)
 
-    /// Maximum number of gap probes per file — a backstop against
-    /// pathological inputs (e.g. hours of intermittent noise). A half-hour
-    /// conference recording with applause breaks legitimately probes ~12
-    /// gaps, and iteration over residual gaps needs headroom beyond that.
+    /// Probe budget per file — backstop against pathological inputs; sizing
+    /// rationale in "Post-Merge Repair Pass" (LongTranscription.md).
     private var maxSeamGapRepairs: Int { 32 }
 
-    // Adaptive speech-gate constants. Value rationale in "Adaptive
-    // Speech-Energy Gate" (Documentation/ASR/LongTranscription.md).
+    // Adaptive speech-gate constants. Per-value rationale (dBFS anchors,
+    // clamp structure, percentile choice) lives in the constants table under
+    // "Adaptive Speech-Energy Gate" in Documentation/ASR/LongTranscription.md.
 
-    /// Ceiling (~-42 dBFS): the pre-adaptive fixed gate, tuned on
-    /// normal-level recordings — clamping to it keeps those byte-identical.
+    /// Ceiling (~-42 dBFS): the pre-adaptive fixed gate.
     static let speechRmsCeiling: Float = 0.008
 
-    /// Floor (~-66 dBFS): above 16-bit dither and quiet room tone, below
-    /// the quietest validated speech (#747 reproducer tail, RMS ≈ 0.001).
+    /// Floor (~-66 dBFS): above dither/room tone, below quiet speech.
     static let speechRmsFloor: Float = 0.0005
 
-    /// Gate at ~-10.5 dB under the speech reference: trailing syllables and
-    /// fricatives decay 6–12 dB below voiced level, noise floors sit 20+ dB
-    /// below — the scale parks the threshold between the two.
+    /// ~-10.5 dB under the speech reference.
     static let speechRmsReferenceScale: Float = 0.3
 
-    /// Reference percentile of per-frame RMS, over non-digital-silence
-    /// frames. p50 lands on silence in pause-heavy files; p90+ converges on
-    /// the max and is skewed by plosives/clipping. Assumes speech fills ≥25%
-    /// of the *recorded* frames — whole-file, so a loud-body/quiet-tail
-    /// recording defeats it (Known Limitations).
+    /// Reference percentile over non-digital-silence frames.
     static let speechRmsReferencePercentile = 0.75
 
     /// Speech-energy threshold scaled to the recording's own level — an
-    /// absolute gate can never fire on quiet audio, the class that blanks
-    /// out (issue #747).
+    /// absolute gate can never fire on quiet audio (issue #747).
     static func adaptiveSpeechRmsThreshold(referenceRms: Float, floor: Float, ceiling: Float) -> Float {
         min(ceiling, max(floor, referenceRms * speechRmsReferenceScale))
     }
 
-    /// Recording-level threshold from the `speechRmsReferencePercentile`
-    /// per-frame RMS. All-zero frames are excluded from the percentile: exact
-    /// digital silence (muted spans, inserted gaps) is *no recording* — real
-    /// capture always carries dither/room tone — and counting it drags the
-    /// percentile to zero on silence-heavy files, collapsing the gate to its
-    /// floor. Quiet-but-nonzero frames stay in: excluding them would need a
-    /// silence threshold, which is the very thing being derived.
+    /// Recording-level threshold from the reference percentile of per-frame
+    /// RMS. All-zero frames are excluded — digital silence is no recording
+    /// and drags the percentile to the floor on silence-heavy files.
     private func adaptiveSpeechRmsThreshold() throws -> Float {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         var frameRms: [Float] = []
@@ -1307,18 +1236,10 @@ struct ChunkProcessor {
         return stream[neighborIndex]
     }
 
-    /// Filter a probe window's decoded tokens down to the run that may be
-    /// spliced into a gap:
-    ///
-    /// - only tokens strictly inside the gap (one-frame margins), so words
-    ///   the merged stream already has are never duplicated;
-    /// - never splice in mid-word — the run starts at a word-initial (or
-    ///   punctuation) piece (same rule as the seam merge, #683);
-    /// - edge dedupe: the probe can re-hear the word bordering the gap at a
-    ///   slightly shifted frame, sometimes with different capitalisation
-    ///   ("▁for" vs "▁For") — keep the merged stream's copy, not both. The
-    ///   tolerance is deliberately tight (6 frames = 0.48s): genuine
-    ///   stutters ("I I") re-heard by the probe sit at or beyond it.
+    /// Filter a probe window's tokens to the spliceable run: strictly
+    /// in-gap, word-initial start, edge dedupe of re-heard border words —
+    /// rules and tolerances in "Post-Merge Repair Pass"
+    /// (LongTranscription.md).
     static func spliceCandidate(
         windowTokens: [Int],
         windowTimestamps: [Int],
@@ -1393,13 +1314,10 @@ struct ChunkProcessor {
     }
     #endif
 
-    /// Detect inter-token gaps that plausibly contain dropped speech and
-    /// re-decode each with a single fresh window centred on the gap. Because
-    /// the window is decoded from silence-free state with no seam inside it,
-    /// it recovers spans the chunk merger dropped (issue #758). Only tokens
-    /// strictly inside the gap are spliced in, starting at a word-initial
-    /// piece; a gap of genuine silence produces no in-gap tokens and the
-    /// stream is returned unchanged.
+    /// Re-decode inter-token gaps that plausibly contain dropped speech with
+    /// a fresh seam-free window and splice in only in-gap tokens (issue
+    /// #758). Genuine silence splices nothing. See "Post-Merge Repair Pass"
+    /// in Documentation/ASR/LongTranscription.md.
     private func repairSeamGaps(
         in tokens: [TokenWindow],
         using manager: AsrManager,
@@ -1424,10 +1342,8 @@ struct ChunkProcessor {
         var working = tokens
         var probes = 0
         var probedGapStarts = Set<Int>()
-        // A successful repair can leave a residual gap (e.g. recovered
-        // speech, then applause, then more dropped speech): iterate so the
-        // residual — whose start has moved — gets its own probe. Gaps that
-        // yielded nothing keep the same start and are skipped via the memo.
+        // Iterate so a partial recovery's residual gap (start has moved)
+        // gets its own probe; yielded-nothing gaps are memoized and skipped.
         for _ in 0..<3 {
             var inserts: [TokenWindow] = []
 
@@ -1453,12 +1369,9 @@ struct ChunkProcessor {
                 probedGapStarts.insert(gapStartFrame)
                 probes += 1
 
-                // Probe placement matters: the merger dropped this span because
-                // the decoder blanks after low-SNR audio, and a probe window that
-                // replays the same pre-gap audio can blank the same way. Start
-                // the fresh window AT the gap (the decoder cold-starts directly
-                // on the dropped speech, without the noise history); fall back
-                // to a gap-centred window for spans the first placement misses.
+                // Cold-start AT the gap first (replaying the pre-gap noise
+                // can re-blank), gap-centred fallback — see "Placement
+                // matters" in LongTranscription.md.
                 let gapCenterSample = (gapStartSample + gapEndSample) / 2
                 let placements = [gapStartSample, gapCenterSample - windowSamples / 2]
                 var recovered: [TokenWindow] = []

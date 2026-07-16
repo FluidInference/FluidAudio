@@ -255,6 +255,10 @@ merge-level fixes (PR #708, shared with the Unified path):
 - **Case-folded overlap matching** — `caseVariantCanonicalIds` maps case-only
   token twins to one canonical ID so `tokenIdsMatch` aligns them at the
   seam; the word collapses to the left window's contextually correct casing.
+  The all-lower-case variant is chosen as the canonical ID so the collapse
+  can tell which copy of a seam duplicate to keep (the lower-cased one has
+  real left context); only IDs with a genuine case twin enter the map, so
+  exact-ID matching is unchanged for every other token.
 - **`collapseSeamWordDuplicates`** — reconstructs SentencePiece *words* from
   the token stream and drops an adjacent case-only duplicate inside the
   overlap window. Word-level reconstruction matters for small subword
@@ -380,10 +384,17 @@ window:
 - Only tokens strictly inside the gap are spliced in (`spliceCandidate`),
   starting at a word-initial piece (same rule as the seam merge, #683),
   with punctuation-aware, case-insensitive edge dedupe against the words
-  bordering the gap.
+  bordering the gap. The probe can re-hear a bordering word at a slightly
+  shifted frame, sometimes re-capitalized ("▁for" vs "▁For") — the merged
+  stream's copy is kept. The dedupe tolerance is deliberately tight
+  (6 frames = 0.48 s): genuine stutters ("I I") re-heard by the probe sit
+  at or beyond it.
 - The scan iterates (max 3 rounds) so a partial recovery's residual gap
   gets its own probe; a probed-gap memo prevents re-probing silent pauses
-  and a 32-probe budget (`maxSeamGapRepairs`) bounds pathological inputs.
+  and a 32-probe budget (`maxSeamGapRepairs`) bounds pathological inputs
+  (hours of intermittent noise). A half-hour conference recording with
+  applause breaks legitimately probes ~12 gaps, and residual-gap iteration
+  needs headroom beyond that — hence 32.
 - Genuine silence yields no in-gap tokens by construction and is left
   untouched.
 

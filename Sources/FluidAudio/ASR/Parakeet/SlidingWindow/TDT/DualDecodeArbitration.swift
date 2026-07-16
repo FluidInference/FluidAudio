@@ -358,26 +358,19 @@ extension ChunkProcessor {
         maxModelSamples: Int,
         language: Language?
     ) async throws -> [TokenWindow] {
-        let defaultVisibleSamples = max(
-            ASRConstants.samplesPerEncoderFrame,
-            chunkSamples - requestedWarmupSamples
-        )
-        let isLastChunk = chunkStart + defaultVisibleSamples >= totalSamples
         // A short final chunk fills its window backwards with real audio
-        // instead of zero padding (issue #747).
-        let warmupSamples =
-            isLastChunk
-            ? Self.lastChunkWarmupSamples(
-                chunkStart: chunkStart,
-                defaultWarmupSamples: requestedWarmupSamples,
-                chunkSamples: chunkSamples,
-                totalSamples: totalSamples)
-            : requestedWarmupSamples
+        // instead of zero padding (issue #747); no-op for non-final chunks.
+        let warmupSamples = Self.lastChunkWarmupSamples(
+            chunkStart: chunkStart,
+            defaultWarmupSamples: requestedWarmupSamples,
+            chunkSamples: chunkSamples,
+            totalSamples: totalSamples)
         let visibleChunkSamples = max(
             ASRConstants.samplesPerEncoderFrame,
             chunkSamples - warmupSamples
         )
         let candidateEnd = chunkStart + visibleChunkSamples
+        let isLastChunk = candidateEnd >= totalSamples
         let chunkEnd = isLastChunk ? totalSamples : candidateEnd
 
         if chunkEnd <= chunkStart {

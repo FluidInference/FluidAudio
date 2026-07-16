@@ -88,10 +88,11 @@ final class EndAlignedFinalWindowTests: XCTestCase {
         XCTAssertEqual(warmup, chunkStart)
     }
 
-    func testKeepsLargerDefaultWarmup() {
-        // A path-B style warmup larger than the backfill is never shrunk.
+    func testNonFinalChunkKeepsRequestedWarmup() {
+        // Plenty of audio remains past this chunk: the backfill must not
+        // touch a mid-file chunk's warmup (last-chunk detection is internal).
         let chunkStart = chunkSamples
-        let totalSamples = chunkStart + chunkSamples - frameSamples
+        let totalSamples = chunkStart + 3 * chunkSamples
         let defaultWarmup = 2 * frameSamples
 
         let warmup = ChunkProcessor.lastChunkWarmupSamples(
@@ -102,6 +103,24 @@ final class EndAlignedFinalWindowTests: XCTestCase {
         )
 
         XCTAssertEqual(warmup, defaultWarmup)
+    }
+
+    func testFinalChunkBackfillNeverShrinksDefaultWarmup() {
+        // On a genuine final chunk the fill is >= any default warmup by
+        // construction; max() guards the invariant regardless.
+        let chunkStart = chunkSamples
+        let defaultWarmup = 2 * frameSamples
+        let totalSamples = chunkStart + chunkSamples - 4 * frameSamples
+
+        let warmup = ChunkProcessor.lastChunkWarmupSamples(
+            chunkStart: chunkStart,
+            defaultWarmupSamples: defaultWarmup,
+            chunkSamples: chunkSamples,
+            totalSamples: totalSamples
+        )
+
+        XCTAssertGreaterThanOrEqual(warmup, defaultWarmup)
+        XCTAssertEqual(warmup, 4 * frameSamples)
     }
 
     func testUnalignedChunkStartStaysFrameAlignedAndInBounds() {
