@@ -1,4 +1,5 @@
 @preconcurrency import CoreML
+import Accelerate
 import Foundation
 
 /// A recognized token together with its time span (seconds) in the source audio.
@@ -70,7 +71,7 @@ public actor ParaformerManager {
 
         // 4) decoder -> logits, then greedy decode
         let logits = try runDecoder(encRows: encRows, validLen: T, embeds: embeds, tokenCount: L)
-        return decode(logits: logits, tokenCount: L, dim: dim)
+        return decode(logits: logits, tokenCount: L)
     }
 
     // MARK: - Timestamps
@@ -133,27 +134,14 @@ public actor ParaformerManager {
     private func decodeWithTimestamps(
         logits: MLMultiArray, tokenCount: Int, alphas: [Float], audio: [Float]
     ) -> [TimestampedSegment] {
-        let vocabSize = logits.shape[2].intValue
         let upsampleRate = 3
         let timeRate = 10.0 * 6.0 / 1000.0 / Double(upsampleRate) // 0.02 s
         let cifThreshold: Float = 1.0 - 1e-4
 
         // 1) Greedy decode every decoder position; ids stay 1:1 with the acoustic
-        //    fire frames.
-        var tokenIds: [Int] = []
-        let useFast = logits.dataType == .float32
-        let p = useFast ? logits.dataPointer.assumingMemoryBound(to: Float32.self) : nil
-        for t in 0..<tokenCount {
-            var best = 0
-            var bestVal: Float = -.infinity
-            for v in 0..<vocabSize {
-                let x = useFast
-                    ? p![t * vocabSize + v]
-                    : logits[[0, t as NSNumber, v as NSNumber]].floatValue
-                if x > bestVal { bestVal = x; best = v }
-            }
-            tokenIds.append(best)
-        }
+        //    fire frames. Uses Accelerate (vDSP_maxvi) + stride-correct pointer read,
+        //    matching `decode` and the SenseVoice CTC optimization.
+        let tokenIds = greedyArgmax(logits: logits, tokenCount: tokenCount)
 
         // 2) char_list: drop <blank>/<s>/</s> (keep ▁ if present).
         var charList: [String] = []
@@ -442,21 +430,55 @@ public actor ParaformerManager {
         return logits
     }
 
-    private func decode(logits: MLMultiArray, tokenCount: Int, dim: Int) -> String {
+    /// Greedy argmax over the decoder logits `[1, L, V]` for the first `tokenCount`
+    /// positions. Returns the raw token ids (before special-token filtering).
+    ///
+    /// This mirrors the SenseVoice CTC-decode optimization: a naive Swift loop over
+    /// `tokenCount × vocab` (~1M for Paraformer) of `MLMultiArray` `NSNumber` reads is
+    /// several hundred milliseconds; `vDSP_maxvi` (SIMD) collapses it to sub-ms. The
+    /// real row `stride` is used (CoreML pads rows for ANE alignment, e.g. 8404→8408),
+    /// so it is correct for both float16 (converted via `vImage` first) and float32.
+    private func greedyArgmax(logits: MLMultiArray, tokenCount: Int) -> [Int] {
         let vocab = logits.shape[2].intValue
-        var pieces: [String] = []
-        let useFast = logits.dataType == .float32
-        let p = useFast ? logits.dataPointer.assumingMemoryBound(to: Float32.self) : nil
-        for t in 0..<tokenCount {
-            var best = 0
-            var bestVal: Float = -.infinity
-            for v in 0..<vocab {
-                let x = useFast ? p![t * vocab + v] : logits[[0, t as NSNumber, v as NSNumber]].floatValue
-                if x > bestVal {
-                    bestVal = x
-                    best = v
-                }
+        // The frame stride may exceed `vocab` (CoreML pads rows for ANE alignment).
+        // Use the real stride and only scan `vocab` elements per row.
+        let frameStride = logits.strides[1].intValue
+        var ids: [Int] = []
+        ids.reserveCapacity(tokenCount)
+
+        func runLoop(_ p: UnsafePointer<Float>) {
+            for t in 0..<tokenCount {
+                let base = t * frameStride
+                var bestVal: Float = 0
+                var bestIdx = vDSP_Length(0)
+                vDSP_maxvi(p + base, 1, &bestVal, &bestIdx, vDSP_Length(vocab))
+                ids.append(Int(bestIdx))
             }
+        }
+
+        if logits.dataType == .float32 {
+            runLoop(logits.dataPointer.assumingMemoryBound(to: Float32.self))
+        } else {
+            let count = tokenCount * frameStride
+            var buf = [Float](repeating: 0, count: count)
+            let src = logits.dataPointer.assumingMemoryBound(to: Float16.self)
+            var srcBuf = vImage_Buffer(
+                data: UnsafeMutableRawPointer(mutating: src),
+                height: 1, width: vImagePixelCount(count),
+                rowBytes: count * MemoryLayout<Float16>.size)
+            var dstBuf = vImage_Buffer(
+                data: &buf, height: 1, width: vImagePixelCount(count),
+                rowBytes: count * MemoryLayout<Float>.size)
+            vImageConvert_Planar16FtoPlanarF(&srcBuf, &dstBuf, 0)  // float16 → float32
+            buf.withUnsafeBufferPointer { runLoop($0.baseAddress!) }
+        }
+        return ids
+    }
+
+    private func decode(logits: MLMultiArray, tokenCount: Int) -> String {
+        let ids = greedyArgmax(logits: logits, tokenCount: tokenCount)
+        var pieces: [String] = []
+        for best in ids {
             if best == ParaformerConfig.blankId || best == ParaformerConfig.sosId || best == ParaformerConfig.eosId {
                 continue
             }
@@ -471,15 +493,20 @@ public actor ParaformerManager {
     private func rows(of arr: MLMultiArray, count: Int, dim: Int) -> [[Float]] {
         var out: [[Float]] = []
         out.reserveCapacity(count)
+        // Use the real row stride: CoreML pads rows for ANE alignment, so the
+        // stride between consecutive frames may exceed `dim`.
+        let frameStride = arr.strides[1].intValue
         if arr.dataType == .float32 {
             let p = arr.dataPointer.assumingMemoryBound(to: Float32.self)
             for t in 0..<count {
-                out.append(Array(UnsafeBufferPointer(start: p + t * dim, count: dim)))
+                out.append(Array(UnsafeBufferPointer(start: p + t * frameStride, count: dim)))
             }
         } else {
+            let p = arr.dataPointer.assumingMemoryBound(to: Float16.self)
             for t in 0..<count {
                 var r = [Float](repeating: 0, count: dim)
-                for d in 0..<dim { r[d] = arr[[0, t as NSNumber, d as NSNumber]].floatValue }
+                let base = t * frameStride
+                for d in 0..<dim { r[d] = Float(p[base + d]) }
                 out.append(r)
             }
         }
