@@ -252,4 +252,24 @@ final class SeamGapRepairTests: XCTestCase {
             ChunkProcessor.adaptiveSpeechRmsThreshold(referenceRms: 0.0, floor: 0.0005, ceiling: 0.008),
             0.0005)
     }
+
+    func testDigitalSilenceFramesAreExcludedFromTheReference() throws {
+        // 80% exact zeros + 20% quiet tone: counting the zeros would put the
+        // percentile on digital silence and collapse the gate to its floor.
+        // Excluded, the reference lands on the tone's own level.
+        var samples = [Float](repeating: 0.0, count: 16000 * 4)
+        for i in 0..<(16000 * 4 / 5) {
+            samples[i] = 0.004 * sin(Float(i) * 0.1)  // RMS ≈ 0.0028
+        }
+        let processor = ChunkProcessor(audioSamples: samples)
+        let threshold = try processor.adaptiveSpeechRmsThresholdForTesting()
+        XCTAssertGreaterThan(threshold, ChunkProcessor.speechRmsFloor)
+        XCTAssertEqual(threshold, 0.0028 * 0.3, accuracy: 0.0002)
+    }
+
+    func testAllDigitalSilenceFileFallsBackToCeiling() throws {
+        let processor = ChunkProcessor(audioSamples: [Float](repeating: 0.0, count: 16000 * 2))
+        let threshold = try processor.adaptiveSpeechRmsThresholdForTesting()
+        XCTAssertEqual(threshold, ChunkProcessor.speechRmsCeiling)
+    }
 }

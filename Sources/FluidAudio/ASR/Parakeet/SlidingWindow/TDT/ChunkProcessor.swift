@@ -1226,10 +1226,11 @@ struct ChunkProcessor {
     /// below — the scale parks the threshold between the two.
     static let speechRmsReferenceScale: Float = 0.3
 
-    /// Reference percentile of per-frame RMS. p50 lands on silence in
-    /// pause-heavy files; p90+ converges on the max and is skewed by
-    /// plosives/clipping. Assumes speech fills ≥25% of frames — whole-file,
-    /// so a loud-body/quiet-tail recording defeats it (Known Limitations).
+    /// Reference percentile of per-frame RMS, over non-digital-silence
+    /// frames. p50 lands on silence in pause-heavy files; p90+ converges on
+    /// the max and is skewed by plosives/clipping. Assumes speech fills ≥25%
+    /// of the *recorded* frames — whole-file, so a loud-body/quiet-tail
+    /// recording defeats it (Known Limitations).
     static let speechRmsReferencePercentile = 0.75
 
     /// Speech-energy threshold scaled to the recording's own level — an
@@ -1240,7 +1241,12 @@ struct ChunkProcessor {
     }
 
     /// Recording-level threshold from the `speechRmsReferencePercentile`
-    /// per-frame RMS.
+    /// per-frame RMS. All-zero frames are excluded from the percentile: exact
+    /// digital silence (muted spans, inserted gaps) is *no recording* — real
+    /// capture always carries dither/room tone — and counting it drags the
+    /// percentile to zero on silence-heavy files, collapsing the gate to its
+    /// floor. Quiet-but-nonzero frames stay in: excluding them would need a
+    /// silence threshold, which is the very thing being derived.
     private func adaptiveSpeechRmsThreshold() throws -> Float {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         var frameRms: [Float] = []
@@ -1252,7 +1258,9 @@ struct ChunkProcessor {
             for sample in samples {
                 sum += sample * sample
             }
-            frameRms.append(sqrt(sum / Float(samples.count)))
+            if sum > 0 {
+                frameRms.append(sqrt(sum / Float(samples.count)))
+            }
             offset += frameSamples
         }
         guard !frameRms.isEmpty else { return Self.speechRmsCeiling }

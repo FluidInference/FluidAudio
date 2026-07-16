@@ -402,7 +402,13 @@ threshold = min(0.008, max(0.0005, p75FrameRms × 0.3))
 
 where `p75FrameRms` is the 75th-percentile per-frame RMS over the whole
 file (robust to long pauses dominating the median), computed once per
-transcription. Normal-level speech
+transcription. Frames of exact digital silence are excluded from the
+percentile: an all-zero frame is *no recording* (muted spans, inserted
+gaps — real capture always carries dither/room tone), and counting them
+drags the percentile to zero on silence-heavy files, collapsing the gate
+to its floor. Quiet-but-nonzero frames stay in — excluding them would need
+a silence threshold, which is the very thing being derived. A fully
+digital-silent file falls back to the ceiling. Normal-level speech
 clamps to the previous 0.008 ceiling — behavior there is unchanged — while
 quiet recordings scale down to a floor that still excludes dither and
 digital silence. A room-tone-only gap can trigger a probe that
@@ -416,7 +422,7 @@ The constants live on `ChunkProcessor` (`speechRms*`):
 | `speechRmsCeiling` | `0.008` | −42 | The pre-adaptive fixed gate, tuned on normal-level recordings. Clamping to it keeps every file loud enough to reach it byte-identical to the pre-#747 behavior (verified: 20-file LibriSpeech test-clean matches stock). The adaptive terms can only *lower* the bar, never raise it. |
 | `speechRmsReferenceScale` | `0.3` | −10.5 below reference | Speech's internal dynamic range: trailing syllables, fricatives, and sentence-final decay sit ~6–12 dB below the voiced-vowel level the reference lands on, while noise floors sit 20–40 dB below it. 0.3 parks the gate in the valley between the two — low enough to admit a fading last word, high enough that room tone never passes. |
 | `speechRmsFloor` | `0.0005` | −66 | Bounds the mostly-silence failure mode where the percentile itself lands on noise and `reference × scale` collapses toward zero. Sits above 16-bit dither/quantization (RMS ~1e-5–1e-4) and quiet room tone (< 3e-4), and below the quietest validated speech (#747 reproducer tail, RMS ≈ 0.001 — 2× headroom, the tightest margin in the formula). |
-| `speechRmsReferencePercentile` | `0.75` | — | p50 lands on silence whenever pauses fill over half the file; p90+ converges on the max and is skewed by plosives, clicks, and clipping. p75 is the highest transient-robust percentile, assuming speech fills ≥ 25 % of frames. |
+| `speechRmsReferencePercentile` | `0.75` | — | p50 lands on silence whenever pauses fill over half the file; p90+ converges on the max and is skewed by plosives, clicks, and clipping. p75 is the highest transient-robust percentile, assuming speech fills ≥ 25 % of the *recorded* (non-digital-zero) frames. |
 
 None of these were swept over a corpus; they are dB-scale engineering
 estimates validated by regression (reproducer recovers byte-exact,
