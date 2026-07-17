@@ -343,7 +343,9 @@ public actor AsrManager {
                 decoderState: &decoderState,
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,
-                globalFrameOffset: globalFrameOffset
+                globalFrameOffset: globalFrameOffset,
+                emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
+                initialTimeIndexOverride: initialTimeIndexOverride
             )
         }
     }

@@ -61,6 +61,9 @@ extension ChunkProcessor {
         let layout = chunkLayout(melChunkContext: false, modelVersion: modelVersion)
         let chunkSamples = layout.chunkSamples
         let strideSamples = layout.strideSamples
+        // The final window must end at the last speech-bearing frame, not
+        // EOF — see `speechEndSamples()`. (This path is v3-only at entry.)
+        let speechEnd = try speechEndSamples()
 
         let pathAStartsDecisions = try silenceAlignedChunkStarts(
             chunkSamples: chunkSamples,
@@ -108,6 +111,7 @@ extension ChunkProcessor {
             chunkIndex: 0,
             chunkSamples: chunkSamples,
             warmupSamples: 0,
+            speechEndSamples: speechEnd,
             using: worker,
             decoderLayers: decoderLayers,
             maxModelSamples: maxModelSamples,
@@ -137,6 +141,7 @@ extension ChunkProcessor {
                     chunkIndex: chunkIndex,
                     chunkSamples: chunkSamples,
                     warmupSamples: 0,
+                    speechEndSamples: speechEnd,
                     using: worker,
                     decoderLayers: decoderLayers,
                     maxModelSamples: maxModelSamples,
@@ -161,6 +166,7 @@ extension ChunkProcessor {
                             chunkIndex: chunkIndex,
                             chunkSamples: chunkSamples,
                             warmupSamples: warmupSamplesForB,
+                            speechEndSamples: speechEnd,
                             using: worker,
                             decoderLayers: decoderLayers,
                             maxModelSamples: maxModelSamples,
@@ -188,6 +194,7 @@ extension ChunkProcessor {
                             chunkIndex: chunkIndex,
                             chunkSamples: chunkSamples,
                             warmupSamples: 0,
+                            speechEndSamples: speechEnd,
                             using: worker,
                             decoderLayers: decoderLayers,
                             maxModelSamples: maxModelSamples,
@@ -290,6 +297,7 @@ extension ChunkProcessor {
                     chunkIndex: chunkIndex,
                     chunkSamples: chunkSamples,
                     warmupSamples: warmupSamples,
+                    speechEndSamples: speechEnd,
                     using: worker,
                     decoderLayers: decoderLayers,
                     maxModelSamples: maxModelSamples,
@@ -352,12 +360,21 @@ extension ChunkProcessor {
         chunkStart: Int,
         chunkIndex: Int,
         chunkSamples: Int,
-        warmupSamples: Int,
+        warmupSamples requestedWarmupSamples: Int,
+        speechEndSamples: Int,
         using manager: AsrManager,
         decoderLayers: Int,
         maxModelSamples: Int,
         language: Language?
     ) async throws -> [TokenWindow] {
+        // A short final chunk fills its window backwards with real audio
+        // instead of zero padding (issue #747); no-op for non-final chunks.
+        let warmupSamples = Self.lastChunkWarmupSamples(
+            chunkStart: chunkStart,
+            defaultWarmupSamples: requestedWarmupSamples,
+            chunkSamples: chunkSamples,
+            totalSamples: totalSamples,
+            speechEndSamples: speechEndSamples)
         let visibleChunkSamples = max(
             ASRConstants.samplesPerEncoderFrame,
             chunkSamples - warmupSamples
@@ -369,10 +386,16 @@ extension ChunkProcessor {
         if chunkEnd <= chunkStart {
             return []
         }
+        // The final window's audio stops at the last speech-bearing frame —
+        // a window ending inside a dead-silence run decodes degenerately.
+        let audioEnd = isLastChunk ? min(chunkEnd, speechEndSamples) : chunkEnd
+        if audioEnd <= chunkStart {
+            return []
+        }
 
         let contextSamples = 0
         let contextStart = chunkStart - warmupSamples
-        let chunkLengthWithContext = chunkEnd - contextStart
+        let chunkLengthWithContext = audioEnd - contextStart
         let chunkSamplesArray = try readSamples(offset: contextStart, count: chunkLengthWithContext)
         let emitTokensAfterFrame =
             warmupSamples > 0 ? chunkStart / ASRConstants.samplesPerEncoderFrame : nil

@@ -203,15 +203,73 @@ final class SeamGapRepairTests: XCTestCase {
         XCTAssertEqual(seconds, 1.0, accuracy: 0.1)
     }
 
-    func testSpeechLikeSecondsIgnoresRoomTone() throws {
-        // Amplitude just above digital silence but below the speech
-        // threshold must not count.
-        var samples = [Float](repeating: 0.0, count: 16000 * 2)
-        for i in 0..<samples.count {
+    func testSpeechLikeSecondsIgnoresRoomToneInNormalLevelRecording() throws {
+        // 3s of normal-level speech followed by 2s of room tone: the adaptive
+        // threshold anchors on the recording's speech level, so the room-tone
+        // span must not count.
+        var samples = [Float](repeating: 0.0, count: 16000 * 5)
+        for i in 0..<(16000 * 3) {
+            samples[i] = 0.1 * sin(Float(i) * 0.1)
+        }
+        for i in (16000 * 3)..<samples.count {
             samples[i] = 0.004 * sin(Float(i) * 0.1)
         }
         let processor = ChunkProcessor(audioSamples: samples)
-        let seconds = try processor.speechLikeSecondsForTesting(from: 0, to: samples.count)
+        let seconds = try processor.speechLikeSecondsForTesting(from: 16000 * 3, to: samples.count)
         XCTAssertEqual(seconds, 0.0)
+    }
+
+    func testSpeechLikeSecondsCountsQuietSpeechInQuietRecording() throws {
+        // Issue #747 reproducer shape: the whole recording peaks below 2% FS,
+        // so speech-level frames sit far below any absolute gate tuned for
+        // normal levels. The adaptive threshold scales down and still counts
+        // the (relatively) loud region.
+        var samples = [Float](repeating: 0.0, count: 16000 * 4)
+        for i in 16000..<32000 {
+            samples[i] = 0.005 * sin(Float(i) * 0.1)  // RMS ≈ 0.0035, below the 0.008 ceiling
+        }
+        let processor = ChunkProcessor(audioSamples: samples)
+        let seconds = try processor.speechLikeSecondsForTesting(from: 0, to: samples.count)
+        XCTAssertEqual(seconds, 1.0, accuracy: 0.1)
+    }
+
+    // MARK: - Adaptive speech threshold
+
+    func testAdaptiveThresholdClampsToCeilingOnNormalLevelAudio() {
+        XCTAssertEqual(
+            ChunkProcessor.adaptiveSpeechRmsThreshold(referenceRms: 0.07, floor: 0.0005, ceiling: 0.008),
+            0.008)
+    }
+
+    func testAdaptiveThresholdScalesWithQuietRecordingLevel() {
+        XCTAssertEqual(
+            ChunkProcessor.adaptiveSpeechRmsThreshold(referenceRms: 0.004, floor: 0.0005, ceiling: 0.008),
+            0.0012, accuracy: 0.0001)
+    }
+
+    func testAdaptiveThresholdClampsToFloorOnSilence() {
+        XCTAssertEqual(
+            ChunkProcessor.adaptiveSpeechRmsThreshold(referenceRms: 0.0, floor: 0.0005, ceiling: 0.008),
+            0.0005)
+    }
+
+    func testDigitalSilenceFramesAreExcludedFromTheReference() throws {
+        // 80% exact zeros + 20% quiet tone: counting the zeros would put the
+        // percentile on digital silence and collapse the gate to its floor.
+        // Excluded, the reference lands on the tone's own level.
+        var samples = [Float](repeating: 0.0, count: 16000 * 4)
+        for i in 0..<(16000 * 4 / 5) {
+            samples[i] = 0.004 * sin(Float(i) * 0.1)  // RMS ≈ 0.0028
+        }
+        let processor = ChunkProcessor(audioSamples: samples)
+        let threshold = try processor.adaptiveSpeechRmsThresholdForTesting()
+        XCTAssertGreaterThan(threshold, ChunkProcessor.speechRmsFloor)
+        XCTAssertEqual(threshold, 0.0028 * 0.3, accuracy: 0.0002)
+    }
+
+    func testAllDigitalSilenceFileFallsBackToCeiling() throws {
+        let processor = ChunkProcessor(audioSamples: [Float](repeating: 0.0, count: 16000 * 2))
+        let threshold = try processor.adaptiveSpeechRmsThresholdForTesting()
+        XCTAssertEqual(threshold, ChunkProcessor.speechRmsCeiling)
     }
 }
