@@ -70,10 +70,12 @@ extension VocabularyRescorer {
     struct CTCMatchCandidate {
         let originalPhrase: String
         let vocabTerm: String
+        let matchedAlias: String?
         let vocabTokens: [Int]
         let similarity: Float
         let spanLength: Int
         let spanIndices: [Int]
+        let tokenRange: Range<Int>?
         let spanStartTime: Double
         let spanEndTime: Double
     }
@@ -83,6 +85,9 @@ extension VocabularyRescorer {
         let shouldReplace: Bool
         let originalScore: Float
         let boostedVocabScore: Float
+        let rawVocabularyCTCScore: Float?
+        let rawOriginalCTCScore: Float?
+        let effectiveBoost: Float?
         let replacement: String
         let reason: String
     }
@@ -93,6 +98,32 @@ extension VocabularyRescorer {
         let candidate: CTCMatchCandidate
         let result: CTCMatchResult
         let similarity: Float  // String similarity for sorting
+    }
+
+    /// Return a half-open token range when the word span has contiguous token provenance.
+    private static func tokenRange(
+        for spanIndices: [Int],
+        in wordTimings: [WordTiming]
+    ) -> Range<Int>? {
+        guard let firstIndex = spanIndices.first,
+            spanIndices.allSatisfy({ wordTimings.indices.contains($0) })
+        else {
+            return nil
+        }
+
+        guard let firstRange = wordTimings[firstIndex].tokenRange else { return nil }
+        var tokenEnd = firstRange.upperBound
+        for (leftIndex, rightIndex) in zip(spanIndices, spanIndices.dropFirst()) {
+            guard rightIndex == leftIndex + 1 else { return nil }
+            guard let rightRange = wordTimings[rightIndex].tokenRange,
+                rightRange.lowerBound == tokenEnd
+            else {
+                return nil
+            }
+            tokenEnd = rightRange.upperBound
+        }
+
+        return firstRange.lowerBound..<tokenEnd
     }
 
     // MARK: - Shared Finalization
@@ -202,13 +233,74 @@ extension VocabularyRescorer {
         marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
         minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> RescoreOutput {
+        var candidateEvidence: [CandidateEvidence]?
+        return evaluateTokenCandidates(
+            transcript: transcript,
+            tokenTimings: tokenTimings,
+            logProbs: logProbs,
+            frameDuration: frameDuration,
+            cbw: cbw,
+            marginSeconds: marginSeconds,
+            minSimilarity: minSimilarity,
+            candidateEvidence: &candidateEvidence
+        )
+    }
+
+    /// Evaluate vocabulary candidates without returning the rewritten transcript.
+    ///
+    /// This runs the same candidate discovery and CTC comparison as ``ctcTokenRescore`` while
+    /// preserving the supplied transcript as ``CandidateEvidenceOutput/baseText``. The output
+    /// includes candidates rejected by the legacy comparison as well as accepted candidates.
+    ///
+    /// - Parameters:
+    ///   - transcript: Untouched transcript from the TDT decoder.
+    ///   - tokenTimings: Token-level timings from the TDT decoder.
+    ///   - logProbs: CTC log-probabilities from the spotter.
+    ///   - frameDuration: Duration of each CTC frame in seconds.
+    ///   - cbw: Context-biasing weight.
+    ///   - marginSeconds: Temporal margin around TDT words for CTC search.
+    ///   - minSimilarity: Minimum string similarity to consider a match.
+    /// - Returns: The untouched base transcript and evidence for every CTC-evaluated candidate.
+    public func ctcTokenEvaluateCandidates(
+        transcript: String,
+        tokenTimings: [TokenTiming],
+        logProbs: [[Float]],
+        frameDuration: Double,
+        cbw: Float = ContextBiasingConstants.defaultCbw,
+        marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
+        minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
+    ) -> CandidateEvidenceOutput {
+        var candidateEvidence: [CandidateEvidence]? = []
+        _ = evaluateTokenCandidates(
+            transcript: transcript,
+            tokenTimings: tokenTimings,
+            logProbs: logProbs,
+            frameDuration: frameDuration,
+            cbw: cbw,
+            marginSeconds: marginSeconds,
+            minSimilarity: minSimilarity,
+            candidateEvidence: &candidateEvidence
+        )
+        return CandidateEvidenceOutput(baseText: transcript, candidates: candidateEvidence ?? [])
+    }
+
+    private func evaluateTokenCandidates(
+        transcript: String,
+        tokenTimings: [TokenTiming],
+        logProbs: [[Float]],
+        frameDuration: Double,
+        cbw: Float,
+        marginSeconds: Double,
+        minSimilarity: Float,
+        candidateEvidence: inout [CandidateEvidence]?
+    ) -> RescoreOutput {
         // Build word-level timings once at the entrypoint and pass into both
         // dispatch paths. Computing this once instead of twice avoids
         // duplicate work for the BK-tree branch and keeps the private
         // functions parameterized by `[WordTiming]` rather than the raw
         // `[TokenTiming]` (cleaner contract; useful if a caller ever wants
         // to supply pre-computed timings from another source).
-        let wordTimings = buildWordTimings(from: tokenTimings)
+        let wordTimings = Self.buildWordTimings(from: tokenTimings)
 
         if useBKTree {
             return rescoreWithConstrainedCTCWordCentric(
@@ -218,7 +310,8 @@ extension VocabularyRescorer {
                 frameDuration: frameDuration,
                 cbw: cbw,
                 marginSeconds: marginSeconds,
-                minSimilarity: minSimilarity
+                minSimilarity: minSimilarity,
+                candidateEvidence: &candidateEvidence
             )
         } else {
             return rescoreWithConstrainedCTCTermCentric(
@@ -228,7 +321,8 @@ extension VocabularyRescorer {
                 frameDuration: frameDuration,
                 cbw: cbw,
                 marginSeconds: marginSeconds,
-                minSimilarity: minSimilarity
+                minSimilarity: minSimilarity,
+                candidateEvidence: &candidateEvidence
             )
         }
     }
@@ -250,7 +344,8 @@ extension VocabularyRescorer {
         frameDuration: Double,
         cbw: Float = ContextBiasingConstants.defaultCbw,
         marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
-        minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
+        minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor,
+        candidateEvidence: inout [CandidateEvidence]?
     ) -> RescoreOutput {
         guard !wordTimings.isEmpty, !logProbs.isEmpty else {
             return RescoreOutput(text: transcript, replacements: [], wasModified: false)
@@ -411,10 +506,12 @@ extension VocabularyRescorer {
                 let matchCandidate = CTCMatchCandidate(
                     originalPhrase: originalPhrase,
                     vocabTerm: vocabTerm,
+                    matchedAlias: nil,
                     vocabTokens: vocabTokens,
                     similarity: similarity,
                     spanLength: spanLength,
                     spanIndices: spanIndices,
+                    tokenRange: Self.tokenRange(for: spanIndices, in: wordTimings),
                     spanStartTime: spanStartTime,
                     spanEndTime: spanEndTime
                 )
@@ -426,6 +523,7 @@ extension VocabularyRescorer {
                     cbw: cbw,
                     marginSeconds: marginSeconds
                 )
+                candidateEvidence?.append(Self.makeCandidateEvidence(candidate: matchCandidate, result: result))
 
                 if result.shouldReplace {
                     pendingReplacements.append(
@@ -465,7 +563,8 @@ extension VocabularyRescorer {
         frameDuration: Double,
         cbw: Float = ContextBiasingConstants.defaultCbw,
         marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
-        minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
+        minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor,
+        candidateEvidence: inout [CandidateEvidence]?
     ) -> RescoreOutput {
         guard !wordTimings.isEmpty, !logProbs.isEmpty else {
             return RescoreOutput(text: transcript, replacements: [], wasModified: false)
@@ -543,9 +642,13 @@ extension VocabularyRescorer {
 
                         // Check similarity against ALL forms (canonical + aliases)
                         var bestSimilarity: Float = 0
+                        var matchedAlias: String?
                         for form in multiWordForms {
                             let similarity = Self.stringSimilarity(normalizedPhrase, form.normalized)
-                            bestSimilarity = max(bestSimilarity, similarity)
+                            if similarity > bestSimilarity {
+                                bestSimilarity = similarity
+                                matchedAlias = form.matchedAlias
+                            }
                         }
 
                         // Skip if already exact match to canonical (no replacement needed)
@@ -578,10 +681,12 @@ extension VocabularyRescorer {
                         let matchCandidate = CTCMatchCandidate(
                             originalPhrase: tdtPhrase,
                             vocabTerm: vocabTerm,
+                            matchedAlias: matchedAlias,
                             vocabTokens: vocabTokens,
                             similarity: bestSimilarity,
                             spanLength: spanLength,
                             spanIndices: spanIndices,
+                            tokenRange: Self.tokenRange(for: spanIndices, in: wordTimings),
                             spanStartTime: spanStartTime,
                             spanEndTime: spanEndTime
                         )
@@ -593,6 +698,7 @@ extension VocabularyRescorer {
                             cbw: cbw,
                             marginSeconds: marginSeconds
                         )
+                        candidateEvidence?.append(Self.makeCandidateEvidence(candidate: matchCandidate, result: result))
 
                         if result.shouldReplace {
                             // Collect candidate instead of applying immediately
@@ -633,9 +739,13 @@ extension VocabularyRescorer {
                     // Check similarity against ALL forms (single word)
                     var bestSimilarity: Float = 0
                     var matchedSpanLength = 1
+                    var matchedAlias: String?
                     for form in singleWordForms {
                         let similarity = Self.stringSimilarity(normalizedWord, form.normalized)
-                        bestSimilarity = max(bestSimilarity, similarity)
+                        if similarity > bestSimilarity {
+                            bestSimilarity = similarity
+                            matchedAlias = form.matchedAlias
+                        }
                     }
 
                     // COMPOUND WORD MATCHING: For single-word vocabulary terms, also try
@@ -668,7 +778,7 @@ extension VocabularyRescorer {
                                 if concatSimilarity > bestSimilarity {
                                     bestSimilarity = concatSimilarity
                                     matchedSpanLength = 2
-
+                                    matchedAlias = form.matchedAlias
                                 }
                             }
                         }
@@ -690,7 +800,7 @@ extension VocabularyRescorer {
                                 if concatSimilarity > bestSimilarity {
                                     bestSimilarity = concatSimilarity
                                     matchedSpanLength = 3
-
+                                    matchedAlias = form.matchedAlias
                                 }
                             }
                         }
@@ -744,10 +854,12 @@ extension VocabularyRescorer {
                     let matchCandidate = CTCMatchCandidate(
                         originalPhrase: originalPhrase,
                         vocabTerm: vocabTerm,
+                        matchedAlias: matchedAlias,
                         vocabTokens: vocabTokens,
                         similarity: bestSimilarity,
                         spanLength: matchedSpanLength,
                         spanIndices: spanIndices,
+                        tokenRange: Self.tokenRange(for: spanIndices, in: wordTimings),
                         spanStartTime: spanStartTime,
                         spanEndTime: spanEndTime
                     )
@@ -759,6 +871,7 @@ extension VocabularyRescorer {
                         cbw: cbw,
                         marginSeconds: marginSeconds
                     )
+                    candidateEvidence?.append(Self.makeCandidateEvidence(candidate: matchCandidate, result: result))
 
                     if result.shouldReplace {
                         // Collect candidate instead of applying immediately
@@ -805,7 +918,8 @@ extension VocabularyRescorer {
                 cbw: cbw,
                 marginSeconds: marginSeconds,
                 vocabularyNormalizedSet: vocabularyNormalizedSet,
-                pendingReplacements: &pendingReplacements
+                pendingReplacements: &pendingReplacements,
+                candidateEvidence: &candidateEvidence
             )
         }
 
@@ -841,7 +955,8 @@ extension VocabularyRescorer {
         cbw: Float,
         marginSeconds: Double,
         vocabularyNormalizedSet: Set<String>,
-        pendingReplacements: inout [PendingReplacement]
+        pendingReplacements: inout [PendingReplacement],
+        candidateEvidence: inout [CandidateEvidence]?
     ) {
         let result = spotter.spotKeywordsFromLogProbs(
             logProbs: logProbs,
@@ -924,8 +1039,13 @@ extension VocabularyRescorer {
 
             // Compute similarity (best over canonical + aliases).
             var bestSimilarity: Float = 0
+            var matchedAlias: String?
             for form in normalizedForms {
-                bestSimilarity = max(bestSimilarity, Self.stringSimilarity(normalizedPhrase, form.normalized))
+                let similarity = Self.stringSimilarity(normalizedPhrase, form.normalized)
+                if similarity > bestSimilarity {
+                    bestSimilarity = similarity
+                    matchedAlias = form.matchedAlias
+                }
             }
 
             // SIMILARITY FLOOR for the acoustic rescue path. The spotter
@@ -955,10 +1075,12 @@ extension VocabularyRescorer {
             let candidate = CTCMatchCandidate(
                 originalPhrase: originalPhrase,
                 vocabTerm: vocabTerm,
+                matchedAlias: matchedAlias,
                 vocabTokens: vocabTokens,
                 similarity: bestSimilarity,
                 spanLength: span.count,
                 spanIndices: span,
+                tokenRange: Self.tokenRange(for: span, in: wordTimings),
                 spanStartTime: wordTimings[firstIdx].startTime,
                 spanEndTime: wordTimings[lastIdx].endTime
             )
@@ -970,6 +1092,7 @@ extension VocabularyRescorer {
                 cbw: cbw,
                 marginSeconds: marginSeconds
             )
+            candidateEvidence?.append(Self.makeCandidateEvidence(candidate: candidate, result: evalResult))
             guard evalResult.shouldReplace else { continue }
 
             debugLog(

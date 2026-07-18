@@ -36,38 +36,48 @@ extension VocabularyRescorer {
     struct NormalizedForm: Hashable {
         let normalized: String
         let wordCount: Int
+        let matchedAlias: String?
+    }
+
+    /// Build normalized canonical and alias forms while retaining the exact alias source.
+    static func normalizedForms(canonicalTerm: String, aliases: [String]) -> [NormalizedForm] {
+        let rawForms: [(text: String, matchedAlias: String?)] =
+            [(canonicalTerm, nil)] + aliases.map { ($0, $0) }
+        var seen = Set<String>()
+        var forms: [NormalizedForm] = []
+
+        for rawForm in rawForms {
+            let normalized = normalizeForSimilarity(rawForm.text)
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+
+            forms.append(
+                NormalizedForm(
+                    normalized: normalized,
+                    wordCount: normalized.split(separator: " ").count,
+                    matchedAlias: rawForm.matchedAlias
+                ))
+        }
+
+        return forms
     }
 
     /// Build all normalized forms (canonical + aliases) for a vocabulary term
     func buildNormalizedForms(for term: CustomVocabularyTerm) -> [NormalizedForm] {
-        var rawForms: [String] = [term.text]
+        var aliases: [String] = []
         let termLower = term.textLowercased
 
         // Look up canonical term in vocabulary to get ALL aliases
         for vocabTerm in vocabulary.terms where vocabTerm.textLowercased == termLower {
-            if let aliases = vocabTerm.aliases {
-                rawForms.append(contentsOf: aliases)
+            if let vocabularyAliases = vocabTerm.aliases {
+                aliases.append(contentsOf: vocabularyAliases)
             }
         }
         // Also add aliases from the term itself
-        if let aliases = term.aliases {
-            rawForms.append(contentsOf: aliases)
+        if let termAliases = term.aliases {
+            aliases.append(contentsOf: termAliases)
         }
 
-        var seen = Set<String>()
-        var forms: [NormalizedForm] = []
-
-        for raw in rawForms {
-            let normalized = Self.normalizeForSimilarity(raw)
-            guard !normalized.isEmpty else { continue }
-            guard !seen.contains(normalized) else { continue }
-            seen.insert(normalized)
-
-            let wordCount = normalized.split(separator: " ").count
-            forms.append(NormalizedForm(normalized: normalized, wordCount: wordCount))
-        }
-
-        return forms
+        return Self.normalizedForms(canonicalTerm: term.text, aliases: aliases)
     }
 
     // MARK: - Similarity Thresholds

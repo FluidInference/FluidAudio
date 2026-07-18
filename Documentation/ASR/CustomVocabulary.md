@@ -290,6 +290,42 @@ Performs principled comparison between original transcript words and vocabulary 
 - `VocabularyRescorer+TokenEvaluation.swift` — per-candidate scoring and guard logic
 - `VocabularyRescorer+Utilities.swift` — string similarity, normalization, token boundary helpers
 
+#### Non-Mutating Candidate Evidence
+
+`ctcTokenRescore()` remains the compatibility API for callers that want FluidAudio to apply its
+existing replacement decision. Call `ctcTokenEvaluateCandidates()` instead when the application
+needs to preserve the decoder transcript and make the final replacement decision itself:
+
+```swift
+let output = rescorer.ctcTokenEvaluateCandidates(
+    transcript: baseTranscript,
+    tokenTimings: tokenTimings,
+    logProbs: ctcLogProbs,
+    frameDuration: 0.04
+)
+
+// Always identical to the supplied decoder transcript.
+let untouchedText = output.baseText
+
+for candidate in output.candidates {
+    print(candidate.basePhrase, candidate.canonicalTerm)
+    print(candidate.rawOriginalCTCScore, candidate.rawVocabularyCTCScore)
+    print(candidate.effectiveBoost, candidate.legacyDecision)
+}
+```
+
+The candidate API runs the same discovery, guards, and CTC comparison as legacy rescoring, but it
+returns both accepted and rejected evaluations without returning a rewritten transcript. Each
+candidate identifies the canonical term, the exact alias that produced the best string match (or
+`nil` for the canonical form), string similarity, raw CTC scores before context biasing, the
+effective boost, and FluidAudio's legacy accept/reject decision and reason.
+
+`wordRange` and `tokenRange` are half-open ranges into the base transcript's word sequence and the
+supplied `tokenTimings`, respectively. `tokenRange` is `nil` when the source tokens are not
+contiguous. Scores and timestamps are optional rather than sentinel values when the corresponding
+evidence is unavailable. Candidate order is diagnostic; callers should use the reported ranges and
+scores rather than array position to arbitrate overlapping proposals.
+
 ### 5. CustomVocabularyContext (`CustomVocabularyContext.swift`)
 
 Defines vocabulary terms to boost:

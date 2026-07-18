@@ -213,6 +213,103 @@ public struct VocabularyRescorer: Sendable {
         public let wasModified: Bool
     }
 
+    /// The replacement decision made by the legacy CTC token rescorer.
+    public enum LegacyDecision: String, Sendable, Equatable {
+        /// The candidate passed the legacy CTC comparison.
+        case accepted
+
+        /// The candidate failed or could not complete the legacy CTC comparison.
+        case rejected
+    }
+
+    /// Diagnostic evidence for one candidate evaluated by the legacy CTC token rescorer.
+    public struct CandidateEvidence: Sendable, Equatable {
+        /// The untouched phrase from the base transcript that was evaluated.
+        public let basePhrase: String
+
+        /// The canonical vocabulary term proposed as a replacement.
+        public let canonicalTerm: String
+
+        /// The exact alias that produced the best string match, or `nil` when the canonical term matched.
+        public let matchedAlias: String?
+
+        /// String similarity used to rank and gate the candidate.
+        public let similarity: Float
+
+        /// Raw CTC score for the vocabulary term, before context biasing, when available.
+        public let rawVocabularyCTCScore: Float?
+
+        /// Raw CTC score for the original phrase, when available.
+        public let rawOriginalCTCScore: Float?
+
+        /// Context-biasing boost added to the vocabulary score, when available.
+        public let effectiveBoost: Float?
+
+        /// Half-open word-index range in the base transcript.
+        public let wordRange: Range<Int>
+
+        /// Half-open token-index range in the supplied token timings, when available and contiguous.
+        public let tokenRange: Range<Int>?
+
+        /// Start time of the evaluated base phrase, when available.
+        public let startTime: TimeInterval?
+
+        /// End time of the evaluated base phrase, when available.
+        public let endTime: TimeInterval?
+
+        /// Decision made by the existing replacement behavior.
+        public let legacyDecision: LegacyDecision
+
+        /// Human-readable reason emitted by the existing replacement behavior.
+        public let reason: String
+
+        /// Creates diagnostic evidence for one evaluated vocabulary candidate.
+        public init(
+            basePhrase: String,
+            canonicalTerm: String,
+            matchedAlias: String?,
+            similarity: Float,
+            rawVocabularyCTCScore: Float?,
+            rawOriginalCTCScore: Float?,
+            effectiveBoost: Float?,
+            wordRange: Range<Int>,
+            tokenRange: Range<Int>?,
+            startTime: TimeInterval?,
+            endTime: TimeInterval?,
+            legacyDecision: LegacyDecision,
+            reason: String
+        ) {
+            self.basePhrase = basePhrase
+            self.canonicalTerm = canonicalTerm
+            self.matchedAlias = matchedAlias
+            self.similarity = similarity
+            self.rawVocabularyCTCScore = rawVocabularyCTCScore
+            self.rawOriginalCTCScore = rawOriginalCTCScore
+            self.effectiveBoost = effectiveBoost
+            self.wordRange = wordRange
+            self.tokenRange = tokenRange
+            self.startTime = startTime
+            self.endTime = endTime
+            self.legacyDecision = legacyDecision
+            self.reason = reason
+        }
+    }
+
+    /// Non-mutating diagnostic output from candidate evaluation.
+    public struct CandidateEvidenceOutput: Sendable, Equatable {
+        /// The untouched transcript supplied to the rescorer.
+        public let baseText: String
+
+        /// Every candidate that reached the legacy CTC evaluation, including rejections.
+        public let candidates: [CandidateEvidence]
+
+        /// Creates diagnostic output for an untouched base transcript.
+        public init(baseText: String, candidates: [CandidateEvidence]) {
+            self.baseText = baseText
+            self.candidates = candidates
+        }
+    }
+
     // MARK: - Word Timing Utilities
 
     /// Word timing information built from TDT token timings
@@ -220,17 +317,21 @@ public struct VocabularyRescorer: Sendable {
         public let word: String
         public let startTime: Double
         public let endTime: Double
+        let tokenRange: Range<Int>?
     }
 
     /// Build word-level timings from token timings.
     /// Tokens starting with space " " or "▁" (SentencePiece) begin new words.
-    func buildWordTimings(from tokenTimings: [TokenTiming]) -> [WordTiming] {
+    static func buildWordTimings(from tokenTimings: [TokenTiming]) -> [WordTiming] {
         var wordTimings: [WordTiming] = []
         var currentWord = ""
         var wordStart: Double = 0
         var wordEnd: Double = 0
+        var wordTokenStart = 0
+        var wordTokenEnd = 0
+        var wordTokensAreContiguous = true
 
-        for timing in tokenTimings {
+        for (tokenIndex, timing) in tokenTimings.enumerated() {
             let token = timing.token
 
             // Skip special tokens
@@ -249,7 +350,8 @@ public struct VocabularyRescorer: Sendable {
                         WordTiming(
                             word: trimmedWord,
                             startTime: wordStart,
-                            endTime: wordEnd
+                            endTime: wordEnd,
+                            tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil
                         ))
                 }
                 currentWord = ""
@@ -258,10 +360,16 @@ public struct VocabularyRescorer: Sendable {
             if startsNewWord {
                 currentWord = stripWordBoundaryPrefix(token)
                 wordStart = timing.startTime
+                wordTokenStart = tokenIndex
+                wordTokensAreContiguous = true
             } else {
+                if tokenIndex != wordTokenEnd {
+                    wordTokensAreContiguous = false
+                }
                 currentWord += token
             }
             wordEnd = timing.endTime
+            wordTokenEnd = tokenIndex + 1
         }
 
         // Save final word
@@ -271,7 +379,8 @@ public struct VocabularyRescorer: Sendable {
                 WordTiming(
                     word: trimmedWord,
                     startTime: wordStart,
-                    endTime: wordEnd
+                    endTime: wordEnd,
+                    tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil
                 ))
         }
 

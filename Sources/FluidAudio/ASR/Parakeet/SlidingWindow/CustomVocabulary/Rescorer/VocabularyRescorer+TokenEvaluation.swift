@@ -81,6 +81,9 @@ extension VocabularyRescorer {
                 shouldReplace: false,
                 originalScore: -Float.infinity,
                 boostedVocabScore: vocabCtcScore,
+                rawVocabularyCTCScore: vocabCtcScore.isFinite ? vocabCtcScore : nil,
+                rawOriginalCTCScore: nil,
+                effectiveBoost: nil,
                 replacement: candidate.vocabTerm,
                 reason: "No tokenizer available"
             )
@@ -93,6 +96,9 @@ extension VocabularyRescorer {
                 shouldReplace: false,
                 originalScore: -Float.infinity,
                 boostedVocabScore: vocabCtcScore,
+                rawVocabularyCTCScore: vocabCtcScore.isFinite ? vocabCtcScore : nil,
+                rawOriginalCTCScore: nil,
+                effectiveBoost: nil,
                 replacement: candidate.vocabTerm,
                 reason: "Empty tokens for original phrase"
             )
@@ -150,9 +156,46 @@ extension VocabularyRescorer {
             shouldReplace: shouldReplace,
             originalScore: originalCtcScore,
             boostedVocabScore: boostedVocabScore,
+            rawVocabularyCTCScore: vocabCtcScore.isFinite ? vocabCtcScore : nil,
+            rawOriginalCTCScore: originalCtcScore.isFinite ? originalCtcScore : nil,
+            effectiveBoost: adaptiveCbwValue.isFinite ? adaptiveCbwValue : nil,
             replacement: replacement,
             reason: reason
         )
+    }
+
+    /// Convert the legacy CTC evaluation into stable, non-sentinel diagnostic evidence.
+    static func makeCandidateEvidence(
+        candidate: CTCMatchCandidate,
+        result: CTCMatchResult
+    ) -> CandidateEvidence {
+        let wordRange: Range<Int>
+        if let firstIndex = candidate.spanIndices.first, let lastIndex = candidate.spanIndices.last {
+            wordRange = firstIndex..<(lastIndex + 1)
+        } else {
+            wordRange = 0..<0
+        }
+
+        return CandidateEvidence(
+            basePhrase: candidate.originalPhrase,
+            canonicalTerm: candidate.vocabTerm,
+            matchedAlias: candidate.matchedAlias,
+            similarity: candidate.similarity,
+            rawVocabularyCTCScore: finite(result.rawVocabularyCTCScore),
+            rawOriginalCTCScore: finite(result.rawOriginalCTCScore),
+            effectiveBoost: finite(result.effectiveBoost),
+            wordRange: wordRange,
+            tokenRange: candidate.tokenRange,
+            startTime: candidate.spanStartTime.isFinite ? candidate.spanStartTime : nil,
+            endTime: candidate.spanEndTime.isFinite ? candidate.spanEndTime : nil,
+            legacyDecision: result.shouldReplace ? .accepted : .rejected,
+            reason: result.reason
+        )
+    }
+
+    private static func finite(_ value: Float?) -> Float? {
+        guard let value, value.isFinite else { return nil }
+        return value
     }
 
     // MARK: - Replacement Application
