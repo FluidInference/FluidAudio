@@ -29,7 +29,7 @@ let package = Package(
             ],
             path: "Sources/FluidAudio",
             resources: [
-                .copy("TTS/LuxTts/G2p/Resources")
+                .process("TTS/LuxTts/G2p/Resources")
             ]
         ),
         // Byte-exact NeMo text normalization (FST engine, all 7 languages).
