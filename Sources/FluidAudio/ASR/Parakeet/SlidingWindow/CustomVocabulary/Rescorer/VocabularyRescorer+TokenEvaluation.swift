@@ -79,6 +79,7 @@ extension VocabularyRescorer {
             debugLog("  [WARN] No tokenizer - skipping CTC comparison for '\(candidate.originalPhrase)'")
             return CTCMatchResult(
                 shouldReplace: false,
+                comparisonWasPerformed: false,
                 originalScore: -Float.infinity,
                 boostedVocabScore: vocabCtcScore,
                 rawVocabularyCTCScore: vocabCtcScore.isFinite ? vocabCtcScore : nil,
@@ -94,6 +95,7 @@ extension VocabularyRescorer {
             debugLog("  [WARN] Empty tokens for '\(candidate.originalPhrase)' - skipping")
             return CTCMatchResult(
                 shouldReplace: false,
+                comparisonWasPerformed: false,
                 originalScore: -Float.infinity,
                 boostedVocabScore: vocabCtcScore,
                 rawVocabularyCTCScore: vocabCtcScore.isFinite ? vocabCtcScore : nil,
@@ -148,12 +150,18 @@ extension VocabularyRescorer {
         let replacement = preserveCapitalization(original: firstOriginalWord, replacement: candidate.vocabTerm)
 
         let reasonPrefix = candidate.spanLength > 1 ? "CTC-vs-CTC (multi-word)" : "CTC-vs-CTC"
-        let reason =
-            "\(reasonPrefix): '\(candidate.vocabTerm)'=\(String(format: "%.2f", boostedVocabScore)) "
-            + "> '\(candidate.originalPhrase)'=\(String(format: "%.2f", originalCtcScore))"
+        let reason = Self.ctcComparisonReason(
+            prefix: reasonPrefix,
+            vocabularyTerm: candidate.vocabTerm,
+            boostedVocabularyScore: boostedVocabScore,
+            originalPhrase: candidate.originalPhrase,
+            originalScore: originalCtcScore,
+            comparisonPassed: shouldReplace
+        )
 
         return CTCMatchResult(
             shouldReplace: shouldReplace,
+            comparisonWasPerformed: true,
             originalScore: originalCtcScore,
             boostedVocabScore: boostedVocabScore,
             rawVocabularyCTCScore: vocabCtcScore.isFinite ? vocabCtcScore : nil,
@@ -164,33 +172,89 @@ extension VocabularyRescorer {
         )
     }
 
+    /// Build a truthful display reason for an available numeric CTC comparison.
+    static func ctcComparisonReason(
+        prefix: String,
+        vocabularyTerm: String,
+        boostedVocabularyScore: Float,
+        originalPhrase: String,
+        originalScore: Float,
+        comparisonPassed: Bool
+    ) -> String {
+        let comparisonOperator = comparisonPassed ? ">" : "<="
+        return
+            "\(prefix): '\(vocabularyTerm)'=\(String(format: "%.2f", boostedVocabularyScore)) "
+            + "\(comparisonOperator) '\(originalPhrase)'=\(String(format: "%.2f", originalScore))"
+    }
+
     /// Convert the legacy CTC evaluation into stable, non-sentinel diagnostic evidence.
     static func makeCandidateEvidence(
+        candidateID: Int,
         candidate: CTCMatchCandidate,
-        result: CTCMatchResult
+        result: CTCMatchResult,
+        wordRange: Range<Int>,
+        baseTextUTF8Range: Range<Int>?
     ) -> CandidateEvidence {
-        let wordRange: Range<Int>
-        if let firstIndex = candidate.spanIndices.first, let lastIndex = candidate.spanIndices.last {
-            wordRange = firstIndex..<(lastIndex + 1)
+        let rawVocabularyScore = finite(result.rawVocabularyCTCScore)
+        let rawOriginalScore = finite(result.rawOriginalCTCScore)
+        let effectiveBoost = finite(result.effectiveBoost)
+        let finiteScoresAvailable =
+            rawVocabularyScore != nil && rawOriginalScore != nil && effectiveBoost != nil
+        let comparisonPassed = result.comparisonWasPerformed && result.shouldReplace
+
+        let legacyOutcome: LegacyApplicationOutcome
+        if !result.comparisonWasPerformed {
+            legacyOutcome = .unavailableEvidence
+        } else if comparisonPassed {
+            // The final overlap pass rewrites this to `.supersededByOverlap` when another candidate wins.
+            legacyOutcome = .applied
         } else {
-            wordRange = 0..<0
+            legacyOutcome = .rejectedByComparison
         }
+        let reason =
+            finiteScoresAvailable
+            ? result.reason
+            : nonNumericComparisonReason(
+                legacyReason: result.reason,
+                comparisonWasPerformed: result.comparisonWasPerformed,
+                comparisonPassed: comparisonPassed
+            )
 
         return CandidateEvidence(
+            candidateID: candidateID,
+            origin: candidate.origin,
             basePhrase: candidate.originalPhrase,
             canonicalTerm: candidate.vocabTerm,
             matchedAlias: candidate.matchedAlias,
             similarity: candidate.similarity,
-            rawVocabularyCTCScore: finite(result.rawVocabularyCTCScore),
-            rawOriginalCTCScore: finite(result.rawOriginalCTCScore),
-            effectiveBoost: finite(result.effectiveBoost),
+            rawVocabularyCTCScore: rawVocabularyScore,
+            rawOriginalCTCScore: rawOriginalScore,
+            effectiveBoost: effectiveBoost,
             wordRange: wordRange,
             tokenRange: candidate.tokenRange,
+            baseTextUTF8Range: baseTextUTF8Range,
             startTime: candidate.spanStartTime.isFinite ? candidate.spanStartTime : nil,
             endTime: candidate.spanEndTime.isFinite ? candidate.spanEndTime : nil,
-            legacyDecision: result.shouldReplace ? .accepted : .rejected,
-            reason: result.reason
+            comparisonPassed: comparisonPassed,
+            legacyOutcome: legacyOutcome,
+            reason: reason
         )
+    }
+
+    private static func nonNumericComparisonReason(
+        legacyReason: String,
+        comparisonWasPerformed: Bool,
+        comparisonPassed: Bool
+    ) -> String {
+        guard legacyReason.contains(" > ") || legacyReason.contains(" <= ") else {
+            return legacyReason
+        }
+        if comparisonWasPerformed {
+            return
+                "CTC comparison \(comparisonPassed ? "passed" : "rejected"): "
+                + "one or more finite diagnostic scores were unavailable"
+        }
+        return "CTC comparison unavailable: required finite score evidence was missing"
     }
 
     private static func finite(_ value: Float?) -> Float? {

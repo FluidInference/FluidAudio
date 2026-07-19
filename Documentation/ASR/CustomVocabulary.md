@@ -306,25 +306,64 @@ let output = rescorer.ctcTokenEvaluateCandidates(
 
 // Always identical to the supplied decoder transcript.
 let untouchedText = output.baseText
+print(output.baseWords) // Exact source-word sequence indexed by every wordRange.
 
 for candidate in output.candidates {
-    print(candidate.basePhrase, candidate.canonicalTerm)
+    print(candidate.candidateID, candidate.origin)
+    print(candidate.basePhrase, candidate.canonicalTerm, candidate.matchedAlias as Any)
     print(candidate.rawOriginalCTCScore, candidate.rawVocabularyCTCScore)
-    print(candidate.effectiveBoost, candidate.legacyDecision)
+    print(candidate.effectiveBoost as Any, candidate.comparisonPassed)
+    print(candidate.legacyOutcome, candidate.wordRange, candidate.tokenRange as Any)
+    print(candidate.baseTextUTF8Range as Any)
 }
 ```
 
 The candidate API runs the same discovery, guards, and CTC comparison as legacy rescoring, but it
-returns both accepted and rejected evaluations without returning a rewritten transcript. Each
-candidate identifies the canonical term, the exact alias that produced the best string match (or
-`nil` for the canonical form), string similarity, raw CTC scores before context biasing, the
-effective boost, and FluidAudio's legacy accept/reject decision and reason.
+returns every comparison evaluation without rewriting `baseText`. Each candidate identifies the
+canonical term, the exact alias that produced the best string match (or `nil` for the canonical
+form), string similarity, raw CTC scores before context biasing, and the effective boost.
 
-`wordRange` and `tokenRange` are half-open ranges into the base transcript's word sequence and the
-supplied `tokenTimings`, respectively. `tokenRange` is `nil` when the source tokens are not
-contiguous. Scores and timestamps are optional rather than sentinel values when the corresponding
-evidence is unavailable. Candidate order is diagnostic; callers should use the reported ranges and
-scores rather than array position to arbitrate overlapping proposals.
+`comparisonPassed` reports only the numeric, pre-arbitration comparison: boosted vocabulary score
+greater than original score. `legacyOutcome` reports what the compatibility `ctcTokenRescore()`
+path finally did after overlap arbitration:
+
+- `applied` — comparison passed and the candidate was written to the legacy transcript.
+- `rejectedByComparison` — the legacy floating-point comparison ran and rejected the candidate.
+- `unavailableEvidence` — the comparison could not run, for example because tokenizer evidence was
+  unavailable.
+- `supersededByOverlap` — comparison passed, but an overlapping candidate won final arbitration.
+
+`comparisonPassed` and `legacyOutcome` preserve the comparison FluidAudio actually performed. A
+raw score remains `nil` when the underlying scorer produced a non-finite diagnostic value, but that
+does not retroactively turn a completed legacy comparison into `unavailableEvidence`. In that case
+the structured outcome remains authoritative and the display reason omits non-finite score text.
+
+`candidateID` is a non-negative correlation identifier unique only within one
+`CandidateEvidenceOutput`. It connects an evaluated row to its final overlap outcome; callers must
+not compare its numeric value across outputs or repeated evaluations. Duplicate-looking rows are
+intentional: separate word-centric, term-centric-single-word, term-centric-multiword, and
+spotter-rescue evaluations retain distinct IDs and `origin` values so diagnostics can attribute
+their discovery paths.
+
+`wordRange` is a half-open range into the returned `output.baseWords` array exactly as FluidAudio
+built it from token timings. It does not index a whitespace split or another caller-derived view of
+`baseText`. `tokenRange` is a half-open range into the supplied `tokenTimings`; it is `nil` when the
+source tokens are not contiguous.
+
+`baseTextUTF8Range` is a half-open UTF-8 byte range into untouched `baseText`. FluidAudio emits it
+only when the complete `baseWords` sequence has one byte-exact ordered alignment, the candidate span
+lands on valid String boundaries, and the aligned substring normalizes to `basePhrase`. Recognized
+quotation wrappers and recognized terminal punctuation remain outside the range; technical boundary
+operators, currency signs, and punctuation such as `+`, `#`, `@`, `$`, and a leading `.` remain
+inside it. Unrelated symbols such as emoji and trademarks, plus ambiguous edge syntax, produce `nil`
+instead of a guessed span, while punctuation and separators inside a multiword span are preserved.
+A `nil` range is explicit missing provenance: callers must not guess a replacement span or mutate
+text through a fabricated range.
+
+Scores and timestamps are likewise optional rather than sentinel values when evidence is
+unavailable. Downstream applications should apply their own candidate policy using the structured
+evidence. They must not replay every `comparisonPassed` row, infer missing scores/ranges, or treat
+candidate array order as a stable identity.
 
 ### 5. CustomVocabularyContext (`CustomVocabularyContext.swift`)
 
