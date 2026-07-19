@@ -132,10 +132,8 @@ final class SortformerTests: XCTestCase {
         }
     }
 
-    // Note: Incremental audio feeding (adding audio in small chunks during real-time streaming)
-    // produces different mel features than batch mode due to NeMo's center padding being applied
-    // at each audio boundary. This is a known architectural limitation.
-    // For exact batch-matching results, feed all audio at once via addAudio() before extracting chunks.
+    // Incremental audio feeding matches batch mode exactly regardless of
+    // feeding granularity; see SortformerStreamingMelTests.
 
     func testBufferBounds() throws {
         var config = DiarizerTimelineConfig.sortformerDefault
