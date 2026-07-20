@@ -138,8 +138,15 @@ enum CleanRegionSelector {
                 let s0 = min(availableSamples, max(0, Int((Double(f) * spf).rounded())))
                 let s1 = min(availableSamples, max(0, Int((Double(j) * spf).rounded())))
                 if s1 - s0 >= regionMinSamples {
-                    regions.append((start: s0, end: s1))
-                    total += s1 - s0
+                    // Truncate the final region so the pooled total lands EXACTLY on
+                    // targetSamples, mirroring the Python reference
+                    // (regions.py: `if total + len(crop) > target: crop = crop[:target-total]`).
+                    // A region qualifies by its FULL length (the guard above), then the
+                    // last one is capped — without this a single long clean run overshoots
+                    // and pools more audio than the reference (retained_s > target/sr).
+                    let take = min(s1 - s0, targetSamples - total)
+                    regions.append((start: s0, end: s0 + take))
+                    total += take
                     if total >= targetSamples { break outer }
                 }
                 f = j

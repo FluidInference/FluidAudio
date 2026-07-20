@@ -222,6 +222,9 @@ struct TitaNetMaskedExtractor {
                 // Explicit frame bounds for segment timing; only .cleanWaveform sets
                 // it (its clean frames use a 0.5 threshold, not metaMask's soft one).
                 var explicitBounds: (first: Int, last: Int)?
+                // Clean solo-speech seconds pooled behind this embedding (Python
+                // `retained_s`). Set per pooling branch below; drives the gate + weight.
+                var retainedSeconds: Double = 0
 
                 switch config.embedding.titanetPooling {
                 case .cleanWaveform:
@@ -267,6 +270,10 @@ struct TitaNetMaskedExtractor {
                     embedding = try runMaskDecoder(encoded: enc, mask: contiguousMask)
                     metaMask = cleanMask
                     explicitBounds = (selection.firstFrame, selection.lastFrame)
+                    // Pooled clean seconds = sum of the (truncated-to-target) region
+                    // sample lengths / sr — matches Python regions.py `total / sr`.
+                    retainedSeconds =
+                        Double(selection.regions.reduce(0) { $0 + ($1.end - $1.start) }) / Double(sr)
 
                 case .cleanRegion:
                     // Resample the OVERLAP-EXCLUDED mask onto the mel grid, pick the
@@ -292,6 +299,7 @@ struct TitaNetMaskedExtractor {
                     for p in 0..<min(frames.count, Self.melFrames) { contiguousMask[p] = 1 }
                     embedding = try runMaskDecoder(encoded: enc, mask: contiguousMask)
                     metaMask = cleanMask
+                    retainedSeconds = Double(frames.count) * frameDuration
 
                 case .maskedFull:
                     let maskToUse: [Float]
@@ -318,6 +326,7 @@ struct TitaNetMaskedExtractor {
                     }
                     embedding = try runMaskDecoder(encoded: enc, mask: resampledMask)
                     metaMask = maskToUse
+                    retainedSeconds = Double(cleanSum) * frameDuration
                 }
 
                 let firstActive: Int
@@ -340,7 +349,8 @@ struct TitaNetMaskedExtractor {
                         startTime: chunkOffsetSeconds + Double(firstActive) * frameDuration,
                         endTime: chunkOffsetSeconds + Double(lastActive + 1) * frameDuration,
                         embedding256: embedding,
-                        rho128: []
+                        rho128: [],
+                        retainedSeconds: retainedSeconds
                     ))
             }
         }
@@ -508,6 +518,24 @@ struct TitaNetMaskedExtractor {
             throw OfflineDiarizationError.processingFailed("TitaNet maskdec missing embedding output")
         }
         let pointer = embeddingArray.dataPointer.assumingMemoryBound(to: Float.self)
-        return Array(UnsafeBufferPointer(start: pointer, count: embeddingArray.count))
+        var v = Array(UnsafeBufferPointer(start: pointer, count: embeddingArray.count))
+        // L2-normalize to match the Python reference (embeddings.py `l2norm`:
+        // v / (‖v‖₂ + 1e-8)). The offline TitaNet output was previously uploaded
+        // un-normalized (‖v‖ ≈ 0.2–0.5 on healthy hardware); the backend re-normalizes
+        // per-cluster, but per-member cosine + the raw upload need unit vectors.
+        var ss: Float = 0
+        for x in v { ss += x * x }
+        let rawNorm = ss.squareRoot()
+        // Corruption tell: a healthy embedding has ‖v‖ ≈ 0.2–0.5. A norm orders of
+        // magnitude off (≈89 observed on an iPhone-ANE run, k=1 collapse) is a broken
+        // embedder — surface it BEFORE normalization erases the evidence (every
+        // corrupted vector normalizes to ‖1‖ and looks textbook-perfect afterward).
+        if rawNorm > 5.0 || rawNorm < 0.01 {
+            logger.warning(
+                "TitaNet embedding raw ‖v‖=\(rawNorm) outside healthy band (~0.2–0.5) — possible embedder corruption")
+        }
+        let inv = 1 / (rawNorm + 1e-8)
+        for i in v.indices { v[i] *= inv }
+        return v
     }
 }

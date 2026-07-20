@@ -138,6 +138,10 @@ public struct ChunkEmbedding: Sendable, Codable {
     public let endTimeSeconds: Double
     public let embedding256: [Float]
     public let rho128: [Double]
+    /// Clean solo-speech seconds pooled behind this embedding (Python `retained_s`).
+    /// Lets consumers (upload → backend) use the true retained duration instead of
+    /// approximating it from the raw span. 0 when unknown.
+    public let retainedSeconds: Double
 
     public init(
         speakerId: String,
@@ -146,7 +150,8 @@ public struct ChunkEmbedding: Sendable, Codable {
         startTimeSeconds: Double,
         endTimeSeconds: Double,
         embedding256: [Float],
-        rho128: [Double] = []
+        rho128: [Double] = [],
+        retainedSeconds: Double = 0
     ) {
         self.speakerId = speakerId
         self.chunkIndex = chunkIndex
@@ -155,6 +160,7 @@ public struct ChunkEmbedding: Sendable, Codable {
         self.endTimeSeconds = endTimeSeconds
         self.embedding256 = embedding256
         self.rho128 = rho128
+        self.retainedSeconds = retainedSeconds
     }
 }
 

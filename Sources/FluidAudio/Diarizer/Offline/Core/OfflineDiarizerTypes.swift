@@ -213,6 +213,14 @@ public struct OfflineDiarizerConfig: Sendable {
         /// when `mergeEnabled`.
         public var mergeThreshold: Float = 0.75
 
+        /// Pristine-cluster gate (Python `cluster_min_retained_s`). When > 0, only
+        /// embeddings backed by ≥ this many clean solo-speech seconds SHAPE the
+        /// clusters (NME-SC structure + centroids); shorter ones are excluded from
+        /// training and then assigned to the nearest resulting centroid — membership
+        /// without influence. 0 = off. No-op when it would exclude nothing or leave
+        /// < 2 pristine embeddings (the assignment pass still places every embedding).
+        public var minRetainedSeconds: Double = 0
+
         public static let community = Clustering(
             threshold: 0.6,
             warmStartFa: 0.07,
@@ -726,6 +734,10 @@ struct TimedEmbedding: Sendable {
     let endTime: Double
     let embedding256: [Float]
     let rho128: [Double]
+    /// Clean solo-speech seconds actually pooled behind this embedding (the Python
+    /// reference's `retained_s`). Drives the pristine-cluster gate + duration
+    /// weighting. Defaults to 0 for paths that don't compute it (e.g. WeSpeaker).
+    var retainedSeconds: Double = 0
 }
 
 // MARK: - Convenience Methods

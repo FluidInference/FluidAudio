@@ -502,7 +502,8 @@ public final class OfflineDiarizerManager {
                 startTimeSeconds: te.startTime,
                 endTimeSeconds: te.endTime,
                 embedding256: te.embedding256,
-                rho128: te.rho128
+                rho128: te.rho128,
+                retainedSeconds: te.retainedSeconds
             )
         }
     }
@@ -626,6 +627,21 @@ public final class OfflineDiarizerManager {
 
         if selected.isEmpty {
             return Array(timedEmbeddings.indices)
+        }
+
+        // Pristine-cluster gate (Python cluster_min_retained_s): only embeddings
+        // with ≥ gate clean solo-speech seconds SHAPE the clusters. The downstream
+        // assignEmbeddings pass places every embedding (incl. the excluded shorts)
+        // at its nearest resulting centroid, so gating narrows training only. No-op
+        // when the gate is off, excludes nothing, or would leave < 2 pristine.
+        let gate = config.clustering.minRetainedSeconds
+        if gate > 0 {
+            let pristine = selected.filter { timedEmbeddings[$0].retainedSeconds >= gate }
+            if pristine.count >= 2 && pristine.count < selected.count {
+                logger.info(
+                    "Pristine gate (≥\(gate)s): \(pristine.count)/\(selected.count) embeddings shape the clusters")
+                return pristine
+            }
         }
 
         return selected

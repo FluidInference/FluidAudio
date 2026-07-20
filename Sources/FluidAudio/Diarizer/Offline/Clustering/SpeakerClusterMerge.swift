@@ -9,12 +9,16 @@ import Foundation
 /// ~0.15–0.55, so a single threshold in the ~0.55–0.80 gap recovers the real
 /// speaker count. Well-separated speakers (large centroid gap) are never touched.
 ///
-/// Greedy centroid-linkage, pure and deterministic: repeatedly fold the two
-/// clusters whose L2-normalized centroids are most similar while that similarity
-/// is ≥ `threshold`, recomputing the merged centroid from all member embeddings
-/// each step. This is the library-level twin of the app's `SpeakerClusterMerge`
-/// (which remaps segment speaker-ids); here it relabels the per-embedding cluster
-/// assignment directly, before reconstruction.
+/// Greedy AVERAGE-LINKAGE, pure and deterministic: repeatedly fold the two
+/// clusters whose linkage — the mean cosine over ALL cross-cluster member pairs —
+/// is highest, while it is ≥ `threshold`. This matches the Python reference
+/// `clustering.merge_oversplit` (`sim[ix_(ai,aj)].mean()`), which is deliberately
+/// NOT centroid-linkage: averaging over members is more robust to an off-centroid
+/// outlier than comparing two means. Note the threshold does NOT transfer from the
+/// old centroid-linkage tuning — average-linkage sits below centroid cosine for the
+/// same pair, so the operating point is the reference's ~0.80, pending the 14-clip
+/// A/B. This relabels the per-embedding cluster assignment directly, before
+/// reconstruction.
 enum SpeakerClusterMerge {
 
     /// Fold over-split clusters together.
@@ -42,38 +46,46 @@ enum SpeakerClusterMerge {
         }
         guard order.count > 1 else { return renumber(labels) }
 
-        // 2. One group per cluster; each carries its member ids + centroid.
-        var groups: [(ids: Set<Int>, centroid: [Double])] =
-            order.map { (Set([$0]), centroidOf(members[$0]!)) }
+        // 2. One group per cluster (a set of original cluster ids).
+        var groups: [Set<Int>] = order.map { Set([$0]) }
 
-        // 3. Greedy: fold the most-similar pair while ≥ threshold.
+        /// Average-linkage: mean cosine over every (member of g1) × (member of g2)
+        /// pair. Members are already unit-normalized, so dot == cosine.
+        func linkage(_ g1: Set<Int>, _ g2: Set<Int>) -> Double {
+            let m1 = g1.flatMap { members[$0]! }
+            let m2 = g2.flatMap { members[$0]! }
+            guard !m1.isEmpty, !m2.isEmpty else { return -Double.greatestFiniteMagnitude }
+            var sum = 0.0
+            for a in m1 { for b in m2 { sum += dot(a, b) } }
+            return sum / Double(m1.count * m2.count)
+        }
+
+        // 3. Greedy: fold the highest-linkage pair while ≥ threshold.
         let thr = Double(threshold)
         while groups.count > 1 {
             var bestI = -1
             var bestJ = -1
-            var bestSim = -Double.greatestFiniteMagnitude
+            var bestLink = -Double.greatestFiniteMagnitude
             for i in 0..<groups.count {
                 for j in (i + 1)..<groups.count {
-                    let s = dot(groups[i].centroid, groups[j].centroid)
-                    if s > bestSim {
-                        bestSim = s
+                    let s = linkage(groups[i], groups[j])
+                    if s > bestLink {
+                        bestLink = s
                         bestI = i
                         bestJ = j
                     }
                 }
             }
-            guard bestSim >= thr, bestI >= 0 else { break }
-            let mergedIds = groups[bestI].ids.union(groups[bestJ].ids)
-            let all = mergedIds.flatMap { members[$0]! }  // recompute from all members
-            groups[bestI] = (mergedIds, centroidOf(all))
+            guard bestLink >= thr, bestI >= 0 else { break }
+            groups[bestI].formUnion(groups[bestJ])
             groups.remove(at: bestJ)
         }
 
         // 4. Build oldCluster → canonicalCluster, then renumber contiguously.
         var canonical: [Int: Int] = [:]
         for group in groups {
-            let rep = group.ids.min()!
-            for id in group.ids { canonical[id] = rep }
+            let rep = group.min()!
+            for id in group { canonical[id] = rep }
         }
         let remapped = labels.map { canonical[$0] ?? $0 }
         return renumber(remapped)
@@ -101,16 +113,6 @@ enum SpeakerClusterMerge {
         let n = sq.squareRoot()
         guard n > 1e-9 else { return nil }
         return v.map { $0 / n }
-    }
-
-    /// Mean of already-normalized vectors, renormalized to unit length.
-    private static func centroidOf(_ vs: [[Double]]) -> [Double] {
-        let d = vs[0].count
-        var c = [Double](repeating: 0, count: d)
-        for v in vs where v.count == d {
-            for k in 0..<d { c[k] += v[k] }
-        }
-        return normed(c) ?? c
     }
 
     private static func dot(_ a: [Double], _ b: [Double]) -> Double {
