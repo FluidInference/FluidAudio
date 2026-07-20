@@ -29,6 +29,7 @@ let package = Package(
             ],
             path: "Sources/FluidAudio",
             resources: [
+                // Keep .process: .copy of a Resources-named directory breaks Apple code signing on iOS.
                 .process("TTS/LuxTts/G2p/Resources")
             ]
         ),
@@ -66,7 +67,7 @@ let package = Package(
                 "FluidAudioCLI",
             ],
             resources: [
-                .copy("TTS/LuxTts/Resources")
+                .process("TTS/LuxTts/Resources")
             ]
         ),
     ],
