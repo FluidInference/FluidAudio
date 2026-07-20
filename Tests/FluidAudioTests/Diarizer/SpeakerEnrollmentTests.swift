@@ -223,6 +223,37 @@ final class SpeakerEnrollmentTests: XCTestCase {
         XCTAssertEqual(namedSpeakerIndices(in: diarizer.timeline), [speaker?.index].compactMap { $0 })
     }
 
+    func testSortformerFailedEnrollmentDoesNotDisableStreaming() async throws {
+        let config = SortformerConfig.default
+        let diarizer = SortformerDiarizer(config: config)
+        let models: SortformerModels
+        do {
+            models = try await loadSortformerModelsForTest(config: config)
+        } catch {
+            throw XCTSkip("Unable to load Sortformer test models: \(error)")
+        }
+        diarizer.initialize(models: models)
+
+        // Too short to fill one chunk: enrollment fails with nil. The
+        // failure must not leave the mel stream exhausted, or all later
+        // streaming would be silently ignored until reset().
+        let tooShort = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 0.0, durationSeconds: 0.5)
+        XCTAssertNil(try diarizer.enrollSpeaker(withAudio: tooShort, named: "Alice"))
+
+        let liveAudio = try DiarizationTestFixtures.fixtureAudio(
+            sampleRate: config.sampleRate, startSeconds: 5.0, durationSeconds: 3.0)
+        var update: DiarizerTimelineUpdate?
+        for chunk in DiarizationTestFixtures.chunk(liveAudio, sizes: [7_680, 9_600, 11_520]) {
+            diarizer.addAudio(chunk)
+            if let next = try diarizer.process() {
+                update = next
+                break
+            }
+        }
+        XCTAssertNotNil(update, "Streaming must keep working after a failed enrollment")
+    }
+
     func testSortformerEnrollmentClearsDiscardedSampleCountBeforeFinalize() async throws {
         XCTExpectFailure("Download might fail in CI environment", strict: false)
 

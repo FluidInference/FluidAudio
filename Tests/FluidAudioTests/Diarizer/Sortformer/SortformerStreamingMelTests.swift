@@ -131,6 +131,29 @@ final class SortformerStreamingMelTests: XCTestCase {
         }
     }
 
+    /// After the mel stream is exhausted, further audio is dropped (not
+    /// buffered) and reset() must fully restart the stream.
+    func testResetAfterExhaustionRestartsMelStream() throws {
+        let audio = makeAudio(seconds: 6)
+        let reference = streamChunks(audio: audio, batchSize: audio.count, finalize: false)
+
+        let diarizer = SortformerDiarizer(config: config)
+        diarizer.addAudio(audio)
+        diarizer.padAndEmitRemainingMel()
+        let exhaustedFrames = diarizer.melFramesEmitted
+        diarizer.addAudio(audio)
+        XCTAssertEqual(diarizer.melFramesEmitted, exhaustedFrames, "Audio after exhaustion must be ignored")
+
+        diarizer.reset()
+        diarizer.addAudio(audio)
+        var chunks: [[Float]] = []
+        while let (mel, _) = diarizer.getNextChunkFeatures() { chunks.append(mel) }
+        XCTAssertEqual(chunks.count, reference.chunks.count)
+        for (i, (chunk, referenceChunk)) in zip(chunks, reference.chunks).enumerated() {
+            XCTAssertEqual(chunk, referenceChunk, "Chunk \(i) differs after reset from exhaustion")
+        }
+    }
+
     /// A reset diarizer must reproduce the session from scratch (the left pad
     /// is re-seeded, counters cleared).
     func testResetRestartsMelStream() throws {
