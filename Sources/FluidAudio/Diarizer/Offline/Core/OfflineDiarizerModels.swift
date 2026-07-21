@@ -71,10 +71,6 @@ public struct OfflineDiarizerModels: Sendable {
         MLModelConfigurationUtils.defaultModelsDirectory()
     }
 
-    private static func defaultConfiguration() -> MLModelConfiguration {
-        MLModelConfigurationUtils.defaultConfiguration(computeUnits: .all)
-    }
-
     public static func load(
         from directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
@@ -85,6 +81,9 @@ public struct OfflineDiarizerModels: Sendable {
         logger.info("Loading offline diarization models from \(modelsDirectory.path)")
 
         let loadStart = Date()
+        // Honor the caller's requested compute units for the segmentation/embedding/PLDA
+        // models; default to `.all` when no configuration is supplied. The fbank model
+        // stays `.cpuOnly` regardless (below) since it runs faster on CPU.
         let inferenceComputeUnits: MLComputeUnits = configuration?.computeUnits ?? .all
 
         let segmentationAndEmbeddingNames: [String] = [
