@@ -213,6 +213,171 @@ public struct VocabularyRescorer: Sendable {
         public let wasModified: Bool
     }
 
+    /// The discovery path that produced a vocabulary candidate.
+    public enum CandidateOrigin: String, Sendable, Equatable {
+        /// Candidate discovered while searching vocabulary terms around one TDT word.
+        case wordCentric
+
+        /// Candidate discovered from a single-word term-centric match.
+        case termCentricSingleWord
+
+        /// Candidate discovered from a multi-word term-centric match.
+        case termCentricMultiWord
+
+        /// Candidate discovered from the CTC keyword-spotter rescue pass.
+        case spotterRescue
+    }
+
+    /// The final action taken by the legacy CTC token rescorer for a candidate.
+    public enum LegacyApplicationOutcome: String, Sendable, Equatable {
+        /// The candidate passed comparison and was applied to the legacy transcript.
+        case applied
+
+        /// The legacy floating-point comparison ran and rejected the candidate.
+        case rejectedByComparison
+
+        /// The legacy comparison could not be completed because required evidence was unavailable.
+        case unavailableEvidence
+
+        /// The candidate passed comparison but an overlapping candidate won final arbitration.
+        case supersededByOverlap
+    }
+
+    /// Diagnostic evidence for one candidate evaluated by the legacy CTC token rescorer.
+    public struct CandidateEvidence: Sendable, Equatable {
+        /// Non-negative correlation identifier unique only within one evidence output.
+        public let candidateID: Int
+
+        /// Discovery path that produced this candidate evaluation.
+        public let origin: CandidateOrigin
+
+        /// The untouched phrase from the base transcript that was evaluated.
+        public let basePhrase: String
+
+        /// The canonical vocabulary term proposed as a replacement.
+        public let canonicalTerm: String
+
+        /// The exact alias that produced the best string match, or `nil` when the canonical term matched.
+        public let matchedAlias: String?
+
+        /// String similarity used to rank and gate the candidate.
+        public let similarity: Float
+
+        /// Raw CTC score for the vocabulary term, before context biasing, when available.
+        public let rawVocabularyCTCScore: Float?
+
+        /// Raw CTC score for the original phrase, when available.
+        public let rawOriginalCTCScore: Float?
+
+        /// Context-biasing boost added to the vocabulary score, when available.
+        public let effectiveBoost: Float?
+
+        /// Half-open word-index range into ``CandidateEvidenceOutput/baseWords``.
+        public let wordRange: Range<Int>
+
+        /// Half-open token-index range in the supplied token timings, when available and contiguous.
+        public let tokenRange: Range<Int>?
+
+        /// Half-open UTF-8 byte range into ``CandidateEvidenceOutput/baseText``, when exact alignment is available.
+        public let baseTextUTF8Range: Range<Int>?
+
+        /// Start time of the evaluated base phrase, when available.
+        public let startTime: TimeInterval?
+
+        /// End time of the evaluated base phrase, when available.
+        public let endTime: TimeInterval?
+
+        /// Whether the boosted vocabulary score passed the pre-arbitration acoustic comparison.
+        public let comparisonPassed: Bool
+
+        /// Final action taken by the legacy rescorer after overlap arbitration.
+        public let legacyOutcome: LegacyApplicationOutcome
+
+        /// Human-readable reason emitted by the existing replacement behavior.
+        public let reason: String
+
+        /// Creates diagnostic evidence for one evaluated vocabulary candidate.
+        public init(
+            candidateID: Int,
+            origin: CandidateOrigin,
+            basePhrase: String,
+            canonicalTerm: String,
+            matchedAlias: String?,
+            similarity: Float,
+            rawVocabularyCTCScore: Float?,
+            rawOriginalCTCScore: Float?,
+            effectiveBoost: Float?,
+            wordRange: Range<Int>,
+            tokenRange: Range<Int>?,
+            baseTextUTF8Range: Range<Int>?,
+            startTime: TimeInterval?,
+            endTime: TimeInterval?,
+            comparisonPassed: Bool,
+            legacyOutcome: LegacyApplicationOutcome,
+            reason: String
+        ) {
+            self.candidateID = candidateID
+            self.origin = origin
+            self.basePhrase = basePhrase
+            self.canonicalTerm = canonicalTerm
+            self.matchedAlias = matchedAlias
+            self.similarity = similarity
+            self.rawVocabularyCTCScore = rawVocabularyCTCScore
+            self.rawOriginalCTCScore = rawOriginalCTCScore
+            self.effectiveBoost = effectiveBoost
+            self.wordRange = wordRange
+            self.tokenRange = tokenRange
+            self.baseTextUTF8Range = baseTextUTF8Range
+            self.startTime = startTime
+            self.endTime = endTime
+            self.comparisonPassed = comparisonPassed
+            self.legacyOutcome = legacyOutcome
+            self.reason = reason
+        }
+
+        /// Returns the same evidence with its final legacy arbitration outcome replaced.
+        func replacingLegacyOutcome(_ outcome: LegacyApplicationOutcome) -> CandidateEvidence {
+            CandidateEvidence(
+                candidateID: candidateID,
+                origin: origin,
+                basePhrase: basePhrase,
+                canonicalTerm: canonicalTerm,
+                matchedAlias: matchedAlias,
+                similarity: similarity,
+                rawVocabularyCTCScore: rawVocabularyCTCScore,
+                rawOriginalCTCScore: rawOriginalCTCScore,
+                effectiveBoost: effectiveBoost,
+                wordRange: wordRange,
+                tokenRange: tokenRange,
+                baseTextUTF8Range: baseTextUTF8Range,
+                startTime: startTime,
+                endTime: endTime,
+                comparisonPassed: comparisonPassed,
+                legacyOutcome: outcome,
+                reason: reason
+            )
+        }
+    }
+
+    /// Non-mutating diagnostic output from candidate evaluation.
+    public struct CandidateEvidenceOutput: Sendable, Equatable {
+        /// The untouched transcript supplied to the rescorer.
+        public let baseText: String
+
+        /// Exact internal word sequence that every candidate ``CandidateEvidence/wordRange`` indexes.
+        public let baseWords: [String]
+
+        /// Every candidate that reached the legacy CTC evaluation, including rejections.
+        public let candidates: [CandidateEvidence]
+
+        /// Creates diagnostic output for an untouched base transcript.
+        public init(baseText: String, baseWords: [String], candidates: [CandidateEvidence]) {
+            self.baseText = baseText
+            self.baseWords = baseWords
+            self.candidates = candidates
+        }
+    }
+
     // MARK: - Word Timing Utilities
 
     /// Word timing information built from TDT token timings
@@ -220,17 +385,21 @@ public struct VocabularyRescorer: Sendable {
         public let word: String
         public let startTime: Double
         public let endTime: Double
+        let tokenRange: Range<Int>?
     }
 
     /// Build word-level timings from token timings.
     /// Tokens starting with space " " or "▁" (SentencePiece) begin new words.
-    func buildWordTimings(from tokenTimings: [TokenTiming]) -> [WordTiming] {
+    static func buildWordTimings(from tokenTimings: [TokenTiming]) -> [WordTiming] {
         var wordTimings: [WordTiming] = []
         var currentWord = ""
         var wordStart: Double = 0
         var wordEnd: Double = 0
+        var wordTokenStart = 0
+        var wordTokenEnd = 0
+        var wordTokensAreContiguous = true
 
-        for timing in tokenTimings {
+        for (tokenIndex, timing) in tokenTimings.enumerated() {
             let token = timing.token
 
             // Skip special tokens
@@ -249,7 +418,8 @@ public struct VocabularyRescorer: Sendable {
                         WordTiming(
                             word: trimmedWord,
                             startTime: wordStart,
-                            endTime: wordEnd
+                            endTime: wordEnd,
+                            tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil
                         ))
                 }
                 currentWord = ""
@@ -258,10 +428,16 @@ public struct VocabularyRescorer: Sendable {
             if startsNewWord {
                 currentWord = stripWordBoundaryPrefix(token)
                 wordStart = timing.startTime
+                wordTokenStart = tokenIndex
+                wordTokensAreContiguous = true
             } else {
+                if tokenIndex != wordTokenEnd {
+                    wordTokensAreContiguous = false
+                }
                 currentWord += token
             }
             wordEnd = timing.endTime
+            wordTokenEnd = tokenIndex + 1
         }
 
         // Save final word
@@ -271,7 +447,8 @@ public struct VocabularyRescorer: Sendable {
                 WordTiming(
                     word: trimmedWord,
                     startTime: wordStart,
-                    endTime: wordEnd
+                    endTime: wordEnd,
+                    tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil
                 ))
         }
 

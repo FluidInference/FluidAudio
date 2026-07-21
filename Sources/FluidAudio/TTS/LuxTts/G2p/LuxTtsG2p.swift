@@ -77,11 +77,9 @@ public struct LuxTtsG2p: Sendable {
     public init() throws {
         guard
             let lexiconURL = Bundle.module.url(
-                forResource: "luxtts_en_us_lexicon.tsv", withExtension: "zz",
-                subdirectory: "Resources"),
+                forResource: "luxtts_en_us_lexicon.tsv", withExtension: "zz"),
             let auxURL = Bundle.module.url(
-                forResource: "luxtts_en_us_g2p_aux", withExtension: "json",
-                subdirectory: "Resources")
+                forResource: "luxtts_en_us_g2p_aux", withExtension: "json")
         else {
             throw LuxTtsError.tokenizerFailed("bundled G2P resources missing")
         }

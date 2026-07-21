@@ -12,6 +12,21 @@ import XCTest
 /// the mobius worktree; these tests pin representative behaviors.
 final class LuxTtsG2pTests: XCTestCase {
 
+    func testFixtureResourcesAreProcessedAtBundleRoot() {
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: Bundle.module.bundleURL
+                    .appendingPathComponent("Resources", isDirectory: true).path
+            ),
+            "LuxTTS test resources must not create a reserved top-level Resources directory"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: Bundle.module.bundleURL.appendingPathComponent("luxtts_fixtures.json").path
+            )
+        )
+    }
+
     private static let g2p: LuxTtsG2p = {
         do {
             return try LuxTtsG2p()

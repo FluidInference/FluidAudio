@@ -29,7 +29,8 @@ let package = Package(
             ],
             path: "Sources/FluidAudio",
             resources: [
-                .copy("TTS/LuxTts/G2p/Resources")
+                // Keep .process: .copy of a Resources-named directory breaks Apple code signing on iOS.
+                .process("TTS/LuxTts/G2p/Resources")
             ]
         ),
         // Byte-exact NeMo text normalization (FST engine, all 7 languages).
@@ -66,7 +67,7 @@ let package = Package(
                 "FluidAudioCLI",
             ],
             resources: [
-                .copy("TTS/LuxTts/Resources")
+                .process("TTS/LuxTts/Resources")
             ]
         ),
     ],

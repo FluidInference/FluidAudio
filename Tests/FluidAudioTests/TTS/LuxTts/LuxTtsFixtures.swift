@@ -120,10 +120,7 @@ struct LuxTtsFixtures: Decodable {
     // MARK: - Loading
 
     static func resourceURL(_ name: String) throws -> URL {
-        guard
-            let url = Bundle.module.url(
-                forResource: name, withExtension: nil, subdirectory: "Resources")
-        else {
+        guard let url = Bundle.module.url(forResource: name, withExtension: nil) else {
             throw XCTSkip("LuxTts fixture resource missing: \(name)")
         }
         return url
