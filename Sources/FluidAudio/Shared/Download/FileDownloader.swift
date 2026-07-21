@@ -38,6 +38,7 @@ enum FileDownloader {
         from repoRemotePath: String,
         at destination: URL,
         recoveringBlockedPaths: Bool,
+        config: DownloadConfig = .default,
         configuration: URLSessionConfiguration? = nil,
         onBytes: (@Sendable (Int64, Int64) -> Void)? = nil
     ) async throws -> Outcome {
@@ -63,7 +64,7 @@ enum FileDownloader {
         let encodedPath =
             file.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file.path
         let fileURL = try ModelRegistry.resolveModel(repoRemotePath, encodedPath)
-        let request = HFClient.authorizedRequest(url: fileURL)
+        let request = HFClient.authorizedRequest(url: fileURL, timeout: config.timeout)
 
         let tempURL = try await download(
             request: request,
@@ -71,6 +72,7 @@ enum FileDownloader {
             expectedSize: file.size,
             partialFileURL: destination.appendingPathExtension("partial"),
             onProgress: onBytes,
+            config: config,
             configuration: configuration
         )
 
@@ -206,6 +208,9 @@ enum FileDownloader {
         request: URLRequest,
         to destination: URL,
         resumeOffset: Int64 = 0,
+        path: String = "",
+        minStallBytes: Int64 = 0,
+        stallWindow: TimeInterval = 0,
         configuration: URLSessionConfiguration? = nil,
         onProgress: (@Sendable (Int64, Int64) -> Void)? = nil,
         onResponse: (@Sendable (HTTPURLResponse) -> Void)? = nil
@@ -213,6 +218,9 @@ enum FileDownloader {
         let delegate = StreamingDownloadDelegate(
             destination: destination,
             resumeOffset: resumeOffset,
+            path: path,
+            minStallBytes: minStallBytes,
+            stallWindow: stallWindow,
             onProgress: onProgress,
             onResponse: onResponse
         )
@@ -290,6 +298,7 @@ enum FileDownloader {
         onProgress: (@Sendable (Int64, Int64) -> Void)?,
         maxAttempts: Int = 4,
         minBackoff: TimeInterval = 1.0,
+        config: DownloadConfig = .default,
         configuration: URLSessionConfiguration? = nil
     ) async throws -> URL {
         let defaultPartialURL = FileManager.default.temporaryDirectory
@@ -341,6 +350,9 @@ enum FileDownloader {
                 request: attemptRequest,
                 to: partialURL,
                 resumeOffset: resumeOffset,
+                path: path,
+                minStallBytes: config.minStallBytes,
+                stallWindow: config.stallWindow,
                 configuration: configuration,
                 onProgress: onProgress,
                 onResponse: { response in
@@ -406,10 +418,25 @@ private final class StreamingDownloadDelegate: NSObject, URLSessionDataDelegate,
         var expectedTotal: Int64 = -1
         var writeError: Error?
         var finished = false
+        // Stall watchdog: `bytesAtWindowStart` snapshots `bytesWritten` at the
+        // top of each observation window; `stalled` records that the watchdog
+        // (not the caller) cancelled the task so completion surfaces a typed,
+        // retryable `.stalled` error instead of a bare cancellation.
+        var watchdog: DispatchSourceTimer?
+        var bytesAtWindowStart: Int64 = 0
+        var stalled = false
     }
+
+    /// Serial queue that fires every download's stall-watchdog timer; shared so
+    /// concurrent per-file downloads don't each spin up a thread.
+    private static let watchdogQueue = DispatchQueue(label: "com.fluidaudio.download.stall-watchdog")
+    private static let logger = AppLogger(category: "DownloadUtils")
 
     private let destination: URL
     private let resumeOffset: Int64
+    private let path: String
+    private let minStallBytes: Int64
+    private let stallWindow: TimeInterval
     private let onProgress: (@Sendable (Int64, Int64) -> Void)?
     private let onResponse: (@Sendable (HTTPURLResponse) -> Void)?
     // Holds the non-Sendable continuation and file handle; the lock (not
@@ -419,28 +446,66 @@ private final class StreamingDownloadDelegate: NSObject, URLSessionDataDelegate,
     init(
         destination: URL,
         resumeOffset: Int64,
+        path: String,
+        minStallBytes: Int64,
+        stallWindow: TimeInterval,
         onProgress: (@Sendable (Int64, Int64) -> Void)?,
         onResponse: (@Sendable (HTTPURLResponse) -> Void)?
     ) {
         self.destination = destination
         self.resumeOffset = resumeOffset
+        self.path = path
+        self.minStallBytes = minStallBytes
+        self.stallWindow = stallWindow
         self.onProgress = onProgress
         self.onResponse = onResponse
     }
 
-    /// Register the continuation and task before the task starts.
+    /// Register the continuation and task before the task starts, and arm the
+    /// stall watchdog (when enabled). The timer wakes every `stallWindow` and
+    /// cancels the task if fewer than `minStallBytes` arrived since the last
+    /// wake — catching a frozen CDN connection in seconds rather than waiting
+    /// out the request's idle `timeout`.
     func attach(
         continuation: CheckedContinuation<HTTPURLResponse, Error>,
         task: URLSessionDataTask
     ) {
+        let timer: DispatchSourceTimer? =
+            (minStallBytes > 0 && stallWindow > 0)
+            ? DispatchSource.makeTimerSource(queue: Self.watchdogQueue) : nil
         state.withLockUnchecked {
             $0.continuation = continuation
             $0.task = task
+            $0.watchdog = timer
+        }
+        if let timer {
+            timer.schedule(deadline: .now() + stallWindow, repeating: stallWindow)
+            timer.setEventHandler { [weak self] in self?.checkStall() }
+            timer.resume()
         }
     }
 
     func cancel() {
         state.withLockUnchecked { $0.task }?.cancel()
+    }
+
+    /// One watchdog tick: cancel the task if the byte count advanced by less
+    /// than `minStallBytes` over the last window. `stalled` is set under the
+    /// lock before cancelling so `didCompleteWithError` reports `.stalled`.
+    private func checkStall() {
+        let stalledTask = state.withLockUnchecked { st -> URLSessionTask? in
+            guard !st.finished, !st.stalled, let task = st.task else { return nil }
+            let delta = st.bytesWritten - st.bytesAtWindowStart
+            st.bytesAtWindowStart = st.bytesWritten
+            guard delta < minStallBytes else { return nil }
+            st.stalled = true
+            return task
+        }
+        guard let stalledTask else { return }
+        Self.logger.warning(
+            "Download of \(path) stalled (<\(minStallBytes) bytes in \(Int(stallWindow))s); cancelling for retry."
+        )
+        stalledTask.cancel()
     }
 
     func urlSession(
@@ -522,8 +587,12 @@ private final class StreamingDownloadDelegate: NSObject, URLSessionDataDelegate,
         didCompleteWithError error: Error?
     ) {
         let response = task.response as? HTTPURLResponse
+        let path = self.path
+        let stallWindow = self.stallWindow
         // Extract the resume action under the lock, run it after releasing.
         let resume = state.withLockUnchecked { st -> (() -> Void)? in
+            st.watchdog?.cancel()
+            st.watchdog = nil
             guard !st.finished, let continuation = st.continuation else { return nil }
             st.finished = true
             st.continuation = nil
@@ -531,8 +600,15 @@ private final class StreamingDownloadDelegate: NSObject, URLSessionDataDelegate,
             try? st.handle?.close()
             st.handle = nil
             let writeError = st.writeError
+            let stalled = st.stalled
             return {
-                if let writeError {
+                if stalled {
+                    // The watchdog cancelled a frozen transfer: surface a typed,
+                    // retryable error rather than the bare cancellation URLError
+                    // (which the retry layer treats as a caller abort).
+                    continuation.resume(
+                        throwing: DownloadError.stalled(path: path, window: stallWindow))
+                } else if let writeError {
                     continuation.resume(throwing: writeError)
                 } else if let error {
                     continuation.resume(throwing: error)

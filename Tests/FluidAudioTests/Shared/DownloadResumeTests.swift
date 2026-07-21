@@ -211,6 +211,71 @@ final class DownloadResumeTests: XCTestCase {
             "a complete, valid partial must be reused without hitting the network")
     }
 
+    // MARK: - Stall watchdog (#810)
+
+    /// A frozen mid-transfer connection is cancelled by the watchdog and the
+    /// retry resumes to completion — instead of hanging on the idle `timeout`.
+    func testStalledTransferIsCancelledAndRetried() async throws {
+        // Attempt 1: 200 + ETag, delivers a small head, then freezes. The head
+        // is far below the 1 MiB threshold so the watchdog trips on its first
+        // (sub-second) window.
+        ResumeStubURLProtocol.enqueue(
+            .init(
+                status: 200,
+                headers: ["ETag": "\"v1\"", "Content-Length": String(Self.fullBody.count)],
+                chunks: [Data(Self.fullBody.prefix(10))],
+                stall: true))
+        // Attempt 2: a range-capable server completes the file.
+        ResumeStubURLProtocol.enqueue(
+            .init(status: 200, headers: ["ETag": "\"v1\""], chunks: [], rangeAwareBody: Self.fullBody))
+
+        let fastWatchdog = DownloadConfig(minStallBytes: 1 << 20, stallWindow: 0.2)
+        let url = try await FileDownloader.download(
+            request: request,
+            path: "model.bin",
+            expectedSize: Self.fullBody.count,
+            partialFileURL: partialURL(),
+            onProgress: nil,
+            maxAttempts: 3,
+            minBackoff: 0.01,
+            config: fastWatchdog,
+            configuration: stubConfiguration
+        )
+
+        XCTAssertEqual(try Data(contentsOf: url), Self.fullBody)
+        XCTAssertEqual(
+            ResumeStubURLProtocol.recordedRequests().count, 2,
+            "the stalled attempt must be cancelled and retried")
+    }
+
+    /// A disabled watchdog (`minStallBytes == 0`) must not cancel a healthy,
+    /// progressing download.
+    func testDisabledWatchdogDoesNotCancelHealthyDownload() async throws {
+        ResumeStubURLProtocol.enqueue(
+            .init(status: 200, headers: ["ETag": "\"v1\""], chunks: [Self.fullBody]))
+
+        let noWatchdog = DownloadConfig(minStallBytes: 0, stallWindow: 0)
+        let url = try await FileDownloader.download(
+            request: request,
+            path: "model.bin",
+            expectedSize: Self.fullBody.count,
+            partialFileURL: partialURL(),
+            onProgress: nil,
+            maxAttempts: 1,
+            minBackoff: 0.01,
+            config: noWatchdog,
+            configuration: stubConfiguration
+        )
+
+        XCTAssertEqual(try Data(contentsOf: url), Self.fullBody)
+        XCTAssertEqual(ResumeStubURLProtocol.recordedRequests().count, 1)
+    }
+
+    func testStalledErrorIsClassifiedRetryable() {
+        XCTAssertTrue(RetryPolicy.isRetryable(DownloadError.stalled(path: "model.bin", window: 120)))
+        XCTAssertFalse(RetryPolicy.isCancellation(DownloadError.stalled(path: "model.bin", window: 120)))
+    }
+
     func testProgressIncludesResumedOffsetSoItNeverDips() async throws {
         let splitAt = 10
         try seedPartial(Data(Self.fullBody.prefix(splitAt)), validator: "\"v1\"")
@@ -256,6 +321,9 @@ final class ResumeStubURLProtocol: URLProtocol {
         let chunks: [Data]
         /// Deliver this many chunks, then fail with `.networkConnectionLost`.
         var failAfterChunks: Int? = nil
+        /// Deliver the chunks, then go silent forever — never finish, never
+        /// fail. Simulates a frozen CDN connection so the stall watchdog fires.
+        var stall: Bool = false
         /// When set, respond like a real range-capable server instead of using
         /// `status`/`chunks`: 206 + the slice from the request's `Range` offset
         /// when the header is present, else 200 + the full body. Lets tests
@@ -330,6 +398,9 @@ final class ResumeStubURLProtocol: URLProtocol {
             }
             client?.urlProtocol(self, didLoad: chunk)
         }
+        // Frozen connection: bytes stop flowing but the request stays open, so
+        // only the stall watchdog (not the idle timeout) can end it.
+        if script.stall { return }
         if let failAfter = script.failAfterChunks, failAfter >= script.chunks.count {
             failAfterFlush()
             return

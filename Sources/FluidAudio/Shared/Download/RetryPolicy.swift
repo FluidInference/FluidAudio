@@ -94,6 +94,10 @@ enum RetryPolicy {
         case DownloadError.invalidArtifact:
             // Usually a transient unhealthy network path (proxy, mirror 5xx) — retry.
             return true
+        case DownloadError.stalled:
+            // A frozen CDN connection cancelled by the stall watchdog — retry
+            // (byte-range resume continues from the bytes already on disk).
+            return true
         case DownloadError.downloadFailed(_, let underlying):
             let nsError = underlying as NSError
             return nsError.domain == "HTTP" && (500...599).contains(nsError.code)

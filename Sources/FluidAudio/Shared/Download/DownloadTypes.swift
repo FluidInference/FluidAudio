@@ -13,6 +13,12 @@ public enum DownloadError: LocalizedError {
     case htmlErrorResponse(path: String, snippet: String)
     case invalidArtifact(path: String, reason: String)
 
+    /// The byte stream stalled: fewer than `DownloadConfig.minStallBytes`
+    /// arrived within `window` seconds, so the transfer was cancelled early
+    /// for retry — byte-range resume continues from the bytes already on disk
+    /// — instead of hanging on the multi-minute idle `timeout`. Retryable.
+    case stalled(path: String, window: TimeInterval)
+
     /// A code path that would have hit the network was blocked by
     /// `ModelHub.offlineMode`. `operation` is the short tag of the blocked
     /// entry point (e.g. `"download(parakeet-tdt-0.6b-v3-coreml)"`).
@@ -37,6 +43,9 @@ public enum DownloadError: LocalizedError {
             return "Model file not found: \(path)"
         case .invalidArtifact(let path, let reason):
             return "Downloaded artifact for \(path) is invalid (\(reason)); refusing to cache it."
+        case .stalled(let path, let window):
+            return
+                "Download of \(path) stalled (no meaningful progress for \(Int(window))s); cancelled for retry."
         case .networkDisabled(let operation):
             return "FluidAudio offline mode: \(operation) blocked"
         case .modelMissing(let repo, let missing):
@@ -48,13 +57,41 @@ public enum DownloadError: LocalizedError {
 
 /// Download configuration shared by the download stack.
 public struct DownloadConfig: Sendable {
+    /// Per-request idle timeout (`URLRequest.timeoutInterval`). This timer
+    /// resets whenever *any* byte arrives, so on its own it only fires after a
+    /// full `timeout` seconds of complete silence — it will not catch a
+    /// connection that trickles a few bytes. The stall watchdog below is what
+    /// detects a frozen transfer quickly; `timeout` remains the outer bound.
     public let timeout: TimeInterval
 
-    public init(timeout: TimeInterval = 1800) {  // 30 minutes for large models
+    /// Stall watchdog threshold: the minimum number of bytes that must arrive
+    /// within each `stallWindow` interval for the transfer to be considered
+    /// alive. If fewer arrive, the transfer is cancelled and retried (byte-range
+    /// resume continues from the bytes already on disk), surfacing a frozen CDN
+    /// connection in seconds instead of waiting out `timeout`. Set to `0` to
+    /// disable the watchdog. Defaults to 1 MiB.
+    public let minStallBytes: Int64
+
+    /// Length of each stall-watchdog observation window, in seconds. The
+    /// watchdog wakes every `stallWindow` seconds and fails the transfer when
+    /// fewer than `minStallBytes` arrived since the previous wake. Defaults to
+    /// 120 s.
+    public let stallWindow: TimeInterval
+
+    public init(
+        timeout: TimeInterval = 1800,  // 30 minutes for large models
+        minStallBytes: Int64 = 1 << 20,  // 1 MiB
+        stallWindow: TimeInterval = 120
+    ) {
         self.timeout = timeout
+        self.minStallBytes = minStallBytes
+        self.stallWindow = stallWindow
     }
 
     public static let `default` = DownloadConfig()
+
+    /// `true` when the stall watchdog is active (positive threshold and window).
+    var stallWatchdogEnabled: Bool { minStallBytes > 0 && stallWindow > 0 }
 }
 
 /// Phase of a model download operation.
