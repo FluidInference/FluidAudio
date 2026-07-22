@@ -14,9 +14,9 @@ struct UnifiedTokenTimingTests {
         10: "\u{2581}play", 11: "back", 12: "\u{2581}the", 13: "\u{2581}note",
     ]
 
-    private func emission(_ token: Int, frame: Int, confidence: Float = 0.9)
-        -> ChunkProcessor.TokenWindow
-    {
+    private func emission(
+        _ token: Int, frame: Int, confidence: Float = 0.9
+    ) -> ChunkProcessor.TokenWindow {
         (token: token, timestamp: frame, confidence: confidence, duration: 0)
     }
 
@@ -66,6 +66,29 @@ struct UnifiedTokenTimingTests {
         let timings = UnifiedAsrManager.tokenTimings(
             from: [emission(10, frame: 37)],
             secondsPerFrame: secondsPerFrame, vocabulary: vocabulary)
+        #expect(abs((timings[0].endTime - timings[0].startTime) - secondsPerFrame) < 0.0001)
+    }
+
+    /// That provisional frame must not run past the end of the audio, or a
+    /// caller seeking to the last token's end lands past EOF. Offline knows the
+    /// sample count, so it can bound what streaming has to leave open.
+    @Test
+    func theLastTokenIsClampedToTheEndOfTheClip() {
+        let timings = UnifiedAsrManager.tokenTimings(
+            from: [emission(10, frame: 37)],
+            secondsPerFrame: secondsPerFrame, vocabulary: vocabulary,
+            clipDuration: 3.0)
+        #expect(abs(timings[0].endTime - 3.0) < 0.0001)
+        #expect(timings[0].endTime >= timings[0].startTime)
+    }
+
+    /// A clip longer than the last emission leaves the one-frame end alone.
+    @Test
+    func aLongerClipLeavesTheProvisionalEndAlone() {
+        let timings = UnifiedAsrManager.tokenTimings(
+            from: [emission(10, frame: 37)],
+            secondsPerFrame: secondsPerFrame, vocabulary: vocabulary,
+            clipDuration: 60.0)
         #expect(abs((timings[0].endTime - timings[0].startTime) - secondsPerFrame) < 0.0001)
     }
 
