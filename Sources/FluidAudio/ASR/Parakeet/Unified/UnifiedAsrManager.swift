@@ -167,9 +167,94 @@ public actor UnifiedAsrManager {
 
     // MARK: - Batch API
 
+    /// A transcript and the per-token timings behind it.
+    public struct TranscriptionWithTimings: Sendable {
+        public let text: String
+        public let tokenTimings: [TokenTiming]
+
+        public init(text: String, tokenTimings: [TokenTiming]) {
+            self.text = text
+            self.tokenTimings = tokenTimings
+        }
+    }
+
     /// Transcribe 16 kHz mono samples of arbitrary length using overlapping
     /// 15 s windows.
     public func transcribe(_ samples: [Float]) async throws -> String {
+        guard let tokenizer = tokenizer else { throw ASRError.notInitialized }
+        return tokenizer.decode(ids: try await decodedTokens(samples).map(\.token))
+    }
+
+    /// Transcribe as `transcribe(_:)` does, additionally reporting the encoder
+    /// frame each token was emitted at, converted to seconds.
+    ///
+    /// The offline path already carries these frames — the greedy RNNT decoder
+    /// records one per emission and the overlap merge preserves them — so this
+    /// costs nothing beyond the conversion. It is the batch counterpart to
+    /// `StreamingUnifiedAsrManager.consumeTokenTimings()`, and its output feeds
+    /// `buildWordTimings(from:)` the same way, for callers that need to align
+    /// the transcript back to the audio (seeking, playback highlighting,
+    /// word→speaker attribution).
+    ///
+    /// As in the streaming manager, RNNT tokens are emitted *at* a frame and
+    /// have no intrinsic duration, so each token's `endTime` is the next
+    /// token's start; the last token gets a provisional one-frame end. These
+    /// are emission times rather than forced-alignment boundaries: the decoder
+    /// emits once it has heard enough context, so a token's start can sit
+    /// slightly after the word's true onset.
+    public func transcribeWithTimings(_ samples: [Float]) async throws -> TranscriptionWithTimings {
+        guard let tokenizer = tokenizer else { throw ASRError.notInitialized }
+        let merged = try await decodedTokens(samples)
+        return TranscriptionWithTimings(
+            text: tokenizer.decode(ids: merged.map(\.token)),
+            tokenTimings: Self.tokenTimings(
+                from: merged,
+                secondsPerFrame: Double(config.frameSamples) / Double(config.sampleRate),
+                vocabulary: tokenizer.vocabulary
+            )
+        )
+    }
+
+    /// Emission frames → seconds. Pure, so the back-fill rule can be tested
+    /// without loading a 600M parameter model.
+    static func tokenTimings(
+        from emissions: [ChunkProcessor.TokenWindow],
+        secondsPerFrame: Double,
+        vocabulary: [Int: String]
+    ) -> [TokenTiming] {
+        var timings: [TokenTiming] = []
+        timings.reserveCapacity(emissions.count)
+        for emission in emissions {
+            guard let piece = vocabulary[emission.token] else { continue }
+            let start = Double(emission.timestamp) * secondsPerFrame
+            // RNNT tokens have no intrinsic duration — back-fill the previous
+            // token's end to this token's start so durations reflect real gaps.
+            if let last = timings.indices.last, timings[last].endTime > start {
+                let previous = timings[last]
+                timings[last] = TokenTiming(
+                    token: previous.token, tokenId: previous.tokenId,
+                    startTime: previous.startTime, endTime: max(previous.startTime, start),
+                    confidence: previous.confidence
+                )
+            }
+            // Frontier token: provisional one-frame end, as in the streaming manager.
+            timings.append(
+                TokenTiming(
+                    token: piece.replacingOccurrences(of: "\u{2581}", with: " "),
+                    tokenId: emission.token,
+                    startTime: start,
+                    endTime: start + secondsPerFrame,
+                    confidence: emission.confidence
+                )
+            )
+        }
+        return timings
+    }
+
+    /// The merged, seam-collapsed token stream for the whole recording, in
+    /// emission order. Shared by both batch entry points so the text they
+    /// return cannot drift apart.
+    private func decodedTokens(_ samples: [Float]) async throws -> [ChunkProcessor.TokenWindow] {
         guard let tokenizer = tokenizer else { throw ASRError.notInitialized }
 
         var merged: [ChunkProcessor.TokenWindow] = []
@@ -199,8 +284,7 @@ public actor UnifiedAsrManager {
         }
 
         merged.sort { $0.timestamp < $1.timestamp }
-        merged = merger.collapseSeamWordDuplicates(merged, vocabulary: tokenizer.vocabulary)
-        return tokenizer.decode(ids: merged.map(\.token))
+        return merger.collapseSeamWordDuplicates(merged, vocabulary: tokenizer.vocabulary)
     }
 
     /// Transcribe an audio buffer (any format; resampled to 16 kHz mono).
