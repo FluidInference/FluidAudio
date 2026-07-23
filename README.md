@@ -119,6 +119,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[echo99](https://www.echo99.app)** | Private call recorder for macOS. Menu-bar app that records the mic and system audio as separate tracks and transcribes them entirely on-device. |
 | **[Presspeech](https://github.com/rcourtman/presspeech)** | Open-source (MIT) menu-bar push-to-talk dictation for macOS — hold a key, speak, release; the transcript pastes at the cursor in about 100 ms. Uses Parakeet TDT v3 ASR on the Apple Neural Engine via FluidAudio. |
 | **[Better Voice](https://voice.baselinemakes.com)** | macOS menu-bar app for on-device dictation and meeting notes that save to Apple Notes. Everything runs locally. Uses speaker diarization. |
+| **[Logue](https://github.com/bitwize-ai/Logue)** | Privacy-first AI meeting notes and writing assistant for macOS. Records mic + system audio and transcribes locally on Apple Silicon, with speaker diarization, Smart Minutes, and an on-device AI writing editor — nothing leaves the Mac. Uses FluidAudio streaming Sortformer speaker diarization. |
 
 ## Installation
 
