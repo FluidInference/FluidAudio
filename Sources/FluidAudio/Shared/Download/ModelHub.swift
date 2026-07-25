@@ -274,30 +274,7 @@ public enum ModelHub {
             }
         }
 
-        // File selection rules for repo downloads (subPath scoping, required-
-        // model patterns, metadata-extension allowances).
-        let include: (String, Bool) -> Bool = { itemPath, isDirectory in
-            if isDirectory {
-                // For subPath repos, only process paths within the subPath
-                if let sub = subPath {
-                    return itemPath == sub || itemPath.hasPrefix("\(sub)/")
-                        || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
-                }
-                return patterns.isEmpty
-                    || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
-            }
-            // For subPath repos, only include files within the subPath
-            if let sub = subPath {
-                let isInSubPath = itemPath.hasPrefix("\(sub)/")
-                let matchesPattern =
-                    patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
-                let isMetadata =
-                    itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model") || itemPath.hasSuffix(".bin")
-                return isInSubPath && (matchesPattern || isMetadata)
-            }
-            return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
-                || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
-        }
+        let include = Self.repoIncludeRule(subPath: subPath, patterns: patterns)
 
         // Repo loads: download occupies 0-0.5, CoreML compile 0.5-1.0.
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 0.5)
@@ -520,5 +497,45 @@ public enum ModelHub {
             from: url, description: description,
             maxAttempts: maxAttempts, minBackoff: minBackoff,
             configuration: configuration)
+    }
+
+    /// File/directory selection rule for repo downloads: subPath scoping,
+    /// required-model patterns, metadata-extension allowances, and CoreML
+    /// bundle completeness.
+    ///
+    /// Files inside a `.mlmodelc`/`.mlpackage` under the subPath are always
+    /// included: the metadata allowance alone sweeps in a non-required
+    /// bundle's `.json`/`.bin` (including its weights) but drops `model.mil`,
+    /// leaving a bundle that passes the `coremldata.bin` existence check yet
+    /// fails MIL load ("Error in reading the MIL network") — seen with
+    /// StyleTTS2's t64/t128/t256 buckets, which the default variant does not
+    /// declare as required.
+    static func repoIncludeRule(
+        subPath: String?, patterns: [String]
+    ) -> (String, Bool) -> Bool {
+        { itemPath, isDirectory in
+            if isDirectory {
+                // For subPath repos, only process paths within the subPath
+                if let sub = subPath {
+                    return itemPath == sub || itemPath.hasPrefix("\(sub)/")
+                        || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
+                }
+                return patterns.isEmpty
+                    || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
+            }
+            // For subPath repos, only include files within the subPath
+            if let sub = subPath {
+                let isInSubPath = itemPath.hasPrefix("\(sub)/")
+                let matchesPattern =
+                    patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+                let isMetadata =
+                    itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model") || itemPath.hasSuffix(".bin")
+                let isBundleInternal =
+                    itemPath.contains(".mlmodelc/") || itemPath.contains(".mlpackage/")
+                return isInSubPath && (matchesPattern || isMetadata || isBundleInternal)
+            }
+            return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+                || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
+        }
     }
 }
