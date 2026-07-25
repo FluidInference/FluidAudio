@@ -65,6 +65,12 @@ public enum Repo: String, CaseIterable, Sendable {
     /// recipe. Ships four `.mlmodelc` bundles + `tts.json` +
     /// `unicode_indexer.json` at the repo root.
     case supertonic3 = "FluidInference/supertonic-3-coreml"
+    /// NeuTTS-2E emotional English TTS (Qwen3 236M backbone + NeuCodec
+    /// decoder). Compiled `.mlmodelc` bundles + `tokenizer.json` +
+    /// `samples/<speaker>.json` reference codes at the repo root; the
+    /// `.mlpackage` sources alongside them are never downloaded. Conversion
+    /// lives in mobius (`models/tts/neutts-2e/coreml`).
+    case neuTts = "FluidInference/neutts-2e-coreml"
     /// LuxTTS (ZipVoice-Distill) — 48 kHz zero-shot voice-cloning TTS.
     /// Two decoder graphs per fixed shape bucket: `gpu/` (original graph,
     /// macOS GPU path) and `ane/` (ANE-canonical rewrite, iOS path), plus
@@ -76,6 +82,8 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Repository slug (without owner)
     public var name: String {
         switch self {
+        case .neuTts:
+            return "neutts-2e-coreml"
         case .nemotronMultilingual:
             return "Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"
         case .vad:
@@ -1359,6 +1367,23 @@ public enum ModelNames {
         }
     }
 
+    /// NeuTTS-2E — Qwen3 LM (prefill + MLState decode) + NeuCodec decoder.
+    /// The M=2048 pair covers the full 2048-token context; the repo also
+    /// ships a faster M=1024 pair and a pass-through-KV decode that the
+    /// Swift host does not use.
+    public enum NeuTts {
+        public static let prefillFile = "LM-Prefill-T768-M2048-fp16.mlmodelc"
+        public static let decodeFile = "LM-Decode-M2048-fp16-stateful.mlmodelc"
+        public static let codecFile = "NeuCodec-Decoder-fp16.mlmodelc"
+        public static let tokenizerFile = "tokenizer.json"
+
+        public static let requiredModels: Set<String> = [
+            prefillFile,
+            decodeFile,
+            codecFile,
+        ]
+    }
+
     static func getRequiredModelNames(for repo: Repo, variant: String?) -> Set<String> {
         switch repo {
         case .nemotronMultilingual:
@@ -1449,6 +1474,8 @@ public enum ModelNames {
             }
         case .supertonic3:
             return ModelNames.Supertonic3.requiredFiles(veVariant: variant)
+        case .neuTts:
+            return ModelNames.NeuTts.requiredModels
         case .luxtts:
             // Variants: "gpu" (macOS) / "ane" (iOS); nil → platform default.
             return ModelNames.LuxTts.requiredFiles(variant: variant)
