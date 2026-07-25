@@ -62,6 +62,10 @@ public struct TTS {
         // KokoroAne language variant — only consulted when backend == .kokoroAne.
         // Parsed from the `--variant` flag (en/english/zh/mandarin).
         var kokoroAneVariant: KokoroAneVariant = .english
+        // Inflect model size — only consulted when backend == .inflect.
+        // Parsed from `--variant` (micro/nano) or the backend token
+        // (inflect-micro / inflect-nano).
+        var inflectVariant: InflectVariant = .micro
         var lexiconPath: String? = nil
         var text: String? = nil
         // KokoroAne: treat the positional/`--text` value as a pre-computed
@@ -136,6 +140,10 @@ public struct TTS {
                         kokoroAneVariant = .mandarin
                     case "ja", "japanese", "jp":
                         kokoroAneVariant = .japanese
+                    case "micro", "inflect-micro":
+                        inflectVariant = .micro
+                    case "nano", "inflect-nano":
+                        inflectVariant = .nano
                     default:
                         logger.warning("Unknown variant preference '\(arguments[i + 1])'; ignoring")
                     }
@@ -160,6 +168,14 @@ public struct TTS {
                         backend = .supertonic3
                     case "luxtts", "lux-tts", "lux", "zipvoice":
                         backend = .luxtts
+                    case "inflect", "inflect-v2":
+                        backend = .inflect
+                    case "inflect-micro":
+                        backend = .inflect
+                        inflectVariant = .micro
+                    case "inflect-nano":
+                        backend = .inflect
+                        inflectVariant = .nano
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro-ane")
                     }
@@ -350,6 +366,89 @@ public struct TTS {
                 treatAsPhonemes: treatAsPhonemes,
                 speed: luxttsSpeed, seed: luxttsSeed,
                 metricsPath: metricsPath)
+        case .inflect:
+            await runInflect(
+                text: text, output: output,
+                variant: inflectVariant, treatAsPhonemes: treatAsPhonemes,
+                seed: pocketSeed ?? 0,
+                metricsPath: metricsPath, cpuOnly: cpuOnly)
+        }
+    }
+
+    /// Run Inflect v2 (Micro / Nano) TTS. With `--phonemes` the positional
+    /// text is treated as an espeak-style IPA string and fed straight to the
+    /// synthesizer (bypassing the Misaki + BART G2P frontend).
+    private static func runInflect(
+        text: String, output: String,
+        variant: InflectVariant, treatAsPhonemes: Bool,
+        seed: UInt64,
+        metricsPath: String?, cpuOnly: Bool
+    ) async {
+        do {
+            let tStart = Date()
+            let computeUnits: MLComputeUnits = cpuOnly ? .cpuOnly : .cpuAndGPU
+            let manager = InflectManager(variant: variant, computeUnits: computeUnits)
+
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+
+            logger.info("Inflect \(variant.rawValue) \(treatAsPhonemes ? "IPA" : "text") synthesis")
+            let tSynth0 = Date()
+            let samples =
+                treatAsPhonemes
+                ? try await manager.synthesize(ipa: text, noiseSeed: seed)
+                : try await manager.synthesize(text: text, noiseSeed: seed)
+            let tSynth1 = Date()
+
+            let outURL = resolveInputURL(output)
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let wav = try AudioWAV.data(
+                from: samples, sampleRate: Double(InflectConstants.sampleRate))
+            try wav.write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let totalS = tSynth1.timeIntervalSince(tStart)
+            let audioSecs = Double(samples.count) / Double(InflectConstants.sampleRate)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+
+            logger.info("Inflect synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Total: \(String(format: "%.3f", totalS))s")
+            logger.info("  Output: \(outURL.path)")
+
+            if let metricsPath {
+                let metricsDict: [String: Any] = [
+                    "backend": "inflect-\(variant.rawValue)",
+                    "text": text,
+                    "phonemes_mode": treatAsPhonemes,
+                    "seed": seed,
+                    "output": outURL.path,
+                    "model_load_time_s": loadS,
+                    "inference_time_s": synthS,
+                    "audio_duration_s": audioSecs,
+                    "realtime_speed": rtfx,
+                    "total_time_s": totalS,
+                ]
+                let artifactsRoot = try ensureArtifactsRoot()
+                let mURL = resolveOutputURL(
+                    metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+                try FileManager.default.createDirectory(
+                    at: mURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let json = try JSONSerialization.data(
+                    withJSONObject: metricsDict, options: [.prettyPrinted])
+                try json.write(to: mURL)
+                logger.info("Metrics saved: \(mURL.path)")
+            }
+        } catch {
+            logger.error("Inflect Error: \(error)")
+            print("Inflect failed: \(error)")
+            exit(1)
         }
     }
 

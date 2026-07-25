@@ -72,6 +72,12 @@ public enum Repo: String, CaseIterable, Sendable {
     /// `tokens.txt` / `config.json`. Conversion lives in mobius
     /// (`models/tts/zipvoice`).
     case luxtts = "FluidInference/luxtts-coreml"
+    /// Inflect v2 (Micro / Nano) — ultra-tiny VITS-family English TTS. One repo
+    /// with two variant subdirectories (`micro/`, `nano/`), each holding
+    /// `encoder.mlmodelc` + 8 `synthesizer_f<N>.mlmodelc` frame buckets.
+    /// Conversion lives in mobius (`models/tts/inflect-v2`).
+    case inflectMicro = "FluidInference/inflect-v2-coreml/micro"
+    case inflectNano = "FluidInference/inflect-v2-coreml/nano"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -142,6 +148,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "supertonic-3-coreml"
         case .luxtts:
             return "luxtts-coreml"
+        case .inflectMicro:
+            return "inflect-v2-coreml/micro"
+        case .inflectNano:
+            return "inflect-v2-coreml/nano"
         }
     }
 
@@ -170,6 +180,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/cohere-transcribe-03-2026-coreml"
         case .styletts2:
             return "FluidInference/StyleTTS-2-coreml"
+        case .inflectMicro, .inflectNano:
+            return "FluidInference/inflect-v2-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -208,6 +220,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "q8"
         case .styletts2:
             return "iteration_3/compiled"
+        case .inflectMicro:
+            return "micro"
+        case .inflectNano:
+            return "nano"
         default:
             return nil
         }
@@ -262,6 +278,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "styletts2"
         case .supertonic3:
             return "supertonic-3"
+        case .inflectMicro:
+            return "inflect-v2-coreml/micro"
+        case .inflectNano:
+            return "inflect-v2-coreml/nano"
         default:
             return name.replacingOccurrences(of: "-coreml", with: "")
         }
@@ -1154,6 +1174,22 @@ public enum ModelNames {
         }
     }
 
+    /// Inflect v2 (Micro / Nano) — VITS-family English TTS. Each variant
+    /// subdirectory holds a fixed-shape `encoder` and 8 `synthesizer_f<N>`
+    /// frame buckets. File names match `FluidInference/inflect-v2-coreml/<v>/`.
+    public enum Inflect {
+        public static let encoderFile = "encoder.mlmodelc"
+
+        public static func synthesizerFile(frames: Int) -> String {
+            "synthesizer_f\(frames).mlmodelc"
+        }
+
+        /// Encoder + all 8 synthesizer buckets (downloaded up front; buckets
+        /// load lazily). Buckets mirror `InflectConstants.frameBuckets`.
+        public static let requiredModels: Set<String> = Set(
+            [encoderFile] + InflectConstants.frameBuckets.map { synthesizerFile(frames: $0) })
+    }
+
     /// LuxTTS (ZipVoice-Distill) model names. The HF repo publishes the same
     /// text encoder + flow-matching decoder in two graph layouts:
     ///   - `gpu/`  — original graph; fastest on Mac GPU (do NOT run on ANE:
@@ -1452,6 +1488,8 @@ public enum ModelNames {
         case .luxtts:
             // Variants: "gpu" (macOS) / "ane" (iOS); nil → platform default.
             return ModelNames.LuxTts.requiredFiles(variant: variant)
+        case .inflectMicro, .inflectNano:
+            return ModelNames.Inflect.requiredModels
         }
     }
 }
