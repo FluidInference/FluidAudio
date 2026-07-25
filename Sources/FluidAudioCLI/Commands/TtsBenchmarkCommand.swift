@@ -106,6 +106,7 @@ public enum TtsBenchmarkCommand {
         var cohereComputeUnitsArg: String?
         var referencePath: String?
         var variantArg: String?
+        var phonemesMode = false
         var voiceStylePath: String?
         var totalStepsArg: Int?
         var speedArg: Float?
@@ -156,6 +157,8 @@ public enum TtsBenchmarkCommand {
                 }
             case "--skip-asr":
                 skipAsr = true
+            case "--phonemes":
+                phonemesMode = true
             case "--asr-backend":
                 if i + 1 < arguments.count {
                     asrBackendName = arguments[i + 1]
@@ -213,7 +216,7 @@ public enum TtsBenchmarkCommand {
         let backend = parseBackend(backendName)
 
         // Resolve corpus.
-        let phrases: [(category: String, text: String)]
+        var phrases: [(category: String, text: String)]
         let corpusLabel: String
         do {
             if let corpusPath {
@@ -233,6 +236,35 @@ public enum TtsBenchmarkCommand {
         guard !phrases.isEmpty else {
             logger.error("Corpus is empty after parsing")
             exit(1)
+        }
+
+        // --phonemes: each corpus line is `ipa_phonemes|reference_text`.
+        // Synthesis feeds the phonemes (G2P bypass); WER/CER scores against
+        // the reference text. Kokoro ANE only — the Japanese variant has no
+        // in-process G2P, so this is the only way to benchmark it.
+        var phonemesByReference: [String: String] = [:]
+        if phonemesMode {
+            guard backend == .kokoroAne else {
+                logger.error("--phonemes is only supported for --backend kokoro-ane")
+                exit(1)
+            }
+            var split: [(category: String, text: String)] = []
+            for item in phrases {
+                guard let pipe = item.text.firstIndex(of: "|") else {
+                    logger.error("--phonemes corpus line has no `phonemes|reference` pipe: \(item.text)")
+                    exit(1)
+                }
+                let phonemes = String(item.text[..<pipe]).trimmingCharacters(in: .whitespaces)
+                let reference = String(item.text[item.text.index(after: pipe)...])
+                    .trimmingCharacters(in: .whitespaces)
+                guard !phonemes.isEmpty, !reference.isEmpty else {
+                    logger.error("--phonemes corpus line has empty phonemes or reference: \(item.text)")
+                    exit(1)
+                }
+                phonemesByReference[reference] = phonemes
+                split.append((category: item.category, text: reference))
+            }
+            phrases = split
         }
         logger.info("Loaded \(phrases.count) phrase(s) from corpus '\(corpusLabel)'")
 
@@ -268,10 +300,17 @@ public enum TtsBenchmarkCommand {
             switch backend {
             case .kokoroAne:
                 let kaVariant = parseKokoroAneVariant(variantArg)
+                if kaVariant == .japanese && !phonemesMode {
+                    logger.error(
+                        "The japanese variant has no text G2P; pass --phonemes with a "
+                            + "`ipa_phonemes|reference_text` corpus (see #698).")
+                    exit(1)
+                }
                 try await runKokoroAne(
                     phrases: phrases, corpusLabel: corpusLabel,
                     variant: kaVariant,
                     voice: voice ?? kaVariant.defaultVoice,
+                    phonemesByReference: phonemesMode ? phonemesByReference : nil,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
             case .pocketTts:
@@ -311,6 +350,7 @@ public enum TtsBenchmarkCommand {
         corpusLabel: String,
         variant: KokoroAneVariant,
         voice: String,
+        phonemesByReference: [String: String]?,
         preset: TtsComputeUnitPreset,
         outputJson: String?,
         audioDir: String?,
@@ -325,8 +365,15 @@ public enum TtsBenchmarkCommand {
         logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
 
         let firstStart = Date()
-        _ = try await manager.synthesizeDetailed(
-            text: "Initialization warm-up.", voice: voice, speed: 1.0)
+        if let phonemesByReference {
+            // Text warm-up would throw on G2P-less variants (japanese);
+            // warm up through the same bypass the loop uses.
+            let warmUp = phrases.first.flatMap { phonemesByReference[$0.text] } ?? "aɾʲiɡatoː"
+            _ = try await manager.synthesizeFromPhonemesDetailed(warmUp, voice: voice, speed: 1.0)
+        } else {
+            _ = try await manager.synthesizeDetailed(
+                text: "Initialization warm-up.", voice: voice, speed: 1.0)
+        }
         let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
         logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
 
@@ -344,8 +391,18 @@ public enum TtsBenchmarkCommand {
             extraSummary: ["voice": voice]
         ) { text in
             let t0 = Date()
-            let result = try await manager.synthesizeDetailed(
-                text: text, voice: voice, speed: 1.0)
+            let result: KokoroAneSynthesisResult
+            if let phonemesByReference {
+                guard let phonemes = phonemesByReference[text] else {
+                    throw KokoroAneError.inputProcessingFailed(
+                        "No phonemes mapped for reference: \(text)")
+                }
+                result = try await manager.synthesizeFromPhonemesDetailed(
+                    phonemes, voice: voice, speed: 1.0)
+            } else {
+                result = try await manager.synthesizeDetailed(
+                    text: text, voice: voice, speed: 1.0)
+            }
             let synthMs = Date().timeIntervalSince(t0) * 1000
             return BackendPhraseSample(
                 synthMs: synthMs,
@@ -979,6 +1036,8 @@ public enum TtsBenchmarkCommand {
         switch name?.lowercased() {
         case "mandarin", "zh", "chinese", "zh-cn":
             return .mandarin
+        case "japanese", "ja", "jp":
+            return .japanese
         case "english", "en", "en-us", nil, "":
             return .english
         default:
@@ -1281,8 +1340,14 @@ public enum TtsBenchmarkCommand {
                                         (required for --backend styletts2;
                                         any sample rate / channel layout —
                                         resampled to 24 kHz mono internally)
-              --variant <name>          Kokoro ANE variant: english (default) or
-                                        mandarin (aliases: zh, chinese)
+              --variant <name>          Kokoro ANE variant: english (default),
+                                        mandarin (aliases: zh, chinese), or
+                                        japanese (aliases: ja, jp; requires
+                                        --phonemes)
+              --phonemes                Kokoro ANE G2P bypass: corpus lines are
+                                        `ipa_phonemes|reference_text`; synthesis
+                                        feeds the phonemes, WER/CER scores
+                                        against the reference text
               --voice-style <path>      Supertonic-3 voice style JSON
                                         (required for --backend supertonic3;
                                         e.g. M1.json shipped under
