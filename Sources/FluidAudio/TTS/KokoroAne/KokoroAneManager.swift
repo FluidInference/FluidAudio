@@ -66,6 +66,13 @@ public actor KokoroAneManager {
     /// Download (if missing), load all 7 mlmodelcs + vocab + default voice
     /// pack. Optionally pre-warm additional voice packs.
     public func initialize(preloadVoices: Set<String>? = nil) async throws {
+        if Self.isBnnsCrashProneOS(ProcessInfo.processInfo.operatingSystemVersion) {
+            logger.warning(
+                "This OS build (26.4–26.5.x line) has a known Apple BNNS bug that can "
+                    + "intermittently crash Kokoro synthesis (EXC_BAD_ACCESS in libBNNS) "
+                    + "regardless of compute-unit routing. Fixed in the 26.6 OS line. "
+                    + "See https://github.com/FluidInference/FluidAudio/issues/817")
+        }
         try await store.loadIfNeeded()
         // English G2P CoreML assets live in the kokoro repo and are loaded
         // from ~/.cache/fluidaudio/Models/kokoro/. The Mandarin variant
@@ -98,6 +105,13 @@ public actor KokoroAneManager {
                 _ = try await store.voicePack(voice)
             }
         }
+    }
+
+    /// OS builds in the 26.4–26.5.x line carry an Apple BNNS bug that can
+    /// intermittently crash synthesis in libBNNS on any compute-unit routing
+    /// (#328/#587/#667/#817); the 26.6 line fixes it.
+    static func isBnnsCrashProneOS(_ version: OperatingSystemVersion) -> Bool {
+        version.majorVersion == 26 && (4...5).contains(version.minorVersion)
     }
 
     /// `true` once the 7 mlmodelcs + vocab are resident.
