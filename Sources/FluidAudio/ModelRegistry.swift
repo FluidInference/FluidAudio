@@ -41,11 +41,49 @@ public enum ModelRegistry {
         }
     }
 
+    // MARK: - Repository Overrides
+
+    // Mutable static for runtime configuration, matching the `_customBaseURL` pattern above.
+    nonisolated(unsafe) private static var _repoOverrides: [String: String] = [:]
+
+    /// Maps upstream repository paths to alternates, e.g. a mirror under a different owner.
+    ///
+    /// `baseURL` only repoints the *host*, but repository paths come from the hardcoded `Repo`
+    /// enum, so a mirror hosted under a different owner on the same registry is unreachable
+    /// without this. Matching is longest-prefix, so mapping a repo also maps its subpaths
+    /// (e.g. `…/parakeet-realtime-eou-120m-coreml/160ms`).
+    ///
+    /// Repositories with no mapping resolve upstream unchanged, so a partial mirror is safe.
+    ///
+    ///     ModelRegistry.repoOverrides = [
+    ///         "FluidInference/parakeet-tdt-0.6b-v3-coreml": "DictionLabs/parakeet-tdt-0.6b-v3-coreml"
+    ///     ]
+    public static var repoOverrides: [String: String] {
+        get { _repoOverrides }
+        set { _repoOverrides = newValue }
+    }
+
+    /// Applies `repoOverrides` to a repository path. Longest key wins, so a more specific
+    /// mapping always beats a broader one regardless of dictionary ordering.
+    static func mapRepoPath(_ repoPath: String) -> String {
+        guard !_repoOverrides.isEmpty else { return repoPath }
+        for from in _repoOverrides.keys.sorted(by: { $0.count > $1.count }) {
+            guard let to = _repoOverrides[from] else { continue }
+            if repoPath == from {
+                return to
+            }
+            if repoPath.hasPrefix(from + "/") {
+                return to + repoPath.dropFirst(from.count)
+            }
+        }
+        return repoPath
+    }
+
     // MARK: - URL Construction
 
     /// Construct API URL for listing model repository contents
     public static func apiModels(_ repoPath: String, _ apiPath: String) throws -> URL {
-        let urlString = "\(baseURL)/api/models/\(repoPath)/\(apiPath)"
+        let urlString = "\(baseURL)/api/models/\(mapRepoPath(repoPath))/\(apiPath)"
         guard let url = URL(string: urlString) else {
             throw Error.invalidURL(urlString)
         }
@@ -54,7 +92,7 @@ public enum ModelRegistry {
 
     /// Construct download URL for a model file
     public static func resolveModel(_ repoPath: String, _ filePath: String) throws -> URL {
-        let urlString = "\(baseURL)/\(repoPath)/resolve/main/\(filePath)"
+        let urlString = "\(baseURL)/\(mapRepoPath(repoPath))/resolve/main/\(filePath)"
         guard let url = URL(string: urlString) else {
             throw Error.invalidURL(urlString)
         }
