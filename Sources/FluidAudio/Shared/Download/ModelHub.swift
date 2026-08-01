@@ -136,12 +136,78 @@ public enum ModelHub {
 
             ModelCache.purgeCorruptedCache(at: repoPath)
 
-            return try await loadModelsOnce(
-                repo, modelNames: modelNames,
-                directory: directory, computeUnits: computeUnits, variant: variant,
-                config: config, progressHandler: progressHandler)
+            do {
+                return try await loadModelsOnce(
+                    repo, modelNames: modelNames,
+                    directory: directory, computeUnits: computeUnits, variant: variant,
+                    config: config, progressHandler: progressHandler)
+            } catch let retryError {
+                if !RetryPolicy.isCancellation(retryError) {
+                    let required = ModelNames.getRequiredModelNames(for: repo, variant: variant)
+                        .union(modelNames)
+                    await logLoadFailureSizeDiagnosis(
+                        repo, directory: directory, requiredFiles: required)
+                }
+                throw retryError
+            }
         }
     }
+    /// Distinguish the two look-alike load-failure classes from the #819
+    /// discussion: CoreML's "Unable to load model" reads the same whether
+    /// the bytes on disk are short (truncated download — refetching helps)
+    /// or the full-size model cannot build an execution plan on this
+    /// hardware (#828 — refetching cannot help). Called after a
+    /// purge-and-redownload retry has ALSO failed; compares each required
+    /// file's on-disk size against the published HuggingFace size and logs
+    /// which class this failure is. Best-effort diagnostics only: needs
+    /// the network for the tree listing, silent in offline mode, never
+    /// throws.
+    static func logLoadFailureSizeDiagnosis(
+        _ repo: Repo, directory: URL, requiredFiles: Set<String>
+    ) async {
+        guard !offlineMode else { return }
+        let repoPath = directory.appendingPathComponent(repo.folderName)
+        let subPath = repo.subPath
+        var patterns: [String] = []
+        for model in requiredFiles {
+            if let sub = subPath {
+                patterns.append("\(sub)/\(model)")
+            } else {
+                patterns.append(model)
+            }
+        }
+        do {
+            let remote = try await HFTreeLister.listTree(
+                repoRemotePath: repo.remotePath,
+                startingAt: subPath ?? "",
+                include: { itemPath, isDirectory in
+                    if isDirectory {
+                        // Descend into ancestors of a pattern and into the
+                        // required bundles themselves.
+                        return patterns.contains {
+                            itemPath == $0 || itemPath.hasPrefix($0 + "/") || $0.hasPrefix(itemPath + "/")
+                        }
+                    }
+                    return patterns.contains { itemPath == $0 || itemPath.hasPrefix($0 + "/") }
+                },
+                fetch: HFTreeLister.fetch(using: session)
+            )
+            let undersized = ModelCache.undersizedFiles(remote: remote, at: repoPath, subPath: subPath)
+            if undersized.isEmpty {
+                logger.error(
+                    "Load still failing but all \(remote.count) required \(repo.folderName) files match their published HuggingFace sizes — the download is intact and re-downloading cannot fix this. The model likely cannot run on this hardware/OS (see issue #828); try a different precision or variant."
+                )
+            } else {
+                logger.error(
+                    "Load still failing and \(undersized.count) \(repo.folderName) file(s) are smaller than their published HuggingFace size — the cache is truncated; clear it (ModelHub.clearCache) and re-download: \(undersized.joined(separator: ", "))"
+                )
+            }
+        } catch {
+            logger.warning(
+                "Load-failure size diagnosis unavailable: \(error.localizedDescription)")
+        }
+    }
+
     /// Ensure a complete cache for `repo`, run `load`, and recover from a
     /// corrupted cache by purging and re-downloading once.
     ///
@@ -231,7 +297,15 @@ public enum ModelHub {
             ModelCache.purgeCorruptedCache(at: repoPath)
 
             try await ensureCacheComplete()
-            return try await load()
+            do {
+                return try await load()
+            } catch let retryError {
+                if !RetryPolicy.isCancellation(retryError) {
+                    await logLoadFailureSizeDiagnosis(
+                        repo, directory: directory, requiredFiles: requiredFiles)
+                }
+                throw retryError
+            }
         }
     }
 

@@ -114,12 +114,99 @@ final class ModelCacheCompletenessTests: XCTestCase {
             ModelCache.isCacheComplete(at: repoPath, requiredFiles: ["encoder.mlmodelc"]))
     }
 
+    // MARK: - SenseVoice / Paraformer public gates
+
+    func testSenseVoiceModelsExistRejectsInterruptedDownload() throws {
+        try makeBundle(ModelNames.SenseVoice.preprocessorFile)
+        try makeBundle(
+            ModelNames.SenseVoice.encoderFile, coremldata: false, partialWeights: true)
+        try makeFile(ModelNames.SenseVoice.vocabularyFile)
+
+        XCTAssertFalse(SenseVoiceModels.modelsExist(at: repoPath, precision: .fp16))
+
+        // Complete the encoder bundle: gate opens.
+        let encoder = repoPath.appendingPathComponent(ModelNames.SenseVoice.encoderFile)
+        try Data("x".utf8).write(to: encoder.appendingPathComponent("coremldata.bin"))
+        try FileManager.default.removeItem(
+            at: encoder.appendingPathComponent("weights/weight.bin.partial"))
+        XCTAssertTrue(SenseVoiceModels.modelsExist(at: repoPath, precision: .fp16))
+        // Other precisions still gated on their own encoder.
+        XCTAssertFalse(SenseVoiceModels.modelsExist(at: repoPath, precision: .int8))
+    }
+
+    func testParaformerModelsExistRejectsInterruptedDownload() throws {
+        try makeBundle(ModelNames.ParaformerZh.preprocessorFile)
+        try makeBundle(ModelNames.ParaformerZh.encoderFile, coremldata: false)
+        try makeBundle(ModelNames.ParaformerZh.cifAlphasFile)
+        try makeBundle(ModelNames.ParaformerZh.decoderFile)
+        try makeFile(ModelNames.ParaformerZh.vocabularyFile)
+
+        XCTAssertFalse(ParaformerModels.modelsExist(at: repoPath, precision: .fp16))
+
+        try Data("x".utf8).write(
+            to: repoPath.appendingPathComponent(ModelNames.ParaformerZh.encoderFile)
+                .appendingPathComponent("coremldata.bin"))
+        XCTAssertTrue(ParaformerModels.modelsExist(at: repoPath, precision: .fp16))
+    }
+
+    // MARK: - undersizedFiles (truncated vs incompatible diagnosis)
+
+    func testUndersizedFilesFlagsTruncatedAndMissingFiles() throws {
+        try makeBundle("encoder.mlmodelc")  // weights/weight.bin is 1 byte
+        let remote = [
+            RemoteFile(path: "encoder.mlmodelc/weights/weight.bin", size: 540),
+            RemoteFile(path: "encoder.mlmodelc/coremldata.bin", size: 1),
+            RemoteFile(path: "vocab.json", size: 100),  // missing locally
+        ]
+
+        XCTAssertEqual(
+            ModelCache.undersizedFiles(remote: remote, at: repoPath, subPath: nil),
+            [
+                "encoder.mlmodelc/weights/weight.bin (1/540 bytes)",
+                "vocab.json (0/100 bytes)",
+            ])
+    }
+
+    func testUndersizedFilesEmptyWhenSizesMatch() throws {
+        try makeBundle("encoder.mlmodelc")
+        let remote = [
+            RemoteFile(path: "encoder.mlmodelc/coremldata.bin", size: 1),
+            RemoteFile(path: "encoder.mlmodelc/weights/weight.bin", size: 1),
+            // Unreported sizes must not be flagged.
+            RemoteFile(path: "encoder.mlmodelc/metadata.json", size: -1),
+        ]
+
+        XCTAssertEqual(
+            ModelCache.undersizedFiles(remote: remote, at: repoPath, subPath: nil), [])
+    }
+
+    func testUndersizedFilesStripsSubPath() throws {
+        try makeFile("vocab.json")  // 2 bytes ("{}")
+        let remote = [
+            RemoteFile(path: "160ms/vocab.json", size: 2),
+            RemoteFile(path: "160ms/missing.bin", size: 10),
+        ]
+
+        XCTAssertEqual(
+            ModelCache.undersizedFiles(remote: remote, at: repoPath, subPath: "160ms"),
+            ["missing.bin (0/10 bytes)"])
+    }
+
     // MARK: - loadWithRecovery (no-network paths)
 
+    /// A unique models root per test: parallel CI runs other suites in
+    /// sibling processes that also create/purge repo caches directly under
+    /// the shared temp directory, so the assertions here must never share
+    /// paths with them.
+    private func makeUniqueBaseDir() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("recovery-\(UUID().uuidString)")
+    }
+
     func testLoadWithRecoveryRunsLoadOnCompleteCache() async throws {
-        let baseDir = repoPath.deletingLastPathComponent()
+        let baseDir = makeUniqueBaseDir()
         let vadRepoPath = baseDir.appendingPathComponent(Repo.vad.folderName)
-        defer { try? FileManager.default.removeItem(at: vadRepoPath) }
+        defer { try? FileManager.default.removeItem(at: baseDir) }
         try FileManager.default.createDirectory(
             at: vadRepoPath.appendingPathComponent(ModelNames.VAD.sileroVadFile),
             withIntermediateDirectories: true)
@@ -138,8 +225,7 @@ final class ModelCacheCompletenessTests: XCTestCase {
 
     func testLoadWithRecoveryOfflineIncompleteCacheThrowsTypedError() async {
         ModelHub.offlineMode = true
-        let baseDir = repoPath.deletingLastPathComponent()
-            .appendingPathComponent("recovery-offline-\(UUID().uuidString)")
+        let baseDir = makeUniqueBaseDir()
         defer { try? FileManager.default.removeItem(at: baseDir) }
 
         do {
@@ -160,9 +246,9 @@ final class ModelCacheCompletenessTests: XCTestCase {
 
     func testLoadWithRecoveryOfflineLoadFailureDoesNotPurgeCache() async throws {
         struct LoadFailure: Error {}
-        let baseDir = repoPath.deletingLastPathComponent()
+        let baseDir = makeUniqueBaseDir()
         let vadRepoPath = baseDir.appendingPathComponent(Repo.vad.folderName)
-        defer { try? FileManager.default.removeItem(at: vadRepoPath) }
+        defer { try? FileManager.default.removeItem(at: baseDir) }
         let bundle = vadRepoPath.appendingPathComponent(ModelNames.VAD.sileroVadFile)
         try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
         try Data("x".utf8).write(to: bundle.appendingPathComponent("coremldata.bin"))
@@ -184,9 +270,9 @@ final class ModelCacheCompletenessTests: XCTestCase {
     }
 
     func testLoadWithRecoveryCancellationPreservesCache() async throws {
-        let baseDir = repoPath.deletingLastPathComponent()
+        let baseDir = makeUniqueBaseDir()
         let vadRepoPath = baseDir.appendingPathComponent(Repo.vad.folderName)
-        defer { try? FileManager.default.removeItem(at: vadRepoPath) }
+        defer { try? FileManager.default.removeItem(at: baseDir) }
         let bundle = vadRepoPath.appendingPathComponent(ModelNames.VAD.sileroVadFile)
         try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
         try Data("x".utf8).write(to: bundle.appendingPathComponent("coremldata.bin"))

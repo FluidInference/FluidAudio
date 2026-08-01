@@ -158,6 +158,35 @@ enum ModelCache {
         return false
     }
 
+    /// Files whose on-disk size is smaller than (or missing versus) the
+    /// published remote size, as `"path (local/remote bytes)"`, sorted.
+    ///
+    /// The pure comparison behind `ModelHub.logLoadFailureSizeDiagnosis`:
+    /// a truncated weight file and a full-size model that cannot run on
+    /// this hardware produce the same CoreML "Unable to load model" error
+    /// (issue #819 discussion / #828); byte counts are what separates
+    /// them. `subPath` is stripped from remote paths to form local paths
+    /// under `repoPath`; remote entries with unreported sizes (-1) are
+    /// skipped.
+    static func undersizedFiles(
+        remote: [RemoteFile], at repoPath: URL, subPath: String?
+    ) -> [String] {
+        var short: [String] = []
+        for file in remote where file.size > 0 {
+            var localRel = file.path
+            if let sub = subPath, localRel.hasPrefix("\(sub)/") {
+                localRel = String(localRel.dropFirst(sub.count + 1))
+            }
+            let localPath = repoPath.appendingPathComponent(localRel).path
+            let attributes = try? FileManager.default.attributesOfItem(atPath: localPath)
+            let localSize = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+            if localSize < Int64(file.size) {
+                short.append("\(localRel) (\(localSize)/\(file.size) bytes)")
+            }
+        }
+        return short.sorted()
+    }
+
     /// Delete a corrupted repo cache, tolerating an already-missing path
     /// (robust directory creation handles any remnants on re-download).
     ///
