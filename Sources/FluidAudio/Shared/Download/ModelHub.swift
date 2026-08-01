@@ -667,23 +667,39 @@ public enum ModelHub {
     }
 
     /// File/directory selection rule for repo downloads: subPath scoping,
-    /// required-model patterns, metadata-extension allowances, and CoreML
-    /// bundle completeness.
+    /// required-model patterns, metadata-extension allowances, and
+    /// all-or-nothing CoreML bundle matching.
     ///
-    /// Files inside a `.mlmodelc`/`.mlpackage` under the subPath are always
-    /// included: the metadata allowance alone sweeps in a non-required
-    /// bundle's `.json`/`.bin` (including its weights) but drops `model.mil`,
-    /// leaving a bundle that passes the `coremldata.bin` existence check yet
-    /// fails MIL load ("Error in reading the MIL network") — seen with
-    /// StyleTTS2's t64/t128/t256 buckets, which the default variant does not
-    /// declare as required.
+    /// For subPath repos, paths that are (or are inside) a
+    /// `.mlmodelc`/`.mlpackage` are decided at bundle granularity against the
+    /// required-model patterns:
+    ///
+    /// - A required bundle is taken whole. The metadata allowance alone
+    ///   sweeps in a bundle's `.json`/`.bin` but drops `model.mil`, leaving a
+    ///   bundle that passes the `coremldata.bin` existence check yet fails
+    ///   MIL load ("Error in reading the MIL network") — StyleTTS2's
+    ///   t64/t128/t256 buckets (#821).
+    /// - A non-required bundle is skipped whole. These repos publish the
+    ///   uncompiled `.mlpackage` next to each compiled `.mlmodelc`, and the
+    ///   `.bin` allowance was pulling every `weight.bin` inside them —
+    ///   roughly half of a first-run parakeetEou/kokoroAne download was never
+    ///   loaded (#826). Skipping applies to directory traversal too, so the
+    ///   tree lister does not recurse into excluded bundles.
     static func repoIncludeRule(
         subPath: String?, patterns: [String]
     ) -> (String, Bool) -> Bool {
         { itemPath, isDirectory in
+            let isBundlePath =
+                itemPath.hasSuffix(".mlmodelc") || itemPath.hasSuffix(".mlpackage")
+                || itemPath.contains(".mlmodelc/") || itemPath.contains(".mlpackage/")
             if isDirectory {
                 // For subPath repos, only process paths within the subPath
                 if let sub = subPath {
+                    if isBundlePath, !patterns.isEmpty {
+                        return patterns.contains {
+                            (itemPath + "/").hasPrefix($0) || $0.hasPrefix(itemPath + "/")
+                        }
+                    }
                     return itemPath == sub || itemPath.hasPrefix("\(sub)/")
                         || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
                 }
@@ -695,11 +711,12 @@ public enum ModelHub {
                 let isInSubPath = itemPath.hasPrefix("\(sub)/")
                 let matchesPattern =
                     patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+                if isBundlePath {
+                    return isInSubPath && matchesPattern
+                }
                 let isMetadata =
                     itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model") || itemPath.hasSuffix(".bin")
-                let isBundleInternal =
-                    itemPath.contains(".mlmodelc/") || itemPath.contains(".mlpackage/")
-                return isInSubPath && (matchesPattern || isMetadata || isBundleInternal)
+                return isInSubPath && (matchesPattern || isMetadata)
             }
             return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
                 || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")

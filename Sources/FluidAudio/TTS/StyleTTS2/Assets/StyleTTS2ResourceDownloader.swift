@@ -130,17 +130,21 @@ public enum StyleTTS2ResourceDownloader {
         }
 
         logger.info("Fetching StyleTTS2 bucket T=\(t) (\(missing.count) bundles)")
-        for fileName in missing {
-            do {
-                try await ModelHub.download(
-                    .styletts2,
-                    subdirectory: fileName,
-                    to: repoDir
-                )
-            } catch {
-                throw StyleTTS2Error.downloadFailed(
-                    "bucket T=\(t) bundle \(fileName) — \(error)")
-            }
+        // The "t<T>" sentinel variant scopes the repo download to the two
+        // bucket bundles; the repo download handles subPath stripping, so the
+        // bundles land directly under `repoDir` where the model store loads
+        // them. (The previous `download(subdirectory:)` call listed the
+        // bundle name at the repo *root* — the buckets live under the
+        // `iteration_3/compiled` subPath, so it fetched nothing; it went
+        // unnoticed because the bulk download used to sweep the buckets in.)
+        var modelsRoot = repoDir
+        for _ in Repo.styletts2.folderName.split(separator: "/") {
+            modelsRoot.deleteLastPathComponent()
+        }
+        do {
+            try await ModelHub.download(.styletts2, to: modelsRoot, variant: "t\(t)")
+        } catch {
+            throw StyleTTS2Error.downloadFailed("bucket T=\(t) — \(error)")
         }
     }
 
