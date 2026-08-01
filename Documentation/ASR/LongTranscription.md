@@ -47,6 +47,11 @@ When reviewing long-form ASR output, check the transcript for:
 - glued words (two words joined without a space) or hybrid words stitched
   from both windows' segmentation of the same seam word — `"worksks"`,
   `"automoti"`, mid-word punctuation like `"ye,ah"` (issue #683)
+- subword or word order scrambled *across* a seam — subwords of two
+  adjacent words interleaved (`"im Frühjahr"` → `"imüh Frjahr"`), two words
+  swapped (`"Für die"` → `"die Für"`), or a word's own pieces rearranged
+  (`"Punkt"` → `"Pktun"`). Fixed in PR #830 — see "Token Order Is
+  Authoritative" (issue #825)
 - missing clauses or full sentences after a boundary
 - wrong-language insertions in otherwise single-language audio
 - wrong-script bursts on multilingual v3 audio
@@ -248,6 +253,32 @@ cannot collapse two different words that happen to share a substring, and it
 is robust to small per-chunk timestamp jitter. The contiguous-match path
 preserves order strictly; LCS is only entered when adjacent chunks disagree
 enough that a contiguous run would be dishonest.
+
+### Token Order Is Authoritative
+
+Each merge step produces tokens in linear text order (left prefix, spliced
+seam, right suffix), and `convertTokensToText` builds the transcript by
+joining tokens in that array order. The merged order — not the frame
+timestamps — is the source of truth for the text.
+
+Frame timestamps are therefore **clamped monotonic, never sorted**
+(`enforceMonotonicTimestamps`). A timestamp sort is unsafe as a final pass
+because the key is both coarse and non-monotonic across a seam:
+
+- TDT emits several tokens per 80 ms encoder frame, so many tokens share a
+  timestamp; sorting on ties can reorder same-frame subwords.
+- The two overlapping windows number frames from different global offsets
+  (plus mel-context / warmup adjustments), so a token that linearly *follows*
+  another can carry a numerically *smaller* timestamp. Sorting then pulls it
+  ahead, interleaving subwords from the two windows.
+
+Re-sorting the merged stream by timestamp produced the seam scrambles in
+issue #825 (`"im Frühjahr"` → `"imüh Frjahr"`, `"Für die"` → `"die Für"`,
+`"Punkt"` → `"Pktun"`) — it discarded the order the splice logic below had
+carefully constructed. The clamp instead only raises any backward-stepping
+timestamp to the running maximum, leaving token order untouched while keeping
+the sequence non-decreasing for word timing, `collapseSeamWordDuplicates`,
+and the post-merge repair pass (PR #830).
 
 ### Case-Folded Matching and Seam Word Duplicates
 
@@ -469,7 +500,12 @@ RMS exceeds `0.008 / 0.3 ≈ 0.027`.
 - Probes are extra window decodes: ~25–30 on a 30-minute applause-heavy
   conference file (~20% over baseline), near zero on clean audio.
 - Seam **garbles** ("language in" → "languag ines") leave no token gap and
-  are invisible to the pass — they need a fix in the merger itself.
+  are invisible to the pass — they need a fix in the merger itself. The
+  *order-inversion* subclass of this (subwords/words reordered across a seam,
+  issue #825) is fixed in the merger by keeping token order authoritative
+  instead of re-sorting by timestamp (PR #830, see "Token Order Is
+  Authoritative"). Garbles from the two windows tokenizing the same audio
+  *differently* at the splice are a separate, still-open case.
 - Edge re-hearings with different tokenization can occasionally duplicate a
   boundary word (~1 per 15–20 min of dense conference speech) — the same
   artifact class and rate the merger already produces. Deliberately not
@@ -612,6 +648,7 @@ authoritative record; the milestones:
 | 2026-07 (#758 → #761) | Seam-gap repair pass | multi-second speech spans dropped at low-SNR seams — unfixable at the merge layer because the tokens never existed. |
 | 2026-07 (#759) | Bound-safe fallbacks in merge repairs | three residual paths that dropped content when no splice-safe token existed. |
 | 2026-07 (#747) | End-aligned final window + adaptive speech gate | final-window blank-out on quiet audio — a short last chunk zero-padded to the model window is a degenerate input; fixed structurally by backfilling with real audio. The adaptive gate replaced an absolute energy gate that was structurally dead on the quiet-audio class. |
+| 2026-07 (#825 → #830) | Merge order authoritative; clamp timestamps instead of re-sorting | subwords/words reordered across a seam ("im Frühjahr" → "imüh Frjahr", "Für die" → "die Für") — a final global timestamp sort scrambled the order the splice logic had built, because frame timestamps are coarse and don't co-register across a seam. |
 
 Two recurring lessons in that table:
 
