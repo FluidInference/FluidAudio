@@ -187,16 +187,24 @@ public actor StreamingNemotronAsrManager {
             .appendingPathComponent("Models", isDirectory: true)
 
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-        let encoderInt8Path = cacheDir.appendingPathComponent("encoder/\(NemotronEncoder.fileName)")
 
-        if !FileManager.default.fileExists(atPath: encoderInt8Path.path) {
-            logger.info("Downloading Nemotron models to \(modelsBaseDir.path)...")
-            try await ModelHub.download(repo, to: modelsBaseDir, progressHandler: progressHandler)
-        } else {
-            logger.info("Using cached Nemotron models at \(cacheDir.path)")
+        // Completeness-checked download + purge-and-retry on load failure: a
+        // bare directory-existence gate mistook an interrupted encoder fetch
+        // for a warm cache and bricked loading permanently (issue #819).
+        // `decoder_joint.mlmodelc` and `metadata.json` are optional at load
+        // time, so they are excluded from the validity set.
+        try await ModelHub.loadWithRecovery(
+            repo, directory: modelsBaseDir,
+            requiredFiles: [
+                "encoder/\(NemotronEncoder.fileName)",
+                ModelNames.NemotronStreaming.decoderFile,
+                ModelNames.NemotronStreaming.jointFile,
+                ModelNames.NemotronStreaming.tokenizer,
+            ],
+            progressHandler: progressHandler
+        ) {
+            try await self.loadModels(from: cacheDir)
         }
-
-        try await loadModels(from: cacheDir)
     }
 
     /// Reset all states for a new transcription session

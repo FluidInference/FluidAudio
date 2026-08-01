@@ -351,19 +351,16 @@ public actor StreamingEouAsrManager {
         }
         let modelDir = modelsRoot.appendingPathComponent(repo.folderName, isDirectory: true)
 
-        let requiredModels = ModelNames.ParakeetEOU.requiredModels
-        let modelsExist = requiredModels.allSatisfy { modelName in
-            FileManager.default.fileExists(atPath: modelDir.appendingPathComponent(modelName).path)
+        // Completeness-checked download + purge-and-retry on load failure: a
+        // bare file-existence gate mistook an interrupted encoder fetch for a
+        // warm cache and bricked loading permanently (issue #819).
+        try await ModelHub.loadWithRecovery(
+            repo, directory: modelsRoot,
+            requiredFiles: ModelNames.ParakeetEOU.requiredModels,
+            progressHandler: progressHandler
+        ) {
+            try await self.loadModels(from: modelDir)
         }
-
-        if !modelsExist {
-            logger.info("Downloading Parakeet EOU models to \(modelsRoot.path)...")
-            try await ModelHub.download(repo, to: modelsRoot, progressHandler: progressHandler)
-        } else {
-            logger.info("Using cached Parakeet EOU models at \(modelDir.path)")
-        }
-
-        try await loadModels(from: modelDir)
     }
 
     private static func defaultCacheDirectory() -> URL {

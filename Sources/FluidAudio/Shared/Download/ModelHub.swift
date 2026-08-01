@@ -142,6 +142,99 @@ public enum ModelHub {
                 config: config, progressHandler: progressHandler)
         }
     }
+    /// Ensure a complete cache for `repo`, run `load`, and recover from a
+    /// corrupted cache by purging and re-downloading once.
+    ///
+    /// The recovery wrapper for managers that load models themselves with
+    /// per-model `MLModelConfiguration`s (e.g. encoder on ANE, decoder on
+    /// CPU) and therefore cannot use `loadModels(_:modelNames:...)`. It
+    /// provides the same guarantees that path has (issue #819):
+    ///
+    /// - Cache validity is judged per required file — every `.mlmodelc`
+    ///   must have its root `coremldata.bin` and no `*.partial` staging
+    ///   file — not by bare directory existence. An interrupted download
+    ///   therefore triggers a re-download (resuming any partial file via
+    ///   HTTP Range) instead of being mistaken for a warm cache.
+    /// - When `load` throws, the repo cache is purged and re-downloaded
+    ///   and `load` retried once — except in offline mode, on
+    ///   cancellation, and on transient network errors, where the cache
+    ///   is preserved and the error rethrown.
+    ///
+    /// - Parameters:
+    ///   - requiredFiles: Paths relative to the repo cache directory that
+    ///     `load` needs (bundle names like `"encoder.mlmodelc"`, nested
+    ///     paths like `"encoder/encoder_int8.mlmodelc"`, or plain files
+    ///     like `"vocab.json"`). Entries outside the repo's registry set
+    ///     are forwarded to the download as `additionalModelNames`.
+    ///   - load: Loads the models from the cache; its result is returned.
+    public static func loadWithRecovery<T: Sendable>(
+        _ repo: Repo,
+        directory: URL,
+        requiredFiles: Set<String>,
+        variant: String? = nil,
+        config: DownloadConfig = .default,
+        progressHandler: ProgressHandler? = nil,
+        load: @Sendable () async throws -> T
+    ) async throws -> T {
+        await SystemInfo.logOnce(using: logger)
+        let repoPath = directory.appendingPathComponent(repo.folderName)
+        let additionalModelNames = requiredFiles.subtracting(
+            ModelNames.getRequiredModelNames(for: repo, variant: variant))
+
+        func ensureCacheComplete() async throws {
+            let incomplete = ModelCache.incompleteFiles(at: repoPath, requiredFiles: requiredFiles)
+            if incomplete.isEmpty {
+                logger.info("Found \(repo.folderName) locally, no download needed")
+                return
+            }
+            if offlineMode {
+                logger.error(
+                    "Offline mode: required models missing or incomplete at \(repoPath.path): \(incomplete)"
+                )
+                throw DownloadError.modelMissing(repo: repo.folderName, missing: incomplete)
+            }
+            logger.info("Models missing or incomplete in cache at \(repoPath.path): \(incomplete)")
+            try await download(
+                repo, to: directory, variant: variant,
+                additionalModelNames: additionalModelNames,
+                config: config,
+                progressHandler: progressHandler)
+        }
+
+        try await ensureCacheComplete()
+        do {
+            return try await load()
+        } catch {
+            // Mirror loadModels: offline mode never purges or re-downloads;
+            // cancellation and transient network failures are not corruption
+            // and must preserve the (valid, resumable) bytes on disk.
+            if offlineMode {
+                logger.warning(
+                    "Offline mode: load failed and re-download blocked. \(error.localizedDescription)"
+                )
+                throw error
+            }
+            if RetryPolicy.isCancellation(error) {
+                logger.info(
+                    "Load cancelled; preserving model cache. \(error.localizedDescription)")
+                throw error
+            }
+            if RetryPolicy.isRetryable(error) {
+                logger.warning(
+                    "Load failed with transient network error; preserving model cache for resume. \(error.localizedDescription)"
+                )
+                throw error
+            }
+
+            logger.warning("First load failed: \(error.localizedDescription)")
+            logger.info("Deleting cache and re-downloading…")
+            ModelCache.purgeCorruptedCache(at: repoPath)
+
+            try await ensureCacheComplete()
+            return try await load()
+        }
+    }
+
     private static func loadModelsOnce(
         _ repo: Repo,
         modelNames: [String],

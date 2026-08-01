@@ -116,6 +116,48 @@ enum ModelCache {
         }
     }
 
+    /// The subset of `requiredFiles` that is missing or not load-ready under
+    /// `repoPath`, sorted for stable error reporting. Compiled bundles
+    /// (`.mlmodelc`) must pass `validateCompiledModelLayout` and contain no
+    /// `*.partial` download staging file; plain files must exist.
+    ///
+    /// This is the cache-validity check behind `ModelHub.loadWithRecovery`.
+    /// A bare directory-existence check passes for a bundle whose download
+    /// was interrupted mid-weights — leaving `weights/weight.bin.partial`
+    /// and no root `coremldata.bin` — which then fails every subsequent
+    /// `MLModel.load` while the downloader believes the cache is warm
+    /// (issue #819). This check reports such a bundle as incomplete so the
+    /// downloader re-runs and resumes the partial file.
+    static func incompleteFiles(at repoPath: URL, requiredFiles: Set<String>) -> [String] {
+        requiredFiles.filter { file in
+            let path = repoPath.appendingPathComponent(file)
+            if file.hasSuffix(".mlmodelc") {
+                guard (try? validateCompiledModelLayout(at: path, name: file)) != nil else { return true }
+                return containsPartialDownload(at: path)
+            }
+            return !FileManager.default.fileExists(atPath: path.path)
+        }.sorted()
+    }
+
+    /// `true` when every file in `requiredFiles` is present and load-ready
+    /// under `repoPath` — see `incompleteFiles(at:requiredFiles:)`.
+    static func isCacheComplete(at repoPath: URL, requiredFiles: Set<String>) -> Bool {
+        incompleteFiles(at: repoPath, requiredFiles: requiredFiles).isEmpty
+    }
+
+    /// `true` when any `*.partial` staging file from an interrupted
+    /// `FileDownloader` fetch remains under `url`.
+    static func containsPartialDownload(at url: URL) -> Bool {
+        guard
+            let enumerator = FileManager.default.enumerator(
+                at: url, includingPropertiesForKeys: nil)
+        else { return false }
+        for case let item as URL in enumerator where item.pathExtension == "partial" {
+            return true
+        }
+        return false
+    }
+
     /// Delete a corrupted repo cache, tolerating an already-missing path
     /// (robust directory creation handles any remnants on re-download).
     ///

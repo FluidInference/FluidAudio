@@ -149,20 +149,23 @@ public actor UnifiedAsrManager {
             .appendingPathComponent("Models", isDirectory: true)
 
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-        let encoderPath = cacheDir.appendingPathComponent(
-            ModelNames.ParakeetUnified.offlineEncoderFile(precision: encoderPrecision))
 
-        if !FileManager.default.fileExists(atPath: encoderPath.path) {
-            logger.info("Downloading Parakeet Unified offline models to \(modelsBaseDir.path)...")
-            try await ModelHub.download(
-                repo, to: modelsBaseDir,
-                variant: encoderPrecision == .fp16 ? "offline-fp16" : "offline",
-                progressHandler: progressHandler)
-        } else {
-            logger.info("Using cached Parakeet Unified offline models at \(cacheDir.path)")
+        // Completeness-checked download + purge-and-retry on load failure: a
+        // bare directory-existence gate mistook an interrupted encoder fetch
+        // for a warm cache and bricked loading permanently (issue #819).
+        try await ModelHub.loadWithRecovery(
+            repo, directory: modelsBaseDir,
+            requiredFiles: [
+                ModelNames.ParakeetUnified.offlineEncoderFile(precision: encoderPrecision),
+                ModelNames.ParakeetUnified.decoderFile,
+                ModelNames.ParakeetUnified.jointDecisionFile,
+                ModelNames.ParakeetUnified.vocab,
+            ],
+            variant: encoderPrecision == .fp16 ? "offline-fp16" : "offline",
+            progressHandler: progressHandler
+        ) {
+            try await self.loadModels(from: cacheDir)
         }
-
-        try await loadModels(from: cacheDir)
     }
 
     // MARK: - Batch API

@@ -146,20 +146,23 @@ public actor StreamingUnifiedAsrManager {
         // this config's specific encoder rather than the default 70_13_13.
         let encoderFile = ModelNames.ParakeetUnified.streamingEncoderFile(
             precision: encoderPrecision, contextSuffix: config.contextSuffix)
-        let encoderPath = cacheDir.appendingPathComponent(encoderFile)
 
-        if !FileManager.default.fileExists(atPath: encoderPath.path) {
-            logger.info("Downloading Parakeet Unified models to \(modelsBaseDir.path)...")
-            try await ModelHub.download(
-                repo, to: modelsBaseDir,
-                variant: encoderPrecision == .fp16 ? "fp16" : nil,
-                additionalModelNames: [encoderFile],
-                progressHandler: progressHandler)
-        } else {
-            logger.info("Using cached Parakeet Unified models at \(cacheDir.path)")
+        // Completeness-checked download + purge-and-retry on load failure: a
+        // bare directory-existence gate mistook an interrupted encoder fetch
+        // for a warm cache and bricked loading permanently (issue #819).
+        try await ModelHub.loadWithRecovery(
+            repo, directory: modelsBaseDir,
+            requiredFiles: [
+                encoderFile,
+                ModelNames.ParakeetUnified.decoderFile,
+                ModelNames.ParakeetUnified.jointDecisionFile,
+                ModelNames.ParakeetUnified.vocab,
+            ],
+            variant: encoderPrecision == .fp16 ? "fp16" : nil,
+            progressHandler: progressHandler
+        ) {
+            try await self.loadModels(from: cacheDir)
         }
-
-        try await loadModels(from: cacheDir)
     }
 
     // MARK: - Streaming API
