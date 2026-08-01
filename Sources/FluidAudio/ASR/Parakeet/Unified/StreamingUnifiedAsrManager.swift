@@ -99,11 +99,24 @@ public actor StreamingUnifiedAsrManager {
         } else {
             encoderConfig = mlConfiguration
         }
-        self.encoder = try await MLModel.load(
-            contentsOf: directory.appendingPathComponent(
-                names.streamingEncoderFile(precision: encoderPrecision, contextSuffix: config.contextSuffix)),
-            configuration: encoderConfig
-        )
+        do {
+            self.encoder = try await MLModel.load(
+                contentsOf: directory.appendingPathComponent(
+                    names.streamingEncoderFile(precision: encoderPrecision, contextSuffix: config.contextSuffix)),
+                configuration: encoderConfig
+            )
+        } catch {
+            if encoderPrecision == .int8 {
+                // On A16 the int8 encoder fails to build an execution plan on
+                // every compute unit, even .cpuOnly, from an intact download
+                // (issue #828) — indistinguishable from a corrupt cache in
+                // CoreML's error text, so name the escape hatch here.
+                logger.error(
+                    "int8 unified encoder failed to load. On some A-series chips (A16 verified) it cannot build an execution plan on any compute unit even from an intact download — retry with encoderPrecision: .fp16 (issue #828). Underlying error: \(error.localizedDescription)"
+                )
+            }
+            throw error
+        }
         self.decoder = try await MLModel.load(
             contentsOf: directory.appendingPathComponent(names.decoderFile),
             configuration: cpuConfig

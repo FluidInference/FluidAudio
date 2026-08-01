@@ -105,11 +105,23 @@ public actor UnifiedAsrManager {
         } else {
             encoderConfig = mlConfiguration
         }
-        self.encoder = try await MLModel.load(
-            contentsOf: directory.appendingPathComponent(
-                names.offlineEncoderFile(precision: encoderPrecision)),
-            configuration: encoderConfig
-        )
+        do {
+            self.encoder = try await MLModel.load(
+                contentsOf: directory.appendingPathComponent(
+                    names.offlineEncoderFile(precision: encoderPrecision)),
+                configuration: encoderConfig
+            )
+        } catch {
+            if encoderPrecision == .int8 {
+                // Same A-series caveat as the streaming manager (issue #828):
+                // the int8 encoder can fail on every compute unit from an
+                // intact download; name the fp16 escape hatch here.
+                logger.error(
+                    "int8 unified encoder failed to load. On some A-series chips (A16 verified) it cannot build an execution plan on any compute unit even from an intact download — retry with encoderPrecision: .fp16 (issue #828). Underlying error: \(error.localizedDescription)"
+                )
+            }
+            throw error
+        }
         self.decoder = try await MLModel.load(
             contentsOf: directory.appendingPathComponent(names.decoderFile),
             configuration: cpuConfig
