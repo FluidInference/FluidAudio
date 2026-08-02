@@ -113,10 +113,12 @@ public actor CanaryManager {
     /// Run the 4-stage pipeline over a single ≤15 s window; returns generated
     /// token ids (prompt stripped, EOS excluded).
     private func transcribeWindow(audio: [Float]) throws -> [Int] {
-        let (mel, melLength) = try runPreprocessor(audio: audio)
-        let (encoder, encoderLength) = try runEncoder(mel: mel, melLength: melLength)
-        let (embeddings, encoderMask) = try makeDecoderContext(encoder: encoder, encoderLength: encoderLength)
-        return try greedyDecode(embeddings: embeddings, encoderMask: encoderMask)
+        try autoreleasepool {
+            let (mel, melLength) = try runPreprocessor(audio: audio)
+            let (encoder, encoderLength) = try runEncoder(mel: mel, melLength: melLength)
+            let (embeddings, encoderMask) = try makeDecoderContext(encoder: encoder, encoderLength: encoderLength)
+            return try greedyDecode(embeddings: embeddings, encoderMask: encoderMask)
+        }
     }
 
     /// Merge two adjacent window token streams using longest-common-substring.
@@ -274,40 +276,54 @@ public actor CanaryManager {
         let d = CanaryConfig.encoderHidden
 
         var generated: [Int] = []
-        while pos < s {
-            let input = try MLDictionaryFeatureProvider(dictionary: [
-                "input_ids": MLFeatureValue(multiArray: inputIds),
-                "decoder_mask": MLFeatureValue(multiArray: decoderMask),
-                "encoder_embeddings": MLFeatureValue(multiArray: embeddings),
-                "encoder_mask": MLFeatureValue(multiArray: encoderMask),
-            ])
-            let out = try models.decoder.prediction(from: input)
-            guard let dec = out.featureValue(for: "decoder")?.multiArrayValue else {
-                throw ASRError.processingFailed("Canary decoder produced no `decoder`")
+        var reachedEos = false
+        while pos < s && !reachedEos {
+            // Each step autoreleases MB-scale IOSurface-backed outputs; drain
+            // per step or long runs exhaust IOSurface allocation (crash).
+            try autoreleasepool {
+                // Re-derive pointers inside the pool: UnsafeMutablePointer is not
+                // Sendable, so capturing the outer ones is a region-isolation error.
+                let idptr = inputIds.dataPointer.assumingMemoryBound(to: Int32.self)
+                let mkptr = decoderMask.dataPointer.assumingMemoryBound(to: Float32.self)
+                let hptr = hidden.dataPointer.assumingMemoryBound(to: Float32.self)
+
+                let input = try MLDictionaryFeatureProvider(dictionary: [
+                    "input_ids": MLFeatureValue(multiArray: inputIds),
+                    "decoder_mask": MLFeatureValue(multiArray: decoderMask),
+                    "encoder_embeddings": MLFeatureValue(multiArray: embeddings),
+                    "encoder_mask": MLFeatureValue(multiArray: encoderMask),
+                ])
+                let out = try models.decoder.prediction(from: input)
+                guard let dec = out.featureValue(for: "decoder")?.multiArrayValue else {
+                    throw ASRError.processingFailed("Canary decoder produced no `decoder`")
+                }
+
+                // hidden state at the last valid position (decoder output may be stride-padded)
+                let decStrides = dec.strides.map { $0.intValue }
+                let rowBase = (pos - 1) * decStrides[1]
+                let elemStride = decStrides[2]
+                let readDec = floatReader(dec)
+                for h in 0..<d { hptr[h] = readDec(rowBase + h * elemStride) }
+
+                let projInput = try MLDictionaryFeatureProvider(dictionary: [
+                    "hidden": MLFeatureValue(multiArray: hidden)
+                ])
+                let projOut = try models.projection.prediction(from: projInput)
+                guard let logits = projOut.featureValue(for: "logits")?.multiArrayValue else {
+                    throw ASRError.processingFailed("Canary projection produced no `logits`")
+                }
+
+                let next = argmax(logits)
+                if next == CanaryConfig.eosId {
+                    reachedEos = true
+                    return
+                }
+
+                generated.append(next)
+                idptr[pos] = Int32(next)
+                mkptr[pos] = 1
+                pos += 1
             }
-
-            // hidden state at the last valid position (decoder output may be stride-padded)
-            let decStrides = dec.strides.map { $0.intValue }
-            let rowBase = (pos - 1) * decStrides[1]
-            let elemStride = decStrides[2]
-            let readDec = floatReader(dec)
-            for h in 0..<d { hptr[h] = readDec(rowBase + h * elemStride) }
-
-            let projInput = try MLDictionaryFeatureProvider(dictionary: [
-                "hidden": MLFeatureValue(multiArray: hidden)
-            ])
-            let projOut = try models.projection.prediction(from: projInput)
-            guard let logits = projOut.featureValue(for: "logits")?.multiArrayValue else {
-                throw ASRError.processingFailed("Canary projection produced no `logits`")
-            }
-
-            let next = argmax(logits)
-            if next == CanaryConfig.eosId { break }
-
-            generated.append(next)
-            idptr[pos] = Int32(next)
-            mkptr[pos] = 1
-            pos += 1
         }
         return generated
     }
