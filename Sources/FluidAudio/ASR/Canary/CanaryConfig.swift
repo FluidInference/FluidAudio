@@ -71,15 +71,22 @@ public enum CanaryConfig {
     public static let promptTargetLangIndex = 5
 
     /// Build a canary2 decoder prompt. The model transcribes when
-    /// `source == target` and translates the speech when they differ
-    /// (en ↔ any supported language).
+    /// `source == target` and translates the speech when they differ.
+    ///
+    /// - Throws: `ASRError.processingFailed` for translation pairs the model
+    ///   was not trained on — canary-1b-v2 only supports en ↔ X.
     public static func makePrompt(
         source: CanaryLanguage,
         target: CanaryLanguage,
         pnc: Bool = true
-    ) -> [Int32] {
+    ) throws -> [Int32] {
+        if source != target && source != .english && target != .english {
+            throw ASRError.processingFailed(
+                "canary-1b-v2 only supports translation to or from English; "
+                    + "\(source.rawValue)→\(target.rawValue) is not a trained task")
+        }
         // ▁ <|startofcontext|> <|startoftranscript|> <|emo:undefined|>
         // <source> <target> <|pnc|>/<|nopnc|> <|noitn|> <|notimestamp|> <|nodiarize|>
-        [16053, 7, 4, 16, source.tokenId, target.tokenId, pnc ? 5 : 6, 9, 11, 13]
+        return [16053, 7, 4, 16, source.tokenId, target.tokenId, pnc ? 5 : 6, 9, 11, 13]
     }
 }

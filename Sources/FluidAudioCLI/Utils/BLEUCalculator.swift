@@ -7,10 +7,19 @@ import Foundation
 enum BLEUCalculator {
 
     /// 13a-style tokenization: split out punctuation/symbols, collapse whitespace.
+    /// Like mteval-13a, `.` and `,` stay attached when BOTH neighbors are ASCII
+    /// digits ("3,5" and "2.5" are single tokens).
     static func tokenize(_ text: String) -> [String] {
+        let scalars = Array(text.unicodeScalars)
         var out: [String] = []
         var current = ""
-        for scalar in text.unicodeScalars {
+
+        func isAsciiDigit(_ i: Int) -> Bool {
+            guard i >= 0, i < scalars.count else { return false }
+            return scalars[i] >= "0" && scalars[i] <= "9"
+        }
+
+        for (i, scalar) in scalars.enumerated() {
             let c = Character(scalar)
             if CharacterSet.whitespacesAndNewlines.contains(scalar) {
                 if !current.isEmpty {
@@ -20,6 +29,10 @@ enum BLEUCalculator {
             } else if CharacterSet.punctuationCharacters.contains(scalar)
                 || CharacterSet.symbols.contains(scalar)
             {
+                if scalar == "." || scalar == ",", isAsciiDigit(i - 1), isAsciiDigit(i + 1) {
+                    current.append(c)
+                    continue
+                }
                 if !current.isEmpty {
                     out.append(current)
                     current = ""

@@ -31,13 +31,19 @@ TSV_URL = "https://huggingface.co/datasets/google/fleurs/resolve/main/data/{lang
 
 def load_tsv(lang: str):
     path = f"/tmp/fleurs_{lang}_test.tsv"
-    if not os.path.exists(path):
-        urllib.request.urlretrieve(TSV_URL.format(lang=lang), path)
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        # Download to a temp name and rename atomically so an interrupted
+        # download can't leave a truncated file that later runs trust.
+        tmp = path + ".part"
+        urllib.request.urlretrieve(TSV_URL.format(lang=lang), tmp)
+        os.replace(tmp, path)
     rows = []
     with open(path, newline="") as f:
         for r in csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE):
             if len(r) >= 4:
                 rows.append({"id": r[0], "raw": r[2], "norm": r[3].strip()})
+    if not rows:
+        raise SystemExit(f"{path} parsed to 0 rows — delete it and re-run to re-download")
     return rows
 
 

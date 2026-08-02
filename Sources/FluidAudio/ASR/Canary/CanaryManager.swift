@@ -23,13 +23,17 @@ public actor CanaryManager {
 
     /// Build a manager for transcription (`source == target`) or speech
     /// translation (`source != target`, en ↔ any supported language).
+    ///
+    /// - Throws: `ASRError.processingFailed` for unsupported (non-English ↔
+    ///   non-English) translation pairs.
     public init(
         models: CanaryModels,
         source: CanaryLanguage,
         target: CanaryLanguage,
         pnc: Bool = true
-    ) {
-        self.init(models: models, prompt: CanaryConfig.makePrompt(source: source, target: target, pnc: pnc))
+    ) throws {
+        let prompt = try CanaryConfig.makePrompt(source: source, target: target, pnc: pnc)
+        self.init(models: models, prompt: prompt)
     }
 
     /// Load models from the default cache (downloading if needed), then build a manager.
@@ -51,7 +55,7 @@ public actor CanaryManager {
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> CanaryManager {
         let models = try await CanaryModels.downloadAndLoad(precision: precision, progressHandler: progressHandler)
-        return CanaryManager(models: models, source: source, target: target, pnc: pnc)
+        return try CanaryManager(models: models, source: source, target: target, pnc: pnc)
     }
 
     /// Whether the prompt requests translation (source ≠ target language slot).
@@ -272,7 +276,6 @@ public actor CanaryManager {
         var pos = promptLen
 
         let hidden = try MLMultiArray(shape: [1, CanaryConfig.encoderHidden as NSNumber], dataType: .float32)
-        let hptr = hidden.dataPointer.assumingMemoryBound(to: Float32.self)
         let d = CanaryConfig.encoderHidden
 
         var generated: [Int] = []
