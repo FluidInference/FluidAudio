@@ -65,4 +65,21 @@ public enum CanaryConfig {
     /// ▁ <|startofcontext|> <|startoftranscript|> <|emo:undefined|> <|en|> <|en|>
     /// <|pnc|> <|noitn|> <|notimestamp|> <|nodiarize|>
     public static let promptEnTranscribePnc: [Int32] = [16053, 7, 4, 16, 64, 64, 5, 9, 11, 13]
+
+    /// Slot indices of the source/target language tokens within a canary2 prompt.
+    public static let promptSourceLangIndex = 4
+    public static let promptTargetLangIndex = 5
+
+    /// Build a canary2 decoder prompt. The model transcribes when
+    /// `source == target` and translates the speech when they differ
+    /// (en ↔ any supported language).
+    public static func makePrompt(
+        source: CanaryLanguage,
+        target: CanaryLanguage,
+        pnc: Bool = true
+    ) -> [Int32] {
+        // ▁ <|startofcontext|> <|startoftranscript|> <|emo:undefined|>
+        // <source> <target> <|pnc|>/<|nopnc|> <|noitn|> <|notimestamp|> <|nodiarize|>
+        [16053, 7, 4, 16, source.tokenId, target.tokenId, pnc ? 5 : 6, 9, 11, 13]
+    }
 }

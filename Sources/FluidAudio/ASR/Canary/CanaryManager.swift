@@ -21,6 +21,17 @@ public actor CanaryManager {
         self.prompt = prompt
     }
 
+    /// Build a manager for transcription (`source == target`) or speech
+    /// translation (`source != target`, en ↔ any supported language).
+    public init(
+        models: CanaryModels,
+        source: CanaryLanguage,
+        target: CanaryLanguage,
+        pnc: Bool = true
+    ) {
+        self.init(models: models, prompt: CanaryConfig.makePrompt(source: source, target: target, pnc: pnc))
+    }
+
     /// Load models from the default cache (downloading if needed), then build a manager.
     public static func load(
         precision: CanaryPrecision = .int4,
@@ -28,6 +39,26 @@ public actor CanaryManager {
     ) async throws -> CanaryManager {
         let models = try await CanaryModels.downloadAndLoad(precision: precision, progressHandler: progressHandler)
         return CanaryManager(models: models)
+    }
+
+    /// Load models, then build a manager that transcribes (`source == target`)
+    /// or translates the speech (`source != target`).
+    public static func load(
+        precision: CanaryPrecision = .int4,
+        source: CanaryLanguage,
+        target: CanaryLanguage,
+        pnc: Bool = true,
+        progressHandler: DownloadUtils.ProgressHandler? = nil
+    ) async throws -> CanaryManager {
+        let models = try await CanaryModels.downloadAndLoad(precision: precision, progressHandler: progressHandler)
+        return CanaryManager(models: models, source: source, target: target, pnc: pnc)
+    }
+
+    /// Whether the prompt requests translation (source ≠ target language slot).
+    private var isTranslationPrompt: Bool {
+        let s = CanaryConfig.promptSourceLangIndex
+        let t = CanaryConfig.promptTargetLangIndex
+        return prompt.count > t && prompt[s] != prompt[t]
     }
 
     /// Transcribe a 16 kHz mono audio file.
@@ -48,6 +79,15 @@ public actor CanaryManager {
         let maxN = CanaryConfig.maxSamples
         if audio.count <= maxN {
             return detokenize(try transcribeWindow(audio: audio))
+        }
+
+        if isTranslationPrompt {
+            // Each window translates independently and translated text is not
+            // token-stable across the overlap the way a transcript is, so the
+            // LCS seam merge can duplicate or drop content at window seams.
+            Self.logger.warning(
+                "Translating \(audio.count) samples (> 15 s) via chunking; seam merges are "
+                    + "unreliable for translation output. Prefer segmenting at pauses ≤ 15 s.")
         }
 
         let hop = maxN - CanaryConfig.chunkOverlapSamples
