@@ -4,9 +4,11 @@ import FluidAudio
 import Foundation
 
 /// `canary-transcribe <audio> [--fp16|--int8] [--reference "..."] [--verbose]`
+/// `canary-transcribe <audio> --translate-to de [--source-lang en]`
 /// `canary-transcribe --benchmark <librispeech-dir> [--max-files N] [--fp16|--int8]`
 ///
-/// Canary-1B-v2 attention encoder-decoder ASR. Default precision int4 (ANE).
+/// Canary-1B-v2 attention encoder-decoder ASR + speech translation (en ↔ 24
+/// European languages via `--translate-to`). Default precision int4 (ANE).
 enum CanaryTranscribeCommand {
     private static let logger = AppLogger(category: "CanaryTranscribe")
 
@@ -18,6 +20,8 @@ enum CanaryTranscribeCommand {
         var maxFiles = Int.max
         var maxDuration = Double.greatestFiniteMagnitude
         var verbose = false
+        var sourceLang: CanaryLanguage = .english
+        var targetLang: CanaryLanguage?
 
         var i = 0
         while i < arguments.count {
@@ -37,6 +41,24 @@ enum CanaryTranscribeCommand {
             case "--max-duration":
                 i += 1
                 if i < arguments.count { maxDuration = Double(arguments[i]) ?? .greatestFiniteMagnitude }
+            case "--source-lang":
+                i += 1
+                if i < arguments.count {
+                    guard let lang = CanaryLanguage(rawValue: arguments[i]) else {
+                        logger.error("Unknown --source-lang '\(arguments[i])'. Supported: \(supportedCodes)")
+                        return
+                    }
+                    sourceLang = lang
+                }
+            case "--translate-to":
+                i += 1
+                if i < arguments.count {
+                    guard let lang = CanaryLanguage(rawValue: arguments[i]) else {
+                        logger.error("Unknown --translate-to '\(arguments[i])'. Supported: \(supportedCodes)")
+                        return
+                    }
+                    targetLang = lang
+                }
             case "--verbose", "-v": verbose = true
             case "--help", "-h":
                 printUsage()
@@ -49,7 +71,11 @@ enum CanaryTranscribeCommand {
         do {
             logger.info("Loading Canary models (\(precision.rawValue))...")
             let loadStart = Date()
-            let manager = try await CanaryManager.load(precision: precision)
+            let manager = try await CanaryManager.load(
+                precision: precision, source: sourceLang, target: targetLang ?? sourceLang)
+            if let target = targetLang, target != sourceLang {
+                logger.info("Speech translation: \(sourceLang.rawValue) → \(target.rawValue)")
+            }
             if verbose { logger.info("Loaded in \(String(format: "%.1f", Date().timeIntervalSince(loadStart)))s") }
 
             if let dir = benchmarkDir {
@@ -183,6 +209,10 @@ enum CanaryTranscribeCommand {
         return CMTimeGetSeconds(asset.duration)
     }
 
+    private static var supportedCodes: String {
+        CanaryLanguage.allCases.map(\.rawValue).sorted().joined(separator: ", ")
+    }
+
     private static func printUsage() {
         print(
             """
@@ -196,6 +226,8 @@ enum CanaryTranscribeCommand {
               --int4         int4 encoder/decoder (ANE, ~573 MB, iOS18) — default
               --fp16         fp16 encoder/decoder (ANE, exact parity, iOS17)
               --int8         int8 encoder/decoder (CPU only)
+              --translate-to L  translate speech to language L (ISO 639-1, e.g. de)
+              --source-lang L   spoken language (default en)
               --reference T  reference transcript for single-file WER
               --benchmark D  run over a LibriSpeech-style dir (uses *.trans.txt refs)
               --max-files N  limit benchmark file count

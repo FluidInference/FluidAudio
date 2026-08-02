@@ -60,4 +60,44 @@ final class CanaryConfigTests: XCTestCase {
         // canary2 English transcribe+pnc prompt
         XCTAssertEqual(CanaryConfig.promptEnTranscribePnc, [16053, 7, 4, 16, 64, 64, 5, 9, 11, 13])
     }
+
+    // MARK: - Languages / prompt builder
+
+    func testLanguageTokenIds() {
+        // Spot-check against vocab.json (`<|xx|>` special-token block).
+        XCTAssertEqual(CanaryLanguage.english.tokenId, 64)
+        XCTAssertEqual(CanaryLanguage.german.tokenId, 78)
+        XCTAssertEqual(CanaryLanguage.french.tokenId, 71)
+        XCTAssertEqual(CanaryLanguage.spanish.tokenId, 171)
+        XCTAssertEqual(CanaryLanguage.ukrainian.tokenId, 192)
+        XCTAssertEqual(CanaryLanguage.allCases.count, 25)
+        // Ids must be unique — a collision would silently change the task.
+        XCTAssertEqual(Set(CanaryLanguage.allCases.map(\.tokenId)).count, 25)
+        XCTAssertEqual(CanaryLanguage(rawValue: "de"), .german)
+        XCTAssertNil(CanaryLanguage(rawValue: "xx"))
+    }
+
+    func testMakePromptTranscribeMatchesConstant() {
+        XCTAssertEqual(
+            CanaryConfig.makePrompt(source: .english, target: .english),
+            CanaryConfig.promptEnTranscribePnc)
+    }
+
+    func testMakePromptTranslate() {
+        let p = CanaryConfig.makePrompt(source: .english, target: .german)
+        XCTAssertEqual(p.count, 10)
+        XCTAssertEqual(p[CanaryConfig.promptSourceLangIndex], 64)  // <|en|>
+        XCTAssertEqual(p[CanaryConfig.promptTargetLangIndex], 78)  // <|de|>
+        // All non-language slots identical to the transcribe prompt.
+        for (i, tok) in p.enumerated()
+        where i != CanaryConfig.promptSourceLangIndex && i != CanaryConfig.promptTargetLangIndex {
+            XCTAssertEqual(tok, CanaryConfig.promptEnTranscribePnc[i], "slot \(i)")
+        }
+    }
+
+    func testMakePromptNoPnc() {
+        let p = CanaryConfig.makePrompt(source: .english, target: .french, pnc: false)
+        XCTAssertEqual(p[6], 6)  // <|nopnc|>
+        XCTAssertEqual(p[CanaryConfig.promptTargetLangIndex], 71)  // <|fr|>
+    }
 }
