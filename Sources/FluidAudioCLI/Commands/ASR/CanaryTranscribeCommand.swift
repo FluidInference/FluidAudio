@@ -22,6 +22,7 @@ enum CanaryTranscribeCommand {
         var verbose = false
         var sourceLang: CanaryLanguage = .english
         var targetLang: CanaryLanguage?
+        var translateBenchmarkManifest: String?
 
         var i = 0
         while i < arguments.count {
@@ -35,6 +36,9 @@ enum CanaryTranscribeCommand {
             case "--benchmark":
                 i += 1
                 if i < arguments.count { benchmarkDir = arguments[i] }
+            case "--translate-benchmark":
+                i += 1
+                if i < arguments.count { translateBenchmarkManifest = arguments[i] }
             case "--max-files":
                 i += 1
                 if i < arguments.count { maxFiles = Int(arguments[i]) ?? .max }
@@ -84,6 +88,12 @@ enum CanaryTranscribeCommand {
                 return
             }
 
+            if let manifest = translateBenchmarkManifest {
+                await runTranslateBenchmark(
+                    manager: manager, manifestPath: manifest, maxFiles: maxFiles, precision: precision)
+                return
+            }
+
             guard let audioPath else {
                 logger.error("Error: No audio file specified")
                 printUsage()
@@ -113,6 +123,73 @@ enum CanaryTranscribeCommand {
             }
         } catch {
             logger.error("Transcription failed: \(error)")
+        }
+    }
+
+    // MARK: - Translation benchmark (FLEURS-style pairs manifest)
+
+    private struct TranslatePair: Codable {
+        let audio: String
+        let reference: String
+        let id: String?
+    }
+
+    /// Run speech translation over a JSON manifest of `{audio, reference}` pairs
+    /// and report corpus BLEU + RTFx. Writes `<manifest>.hyps.json` with parallel
+    /// hypotheses/references for exact scoring via sacrebleu.
+    private static func runTranslateBenchmark(
+        manager: CanaryManager, manifestPath: String, maxFiles: Int, precision: CanaryPrecision
+    ) async {
+        let url = URL(fileURLWithPath: manifestPath)
+        guard let data = try? Data(contentsOf: url),
+            let pairs = try? JSONDecoder().decode([TranslatePair].self, from: data)
+        else {
+            logger.error("Could not read pairs manifest at \(manifestPath)")
+            return
+        }
+        let subset = Array(pairs.prefix(maxFiles))
+        logger.info("Translation benchmark (\(precision.rawValue)): \(subset.count)/\(pairs.count) pairs")
+
+        var hyps: [String] = []
+        var refs: [String] = []
+        var totalAudio = 0.0
+        var totalTime = 0.0
+        var failed = 0
+        for (idx, pair) in subset.enumerated() {
+            let audioURL = URL(fileURLWithPath: pair.audio)
+            do {
+                let duration = audioDuration(audioURL)
+                let start = Date()
+                let hyp = try await manager.transcribe(audioURL: audioURL)
+                totalTime += Date().timeIntervalSince(start)
+                totalAudio += duration
+                hyps.append(hyp)
+                refs.append(pair.reference)
+            } catch {
+                failed += 1
+                logger.warning("Failed \(pair.audio): \(error.localizedDescription)")
+            }
+            if (idx + 1) % 50 == 0 {
+                let bleuSoFar = BLEUCalculator.corpusBLEU(hypotheses: hyps, references: refs)
+                logger.info(
+                    "  \(idx + 1)/\(subset.count) | BLEU \(String(format: "%.2f", bleuSoFar)) | RTFx \(String(format: "%.2f", totalAudio / max(totalTime, 0.001)))x"
+                )
+            }
+        }
+
+        let bleu = BLEUCalculator.corpusBLEU(hypotheses: hyps, references: refs)
+        print("Pairs: \(hyps.count) scored, \(failed) failed")
+        print("Corpus BLEU (in-process, 13a-style): \(String(format: "%.2f", bleu))")
+        print(
+            "Audio \(String(format: "%.1f", totalAudio))s | inference \(String(format: "%.1f", totalTime))s | RTFx \(String(format: "%.2f", totalAudio / max(totalTime, 0.001)))x"
+        )
+
+        let outURL = url.deletingPathExtension().appendingPathExtension("hyps.json")
+        if let out = try? JSONSerialization.data(
+            withJSONObject: ["hypotheses": hyps, "references": refs], options: [.prettyPrinted])
+        {
+            try? out.write(to: outURL)
+            print("Hypotheses written to \(outURL.path) (score exactly with: sacrebleu)")
         }
     }
 
@@ -230,6 +307,8 @@ enum CanaryTranscribeCommand {
               --source-lang L   spoken language (default en)
               --reference T  reference transcript for single-file WER
               --benchmark D  run over a LibriSpeech-style dir (uses *.trans.txt refs)
+              --translate-benchmark M  BLEU over a JSON manifest of {audio, reference}
+                             pairs (use with --translate-to/--source-lang)
               --max-files N  limit benchmark file count
               --verbose,-v   print load + per-file timing
               --help,-h      show this help
