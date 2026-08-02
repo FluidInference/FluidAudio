@@ -1,3 +1,4 @@
+#if os(macOS)
 import XCTest
 
 @testable import FluidAudioCLI
@@ -10,6 +11,16 @@ final class BLEUCalculatorTests: XCTestCase {
             ["Hallo", ",", "Welt", "!", "Es", "geht", "."])
         XCTAssertEqual(BLEUCalculator.tokenize("  a  b "), ["a", "b"])
         XCTAssertEqual(BLEUCalculator.tokenize(""), [])
+    }
+
+    func testTokenizeKeepsDigitInternalPunctuation() {
+        // mteval-13a keeps . and , attached when both neighbors are digits.
+        XCTAssertEqual(
+            BLEUCalculator.tokenize("3,5 Millionen um 2.5 Uhr."),
+            ["3,5", "Millionen", "um", "2.5", "Uhr", "."])
+        XCTAssertEqual(BLEUCalculator.tokenize("1,234.56"), ["1,234.56"])
+        // Digit on one side only still splits.
+        XCTAssertEqual(BLEUCalculator.tokenize("5, dann"), ["5", ",", "dann"])
     }
 
     func testPerfectMatchIs100() {
@@ -48,3 +59,4 @@ final class BLEUCalculatorTests: XCTestCase {
         XCTAssertLessThan(bleu, 100.0)
     }
 }
+#endif

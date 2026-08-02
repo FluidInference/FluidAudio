@@ -41,28 +41,22 @@ enum CanaryTranscribeCommand {
                 if i < arguments.count { translateBenchmarkManifest = arguments[i] }
             case "--max-files":
                 i += 1
-                if i < arguments.count { maxFiles = Int(arguments[i]) ?? .max }
+                if i < arguments.count { maxFiles = max(Int(arguments[i]) ?? .max, 0) }
             case "--max-duration":
                 i += 1
                 if i < arguments.count { maxDuration = Double(arguments[i]) ?? .greatestFiniteMagnitude }
-            case "--source-lang":
+            case "--source-lang", "--translate-to":
+                let flag = arguments[i]
                 i += 1
-                if i < arguments.count {
-                    guard let lang = CanaryLanguage(rawValue: arguments[i]) else {
-                        logger.error("Unknown --source-lang '\(arguments[i])'. Supported: \(supportedCodes)")
-                        return
-                    }
-                    sourceLang = lang
+                guard i < arguments.count else {
+                    print("Error: \(flag) requires a language code. Supported: \(supportedCodes)")
+                    return
                 }
-            case "--translate-to":
-                i += 1
-                if i < arguments.count {
-                    guard let lang = CanaryLanguage(rawValue: arguments[i]) else {
-                        logger.error("Unknown --translate-to '\(arguments[i])'. Supported: \(supportedCodes)")
-                        return
-                    }
-                    targetLang = lang
+                guard let lang = CanaryLanguage(rawValue: arguments[i]) else {
+                    print("Error: unknown \(flag) '\(arguments[i])'. Supported: \(supportedCodes)")
+                    return
                 }
+                if flag == "--source-lang" { sourceLang = lang } else { targetLang = lang }
             case "--verbose", "-v": verbose = true
             case "--help", "-h":
                 printUsage()
@@ -70,6 +64,29 @@ enum CanaryTranscribeCommand {
             default: if audioPath == nil { audioPath = arguments[i] }
             }
             i += 1
+        }
+
+        // Flag-combination validation: the language flags change the decode task,
+        // so modes that score against fixed-language references must not compose
+        // with a translation prompt.
+        let isTranslating = targetLang.map { $0 != sourceLang } ?? false
+        if benchmarkDir != nil && translateBenchmarkManifest != nil {
+            print("Error: --benchmark and --translate-benchmark are mutually exclusive")
+            return
+        }
+        if translateBenchmarkManifest != nil && !isTranslating {
+            print("Error: --translate-benchmark requires --translate-to with a language different from --source-lang")
+            return
+        }
+        if isTranslating && (benchmarkDir != nil || reference != nil) {
+            print(
+                "Error: --translate-to cannot be combined with WER scoring (--benchmark/--reference): "
+                    + "hypotheses would be in \(targetLang!.rawValue) while references are transcripts")
+            return
+        }
+        if isTranslating, sourceLang != .english, targetLang != .english {
+            print("Error: canary-1b-v2 only supports translation to or from English (en ↔ X)")
+            return
         }
 
         do {
@@ -185,11 +202,13 @@ enum CanaryTranscribeCommand {
         )
 
         let outURL = url.deletingPathExtension().appendingPathExtension("hyps.json")
-        if let out = try? JSONSerialization.data(
-            withJSONObject: ["hypotheses": hyps, "references": refs], options: [.prettyPrinted])
-        {
-            try? out.write(to: outURL)
+        do {
+            let out = try JSONSerialization.data(
+                withJSONObject: ["hypotheses": hyps, "references": refs], options: [.prettyPrinted])
+            try out.write(to: outURL)
             print("Hypotheses written to \(outURL.path) (score exactly with: sacrebleu)")
+        } catch {
+            logger.error("Failed to write hypotheses JSON to \(outURL.path): \(error)")
         }
     }
 
@@ -308,7 +327,8 @@ enum CanaryTranscribeCommand {
               --reference T  reference transcript for single-file WER
               --benchmark D  run over a LibriSpeech-style dir (uses *.trans.txt refs)
               --translate-benchmark M  BLEU over a JSON manifest of {audio, reference}
-                             pairs (use with --translate-to/--source-lang)
+                             pairs (requires --translate-to; not combinable
+                             with --benchmark/--reference)
               --max-files N  limit benchmark file count
               --verbose,-v   print load + per-file timing
               --help,-h      show this help

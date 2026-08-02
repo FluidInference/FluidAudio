@@ -77,14 +77,14 @@ final class CanaryConfigTests: XCTestCase {
         XCTAssertNil(CanaryLanguage(rawValue: "xx"))
     }
 
-    func testMakePromptTranscribeMatchesConstant() {
+    func testMakePromptTranscribeMatchesConstant() throws {
         XCTAssertEqual(
-            CanaryConfig.makePrompt(source: .english, target: .english),
+            try CanaryConfig.makePrompt(source: .english, target: .english),
             CanaryConfig.promptEnTranscribePnc)
     }
 
-    func testMakePromptTranslate() {
-        let p = CanaryConfig.makePrompt(source: .english, target: .german)
+    func testMakePromptTranslate() throws {
+        let p = try CanaryConfig.makePrompt(source: .english, target: .german)
         XCTAssertEqual(p.count, 10)
         XCTAssertEqual(p[CanaryConfig.promptSourceLangIndex], 64)  // <|en|>
         XCTAssertEqual(p[CanaryConfig.promptTargetLangIndex], 78)  // <|de|>
@@ -95,9 +95,17 @@ final class CanaryConfigTests: XCTestCase {
         }
     }
 
-    func testMakePromptNoPnc() {
-        let p = CanaryConfig.makePrompt(source: .english, target: .french, pnc: false)
+    func testMakePromptNoPnc() throws {
+        let p = try CanaryConfig.makePrompt(source: .english, target: .french, pnc: false)
         XCTAssertEqual(p[6], 6)  // <|nopnc|>
         XCTAssertEqual(p[CanaryConfig.promptTargetLangIndex], 71)  // <|fr|>
+    }
+
+    func testMakePromptRejectsNonEnglishPair() {
+        // canary-1b-v2 is trained on en ↔ X only.
+        XCTAssertThrowsError(try CanaryConfig.makePrompt(source: .german, target: .french))
+        // Non-English transcription (source == target) stays valid.
+        XCTAssertNoThrow(try CanaryConfig.makePrompt(source: .german, target: .german))
+        XCTAssertNoThrow(try CanaryConfig.makePrompt(source: .french, target: .english))
     }
 }
