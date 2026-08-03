@@ -311,7 +311,7 @@ print(output.baseWords) // Exact source-word sequence indexed by every wordRange
 for candidate in output.candidates {
     print(candidate.candidateID, candidate.origin)
     print(candidate.basePhrase, candidate.canonicalTerm, candidate.matchedAlias as Any)
-    print(candidate.matchedFormWasExact)
+    print(candidate.isExactStringMatch)
     print(candidate.rawOriginalCTCScore, candidate.rawVocabularyCTCScore)
     print(candidate.effectiveBoost as Any, candidate.comparisonPassed)
     print(candidate.legacyOutcome, candidate.wordRange, candidate.tokenRange as Any)
@@ -324,8 +324,11 @@ returns every comparison evaluation without rewriting `baseText`. Each candidate
 canonical term, the configured alias that produced the best string-similarity score (or `nil` when
 the canonical form produced it), string similarity, raw CTC scores before context biasing, and the
 effective boost. `matchedAlias` identifies the winning configured form even when the match was
-fuzzy. `matchedFormWasExact` separately reports whether `basePhrase` exactly matched that form after
-the same case, punctuation, and whitespace normalization used for similarity scoring.
+fuzzy. `isExactStringMatch` reports whether the discovery path's actual string scorer returned
+`similarity == 1.0`. This includes path-specific handling such as concatenating adjacent words for a
+compound match. It does not assert raw-text equality: similarity normalization can ignore case or
+punctuation. It also does not determine whether applying the vocabulary replacement is semantically
+safe; clients implementing custom arbitration must make that policy decision themselves.
 
 `comparisonPassed` reports only the numeric, pre-arbitration comparison: boosted vocabulary score
 greater than original score. `legacyOutcome` reports what the compatibility `ctcTokenRescore()`

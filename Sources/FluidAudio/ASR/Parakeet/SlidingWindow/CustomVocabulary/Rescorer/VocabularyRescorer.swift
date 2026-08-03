@@ -259,15 +259,22 @@ public struct VocabularyRescorer: Sendable {
 
         /// The configured alias that produced the best string-similarity score, or `nil` when the canonical
         /// term produced it. This identifies the winning vocabulary form; it does not imply an exact match to
-        /// ``basePhrase``. Inspect ``matchedFormWasExact`` for that distinction.
+        /// the scorer input. Inspect ``isExactStringMatch`` for that distinction.
         public let matchedAlias: String?
-
-        /// Whether ``basePhrase`` exactly matched the winning canonical or alias form after applying the same
-        /// case, punctuation, and whitespace normalization used by the string-similarity scorer.
-        public let matchedFormWasExact: Bool
 
         /// String similarity used to rank and gate the candidate.
         public let similarity: Float
+
+        /// Whether the discovery path's string scorer reported an exact match.
+        ///
+        /// This is derived from ``similarity`` and therefore reflects the actual path-specific scorer input.
+        /// For example, compound matching may concatenate adjacent transcript words before scoring. Similarity
+        /// normalization may also ignore case or punctuation. Consequently, this does not mean that
+        /// ``basePhrase`` and the winning vocabulary form are raw-text-equal, nor that a replacement is
+        /// semantically safe.
+        public var isExactStringMatch: Bool {
+            similarity == 1.0
+        }
 
         /// Raw CTC score for the vocabulary term, before context biasing, when available.
         public let rawVocabularyCTCScore: Float?
@@ -327,11 +334,6 @@ public struct VocabularyRescorer: Sendable {
             self.basePhrase = basePhrase
             self.canonicalTerm = canonicalTerm
             self.matchedAlias = matchedAlias
-            let matchedForm = matchedAlias ?? canonicalTerm
-            let normalizedBasePhrase = VocabularyRescorer.normalizeForSimilarity(basePhrase)
-            let normalizedMatchedForm = VocabularyRescorer.normalizeForSimilarity(matchedForm)
-            self.matchedFormWasExact =
-                !normalizedBasePhrase.isEmpty && normalizedBasePhrase == normalizedMatchedForm
             self.similarity = similarity
             self.rawVocabularyCTCScore = rawVocabularyCTCScore
             self.rawOriginalCTCScore = rawOriginalCTCScore
