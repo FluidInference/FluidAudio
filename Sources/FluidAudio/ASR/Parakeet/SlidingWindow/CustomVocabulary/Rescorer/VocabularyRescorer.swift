@@ -257,8 +257,14 @@ public struct VocabularyRescorer: Sendable {
         /// The canonical vocabulary term proposed as a replacement.
         public let canonicalTerm: String
 
-        /// The exact alias that produced the best string match, or `nil` when the canonical term matched.
+        /// The configured alias that produced the best string-similarity score, or `nil` when the canonical
+        /// term produced it. This identifies the winning vocabulary form; it does not imply an exact match to
+        /// ``basePhrase``. Inspect ``matchedFormWasExact`` for that distinction.
         public let matchedAlias: String?
+
+        /// Whether ``basePhrase`` exactly matched the winning canonical or alias form after applying the same
+        /// case, punctuation, and whitespace normalization used by the string-similarity scorer.
+        public let matchedFormWasExact: Bool
 
         /// String similarity used to rank and gate the candidate.
         public let similarity: Float
@@ -321,6 +327,11 @@ public struct VocabularyRescorer: Sendable {
             self.basePhrase = basePhrase
             self.canonicalTerm = canonicalTerm
             self.matchedAlias = matchedAlias
+            let matchedForm = matchedAlias ?? canonicalTerm
+            let normalizedBasePhrase = VocabularyRescorer.normalizeForSimilarity(basePhrase)
+            let normalizedMatchedForm = VocabularyRescorer.normalizeForSimilarity(matchedForm)
+            self.matchedFormWasExact =
+                !normalizedBasePhrase.isEmpty && normalizedBasePhrase == normalizedMatchedForm
             self.similarity = similarity
             self.rawVocabularyCTCScore = rawVocabularyCTCScore
             self.rawOriginalCTCScore = rawOriginalCTCScore

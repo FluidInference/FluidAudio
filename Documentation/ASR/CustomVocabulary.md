@@ -311,6 +311,7 @@ print(output.baseWords) // Exact source-word sequence indexed by every wordRange
 for candidate in output.candidates {
     print(candidate.candidateID, candidate.origin)
     print(candidate.basePhrase, candidate.canonicalTerm, candidate.matchedAlias as Any)
+    print(candidate.matchedFormWasExact)
     print(candidate.rawOriginalCTCScore, candidate.rawVocabularyCTCScore)
     print(candidate.effectiveBoost as Any, candidate.comparisonPassed)
     print(candidate.legacyOutcome, candidate.wordRange, candidate.tokenRange as Any)
@@ -320,8 +321,11 @@ for candidate in output.candidates {
 
 The candidate API runs the same discovery, guards, and CTC comparison as legacy rescoring, but it
 returns every comparison evaluation without rewriting `baseText`. Each candidate identifies the
-canonical term, the exact alias that produced the best string match (or `nil` for the canonical
-form), string similarity, raw CTC scores before context biasing, and the effective boost.
+canonical term, the configured alias that produced the best string-similarity score (or `nil` when
+the canonical form produced it), string similarity, raw CTC scores before context biasing, and the
+effective boost. `matchedAlias` identifies the winning configured form even when the match was
+fuzzy. `matchedFormWasExact` separately reports whether `basePhrase` exactly matched that form after
+the same case, punctuation, and whitespace normalization used for similarity scoring.
 
 `comparisonPassed` reports only the numeric, pre-arbitration comparison: boosted vocabulary score
 greater than original score. `legacyOutcome` reports what the compatibility `ctcTokenRescore()`

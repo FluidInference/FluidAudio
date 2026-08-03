@@ -171,6 +171,49 @@ final class VocabularyCandidateEvidenceTests: XCTestCase {
         XCTAssertEqual(forms[2].matchedAlias, "es-lint")
     }
 
+    func testCandidateEvidenceDistinguishesExactAndFuzzyMatchedForms() {
+        let exactCanonical = formEvidence(
+            candidateID: 0,
+            basePhrase: "DNS",
+            canonicalTerm: "dns",
+            matchedAlias: nil
+        )
+        let fuzzyCanonical = formEvidence(
+            candidateID: 1,
+            basePhrase: "DMs",
+            canonicalTerm: "DNS",
+            matchedAlias: nil
+        )
+        let exactAlias = formEvidence(
+            candidateID: 2,
+            basePhrase: "Cube,   CONTROL",
+            canonicalTerm: "kubectl",
+            matchedAlias: "cube control"
+        )
+        let fuzzyAlias = formEvidence(
+            candidateID: 3,
+            basePhrase: "as your",
+            canonicalTerm: "Azure",
+            matchedAlias: "az your"
+        )
+        let emptyNormalizedForms = formEvidence(
+            candidateID: 4,
+            basePhrase: "...",
+            canonicalTerm: "...",
+            matchedAlias: nil
+        )
+
+        XCTAssertTrue(exactCanonical.matchedFormWasExact)
+        XCTAssertFalse(fuzzyCanonical.matchedFormWasExact)
+        XCTAssertTrue(exactAlias.matchedFormWasExact)
+        XCTAssertFalse(fuzzyAlias.matchedFormWasExact)
+        XCTAssertFalse(emptyNormalizedForms.matchedFormWasExact)
+        XCTAssertTrue(
+            exactAlias.replacingLegacyOutcome(.supersededByOverlap).matchedFormWasExact,
+            "legacy arbitration must not discard lexical match provenance"
+        )
+    }
+
     func testWordTimingsRetainContiguousHalfOpenTokenRanges() {
         let timings = VocabularyRescorer.buildWordTimings(from: [
             makeTokenTiming(token: "▁test", tokenID: 1, start: 0.0, end: 0.2),
@@ -398,6 +441,30 @@ final class VocabularyCandidateEvidenceTests: XCTestCase {
             result: result,
             wordRange: wordRange,
             baseTextUTF8Range: baseTextUTF8Range
+        )
+    }
+
+    private func formEvidence(
+        candidateID: Int,
+        basePhrase: String,
+        canonicalTerm: String,
+        matchedAlias: String?
+    ) -> VocabularyRescorer.CandidateEvidence {
+        makeEvidence(
+            candidateID: candidateID,
+            origin: .termCentricSingleWord,
+            basePhrase: basePhrase,
+            canonicalTerm: canonicalTerm,
+            matchedAlias: matchedAlias,
+            rawVocabularyScore: -2,
+            rawOriginalScore: -5,
+            effectiveBoost: 1,
+            wordRange: 0..<1,
+            tokenRange: nil,
+            baseTextUTF8Range: nil,
+            startTime: 0,
+            endTime: 0.5,
+            reason: "test"
         )
     }
 
