@@ -311,7 +311,6 @@ print(output.baseWords) // Exact source-word sequence indexed by every wordRange
 for candidate in output.candidates {
     print(candidate.candidateID, candidate.origin)
     print(candidate.basePhrase, candidate.canonicalTerm, candidate.matchedAlias as Any)
-    print(candidate.isExactStringMatch)
     print(candidate.rawOriginalCTCScore, candidate.rawVocabularyCTCScore)
     print(candidate.effectiveBoost as Any, candidate.comparisonPassed)
     print(candidate.legacyOutcome, candidate.wordRange, candidate.tokenRange as Any)
@@ -324,11 +323,12 @@ returns every comparison evaluation without rewriting `baseText`. Each candidate
 canonical term, the configured alias that produced the best string-similarity score (or `nil` when
 the canonical form produced it), string similarity, raw CTC scores before context biasing, and the
 effective boost. `matchedAlias` identifies the winning configured form even when the match was
-fuzzy. `isExactStringMatch` reports whether the discovery path's actual string scorer returned
-`similarity == 1.0`. This includes path-specific handling such as concatenating adjacent words for a
-compound match. It does not assert raw-text equality: similarity normalization can ignore case or
-punctuation. It also does not determine whether applying the vocabulary replacement is semantically
-safe; clients implementing custom arbitration must make that policy decision themselves.
+fuzzy; its presence does not prove that the alias was spoken exactly. Consumers that need to
+distinguish exact from fuzzy scorer results can use `similarity == 1.0`. That score reflects the
+discovery path's normalized scorer input: compound matching may concatenate adjacent words, and
+normalization may ignore case or punctuation. It therefore does not assert raw-text equality or
+determine whether applying the vocabulary replacement is semantically safe. Clients implementing
+custom arbitration must make that policy decision themselves.
 
 `comparisonPassed` reports only the numeric, pre-arbitration comparison: boosted vocabulary score
 greater than original score. `legacyOutcome` reports what the compatibility `ctcTokenRescore()`

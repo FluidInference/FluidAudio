@@ -155,7 +155,6 @@ final class VocabularyCandidateEvidenceTests: XCTestCase {
         XCTAssertNil(evidence.baseTextUTF8Range)
         XCTAssertFalse(evidence.comparisonPassed)
         XCTAssertEqual(evidence.legacyOutcome, .unavailableEvidence)
-        XCTAssertFalse(evidence.isExactStringMatch)
     }
 
     func testNormalizedFormsDistinguishCanonicalFromExactAlias() {
@@ -170,68 +169,6 @@ final class VocabularyCandidateEvidenceTests: XCTestCase {
         XCTAssertEqual(forms[1].matchedAlias, "E S lint")
         XCTAssertEqual(forms[2].normalized, "es-lint")
         XCTAssertEqual(forms[2].matchedAlias, "es-lint")
-    }
-
-    func testCandidateEvidenceReportsAuthoritativeExactAndFuzzyStringMatches() {
-        let exactCanonical = formEvidence(
-            candidateID: 0,
-            basePhrase: "DNS",
-            canonicalTerm: "dns",
-            matchedAlias: nil,
-            similarity: 1.0
-        )
-        let fuzzyCanonical = formEvidence(
-            candidateID: 1,
-            basePhrase: "DMs",
-            canonicalTerm: "DNS",
-            matchedAlias: nil
-        )
-        let exactAlias = formEvidence(
-            candidateID: 2,
-            basePhrase: "Cube,   CONTROL",
-            canonicalTerm: "kubectl",
-            matchedAlias: "cube control",
-            similarity: 1.0
-        )
-        let fuzzyAlias = formEvidence(
-            candidateID: 3,
-            basePhrase: "as your",
-            canonicalTerm: "Azure",
-            matchedAlias: "az your"
-        )
-        XCTAssertTrue(exactCanonical.isExactStringMatch)
-        XCTAssertFalse(fuzzyCanonical.isExactStringMatch)
-        XCTAssertTrue(
-            exactAlias.isExactStringMatch,
-            "exact scorer matches may ignore punctuation and case without implying raw-text equality"
-        )
-        XCTAssertFalse(fuzzyAlias.isExactStringMatch)
-        XCTAssertTrue(
-            exactAlias.replacingLegacyOutcome(.supersededByOverlap).isExactStringMatch,
-            "legacy arbitration must not discard scorer match provenance"
-        )
-    }
-
-    func testCandidateEvidencePreservesExactCompoundMatchFromScorer() {
-        let scorerInput = ["Git", "Hub"]
-            .map(VocabularyRescorer.normalizeForSimilarity)
-            .joined()
-        let matchedForm = VocabularyRescorer.normalizeForSimilarity("GitHub")
-        let similarity = VocabularyRescorer.stringSimilarity(scorerInput, matchedForm)
-        XCTAssertEqual(similarity, 1.0, "compound discovery scores concatenated adjacent words")
-
-        let exactCompound = formEvidence(
-            candidateID: 0,
-            basePhrase: "Git Hub",
-            canonicalTerm: "GitHub",
-            matchedAlias: nil,
-            similarity: similarity
-        )
-
-        XCTAssertTrue(
-            exactCompound.isExactStringMatch,
-            "compound matching compares the concatenated scorer input, not the space-preserving base phrase"
-        )
     }
 
     func testWordTimingsRetainContiguousHalfOpenTokenRanges() {
@@ -429,8 +366,7 @@ final class VocabularyCandidateEvidenceTests: XCTestCase {
         baseTextUTF8Range: Range<Int>?,
         startTime: TimeInterval,
         endTime: TimeInterval,
-        reason: String,
-        similarity: Float = 0.875
+        reason: String
     ) -> VocabularyRescorer.CandidateEvidence {
         let candidate = VocabularyRescorer.CTCMatchCandidate(
             origin: origin,
@@ -438,7 +374,7 @@ final class VocabularyCandidateEvidenceTests: XCTestCase {
             vocabTerm: canonicalTerm,
             matchedAlias: matchedAlias,
             vocabTokens: [10, 11],
-            similarity: similarity,
+            similarity: 0.875,
             spanLength: wordRange.count,
             spanIndices: Array(wordRange),
             tokenRange: tokenRange,
@@ -462,32 +398,6 @@ final class VocabularyCandidateEvidenceTests: XCTestCase {
             result: result,
             wordRange: wordRange,
             baseTextUTF8Range: baseTextUTF8Range
-        )
-    }
-
-    private func formEvidence(
-        candidateID: Int,
-        basePhrase: String,
-        canonicalTerm: String,
-        matchedAlias: String?,
-        similarity: Float = 0.875
-    ) -> VocabularyRescorer.CandidateEvidence {
-        makeEvidence(
-            candidateID: candidateID,
-            origin: .termCentricSingleWord,
-            basePhrase: basePhrase,
-            canonicalTerm: canonicalTerm,
-            matchedAlias: matchedAlias,
-            rawVocabularyScore: -2,
-            rawOriginalScore: -5,
-            effectiveBoost: 1,
-            wordRange: 0..<1,
-            tokenRange: nil,
-            baseTextUTF8Range: nil,
-            startTime: 0,
-            endTime: 0.5,
-            reason: "test",
-            similarity: similarity
         )
     }
 

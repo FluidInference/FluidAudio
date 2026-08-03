@@ -257,24 +257,11 @@ public struct VocabularyRescorer: Sendable {
         /// The canonical vocabulary term proposed as a replacement.
         public let canonicalTerm: String
 
-        /// The configured alias that produced the best string-similarity score, or `nil` when the canonical
-        /// term produced it. This identifies the winning vocabulary form; it does not imply an exact match to
-        /// the scorer input. Inspect ``isExactStringMatch`` for that distinction.
+        /// The exact alias that produced the best string match, or `nil` when the canonical term matched.
         public let matchedAlias: String?
 
         /// String similarity used to rank and gate the candidate.
         public let similarity: Float
-
-        /// Whether the discovery path's string scorer reported an exact match.
-        ///
-        /// This is derived from ``similarity`` and therefore reflects the actual path-specific scorer input.
-        /// For example, compound matching may concatenate adjacent transcript words before scoring. Similarity
-        /// normalization may also ignore case or punctuation. Consequently, this does not mean that
-        /// ``basePhrase`` and the winning vocabulary form are raw-text-equal, nor that a replacement is
-        /// semantically safe.
-        public var isExactStringMatch: Bool {
-            similarity == 1.0
-        }
 
         /// Raw CTC score for the vocabulary term, before context biasing, when available.
         public let rawVocabularyCTCScore: Float?
