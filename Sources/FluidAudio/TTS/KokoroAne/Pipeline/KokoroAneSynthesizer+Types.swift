@@ -40,6 +40,16 @@ public struct KokoroAneSynthesisResult: Sendable {
     public let encoderTokens: Int
     /// `T_a` — acoustic frames produced by PostAlbert / Alignment.
     public let acousticFrames: Int
+    /// Token ids passed to the Kokoro chain, including BOS/EOS.
+    ///
+    /// Indices align one-to-one with ``predictedDurations``.
+    public let inputIds: [Int32]
+    /// PostAlbert `pred_dur`: acoustic-frame counts for each input token.
+    ///
+    /// Kokoro uses these exact durations to build the alignment consumed by
+    /// the downstream prosody/vocoder stages. Exposing them lets callers
+    /// derive token/word timestamps without re-aligning the synthesized audio.
+    public let predictedDurations: [Int32]
     /// Per-stage timings.
     public let timings: KokoroAneStageTimings
 
@@ -53,12 +63,16 @@ public struct KokoroAneSynthesisResult: Sendable {
         sampleRate: Int,
         encoderTokens: Int,
         acousticFrames: Int,
-        timings: KokoroAneStageTimings
+        timings: KokoroAneStageTimings,
+        inputIds: [Int32] = [],
+        predictedDurations: [Int32] = []
     ) {
         self.samples = samples
         self.sampleRate = sampleRate
         self.encoderTokens = encoderTokens
         self.acousticFrames = acousticFrames
+        self.inputIds = inputIds
+        self.predictedDurations = predictedDurations
         self.timings = timings
     }
 }
