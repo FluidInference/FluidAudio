@@ -155,7 +155,9 @@ public struct KokoroAneSynthesizer {
             sampleRate: KokoroAneConstants.sampleRate,
             encoderTokens: tEnc,
             acousticFrames: tA,
-            timings: timings
+            timings: timings,
+            inputIds: inputIds,
+            predictedDurations: predDur
         )
     }
 
