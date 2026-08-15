@@ -10,7 +10,7 @@ import Foundation
 /// Byte-level scheme: each pre-tokenized piece is UTF-8 encoded and every
 /// byte mapped through the GPT-2 `bytes_to_unicode` table before BPE merges,
 /// so vocabulary tokens are strings over that mapped alphabet.
-final class NeuTtsBpeTokenizer {
+final class NeuTtsBpeTokenizer: Sendable {
 
     enum TokenizerError: Error, LocalizedError {
         case malformedTokenizerJson(String)

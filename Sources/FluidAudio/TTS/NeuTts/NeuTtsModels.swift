@@ -5,7 +5,7 @@ import Foundation
 /// `FluidInference/neutts-2e-coreml` (compiled `.mlmodelc` bundles at the
 /// repo root, plus `tokenizer.json` and `samples/<speaker>.json`).
 @available(macOS 15.0, iOS 18.0, *)
-struct NeuTtsModels {
+struct NeuTtsModels: Sendable {
 
     private static let logger = AppLogger(category: "NeuTtsModels")
 
