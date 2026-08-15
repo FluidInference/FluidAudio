@@ -1,6 +1,7 @@
 # TTS Benchmarks
 
-> **Setup:** Apple M5 Pro, 24 GB, macOS 26.5 (25F71), on AC.
+> **Setup:** Apple M5 Pro, 24 GB, on AC — Kokoro ANE rows on macOS
+> 26.6, PocketTTS / Supertonic-3 rows on macOS 26.5 (25F71).
 > Kokoro ANE now runs on M5 out of the box — the **default** compute
 > routing is the M5-safe placement (tail iSTFT on GPU, RNN stages on
 > ANE; see the ᴷ footnote). Only the StyleTTS2 row is carried from the
@@ -10,10 +11,10 @@
 > phrases / language, CC-BY-SA-4.0) — the same public corpus used
 > by [MiniMax-Speech][mms], seed-tts-eval, and Gradium, so numbers
 > here are directly paper-comparable.
-> **Status:** Kokoro ANE (English + Mandarin), PocketTTS (English),
-> and Supertonic-3 (English) all complete the full
-> 100-phrase MiniMax run on **M5 Pro** (Kokoro on its default M5-safe
-> routing). Only **StyleTTS2** is **M2-only** here — its bucketed BERT
+> **Status:** Kokoro ANE (English + Mandarin + Japanese via
+> `--phonemes`), PocketTTS (English), and Supertonic-3 (English) all
+> complete the full 100-phrase MiniMax run on **M5 Pro** (Kokoro on
+> its default M5-safe routing). Only **StyleTTS2** is **M2-only** here — its bucketed BERT
 > assets ship without `model.mil`; that row carries its M2 numbers.
 >
 > [minimax]: https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
@@ -59,7 +60,7 @@ Reference each language as `--corpus minimax-<lang>`:
 
 | Backend     | Default corpus     | Other supported MiniMax languages              |
 |-------------|--------------------|------------------------------------------------|
-| Kokoro ANE  | `minimax-english` | `english` (`af_heart`); Kokoro ANE also ships `chinese` (`--variant mandarin`, voice `zf_001`) |
+| Kokoro ANE  | `minimax-english` | `english` (`af_heart`); Kokoro ANE also ships `chinese` (`--variant mandarin`, voice `zf_001`) and `japanese` (`--variant japanese`, voice `jf_alpha` — no in-process G2P, so pass a pre-phonemized `ipa_phonemes\|reference_text` corpus via `--corpus-path … --phonemes`; see footnote ᴶ) |
 | PocketTTS   | `minimax-english`  | 6L packs: `english`, `german`, `italian`, `portuguese`, `spanish`. 24L packs: `french_24l`, `german_24l`, `italian_24l`, `portuguese_24l`, `spanish_24l` |
 | StyleTTS2   | `minimax-english`  | `english` only (LibriTTS iteration_3, zero-shot from `--reference` audio) |
 | Supertonic-3 | `minimax-english` | 31 ISO codes minus `zh`: `english`, `korean`, `japanese`, `arabic`, `bulgarian`, `czech`, `danish`, `german`, `greek`, `spanish`, `estonian`, `finnish`, `french`, `hindi`, `croatian`, `hungarian`, `indonesian`, `italian`, `lithuanian`, `latvian`, `dutch`, `polish`, `portuguese`, `romanian`, `russian`, `slovak`, `slovenian`, `swedish`, `turkish`, `ukrainian`, `vietnamese`. Voice styling via `--voice-style <preset.json>` |
@@ -163,9 +164,9 @@ Mandarin (or any of the 14 Cohere languages) against
 
 ### Per-backend top-line
 
-Reference machine: **Apple M5 Pro, 24 GB unified memory, macOS 26.5
-(`25F71`), on AC** for the Kokoro ANE, PocketTTS, and
-Supertonic-3 rows. Only the **StyleTTS2** row is carried from the
+Reference machine: **Apple M5 Pro, 24 GB unified memory, on AC** —
+Kokoro ANE rows re-measured on **macOS 26.6** (post-[#700][i700]),
+PocketTTS and Supertonic-3 rows on macOS 26.5 (`25F71`). Only the **StyleTTS2** row is carried from the
 prior **MacBook Air, Apple M2 (2022), 8-core CPU / 8-core GPU /
 16-core Neural Engine, 16 GB, macOS 26** (`Mac14,2`) reference — it
 does not run on the M5 host (missing `model.mil` in the shipped
@@ -184,8 +185,9 @@ peak RSS, WER, CER) so there is a single source of truth.
 
 | Backend    | License    | Language (voice)          | Footprint                  | Sample rate | Max chunk per pass                                               | Streaming | TTFT p50 / p95\*  | Synth p50 / p95   | Agg RTFx  | Peak RSS | WER    | CER    |
 |------------|------------|---------------------------|----------------------------|-------------|------------------------------------------------------------------|-----------|-------------------|-------------------|-----------|----------|--------|--------|
-| Kokoro ANEᴷ | Apache-2.0 | en (`af_heart`)           | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **277 / 346 ms** | 277 / 346 ms     | **28.7×**ᴷ | 788 MB   | 10.38% | 3.72%  |
-| Kokoro ANEᴷ | Apache-2.0 | zh (`zf_001`)             | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **201 / 286 ms** | 201 / 286 ms     | 20.1×ᴷ     | 761 MB   | n/a‡   | 3.81%‡ |
+| Kokoro ANEᴷ | Apache-2.0 | en (`af_heart`)           | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **241 / 305 ms** | 241 / 305 ms     | **31.0×**ᴷ | 881 MB   | 0.68%ᴷ | 0.15%ᴷ |
+| Kokoro ANEᴷ | Apache-2.0 | zh (`zf_001`)             | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **176 / 231 ms** | 176 / 231 ms     | 37.4×ᴷ     | 737 MB   | n/a‡   | 1.90%‡ |
+| Kokoro ANEᴷ | Apache-2.0 | ja (`jf_alpha`)ᴶ          | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **210 / 320 ms** | 210 / 320 ms     | 41.6×ᴷ     | 953 MB   | n/aᴶ   | 1.51%ᴶ |
 | PocketTTS (v2.1) | research   | en (`alba`, 6L pack)      | fp16 ~330 MB | 24 kHz      | 80 ms Mimi frame, streams until EOS (no fixed cap)               | Yes       | **26 / 27 ms** | 933 / 1233 ms    | **6.51×** | 761 MB   | 0.51%  | 0.08%  |
 | StyleTTS2 (M2)ˢ | research   | en (LibriTTS iteration_3) | ~0.67 GB¶                  | 24 kHz      | 256 tokens / pass (≈30 s of audio max)                           | No        | 1574 / 3088 ms    | 1574 / 3088 ms    | 4.59×     | 522 MB   | 9.4%   | 4.1%   |
 | Supertonic-3 (int4) | Apache-2.0 | en (`M1`, 31-lang)        | int4 ~0.10 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥70 char Latin / 57 CJK)   | No        | **81 / 120 ms** | 81 / 120 ms     | **94×** | 197 MB   | 1.02%ᶜ | 0.31%ᶜ |
@@ -199,15 +201,20 @@ supported'` on the prosody RNN on the GPU), and `all-ane`/`cpu-only`
 crash in `libBNNS` (SIGSEGV) on the tail iSTFT. Keeping the RNN off the
 GPU and the iSTFT off BNNS dodges both (the tail was always meant to run
 fp32 on CPU/GPU — ANE rejects the exp/sin/iSTFT — so this is faithful,
-not a hack). Quality matches the prior M2 baseline (en WER ~10.3% vs
-10.8%; zh CER 3.81% vs 4.01%). The en row was re-measured after the
-Noise→GPU routing fix (Noise is all-fp32, so `.cpuAndNeuralEngine`
-degenerated to plain CPU; it has no RNN ops, so the #667 GPU ban never
-applied): TTFT p50 317→277 ms, agg RTFx 25.1→28.7 (+14%), WER
-unchanged. The zh row predates the fix; expect a similar improvement. The old `.all` default ran fine on M2 but
+not a hack). The old `.all` default ran fine on M2 but
 its M2 perf under the new default is not re-verified here. The underlying
 Apple bug is tracked in [#667][i667]; this routing is
 `TtsComputeUnitPreset.default` / `.aneTailGpu`.
+
+All three Kokoro ANE rows were **re-measured on macOS 26.6 after the
+KokoroNoise v2 fix** ([#700][i700] — atan2 phase reconstruction,
+removing the high-frequency sharpness of the v1 noise stage). The fix
+is a step-change in ASR-measured quality: en WER 10.38% → **0.68%**
+and CER 3.72% → **0.15%** (same Parakeet TDT roundtrip), zh CER
+3.81% → **1.90%** (same whisper-large-v3-turbo methodology, see ‡).
+Speed also improved across the board (en agg RTFx 28.7 → 31.0; the zh
+row additionally picks up the Noise→GPU routing fix it predated:
+TTFT p50 201 → 176 ms, agg RTFx 20.1 → 37.4).
 
 ᶜ **Supertonic-3 (int4)** is measured on **M5 Pro / macOS 26.5** with
 the default **int4 L-bucketed (ANE) VectorEstimator**. The int4-ANE
@@ -232,12 +239,31 @@ rows `ttft_ms == synth_ms == time-to-complete-wav`.
 ‡ Kokoro ANE Mandarin CER measured on the **full 100-phrase**
 `minimax-chinese` corpus via `mlx-community/whisper-large-v3-turbo`
 against the WAVs rendered by `tts-benchmark --backend kokoro-ane
---variant mandarin --voice zf_001 --corpus minimax-chinese
---compute-units ane-tail-gpu --skip-asr`: **macro CER 3.81% (M5 Pro /
-macOS 26.5)**, in line with the prior M2 baseline (4.01%). WER is
-omitted because Mandarin has no word boundaries and `WERCalculator`
-splits on whitespace — word-level WER reads near 100% and is
-meaningless.
+--variant mandarin --voice zf_001 --corpus minimax-chinese --skip-asr
+--audio-dir …`: **macro CER 1.90% (M5 Pro / macOS 26.6, post-#700)**,
+down from 3.81% pre-fix. Hypothesis and reference are NFKC-folded,
+punctuation/whitespace-stripped, and **converted traditional →
+simplified (`zhconv`) before scoring** — whisper freely emits
+traditional script, which is an orthography difference, not a TTS
+error (unnormalized it reads 6.19%). WER is omitted because Mandarin
+has no word boundaries and `WERCalculator` splits on whitespace —
+word-level WER reads near 100% and is meaningless.
+
+ᴶ **Kokoro ANE Japanese** (`jf_alpha`, ANE-ja bundle) ships **no
+in-process text→phoneme frontend** — `synthesize(text:)` throws (see
+[#698][i698]). It is benchmarked through the `--phonemes` G2P bypass:
+the 100-phrase `minimax-japanese` corpus is phonemized offline with
+[`misaki[ja]`](https://github.com/hexgrad/misaki) (the same G2P
+upstream Kokoro uses for `jf_*`/`jm_*` voices) into
+`ipa_phonemes|reference_text` lines, synthesis feeds the IPA, and
+quality scores against the reference text. CER via
+`whisper-large-v3-turbo` on **kana readings** (both sides converted
+with `pykakasi` after NFKC + punctuation strip): **macro CER 1.51%**.
+Raw character CER reads 4.24%, but the gap is orthographic variance
+(whisper writing 頑張って where the corpus has がんばって, 私 vs
+わたくし), not pronunciation error — the reading-level number is the
+faithful one, mirroring the trad→simp normalization for zh. WER n/a
+for the same no-word-boundary reason as zh.
 
 ¶ StyleTTS2 footprint is the sum of the shipped iteration_3 mlpackages
 (text encoder + bert + ref_encoder + post_albert + alignment + prosody
@@ -345,3 +371,5 @@ raw paper numbers.
 [i667]: https://github.com/FluidInference/FluidAudio/issues/667
 [i668]: https://github.com/FluidInference/FluidAudio/issues/668
 [i669]: https://github.com/FluidInference/FluidAudio/issues/669
+[i698]: https://github.com/FluidInference/FluidAudio/issues/698
+[i700]: https://github.com/FluidInference/FluidAudio/pull/700

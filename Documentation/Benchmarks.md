@@ -91,6 +91,11 @@ Model: [FluidInference/parakeet-unified-en-0.6b-coreml](https://huggingface.co/F
 
 Hardware: Apple M5 Pro, macOS 26. Encoder int8 on ANE (`.cpuAndNeuralEngine`).
 
+> **iOS note:** the int8 encoder is verified on M-series only. On A16 (iPhone 14 Pro) it fails
+> to load on every compute unit — including `.cpuOnly` — even from an intact download
+> ([#828](https://github.com/FluidInference/FluidAudio/issues/828)). Use `encoderPrecision: .fp16`
+> on iOS; it loads and transcribes on the same device.
+
 ### LibriSpeech test-clean (2620 files, 5.40h audio)
 
 | Mode      | WER (Avg) | Aggregate WER | Median WER | Overall RTFx | Median RTFx | Long files (>15s) |

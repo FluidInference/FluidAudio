@@ -101,7 +101,23 @@ final public class AudioConverter: Sendable {
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: framesToRead) else {
                 throw AudioConverterError.failedToCreateBuffer
             }
-            try audioFile.read(into: buffer)
+            do {
+                try audioFile.read(into: buffer)
+            } catch {
+                // AVAudioFile.length is an ESTIMATE for packetized formats
+                // (MP3/AAC): encoder delay/padding accounting can overshoot the
+                // decodable stream by a few hundred frames, and reading the
+                // phantom tail throws a contract-breaking nilError
+                // (Foundation._GenericObjCError 0) instead of returning an
+                // empty buffer. Everything decodable is already in hand —
+                // treat a failed read after real audio as EOF rather than
+                // failing the whole file. A throw on the FIRST read is a
+                // genuinely unreadable file and still propagates.
+                if monoSamples.isEmpty {
+                    throw error
+                }
+                break
+            }
             if buffer.frameLength == 0 {
                 break
             }

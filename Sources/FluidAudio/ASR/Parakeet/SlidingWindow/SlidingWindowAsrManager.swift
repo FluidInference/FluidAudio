@@ -31,6 +31,10 @@ public actor SlidingWindowAsrManager {
     private var segmentIndex: Int = 0
     private var lastProcessedFrame: Int = 0
     private var accumulatedTokens: [Int] = []
+    // Global encoder-frame timestamp for each accumulated token (1:1 with
+    // accumulatedTokens). Lets per-chunk dedup require temporal adjacency so a
+    // coincidental subword-prefix match between far-apart words isn't dropped (#787).
+    private var accumulatedTokenTimestamps: [Int] = []
 
     // Raw sample buffer for sliding-window assembly (absolute indexing)
     private var sampleBuffer: [Float] = []
@@ -180,6 +184,7 @@ public actor SlidingWindowAsrManager {
         segmentIndex = 0
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
+        accumulatedTokenTimestamps.removeAll()
         failedWindowCount = 0
         lastWindowError = nil
 
@@ -314,6 +319,7 @@ public actor SlidingWindowAsrManager {
         segmentIndex = 0
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
+        accumulatedTokenTimestamps.removeAll()
 
         logger.info("SlidingWindowAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -445,6 +451,8 @@ public actor SlidingWindowAsrManager {
                     windowSamples,
                     decoderState: &state,
                     previousTokens: accumulatedTokens,
+                    previousTokenTimestamps: accumulatedTokenTimestamps,
+                    globalFrameOffset: windowStartSample / ASRConstants.samplesPerEncoderFrame,
                     isLastChunk: isLastChunk,
                     language: config.language
                 )
@@ -477,6 +485,18 @@ public actor SlidingWindowAsrManager {
 
             // Update state only after all required async calls complete successfully
             accumulatedTokens.append(contentsOf: tokens)
+            // Keep global timestamps aligned 1:1 with accumulatedTokens for #787 dedup.
+            // `tokens`/`adjustedTimestamps` are already post-dedup and same length; guard
+            // against any mismatch so the arrays never drift out of alignment.
+            if adjustedTimestamps.count == tokens.count {
+                accumulatedTokenTimestamps.append(contentsOf: adjustedTimestamps)
+            } else {
+                accumulatedTokenTimestamps.append(contentsOf: adjustedTimestamps.prefix(tokens.count))
+                if adjustedTimestamps.count < tokens.count {
+                    accumulatedTokenTimestamps.append(
+                        contentsOf: Array(repeating: -1, count: tokens.count - adjustedTimestamps.count))
+                }
+            }
             lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
             segmentIndex += 1
             processedChunks += 1

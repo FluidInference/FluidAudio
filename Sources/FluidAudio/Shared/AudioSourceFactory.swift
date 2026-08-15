@@ -135,7 +135,9 @@ public struct AudioSourceFactory {
             }
 
             do {
-                let remainingFrames = AVAudioFrameCount(audioFile.length - audioFile.framePosition)
+                // Clamp to AVAudioFrameCount.max to prevent overflow when casting from Int64
+                let remainingFramesInt64 = audioFile.length - audioFile.framePosition
+                let remainingFrames = AVAudioFrameCount(min(remainingFramesInt64, Int64(AVAudioFrameCount.max)))
                 let framesToRead = min(inputCapacity, remainingFrames)
                 if framesToRead > 0 {
                     try audioFile.read(into: capturedInputBuffer, frameCount: framesToRead)
