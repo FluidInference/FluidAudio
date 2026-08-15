@@ -478,7 +478,7 @@ enum JapaneseAsrBenchmark {
         try jsonData.write(to: URL(fileURLWithPath: outputFile))
     }
 
-    private static func createProgressHandler() -> DownloadUtils.ProgressHandler {
+    private static func createProgressHandler() -> ProgressHandler {
         return { progress in
             let percentage = progress.fractionCompleted * 100.0
             switch progress.phase {

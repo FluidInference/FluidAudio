@@ -2,7 +2,8 @@ import Foundation
 
 /// `[510, 256]` flat fp32 voice pack (e.g. `af_heart.bin`).
 ///
-/// Indexed by phoneme-length bucket: `row = min(max(T_enc - 1, 0), 509)`.
+/// Indexed by phoneme-length bucket: `row = min(max(phonemeCount - 1, 0), 509)`
+/// where `phonemeCount` is the raw phoneme-string length (BOS/EOS excluded).
 /// Columns split into:
 ///   * `[0..<128]`   = `style_timbre` (fed into Noise + Vocoder)
 ///   * `[128..<256]` = `style_s`      (fed into PostAlbert + Prosody)

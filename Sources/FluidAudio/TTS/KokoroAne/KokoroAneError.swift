@@ -13,6 +13,7 @@ public enum KokoroAneError: Error, LocalizedError {
     case acousticFramesExceedCap(have: Int, cap: Int)
     case predictionFailed(stage: String, underlying: Error)
     case unexpectedOutputShape(stage: String, expected: String, got: String)
+    case nonFiniteModelOutput(stage: String, output: String)
     case audioConversionFailed(String)
 
     public var errorDescription: String? {
@@ -39,6 +40,11 @@ public enum KokoroAneError: Error, LocalizedError {
             return "KokoroAne stage '\(stage)' failed: \(err.localizedDescription)"
         case .unexpectedOutputShape(let stage, let expected, let got):
             return "KokoroAne stage '\(stage)' returned unexpected shape (expected \(expected), got \(got))."
+        case .nonFiniteModelOutput(let stage, let output):
+            return
+                "KokoroAne stage '\(stage)' returned non-finite values in '\(output)'. "
+                + "The CoreML runtime mis-executed the model on this OS (seen on iOS 27 betas, "
+                + "see FluidAudio issue #738)."
         case .audioConversionFailed(let detail):
             return "KokoroAne audio conversion failed: \(detail)"
         }

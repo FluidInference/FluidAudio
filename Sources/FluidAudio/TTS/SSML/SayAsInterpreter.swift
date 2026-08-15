@@ -48,6 +48,9 @@ public enum SayAsInterpreter {
             return interpretCardinal(trimmedContent)
         case "ordinal":
             return interpretOrdinal(trimmedContent)
+        case "year":
+            guard let year = Int(trimmedContent.filter { $0.isNumber }) else { return content }
+            return interpretYear(year)
         case "digits":
             return interpretDigits(trimmedContent)
         case "date":

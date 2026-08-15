@@ -35,9 +35,10 @@ final class KokoroAneVariantTests: XCTestCase {
     }
 
     func testVariantAllCases() {
-        XCTAssertEqual(KokoroAneVariant.allCases.count, 2)
+        XCTAssertEqual(KokoroAneVariant.allCases.count, 3)
         XCTAssertTrue(KokoroAneVariant.allCases.contains(.english))
         XCTAssertTrue(KokoroAneVariant.allCases.contains(.mandarin))
+        XCTAssertTrue(KokoroAneVariant.allCases.contains(.japanese))
     }
 
     // MARK: - Repo wiring

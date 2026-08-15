@@ -2,6 +2,25 @@
 import FluidAudio
 import Foundation
 
+/// Errors thrown when AMI reference annotations cannot be loaded.
+///
+/// Benchmarks must fail loudly on these instead of scoring against a synthetic
+/// reference: a transient annotation download failure once produced a bogus
+/// 80.8% DER report scored against placeholder ground truth (issue #752).
+enum AMIParserError: Error, LocalizedError {
+    case annotationsNotFound(subdirectory: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .annotationsNotFound(let subdirectory):
+            return
+                "AMI annotations not found in any expected location. "
+                + "Expected structure: [path]/\(subdirectory)/ AND [path]/corpusResources/meetings.xml. "
+                + "Run with --auto-download or download manually from https://groups.inf.ed.ac.uk/ami/download/"
+        }
+    }
+}
+
 /// AMI annotation parser and ground truth handling
 struct AMIParser {
     private static let logger = AppLogger(category: "AMIParser")
@@ -40,41 +59,31 @@ struct AMIParser {
         return 4  // AMI meetings typically have 4 speakers
     }
 
-    /// Load AMI ground truth annotations for a specific meeting
+    /// Load AMI ground truth annotations for a specific meeting.
+    ///
+    /// Throws if annotations are missing or unparsable — never substitutes a
+    /// placeholder reference, so callers cannot silently score against fake data.
     static func loadAMIGroundTruth(
-        for meetingId: String, duration: Float
-    ) async
-        -> [TimedSpeakerSegment]
-    {
-        guard let validAmiDir = findAnnotationRoot(requiringSubdirectory: "segments") else {
-            logger.warning("   AMI annotations not found in any expected location")
-            logger.warning(
-                "      📁 Expected structure: [path]/segments/ AND [path]/corpusResources/meetings.xml"
-            )
-            logger.warning(
-                "      🔧 To download annotations: visit https://groups.inf.ed.ac.uk/ami/download/"
-            )
-            logger.warning(
-                "      📋 Using simplified placeholder ground truth (causes poor DER performance)"
-            )
-            return generateSimplifiedGroundTruth(duration: duration, speakerCount: 4)
+        for meetingId: String,
+        duration: Float,
+        searchRoots: [URL]? = nil
+    ) throws -> [TimedSpeakerSegment] {
+        guard
+            let validAmiDir = findAnnotationRoot(
+                requiringSubdirectory: "segments", searchRoots: searchRoots)
+        else {
+            throw AMIParserError.annotationsNotFound(subdirectory: "segments")
         }
 
         logger.info("   📖 Loading AMI annotations for meeting: \(meetingId)")
 
-        do {
-            let allSegments = try loadAMIGroundTruth(
-                for: meetingId,
-                in: validAmiDir,
-                duration: duration
-            )
-            logger.info("      Total segments loaded: \(allSegments.count)")
-            return allSegments
-        } catch {
-            logger.warning("      Failed to parse AMI annotations: \(error)")
-            logger.warning("      Using simplified placeholder instead")
-            return generateSimplifiedGroundTruth(duration: duration, speakerCount: 4)
-        }
+        let allSegments = try loadAMIGroundTruth(
+            for: meetingId,
+            in: validAmiDir,
+            duration: duration
+        )
+        logger.info("      Total segments loaded: \(allSegments.count)")
+        return allSegments
     }
 
     /// Internal hook for tests and benchmark helpers that need deterministic parsing
@@ -163,35 +172,22 @@ struct AMIParser {
     static func loadFrameAlignedDERReference(
         for meetingId: String,
         duration: Float,
-        frameStep: Double = defaultReferenceFrameStepSeconds
-    ) async -> [DERSpeakerSegment] {
-        guard let validAmiDir = findAnnotationRoot(requiringSubdirectory: "segments") else {
-            logger.warning("   AMI annotations not found in any expected location")
-            logger.warning(
-                "      📁 Expected structure: [path]/segments/ AND [path]/corpusResources/meetings.xml"
-            )
-            logger.warning("      📋 Falling back to simplified placeholder ground truth")
-            return frameAlignedDERReference(
-                from: generateSimplifiedGroundTruth(duration: duration, speakerCount: 4),
-                frameStep: frameStep
-            )
+        frameStep: Double = defaultReferenceFrameStepSeconds,
+        searchRoots: [URL]? = nil
+    ) throws -> [DERSpeakerSegment] {
+        guard
+            let validAmiDir = findAnnotationRoot(
+                requiringSubdirectory: "segments", searchRoots: searchRoots)
+        else {
+            throw AMIParserError.annotationsNotFound(subdirectory: "segments")
         }
 
-        do {
-            return try loadFrameAlignedDERReference(
-                for: meetingId,
-                in: validAmiDir,
-                duration: duration,
-                frameStep: frameStep
-            )
-        } catch {
-            logger.warning("      Failed to parse AMI annotations: \(error)")
-            logger.warning("      Falling back to simplified placeholder ground truth")
-            return frameAlignedDERReference(
-                from: generateSimplifiedGroundTruth(duration: duration, speakerCount: 4),
-                frameStep: frameStep
-            )
-        }
+        return try loadFrameAlignedDERReference(
+            for: meetingId,
+            in: validAmiDir,
+            duration: duration,
+            frameStep: frameStep
+        )
     }
 
     static func loadFrameAlignedDERReference(
@@ -216,29 +212,22 @@ struct AMIParser {
     static func loadWordAlignedGroundTruth(
         for meetingId: String,
         duration: Float,
-        mergeGap: Double = defaultMergeGapSeconds
-    ) async -> [TimedSpeakerSegment] {
-        guard let validAmiDir = findAnnotationRoot(requiringSubdirectory: "words") else {
-            logger.warning("   AMI word annotations not found in any expected location")
-            logger.warning(
-                "      📁 Expected structure: [path]/words/ AND [path]/corpusResources/meetings.xml"
-            )
-            logger.warning("      📋 Falling back to simplified placeholder ground truth")
-            return generateSimplifiedGroundTruth(duration: duration, speakerCount: 4)
+        mergeGap: Double = defaultMergeGapSeconds,
+        searchRoots: [URL]? = nil
+    ) throws -> [TimedSpeakerSegment] {
+        guard
+            let validAmiDir = findAnnotationRoot(
+                requiringSubdirectory: "words", searchRoots: searchRoots)
+        else {
+            throw AMIParserError.annotationsNotFound(subdirectory: "words")
         }
 
-        do {
-            return try loadWordAlignedGroundTruth(
-                for: meetingId,
-                in: validAmiDir,
-                duration: duration,
-                mergeGap: mergeGap
-            )
-        } catch {
-            logger.warning("      Failed to parse AMI word annotations: \(error)")
-            logger.warning("      Falling back to simplified placeholder ground truth")
-            return generateSimplifiedGroundTruth(duration: duration, speakerCount: 4)
-        }
+        return try loadWordAlignedGroundTruth(
+            for: meetingId,
+            in: validAmiDir,
+            duration: duration,
+            mergeGap: mergeGap
+        )
     }
 
     /// Internal hook for tests and benchmark helpers that need deterministic parsing
@@ -293,12 +282,14 @@ struct AMIParser {
     static func loadWordAlignedDERReference(
         for meetingId: String,
         duration: Float,
-        mergeGap: Double = defaultMergeGapSeconds
-    ) async -> [DERSpeakerSegment] {
-        let segments = await loadWordAlignedGroundTruth(
+        mergeGap: Double = defaultMergeGapSeconds,
+        searchRoots: [URL]? = nil
+    ) throws -> [DERSpeakerSegment] {
+        let segments = try loadWordAlignedGroundTruth(
             for: meetingId,
             duration: duration,
-            mergeGap: mergeGap
+            mergeGap: mergeGap,
+            searchRoots: searchRoots
         )
         return segments.map {
             DERSpeakerSegment(
@@ -328,34 +319,6 @@ struct AMIParser {
                 end: Double($0.endTimeSeconds)
             )
         }
-    }
-
-    /// Generate simplified ground truth for testing
-    static func generateSimplifiedGroundTruth(
-        duration: Float, speakerCount: Int
-    )
-        -> [TimedSpeakerSegment]
-    {
-        let segmentDuration = duration / Float(speakerCount * 2)
-        var segments: [TimedSpeakerSegment] = []
-        let dummyEmbedding: [Float] = Array(repeating: 0.1, count: 512)
-
-        for i in 0..<(speakerCount * 2) {
-            let speakerId = "Speaker \((i % speakerCount) + 1)"
-            let startTime = Float(i) * segmentDuration
-            let endTime = min(startTime + segmentDuration, duration)
-
-            segments.append(
-                TimedSpeakerSegment(
-                    speakerId: speakerId,
-                    embedding: dummyEmbedding,
-                    startTimeSeconds: startTime,
-                    endTimeSeconds: endTime,
-                    qualityScore: 1.0
-                ))
-        }
-
-        return segments
     }
 
     /// Generate consistent placeholder embeddings for each speaker
@@ -388,8 +351,11 @@ struct AMIParser {
         ]
     }
 
-    private static func findAnnotationRoot(requiringSubdirectory subdirectory: String) -> URL? {
-        for path in possibleAnnotationRoots() {
+    private static func findAnnotationRoot(
+        requiringSubdirectory subdirectory: String,
+        searchRoots: [URL]? = nil
+    ) -> URL? {
+        for path in searchRoots ?? possibleAnnotationRoots() {
             let requiredDir = path.appendingPathComponent(subdirectory)
             let meetingsFile = path.appendingPathComponent("corpusResources/meetings.xml")
             let hasRequiredDir = FileManager.default.fileExists(atPath: requiredDir.path)

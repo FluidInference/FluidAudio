@@ -9,7 +9,7 @@ import Foundation
 /// corpus format (strip `<cloning_audio_filename>|` prefix, prepend a
 /// header documenting source + revision + license).
 ///
-/// Reuses `DownloadUtils.fetchHuggingFaceFile` so we get the same auth
+/// Reuses `ModelHub.fetchFile` so we get the same auth
 /// (HF_TOKEN env), retry, and backoff treatment as every other HF asset
 /// pull in the project — no hardcoded URLs, no swift-transformers
 /// dependency added just for one corpus fetch.
@@ -102,7 +102,7 @@ public enum MinimaxCorpusCommand {
                 exit(1)
             }
             do {
-                let data = try await DownloadUtils.fetchHuggingFaceFile(
+                let data = try await ModelHub.fetchFile(
                     from: url, description: "minimax TTS corpus (\(lang))")
                 guard let raw = String(data: data, encoding: .utf8) else {
                     logger.error("[\(lang)] response was not valid UTF-8")

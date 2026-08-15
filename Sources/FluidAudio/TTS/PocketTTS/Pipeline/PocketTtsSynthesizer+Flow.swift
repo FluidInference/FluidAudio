@@ -3,23 +3,28 @@ import Foundation
 
 extension PocketTtsSynthesizer {
 
-    /// Run the flow decoder using Euler integration (LSD steps).
+    /// Run the flow decoder (LSD Euler integration), fused into one predict.
     ///
     /// Converts the 1024-d transformer hidden state into a 32-d audio latent code.
-    /// Flow matching works by starting from random Gaussian noise and iteratively
-    /// moving it toward a valid audio code over `numSteps` Euler steps. The
-    /// transformer output guides each step by predicting a velocity field.
+    /// Flow matching starts from random Gaussian noise and moves it toward a
+    /// valid audio code over `numSteps` Euler steps. The whole integration loop
+    /// is fused into the CoreML graph (`flow_decoder_fused.mlpackage`), so this
+    /// makes a SINGLE `predict()` per frame instead of `numSteps` calls — the
+    /// host previously dispatched 8×/frame (~336 calls/utterance), which paid
+    /// dispatch + fp32↔fp16 cast 8× on a kernel too small to amortize ANE
+    /// residency. The fused model takes `latent_init` (z_0) and returns
+    /// `latent_final` (z_N); the `s`/`t` time endpoints are baked in at
+    /// conversion for the chosen step count, so `numSteps` here MUST match the
+    /// value passed to `convert_flow_decoder_fused.py --num-steps`.
     static func flowDecode(
         transformerOut: MLMultiArray,
-        numSteps: Int,
         temperature: Float,
         model: MLModel,
         rng: inout some RandomNumberGenerator
     ) async throws -> [Float] {
         let latentDim = PocketTtsConstants.latentDim
-        let dt: Float = 1.0 / Float(numSteps)
 
-        // Initialize latent with scaled random noise.
+        // Initialize z_0 with scaled random noise (host owns the seed/RNG).
         // sqrt(temperature) because variance scales quadratically with the multiplier.
         var latent = [Float](repeating: 0, count: latentDim)
         let scale = sqrtf(temperature)
@@ -27,51 +32,10 @@ extension PocketTtsSynthesizer {
             latent[i] = Float.gaussianRandom(using: &rng) * scale
         }
 
-        // Flatten transformer_out from [1, 1, 1024] to [1, 1024]
+        // Flatten transformer_out from [1, 1, 1024] to [1, 1024].
         let transformerFlat = try reshapeToFlat(transformerOut, dim: PocketTtsConstants.transformerDim)
 
-        // Euler integration: 8 steps from t=0 to t=1
-        for step in 0..<numSteps {
-            let sValue = Float(step) * dt
-            let tValue = Float(step + 1) * dt
-
-            let velocity = try await runFlowDecoderStep(
-                transformerOut: transformerFlat,
-                latent: latent,
-                s: sValue,
-                t: tValue,
-                model: model
-            )
-
-            // Euler step: latent += velocity * dt
-            for i in 0..<latentDim {
-                latent[i] += velocity[i] * dt
-            }
-        }
-
-        return latent
-    }
-
-    // MARK: - Private
-
-    /// Run a single flow decoder step.
-    ///
-    /// - Parameters:
-    ///   - s: Start time of this Euler interval (e.g., 0.0, 0.125, 0.25, ...).
-    ///   - t: End time of this Euler interval (e.g., 0.125, 0.25, 0.375, ...).
-    ///
-    /// The model predicts a velocity vector given the current noisy latent and time
-    /// interval. The caller applies the Euler update: `latent += velocity * dt`.
-    private static func runFlowDecoderStep(
-        transformerOut: MLMultiArray,
-        latent: [Float],
-        s: Float,
-        t: Float,
-        model: MLModel
-    ) async throws -> [Float] {
-        let latentDim = PocketTtsConstants.latentDim
-
-        // Create latent MLMultiArray [1, 32]
+        // Build latent_init [1, 32].
         let latentArray = try MLMultiArray(
             shape: [1, NSNumber(value: latentDim)], dataType: .float32)
         let latentPtr = latentArray.dataPointer.bindMemory(to: Float.self, capacity: latentDim)
@@ -80,32 +44,29 @@ extension PocketTtsSynthesizer {
             latentPtr.update(from: base, count: latentDim)
         }
 
-        // Create s and t MLMultiArrays [1, 1]
-        let sArray = try MLMultiArray(shape: [1, 1], dataType: .float32)
-        sArray[0] = NSNumber(value: s)
-
-        let tArray = try MLMultiArray(shape: [1, 1], dataType: .float32)
-        tArray[0] = NSNumber(value: t)
-
+        // One fused predict: the model runs all its baked-in Euler steps
+        // internally (step count fixed at conversion: --num-steps).
         let inputDict: [String: Any] = [
-            "transformer_out": transformerOut,
-            "latent": latentArray,
-            "s": sArray,
-            "t": tArray,
+            "transformer_out": transformerFlat,
+            "latent_init": latentArray,
         ]
-
         let input = try MLDictionaryFeatureProvider(dictionary: inputDict)
         let output = try await model.compatPrediction(from: input, options: MLPredictionOptions())
 
-        // Extract velocity — take the first (and likely only) output
-        let outputNames = Array(output.featureNames)
-        guard let velocityArray = output.featureValue(for: outputNames[0])?.multiArrayValue else {
-            throw PocketTTSError.processingFailed("Missing flow decoder velocity output")
+        // Prefer the named output; fall back to the sole output for robustness
+        // against CoreML auto-generated names.
+        let finalName =
+            output.featureNames.contains("latent_final")
+            ? "latent_final" : (output.featureNames.first ?? "")
+        guard let finalArray = output.featureValue(for: finalName)?.multiArrayValue else {
+            throw PocketTTSError.processingFailed("Missing fused flow decoder latent_final output")
         }
 
-        let velocityPtr = velocityArray.dataPointer.bindMemory(to: Float.self, capacity: latentDim)
-        return Array(UnsafeBufferPointer(start: velocityPtr, count: latentDim))
+        let finalPtr = finalArray.dataPointer.bindMemory(to: Float.self, capacity: latentDim)
+        return Array(UnsafeBufferPointer(start: finalPtr, count: latentDim))
     }
+
+    // MARK: - Private
 
     /// Reshape a [1, 1, D] MLMultiArray to [1, D].
     private static func reshapeToFlat(_ array: MLMultiArray, dim: Int) throws -> MLMultiArray {

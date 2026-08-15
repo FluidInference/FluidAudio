@@ -45,15 +45,24 @@ public struct ParaformerModels: Sendable {
 
     public static func downloadAndLoad(
         precision: ParaformerPrecision = .fp16,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> ParaformerModels {
-        let directory = try await download(precision: precision, progressHandler: progressHandler)
-        return try load(from: directory, precision: precision)
+        let modelsRoot = modelsRootDirectory()
+        let targetDir = modelsRoot.appendingPathComponent(Repo.paraformerLargeZh.folderName, isDirectory: true)
+        // Completeness-checked download + purge-and-retry on load failure —
+        // the same #819 hardening as the streaming ASR managers.
+        return try await ModelHub.loadWithRecovery(
+            .paraformerLargeZh, directory: modelsRoot,
+            requiredFiles: requiredFiles(precision: precision),
+            progressHandler: progressHandler
+        ) {
+            try load(from: targetDir, precision: precision)
+        }
     }
 
     public static func download(
         precision: ParaformerPrecision = .fp16,
-        force: Bool = false, progressHandler: DownloadUtils.ProgressHandler? = nil
+        force: Bool = false, progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = modelsRootDirectory()
         let targetDir = modelsRoot.appendingPathComponent(Repo.paraformerLargeZh.folderName, isDirectory: true)
@@ -63,21 +72,28 @@ public struct ParaformerModels: Sendable {
         }
         if force { try? FileManager.default.removeItem(at: targetDir) }
         logger.info("Downloading Paraformer models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(.paraformerLargeZh, to: modelsRoot, progressHandler: progressHandler)
+        try await ModelHub.download(.paraformerLargeZh, to: modelsRoot, progressHandler: progressHandler)
         logger.info("Successfully downloaded Paraformer models")
         return targetDir
     }
 
+    /// `true` when every required artifact is present **and load-ready**:
+    /// compiled bundles must have their root `coremldata.bin` and no
+    /// `*.partial` download staging file, not merely exist (issue #819 —
+    /// a bare existence check mistakes an interrupted download for a
+    /// valid cache).
     public static func modelsExist(at directory: URL, precision: ParaformerPrecision = .fp16) -> Bool {
-        let fm = FileManager.default
-        let required = [
+        ModelCache.isCacheComplete(at: directory, requiredFiles: requiredFiles(precision: precision))
+    }
+
+    private static func requiredFiles(precision: ParaformerPrecision) -> Set<String> {
+        [
             ModelNames.ParaformerZh.preprocessorFile,
             precision.encoderName + ".mlmodelc",
             ModelNames.ParaformerZh.cifAlphasFile,
             precision.decoderName + ".mlmodelc",
             ModelNames.ParaformerZh.vocabularyFile,
         ]
-        return required.allSatisfy { fm.fileExists(atPath: directory.appendingPathComponent($0).path) }
     }
 
     public static func load(from directory: URL, precision: ParaformerPrecision = .fp16) throws -> ParaformerModels {

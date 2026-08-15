@@ -4,7 +4,8 @@ Fluid Audio ships the Silero VAD converted for Core ML together with Silero-styl
 timestamp extraction and streaming hysteresis. If you need help tuning the
 parameters for your use case, reach out on Discord.
 
-For comparison of Silero-VAD compared to other models, see this. We are running v6
+For comparison of Silero-VAD compared to other models, see this. We are running
+the 256 ms unified Silero v6.2.1 Core ML artifact.
 
 https://github.com/snakers4/silero-vad/wiki/Quality-Metrics
 
@@ -33,7 +34,7 @@ Stage the Core ML bundle yourself when the runtime cannot reach HuggingFace.
 
 ### Required asset
 
-- `silero-vad-unified-256ms-v6.0.0.mlmodelc`
+- `silero-vad-unified-256ms-v6.2.1.mlmodelc`
 
 The bundle lives in the `FluidInference/silero-vad-coreml` repo. Keep the folder name intact so `coremldata.bin` remains discoverable.
 
@@ -42,12 +43,12 @@ The bundle lives in the `FluidInference/silero-vad-coreml` repo. Keep the folder
 ```
 /opt/models
 └── silero-vad-coreml
-    └── silero-vad-unified-256ms-v6.0.0.mlmodelc
+    └── silero-vad-unified-256ms-v6.2.1.mlmodelc
         ├── coremldata.bin
         └── ...
 ```
 
-Clone with Git LFS, download the archive from the HuggingFace UI, or copy from a machine that already initialized `VadManager()` (cache path: `~/Library/Application Support/FluidAudio/Models/silero-vad-coreml`).
+Clone with Git LFS, download the archive from the HuggingFace UI, or copy from a machine that already initialized `VadManager()` (default cache path: `~/Library/Application Support/FluidAudio/Models/silero-vad`).
 
 ### Loading without downloads
 
@@ -59,7 +60,7 @@ import CoreML
 
 Task {
     do {
-        let modelURL = URL(fileURLWithPath: "/opt/models/silero-vad-coreml/silero-vad-unified-256ms-v6.0.0.mlmodelc", isDirectory: true)
+        let modelURL = URL(fileURLWithPath: "/opt/models/silero-vad-coreml/silero-vad-unified-256ms-v6.2.1.mlmodelc", isDirectory: true)
 
         var configuration = MLModelConfiguration()
         configuration.computeUnits = .cpuOnly

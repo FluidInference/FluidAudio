@@ -15,7 +15,7 @@ Each new model should reference all three in their PRs:
 | Item | Example |
 |------|---------|
 | mobius PR | [`FluidInference/mobius#21`](https://github.com/FluidInference/mobius/pull/21) (conversion scripts, inference scripts, trial notes) |
-| HuggingFace repo | [`FluidInference/qwen3-asr-0.6b-coreml`](https://huggingface.co/FluidInference/qwen3-asr-0.6b-coreml) (name mirrors the base model, model card links back to it) |
+| HuggingFace repo | [`FluidInference/parakeet-tdt-0.6b-v3-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml) (name mirrors the base model, model card links back to it) |
 | FluidAudio PR | [`FluidInference/FluidAudio#315`](https://github.com/FluidInference/FluidAudio/pull/315) |
 
 ---
@@ -159,7 +159,7 @@ Also update `getRequiredModelNames(for:variant:)` to return the new model's requ
 
 The manager:
 - Is an `actor` (thread safety, no `@unchecked Sendable`)
-- Downloads models via `DownloadUtils.loadModels()`
+- Downloads models via `ModelHub.loadModels()`
 - Exposes a public inference API
 
 ```swift
@@ -168,7 +168,7 @@ public actor MyModelManager {
     private var decoder: MLModel?
 
     public init(config: MyModelConfig = .default) async throws {
-        let models = try await DownloadUtils.loadModels(
+        let models = try await ModelHub.loadModels(
             .myModel,
             modelNames: Array(ModelNames.MyModel.requiredModels),
             directory: cacheDir,

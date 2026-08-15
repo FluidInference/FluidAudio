@@ -47,6 +47,14 @@ public final class TextNormalizer: Sendable {
         (
             @convention(c) (UnsafePointer<CChar>?, UInt32) -> UnsafeMutablePointer<CChar>?
         )?
+    private let nemoTnNormalize:
+        (
+            @convention(c) (UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
+        )?
+    private let nemoTnNormalizeSentence:
+        (
+            @convention(c) (UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
+        )?
     private let nemoFreeString:
         (
             @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
@@ -78,6 +86,8 @@ public final class TextNormalizer: Sendable {
             self.nemoNormalize = nil
             self.nemoNormalizeSentence = nil
             self.nemoNormalizeSentenceMaxSpan = nil
+            self.nemoTnNormalize = nil
+            self.nemoTnNormalizeSentence = nil
             self.nemoFreeString = nil
             self.nemoAddRule = nil
             self.nemoRemoveRule = nil
@@ -95,6 +105,8 @@ public final class TextNormalizer: Sendable {
             self.nemoNormalize = nil
             self.nemoNormalizeSentence = nil
             self.nemoNormalizeSentenceMaxSpan = nil
+            self.nemoTnNormalize = nil
+            self.nemoTnNormalizeSentence = nil
             self.nemoFreeString = nil
             self.nemoAddRule = nil
             self.nemoRemoveRule = nil
@@ -134,6 +146,27 @@ public final class TextNormalizer: Sendable {
             )
         } else {
             self.nemoNormalizeSentenceMaxSpan = nil
+        }
+
+        // Text-normalization (written → spoken) functions — optional; present
+        // only when the linked library exposes the TN surface (issue #711
+        // follow-up). Used by the TTS frontends for richer normalization.
+        if let tnPtr = dlsym(handle, "nemo_tn_normalize") {
+            self.nemoTnNormalize = unsafeBitCast(
+                tnPtr,
+                to: (@convention(c) (UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?).self
+            )
+        } else {
+            self.nemoTnNormalize = nil
+        }
+
+        if let tnSentencePtr = dlsym(handle, "nemo_tn_normalize_sentence") {
+            self.nemoTnNormalizeSentence = unsafeBitCast(
+                tnSentencePtr,
+                to: (@convention(c) (UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?).self
+            )
+        } else {
+            self.nemoTnNormalizeSentence = nil
         }
 
         // Custom rules functions (optional)
@@ -198,6 +231,43 @@ public final class TextNormalizer: Sendable {
         return String(cString: resultPtr)
     }
 
+    // MARK: - Text Normalization (written → spoken)
+
+    /// Whether the linked library exposes the TN (written→spoken) surface used
+    /// by the TTS frontends. False when no native library is linked or it only
+    /// provides the ITN symbols.
+    public var isTnAvailable: Bool {
+        isNativeAvailable && nemoTnNormalizeSentence != nil
+    }
+
+    /// Normalize written-form text to spoken form (single expression), e.g.
+    /// `"$5.50"` → `"five dollars fifty cents"`. Returns the input unchanged
+    /// when the native TN surface is unavailable.
+    public func tnNormalize(_ input: String) -> String {
+        guard let tnFn = nemoTnNormalize, let freeFn = nemoFreeString else {
+            return input
+        }
+        guard let resultPtr = input.withCString({ tnFn($0) }) else {
+            return input
+        }
+        defer { freeFn(resultPtr) }
+        return String(cString: resultPtr)
+    }
+
+    /// Normalize a full sentence to spoken form, rewriting written-form spans
+    /// in place (`"I paid $5"` → `"I paid five dollars"`). Returns the input
+    /// unchanged when the native TN surface is unavailable.
+    public func tnNormalizeSentence(_ input: String) -> String {
+        guard let tnFn = nemoTnNormalizeSentence, let freeFn = nemoFreeString else {
+            return input
+        }
+        guard let resultPtr = input.withCString({ tnFn($0) }) else {
+            return input
+        }
+        defer { freeFn(resultPtr) }
+        return String(cString: resultPtr)
+    }
+
     /// Normalize a full sentence, replacing spoken-form spans with written form.
     ///
     /// Uses a sliding window to find normalizable spans within the sentence.
@@ -211,8 +281,8 @@ public final class TextNormalizer: Sendable {
             return input
         }
 
-        let filtered = filterAmbiguousWords(in: input)
-        return callNormalizeSentence(filtered)
+        let (masked, restore) = maskAmbiguousWords(in: input)
+        return restoreMaskedWords(callNormalizeSentence(masked), restore)
     }
 
     /// Normalize a full sentence with a configurable max span size.
@@ -226,8 +296,9 @@ public final class TextNormalizer: Sendable {
             return input
         }
 
-        let filtered = filterAmbiguousWords(in: input)
-        return callNormalizeSentenceWithMaxSpan(filtered, maxSpanTokens: maxSpanTokens)
+        let (masked, restore) = maskAmbiguousWords(in: input)
+        return restoreMaskedWords(
+            callNormalizeSentenceWithMaxSpan(masked, maxSpanTokens: maxSpanTokens), restore)
     }
 
     /// Normalize an ASR result, returning a new result with normalized text.
@@ -320,7 +391,15 @@ public final class TextNormalizer: Sendable {
     ///
     /// - Parameter input: The raw sentence
     /// - Returns: Sentence with ambiguous natural-language words preserved
-    private func filterAmbiguousWords(in input: String) -> String {
+    /// Mask ambiguous words that NLTagger identifies as natural language, so the
+    /// native normalizer can't rewrite them (e.g. the noun "period" → ".").
+    ///
+    /// Each protected word is replaced with a unique Private-Use-Area sentinel
+    /// character; the native normalizer passes those through unchanged, and the
+    /// caller restores them via the returned map. Returns the (possibly)
+    /// rewritten string and a sentinel→original map (empty when nothing was
+    /// masked).
+    private func maskAmbiguousWords(in input: String) -> (masked: String, restore: [Character: String]) {
         let words = input.split(separator: " ", omittingEmptySubsequences: true)
 
         // Quick check: are there any ambiguous words at all?
@@ -328,13 +407,17 @@ public final class TextNormalizer: Sendable {
             Self.ambiguousWords.contains(word.lowercased())
         }
         guard hasAmbiguous else {
-            return input
+            return (input, [:])
         }
 
         let tagger = NLTagger(tagSchemes: [.lexicalClass])
         tagger.string = input
 
         var result: [String] = []
+        var restore: [Character: String] = [:]
+        // Private Use Area (U+E000…) — never appears in real ASR text and is
+        // passed through untouched by the native normalizer.
+        var nextSentinel: UInt32 = 0xE000
         for word in words {
             let wordLower = word.lowercased()
 
@@ -351,21 +434,33 @@ public final class TextNormalizer: Sendable {
 
             let tag = tagger.tag(at: wordRange.lowerBound, unit: .word, scheme: .lexicalClass).0
 
-            // If NLTagger identifies it as a noun, verb, adjective, or adverb,
-            // it's being used as natural language — keep it as-is.
-            // If it's "other" or unrecognized, treat it as a potential punctuation command.
+            // A noun/verb/adjective/adverb in a multi-word sentence is being used
+            // as natural language — mask it so the normalizer leaves it alone.
+            // Standalone or "other" usage is a potential punctuation command;
+            // leave it for the normalizer to process.
             let isNaturalLanguage = tag == .noun || tag == .verb || tag == .adjective || tag == .adverb
 
-            if isNaturalLanguage && words.count > 1 {
-                // Keep the original word — don't let the normalizer touch it
-                result.append(String(word))
+            if isNaturalLanguage && words.count > 1, let scalar = UnicodeScalar(nextSentinel) {
+                let sentinel = Character(scalar)
+                nextSentinel += 1
+                restore[sentinel] = String(word)
+                result.append(String(sentinel))
             } else {
-                // Standalone or non-NL usage — let normalizer process it
                 result.append(String(word))
             }
         }
 
-        return result.joined(separator: " ")
+        return (result.joined(separator: " "), restore)
+    }
+
+    /// Restore sentinel characters produced by ``maskAmbiguousWords(in:)``.
+    private func restoreMaskedWords(_ text: String, _ restore: [Character: String]) -> String {
+        guard !restore.isEmpty else { return text }
+        var out = text
+        for (sentinel, original) in restore {
+            out = out.replacingOccurrences(of: String(sentinel), with: original)
+        }
+        return out
     }
 
     // MARK: - Private FFI Helpers

@@ -226,4 +226,78 @@ final class PocketTtsVoiceClonerTests: XCTestCase {
         XCTAssertFalse(out.contains(-99), "padding must not leak into the extraction")
     }
     #endif
+
+    // MARK: - reproject (#793 speaker projection)
+
+    /// `reproject` must equal `conditioning · pinv · targetProjᵀ`. Validate the
+    /// cblas matmul indexing against a naive triple-loop reference.
+    func testReprojectMatchesNaiveReference() {
+        let d = PocketTtsConstants.embeddingDim  // 1024
+        let k = PocketTtsConstants.latentDim  // 32
+        let frames = 3
+
+        // Deterministic pseudo-random inputs.
+        func seq(_ n: Int, _ salt: Int) -> [Float] {
+            (0..<n).map { i in Float(((i * 1_103_515_245 + salt * 12345) % 2001) - 1000) / 1000.0 }
+        }
+        let cond = seq(frames * d, 1)
+        let pinv = seq(d * k, 2)
+        let targetProj = seq(d * k, 3)
+
+        let out = PocketTtsVoiceCloner.reproject(
+            conditioning: cond, frames: frames,
+            projection: .init(encoderRecoverPinv: pinv, targetProj: targetProj))
+
+        // Naive reference: latents[f,x] = Σ_j cond[f,j]·pinv[j,x];
+        //                  ref[f,e]     = Σ_x latents[f,x]·targetProj[e,x].
+        var ref = [Float](repeating: 0, count: frames * d)
+        for f in 0..<frames {
+            var latents = [Float](repeating: 0, count: k)
+            for x in 0..<k {
+                var acc: Float = 0
+                for j in 0..<d { acc += cond[f * d + j] * pinv[j * k + x] }
+                latents[x] = acc
+            }
+            for e in 0..<d {
+                var acc: Float = 0
+                for x in 0..<k { acc += latents[x] * targetProj[e * k + x] }
+                ref[f * d + e] = acc
+            }
+        }
+
+        XCTAssertEqual(out.count, frames * d)
+        for i in 0..<out.count {
+            XCTAssertEqual(out[i], ref[i], accuracy: 1e-3, "mismatch at \(i)")
+        }
+    }
+
+    /// A projection whose recover-pinv and target are set so the second matmul
+    /// inverts the first (`Σ_x pinv[j,x]·targetProj[e,x] = δ_{j,e}` on the used
+    /// support) leaves the conditioning unchanged — the English (identity) case.
+    func testReprojectIdentityWhenTargetInvertsRecover() {
+        let d = PocketTtsConstants.embeddingDim
+        let k = PocketTtsConstants.latentDim
+        let frames = 2
+
+        // pinv selects dims [0..k) into latents; targetProj scatters them back to
+        // dims [0..k). Then reproject zeroes dims [k..d) and preserves [0..k).
+        var pinv = [Float](repeating: 0, count: d * k)
+        var targetProj = [Float](repeating: 0, count: d * k)
+        for x in 0..<k {
+            pinv[x * k + x] = 1  // pinv[j=x, x] = 1
+            targetProj[x * k + x] = 1  // targetProj[e=x, x] = 1
+        }
+        let cond = (0..<frames * d).map { Float($0 % 13) - 6 }
+
+        let out = PocketTtsVoiceCloner.reproject(
+            conditioning: cond, frames: frames,
+            projection: .init(encoderRecoverPinv: pinv, targetProj: targetProj))
+
+        for f in 0..<frames {
+            for e in 0..<d {
+                let expected: Float = e < k ? cond[f * d + e] : 0
+                XCTAssertEqual(out[f * d + e], expected, accuracy: 1e-4)
+            }
+        }
+    }
 }

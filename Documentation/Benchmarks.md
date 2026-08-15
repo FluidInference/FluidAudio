@@ -80,6 +80,80 @@ iPhone 16 Pro Max run, and only for models that were reloaded during the session
 | Decoder       |                       88.49 |                        8.11 |              146.01 | MLComputeUnits(rawValue: 1) |
 | JointDecision |                       48.46 |                        7.97 |               71.85 | MLComputeUnits(rawValue: 1) |
 
+## Parakeet Unified (English, batch + streaming)
+
+Unified FastConformer-RNNT — one checkpoint serves both offline batch and chunked-attention
+streaming, English with punctuation and capitalization. Greedy RNNT decode (no TDT duration
+head); batch and streaming share the same decoder and differ only in the encoder window
+(offline 15 s full-attention vs streaming 7.68 s chunked).
+
+Model: [FluidInference/parakeet-unified-en-0.6b-coreml](https://huggingface.co/FluidInference/parakeet-unified-en-0.6b-coreml)
+
+Hardware: Apple M5 Pro, macOS 26. Encoder int8 on ANE (`.cpuAndNeuralEngine`).
+
+> **iOS note:** the int8 encoder is verified on M-series only. On A16 (iPhone 14 Pro) it fails
+> to load on every compute unit — including `.cpuOnly` — even from an intact download
+> ([#828](https://github.com/FluidInference/FluidAudio/issues/828)). Use `encoderPrecision: .fp16`
+> on iOS; it loads and transcribes on the same device.
+
+### LibriSpeech test-clean (2620 files, 5.40h audio)
+
+| Mode      | WER (Avg) | Aggregate WER | Median WER | Overall RTFx | Median RTFx | Long files (>15s) |
+|-----------|-----------|---------------|------------|--------------|-------------|-------------------|
+| Batch     | 2.15%     | 1.68%         | 0.00%      | 123.3x       | 111.5x      | 238               |
+| Streaming | 2.21%     | 1.79%         | 0.00%      | 29.1x        | 53.1x       | 238               |
+
+Same harness and `TextNormalizer` as `asr-benchmark`, so directly comparable to the
+Transcription numbers above: Parakeet TDT v3 = 2.6% Avg WER / 110x RTFx (multilingual, no
+punctuation). For English files, Unified batch wins on WER, throughput, and punctuation; TDT v3
+remains the multilingual option.
+
+- **Avg WER** is the mean of per-file WER (matches `asr-benchmark`); **Aggregate WER** is total errors ÷ total words.
+- Long files (> 15 s) are not skipped — batch uses overlapping 15 s windows merged on a 2 s overlap; streaming runs them as one continuous session.
+- Streaming's overall RTFx falls below its median because it re-encodes a 7.68 s window per 1.04 s chunk (the latency tax) — long files amortize that poorly. Batch only re-encodes the 2 s overlap, so throughput stays flat. **Use batch for files, streaming for live audio.**
+- int8 encoder is WER-lossless vs fp16 (within noise) at half the size.
+
+```bash
+# Full benchmark, both modes (auto-downloads dataset + models)
+swift run -c release fluidaudiocli unified-benchmark --mode both
+
+# Single mode, limited files, or fp16 encoder
+swift run -c release fluidaudiocli unified-benchmark --mode streaming --max-files 100
+swift run -c release fluidaudiocli unified-benchmark --mode batch --precision fp16
+```
+
+## Nemotron Speech Streaming 0.6B (English)
+
+Cache-aware FastConformer-RNNT streaming, English. Mel features are computed **natively in
+Swift** (`NemotronMelExtractor` → `AudioMelSpectrogram`, NeMo `normalize: NA` raw log-mel) —
+there is no CoreML preprocessor stage. It was removed in the issue #739 fix: the preprocessor's
+flexible `RangeDim` audio input was the source of the `ios17.slice_by_index: zero shape error`
+("Skipped adding default_function to entry point: main") ANE warning behind the iPadOS
+cold-start empty-transcript failure. Encoder int8 on ANE (`.cpuAndNeuralEngine`).
+
+Model: [FluidInference/nemotron-speech-streaming-en-0.6b-coreml](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml)
+
+### LibriSpeech test-clean (2620 files, 53,120 words, ~5.4h audio)
+
+| Chunk tier | Aggregate WER | RTFx | Errors / words |
+|------------|---------------|------|----------------|
+| 560 ms (lowest latency) | 2.71%     | 40.7x | 1442 / 53120 |
+| 1120 ms (trained chunk) | **2.58%** | 24.3x | 1369 / 53120 |
+| 2240 ms (default)       | 2.64%     | 87.4x | 1403 / 53120 |
+
+- **WER** is aggregate (total errors ÷ total words across all 2620 files).
+- **RTFx** is end-to-end single-stream (Swift mel + int8 ANE encode + greedy RNN-T), release
+  build, Apple Silicon; absolute RTFx is machine/load-dependent, relative ordering is stable.
+- Accuracy is essentially flat across tiers (2.58–2.71%). 1120 ms has the best WER but lowest
+  throughput; 2240 ms (default) is the throughput sweet spot, within ~0.06 pp of the best WER.
+- Parity: `NemotronMelExtractor` matches NeMo PyTorch raw log-mel to max |Δ| ≈ 9e-3 — the WER
+  here confirms end-to-end correctness (a wrong mel front-end would collapse WER).
+- Multilingual FLEURS results: see [NemotronMultilingual.md](ASR/NemotronMultilingual.md).
+
+```bash
+swift run -c release fluidaudiocli nemotron-benchmark --subset test-clean --chunk <560|1120|2240>
+```
+
 ## Transcription with Keyword Boosting
 
 CTC-based custom vocabulary boosting system, which enables accurate recognition of domain-specific terms (company names, technical jargon, proper nouns) without retraining the ASR model.
@@ -242,6 +316,17 @@ Model is nearly identical to the base model in terms of quality, performance wis
 ![VAD/speed.png](VAD/speed.png)
 ![VAD/correlation.png](VAD/correlation.png)
 
+Silero VAD v6.2.1 Core ML preflight benchmark on an Apple M1 MacBook Air (`macOS 26.5.1`), using the same `mini50` dataset and threshold as the VAD CI workflow:
+
+```text
+swift run -c release fluidaudiocli vad-benchmark --dataset mini50 --all-files --threshold 0.5 --output musan_vad_results.json
+```
+
+| Model | Accuracy | Precision | Recall | F1-Score | Total time | RTFx |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Upstream baseline | 92.0% | 86.2% | 100.0% | 92.6% | 2.19s | 1117.2x |
+| Silero VAD v6.2.1 | 94.0% | 89.3% | 100.0% | 94.3% | 2.27s | 1077.9x |
+
 Dataset: https://github.com/Lab41/VOiCES-subset
 
 ```text
@@ -290,125 +375,6 @@ swift run fluidaudiocli vad-benchmark --dataset musan-full --num-files all --thr
 [23:02:35.711] [INFO] [VAD] Files Processed: 2016
 [23:02:35.711] [INFO] [VAD] Avg Time per File: 0.160s
 [23:02:35.744] [INFO] [VAD] Results saved to: vad_benchmark_results.json
-```
-
-## Qwen3-ASR (Beta / In Progress)
-
-Encoder-decoder ASR using Qwen3-ASR-0.6B converted to CoreML. Autoregressive generation with KV-cache.
-
-> **Note:** WER/CER may be higher than the original PyTorch model due to CoreML conversion limitations. See FLEURS results below for full multilingual benchmarks.
-
-Model: [FluidInference/qwen3-asr-0.6b-coreml](https://huggingface.co/FluidInference/qwen3-asr-0.6b-coreml) (f32 variant)
-
-Hardware: Apple M2, 2022, macOS 26
-
-### LibriSpeech test-clean (2620 files)
-
-| Metric | Value |
-|--------|-------|
-| WER (Avg) | 4.4% |
-| WER (Median) | 0.0% |
-| RTFx | 2.8x |
-| Per-token | ~75ms |
-
-### AISHELL-1 Chinese (6920 files, 9.7h audio)
-
-| Metric | Value |
-|--------|-------|
-| CER (Avg) | 6.6% |
-| WER (Avg) | 10.3% |
-| Median RTFx | 4.6x |
-| Overall RTFx | 3.8x |
-| Processing Time | 2.6h |
-
-**Methodology notes:**
-- CER (Character Error Rate) is the primary metric for Chinese ASR, as per the [Qwen3-ASR Technical Report](https://arxiv.org/html/2601.21337v1): *"We use CER for character-based languages (e.g., Mandarin Chinese, Cantonese, and Korean) and WER for word-delimited languages"*
-- WER calculation uses Apple's `NLTokenizer` for Chinese word segmentation; we were unable to verify how official Qwen3-ASR evaluation performs tokenization
-- Official Qwen3-ASR reports 3.15% on AISHELL-2 (different dataset) per [HuggingFace model card](https://huggingface.co/Qwen/Qwen3-ASR-0.6B); our 6.6% CER on AISHELL-1 suggests some accuracy loss in CoreML conversion
-- **Why AISHELL-1?** AISHELL-2 (1000h) requires an application with institutional affiliation and is restricted to non-commercial use. AISHELL-1 (178h) is openly available under Apache 2.0.
-- Dataset: [AudioLLMs/aishell_1_zh_test](https://huggingface.co/datasets/AudioLLMs/aishell_1_zh_test)
-
-```bash
-# Run AISHELL-1 benchmark
-swift run -c release fluidaudiocli qwen3-benchmark --dataset aishell
-```
-
-### FLEURS Multilingual (30 languages, ~70h audio)
-
-Full benchmark across all 30 languages supported by Qwen3-ASR, matching the official FLEURS tiers.
-
-**Which metric to use:**
-- **CER** for character-based languages (Chinese, Japanese, Korean, Thai, Vietnamese, Cantonese) - WER is meaningless due to word segmentation differences
-- **WER** for word-delimited languages (European, Arabic, etc.)
-
-#### Results by FLEURS Tier
-
-| Tier | Languages | Our CER | Official 0.6B WER |
-|------|-----------|---------|-------------------|
-| FLEURS (12 core) | en, zh, yue, ar, de, es, fr, it, ja, ko, pt, ru | **10.3%** | 10.0% |
-| FLEURS† (8 add) | hi, id, ms, nl, pl, th, tr, vi | **20.9%** | 31.9% |
-| FLEURS†† (10 hardest) | cs, da, el, fa, fi, fil, hu, mk, ro, sv | **41.0%** | 47.8% |
-
-> **Note:** Official Qwen3-ASR reports WER, but for CJK languages this includes word segmentation artifacts. Our CER comparison shows CoreML conversion has minimal accuracy loss on core languages.
-
-#### Full Results (sorted by CER)
-
-| Language | RTFx | Avg CER | Med CER | Avg WER | Med WER | Use |
-|----------|------|---------|---------|---------|---------|-----|
-| en_us | 1.16x | 4.0% | 2.3% | 7.3% | 5.3% | WER |
-| es_419 | 2.04x | 4.9% | 3.0% | 10.5% | 8.1% | WER |
-| it_it | 3.46x | 5.1% | 2.8% | 12.4% | 10.0% | WER |
-| ru_ru | 1.84x | 6.9% | 4.6% | 18.0% | 15.6% | WER |
-| de_de | 1.22x | 8.1% | 5.1% | 16.6% | 13.3% | WER |
-| pt_br | 3.27x | 8.6% | 5.4% | 17.5% | 13.0% | WER |
-| fr_fr | 1.72x | 8.9% | 6.2% | 17.3% | 13.3% | WER |
-| cmn_hans_cn | 1.74x | 9.4% | 5.1% | 99.7%* | 100%* | CER |
-| ko_kr | 1.10x | 10.6% | 7.9% | 23.5% | 21.7% | CER |
-| tr_tr | 2.84x | 11.6% | 9.6% | 33.0% | 31.2% | WER |
-| id_id | 2.86x | 16.0% | 9.1% | 30.9% | 22.2% | WER |
-| nl_nl | 2.29x | 17.2% | 13.6% | 36.5% | 30.3% | WER |
-| ms_my | 2.24x | 17.4% | 13.2% | 37.6% | 33.3% | WER |
-| th_th | 1.42x | 18.3% | 15.4% | 96.8%* | 100%* | CER |
-| ar_eg | 1.53x | 18.5% | 13.8% | 40.3% | 36.4% | WER |
-| ja_jp | 0.83x | 19.3% | 17.1% | 94.4%* | 100%* | CER |
-| yue_hant_hk | 0.87x | 19.5% | 13.8% | 99.8%* | 100%* | CER |
-| vi_vn | 2.69x | 25.4% | 21.0% | 35.9% | 31.0% | CER |
-| fi_fi | 1.56x | 25.9% | 22.7% | 70.3% | 70.0% | WER |
-| hi_in | 0.74x | 30.8% | 21.4% | 36.0% | 30.6% | WER |
-| pl_pl | 1.69x | 30.8% | 27.4% | 61.9% | 60.0% | WER |
-| sv_se | 2.38x | 31.3% | 30.1% | 67.8% | 66.7% | WER |
-| fil_ph | 1.56x | 32.2% | 22.4% | 64.8% | 61.1% | WER |
-| mk_mk | 0.79x | 43.2% | 27.9% | 73.0% | 75.9% | WER |
-| da_dk | 2.33x | 45.5% | 46.5% | 81.1% | 84.6% | WER |
-| fa_ir | 1.88x | 48.9% | 34.4% | 75.1% | 75.0% | WER |
-| el_gr | 0.95x | 51.9% | 39.2% | 78.2% | 76.5% | WER |
-| hu_hu | 1.05x | 59.0% | 55.7% | 91.8% | 95.8% | WER |
-| ro_ro | 1.03x | 60.9% | 56.2% | 97.2% | 100% | WER |
-| cs_cz | 2.26x | 62.2% | 56.5% | 88.2% | 96.2% | WER |
-
-*\*WER >90% is expected for CJK/Thai due to word segmentation - FLEURS references have artificial character-by-character spacing while our output is natural continuous text. CER shows actual transcription quality.*
-
-#### Averages
-
-| Metric | Average | Median |
-|--------|---------|--------|
-| CER (all 30) | 25.1% | 19.4% |
-| RTFx | 1.78x | 1.72x |
-
-#### Speed by Language Type
-
-| Type | Avg RTFx | Notes |
-|------|----------|-------|
-| Romance (es, it, pt, fr) | 2.6x | Fastest |
-| Turkic/Indonesian | 2.5x | Fast |
-| Germanic (en, de, nl) | 1.6x | Medium |
-| Slavic (ru, pl, cs) | 1.9x | Medium |
-| CJK (zh, ja, ko, yue) | 1.1x | Slow - more tokens |
-| Indic (hi) | 0.74x | Slowest |
-
-```bash
-# Run FLEURS benchmark for all languages
-swift run -c release fluidaudiocli qwen3-benchmark --dataset fleurs --languages all
 ```
 
 ## SenseVoice
@@ -507,27 +473,109 @@ swift run -c release fluidaudiocli parakeet-eou --benchmark --chunk-size 320 --u
 swift run -c release fluidaudiocli parakeet-eou --benchmark --chunk-size 160 --use-cache
 ```
 
-## Streaming ASR (Nemotron)
+## Streaming ASR (Nemotron, English)
 
-NVIDIA's Nemotron Speech Streaming 0.6B model for low-latency streaming ASR.
+NVIDIA's Nemotron Speech Streaming 0.6B for streaming ASR. The default tier is now
+**2240ms with B1-fused decode** (decoder+joint merged into one CoreML call per step) —
+it trades ~1.1 s of chunk latency for throughput at no accuracy cost. Pass an explicit
+`NemotronChunkSize` / `--chunk` (1120/560/160/80) for lower-latency tiers.
 
-Model: [FluidInference/nemotron-speech-streaming-0.6b-coreml](https://huggingface.co/FluidInference/nemotron-speech-streaming-0.6b-coreml)
+Model: [FluidInference/nemotron-speech-streaming-en-0.6b-coreml](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml)
 
-Hardware: Apple M1, 2020, macOS 26
+Hardware: Apple M5 Pro, macOS 26.5. Encoder int8 on ANE (`.cpuAndNeuralEngine`).
 
-### LibriSpeech test-clean (2620 files, 5.40h audio)
+### LibriSpeech test-clean (100 files)
 
-| Chunk Size | WER (Avg) | Median WER | RTFx | Total Time |
-|------------|-----------|------------|------|------------|
-| 1120ms     | 2.51%     | 0.00%      | 6.03x | 3228s (53.8m) |
-| 560ms      | 2.12%     | 0.00%      | TBD  | TBD |
+Three tiers, all from one conversion with B1-fused decode (`decoder_joint.mlmodelc`):
+
+| Tier | WER | RTFx | Δ vs 1120ms |
+|------|-----|------|-------------|
+| 560ms | 2.28% | 42.1 | −35% |
+| 1120ms | 2.28% | 65.0 | — |
+| **2240ms (default)** | **2.46%** | **93.6** | **+44%** |
+
+WER is neutral across tiers (within n=100 noise). 2240ms = 2× the trained 14-encoder-frame
+chunk (the chunked-attention mask still tiles cleanly); B1 fusion = one CoreML call per
+decode step instead of two (~+15% on any tier shipping `decoder_joint.mlmodelc`). The v1
+160ms/80ms tiers were removed (off-tiling, degraded WER).
+
+**Encoder optimization notes (M5 Pro):**
+- **6-bit palettization beats int8** on every axis — 2.24% WER, +9% RTFx, smaller (422 MB vs
+  564 MB). Planned follow-up to replace the shipped int8 encoder.
+- **Encoder placement / iOS:** ANE gives the fastest inference but slowest load (the iOS
+  ~1.4 GB / ~130 s residency wall for the 24-layer encoder). On iOS, running the encoder on
+  **CPU** (instant load, ~140 MB, ~66 RTFx) is ~2× faster than 4-way ANE sharding (~33 RTFx)
+  — so CPU, not sharding, is the iOS encoder choice. macOS / plugged-in stays on ANE.
+
+> All three tiers are a faithful conversion of the public `nvidia/nemotron-speech-streaming-en-0.6b`
+> checkpoint (decoder & joint match PyTorch at cos=1.0) and replace the previous v1 tiers. WER
+> parity against NVIDIA's internal tuning of the same model is a tracked follow-up; the ladder
+> above is internally consistent (one conversion for all tiers) and reports the relative gains.
 
 ```bash
-# Run 1120ms benchmark
-swift run -c release fluidaudiocli nemotron-benchmark --chunk 1120
+# Default (2240ms + B1)
+swift run -c release fluidaudiocli nemotron-benchmark --max-files 100
 
-# Run 560ms benchmark
-swift run -c release fluidaudiocli nemotron-benchmark --chunk 560
+# Lower-latency tier
+swift run -c release fluidaudiocli nemotron-benchmark --chunk 1120 --max-files 100
+```
+
+## Streaming ASR (Nemotron Multilingual)
+
+NVIDIA's Nemotron 3.5 ASR Streaming Multilingual 0.6B — real-time streaming RNN-T
+covering ~40 language-locales, fully on-device. Two models share one encoder per
+tier: `latin` (en/es/fr/it/pt/de, 2,828-token script-pruned vocab) and
+`multilingual` (zh/ja + 100+ via `prompt_id`, full 13,087 vocab).
+
+Model: [FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML](https://huggingface.co/FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML)
+
+Hardware: Apple M5 Pro, macOS 26.5. Encoder/decoder/joint on ANE
+(`.cpuAndNeuralEngine`), CoreML iOS 17 target. Per-file sum-aggregate RTFx, 2.24 s
+(2240 ms) tier, B1 fused decode.
+
+### LibriSpeech test-clean (English, 2620 files, 5.40h audio)
+
+| Model | Vocab | WER | RTFx |
+|-------|-------|-----|------|
+| `latin` | 2,828 | 3.6% | 124x |
+| `multilingual` | 13,087 | 3.2% | 76x |
+
+`latin` is ~1.6× faster than the full-vocab model on the same English audio
+(smaller per-frame joint matmul) at ~0.4 pp WER. English WER uses the HF
+`EnglishTextNormalizer` (Open ASR Leaderboard convention).
+
+### FLEURS (full test splits, 2.24 s tier)
+
+| Language | Model | WER / CER | RTFx |
+|----------|-------|-----------|------|
+| English (en) | `latin` | 8.96% | 130x |
+| Spanish (es) | `latin` | 4.80% | 140x |
+| French (fr) | `latin` | 9.52% | 130x |
+| Italian (it) | `latin` | 5.41% | 147x |
+| Portuguese (pt) | `latin` | 6.14% | 141x |
+| German (de) | `latin` | 9.83% | 144x |
+| Chinese (zh) | `multilingual` | 18.57% CER | 89x |
+| Japanese (ja) | `multilingual` | 13.79% CER | 84x |
+
+FLEURS is multi-domain and digit-bearing, so it runs higher than test-clean for
+the same model. Reference and hypothesis are normalized with
+[`text-processing-rs`](https://github.com/FluidInference/text-processing-rs) —
+FluidInference's Rust port of NVIDIA NeMo's (inverse) text-normalization grammars
+(~98.6% NeMo-suite compatibility) — to match NVIDIA's FLEURS scoring; zh/ja are
+scored as CER. (The `nemotron-multilingual-benchmark` CLI's built-in scorer uses
+a lighter Swift normalizer, so non-English numbers it prints may differ slightly
+from these.) The full-vocab `multilingual` model is chunk-sensitive — use the 2 s
+tier for zh/ja.
+
+```bash
+# LibriSpeech test-clean (English)
+swift run -c release fluidaudiocli nemotron-multilingual-benchmark \
+  --dataset librispeech --librispeech-subset test-clean --model-dir <model-dir>
+
+# FLEURS per-language
+swift run -c release fluidaudiocli nemotron-multilingual-benchmark \
+  --dataset fleurs --languages en_us,es_419,fr_fr,it_it,pt_br,de_de,cmn_hans_cn,ja_jp \
+  --model-dir <model-dir>
 ```
 
 ## Speaker Diarization
@@ -576,43 +624,47 @@ Step Ratio 1, min duration 0 (edited)
 
 Note that the baseline pytorch version is ~11% DER, we lost some precision dropping down to fp16 precision in order to run most of the embedding model on neural engine. But as a result, we significantly out perform the baseline `mps` backend as well. the pyannote-community-1 on cpu is ~1.5-2 RTFx, on mps, it's ~20-25 RTFx.
 
-Running on the full AMI SDM 16-meeting test set (official NeMo/pyannote evaluation split: EN2002, ES2004, IS1009, TS3003 × a-d):
+Running on the full AMI SDM 16-meeting test set (official NeMo/pyannote evaluation split: EN2002, ES2004, IS1009, TS3003 × a-d). Re-run 2026-07-03 on an Apple M5 Pro:
 
 ```bash
 swift run -c release fluidaudiocli diarization-benchmark --mode offline \
-    --dataset ami-sdm --auto-download
+    --dataset ami-sdm --auto-download --threshold 0.7
 ```
 
 ```text
 ------------------------------------------------------------------------------------------
 Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
 ------------------------------------------------------------------------------------------
-IS1009c           5.1      5.9      3.1      1.5      0.6     4/4        94.6
-IS1009b           5.4      6.4      2.8      1.4      1.1     4/4        77.6
-ES2004b           6.0      7.0      2.7      2.2      1.1     4/4        70.4
-ES2004c           6.4      7.3      2.0      3.4      1.0     4/4        70.5
-EN2002c           7.8      9.7      5.1      0.5      2.2     3/3        60.3
-TS3003b           8.0      7.8      3.6      3.7      0.7     4/4        71.4
-TS3003c           9.0      8.7      6.1      1.9      0.9     4/4        70.4
-EN2002b           9.1     12.9      4.0      1.9      3.2     5/4        63.4
-IS1009d           9.2     11.7      4.5      2.6      2.2     4/4        91.6
-IS1009a           9.9     11.9      5.0      2.5      2.4     4/4        60.8
-ES2004a          10.4     13.4      7.5      1.6      1.4     4/4        60.0
-EN2002a          10.6     15.0      5.4      1.2      4.0     4/4        52.2
-ES2004d          11.4     16.4      5.3      2.6      3.5     4/4        62.1
-TS3003a          17.2     64.1     13.1      1.3      2.8     2/4        68.7
-EN2002d          18.3     38.2      4.6      1.5     12.2     3/4        78.6
-TS3003d          26.0     41.6     11.0      2.2     12.8     3/4        64.5
+IS1009c           5.1      5.9       3.1      1.5      0.6     4/4        335.3
+IS1009b           5.4      6.4       2.8      1.4      1.1     4/4        337.1
+ES2004b           6.0      7.0       2.7      2.2      1.1     4/4        314.0
+ES2004c           6.4      7.3       2.0      3.4      1.0     4/4        304.0
+EN2002c           7.8      9.7       5.1      0.5      2.2     3/3        305.0
+TS3003b           8.0      7.8       3.6      3.7      0.7     4/4        307.3
+TS3003c           9.0      8.7       6.1      1.9      0.9     4/4        350.0
+EN2002b           9.1     12.9       4.0      1.9      3.2     5/4        318.5
+IS1009d           9.2     11.7       4.5      2.6      2.2     4/4        320.9
+IS1009a           9.9     11.9       5.0      2.5      2.4     4/4        342.9
+ES2004a          10.4     13.4       7.5      1.6      1.4     4/4        334.0
+EN2002a          10.6     15.0       5.4      1.2      4.0     4/4        298.7
+ES2004d          11.4     16.4       5.3      2.6      3.5     4/4        329.4
+TS3003a          17.2     64.1      13.1      1.3      2.8     2/4        346.4
+EN2002d          18.3     38.2       4.6      1.5     12.2     3/4        302.5
+TS3003d          26.0     41.6      11.0      2.2     12.8     3/4        324.6
 ------------------------------------------------------------------------------------------
-AVERAGE          10.6     17.4      5.4      2.0      3.3      -         69.8
+AVERAGE          10.6     17.4       5.4      2.0      3.3      -        323.2
 ==========================================================================================
 ```
 
-12/16 meetings detect the correct speaker count. Average DER 10.62% matches published pyannote-community-1 offline numbers on this split (~11-12%).
+12/16 meetings detect the correct speaker count. Average DER 10.62% matches published pyannote-community-1 offline numbers on this split (~11-12%). Results are fully deterministic (two consecutive runs produce bit-identical metrics).
+
+**Clustering threshold matters on this split.** The table above uses `--threshold 0.7`. Since #616 the CLI default is the community-1 preset (0.6), which merges clusters more aggressively and undercounts speakers on 4 meetings (EN2002a 2/4 → 41.9% DER, ES2004d 3/4 → 34.8%, EN2002b 19.0%, IS1009d 16.4%), degrading the average to 15.5% DER. Pass `--threshold 0.7` (or set `clusteringThreshold: 0.7` in `OfflineDiarizerConfig`) for AMI-SDM-like meeting audio.
 
 ### Streaming/online Diarization
 
-This is more tricky and honestly a lot more fragile to clustering. Expect +10-15% worse DER for the streaming implementation. Only use this when you critically need realtime streaming speaker diarization. In most cases, offline is more than enough for most applications.
+This is more tricky and honestly a lot more fragile to clustering. Expect substantially worse DER than the offline pipeline — the tail meetings suffer heavy speaker confusion. Only use this when you critically need realtime streaming speaker diarization. In most cases, offline is more than enough for most applications.
+
+All streaming tables below were re-run 2026-07-03 on an Apple M5 Pro against the official AMI SDM 16-meeting test set (same split as the offline table above; earlier revisions of these tables used a different 7-meeting subset, so numbers are not directly comparable to those).
 
 Running a near real-time diarization benchmark for 3s chunks, 1s overlap, and 0.85 clustering threshold:
 ```bash
@@ -628,26 +680,35 @@ swift run fluidaudiocli diarization-benchmark --mode streaming \
 ------------------------------------------------------------------------------------------
 Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
 ------------------------------------------------------------------------------------------
-ES2004a          31.6     41.6      6.7      2.1     22.7     7/4        49.8
-ES2005a          39.7     65.0      6.9      7.3     25.5     5/4        59.1
-IS1002b          40.4     51.3      1.1      5.2     34.1     9/4        45.3
-ES2002a          41.5     56.0      5.3     10.1     26.1     6/4        48.6
-ES2003a          53.1     78.7      5.3      2.3     45.5     5/4        57.1
-IS1000a          66.7     74.0      6.1      7.6     53.0     7/4        50.7
-IS1001a          75.0     88.6      7.1      4.7     63.2     10/4       48.8
+TS3003a          19.3     37.0       7.3      3.0      9.1     5/4         26.1
+ES2004d          21.7     36.9       4.8      3.1     13.8     6/4         24.5
+IS1009d          24.4     38.4       2.0      4.6     17.8     10/4        24.7
+IS1009a          29.8     46.0       2.8      3.7     23.4     6/4         25.3
+TS3003c          31.6     45.9       4.2      3.4     24.0     5/4         25.4
+ES2004a          31.7     41.6       6.7      2.1     22.8     7/4         24.9
+TS3003b          55.3     63.5       3.0      5.3     47.0     5/4         24.4
+EN2002d          60.3     62.8       5.3      2.2     52.8     7/4         23.6
+IS1009c          61.0     70.7       1.4      3.8     55.8     6/4         24.7
+EN2002a          63.0     62.2       4.8      2.0     56.2     7/4         23.4
+EN2002c          67.0     70.9       4.7      2.0     60.4     9/3         23.7
+ES2004b          69.5     71.2       3.2      2.6     63.8     9/4         24.2
+ES2004c          70.8     68.2       2.5      3.2     65.2     7/4         24.2
+TS3003d          74.8     89.2       7.0      3.5     64.3     7/4         24.9
+EN2002b          83.9     84.7       3.6      2.3     77.9     11/4        24.2
+IS1009b          88.1     90.8       1.3      2.3     84.5     7/4         24.7
 ------------------------------------------------------------------------------------------
-AVERAGE          49.7     65.0      5.5      5.6     38.6      -         51.4
+AVERAGE          53.3     61.2       4.0      3.1     46.2      -         24.6
 ==========================================================================================
 ```
 
 
-Diarization benchmark with 10s chunks, 0s overlap, and 0.7 clustering threshold:
+Diarization benchmark with 10s chunks, 0s overlap, and 0.7 clustering threshold (best streaming configuration found on this split):
 ```bash
 swift run fluidaudiocli diarization-benchmark --mode streaming \
-    --dataset ami-sdm
-    --threshold 0.7
-    --auto-download
-    --chunk-seconds 10.0
+    --dataset ami-sdm \
+    --threshold 0.7 \
+    --auto-download \
+    --chunk-seconds 10.0 \
     --overlap-seconds 0.0
 
 ...
@@ -655,26 +716,35 @@ swift run fluidaudiocli diarization-benchmark --mode streaming \
 ------------------------------------------------------------------------------------------
 Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
 ------------------------------------------------------------------------------------------
-ES2003a          12.0     19.5      6.9      1.2      3.9 4/4           477.0
-ES2004a          15.1     24.8      9.2      1.2      4.7 4/4           367.4
-ES2002a          17.8     26.8      8.6      5.8      3.4 6/4           356.8
-IS1002b          38.0     41.8      3.1      3.1     31.8 5/4           361.9
-ES2005a          22.5     36.8      7.7      6.8      8.0 4/4           460.8
-IS1000a          57.7     80.6     11.9      3.9     41.9 8/4           352.1
-IS1001a          70.1     85.4     11.2      2.4     56.5 7/4           370.9
+ES2004a          15.1     24.8       9.2      1.2      4.7     4/4        208.9
+ES2004d          17.5     24.5       9.0      1.3      7.2     5/4        199.9
+TS3003a          18.8     29.3      13.0      1.2      4.5     5/4        212.2
+EN2002b          20.5     28.9       7.1      1.2     12.2     5/4        199.8
+TS3003b          20.9     26.0       7.2      2.8     10.8     4/4        214.0
+TS3003c          22.1     30.7       9.0      1.3     11.9     4/4        221.3
+IS1009c          38.2     45.6       5.7      1.4     31.1     4/4        221.0
+EN2002c          39.0     44.5       6.9      0.6     31.4     5/3        200.7
+IS1009b          39.3     45.8       4.9      1.0     33.4     6/4        215.6
+EN2002d          42.1     47.5       7.0      1.1     34.1     6/4        191.1
+IS1009d          44.1     53.5       6.7      2.0     35.3     5/4        210.5
+EN2002a          45.5     51.8       8.6      0.8     36.0     7/4        184.8
+TS3003d          52.7     68.5      13.5      1.5     37.6     4/4        197.3
+ES2004c          55.7     62.6       4.3      2.4     49.1     9/4        211.5
+IS1009a          61.0     77.5       6.0      1.9     53.1     5/4        215.5
+ES2004b          78.5     86.9       5.1      1.8     71.6     7/4        216.3
 ------------------------------------------------------------------------------------------
-AVERAGE          33.3     45.1      8.4      3.5     21.5         -     392.4
+AVERAGE          38.2     46.8       7.7      1.5     29.0      -        207.5
 ==========================================================================================
 ```
 
 
-Diarization benchmark with 5s chunks, 0s overlap, and 0.8 clustering threshold (best configuration found):
+Diarization benchmark with 5s chunks, 0s overlap, and 0.8 clustering threshold:
 ```bash
 swift run fluidaudiocli diarization-benchmark --mode streaming \
-    --dataset ami-sdm
-    --threshold 0.8
-    --auto-download
-    --chunk-seconds 5.0
+    --dataset ami-sdm \
+    --threshold 0.8 \
+    --auto-download \
+    --chunk-seconds 5.0 \
     --overlap-seconds 0.0
 
 ...
@@ -682,15 +752,24 @@ swift run fluidaudiocli diarization-benchmark --mode streaming \
 ------------------------------------------------------------------------------------------
 Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
 ------------------------------------------------------------------------------------------
-IS1002b           9.8     11.7      3.5      3.8      2.6      5/4       205.2
-ES2003a          14.4     23.3      7.4      1.6      5.3      4/4       260.9
-ES2004a          17.0     26.0      9.0      1.3      6.7      7/4       218.1
-ES2005a          18.4     31.0      9.2      5.8      3.4      4/4       259.8
-ES2002a          20.8     30.5      9.5      7.4      3.9      5/4       198.0
-IS1000a          24.7     35.7     12.1      4.3      8.3      6/4       204.2
-IS1001a          78.0     94.5     13.3      3.0     61.6      6/4       215.7
+ES2004a          17.0     26.0       9.0      1.3      6.7     7/4        113.4
+IS1009a          18.1     26.5       4.7      2.7     10.8     4/4        113.2
+TS3003a          21.0     32.3      12.7      1.4      6.8     2/4        114.4
+TS3003b          21.5     26.2       7.1      4.2     10.2     4/4        109.8
+ES2004d          22.5     29.6       9.6      1.8     11.0     6/4        108.6
+IS1009c          25.5     30.7       3.4      2.5     19.6     5/4        112.9
+ES2004c          25.6     29.9       4.8      2.4     18.4     5/4        111.8
+TS3003c          33.2     44.3       8.0      2.5     22.7     4/4        114.2
+EN2002c          40.6     46.5       8.4      1.5     30.7     5/3         29.7
+EN2002b          46.4     57.2       8.2      1.2     36.9     8/4          9.9
+IS1009d          47.8     56.7       4.9      3.0     39.9     5/4        111.4
+IS1009b          56.1     63.9       2.5      1.5     52.1     5/4        111.7
+ES2004b          57.6     64.0       5.9      2.0     49.7     8/4        111.5
+EN2002d          62.4     71.3      10.1      1.4     50.9     7/4        103.4
+EN2002a          63.4     71.1       9.2      1.1     53.0     7/4        105.2
+TS3003d          66.3     83.3      12.7      2.6     51.0     5/4        105.3
 ------------------------------------------------------------------------------------------
-AVERAGE          26.2     36.1      9.2      3.9     13.1       -        223.1
+AVERAGE          39.0     47.5       7.6      2.1     29.4      -         99.1
 ==========================================================================================
 ```
 
@@ -698,10 +777,10 @@ AVERAGE          26.2     36.1      9.2      3.9     13.1       -        223.1
 Diarization benchmark with 5s chunks, 2s overlap, and 0.8 clustering threshold:
 ```bash
 swift run fluidaudiocli diarization-benchmark --mode streaming \
-    --dataset ami-sdm
-    --threshold 0.8
-    --auto-download
-    --chunk-seconds 5.0
+    --dataset ami-sdm \
+    --threshold 0.8 \
+    --auto-download \
+    --chunk-seconds 5.0 \
     --overlap-seconds 2.0
 
 ...
@@ -709,17 +788,28 @@ swift run fluidaudiocli diarization-benchmark --mode streaming \
 ------------------------------------------------------------------------------------------
 Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
 ------------------------------------------------------------------------------------------
-ES2003a          24.5     42.1      4.7      1.9     18.0     6/4        81.4
-ES2005a          27.5     50.6      5.5      7.6     14.4     5/4        76.8
-ES2004a          31.6     54.8      6.4      2.3     23.0     5/4        66.9
-IS1002b          39.6     57.0      0.8      5.1     33.7     6/4        63.7
-ES2002a          41.1     57.2      4.7      9.8     26.7     5/4        65.5
-IS1000a          57.4     54.2      6.1      7.7     43.6     9/4        67.2
-IS1001a          79.0     86.8      7.0      5.0     66.9     10/4       64.5
+TS3003a          20.2     45.0       6.7      2.9     10.6     4/4         37.6
+ES2004c          26.8     40.7       1.7      3.5     21.6     6/4         34.9
+ES2004a          31.6     54.8       6.4      2.3     23.0     5/4         35.2
+IS1009c          38.1     39.0       1.3      4.0     32.7     7/4         36.1
+EN2002c          38.1     39.3       3.1      1.9     33.1     6/3         33.6
+ES2004d          39.0     44.3       4.4      3.1     31.5     5/4         35.1
+EN2002b          45.8     59.1       3.3      2.4     40.1     7/4         34.5
+IS1009d          55.3     62.1       2.2      4.4     48.7     8/4         35.6
+EN2002a          60.9     54.0       3.6      1.9     55.5     7/4         33.8
+ES2004b          69.5     74.6       2.4      2.9     64.1     8/4         34.9
+TS3003d          71.7     83.4       5.2      4.7     61.8     6/4         34.5
+IS1009a          72.2     75.1       1.7      3.5     67.0     5/4         36.9
+TS3003c          72.8     85.2       3.2      3.5     66.1     5/4         36.5
+IS1009b          77.6     80.3       0.8      2.1     74.6     6/4         35.9
+TS3003b          86.4     86.7       2.8      5.5     78.0     5/4         35.5
+EN2002d          88.8     92.2       3.7      2.0     83.1     9/4         33.4
 ------------------------------------------------------------------------------------------
-AVERAGE          43.0     57.5      5.0      5.6     32.3      -         69.4
+AVERAGE          55.9     63.5       3.3      3.2     49.5      -         35.2
 ==========================================================================================
 ```
+
+Takeaways from the 2026-07-03 sweep: on the official 16-meeting split, no-overlap configs clearly beat overlap configs (10s/0s 38.2% and 5s/0s 39.0% vs 3s/1s 53.3% and 5s/2s 55.9% average DER) — overlap increases chunk count and drives over-clustering (5-11 detected speakers vs 4 truth on the worst meetings). Note: the two overlap configs were measured one meeting per process; running many overlapping-chunk meetings back-to-back in a single process can exhaust IOSurface-backed CoreML buffers on macOS (E5RT `Failed to allocate memory IOSurface object`).
 
 ## Sortformer Streaming Diarization
 
@@ -763,6 +853,46 @@ TS3003a          41.8     36.8      0.7      4.3 4/4           125.7
 AVERAGE          31.7     21.5      0.5      9.7         -     126.7
 ======================================================================
 ```
+
+### Offline throughput (M5 Pro)
+
+A single fused offline graph (`mel[1,128,3072] → speaker_preds`, 30.72 s window) exported via the
+NeMo offline path — one CoreML call per window, no streaming state. ComputeUnit.ALL, median of 120
+runs after 12 warmup:
+
+| variant | model-exec (mel → preds) | RTFx |
+|---|---:|---:|
+| **fp16** | **10.65 ms** | **2884×** |
+| 6-bit palettized | 10.93 ms | 2809× |
+
+End-to-end incl. mel (fp16): 12.49 ms · 2459×. One fused GPU graph — no per-call dispatch or
+ANE→GPU handoff. Numerical parity vs the PyTorch reference: 100% speaker-argmax agreement (fp16).
+
+### Offline diarizer (whole-file, Swift)
+
+`OfflineSortformerDiarizer` runs the fused offline model end-to-end: mel extraction → fused graph
+per 30.72 s window (no streaming state) → timeline. Run with `fluidaudio sortformer <file> --offline`
+(`--palettized` for the 6-bit set). Models: `FluidInference/diar-streaming-sortformer-coreml`
+`v3/{fp16,palettized}/SortformerOffline_v2.1.mlmodelc`; NeMo-reference parity = 100% speaker-argmax
+(fp16), 96.4% (6-bit palettized).
+
+**Throughput** is excellent — ~1000–1400× RTFx (one fused call per window, no per-chunk state). Voice
+detection matches streaming exactly (identical Miss/FA on AMI).
+
+**Quality caveat — not for long multi-speaker audio.** Each 30.72 s window diarizes independently
+with no speaker cache, so on long meetings with several speakers it produces large speaker confusion.
+AMI-SDM (collar 0.25, full test set), same harness:
+
+| | DER | Miss | FA | Speaker confusion | RTFx |
+|---|---|---|---|---|---|
+| Streaming (`highContextV2_1`) | **26.4%** | 23.4 | 0.6 | **2.4** | 835× |
+| Offline (whole-file) | 56.7% | 23.4 | 0.6 | **32.7** | 1418× |
+
+Detection is identical; the entire gap is speaker confusion the streaming `spkcache` avoids by
+construction (accumulating speaker profiles across the whole history). Cross-window re-stitching does
+not recover it — the confusion is generated *within* each window — so **use offline for short clips
+(≤ ~30 s), few-speaker audio, or throughput-bound batch jobs, and use the streaming variants for
+accurate long-form multi-speaker diarization.**
 
 ## LS-EEND Streaming Diarization
 A research prototype from Westlake University for streaming speaker diarization.
@@ -860,55 +990,6 @@ Both the English BART G2P and multilingual ByT5 G2P models run fastest on CPU-on
 | cpuOnly | **13.0** |
 | all (ANE+GPU+CPU) | 17.3 |
 | cpuAndGPU | 23.4 |
-
-## CTC zh-CN Mandarin ASR (Experimental)
-
-Parakeet CTC 0.6B zh-CN model converted to CoreML for on-device Mandarin Chinese transcription.
-
-> **⚠️ Experimental Feature**: This is an early preview of Mandarin Chinese ASR support. The API and performance characteristics may change in future releases.
-
-Model: [FluidInference/parakeet-ctc-0.6b-zh-cn-coreml](https://huggingface.co/FluidInference/parakeet-ctc-0.6b-zh-cn-coreml)
-
-Hardware: Apple M2, 2022, macOS 26
-
-### THCHS-30 Test Set
-
-Full benchmark on the complete THCHS-30 test set — 2,495 utterances (250 unique sentences × 10 speakers) from the THCHS-30 corpus.
-
-Dataset: [FluidInference/THCHS-30-tests](https://huggingface.co/datasets/FluidInference/THCHS-30-tests)
-
-```bash
-swift run -c release fluidaudiocli ctc-zh-cn-benchmark --auto-download
-```
-
-| Metric | int8 encoder (0.55 GB) |
-|---|---|
-| **Mean CER** | **8.23%** |
-| **Median CER** | **6.45%** |
-| CER = 0% (perfect) | 435 (17.4%) |
-| CER < 5% | 947 (38.0%) |
-| CER < 10% | 1,674 (67.1%) |
-| CER < 20% | 2,325 (93.2%) |
-| Mean Latency | 614 ms |
-| Mean RTFx | 14.83x |
-
-### Error Analysis
-
-Error analysis from the 100 highest-CER samples (out of the full 2,495) identified 862 substitution errors. The dominant patterns:
-
-- **Homophones / near-homophones**: acoustically similar syllables (e.g. 呢/了, 了/的) account for the majority of substitutions — unavoidable without a language model
-- **Digit representation**: the model may output Arabic digits (1, 5, 2011) when references use Chinese characters (一五, 二零一一); the benchmark normalizer converts digits before scoring to avoid penalizing this
-- **Sentence-final particles**: 了/的/呢/吧 are frequently confused, contributing a disproportionate share of errors given their high occurrence
-
-### Beam Search
-
-Beam search does not improve CER for this model without a language model. Greedy decoding (beam width 1) is recommended.
-
-### Recommendations
-
-- **Greedy decoding** is sufficient for production use at this CER level.
-- For applications requiring <8% CER, a character-level language model would be needed.
-- Int8 encoder (0.55 GB) performs on par with FP32 (1.1 GB).
 
 ## TDT Japanese ASR
 

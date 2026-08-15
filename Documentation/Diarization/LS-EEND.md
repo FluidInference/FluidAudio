@@ -520,7 +520,7 @@ public static func loadFromHuggingFace(
     stepSize: LSEENDStepSize = .step100ms,
     cacheDirectory: URL? = nil,
     computeUnits: MLComputeUnits = .cpuOnly,
-    progressHandler: DownloadUtils.ProgressHandler? = nil
+    progressHandler: ProgressHandler? = nil
 ) async throws -> LSEENDModel
 ```
 

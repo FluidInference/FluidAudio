@@ -7,8 +7,6 @@ public enum AsrModelVersion: Sendable {
     case v3
     /// 110M parameter hybrid TDT-CTC model with fused preprocessor+encoder
     case tdtCtc110m
-    /// 600M parameter CTC-only model for Mandarin Chinese (zh-CN)
-    case ctcZhCn
     /// 600M parameter TDT model for Japanese (ja) - hybrid CTC preprocessor/encoder + TDT decoder/joint v2
     case tdtJa
 
@@ -17,7 +15,6 @@ public enum AsrModelVersion: Sendable {
         case .v2: return .parakeetV2
         case .v3: return .parakeetV3
         case .tdtCtc110m: return .parakeetTdtCtc110m
-        case .ctcZhCn: return .parakeetCtcZhCn
         case .tdtJa: return .parakeetJa
         }
     }
@@ -30,19 +27,11 @@ public enum AsrModelVersion: Sendable {
         }
     }
 
-    /// Whether this model is CTC-only (no TDT decoder+joint)
-    public var isCtcOnly: Bool {
-        switch self {
-        case .ctcZhCn: return true
-        default: return false
-        }
-    }
-
     /// Encoder hidden dimension for this model version
     public var encoderHiddenSize: Int {
         switch self {
         case .tdtCtc110m: return 512
-        case .ctcZhCn, .tdtJa: return 1024
+        case .tdtJa: return 1024
         default: return 1024
         }
     }
@@ -52,7 +41,6 @@ public enum AsrModelVersion: Sendable {
         switch self {
         case .v2, .tdtCtc110m: return 1024
         case .v3: return 8192
-        case .ctcZhCn: return 7000
         case .tdtJa: return 3072
         }
     }
@@ -120,7 +108,8 @@ extension AsrModels {
     private static func createModelSpecs(
         using config: MLModelConfiguration,
         version: AsrModelVersion,
-        encoderPrecision: ParakeetEncoderPrecision
+        encoderPrecision: ParakeetEncoderPrecision,
+        encoderComputeUnits: MLComputeUnits? = nil
     ) -> [ModelSpec] {
         if version.hasFusedEncoder {
             // Fused preprocessor+encoder runs on ANE (it contains the conformer encoder)
@@ -134,7 +123,16 @@ extension AsrModels {
             // that 100% of the the operations map to the CPU anyways.
             ModelSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
 
-            ModelSpec(fileName: fileNames.encoder, computeUnits: config.computeUnits),
+            // The conformer encoder defaults to the configuration's compute units
+            // (`.cpuAndNeuralEngine`). It can be overridden to `.cpuAndGPU`, which
+            // is ~24% faster on Apple Silicon GPUs (17.8ms vs 23.5ms per 15s window,
+            // M-series) for ~+8% end-to-end RTFx, WER-neutral. ANE remains the default
+            // because it is far more power-efficient on iOS; opt into GPU for
+            // throughput-oriented / plugged-in workloads. See docs/perf/parakeet-v3-encoder.md.
+            ModelSpec(
+                fileName: fileNames.encoder,
+                computeUnits: encoderComputeUnits ?? config.computeUnits
+            ),
         ]
     }
 
@@ -146,9 +144,6 @@ extension AsrModels {
 
     private static func inferredVersion(from directory: URL) -> AsrModelVersion? {
         let directoryPath = directory.path.lowercased()
-        // `.ctcZhCn` is intentionally absent: it is rejected at the top of
-        // `load(...)` and has its own dedicated loader (`CtcZhCnManager`), so
-        // inference callers should never hit this path with a ctcZhCn dir.
         let knownVersions: [AsrModelVersion] = [.tdtCtc110m, .v2, .v3, .tdtJa]
 
         for version in knownVersions {
@@ -219,6 +214,12 @@ extension AsrModels {
     ///                   computeUnits will be respected. When nil, platform-optimized defaults
     ///                   are used (per-model optimization based on model type).
     ///   - version: ASR model version to load (defaults to v3)
+    ///   - encoderComputeUnits: Optional override for the conformer encoder's compute units.
+    ///                   When `nil` (default) the encoder uses the configuration's compute
+    ///                   units (`.cpuAndNeuralEngine`). Pass `.cpuAndGPU` to run the encoder
+    ///                   on the GPU (~+8% RTFx, WER-neutral on Apple Silicon) for
+    ///                   throughput-oriented workloads; ANE stays the default for power
+    ///                   efficiency on iOS. See docs/perf/parakeet-v3-encoder.md.
     ///
     /// - Returns: Loaded ASR models
     ///
@@ -230,27 +231,23 @@ extension AsrModels {
         configuration: MLModelConfiguration? = nil,
         version: AsrModelVersion = .v3,
         encoderPrecision: ParakeetEncoderPrecision = .int8,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        encoderComputeUnits: MLComputeUnits? = nil,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
-        // Validate that CTC-only models use their dedicated managers
-        if version.isCtcOnly {
-            throw AsrModelsError.loadingFailed(
-                "CTC-only model \(version) must be loaded via its dedicated manager class (e.g., CtcZhCnManager)"
-            )
-        }
-
         logger.info("Loading ASR models from: \(directory.path)")
 
         let config = configuration ?? defaultConfiguration()
 
         let parentDirectory = directory.deletingLastPathComponent()
         let downloadVariant: String? = (version == .v3) ? encoderPrecision.rawValue : nil
-        let specs = createModelSpecs(using: config, version: version, encoderPrecision: encoderPrecision)
+        let specs = createModelSpecs(
+            using: config, version: version, encoderPrecision: encoderPrecision,
+            encoderComputeUnits: encoderComputeUnits)
 
         var loadedModels: [String: MLModel] = [:]
 
         for spec in specs {
-            let models = try await DownloadUtils.loadModels(
+            let models = try await ModelHub.loadModels(
                 version.repo,
                 modelNames: [spec.fileName],
                 directory: parentDirectory,
@@ -278,7 +275,7 @@ extension AsrModels {
         }
 
         // Load decoder first
-        let decoderModels = try await DownloadUtils.loadModels(
+        let decoderModels = try await ModelHub.loadModels(
             version.repo,
             modelNames: [fileNames.decoder],
             directory: parentDirectory,
@@ -294,7 +291,7 @@ extension AsrModels {
         // Load the joint model. For v3 this is JointDecisionv3.mlmodelc (with
         // top-K outputs); for v2 / 110m / tdtJa it is the version-specific
         // JointDecision.mlmodelc.
-        let jointModels = try await DownloadUtils.loadModels(
+        let jointModels = try await ModelHub.loadModels(
             version.repo,
             modelNames: [fileNames.joint],
             directory: parentDirectory,
@@ -335,7 +332,7 @@ extension AsrModels {
             // v2: Fall back to downloading from parakeet-ctc-110m HF repo
             if ctcHeadModel == nil {
                 do {
-                    let ctcModels = try await DownloadUtils.loadModels(
+                    let ctcModels = try await ModelHub.loadModels(
                         .parakeetCtc110m,
                         modelNames: [Names.ctcHeadFile],
                         directory: parentDirectory,
@@ -414,11 +411,13 @@ extension AsrModels {
     public static func loadFromCache(
         configuration: MLModelConfiguration? = nil,
         version: AsrModelVersion = .v3,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        encoderComputeUnits: MLComputeUnits? = nil,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
         let cacheDir = defaultCacheDirectory(for: version)
         return try await load(
             from: cacheDir, configuration: configuration, version: version,
+            encoderComputeUnits: encoderComputeUnits,
             progressHandler: progressHandler)
     }
 
@@ -426,10 +425,13 @@ extension AsrModels {
     public static func loadWithAutoRecovery(
         from directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        encoderComputeUnits: MLComputeUnits? = nil,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
         let targetDir = directory ?? defaultCacheDirectory()
-        return try await load(from: targetDir, configuration: configuration, progressHandler: progressHandler)
+        return try await load(
+            from: targetDir, configuration: configuration,
+            encoderComputeUnits: encoderComputeUnits, progressHandler: progressHandler)
     }
 
     private static func describeComputeUnits(_ units: MLComputeUnits) -> String {
@@ -483,15 +485,8 @@ extension AsrModels {
         force: Bool = false,
         version: AsrModelVersion = .v3,
         encoderPrecision: ParakeetEncoderPrecision = .int8,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
-        // Validate that CTC-only models use their dedicated managers
-        if version.isCtcOnly {
-            throw AsrModelsError.downloadFailed(
-                "CTC-only model \(version) must be downloaded via its dedicated model class (e.g., CtcZhCnModels)"
-            )
-        }
-
         let targetDir = directory ?? defaultCacheDirectory(for: version)
         logger.info("Downloading ASR models to: \(targetDir.path)")
         let parentDir = targetDir.deletingLastPathComponent()
@@ -536,7 +531,7 @@ extension AsrModels {
         }
 
         for spec in specs {
-            _ = try await DownloadUtils.loadModels(
+            _ = try await ModelHub.loadModels(
                 version.repo,
                 modelNames: [spec.fileName],
                 directory: parentDir,
@@ -546,8 +541,50 @@ extension AsrModels {
             )
         }
 
+        // The compiled-model download above doesn't cover the vocab JSON that
+        // `load()` needs; guarantee it here (#748).
+        try await ensureVocabularyDownloaded(
+            version: version, encoderPrecision: encoderPrecision, targetDir: targetDir)
+
         logger.info("Successfully downloaded ASR models")
         return targetDir
+    }
+
+    /// On-disk location of the version's vocabulary JSON in a cache rooted at `targetDir`.
+    static func vocabularyFileURL(
+        version: AsrModelVersion,
+        encoderPrecision: ParakeetEncoderPrecision,
+        targetDir: URL
+    ) -> URL {
+        let vocabularyFileName = getModelFileNames(
+            version: version, encoderPrecision: encoderPrecision
+        ).vocabulary
+        return repoPath(from: targetDir, version: version)
+            .appendingPathComponent(vocabularyFileName)
+    }
+
+    /// Fetch the vocabulary JSON from HuggingFace if missing; no-op when already on disk (#748).
+    static func ensureVocabularyDownloaded(
+        version: AsrModelVersion,
+        encoderPrecision: ParakeetEncoderPrecision,
+        targetDir: URL
+    ) async throws {
+        let vocabURL = vocabularyFileURL(
+            version: version, encoderPrecision: encoderPrecision, targetDir: targetDir)
+        let vocabularyFileName = vocabURL.lastPathComponent
+
+        if FileManager.default.fileExists(atPath: vocabURL.path) {
+            return
+        }
+
+        logger.info("Vocabulary \(vocabularyFileName) missing after model download; fetching directly")
+        let remoteURL = try ModelRegistry.resolveModel(version.repo.remotePath, vocabularyFileName)
+        let data = try await ModelHub.fetchFile(
+            from: remoteURL, description: vocabularyFileName)
+        try FileManager.default.createDirectory(
+            at: vocabURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: vocabURL, options: [.atomic])
+        logger.info("Downloaded vocabulary \(vocabularyFileName) (\(data.count / 1024) KB)")
     }
 
     public static func downloadAndLoad(
@@ -555,7 +592,8 @@ extension AsrModels {
         configuration: MLModelConfiguration? = nil,
         version: AsrModelVersion = .v3,
         encoderPrecision: ParakeetEncoderPrecision = .int8,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        encoderComputeUnits: MLComputeUnits? = nil,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
         let targetDir = try await download(
             to: directory,
@@ -568,6 +606,7 @@ extension AsrModels {
             configuration: configuration,
             version: version,
             encoderPrecision: encoderPrecision,
+            encoderComputeUnits: encoderComputeUnits,
             progressHandler: progressHandler)
     }
 
@@ -584,7 +623,7 @@ extension AsrModels {
         let fileManager = FileManager.default
         let requiredFiles = getRequiredModels(version: version, encoderPrecision: encoderPrecision)
 
-        // Check in the DownloadUtils repo structure
+        // Check in the ModelHub repo structure
         let repoPath = repoPath(from: directory, version: version)
 
         let modelsPresent = requiredFiles.allSatisfy { fileName in

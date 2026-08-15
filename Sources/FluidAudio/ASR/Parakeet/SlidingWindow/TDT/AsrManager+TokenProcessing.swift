@@ -107,34 +107,74 @@ extension AsrManager {
         return timings
     }
 
+    /// A token paired with the global encoder-frame index at which it was emitted.
+    /// Used to make dedup matching temporally aware; `timestamp < 0` means "unknown".
+    private struct TimedToken {
+        let id: Int
+        let timestamp: Int
+    }
+
     /// Remove duplicate token sequences at the start of the current list that overlap
     /// with the tail of the previous accumulated tokens. Returns deduplicated current tokens
     /// and the number of removed leading tokens so caller can drop aligned timestamps.
+    ///
+    /// When `previousTimestamps` and `currentTimestamps` (both in **global** encoder frames)
+    /// are supplied, a token match only counts as a genuine chunk-boundary duplicate if the
+    /// two occurrences fall within `frameTolerance` frames of each other — i.e. they describe
+    /// the same acoustic moment in the overlap region. This prevents false positives where two
+    /// unrelated words spoken seconds apart share a short subword prefix (issue #787). Without
+    /// timestamps the matcher falls back to pure token-ID equality (legacy behavior).
+    ///
     /// Ideally this is not needed. We need to make some more fixes to the TDT decoding logic,
     /// this should be a temporary workaround.
     nonisolated internal func removeDuplicateTokenSequence(
-        previous: [Int], current: [Int], maxOverlap: Int = 12
+        previous: [Int], current: [Int], maxOverlap: Int = 12,
+        previousTimestamps: [Int]? = nil,
+        currentTimestamps: [Int]? = nil,
+        frameTolerance: Int = ASRConstants.duplicateFrameTolerance
     ) -> (deduped: [Int], removedCount: Int) {
 
         // Handle single punctuation token duplicates first (domain-specific)
         let punctuationTokens = ASRConstants.punctuationTokens
         var workingCurrent = current
+        var workingCurrentTimestamps = currentTimestamps
         var removedCount = 0
 
         if !previous.isEmpty && !workingCurrent.isEmpty && previous.last == workingCurrent.first
             && punctuationTokens.contains(workingCurrent.first!)
         {
             workingCurrent = Array(workingCurrent.dropFirst())
+            workingCurrentTimestamps = workingCurrentTimestamps.map { Array($0.dropFirst()) }
             removedCount += 1
         }
 
+        // Pair tokens with their global frame timestamps so the matcher can reject
+        // token-ID coincidences that don't line up in time. When timestamps are absent
+        // (or misaligned) the sentinel -1 makes the matcher fall back to ID-only equality.
+        func timed(_ ids: [Int], _ timestamps: [Int]?) -> [TimedToken] {
+            if let timestamps, timestamps.count == ids.count {
+                return zip(ids, timestamps).map { TimedToken(id: $0, timestamp: $1) }
+            }
+            return ids.map { TimedToken(id: $0, timestamp: -1) }
+        }
+
+        let previousTimed = timed(previous, previousTimestamps)
+        let currentTimed = timed(workingCurrent, workingCurrentTimestamps)
+
+        // Token IDs must match, and — when both timestamps are known — the two
+        // occurrences must describe the same acoustic moment (within tolerance).
+        let temporalMatcher: (TimedToken, TimedToken) -> Bool = { a, b in
+            guard a.id == b.id else { return false }
+            guard a.timestamp >= 0 && b.timestamp >= 0 else { return true }
+            return abs(a.timestamp - b.timestamp) <= frameTolerance
+        }
+
         // STAGE 2: Suffix-prefix overlap using extracted utility
-        let exactMatcher: (Int, Int) -> Bool = { $0 == $1 }
         if let match = SequenceMatcher.findSuffixPrefixMatch(
-            previous: previous,
-            current: workingCurrent,
+            previous: previousTimed,
+            current: currentTimed,
             maxOverlap: maxOverlap,
-            matcher: exactMatcher
+            matcher: temporalMatcher
         ) {
             logger.debug("Found exact suffix-prefix overlap of length \(match.length)")
             let finalRemoved = removedCount + match.length
@@ -146,11 +186,11 @@ extension AsrManager {
         let maxSearchLength = min(15, previous.count)
 
         if let match = SequenceMatcher.findBoundedSubstringMatch(
-            previous: previous,
-            current: workingCurrent,
+            previous: previousTimed,
+            current: currentTimed,
             maxSearchLength: maxSearchLength,
             boundarySearchFrames: boundarySearchFrames,
-            matcher: exactMatcher
+            matcher: temporalMatcher
         ) {
             logger.debug(
                 "Found duplicate sequence length=\(match.length) at currStart=\(match.rightStartIndex) (boundarySearch=\(boundarySearchFrames))"

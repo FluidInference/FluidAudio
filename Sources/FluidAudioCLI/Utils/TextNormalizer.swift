@@ -21,9 +21,28 @@ struct TextNormalizer {
         return dictionary
     }()
 
-    /// Basic text normalizer that matches the reference Python implementation
-    static func basicNormalize(_ text: String, removeDiacritics: Bool = false) -> String {
-        var normalized = text.lowercased()
+    /// Basic text normalizer that matches the reference Python implementation.
+    ///
+    /// When `spellOutLocale` is non-nil, an inverse text normalization (ITN)
+    /// pass runs FIRST: every digit-run in the input is replaced by its
+    /// spelled-out form for that locale (`NumberFormatter` `.spellOut`). This
+    /// matches what NeMo / NVIDIA's leaderboard pipeline does for multilingual
+    /// FLEURS scoring — non-English ASR models emit numbers as words, but
+    /// FLEURS references keep digits, which manufactures large substitution
+    /// gaps otherwise. Hyphens and soft hyphens produced by NumberFormatter
+    /// (e.g. fr "soixante-seize", it/de soft-hyphen U+00AD between morphemes)
+    /// are stripped here / by the downstream punct strip so the output
+    /// tokenizes the same way as the model's words.
+    static func basicNormalize(
+        _ text: String,
+        removeDiacritics: Bool = false,
+        spellOutLocale: Locale? = nil
+    ) -> String {
+        var normalized = text
+        if let locale = spellOutLocale {
+            normalized = spellOutDigits(normalized, locale: locale)
+        }
+        normalized = normalized.lowercased()
 
         // Remove words between brackets
         let bracketsPattern = try! NSRegularExpression(pattern: "[<\\[].*?[>\\]]", options: [])
@@ -43,12 +62,18 @@ struct TextNormalizer {
             withTemplate: ""
         )
 
-        // Apply NFKD normalization and handle diacritics/symbols
-        normalized = normalized.precomposedStringWithCompatibilityMapping
-
+        // Apply Unicode normalization. Matches Whisper BasicTextNormalizer:
+        // - remove_diacritics=False: NFKC (precomposed), then replace M/S/P
+        //   category chars with space (diacritics survive as precomposed
+        //   letters in Ll/Lu).
+        // - remove_diacritics=True:  NFKD (decomposed), then drop Mn chars
+        //   and replace remaining M/S/P with space (combining marks now
+        //   appear as separate Mn code points that get stripped).
         if removeDiacritics {
+            normalized = normalized.decomposedStringWithCompatibilityMapping
             normalized = removeSymbolsAndDiacritics(normalized)
         } else {
+            normalized = normalized.precomposedStringWithCompatibilityMapping
             normalized = removeSymbols(normalized)
         }
 
@@ -64,43 +89,134 @@ struct TextNormalizer {
         return normalized.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Replace every digit-run in `text` with its spelled-out form for
+    /// `locale`. Handles two surface forms:
+    ///   1. Bare digit runs: `1976` → `mille neuf cent soixante-seize` (fr).
+    ///   2. Thousands-separated groups: `30 000` / `1\u{00A0}000\u{00A0}000`
+    ///      → `trente mille` / `un million` — required because FLEURS keeps
+    ///      the locale's thousands separator and our basic punct strip would
+    ///      otherwise treat the parts as independent numbers.
+    /// Soft hyphens (`U+00AD`) inserted by NumberFormatter inside compounds
+    /// (e.g. de "ein­tausend­neun­hundert…", it "otto­cento­due") are
+    /// stripped. ASCII hyphens (fr "soixante-seize") are left for the
+    /// downstream punct strip in `basicNormalize` to convert into spaces.
+    ///
+    /// The thousands-separator character class covers the Unicode space
+    /// variants that FLEURS references actually contain across locales:
+    ///   - U+0020 SPACE
+    ///   - U+00A0 NO-BREAK SPACE
+    ///   - U+2007 FIGURE SPACE
+    ///   - U+2009 THIN SPACE                 (common in fr_fr "800 000")
+    ///   - U+202F NARROW NO-BREAK SPACE      (typographic French / SI groups)
+    static func spellOutDigits(_ text: String, locale: Locale) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .spellOut
+        formatter.locale = locale
+
+        // Prefer the thousands-grouped alternative (longest match first) so
+        // "30 000" / "800\u{2009}000" parses as a single number, falling back
+        // to a bare digit run for non-grouped occurrences.
+        let pattern = #"\d+(?:[\u00A0\u2007\u2009\u202F ]\d{3})+|\d+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return text
+        }
+
+        let nsText = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+        if matches.isEmpty { return text }
+
+        var result = ""
+        var lastEnd = 0
+        for m in matches {
+            let r = m.range
+            result += nsText.substring(with: NSRange(location: lastEnd, length: r.location - lastEnd))
+            let matched = nsText.substring(with: r)
+            let digitsOnly =
+                matched
+                .replacingOccurrences(of: " ", with: "")
+                .replacingOccurrences(of: "\u{00A0}", with: "")
+                .replacingOccurrences(of: "\u{2007}", with: "")
+                .replacingOccurrences(of: "\u{2009}", with: "")
+                .replacingOccurrences(of: "\u{202F}", with: "")
+            if let n = Int(digitsOnly),
+                let spelled = formatter.string(from: NSNumber(value: n))
+            {
+                result += spelled.replacingOccurrences(of: "\u{00AD}", with: "")
+            } else {
+                result += matched
+            }
+            lastEnd = r.location + r.length
+        }
+        result += nsText.substring(from: lastEnd)
+        return result
+    }
+
+    /// Matches Whisper `remove_symbols_and_diacritics`: drop combining marks
+    /// (Mn) entirely, fold the `ADDITIONAL_DIACRITICS` map (œ→oe, ß→ss, …),
+    /// replace any remaining M/S/P category char with a single space.
     private static func removeSymbolsAndDiacritics(_ text: String) -> String {
         return text.compactMap { char in
             if let replacement = additionalDiacritics[char] {
                 return replacement
             }
-
-            let category = char.unicodeScalars.first?.properties.generalCategory
-
-            // Remove combining marks (diacritics)
+            guard let category = char.unicodeScalars.first?.properties.generalCategory else {
+                return String(char)
+            }
+            // Drop non-spacing combining marks entirely (the diacritic itself).
             if category == .nonspacingMark {
                 return ""
             }
-
-            // Replace symbols, punctuation, separators with space
-            if let cat = category,
-                ["symbol", "punctuation", "separator"].contains(String(describing: cat).prefix(1).lowercased())
-            {
+            if Self.isSymbolPunctOrSpacingMark(category) {
                 return " "
             }
-
             return String(char)
         }.joined()
     }
 
+    /// Matches Whisper `remove_symbols` (the default `BasicTextNormalizer`
+    /// path with `remove_diacritics=False`): NFKC has already been applied
+    /// upstream; here we just replace every char whose Unicode category
+    /// starts with M, S, or P (combining mark / symbol / punctuation) with
+    /// a single space. Diacritics that survived NFKC composition are kept
+    /// as part of the precomposed letter (Ll / Lu).
     private static func removeSymbols(_ text: String) -> String {
         return text.compactMap { char in
-            let category = char.unicodeScalars.first?.properties.generalCategory
-
-            // Replace symbols, punctuation, separators with space, but keep diacritics
-            if let cat = category,
-                ["symbol", "punctuation", "separator"].contains(String(describing: cat).prefix(1).lowercased())
-            {
+            guard let category = char.unicodeScalars.first?.properties.generalCategory else {
+                return String(char)
+            }
+            if Self.isSymbolPunctOrMark(category) {
                 return " "
             }
-
             return String(char)
         }.joined()
+    }
+
+    /// Mirror of Python's `unicodedata.category(c)[0] in "MSP"` — covers all
+    /// Mark / Symbol / Punctuation subcategories of the Unicode standard.
+    private static func isSymbolPunctOrMark(_ category: Unicode.GeneralCategory) -> Bool {
+        switch category {
+        case .nonspacingMark, .spacingMark, .enclosingMark,
+            .currencySymbol, .mathSymbol, .modifierSymbol, .otherSymbol,
+            .connectorPunctuation, .dashPunctuation, .openPunctuation, .closePunctuation,
+            .initialPunctuation, .finalPunctuation, .otherPunctuation:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Same as `isSymbolPunctOrMark` but excludes `.nonspacingMark` because
+    /// the diacritic-stripping path drops Mn entirely (returns "" not " ").
+    private static func isSymbolPunctOrSpacingMark(_ category: Unicode.GeneralCategory) -> Bool {
+        switch category {
+        case .spacingMark, .enclosingMark,
+            .currencySymbol, .mathSymbol, .modifierSymbol, .otherSymbol,
+            .connectorPunctuation, .dashPunctuation, .openPunctuation, .closePunctuation,
+            .initialPunctuation, .finalPunctuation, .otherPunctuation:
+            return true
+        default:
+            return false
+        }
     }
 
     /// Normalize text using HuggingFace ASR leaderboard standards

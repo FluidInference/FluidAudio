@@ -222,15 +222,32 @@ public struct PocketTtsSynthesizer {
 
         logger.info("PocketTTS streaming synthesis with custom voice: '\(text)'")
 
+        // `.aneState` runs on the Trial 23 MLState pipeline (one shared KV
+        // state instead of 24-tensor cache I/O) via a one-shot session.
+        if store.placement == .aneState {
+            return try await synthesizeStreamingStateful(
+                text: text,
+                voiceData: voiceData,
+                temperature: temperature,
+                seed: seed,
+                maxTokensPerChunk: maxTokensPerChunk,
+                language: language
+            )
+        }
+
         let constants = try await store.constants()
         let chunks = chunkTextWithMetadata(
             text, tokenizer: constants.tokenizer,
             maxTokens: maxTokensPerChunk, language: language)
         let condModel = try await store.condStep()
+        let hasCondPrefill = await store.hasCondPrefill()
         let stepModel = try await store.flowlmStep()
         let flowModel = try await store.flowDecoder()
         let mimiModel = try await store.mimiDecoder()
         let condLayerKeys = try await store.condStepLayerKeys()
+        let condPrefillLayerKeys = await store.condPrefillStepLayerKeys()
+        let useCondPrefill = hasCondPrefill && condPrefillLayerKeys != nil
+        let condPrefillModel = useCondPrefill ? try await store.condPrefill() : condModel
         let flowlmLayerKeys = try await store.flowLMStepLayerKeys()
         let mimiKeys = try await store.mimiDecoderKeys()
         let repoDir = try await store.repoDir()
@@ -244,10 +261,13 @@ public struct PocketTtsSynthesizer {
             voiceData: voiceData,
             chunks: chunks,
             condModel: condModel,
+            condPrefillModel: condPrefillModel,
+            useCondPrefill: useCondPrefill,
             stepModel: stepModel,
             flowModel: flowModel,
             mimiModel: mimiModel,
             condLayerKeys: condLayerKeys,
+            condPrefillLayerKeys: condPrefillLayerKeys,
             flowlmLayerKeys: flowlmLayerKeys,
             mimiKeys: mimiKeys,
             mimiInitialState: mimiInitialState,
@@ -277,12 +297,27 @@ public struct PocketTtsSynthesizer {
     ) async throws -> PocketTtsSession {
         let store = try currentModelStore()
 
+        // `.aneState` sessions run on the Trial 23 MLState pipeline; none of
+        // the IO models below exist in that configuration.
+        if store.placement == .aneState {
+            return try await makeStateSession(
+                voiceData: voiceData,
+                temperature: temperature,
+                seed: seed,
+                language: language
+            )
+        }
+
         let constants = try await store.constants()
         let condModel = try await store.condStep()
+        let hasCondPrefill = await store.hasCondPrefill()
         let stepModel = try await store.flowlmStep()
         let flowModel = try await store.flowDecoder()
         let mimiModel = try await store.mimiDecoder()
         let condLayerKeys = try await store.condStepLayerKeys()
+        let condPrefillLayerKeys = await store.condPrefillStepLayerKeys()
+        let useCondPrefill = hasCondPrefill && condPrefillLayerKeys != nil
+        let condPrefillModel = useCondPrefill ? try await store.condPrefill() : condModel
         let flowlmLayerKeys = try await store.flowLMStepLayerKeys()
         let mimiKeys = try await store.mimiDecoderKeys()
         let repoDir = try await store.repoDir()
@@ -299,13 +334,16 @@ public struct PocketTtsSynthesizer {
         let voiceKVSnapshot: KVCacheState
         if let snapshot = voiceData.cacheSnapshot {
             voiceKVSnapshot = try kvCacheStateFromSnapshot(
-                snapshot, layers: condLayerKeys.layerCount)
+                snapshot, layers: condLayerKeys.layerCount, splitKV: condLayerKeys.isSplitKV)
         } else {
-            let emptyState = try emptyKVCacheState(layers: condLayerKeys.layerCount)
+            let emptyState = try emptyKVCacheState(
+                layers: condLayerKeys.layerCount, splitKV: condLayerKeys.isSplitKV)
             voiceKVSnapshot = try await prefillKVCacheVoice(
                 state: emptyState, voiceData: voiceData,
                 bosBeforeVoice: constants.bosBeforeVoice,
-                model: condModel, layerKeys: condLayerKeys
+                model: condModel, layerKeys: condLayerKeys,
+                prefillModel: condPrefillModel, prefillLayerKeys: condPrefillLayerKeys,
+                useFastPrefill: useCondPrefill
             )
         }
 
@@ -318,10 +356,13 @@ public struct PocketTtsSynthesizer {
             mimiState: mimiState,
             constants: constants,
             condModel: condModel,
+            condPrefillModel: condPrefillModel,
+            useCondPrefill: useCondPrefill,
             stepModel: stepModel,
             flowModel: flowModel,
             mimiModel: mimiModel,
             condLayerKeys: condLayerKeys,
+            condPrefillLayerKeys: condPrefillLayerKeys,
             flowlmLayerKeys: flowlmLayerKeys,
             mimiKeys: mimiKeys,
             bosEmb: bosEmb,
@@ -345,10 +386,13 @@ public struct PocketTtsSynthesizer {
         let voiceData: PocketTtsVoiceData
         let chunks: [TextChunk]
         let condModel: MLModel
+        let condPrefillModel: MLModel
+        let useCondPrefill: Bool
         let stepModel: MLModel
         let flowModel: MLModel
         let mimiModel: MLModel
         let condLayerKeys: PocketTtsLayerKeys
+        let condPrefillLayerKeys: PocketTtsLayerKeys?
         let flowlmLayerKeys: PocketTtsLayerKeys
         let mimiKeys: PocketTtsMimiKeys
         var mimiState: MimiState
@@ -363,10 +407,13 @@ public struct PocketTtsSynthesizer {
             voiceData: PocketTtsVoiceData,
             chunks: [TextChunk],
             condModel: MLModel,
+            condPrefillModel: MLModel,
+            useCondPrefill: Bool,
             stepModel: MLModel,
             flowModel: MLModel,
             mimiModel: MLModel,
             condLayerKeys: PocketTtsLayerKeys,
+            condPrefillLayerKeys: PocketTtsLayerKeys?,
             flowlmLayerKeys: PocketTtsLayerKeys,
             mimiKeys: PocketTtsMimiKeys,
             mimiInitialState: MimiState,
@@ -380,10 +427,13 @@ public struct PocketTtsSynthesizer {
             self.voiceData = voiceData
             self.chunks = chunks
             self.condModel = condModel
+            self.condPrefillModel = condPrefillModel
+            self.useCondPrefill = useCondPrefill
             self.stepModel = stepModel
             self.flowModel = flowModel
             self.mimiModel = mimiModel
             self.condLayerKeys = condLayerKeys
+            self.condPrefillLayerKeys = condPrefillLayerKeys
             self.flowlmLayerKeys = flowlmLayerKeys
             self.mimiKeys = mimiKeys
             self.mimiState = mimiInitialState
@@ -404,7 +454,6 @@ public struct PocketTtsSynthesizer {
             var localRng = rng
             let result = try await PocketTtsSynthesizer.flowDecode(
                 transformerOut: transformerOut,
-                numSteps: PocketTtsConstants.numLsdSteps,
                 temperature: temperature,
                 model: flowModel,
                 rng: &localRng
@@ -469,12 +518,17 @@ public struct PocketTtsSynthesizer {
                         textEmbeddings: textEmbeddings,
                         bosBeforeVoice: constants.bosBeforeVoice,
                         model: condModel,
-                        layerKeys: condLayerKeys
+                        layerKeys: condLayerKeys,
+                        prefillModel: condPrefillModel,
+                        prefillLayerKeys: condPrefillLayerKeys,
+                        useFastPrefill: useCondPrefill
                     )
 
                     let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: chunk.text)
                     var eosStep: Int?
-                    var sequence = try PocketTtsSynthesizer.createNaNSequence()
+                    var sequence = try PocketTtsSynthesizer.createBosStartSequence(
+                        bosEmbedding: constants.bosEmbedding,
+                        splitKV: flowlmLayerKeys.isSplitKV)
                     let totalFramesAfterEos =
                         framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
 
@@ -520,7 +574,135 @@ public struct PocketTtsSynthesizer {
                 continuation.finish(throwing: error)
             }
         }
+
+        /// Cross-engine pipelined variant of `generate`.
+        ///
+        /// The per-frame chain is flowlm(GPU) → flow(ANE) → latent → [fed back to
+        /// flowlm] + mimi(CPU). mimi's audio output feeds NOTHING back, so mimi[N]
+        /// can run concurrently with flowlm[N+1]+flow[N+1]. This moves mimi onto its
+        /// own actor + a detached consumer so the CPU decode overlaps the GPU/ANE
+        /// critical path → per-frame wall ≈ max(mimi, flowlm+flow) instead of the sum.
+        ///
+        /// OPT-IN and UNVERIFIED on-device (gated by
+        /// `PocketTtsSynthesizer.useCrossEnginePipeline`). Output is identical to
+        /// `generate`; only scheduling differs. Verify timing + ordering on-device
+        /// before making it the default.
+        func generatePipelined(
+            continuation: AsyncThrowingStream<AudioFrame, Error>.Continuation
+        ) async {
+            let mimi = MimiDecodeActor(
+                model: mimiModel, keys: mimiKeys, initialState: mimiState)
+            let totalChunks = chunkCount
+
+            struct LatentWork: Sendable {
+                let latent: [Float]
+                let frameIndex: Int
+                let chunkIndex: Int
+            }
+            let (latents, latentCont) = AsyncStream.makeStream(of: LatentWork.self)
+
+            // CONSUMER (detached → off this actor): decode each latent on the mimi
+            // actor (CPU) in order and yield audio. While it awaits mimi.decode,
+            // the producer below runs flowlm/flow on GPU/ANE — the overlap.
+            let consumer = Task.detached {
+                do {
+                    for await w in latents {
+                        if Task.isCancelled { break }
+                        let audio = try await mimi.decode(w.latent)
+                        continuation.yield(
+                            AudioFrame(
+                                samples: audio, frameIndex: w.frameIndex,
+                                chunkIndex: w.chunkIndex, chunkCount: totalChunks,
+                                utteranceIndex: nil))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            // PRODUCER: flowlm(GPU)→flow(ANE) recurrence. Hands each latent off and
+            // continues immediately — never waits for mimi.
+            do {
+                for (chunkIdx, chunk) in chunks.enumerated() {
+                    if Task.isCancelled { break }
+                    let (normalizedChunk, framesAfterEos) =
+                        PocketTtsSynthesizer.normalizeText(
+                            chunk.text, isMidSentence: chunk.isMidSentence, language: language)
+                    let tokenIds = constants.tokenizer.encode(normalizedChunk)
+                    let textEmbeddings = PocketTtsSynthesizer.embedTokens(
+                        tokenIds, constants: constants)
+                    var kvState = try await PocketTtsSynthesizer.prefillKVCache(
+                        voiceData: voiceData, textEmbeddings: textEmbeddings,
+                        bosBeforeVoice: constants.bosBeforeVoice, model: condModel,
+                        layerKeys: condLayerKeys, prefillModel: condPrefillModel,
+                        prefillLayerKeys: condPrefillLayerKeys, useFastPrefill: useCondPrefill)
+
+                    let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: chunk.text)
+                    var eosStep: Int?
+                    var sequence = try PocketTtsSynthesizer.createBosStartSequence(
+                        bosEmbedding: constants.bosEmbedding,
+                        splitKV: flowlmLayerKeys.isSplitKV)
+                    let totalFramesAfterEos =
+                        framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
+
+                    for step in 0..<maxGenLen {
+                        if Task.isCancelled { break }
+                        let (transformerOut, eosLogit) = try await flowLMStep(
+                            sequence: sequence, kvState: &kvState)
+                        if eosLogit > PocketTtsConstants.eosThreshold && eosStep == nil {
+                            eosStep = step
+                        }
+                        if let eos = eosStep, step >= eos + totalFramesAfterEos { break }
+                        let latent = try await flowDecodeStep(transformerOut: transformerOut)
+                        latentCont.yield(
+                            LatentWork(latent: latent, frameIndex: step, chunkIndex: chunkIdx))
+                        sequence = try PocketTtsSynthesizer.createSequenceFromLatent(latent)
+                    }
+                    if Task.isCancelled { break }
+                }
+                latentCont.finish()
+            } catch {
+                latentCont.finish()
+                consumer.cancel()
+                continuation.finish(throwing: error)
+                return
+            }
+            _ = await consumer.value
+        }
     }
+
+    /// Mimi streaming codec on its own actor so its CPU decode runs concurrently
+    /// with the flowlm(GPU)→flow(ANE) critical path in `generatePipelined`.
+    private actor MimiDecodeActor {
+        private let model: MLModel
+        private let keys: PocketTtsMimiKeys
+        private var state: MimiState
+        init(model: MLModel, keys: PocketTtsMimiKeys, initialState: MimiState) {
+            self.model = model
+            self.keys = keys
+            self.state = initialState
+        }
+        func decode(_ latent: [Float]) async throws -> [Float] {
+            var local = state
+            let out = try await PocketTtsSynthesizer.runMimiDecoder(
+                latent: latent, state: &local, model: model, mimiKeys: keys)
+            state = local  // sequential codec state, single in-order consumer
+            return out
+        }
+    }
+
+    /// Opt-in cross-engine pipelining (mimi overlaps flowlm/flow).
+    ///
+    /// MEASURED on-device (M5 Pro, macOS 26.5, release, 3-sentence utterance,
+    /// seed 42, 3 runs each): NO win over the serial loop on either placement
+    /// — serial `.ane` 1.108 s vs pipelined 1.124 s; serial `.gpu` ~1.33 s vs
+    /// pipelined ~1.33 s (WER 0 everywhere). The Phase 7 projection assumed
+    /// mimi(CPU) dominates and overlaps flowlm/flow; in the real host the
+    /// stages don't overlap as scheduled (producer-bound and/or predictions
+    /// not actually concurrent through `compatPrediction`). Keep `false`;
+    /// re-evaluate with per-stage timers before retrying.
+    static let useCrossEnginePipeline = false
 
     /// Create the AsyncThrowingStream and spawn the generation task.
     private static func makeStream(
@@ -529,7 +711,11 @@ public struct PocketTtsSynthesizer {
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: AudioFrame.self)
 
         let task = Task {
-            await generator.generate(continuation: continuation)
+            if PocketTtsSynthesizer.useCrossEnginePipeline {
+                await generator.generatePipelined(continuation: continuation)
+            } else {
+                await generator.generate(continuation: continuation)
+            }
         }
 
         continuation.onTermination = { _ in
@@ -1058,6 +1244,21 @@ public struct PocketTtsSynthesizer {
             ptr.update(from: base, count: dim)
         }
         return array
+    }
+
+    /// Create the first-step `sequence` input for a generation loop.
+    ///
+    /// Rank-5 packs use the NaN-BOS protocol (the graph substitutes
+    /// `bos_emb` for NaN via `isnan`). The rank-4 `_ane` FlowLM has no such
+    /// path — the ANE mangles NaN inputs before `isnan` evaluates — so for
+    /// split-KV models the BOS latent embedding is passed directly.
+    static func createBosStartSequence(
+        bosEmbedding: [Float], splitKV: Bool
+    ) throws -> MLMultiArray {
+        if splitKV {
+            return try createSequenceFromLatent(bosEmbedding)
+        }
+        return try createNaNSequence()
     }
 
     /// Create a NaN-filled sequence `[1, 1, 32]` to signal beginning-of-sequence.

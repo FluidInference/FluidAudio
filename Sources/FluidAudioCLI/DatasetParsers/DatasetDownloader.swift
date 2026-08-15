@@ -111,22 +111,28 @@ struct DatasetDownloader {
     ) async
         -> Bool
     {
-        // Try multiple URL patterns - the AMI corpus mirror structure has some variations
-        let baseURLs = [
-            "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror//amicorpus",  // Double slash pattern (from user's working example)
-            "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus",  // Single slash pattern
-            "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror//amicorpus",  // Alternative with extra slash
+        // Prefer the HuggingFace mirror (hosts the official 16-meeting SDM test
+        // split), then fall back to the intermittently-available Edinburgh
+        // server. Meetings or variants absent from the mirror 404 and fall
+        // through to upstream.
+        let mirrorURL =
+            "https://huggingface.co/datasets/FluidInference/ami-corpus-mirror/resolve/main/\(variant.rawValue)/\(meetingId).\(variant.filePattern)"
+        // Both slash patterns of the upstream corpus mirror have been seen working.
+        let upstreamBases = [
+            "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror//amicorpus",
+            "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus",
         ]
+        let candidateURLs =
+            [mirrorURL]
+            + upstreamBases.map { "\($0)/\(meetingId)/audio/\(meetingId).\(variant.filePattern)" }
 
-        for (_, baseURL) in baseURLs.enumerated() {
-            let urlString = "\(baseURL)/\(meetingId)/audio/\(meetingId).\(variant.filePattern)"
-
+        for urlString in candidateURLs {
             guard let url = URL(string: urlString) else {
                 continue
             }
 
             do {
-                let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
+                let (data, response) = try await ModelHub.session.data(from: url)
 
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
@@ -191,14 +197,31 @@ struct DatasetDownloader {
             return
         }
 
-        // Download and extract AMI manual annotations v1.6.2
-        let zipURL =
-            "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip"
+        // Download and extract AMI manual annotations v1.6.2.
+        // Prefer the HuggingFace mirror — the upstream Edinburgh server is
+        // intermittently down, and a single transient failure here once
+        // poisoned a CI benchmark run with placeholder ground truth (#752).
+        let zipURLs = [
+            "https://huggingface.co/datasets/FluidInference/ami-corpus-mirror/resolve/main/annotations/ami_public_manual_1.6.2.zip",
+            "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip",
+        ]
         let zipFile = annotationsDir.appendingPathComponent("ami_public_manual_1.6.2.zip")
-        let zipSuccess = await downloadAnnotationFile(from: zipURL, to: zipFile)
+
+        var zipSuccess = false
+        let maxAttempts = 3
+        attempts: for attempt in 1...maxAttempts {
+            for zipURL in zipURLs {
+                zipSuccess = await downloadAnnotationFile(from: zipURL, to: zipFile)
+                if zipSuccess { break attempts }
+            }
+            logger.warning("Annotation download attempt \(attempt)/\(maxAttempts) failed for all sources")
+            if attempt < maxAttempts {
+                try? await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
+            }
+        }
 
         if !zipSuccess {
-            logger.error("Failed to download AMI annotations")
+            logger.error("Failed to download AMI annotations after \(maxAttempts) attempts")
             return
         }
 
@@ -231,7 +254,7 @@ struct DatasetDownloader {
         }
 
         do {
-            let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
+            let (data, response) = try await ModelHub.session.data(from: url)
 
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 200 {
@@ -580,7 +603,7 @@ struct DatasetDownloader {
                 userInfo: [NSLocalizedDescriptionKey: "Invalid API URL"])
         }
 
-        let (data, _) = try await DownloadUtils.sharedSession.data(from: url)
+        let (data, _) = try await ModelHub.session.data(from: url)
 
         // Parse the JSON response to extract file names
         if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
@@ -635,7 +658,7 @@ struct DatasetDownloader {
         )
 
         // Download using URLSession
-        let (data, _) = try await DownloadUtils.sharedSession.data(from: url)
+        let (data, _) = try await ModelHub.session.data(from: url)
         try data.write(to: destination)
 
         // Verify it's valid audio
@@ -694,7 +717,7 @@ struct DatasetDownloader {
 
         do {
             // Download the tar.gz file
-            let (downloadURL, response) = try await DownloadUtils.sharedSession.download(
+            let (downloadURL, response) = try await ModelHub.session.download(
                 from: URL(string: musanURL)!)
 
             // Check response
@@ -851,7 +874,7 @@ struct DatasetDownloader {
             }
 
             do {
-                let (data, response) = try await DownloadUtils.sharedSession.data(from: apiURL)
+                let (data, response) = try await ModelHub.session.data(from: apiURL)
 
                 guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -883,7 +906,7 @@ struct DatasetDownloader {
                         continue
                     }
 
-                    let (audioData, audioResponse) = try await DownloadUtils.sharedSession.data(from: audioURL)
+                    let (audioData, audioResponse) = try await ModelHub.session.data(from: audioURL)
                     guard let audioHTTP = audioResponse as? HTTPURLResponse, audioHTTP.statusCode == 200 else {
                         logger.warning("Failed to download audio for \(fileId)")
                         continue

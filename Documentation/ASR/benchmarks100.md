@@ -11,7 +11,7 @@ All batch TDT, CTC earnings, streaming, and multilingual benchmarks can be repro
 ./Scripts/parakeet_subset_benchmark.sh --download
 
 # Run all 8 benchmarks offline (100 files each, sleep-prevented)
-# Includes: v3, v2, tdt-ctc-110m, CTC earnings, EOU, Nemotron, Japanese TDT, Chinese CTC
+# Includes: v3, v2, tdt-ctc-110m, CTC earnings, EOU, Nemotron, Japanese TDT
 ./Scripts/parakeet_subset_benchmark.sh
 ```
 

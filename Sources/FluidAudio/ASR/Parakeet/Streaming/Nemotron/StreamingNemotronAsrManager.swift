@@ -11,10 +11,18 @@ public actor StreamingNemotronAsrManager {
     private let logger = AppLogger(category: "NemotronStreaming")
 
     // Models
-    internal var preprocessor: MLModel?
+    /// Native-Swift log-mel front-end, replacing the CoreML `preprocessor`
+    /// model. See `NemotronMelExtractor` (and issue #739) for why the CoreML
+    /// preprocessor was removed.
+    internal var melExtractor: NemotronMelExtractor?
     internal var encoder: MLModel?
     internal var decoder: MLModel?
     internal var joint: MLModel?
+    /// Optional fused decoder+joint model (B1). When present, the RNN-T inner
+    /// loop makes one CoreML call per step instead of two (decoder then joint),
+    /// halving per-step dispatch. Argmax stays in Swift. Mirrors the multilingual
+    /// manager's `decoderJoint` path. Falls back to separate decoder+joint when nil.
+    internal var decoderJoint: MLModel?
 
     // Components
     private let audioConverter = AudioConverter()
@@ -28,6 +36,18 @@ public actor StreamingNemotronAsrManager {
 
     // Accumulated token IDs
     internal var accumulatedTokenIds: [Int] = []
+
+    // Per-token absolute timings captured during the RNNT decode loop. Each
+    // token's startTime is its absolute encoder-frame index multiplied by
+    // ASRConstants.secondsPerEncoderFrame. Exposed via finishWithTokenTimings()
+    // so callers can derive word-level timestamps (e.g. for speaker attribution).
+    internal var accumulatedTokenTimings: [TokenTiming] = []
+    // Running encoder-frame base across processed chunks (advances by the chunk's
+    // encoder-frame count after each decode loop). Reset with the session.
+    internal var absoluteFrameBase: Int = 0
+    // Snapshot of token timings taken in finish() before the working buffers are
+    // cleared, so finishWithTokenTimings() can return them after finish() runs.
+    internal var lastFinishTokenTimings: [TokenTiming] = []
 
     // Encoder cache states
     internal var cacheChannel: MLMultiArray?
@@ -55,10 +75,13 @@ public actor StreamingNemotronAsrManager {
     public private(set) var mlConfiguration: MLModelConfiguration
 
     public init(
-        configuration: MLModelConfiguration = MLModelConfiguration(),
+        configuration: MLModelConfiguration? = nil,
         requestedChunkSize: NemotronChunkSize? = nil
     ) {
-        self.mlConfiguration = configuration
+        // Default to `.cpuAndNeuralEngine`: the int8 encoder is ANE-targeted.
+        // Under the bare `MLModelConfiguration()` default (which is `.all`),
+        // CoreML routes int8 ops to GPU and runs ~10× slower than the ANE path.
+        self.mlConfiguration = configuration ?? MLModelConfigurationUtils.defaultConfiguration()
         self.requestedChunkSize = requestedChunkSize
         self.config = NemotronStreamingConfig()
         self.lastToken = Int32(config.blankIdx)
@@ -69,9 +92,15 @@ public actor StreamingNemotronAsrManager {
         self.partialCallback = callback
     }
 
-    /// Load models from a directory containing preprocessor, encoder, decoder, joint, and tokenizer
+    /// Load models from a directory containing encoder, decoder, joint, and tokenizer
+    /// (the mel front-end is computed natively in Swift; no CoreML preprocessor)
     /// - Parameter directory: Directory containing the model files
     public func loadModels(from directory: URL) async throws {
+        guard SystemInfo.isAppleSilicon else {
+            throw ASRError.unsupportedPlatform(
+                "Nemotron int8 streaming models require Apple Silicon (ANE). Intel Macs are not supported."
+            )
+        }
         logger.info("Loading Nemotron CoreML models from \(directory.path)...")
 
         // Load config from metadata.json
@@ -81,9 +110,8 @@ public actor StreamingNemotronAsrManager {
             logger.info("Loaded config: \(config.chunkMs)ms chunks, \(config.chunkMelFrames) mel frames")
         }
 
-        // Load preprocessor
-        let preprocessorPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.preprocessorFile)
-        self.preprocessor = try await MLModel.load(contentsOf: preprocessorPath, configuration: mlConfiguration)
+        // Native-Swift log-mel front-end (replaces the CoreML preprocessor).
+        self.melExtractor = NemotronMelExtractor(nMels: config.melFeatures)
 
         // Load encoder (int8 quantized)
         let encoderPath = directory.appendingPathComponent("encoder").appendingPathComponent(NemotronEncoder.fileName)
@@ -97,11 +125,36 @@ public actor StreamingNemotronAsrManager {
         let jointPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.jointFile)
         self.joint = try await MLModel.load(contentsOf: jointPath, configuration: mlConfiguration)
 
+        // Optional fused decoder+joint (B1). When the tier folder ships a
+        // `decoder_joint.mlmodelc`, prefer it in the inner loop (one call/step).
+        let fusedPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.decoderJointFile)
+        if FileManager.default.fileExists(atPath: fusedPath.path) {
+            self.decoderJoint = try await MLModel.load(contentsOf: fusedPath, configuration: mlConfiguration)
+            logger.info("Loaded fused decoder_joint (B1) — merged inner-loop path enabled")
+        }
+
         // Load tokenizer
         let tokenizerUrl = directory.appendingPathComponent(ModelNames.NemotronStreaming.tokenizer)
         self.tokenizer = try Tokenizer(vocabPath: tokenizerUrl)
 
         // Initialize states
+        try resetStates()
+
+        // Fail loudly if the encoder's ANE program failed to instantiate (issue
+        // #739): on iPadOS cold starts the int8 encoder can silently return an
+        // all-zero buffer, yielding an empty transcript with no error thrown.
+        // Probe once with non-zero input; throw a clear error instead of letting
+        // every transcript come back empty. The probe also warms the encoder.
+        let encoderHealthy = try await encoderProducesNonZeroOutput()
+        guard encoderHealthy else {
+            throw ASRError.encoderInstantiationFailed(
+                "Nemotron int8 encoder returned all-zero output on a load-time probe — the ANE "
+                    + "program did not instantiate (see CoreML ANEProgramProcessRequestDirect "
+                    + "status=0x12). This is the iPadOS cold-start failure in issue #739; "
+                    + "re-download or update the encoder model."
+            )
+        }
+        // Probe used throwaway inputs; restore clean session state.
         try resetStates()
 
         logger.info("Nemotron models loaded successfully (\(config.chunkMs)ms chunks).")
@@ -116,13 +169,13 @@ public actor StreamingNemotronAsrManager {
     public func loadModels(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         if let configuration {
             self.mlConfiguration = configuration
         }
 
-        let chunkSize = requestedChunkSize ?? .ms1120
+        let chunkSize = requestedChunkSize ?? .ms2240
         let repo = chunkSize.repo
 
         let modelsBaseDir =
@@ -134,16 +187,24 @@ public actor StreamingNemotronAsrManager {
             .appendingPathComponent("Models", isDirectory: true)
 
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-        let encoderInt8Path = cacheDir.appendingPathComponent("encoder/\(NemotronEncoder.fileName)")
 
-        if !FileManager.default.fileExists(atPath: encoderInt8Path.path) {
-            logger.info("Downloading Nemotron models to \(modelsBaseDir.path)...")
-            try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir, progressHandler: progressHandler)
-        } else {
-            logger.info("Using cached Nemotron models at \(cacheDir.path)")
+        // Completeness-checked download + purge-and-retry on load failure: a
+        // bare directory-existence gate mistook an interrupted encoder fetch
+        // for a warm cache and bricked loading permanently (issue #819).
+        // `decoder_joint.mlmodelc` and `metadata.json` are optional at load
+        // time, so they are excluded from the validity set.
+        try await ModelHub.loadWithRecovery(
+            repo, directory: modelsBaseDir,
+            requiredFiles: [
+                "encoder/\(NemotronEncoder.fileName)",
+                ModelNames.NemotronStreaming.decoderFile,
+                ModelNames.NemotronStreaming.jointFile,
+                ModelNames.NemotronStreaming.tokenizer,
+            ],
+            progressHandler: progressHandler
+        ) {
+            try await self.loadModels(from: cacheDir)
         }
-
-        try await loadModels(from: cacheDir)
     }
 
     /// Reset all states for a new transcription session
@@ -153,6 +214,9 @@ public actor StreamingNemotronAsrManager {
             accumulatedTokenIds: &accumulatedTokenIds,
             processedChunks: &processedChunks
         )
+        accumulatedTokenTimings.removeAll()
+        absoluteFrameBase = 0
+        lastFinishTokenTimings.removeAll()
         do {
             try resetStates()
         } catch {
@@ -162,10 +226,11 @@ public actor StreamingNemotronAsrManager {
 
     public func cleanup() async {
         await reset()
-        preprocessor = nil
+        melExtractor = nil
         encoder = nil
         decoder = nil
         joint = nil
+        decoderJoint = nil
         tokenizer = nil
         cacheChannel = nil
         cacheTime = nil
@@ -217,7 +282,7 @@ public actor StreamingNemotronAsrManager {
     /// Process audio and return partial transcript
     public func process(audioBuffer: AVAudioPCMBuffer) async throws -> String {
         // Check if models are loaded
-        guard preprocessor != nil, encoder != nil, decoder != nil, joint != nil else {
+        guard melExtractor != nil, encoder != nil, decoder != nil, joint != nil else {
             throw ASRError.notInitialized
         }
 
@@ -240,7 +305,7 @@ public actor StreamingNemotronAsrManager {
     public func finish() async throws -> String {
         // Check if models are loaded
         guard let tokenizer = tokenizer,
-            preprocessor != nil,
+            melExtractor != nil,
             encoder != nil,
             decoder != nil,
             joint != nil
@@ -262,15 +327,36 @@ public actor StreamingNemotronAsrManager {
 
         // Decode accumulated tokens
         let transcript = tokenizer.decode(ids: accumulatedTokenIds)
+        // Snapshot timings before clearing so finishWithTokenTimings() can return
+        // them; finish() must clear the working buffers atomically with the ids.
+        lastFinishTokenTimings = accumulatedTokenTimings
         accumulatedTokenIds.removeAll()
+        accumulatedTokenTimings.removeAll()
 
         return transcript
+    }
+
+    /// Finish processing and return the final transcript together with per-token
+    /// timings (absolute seconds from the start of the fed audio). The timings
+    /// are aligned 1:1 with the decoded token stream; group them by the
+    /// SentencePiece word-boundary marker to obtain word-level timestamps.
+    public func finishWithTokenTimings() async throws -> (text: String, timings: [TokenTiming]) {
+        let text = try await finish()
+        return (text, lastFinishTokenTimings)
     }
 
     /// Get current partial transcript without finishing
     public func getPartialTranscript() -> String {
         guard let tokenizer = tokenizer else { return "" }
         return tokenizer.decode(ids: accumulatedTokenIds)
+    }
+
+    /// Get per-token timings accumulated so far without finishing. Aligned 1:1
+    /// with the tokens behind getPartialTranscript(). Use this when a caller must
+    /// salvage a partially-processed session that cannot safely call finish()
+    /// (e.g. after a mid-stream decode failure).
+    public func getTokenTimings() -> [TokenTiming] {
+        return accumulatedTokenTimings
     }
 }
 
@@ -286,7 +372,7 @@ extension StreamingNemotronAsrManager: StreamingAsrManager {
     }
 
     public func processBufferedAudio() async throws {
-        guard preprocessor != nil, encoder != nil, decoder != nil, joint != nil else {
+        guard melExtractor != nil, encoder != nil, decoder != nil, joint != nil else {
             throw ASRError.notInitialized
         }
 

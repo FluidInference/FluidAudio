@@ -17,7 +17,7 @@ public enum KokoroAneResourceDownloader {
     public static func ensureModels(
         variant: KokoroAneVariant = .english,
         directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let modelsDirectory = try directory ?? defaultModelsDirectory()
         let repo = variant.repo
@@ -29,6 +29,8 @@ public enum KokoroAneResourceDownloader {
             required = ModelNames.KokoroAne.requiredModels
         case .mandarin:
             required = ModelNames.KokoroAne.requiredModelsZh
+        case .japanese:
+            required = ModelNames.KokoroAne.requiredModelsJa
         }
         let allPresent = required.allSatisfy { name in
             FileManager.default.fileExists(atPath: repoDir.appendingPathComponent(name).path)
@@ -36,7 +38,7 @@ public enum KokoroAneResourceDownloader {
 
         if !allPresent {
             logger.info("Downloading laishere Kokoro models (\(variant.rawValue)) from HuggingFace...")
-            try await DownloadUtils.downloadRepo(
+            try await ModelHub.download(
                 repo,
                 to: modelsDirectory,
                 progressHandler: progressHandler
@@ -59,7 +61,7 @@ public enum KokoroAneResourceDownloader {
     @discardableResult
     public static func ensureMandarinG2P(
         repoDirectory: URL,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let g2pDir = repoDirectory.appendingPathComponent(KokoroAneConstants.g2pSubdir)
         if !FileManager.default.fileExists(atPath: g2pDir.path) {
@@ -254,7 +256,7 @@ public enum KokoroAneResourceDownloader {
     /// `G2PModelError.vocabLoadFailed`.
     public static func ensureG2PAssets(
         directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         let modelsDirectory = try directory ?? defaultModelsDirectory()
         let kokoroDir = modelsDirectory.appendingPathComponent(Repo.kokoro.folderName)
@@ -265,12 +267,54 @@ public enum KokoroAneResourceDownloader {
             return
         }
         logger.info("Downloading shared kokoro G2P assets from HuggingFace...")
-        try await DownloadUtils.downloadRepo(
+        try await ModelHub.download(
             .kokoro,
             to: modelsDirectory,
             variant: "g2p-only",
             progressHandler: progressHandler
         )
+    }
+
+    /// Best-effort fetch of Kokoro's preprocessed Misaki lexicon cache
+    /// (`us_lexicon_cache.json`) into the shared kokoro cache directory
+    /// (next to the G2P CoreML assets — same file StyleTTS2 consumes via
+    /// `LexiconAssetCache`).
+    ///
+    /// Returns the kokoro cache directory when the file is resident
+    /// (pre-cached or freshly downloaded), or `nil` when it is missing
+    /// and could not be fetched — the English frontend then falls back
+    /// to BART-G2P-only phonemization. The lexicon is a pronunciation
+    /// quality booster (Misaki weak forms for function words, issue
+    /// #691), not a hard dependency.
+    public static func ensureEnglishLexicon(
+        directory: URL? = nil
+    ) async -> URL? {
+        let filename = "us_lexicon_cache.json"
+        do {
+            let modelsDirectory = try directory ?? defaultModelsDirectory()
+            let kokoroDir = modelsDirectory.appendingPathComponent(Repo.kokoro.folderName)
+            try FileManager.default.createDirectory(
+                at: kokoroDir, withIntermediateDirectories: true)
+
+            let localURL = kokoroDir.appendingPathComponent(filename)
+            if FileManager.default.fileExists(atPath: localURL.path) {
+                return kokoroDir
+            }
+
+            let remoteURL = try ModelRegistry.resolveModel(Repo.kokoro.remotePath, filename)
+            let descriptor = AssetDownloader.Descriptor(
+                description: filename,
+                remoteURL: remoteURL,
+                destinationURL: localURL
+            )
+            _ = try await AssetDownloader.ensure(descriptor, logger: logger)
+            return kokoroDir
+        } catch {
+            logger.warning(
+                "English lexicon cache unavailable (\(error.localizedDescription)) — "
+                    + "falling back to BART G2P only")
+            return nil
+        }
     }
 
     /// Ensure a specific voice pack `.bin` file exists, downloading if missing.

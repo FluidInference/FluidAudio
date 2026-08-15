@@ -12,7 +12,6 @@ import Foundation
 /// Backends:
 ///   kokoro-ane    — 7-stage ANE pipeline (per-stage timings, per-stage CU)
 ///   pocket-tts    — streaming flow-matching (no per-stage timings)
-///   magpie        — encoder-decoder + NanoCodec (6-stage timings, slow)
 ///   styletts2     — LibriTTS iteration_3, zero-shot w/ reference audio
 ///   supertonic3   — 4-stage multilingual flow-matching diffusion (31 langs)
 ///
@@ -96,7 +95,6 @@ public enum TtsBenchmarkCommand {
         var corpusName: String?
         var corpusPath: String?
         var voice: String?
-        var speakerName: String?
         var languageName: String?
         var computeUnitsName = "default"
         var outputJson: String?
@@ -108,6 +106,7 @@ public enum TtsBenchmarkCommand {
         var cohereComputeUnitsArg: String?
         var referencePath: String?
         var variantArg: String?
+        var phonemesMode = false
         var voiceStylePath: String?
         var totalStepsArg: Int?
         var speedArg: Float?
@@ -136,11 +135,6 @@ public enum TtsBenchmarkCommand {
                     voice = arguments[i + 1]
                     i += 1
                 }
-            case "--speaker":
-                if i + 1 < arguments.count {
-                    speakerName = arguments[i + 1]
-                    i += 1
-                }
             case "--language":
                 if i + 1 < arguments.count {
                     languageName = arguments[i + 1]
@@ -163,6 +157,8 @@ public enum TtsBenchmarkCommand {
                 }
             case "--skip-asr":
                 skipAsr = true
+            case "--phonemes":
+                phonemesMode = true
             case "--asr-backend":
                 if i + 1 < arguments.count {
                     asrBackendName = arguments[i + 1]
@@ -220,7 +216,7 @@ public enum TtsBenchmarkCommand {
         let backend = parseBackend(backendName)
 
         // Resolve corpus.
-        let phrases: [(category: String, text: String)]
+        var phrases: [(category: String, text: String)]
         let corpusLabel: String
         do {
             if let corpusPath {
@@ -241,11 +237,40 @@ public enum TtsBenchmarkCommand {
             logger.error("Corpus is empty after parsing")
             exit(1)
         }
+
+        // --phonemes: each corpus line is `ipa_phonemes|reference_text`.
+        // Synthesis feeds the phonemes (G2P bypass); WER/CER scores against
+        // the reference text. Kokoro ANE only — the Japanese variant has no
+        // in-process G2P, so this is the only way to benchmark it.
+        var phonemesByReference: [String: String] = [:]
+        if phonemesMode {
+            guard backend == .kokoroAne else {
+                logger.error("--phonemes is only supported for --backend kokoro-ane")
+                exit(1)
+            }
+            var split: [(category: String, text: String)] = []
+            for item in phrases {
+                guard let pipe = item.text.firstIndex(of: "|") else {
+                    logger.error("--phonemes corpus line has no `phonemes|reference` pipe: \(item.text)")
+                    exit(1)
+                }
+                let phonemes = String(item.text[..<pipe]).trimmingCharacters(in: .whitespaces)
+                let reference = String(item.text[item.text.index(after: pipe)...])
+                    .trimmingCharacters(in: .whitespaces)
+                guard !phonemes.isEmpty, !reference.isEmpty else {
+                    logger.error("--phonemes corpus line has empty phonemes or reference: \(item.text)")
+                    exit(1)
+                }
+                phonemesByReference[reference] = phonemes
+                split.append((category: item.category, text: reference))
+            }
+            phrases = split
+        }
         logger.info("Loaded \(phrases.count) phrase(s) from corpus '\(corpusLabel)'")
 
         guard let preset = TtsComputeUnitPreset(cliValue: computeUnitsName) else {
             logger.error(
-                "Unknown --compute-units value: \(computeUnitsName). Expected default | all-ane | cpu-and-gpu | cpu-only."
+                "Unknown --compute-units value: \(computeUnitsName). Expected default | all-ane | cpu-and-gpu | cpu-only | ane-tail-gpu."
             )
             exit(1)
         }
@@ -275,10 +300,17 @@ public enum TtsBenchmarkCommand {
             switch backend {
             case .kokoroAne:
                 let kaVariant = parseKokoroAneVariant(variantArg)
+                if kaVariant == .japanese && !phonemesMode {
+                    logger.error(
+                        "The japanese variant has no text G2P; pass --phonemes with a "
+                            + "`ipa_phonemes|reference_text` corpus (see #698).")
+                    exit(1)
+                }
                 try await runKokoroAne(
                     phrases: phrases, corpusLabel: corpusLabel,
                     variant: kaVariant,
                     voice: voice ?? kaVariant.defaultVoice,
+                    phonemesByReference: phonemesMode ? phonemesByReference : nil,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
             case .pocketTts:
@@ -286,12 +318,6 @@ public enum TtsBenchmarkCommand {
                     phrases: phrases, corpusLabel: corpusLabel,
                     voice: voice ?? PocketTtsConstants.defaultVoice,
                     languageName: languageName,
-                    preset: preset, outputJson: outputJson, audioDir: audioDir,
-                    asrChoice: asrChoice)
-            case .magpie:
-                try await runMagpie(
-                    phrases: phrases, corpusLabel: corpusLabel,
-                    speakerName: speakerName, languageName: languageName,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
             case .styleTts2:
@@ -324,6 +350,7 @@ public enum TtsBenchmarkCommand {
         corpusLabel: String,
         variant: KokoroAneVariant,
         voice: String,
+        phonemesByReference: [String: String]?,
         preset: TtsComputeUnitPreset,
         outputJson: String?,
         audioDir: String?,
@@ -338,8 +365,15 @@ public enum TtsBenchmarkCommand {
         logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
 
         let firstStart = Date()
-        _ = try await manager.synthesizeDetailed(
-            text: "Initialization warm-up.", voice: voice, speed: 1.0)
+        if let phonemesByReference {
+            // Text warm-up would throw on G2P-less variants (japanese);
+            // warm up through the same bypass the loop uses.
+            let warmUp = phrases.first.flatMap { phonemesByReference[$0.text] } ?? "aɾʲiɡatoː"
+            _ = try await manager.synthesizeFromPhonemesDetailed(warmUp, voice: voice, speed: 1.0)
+        } else {
+            _ = try await manager.synthesizeDetailed(
+                text: "Initialization warm-up.", voice: voice, speed: 1.0)
+        }
         let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
         logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
 
@@ -357,8 +391,18 @@ public enum TtsBenchmarkCommand {
             extraSummary: ["voice": voice]
         ) { text in
             let t0 = Date()
-            let result = try await manager.synthesizeDetailed(
-                text: text, voice: voice, speed: 1.0)
+            let result: KokoroAneSynthesisResult
+            if let phonemesByReference {
+                guard let phonemes = phonemesByReference[text] else {
+                    throw KokoroAneError.inputProcessingFailed(
+                        "No phonemes mapped for reference: \(text)")
+                }
+                result = try await manager.synthesizeFromPhonemesDetailed(
+                    phonemes, voice: voice, speed: 1.0)
+            } else {
+                result = try await manager.synthesizeDetailed(
+                    text: text, voice: voice, speed: 1.0)
+            }
             let synthMs = Date().timeIntervalSince(t0) * 1000
             return BackendPhraseSample(
                 synthMs: synthMs,
@@ -468,74 +512,6 @@ public enum TtsBenchmarkCommand {
                 extraFields: [
                     "frame_count": frameCount,
                     "chunk_count": lastChunkCount,
-                ]
-            )
-        }
-    }
-
-    // MARK: - Magpie driver
-
-    private static func runMagpie(
-        phrases: [(category: String, text: String)],
-        corpusLabel: String,
-        speakerName: String?,
-        languageName: String?,
-        preset: TtsComputeUnitPreset,
-        outputJson: String?,
-        audioDir: String?,
-        asrChoice: AsrChoice
-    ) async throws {
-        let units = preset.uniformUnits ?? .cpuAndNeuralEngine
-        let language = parseMagpieLanguage(languageName)
-        let speaker = parseMagpieSpeaker(speakerName)
-        logger.info("Magpie speaker=\(speaker.displayName) language=\(language.rawValue)")
-
-        let manager = MagpieTtsManager(
-            computeUnits: units, preferredLanguages: [language])
-
-        let coldStart = Date()
-        try await manager.initialize()
-        let coldStartS = Date().timeIntervalSince(coldStart)
-        logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
-
-        let firstStart = Date()
-        _ = try await manager.synthesize(
-            text: "Initialization warm-up.", speaker: speaker, language: language)
-        let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
-        logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
-
-        try await runPhraseLoop(
-            backendId: "magpie",
-            voiceLabel: speaker.displayName,
-            corpusLabel: corpusLabel,
-            phrases: phrases,
-            preset: preset,
-            coldStartS: coldStartS,
-            firstSynthMs: firstSynthMs,
-            outputJson: outputJson,
-            audioDir: audioDir,
-            asrChoice: asrChoice,
-            extraSummary: [
-                "speaker": speaker.displayName, "language": language.rawValue,
-            ]
-        ) { text in
-            // Magpie is a batch / offline model — `synthesize()` runs the
-            // full chunked AR + codec pipeline and returns a single
-            // `MagpieSynthesisResult`. TTFT therefore equals synthMs (no
-            // incremental yield to measure against).
-            let t0 = Date()
-            let result = try await manager.synthesize(
-                text: text, speaker: speaker, language: language)
-            let synthMs = Date().timeIntervalSince(t0) * 1000
-            return BackendPhraseSample(
-                synthMs: synthMs,
-                ttftMs: synthMs,
-                samples: result.samples,
-                sampleRate: result.sampleRate,
-                stageMs: [:],
-                extraFields: [
-                    "code_count": result.codeCount,
-                    "finished_on_eos": result.finishedOnEos,
                 ]
             )
         }
@@ -974,7 +950,6 @@ public enum TtsBenchmarkCommand {
     private enum Backend: String {
         case kokoroAne
         case pocketTts
-        case magpie
         case styleTts2
         case supertonic3
 
@@ -989,8 +964,6 @@ public enum TtsBenchmarkCommand {
             return .kokoroAne
         case "pocket-tts", "pockettts", "pocket":
             return .pocketTts
-        case "magpie":
-            return .magpie
         case "styletts2", "style-tts2", "styletts", "style-tts":
             return .styleTts2
         case "supertonic3", "supertonic-3", "sup3", "supertonic":
@@ -1006,24 +979,6 @@ public enum TtsBenchmarkCommand {
             return .english
         }
         return l
-    }
-
-    private static func parseMagpieLanguage(_ name: String?) -> MagpieLanguage {
-        guard let name, let l = MagpieLanguage(rawValue: name.lowercased()) else {
-            return .english
-        }
-        return l
-    }
-
-    private static func parseMagpieSpeaker(_ name: String?) -> MagpieSpeaker {
-        switch name?.lowercased() {
-        case "sofia": return .sofia
-        case "aria": return .aria
-        case "jason": return .jason
-        case "leo": return .leo
-        case "john", nil, "": return .john
-        default: return .john
-        }
     }
 
     /// Map an explicit `--language` flag or a `minimax-<lang>` corpus name
@@ -1081,6 +1036,8 @@ public enum TtsBenchmarkCommand {
         switch name?.lowercased() {
         case "mandarin", "zh", "chinese", "zh-cn":
             return .mandarin
+        case "japanese", "ja", "jp":
+            return .japanese
         case "english", "en", "en-us", nil, "":
             return .english
         default:
@@ -1158,7 +1115,7 @@ public enum TtsBenchmarkCommand {
     ///
     /// `Repo.cohereTranscribeCoreml` ships `vocab.json` in `requiredModels`, and
     /// that file lives at the repo root rather than under the `q8/` subPath.
-    /// `DownloadUtils.downloadRepo` now sweeps the repo root for required
+    /// `ModelHub.download` now sweeps the repo root for required
     /// auxiliary files (issue #649), so auto-download resolves it correctly.
     private static func resolveCohereModelDir(_ override: String?) async throws -> URL {
         if let override {
@@ -1167,7 +1124,7 @@ public enum TtsBenchmarkCommand {
         let appSupport = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask, appropriateFor: nil, create: true)
-        // `downloadRepo` appends `repo.folderName` (cohere-transcribe/q8), so
+        // `ModelHub.download` appends `repo.folderName` (cohere-transcribe/q8), so
         // pass the Models base dir and let it land the bundle at `target`.
         let modelsBase = appSupport.appendingPathComponent("FluidAudio/Models")
         let target = modelsBase.appendingPathComponent("cohere-transcribe/q8")
@@ -1183,7 +1140,7 @@ public enum TtsBenchmarkCommand {
             }
         }
         if !missingFiles().isEmpty {
-            try await DownloadUtils.downloadRepo(.cohereTranscribeCoreml, to: modelsBase)
+            try await ModelHub.download(.cohereTranscribeCoreml, to: modelsBase)
         }
         let missing = missingFiles()
         guard missing.isEmpty else {
@@ -1338,7 +1295,6 @@ public enum TtsBenchmarkCommand {
             Backends:
               kokoro-ane    7-stage ANE pipeline (per-stage timings, per-stage CU)
               pocket-tts    Streaming flow-matching (multilingual)
-              magpie        Encoder-decoder + NanoCodec (per-stage, slow)
               styletts2     LibriTTS iteration_3, zero-shot, requires --reference
               supertonic3   4-stage multilingual flow-matching (31 langs);
                             requires --voice-style <preset.json>
@@ -1351,9 +1307,9 @@ public enum TtsBenchmarkCommand {
                                         see Documentation/TTS/MinimaxCorpus.md)
               --corpus-path <path>      Custom corpus file (overrides --corpus)
               --voice <name>            Voice id (KokoroAne/PocketTTS)
-              --speaker <name>          Magpie speaker: john|sofia|aria|jason|leo
-              --language <code>         PocketTTS lang pack or Magpie language code
-              --compute-units <preset>  default | all-ane | cpu-and-gpu | cpu-only
+              --language <code>         PocketTTS lang pack code
+              --compute-units <preset>  default | all-ane | cpu-and-gpu | cpu-only | ane-tail-gpu
+                                        (kokoro-ane on M5/macOS 26.5 needs ane-tail-gpu; see #667)
               --output-json <path>      Write JSON report
               --audio-dir <path>        Keep generated WAVs under this dir
               --skip-asr                Skip ASR roundtrip (no WER/CER)
@@ -1384,8 +1340,14 @@ public enum TtsBenchmarkCommand {
                                         (required for --backend styletts2;
                                         any sample rate / channel layout —
                                         resampled to 24 kHz mono internally)
-              --variant <name>          Kokoro ANE variant: english (default) or
-                                        mandarin (aliases: zh, chinese)
+              --variant <name>          Kokoro ANE variant: english (default),
+                                        mandarin (aliases: zh, chinese), or
+                                        japanese (aliases: ja, jp; requires
+                                        --phonemes)
+              --phonemes                Kokoro ANE G2P bypass: corpus lines are
+                                        `ipa_phonemes|reference_text`; synthesis
+                                        feeds the phonemes, WER/CER scores
+                                        against the reference text
               --voice-style <path>      Supertonic-3 voice style JSON
                                         (required for --backend supertonic3;
                                         e.g. M1.json shipped under
@@ -1401,7 +1363,6 @@ public enum TtsBenchmarkCommand {
               fluidaudio tts-benchmark --backend kokoro-ane --variant mandarin \\
                   --voice zf_001 --corpus minimax-chinese --skip-asr
               fluidaudio tts-benchmark --backend pocket-tts --corpus minimax-german --language german
-              fluidaudio tts-benchmark --backend magpie --speaker sofia --language en
               fluidaudio tts-benchmark --backend styletts2 --reference speaker.wav
               fluidaudio tts-benchmark --backend supertonic3 \\
                   --voice-style M1.json --corpus minimax-english
