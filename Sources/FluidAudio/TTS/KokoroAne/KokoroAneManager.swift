@@ -66,6 +66,14 @@ public actor KokoroAneManager {
     /// Download (if missing), load all 7 mlmodelcs + vocab + default voice
     /// pack. Optionally pre-warm additional voice packs.
     public func initialize(preloadVoices: Set<String>? = nil) async throws {
+        if Self.isBnnsCrashProneOS(ProcessInfo.processInfo.operatingSystemVersion) {
+            logger.warning(
+                "This OS build has a known Apple BNNS bug that can "
+                    + "intermittently crash Kokoro synthesis (EXC_BAD_ACCESS in libBNNS) "
+                    + "regardless of compute-unit routing. macOS 26.6 fixes it; on iOS "
+                    + "the 26.6 line still crashes. "
+                    + "See https://github.com/FluidInference/FluidAudio/issues/844")
+        }
         try await store.loadIfNeeded()
         // English G2P CoreML assets live in the kokoro repo and are loaded
         // from ~/.cache/fluidaudio/Models/kokoro/. The Mandarin variant
@@ -98,6 +106,24 @@ public actor KokoroAneManager {
                 _ = try await store.voicePack(voice)
             }
         }
+    }
+
+    #if os(macOS)
+    private static let runningOnMacOS = true
+    #else
+    private static let runningOnMacOS = false
+    #endif
+
+    /// The 26.4+ OS line carries an Apple BNNS bug that can intermittently
+    /// crash synthesis in libBNNS on any compute-unit routing
+    /// (#328/#587/#667/#817). macOS 26.6 fixes it (verified, #817); iOS 26.6
+    /// still crashes with the identical signature (#844), so on non-macOS the
+    /// whole 26.4+ line stays flagged until a fixed build is confirmed.
+    static func isBnnsCrashProneOS(
+        _ version: OperatingSystemVersion, onMacOS: Bool = runningOnMacOS
+    ) -> Bool {
+        guard version.majorVersion == 26, version.minorVersion >= 4 else { return false }
+        return onMacOS ? version.minorVersion <= 5 : true
     }
 
     /// `true` once the 7 mlmodelcs + vocab are resident.
@@ -191,17 +217,25 @@ public actor KokoroAneManager {
     public func phonemes(for text: String) async throws -> String {
         switch variant {
         case .english:
-            return try await phonemize(text: text)
+            // Byte-exact NeMo TN before G2P via the shared frontend entry
+            // point: "$5" → "five dollars", "2024" → "twenty twenty four".
+            // No-op for plain prose.
+            let normalized = EnglishTextNormalizer.normalizeForFrontend(text)
+            return try await phonemize(text: normalized)
         case .mandarin:
             try await store.loadIfNeeded()
-            if MandarinG2P.looksLikeHanzi(text) {
+            // Normalize written forms to their Mandarin reading before
+            // segmentation — e.g. "$5" → "五美元", "2024年" → "二零二四年" —
+            // so the numeric/semiotic tokens reach MandarinG2P as Hanzi.
+            let normalized = NemoTextNormalizer.normalize(text, language: .mandarin)
+            if MandarinG2P.looksLikeHanzi(normalized) {
                 let g2p = try await store.mandarinG2PPipeline()
-                return try await g2p.phonemize(text)
+                return try await g2p.phonemize(normalized)
             } else {
                 // No Hanzi present → caller already supplied bopomofo /
                 // ASCII punctuation. Pass through so power users can
                 // still override pronunciation manually.
-                return text
+                return normalized
             }
         case .japanese:
             // The Japanese variant ships no in-process kana/kanji → IPA

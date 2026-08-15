@@ -38,16 +38,100 @@ public enum PocketTtsVoiceCloner {
 
     // MARK: - Voice Cloning
 
+    /// Per-language speaker projection needed to place live-cloned conditioning
+    /// in the target language's latent space.
+    ///
+    /// The shared `mimi_encoderv2` bakes in the **English** `speaker_proj_weight`
+    /// (it was traced from the default English `TTSModel`), so its `conditioning`
+    /// output lives in English's conditioning space. Feeding that into a
+    /// non-English pack's flow LM diverges. To fix it we recover the 32-d latents
+    /// from the encoder output via `encoderRecoverPinv` (pseudo-inverse of
+    /// English's projection) and re-project with the target language's
+    /// `targetProj`. For English packs this round-trips to the identity, leaving
+    /// output bit-identical to the un-projected path.
+    ///
+    /// Empirically (issue #793) this makes live cloning work for the 24-layer
+    /// language packs (`*_24l`); the 6-layer non-English packs early-EOS on the
+    /// encoded voice conditioning even with the correct projection (a limitation
+    /// of the upstream pocket-tts models, confirmed against the PyTorch
+    /// reference), so cloning there stays best-effort.
+    public struct SpeakerProjection: Sendable {
+        /// `[embeddingDim, latentDim]` (`[1024, 32]`) row-major F32: pseudo-
+        /// inverse of the encoder's baked (English) projection transposed.
+        public let encoderRecoverPinv: [Float]
+        /// `[embeddingDim, latentDim]` (`[1024, 32]`) row-major F32: the target
+        /// language's `flow_lm.speaker_proj_weight`.
+        public let targetProj: [Float]
+
+        public init(encoderRecoverPinv: [Float], targetProj: [Float]) {
+            self.encoderRecoverPinv = encoderRecoverPinv
+            self.targetProj = targetProj
+        }
+    }
+
+    /// Re-project encoder `conditioning` (`[frames * embeddingDim]` row-major,
+    /// in the encoder's English space) into the target language's conditioning
+    /// space.
+    ///
+    /// Two matmuls: `latents = conditioning · encoderRecoverPinv` (recover the
+    /// 32-d latents), then `out = latents · targetProjᵀ`. Runs once per clone
+    /// (`frames ≤ 125`), so the cost is negligible.
+    static func reproject(
+        conditioning: [Float], frames: Int, projection: SpeakerProjection
+    ) -> [Float] {
+        let d = PocketTtsConstants.embeddingDim  // 1024
+        let k = PocketTtsConstants.latentDim  // 32
+        precondition(conditioning.count == frames * d, "conditioning shape mismatch")
+        precondition(projection.encoderRecoverPinv.count == d * k, "recover pinv shape mismatch")
+        precondition(projection.targetProj.count == d * k, "target proj shape mismatch")
+
+        // latents[frames, k] = conditioning[frames, d] @ encoderRecoverPinv[d, k]
+        var latents = [Float](repeating: 0, count: frames * k)
+        conditioning.withUnsafeBufferPointer { cond in
+            projection.encoderRecoverPinv.withUnsafeBufferPointer { pinv in
+                latents.withUnsafeMutableBufferPointer { out in
+                    cblas_sgemm(
+                        CblasRowMajor, CblasNoTrans, CblasNoTrans,
+                        Int32(frames), Int32(k), Int32(d),
+                        1.0, cond.baseAddress, Int32(d),
+                        pinv.baseAddress, Int32(k),
+                        0.0, out.baseAddress, Int32(k))
+                }
+            }
+        }
+
+        // out[frames, d] = latents[frames, k] @ targetProj[d, k]ᵀ
+        var result = [Float](repeating: 0, count: frames * d)
+        latents.withUnsafeBufferPointer { lat in
+            projection.targetProj.withUnsafeBufferPointer { proj in
+                result.withUnsafeMutableBufferPointer { out in
+                    cblas_sgemm(
+                        CblasRowMajor, CblasNoTrans, CblasTrans,
+                        Int32(frames), Int32(d), Int32(k),
+                        1.0, lat.baseAddress, Int32(k),
+                        proj.baseAddress, Int32(k),
+                        0.0, out.baseAddress, Int32(d))
+                }
+            }
+        }
+        return result
+    }
+
     /// Clone a voice from audio samples.
     ///
     /// - Parameters:
     ///   - samples: Audio samples at 24kHz mono float32.
     ///   - encoder: The Mimi encoder CoreML model.
+    ///   - projection: Optional per-language speaker projection. When provided,
+    ///     the encoder's English-space conditioning is re-projected into the
+    ///     target language's space (required for non-English live cloning —
+    ///     issue #793). Pass `nil` for the legacy English-only behavior.
     /// - Returns: Voice conditioning data ready for TTS.
     /// - Throws: `PocketTTSError.processingFailed` if samples are too short or too long.
     public static func cloneVoice(
         from samples: [Float],
-        using encoder: MLModel
+        using encoder: MLModel,
+        projection: SpeakerProjection? = nil
     ) throws -> PocketTtsVoiceData {
         // Validate input
         let durationSeconds = Double(samples.count) / Double(sampleRate)
@@ -94,11 +178,19 @@ public enum PocketTtsVoiceCloner {
 
         // Extract conditioning, honoring the array's strides (no zero-padding).
         let totalFloats = usableFrames * embDim
-        let voiceData = extractConditioning(conditioning, frames: usableFrames, embDim: embDim)
+        var voiceData = extractConditioning(conditioning, frames: usableFrames, embDim: embDim)
 
         guard voiceData.count == totalFloats else {
             throw PocketTTSError.processingFailed(
                 "Conditioning extraction mismatch: got \(voiceData.count), expected \(totalFloats)")
+        }
+
+        // Re-project the encoder's English-space conditioning into the target
+        // language's space when a projection is supplied (#793). No-op for the
+        // English pack (round-trips to identity).
+        if let projection {
+            voiceData = reproject(
+                conditioning: voiceData, frames: usableFrames, projection: projection)
         }
 
         return PocketTtsVoiceData(audioPrompt: voiceData, promptLength: usableFrames)
@@ -116,10 +208,11 @@ public enum PocketTtsVoiceCloner {
     /// - Throws: `PocketTTSError.processingFailed` if the file cannot be read or audio is invalid.
     public static func cloneVoice(
         from url: URL,
-        using encoder: MLModel
+        using encoder: MLModel,
+        projection: SpeakerProjection? = nil
     ) throws -> PocketTtsVoiceData {
         let samples = try loadAudio(from: url)
-        return try cloneVoice(from: samples, using: encoder)
+        return try cloneVoice(from: samples, using: encoder, projection: projection)
     }
 
     /// Save voice conditioning data to a binary file.

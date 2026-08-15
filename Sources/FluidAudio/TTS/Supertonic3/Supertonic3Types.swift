@@ -107,7 +107,7 @@ public enum Supertonic3VectorEstimator: Sendable, Equatable {
         return false
     }
 
-    /// Variant token passed to `DownloadUtils.downloadRepo` / `getRequiredModelNames`
+    /// Variant token passed to `ModelHub.download` / `getRequiredModelNames`
     /// so only the selected VectorEstimator file(s) are fetched.
     var downloadVariant: String? {
         switch self {

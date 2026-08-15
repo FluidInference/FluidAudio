@@ -61,7 +61,7 @@ extension CtcModels {
 
     /// Load CTC models directly from a custom directory (e.g., canary-1b-v2).
     ///
-    /// This method loads models directly without going through DownloadUtils,
+    /// This method loads models directly without going through ModelHub,
     /// allowing support for custom CTC models like canary-1b-v2.
     ///
     /// Expected directory structure:
@@ -151,14 +151,14 @@ extension CtcModels {
         let parentDirectory = directory.deletingLastPathComponent()
         let config = defaultConfiguration()
 
-        // DownloadUtils expects the base directory (without the repo folder) and
+        // ModelHub expects the base directory (without the repo folder) and
         // resolves the repo's folderName internally.
         let modelNames = [
             ModelNames.CTC.melSpectrogramPath,
             ModelNames.CTC.audioEncoderPath,
         ]
 
-        let models = try await DownloadUtils.loadModels(
+        let models = try await ModelHub.loadModels(
             variant.repo,
             modelNames: modelNames,
             directory: parentDirectory,
@@ -221,7 +221,7 @@ extension CtcModels {
         ]
 
         for name in modelNames {
-            _ = try await DownloadUtils.loadModels(
+            _ = try await ModelHub.loadModels(
                 variant.repo,
                 modelNames: [name],
                 directory: parentDir

@@ -17,7 +17,7 @@ public actor ParaformerManager {
     }
 
     public static func load(
-        precision: ParaformerPrecision = .fp16, progressHandler: DownloadUtils.ProgressHandler? = nil
+        precision: ParaformerPrecision = .fp16, progressHandler: ProgressHandler? = nil
     ) async throws -> ParaformerManager {
         ParaformerManager(
             models: try await ParaformerModels.downloadAndLoad(precision: precision, progressHandler: progressHandler))

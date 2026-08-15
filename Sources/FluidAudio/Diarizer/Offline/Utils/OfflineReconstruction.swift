@@ -16,10 +16,16 @@ struct OfflineReconstruction {
         self.config = config
     }
 
+    /// - Parameters:
+    ///   - spanEmbedder: Optional closure that extracts an embedding over an exact audio
+    ///     span `(startSeconds, endSeconds)`, returning `nil` on failure. Required by the
+    ///     zero-vote re-embed post-pass (`config.zeroVoteReembed.enabled`); when absent
+    ///     the pass is skipped and zero-vote frames keep the tie-break behavior.
     func buildSegments(
         segmentation: SegmentationOutput,
         hardClusters: [[Int]],
-        centroids: [[Double]]
+        centroids: [[Double]],
+        spanEmbedder: ((_ startSeconds: Double, _ endSeconds: Double) -> [Float]?)? = nil
     ) -> [TimedSpeakerSegment] {
         guard segmentation.numChunks > 0, segmentation.numFrames > 0 else { return [] }
 
@@ -167,6 +173,17 @@ struct OfflineReconstruction {
             perFrameClusters[frame] = selected
         }
 
+        if config.zeroVoteReembed.enabled, let spanEmbedder, !centroids.isEmpty {
+            applyZeroVoteReembed(
+                perFrameClusters: &perFrameClusters,
+                speakerCountPerFrame: speakerCountPerFrame,
+                activationSums: activationSums,
+                frameDuration: frameDuration,
+                centroids: centroids,
+                spanEmbedder: spanEmbedder
+            )
+        }
+
         var activeSegments: [Int: Accumulator] = [:]
         var rawSegments: [TimedSpeakerSegment] = []
 
@@ -218,6 +235,67 @@ struct OfflineReconstruction {
         let merged = mergeSegments(rawSegments, gapThreshold: gapThreshold)
         return sanitize(segments: merged)
     }
+
+    /// Zero-vote re-embed post-pass over the aggregated frame timeline.
+    ///
+    /// Speech-active frames whose vote sums are zero across all clusters carry no
+    /// clustering evidence at all (the active local speaker slot got assignment −2 in
+    /// every covering window), so the per-frame ranking tie-breaks them arbitrarily to
+    /// cluster 0. For each maximal contiguous zero-vote run of at least
+    /// `config.zeroVoteReembed.minDurationSeconds`, re-embed the run's exact audio span
+    /// and assign its frames to the closest speaker centroid regardless of margin.
+    /// Segment boundaries then follow the run boundaries via the normal accumulator
+    /// machinery. A failed/NaN embedding keeps the tie-break behavior for that run.
+    private func applyZeroVoteReembed(
+        perFrameClusters: inout [[Int]],
+        speakerCountPerFrame: [Int],
+        activationSums: [[Double]],
+        frameDuration: Double,
+        centroids: [[Double]],
+        spanEmbedder: (_ startSeconds: Double, _ endSeconds: Double) -> [Float]?
+    ) {
+        let runs = ZeroVoteReembedder.detectRuns(
+            speakerCountPerFrame: speakerCountPerFrame,
+            activationSums: activationSums,
+            frameDuration: frameDuration,
+            minDurationSeconds: config.zeroVoteReembed.minDurationSeconds
+        )
+        guard !runs.isEmpty else { return }
+
+        for run in runs {
+            let startSeconds = Double(run.lowerBound) * frameDuration
+            let endSeconds = Double(run.upperBound) * frameDuration
+            let startString = String(format: "%.2f", startSeconds)
+            let endString = String(format: "%.2f", endSeconds)
+
+            guard
+                let embedding = spanEmbedder(startSeconds, endSeconds),
+                let assignment = ZeroVoteReembedder.assignment(
+                    embedding: embedding.map(Double.init),
+                    centroids: centroids
+                )
+            else {
+                logger.warning(
+                    "Zero-vote re-embed [\(startString)s–\(endString)s]: embedding failed; keeping tie-break assignment"
+                )
+                continue
+            }
+
+            for frame in run {
+                perFrameClusters[frame] = [assignment.cluster]
+            }
+
+            let cosineString = assignment.cosines
+                .map { String(format: "%.3f", $0) }
+                .joined(separator: ", ")
+            logger.info(
+                "Zero-vote re-embed [\(startString)s–\(endString)s]: assigned S\(assignment.cluster + 1) (cosines [\(cosineString)])"
+            )
+        }
+    }
+
+    /// Debug-only dump of the aggregated global frame timeline (post-window-aggregation,
+    /// post cluster assignment). No-op unless FLUID_OFFLINE_POSTERIOR_DUMP is set.
 
     func buildSpeakerDatabase(
         segments: [TimedSpeakerSegment]

@@ -3,12 +3,16 @@ import Foundation
 
 /// Per-stage compute-unit assignment for the laishere chain.
 ///
-/// Default placement: all stages on `cpuAndNeuralEngine` EXCEPT the tail
-/// (iSTFT) on `cpuAndGPU`. This is the only routing that runs on every Apple
-/// Silicon generation: the prosody RNN crashes the GPU MPSGraph JIT
-/// (`GPURNNOps`) on M5/macOS 26.5 if placed on `all`, and the tail iSTFT
-/// crashes `libBNNS` if placed on CPU/ANE — so the RNN-bearing stages stay on
-/// ANE while the iSTFT goes to the GPU. See #667.
+/// Default placement (OS 26 and earlier): all stages on `cpuAndNeuralEngine`
+/// EXCEPT noise + tail (iSTFT) on `cpuAndGPU`. This is the only routing that
+/// runs on every Apple Silicon generation there: the prosody RNN crashes the
+/// GPU MPSGraph JIT (`GPURNNOps`) on M5/macOS 26.5 if placed on `all`, and
+/// the tail iSTFT crashes `libBNNS` if placed on CPU/ANE — so the RNN-bearing
+/// stages stay on ANE while the iSTFT goes to the GPU. See #667.
+///
+/// On OS 27+ the GPU stages themselves abort in MPSGraph under CoreML
+/// (#843), so the default swaps noise + tail to `.cpuOnly` — see
+/// ``aneTailCpu``.
 ///
 /// (The earlier "Prosody/Noise/Tail on `all`" placement matched laishere's
 /// iOSDemo and ran fine on M2, but crashes by default on M5. The tail was
@@ -46,12 +50,22 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
         self.tail = tail
     }
 
-    /// Default — RNN stages on ANE, Noise + tail iSTFT on GPU (both are
-    /// fp32-only graphs the ANE cannot take). Runs on M2 + M5 (the old
-    /// `all`-placement default crashed on M5/macOS 26.5). See #667 and the
-    /// `noise:` parameter note above.
-    /// Identical to ``aneTailGpu``.
-    public static let `default` = KokoroAneComputeUnits()
+    /// Default — OS-dependent. On OS 26 and earlier: RNN stages on ANE,
+    /// noise + tail iSTFT on GPU (both are fp32-only graphs the ANE cannot
+    /// take); identical to ``aneTailGpu``. See #667 and the `noise:`
+    /// parameter note above.
+    ///
+    /// On OS 27+: identical to ``aneTailCpu`` — the GPU stages abort
+    /// intermittently inside MPSGraph under CoreML on the 27 line (#843,
+    /// FB24243070), so noise + tail move to `.cpuOnly`.
+    public static var `default`: KokoroAneComputeUnits {
+        defaultUnits(for: ProcessInfo.processInfo.operatingSystemVersion)
+    }
+
+    /// Testable seam for the OS-conditional ``default``.
+    static func defaultUnits(for version: OperatingSystemVersion) -> KokoroAneComputeUnits {
+        version.majorVersion >= 27 ? .aneTailCpu : .aneTailGpu
+    }
 
     /// CPU+GPU only (skip ANE entirely). Useful for a baseline / debugging.
     public static let cpuAndGpu = KokoroAneComputeUnits(
@@ -95,6 +109,20 @@ public struct KokoroAneComputeUnits: Sendable, Equatable {
         alignment: .cpuAndNeuralEngine, prosody: .cpuAndNeuralEngine,
         noise: .cpuAndGPU, vocoder: .cpuAndNeuralEngine,
         tail: .cpuAndGPU
+    )
+
+    /// OS 27 stability: like ``aneTailGpu`` but noise + tail on `.cpuOnly`,
+    /// so Metal is never invoked. On the 27 line the GPU stages abort
+    /// intermittently inside MPSGraph under CoreML (uncatchable in-process
+    /// abort, #843, FB24243070); the BNNS iSTFT path they fall back to is
+    /// fine there — the libBNNS segfault is a 26.x-line bug (#817/#844).
+    /// Field-validated on iPadOS 27.0 with imperceptible perf cost for
+    /// speech-length inputs.
+    public static let aneTailCpu = KokoroAneComputeUnits(
+        albert: .cpuAndNeuralEngine, postAlbert: .cpuAndNeuralEngine,
+        alignment: .cpuAndNeuralEngine, prosody: .cpuAndNeuralEngine,
+        noise: .cpuOnly, vocoder: .cpuAndNeuralEngine,
+        tail: .cpuOnly
     )
 
     /// Build a configuration from a generic preset (used by the

@@ -19,6 +19,7 @@ public actor PocketTtsModelStore {
     private var flowDecoderModel: MLModel?
     private var mimiDecoderModel: MLModel?
     private var mimiEncoderModel: MLModel?
+    private var speakerProjectionCache: PocketTtsVoiceCloner.SpeakerProjection?
     /// `.aneState` only: the prefill/generate function instances loaded from
     /// the `pocket_state.mlmodelc` multifunction package (mobius Trial 23).
     private var stateModelsStore: PocketTtsStateModels?
@@ -420,12 +421,83 @@ public actor PocketTtsModelStore {
     /// Clone a voice from an audio URL within the actor's isolation context.
     public func cloneVoice(from audioURL: URL) throws -> PocketTtsVoiceData {
         let encoder = try mimiEncoder()
-        return try PocketTtsVoiceCloner.cloneVoice(from: audioURL, using: encoder)
+        return try PocketTtsVoiceCloner.cloneVoice(
+            from: audioURL, using: encoder, projection: loadSpeakerProjection())
     }
 
     /// Clone a voice from audio samples within the actor's isolation context.
     public func cloneVoice(from samples: [Float]) throws -> PocketTtsVoiceData {
         let encoder = try mimiEncoder()
-        return try PocketTtsVoiceCloner.cloneVoice(from: samples, using: encoder)
+        return try PocketTtsVoiceCloner.cloneVoice(
+            from: samples, using: encoder, projection: loadSpeakerProjection())
+    }
+
+    /// Load (and cache) the per-language speaker projection used to re-project
+    /// live-cloned conditioning from the shared encoder's English space into the
+    /// target language's space (#793).
+    ///
+    /// Returns `nil` when the projection assets are absent — cloning then falls
+    /// back to the legacy English-only behavior. For non-English packs that miss
+    /// the assets we warn, since cloning will not place the voice correctly.
+    private func loadSpeakerProjection() -> PocketTtsVoiceCloner.SpeakerProjection? {
+        if let cached = speakerProjectionCache { return cached }
+        guard let languageRoot = languageRootDirectory else { return nil }
+
+        let d = PocketTtsConstants.embeddingDim
+        let k = PocketTtsConstants.latentDim
+        let expected = d * k
+
+        // `encoder_recover_pinv.bin` is language-agnostic (tied to the shared
+        // encoder) and lives at the repo root; `speaker_proj_weight.bin` is
+        // per-language and lives in the pack's `constants_bin/`.
+        let repoRoot = languageRoot.deletingLastPathComponent().deletingLastPathComponent()
+        let pinvURL = repoRoot.appendingPathComponent(ModelNames.PocketTTS.encoderRecoverPinvFile)
+        let projURL =
+            languageRoot
+            .appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
+            .appendingPathComponent(ModelNames.PocketTTS.speakerProjWeightFile)
+
+        guard let pinv = loadFloatBin(pinvURL, expectedCount: expected),
+            let proj = loadFloatBin(projURL, expectedCount: expected)
+        else {
+            // 6-layer non-English packs can't clone reliably even with the
+            // projection — the upstream pocket-tts flow LM early-EOSes on the
+            // encoded voice conditioning (confirmed against the PyTorch
+            // reference, #793). Steer callers to the 24-layer variant, which
+            // works. Other missing-asset cases are a transient fetch gap.
+            if language.transformerLayers == 6 && language != .english {
+                logger.warning(
+                    "PocketTTS live voice cloning is not supported for the \(self.language.rawValue) "
+                        + "(6-layer) pack — the upstream model produces garbled/truncated output "
+                        + "for cloned voices. Use the 24-layer variant (\(self.language.rawValue)_24l) "
+                        + "for voice cloning (#793).")
+            } else if language != .english {
+                logger.warning(
+                    "PocketTTS speaker projection assets missing for \(self.language.rawValue) "
+                        + "(need \(ModelNames.PocketTTS.encoderRecoverPinvFile) at repo root and "
+                        + "\(ModelNames.PocketTTS.speakerProjWeightFile) in constants_bin). Live "
+                        + "voice cloning will not place the voice correctly until they are available (#793)."
+                )
+            }
+            return nil
+        }
+
+        let projection = PocketTtsVoiceCloner.SpeakerProjection(
+            encoderRecoverPinv: pinv, targetProj: proj)
+        speakerProjectionCache = projection
+        return projection
+    }
+
+    /// Read a raw little-endian F32 `.bin` into `[Float]`, or `nil` if the file
+    /// is absent or its element count doesn't match `expectedCount`.
+    private func loadFloatBin(_ url: URL, expectedCount: Int) -> [Float]? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard data.count == expectedCount * MemoryLayout<Float>.size else {
+            logger.warning(
+                "PocketTTS projection file \(url.lastPathComponent) has \(data.count) bytes, "
+                    + "expected \(expectedCount * MemoryLayout<Float>.size); ignoring.")
+            return nil
+        }
+        return data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
     }
 }

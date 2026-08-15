@@ -58,7 +58,7 @@ extension StreamingNemotronMultilingualAsrManager {
     internal func processChunk(_ samples: [Float], nextChunkSamples: [Float]? = nil) async throws {
         // decoder/joint are optional (lean B1 ships omit them) — bound
         // locally at the sites that need them (smart-spec, unfused fallback).
-        guard let preprocessor = preprocessor,
+        guard let melExtractor = melExtractor,
             let encoder = encoder,
             let cacheChannel = cacheChannel,
             let cacheTime = cacheTime,
@@ -130,35 +130,8 @@ extension StreamingNemotronMultilingualAsrManager {
                 chunkMel = prefetched
                 self.prefetchedMel = nil
             } else {
-                // Reuse pre-allocated audio buffer when sized correctly
-                // (chunkSamples == config.chunkSamples for normal chunks).
-                // Final chunk may be shorter (padded) so falls back to fresh
-                // alloc to match the actual sample count.
-                let audioArray: MLMultiArray
-                let audioLen: MLMultiArray
-                if let buf = audioInputBuf,
-                    buf.shape[1].intValue == samples.count,
-                    let lenBuf = audioLenBuf
-                {
-                    let ptr = buf.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
-                    ptr.update(from: samples, count: samples.count)
-                    lenBuf[0] = NSNumber(value: samples.count)
-                    audioArray = buf
-                    audioLen = lenBuf
-                } else {
-                    audioArray = try createAudioArray(samples)
-                    audioLen = try MLMultiArray(shape: [1], dataType: .int32)
-                    audioLen[0] = NSNumber(value: samples.count)
-                }
-                let preprocInput = try MLDictionaryFeatureProvider(dictionary: [
-                    "audio": MLFeatureValue(multiArray: audioArray),
-                    "audio_length": MLFeatureValue(multiArray: audioLen),
-                ])
-                let preprocOutput = try await preprocessor.prediction(from: preprocInput)
-                guard let mel = preprocOutput.featureValue(for: "mel")?.multiArrayValue else {
-                    throw ASRError.processingFailed("Preprocessor failed to produce mel output")
-                }
-                chunkMel = mel
+                // Native-Swift log-mel (replaces the CoreML preprocessor).
+                chunkMel = try melExtractor.melSpectrogram(samples: samples)
             }
             self.prepNanos &+= DispatchTime.now().uptimeNanoseconds &- prepStart
 
@@ -243,8 +216,9 @@ extension StreamingNemotronMultilingualAsrManager {
         nonisolated(unsafe) let snapshotCacheTime = self.cacheTime
         nonisolated(unsafe) let snapshotCacheLen = self.cacheLen
         nonisolated(unsafe) let snapshotMelCache = self.melCache
-        nonisolated(unsafe) let snapshotAudioBuf = self.audioInputBuf
-        nonisolated(unsafe) let snapshotAudioLenBuf = self.audioLenBuf
+        // Dedicated prefetch extractor instance — never shared with the
+        // on-actor `melExtractor`, so its FFT scratch buffers can't race.
+        nonisolated(unsafe) let snapshotMelExtractor = self.prefetchMelExtractor
         let snapshotPromptId = currentPromptIdValue()
         let snapshotTotalMelFrames = config.totalMelFrames
         let snapshotMelFeatures = config.melFeatures
@@ -267,7 +241,8 @@ extension StreamingNemotronMultilingualAsrManager {
                     !tripleStageDisabled,
                     let ch = snapshotCacheChannel,
                     let ti = snapshotCacheTime,
-                    let ln = snapshotCacheLen
+                    let ln = snapshotCacheLen,
+                    let mex = snapshotMelExtractor
                 else { return nil }
                 return try await Self.runPrepAndEncoderPure(
                     samples: next,
@@ -279,10 +254,8 @@ extension StreamingNemotronMultilingualAsrManager {
                     totalMelFrames: snapshotTotalMelFrames,
                     melFeatures: snapshotMelFeatures,
                     preEncodeCache: snapshotPreEncodeCache,
-                    preprocessor: preprocessor,
-                    encoder: encoder,
-                    audioInputBuf: snapshotAudioBuf,
-                    audioLenBuf: snapshotAudioLenBuf
+                    melExtractor: mex,
+                    encoder: encoder
                 )
             }()
 

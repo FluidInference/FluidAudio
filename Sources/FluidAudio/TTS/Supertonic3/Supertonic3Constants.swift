@@ -69,8 +69,14 @@ public enum Supertonic3Constants {
     public static let defaultSpeed: Float = 1.05
 
     /// Default silence inserted between text chunks when synthesizing long
-    /// utterances. 0.3 s mirrors the reference CLI default.
-    public static let defaultSilenceDuration: Float = 0.3
+    /// utterances. The 70-char chunk cap (#669) splits a paragraph into many
+    /// chunks; the reference CLI's 0.3 s pad stacks on top of the model's own
+    /// trailing sentence silence, inflating natural ~0.5–1.0 s sentence pauses
+    /// to ~1.1–1.2 s (the "unintended pauses" of #736). 0.05 s keeps the seams
+    /// from butting tokens together while letting the model's intrinsic
+    /// sentence prosody come through. Override via the synthesize parameter
+    /// (CLI `--silence`).
+    public static let defaultSilenceDuration: Float = 0.05
 
     /// Max characters per chunk when synthesizing long English/Latin text.
     /// Although `textTFixed = 128` would *fit* ~110 chars, the model's output

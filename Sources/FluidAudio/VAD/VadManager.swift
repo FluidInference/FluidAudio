@@ -78,7 +78,7 @@ public actor VadManager {
     /// Initialize with configuration
     public init(
         config: VadConfig = .default,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         self.config = config
 
@@ -110,7 +110,7 @@ public actor VadManager {
     public init(
         config: VadConfig = .default,
         modelDirectory: URL,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         self.config = config
 
@@ -123,12 +123,12 @@ public actor VadManager {
 
     private func loadUnifiedModel(
         from directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         let baseDirectory = directory ?? getDefaultBaseDirectory()
 
-        // Use DownloadUtils to load the model (handles downloading if needed)
-        let models = try await DownloadUtils.loadModels(
+        // Use ModelHub to load the model (handles downloading if needed)
+        let models = try await ModelHub.loadModels(
             .vad,
             modelNames: Array(ModelNames.VAD.requiredModels),
             directory: baseDirectory.appendingPathComponent("Models"),

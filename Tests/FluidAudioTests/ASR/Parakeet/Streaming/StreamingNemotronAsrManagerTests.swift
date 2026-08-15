@@ -189,6 +189,66 @@ final class StreamingNemotronAsrManagerTests: XCTestCase {
             })
     }
 
+    func testEncoderInstantiationFailedErrorDescription() {
+        // Issue #739: loadModels throws this when the encoder ANE program does
+        // not instantiate and the cold-start probe sees all-zero output.
+        let error = ASRError.encoderInstantiationFailed("probe returned zeros")
+        let description = error.errorDescription ?? ""
+        XCTAssertTrue(description.contains("ANE program failed to instantiate"))
+        XCTAssertTrue(description.contains("probe returned zeros"))
+    }
+
+    // MARK: - Native Swift Mel Extractor (replaces CoreML preprocessor)
+
+    func testNemotronMelExtractorShapeAndFrameCount() throws {
+        // One 1120ms chunk @ 16kHz. NeMo center padding => floor(N/hop)+1 frames.
+        let n = 17920
+        let extractor = NemotronMelExtractor(nMels: 128)
+        let samples = (0..<n).map { Float(sin(2.0 * Double.pi * 440.0 * Double($0) / 16000.0)) * 0.5 }
+
+        let mel = try extractor.melSpectrogram(samples: samples)
+        XCTAssertEqual(mel.shape.map { $0.intValue }, [1, 128, n / 160 + 1])  // [1, 128, 113]
+    }
+
+    func testNemotronMelExtractorIsDeterministic() throws {
+        let extractor = NemotronMelExtractor(nMels: 128)
+        let samples = (0..<8000).map { Float(sin(2.0 * Double.pi * 220.0 * Double($0) / 16000.0)) }
+
+        let a = try extractor.melSpectrogram(samples: samples)
+        let b = try extractor.melSpectrogram(samples: samples)
+        let pa = a.dataPointer.bindMemory(to: Float.self, capacity: a.count)
+        let pb = b.dataPointer.bindMemory(to: Float.self, capacity: b.count)
+        for i in 0..<a.count {
+            XCTAssertEqual(pa[i], pb[i])
+        }
+    }
+
+    func testNemotronMelExtractorIsNotPerFeatureNormalized() throws {
+        // Nemotron uses `normalize: NA` (raw log-mel), unlike the Unified model's
+        // per-feature standardization. Raw log-mel bins have large non-zero means
+        // (~-15); per-feature normalization would force each bin's mean to ~0.
+        let frames = 113
+        let nMels = 128
+        let extractor = NemotronMelExtractor(nMels: nMels)
+        let samples = (0..<17920).map { Float(sin(2.0 * Double.pi * 440.0 * Double($0) / 16000.0)) * 0.5 }
+
+        let mel = try extractor.melSpectrogram(samples: samples)
+        let ptr = mel.dataPointer.bindMemory(to: Float.self, capacity: mel.count)
+
+        var maxAbsBinMean: Float = 0
+        for m in 0..<nMels {
+            var sum: Float = 0
+            for t in 0..<frames { sum += ptr[m * frames + t] }
+            maxAbsBinMean = max(maxAbsBinMean, abs(sum / Float(frames)))
+        }
+        // A per-feature-normalized tensor would have every bin mean ~0.
+        XCTAssertGreaterThan(maxAbsBinMean, 1.0)
+        // Output must be finite.
+        for i in 0..<mel.count {
+            XCTAssertTrue(ptr[i].isFinite)
+        }
+    }
+
     // MARK: - P0: Stride Calculation Tests
 
     func testStrideCalculationWithContiguousArray() throws {

@@ -487,7 +487,7 @@ enum LSEENDBenchmark {
 
             if dataset == .ami {
                 print("   [REF] Using AMI word-aligned annotations")
-                referenceSegments = await AMIParser.loadWordAlignedDERReference(
+                referenceSegments = try AMIParser.loadWordAlignedDERReference(
                     for: meetingName,
                     duration: duration
                 )

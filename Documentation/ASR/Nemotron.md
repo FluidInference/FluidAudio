@@ -70,7 +70,7 @@ let chunkSize: NemotronChunkSize = .ms560  // Recommended balance
 let repo = chunkSize.repo  // .nemotronStreaming560
 
 // Download models
-try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir)
+try await ModelHub.download(repo, to: modelsBaseDir)
 
 // Models will be at: modelsBaseDir/nemotron-streaming/560ms/
 ```
@@ -85,7 +85,7 @@ let modelsBaseDir = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent(".cache/fluidaudio/models")
 
 // Download if not cached
-try await DownloadUtils.downloadRepo(chunkSize.repo, to: modelsBaseDir)
+try await ModelHub.download(chunkSize.repo, to: modelsBaseDir)
 
 // Load from cache
 let modelDir = modelsBaseDir.appendingPathComponent(chunkSize.repo.folderName)

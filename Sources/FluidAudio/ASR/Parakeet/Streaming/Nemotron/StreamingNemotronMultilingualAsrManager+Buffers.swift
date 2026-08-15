@@ -9,48 +9,16 @@ extension StreamingNemotronMultilingualAsrManager {
     // MARK: - Tensor Utilities (duplicated from the English pipeline so the
     // two managers stay independent; the math is small and self-contained).
 
-    internal func createAudioArray(_ samples: [Float]) throws -> MLMultiArray {
-        let array = try MLMultiArray(shape: [1, NSNumber(value: samples.count)], dataType: .float32)
-        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
-        ptr.update(from: samples, count: samples.count)
-        return array
-    }
-
-    /// Nonisolated helper for async pipelining — runs the preprocessor on a
-    /// chunk of samples without touching actor state. Sendable inputs only.
-    /// Reuses caller-provided `audioInputBuf` / `audioLenBuf` when supplied
-    /// and shape-compatible; otherwise falls back to fresh allocation.
+    /// Nonisolated helper for async pipelining — computes the native-Swift
+    /// log-mel for a chunk without touching actor state. The caller passes a
+    /// dedicated `melExtractor` instance (distinct from the on-actor one) so
+    /// the extractor's non-thread-safe FFT scratch buffers are never shared
+    /// across the concurrent prefetch boundary.
     nonisolated internal static func runPreprocessorPure(
         samples: [Float],
-        preprocessor: MLModel,
-        audioInputBuf: MLMultiArray? = nil,
-        audioLenBuf: MLMultiArray? = nil
-    ) async throws -> MLMultiArray? {
-        let array: MLMultiArray
-        let audioLen: MLMultiArray
-        if let buf = audioInputBuf,
-            buf.shape[1].intValue == samples.count,
-            let lenBuf = audioLenBuf
-        {
-            let ptr = buf.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
-            ptr.update(from: samples, count: samples.count)
-            lenBuf[0] = NSNumber(value: samples.count)
-            array = buf
-            audioLen = lenBuf
-        } else {
-            array = try MLMultiArray(shape: [1, NSNumber(value: samples.count)], dataType: .float32)
-            let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
-            ptr.update(from: samples, count: samples.count)
-            audioLen = try MLMultiArray(shape: [1], dataType: .int32)
-            audioLen[0] = NSNumber(value: samples.count)
-        }
-
-        let input = try MLDictionaryFeatureProvider(dictionary: [
-            "audio": MLFeatureValue(multiArray: array),
-            "audio_length": MLFeatureValue(multiArray: audioLen),
-        ])
-        let output = try await preprocessor.prediction(from: input)
-        return output.featureValue(for: "mel")?.multiArrayValue
+        melExtractor: NemotronMelExtractor
+    ) throws -> MLMultiArray? {
+        return try melExtractor.melSpectrogram(samples: samples)
     }
 
     /// Triple-stage pipeline helper: runs preprocessor[t+1] + encoder[t+1] in
@@ -104,10 +72,8 @@ extension StreamingNemotronMultilingualAsrManager {
         totalMelFrames: Int,
         melFeatures: Int,
         preEncodeCache: Int,
-        preprocessor: MLModel,
-        encoder: MLModel,
-        audioInputBuf: MLMultiArray? = nil,
-        audioLenBuf: MLMultiArray? = nil
+        melExtractor: NemotronMelExtractor,
+        encoder: MLModel
     ) async throws -> (
         encoded: MLMultiArray,
         encoderProj: MLMultiArray?,
@@ -125,11 +91,9 @@ extension StreamingNemotronMultilingualAsrManager {
             return nil
         }
         guard
-            let chunkMel = try await runPreprocessorPure(
+            let chunkMel = try runPreprocessorPure(
                 samples: samples,
-                preprocessor: preprocessor,
-                audioInputBuf: audioInputBuf,
-                audioLenBuf: audioLenBuf
+                melExtractor: melExtractor
             )
         else {
             return nil

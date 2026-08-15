@@ -72,6 +72,13 @@ public enum Repo: String, CaseIterable, Sendable {
     /// recipe. Ships four `.mlmodelc` bundles + `tts.json` +
     /// `unicode_indexer.json` at the repo root.
     case supertonic3 = "FluidInference/supertonic-3-coreml"
+    /// LuxTTS (ZipVoice-Distill) — 48 kHz zero-shot voice-cloning TTS.
+    /// Two decoder graphs per fixed shape bucket: `gpu/` (original graph,
+    /// macOS GPU path) and `ane/` (ANE-canonical rewrite, iOS path), plus
+    /// fixed-shape Vocos vocoders under `vocoder/` and the shared
+    /// `tokens.txt` / `config.json`. Conversion lives in mobius
+    /// (`models/tts/zipvoice`).
+    case luxtts = "FluidInference/luxtts-coreml"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -142,6 +149,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "StyleTTS-2-coreml/iteration_3/compiled"
         case .supertonic3:
             return "supertonic-3-coreml"
+        case .luxtts:
+            return "luxtts-coreml"
         }
     }
 
@@ -528,7 +537,7 @@ public enum ModelNames {
 
     /// VAD model names
     public enum VAD {
-        public static let sileroVad = "silero-vad-unified-256ms-v6.0.0"
+        public static let sileroVad = "silero-vad-unified-256ms-v6.2.1"
 
         public static let sileroVadFile = sileroVad + ".mlmodelc"
 
@@ -631,7 +640,7 @@ public enum ModelNames {
             var models: Set<String> = [decoderFile, jointDecisionFile, vocab, metadata]
             // The streaming encoder is context-specific — each [L,C,R] latency
             // tier bakes its attention mask into a distinct bundle — so the
-            // streaming manager passes its exact encoder via downloadRepo's
+            // streaming manager passes its exact encoder via ModelHub.download's
             // `additionalModelNames` instead of pulling a fixed default here
             // (which would over-fetch the 70_13_13 encoder for every tier). The
             // offline encoder is fixed, so it stays in the base set.
@@ -675,6 +684,26 @@ public enum ModelNames {
 
     /// Sortformer streaming diarization model names
     public enum Sortformer {
+        /// Selects which weight-precision build of the model set to download.
+        ///
+        /// Both sets are the BNNS-fixed v3 rebuild (issue #726); they differ only in head weights:
+        /// - `.fp16`: full-precision head. Default. Best DER.
+        /// - `.palettized`: 6-bit k-means LUT head, ~2.5x smaller on disk and ~330MB RAM
+        ///   (vs ~2.4GB for `highContextV2_1` fp16), at ~+0.9pp DER. Use on RAM-constrained
+        ///   devices where the fp16 set crashes (older iPhones).
+        public enum ModelPrecision: String, Sendable, CaseIterable {
+            case fp16
+            case palettized
+
+            /// Repo subdirectory holding this precision's model set.
+            public var subdirectory: String {
+                switch self {
+                case .fp16: return "v3/fp16"
+                case .palettized: return "v3/palettized"
+                }
+            }
+        }
+
         public enum Variant: CaseIterable, Sendable {
             case fastV2
             case fastV2_1
@@ -682,6 +711,9 @@ public enum ModelNames {
             case balancedV2_1
             case highContextV2
             case highContextV2_1
+            /// Higher-throughput streaming: larger chunk (~2s output latency) for ~4x the
+            /// real-time factor of `fastV2_1` at near-identical per-inference cost.
+            case efficientV2_1
 
             public var name: String {
                 switch self {
@@ -697,6 +729,8 @@ public enum ModelNames {
                     return "SortformerNvidiaHigh_v2"
                 case .highContextV2_1:
                     return "SortformerNvidiaHigh_v2.1"
+                case .efficientV2_1:
+                    return "SortformerEfficient_v2.1"
                 }
             }
 
@@ -714,11 +748,19 @@ public enum ModelNames {
                     return .highContextV2
                 case .highContextV2_1:
                     return .highContextV2_1
+                case .efficientV2_1:
+                    return .efficientV2_1
                 }
             }
 
+            /// Compiled-model path for this variant at the default (`.fp16`) precision.
             public var fileName: String {
-                return "\(name).mlmodelc"
+                return fileName(precision: .fp16)
+            }
+
+            /// Compiled-model path for this variant at the given weight precision.
+            public func fileName(precision: ModelPrecision) -> String {
+                return "\(precision.subdirectory)/\(name).mlmodelc"
             }
 
             public func isCompatible(with config: SortformerConfig) -> Bool {
@@ -726,21 +768,33 @@ public enum ModelNames {
             }
         }
 
+        /// Repo subdirectory holding the default (`.fp16`) model set. Both v3 sets are the
+        /// BNNS-fixed rebuild (the older root-level models hit a "tensor as both input and output"
+        /// graph-compile crash on newer BNNS — issue #726). Select the 6-bit, ~2.5x-smaller set
+        /// via `SortformerConfig.precision = .palettized` (fixes RAM-driven crashes on older
+        /// devices at ~+0.9pp DER).
+        public static let modelsSubdirectory = ModelPrecision.fp16.subdirectory
+
         /// Lowest latency for streaming
         public static let defaultVariant: Variant = .fastV2_1
 
-        /// Bundle name for a specific variant
+        /// Bundle name for a specific variant at the default (`.fp16`) precision
         public static func bundle(for variant: Variant) -> String {
             return variant.fileName
         }
 
-        /// Bundle name for a given configuration
+        /// Bundle name for a specific variant at the given precision
+        public static func bundle(for variant: Variant, precision: ModelPrecision) -> String {
+            return variant.fileName(precision: precision)
+        }
+
+        /// Bundle name for a given configuration (honors `config.precision`)
         public static func bundle(for config: SortformerConfig) -> String? {
             guard let variant = config.modelVariant else {
                 return nil
             }
             assert(variant.isCompatible(with: config), "ERROR: Model variant and configuration are not compatible.")
-            return variant.fileName
+            return variant.fileName(precision: config.precision)
         }
 
         /// Default bundle name
@@ -751,6 +805,18 @@ public enum ModelNames {
         /// All Sortformer bundle models required by the downloader
         public static var requiredModels: Set<String> {
             Set(Variant.allCases.map(\.fileName))
+        }
+
+        // MARK: - Offline (whole-window) model
+
+        /// Fused offline model name (v2.1 weights). Unlike the streaming variants this is a single
+        /// graph `mel -> speaker_preds` over a fixed 30.72s window (3072 mel -> 384 output frames),
+        /// with no spkcache/FIFO state — see ``OfflineSortformerDiarizer``.
+        public static let offlineModelName = "SortformerOffline_v2.1"
+
+        /// Compiled-model path for the offline model at the given precision.
+        public static func offlineBundle(precision: ModelPrecision = .fp16) -> String {
+            return "\(precision.subdirectory)/\(offlineModelName).mlmodelc"
         }
     }
 
@@ -884,6 +950,19 @@ public enum ModelNames {
 
         /// Directory containing binary constants, tokenizer, and voice data.
         public static let constantsBinDir = "constants_bin"
+
+        /// Per-language speaker projection weight (`flow_lm.speaker_proj_weight`,
+        /// `[1024, 32]` row-major F32), stored in each pack's `constants_bin/`.
+        /// Live voice cloning re-projects the shared encoder's (English) output
+        /// into the target language's conditioning space with this (see #793).
+        public static let speakerProjWeightFile = "speaker_proj_weight.bin"
+
+        /// Pseudo-inverse of the shared `mimi_encoderv2`'s baked (English)
+        /// speaker projection (`[1024, 32]` row-major F32), stored at the repo
+        /// root next to the encoder. Recovers the 32-d latents from the
+        /// encoder's English-projected conditioning so they can be re-projected
+        /// per language (#793).
+        public static let encoderRecoverPinvFile = "encoder_recover_pinv.bin"
 
         /// FlowLM filename for a given precision. Both variants ship in the
         /// same `v2/<lang>/` directory upstream; only the FlowLM transformer
@@ -1115,6 +1194,74 @@ public enum ModelNames {
         }
     }
 
+    /// LuxTTS (ZipVoice-Distill) model names. The HF repo publishes the same
+    /// text encoder + flow-matching decoder in two graph layouts:
+    ///   - `gpu/`  — original graph; fastest on Mac GPU (do NOT run on ANE:
+    ///     the seq-first rel-pos attention path corrupts audio there)
+    ///   - `ane/`  — ANE-canonical rewrite; 100% ANE placement (iOS path)
+    /// plus fixed-shape Vocos vocoders (282 / 555 generated frames) and the
+    /// shared `tokens.txt` / `config.json`. All decoder I/O is identical
+    /// across the two graphs.
+    public enum LuxTts {
+        public static let gpuVariant = "gpu"
+        public static let aneVariant = "ane"
+
+        /// Platform default graph variant: `gpu/` on macOS, `ane/` elsewhere.
+        ///
+        /// The `FLUIDAUDIO_LUXTTS_VARIANT` environment variable overrides this
+        /// (accepts `gpu` / `ane`). It exists so the iOS `ane/` path can be
+        /// exercised on macOS — the M-series ANE runs the `ane/` graph under
+        /// `.cpuAndNeuralEngine` exactly as an iPhone would, so the override
+        /// is the on-device validation seam without an `#if os(iOS)` fork.
+        public static var defaultVariant: String {
+            if let override = variantOverride { return override }
+            #if os(macOS)
+            return gpuVariant
+            #else
+            return aneVariant
+            #endif
+        }
+
+        /// `gpu` / `ane` parsed from `FLUIDAUDIO_LUXTTS_VARIANT`, or `nil` when
+        /// unset/unrecognized (falls back to the platform default).
+        static var variantOverride: String? {
+            guard
+                let raw = ProcessInfo.processInfo.environment["FLUIDAUDIO_LUXTTS_VARIANT"]?
+                    .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            else { return nil }
+            switch raw {
+            case gpuVariant: return gpuVariant
+            case aneVariant: return aneVariant
+            default: return nil
+            }
+        }
+
+        public static let tokensFile = "tokens.txt"
+        public static let configFile = "config.json"
+        public static let vocoder282File = "vocoder/Vocoder282.mlmodelc"
+        public static let vocoder555File = "vocoder/Vocoder555.mlmodelc"
+
+        public static func textEncoderFile(variant: String) -> String {
+            "\(variant)/TextEncoder.mlmodelc"
+        }
+
+        public static func fmDecoderFile(variant: String) -> String {
+            "\(variant)/FmDecoder.mlmodelc"
+        }
+
+        public static func requiredFiles(variant: String?) -> Set<String> {
+            let v = variant ?? defaultVariant
+            return [
+                textEncoderFile(variant: v),
+                fmDecoderFile(variant: v),
+                vocoder282File,
+                vocoder555File,
+                tokensFile,
+                configFile,
+            ]
+        }
+    }
+
     /// Multilingual G2P (CharsiuG2P ByT5) model names
     public enum MultilingualG2P {
         public static let encoder = "MultilingualG2PEncoder"
@@ -1220,7 +1367,7 @@ public enum ModelNames {
         /// trip. The two auxiliary text files (`vocab.txt`,
         /// `POLYPHONIC_CHARS.txt`) ship via the lazy
         /// `KokoroAneResourceDownloader.ensureMandarinG2pw` helper because
-        /// `DownloadUtils.downloadRepo` does not whitelist `.txt` for
+        /// `ModelHub.download` does not whitelist `.txt` for
         /// subPath repos and a manual fetch keeps the bulk-grab matcher
         /// idempotent.
         public static let g2pwModelZh = "g2pw/g2pw.mlmodelc"
@@ -1256,7 +1403,7 @@ public enum ModelNames {
         switch repo {
         case .nemotronMultilingual:
             // Compiled .mlmodelc component dirs. Download is normally driven by
-            // `downloadSubdirectory` (dynamic <lang>/<tier>ms path), which does
+            // `download(subdirectory:)` (dynamic <lang>/<tier>ms path), which does
             // not consult this set; provided for completeness / exhaustiveness.
             return [
                 NemotronMultilingualStreaming.preprocessorFile,
@@ -1345,6 +1492,9 @@ public enum ModelNames {
             }
         case .supertonic3:
             return ModelNames.Supertonic3.requiredFiles(veVariant: variant)
+        case .luxtts:
+            // Variants: "gpu" (macOS) / "ane" (iOS); nil → platform default.
+            return ModelNames.LuxTts.requiredFiles(variant: variant)
         }
     }
 }

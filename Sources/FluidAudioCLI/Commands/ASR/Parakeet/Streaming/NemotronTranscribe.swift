@@ -201,7 +201,7 @@ public class NemotronTranscribe {
         let repo = config.chunkSize.repo
 
         // Check default cache location
-        // Note: downloadRepo appends repo.folderName internally, so we use the parent dir
+        // Note: ModelHub.download appends repo.folderName internally, so we use the parent dir
         let modelsBaseDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cache/fluidaudio/models")
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
@@ -214,9 +214,9 @@ public class NemotronTranscribe {
             return cacheDir
         }
 
-        // Download models (downloadRepo appends folderName internally)
+        // Download models (ModelHub.download appends folderName internally)
         logger.info("Downloading Nemotron \(config.chunkSize.rawValue)ms models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir)
+        try await ModelHub.download(repo, to: modelsBaseDir)
 
         return cacheDir
     }

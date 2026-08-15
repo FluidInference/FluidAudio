@@ -46,6 +46,16 @@ public actor AsrManager {
         config.dualDecodeArbitration
     }
 
+    /// Seam-gap repair flag exposed to `ChunkProcessor` (issue #758).
+    internal var seamGapRepair: Bool {
+        config.seamGapRepair
+    }
+
+    /// Minimum inter-token gap that triggers a seam-gap repair probe.
+    internal var seamGapRepairMinGapSeconds: Double {
+        config.seamGapRepairMinGapSeconds
+    }
+
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
     #if DEBUG
@@ -333,7 +343,9 @@ public actor AsrManager {
                 decoderState: &decoderState,
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,
-                globalFrameOffset: globalFrameOffset
+                globalFrameOffset: globalFrameOffset,
+                emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
+                initialTimeIndexOverride: initialTimeIndexOverride
             )
         }
     }

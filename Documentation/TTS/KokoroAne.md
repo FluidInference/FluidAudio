@@ -229,6 +229,25 @@ MiniMax-English 100-phrase suite — including the longer paragraph
 phrases that pull the per-corpus aggregate down to ~5.2× — see
 [Benchmarks.md](Benchmarks.md).
 
+## Known OS issues
+
+Two distinct Apple runtime bugs affect the 7-stage chain. Neither is
+input-, model-, or FluidAudio-version-gated.
+
+| Bug | Signature | Affected OS | Status |
+|-----|-----------|-------------|--------|
+| BNNS CPU segfault | `EXC_BAD_ACCESS` in `libBNNS.dylib` (`BNNSGraphContextExecute_v2` → `BnnsCpuInferenceOperation::ExecuteSync`, queue `com.apple.e5rt.concurrentExecutionQueue`) | iOS/macOS **26.4 – 26.5.x** | **Fixed in the 26.6 line.** Verified on M5/macOS 26.6: the #667 repro (repeated synthesis) passes under `cpuOnly` and `allAne`, both of which segfaulted every time on 26.5. |
+| GPU RNN JIT assert | `GPURNNOps.mm: failed assertion 'JIT not supported'` (SIGABRT) | macOS 26.5+, incl. **26.6** (M5-class) | **Still live.** Avoided by the default routing (#671/#677), which keeps RNN-bearing stages off the GPU. Do not route Prosody/Vocoder to `.cpuAndGPU`. |
+
+The BNNS segfault cannot be avoided by compute-unit routing — CoreML places
+segments on the BNNS CPU path even under `.cpuOnly` (#587), and on affected
+OS builds the same binary can flip between all-pass and all-crash across a
+day (#817). `KokoroAneManager.initialize()` logs a warning on affected OS
+builds. The only reliable remedy is updating to the 26.6 OS line.
+
+History: #328 (26.4 beta), #587 (iOS 26.4.2), #661 (cross-manager E5RT),
+#667 (M5/macOS 26.5), #817 (time/environment-gated evidence).
+
 ## Source
 
 - HuggingFace (English): [`FluidInference/kokoro-82m-coreml/ANE/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE)

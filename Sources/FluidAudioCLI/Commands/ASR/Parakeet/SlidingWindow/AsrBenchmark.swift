@@ -446,7 +446,7 @@ public class ASRBenchmark {
         let downloadURL = URL(string: url)!
 
         logger.info("Downloading \(url)...")
-        let (tempFile, _) = try await DownloadUtils.sharedSession.download(from: downloadURL)
+        let (tempFile, _) = try await ModelHub.session.download(from: downloadURL)
 
         try FileManager.default.createDirectory(at: extractTo, withIntermediateDirectories: true)
 

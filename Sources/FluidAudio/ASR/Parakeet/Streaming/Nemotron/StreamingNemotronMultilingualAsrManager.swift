@@ -25,7 +25,12 @@ public actor StreamingNemotronMultilingualAsrManager {
     internal let logger = AppLogger(category: "NemotronMultilingualStreaming")
 
     // Models
-    internal var preprocessor: MLModel?
+    /// Native-Swift log-mel front-end (replaces the CoreML preprocessor; see
+    /// `NemotronMelExtractor` and issue #739). Two instances so the on-actor
+    /// inline path and the concurrent triple-stage prefetch task never share
+    /// the extractor's (non-thread-safe) FFT scratch buffers.
+    internal var melExtractor: NemotronMelExtractor?
+    internal var prefetchMelExtractor: NemotronMelExtractor?
     internal var encoder: MLModel?
     internal var decoder: MLModel?
     internal var joint: MLModel?
@@ -173,8 +178,6 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// (~25-800 allocs/h depending on chunk size). Pre-allocated once,
     /// refilled in place. Triple-stage helpers are sequential (await before
     /// next dispatch) so a single shared buffer is safe.
-    internal var audioInputBuf: MLMultiArray?
-    internal var audioLenBuf: MLMultiArray?
 
     // Triple-stage pipelining: encoder[t+1] dispatched concurrent with
     // decode[t]. These are the prefetched encoder outputs (and the caches
@@ -331,17 +334,11 @@ public actor StreamingNemotronMultilingualAsrManager {
             "Loaded multilingual config: \(config.chunkMs)ms chunks, vocab=\(config.vocabSize), \(config.numPrompts) prompts, default=\(config.defaultPromptId)"
         )
 
-        // Load model bundles (prefer .mlmodelc, fall back to .mlpackage with on-demand compile)
-        let preprocessorURL = try await locateModelBundle(
-            in: directory,
-            compiled: ModelNames.NemotronMultilingualStreaming.preprocessorFile,
-            uncompiled: ModelNames.NemotronMultilingualStreaming.preprocessorPackage
-        )
-        self.preprocessor = try await MLModel.load(
-            contentsOf: preprocessorURL,
-            configuration: Self.computeUnitOverride(
-                name: "FLUIDAUDIO_PREPROCESSOR_CU", base: mlConfiguration, logger: logger)
-        )
+        // Native-Swift log-mel front-end replaces the CoreML preprocessor
+        // (Nemotron uses `normalize: NA` — raw log-mel — same as the English
+        // variant). Two instances: inline path + concurrent prefetch task.
+        self.melExtractor = NemotronMelExtractor(nMels: config.melFeatures)
+        self.prefetchMelExtractor = NemotronMelExtractor(nMels: config.melFeatures)
 
         let encoderURL = try await locateModelBundle(
             in: directory,
@@ -525,16 +522,6 @@ public actor StreamingNemotronMultilingualAsrManager {
             self.tokenLenBuf = tokLen
         }
 
-        // Reusable preprocessor input buffers — [1, chunkSamples] float32
-        // audio + [1] int32 length. Refilled by triple-stage helper.
-        if let audBuf = try? MLMultiArray(shape: [1, NSNumber(value: config.chunkSamples)], dataType: .float32) {
-            self.audioInputBuf = audBuf
-        }
-        if let audLen = try? MLMultiArray(shape: [1], dataType: .int32) {
-            audLen[0] = NSNumber(value: config.chunkSamples)
-            self.audioLenBuf = audLen
-        }
-
         // First-chunk warm-up: dispatch one zero-input prediction per model so
         // the ANE program is compiled + resident before the first real
         // chunk. Cuts ~10-20ms off every clip's first chunk (which can't
@@ -555,8 +542,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         // start — warm them unconditionally. Bare decoder/joint are optional on
         // lean B1 ships; requiring them here skipped ALL warmup (incl. encoder)
         // on those ships. They're bound only in the unfused branch below.
-        guard let preprocessor = preprocessor,
-            let encoder = encoder,
+        guard let encoder = encoder,
             let cacheChannel = cacheChannel,
             let cacheTime = cacheTime,
             let cacheLen = cacheLen,
@@ -564,20 +550,7 @@ public actor StreamingNemotronMultilingualAsrManager {
             let cState = cState
         else { return }
 
-        // Preprocessor: 1s of silence
-        if let audio = try? MLMultiArray(shape: [1, 16000], dataType: .float32),
-            let audioLen = try? MLMultiArray(shape: [1], dataType: .int32)
-        {
-            audio.reset(to: 0)
-            audioLen[0] = 16000
-            let input = try? MLDictionaryFeatureProvider(dictionary: [
-                "audio": MLFeatureValue(multiArray: audio),
-                "audio_length": MLFeatureValue(multiArray: audioLen),
-            ])
-            if let input = input {
-                _ = try? await preprocessor.prediction(from: input)
-            }
-        }
+        // (No CoreML preprocessor to warm — mel is computed natively in Swift.)
 
         // Encoder: zero mel + zeros caches
         if let mel = try? MLMultiArray(
@@ -871,7 +844,8 @@ public actor StreamingNemotronMultilingualAsrManager {
 
     public func cleanup() async {
         await reset()
-        preprocessor = nil
+        melExtractor = nil
+        prefetchMelExtractor = nil
         encoder = nil
         decoder = nil
         joint = nil
@@ -954,7 +928,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         let hasDecodePath =
             decoderJoint != nil || decoderJointNoEncProj != nil || decoderJointArgmax != nil
             || (decoder != nil && joint != nil)
-        guard preprocessor != nil, encoder != nil, hasDecodePath else {
+        guard melExtractor != nil, encoder != nil, hasDecodePath else {
             throw ASRError.notInitialized
         }
 
@@ -999,7 +973,7 @@ public actor StreamingNemotronMultilingualAsrManager {
             decoderJoint != nil || decoderJointNoEncProj != nil || decoderJointArgmax != nil
             || (decoder != nil && joint != nil)
         guard let tokenizer = tokenizer,
-            preprocessor != nil,
+            melExtractor != nil,
             encoder != nil,
             hasDecodePath
         else {

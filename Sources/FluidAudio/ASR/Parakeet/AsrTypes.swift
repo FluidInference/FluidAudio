@@ -23,43 +23,26 @@ public struct ASRConfig: Sendable {
     /// Default: 480,000 samples (~30 seconds at 16kHz)
     public let streamingThreshold: Int
 
-    /// Enable the 80ms (1 encoder frame) mel-context prepend on non-first
-    /// chunks in the long-form batch path. Added in PR #264 to fix
-    /// all-blank predictions at chunk boundaries on long English audio.
-    ///
-    /// Issue #594 root cause: on `parakeet-tdt-0.6b-v3-coreml` multilingual
-    /// long-form audio, the 80ms prepend can shift the FastConformer encoder's
-    /// first-frame distribution enough that the SOS-primed TDT decoder drifts
-    /// back to its English-biased prior. Disabling this flag (`false`) lets
-    /// the v3 batch path use acoustic warmup plus silence-aligned starts while
-    /// keeping parallel chunk processing.
-    ///
-    /// Default `true` preserves PR #264's blank-prediction fix on English.
-    /// Set to `false` for v3 multilingual long-form batch transcription.
+    /// 80ms mel-context prepend on non-first long-form chunks (PR #264
+    /// blank-boundary fix). Set `false` for v3 multilingual long-form batch
+    /// transcription (issue #594 English-prior drift) — see "Current Paths"
+    /// in Documentation/ASR/LongTranscription.md.
     public let melChunkContext: Bool
 
-    /// Opt-in dual-decode arbitration for the v3 + no-mel batch path.
-    /// When `true`, the first non-trivial chunks of each file are probed
-    /// with three strategies: silence-aligned without warmup, silence-
-    /// aligned with a 7-frame warmup prefix, and regular fixed-stride
-    /// chunking. The file then commits to the winning path and decodes the
-    /// remaining chunks single-path with that choice. Probe ties go to the
-    /// warmup-free path (the content-safer default).
-    ///
-    /// Per-file commitment (rather than per-chunk arbitration) eliminates
-    /// the inter-path stitching artifacts the LCS+midpoint merger produces
-    /// when adjacent chunks are decoded under different warmup conditions
-    /// — observed as mid-word duplicates and dropped clauses on
-    /// heterogeneous-confidence files like long Spanish narration.
-    ///
-    /// Mechanism is language-agnostic (confidence-based; no text inspection,
-    /// no vocabulary/script/token filtering, no language hints).
-    ///
-    /// Default `false`. Off-by-default because the wins are quality-tier
-    /// rather than correctness-tier, and the probe adds a modest constant
-    /// overhead (≈1.1–1.5× depending on file length) over the regular
-    /// `melChunkContext = false` path.
+    /// Opt-in probe-then-commit chunking arbitration for the v3 + no-mel
+    /// batch path (default `false`) — strategies, commitment rationale, and
+    /// cost in "Current Paths" (Documentation/ASR/LongTranscription.md).
     public let dualDecodeArbitration: Bool
+
+    /// Post-merge repair pass for chunk-seam content drops in long-form
+    /// batch transcription (issue #758, default `true`) — mechanics, cost,
+    /// and limitations in "Post-Merge Repair Pass"
+    /// (Documentation/ASR/LongTranscription.md).
+    public let seamGapRepair: Bool
+
+    /// Minimum inter-token gap, in seconds, that triggers a seam-gap repair
+    /// probe when `seamGapRepair` is enabled.
+    public let seamGapRepairMinGapSeconds: Double
 
     public static let `default` = ASRConfig()
 
@@ -71,7 +54,9 @@ public struct ASRConfig: Sendable {
         streamingEnabled: Bool = true,
         streamingThreshold: Int = 480_000,
         melChunkContext: Bool = true,
-        dualDecodeArbitration: Bool = false
+        dualDecodeArbitration: Bool = false,
+        seamGapRepair: Bool = true,
+        seamGapRepairMinGapSeconds: Double = 1.5
     ) {
         self.sampleRate = sampleRate
         self.tdtConfig = tdtConfig
@@ -81,6 +66,8 @@ public struct ASRConfig: Sendable {
         self.streamingThreshold = streamingThreshold
         self.melChunkContext = melChunkContext
         self.dualDecodeArbitration = dualDecodeArbitration
+        self.seamGapRepair = seamGapRepair
+        self.seamGapRepairMinGapSeconds = max(0.5, seamGapRepairMinGapSeconds)
     }
 }
 
@@ -227,6 +214,7 @@ public enum ASRError: Error, LocalizedError {
     case unsupportedPlatform(String)
     case streamingConversionFailed(Error)
     case fileAccessFailed(URL, Error)
+    case encoderInstantiationFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -246,6 +234,8 @@ public enum ASRError: Error, LocalizedError {
             return "Streaming audio conversion failed: \(error.localizedDescription)"
         case .fileAccessFailed(let url, let error):
             return "Failed to access audio file at \(url.path): \(error.localizedDescription)"
+        case .encoderInstantiationFailed(let message):
+            return "Encoder ANE program failed to instantiate: \(message)"
         }
     }
 }

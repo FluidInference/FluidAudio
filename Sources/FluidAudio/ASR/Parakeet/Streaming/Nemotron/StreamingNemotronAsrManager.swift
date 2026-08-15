@@ -11,7 +11,10 @@ public actor StreamingNemotronAsrManager {
     private let logger = AppLogger(category: "NemotronStreaming")
 
     // Models
-    internal var preprocessor: MLModel?
+    /// Native-Swift log-mel front-end, replacing the CoreML `preprocessor`
+    /// model. See `NemotronMelExtractor` (and issue #739) for why the CoreML
+    /// preprocessor was removed.
+    internal var melExtractor: NemotronMelExtractor?
     internal var encoder: MLModel?
     internal var decoder: MLModel?
     internal var joint: MLModel?
@@ -89,7 +92,8 @@ public actor StreamingNemotronAsrManager {
         self.partialCallback = callback
     }
 
-    /// Load models from a directory containing preprocessor, encoder, decoder, joint, and tokenizer
+    /// Load models from a directory containing encoder, decoder, joint, and tokenizer
+    /// (the mel front-end is computed natively in Swift; no CoreML preprocessor)
     /// - Parameter directory: Directory containing the model files
     public func loadModels(from directory: URL) async throws {
         guard SystemInfo.isAppleSilicon else {
@@ -106,9 +110,8 @@ public actor StreamingNemotronAsrManager {
             logger.info("Loaded config: \(config.chunkMs)ms chunks, \(config.chunkMelFrames) mel frames")
         }
 
-        // Load preprocessor
-        let preprocessorPath = directory.appendingPathComponent(ModelNames.NemotronStreaming.preprocessorFile)
-        self.preprocessor = try await MLModel.load(contentsOf: preprocessorPath, configuration: mlConfiguration)
+        // Native-Swift log-mel front-end (replaces the CoreML preprocessor).
+        self.melExtractor = NemotronMelExtractor(nMels: config.melFeatures)
 
         // Load encoder (int8 quantized)
         let encoderPath = directory.appendingPathComponent("encoder").appendingPathComponent(NemotronEncoder.fileName)
@@ -137,6 +140,23 @@ public actor StreamingNemotronAsrManager {
         // Initialize states
         try resetStates()
 
+        // Fail loudly if the encoder's ANE program failed to instantiate (issue
+        // #739): on iPadOS cold starts the int8 encoder can silently return an
+        // all-zero buffer, yielding an empty transcript with no error thrown.
+        // Probe once with non-zero input; throw a clear error instead of letting
+        // every transcript come back empty. The probe also warms the encoder.
+        let encoderHealthy = try await encoderProducesNonZeroOutput()
+        guard encoderHealthy else {
+            throw ASRError.encoderInstantiationFailed(
+                "Nemotron int8 encoder returned all-zero output on a load-time probe — the ANE "
+                    + "program did not instantiate (see CoreML ANEProgramProcessRequestDirect "
+                    + "status=0x12). This is the iPadOS cold-start failure in issue #739; "
+                    + "re-download or update the encoder model."
+            )
+        }
+        // Probe used throwaway inputs; restore clean session state.
+        try resetStates()
+
         logger.info("Nemotron models loaded successfully (\(config.chunkMs)ms chunks).")
     }
 
@@ -149,7 +169,7 @@ public actor StreamingNemotronAsrManager {
     public func loadModels(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         if let configuration {
             self.mlConfiguration = configuration
@@ -167,16 +187,24 @@ public actor StreamingNemotronAsrManager {
             .appendingPathComponent("Models", isDirectory: true)
 
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-        let encoderInt8Path = cacheDir.appendingPathComponent("encoder/\(NemotronEncoder.fileName)")
 
-        if !FileManager.default.fileExists(atPath: encoderInt8Path.path) {
-            logger.info("Downloading Nemotron models to \(modelsBaseDir.path)...")
-            try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir, progressHandler: progressHandler)
-        } else {
-            logger.info("Using cached Nemotron models at \(cacheDir.path)")
+        // Completeness-checked download + purge-and-retry on load failure: a
+        // bare directory-existence gate mistook an interrupted encoder fetch
+        // for a warm cache and bricked loading permanently (issue #819).
+        // `decoder_joint.mlmodelc` and `metadata.json` are optional at load
+        // time, so they are excluded from the validity set.
+        try await ModelHub.loadWithRecovery(
+            repo, directory: modelsBaseDir,
+            requiredFiles: [
+                "encoder/\(NemotronEncoder.fileName)",
+                ModelNames.NemotronStreaming.decoderFile,
+                ModelNames.NemotronStreaming.jointFile,
+                ModelNames.NemotronStreaming.tokenizer,
+            ],
+            progressHandler: progressHandler
+        ) {
+            try await self.loadModels(from: cacheDir)
         }
-
-        try await loadModels(from: cacheDir)
     }
 
     /// Reset all states for a new transcription session
@@ -198,7 +226,7 @@ public actor StreamingNemotronAsrManager {
 
     public func cleanup() async {
         await reset()
-        preprocessor = nil
+        melExtractor = nil
         encoder = nil
         decoder = nil
         joint = nil
@@ -254,7 +282,7 @@ public actor StreamingNemotronAsrManager {
     /// Process audio and return partial transcript
     public func process(audioBuffer: AVAudioPCMBuffer) async throws -> String {
         // Check if models are loaded
-        guard preprocessor != nil, encoder != nil, decoder != nil, joint != nil else {
+        guard melExtractor != nil, encoder != nil, decoder != nil, joint != nil else {
             throw ASRError.notInitialized
         }
 
@@ -277,7 +305,7 @@ public actor StreamingNemotronAsrManager {
     public func finish() async throws -> String {
         // Check if models are loaded
         guard let tokenizer = tokenizer,
-            preprocessor != nil,
+            melExtractor != nil,
             encoder != nil,
             decoder != nil,
             joint != nil
@@ -344,7 +372,7 @@ extension StreamingNemotronAsrManager: StreamingAsrManager {
     }
 
     public func processBufferedAudio() async throws {
-        guard preprocessor != nil, encoder != nil, decoder != nil, joint != nil else {
+        guard melExtractor != nil, encoder != nil, decoder != nil, joint != nil else {
             throw ASRError.notInitialized
         }
 

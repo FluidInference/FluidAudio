@@ -8,7 +8,7 @@ extension StreamingNemotronAsrManager {
 
     /// Process a single audio chunk through the full pipeline
     internal func processChunk(_ samples: [Float]) async throws {
-        guard let preprocessor = preprocessor,
+        guard let melExtractor = melExtractor,
             let encoder = encoder,
             let decoder = decoder,
             let joint = joint,
@@ -24,20 +24,9 @@ extension StreamingNemotronAsrManager {
         // Track decoder state locally to ensure atomicity
         var currentToken = lastToken
 
-        // 1. Preprocessor: audio -> mel spectrogram
-        let audioArray = try createAudioArray(samples)
-        let audioLen = try MLMultiArray(shape: [1], dataType: .int32)
-        audioLen[0] = NSNumber(value: samples.count)
-
-        let preprocInput = try MLDictionaryFeatureProvider(dictionary: [
-            "audio": MLFeatureValue(multiArray: audioArray),
-            "audio_length": MLFeatureValue(multiArray: audioLen),
-        ])
-
-        let preprocOutput = try await preprocessor.prediction(from: preprocInput)
-        guard let chunkMel = preprocOutput.featureValue(for: "mel")?.multiArrayValue else {
-            throw ASRError.processingFailed("Preprocessor failed to produce mel output")
-        }
+        // 1. Native-Swift log-mel front-end (replaces the CoreML preprocessor):
+        //    audio -> raw (unnormalized) log-mel [1, melFeatures, T].
+        let chunkMel = try melExtractor.melSpectrogram(samples: samples)
 
         // 2. Build encoder input: prepend mel_cache (9 frames) + current chunk mel
         let inputMel = try prependMelCache(to: chunkMel)
@@ -198,14 +187,69 @@ extension StreamingNemotronAsrManager {
         processedChunks += 1
     }
 
-    // MARK: - Tensor Utilities
+    // MARK: - Encoder Health Probe
 
-    internal func createAudioArray(_ samples: [Float]) throws -> MLMultiArray {
-        let array = try MLMultiArray(shape: [1, NSNumber(value: samples.count)], dataType: .float32)
-        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
-        ptr.update(from: samples, count: samples.count)
-        return array
+    /// Run one encoder prediction with a non-zero mel probe and report whether
+    /// the encoder produced any non-zero output.
+    ///
+    /// On iPadOS cold starts the int8 encoder's ANE `main` entry point can fail
+    /// to instantiate (logged by CoreML as
+    /// `ANEProgramProcessRequestDirect() Failed with status=0x12`). When that
+    /// happens `prediction` does not throw — it silently returns an all-zero
+    /// `encoded` buffer, so the RNN-T loop only ever sees blanks and the final
+    /// transcript is empty with no error surfaced (issue #739). A single
+    /// non-zero probe distinguishes a working encoder (LayerNorm/bias guarantee
+    /// non-zero output for non-zero input) from a stillborn ANE program, letting
+    /// `loadModels` fail loudly instead of returning empty transcripts.
+    ///
+    /// Uses throwaway local inputs and does not write the encoder's updated
+    /// caches back, so the freshly reset session state is left untouched. The
+    /// probe doubles as a model warm-up.
+    internal func encoderProducesNonZeroOutput() async throws -> Bool {
+        guard let encoder = encoder,
+            let cacheChannel = cacheChannel,
+            let cacheTime = cacheTime,
+            let cacheLen = cacheLen
+        else {
+            throw ASRError.notInitialized
+        }
+
+        // Non-zero mel input ([1, melFeatures, totalMelFrames]) so a healthy
+        // encoder is guaranteed to emit non-zero output. A small ramp avoids a
+        // degenerate constant that could in theory cancel out.
+        let mel = try MLMultiArray(
+            shape: [1, NSNumber(value: config.melFeatures), NSNumber(value: config.totalMelFrames)],
+            dataType: .float32
+        )
+        let melPtr = mel.dataPointer.bindMemory(to: Float.self, capacity: mel.count)
+        for i in 0..<mel.count {
+            melPtr[i] = Float(i % 17) * 0.01 + 0.1
+        }
+
+        let melLen = try MLMultiArray(shape: [1], dataType: .int32)
+        melLen[0] = NSNumber(value: config.totalMelFrames)
+
+        let encoderInput = try MLDictionaryFeatureProvider(dictionary: [
+            "mel": MLFeatureValue(multiArray: mel),
+            "mel_length": MLFeatureValue(multiArray: melLen),
+            "cache_channel": MLFeatureValue(multiArray: cacheChannel),
+            "cache_time": MLFeatureValue(multiArray: cacheTime),
+            "cache_len": MLFeatureValue(multiArray: cacheLen),
+        ])
+
+        let encoderOutput = try await encoder.prediction(from: encoderInput)
+        guard let encoded = encoderOutput.featureValue(for: "encoded")?.multiArrayValue else {
+            throw ASRError.processingFailed("Encoder probe produced no `encoded` output")
+        }
+
+        let outPtr = encoded.dataPointer.bindMemory(to: Float.self, capacity: encoded.count)
+        for i in 0..<encoded.count where outPtr[i] != 0 {
+            return true
+        }
+        return false
     }
+
+    // MARK: - Tensor Utilities
 
     internal func prependMelCache(to chunkMel: MLMultiArray) throws -> MLMultiArray {
         // Prepend cached mel frames (9) to current chunk mel (112) → [1, 128, 121]

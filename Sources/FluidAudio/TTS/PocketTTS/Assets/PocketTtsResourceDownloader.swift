@@ -39,7 +39,7 @@ public enum PocketTtsResourceDownloader {
         directory: URL? = nil,
         precision: PocketTtsPrecision = .fp16,
         placement: PocketTtsModelPlacement = .gpu,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let targetDir = try directory ?? cacheDirectory()
         let modelsDirectory = targetDir.appendingPathComponent(
@@ -77,13 +77,21 @@ public enum PocketTtsResourceDownloader {
                         + "until this file is available; shipped snapshot voices are unaffected."
                 )
             }
+            // The voice-clone reprojection assets are only published for — and
+            // only usable by — the 24-layer packs (English and the 6-layer
+            // non-English packs don't use them, #793). Gating here avoids a
+            // fetch that would 404 on every load for those packs.
+            if language.transformerLayers == 24 {
+                await ensureSpeakerProjWeight(language: language, languageRoot: languageRoot)
+                await tryEnsureEncoderRecoverPinv(repoDir: repoDir)
+            }
             return languageRoot
         }
 
         logger.info(
             "Downloading PocketTTS \(language.rawValue) (\(precision)) language pack from HuggingFace (\(subdir))..."
         )
-        try await DownloadUtils.downloadSubdirectory(
+        try await ModelHub.download(
             .pocketTts,
             subdirectory: subdir,
             to: repoDir,
@@ -112,7 +120,25 @@ public enum PocketTtsResourceDownloader {
             }
         }
 
+        // Voice-clone reprojection assets are only for the 24-layer packs (#793).
+        if language.transformerLayers == 24 {
+            await tryEnsureEncoderRecoverPinv(repoDir: repoDir)
+        }
         return languageRoot
+    }
+
+    /// Best-effort wrapper around `ensureEncoderRecoverPinv` — logs and swallows
+    /// failures so a missing/unreachable reprojection asset never blocks
+    /// synthesis (only non-English live cloning depends on it, #793).
+    private static func tryEnsureEncoderRecoverPinv(repoDir: URL) async {
+        do {
+            try await ensureEncoderRecoverPinv(repoDir: repoDir)
+        } catch {
+            logger.warning(
+                "Failed to fetch \(ModelNames.PocketTTS.encoderRecoverPinvFile): "
+                    + "\(error.localizedDescription). Non-English live voice cloning will not "
+                    + "re-project correctly until it is available; other paths are unaffected.")
+        }
     }
 
     /// Skip filter applied to every remote path the HF lister walks for a
@@ -140,9 +166,77 @@ public enum PocketTtsResourceDownloader {
         return false
     }
 
+    /// Ensure `encoder_recover_pinv.bin` (the shared, language-agnostic
+    /// encoder pseudo-inverse used to re-project cloned voices, #793) is present
+    /// at the repo root. Unlike the per-language `speaker_proj_weight.bin` — which
+    /// rides along with the pack's `constants_bin/` subdirectory download — this
+    /// file lives at the repo root and must be fetched separately.
+    ///
+    /// Best-effort: only live voice cloning for non-English packs needs it, so a
+    /// failed fetch (offline, or before the file lands on HF) must not block
+    /// synthesis with shipped voices.
+    private static func ensureEncoderRecoverPinv(repoDir: URL) async throws {
+        let localURL = repoDir.appendingPathComponent(ModelNames.PocketTTS.encoderRecoverPinvFile)
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            return
+        }
+        try FileManager.default.createDirectory(at: repoDir, withIntermediateDirectories: true)
+        let remoteURL = try ModelRegistry.resolveModel(
+            Repo.pocketTts.remotePath, ModelNames.PocketTTS.encoderRecoverPinvFile)
+        logger.info("Fetching \(ModelNames.PocketTTS.encoderRecoverPinvFile) (voice-clone reprojection)...")
+        let data = try await AssetDownloader.fetchData(
+            from: remoteURL,
+            description: ModelNames.PocketTTS.encoderRecoverPinvFile,
+            logger: logger
+        )
+        try data.write(to: localURL, options: [.atomic])
+        logger.info("Wrote \(ModelNames.PocketTTS.encoderRecoverPinvFile) (\(data.count) bytes)")
+    }
+
+    /// Backfill `constants_bin/speaker_proj_weight.bin` for already-cached packs
+    /// (the pack subdir download is skipped when the models are present, so a
+    /// pack cached before this file was published would otherwise never get it).
+    /// New downloads pick it up via the subdirectory download.
+    ///
+    /// Best-effort and quiet: the file is only published for the packs where
+    /// live cloning works (the `*_24l` variants), so a 404 for English / the
+    /// 6-layer packs is expected and logged at debug, not warning. Only live
+    /// voice cloning consumes it.
+    private static func ensureSpeakerProjWeight(
+        language: PocketTtsLanguage, languageRoot: URL
+    ) async {
+        let constantsDir = languageRoot.appendingPathComponent(ModelNames.PocketTTS.constantsBinDir)
+        let localURL = constantsDir.appendingPathComponent(ModelNames.PocketTTS.speakerProjWeightFile)
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            return
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: constantsDir, withIntermediateDirectories: true)
+            let remotePath =
+                "\(language.repoSubdirectory)/\(ModelNames.PocketTTS.constantsBinDir)/"
+                + ModelNames.PocketTTS.speakerProjWeightFile
+            let remoteURL = try ModelRegistry.resolveModel(Repo.pocketTts.remotePath, remotePath)
+            let data = try await AssetDownloader.fetchData(
+                from: remoteURL,
+                description: "\(ModelNames.PocketTTS.speakerProjWeightFile) (\(language.rawValue))",
+                logger: logger
+            )
+            try data.write(to: localURL, options: [.atomic])
+            logger.info(
+                "Backfilled \(ModelNames.PocketTTS.speakerProjWeightFile) for \(language.rawValue) "
+                    + "(\(data.count) bytes)")
+        } catch {
+            // Expected for English and the 6-layer packs (no published file).
+            logger.debug(
+                "No \(ModelNames.PocketTTS.speakerProjWeightFile) for \(language.rawValue) "
+                    + "(\(error.localizedDescription)); voice cloning there is unaffected or unsupported.")
+        }
+    }
+
     /// Backfill `constants_bin/bos_before_voice.bin` for cached language packs
     /// that were downloaded before the FluidAudio #592 fix. New downloads pick
-    /// it up via `downloadSubdirectory` — this helper exists only to upgrade
+    /// it up via `download(subdirectory:)` — this helper exists only to upgrade
     /// older caches without a full re-download.
     private static func ensureBosBeforeVoice(
         language: PocketTtsLanguage,
@@ -226,7 +320,7 @@ public enum PocketTtsResourceDownloader {
             at: repoDir, withIntermediateDirectories: true)
 
         logger.info("Downloading Mimi encoder for voice cloning...")
-        try await DownloadUtils.downloadSubdirectory(
+        try await ModelHub.download(
             .pocketTts,
             subdirectory: ModelNames.PocketTTS.mimiEncoderFile,
             to: repoDir

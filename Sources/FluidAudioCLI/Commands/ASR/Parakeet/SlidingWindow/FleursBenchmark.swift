@@ -260,7 +260,7 @@ public class FLEURSBenchmark {
         do {
             // List files in the language directory using HuggingFace API (registry-aware with auth)
             let apiURL = try ModelRegistry.apiDatasets(datasetRepo, "tree/main/\(language)")
-            let (listData, _) = try await DownloadUtils.fetchWithAuth(from: apiURL)
+            let (listData, _) = try await ModelHub.fetchWithAuth(from: apiURL)
 
             guard let items = try JSONSerialization.jsonObject(with: listData) as? [[String: Any]] else {
                 throw NSError(
@@ -284,7 +284,7 @@ public class FLEURSBenchmark {
                 if fileName == "\(language).trans.txt" {
                     // Download transcript file
                     let downloadURL = try ModelRegistry.resolveDataset(datasetRepo, itemPath)
-                    let transData = try await DownloadUtils.fetchHuggingFaceFile(
+                    let transData = try await ModelHub.fetchFile(
                         from: downloadURL,
                         description: "\(language) transcript"
                     )
@@ -323,7 +323,7 @@ public class FLEURSBenchmark {
                 let downloadURL = try ModelRegistry.resolveDataset(datasetRepo, audioPath)
 
                 do {
-                    let audioData = try await DownloadUtils.fetchHuggingFaceFile(
+                    let audioData = try await ModelHub.fetchFile(
                         from: downloadURL,
                         description: "\(language)/\(fileName)"
                     )

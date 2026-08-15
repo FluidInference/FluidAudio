@@ -17,7 +17,7 @@ public enum KokoroAneResourceDownloader {
     public static func ensureModels(
         variant: KokoroAneVariant = .english,
         directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let modelsDirectory = try directory ?? defaultModelsDirectory()
         let repo = variant.repo
@@ -38,7 +38,7 @@ public enum KokoroAneResourceDownloader {
 
         if !allPresent {
             logger.info("Downloading laishere Kokoro models (\(variant.rawValue)) from HuggingFace...")
-            try await DownloadUtils.downloadRepo(
+            try await ModelHub.download(
                 repo,
                 to: modelsDirectory,
                 progressHandler: progressHandler
@@ -61,7 +61,7 @@ public enum KokoroAneResourceDownloader {
     @discardableResult
     public static func ensureMandarinG2P(
         repoDirectory: URL,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let g2pDir = repoDirectory.appendingPathComponent(KokoroAneConstants.g2pSubdir)
         if !FileManager.default.fileExists(atPath: g2pDir.path) {
@@ -256,7 +256,7 @@ public enum KokoroAneResourceDownloader {
     /// `G2PModelError.vocabLoadFailed`.
     public static func ensureG2PAssets(
         directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         let modelsDirectory = try directory ?? defaultModelsDirectory()
         let kokoroDir = modelsDirectory.appendingPathComponent(Repo.kokoro.folderName)
@@ -267,7 +267,7 @@ public enum KokoroAneResourceDownloader {
             return
         }
         logger.info("Downloading shared kokoro G2P assets from HuggingFace...")
-        try await DownloadUtils.downloadRepo(
+        try await ModelHub.download(
             .kokoro,
             to: modelsDirectory,
             variant: "g2p-only",

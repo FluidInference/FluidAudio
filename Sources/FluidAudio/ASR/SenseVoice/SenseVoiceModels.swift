@@ -47,21 +47,31 @@ public struct SenseVoiceModels: Sendable {
     ///   `.int8` ~half size on ANE, `.fp32` fallback for non-ANE hardware).
     public static func downloadAndLoad(
         precision: SenseVoiceEncoderPrecision = .fp16,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> SenseVoiceModels {
-        let directory = try await download(precision: precision, progressHandler: progressHandler)
-        return try load(from: directory, precision: precision)
+        let modelsRoot = modelsRootDirectory()
+        let targetDir = modelsRoot.appendingPathComponent(Repo.senseVoiceSmall.folderName, isDirectory: true)
+        // Completeness-checked download + purge-and-retry on load failure —
+        // the same #819 hardening as the streaming ASR managers.
+        return try await ModelHub.loadWithRecovery(
+            .senseVoiceSmall, directory: modelsRoot,
+            requiredFiles: requiredFiles(precision: precision),
+            variant: precision.rawValue,
+            progressHandler: progressHandler
+        ) {
+            try load(from: targetDir, precision: precision)
+        }
     }
 
     /// Download the repo into the shared model cache; returns the model directory.
     ///
     /// `precision` ensures the requested encoder variant is present — a cache that
     /// predates a variant (e.g. fp16-only) re-fetches just the missing file
-    /// (`DownloadUtils.downloadRepo` skips files already on disk).
+    /// (`ModelHub.download` skips files already on disk).
     public static func download(
         precision: SenseVoiceEncoderPrecision = .fp16,
         force: Bool = false,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = modelsRootDirectory()
         let targetDir = modelsRoot.appendingPathComponent(Repo.senseVoiceSmall.folderName, isDirectory: true)
@@ -73,7 +83,7 @@ public struct SenseVoiceModels: Sendable {
         if force { try? FileManager.default.removeItem(at: targetDir) }
 
         logger.info("Downloading SenseVoice models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(
+        try await ModelHub.download(
             .senseVoiceSmall,
             to: modelsRoot,
             variant: precision.rawValue,
@@ -83,16 +93,23 @@ public struct SenseVoiceModels: Sendable {
         return targetDir
     }
 
+    /// `true` when every required artifact is present **and load-ready**:
+    /// compiled bundles must have their root `coremldata.bin` and no
+    /// `*.partial` download staging file, not merely exist (issue #819 —
+    /// a bare existence check mistakes an interrupted download for a
+    /// valid cache).
     public static func modelsExist(
         at directory: URL, precision: SenseVoiceEncoderPrecision = .fp16
     ) -> Bool {
-        let fm = FileManager.default
-        let required = [
+        ModelCache.isCacheComplete(at: directory, requiredFiles: requiredFiles(precision: precision))
+    }
+
+    private static func requiredFiles(precision: SenseVoiceEncoderPrecision) -> Set<String> {
+        [
             ModelNames.SenseVoice.preprocessorFile,
             precision.modelName + ".mlmodelc",
             ModelNames.SenseVoice.vocabularyFile,
         ]
-        return required.allSatisfy { fm.fileExists(atPath: directory.appendingPathComponent($0).path) }
     }
 
     /// Load models from a directory that already contains the artifacts.

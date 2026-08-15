@@ -46,7 +46,9 @@ final class ModelNamesTests: XCTestCase {
     }
 
     func testModelFileExtensions() {
-        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin"]
+        // `.txt` covers vocab/token text files (e.g. LuxTTS `tokens.txt`),
+        // which are legitimate model artifacts.
+        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin", ".txt"]
         let validDirectories: Set<String> = ["constants_bin"]
 
         for repo in Repo.allCases {
@@ -74,7 +76,7 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertTrue(offlineFp16.contains(ModelNames.ParakeetUnified.offlineEncoderFp16File))
         // ...but the streaming encoder is context-specific ([L,C,R] tier), so it
         // is NOT in the base set — the streaming manager adds its exact encoder
-        // via downloadRepo(additionalModelNames:), avoiding a default over-fetch.
+        // via ModelHub.download(additionalModelNames:), avoiding a default over-fetch.
         for set in [streaming, streamingFp16] {
             XCTAssertEqual(set.filter { $0.contains("encoder") }.count, 0)
         }
@@ -117,6 +119,38 @@ final class ModelNamesTests: XCTestCase {
             required.count, ModelNames.Sortformer.Variant.allCases.count,
             "Required models count should match variant count"
         )
+    }
+
+    func testSortformerPrecisionSubdirectories() {
+        XCTAssertEqual(ModelNames.Sortformer.ModelPrecision.fp16.subdirectory, "v3/fp16")
+        XCTAssertEqual(ModelNames.Sortformer.ModelPrecision.palettized.subdirectory, "v3/palettized")
+        // Default subdirectory must track the fp16 precision.
+        XCTAssertEqual(
+            ModelNames.Sortformer.modelsSubdirectory, ModelNames.Sortformer.ModelPrecision.fp16.subdirectory)
+    }
+
+    func testSortformerBundleHonorsPrecision() {
+        for variant in ModelNames.Sortformer.Variant.allCases {
+            let fp16 = ModelNames.Sortformer.bundle(for: variant, precision: .fp16)
+            let palettized = ModelNames.Sortformer.bundle(for: variant, precision: .palettized)
+            XCTAssertTrue(fp16.hasPrefix("v3/fp16/"), "fp16 bundle '\(fp16)' should live under v3/fp16/")
+            XCTAssertTrue(
+                palettized.hasPrefix("v3/palettized/"),
+                "palettized bundle '\(palettized)' should live under v3/palettized/")
+            // Default (no precision) bundle must equal the fp16 path.
+            XCTAssertEqual(ModelNames.Sortformer.bundle(for: variant), fp16)
+        }
+    }
+
+    func testSortformerConfigPrecisionDrivesBundle() {
+        var config = SortformerConfig.highContextV2_1
+        XCTAssertEqual(config.precision, .fp16, "precision should default to fp16")
+        XCTAssertEqual(ModelNames.Sortformer.bundle(for: config), config.modelVariant?.fileName(precision: .fp16))
+
+        config.precision = .palettized
+        XCTAssertEqual(
+            ModelNames.Sortformer.bundle(for: config), config.modelVariant?.fileName(precision: .palettized),
+            "Flipping config.precision must redirect the bundle to the palettized set")
     }
 
     // MARK: - Specific Model Names

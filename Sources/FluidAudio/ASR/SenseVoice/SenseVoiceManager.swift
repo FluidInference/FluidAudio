@@ -27,7 +27,7 @@ public actor SenseVoiceManager {
     /// Load models from the default cache (downloading if needed), then build a manager.
     public static func load(
         precision: SenseVoiceEncoderPrecision = .fp16,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> SenseVoiceManager {
         let models = try await SenseVoiceModels.downloadAndLoad(
             precision: precision, progressHandler: progressHandler)

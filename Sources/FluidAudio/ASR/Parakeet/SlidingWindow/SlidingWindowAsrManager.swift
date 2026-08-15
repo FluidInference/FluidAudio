@@ -31,6 +31,10 @@ public actor SlidingWindowAsrManager {
     private var segmentIndex: Int = 0
     private var lastProcessedFrame: Int = 0
     private var accumulatedTokens: [Int] = []
+    // Global encoder-frame timestamp for each accumulated token (1:1 with
+    // accumulatedTokens). Lets per-chunk dedup require temporal adjacency so a
+    // coincidental subword-prefix match between far-apart words isn't dropped (#787).
+    private var accumulatedTokenTimestamps: [Int] = []
 
     // Raw sample buffer for sliding-window assembly (absolute indexing)
     private var sampleBuffer: [Float] = []
@@ -130,7 +134,7 @@ public actor SlidingWindowAsrManager {
     ///   - progressHandler: Optional download progress callback
     public func loadModels(
         to directory: URL? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         logger.info("Loading ASR models...")
         let models = try await AsrModels.downloadAndLoad(
@@ -180,6 +184,7 @@ public actor SlidingWindowAsrManager {
         segmentIndex = 0
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
+        accumulatedTokenTimestamps.removeAll()
         failedWindowCount = 0
         lastWindowError = nil
 
@@ -314,6 +319,7 @@ public actor SlidingWindowAsrManager {
         segmentIndex = 0
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
+        accumulatedTokenTimestamps.removeAll()
 
         logger.info("SlidingWindowAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -445,7 +451,10 @@ public actor SlidingWindowAsrManager {
                     windowSamples,
                     decoderState: &state,
                     previousTokens: accumulatedTokens,
-                    isLastChunk: isLastChunk
+                    previousTokenTimestamps: accumulatedTokenTimestamps,
+                    globalFrameOffset: windowStartSample / ASRConstants.samplesPerEncoderFrame,
+                    isLastChunk: isLastChunk,
+                    language: config.language
                 )
             else { return }
 
@@ -469,13 +478,25 @@ public actor SlidingWindowAsrManager {
                     timestamps: adjustedTimestamps,
                     confidences: confidences,
                     encoderSequenceLength: 0,
-                    audioSamples: windowSamples,
+                    audioSampleCount: windowSamples.count,
                     processingTime: processingTime
                 )
             else { return }
 
             // Update state only after all required async calls complete successfully
             accumulatedTokens.append(contentsOf: tokens)
+            // Keep global timestamps aligned 1:1 with accumulatedTokens for #787 dedup.
+            // `tokens`/`adjustedTimestamps` are already post-dedup and same length; guard
+            // against any mismatch so the arrays never drift out of alignment.
+            if adjustedTimestamps.count == tokens.count {
+                accumulatedTokenTimestamps.append(contentsOf: adjustedTimestamps)
+            } else {
+                accumulatedTokenTimestamps.append(contentsOf: adjustedTimestamps.prefix(tokens.count))
+                if adjustedTimestamps.count < tokens.count {
+                    accumulatedTokenTimestamps.append(
+                        contentsOf: Array(repeating: -1, count: tokens.count - adjustedTimestamps.count))
+                }
+            }
             lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
             segmentIndex += 1
             processedChunks += 1
@@ -497,7 +518,7 @@ public actor SlidingWindowAsrManager {
                     timestamps: timestamps,  // Original chunk-local timestamps (not adjusted)
                     confidences: confidences,
                     encoderSequenceLength: 0,
-                    audioSamples: windowSamples,
+                    audioSampleCount: windowSamples.count,
                     processingTime: processingTime
                 )
             {
@@ -727,6 +748,16 @@ public struct SlidingWindowAsrConfig: Sendable {
     /// `AsrManager`'s internal blank-token auto-adaptation.
     public let tdtConfig: TdtConfig?
 
+    /// Optional language hint for script-aware token filtering (v3 joint decoder only).
+    ///
+    /// Streaming windows carry much less acoustic context than offline chunks, which
+    /// makes the multilingual v3 model prone to emitting wrong-script tokens (e.g.
+    /// Cyrillic while transcribing German — see issue #512). Batch transcription
+    /// already accepts a `language` hint via `AsrManager.transcribe(_:language:)`;
+    /// this extends the same filter to the sliding-window path. Ignored by v2 and
+    /// tdtJa models (same behavior as the batch API).
+    public let language: Language?
+
     /// Default configuration using the proven 11+2+2 window layout.
     /// The assembled window (left + chunk + right) must fit the model's fixed
     /// 15 s input (`ASRConstants.maxModelSamples`); 2 + 11 + 2 = 15 s fits exactly.
@@ -758,7 +789,8 @@ public struct SlidingWindowAsrConfig: Sendable {
         rightContextSeconds: TimeInterval = 2.0,
         minContextForConfirmation: TimeInterval = 10.0,
         confirmationThreshold: Double = 0.85,
-        tdtConfig: TdtConfig? = nil
+        tdtConfig: TdtConfig? = nil,
+        language: Language? = nil
     ) {
         self.chunkSeconds = chunkSeconds
         self.hypothesisChunkSeconds = hypothesisChunkSeconds
@@ -767,6 +799,7 @@ public struct SlidingWindowAsrConfig: Sendable {
         self.minContextForConfirmation = minContextForConfirmation
         self.confirmationThreshold = confirmationThreshold
         self.tdtConfig = tdtConfig
+        self.language = language
     }
 
     /// Returns a copy of this config with the given TDT configuration applied.
@@ -778,7 +811,22 @@ public struct SlidingWindowAsrConfig: Sendable {
             rightContextSeconds: rightContextSeconds,
             minContextForConfirmation: minContextForConfirmation,
             confirmationThreshold: confirmationThreshold,
-            tdtConfig: tdtConfig
+            tdtConfig: tdtConfig,
+            language: language
+        )
+    }
+
+    /// Returns a copy of this config with the given language hint applied.
+    public func applying(language: Language?) -> SlidingWindowAsrConfig {
+        SlidingWindowAsrConfig(
+            chunkSeconds: chunkSeconds,
+            hypothesisChunkSeconds: hypothesisChunkSeconds,
+            leftContextSeconds: leftContextSeconds,
+            rightContextSeconds: rightContextSeconds,
+            minContextForConfirmation: minContextForConfirmation,
+            confirmationThreshold: confirmationThreshold,
+            tdtConfig: tdtConfig,
+            language: language
         )
     }
 

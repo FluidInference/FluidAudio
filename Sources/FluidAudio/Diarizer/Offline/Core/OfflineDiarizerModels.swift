@@ -71,21 +71,20 @@ public struct OfflineDiarizerModels: Sendable {
         MLModelConfigurationUtils.defaultModelsDirectory()
     }
 
-    private static func defaultConfiguration() -> MLModelConfiguration {
-        MLModelConfigurationUtils.defaultConfiguration(computeUnits: .all)
-    }
-
     public static func load(
         from directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> OfflineDiarizerModels {
         let modelsDirectory = directory ?? defaultModelsDirectory()
         let logger = Self.logger
         logger.info("Loading offline diarization models from \(modelsDirectory.path)")
 
         let loadStart = Date()
-        let inferenceComputeUnits: MLComputeUnits = .all
+        // Honor the caller's requested compute units for the segmentation/embedding/PLDA
+        // models; default to `.all` when no configuration is supplied. The fbank model
+        // stays `.cpuOnly` regardless (below) since it runs faster on CPU.
+        let inferenceComputeUnits: MLComputeUnits = configuration?.computeUnits ?? .all
 
         let segmentationAndEmbeddingNames: [String] = [
             ModelNames.OfflineDiarizer.segmentationPath,
@@ -93,7 +92,7 @@ public struct OfflineDiarizerModels: Sendable {
             ModelNames.OfflineDiarizer.pldaRhoPath,
         ]
 
-        let segmentationEmbeddingModels = try await DownloadUtils.loadModels(
+        let segmentationEmbeddingModels = try await ModelHub.loadModels(
             .diarizer,
             modelNames: segmentationAndEmbeddingNames,
             directory: modelsDirectory,
@@ -113,7 +112,7 @@ public struct OfflineDiarizerModels: Sendable {
         }
 
         let fbankComputeUnits: MLComputeUnits = .cpuOnly
-        let fbankModels = try await DownloadUtils.loadModels(
+        let fbankModels = try await ModelHub.loadModels(
             .diarizer,
             modelNames: [ModelNames.OfflineDiarizer.fbankPath],
             directory: modelsDirectory,

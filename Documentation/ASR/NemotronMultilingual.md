@@ -10,7 +10,7 @@ FluidAudio supports NVIDIA's `nemotron-asr-streaming-multilingual-0.6b` for real
 | Architecture | FastConformer Cache-Aware RNNT **with Prompt** |
 | Parameters | 0.6B |
 | Languages | ~40 (en, es, de, fr, it, pt, ar, ja, ko, zh-CN, ru, hi, vi, …) |
-| Default Latency Modes | 320 ms · 560 ms · 1120 ms (each is a separate CoreML build) |
+| Default Latency Modes | 560 ms · 1120 ms · 2240 ms (each is a separate CoreML build) |
 | Mel Features | 128 bins, 16 kHz |
 | Vocab Size | 13,087 + 1 blank |
 | Hardware | Apple Silicon only (int8 encoder is ANE-targeted) |
@@ -95,33 +95,54 @@ Scoring follows the [HF Open ASR Leaderboard](https://github.com/huggingface/ope
 - **Non-English Latin** (fr, de, es, it, pt, …) → `BasicTextNormalizer(remove_diacritics=False)` plus an inverse text normalization (ITN) pass: digit runs in the reference are spelled out via `NumberFormatter.spellOut` for the language's locale before WER computation. Required because the model emits "mille neuf cent soixante-seize" while FLEURS keeps "1976" in the reference. Thousands separators handled across all five Unicode space variants FLEURS actually uses (U+0020/00A0/2007/2009/202F). Our `TextNormalizer.basicNormalize(_, spellOutLocale:)`.
 - **CJK** (ja, ko, zh, th) → character-level edit rate after whitespace stripping (segmentation-free). Reported in the "WER" column by community convention.
 
-### Chunk size sweep (FLEURS test split, full data)
+### Chunk size sweep (FLEURS full test split)
 
-All three builds use `att_context_size=[56,0]` (NVIDIA's lowest-latency mode); they differ only in `chunk_mel_frames` (32 / 56 / 112 → 320 / 560 / 1120 ms processing chunks). NVIDIA's published FLEURS numbers are also at `[56,0]`, so the comparison is architecturally apples-to-apples.
+Re-measured 2026-06-28 with the **native-Swift mel front-end** (`NemotronMelExtractor`;
+no CoreML preprocessor — see issue #739) over the full `google/fleurs` test splits. All
+builds use `att_context_size=[56,0]`; they differ only in `chunk_mel_frames` → processing
+chunk size. The shipped tiers are now **560 / 1120 / 2240 ms** (the earlier 320 ms tier was
+dropped, 2240 ms added). The per-language vocab-pruned ship and the full multilingual ship
+score identically (en_us @ 2240 ms = 8.72 % on both), so the table uses the full ship.
 
-| Language | 320 ms | 560 ms | 1120 ms | NVIDIA ([56,0]) | Δ (1120 vs NVIDIA) | n   |
-|----------|-------:|-------:|--------:|----------------:|-------------------:|----:|
-| en_us    |  17.5  |  12.1  |   12.0  |         11.35   |             +0.65  | 647 |
-| fr_fr    |  16.4  |  13.9  |   13.8  |         13.44   |             +0.36  | 676 |
-| de_de    |  17.8  |  14.9  |   13.6  |           —     |               —    | 862 |
-| es_419   |   8.6  |   7.4  |    7.4  |          8.69   |             −1.29  | 908 |
-| ja_jp    |  21.9  |  18.4  |   17.4  |           —     |               —    | 650 |
-| it_it    |   9.8  |   7.9  |    7.4  |          7.33   |             +0.07  | 865 |
-| pt_br    |  13.4  |  10.0  |    8.4  |          8.99   |             −0.59  | 919 |
-| **AVG**  |**15.0**|**12.1**|**11.4** |                 |                    |     |
-| RTFx     |   8.6  |  16.8  |   22.0  |                 |                    |     |
+| Language | 560 ms | 1120 ms | 2240 ms | NVIDIA ([56,0]) | n   |
+|----------|-------:|--------:|--------:|----------------:|----:|
+| en_us    |  9.05  |   8.73  |   8.72  |         11.35   | 647 |
+| fr_fr    |  9.80  |   9.44  |   9.36  |         13.44   | 676 |
+| de_de    | 10.61  |  10.01  |   9.96  |           —     | 862 |
+| es_419   |  4.85  |   4.75  |   4.73  |          8.69   | 908 |
+| ja_jp    | 14.27  |  13.79  |  13.78  |           —     | 650 |
+| it_it    |  5.40  |   5.43  |   5.39  |          7.33   | 865 |
+| pt_br    |  6.38  |   6.16  |   6.19  |          8.99   | 919 |
+| **AVG**  |**8.62**|**8.33** |**8.30** |                 |     |
+| agg RTFx | 40.5x  | 66.0x   |  73.1x  |                 |     |
 
-WER% for spaced scripts, CER% for ja_jp (segmentation-free). Full `google/fleurs` test splits (en=647, fr=676, de=862, es=908, ja=650, it=865, pt=919). The "Δ (1120 vs NVIDIA)" column compares our highest-accuracy build against NVIDIA's published number for the same `[56,0]` attention mode.
+WER% for spaced scripts, CER% for ja_jp (segmentation-free, whitespace-stripped). Same
+normalizer pipeline as the row above (HF Open-ASR-Leaderboard convention). Aggregate RTFx
+is total audio ÷ total processing across all 7 languages, end-to-end single-stream on Apple
+Silicon (machine/load-dependent — treat the relative ordering, not the absolute, as meaningful).
 
-**All 5 published languages are within ~0.7 pp of NVIDIA at 1120 ms.** es-419 and pt-br actually beat the reference (−1.29 and −0.59 pp respectively); en, fr, it are +0.65 / +0.36 / +0.07. At 560 ms (the recommended low-latency build) all 5 are within ~1 pp; es-419 still beats NVIDIA by −1.29 pp.
+**Accuracy improves monotonically with chunk size** and meets-or-beats NVIDIA's published
+`[56,0]` numbers on all five published languages (at 2240 ms: en −2.6, fr −4.1, es −4.0,
+it −1.9, pt −2.8 pp). These numbers are ~2–4 pp better than the prior version of this table;
+the gain comes from model / decode-path / normalizer updates since it was written — **not**
+the Swift mel port, which is numerically parity to the removed CoreML preprocessor
+(max |Δ| ≈ 9e-3 vs NeMo PyTorch, confirmed at conversion time). Cross-comparison to NVIDIA is
+sensitive to normalization and should be read as indicative.
 
-**320 ms shows boundary effects on English and accent-heavy languages.** en_us jumps from 12.0 → 17.5 (+5.5 pp) and pt_br from 8.4 → 13.4 (+5.0 pp) when dropping from 1120 ms to 320 ms. 560 ms recovers most of the loss (<1.6 pp from 1120 ms on every language). If you need low latency, ship 560 ms; only use 320 ms if you absolutely need sub-half-second response and can tolerate the English regression.
+Reproduce (one run per tier):
+
+```bash
+swift run -c release fluidaudiocli nemotron-multilingual-benchmark \
+    --model-dir <multilingual ship dir> \
+    --languages en_us,fr_fr,de_de,es_419,ja_jp,it_it,pt_br \
+    --samples all --chunk-ms <560|1120|2240> --output results.json
+```
 
 ### Caveats
 
 - **`MLComputeUnits` matters a lot.** Default `.all` routes the int8 encoder to GPU and runs ~10× slower than ANE. The manager pins `.cpuAndNeuralEngine` automatically; do not override unless you have a reason.
 - **int8 vs fp16 is a wash.** Average WER is identical at all three chunk sizes; per-language drift is within ±1 pp. Ship int8 for the 50% size win and ANE residency.
-- **Two independent latency axes.** NVIDIA's published modes (`att_context_size = [56,0] / [56,3] / [56,6] / [56,13]` → ~80 / 320 / 560 / 1120 ms architectural lookahead) control right-context inside the encoder. Our `320 / 560 / 1120 ms` build labels refer to `chunk_mel_frames` (processing chunk size), not lookahead. All FluidAudio builds currently ship `[56,0]` (no lookahead).
+- **Two independent latency axes.** NVIDIA's published modes (`att_context_size = [56,0] / [56,3] / [56,6] / [56,13]` → ~80 / 320 / 560 / 1120 ms architectural lookahead) control right-context inside the encoder. Our `560 / 1120 / 2240 ms` build labels refer to `chunk_mel_frames` (processing chunk size), not lookahead. All FluidAudio builds currently ship `[56,0]` (no lookahead).
 - **CJK languages** use character-level edit rate as the "WER" field by convention; whitespace tokenization is meaningless for ja/ko/zh/th.
 - **Punctuation density drops at small chunk sizes** ([#687](https://github.com/FluidInference/FluidAudio/issues/687)). On long continuous speech the 560 ms build starts punctuating normally, then commas/periods become increasingly sparse as the session continues; 1120 ms and 2240 ms retain noticeably more punctuation on the same audio, and a session reset restores it. The words themselves are unaffected (WER-neutral) — only punctuation marks thin out. Cause is model-side: shorter chunks give the encoder less right context at sentence boundaries than the published builds' `att_context_size` assumes, and greedy RNN-T decoding compounds the miss over the session. If punctuation matters for your use case, ship 1120 ms or larger, or segment long streams (e.g. reset on VAD silence).
 

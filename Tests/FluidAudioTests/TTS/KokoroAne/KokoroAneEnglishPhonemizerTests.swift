@@ -22,10 +22,26 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         "hello": ["h", "ə", "l", "ˈ", "O"],
         "there's": ["ð", "ɛ", "ɹ", "z"],
         "world": ["w", "ˈ", "ɜ", "ɹ", "l", "d"],
+        // Lowercase pronoun must stay the weak `ʌs` shape (issue #710).
+        "us": ["ˌ", "ʌ", "s"],
     ]
 
+    /// Mirrors the real `us_lexicon_cache.json`: the blended `AI`/`US`
+    /// shapes the #710 overrides bypass, the per-letter names the spell-out
+    /// reads, and known acronyms that must stay lexicon-backed.
     private let caseSensitive: [String: [String]] = [
-        "AI": ["ˈ", "A", "ˈ", "I"]
+        "AI": ["ˈ", "A", "ˌ", "I"],
+        "US": ["ˌ", "ʌ", "s"],
+        "A": ["ˈ", "A"],
+        "I": ["ˈ", "I"],
+        "U": ["j", "ˈ", "u"],
+        "S": ["ˈ", "ɛ", "s"],
+        "F": ["ˈ", "ɛ", "f"],
+        "B": ["b", "ˈ", "i"],
+        "T": ["t", "ˈ", "i"],
+        "P": ["p", "ˈ", "i"],
+        "NASA": ["n", "ˈ", "æ", "s", "ə"],
+        "OK": ["ˌ", "O", "k", "ˈ", "A"],
     ]
 
     /// Punctuation present in the real `ANE/vocab.json`.
@@ -77,9 +93,85 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
 
     // MARK: - Resolution order
 
-    func testCaseSensitiveLexiconWinsForAbbreviations() async throws {
+    func testCaseSensitiveLexiconWinsForProperNouns() async throws {
+        // `NASA` is a lexicon-backed acronym, not spelled out.
+        let result = try await makePhonemizer().phonemize("NASA") { _ in nil }
+        XCTAssertEqual(result, "nˈæsə")
+    }
+
+    // MARK: - Letter-name initialisms (issue #710)
+
+    func testAIOverrideSpellsLetterNamesNotBlendedShape() async throws {
+        // `AI` bypasses the blended `ˈAˌI` lexicon entry and reads `A I`.
         let result = try await makePhonemizer().phonemize("AI") { _ in nil }
-        XCTAssertEqual(result, "ˈAˈI")
+        XCTAssertEqual(result, "ˈA ˈI")
+    }
+
+    func testUSOverrideSpellsLetterNamesNotPronoun() async throws {
+        // Uppercase `US` reads `U S`, not the lowercase pronoun `ʌs`.
+        let result = try await makePhonemizer().phonemize("US") { _ in nil }
+        XCTAssertEqual(result, "jˈu ˈɛs")
+    }
+
+    func testLowercaseUsStaysPronoun() async throws {
+        // The override only matches the exact uppercase spelling.
+        let result = try await makePhonemizer().phonemize("us") { _ in nil }
+        XCTAssertEqual(result, "ˌʌs")
+    }
+
+    func testUnknownAllCapsInitialismSpelledAsLetterNames() async throws {
+        // `FBI`/`ATP` miss the lexicon and spell out instead of reaching G2P.
+        let recorder = FallbackRecorder()
+        let fbi = try await makePhonemizer().phonemize("FBI") { await recorder.g2p($0) }
+        XCTAssertEqual(fbi, "ˈɛf bˈi ˈI")
+        let atp = try await makePhonemizer().phonemize("ATP") { await recorder.g2p($0) }
+        XCTAssertEqual(atp, "ˈA tˈi pˈi")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty, "initialisms must not reach BART G2P")
+    }
+
+    func testKnownAcronymStaysLexiconBackedNotSpelled() async throws {
+        // `OK` is a lexicon hit (2-5 all-caps) — it keeps its bundled shape
+        // rather than spelling `O K`.
+        let result = try await makePhonemizer().phonemize("OK") { _ in nil }
+        XCTAssertEqual(result, "ˌOkˈA")
+    }
+
+    func testInitialismSpellOutFallsThroughToG2PWithoutLetterEntries() async throws {
+        // G2P-only degraded path: no per-letter lexicon entries, so the
+        // all-caps token must reach the fallback rather than emit a partial.
+        let phonemizer = KokoroAneEnglishPhonemizer(allowedPunctuation: punctuation)
+        let recorder = FallbackRecorder()
+        let result = try await phonemizer.phonemize("FBI") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "<g2p:fbi>")
+        let recorded = await recorder.words
+        XCTAssertEqual(recorded, ["fbi"])
+    }
+
+    func testOverrideFallsBackToLexiconWhenLettersMissing() async throws {
+        // Degraded lexicon: `US` is present but the per-letter entries are
+        // not, so the override can't spell it and falls through to the
+        // bundled shape (logged, never silently dropped or sent to G2P).
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            caseSensitiveWordToPhonemes: ["US": ["ˌ", "ʌ", "s"]],
+            allowedPunctuation: punctuation
+        )
+        let recorder = FallbackRecorder()
+        let result = try await phonemizer.phonemize("US") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "ˌʌs")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty, "override fall-through must use the lexicon, not G2P")
+    }
+
+    func testLongAllCapsWordIsNotSpelledButReachesG2P() async throws {
+        // Outside the 2-5 length range → not an initialism; reaches G2P
+        // instead of being spelled letter by letter. (Candidate boundaries
+        // are unit-tested in EnglishInitialismsTests.)
+        let recorder = FallbackRecorder()
+        let result = try await makePhonemizer().phonemize("ABCDEF") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "<g2p:abcdef>")
+        let recorded = await recorder.words
+        XCTAssertEqual(recorded, ["abcdef"])
     }
 
     func testOOVWordFallsBackToG2PWithNormalizedSpelling() async throws {
@@ -198,6 +290,66 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         } catch {
             XCTFail("unexpected error: \(error)")
         }
+    }
+
+    // MARK: - Smart apostrophes (issue #774)
+
+    func testSmartApostropheContractionStaysIntact() async throws {
+        let recorder = FallbackRecorder()
+        // U+2019 curly apostrophe must fold to ASCII so `we’re` hits the
+        // lexicon intact instead of splitting into `we` + `re`.
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            wordToPhonemes: ["we're": ["w", "ɪ", "ɹ"]],
+            allowedPunctuation: punctuation
+        )
+        let result = try await phonemizer.phonemize("we\u{2019}re here") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "wɪɹ <g2p:here>")
+        let recorded = await recorder.words
+        XCTAssertFalse(recorded.contains("re"), "contraction must not split into a standalone `re`")
+    }
+
+    func testNormalizeApostrophesFoldsTypographicForms() {
+        XCTAssertEqual(KokoroAneEnglishPhonemizer.normalizeApostrophes("we\u{2019}re"), "we're")
+        XCTAssertEqual(KokoroAneEnglishPhonemizer.normalizeApostrophes("\u{2018}tis"), "'tis")
+        XCTAssertEqual(KokoroAneEnglishPhonemizer.normalizeApostrophes("we\u{02BC}re"), "we're")
+        // No smart apostrophe → unchanged.
+        XCTAssertEqual(KokoroAneEnglishPhonemizer.normalizeApostrophes("plain"), "plain")
+    }
+
+    // MARK: - Hyphenated words (issue #775)
+
+    func testHyphenatedLexiconKeyResolvesWithHyphenIntact() async throws {
+        let recorder = FallbackRecorder()
+        // The Misaki cache stores `twenty-one` WITH the hyphen; the lookup must
+        // try the raw lowercased token before `normalizeKey` strips it.
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            wordToPhonemes: ["twenty-one": ["t", "w", "ˈ", "ɛ", "n", "t", "i", "w", "ˈ", "ʌ", "n"]],
+            allowedPunctuation: punctuation
+        )
+        let result = try await phonemizer.phonemize("twenty-one") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "twˈɛntiwˈʌn")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty, "should hit the lexicon, not G2P")
+    }
+
+    func testHyphenatedCompoundMissSplitsIntoParts() async throws {
+        let recorder = FallbackRecorder()
+        // `tales-to-amaze` isn't a lexicon entry; each part resolves separately
+        // (`to` via lexicon, `tales`/`amaze` via G2P) instead of gluing into
+        // `talestoamaze`.
+        let result = try await makePhonemizer().phonemize("tales-to-amaze") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "<g2p:tales> tu <g2p:amaze>")
+        let recorded = await recorder.words
+        XCTAssertEqual(recorded, ["tales", "amaze"])
+    }
+
+    func testHyphenatedCompoundFallsBackToWholeWordWhenPartUnresolved() async throws {
+        // If any part can't be resolved, the compound aborts and the whole
+        // glued token goes to G2P — no partial output.
+        let result = try await makePhonemizer().phonemize("go-zzz") { word in
+            word == "zzz" ? nil : ["<g2p:\(word)>"]
+        }
+        XCTAssertEqual(result, "<g2p:gozzz>")
     }
 
     // MARK: - Without lexicon (pre-#691 behavior preserved)

@@ -226,6 +226,76 @@ struct OfflineEmbeddingExtractor {
         )
     }
 
+    /// Extract a single raw 256-dim embedding over an exact time span of the audio.
+    ///
+    /// Used by span re-embedding post-passes (zero-vote re-embed; the fork's
+    /// short-segment relabel): the span's samples are placed at the
+    /// start of a zero-padded model window and an all-active weight mask covering only the
+    /// span's frames is applied, so the embedding reflects the span's speaker exclusively
+    /// (neighboring audio never leaks in through the mask).
+    ///
+    /// - Parameters:
+    ///   - audioSource: Full-session audio source (same one used by the main pipeline).
+    ///   - startSeconds: Span start, in seconds.
+    ///   - endSeconds: Span end, in seconds. Spans longer than one model window are
+    ///     truncated to the window duration.
+    /// - Returns: Raw embedding vector (not L2-normalized).
+    func embedSpan(
+        audioSource: AudioSampleSource,
+        startSeconds: Double,
+        endSeconds: Double
+    ) throws -> [Float] {
+        let sampleRate = Double(config.sampleRate)
+        let startSample = max(0, Int((startSeconds * sampleRate).rounded()))
+        let endSample = min(audioSource.sampleCount, Int((endSeconds * sampleRate).rounded()))
+        let spanLength = min(endSample - startSample, config.samplesPerWindow)
+        guard spanLength > 0 else {
+            throw OfflineDiarizationError.processingFailed(
+                "embedSpan: empty span [\(startSeconds)s, \(endSeconds)s)"
+            )
+        }
+
+        var buffer = [Float](repeating: 0, count: config.samplesPerWindow)
+        try buffer.withUnsafeMutableBufferPointer { pointer in
+            guard let baseAddress = pointer.baseAddress else {
+                throw OfflineDiarizationError.processingFailed(
+                    "embedSpan: failed to access span buffer"
+                )
+            }
+            try audioSource.copySamples(
+                into: baseAddress,
+                offset: startSample,
+                count: spanLength
+            )
+        }
+
+        let fbankInput = try buffer.withUnsafeBufferPointer { pointer -> MLMultiArray in
+            guard let baseAddress = pointer.baseAddress else {
+                throw OfflineDiarizationError.processingFailed("embedSpan: failed to access span buffer")
+            }
+            return try prepareFbankInput(chunkPointer: baseAddress, length: spanLength)
+        }
+        let fbankFeatures = try runFbankModel(audioArray: fbankInput)
+
+        // All-active mask over exactly the frames covering the span; zero elsewhere so the
+        // zero-padded tail of the window contributes nothing to the pooled embedding.
+        let spanFraction = Double(spanLength) / Double(config.samplesPerWindow)
+        let activeFrames = max(
+            1,
+            min(weightFrameCount, Int((spanFraction * Double(weightFrameCount)).rounded()))
+        )
+        var weights = [Float](repeating: 0, count: weightFrameCount)
+        for frame in 0..<activeFrames {
+            weights[frame] = 1
+        }
+        let weightsArray = try prepareWeightsInput(weights: weights)
+
+        return try runEmbeddingModel(
+            fbankFeatures: fbankFeatures,
+            weightsArray: weightsArray
+        )
+    }
+
     func extractEmbeddings<S: AsyncSequence>(
         audioSource: AudioSampleSource,
         segmentationStream: S

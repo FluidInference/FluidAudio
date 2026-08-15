@@ -33,7 +33,7 @@ public final class AudioMelSpectrogram {
     private let winLength: Int  // window_size * sample_rate
     private let fMin: Float = 0.0
     private let fMax: Float  // sample_rate / 2
-    private let preemph: Float  // NeMo preemphasis coefficient
+    internal let preemph: Float  // NeMo preemphasis coefficient
     private let logFloor: Float
     private let logFloorMode: LogFloorMode
     private let padValue: Float = 0

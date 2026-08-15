@@ -59,7 +59,7 @@ public enum AssetDownloader {
 
     public static func ensure(
         _ descriptor: Descriptor,
-        session: URLSession = DownloadUtils.sharedSession,
+        session: URLSession = ModelHub.session,
         logger: AppLogger = AppLogger(category: "AssetDownloader")
     ) async throws -> URL {
         if descriptor.skipIfExists,
@@ -99,7 +99,7 @@ public enum AssetDownloader {
     public static func fetchData(
         from remoteURL: URL,
         description: String,
-        session: URLSession = DownloadUtils.sharedSession,
+        session: URLSession = ModelHub.session,
         logger: AppLogger = AppLogger(category: "AssetDownloader")
     ) async throws -> Data {
         logger.debug("Fetching \(description) from \(remoteURL.absoluteString)")

@@ -156,11 +156,59 @@ public actor StyleTTS2Manager {
         guard let phonemizer = phonemizer else {
             throw StyleTTS2Error.notInitialized
         }
-        let tokenIds = try await phonemizer.encode(text)
-        return try await synthesize(
-            tokenIds: tokenIds,
+        let ipa = try await phonemizer.phonemize(text)
+
+        // High-level text API owns chunking: if the phonemes won't fit the
+        // largest bert/sampler bucket, split at whitespace / pause
+        // punctuation and synthesize each chunk against the same reference,
+        // instead of throwing `textTooLong` (#712). The low-level `ipa:` and
+        // `tokenIds:` paths stay strict. Chunking runs on the resolved
+        // phonemes, so normalization / G2P already happened.
+        let chunks = PhonemeChunker.chunk(ipa, maxLength: StyleTTS2Constants.maxPhonemeChunkChars)
+        guard chunks.count > 1 else {
+            let tokenIds = StyleTTS2TextCleaner.encode(ipa)
+            return try await synthesize(
+                tokenIds: tokenIds,
+                referenceAudioURL: referenceAudioURL,
+                alpha: alpha, beta: beta, noiseSeed: noiseSeed)
+        }
+        return try await synthesizeChunked(
+            chunks,
             referenceAudioURL: referenceAudioURL,
             alpha: alpha, beta: beta, noiseSeed: noiseSeed)
+    }
+
+    /// Synthesize each phoneme chunk against the *same* reference mel
+    /// (computed once) and concatenate the samples in order. Reusing one mel
+    /// keeps the speaker style consistent across the join and skips repeated
+    /// FFT / mel work.
+    private func synthesizeChunked(
+        _ chunks: [String],
+        referenceAudioURL: URL,
+        alpha: Float,
+        beta: Float,
+        noiseSeed: UInt64
+    ) async throws -> [Float] {
+        guard let melExtractor = melExtractor else {
+            throw StyleTTS2Error.notInitialized
+        }
+        let refSamples = try loadReferenceAudio(url: referenceAudioURL)
+        let (mel, frames) = melExtractor.compute(audio: refSamples)
+        guard frames > 0 else {
+            throw StyleTTS2Error.unsupportedReferenceAudio(
+                "reference audio at \(referenceAudioURL.lastPathComponent) yielded 0 mel frames")
+        }
+
+        var samples: [Float] = []
+        for chunk in chunks {
+            let tokenIds = StyleTTS2TextCleaner.encode(chunk)
+            let chunkSamples = try await synthesize(
+                tokenIds: tokenIds,
+                referenceMel: mel, referenceMelFrames: frames,
+                alpha: alpha, beta: beta, noiseSeed: noiseSeed)
+            samples.append(contentsOf: chunkSamples)
+        }
+        return samples
     }
 
     // MARK: - Synthesis: IPA path (espeak-parity escape hatch)

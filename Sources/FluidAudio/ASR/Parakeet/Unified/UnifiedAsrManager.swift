@@ -105,11 +105,23 @@ public actor UnifiedAsrManager {
         } else {
             encoderConfig = mlConfiguration
         }
-        self.encoder = try await MLModel.load(
-            contentsOf: directory.appendingPathComponent(
-                names.offlineEncoderFile(precision: encoderPrecision)),
-            configuration: encoderConfig
-        )
+        do {
+            self.encoder = try await MLModel.load(
+                contentsOf: directory.appendingPathComponent(
+                    names.offlineEncoderFile(precision: encoderPrecision)),
+                configuration: encoderConfig
+            )
+        } catch {
+            if encoderPrecision == .int8 {
+                // Same A-series caveat as the streaming manager (issue #828):
+                // the int8 encoder can fail on every compute unit from an
+                // intact download; name the fp16 escape hatch here.
+                logger.error(
+                    "int8 unified encoder failed to load. On some A-series chips (A16 verified) it cannot build an execution plan on any compute unit even from an intact download — retry with encoderPrecision: .fp16 (issue #828). Underlying error: \(error.localizedDescription)"
+                )
+            }
+            throw error
+        }
         self.decoder = try await MLModel.load(
             contentsOf: directory.appendingPathComponent(names.decoderFile),
             configuration: cpuConfig
@@ -133,7 +145,7 @@ public actor UnifiedAsrManager {
     public func loadModels(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws {
         if let configuration {
             self.mlConfiguration = configuration
@@ -149,33 +161,147 @@ public actor UnifiedAsrManager {
             .appendingPathComponent("Models", isDirectory: true)
 
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-        let encoderPath = cacheDir.appendingPathComponent(
-            ModelNames.ParakeetUnified.offlineEncoderFile(precision: encoderPrecision))
 
-        if !FileManager.default.fileExists(atPath: encoderPath.path) {
-            logger.info("Downloading Parakeet Unified offline models to \(modelsBaseDir.path)...")
-            try await DownloadUtils.downloadRepo(
-                repo, to: modelsBaseDir,
-                variant: encoderPrecision == .fp16 ? "offline-fp16" : "offline",
-                progressHandler: progressHandler)
-        } else {
-            logger.info("Using cached Parakeet Unified offline models at \(cacheDir.path)")
+        // Completeness-checked download + purge-and-retry on load failure: a
+        // bare directory-existence gate mistook an interrupted encoder fetch
+        // for a warm cache and bricked loading permanently (issue #819).
+        try await ModelHub.loadWithRecovery(
+            repo, directory: modelsBaseDir,
+            requiredFiles: [
+                ModelNames.ParakeetUnified.offlineEncoderFile(precision: encoderPrecision),
+                ModelNames.ParakeetUnified.decoderFile,
+                ModelNames.ParakeetUnified.jointDecisionFile,
+                ModelNames.ParakeetUnified.vocab,
+            ],
+            variant: encoderPrecision == .fp16 ? "offline-fp16" : "offline",
+            progressHandler: progressHandler
+        ) {
+            try await self.loadModels(from: cacheDir)
         }
-
-        try await loadModels(from: cacheDir)
     }
 
     // MARK: - Batch API
+
+    /// A transcript and the per-token timings behind it.
+    public struct TranscriptionWithTimings: Sendable {
+        public let text: String
+        public let tokenTimings: [TokenTiming]
+
+        public init(text: String, tokenTimings: [TokenTiming]) {
+            self.text = text
+            self.tokenTimings = tokenTimings
+        }
+    }
 
     /// Transcribe 16 kHz mono samples of arbitrary length using overlapping
     /// 15 s windows.
     public func transcribe(_ samples: [Float]) async throws -> String {
         guard let tokenizer = tokenizer else { throw ASRError.notInitialized }
+        let merged = try await decodedTokens(samples, tokenizer: tokenizer)
+        return tokenizer.decode(ids: merged.map(\.token))
+    }
 
+    /// Transcribe as `transcribe(_:)` does, additionally reporting the encoder
+    /// frame each token was emitted at, converted to seconds.
+    ///
+    /// The offline path already carries these frames — the greedy RNNT decoder
+    /// records one per emission and the overlap merge preserves them — so this
+    /// costs nothing beyond the conversion. It is the batch counterpart to
+    /// `StreamingUnifiedAsrManager.consumeTokenTimings()`, and its output feeds
+    /// `buildWordTimings(from:)` the same way, for callers that need to align
+    /// the transcript back to the audio (seeking, playback highlighting,
+    /// word→speaker attribution).
+    ///
+    /// As in the streaming manager, RNNT tokens are emitted *at* a frame and
+    /// have no intrinsic duration, so every token gets a provisional one-frame
+    /// end that is clamped back only when it would overrun its successor. The
+    /// spans are therefore not contiguous: a real pause stays visible as a gap
+    /// between one token's end and the next one's start. The last token keeps
+    /// its provisional end, clamped to the end of the clip. These are emission
+    /// times rather than forced-alignment boundaries: the decoder emits once it
+    /// has heard enough context, so a token's start can sit slightly after the
+    /// word's true onset.
+    public func transcribeWithTimings(_ samples: [Float]) async throws -> TranscriptionWithTimings {
+        guard let tokenizer = tokenizer else { throw ASRError.notInitialized }
+        let merged = try await decodedTokens(samples, tokenizer: tokenizer)
+        return TranscriptionWithTimings(
+            text: tokenizer.decode(ids: merged.map(\.token)),
+            tokenTimings: Self.tokenTimings(
+                from: merged,
+                secondsPerFrame: Double(config.frameSamples) / Double(config.sampleRate),
+                vocabulary: tokenizer.vocabulary,
+                clipDuration: Double(samples.count) / Double(config.sampleRate)
+            )
+        )
+    }
+
+    /// Emission frames → seconds. Pure, so the back-fill rule can be tested
+    /// without loading a 600M parameter model.
+    ///
+    /// `clipDuration` bounds the last token's provisional end, which the batch
+    /// path can do because it knows the sample count up front and the streaming
+    /// one cannot. Pass `nil` to leave it unbounded.
+    static func tokenTimings(
+        from emissions: [ChunkProcessor.TokenWindow],
+        secondsPerFrame: Double,
+        vocabulary: [Int: String],
+        clipDuration: Double? = nil
+    ) -> [TokenTiming] {
+        var timings: [TokenTiming] = []
+        timings.reserveCapacity(emissions.count)
+        for emission in emissions {
+            guard let piece = vocabulary[emission.token] else { continue }
+            let start = Double(emission.timestamp) * secondsPerFrame
+            // RNNT tokens have no intrinsic duration — back-fill the previous
+            // token's end to this token's start so durations reflect real gaps.
+            if let last = timings.indices.last, timings[last].endTime > start {
+                let previous = timings[last]
+                timings[last] = TokenTiming(
+                    token: previous.token, tokenId: previous.tokenId,
+                    startTime: previous.startTime, endTime: max(previous.startTime, start),
+                    confidence: previous.confidence
+                )
+            }
+            // Frontier token: provisional one-frame end, as in the streaming manager.
+            timings.append(
+                TokenTiming(
+                    token: piece.replacingOccurrences(of: "\u{2581}", with: " "),
+                    tokenId: emission.token,
+                    startTime: start,
+                    endTime: start + secondsPerFrame,
+                    confidence: emission.confidence
+                )
+            )
+        }
+        // The frontier token's one-frame end is a guess; offline knows where the
+        // audio actually stops, so don't hand callers a seek target past EOF.
+        if let clipDuration, let last = timings.indices.last, timings[last].endTime > clipDuration {
+            let previous = timings[last]
+            timings[last] = TokenTiming(
+                token: previous.token, tokenId: previous.tokenId,
+                startTime: previous.startTime, endTime: max(previous.startTime, clipDuration),
+                confidence: previous.confidence
+            )
+        }
+        return timings
+    }
+
+    /// The merged, seam-collapsed token stream for the whole recording, in
+    /// emission order. Shared by both batch entry points so the text they
+    /// return cannot drift apart.
+    private func decodedTokens(
+        _ samples: [Float], tokenizer: Tokenizer
+    ) async throws -> [ChunkProcessor.TokenWindow] {
         var merged: [ChunkProcessor.TokenWindow] = []
-        let merger = ChunkProcessor(audioSamples: [])
+        // Reuse the TDT overlap merger to dedupe adjacent windows.
+        let merger = ChunkProcessor(audioSamples: samples)
         let spliceSafeTokenIds = ChunkProcessor.spliceSafeTokenIds(vocabulary: tokenizer.vocabulary)
+        let caseVariantIds = ChunkProcessor.caseVariantCanonicalIds(vocabulary: tokenizer.vocabulary)
 
+        // Fixed-stride 15 s / 2 s grid. Silence-aligned starts were measured to
+        // cost ~1 WER point on the 15 s offline encoder (Earnings-22 long-form)
+        // with no artifact benefit, so the seam artifacts (#706) are handled
+        // purely by the merge: case-folded matching + word-level collapse below.
         for chunkStart in layout.chunkStarts(totalSamples: samples.count) {
             let chunkEnd = min(chunkStart + layout.chunkSamples, samples.count)
             let windowTokens = try await transcribeWindow(
@@ -184,11 +310,16 @@ public actor UnifiedAsrManager {
             merged =
                 merged.isEmpty
                 ? windowTokens
-                : merger.mergeChunks(merged, windowTokens, spliceSafeTokenIds: spliceSafeTokenIds)
+                : merger.mergeChunks(
+                    merged,
+                    windowTokens,
+                    spliceSafeTokenIds: spliceSafeTokenIds,
+                    caseVariantIds: caseVariantIds
+                )
         }
 
         merged.sort { $0.timestamp < $1.timestamp }
-        return tokenizer.decode(ids: merged.map(\.token))
+        return merger.collapseSeamWordDuplicates(merged, vocabulary: tokenizer.vocabulary)
     }
 
     /// Transcribe an audio buffer (any format; resampled to 16 kHz mono).
@@ -217,10 +348,7 @@ public actor UnifiedAsrManager {
         let (mel, melLength) = try swiftMel.features(window: buffer, validCount: validCount)
 
         let encoderOutput = try await encoder.prediction(
-            from: MLDictionaryFeatureProvider(dictionary: [
-                "mel": MLFeatureValue(multiArray: mel),
-                "mel_length": MLFeatureValue(multiArray: melLength),
-            ])
+            from: UnifiedEncoderFeatureProvider(mel: mel, melLength: melLength)
         )
         guard let encoded = encoderOutput.featureValue(for: "encoder")?.multiArrayValue,
             let encodedLength = encoderOutput.featureValue(for: "encoder_length")?.multiArrayValue
