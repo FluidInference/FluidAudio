@@ -40,7 +40,7 @@ public actor FsmnVadManager {
         self.models = models
     }
 
-    public static func load(progressHandler: DownloadUtils.ProgressHandler? = nil) async throws -> FsmnVadManager {
+    public static func load(progressHandler: ProgressHandler? = nil) async throws -> FsmnVadManager {
         FsmnVadManager(models: try await FsmnVadModels.downloadAndLoad(progressHandler: progressHandler))
     }
 

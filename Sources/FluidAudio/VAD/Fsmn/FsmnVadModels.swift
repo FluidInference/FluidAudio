@@ -19,13 +19,13 @@ public struct FsmnVadModels: Sendable {
     }
 
     public static func downloadAndLoad(
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> FsmnVadModels {
         try load(from: try await download(progressHandler: progressHandler))
     }
 
     public static func download(
-        force: Bool = false, progressHandler: DownloadUtils.ProgressHandler? = nil
+        force: Bool = false, progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let root = modelsRootDirectory()
         let dir = root.appendingPathComponent(Repo.fsmnVad.folderName, isDirectory: true)
@@ -35,7 +35,7 @@ public struct FsmnVadModels: Sendable {
         }
         if force { try? FileManager.default.removeItem(at: dir) }
         logger.info("Downloading FSMN-VAD models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(.fsmnVad, to: root, progressHandler: progressHandler)
+        try await ModelHub.download(.fsmnVad, to: root, progressHandler: progressHandler)
         return dir
     }
 
