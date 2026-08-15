@@ -169,6 +169,44 @@ final class CITests: XCTestCase {
         XCTAssertEqual(modelPaths.embeddingPath.absoluteString, "file:///path/to/embedding.mlmodelc")
     }
 
+    func testSenseVoiceRequiredModelsRespectPrecisionVariant() {
+        let expectedFp16: Set<String> = [
+            ModelNames.SenseVoice.preprocessorFile,
+            ModelNames.SenseVoice.encoderFile,
+        ]
+        let expectedInt8: Set<String> = [
+            ModelNames.SenseVoice.preprocessorFile,
+            ModelNames.SenseVoice.encoderInt8File,
+        ]
+        let expectedFp32: Set<String> = [
+            ModelNames.SenseVoice.preprocessorFile,
+            ModelNames.SenseVoice.encoderFp32File,
+        ]
+
+        XCTAssertEqual(ModelNames.SenseVoice.requiredModels(), expectedFp16)
+        XCTAssertEqual(ModelNames.SenseVoice.requiredModels(precision: "fp16"), expectedFp16)
+        XCTAssertEqual(ModelNames.SenseVoice.requiredModels(precision: "int8"), expectedInt8)
+        XCTAssertEqual(ModelNames.SenseVoice.requiredModels(precision: "fp32"), expectedFp32)
+        XCTAssertEqual(ModelNames.SenseVoice.requiredModels, expectedFp16)
+    }
+
+    func testSenseVoiceRepoRequirementsForwardVariant() {
+        XCTAssertEqual(
+            ModelNames.getRequiredModelNames(for: .senseVoiceSmall, variant: "int8"),
+            [
+                ModelNames.SenseVoice.preprocessorFile,
+                ModelNames.SenseVoice.encoderInt8File,
+            ]
+        )
+        XCTAssertEqual(
+            ModelNames.getRequiredModelNames(for: .senseVoiceSmall, variant: "fp32"),
+            [
+                ModelNames.SenseVoice.preprocessorFile,
+                ModelNames.SenseVoice.encoderFp32File,
+            ]
+        )
+    }
+
     // MARK: - Backend Enum Tests
 
     func testManagerTypes() {

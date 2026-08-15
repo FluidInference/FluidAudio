@@ -704,10 +704,14 @@ struct VBxClustering {
             "Speaker count \(detectedCount) outside bounds [\(constraints.minSpeakers), \(constraints.maxSpeakers)]; re-clustering to \(targetCount)"
         )
 
-        let (kmeansClusters, centroids) = KMeansClustering.clusterWithCentroids(
+        // n_init=10 の決定的初期化から最小 inertia を採用(sklearn 流)。単一ランダム初期化は
+        // 脆い話者を非決定的に collapse させる(ICT 小牧で実証、~10%↔~30% の揺れ)。
+        let (kmeansClusters, centroids) = KMeansClustering.clusterWithCentroidsNInit(
             embeddings: trainingEmbeddings,
             numClusters: targetCount,
-            maxIterations: 100
+            maxIterations: 100,
+            nInit: 10,
+            baseSeed: 0
         )
 
         return VBxOutput(

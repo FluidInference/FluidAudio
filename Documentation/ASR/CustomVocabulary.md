@@ -290,6 +290,88 @@ Performs principled comparison between original transcript words and vocabulary 
 - `VocabularyRescorer+TokenEvaluation.swift` — per-candidate scoring and guard logic
 - `VocabularyRescorer+Utilities.swift` — string similarity, normalization, token boundary helpers
 
+#### Non-Mutating Candidate Evidence
+
+`ctcTokenRescore()` remains the compatibility API for callers that want FluidAudio to apply its
+existing replacement decision. Call `ctcTokenEvaluateCandidates()` instead when the application
+needs to preserve the decoder transcript and make the final replacement decision itself:
+
+```swift
+let output = rescorer.ctcTokenEvaluateCandidates(
+    transcript: baseTranscript,
+    tokenTimings: tokenTimings,
+    logProbs: ctcLogProbs,
+    frameDuration: 0.04
+)
+
+// Always identical to the supplied decoder transcript.
+let untouchedText = output.baseText
+print(output.baseWords) // Exact source-word sequence indexed by every wordRange.
+
+for candidate in output.candidates {
+    print(candidate.candidateID, candidate.origin)
+    print(candidate.basePhrase, candidate.canonicalTerm, candidate.matchedAlias as Any)
+    print(candidate.rawOriginalCTCScore, candidate.rawVocabularyCTCScore)
+    print(candidate.effectiveBoost as Any, candidate.comparisonPassed)
+    print(candidate.legacyOutcome, candidate.wordRange, candidate.tokenRange as Any)
+    print(candidate.baseTextUTF8Range as Any)
+}
+```
+
+The candidate API runs the same discovery, guards, and CTC comparison as legacy rescoring, but it
+returns every comparison evaluation without rewriting `baseText`. Each candidate identifies the
+canonical term, the configured alias that produced the best string-similarity score (or `nil` when
+the canonical form produced it), string similarity, raw CTC scores before context biasing, and the
+effective boost. `matchedAlias` identifies the winning configured form even when the match was
+fuzzy; its presence does not prove that the alias was spoken exactly. Consumers that need to
+distinguish exact from fuzzy scorer results can use `similarity == 1.0`. That score reflects the
+discovery path's normalized scorer input: compound matching may concatenate adjacent words, and
+normalization may ignore case or punctuation. It therefore does not assert raw-text equality or
+determine whether applying the vocabulary replacement is semantically safe. Clients implementing
+custom arbitration must make that policy decision themselves.
+
+`comparisonPassed` reports only the numeric, pre-arbitration comparison: boosted vocabulary score
+greater than original score. `legacyOutcome` reports what the compatibility `ctcTokenRescore()`
+path finally did after overlap arbitration:
+
+- `applied` — comparison passed and the candidate was written to the legacy transcript.
+- `rejectedByComparison` — the legacy floating-point comparison ran and rejected the candidate.
+- `unavailableEvidence` — the comparison could not run, for example because tokenizer evidence was
+  unavailable.
+- `supersededByOverlap` — comparison passed, but an overlapping candidate won final arbitration.
+
+`comparisonPassed` and `legacyOutcome` preserve the comparison FluidAudio actually performed. A
+raw score remains `nil` when the underlying scorer produced a non-finite diagnostic value, but that
+does not retroactively turn a completed legacy comparison into `unavailableEvidence`. In that case
+the structured outcome remains authoritative and the display reason omits non-finite score text.
+
+`candidateID` is a non-negative correlation identifier unique only within one
+`CandidateEvidenceOutput`. It connects an evaluated row to its final overlap outcome; callers must
+not compare its numeric value across outputs or repeated evaluations. Duplicate-looking rows are
+intentional: separate word-centric, term-centric-single-word, term-centric-multiword, and
+spotter-rescue evaluations retain distinct IDs and `origin` values so diagnostics can attribute
+their discovery paths.
+
+`wordRange` is a half-open range into the returned `output.baseWords` array exactly as FluidAudio
+built it from token timings. It does not index a whitespace split or another caller-derived view of
+`baseText`. `tokenRange` is a half-open range into the supplied `tokenTimings`; it is `nil` when the
+source tokens are not contiguous.
+
+`baseTextUTF8Range` is a half-open UTF-8 byte range into untouched `baseText`. FluidAudio emits it
+only when the complete `baseWords` sequence has one byte-exact ordered alignment, the candidate span
+lands on valid String boundaries, and the aligned substring normalizes to `basePhrase`. Recognized
+quotation wrappers and recognized terminal punctuation remain outside the range; technical boundary
+operators, currency signs, and punctuation such as `+`, `#`, `@`, `$`, and a leading `.` remain
+inside it. Unrelated symbols such as emoji and trademarks, plus ambiguous edge syntax, produce `nil`
+instead of a guessed span, while punctuation and separators inside a multiword span are preserved.
+A `nil` range is explicit missing provenance: callers must not guess a replacement span or mutate
+text through a fabricated range.
+
+Scores and timestamps are likewise optional rather than sentinel values when evidence is
+unavailable. Downstream applications should apply their own candidate policy using the structured
+evidence. They must not replay every `comparisonPassed` row, infer missing scores/ranges, or treat
+candidate array order as a stable identity.
+
 ### 5. CustomVocabularyContext (`CustomVocabularyContext.swift`)
 
 Defines vocabulary terms to boost:
@@ -399,6 +481,143 @@ on `cbw=4.5`.
 The thresholds, the size buckets (`largeVocabThreshold = 10`,
 `extraLargeVocabThreshold = 100`), and the dispatch logic live in
 `ContextBiasingConstants.rescorerConfig(forVocabSize:)`.
+
+### Short-Term Over-Fire Controls (opt-in, #702)
+
+The blank-aware DP score is a per-token average log-prob. A **short** keyword
+(few tokens) can free-start align to its single best-matching frame-run and
+score close to zero per token, so it can beat a correctly transcribed common
+word. With vocabularies of short terms that collide acoustically with ordinary
+English (`CRAN`~"ran", `Snyk`~"sync", a 3-letter acronym ~ a function word),
+the rescorer over-fires — replacing ordinary words that are none of the
+keywords.
+
+Benchmarking shows the over-fire and the genuine KWS recall on
+distinctive-name vocabularies (earnings22) come from the *same* mechanisms
+(the flat `cbw` boost and the acoustic spotter-rescue), and neither string
+similarity nor token length separates them — gating hard enough to suppress
+the false positives also costs recall. These controls are therefore **opt-in
+and default to disabled (no behavior change)**:
+
+| `VocabularyRescorer.Config` field | CLI flag | Env | Default | Recommended (short-vocab) |
+|---|---|---|---|---|
+| `shortTermCbwTaperPivot` | `--vocab-short-term-taper-pivot` | `FLUID_CBW_TAPER_PIVOT` | `1` (off) | `5` |
+| `shortTermCbwTaperExponent` | — | `FLUID_CBW_TAPER_EXP` | `2.0` | `2.0` |
+| `spotterRescueMinSimilarity` | `--vocab-spotter-min-sim` | `FLUID_SPOTTER_MIN_SIM` | `0.0` (off) | `0.30` |
+| `spotterRescueMultiWordMinSimilarity` | `--vocab-spotter-min-sim-multi` | `FLUID_SPOTTER_MIN_SIM_MULTI` | `0.0` (off) | `0.50` |
+
+The taper scales the `cbw` boost down for terms with fewer than `pivot` tokens
+(`cbw * (tokenCount / pivot) ** exponent`). The spotter floors require a
+minimum string similarity before the acoustic-only rescue path may fire
+(higher for multi-word spans, which are the most error-prone). Tune these for
+short-keyword KWS; leave them off for distinctive-name vocabularies.
+
+#### When to enable
+
+Turn these on when **all** of the following hold; otherwise leave them off:
+
+- the vocabulary is small and made of **short** terms (≤ ~5 chars / a few
+  CTC tokens), and
+- those terms **collide acoustically with ordinary English** (brand names,
+  acronyms, function-word homophones), and
+- you observe ordinary words being replaced by keywords that were not spoken.
+
+For vocabularies of long, distinctive names (company/drug names, the
+earnings22 profile) leave them **off** — enabling them costs KWS recall
+(see below).
+
+#### Enabling
+
+```bash
+# CLI (batch) — recommended short-vocab settings
+fluidaudio transcribe audio.wav \
+    --custom-vocab short_terms.txt \
+    --vocab-short-term-taper-pivot 5 \
+    --vocab-spotter-min-sim 0.30 \
+    --vocab-spotter-min-sim-multi 0.50
+```
+
+```swift
+// API — pass an opt-in Config to the rescorer
+let config = VocabularyRescorer.Config(
+    shortTermCbwTaperPivot: 5,            // taper boost for terms < 5 tokens
+    spotterRescueMinSimilarity: 0.30,     // single-word acoustic-rescue floor
+    spotterRescueMultiWordMinSimilarity: 0.50  // multi-word floor
+)
+let rescorer = try await VocabularyRescorer.create(
+    spotter: ctcSpotter,
+    vocabulary: vocabulary,
+    config: config
+)
+```
+
+```bash
+# Env overrides (handy for parameter sweeps; apply to any entry point)
+export FLUID_CBW_TAPER_PIVOT=5
+export FLUID_SPOTTER_MIN_SIM=0.30
+export FLUID_SPOTTER_MIN_SIM_MULTI=0.50
+```
+
+#### Measured effect
+
+Repro: 8 short brand/acronym distractors (none spoken) over one minute of
+ordinary speech, plus the earnings22-kws KWS set (200 files) as the recall
+guard.
+
+| Setting | distractor false positives | earnings22 recall |
+|---|---|---|
+| **off (default)** | 12 | 95.7% |
+| recommended opt-in (pivot 5, floors 0.30 / 0.50) | **0** | (lower — only enable for short-vocab KWS) |
+
+The defaults are byte-for-byte identical to the pre-#702 behavior; the floors
+and taper only change scoring when explicitly enabled.
+
+### Disabling the Acoustic Spotter-Rescue (opt-in, #724)
+
+The biggest single lever for short-keyword over-firing is the **spotter-anchored
+acoustic rescue** — a pass that proposes a vocabulary term when the CTC keyword
+spotter detects it acoustically, even if string similarity to the transcript is
+low (it exists to recover brand names TDT mangles past the similarity gate, e.g.
+`DiaSorin` → `the solar`). On short terms that collide with common English it is
+the dominant false-positive source. It was added on top of the pre-0.14.5
+pipeline; turning it off reproduces the older, much-lower over-fire behavior.
+
+| `VocabularyRescorer.Config` field | CLI flag | Env | Default |
+|---|---|---|---|
+| `spotterRescueEnabled` | `--vocab-disable-spotter-rescue` | `FLUID_SPOTTER_RESCUE` (`0` disables) | `true` (on) |
+
+```swift
+// Disable the acoustic rescue for short-keyword KWS:
+let config = VocabularyRescorer.Config(spotterRescueEnabled: false)
+```
+
+```bash
+fluidaudio transcribe audio.wav --custom-vocab short_terms.txt \
+    --vocab-disable-spotter-rescue
+```
+
+**When to disable:** small vocabularies of short terms that collide with ordinary
+English (brand names, acronyms). **When to keep on (default):** distinctive-name
+vocabularies (company/drug names) where the acoustic rescue recovers
+heavily-mangled terms that string matching misses.
+
+#### Measured effect
+
+Repro: 8 short brand/acronym distractors (none spoken) across a 90-clip,
+3-voice ordinary-speech set, plus a 100-pair distinctive-name biasing set as the
+recall guard.
+
+| Setting | distractor false positives | biasing recall |
+|---|---|---|
+| **on (default)** | ~94 | 0.92 |
+| `spotterRescueEnabled = false` | **~19** | **0.97** |
+
+For short colliding vocabularies, disabling the rescue both **lowers over-fire**
+and (because spurious replacements no longer clobber correct words) **raises**
+recall — it reproduces the pre-rescue scoring. This is a bigger, cleaner lever
+than the per-term floors above for the short-vocab case; the floors remain useful
+when you want to *keep* the rescue but gate its lowest-similarity firings. The
+default is unchanged, so existing distinctive-name setups are unaffected.
 
 ## Usage Example
 

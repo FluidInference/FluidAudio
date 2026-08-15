@@ -59,6 +59,26 @@ public class FLEURSBenchmark {
         let outputFile: String
         let cacheDir: String
         let debugMode: Bool
+        /// HuggingFace dataset repo to download from. Defaults to the European
+        /// subset (`FluidInference/fleurs`). Multilingual benchmarks needing
+        /// CJK / Arabic / Indic samples should use `FluidInference/fleurs-full`.
+        let datasetRepo: String
+
+        public init(
+            languages: [String],
+            samplesPerLanguage: Int,
+            outputFile: String,
+            cacheDir: String,
+            debugMode: Bool,
+            datasetRepo: String = "FluidInference/fleurs"
+        ) {
+            self.languages = languages
+            self.samplesPerLanguage = samplesPerLanguage
+            self.outputFile = outputFile
+            self.cacheDir = cacheDir
+            self.debugMode = debugMode
+            self.datasetRepo = datasetRepo
+        }
     }
 
     public struct FLEURSSample {
@@ -233,15 +253,14 @@ public class FLEURSBenchmark {
             }
         }
 
-        // Download from Hugging Face dataset: FluidInference/fleurs
-        logger.info("Downloading from HuggingFace: FluidInference/fleurs/\(language)...")
-
-        let datasetRepo = "FluidInference/fleurs"
+        // Download from Hugging Face dataset (configurable: fleurs / fleurs-full)
+        let datasetRepo = config.datasetRepo
+        logger.info("Downloading from HuggingFace: \(datasetRepo)/\(language)...")
 
         do {
             // List files in the language directory using HuggingFace API (registry-aware with auth)
             let apiURL = try ModelRegistry.apiDatasets(datasetRepo, "tree/main/\(language)")
-            let (listData, _) = try await DownloadUtils.fetchWithAuth(from: apiURL)
+            let (listData, _) = try await ModelHub.fetchWithAuth(from: apiURL)
 
             guard let items = try JSONSerialization.jsonObject(with: listData) as? [[String: Any]] else {
                 throw NSError(
@@ -265,7 +284,7 @@ public class FLEURSBenchmark {
                 if fileName == "\(language).trans.txt" {
                     // Download transcript file
                     let downloadURL = try ModelRegistry.resolveDataset(datasetRepo, itemPath)
-                    let transData = try await DownloadUtils.fetchHuggingFaceFile(
+                    let transData = try await ModelHub.fetchFile(
                         from: downloadURL,
                         description: "\(language) transcript"
                     )
@@ -304,7 +323,7 @@ public class FLEURSBenchmark {
                 let downloadURL = try ModelRegistry.resolveDataset(datasetRepo, audioPath)
 
                 do {
-                    let audioData = try await DownloadUtils.fetchHuggingFaceFile(
+                    let audioData = try await ModelHub.fetchFile(
                         from: downloadURL,
                         description: "\(language)/\(fileName)"
                     )
@@ -549,9 +568,7 @@ public class FLEURSBenchmark {
     /// the v3 script-filter enum (either the language isn't covered by v3, or it uses
     /// a script that doesn't need Latin/Cyrillic disambiguation — e.g. Arabic, CJK).
     ///
-    /// Other ASR engines have their own language enums and their own FLEURS mappings:
-    /// see `Qwen3AsrBenchmark.fleursToQwen3Language` for the Qwen3 multilingual enum
-    /// (30 languages, including CJK / Arabic / Indic that Parakeet v3 doesn't cover).
+    /// Other ASR engines have their own language enums and their own FLEURS mappings.
     private func mapToLanguageEnum(_ fleursCode: String) -> Language? {
         switch fleursCode {
         case "en_us": return .english

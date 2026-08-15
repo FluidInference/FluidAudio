@@ -137,6 +137,36 @@ public final class OfflineDiarizerManager {
         audioLoadingSeconds: TimeInterval,
         progressCallback: (@Sendable (Int, Int) -> Void)? = nil
     ) async throws -> DiarizationResult {
+        let prepared = try await prepare(
+            audioSource: audioSource,
+            audioLoadingSeconds: audioLoadingSeconds,
+            progressCallback: progressCallback
+        )
+        return try cluster(prepared)
+    }
+
+    /// Runs deterministic segmentation and embedding extraction over `audio`.
+    ///
+    /// - Parameters:
+    ///   - audio: Mono audio samples at the model's target sample rate.
+    ///   - progressCallback: Optional callback receiving `(chunksProcessed, totalChunks)` after each segmentation chunk.
+    public func prepare(
+        audio: [Float],
+        progressCallback: (@Sendable (Int, Int) -> Void)? = nil
+    ) async throws -> PreparedDiarization {
+        try await prepare(
+            audioSource: ArrayAudioSampleSource(samples: audio),
+            audioLoadingSeconds: 0,
+            progressCallback: progressCallback
+        )
+    }
+
+    /// Runs deterministic segmentation and embedding extraction over `audioSource`.
+    public func prepare(
+        audioSource: AudioSampleSource,
+        audioLoadingSeconds: TimeInterval = 0,
+        progressCallback: (@Sendable (Int, Int) -> Void)? = nil
+    ) async throws -> PreparedDiarization {
         try config.validate()
         if models == nil {
             try await prepareModels()
@@ -146,7 +176,7 @@ public final class OfflineDiarizerManager {
             throw OfflineDiarizationError.modelNotLoaded("offline-diarizer")
         }
 
-        let totalStart = Date()
+        let prepareStart = Date()
         let totalChunks = max(
             1, (audioSource.sampleCount + config.samplesPerStep - 1) / config.samplesPerStep)
 
@@ -154,7 +184,6 @@ public final class OfflineDiarizerManager {
         let chunkStream = streamPair.stream
         let chunkContinuation = streamPair.continuation
 
-        // Capture models for concurrent tasks
         let capturedModels = models
         let capturedConfig = config
 
@@ -222,6 +251,31 @@ public final class OfflineDiarizerManager {
 
         let (timedEmbeddings, embeddingTime) = embeddingResult
         logger.debug("Embedding extraction produced \(timedEmbeddings.count) vectors in \(embeddingTime)s (async)")
+
+        return PreparedDiarization(
+            audioSource: audioSource,
+            segmentation: segmentation,
+            timedEmbeddings: timedEmbeddings,
+            audioLoadingSeconds: audioLoadingSeconds,
+            segmentationSeconds: segmentationTime,
+            embeddingExtractionSeconds: embeddingTime,
+            prepareWallSeconds: Date().timeIntervalSince(prepareStart)
+        )
+    }
+
+    /// Clusters and reconstructs a prepared diarization without repeating model inference.
+    ///
+    /// The receiving instance supplies its models and configuration, and must already be
+    /// initialized. Reusing a prepared value is supported.
+    public func cluster(_ prepared: PreparedDiarization) throws -> DiarizationResult {
+        guard let models else {
+            throw OfflineDiarizationError.modelNotLoaded("offline-diarizer")
+        }
+
+        let clusterPhaseStart = Date()
+        let audioSource = prepared.audioSource
+        let segmentation = prepared.segmentation
+        let timedEmbeddings = prepared.timedEmbeddings
 
         let pldaTransform = PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi)
 
@@ -321,11 +375,34 @@ public final class OfflineDiarizerManager {
             logger.debug("Clustering completed in \(clusteringTime)s with no assignments")
         }
 
+        // Zero-vote runs carry no clustering evidence, so reconstruction re-embeds their
+        // exact audio span to pick a speaker. Extraction needs models + audio, which the
+        // reconstruction helper doesn't own — hand it a closure instead.
+        let spanEmbedder: ((Double, Double) -> [Float]?)?
+        if config.zeroVoteReembed.enabled, !centroids.isEmpty {
+            let extractor = OfflineEmbeddingExtractor(
+                fbankModel: models.fbankModel,
+                embeddingModel: models.embeddingModel,
+                pldaTransform: pldaTransform,
+                config: config
+            )
+            spanEmbedder = { startSeconds, endSeconds in
+                try? extractor.embedSpan(
+                    audioSource: audioSource,
+                    startSeconds: startSeconds,
+                    endSeconds: endSeconds
+                )
+            }
+        } else {
+            spanEmbedder = nil
+        }
+
         let reconstruction = OfflineReconstruction(config: config)
         let segments = reconstruction.buildSegments(
             segmentation: segmentation,
             hardClusters: chunkAssignments,
-            centroids: centroids
+            centroids: centroids,
+            spanEmbedder: spanEmbedder
         )
 
         let speakerDatabase = reconstruction.buildSpeakerDatabase(segments: segments)
@@ -347,14 +424,20 @@ public final class OfflineDiarizerManager {
             )
             : nil
 
-        let totalProcessing = Date().timeIntervalSince(totalStart)
+        // Total pipeline wall time: the prepare phase plus this cluster phase. When called
+        // back-to-back via `process(...)` this equals the pre-split single-call measurement.
+        let totalProcessing = prepared.prepareWallSeconds + Date().timeIntervalSince(clusterPhaseStart)
         let timings = PipelineTimings(
             modelCompilationSeconds: models.compilationDuration,
-            audioLoadingSeconds: audioLoadingSeconds,
-            segmentationSeconds: segmentationTime,
-            embeddingExtractionSeconds: embeddingTime,
+            audioLoadingSeconds: prepared.audioLoadingSeconds,
+            segmentationSeconds: prepared.segmentationSeconds,
+            embeddingExtractionSeconds: prepared.embeddingExtractionSeconds,
             speakerClusteringSeconds: clusteringTime,
-            postProcessingSeconds: max(0, totalProcessing - segmentationTime - embeddingTime - clusteringTime)
+            postProcessingSeconds: max(
+                0,
+                totalProcessing - prepared.segmentationSeconds - prepared.embeddingExtractionSeconds
+                    - clusteringTime
+            )
         )
 
         return DiarizationResult(

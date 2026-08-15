@@ -388,14 +388,19 @@ final class SortformerTimelineTests: XCTestCase {
         XCTAssertTrue(timeline.speakers.isEmpty, "Tentative segments must not create speakers")
     }
 
-    func testUpsertSpeakerRefusedInEmitOnlyMode() {
+    func testUpsertSpeakerAllowedInEmitOnlyMode() {
         var config = DiarizerTimelineConfig.sortformerDefault
         config.storeSegments = false
         let timeline = DiarizerTimeline(config: config)
 
-        XCTAssertNil(timeline.upsertSpeaker(named: "Alice", atIndex: 0))
-        XCTAssertNil(timeline.upsertSpeaker(DiarizerSpeaker(index: 1, name: "Bob"), atIndex: 1))
-        XCTAssertTrue(timeline.speakers.isEmpty)
+        // Speaker identity registration is independent of segment storage: enrollment
+        // must be able to register a named speaker even when the timeline only emits
+        // segments via updates. Auto-tracking of speakers from processing stays off.
+        let alice = timeline.upsertSpeaker(named: "Alice", atIndex: 0)
+        XCTAssertEqual(alice?.name, "Alice")
+        let bob = timeline.upsertSpeaker(DiarizerSpeaker(index: 1, name: "Bob"), atIndex: 1)
+        XCTAssertEqual(bob?.name, "Bob")
+        XCTAssertEqual(Set(timeline.speakers.keys), [0, 1])
     }
 
     func testSnapshotInitDropsSpeakersInEmitOnlyMode() throws {

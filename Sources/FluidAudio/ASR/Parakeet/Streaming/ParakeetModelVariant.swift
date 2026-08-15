@@ -23,10 +23,31 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
 
     // MARK: - Nemotron Speech Streaming (cache-aware streaming, 0.6B params)
 
-    /// Nemotron 0.6B with 560ms chunks (balanced)
-    case nemotron560ms = "nemotron-560ms"
-    /// Nemotron 0.6B with 1120ms chunks (best accuracy)
+    /// Nemotron 0.6B with 2240ms chunks (default; highest throughput, +B1 fused decode)
+    case nemotron2240ms = "nemotron-2240ms"
+    /// Nemotron 0.6B with 1120ms chunks (lower latency)
     case nemotron1120ms = "nemotron-1120ms"
+    /// Nemotron 0.6B with 560ms chunks (lowest-latency tier)
+    case nemotron560ms = "nemotron-560ms"
+
+    // MARK: - Parakeet Unified (chunked-attention streaming, 0.6B params)
+
+    /// Parakeet Unified 0.6B, 2080ms latency (1.04s chunk + 1.04s right context).
+    /// Stateless encoder re-run per chunk — streamed output matches offline quality.
+    case parakeetUnified2080ms = "parakeet-unified-2080ms"
+    /// Parakeet Unified 0.6B, 1120ms latency ([70,7,7]: 0.56s chunk + 0.56s right
+    /// context). Lower latency *and* better WER than the 2080ms tier on test-clean.
+    case parakeetUnified1120ms = "parakeet-unified-1120ms"
+    /// Parakeet Unified 0.6B, 320ms latency ([70,2,2]: 0.16s chunk + 0.16s right
+    /// context). Lowest-latency tier; keeps look-ahead so WER stays near the best.
+    case parakeetUnified320ms = "parakeet-unified-320ms"
+    /// Parakeet Unified 0.6B, 640ms latency ([70,7,1]: 0.56s chunk + 0.08s right
+    /// context). Efficiency tier — same WER as 320ms at ~2.5x the RTFx (the large
+    /// chunk re-encodes far less often), trading latency for throughput.
+    case parakeetUnified640ms = "parakeet-unified-640ms"
+    /// Parakeet Unified 0.6B offline batch: full-attention 15s windows with 2s
+    /// overlap, merged on the seams. Best WER; transcribes only at finish().
+    case parakeetUnifiedOffline15s = "parakeet-unified-offline-15s"
 
     /// Human-readable display name
     public var displayName: String {
@@ -34,8 +55,14 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case .parakeetEou160ms: return "Parakeet EOU 120M (160ms)"
         case .parakeetEou320ms: return "Parakeet EOU 120M (320ms)"
         case .parakeetEou1280ms: return "Parakeet EOU 120M (1280ms)"
-        case .nemotron560ms: return "Nemotron 0.6B (560ms)"
+        case .nemotron2240ms: return "Nemotron 0.6B (2240ms)"
         case .nemotron1120ms: return "Nemotron 0.6B (1120ms)"
+        case .nemotron560ms: return "Nemotron 0.6B (560ms)"
+        case .parakeetUnified2080ms: return "Parakeet Unified 0.6B (2080ms)"
+        case .parakeetUnified1120ms: return "Parakeet Unified 0.6B (1120ms)"
+        case .parakeetUnified320ms: return "Parakeet Unified 0.6B (320ms)"
+        case .parakeetUnified640ms: return "Parakeet Unified 0.6B (640ms)"
+        case .parakeetUnifiedOffline15s: return "Parakeet Unified 0.6B (offline 15s batch)"
         }
     }
 
@@ -45,8 +72,12 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case .parakeetEou160ms: return .parakeetEou160
         case .parakeetEou320ms: return .parakeetEou320
         case .parakeetEou1280ms: return .parakeetEou1280
-        case .nemotron560ms: return .nemotronStreaming560
+        case .nemotron2240ms: return .nemotronStreaming2240
         case .nemotron1120ms: return .nemotronStreaming1120
+        case .nemotron560ms: return .nemotronStreaming560
+        case .parakeetUnified2080ms, .parakeetUnified1120ms, .parakeetUnified320ms,
+            .parakeetUnified640ms, .parakeetUnifiedOffline15s:
+            return .parakeetUnified
         }
     }
 
@@ -55,8 +86,24 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         switch self {
         case .parakeetEou160ms, .parakeetEou320ms, .parakeetEou1280ms:
             return .parakeetEou
-        case .nemotron560ms, .nemotron1120ms:
+        case .nemotron2240ms, .nemotron1120ms, .nemotron560ms:
             return .nemotron
+        case .parakeetUnified2080ms, .parakeetUnified1120ms, .parakeetUnified320ms,
+            .parakeetUnified640ms, .parakeetUnifiedOffline15s:
+            return .parakeetUnified
+        }
+    }
+
+    /// The streaming attention context for Parakeet Unified variants (nil otherwise).
+    /// The encoder bakes `[left, chunk, right]` into its attention mask at conversion
+    /// time, so each tier loads a distinct encoder by `UnifiedConfig.contextSuffix`.
+    public var unifiedConfig: UnifiedConfig? {
+        switch self {
+        case .parakeetUnified2080ms: return UnifiedConfig(leftFrames: 70, chunkFrames: 13, rightFrames: 13)
+        case .parakeetUnified1120ms: return UnifiedConfig(leftFrames: 70, chunkFrames: 7, rightFrames: 7)
+        case .parakeetUnified320ms: return UnifiedConfig(leftFrames: 70, chunkFrames: 2, rightFrames: 2)
+        case .parakeetUnified640ms: return UnifiedConfig(leftFrames: 70, chunkFrames: 7, rightFrames: 1)
+        default: return nil
         }
     }
 
@@ -73,8 +120,9 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
     /// The streaming chunk size for Nemotron variants (nil for non-Nemotron)
     public var nemotronChunkSize: NemotronChunkSize? {
         switch self {
-        case .nemotron560ms: return .ms560
+        case .nemotron2240ms: return .ms2240
         case .nemotron1120ms: return .ms1120
+        case .nemotron560ms: return .ms560
         default: return nil
         }
     }
@@ -86,16 +134,26 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
     /// - Parameter configuration: Optional `MLModelConfiguration` override.
     /// - Returns: A streaming ASR manager conforming to `StreamingAsrManager`.
     public func createManager(
-        configuration: MLModelConfiguration? = nil
+        configuration: sending MLModelConfiguration? = nil
     ) -> any StreamingAsrManager {
+        // `sending` so the (non-Sendable) configuration transfers into the
+        // actor manager inits without a data-race diagnostic. Xcode 16's iOS
+        // build enforces this region check more strictly than the macOS 6.1
+        // toolchain, which accepts the unannotated form.
         let mlConfig = configuration ?? MLModelConfiguration()
         switch engineFamily {
         case .parakeetEou:
             let chunkSize = eouChunkSize ?? .ms160
             return StreamingEouAsrManager(configuration: mlConfig, chunkSize: chunkSize)
         case .nemotron:
-            let chunkSize = nemotronChunkSize ?? .ms1120
+            let chunkSize = nemotronChunkSize ?? .ms2240
             return StreamingNemotronAsrManager(configuration: mlConfig, requestedChunkSize: chunkSize)
+        case .parakeetUnified:
+            if self == .parakeetUnifiedOffline15s {
+                return UnifiedAsrManager(configuration: mlConfig)
+            }
+            return StreamingUnifiedAsrManager(
+                configuration: mlConfig, config: unifiedConfig ?? UnifiedConfig())
         }
     }
 
@@ -105,5 +163,7 @@ public enum StreamingModelVariant: String, CaseIterable, Sendable {
         case parakeetEou = "parakeet-eou"
         /// Nemotron: cache-aware streaming with encoder cache states
         case nemotron = "nemotron"
+        /// Parakeet Unified: chunked-attention streaming (stateless encoder re-runs)
+        case parakeetUnified = "parakeet-unified"
     }
 }

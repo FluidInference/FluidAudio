@@ -211,6 +211,7 @@ enum TranscribeCommand {
         var encoderPrecision: ParakeetEncoderPrecision = .int8
         var melChunkContext = true
         var dualDecodeArbitration = false
+        var seamGapRepair = true
         var streamingMode = false
 
         // Streaming mode (SlidingWindowAsrConfig)
@@ -228,6 +229,12 @@ enum TranscribeCommand {
         var vocabMinSimilarity: Float?
         var vocabCbw: Float?
         var vocabMargin: Double?
+        // #702 opt-in short-term over-fire controls (nil = library default = disabled).
+        var vocabShortTermTaperPivot: Int?
+        var vocabSpotterMinSim: Float?
+        var vocabSpotterMinSimMulti: Float?
+        // #724: disable the acoustic spotter-rescue pass (pre-#634 behavior).
+        var vocabDisableSpotterRescue: Bool = false
     }
 
     private static func parseArguments(_ args: [String]) -> ParsedArgs? {
@@ -311,6 +318,8 @@ enum TranscribeCommand {
                 parsed.melChunkContext = false
             case "--dual-decode-arbitration":
                 parsed.dualDecodeArbitration = true
+            case "--no-seam-gap-repair":
+                parsed.seamGapRepair = false
 
             // Streaming mode config
             case "--chunk-seconds":
@@ -367,6 +376,23 @@ enum TranscribeCommand {
                     parsed.vocabMargin = Double(args[i + 1])
                     i += 1
                 }
+            case "--vocab-short-term-taper-pivot":
+                if i + 1 < args.count {
+                    parsed.vocabShortTermTaperPivot = Int(args[i + 1])
+                    i += 1
+                }
+            case "--vocab-spotter-min-sim":
+                if i + 1 < args.count {
+                    parsed.vocabSpotterMinSim = Float(args[i + 1])
+                    i += 1
+                }
+            case "--vocab-spotter-min-sim-multi":
+                if i + 1 < args.count {
+                    parsed.vocabSpotterMinSimMulti = Float(args[i + 1])
+                    i += 1
+                }
+            case "--vocab-disable-spotter-rescue":
+                parsed.vocabDisableSpotterRescue = true
 
             default:
                 fputs("WARNING: Unknown option: \(args[i])\n", stderr)
@@ -430,7 +456,8 @@ enum TranscribeCommand {
                 tdtConfig: tdtConfig,
                 encoderHiddenSize: args.modelVersion.encoderHiddenSize,
                 melChunkContext: args.melChunkContext,
-                dualDecodeArbitration: args.dualDecodeArbitration
+                dualDecodeArbitration: args.dualDecodeArbitration,
+                seamGapRepair: args.seamGapRepair
             )
             let asrManager = AsrManager(config: asrConfig)
             try await asrManager.loadModels(models)
@@ -438,31 +465,31 @@ enum TranscribeCommand {
             logger.info("ASR Manager initialized successfully")
 
             let audioFileURL = URL(fileURLWithPath: audioFile)
-            let audioFileHandle = try AVAudioFile(forReading: audioFileURL)
-            let format = audioFileHandle.processingFormat
-            let frameCount = AVAudioFrameCount(audioFileHandle.length)
-
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
-            else {
-                logger.error("Failed to create audio buffer")
-                return
-            }
-
-            try audioFileHandle.read(into: buffer)
-
-            let samples = try AudioConverter().resampleAudioFile(path: audioFile)
-            let duration = Double(audioFileHandle.length) / format.sampleRate
-            logger.info("Processing \(String(format: "%.2f", duration))s of audio (\(samples.count) samples)\n")
-
             logger.info("Transcribing file: \(audioFileURL) ...")
             var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
             let startTime = Date()
-            var result = try await asrManager.transcribe(
-                audioFileURL, decoderState: &decoderState, language: args.language)
+
+            let customVocabularySamples: [Float]?
+            var result: ASRResult
+            if args.customVocabPath != nil {
+                let samples = try AudioConverter().resampleAudioFile(audioFileURL)
+                customVocabularySamples = samples
+                result = try await asrManager.transcribe(
+                    samples,
+                    decoderState: &decoderState,
+                    language: args.language
+                )
+            } else {
+                customVocabularySamples = nil
+                result = try await asrManager.transcribe(
+                    audioFileURL, decoderState: &decoderState, language: args.language)
+            }
             let processingTime = Date().timeIntervalSince(startTime)
+            let duration = result.duration
+            logger.info("Processed \(String(format: "%.2f", duration))s of audio\n")
 
             // Apply vocabulary rescoring if custom vocab is provided
-            if let vocabPath = args.customVocabPath {
+            if let vocabPath = args.customVocabPath, let samples = customVocabularySamples {
                 logger.info("Applying vocabulary boosting from: \(vocabPath)")
 
                 let (customVocab, ctcModels) = try await CustomVocabularyContext.loadWithCtcTokens(from: vocabPath)
@@ -482,7 +509,21 @@ enum TranscribeCommand {
                     let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
 
                     let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: customVocab.terms.count)
-                    let rescorerConfig = VocabularyRescorer.Config.default
+                    // #702: opt-in short-term over-fire controls. Each flag
+                    // falls back to the library default (disabled) when unset.
+                    let rescorerConfig = VocabularyRescorer.Config(
+                        shortTermCbwTaperPivot: args.vocabShortTermTaperPivot
+                            ?? ContextBiasingConstants.defaultShortTermCbwTaperPivot,
+                        spotterRescueMinSimilarity: args.vocabSpotterMinSim
+                            ?? ContextBiasingConstants.defaultSpotterRescueMinSimilarity,
+                        spotterRescueMultiWordMinSimilarity: args.vocabSpotterMinSimMulti
+                            ?? ContextBiasingConstants.defaultSpotterRescueMultiWordMinSimilarity,
+                        // #724: `--vocab-disable-spotter-rescue` forces the acoustic
+                        // rescue pass off; otherwise follow the library/env default
+                        // (on unless `FLUID_SPOTTER_RESCUE` disables it).
+                        spotterRescueEnabled: args.vocabDisableSpotterRescue
+                            ? false : ContextBiasingConstants.defaultSpotterRescueEnabled
+                    )
 
                     let rescorer = try await VocabularyRescorer.create(
                         spotter: spotter,
@@ -491,7 +532,9 @@ enum TranscribeCommand {
                         ctcModelDirectory: ctcModelDir
                     )
 
-                    // Vocabulary-size-aware defaults, overridable via CLI
+                    // Vocabulary-size-aware default, overridable via CLI.
+                    // Per-term minSimilarity overrides are applied inside the
+                    // rescorer regardless of this global value.
                     let minSimilarity: Float = args.vocabMinSimilarity ?? vocabConfig.minSimilarity
                     let cbw: Float = args.vocabCbw ?? vocabConfig.cbw
                     let marginSeconds: Double = args.vocabMargin ?? ContextBiasingConstants.defaultMarginSeconds
@@ -539,7 +582,6 @@ enum TranscribeCommand {
                 case .v2: modelVersionLabel = "v2"
                 case .v3: modelVersionLabel = "v3"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
-                case .ctcZhCn: modelVersionLabel = "ctc-zh-cn"
                 case .tdtJa: modelVersionLabel = "tdt-ja"
                 }
                 let output = TranscriptionJSONOutput(
@@ -788,7 +830,6 @@ enum TranscribeCommand {
                 case .v2: modelVersionLabel = "v2"
                 case .v3: modelVersionLabel = "v3"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
-                case .ctcZhCn: modelVersionLabel = "ctc-zh-cn"
                 case .tdtJa: modelVersionLabel = "tdt-ja"
                 }
                 let output = TranscriptionJSONOutput(
@@ -986,6 +1027,15 @@ enum TranscribeCommand {
                 --vocab-min-similarity <0-1>     Minimum string similarity for replacement (default: auto)
                 --vocab-cbw <float>              Context-biasing weight boost (default: auto)
                 --vocab-margin <sec>             CTC frame alignment margin (default: 0.5)
+
+              Short-term over-fire controls (#702, opt-in; default off — these
+              improve precision on SHORT keyword vocabularies at some recall
+              cost on distinctive-name vocabularies):
+                --vocab-short-term-taper-pivot <n>   Reduce boost for terms with < n tokens (e.g. 5)
+                --vocab-spotter-min-sim <0-1>        Min similarity for acoustic single-word rescue (e.g. 0.30)
+                --vocab-spotter-min-sim-multi <0-1>  Min similarity for multi-word rescue (e.g. 0.50)
+                --vocab-disable-spotter-rescue       Turn the acoustic rescue OFF entirely (#724; pre-#634
+                                                     behavior — biggest over-fire reduction for short vocabs)
 
             PARAKEET VARIANT MODE (--parakeet-variant):
                 --parakeet-variant <variant>     Engine: parakeet-eou-160ms, nemotron-560ms, …

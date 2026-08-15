@@ -130,6 +130,9 @@ public final class DiarizerManager {
     ///   - samples: Audio samples (16kHz mono) - accepts any RandomAccessCollection of Float
     ///             (Array, ArraySlice, ContiguousArray, or custom collections)
     ///   - sampleRate: Sample rate (default: 16000)
+    ///   - progressHandler: Optional callback invoked after each processed audio chunk with
+    ///             overall progress in the range `0.0...1.0`. Called synchronously on the
+    ///             calling thread; the final call reports `1.0` once processing completes.
     /// - Returns: `DiarizationResult` containing:
     ///   - `segments`: Array of speaker segments with speaker IDs, timestamps, and embeddings
     ///   - `speakerDatabase`: Dictionary mapping speaker IDs to embeddings (only when debugMode enabled)
@@ -151,7 +154,8 @@ public final class DiarizerManager {
     /// let result = try diarizer.performCompleteDiarization(audioContiguous)
     /// ```
     public func performCompleteDiarization<C>(
-        _ samples: C, sampleRate: Int = 16000, atTime startTime: TimeInterval = 0
+        _ samples: C, sampleRate: Int = 16000, atTime startTime: TimeInterval = 0,
+        progressHandler: ((Double) -> Void)? = nil
     ) throws -> DiarizationResult
     where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
         guard let models else {
@@ -196,7 +200,11 @@ public final class DiarizerManager {
             segmentationTime += chunkTimings.segmentationTime
             embeddingTime += chunkTimings.embeddingTime
             clusteringTime += chunkTimings.clusteringTime
+
+            progressHandler?(
+                Double(min(chunkStartOffset + stepSize, totalSamples)) / Double(totalSamples))
         }
+        progressHandler?(1.0)
 
         let postProcessingStartTime = Date()
         let filteredSegments = allSegments  // No post-processing

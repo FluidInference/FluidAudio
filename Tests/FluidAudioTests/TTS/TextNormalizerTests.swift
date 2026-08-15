@@ -322,24 +322,40 @@ final class TextNormalizerTests: XCTestCase {
 
     // MARK: - filterAmbiguousWords Logic
 
-    func testFilterReturnsUnchangedWhenNoAmbiguousWords() {
+    func testFilterReturnsUnchangedWhenNoAmbiguousWords() throws {
         let normalizer = TextNormalizer()
-        // This sentence has no ambiguous words — should pass through unchanged
+        // This asserts the no-native-lib fallback (normalizeSentence returns the
+        // input unchanged). When the native ITN lib is linked it deliberately
+        // rewrites spoken forms (e.g. "twenty one" → "21"); that path is
+        // covered in text-processing-rs, so skip here.
+        try XCTSkipIf(normalizer.isNativeAvailable, "native ITN linked; asserts the fallback path")
         let input = "I have twenty one apples"
-        // Without native lib, normalizeSentence returns input unchanged,
-        // but we can verify the function doesn't crash on non-ambiguous input
         let result = normalizer.normalizeSentence(input)
         XCTAssertEqual(result, input)
     }
 
     func testFilterWithAmbiguousWordInSentence() {
         let normalizer = TextNormalizer()
-        // "period" as a noun — should be preserved even through normalization pipeline
-        let input = "the period of growth was remarkable"
-        let result = normalizer.normalizeSentence(input)
-        // Without native lib, returns unchanged. With native lib, "period" should
-        // still be preserved because NLTagger identifies it as a noun.
-        XCTAssertEqual(result, input)
+        // Ambiguous words used as natural language (nouns) must survive
+        // normalization: the native ITN would otherwise rewrite "period" → ".",
+        // "dash" → "-". Passes with the native lib (masked + restored) and
+        // without it (fallback returns the input unchanged).
+        let unchanged = [
+            "the period of growth was remarkable",
+            "add a period here",
+            "the dash between them",
+        ]
+        for input in unchanged {
+            XCTAssertEqual(normalizer.normalizeSentence(input), input)
+        }
+    }
+
+    func testStandaloneAmbiguousWordStillNormalizes() throws {
+        let normalizer = TextNormalizer()
+        // The mask only protects natural-language usage; a standalone spoken
+        // command still normalizes when the native lib is linked.
+        try XCTSkipIf(!normalizer.isNativeAvailable, "requires the native normalizer")
+        XCTAssertEqual(normalizer.normalizeSentence("period"), ".")
     }
 
     func testFilterWithStandalonePunctuationWord() {
@@ -397,5 +413,31 @@ final class TextNormalizerTests: XCTestCase {
         let input = "twenty one apples"
         let result = normalizer.normalizeSentence(input, maxSpanTokens: 8)
         XCTAssertEqual(result, input)
+    }
+
+    // MARK: - TN (written → spoken) surface
+
+    func testTnPassthroughWithoutNativeLib() {
+        let normalizer = TextNormalizer()
+        guard !normalizer.isNativeAvailable else { return }
+
+        // No native library linked → TN unavailable and inputs pass through.
+        XCTAssertFalse(normalizer.isTnAvailable)
+        XCTAssertEqual(normalizer.tnNormalize("$5.50"), "$5.50")
+        XCTAssertEqual(normalizer.tnNormalizeSentence("I paid $5"), "I paid $5")
+    }
+
+    /// When the native TN surface is unavailable (the default), the shared TTS
+    /// entry point must equal the conservative baseline so spoken output is
+    /// unchanged.
+    func testFrontendNormalizationFallsBackToBaseline() {
+        guard !TextNormalizer.shared.isTnAvailable else { return }
+
+        for input in ["I am 26 years old.", "The score is 3.14.", "Agent 007", "hello world"] {
+            XCTAssertEqual(
+                EnglishTextNormalizer.normalizeForFrontend(input),
+                EnglishTextNormalizer.normalize(input),
+                "frontend normalization should match the baseline without the native lib")
+        }
     }
 }

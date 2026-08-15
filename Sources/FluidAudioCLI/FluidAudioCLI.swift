@@ -36,6 +36,8 @@ struct FluidAudioCLI {
             await VadAnalyzeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "asr-benchmark":
             await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
+        case "unified-benchmark":
+            await UnifiedBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "fleurs-benchmark":
             await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "transcribe":
@@ -44,10 +46,10 @@ struct FluidAudioCLI {
             await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "tts":
             await TTS.run(arguments: Array(arguments.dropFirst(2)))
-        case "magpie":
-            await MagpieCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "tts-asr-verify":
             await TTSAsrVerifyCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "luxtts-g2p-dump":
+            await LuxTtsG2pDumpCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "tts-benchmark":
             await TtsBenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "minimax-corpus":
@@ -72,18 +74,18 @@ struct FluidAudioCLI {
             await LSEENDCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "lseend-benchmark":
             await LSEENDBenchmark.run(arguments: Array(arguments.dropFirst(2)))
-        case "qwen3-benchmark":
-            await Qwen3AsrBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
-        case "qwen3-transcribe":
-            await Qwen3TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "g2p-benchmark":
             await G2PBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-benchmark":
             await NemotronBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-transcribe":
             await NemotronTranscribe.run(arguments: Array(arguments.dropFirst(2)))
-        case "ctc-zh-cn-transcribe":
-            await CtcZhCnTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron-multilingual-transcribe":
+            await NemotronMultilingualTranscribe.run(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron-multilingual-benchmark":
+            await NemotronMultilingualFleursBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron-multilingual-multi-stream-bench":
+            await NemotronMultilingualMultiStreamBench.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-transcribe":
             await SenseVoiceTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "fsmn-vad-segment":
@@ -92,8 +94,6 @@ struct FluidAudioCLI {
             await SenseVoiceBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "paraformer-transcribe":
             await ParaformerTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
-        case "ctc-zh-cn-benchmark":
-            await CtcZhCnBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "ja-benchmark":
             await JapaneseAsrBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "cohere-transcribe":
@@ -126,7 +126,6 @@ struct FluidAudioCLI {
                 transcribe              Transcribe audio file using streaming ASR
                 multi-stream            Transcribe multiple audio files in parallel
                 tts                     Synthesize speech from text (KokoroAne / PocketTTS / StyleTTS2)
-                magpie                  Magpie TTS Multilingual 357M (experimental, ~0.04 RTFx — slow, needs perf work)
                 tts-asr-verify          Batch TTS→ASR roundtrip WER verification
                 tts-benchmark           Quantitative TTS benchmark (latency, quality, compute-unit sweep)
                 minimax-corpus          Fetch MiniMax TTS Multilingual Test Set into Benchmarks/tts/corpus/minimax
@@ -137,13 +136,12 @@ struct FluidAudioCLI {
                 sortformer-benchmark    Run Sortformer benchmark on AMI dataset
                 lseend                  Run LS-EEND diarization on a single file
                 lseend-benchmark        Run LS-EEND benchmark on AMI dataset
-                qwen3-benchmark         Run Qwen3 ASR benchmark
-                qwen3-transcribe        Transcribe using Qwen3 ASR
                 g2p-benchmark           Run multilingual G2P benchmark
                 nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
                 nemotron-transcribe     Transcribe custom audio files with Nemotron
-                ctc-zh-cn-transcribe    Transcribe Mandarin Chinese audio with Parakeet CTC
-                ctc-zh-cn-benchmark     Run CTC zh-CN benchmark on THCHS-30 dataset
+                nemotron-multilingual-transcribe   Transcribe audio with Nemotron multilingual (local model path)
+                nemotron-multilingual-benchmark    Run Nemotron multilingual benchmark on FLEURS / MCV-17 / MLS (local model path)
+                nemotron-multilingual-multi-stream-bench  Parallel multi-stream benchmark (N concurrent managers)
                 ja-benchmark            Run Japanese ASR benchmark on JSUT/Common Voice
                 cohere-transcribe       Transcribe using Cohere Transcribe (cache-external pipeline, 14 languages)
                 cohere-benchmark        Run Cohere Transcribe FLEURS benchmark

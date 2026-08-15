@@ -44,7 +44,7 @@ extension DatasetDownloader {
             // Download transcript_utf8.txt (format: "FILENAME:transcription text")
             logger.info("📄 Downloading transcripts...")
             let transcriptURL = try ModelRegistry.resolveDataset(dataset, "basic5000/transcript_utf8.txt")
-            let (transcriptData, _) = try await DownloadUtils.sharedSession.data(from: transcriptURL)
+            let (transcriptData, _) = try await ModelHub.session.data(from: transcriptURL)
             let transcriptContent = String(data: transcriptData, encoding: .utf8) ?? ""
 
             // Parse transcripts and build metadata
@@ -182,7 +182,7 @@ extension DatasetDownloader {
             // Download TSV metadata (format: client_id\tpath\tsentence_id\tsentence\t...)
             logger.info("📄 Downloading metadata TSV...")
             let tsvURL = try ModelRegistry.resolveDataset(dataset, "ja/\(split.rawValue).tsv")
-            let (tsvData, _) = try await DownloadUtils.sharedSession.data(from: tsvURL)
+            let (tsvData, _) = try await ModelHub.session.data(from: tsvURL)
             let tsvContent = String(data: tsvData, encoding: .utf8) ?? ""
 
             // Parse TSV to extract entries

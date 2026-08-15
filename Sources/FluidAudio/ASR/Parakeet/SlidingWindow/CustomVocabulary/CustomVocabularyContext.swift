@@ -13,12 +13,23 @@ public struct CustomVocabularyTerm: Codable, Sendable {
     /// the Parakeet TDT token IDs above.
     public let ctcTokenIds: [Int]?
 
+    /// Optional per-term minimum string similarity for CTC rescoring.
+    ///
+    /// Overrides the vocabulary-level `CustomVocabularyContext.minSimilarity`
+    /// for this term only. Lower values widen recall (more aggressive
+    /// correction); higher values demand a closer match (fewer false
+    /// replacements). When `nil`, the vocabulary-level / size-aware default is
+    /// used. Vocabulary-wide safety guards (short-word, stopword-span, and
+    /// length-ratio floors) still apply on top of this value, so a per-term
+    /// override can only loosen matching down to those guards.
+    public let minSimilarity: Float?
+
     /// Pre-computed lowercased text for efficient comparison (not serialized).
     public let textLowercased: String
 
     // Only encode/decode the original properties, not the cached ones
     private enum CodingKeys: String, CodingKey {
-        case text, weight, aliases, tokenIds, ctcTokenIds
+        case text, weight, aliases, tokenIds, ctcTokenIds, minSimilarity
     }
 
     /// Create a custom vocabulary term.
@@ -28,18 +39,22 @@ public struct CustomVocabularyTerm: Codable, Sendable {
     ///   - aliases: Optional alternative spellings
     ///   - tokenIds: Optional pre-tokenized Parakeet TDT token IDs
     ///   - ctcTokenIds: Optional pre-tokenized CTC token IDs
+    ///   - minSimilarity: Optional per-term minimum string similarity override
+    ///     (falls back to the vocabulary-level threshold when `nil`)
     public init(
         text: String,
         weight: Float? = nil,
         aliases: [String]? = nil,
         tokenIds: [Int]? = nil,
-        ctcTokenIds: [Int]? = nil
+        ctcTokenIds: [Int]? = nil,
+        minSimilarity: Float? = nil
     ) {
         self.text = text
         self.weight = weight
         self.aliases = aliases
         self.tokenIds = tokenIds
         self.ctcTokenIds = ctcTokenIds
+        self.minSimilarity = minSimilarity.map { Self.clampSimilarity($0) }
         self.textLowercased = text.lowercased()
     }
 
@@ -50,7 +65,15 @@ public struct CustomVocabularyTerm: Codable, Sendable {
         aliases = try container.decodeIfPresent([String].self, forKey: .aliases)
         tokenIds = try container.decodeIfPresent([Int].self, forKey: .tokenIds)
         ctcTokenIds = try container.decodeIfPresent([Int].self, forKey: .ctcTokenIds)
+        minSimilarity = try container.decodeIfPresent(Float.self, forKey: .minSimilarity)
+            .map { Self.clampSimilarity($0) }
         textLowercased = text.lowercased()
+    }
+
+    /// Clamp a similarity threshold into the valid [0, 1] range so malformed
+    /// config values cannot disable or invert the rescoring gate.
+    private static func clampSimilarity(_ value: Float) -> Float {
+        min(1.0, max(0.0, value))
     }
 }
 
@@ -138,7 +161,8 @@ public struct CustomVocabularyContext: Sendable {
                 weight: term.weight,
                 aliases: sanitizedAliases?.isEmpty == true ? nil : sanitizedAliases,
                 tokenIds: term.tokenIds,
-                ctcTokenIds: term.ctcTokenIds
+                ctcTokenIds: term.ctcTokenIds,
+                minSimilarity: term.minSimilarity
             )
             validatedTerms.append(sanitizedTerm)
         }
@@ -234,11 +258,15 @@ public struct CustomVocabularyContext: Sendable {
 
     /// Load vocabulary from file and tokenize with CTC tokenizer.
     ///
-    /// This is a convenience method that combines loading vocabulary from a simple text file
-    /// and tokenizing each term with the CTC tokenizer for use with vocabulary boosting.
+    /// This is a convenience method that loads a vocabulary file and tokenizes
+    /// each term with the CTC tokenizer for use with vocabulary boosting. The
+    /// file may be either the structured JSON config (which supports per-term
+    /// `minSimilarity` and vocabulary-level thresholds, see ``load(from:)``) or
+    /// the simple one-term-per-line text format (see ``loadFromSimpleFormat(from:)``).
+    /// The format is detected from the file contents.
     ///
     /// - Parameters:
-    ///   - path: Path to the vocabulary file (one term per line)
+    ///   - path: Path to the vocabulary file (JSON config or simple text list)
     ///   - ctcVariant: CTC model variant to use for tokenization (default: .ctc110m)
     /// - Returns: Tuple of tokenized vocabulary context and loaded CTC models
     /// - Throws: Error if vocabulary file cannot be read or CTC models fail to load
@@ -249,16 +277,16 @@ public struct CustomVocabularyContext: Sendable {
         // Load CTC models
         let ctcModels = try await CtcModels.downloadAndLoad(variant: ctcVariant)
 
-        // Load vocabulary from file
+        // Load vocabulary from file (JSON config or simple text list).
         let vocabURL = URL(fileURLWithPath: path)
-        let loadedVocab = try loadFromSimpleFormat(from: vocabURL)
+        let loadedVocab = try loadVocabularyFile(at: vocabURL)
 
         // Load CTC tokenizer
         let ctcTokenizer = try await CtcTokenizer.load(
             from: CtcModels.defaultCacheDirectory(for: ctcVariant)
         )
 
-        // Tokenize each term with CTC tokenizer
+        // Tokenize each term with CTC tokenizer, preserving per-term settings.
         let tokenizedTerms = loadedVocab.terms.compactMap { term -> CustomVocabularyTerm? in
             let tokenIds = ctcTokenizer.encode(term.text)
             guard !tokenIds.isEmpty else { return nil }
@@ -267,11 +295,36 @@ public struct CustomVocabularyContext: Sendable {
                 weight: term.weight,
                 aliases: term.aliases,
                 tokenIds: nil,
-                ctcTokenIds: tokenIds
+                ctcTokenIds: tokenIds,
+                minSimilarity: term.minSimilarity
             )
         }
 
-        let tokenizedVocab = CustomVocabularyContext(terms: tokenizedTerms)
+        // Preserve vocabulary-level thresholds parsed from the JSON config so
+        // a structured file is honored end-to-end (the simple-text path keeps
+        // the defaults it always used).
+        let tokenizedVocab = CustomVocabularyContext(
+            terms: tokenizedTerms,
+            alpha: loadedVocab.alpha,
+            minCtcScore: loadedVocab.minCtcScore,
+            minSimilarity: loadedVocab.minSimilarity,
+            minCombinedConfidence: loadedVocab.minCombinedConfidence,
+            minTermLength: loadedVocab.minTermLength
+        )
         return (tokenizedVocab, ctcModels)
+    }
+
+    /// Load a vocabulary file, auto-detecting the structured JSON config vs the
+    /// simple one-term-per-line text format. JSON config files begin with `{`
+    /// (after optional leading whitespace); anything else is treated as simple
+    /// text.
+    static func loadVocabularyFile(at url: URL) throws -> CustomVocabularyContext {
+        let data = try Data(contentsOf: url)
+        let whitespace: Set<UInt8> = [0x20, 0x09, 0x0a, 0x0d]  // space, tab, LF, CR
+        let firstMeaningfulByte = data.first { !whitespace.contains($0) }
+        if firstMeaningfulByte == UInt8(ascii: "{") {
+            return try load(from: url)
+        }
+        return try loadFromSimpleFormat(from: url)
     }
 }

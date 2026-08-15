@@ -36,7 +36,7 @@ published TTS work.
 Upstream lines have a `<cloning_audio_filename>|<text>` pipe-delimited
 shape because the dataset also ships per-speaker reference audio for
 zero-shot voice cloning. The FluidAudio harness only needs the text —
-voice selection is a per-backend concern (Kokoro ANE / PocketTTS / Magpie
+voice selection is a per-backend concern (Kokoro ANE / PocketTTS
 each have their own voice plumbing). The leading
 `<filename>|` is stripped at fetch time; if you need the cloning audio
 later, fetch it from the upstream HF repo's `audio/` directory.

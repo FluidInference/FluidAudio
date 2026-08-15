@@ -591,6 +591,345 @@ final class ChunkProcessorTests: XCTestCase {
         XCTAssertNotNil(processor)
     }
 
+    // MARK: - Word Boundary Splice Tests (Issue #683)
+
+    /// Vocabulary for splice tests: tokens 21/22/25/26/28/50 are SentencePiece
+    /// continuation pieces (no `▁` prefix), the rest are word-initial.
+    private let spliceTestVocabulary: [Int: String] = [
+        10: "▁hello",
+        20: "▁wor",
+        21: "ld",
+        22: "ldo",
+        24: "▁Gre",
+        25: "nl",
+        26: "and",
+        27: "▁Green",
+        28: "andia",
+        30: "▁there",
+        40: "▁friend",
+        50: "ne",
+        60: "▁o",
+    ]
+
+    private var spliceTestSafeIds: Set<Int> {
+        ChunkProcessor.spliceSafeTokenIds(vocabulary: spliceTestVocabulary)!
+    }
+
+    func testPostMatchTailAdoptsRightSegmentationOfSeamWord() {
+        // Issue #683: the matched anchor lands mid-word ("nl") and the two
+        // windows segment the seam word differently. Splicing left's prefix
+        // onto right's suffix would decode a hybrid word ("▁Gre"+"nl"+
+        // "andia"). Since the right window heard the word from its start,
+        // the merge must adopt right's segmentation of the whole word.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),  // ▁hello
+            (token: 24, timestamp: 130, confidence: 0.97, duration: 1),  // ▁Gre
+            (token: 25, timestamp: 131, confidence: 0.96, duration: 1),  // nl (matched anchor)
+            (token: 26, timestamp: 132, confidence: 0.95, duration: 1),  // and
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 27, timestamp: 130, confidence: 0.97, duration: 1),  // ▁Green
+            (token: 25, timestamp: 131, confidence: 0.96, duration: 1),  // nl (matched anchor)
+            (token: 28, timestamp: 132, confidence: 0.95, duration: 1),  // andia (continuation)
+            (token: 30, timestamp: 134, confidence: 0.97, duration: 1),  // ▁there
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: spliceTestSafeIds
+        ).map(\.token)
+
+        // "▁hello ▁Green nl andia ▁there" — the seam word is segmented by
+        // the right window alone; left's truncated view of it is dropped.
+        XCTAssertEqual(merged, [10, 27, 25, 28, 30])
+    }
+
+    func testPostMatchTailKeepsLeftWordWhenRightCutMidWord() {
+        // Issue #683 glue repro: the right window's stream starts mid-word
+        // (utterance-initial, no `▁` piece before the anchor), so right
+        // never heard the word start. The merge must keep the left window's
+        // segmentation of the seam word and resume right at its next
+        // word-initial piece — never glue "and"-style continuations onto a
+        // different word.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),  // ▁hello
+            (token: 24, timestamp: 130, confidence: 0.97, duration: 1),  // ▁Gre
+            (token: 25, timestamp: 131, confidence: 0.96, duration: 1),  // nl (matched anchor)
+            (token: 26, timestamp: 132, confidence: 0.95, duration: 1),  // and
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 25, timestamp: 131, confidence: 0.96, duration: 1),  // nl (stream starts mid-word)
+            (token: 28, timestamp: 132, confidence: 0.95, duration: 1),  // andia (continuation)
+            (token: 30, timestamp: 134, confidence: 0.97, duration: 1),  // ▁there
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: spliceTestSafeIds
+        ).map(\.token)
+
+        // "▁hello ▁Gre nl and ▁there" — left's word completed from left,
+        // right's orphaned continuation skipped.
+        XCTAssertEqual(merged, [10, 24, 25, 26, 30])
+    }
+
+    func testPostMatchTailLegacyBehaviorWithoutVocabulary() {
+        // Without a vocabulary the merge must behave exactly as before:
+        // the tail is appended verbatim (this is the glued-word output).
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),
+            (token: 20, timestamp: 130, confidence: 0.97, duration: 1),
+            (token: 21, timestamp: 131, confidence: 0.96, duration: 1),
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 20, timestamp: 130, confidence: 0.97, duration: 1),
+            (token: 22, timestamp: 131, confidence: 0.95, duration: 1),
+            (token: 30, timestamp: 133, confidence: 0.97, duration: 1),
+            (token: 40, timestamp: 134, confidence: 0.98, duration: 1),
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(left: left, right: right).map(\.token)
+
+        XCTAssertEqual(merged, [10, 20, 22, 30, 40])
+    }
+
+    func testPostMatchTailKeepsWordInitialTailVerbatim() {
+        // When the right tail already starts at a word boundary the splice
+        // is untouched.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),
+            (token: 20, timestamp: 130, confidence: 0.97, duration: 1),
+            (token: 21, timestamp: 131, confidence: 0.96, duration: 1),
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 21, timestamp: 131, confidence: 0.97, duration: 1),  // ld (matched anchor)
+            (token: 30, timestamp: 133, confidence: 0.97, duration: 1),  // ▁there
+            (token: 40, timestamp: 134, confidence: 0.98, duration: 1),  // ▁friend
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: spliceTestSafeIds
+        ).map(\.token)
+
+        XCTAssertEqual(merged, [10, 20, 21, 30, 40])
+    }
+
+    func testMidpointMergeDoesNotCutWords() {
+        // No tokens match (disjoint IDs) so the merge falls back to the
+        // midpoint cutoff. The cutoff lands inside left's last word and the
+        // first right token past the cutoff is an orphaned continuation
+        // piece; both sides must be adjusted to word boundaries.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),  // ▁hello
+            (token: 20, timestamp: 133, confidence: 0.97, duration: 1),  // ▁wor
+            (token: 21, timestamp: 135, confidence: 0.96, duration: 1),  // ld (past cutoff)
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 60, timestamp: 134, confidence: 0.90, duration: 1),  // ▁o (before cutoff, trimmed)
+            (token: 50, timestamp: 136, confidence: 0.91, duration: 1),  // ne (orphaned continuation)
+            (token: 30, timestamp: 138, confidence: 0.97, duration: 1),  // ▁there
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: spliceTestSafeIds
+        ).map(\.token)
+
+        // "▁hello ▁wor ld ▁there" — left's word completed past the cutoff,
+        // right's headless continuation dropped.
+        XCTAssertEqual(merged, [10, 20, 21, 30])
+    }
+
+    func testMidpointMergeLegacyBehaviorWithoutVocabulary() {
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 120, confidence: 0.98, duration: 1),
+            (token: 20, timestamp: 133, confidence: 0.97, duration: 1),
+            (token: 21, timestamp: 135, confidence: 0.96, duration: 1),
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 60, timestamp: 134, confidence: 0.90, duration: 1),
+            (token: 50, timestamp: 136, confidence: 0.91, duration: 1),
+            (token: 30, timestamp: 138, confidence: 0.97, duration: 1),
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(left: left, right: right).map(\.token)
+
+        // Pure time cutoff: left's "ld" trimmed, right's "ne" glued in.
+        XCTAssertEqual(merged, [10, 20, 50, 30])
+    }
+
+    func testSpliceSafePieceClassification() {
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece("▁word"))
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece("▁"))
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece(" word"))
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece(","))
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece("..."))
+        XCTAssertTrue(ChunkProcessor.isSpliceSafePiece("?"))
+        XCTAssertFalse(ChunkProcessor.isSpliceSafePiece("ld"))
+        XCTAssertFalse(ChunkProcessor.isSpliceSafePiece("ня"))
+        XCTAssertFalse(ChunkProcessor.isSpliceSafePiece(""))
+        XCTAssertFalse(ChunkProcessor.isSpliceSafePiece("<unk>"))
+    }
+
+    func testSpliceSafeTokenIdsFromVocabulary() {
+        XCTAssertNil(ChunkProcessor.spliceSafeTokenIds(vocabulary: [:]))
+
+        let ids = ChunkProcessor.spliceSafeTokenIds(vocabulary: spliceTestVocabulary)
+        XCTAssertEqual(ids, [10, 20, 24, 27, 30, 40, 60])
+    }
+
+    // MARK: - Seam Case Artifacts (Issue #706)
+
+    /// Vocabulary with case-only twins: `▁meeting`/`▁Meeting` and `▁the`/`▁The`.
+    private let caseTestVocabulary: [Int: String] = [
+        10: "▁the",
+        11: "▁The",
+        20: "▁meeting",
+        21: "▁Meeting",
+        30: "▁was",
+        40: "▁good",
+        50: "▁here",
+    ]
+
+    private var caseTestSafeIds: Set<Int> {
+        ChunkProcessor.spliceSafeTokenIds(vocabulary: caseTestVocabulary)!
+    }
+
+    private var caseTestVariantIds: [Int: Int] {
+        ChunkProcessor.caseVariantCanonicalIds(vocabulary: caseTestVocabulary)!
+    }
+
+    func testCaseVariantCanonicalIdsMapsTwinsToLowercaseId() {
+        XCTAssertNil(ChunkProcessor.caseVariantCanonicalIds(vocabulary: [:]))
+
+        let canon = ChunkProcessor.caseVariantCanonicalIds(vocabulary: caseTestVocabulary)
+        // Only the case twins are present; each maps to its lower-case ID.
+        XCTAssertEqual(canon, [10: 10, 11: 10, 20: 20, 21: 20])
+    }
+
+    func testSeamWordCapitalizationCollapsesToLeftCasing() {
+        // The longest contiguous run is BEFORE the seam word, so the merge
+        // splices right's tail in — which starts with the capitalized
+        // `▁Meeting` the right window emitted as a false sentence start.
+        // Case-folded matching anchors the whole overlap and keeps left's
+        // lower-cased `▁meeting`.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+
+        let left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 128, confidence: 0.98, duration: 1),  // ▁the
+            (token: 30, timestamp: 130, confidence: 0.97, duration: 1),  // ▁was
+            (token: 20, timestamp: 132, confidence: 0.96, duration: 1),  // ▁meeting
+            (token: 40, timestamp: 134, confidence: 0.95, duration: 1),  // ▁good
+        ]
+        let right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = [
+            (token: 10, timestamp: 128, confidence: 0.98, duration: 1),  // ▁the
+            (token: 30, timestamp: 130, confidence: 0.97, duration: 1),  // ▁was
+            (token: 21, timestamp: 132, confidence: 0.96, duration: 1),  // ▁Meeting (capitalized)
+            (token: 40, timestamp: 134, confidence: 0.95, duration: 1),  // ▁good
+        ]
+
+        let withFold = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: caseTestSafeIds, caseVariantIds: caseTestVariantIds
+        ).map(\.token)
+        XCTAssertEqual(withFold, [10, 30, 20, 40], "Case-folded matching keeps left's lower-case ▁meeting")
+
+        // Without the case map the exact-ID matcher misses the seam word and
+        // the spliced tail carries the spurious capital.
+        let withoutFold = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: caseTestSafeIds
+        ).map(\.token)
+        XCTAssertEqual(withoutFold, [10, 30, 21, 40], "Legacy matcher leaves the mid-sentence capital")
+    }
+
+    // Subword vocab (mirrors the 1024-piece Unified vocab): whole words are
+    // multiple pieces. "have"=[1,2], "Have"=[3,2], "either"=[4,5], "Either"=[6,5].
+    private let subwordVocabulary: [Int: String] = [
+        1: "▁ha", 2: "ve",
+        3: "▁Ha",
+        4: "▁ei", 5: "ther",
+        6: "▁Ei",
+        7: "▁a",
+        8: "▁the",
+        9: ".",
+    ]
+
+    private func word(_ ids: [Int], from start: Int) -> [(token: Int, timestamp: Int, confidence: Float, duration: Int)]
+    {
+        ids.enumerated().map { (token: $0.element, timestamp: start + $0.offset, confidence: 0.95, duration: 1) }
+    }
+
+    func testCollapseSeamWordDuplicatesRemovesMultiTokenDuplicate() {
+        // "...have Have a" — the Unified artifact: a multi-token word the
+        // token-level check could never see as a unit.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+        let tokens =
+            word([1, 2], from: 100)  // have
+            + word([3, 2], from: 102)  // Have (seam dupe)
+            + word([7], from: 104)  // a
+
+        let collapsed = processor.collapseSeamWordDuplicates(tokens, vocabulary: subwordVocabulary).map(\.token)
+        XCTAssertEqual(collapsed, [1, 2, 7], "Capitalized multi-token seam dupe dropped, lower-case kept")
+    }
+
+    func testCollapseSeamWordDuplicatesKeepsLowercaseWhenCapitalFirst() {
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+        let tokens =
+            word([6, 5], from: 100)  // Either (capital first)
+            + word([4, 5], from: 102)  // either
+            + word([7], from: 104)  // a
+
+        let collapsed = processor.collapseSeamWordDuplicates(tokens, vocabulary: subwordVocabulary).map(\.token)
+        XCTAssertEqual(collapsed, [4, 5, 7], "Lower-case copy survives even when the capital comes first")
+    }
+
+    func testCollapseSeamWordDuplicatesKeepsGenuineRepeats() {
+        // "have have" — same case is a real disfluency, not a seam artifact.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+        let tokens = word([1, 2], from: 100) + word([1, 2], from: 102)
+
+        let collapsed = processor.collapseSeamWordDuplicates(tokens, vocabulary: subwordVocabulary).map(\.token)
+        XCTAssertEqual(collapsed, [1, 2, 1, 2])
+    }
+
+    func testCollapseSeamWordDuplicatesKeepsDistantRepeats() {
+        // The two casings are far apart in time — separate occurrences.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+        let tokens = word([1, 2], from: 100) + word([3, 2], from: 200)
+
+        let collapsed = processor.collapseSeamWordDuplicates(tokens, vocabulary: subwordVocabulary).map(\.token)
+        XCTAssertEqual(collapsed, [1, 2, 3, 2])
+    }
+
+    func testCollapseSeamWordDuplicatesKeepsSentenceBoundary() {
+        // "have. Have a" — the earlier word ends a sentence, so the capital is a
+        // legitimate sentence start, not a seam artifact.
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+        let tokens =
+            word([1, 2, 9], from: 100)  // have.
+            + word([3, 2], from: 103)  // Have
+            + word([7], from: 105)  // a
+
+        let collapsed = processor.collapseSeamWordDuplicates(tokens, vocabulary: subwordVocabulary).map(\.token)
+        XCTAssertEqual(collapsed, [1, 2, 9, 3, 2, 7])
+    }
+
+    func testCollapseSeamWordDuplicatesNoOpWithoutVocabulary() {
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 22.0))
+        let tokens = word([1, 2], from: 100) + word([3, 2], from: 102)
+
+        let collapsed = processor.collapseSeamWordDuplicates(tokens, vocabulary: [:]).map(\.token)
+        XCTAssertEqual(collapsed, [1, 2, 3, 2], "No vocabulary → nothing collapsed")
+    }
+
     // MARK: - Chunk Count Prediction with Overlap
 
     func testPredictableChunkCountWithOverlap() {

@@ -102,6 +102,14 @@ FluidAudioDatasets/
 Resources/
 !Sources/FluidAudio/Resources/
 !Sources/FluidAudio/Resources/**
+# LuxTts parity fixtures (dump_swift_fixtures.py); the reference wav
+# stays untracked per the repo-wide *.wav rule (tests read JSON stats).
+!Tests/FluidAudioTests/TTS/LuxTts/Resources/
+!Tests/FluidAudioTests/TTS/LuxTts/Resources/**
+Tests/FluidAudioTests/TTS/LuxTts/Resources/*.wav
+# LuxTts bundled G2P lexicon (probe_lexicon.py in mobius zipvoice)
+!Sources/FluidAudio/TTS/LuxTts/G2p/Resources/
+!Sources/FluidAudio/TTS/LuxTts/G2p/Resources/**
 scripts/
 !Scripts/parakeet_subset_benchmark.sh
 !Scripts/diarizer_subset_benchmark.sh

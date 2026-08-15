@@ -64,12 +64,18 @@ public struct TTS {
         var kokoroAneVariant: KokoroAneVariant = .english
         var lexiconPath: String? = nil
         var text: String? = nil
+        // KokoroAne: treat the positional/`--text` value as a pre-computed
+        // phoneme string (IPA for en/ja, Bopomofo+tone for zh) and bypass
+        // G2P via synthesizeFromPhonemes. Required for `.japanese`, which
+        // ships no text frontend (issue #698).
+        var treatAsPhonemes = false
         var deEss = true
         var backend: TtsBackend = .kokoroAne
         var cloneVoicePath: String? = nil
         var voiceFilePath: String? = nil
         var saveVoicePath: String? = nil
         var pocketLanguage: PocketTtsLanguage = .english
+        var pocketPlacement: PocketTtsModelPlacement = .gpu
         // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
         var pocketSeed: UInt64? = nil
         // StyleTTS2 zero-shot args.
@@ -86,6 +92,15 @@ public struct TTS {
         var supertonicVoiceStylePath: String? = nil
         var supertonicTotalSteps: Int = Supertonic3Constants.defaultTotalSteps
         var supertonicSpeed: Float = Supertonic3Constants.defaultSpeed
+        var supertonicSilence: Float = Supertonic3Constants.defaultSilenceDuration
+        // VectorEstimator build: fp16 | int8/int6/int4 (ANE-bucketed) |
+        // dyn-int8/dyn-int6/dyn-int4 (dynamic CPU/GPU). Default fp16.
+        var supertonicVE: Supertonic3VectorEstimator = .aneBucketed(.int4)
+        // LuxTTS zero-shot voice-cloning args.
+        var luxttsPromptAudioPath: String? = nil
+        var luxttsPromptText: String? = nil
+        var luxttsSpeed: Float = LuxTtsConstants.defaultSpeed
+        var luxttsSeed: UInt64 = LuxTtsConstants.defaultSeed
 
         var i = 0
         while i < arguments.count {
@@ -109,6 +124,8 @@ public struct TTS {
                     metricsPath = arguments[i + 1]
                     i += 1
                 }
+            case "--phonemes":
+                treatAsPhonemes = true
             case "--variant", "--model-variant":
                 if i + 1 < arguments.count {
                     let value = arguments[i + 1].lowercased()
@@ -117,6 +134,8 @@ public struct TTS {
                         kokoroAneVariant = .english
                     case "zh", "mandarin", "zh-cn", "zh_cn":
                         kokoroAneVariant = .mandarin
+                    case "ja", "japanese", "jp":
+                        kokoroAneVariant = .japanese
                     default:
                         logger.warning("Unknown variant preference '\(arguments[i + 1])'; ignoring")
                     }
@@ -139,6 +158,8 @@ public struct TTS {
                         backend = .styletts2
                     case "supertonic3", "supertonic-3", "sup3":
                         backend = .supertonic3
+                    case "luxtts", "lux-tts", "lux", "zipvoice":
+                        backend = .luxtts
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro-ane")
                     }
@@ -154,6 +175,18 @@ public struct TTS {
                     supertonicVoiceStylePath = arguments[i + 1]
                     i += 1
                 }
+            case "--ve-variant", "--vector-estimator":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1].lowercased()
+                    if let v = Self.parseSupertonicVE(raw) {
+                        supertonicVE = v
+                    } else {
+                        logger.warning(
+                            "Unknown --ve-variant '\(raw)'; using fp16. "
+                                + "Valid: fp16, int8/int6/int4 (ANE), dyn-int8/dyn-int6/dyn-int4.")
+                    }
+                    i += 1
+                }
             case "--total-steps":
                 if i + 1 < arguments.count, let v = Int(arguments[i + 1]) {
                     supertonicTotalSteps = v
@@ -162,6 +195,22 @@ public struct TTS {
             case "--speed":
                 if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
                     supertonicSpeed = v
+                    luxttsSpeed = v
+                    i += 1
+                }
+            case "--prompt-audio":
+                if i + 1 < arguments.count {
+                    luxttsPromptAudioPath = arguments[i + 1]
+                    i += 1
+                }
+            case "--prompt-text":
+                if i + 1 < arguments.count {
+                    luxttsPromptText = arguments[i + 1]
+                    i += 1
+                }
+            case "--silence":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    supertonicSilence = v
                     i += 1
                 }
             case "--alpha":
@@ -188,6 +237,7 @@ public struct TTS {
                 if i + 1 < arguments.count, let parsed = UInt64(arguments[i + 1]) {
                     styletts2Seed = parsed
                     pocketSeed = parsed
+                    luxttsSeed = parsed
                     i += 1
                 }
             case "--cpu-only":
@@ -216,6 +266,19 @@ public struct TTS {
             case "--save-voice":
                 if i + 1 < arguments.count {
                     saveVoicePath = arguments[i + 1]
+                    i += 1
+                }
+            case "--placement":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1].lowercased()
+                    if let parsed = PocketTtsModelPlacement(rawValue: raw) {
+                        pocketPlacement = parsed
+                    } else {
+                        logger.error(
+                            "Unknown PocketTTS placement '\(arguments[i + 1])'. Supported: gpu, ane, ane-state"
+                        )
+                        return
+                    }
                     i += 1
                 }
             case "--language":
@@ -255,11 +318,13 @@ public struct TTS {
                 text: text, output: output, voice: voice, deEss: deEss,
                 metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
                 voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath,
-                language: pocketLanguage, seed: pocketSeed)
+                language: pocketLanguage, seed: pocketSeed,
+                placement: pocketPlacement)
         case .kokoroAne:
             await runKokoroAne(
                 text: text, output: output, voice: voice, metricsPath: metricsPath,
-                variant: kokoroAneVariant, lexiconPath: lexiconPath)
+                variant: kokoroAneVariant, lexiconPath: lexiconPath,
+                treatAsPhonemes: treatAsPhonemes)
         case .styletts2:
             await runStyleTTS2(
                 text: text, ipa: styletts2Ipa,
@@ -274,8 +339,181 @@ public struct TTS {
                 text: text, output: output, language: supertonicLanguage,
                 voiceStylePath: supertonicVoiceStylePath, voiceName: voice,
                 totalSteps: supertonicTotalSteps, speed: supertonicSpeed,
+                silenceDuration: supertonicSilence,
+                vectorEstimator: supertonicVE,
                 metricsPath: metricsPath, cpuOnly: cpuOnly)
+        case .luxtts:
+            await runLuxTts(
+                text: text, output: output,
+                promptAudioPath: luxttsPromptAudioPath,
+                promptText: luxttsPromptText,
+                treatAsPhonemes: treatAsPhonemes,
+                speed: luxttsSpeed, seed: luxttsSeed,
+                metricsPath: metricsPath)
         }
+    }
+
+    /// Run LuxTTS zero-shot voice cloning. Requires `--prompt-audio`.
+    /// Text mode (default): the positional text and `--prompt-text` are
+    /// raw English, phonemized in-process (`LuxTtsG2p`). If `--prompt-text`
+    /// is omitted the prompt clip is transcribed with Parakeet ASR (models
+    /// download on first use). With `--phonemes`, both the text and
+    /// `--prompt-text` are espeak IPA (en-us) from the `tokens.txt` set.
+    private static func runLuxTts(
+        text: String, output: String,
+        promptAudioPath: String?, promptText: String?,
+        treatAsPhonemes: Bool,
+        speed: Float, seed: UInt64,
+        metricsPath: String?
+    ) async {
+        guard let promptAudioPath else {
+            logger.error("luxtts backend requires --prompt-audio <clip.wav>")
+            exit(1)
+        }
+        if treatAsPhonemes && promptText == nil {
+            logger.error(
+                "luxtts --phonemes requires --prompt-text (espeak IPA of the prompt "
+                    + "clip); ASR prompt transcription is only available in text mode")
+            exit(1)
+        }
+        do {
+            let tStart = Date()
+            let manager = LuxTtsManager()
+
+            let promptURL = resolveInputURL(promptAudioPath)
+            logger.info("LuxTTS prompt audio: \(promptURL.path)")
+            logger.info(
+                "LuxTTS speed=\(String(format: "%.2f", speed)) seed=\(seed)")
+
+            // Prompt transcription (ASR) is independent of the TTS models and
+            // only needs the prompt URL, so resolve it before loading the
+            // synthesis stages. On failure, point the user at --prompt-text so
+            // they can skip ASR entirely.
+            let resolvedPromptText: String
+            if let promptText {
+                resolvedPromptText = promptText
+            } else {
+                do {
+                    resolvedPromptText = try await transcribeLuxTtsPrompt(promptURL)
+                } catch {
+                    logger.error(
+                        "Prompt transcription failed; pass --prompt-text to skip ASR: \(error)")
+                    throw error
+                }
+            }
+
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+
+            let tSynth0 = Date()
+            let result: LuxTtsSynthesisResult
+            if treatAsPhonemes {
+                result = try await manager.synthesize(
+                    phonemes: text,
+                    promptAudio: promptURL,
+                    promptPhonemes: resolvedPromptText,
+                    speed: speed,
+                    seed: seed)
+            } else {
+                result = try await manager.synthesize(
+                    text: text,
+                    promptAudio: promptURL,
+                    promptText: resolvedPromptText,
+                    speed: speed,
+                    seed: seed)
+            }
+            let tSynth1 = Date()
+
+            let outURL = resolveInputURL(output)
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            // No peak normalization: the output level carries the
+            // prompt-matched loudness (upstream rms_norm contract).
+            let wav = try AudioWAV.data(
+                from: result.samples,
+                sampleRate: Double(result.sampleRate),
+                normalize: false)
+            try wav.write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let totalS = tSynth1.timeIntervalSince(tStart)
+            let audioSecs = Double(result.samples.count) / Double(result.sampleRate)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+            let sumSquares = result.samples.reduce(Double(0)) { $0 + Double($1) * Double($1) }
+            let rms = result.samples.isEmpty ? 0 : (sumSquares / Double(result.samples.count)).squareRoot()
+
+            logger.info("LuxTTS synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info(
+                "  Audio: \(String(format: "%.3f", audioSecs))s "
+                    + "(\(result.samples.count) samples @ \(result.sampleRate) Hz)")
+            logger.info(
+                "  Frames: prompt=\(result.promptFrames) "
+                    + "generated=\(result.generatedFrames) total=\(result.featuresLength)")
+            logger.info("  RMS: \(String(format: "%.5f", rms))")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Total: \(String(format: "%.3f", totalS))s")
+            logger.info("  Output: \(outURL.path)")
+
+            if let metricsPath {
+                let metricsDict: [String: Any] = [
+                    "backend": "luxtts",
+                    "text": text,
+                    "prompt_audio": promptURL.path,
+                    "speed": Double(speed),
+                    "seed": seed,
+                    "output": outURL.path,
+                    "model_load_time_s": loadS,
+                    "inference_time_s": synthS,
+                    "audio_duration_s": audioSecs,
+                    "audio_samples": result.samples.count,
+                    "audio_rms": rms,
+                    "prompt_frames": result.promptFrames,
+                    "generated_frames": result.generatedFrames,
+                    "realtime_speed": rtfx,
+                    "total_time_s": totalS,
+                ]
+                let artifactsRoot = try ensureArtifactsRoot()
+                let mURL = resolveOutputURL(
+                    metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+                try FileManager.default.createDirectory(
+                    at: mURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true)
+                let json = try JSONSerialization.data(
+                    withJSONObject: metricsDict, options: [.prettyPrinted])
+                try json.write(to: mURL)
+                logger.info("Metrics saved: \(mURL.path)")
+            }
+        } catch {
+            logger.error("LuxTTS Error: \(error)")
+            print("LuxTTS failed: \(error)")
+            exit(1)
+        }
+    }
+
+    /// Transcribe the LuxTTS prompt clip with Parakeet ASR (only invoked
+    /// when `--prompt-text` is omitted, so TTS-only users never pay the
+    /// ASR model download).
+    private static func transcribeLuxTtsPrompt(_ promptURL: URL) async throws -> String {
+        logger.info("--prompt-text not provided; transcribing prompt with Parakeet ASR…")
+        let models = try await AsrModels.downloadAndLoad()
+        let asrManager = AsrManager(config: .default)
+        try await asrManager.loadModels(models)
+        var decoderState = TdtDecoderState.make(
+            decoderLayers: await asrManager.decoderLayerCount)
+        let result = try await asrManager.transcribe(promptURL, decoderState: &decoderState)
+        let transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !transcript.isEmpty else {
+            throw LuxTtsError.invalidPromptAudio(
+                "ASR produced an empty transcript for \(promptURL.path); "
+                    + "pass --prompt-text explicitly")
+        }
+        logger.info("Prompt transcript: \(transcript)")
+        return transcript
     }
 
     /// Run PocketTTS in deterministic-seed mode through the session API,
@@ -335,7 +573,8 @@ public struct TTS {
         metricsPath: String?, cloneVoicePath: String?,
         voiceFilePath: String?, saveVoicePath: String?,
         language: PocketTtsLanguage,
-        seed: UInt64? = nil
+        seed: UInt64? = nil,
+        placement: PocketTtsModelPlacement = .gpu
     ) async {
         do {
             let tStart = Date()
@@ -343,8 +582,9 @@ public struct TTS {
                 voice == TtsConstants.recommendedVoice
                 ? PocketTtsConstants.defaultVoice : voice
             let manager = PocketTtsManager(
-                defaultVoice: pocketVoice, language: language)
-            logger.info("PocketTTS language: \(language.rawValue)")
+                defaultVoice: pocketVoice, language: language, placement: placement)
+            logger.info(
+                "PocketTTS language: \(language.rawValue), placement: \(placement.rawValue)")
 
             let tLoad0 = Date()
             try await manager.initialize()
@@ -479,7 +719,7 @@ public struct TTS {
 
     private static func runKokoroAne(
         text: String, output: String, voice: String, metricsPath: String?,
-        variant: KokoroAneVariant, lexiconPath: String?
+        variant: KokoroAneVariant, lexiconPath: String?, treatAsPhonemes: Bool
     ) async {
         do {
             let tStart = Date()
@@ -501,10 +741,10 @@ public struct TTS {
                     if let lex = try loadMandarinLexicon(from: lexiconPath) {
                         await manager.setMandarinCustomLexicon(lex)
                     }
-                case .english:
+                case .english, .japanese:
                     logger.warning(
-                        "--lexicon ignored: KokoroAne English variant has "
-                            + "no custom lexicon support yet (only Mandarin does).")
+                        "--lexicon ignored: only the KokoroAne Mandarin variant "
+                            + "supports a custom lexicon.")
                 }
             }
 
@@ -513,14 +753,22 @@ public struct TTS {
             let tLoad1 = Date()
 
             let tSynth0 = Date()
-            // synthesizeDetailed handles both variants: English routes
-            // through G2PModel, Mandarin routes Hanzi through MandarinG2P
-            // (and passes through pre-computed Bopomofo verbatim).
-            let detailed = try await manager.synthesizeDetailed(
-                text: text, voice: resolvedVoice, speed: 1.0)
+            // synthesizeDetailed handles English (G2PModel) and Mandarin
+            // (MandarinG2P, with pass-through for pre-computed Bopomofo).
+            // With --phonemes, or for Japanese (no text frontend), bypass
+            // G2P and feed the input as a pre-computed phoneme string.
+            let detailed: KokoroAneSynthesisResult
+            if treatAsPhonemes || variant == .japanese {
+                detailed = try await manager.synthesizeFromPhonemesDetailed(
+                    text, voice: resolvedVoice, speed: 1.0)
+            } else {
+                detailed = try await manager.synthesizeDetailed(
+                    text: text, voice: resolvedVoice, speed: 1.0)
+            }
             let wav = try AudioWAV.data(
                 from: detailed.samples,
-                sampleRate: Double(detailed.sampleRate))
+                sampleRate: Double(detailed.sampleRate),
+                normalize: variant != .japanese)
             let tSynth1 = Date()
 
             let outURL = resolveInputURL(output)
@@ -734,16 +982,33 @@ public struct TTS {
     /// Run Supertonic-3 multilingual TTS. Voice comes from a built-in style
     /// (`--voice F1`..`M5`, downloaded on demand, default `M1`) or an explicit
     /// `--voice-style <file.json>`, which overrides `--voice`.
+    /// Map a `--ve-variant` token to a `Supertonic3VectorEstimator`.
+    private static func parseSupertonicVE(_ raw: String) -> Supertonic3VectorEstimator? {
+        func q(_ s: String) -> Supertonic3Quantization? { Supertonic3Quantization(rawValue: s) }
+        switch raw {
+        case "fp16", "fp16dynamic": return .fp16Dynamic
+        case "default", "": return .aneBucketed(.int4)
+        case "int8", "int6", "int4", "ane-int8", "ane-int6", "ane-int4":
+            return q(String(raw.split(separator: "-").last!)).map { .aneBucketed($0) }
+        case "dyn-int8", "dyn-int6", "dyn-int4", "dynamic-int8", "dynamic-int6", "dynamic-int4":
+            return q("int" + String(raw.suffix(1))).map { .dynamic($0) }
+        default: return nil
+        }
+    }
+
     private static func runSupertonic3(
         text: String, output: String, language: String,
         voiceStylePath: String?, voiceName: String,
         totalSteps: Int, speed: Float,
+        silenceDuration: Float,
+        vectorEstimator: Supertonic3VectorEstimator,
         metricsPath: String?, cpuOnly: Bool
     ) async {
         do {
             let tStart = Date()
             let computeUnits: MLComputeUnits = cpuOnly ? .cpuOnly : .cpuAndNeuralEngine
-            let manager = Supertonic3Manager(computeUnits: computeUnits)
+            let manager = Supertonic3Manager(
+                computeUnits: computeUnits, vectorEstimator: vectorEstimator)
 
             let tLoad0 = Date()
             try await manager.initialize()
@@ -777,7 +1042,8 @@ public struct TTS {
             let tSynth0 = Date()
             let result = try await manager.synthesize(
                 text: text, language: language, style: style,
-                totalSteps: totalSteps, speed: speed)
+                totalSteps: totalSteps, speed: speed,
+                silenceDuration: silenceDuration)
             let tSynth1 = Date()
 
             let outURL = resolveInputURL(output)
@@ -845,7 +1111,7 @@ public struct TTS {
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for KokoroAne, alba for PocketTTS)
-              --backend            TTS backend: kokoro-ane (default), pocket, styletts2, supertonic3
+              --backend            TTS backend: kokoro-ane (default), pocket, styletts2, supertonic3, luxtts
                                    StyleTTS2 (zero-shot, English):
                                      --reference <speaker.wav>  required
                                      --alpha 0.3                ref-side blend (default 0.3)
@@ -858,7 +1124,17 @@ public struct TTS {
                                      --lang en                  ISO-639-1 language code (default en)
                                      --total-steps 8            denoising step count (default 8)
                                      --speed 1.05               duration multiplier (default 1.05)
+                                     --silence 0.05             inter-chunk silence seconds (default 0.05)
                                      --cpu-only                 disable Neural Engine
+                                   LuxTTS (zero-shot voice cloning, 48 kHz):
+                                     --prompt-audio <clip.wav>  required — voice prompt (<= 5 s used)
+                                     --prompt-text "…"          prompt transcript (English text); if
+                                                                omitted, the clip is transcribed with
+                                                                Parakeet ASR (downloads ASR models)
+                                     --phonemes                 bypass the built-in G2P: text and
+                                                                --prompt-text are espeak IPA (en-us)
+                                     --speed 1.0                speech-rate divisor (default 1.0)
+                                     --seed N                   flow-matching noise seed (default 42)
               --lexicon, -l        Custom pronunciation lexicon file (KokoroAne --variant zh only):
                                      word  pinyin1 pinyin2   (e.g. zi4 jie2)
                                      word  @bopomofo1        (escape: @-prefixed,
@@ -889,6 +1165,9 @@ public struct TTS {
                                    portuguese, portuguese_24l, spanish, spanish_24l
                                    Note: French is 24-layer only (no 6-layer pack upstream)
               --seed N             Deterministic-mode seed (uses session API for fixed RNG)
+              --placement P        Model placement: gpu (default), ane (rank-4 ANE models),
+                                   ane-state (Trial 23 MLState multifunction pipeline;
+                                   macOS 15+/iOS 18+, requires pocket_state.mlmodelc)
 
             Voice Cloning examples:
               # Clone and synthesize in one step

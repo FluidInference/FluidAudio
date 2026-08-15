@@ -605,6 +605,13 @@ enum StreamDiarizationBenchmark {
             }
         }
 
+        // Fail loudly if no meeting produced a result (e.g. missing ground truth
+        // annotations) instead of exiting cleanly with empty metrics (issue #752).
+        guard !allResults.isEmpty else {
+            logger.error("❌ Benchmark produced no results — see errors above")
+            exit(1)
+        }
+
         // Print final summary
         printFinalSummary(results: allResults)
 
@@ -765,8 +772,9 @@ enum StreamDiarizationBenchmark {
             let totalElapsed = Date().timeIntervalSince(startTime)
             let finalRTFx = totalDuration / totalElapsed
 
-            // Load ground truth
-            let groundTruth = await AMIParser.loadAMIGroundTruth(
+            // Load ground truth (throws if annotations are missing — never scores
+            // against placeholder data, see issue #752)
+            let groundTruth = try AMIParser.loadAMIGroundTruth(
                 for: meetingName,
                 duration: Float(totalDuration)
             )
@@ -870,8 +878,9 @@ enum StreamDiarizationBenchmark {
                 logger.info("  RTFx: \(String(format: "%.1f", finalRTFx))x")
             }
 
-            // Load ground truth
-            let groundTruth = await AMIParser.loadAMIGroundTruth(
+            // Load ground truth (throws if annotations are missing — never scores
+            // against placeholder data, see issue #752)
+            let groundTruth = try AMIParser.loadAMIGroundTruth(
                 for: meetingName,
                 duration: Float(totalDuration)
             )

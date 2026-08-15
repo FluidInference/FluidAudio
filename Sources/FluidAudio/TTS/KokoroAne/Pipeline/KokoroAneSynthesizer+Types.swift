@@ -16,6 +16,18 @@ public struct KokoroAneStageTimings: Sendable, Equatable {
     }
 
     public init() {}
+
+    /// Accumulate another call's per-stage timings into this one — used when
+    /// a long prompt is synthesized in several chunks (issue #712).
+    mutating func add(_ other: KokoroAneStageTimings) {
+        albert += other.albert
+        postAlbert += other.postAlbert
+        alignment += other.alignment
+        prosody += other.prosody
+        noise += other.noise
+        vocoder += other.vocoder
+        tail += other.tail
+    }
 }
 
 /// Detailed result of a `KokoroAneManager.synthesizeDetailed` call.
@@ -68,7 +80,7 @@ public enum KokoroAneStage: String, CaseIterable, Sendable {
         case .postAlbert: return "KokoroPostAlbert.mlmodelc"
         case .alignment: return "KokoroAlignment.mlmodelc"
         case .prosody: return "KokoroProsody.mlmodelc"
-        case .noise: return "KokoroNoise.mlmodelc"
+        case .noise: return "KokoroNoise_v2.mlmodelc"  // v2: atan2 phase-correction (HF-noise fix)
         case .vocoder: return "KokoroVocoder.mlmodelc"
         case .tail: return "KokoroTail.mlmodelc"
         }

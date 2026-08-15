@@ -17,6 +17,37 @@ How the Swift code generates speech from text.
 | `PocketTtsConstantsLoader.swift` | Loads binary constants (embeddings, tokenizer, quantizer weights) |
 | `PocketTtsConstants.swift` | All numeric constants (dimensions, thresholds, etc.) |
 
+## v2.1 — Optimized Re-Conversion (current default)
+
+v2.1 is the **same weights** as v2, re-converted for speed (not a finetune).
+The loader points at `v2.1/<lang>/`. Measured on M-series / macOS 26:
+**~905 ms → ~452–520 ms per utterance (~1.8× RTFx)**; validated end-to-end
+(Whisper: english exact, german_24l intelligible).
+
+| stage | v2 | v2.1 |
+|---|---|---|
+| conditioning | `cond_step`, per-token (~141 calls) | **`cond_prefill`** — whole block in 1 call (122→4.8 ms) |
+| flow decoder | `flow_decoder`, 8-step Euler loop (8 calls/frame) | **`flow_decoder_fused`** — 8 steps fused, 1 call/frame (249→46 ms) |
+| flowlm | fp16 | fp16 (unchanged; int8 `flowlm_stepv2` is the fastest variant) |
+| mimi | unchanged | unchanged (compute-bound floor) |
+
+**ANE residency (measured — corrects earlier claims):** **only
+`flow_decoder_fused` runs on the ANE** (0%→100%; scatter-free fp16 graph).
+`flowlm` and `cond` run on **GPU** — their rank-5 KV-cache `scatter` is rejected
+by the ANE compiler at *any* precision, so the previous "flowlm 1.97× on ANE"
+claim did **not** reproduce on-device. `mimi` is **CPU** (fp16 streaming
+feedback beeps on ANE, and it is compute-bound regardless).
+
+**Per-model compute units (measured fastest):** `flowlm` `.all`,
+`flow_decoder_fused` `.all` (→ANE), `cond_prefill` `.all` (→GPU),
+`mimi_decoder` `.cpuOnly`.
+
+The v2 table below documents the original per-step contracts; v2.1 swaps in the
+fused/prefill artifacts at `v2.1/<lang>/` and otherwise reuses v2's `mimi`,
+`flowlm_stepv2`, and `constants`.
+
+---
+
 ## Model Files & Precision
 
 The four CoreML submodels (plus the optional Mimi encoder) and their
@@ -135,7 +166,7 @@ Splitting priority:
 
 ## CoreML Details
 
-- All 4 models loaded with `.cpuAndGPU` compute units (ANE float16 causes artifacts in Mimi state feedback)
+- Per-model compute units (measured fastest, v2.1): `flowlm`/`flow_decoder_fused` `.all`, `cond_prefill` `.all` (GPU), `mimi_decoder` `.cpuOnly`. Only the fused flow decoder reaches the ANE; mimi stays off the ANE (fp16 streaming-state feedback causes audible artifacts there)
 - Models compiled from `.mlpackage` → `.mlmodelc` on first load, cached on disk
 - `PocketTtsModelStore` is an actor — thread-safe access to loaded models
 - Voice data cached per voice name to avoid reloading

@@ -21,11 +21,15 @@ public struct KokoroAneSynthesizer {
         speed: Float = KokoroAneConstants.defaultSpeed,
         store: KokoroAneModelStore
     ) async throws -> KokoroAneSynthesisResult {
-        precondition(styleS.count == 128, "style_s must be length 128, got \(styleS.count)")
-        precondition(
-            styleTimbre.count == 128,
-            "style_timbre must be length 128, got \(styleTimbre.count)")
+        guard styleS.count == 128 else {
+            throw KokoroAneError.invalidVoicePack("style_s must be length 128, got \(styleS.count)")
+        }
+        guard styleTimbre.count == 128 else {
+            throw KokoroAneError.invalidVoicePack(
+                "style_timbre must be length 128, got \(styleTimbre.count)")
+        }
 
+        try Task.checkCancellation()
         let tEnc = inputIds.count
         var timings = KokoroAneStageTimings()
 
@@ -49,6 +53,7 @@ public struct KokoroAneSynthesizer {
         let bertDur = try rebuild16(albertOut, key: "bert_dur", stage: .albert)
 
         // ── 2: PostAlbert ────────────────────────────────────────────
+        try Task.checkCancellation()
         let postModel = try await store.model(for: .postAlbert)
         let postOut = try await predict(
             stage: .postAlbert, model: postModel,
@@ -65,10 +70,7 @@ public struct KokoroAneSynthesizer {
         // duration → pred_dur (int32, rounded, clamped ≥ 1)
         let duration = try outputArray(postOut, key: "duration", stage: .postAlbert)
         let durFloats = KokoroAneArrays.readFloats(duration)
-        let predDur = durFloats.map { d -> Int32 in
-            let r = Int32(Float(d).rounded())
-            return max(r, 1)
-        }
+        let predDur = try predictedDurations(from: durFloats)
         let tA = predDur.reduce(0) { $0 + Int($1) }
         if tA > KokoroAneConstants.maxAcousticFrames {
             throw KokoroAneError.acousticFramesExceedCap(
@@ -81,6 +83,7 @@ public struct KokoroAneSynthesizer {
         let tEnArr = try rebuild16(postOut, key: "t_en", stage: .postAlbert)
 
         // ── 3: Alignment ─────────────────────────────────────────────
+        try Task.checkCancellation()
         let alignModel = try await store.model(for: .alignment)
         let alignOut = try await predict(
             stage: .alignment, model: alignModel,
@@ -91,6 +94,7 @@ public struct KokoroAneSynthesizer {
         let asrArr = try rebuild16(alignOut, key: "asr", stage: .alignment)
 
         // ── 4: Prosody ───────────────────────────────────────────────
+        try Task.checkCancellation()
         let prosodyModel = try await store.model(for: .prosody)
         let prosOut = try await predict(
             stage: .prosody, model: prosodyModel,
@@ -104,6 +108,7 @@ public struct KokoroAneSynthesizer {
         let nShape = nRaw.shape.map(\.intValue)
 
         // ── 5: Noise (fp32 boundary) ─────────────────────────────────
+        try Task.checkCancellation()
         let f0F32 = try KokoroAneArrays.float32Array(shape: f0Shape, from: f0Raw)
         let noiseModel = try await store.model(for: .noise)
         let noiseOut = try await predict(
@@ -113,6 +118,7 @@ public struct KokoroAneSynthesizer {
         )
 
         // ── 6: Vocoder (fp16 boundary) ───────────────────────────────
+        try Task.checkCancellation()
         let f0F16 = try KokoroAneArrays.float16Array(shape: f0Shape, from: f0Raw)
         let nF16 = try KokoroAneArrays.float16Array(shape: nShape, from: nRaw)
         let xs0F16 = try rebuild16(noiseOut, key: "x_source_0", stage: .noise)
@@ -133,6 +139,7 @@ public struct KokoroAneSynthesizer {
 
         // ── 7: Tail (fp32 iSTFT) ─────────────────────────────────────
         // Discard "anchor"; use only "x_pre".
+        try Task.checkCancellation()
         let xPreF32 = try rebuild32(vocOut, key: "x_pre", stage: .vocoder)
         let tailModel = try await store.model(for: .tail)
         let tailOut = try await predict(
@@ -154,6 +161,22 @@ public struct KokoroAneSynthesizer {
 
     // MARK: - Helpers
 
+    /// Round PostAlbert `duration` floats to per-token frame counts, clamped
+    /// to [1, maxAcousticFrames]. Throws instead of trapping when the model
+    /// emits NaN/±inf — broken CoreML runtimes can return non-finite outputs
+    /// (iOS 27 betas mis-execute the dynamic-shape stages, issue #738), and
+    /// `Int32(Float)` on those values is a fatal error in the host app.
+    static func predictedDurations(from durFloats: [Float]) throws -> [Int32] {
+        guard durFloats.allSatisfy({ $0.isFinite }) else {
+            throw KokoroAneError.nonFiniteModelOutput(
+                stage: KokoroAneStage.postAlbert.rawValue, output: "duration")
+        }
+        let cap = Float(KokoroAneConstants.maxAcousticFrames)
+        return durFloats.map { d in
+            Int32(min(max(d.rounded(), 1), cap))
+        }
+    }
+
     private static func predict(
         stage: KokoroAneStage,
         model: MLModel,
@@ -162,14 +185,24 @@ public struct KokoroAneSynthesizer {
     ) async throws -> MLFeatureProvider {
         let provider = try MLDictionaryFeatureProvider(
             dictionary: inputs.mapValues { MLFeatureValue(multiArray: $0) })
-        let start = Date()
+        let clock = ContinuousClock()
+        let start = clock.now
         do {
             let out = try await model.prediction(from: provider)
-            timing = Date().timeIntervalSince(start) * 1000
+            timing = milliseconds(start.duration(to: clock.now))
             return out
+        } catch let error as CancellationError {
+            // Preserve cancellation semantics — don't bury it as a stage failure.
+            throw error
         } catch {
             throw KokoroAneError.predictionFailed(stage: stage.rawValue, underlying: error)
         }
+    }
+
+    /// Convert a monotonic `Duration` to milliseconds (1 ms = 1e15 attoseconds).
+    private static func milliseconds(_ duration: Duration) -> Double {
+        let c = duration.components
+        return Double(c.seconds) * 1_000 + Double(c.attoseconds) / 1_000_000_000_000_000
     }
 
     private static func outputArray(

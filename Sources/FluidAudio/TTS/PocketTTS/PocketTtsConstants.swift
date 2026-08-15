@@ -23,7 +23,20 @@ public enum PocketTtsConstants {
     // MARK: - Generation parameters
 
     /// Number of Euler integration steps in flow_decoder (noise → audio code).
+    ///
+    /// Informational: the LSD Euler step count BAKED INTO `flow_decoder_fused`
+    /// at conversion (`convert_flow_decoder_fused.py --num-steps`). NOT read at
+    /// runtime — `flowDecode` calls the fused model which runs this many steps
+    /// internally. The shipped v2.1 packs were converted with 8. To change it,
+    /// re-convert the fused model and update this value; editing it alone has no
+    /// runtime effect.
     public static let numLsdSteps: Int = 8
+
+    /// Fixed conditioning-block length compiled into `cond_prefill.mlpackage`
+    /// (`convert_cond_prefill.py --t-max`). The host pads the real voice+text
+    /// block to this length and passes the true count as `valid_len`; if a
+    /// block exceeds this, the prefill falls back to per-token `cond_step`.
+    public static let condPrefillMaxTokens: Int = 256
     /// Controls randomness in flow_decoder: scales initial noise by sqrt(temperature).
     public static let temperature: Float = 0.7
     /// flowlm_step EOS logit threshold — above this means the model is done speaking.
@@ -79,7 +92,9 @@ public enum PocketTtsLanguage: String, Sendable, CaseIterable {
 
     /// HF subdirectory under the pocket-tts-coreml repo root.
     public var repoSubdirectory: String {
-        "v2/\(rawValue)"
+        // v2.1 = optimized re-conversion of v2 (fused flow decoder on ANE,
+        // one-shot cond prefill, fp16 flowlm). Same weights as v2.
+        "v2.1/\(rawValue)"
     }
 }
 
@@ -134,4 +149,39 @@ public enum PocketTtsLanguage: String, Sendable, CaseIterable {
 public enum PocketTtsPrecision: Sendable, Hashable {
     case fp16
     case int8
+}
+
+/// Which transformer-model formulation (and compute-unit policy) to load.
+///
+/// The v2.1 packs ship rank-5 KV-cache graphs that the ANE compiler rejects
+/// outright (`ANECCompile FAILED`), so they run on GPU. The rank-4
+/// scatter-free rewrites (mobius Trials 19/20) are ANE-eligible:
+/// `flowlm_step_ane` plans 100% ANE and `cond_prefill_ane` 92% under
+/// `.cpuAndNeuralEngine`, bit-identical math to the rank-5 graphs.
+///
+/// On M-series Macs the GPU is slightly faster per call (flowlm 3.04 ms GPU
+/// vs 3.68 ms ANE), so `.gpu` stays the default. `.ane` removes the GPU
+/// from the synthesis path entirely — the per-frame loop becomes
+/// ANE (flowlm) → ANE (flow decoder) → CPU (mimi) — for power, engine
+/// parallelism with `useCrossEnginePipeline`, and iOS placement.
+public enum PocketTtsModelPlacement: String, Sendable, Hashable {
+    /// v2.1 rank-5 models, GPU-placed (default).
+    case gpu
+    /// Rank-4 ANE-eligible models (`flowlm_step_ane` + `cond_prefill_ane`).
+    /// Requires the `*_ane.mlmodelc` files in the language pack (fp16 only;
+    /// `precision` is ignored for the FlowLM when this is selected).
+    case ane
+    /// MLState multifunction pipeline (mobius Trial 23): ONE
+    /// `pocket_state.mlmodelc` package exposing `write_state` / `prefill` /
+    /// `generate` functions over a shared 12-buffer fp16 KV state that stays
+    /// resident on the ANE — the 24-tensor cache I/O of `.gpu`/`.ane` is
+    /// bypassed entirely, and the per-frame `generate` call fuses
+    /// flowlm_step + flow_decoder into one dispatch.
+    ///
+    /// Requires macOS 15+/iOS 18+ at RUNTIME (both `MLState` and
+    /// multifunction models); `loadIfNeeded` throws on older OSes. fp16 only
+    /// (`precision` is ignored). Python-measured −35.8%/utterance on the
+    /// flowlm+flow share vs the `.ane` IO pipeline (mobius TRIALS.md,
+    /// Trial 23); mimi decode is unchanged.
+    case aneState = "ane-state"
 }

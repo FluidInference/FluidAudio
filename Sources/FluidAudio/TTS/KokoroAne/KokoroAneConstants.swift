@@ -13,6 +13,9 @@ public enum KokoroAneConstants {
     /// Default voice id for the Mandarin (`ANE-zh/`) variant.
     public static let defaultVoiceMandarin = "zf_001"
 
+    /// Default voice id for the Japanese (`ANE-ja/`) variant.
+    public static let defaultVoiceJapanese = "jf_alpha"
+
     /// Output sample rate of the iSTFT in `KokoroTail.mlpackage`.
     public static let sampleRate = 24_000
 
@@ -26,7 +29,9 @@ public enum KokoroAneConstants {
     public static let maxPhonemeLength = 510
 
     /// Voice pack rows × columns. The pack is stored flat as `[510, 256]` fp32:
-    ///   * row index = `min(max(T_enc - 1, 0), 509)` (utterance-length bucket)
+    ///   * row index = `min(max(phonemeCount - 1, 0), 509)` — bucketed by the
+    ///     raw phoneme-string length (BOS/EOS excluded), matching
+    ///     `convert.py:get_ref_data`.
     ///   * cols `[0..<128]`   = `style_timbre` (→ Noise + Vocoder)
     ///   * cols `[128..<256]` = `style_s`      (→ PostAlbert + Prosody)
     public static let voicePackRows = 510
@@ -113,28 +118,37 @@ public enum KokoroAneConstants {
 /// the embedding vocab, HF subdirectory, voice-file layout, and the default
 /// voice id differ.
 ///
-/// | Variant      | HF subdir | Vocab | Default voice | Voice layout       |
-/// |--------------|-----------|-------|---------------|--------------------|
-/// | `.english`   | `ANE/`    | 177   | `af_heart`    | flat (`<voice>.bin`)            |
-/// | `.mandarin`  | `ANE-zh/` | 171   | `zf_001`      | nested (`voices/<voice>.bin`)   |
+/// | Variant      | HF subdir  | Default voice | Voice layout                  | Text frontend                |
+/// |--------------|------------|---------------|-------------------------------|------------------------------|
+/// | `.english`   | `ANE/`     | `af_heart`    | flat (`<voice>.bin`)          | `KokoroAneEnglishPhonemizer` |
+/// | `.mandarin`  | `ANE-zh/`  | `zf_001`      | nested (`voices/<voice>.bin`) | `MandarinG2P`                |
+/// | `.japanese`  | `ANE-ja/`  | `jf_alpha`    | nested (`voices/<voice>.bin`) | none — phoneme bypass only   |
+///
+/// The Japanese variant ships **no in-process text → phoneme frontend**.
+/// `synthesize(text:)` / `phonemes(for:)` throw for `.japanese`; callers feed
+/// pre-computed IPA through ``KokoroAneManager/synthesizeFromPhonemes(_:voice:speed:)``
+/// (the bypass path the 7-stage chain already supports). See issue #698.
 public enum KokoroAneVariant: String, CaseIterable, Sendable {
     case english
     case mandarin
+    case japanese
 
     /// Default voice id shipped with the variant's HF bundle.
     public var defaultVoice: String {
         switch self {
         case .english: return KokoroAneConstants.defaultVoice
         case .mandarin: return KokoroAneConstants.defaultVoiceMandarin
+        case .japanese: return KokoroAneConstants.defaultVoiceJapanese
         }
     }
 
-    /// True if voice packs live under a `voices/` subdirectory inside the
-    /// repo bundle (Mandarin); false if they sit at the bundle root (English).
+    /// True if voice packs live under a `voices/` subdirectory inside the repo
+    /// bundle (Mandarin / Japanese); false if they sit at the bundle root
+    /// (English).
     public var useVoicesSubdir: Bool {
         switch self {
         case .english: return false
-        case .mandarin: return true
+        case .mandarin, .japanese: return true
         }
     }
 
@@ -143,6 +157,7 @@ public enum KokoroAneVariant: String, CaseIterable, Sendable {
         switch self {
         case .english: return .kokoroAne
         case .mandarin: return .kokoroAneZh
+        case .japanese: return .kokoroAneJa
         }
     }
 }

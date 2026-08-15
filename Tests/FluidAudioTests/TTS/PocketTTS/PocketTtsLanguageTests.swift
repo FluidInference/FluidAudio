@@ -12,12 +12,12 @@ final class PocketTtsLanguageTests: XCTestCase {
 
     // MARK: - PocketTtsLanguage.repoSubdirectory
 
-    func testAllLanguagesUseV2Subdirectory() {
-        // Every language pack lives under `v2/<rawValue>/` on the HF repo.
+    func testAllLanguagesUseV21Subdirectory() {
+        // v2.1 optimized packs live under `v2.1/<rawValue>/` on the HF repo.
         for lang in PocketTtsLanguage.allCases {
             XCTAssertEqual(
-                lang.repoSubdirectory, "v2/\(lang.rawValue)",
-                "Language \(lang.rawValue) does not follow v2/<rawValue> convention")
+                lang.repoSubdirectory, "v2.1/\(lang.rawValue)",
+                "Language \(lang.rawValue) does not follow v2.1/<rawValue> convention")
         }
     }
 
@@ -48,10 +48,12 @@ final class PocketTtsLanguageTests: XCTestCase {
     // MARK: - ModelNames.PocketTTS.requiredModels
 
     func testRequiredModels() {
+        // v2.1 required set: cond_prefill + flow_decoder_fused replace the v2
+        // cond_step + per-step flow_decoder.
         let models = ModelNames.PocketTTS.requiredModels
-        XCTAssertTrue(models.contains(ModelNames.PocketTTS.condStepFile))
+        XCTAssertTrue(models.contains(ModelNames.PocketTTS.condPrefillFile))
         XCTAssertTrue(models.contains(ModelNames.PocketTTS.flowlmStepFile))
-        XCTAssertTrue(models.contains(ModelNames.PocketTTS.flowDecoderFile))
+        XCTAssertTrue(models.contains(ModelNames.PocketTTS.flowDecoderFusedFile))
         XCTAssertTrue(models.contains(ModelNames.PocketTTS.mimiDecoderFile))
         XCTAssertTrue(models.contains(ModelNames.PocketTTS.constantsBinDir))
     }

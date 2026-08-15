@@ -1,5 +1,6 @@
 #if os(macOS)
 import AVFoundation
+import CoreML
 import FluidAudio
 import Foundation
 
@@ -152,7 +153,10 @@ enum ProcessCommand {
             let modelDir = OfflineDiarizerModels.defaultModelsDirectory()
             let manager = OfflineDiarizerManager(config: offlineConfig)
 
-            let models = try await OfflineDiarizerModels.load(from: modelDir)
+            let configuration = MLModelConfigurationUtils.defaultConfiguration(
+                computeUnits: args.computeUnits)
+            let models = try await OfflineDiarizerModels.load(
+                from: modelDir, configuration: configuration)
             manager.initialize(models: models)
 
             logger.info("Offline manager initialized")
@@ -278,6 +282,7 @@ enum ProcessCommand {
         var minSpeakers: Int?
         var maxSpeakers: Int?
         var numSpeakers: Int?
+        var computeUnits: MLComputeUnits = .all
     }
 
     private static func parseArguments(_ args: [String]) -> ParsedArgs {
@@ -453,6 +458,17 @@ enum ProcessCommand {
                     parsed.embeddingExportPath = args[i + 1]
                     i += 1
                 }
+            case "--compute-units":
+                if i + 1 < args.count {
+                    switch args[i + 1].lowercased() {
+                    case "all": parsed.computeUnits = .all
+                    case "cpu-only": parsed.computeUnits = .cpuOnly
+                    case "ane": parsed.computeUnits = .cpuAndNeuralEngine
+                    default:
+                        logger.warning("Invalid --compute-units value '\(args[i + 1])', using 'all'")
+                    }
+                    i += 1
+                }
 
             default:
                 logger.warning("Unknown option: \(args[i])")
@@ -510,6 +526,8 @@ enum ProcessCommand {
                 --max-speakers <n>              Maximum number of speakers
                 --num-speakers <n>              Exact speaker count (overrides min/max)
                 --export-embeddings <file>      Export embeddings to JSON for debugging
+                --compute-units <all|cpu-only|ane>  ML compute units for inference; use cpu-only/ane
+                                                to guarantee off-GPU (default: all)
 
             Examples:
                 # Streaming mode (default)

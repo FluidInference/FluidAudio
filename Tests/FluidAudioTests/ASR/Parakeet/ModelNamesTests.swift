@@ -32,8 +32,6 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertEqual(Repo.parakeetEou160.subPath, "160ms")
         XCTAssertEqual(Repo.parakeetEou320.subPath, "320ms")
         XCTAssertEqual(Repo.parakeetEou1280.subPath, "1280ms")
-        XCTAssertEqual(Repo.qwen3Asr.subPath, "f32")
-        XCTAssertEqual(Repo.qwen3AsrInt8.subPath, "int8")
         XCTAssertNil(Repo.vad.subPath)
         XCTAssertNil(Repo.parakeetV3.subPath)
     }
@@ -48,16 +46,12 @@ final class ModelNamesTests: XCTestCase {
     }
 
     func testModelFileExtensions() {
-        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin"]
+        // `.txt` covers vocab/token text files (e.g. LuxTTS `tokens.txt`),
+        // which are legitimate model artifacts.
+        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin", ".txt"]
         let validDirectories: Set<String> = ["constants_bin"]
 
-        // `magpieTts` is intentionally excluded — it is the only repo that ships
-        // bare directory entries (`constants/`, `tokenizer/`) instead of files.
-        // It's a not-production-ready experimental backend; its directory layout
-        // is asserted in `MagpieConstantsTests` rather than the global whitelist.
-        let reposExcludedFromExtensionCheck: Set<Repo> = [.magpieTts]
-
-        for repo in Repo.allCases where !reposExcludedFromExtensionCheck.contains(repo) {
+        for repo in Repo.allCases {
             let models = ModelNames.getRequiredModelNames(for: repo, variant: nil)
             for model in models {
                 let hasValidExtension = validExtensions.contains(where: { model.hasSuffix($0) })
@@ -67,6 +61,31 @@ final class ModelNamesTests: XCTestCase {
                     "Model '\(model)' for \(repo) should have a valid extension or be a known directory"
                 )
             }
+        }
+    }
+
+    func testParakeetUnifiedVariants() {
+        let streaming = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: nil)
+        let offline = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: "offline")
+        let streamingFp16 = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: "fp16")
+        let offlineFp16 = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: "offline-fp16")
+
+        // int8 encoders are the default; fp16 selected by variant suffix.
+        // The offline encoder is fixed, so it's in the required set...
+        XCTAssertTrue(offline.contains(ModelNames.ParakeetUnified.offlineEncoderInt8File))
+        XCTAssertTrue(offlineFp16.contains(ModelNames.ParakeetUnified.offlineEncoderFp16File))
+        // ...but the streaming encoder is context-specific ([L,C,R] tier), so it
+        // is NOT in the base set — the streaming manager adds its exact encoder
+        // via ModelHub.download(additionalModelNames:), avoiding a default over-fetch.
+        for set in [streaming, streamingFp16] {
+            XCTAssertEqual(set.filter { $0.contains("encoder") }.count, 0)
+        }
+        for set in [offline, offlineFp16] {
+            XCTAssertEqual(set.filter { $0.contains("encoder") }.count, 1)
+        }
+        // Mel is computed in Swift; the CoreML preprocessor is never required.
+        for set in [streaming, offline, streamingFp16, offlineFp16] {
+            XCTAssertFalse(set.contains { $0.contains("preprocessor") })
         }
     }
 
@@ -102,6 +121,38 @@ final class ModelNamesTests: XCTestCase {
         )
     }
 
+    func testSortformerPrecisionSubdirectories() {
+        XCTAssertEqual(ModelNames.Sortformer.ModelPrecision.fp16.subdirectory, "v3/fp16")
+        XCTAssertEqual(ModelNames.Sortformer.ModelPrecision.palettized.subdirectory, "v3/palettized")
+        // Default subdirectory must track the fp16 precision.
+        XCTAssertEqual(
+            ModelNames.Sortformer.modelsSubdirectory, ModelNames.Sortformer.ModelPrecision.fp16.subdirectory)
+    }
+
+    func testSortformerBundleHonorsPrecision() {
+        for variant in ModelNames.Sortformer.Variant.allCases {
+            let fp16 = ModelNames.Sortformer.bundle(for: variant, precision: .fp16)
+            let palettized = ModelNames.Sortformer.bundle(for: variant, precision: .palettized)
+            XCTAssertTrue(fp16.hasPrefix("v3/fp16/"), "fp16 bundle '\(fp16)' should live under v3/fp16/")
+            XCTAssertTrue(
+                palettized.hasPrefix("v3/palettized/"),
+                "palettized bundle '\(palettized)' should live under v3/palettized/")
+            // Default (no precision) bundle must equal the fp16 path.
+            XCTAssertEqual(ModelNames.Sortformer.bundle(for: variant), fp16)
+        }
+    }
+
+    func testSortformerConfigPrecisionDrivesBundle() {
+        var config = SortformerConfig.highContextV2_1
+        XCTAssertEqual(config.precision, .fp16, "precision should default to fp16")
+        XCTAssertEqual(ModelNames.Sortformer.bundle(for: config), config.modelVariant?.fileName(precision: .fp16))
+
+        config.precision = .palettized
+        XCTAssertEqual(
+            ModelNames.Sortformer.bundle(for: config), config.modelVariant?.fileName(precision: .palettized),
+            "Flipping config.precision must redirect the bundle to the palettized set")
+    }
+
     // MARK: - Specific Model Names
 
     func testASRModelNamesEndInMlmodelc() {
@@ -113,11 +164,6 @@ final class ModelNamesTests: XCTestCase {
     func testVADModelNames() {
         XCTAssertEqual(ModelNames.VAD.requiredModels.count, 1)
         XCTAssertTrue(ModelNames.VAD.requiredModels.first!.hasSuffix(".mlmodelc"))
-    }
-
-    func testQwen3ASRRequiredModels() {
-        XCTAssertFalse(ModelNames.Qwen3ASR.requiredModels.isEmpty)
-        XCTAssertFalse(ModelNames.Qwen3ASR.requiredModelsFull.isEmpty)
     }
 
     // MARK: - TDT-CTC-110M Repo Tests

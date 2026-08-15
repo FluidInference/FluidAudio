@@ -79,7 +79,7 @@ extension ParakeetLanguageModels {
         from directory: URL,
         useInt8Encoder: Bool = true,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> ParakeetLanguageModels<Config> {
         logger.info("Loading \(Config.languageLabel) models from: \(directory.path)")
 
@@ -105,7 +105,7 @@ extension ParakeetLanguageModels {
             modelNames.append(jointFile)
         }
 
-        let models = try await DownloadUtils.loadModels(
+        let models = try await ModelHub.loadModels(
             Config.repository,
             modelNames: modelNames,
             directory: parentDirectory,
@@ -174,7 +174,7 @@ extension ParakeetLanguageModels {
         useInt8Encoder: Bool = true,
         downloadBothEncoders: Bool = false,
         force: Bool = false,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory()
         logger.info("Preparing \(Config.languageLabel) models at: \(targetDir.path)")
@@ -213,7 +213,7 @@ extension ParakeetLanguageModels {
             modelNames.append(jointFile)
         }
 
-        _ = try await DownloadUtils.loadModels(
+        _ = try await ModelHub.loadModels(
             Config.repository,
             modelNames: modelNames,
             directory: parentDir,
@@ -236,7 +236,7 @@ extension ParakeetLanguageModels {
         to directory: URL? = nil,
         useInt8Encoder: Bool = true,
         configuration: MLModelConfiguration? = nil,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> ParakeetLanguageModels<Config> {
         let targetDir = try await download(
             to: directory,
