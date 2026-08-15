@@ -18,7 +18,7 @@ public actor CampPlusEmbedder {
         self.models = models
     }
 
-    public static func load(progressHandler: DownloadUtils.ProgressHandler? = nil) async throws -> CampPlusEmbedder {
+    public static func load(progressHandler: ProgressHandler? = nil) async throws -> CampPlusEmbedder {
         CampPlusEmbedder(models: try await CampPlusModels.downloadAndLoad(progressHandler: progressHandler))
     }
 

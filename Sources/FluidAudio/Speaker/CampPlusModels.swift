@@ -19,13 +19,13 @@ public struct CampPlusModels: Sendable {
     }
 
     public static func downloadAndLoad(
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> CampPlusModels {
         try load(from: try await download(progressHandler: progressHandler))
     }
 
     public static func download(
-        force: Bool = false, progressHandler: DownloadUtils.ProgressHandler? = nil
+        force: Bool = false, progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = modelsRootDirectory()
         let targetDir = modelsRoot.appendingPathComponent(Repo.campPlus.folderName, isDirectory: true)
@@ -35,7 +35,7 @@ public struct CampPlusModels: Sendable {
         }
         if force { try? FileManager.default.removeItem(at: targetDir) }
         logger.info("Downloading CAM++ models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(.campPlus, to: modelsRoot, progressHandler: progressHandler)
+        try await ModelHub.download(.campPlus, to: modelsRoot, progressHandler: progressHandler)
         return targetDir
     }
 
