@@ -32,7 +32,7 @@ public struct CanaryModels: Sendable {
     /// Download (if needed) and load all canary models.
     public static func downloadAndLoad(
         precision: CanaryPrecision = .int4,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> CanaryModels {
         let directory = try await download(precision: precision, progressHandler: progressHandler)
         return try load(from: directory, precision: precision)
@@ -42,7 +42,7 @@ public struct CanaryModels: Sendable {
     public static func download(
         precision: CanaryPrecision = .int4,
         force: Bool = false,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let modelsRoot = modelsRootDirectory()
         let targetDir = modelsRoot.appendingPathComponent(Repo.canary1bV2.folderName, isDirectory: true)
@@ -54,7 +54,7 @@ public struct CanaryModels: Sendable {
         if force { try? FileManager.default.removeItem(at: targetDir) }
 
         logger.info("Downloading Canary models (\(precision.rawValue)) from HuggingFace...")
-        try await DownloadUtils.downloadRepo(
+        try await ModelHub.download(
             .canary1bV2, to: modelsRoot, variant: precision.rawValue, progressHandler: progressHandler)
         logger.info("Successfully downloaded Canary models")
         return targetDir

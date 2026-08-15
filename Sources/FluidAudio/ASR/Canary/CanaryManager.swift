@@ -24,7 +24,7 @@ public actor CanaryManager {
     /// Load models from the default cache (downloading if needed), then build a manager.
     public static func load(
         precision: CanaryPrecision = .int4,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> CanaryManager {
         let models = try await CanaryModels.downloadAndLoad(precision: precision, progressHandler: progressHandler)
         return CanaryManager(models: models)
