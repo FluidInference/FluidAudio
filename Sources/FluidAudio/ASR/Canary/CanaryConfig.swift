@@ -65,4 +65,28 @@ public enum CanaryConfig {
     /// ▁ <|startofcontext|> <|startoftranscript|> <|emo:undefined|> <|en|> <|en|>
     /// <|pnc|> <|noitn|> <|notimestamp|> <|nodiarize|>
     public static let promptEnTranscribePnc: [Int32] = [16053, 7, 4, 16, 64, 64, 5, 9, 11, 13]
+
+    /// Slot indices of the source/target language tokens within a canary2 prompt.
+    public static let promptSourceLangIndex = 4
+    public static let promptTargetLangIndex = 5
+
+    /// Build a canary2 decoder prompt. The model transcribes when
+    /// `source == target` and translates the speech when they differ.
+    ///
+    /// - Throws: `ASRError.processingFailed` for translation pairs the model
+    ///   was not trained on — canary-1b-v2 only supports en ↔ X.
+    public static func makePrompt(
+        source: CanaryLanguage,
+        target: CanaryLanguage,
+        pnc: Bool = true
+    ) throws -> [Int32] {
+        if source != target && source != .english && target != .english {
+            throw ASRError.processingFailed(
+                "canary-1b-v2 only supports translation to or from English; "
+                    + "\(source.rawValue)→\(target.rawValue) is not a trained task")
+        }
+        // ▁ <|startofcontext|> <|startoftranscript|> <|emo:undefined|>
+        // <source> <target> <|pnc|>/<|nopnc|> <|noitn|> <|notimestamp|> <|nodiarize|>
+        return [16053, 7, 4, 16, source.tokenId, target.tokenId, pnc ? 5 : 6, 9, 11, 13]
+    }
 }
