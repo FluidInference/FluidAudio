@@ -47,8 +47,17 @@ public struct ParaformerModels: Sendable {
         precision: ParaformerPrecision = .fp16,
         progressHandler: ProgressHandler? = nil
     ) async throws -> ParaformerModels {
-        let directory = try await download(precision: precision, progressHandler: progressHandler)
-        return try load(from: directory, precision: precision)
+        let modelsRoot = modelsRootDirectory()
+        let targetDir = modelsRoot.appendingPathComponent(Repo.paraformerLargeZh.folderName, isDirectory: true)
+        // Completeness-checked download + purge-and-retry on load failure —
+        // the same #819 hardening as the streaming ASR managers.
+        return try await ModelHub.loadWithRecovery(
+            .paraformerLargeZh, directory: modelsRoot,
+            requiredFiles: requiredFiles(precision: precision),
+            progressHandler: progressHandler
+        ) {
+            try load(from: targetDir, precision: precision)
+        }
     }
 
     public static func download(
@@ -68,16 +77,23 @@ public struct ParaformerModels: Sendable {
         return targetDir
     }
 
+    /// `true` when every required artifact is present **and load-ready**:
+    /// compiled bundles must have their root `coremldata.bin` and no
+    /// `*.partial` download staging file, not merely exist (issue #819 —
+    /// a bare existence check mistakes an interrupted download for a
+    /// valid cache).
     public static func modelsExist(at directory: URL, precision: ParaformerPrecision = .fp16) -> Bool {
-        let fm = FileManager.default
-        let required = [
+        ModelCache.isCacheComplete(at: directory, requiredFiles: requiredFiles(precision: precision))
+    }
+
+    private static func requiredFiles(precision: ParaformerPrecision) -> Set<String> {
+        [
             ModelNames.ParaformerZh.preprocessorFile,
             precision.encoderName + ".mlmodelc",
             ModelNames.ParaformerZh.cifAlphasFile,
             precision.decoderName + ".mlmodelc",
             ModelNames.ParaformerZh.vocabularyFile,
         ]
-        return required.allSatisfy { fm.fileExists(atPath: directory.appendingPathComponent($0).path) }
     }
 
     public static func load(from directory: URL, precision: ParaformerPrecision = .fp16) throws -> ParaformerModels {

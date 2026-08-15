@@ -99,11 +99,24 @@ public actor StreamingUnifiedAsrManager {
         } else {
             encoderConfig = mlConfiguration
         }
-        self.encoder = try await MLModel.load(
-            contentsOf: directory.appendingPathComponent(
-                names.streamingEncoderFile(precision: encoderPrecision, contextSuffix: config.contextSuffix)),
-            configuration: encoderConfig
-        )
+        do {
+            self.encoder = try await MLModel.load(
+                contentsOf: directory.appendingPathComponent(
+                    names.streamingEncoderFile(precision: encoderPrecision, contextSuffix: config.contextSuffix)),
+                configuration: encoderConfig
+            )
+        } catch {
+            if encoderPrecision == .int8 {
+                // On A16 the int8 encoder fails to build an execution plan on
+                // every compute unit, even .cpuOnly, from an intact download
+                // (issue #828) — indistinguishable from a corrupt cache in
+                // CoreML's error text, so name the escape hatch here.
+                logger.error(
+                    "int8 unified encoder failed to load. On some A-series chips (A16 verified) it cannot build an execution plan on any compute unit even from an intact download — retry with encoderPrecision: .fp16 (issue #828). Underlying error: \(error.localizedDescription)"
+                )
+            }
+            throw error
+        }
         self.decoder = try await MLModel.load(
             contentsOf: directory.appendingPathComponent(names.decoderFile),
             configuration: cpuConfig
@@ -146,20 +159,23 @@ public actor StreamingUnifiedAsrManager {
         // this config's specific encoder rather than the default 70_13_13.
         let encoderFile = ModelNames.ParakeetUnified.streamingEncoderFile(
             precision: encoderPrecision, contextSuffix: config.contextSuffix)
-        let encoderPath = cacheDir.appendingPathComponent(encoderFile)
 
-        if !FileManager.default.fileExists(atPath: encoderPath.path) {
-            logger.info("Downloading Parakeet Unified models to \(modelsBaseDir.path)...")
-            try await ModelHub.download(
-                repo, to: modelsBaseDir,
-                variant: encoderPrecision == .fp16 ? "fp16" : nil,
-                additionalModelNames: [encoderFile],
-                progressHandler: progressHandler)
-        } else {
-            logger.info("Using cached Parakeet Unified models at \(cacheDir.path)")
+        // Completeness-checked download + purge-and-retry on load failure: a
+        // bare directory-existence gate mistook an interrupted encoder fetch
+        // for a warm cache and bricked loading permanently (issue #819).
+        try await ModelHub.loadWithRecovery(
+            repo, directory: modelsBaseDir,
+            requiredFiles: [
+                encoderFile,
+                ModelNames.ParakeetUnified.decoderFile,
+                ModelNames.ParakeetUnified.jointDecisionFile,
+                ModelNames.ParakeetUnified.vocab,
+            ],
+            variant: encoderPrecision == .fp16 ? "fp16" : nil,
+            progressHandler: progressHandler
+        ) {
+            try await self.loadModels(from: cacheDir)
         }
-
-        try await loadModels(from: cacheDir)
     }
 
     // MARK: - Streaming API

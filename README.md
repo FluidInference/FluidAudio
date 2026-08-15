@@ -6,8 +6,7 @@
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 [![Documentation](https://img.shields.io/badge/Documentation-docs.fluidinference.com-008574.svg)](https://docs.fluidinference.com/introduction)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/WNsvaCtmDe)
-[![Hugging Face Models](https://img.shields.io/badge/Hugging%20Face%20Models-800k%2B%20downloads-brightgreen?logo=huggingface)](https://huggingface.co/FluidInference)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/FluidInference/FluidAudio)
+[![Hugging Face Models](https://img.shields.io/badge/Hugging%20Face%20Models-500k%2B%20Monthly%20Downloads-brightgreen?logo=huggingface)](https://huggingface.co/FluidInference)[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/FluidInference/FluidAudio)
 
 FluidAudio is a Swift SDK for fully local, low-latency audio AI on Apple devices, with inference offloaded to the Apple Neural Engine (ANE), resulting in less memory and generally faster inference.
 
@@ -104,7 +103,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[MimicScribe](https://mimicscribe.app/)** | macOS menu bar app combining Parakeet TDT streaming ASR, PyanNote Community 1 speaker diarization, and cloud LLMs to provide AI-generated talking points during meetings, derived from the live transcript and user-provided instructions. Features meeting summarization, natural language search, an MCP server for agent integration, and a keyboard- and voice-forward UI. |
 | **[Action Phrase](https://actionphrase.com/)** | Voice-controlled live production app for iOS, iPadOS, and macOS. Control cameras, graphics, layouts, and production workflows with natural voice commands. Integrates with popular tools including OBS, vMix, ProPresenter, Bitfocus Companion, and more. Uses Parakeet TDT ASR and Sortformer diarization. |
 | **[Sayboard](https://github.com/stanlsv/sayboard)** | Privacy-first AI voice keyboard for iOS. Local models, no servers, no tracking, no subscriptions, no ads, no in-app purchases. Fully offline and open-source. |
-| **[Kesha Voice Kit](https://github.com/drakulavich/kesha-voice-kit)** | Local-first voice toolkit for CLI and LLM-agent workflows. Provides speech-to-text in 25 languages, text-to-speech, VAD, language detection, OpenClaw and MCP integrations, with FluidAudio powering Apple Silicon ASR and Kokoro TTS. |
+| **[Kesha Voice Kit](https://github.com/drakulavich/kesha-voice-kit)** | Local-first voice toolkit for CLI and LLM-agent workflows. Speech-to-text in 25 languages, text-to-speech in 9, VAD, language detection, and MCP, OpenClaw and Hermes integrations. On Apple Silicon, FluidAudio powers ASR, Kokoro TTS and speaker diarization. |
 | **[Dictato](https://dicta.to)** | Turn your voice into text anywhere on your Mac. Fully local, private, and offline — boost your own vocabulary and dictate in multiple languages. Uses Parakeet TDT ASR. |
 | **[Utter](https://github.com/joepetrakovich/utter)** | An ultra-minimal speech-to-text status bar utility for Mac.  Register a hotkey and go. |
 | **[Resonant](https://onresonant.com)** | macOS voice workspace for dictation, meetings, and ambient work context. Uses FluidAudio for local transcription and speaker diarization. |
@@ -120,6 +119,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Presspeech](https://github.com/rcourtman/presspeech)** | Open-source (MIT) menu-bar push-to-talk dictation for macOS — hold a key, speak, release; the transcript pastes at the cursor in about 100 ms. Uses Parakeet TDT v3 ASR on the Apple Neural Engine via FluidAudio. |
 | **[Better Voice](https://voice.baselinemakes.com)** | macOS menu-bar app for on-device dictation and meeting notes that save to Apple Notes. Everything runs locally. Uses speaker diarization. |
 | **[Logue](https://github.com/bitwize-ai/Logue)** | Privacy-first AI meeting notes and writing assistant for macOS. Records mic + system audio and transcribes locally on Apple Silicon, with speaker diarization, Smart Minutes, and an on-device AI writing editor — nothing leaves the Mac. Uses FluidAudio streaming Sortformer speaker diarization. |
+| **[Goodmeet](https://goodmeet.com/)** | The AI note-taker that puts your privacy first. Uses FluidAudio models for VAD and transcription. |
 
 ## Installation
 

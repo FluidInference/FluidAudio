@@ -290,7 +290,7 @@ internal struct TdtDecoderV3: Sendable {
                 vocabulary: vocabulary,
                 blankId: blankId
             )
-            if let lang = language, lang.script == .latin, lang != .english,
+            if Self.englishBlocklistApplies(to: language),
                 let ids = decision.topKIds, let logits = decision.topKLogits, let vocab = vocabulary
             {
                 Self.applyEnglishBlocklist(
@@ -377,7 +377,7 @@ internal struct TdtDecoderV3: Sendable {
                     vocabulary: vocabulary,
                     blankId: blankId
                 )
-                if let lang = language, lang.script == .latin, lang != .english,
+                if Self.englishBlocklistApplies(to: language),
                     let ids = innerDecision.topKIds, let logits = innerDecision.topKLogits,
                     let vocab = vocabulary
                 {
@@ -616,9 +616,17 @@ internal struct TdtDecoderV3: Sendable {
 
     // MARK: - Private Helper Methods
 
-    /// When the target language is a non-English Latin-script language and the
-    /// winning token is in the English-exclusive blocklist, replace it with the
-    /// highest-logit top-K token that is not in the blocklist.
+    /// The blocklist is French-only: its token list was tuned against French
+    /// prose (#630), and the same ids are core vocabulary elsewhere — Dutch
+    /// ' we'/' was', German ' so', Italian ' so' — so running it for every
+    /// non-English Latin language corrupts clean speech (#840).
+    static func englishBlocklistApplies(to language: Language?) -> Bool {
+        language == .french
+    }
+
+    /// When the target language is French and the winning token is in the
+    /// English-exclusive blocklist, replace it with the highest-logit top-K
+    /// token that is not in the blocklist.
     ///
     /// This runs AFTER `tokenLanguageFilter` (which only distinguishes
     /// Latin from Cyrillic and leaves English/French ambiguous). It targets

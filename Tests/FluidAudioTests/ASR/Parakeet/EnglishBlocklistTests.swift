@@ -102,6 +102,22 @@ final class EnglishBlocklistTests: XCTestCase {
         XCTAssertEqual(score, expected, accuracy: 1e-5)
     }
 
+    func testBlocklistAppliesOnlyToFrench() {
+        XCTAssertTrue(TdtDecoderV3.englishBlocklistApplies(to: .french))
+
+        // #840: the French-tuned blocklist corrupts other Latin-script
+        // languages whose core vocabulary overlaps the blocked ids.
+        XCTAssertFalse(TdtDecoderV3.englishBlocklistApplies(to: .german))
+        XCTAssertFalse(TdtDecoderV3.englishBlocklistApplies(to: .dutch))
+        XCTAssertFalse(TdtDecoderV3.englishBlocklistApplies(to: .italian))
+        XCTAssertFalse(TdtDecoderV3.englishBlocklistApplies(to: .polish))
+        XCTAssertFalse(TdtDecoderV3.englishBlocklistApplies(to: .spanish))
+
+        XCTAssertFalse(TdtDecoderV3.englishBlocklistApplies(to: .english))
+        XCTAssertFalse(TdtDecoderV3.englishBlocklistApplies(to: .russian))
+        XCTAssertFalse(TdtDecoderV3.englishBlocklistApplies(to: nil))
+    }
+
     func testBlocklistContainsExpectedTokens() {
         XCTAssertTrue(TdtDecoderV3.englishBlocklistIds.contains(506))  // ' the'
         XCTAssertTrue(TdtDecoderV3.englishBlocklistIds.contains(575))  // ' and'

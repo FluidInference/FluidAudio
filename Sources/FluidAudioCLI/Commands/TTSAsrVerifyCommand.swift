@@ -1,4 +1,5 @@
 #if os(macOS)
+import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -24,6 +25,7 @@ public enum TTSAsrVerifyCommand {
         var voice: String = TtsConstants.recommendedVoice
         var outputJson: String?
         var audioDir: String?
+        var scoreOnly = false
 
         var i = 0
         while i < arguments.count {
@@ -54,6 +56,8 @@ public enum TTSAsrVerifyCommand {
                     audioDir = arguments[i + 1]
                     i += 1
                 }
+            case "--score-only":
+                scoreOnly = true
             case "--help", "-h":
                 printUsage()
                 return
@@ -81,6 +85,18 @@ public enum TTSAsrVerifyCommand {
             exit(1)
         }
         logger.info("Loaded \(phrases.count) phrase(s) from \(textsFile)")
+
+        if scoreOnly {
+            guard let audioDir else {
+                logger.error("--score-only requires --audio-dir with phrase_%03d.wav files")
+                exit(1)
+            }
+            await runScoreOnly(
+                phrases: phrases,
+                audioDir: resolveURL(audioDir, isDirectory: true),
+                outputJson: outputJson)
+            return
+        }
 
         let backend = parseBackend(backendName)
         guard backend == .kokoroAne else {
@@ -250,6 +266,100 @@ public enum TTSAsrVerifyCommand {
             }
         } catch {
             logger.error("tts-asr-verify failed: \(error)")
+            exit(1)
+        }
+    }
+
+    // MARK: - Score-only mode
+
+    /// Transcribe pre-rendered `phrase_%03d.wav` files (e.g. from an external
+    /// TTS engine) and score them against the texts file with the same
+    /// Parakeet + TextNormalizer path the synthesis mode uses.
+    private static func runScoreOnly(
+        phrases: [String], audioDir: URL, outputJson: String?
+    ) async {
+        do {
+            let asrModels = try await AsrModels.downloadAndLoad()
+            let asr = AsrManager()
+            try await asr.loadModels(asrModels)
+            let decoderLayers = await asr.decoderLayerCount
+
+            var perPhrase: [[String: Any]] = []
+            var werValues: [Double] = []
+            var cerValues: [Double] = []
+            var totalAudioS = 0.0
+            var totalAsrS = 0.0
+
+            for (idx, phrase) in phrases.enumerated() {
+                let wavURL = audioDir.appendingPathComponent(
+                    String(format: "phrase_%03d.wav", idx + 1))
+                guard FileManager.default.fileExists(atPath: wavURL.path) else {
+                    logger.error("Missing \(wavURL.path)")
+                    exit(1)
+                }
+                let audioFile = try AVAudioFile(forReading: wavURL)
+                let audioS = Double(audioFile.length) / audioFile.processingFormat.sampleRate
+
+                let asr0 = Date()
+                var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
+                let transcription = try await asr.transcribe(wavURL, decoderState: &decoderState)
+                let asrS = Date().timeIntervalSince(asr0)
+
+                let m = WERCalculator.calculateWERAndCER(
+                    hypothesis: transcription.text, reference: phrase)
+                werValues.append(m.wer)
+                cerValues.append(m.cer)
+                totalAudioS += audioS
+                totalAsrS += asrS
+
+                logger.info(
+                    String(
+                        format: "[%03d/%03d] wer=%.1f%% cer=%.1f%% audio=%.2fs",
+                        idx + 1, phrases.count, m.wer * 100, m.cer * 100, audioS))
+                perPhrase.append([
+                    "index": idx + 1,
+                    "reference": phrase,
+                    "hypothesis": transcription.text,
+                    "wer": m.wer,
+                    "cer": m.cer,
+                    "audio_s": audioS,
+                    "asr_s": asrS,
+                    "wav_path": wavURL.path,
+                ])
+            }
+            await asr.cleanup()
+
+            let macroWer = werValues.isEmpty ? 0.0 : werValues.reduce(0, +) / Double(werValues.count)
+            let macroCer = cerValues.isEmpty ? 0.0 : cerValues.reduce(0, +) / Double(cerValues.count)
+            logger.info("--- Summary (score-only) ---")
+            logger.info("  phrases: \(phrases.count)")
+            logger.info(String(format: "  macro WER: %.2f%%", macroWer * 100))
+            logger.info(String(format: "  macro CER: %.2f%%", macroCer * 100))
+            logger.info(String(format: "  total audio: %.2fs  total asr: %.2fs", totalAudioS, totalAsrS))
+
+            if let outputJson {
+                let report: [String: Any] = [
+                    "summary": [
+                        "mode": "score-only",
+                        "audio_dir": audioDir.path,
+                        "phrase_count": phrases.count,
+                        "macro_wer": macroWer,
+                        "macro_cer": macroCer,
+                        "total_audio_s": totalAudioS,
+                        "total_asr_s": totalAsrS,
+                    ],
+                    "phrases": perPhrase,
+                ]
+                let url = resolveURL(outputJson, isDirectory: false)
+                try FileManager.default.createDirectory(
+                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let data = try JSONSerialization.data(
+                    withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+                try data.write(to: url)
+                logger.info("Report written: \(url.path)")
+            }
+        } catch {
+            logger.error("tts-asr-verify --score-only failed: \(error)")
             exit(1)
         }
     }

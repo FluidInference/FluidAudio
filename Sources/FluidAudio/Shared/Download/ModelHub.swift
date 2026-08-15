@@ -136,12 +136,179 @@ public enum ModelHub {
 
             ModelCache.purgeCorruptedCache(at: repoPath)
 
-            return try await loadModelsOnce(
-                repo, modelNames: modelNames,
-                directory: directory, computeUnits: computeUnits, variant: variant,
-                config: config, progressHandler: progressHandler)
+            do {
+                return try await loadModelsOnce(
+                    repo, modelNames: modelNames,
+                    directory: directory, computeUnits: computeUnits, variant: variant,
+                    config: config, progressHandler: progressHandler)
+            } catch let retryError {
+                if !RetryPolicy.isCancellation(retryError) {
+                    let required = ModelNames.getRequiredModelNames(for: repo, variant: variant)
+                        .union(modelNames)
+                    await logLoadFailureSizeDiagnosis(
+                        repo, directory: directory, requiredFiles: required)
+                }
+                throw retryError
+            }
         }
     }
+    /// Distinguish the two look-alike load-failure classes from the #819
+    /// discussion: CoreML's "Unable to load model" reads the same whether
+    /// the bytes on disk are short (truncated download — refetching helps)
+    /// or the full-size model cannot build an execution plan on this
+    /// hardware (#828 — refetching cannot help). Called after a
+    /// purge-and-redownload retry has ALSO failed; compares each required
+    /// file's on-disk size against the published HuggingFace size and logs
+    /// which class this failure is. Best-effort diagnostics only: needs
+    /// the network for the tree listing, silent in offline mode, never
+    /// throws.
+    static func logLoadFailureSizeDiagnosis(
+        _ repo: Repo, directory: URL, requiredFiles: Set<String>
+    ) async {
+        guard !offlineMode else { return }
+        let repoPath = directory.appendingPathComponent(repo.folderName)
+        let subPath = repo.subPath
+        var patterns: [String] = []
+        for model in requiredFiles {
+            if let sub = subPath {
+                patterns.append("\(sub)/\(model)")
+            } else {
+                patterns.append(model)
+            }
+        }
+        do {
+            let remote = try await HFTreeLister.listTree(
+                repoRemotePath: repo.remotePath,
+                startingAt: subPath ?? "",
+                include: { itemPath, isDirectory in
+                    if isDirectory {
+                        // Descend into ancestors of a pattern and into the
+                        // required bundles themselves.
+                        return patterns.contains {
+                            itemPath == $0 || itemPath.hasPrefix($0 + "/") || $0.hasPrefix(itemPath + "/")
+                        }
+                    }
+                    return patterns.contains { itemPath == $0 || itemPath.hasPrefix($0 + "/") }
+                },
+                fetch: HFTreeLister.fetch(using: session)
+            )
+            let undersized = ModelCache.undersizedFiles(remote: remote, at: repoPath, subPath: subPath)
+            if undersized.isEmpty {
+                logger.error(
+                    "Load still failing but all \(remote.count) required \(repo.folderName) files match their published HuggingFace sizes — the download is intact and re-downloading cannot fix this. The model likely cannot run on this hardware/OS (see issue #828); try a different precision or variant."
+                )
+            } else {
+                logger.error(
+                    "Load still failing and \(undersized.count) \(repo.folderName) file(s) are smaller than their published HuggingFace size — the cache is truncated; clear it (ModelHub.clearCache) and re-download: \(undersized.joined(separator: ", "))"
+                )
+            }
+        } catch {
+            logger.warning(
+                "Load-failure size diagnosis unavailable: \(error.localizedDescription)")
+        }
+    }
+
+    /// Ensure a complete cache for `repo`, run `load`, and recover from a
+    /// corrupted cache by purging and re-downloading once.
+    ///
+    /// The recovery wrapper for managers that load models themselves with
+    /// per-model `MLModelConfiguration`s (e.g. encoder on ANE, decoder on
+    /// CPU) and therefore cannot use `loadModels(_:modelNames:...)`. It
+    /// provides the same guarantees that path has (issue #819):
+    ///
+    /// - Cache validity is judged per required file — every `.mlmodelc`
+    ///   must have its root `coremldata.bin` and no `*.partial` staging
+    ///   file — not by bare directory existence. An interrupted download
+    ///   therefore triggers a re-download (resuming any partial file via
+    ///   HTTP Range) instead of being mistaken for a warm cache.
+    /// - When `load` throws, the repo cache is purged and re-downloaded
+    ///   and `load` retried once — except in offline mode, on
+    ///   cancellation, and on transient network errors, where the cache
+    ///   is preserved and the error rethrown.
+    ///
+    /// - Parameters:
+    ///   - requiredFiles: Paths relative to the repo cache directory that
+    ///     `load` needs (bundle names like `"encoder.mlmodelc"`, nested
+    ///     paths like `"encoder/encoder_int8.mlmodelc"`, or plain files
+    ///     like `"vocab.json"`). Entries outside the repo's registry set
+    ///     are forwarded to the download as `additionalModelNames`.
+    ///   - load: Loads the models from the cache; its result is returned.
+    public static func loadWithRecovery<T: Sendable>(
+        _ repo: Repo,
+        directory: URL,
+        requiredFiles: Set<String>,
+        variant: String? = nil,
+        config: DownloadConfig = .default,
+        progressHandler: ProgressHandler? = nil,
+        load: @Sendable () async throws -> T
+    ) async throws -> T {
+        await SystemInfo.logOnce(using: logger)
+        let repoPath = directory.appendingPathComponent(repo.folderName)
+        let additionalModelNames = requiredFiles.subtracting(
+            ModelNames.getRequiredModelNames(for: repo, variant: variant))
+
+        func ensureCacheComplete() async throws {
+            let incomplete = ModelCache.incompleteFiles(at: repoPath, requiredFiles: requiredFiles)
+            if incomplete.isEmpty {
+                logger.info("Found \(repo.folderName) locally, no download needed")
+                return
+            }
+            if offlineMode {
+                logger.error(
+                    "Offline mode: required models missing or incomplete at \(repoPath.path): \(incomplete)"
+                )
+                throw DownloadError.modelMissing(repo: repo.folderName, missing: incomplete)
+            }
+            logger.info("Models missing or incomplete in cache at \(repoPath.path): \(incomplete)")
+            try await download(
+                repo, to: directory, variant: variant,
+                additionalModelNames: additionalModelNames,
+                config: config,
+                progressHandler: progressHandler)
+        }
+
+        try await ensureCacheComplete()
+        do {
+            return try await load()
+        } catch {
+            // Mirror loadModels: offline mode never purges or re-downloads;
+            // cancellation and transient network failures are not corruption
+            // and must preserve the (valid, resumable) bytes on disk.
+            if offlineMode {
+                logger.warning(
+                    "Offline mode: load failed and re-download blocked. \(error.localizedDescription)"
+                )
+                throw error
+            }
+            if RetryPolicy.isCancellation(error) {
+                logger.info(
+                    "Load cancelled; preserving model cache. \(error.localizedDescription)")
+                throw error
+            }
+            if RetryPolicy.isRetryable(error) {
+                logger.warning(
+                    "Load failed with transient network error; preserving model cache for resume. \(error.localizedDescription)"
+                )
+                throw error
+            }
+
+            logger.warning("First load failed: \(error.localizedDescription)")
+            logger.info("Deleting cache and re-downloading…")
+            ModelCache.purgeCorruptedCache(at: repoPath)
+
+            try await ensureCacheComplete()
+            do {
+                return try await load()
+            } catch let retryError {
+                if !RetryPolicy.isCancellation(retryError) {
+                    await logLoadFailureSizeDiagnosis(
+                        repo, directory: directory, requiredFiles: requiredFiles)
+                }
+                throw retryError
+            }
+        }
+    }
+
     private static func loadModelsOnce(
         _ repo: Repo,
         modelNames: [String],
@@ -274,30 +441,7 @@ public enum ModelHub {
             }
         }
 
-        // File selection rules for repo downloads (subPath scoping, required-
-        // model patterns, metadata-extension allowances).
-        let include: (String, Bool) -> Bool = { itemPath, isDirectory in
-            if isDirectory {
-                // For subPath repos, only process paths within the subPath
-                if let sub = subPath {
-                    return itemPath == sub || itemPath.hasPrefix("\(sub)/")
-                        || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
-                }
-                return patterns.isEmpty
-                    || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
-            }
-            // For subPath repos, only include files within the subPath
-            if let sub = subPath {
-                let isInSubPath = itemPath.hasPrefix("\(sub)/")
-                let matchesPattern =
-                    patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
-                let isMetadata =
-                    itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model") || itemPath.hasSuffix(".bin")
-                return isInSubPath && (matchesPattern || isMetadata)
-            }
-            return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
-                || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
-        }
+        let include = Self.repoIncludeRule(subPath: subPath, patterns: patterns)
 
         // Repo loads: download occupies 0-0.5, CoreML compile 0.5-1.0.
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 0.5)
@@ -520,5 +664,62 @@ public enum ModelHub {
             from: url, description: description,
             maxAttempts: maxAttempts, minBackoff: minBackoff,
             configuration: configuration)
+    }
+
+    /// File/directory selection rule for repo downloads: subPath scoping,
+    /// required-model patterns, metadata-extension allowances, and
+    /// all-or-nothing CoreML bundle matching.
+    ///
+    /// For subPath repos, paths that are (or are inside) a
+    /// `.mlmodelc`/`.mlpackage` are decided at bundle granularity against the
+    /// required-model patterns:
+    ///
+    /// - A required bundle is taken whole. The metadata allowance alone
+    ///   sweeps in a bundle's `.json`/`.bin` but drops `model.mil`, leaving a
+    ///   bundle that passes the `coremldata.bin` existence check yet fails
+    ///   MIL load ("Error in reading the MIL network") — StyleTTS2's
+    ///   t64/t128/t256 buckets (#821).
+    /// - A non-required bundle is skipped whole. These repos publish the
+    ///   uncompiled `.mlpackage` next to each compiled `.mlmodelc`, and the
+    ///   `.bin` allowance was pulling every `weight.bin` inside them —
+    ///   roughly half of a first-run parakeetEou/kokoroAne download was never
+    ///   loaded (#826). Skipping applies to directory traversal too, so the
+    ///   tree lister does not recurse into excluded bundles.
+    static func repoIncludeRule(
+        subPath: String?, patterns: [String]
+    ) -> (String, Bool) -> Bool {
+        { itemPath, isDirectory in
+            let isBundlePath =
+                itemPath.hasSuffix(".mlmodelc") || itemPath.hasSuffix(".mlpackage")
+                || itemPath.contains(".mlmodelc/") || itemPath.contains(".mlpackage/")
+            if isDirectory {
+                // For subPath repos, only process paths within the subPath
+                if let sub = subPath {
+                    if isBundlePath, !patterns.isEmpty {
+                        return patterns.contains {
+                            (itemPath + "/").hasPrefix($0) || $0.hasPrefix(itemPath + "/")
+                        }
+                    }
+                    return itemPath == sub || itemPath.hasPrefix("\(sub)/")
+                        || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
+                }
+                return patterns.isEmpty
+                    || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
+            }
+            // For subPath repos, only include files within the subPath
+            if let sub = subPath {
+                let isInSubPath = itemPath.hasPrefix("\(sub)/")
+                let matchesPattern =
+                    patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+                if isBundlePath {
+                    return isInSubPath && matchesPattern
+                }
+                let isMetadata =
+                    itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model") || itemPath.hasSuffix(".bin")
+                return isInSubPath && (matchesPattern || isMetadata)
+            }
+            return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+                || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
+        }
     }
 }
