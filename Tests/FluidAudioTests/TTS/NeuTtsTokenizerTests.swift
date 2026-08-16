@@ -48,21 +48,26 @@ final class NeuTtsTokenizerTests: XCTestCase {
         ("<|SURPRISED|>", 217225),
     ]
 
-    private static var tokenizer: NeuTtsBpeTokenizer?
+    /// Parsed at most once: `static let` closure initialization is
+    /// concurrency-safe (unlike the previous mutable `static var` cache) and
+    /// NeuTtsBpeTokenizer is Sendable. nil when the asset is missing/unreadable.
+    private static let tokenizer: NeuTtsBpeTokenizer? = {
+        guard let root = try? TtsCacheDirectory.ensure() else { return nil }
+        let url =
+            root
+            .appendingPathComponent("Models")
+            .appendingPathComponent(Repo.neuTts.folderName)
+            .appendingPathComponent(ModelNames.NeuTts.tokenizerFile)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try? NeuTtsBpeTokenizer(tokenizerJsonURL: url)
+    }()
 
     /// Loads tokenizer.json from the local model cache; skips (does not
     /// fail) when the asset has not been downloaded on this machine/CI.
     private func loadTokenizer() throws -> NeuTtsBpeTokenizer {
-        if let cached = Self.tokenizer { return cached }
-        let url = try TtsCacheDirectory.ensure()
-            .appendingPathComponent("Models")
-            .appendingPathComponent(Repo.neuTts.folderName)
-            .appendingPathComponent(ModelNames.NeuTts.tokenizerFile)
-        try XCTSkipUnless(
-            FileManager.default.fileExists(atPath: url.path),
-            "neutts tokenizer.json not cached locally")
-        let tokenizer = try NeuTtsBpeTokenizer(tokenizerJsonURL: url)
-        Self.tokenizer = tokenizer
+        guard let tokenizer = Self.tokenizer else {
+            throw XCTSkip("neutts tokenizer.json not cached locally")
+        }
         return tokenizer
     }
 
