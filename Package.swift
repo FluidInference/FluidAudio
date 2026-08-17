@@ -28,6 +28,7 @@ let package = Package(
                 "NemoTextProcessing",
             ],
             path: "Sources/FluidAudio",
+            exclude: ["ASR/Parakeet/Unified/benchmark.md"],
             resources: [
                 // Keep .process: .copy of a Resources-named directory breaks Apple code signing on iOS.
                 .process("TTS/LuxTts/G2p/Resources")
