@@ -4,6 +4,8 @@ import Foundation
 /// Downloads and loads the NeuTTS-2E CoreML assets from
 /// `FluidInference/neutts-2e-coreml` (compiled `.mlmodelc` bundles at the
 /// repo root, plus `tokenizer.json` and `samples/<speaker>.json`).
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 @available(macOS 15.0, iOS 18.0, *)
 struct NeuTtsModels: Sendable {
 

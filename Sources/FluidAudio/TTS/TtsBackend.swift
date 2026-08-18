@@ -41,5 +41,7 @@ public enum TtsBackend: Sendable {
     /// macOS 15+/iOS 18+ only), decoded to 24 kHz audio by the NeuCodec
     /// decoder. Seven emotions × four fixed speakers; BPE text input, no
     /// phonemizer.
+    ///
+    /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
     case neuTts
 }

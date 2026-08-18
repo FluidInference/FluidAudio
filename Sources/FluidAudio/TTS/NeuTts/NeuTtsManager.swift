@@ -5,6 +5,8 @@ import Foundation
 /// Requires macOS 15 / iOS 18: the LM decode step keeps its KV cache in
 /// CoreML `MLState` buffers.
 ///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
+///
 /// ```swift
 /// let manager = NeuTtsManager()
 /// try await manager.initialize()
