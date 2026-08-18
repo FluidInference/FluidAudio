@@ -36,6 +36,8 @@ public enum CanaryPrecision: String, Sendable, CaseIterable {
 }
 
 /// Fixed-shape contract for the canary-1b-v2 CoreML pipeline (15 s window).
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public enum CanaryConfig {
     public static let sampleRate = 16000
     /// 15 s window — the preprocessor input is fixed at this sample count.

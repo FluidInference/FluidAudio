@@ -39,7 +39,7 @@ enum CanaryEarningsBenchmark {
             case "--help", "-h":
                 print(
                     """
-                    Usage: fluidaudio canary-earnings-benchmark [options]
+                    Usage: fluidaudio canary-earnings-benchmark [options]  (beta model conversion)
                       --max-files N        limit files
                       --no-vocab           canary only (no keyword boosting) baseline
                       --min-similarity F   fuzzy-replace threshold (default 0.60)

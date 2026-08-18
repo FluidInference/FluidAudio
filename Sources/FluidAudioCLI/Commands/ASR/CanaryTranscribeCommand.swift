@@ -190,7 +190,7 @@ enum CanaryTranscribeCommand {
               fluidaudio canary-transcribe <audio-file> [options]
               fluidaudio canary-transcribe --benchmark <librispeech-dir> [options]
 
-            Canary-1B-v2 attention encoder-decoder ASR (25 European languages, 15 s window).
+            Canary-1B-v2 attention encoder-decoder ASR (25 European languages, 15 s window). Beta model conversion.
 
             Options:
               --int4         int4 encoder/decoder (ANE, ~573 MB, iOS18) — default

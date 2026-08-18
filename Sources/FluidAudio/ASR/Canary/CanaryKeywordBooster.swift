@@ -11,6 +11,8 @@ import Foundation
 /// each detected term into Canary's transcript by fuzzy string match: a span that
 /// is close-but-not-exact to a detected term (i.e. Canary mis-spelled the domain
 /// word) is replaced with the canonical term.
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public struct CanaryKeywordBooster: Sendable {
 
     public struct Result: Sendable {

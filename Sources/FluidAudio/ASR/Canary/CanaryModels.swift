@@ -9,6 +9,8 @@ import Foundation
 ///   - `decoder` (int4 ANE / fp16): autoregressive transformer → hidden [1,256,1024]
 ///   - `projection` (fp16, ANE): hidden [1,1024] → logits [1,16384]
 ///   - `tokenizer`: 16384 SentencePiece pieces (id → piece)
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public struct CanaryModels: Sendable {
 
     public let preprocessor: MLModel

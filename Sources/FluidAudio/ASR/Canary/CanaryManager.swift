@@ -10,6 +10,8 @@ import Foundation
 /// The decoder carries no KV cache: each step re-runs the full `[1, 256]` token
 /// sequence (matches the converted CoreML model). The 15 s window is fixed; audio
 /// longer than 15 s is truncated (chunking is a future addition).
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public actor CanaryManager {
 
     private let models: CanaryModels
