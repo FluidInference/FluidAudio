@@ -36,11 +36,13 @@ public enum TtsBackend: Sendable {
     /// (`LuxTtsG2p`); pre-phonemized espeak IPA is accepted via
     /// `LuxTtsManager.synthesize(phonemes:...)`.
     case luxtts
-    /// Inflect v2 (Micro / Nano) — ultra-tiny VITS-family English TTS
+    /// Inflect v2 (Micro / Nano, beta) — ultra-tiny VITS-family English TTS
     /// (9.4M / 4.0M params, 24 kHz mono). Fixed-shape encoder + duration
     /// predictor, host-side duration expansion + prior sampling, then a
     /// bucketed HiFiGAN synthesizer. English frontend shared with StyleTTS2
     /// (espeak-approximated Misaki + BART G2P); feed IPA directly via
     /// `InflectManager.synthesize(ipa:)` to bypass it.
+    ///
+    /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
     case inflect
 }

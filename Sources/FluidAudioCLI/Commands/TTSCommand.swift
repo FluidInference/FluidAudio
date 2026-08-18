@@ -1210,7 +1210,8 @@ public struct TTS {
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for KokoroAne, alba for PocketTTS)
-              --backend            TTS backend: kokoro-ane (default), pocket, styletts2, supertonic3, luxtts
+              --backend            TTS backend: kokoro-ane (default), pocket, styletts2, supertonic3, luxtts,
+                                   inflect (beta)
                                    StyleTTS2 (zero-shot, English):
                                      --reference <speaker.wav>  required
                                      --alpha 0.3                ref-side blend (default 0.3)

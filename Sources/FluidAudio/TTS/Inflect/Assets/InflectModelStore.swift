@@ -7,6 +7,8 @@ import Foundation
 ///
 /// All buckets are *downloaded* up front by `InflectResourceDownloader`
 /// (they total ~8–19 MB), so bucket loads never hit the network.
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public actor InflectModelStore {
 
     private let logger = AppLogger(category: "InflectModelStore")

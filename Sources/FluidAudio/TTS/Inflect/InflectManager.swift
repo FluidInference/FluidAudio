@@ -15,6 +15,8 @@ import Foundation
 /// > approximates espeak IPA. Output is intelligible but stress markers can
 /// > differ. Callers with a real espeak phonemizer should feed IPA directly
 /// > via ``synthesize(ipa:)``.
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public actor InflectManager {
 
     private let logger = AppLogger(category: "InflectManager")

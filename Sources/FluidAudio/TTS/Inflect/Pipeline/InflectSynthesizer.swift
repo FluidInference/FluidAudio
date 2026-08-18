@@ -5,6 +5,8 @@ import Foundation
 /// encoder → host duration expansion + prior sampling → bucketed synthesizer.
 /// Everything stochastic or dynamically shaped runs here in Swift; both CoreML
 /// graphs are deterministic and fixed-shape.
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 struct InflectSynthesizer {
 
     private let store: InflectModelStore
