@@ -3,7 +3,7 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// `fsmn-vad-segment <audio>` — print detected speech segments [start_ms, end_ms].
+/// `fsmn-vad-segment <audio>` — print detected speech segments [start_ms, end_ms]. (beta)
 enum FsmnVadSegmentCommand {
     private static let logger = AppLogger(category: "FsmnVadSegment")
 

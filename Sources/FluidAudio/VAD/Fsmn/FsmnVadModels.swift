@@ -6,6 +6,8 @@ import Foundation
 /// 2 stages from `FluidInference/fsmn-vad-coreml`:
 ///   - `preprocessor` (fp32, CPU): waveform -> [1, T, 400] features (fbank80 + LFR m=5,n=1)
 ///   - `scorer` (fp16, ANE): features -> [1, T, 248] frame scores (col 0 = silence prob)
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public struct FsmnVadModels: Sendable {
 
     public let preprocessor: MLModel

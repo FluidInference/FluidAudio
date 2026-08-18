@@ -15,6 +15,8 @@ public struct FsmnVadSegment: Sendable, Equatable {
 ///
 /// Audio longer than the largest bucket is processed in ~30 s chunks; the per-frame
 /// silence probabilities are concatenated and the decision runs once over all frames.
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public actor FsmnVadManager {
 
     // Enumerated scorer buckets (post-LFR frames; matches the converted model).

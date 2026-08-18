@@ -121,6 +121,7 @@ struct FluidAudioCLI {
                 diarization-benchmark   Run diarization benchmark
                 vad-benchmark           Run VAD-specific benchmark
                 vad-analyze             Inspect VAD segmentation and streaming events
+                fsmn-vad-segment        Detect speech segments with FSMN-VAD (beta)
                 asr-benchmark           Run ASR benchmark on LibriSpeech
                 fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
                 transcribe              Transcribe audio file using streaming ASR

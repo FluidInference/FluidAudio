@@ -317,6 +317,8 @@ Model is nearly identical to the base model in terms of quality, performance wis
 
 ### FSMN-VAD (`fsmn-vad-segment`)
 
+> **Beta:** FSMN-VAD is a beta model conversion; results and model artifacts may change.
+
 CoreML FSMN-VAD (FunASR, ~5.2M), an alternative to silero-vad. Model: [FluidInference/fsmn-vad-coreml](https://huggingface.co/FluidInference/fsmn-vad-coreml). 2-stage: fbank80+LFR preprocessor (fp32/CPU) → FSMN scorer (fp16/ANE, enumerated buckets) → host decision (port of FunASR `FsmnVADStreaming`). Hardware: Apple M5 Pro.
 
 Evaluated on the **mini50** labeled set via the standard `vad-benchmark` harness (per-clip speech/non-speech), same metric as the silero baseline:
