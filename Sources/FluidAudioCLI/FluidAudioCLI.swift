@@ -136,6 +136,7 @@ struct FluidAudioCLI {
                 sortformer-benchmark    Run Sortformer benchmark on AMI dataset
                 lseend                  Run LS-EEND diarization on a single file
                 lseend-benchmark        Run LS-EEND benchmark on AMI dataset
+                campplus-embed          CAM++ speaker embedding / cosine similarity (beta)
                 g2p-benchmark           Run multilingual G2P benchmark
                 nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
                 nemotron-transcribe     Transcribe custom audio files with Nemotron

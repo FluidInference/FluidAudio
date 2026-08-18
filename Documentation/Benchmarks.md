@@ -584,6 +584,8 @@ Both offline and online versions use the community-1 model (via FluidInference/s
 
 ### CAM++ speaker embedding (`campplus-embed`)
 
+> **Beta:** CAM++ is a beta model conversion; results and model artifacts may change.
+
 CoreML CAM++ (FunASR, ~7.2M) speaker-embedding extractor. Model: [FluidInference/campplus-coreml](https://huggingface.co/FluidInference/campplus-coreml). 2-stage: fbank80 preprocessor (fp32/CPU) → CAM++ (RangeDim, CPU/GPU) → 192-d L2-normalized embedding. Hardware: Apple M5 Pro.
 
 | Metric | Value |

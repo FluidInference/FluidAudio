@@ -6,6 +6,8 @@ import Foundation
 /// 2 stages from `FluidInference/campplus-coreml`:
 ///   - `preprocessor` (fp32, CPU): waveform -> [1, T, 80] fbank
 ///   - `model` (fp16, ANE): fbank -> [1, 192] speaker embedding
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public struct CampPlusModels: Sendable {
 
     public let preprocessor: MLModel

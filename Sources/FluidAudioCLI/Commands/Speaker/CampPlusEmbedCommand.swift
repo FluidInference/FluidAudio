@@ -3,9 +3,11 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// `campplus-embed <a.wav> [b.wav]`
+/// `campplus-embed <a.wav> [b.wav]` (beta)
 /// One file → prints the 192-d embedding norm/preview; two files → cosine similarity
 /// (speaker verification).
+///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 enum CampPlusEmbedCommand {
     private static let logger = AppLogger(category: "CampPlusEmbed")
 
