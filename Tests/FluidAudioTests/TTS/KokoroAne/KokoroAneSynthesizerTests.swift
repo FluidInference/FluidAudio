@@ -46,6 +46,19 @@ final class KokoroAnePredictedDurationTests: XCTestCase {
     func testEmptyInput() throws {
         XCTAssertEqual(try KokoroAneSynthesizer.predictedDurations(from: []), [])
     }
+
+    func testSynthesisResultTimingMetadataDefaultsForSourceCompatibility() {
+        let result = KokoroAneSynthesisResult(
+            samples: [0],
+            sampleRate: KokoroAneConstants.sampleRate,
+            encoderTokens: 1,
+            acousticFrames: 1,
+            timings: KokoroAneStageTimings()
+        )
+
+        XCTAssertTrue(result.inputIds.isEmpty)
+        XCTAssertTrue(result.predictedDurations.isEmpty)
+    }
 }
 
 /// Heavy E2E tests gated by env var (require all 7 mlmodelc + voice + vocab
@@ -78,6 +91,15 @@ final class KokoroAneSynthesizerTests: XCTestCase {
         XCTAssertGreaterThan(result.acousticFrames, 0)
         XCTAssertLessThanOrEqual(
             result.acousticFrames, KokoroAneConstants.maxAcousticFrames)
+
+        // Duration metadata should describe exactly the token sequence and
+        // acoustic-frame count that were used by the alignment stage.
+        XCTAssertEqual(result.inputIds.count, result.encoderTokens)
+        XCTAssertEqual(result.predictedDurations.count, result.inputIds.count)
+        XCTAssertEqual(
+            result.predictedDurations.reduce(0) { $0 + Int($1) },
+            result.acousticFrames)
+        XCTAssertTrue(result.predictedDurations.allSatisfy { $0 >= 1 })
 
         // Per-stage timings should all be > 0.
         XCTAssertGreaterThan(result.timings.totalMs, 0)
