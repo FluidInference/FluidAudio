@@ -280,6 +280,43 @@ final class NemotronMultilingualTests: XCTestCase {
                 tokenizerPath: tokenizer, metadataPath: metadata))
     }
 
+    // MARK: - Blank-span rescue (issue #838)
+
+    func testContainsLexicalContentWords() {
+        XCTAssertTrue(StreamingNemotronMultilingualAsrManager.containsLexicalContent("▁Gemma"))
+        XCTAssertTrue(StreamingNemotronMultilingualAsrManager.containsLexicalContent("hello"))
+        XCTAssertTrue(StreamingNemotronMultilingualAsrManager.containsLexicalContent("A"))
+        XCTAssertTrue(StreamingNemotronMultilingualAsrManager.containsLexicalContent("42"))
+        // CJK ideographs and kana are lexical.
+        XCTAssertTrue(StreamingNemotronMultilingualAsrManager.containsLexicalContent("你好"))
+        XCTAssertTrue(StreamingNemotronMultilingualAsrManager.containsLexicalContent("こんにちは"))
+        // Word piece with attached punctuation still counts.
+        XCTAssertTrue(StreamingNemotronMultilingualAsrManager.containsLexicalContent("▁afternoon."))
+    }
+
+    func testContainsLexicalContentPunctuationOnly() {
+        // Terminal punctuation emitted into a pause must not mask a
+        // swallowed word (the rescue-suppression case from #838).
+        XCTAssertFalse(StreamingNemotronMultilingualAsrManager.containsLexicalContent("."))
+        XCTAssertFalse(StreamingNemotronMultilingualAsrManager.containsLexicalContent(","))
+        XCTAssertFalse(StreamingNemotronMultilingualAsrManager.containsLexicalContent("?"))
+        XCTAssertFalse(StreamingNemotronMultilingualAsrManager.containsLexicalContent("。"))
+        XCTAssertFalse(StreamingNemotronMultilingualAsrManager.containsLexicalContent("▁"))
+        XCTAssertFalse(StreamingNemotronMultilingualAsrManager.containsLexicalContent("▁..."))
+        XCTAssertFalse(StreamingNemotronMultilingualAsrManager.containsLexicalContent(""))
+    }
+
+    func testBlankRescueDefaults() {
+        // Default-on unless FLUIDAUDIO_DISABLE_BLANK_RESCUE is set in the
+        // environment (CI does not set it).
+        if ProcessInfo.processInfo.environment["FLUIDAUDIO_DISABLE_BLANK_RESCUE"] == nil {
+            XCTAssertTrue(StreamingNemotronMultilingualAsrManager.blankRescueEnabled)
+        }
+        if ProcessInfo.processInfo.environment["FLUIDAUDIO_RESCUE_RMS_THRESHOLD"] == nil {
+            XCTAssertEqual(StreamingNemotronMultilingualAsrManager.rescueRmsThreshold, 0.0025)
+        }
+    }
+
     // MARK: - Helpers
 
     private func makeConfig(

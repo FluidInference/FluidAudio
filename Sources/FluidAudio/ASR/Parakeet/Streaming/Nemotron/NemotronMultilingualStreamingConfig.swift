@@ -4,7 +4,8 @@ import Foundation
 ///
 /// Loaded from `metadata.json`. Differs from the English variant in three ways:
 ///   1. Larger vocab (13,087 tokens) and matching `blank_idx`.
-///   2. Smaller channel cache: `[1, 24, 56, 1024]` (att_context_size=[56, 0]).
+///   2. Cache shapes per `metadata.json` (published artifacts ship
+///      `att_context_size=[42, 13]`, channel cache `[1, 24, 42, 1024]`).
 ///   3. The encoder takes an additional `prompt_id` int32 [1] input per chunk
 ///      which selects the language hint embedding. The model also emits a leading
 ///      `<xx-XX>` language-tag token whose IDs are listed in `lang_tag_token_ids`.

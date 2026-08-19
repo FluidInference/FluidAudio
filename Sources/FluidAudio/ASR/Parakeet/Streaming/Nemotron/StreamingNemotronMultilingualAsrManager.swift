@@ -13,7 +13,8 @@ public typealias NemotronMultilingualPartialCallback = @Sendable (String) -> Voi
 ///   1. The encoder takes an extra `prompt_id` int32 [1] input per chunk.
 ///   2. The vocab is ~13k tokens and includes language-tag pieces like
 ///      `<en-US>` which are filtered from the transcript.
-///   3. The channel cache shape is `[1, 24, 56, 1024]` (att_context_size=[56,0]).
+///   3. The cache shapes come from `metadata.json` (published artifacts ship
+///      `att_context_size=[42,13]` with channel cache `[1, 24, 42, 1024]`).
 ///
 /// **Models** are published at
 /// `FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML`. Use
@@ -209,6 +210,25 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// chunks — preserves the first low chunk after speech (consonant
     /// tails) and only skips true sustained silence.
     internal var vadConsecutiveLowChunks: Int = 0
+
+    // MARK: - Blank-span rescue bookkeeping (issue #838; see +BlankRescue.swift)
+    /// Encoder frames of audio consumed by the live stream (rescue-invariant,
+    /// unlike `absoluteFrameBase` which the rescue temporarily rebases).
+    internal var rescueFrameCursor: Int = 0
+    internal var rescueSpanOpen: Bool = false
+    internal var rescueSpanStartFrame: Int = 0
+    internal var rescueSpanLastSpeechFrame: Int = 0
+    internal var rescueSpanSpeechWindows: Int = 0
+    internal var rescueSpanPreRollFrames: Int = 0
+    internal var rescueSilentWindowRun: Int = 0
+    internal var rescueSpanAudio: [Float] = []
+    internal var rescueSpanOverflowed: Bool = false
+    internal var rescuePreRollTail: [Float] = []
+    internal var inBlankRescue: Bool = false
+    /// Number of spans whose fresh-state re-decode recovered tokens this
+    /// session. A nonzero value means the live decode silently dropped
+    /// pause-delimited speech (issue #838).
+    public internal(set) var blankRescueCount: Int = 0
 
     // Decoder LSTM states
     internal var hState: MLMultiArray?
@@ -799,7 +819,7 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// language and write the resulting state back to `hState`/`cState`/`lastToken`.
     /// No-op if forced-prefix is disabled, no language is set, the tokenizer/
     /// decoder isn't loaded, or the language has no matching lang-tag token.
-    private func applyForcedPrefixIfNeeded() async throws {
+    internal func applyForcedPrefixIfNeeded() async throws {
         guard useForcedPrefix,
             let language = currentLanguageCode,
             let tokenizer = tokenizer,
@@ -904,6 +924,8 @@ public actor StreamingNemotronMultilingualAsrManager {
         )
 
         lastToken = Int32(config.blankIdx)
+
+        resetRescueState()
     }
 
     /// Append audio buffer for processing
@@ -951,7 +973,7 @@ public actor StreamingNemotronMultilingualAsrManager {
                 (self.audioBuffer.count - nextStart) >= chunkSamples
                 ? Array(self.audioBuffer[nextStart..<nextEnd])
                 : nil
-            try await processChunk(chunk, nextChunkSamples: nextChunkSamples)
+            try await processChunkTracked(chunk, nextChunkSamples: nextChunkSamples)
             self.audioBufferOffset += chunkSamples
 
             // Periodic compaction: once we've consumed enough prefix, do a
@@ -990,10 +1012,14 @@ public actor StreamingNemotronMultilingualAsrManager {
             let chunkStart = audioBufferOffset
             let chunkEnd = chunkStart + config.chunkSamples
             let chunk = Array(audioBuffer[chunkStart..<chunkEnd])
-            try await processChunk(chunk)
+            try await processChunkTracked(chunk)
             audioBuffer.removeAll()
             audioBufferOffset = 0
         }
+
+        // Issue #838: a trailing speech span that decoded to all-blank gets
+        // one fresh-state re-decode before the transcript is assembled.
+        try await finalizeRescueSpanIfNeeded()
 
         let decoded = tokenizer.decode(ids: accumulatedTokenIds)
         if firstDetectedLanguage == nil {
