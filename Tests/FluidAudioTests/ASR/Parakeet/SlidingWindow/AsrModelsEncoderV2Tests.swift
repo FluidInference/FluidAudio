@@ -22,9 +22,24 @@ final class AsrModelsEncoderV2Tests: XCTestCase {
         try? FileManager.default.removeItem(at: parentDir)
     }
 
+    /// Create a load-ready compiled bundle: resolution requires a complete
+    /// `.mlmodelc` (layout check + no `.partial` staging files), so a bare
+    /// directory must NOT count as a usable encoder.
     private func place(_ fileName: String) throws {
+        let bundle = repoDir.appendingPathComponent(fileName)
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        try Data().write(to: bundle.appendingPathComponent("coremldata.bin"))
+    }
+
+    private func placeIncomplete(_ fileName: String, partial: Bool) throws {
+        let bundle = repoDir.appendingPathComponent(fileName)
         try FileManager.default.createDirectory(
-            at: repoDir.appendingPathComponent(fileName), withIntermediateDirectories: true)
+            at: bundle.appendingPathComponent("weights"), withIntermediateDirectories: true)
+        if partial {
+            try Data().write(to: bundle.appendingPathComponent("coremldata.bin"))
+            try Data().write(
+                to: bundle.appendingPathComponent("weights/weight.bin.partial"))
+        }
     }
 
     func testEncoderFileNames() {
@@ -71,6 +86,33 @@ final class AsrModelsEncoderV2Tests: XCTestCase {
     }
 
     func testResolveFreshInstallTriesV2First() {
+        XCTAssertEqual(
+            AsrModels.resolveEncoderPrecision(.int8, version: .v3, directory: modelsDir),
+            .int8V2)
+    }
+
+    func testIncompleteV2DoesNotOutrankValidOriginal() throws {
+        // An interrupted v2 download leaves a partial bundle for resume; it
+        // must not be selected over a load-ready original encoder.
+        try place(ModelNames.ASR.encoderFile)
+        try placeIncomplete(ModelNames.ASR.encoderV2File, partial: false)
+        XCTAssertEqual(
+            AsrModels.resolveEncoderPrecision(.int8, version: .v3, directory: modelsDir),
+            .int8)
+
+        try FileManager.default.removeItem(
+            at: repoDir.appendingPathComponent(ModelNames.ASR.encoderV2File))
+        try placeIncomplete(ModelNames.ASR.encoderV2File, partial: true)
+        XCTAssertEqual(
+            AsrModels.resolveEncoderPrecision(.int8, version: .v3, directory: modelsDir),
+            .int8)
+    }
+
+    func testBothIncompleteResolvesToV2ForResume() throws {
+        // Neither bundle is usable: resolve like a fresh install so the v2
+        // download runs (and resumes its partial file).
+        try placeIncomplete(ModelNames.ASR.encoderFile, partial: false)
+        try placeIncomplete(ModelNames.ASR.encoderV2File, partial: true)
         XCTAssertEqual(
             AsrModels.resolveEncoderPrecision(.int8, version: .v3, directory: modelsDir),
             .int8V2)

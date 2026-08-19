@@ -243,6 +243,9 @@ extension AsrModels {
                     encoderPrecision: effectivePrecision,
                     encoderComputeUnits: encoderComputeUnits, progressHandler: progressHandler)
             } catch {
+                // Cancellation is the caller's abort, not v2 unavailability —
+                // falling back would start a second multi-hundred-MB fetch.
+                if RetryPolicy.isCancellation(error) { throw error }
                 logger.warning(
                     "\(effectivePrecision.encoderFileName) unavailable, falling back to \(encoderPrecision.encoderFileName): \(error.localizedDescription)"
                 )
@@ -257,10 +260,13 @@ extension AsrModels {
     /// Issue #760: the original v3 "int8" encoder (`Encoder.mlmodelc`, actually
     /// 6-bit-LUT palettized) corrupts tokens under specific right-context; the
     /// int8-per-channel-linear rebuild ships as `Encoder_v2.mlmodelc` alongside
-    /// it. `.int8` requests resolve to whichever file is already on disk
-    /// (no surprise re-download for existing caches), preferring v2 when both
-    /// are present. Fresh installs try v2 first; `load`/`download` fall back to
-    /// the original for mirrors and pinned local dirs that predate the file.
+    /// it. `.int8` requests resolve to whichever encoder is already load-ready
+    /// on disk (no surprise re-download for existing caches), preferring v2
+    /// when both are. Load-ready means a complete compiled bundle — an
+    /// interrupted v2 download (partial weights left behind for resume) must
+    /// not outrank a valid original. Fresh installs try v2 first;
+    /// `load`/`download` fall back to the original for mirrors and pinned
+    /// local dirs that predate the file.
     static func resolveEncoderPrecision(
         _ precision: ParakeetEncoderPrecision,
         version: AsrModelVersion,
@@ -268,15 +274,10 @@ extension AsrModels {
     ) -> ParakeetEncoderPrecision {
         guard version == .v3, precision == .int8 else { return precision }
         let repoDir = repoPath(from: directory, version: version)
-        let fileManager = FileManager.default
-        if fileManager.fileExists(
-            atPath: repoDir.appendingPathComponent(Names.encoderV2File).path)
-        {
+        if ModelCache.isCacheComplete(at: repoDir, requiredFiles: [Names.encoderV2File]) {
             return .int8V2
         }
-        if fileManager.fileExists(
-            atPath: repoDir.appendingPathComponent(Names.encoderFile).path)
-        {
+        if ModelCache.isCacheComplete(at: repoDir, requiredFiles: [Names.encoderFile]) {
             return .int8
         }
         return .int8V2
@@ -559,6 +560,9 @@ extension AsrModels {
                     to: directory, force: force, version: version,
                     encoderPrecision: effectivePrecision, progressHandler: progressHandler)
             } catch {
+                // Cancellation is the caller's abort, not v2 unavailability —
+                // falling back would start a second multi-hundred-MB fetch.
+                if RetryPolicy.isCancellation(error) { throw error }
                 logger.warning(
                     "\(effectivePrecision.encoderFileName) unavailable, falling back to \(encoderPrecision.encoderFileName): \(error.localizedDescription)"
                 )
