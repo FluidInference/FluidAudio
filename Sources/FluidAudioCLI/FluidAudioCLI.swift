@@ -88,6 +88,10 @@ struct FluidAudioCLI {
             await NemotronMultilingualMultiStreamBench.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-transcribe":
             await SenseVoiceTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "campplus-embed":
+            await CampPlusEmbedCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "fsmn-vad-segment":
+            await FsmnVadSegmentCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-benchmark":
             await SenseVoiceBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "paraformer-transcribe":
@@ -98,6 +102,10 @@ struct FluidAudioCLI {
             await CohereTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "cohere-benchmark":
             await CohereBenchmark.run(arguments: Array(arguments.dropFirst(2)))
+        case "canary-transcribe":
+            await CanaryTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "canary-earnings-benchmark":
+            await CanaryEarningsBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -119,11 +127,12 @@ struct FluidAudioCLI {
                 diarization-benchmark   Run diarization benchmark
                 vad-benchmark           Run VAD-specific benchmark
                 vad-analyze             Inspect VAD segmentation and streaming events
+                fsmn-vad-segment        Detect speech segments with FSMN-VAD (beta)
                 asr-benchmark           Run ASR benchmark on LibriSpeech
                 fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
                 transcribe              Transcribe audio file using streaming ASR
                 multi-stream            Transcribe multiple audio files in parallel
-                tts                     Synthesize speech from text (KokoroAne / PocketTTS / StyleTTS2 / Inflect beta)
+                tts                     Synthesize speech (KokoroAne / PocketTTS / StyleTTS2 / NeuTTS / Inflect beta)
                 tts-asr-verify          Batch TTS→ASR roundtrip WER verification
                 tts-benchmark           Quantitative TTS benchmark (latency, quality, compute-unit sweep)
                 minimax-corpus          Fetch MiniMax TTS Multilingual Test Set into Benchmarks/tts/corpus/minimax
@@ -134,6 +143,7 @@ struct FluidAudioCLI {
                 sortformer-benchmark    Run Sortformer benchmark on AMI dataset
                 lseend                  Run LS-EEND diarization on a single file
                 lseend-benchmark        Run LS-EEND benchmark on AMI dataset
+                campplus-embed          CAM++ speaker embedding / cosine similarity (beta)
                 g2p-benchmark           Run multilingual G2P benchmark
                 nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
                 nemotron-transcribe     Transcribe custom audio files with Nemotron
@@ -143,6 +153,8 @@ struct FluidAudioCLI {
                 ja-benchmark            Run Japanese ASR benchmark on JSUT/Common Voice
                 cohere-transcribe       Transcribe using Cohere Transcribe (cache-external pipeline, 14 languages)
                 cohere-benchmark        Run Cohere Transcribe FLEURS benchmark
+                canary-transcribe       Transcribe using Canary-1B-v2 (beta model conversion)
+                canary-earnings-benchmark  Run Canary-1B-v2 earnings custom-vocab benchmark (beta)
                 download                Download evaluation datasets
                 help                    Show this help message
 

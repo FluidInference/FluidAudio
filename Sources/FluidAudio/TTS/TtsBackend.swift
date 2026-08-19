@@ -36,6 +36,14 @@ public enum TtsBackend: Sendable {
     /// (`LuxTtsG2p`); pre-phonemized espeak IPA is accepted via
     /// `LuxTtsManager.synthesize(phonemes:...)`.
     case luxtts
+    /// NeuTTS-2E — emotional English TTS: Qwen3 236M backbone emits NeuCodec
+    /// speech tokens autoregressively (top-k sampling, MLState KV cache —
+    /// macOS 15+/iOS 18+ only), decoded to 24 kHz audio by the NeuCodec
+    /// decoder. Seven emotions × four fixed speakers; BPE text input, no
+    /// phonemizer.
+    ///
+    /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
+    case neuTts
     /// Inflect v2 (Micro / Nano, beta) — ultra-tiny VITS-family English TTS
     /// (9.4M / 4.0M params, 24 kHz mono). Fixed-shape encoder + duration
     /// predictor, host-side duration expansion + prior sampling, then a
