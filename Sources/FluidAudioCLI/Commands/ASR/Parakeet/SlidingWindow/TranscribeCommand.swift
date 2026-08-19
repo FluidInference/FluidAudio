@@ -1023,7 +1023,8 @@ enum TranscribeCommand {
                 --output-json <file>           Save full transcription to JSON
                 --model-version <v2|v3|110m>   ASR model version (default: v3)
                 --model-dir <path>             Local model directory (skips download)
-                --encoder-precision <int8|int4> Encoder quantization (default: int8)
+                --encoder-precision <int8|int8-v2|int4> Encoder quantization (default: int8;
+                                               auto-upgrades to int8-v2 when available, #760)
                 --language <code>              Language hint (e.g., en, de, fr, es)
                 --custom-vocab <file>          Apply vocabulary boosting in batch mode
                 --no-mel-context               Disable 80ms mel-context prepend for long-form batch ASR

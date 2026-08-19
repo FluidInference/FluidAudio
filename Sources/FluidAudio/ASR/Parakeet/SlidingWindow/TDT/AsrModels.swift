@@ -234,6 +234,62 @@ extension AsrModels {
         encoderComputeUnits: MLComputeUnits? = nil,
         progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
+        let effectivePrecision = resolveEncoderPrecision(
+            encoderPrecision, version: version, directory: directory)
+        if effectivePrecision != encoderPrecision {
+            do {
+                return try await loadResolved(
+                    from: directory, configuration: configuration, version: version,
+                    encoderPrecision: effectivePrecision,
+                    encoderComputeUnits: encoderComputeUnits, progressHandler: progressHandler)
+            } catch {
+                logger.warning(
+                    "\(effectivePrecision.encoderFileName) unavailable, falling back to \(encoderPrecision.encoderFileName): \(error.localizedDescription)"
+                )
+            }
+        }
+        return try await loadResolved(
+            from: directory, configuration: configuration, version: version,
+            encoderPrecision: encoderPrecision,
+            encoderComputeUnits: encoderComputeUnits, progressHandler: progressHandler)
+    }
+
+    /// Issue #760: the original v3 "int8" encoder (`Encoder.mlmodelc`, actually
+    /// 6-bit-LUT palettized) corrupts tokens under specific right-context; the
+    /// int8-per-channel-linear rebuild ships as `Encoder_v2.mlmodelc` alongside
+    /// it. `.int8` requests resolve to whichever file is already on disk
+    /// (no surprise re-download for existing caches), preferring v2 when both
+    /// are present. Fresh installs try v2 first; `load`/`download` fall back to
+    /// the original for mirrors and pinned local dirs that predate the file.
+    static func resolveEncoderPrecision(
+        _ precision: ParakeetEncoderPrecision,
+        version: AsrModelVersion,
+        directory: URL
+    ) -> ParakeetEncoderPrecision {
+        guard version == .v3, precision == .int8 else { return precision }
+        let repoDir = repoPath(from: directory, version: version)
+        let fileManager = FileManager.default
+        if fileManager.fileExists(
+            atPath: repoDir.appendingPathComponent(Names.encoderV2File).path)
+        {
+            return .int8V2
+        }
+        if fileManager.fileExists(
+            atPath: repoDir.appendingPathComponent(Names.encoderFile).path)
+        {
+            return .int8
+        }
+        return .int8V2
+    }
+
+    private static func loadResolved(
+        from directory: URL,
+        configuration: MLModelConfiguration? = nil,
+        version: AsrModelVersion = .v3,
+        encoderPrecision: ParakeetEncoderPrecision = .int8,
+        encoderComputeUnits: MLComputeUnits? = nil,
+        progressHandler: ProgressHandler? = nil
+    ) async throws -> AsrModels {
         logger.info("Loading ASR models from: \(directory.path)")
 
         let config = configuration ?? defaultConfiguration()
@@ -487,6 +543,40 @@ extension AsrModels {
         encoderPrecision: ParakeetEncoderPrecision = .int8,
         progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
+        let resolveDir = directory ?? defaultCacheDirectory(for: version)
+        // force wipes the cache, so resolve like a fresh install (prefer v2)
+        // instead of pinning to the encoder file currently on disk.
+        let effectivePrecision: ParakeetEncoderPrecision
+        if force, version == .v3, encoderPrecision == .int8 {
+            effectivePrecision = .int8V2
+        } else {
+            effectivePrecision = resolveEncoderPrecision(
+                encoderPrecision, version: version, directory: resolveDir)
+        }
+        if effectivePrecision != encoderPrecision {
+            do {
+                return try await downloadResolved(
+                    to: directory, force: force, version: version,
+                    encoderPrecision: effectivePrecision, progressHandler: progressHandler)
+            } catch {
+                logger.warning(
+                    "\(effectivePrecision.encoderFileName) unavailable, falling back to \(encoderPrecision.encoderFileName): \(error.localizedDescription)"
+                )
+            }
+        }
+        return try await downloadResolved(
+            to: directory, force: force, version: version,
+            encoderPrecision: encoderPrecision, progressHandler: progressHandler)
+    }
+
+    @discardableResult
+    private static func downloadResolved(
+        to directory: URL? = nil,
+        force: Bool = false,
+        version: AsrModelVersion = .v3,
+        encoderPrecision: ParakeetEncoderPrecision = .int8,
+        progressHandler: ProgressHandler? = nil
+    ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory(for: version)
         logger.info("Downloading ASR models to: \(targetDir.path)")
         let parentDir = targetDir.deletingLastPathComponent()
@@ -621,7 +711,9 @@ extension AsrModels {
         encoderPrecision: ParakeetEncoderPrecision = .int8
     ) -> Bool {
         let fileManager = FileManager.default
-        let requiredFiles = getRequiredModels(version: version, encoderPrecision: encoderPrecision)
+        let effectivePrecision = resolveEncoderPrecision(
+            encoderPrecision, version: version, directory: directory)
+        let requiredFiles = getRequiredModels(version: version, encoderPrecision: effectivePrecision)
 
         // Check in the ModelHub repo structure
         let repoPath = repoPath(from: directory, version: version)
@@ -657,7 +749,9 @@ extension AsrModels {
         let config = MLModelConfiguration()
         config.computeUnits = .cpuOnly
 
-        let fileNames = getModelFileNames(version: version, encoderPrecision: encoderPrecision)
+        let effectivePrecision = resolveEncoderPrecision(
+            encoderPrecision, version: version, directory: cacheDir)
+        let fileNames = getModelFileNames(version: version, encoderPrecision: effectivePrecision)
         var modelsToValidate = [
             ("Preprocessor", ModelNames.ASR.preprocessorFile),
             ("Decoder", fileNames.decoder),

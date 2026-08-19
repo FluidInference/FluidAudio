@@ -317,12 +317,20 @@ public enum Repo: String, CaseIterable, Sendable {
 /// Encoder precision for the v3 Parakeet TDT 0.6B encoder.
 public enum ParakeetEncoderPrecision: String, Sendable, CaseIterable {
     case int8
+    /// int8 per-channel linear re-quantization of the v3 encoder
+    /// (`Encoder_v2.mlmodelc`). Fixes token corruption caused by the original
+    /// 6-bit-LUT palettized `Encoder.mlmodelc` (issue #760). `.int8` requests
+    /// auto-resolve to this file when it is available; see
+    /// `AsrModels.resolveEncoderPrecision`.
+    case int8V2 = "int8-v2"
     case int4
 
     public var encoderFileName: String {
         switch self {
         case .int8:
             return ModelNames.ASR.encoderFile
+        case .int8V2:
+            return ModelNames.ASR.encoderV2File
         case .int4:
             return ModelNames.ASR.encoderInt4File
         }
@@ -391,6 +399,10 @@ public enum ModelNames {
         /// Joint decoder variant for v3 that exposes top-K outputs
         /// (`top_k_ids`, `top_k_logits`) used for language-aware script filtering.
         public static let jointV3File = "JointDecisionv3.mlmodelc"
+        /// v3 encoder re-quantized as int8 per-channel linear (issue #760).
+        /// Published alongside the immutable original `Encoder.mlmodelc`;
+        /// HF repo files are never mutated in place, fixes ship as new names.
+        public static let encoderV2File = "Encoder_v2.mlmodelc"
         public static let encoderInt4File = "EncoderInt4.mlmodelc"
         public static let ctcHeadFile = ctcHead + ".mlmodelc"
 
