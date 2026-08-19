@@ -14,6 +14,8 @@ public enum Repo: String, CaseIterable, Sendable {
     /// CAM++ speaker-embedding model (fbank80 -> 192-d) for speaker verification /
     /// diarization clustering. See Speaker/CampPlusEmbedder.
     case campPlus = "FluidInference/campplus-coreml"
+    /// FSMN-VAD voice activity detection (FunASR). See VAD/Fsmn.
+    case fsmnVad = "FluidInference/fsmn-vad-coreml"
     /// Paraformer-large (zh) — non-autoregressive ASR: SANM encoder + CIF
     /// predictor (host-side integrate-and-fire) + parallel decoder. See ASR/Paraformer.
     case paraformerLargeZh = "FluidInference/paraformer-large-zh-coreml"
@@ -102,6 +104,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "sensevoice-small-coreml"
         case .campPlus:
             return "campplus-coreml"
+        case .fsmnVad:
+            return "fsmn-vad-coreml"
         case .paraformerLargeZh:
             return "paraformer-large-zh-coreml"
         case .parakeetJa:
@@ -462,6 +466,23 @@ public enum ModelNames {
         public static let requiredModels: Set<String> = [
             preprocessorFile,
             modelFile,
+        ]
+    }
+
+    /// FSMN-VAD model names (2 CoreML stages + host decision).
+    ///   Preprocessor (fp32/CPU): waveform -> 400-d features (fbank80 + LFR m=5,n=1)
+    ///   FsmnVad (fp16/ANE): features -> [1,T,248] frame scores (col 0 = silence prob)
+    /// Plus `vad_config.json` (auto-fetched as a root file).
+    public enum FsmnVad {
+        public static let preprocessor = "FsmnVadPreprocessor"
+        public static let scorer = "FsmnVad"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let scorerFile = scorer + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            scorerFile,
         ]
     }
 
@@ -1450,6 +1471,8 @@ public enum ModelNames {
             return ModelNames.SenseVoice.requiredModels(precision: variant)
         case .campPlus:
             return ModelNames.CampPlus.requiredModels
+        case .fsmnVad:
+            return ModelNames.FsmnVad.requiredModels
         case .paraformerLargeZh:
             return ModelNames.ParaformerZh.requiredModels
         case .parakeetJa:

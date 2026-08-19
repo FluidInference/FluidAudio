@@ -90,6 +90,8 @@ struct FluidAudioCLI {
             await SenseVoiceTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "campplus-embed":
             await CampPlusEmbedCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "fsmn-vad-segment":
+            await FsmnVadSegmentCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-benchmark":
             await SenseVoiceBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "paraformer-transcribe":
@@ -125,6 +127,7 @@ struct FluidAudioCLI {
                 diarization-benchmark   Run diarization benchmark
                 vad-benchmark           Run VAD-specific benchmark
                 vad-analyze             Inspect VAD segmentation and streaming events
+                fsmn-vad-segment        Detect speech segments with FSMN-VAD (beta)
                 asr-benchmark           Run ASR benchmark on LibriSpeech
                 fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
                 transcribe              Transcribe audio file using streaming ASR
