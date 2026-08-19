@@ -107,6 +107,20 @@ extension VocabularyRescorer {
         return replacement
     }
 
+    /// True when a candidate span already contains the exact vocabulary term
+    /// as a contiguous word run PLUS at least one extra word. Replacing such
+    /// a span with the bare term deletes the correct neighbors — e.g.
+    /// 'Mechatronics systems. Orders' → 'Mechatronics systems' eats "Orders"
+    /// (PR #862). Both inputs must be per-word `normalizeForSimilarity` output.
+    static func spanContainsExactTerm(spanWords: [String], termWords: [String]) -> Bool {
+        guard !termWords.isEmpty, spanWords.count > termWords.count else { return false }
+        for start in 0...(spanWords.count - termWords.count)
+        where Array(spanWords[start..<(start + termWords.count)]) == termWords {
+            return true
+        }
+        return false
+    }
+
     /// Normalize text for similarity checks: lowercase, collapse whitespace,
     /// and strip punctuation while preserving letters, numbers, apostrophes, and hyphens.
     static func normalizeForSimilarity(_ text: String) -> String {

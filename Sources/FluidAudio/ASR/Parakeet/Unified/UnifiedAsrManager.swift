@@ -442,6 +442,7 @@ public actor UnifiedAsrManager {
         rnntDecoder = nil
         swiftMel = nil
         tokenizer = nil
+        vocabularyBoosting = nil
         logger.info("UnifiedAsrManager resources cleaned up")
     }
 }

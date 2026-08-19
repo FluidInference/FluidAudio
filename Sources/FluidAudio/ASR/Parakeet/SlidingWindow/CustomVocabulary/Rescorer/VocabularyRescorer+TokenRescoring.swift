@@ -582,6 +582,19 @@ extension VocabularyRescorer {
                     continue
                 }
 
+                // Guard: an expanded span that already CONTAINS the exact term
+                // must not collapse to the bare term (deletes correct neighbors)
+                if spanLength >= 2,
+                    Self.spanContainsExactTerm(
+                        spanWords: spanIndices.map { normalizedWords[$0] },
+                        termWords: normalizedCanonical.components(separatedBy: " ")
+                    )
+                {
+                    debugLog(
+                        "  Skipping '\(vocabTerm)': span '\(originalPhrase)' already contains the exact term")
+                    continue
+                }
+
                 // Guard: Skip if original phrase matches a DIFFERENT vocabulary term
                 let normalizedCurrentSet = Set(buildNormalizedForms(for: term).map { $0.normalized })
                 if vocabularyNormalizedSet.contains(normalizedPhrase)
@@ -787,6 +800,19 @@ extension VocabularyRescorer {
 
                         // Skip if already exact match to canonical (no replacement needed)
                         if normalizedPhrase == normalizedCanonical {
+                            continue
+                        }
+
+                        // Guard: an expanded span that already CONTAINS the
+                        // exact term must not collapse to the bare term
+                        // (deletes correct neighbors)
+                        if Self.spanContainsExactTerm(
+                            spanWords: spanWords.map { Self.normalizeForSimilarity($0) },
+                            termWords: normalizedCanonical.components(separatedBy: " ")
+                        ) {
+                            debugLog(
+                                "  [MULTI] Skipping '\(vocabTerm)': span '\(tdtPhrase)' already contains the exact term"
+                            )
                             continue
                         }
 
@@ -1182,6 +1208,18 @@ extension VocabularyRescorer {
             if span.count >= 2 {
                 let allStopwords = normalizedSpanWords.allSatisfy { Self.stopwords.contains($0) }
                 if allStopwords { continue }
+            }
+
+            // Guard: an expanded span that already CONTAINS the exact term
+            // must not collapse to the bare term (deletes correct neighbors)
+            if Self.spanContainsExactTerm(
+                spanWords: normalizedSpanWords,
+                termWords: normalizedCanonical.components(separatedBy: " ")
+            ) {
+                debugLog(
+                    "  [SPOTTER-RESCUE] Skipping '\(vocabTerm)': span '\(originalPhrase)' already contains the exact term"
+                )
+                continue
             }
 
             // Compute similarity (best over canonical + aliases).

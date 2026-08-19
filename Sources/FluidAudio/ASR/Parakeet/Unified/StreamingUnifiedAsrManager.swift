@@ -311,6 +311,7 @@ public actor StreamingUnifiedAsrManager {
         rnntDecoder = nil
         tokenizer = nil
         swiftMel = nil
+        vocabularyBoosting = nil
         logger.info("StreamingUnifiedAsrManager resources cleaned up")
     }
 

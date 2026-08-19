@@ -321,7 +321,7 @@ public enum CtcEarningsBenchmark {
 
             // Print summary
             print("\n" + String(repeating: "=", count: 60))
-            print("EARNINGS22 BENCHMARK (TDT + CTC)")
+            print("EARNINGS22 BENCHMARK (\(engine == .unified ? "Unified" : "TDT") + CTC)")
             print(String(repeating: "=", count: 60))
             print("Model: \(modelPath)")
             print("Total tests: \(results.count)")
@@ -359,6 +359,7 @@ public enum CtcEarningsBenchmark {
             ]
 
             let output: [String: Any] = [
+                "engine": engine.rawValue,
                 "model": modelPath,
                 "keywordsMode": keywordsMode.rawValue,
                 "summary": summaryDict,

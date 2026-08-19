@@ -311,6 +311,7 @@ public actor SlidingWindowAsrManager {
         await cancel()
         await asrManager?.cleanup()
         asrManager = nil
+        vocabularyBoosting = nil
         logger.info("SlidingWindowAsrManager resources cleaned up")
     }
 

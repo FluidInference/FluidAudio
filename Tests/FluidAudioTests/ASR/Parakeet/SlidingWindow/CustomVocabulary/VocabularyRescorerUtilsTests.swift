@@ -229,4 +229,55 @@ final class VocabularyRescorerUtilsTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - spanContainsExactTerm (PR #862 P1 regression)
+
+    // Fixture 4482641_chunk_19: 'Mechatronics systems. Orders' must not
+    // collapse to 'Mechatronics systems' — that deletes the correct "Orders".
+    func testExpandedSpanContainingExactTermIsDetected() {
+        XCTAssertTrue(
+            VocabularyRescorer.spanContainsExactTerm(
+                spanWords: ["mechatronics", "systems", "orders"],
+                termWords: ["mechatronics", "systems"]
+            ))
+        // Leading extra word ('Expectations. Mechatronics systems')
+        XCTAssertTrue(
+            VocabularyRescorer.spanContainsExactTerm(
+                spanWords: ["expectations", "mechatronics", "systems"],
+                termWords: ["mechatronics", "systems"]
+            ))
+    }
+
+    func testSpanEqualToTermIsNotFlagged() {
+        // Exact-equality spans are handled by the existing skip; the guard
+        // only targets spans with extra words.
+        XCTAssertFalse(
+            VocabularyRescorer.spanContainsExactTerm(
+                spanWords: ["mechatronics", "systems"],
+                termWords: ["mechatronics", "systems"]
+            ))
+    }
+
+    func testFuzzySpanIsNotFlagged() {
+        // 'Megatronic systems orders' does NOT contain the exact term, so the
+        // acoustic replacement path must remain reachable for real fixes.
+        XCTAssertFalse(
+            VocabularyRescorer.spanContainsExactTerm(
+                spanWords: ["megatronic", "systems", "orders"],
+                termWords: ["mechatronics", "systems"]
+            ))
+    }
+
+    func testNonContiguousWordsAreNotFlagged() {
+        XCTAssertFalse(
+            VocabularyRescorer.spanContainsExactTerm(
+                spanWords: ["mechatronics", "big", "systems"],
+                termWords: ["mechatronics", "systems"]
+            ))
+    }
+
+    func testEmptyTermIsNotFlagged() {
+        XCTAssertFalse(
+            VocabularyRescorer.spanContainsExactTerm(spanWords: ["a", "b"], termWords: []))
+    }
 }
