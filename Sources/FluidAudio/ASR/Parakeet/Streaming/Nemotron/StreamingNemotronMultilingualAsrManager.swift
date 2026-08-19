@@ -89,6 +89,12 @@ public actor StreamingNemotronMultilingualAsrManager {
     // Accumulated token IDs (raw, including any lang-tag tokens)
     internal var accumulatedTokenIds: [Int] = []
 
+    // Decode-time hotword biasing (see NemotronVocabularyBias.swift). The
+    // terms survive reset() like the selected language does; the bias is
+    // rebuilt whenever a tokenizer becomes available.
+    internal var vocabularyTerms: [CustomVocabularyTerm] = []
+    internal var vocabularyBias: NemotronVocabularyBias?
+
     // Per-token absolute timings captured during the RNNT decode loop, parallel
     // to the user-visible (lang-tag-stripped) token stream. Each token's
     // startTime is its absolute encoder-frame index * secondsPerEncoderFrame.
@@ -491,6 +497,7 @@ public actor StreamingNemotronMultilingualAsrManager {
             vocabPath: tokenizerURL,
             langTagTokenIds: config.langTagTokenIds
         )
+        rebuildVocabularyBias()
 
         // Initialize states
         try resetStates()
@@ -781,6 +788,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         lastFinishTokenTimings.removeAll()
         audioBufferOffset = 0
         firstDetectedLanguage = nil
+        vocabularyBias?.resetMatchState()
         do {
             try resetStates()
         } catch {
@@ -1008,6 +1016,8 @@ public actor StreamingNemotronMultilingualAsrManager {
         lastFinishTokenTimings = accumulatedTokenTimings
         accumulatedTokenIds.removeAll()
         accumulatedTokenTimings.removeAll()
+        // The emitted-token tail must follow the accumulated ids it mirrors.
+        vocabularyBias?.resetMatchState()
 
         if appendTerminalPunctuation {
             return Self.tidyTerminalPunctuation(

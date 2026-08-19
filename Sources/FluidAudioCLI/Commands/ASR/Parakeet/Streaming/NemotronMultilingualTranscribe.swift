@@ -22,6 +22,9 @@ public class NemotronMultilingualTranscribe {
         var promptId: Int?
         /// Chunk-size tier in ms (560 / 1120 / 2240 / 4480) for auto-download.
         var chunkMs: Int = 2240
+        /// Custom vocabulary file (JSON config or one-term-per-line text) for
+        /// decode-time hotword biasing.
+        var customVocabPath: String?
 
         public init() {}
     }
@@ -69,6 +72,11 @@ public class NemotronMultilingualTranscribe {
                 i += 1
                 if i < arguments.count, let ms = Int(arguments[i]) {
                     config.chunkMs = ms
+                }
+            case "--custom-vocab":
+                i += 1
+                if i < arguments.count {
+                    config.customVocabPath = arguments[i]
                 }
             case "--help", "-h":
                 printUsage()
@@ -125,6 +133,8 @@ public class NemotronMultilingualTranscribe {
                 --chunk-ms <int>          Chunk-size tier for auto-download: 560 / 1120 /
                                           2240 (default, recommended) / 4480.
                 --prompt-id <int>         Raw prompt id (overrides --language)
+                --custom-vocab <path>     Vocabulary file for decode-time hotword biasing
+                                          (JSON config or one-term-per-line text)
                 --help, -h                Show this help
 
             Notes:
@@ -188,6 +198,18 @@ public class NemotronMultilingualTranscribe {
                 logger.info("Language hint: \(language)")
             } else {
                 logger.info("Using default prompt id (auto)")
+            }
+
+            if let vocabPath = config.customVocabPath {
+                let vocabURL = URL(fileURLWithPath: vocabPath)
+                let vocab: CustomVocabularyContext
+                do {
+                    vocab = try CustomVocabularyContext.load(from: vocabURL)
+                } catch {
+                    vocab = try CustomVocabularyContext.loadFromSimpleFormat(from: vocabURL)
+                }
+                await manager.setCustomVocabulary(vocab.terms)
+                logger.info("Custom vocabulary: \(vocab.terms.count) term(s) from \(vocabPath)")
             }
             logger.info("")
 

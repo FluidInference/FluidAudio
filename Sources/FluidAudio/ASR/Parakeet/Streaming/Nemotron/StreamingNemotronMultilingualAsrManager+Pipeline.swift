@@ -423,11 +423,14 @@ extension StreamingNemotronMultilingualAsrManager {
                     else {
                         throw ASRError.processingFailed("B3+B1 fused decoder_joint_noencproj failed")
                     }
-                    predToken = findMaxIndex(fl)
+                    predToken = selectToken(fl)
                     hOut = fh
                     cOut = fc
-                } else if let dja = decoderJointArgmax {
-                    // Triple-fused path: token + h + c + encoder → token_id (int32) + h + c
+                } else if let dja = decoderJointArgmax, !vocabularyBiasPrefersLogits {
+                    // Triple-fused path: token + h + c + encoder → token_id (int32) + h + c.
+                    // Hotword biasing cannot reach this branch — the argmax is
+                    // fused inside the CoreML model and no logits come out —
+                    // so an active vocabulary routes to a logits path instead.
                     let tripleInput = try MLDictionaryFeatureProvider(dictionary: [
                         "token": MLFeatureValue(multiArray: tokenInput),
                         "token_length": MLFeatureValue(multiArray: tokenLen),
@@ -470,7 +473,7 @@ extension StreamingNemotronMultilingualAsrManager {
                     else {
                         throw ASRError.processingFailed("Fused decoder_joint failed")
                     }
-                    predToken = findMaxIndex(fl)
+                    predToken = selectToken(fl)
                     hOut = fh
                     cOut = fc
                 } else if let decoder = self.decoder, let joint = self.joint {
@@ -506,7 +509,7 @@ extension StreamingNemotronMultilingualAsrManager {
                     guard let jl = jointOutput.featureValue(for: "logits")?.multiArrayValue else {
                         throw ASRError.processingFailed("Joint failed")
                     }
-                    predToken = findMaxIndex(jl)
+                    predToken = selectToken(jl)
                     hOut = dh
                     cOut = dc
                 } else {

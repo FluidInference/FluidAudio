@@ -83,6 +83,51 @@ let detected = await manager.detectedLanguage()   // e.g. "fr-FR"
 await manager.reset()
 ```
 
+### Custom vocabulary (hotword biasing)
+
+The Nemotron exports ship no CTC head, so the sliding-window path's CTC
+rescorer does not apply here. Instead the manager biases inside the greedy
+RNN-T decode: tokens that extend a partially matched vocabulary term get a
+flat log-prob bonus at every emission step (decode-time shallow fusion, issue
+#841).
+
+```swift
+await manager.setCustomVocabulary([
+    CustomVocabularyTerm(text: "Torvane"),
+    CustomVocabularyTerm(text: "Quexal", aliases: ["Kwexal"]),
+])
+// Pass [] to disable. Survives reset(); may be set before loadModels().
+```
+
+Semantics and limits:
+
+- **Weight scale.** `weight` here is a *per-token logit bonus* (default 4.5,
+  the measured recall peak), not the CTC rescoring weight. Values above 6.0
+  are clamped — the simple text-list loader's `weight: 10.0` would otherwise
+  over-bias (measured artifacts: word splits like "build today" → "build to
+  day"). Most terms should omit `weight`.
+- **Assets.** Biasing needs a logits-producing step decoder
+  (`decoder_joint_noencproj` or `decoder_joint`). When a vocabulary is
+  active the fused-argmax `decoder_joint_argmax` asset is bypassed in favor
+  of a logits path; if it is the *only* step decoder, the vocabulary is
+  rejected with an error log rather than silently half-applied.
+- **Greedy decode.** Once a boosted token wins the argmax it is committed —
+  there is no beam to undo an over-fire. Keep vocabularies to genuinely
+  rare terms; a term the model hears as a word it already spells
+  ("Pheynix" → "Phoenix") needs an alias, not more weight.
+- **Chunk boundaries.** A term whose audio spans a chunk boundary is decoded
+  as two independent halves; single-word terms are the reliable target.
+- Terms shorter than 3 letters are skipped (2 for CJK); word-start anchoring
+  keeps "ran" from matching into "CRAN". CJK terms match unanchored.
+- **False-fire profile** (LibriSpeech test-clean spot check, 40 invented
+  distractor terms): confidently decoded speech is untouched, but an
+  acoustically uncertain rare-name region can be captured by a distractor
+  that shares the true audio's opening letters. Keep vocabularies small and
+  relevant; do not feed speculative or screen-harvested term lists.
+
+`FLUIDAUDIO_BIAS_LOG=1` traces every boosted flip on stderr for weight
+tuning and over-fire attribution.
+
 ## Benchmark Results
 
 Apple M2, FLEURS test set, int8 encoder, `MLComputeUnits.cpuAndNeuralEngine`.

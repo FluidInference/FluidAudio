@@ -220,6 +220,29 @@ extension StreamingNemotronMultilingualAsrManager {
                         }
                     }
                 }
+                // Hotword shallow fusion: a boosted vocabulary continuation
+                // may overtake the plain argmax — including blank, which is
+                // how a term the decoder was about to drop gets emitted.
+                if let bias = vocabularyBias {
+                    let candidates = bias.candidates()
+                    if !candidates.isEmpty {
+                        let readLogit: (Int) -> Float = { v in
+                            logitsIsF16
+                                ? nemotronHalfBitsToFloat(
+                                    logitsF16Ptr![frameBase + v * logitsStride3])
+                                : logitsF32Ptr![frameBase + v * logitsStride3]
+                        }
+                        let plain = bestIdx
+                        bestIdx = Self.pickBiased(
+                            plain: plain, candidates: candidates, count: vocabSize,
+                            logit: readLogit)
+                        if bestIdx != plain {
+                            traceBiasFlip(
+                                plain: plain, picked: bestIdx,
+                                plainLogit: readLogit(plain), pickedLogit: readLogit(bestIdx))
+                        }
+                    }
+                }
                 if bestIdx != blankIdx {
                     firstNonBlankAt = kk
                     emittedToken = bestIdx
@@ -334,10 +357,13 @@ extension StreamingNemotronMultilingualAsrManager {
                             let djneH = djneOutput.featureValue(for: "h_out")?.multiArrayValue,
                             let djneC = djneOutput.featureValue(for: "c_out")?.multiArrayValue
                         else { throw ASRError.processingFailed("Drain B3+B1 failed") }
-                        dBestIdx = findMaxIndex(djneLogits)
+                        dBestIdx = selectToken(djneLogits)
                         newH = djneH
                         newC = djneC
-                    } else if let dja = self.decoderJointArgmax {
+                    } else if let dja = self.decoderJointArgmax, !vocabularyBiasPrefersLogits {
+                        // No logits out of the fused-argmax model, so an active
+                        // vocabulary routes this drain to a logits path instead
+                        // (same as the inner loop's B2 branch).
                         let djaInput = try MLDictionaryFeatureProvider(dictionary: [
                             "token": MLFeatureValue(multiArray: tokInput2),
                             "token_length": MLFeatureValue(multiArray: tokLen2),
@@ -376,7 +402,7 @@ extension StreamingNemotronMultilingualAsrManager {
                             let djH = djOutput.featureValue(for: "h_out")?.multiArrayValue,
                             let djC = djOutput.featureValue(for: "c_out")?.multiArrayValue
                         else { throw ASRError.processingFailed("Drain B1 failed") }
-                        dBestIdx = findMaxIndex(djLogits)
+                        dBestIdx = selectToken(djLogits)
                         newH = djH
                         newC = djC
                     } else {
@@ -400,7 +426,7 @@ extension StreamingNemotronMultilingualAsrManager {
                         let jOut = try await self.joint!.prediction(from: jIn)
                         guard let jLogits = jOut.featureValue(for: "logits")?.multiArrayValue
                         else { throw ASRError.processingFailed("Drain joint failed") }
-                        dBestIdx = findMaxIndex(jLogits)
+                        dBestIdx = selectToken(jLogits)
                         newH = h2
                         newC = c2
                     }
@@ -501,6 +527,10 @@ extension StreamingNemotronMultilingualAsrManager {
     internal func appendTokenTiming(
         _ tokenId: Int, frameInChunk: Int, tokenizer: NemotronMultilingualTokenizer
     ) {
+        // Every decode path commits an emission through here, which makes it
+        // the one place the hotword matcher has to watch. Lang tags carry no
+        // piece text (the bias skips special pieces itself).
+        vocabularyBias?.observe(tokenId)
         guard !config.langTagTokenIds.contains(tokenId) else { return }
         let startTime =
             Double(absoluteFrameBase + frameInChunk) * ASRConstants.secondsPerEncoderFrame
