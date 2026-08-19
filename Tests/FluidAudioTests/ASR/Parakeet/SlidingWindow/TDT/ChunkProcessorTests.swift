@@ -166,6 +166,24 @@ final class ChunkProcessorTests: XCTestCase {
         XCTAssertEqual(audio.count, 480_000, "30 second audio should be 480,000 samples")
     }
 
+    func testMelChunkContextAutoResolution() {
+        // Issue #803: unset config resolves to no-mel on v3 (silence-aligned
+        // starts), mel elsewhere; explicit values are preserved on all versions.
+        let auto = ASRConfig()
+        XCTAssertFalse(auto.resolvedMelChunkContext(for: .v3))
+        XCTAssertTrue(auto.resolvedMelChunkContext(for: .v2))
+        XCTAssertTrue(auto.resolvedMelChunkContext(for: .tdtCtc110m))
+        XCTAssertTrue(auto.resolvedMelChunkContext(for: nil))
+
+        let explicitMel = ASRConfig(melChunkContext: true)
+        XCTAssertTrue(explicitMel.resolvedMelChunkContext(for: .v3))
+        XCTAssertTrue(explicitMel.resolvedMelChunkContext(for: .v2))
+
+        let explicitNoMel = ASRConfig(melChunkContext: false)
+        XCTAssertFalse(explicitNoMel.resolvedMelChunkContext(for: .v3))
+        XCTAssertFalse(explicitNoMel.resolvedMelChunkContext(for: .v2))
+    }
+
     func testNoMelV3DefaultPathKeepsWarmupDisabled() {
         let audio = createMockAudioSamples(durationSeconds: 30.0)
         let processor = ChunkProcessor(audioSamples: audio)

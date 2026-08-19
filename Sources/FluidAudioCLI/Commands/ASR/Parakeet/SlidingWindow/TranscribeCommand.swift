@@ -209,7 +209,7 @@ enum TranscribeCommand {
         var parakeetVariant: StreamingModelVariant?
         var language: Language?
         var encoderPrecision: ParakeetEncoderPrecision = .int8
-        var melChunkContext = true
+        var melChunkContext: Bool? = nil
         var dualDecodeArbitration = false
         var seamGapRepair = true
         var streamingMode = false
@@ -316,6 +316,8 @@ enum TranscribeCommand {
                 }
             case "--no-mel-context":
                 parsed.melChunkContext = false
+            case "--mel-context":
+                parsed.melChunkContext = true
             case "--dual-decode-arbitration":
                 parsed.dualDecodeArbitration = true
             case "--no-seam-gap-repair":
@@ -1025,6 +1027,8 @@ enum TranscribeCommand {
                 --language <code>              Language hint (e.g., en, de, fr, es)
                 --custom-vocab <file>          Apply vocabulary boosting in batch mode
                 --no-mel-context               Disable 80ms mel-context prepend for long-form batch ASR
+                                               (default: disabled on v3, enabled otherwise)
+                --mel-context                  Force-enable the mel-context prepend (v3 opt-in)
                 --dual-decode-arbitration      Enable v3/no-mel long-form boundary arbitration
 
             STREAMING MODE OPTIONS (--streaming, SlidingWindowAsrManager):

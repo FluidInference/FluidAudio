@@ -24,10 +24,12 @@ public struct ASRConfig: Sendable {
     public let streamingThreshold: Int
 
     /// 80ms mel-context prepend on non-first long-form chunks (PR #264
-    /// blank-boundary fix). Set `false` for v3 multilingual long-form batch
-    /// transcription (issue #594 English-prior drift) — see "Current Paths"
-    /// in Documentation/ASR/LongTranscription.md.
-    public let melChunkContext: Bool
+    /// blank-boundary fix). `nil` (default) resolves per model version:
+    /// `false` on v3 — the no-mel path's silence-aligned chunk starts avoid
+    /// both the multilingual drift (issue #594) and quiet-speech drops near
+    /// long silence runs (issue #803) — and `true` elsewhere. See "Current
+    /// Paths" in Documentation/ASR/LongTranscription.md.
+    public let melChunkContext: Bool?
 
     /// Opt-in probe-then-commit chunking arbitration for the v3 + no-mel
     /// batch path (default `false`) — strategies, commitment rationale, and
@@ -53,7 +55,7 @@ public struct ASRConfig: Sendable {
         parallelChunkConcurrency: Int = 4,
         streamingEnabled: Bool = true,
         streamingThreshold: Int = 480_000,
-        melChunkContext: Bool = true,
+        melChunkContext: Bool? = nil,
         dualDecodeArbitration: Bool = false,
         seamGapRepair: Bool = true,
         seamGapRepairMinGapSeconds: Double = 1.5
@@ -68,6 +70,11 @@ public struct ASRConfig: Sendable {
         self.dualDecodeArbitration = dualDecodeArbitration
         self.seamGapRepair = seamGapRepair
         self.seamGapRepairMinGapSeconds = max(0.5, seamGapRepairMinGapSeconds)
+    }
+
+    /// Resolve the mel-context tri-state against the loaded model version.
+    func resolvedMelChunkContext(for modelVersion: AsrModelVersion?) -> Bool {
+        melChunkContext ?? (modelVersion != .v3)
     }
 }
 

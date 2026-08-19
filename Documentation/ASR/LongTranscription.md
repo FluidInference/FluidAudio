@@ -71,9 +71,9 @@ phrase at the wrong point.
 
 | Path | Enabled by | Scope | Purpose |
 |---|---|---|---|
-| Default mel-context | `ASRConfig.melChunkContext = true` | Batch TDT long audio | Preserves the existing 80 ms left-context behavior for non-first chunks. |
-| v3 no-mel | `ASRConfig.melChunkContext = false`, CLI `--no-mel-context` | Parakeet TDT v3 batch long audio | Avoids the v3 multilingual drift introduced by prepending mel context at chunk boundaries. |
-| v3 dual-decode arbitration | `melChunkContext = false` plus `ASRConfig.dualDecodeArbitration = true`, CLI `--no-mel-context --dual-decode-arbitration` | Parakeet TDT v3 no-mel batch long audio | Opt-in quality mode for files where one boundary strategy is clearly safer than another. |
+| Mel-context | `ASRConfig.melChunkContext = true`, CLI `--mel-context` (default for non-v3 models) | Batch TDT long audio | Preserves the existing 80 ms left-context behavior for non-first chunks. |
+| v3 no-mel | Default for v3 (`melChunkContext = nil`); explicit via `ASRConfig.melChunkContext = false`, CLI `--no-mel-context` | Parakeet TDT v3 batch long audio | Avoids the v3 multilingual drift introduced by prepending mel context at chunk boundaries (#594), and — via silence-aligned chunk starts — the quiet-speech drops near long mid-file silence runs (#803). |
+| v3 dual-decode arbitration | `ASRConfig.dualDecodeArbitration = true` on the v3 no-mel path, CLI `--dual-decode-arbitration` | Parakeet TDT v3 no-mel batch long audio | Opt-in quality mode for files where one boundary strategy is clearly safer than another. |
 | Parallel chunk workers | `ASRConfig.parallelChunkConcurrency` (default `4`, clamped to `>= 1`) | Stateless chunked batch TDT (all of the above) | Decodes independent chunks concurrently across a worker pool of cloned `AsrManager` instances. |
 | Post-merge repair pass | `ASRConfig.seamGapRepair = true` (default), CLI `--no-seam-gap-repair` | Multi-chunk batch TDT (all of the above) | Re-decodes suspicious inter-token gaps with fresh seam-free windows, splicing recovered tokens in. See "Post-Merge Repair Pass". |
 
@@ -136,7 +136,8 @@ but the two mechanisms behave differently:
   the chunk so the FastConformer encoder's depthwise convolutions have stable
   left context for the first emitted frame. The decoder is told to *skip*
   those leading frames via `contextSamples`; they do not produce tokens.
-  Enabled when `ASRConfig.melChunkContext = true` (the default).
+  Enabled when `ASRConfig.melChunkContext` resolves to `true` (the default
+  for non-v3 models; v3 defaults to the no-mel path).
 - **Warmup prefix** (`warmupPrefixSamples`, 0–7 encoder frames). Real audio
   from before the chunk start, decoded normally from frame 0; emitted tokens
   are suppressed up to the chunk start via `emitTokensAfterFrame`. Used only
@@ -515,12 +516,15 @@ RMS exceeds `0.008 / 0.3 ≈ 0.027`.
   with a quiet gap clamps to the ceiling, so that gap is gated as if the
   whole file were loud. A gap-local reference window would close this.
 - The dead-silence-at-window-end pathology also afflicts **mid-file**
-  windows whose fixed-stride end lands inside a silence run (observed: a
-  LibriVox recording whose quiet outro credit falls in such a window loses
-  it — on `main` and on this branch alike). Snapping *every* window end to
-  the last speech-bearing frame was tried and reverted: it perturbs dozens
-  of mid-file windows per hour of audio for a net-neutral WER change. A
-  targeted fix needs its own issue and regression run.
+  windows on the mel-context path (issue #803; observed: a LibriVox
+  recording whose quiet outro credit falls in such a window loses it).
+  Snapping window ends to the last speech-bearing frame was tried twice and
+  reverted both times — the failing window decodes all-blank even when
+  trimmed and backfilled to end in speech, because the trigger is
+  fixed-stride window *starts* landing mid-word on quiet speech, not the
+  trailing silence. The v3 no-mel path's silence-aligned starts avoid the
+  class (validated on the LibriVox case), which is why v3 now defaults to
+  no-mel; the mel-context path retains the limitation.
 - Repair validation corpora are English conference and quiet dictation
   audio; multilingual and music-heavy content is less exercised.
 
