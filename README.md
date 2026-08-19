@@ -72,15 +72,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Whisper Mate](https://whisper.marksdo.com)** | Transcribes movies and audio locally; records and transcribes in real time from speakers or system apps. Uses speaker diarization. |
 | **[Altic/Fluid Voice](https://github.com/altic-dev/Fluid-oss)** | Lightweight Fully free and Open Source Voice to Text dictation for macOS built using FluidAudio. Never pay for dictation apps |
 | **[Paraspeech](https://paraspeech.com)** | AI powered voice to text. Fully offline. No subscriptions. |
-| **[mac-whisper-speedtest](https://github.com/anvanvan/mac-whisper-speedtest)** | Comparison of different local ASR, including one of the first versions of FluidAudio's ASR models |
-| **[Starling](https://github.com/Ryandonofrio3/Starling)** | Open Source, fully local voice-to-text transcription with auto-paste at your cursor. |
 | **[BoltAI](https://boltai.com/)** | Write content 10x faster using parakeet models |
-| **[Voxeoflow](https://www.voxeoflow.app)** | Mac dictation app with real-time translation. Lightning-fast transcription in over 100 languages, instantly translated to your target language. |
-| **[Speakmac](https://speakmac.app)** | Mac app that lets you type anywhere on your Mac using your voice. Fully local, private dictation built on FluidAudio. |
-| **[SamScribe](https://github.com/Steven-Weng/SamScribe)** | An open-source macOS app that captures and transcribes audio from your microphone and meeting applications (Zoom, Teams, Chrome) in real-time, with cross-session speaker recognition. |
-| **[WhisKey](https://whiskey.asktobuild.app/)** | Privacy-first voice dictation keyboard for iOS and macOS. On-device transcription with 12+ languages, AI meeting summaries, and mindmap generation. Great for daily use and vibe-coding. Uses speaker diarization. |
-| **[Dictate Anywhere](https://github.com/hoomanaskari/mac-dictate-anywhere)** | Native macOS dictation app with global Fn key activation. Dictate into any app with 25 language support. Uses Parakeet ASR. |
-| **[hongbomiao.com](https://github.com/hongbo-miao/hongbomiao.com)** | A personal R&D lab that facilitates knowledge sharing. Uses Parakeet ASR. |
 | **[Hex](https://github.com/kitlangton/Hex)** | macOS app that lets you press-and-hold a hotkey to record your voice, transcribe it, and paste into any application. Uses Parakeet ASR. |
 | **[Super Voice Assistant](https://github.com/ykdojo/super-voice-assistant)** | Open-source macOS voice assistant with local transcription. Uses Parakeet ASR. |
 | **[VoiceTypr](https://github.com/moinulmoin/voicetypr)** | Open-source voice-to-text dictation for macOS and Windows. Uses Parakeet ASR. |
@@ -116,6 +108,8 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[TypeWhisper](https://www.typewhisper.com/)** | Speech-to-text and AI text processing for macOS. Uses FluidAudio's Parakeet ASR for local transcription. |
 | **[evoglyph](https://evoglyph.com)** | Lightweight, privacy-first macOS menu-bar dictation — press a hotkey, speak, and cleaned-up text is injected at your cursor. Fully local: Parakeet TDT ASR with CTC vocabulary boosting and Silero VAD via FluidAudio on the Apple Neural Engine, plus on-device LLM cleanup. Audio never leaves the Mac. |
 | **[echo99](https://www.echo99.app)** | Private call recorder for macOS. Menu-bar app that records the mic and system audio as separate tracks and transcribes them entirely on-device. |
+
+More apps built with FluidAudio are listed in [Documentation/Showcase.md](Documentation/Showcase.md).
 | **[Presspeech](https://github.com/rcourtman/presspeech)** | Open-source (MIT) menu-bar push-to-talk dictation for macOS — hold a key, speak, release; the transcript pastes at the cursor in about 100 ms. Uses Parakeet TDT v3 ASR on the Apple Neural Engine via FluidAudio. |
 | **[Better Voice](https://voice.baselinemakes.com)** | macOS menu-bar app for on-device dictation and meeting notes that save to Apple Notes. Everything runs locally. Uses speaker diarization. |
 | **[Logue](https://github.com/bitwize-ai/Logue)** | Privacy-first AI meeting notes and writing assistant for macOS. Records mic + system audio and transcribes locally on Apple Silicon, with speaker diarization, Smart Minutes, and an on-device AI writing editor — nothing leaves the Mac. Uses FluidAudio streaming Sortformer speaker diarization. |
