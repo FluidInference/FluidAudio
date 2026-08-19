@@ -262,7 +262,7 @@ public actor AsrManager {
                 parallelChunkConcurrency: workingConfig.parallelChunkConcurrency,
                 streamingEnabled: workingConfig.streamingEnabled,
                 streamingThreshold: workingConfig.streamingThreshold,
-                melChunkContext: workingConfig.melChunkContext,
+                melChunkContext: workingConfig.melChunkContextOverride,
                 dualDecodeArbitration: workingConfig.dualDecodeArbitration
             )
         }
@@ -277,7 +277,7 @@ public actor AsrManager {
                 parallelChunkConcurrency: workingConfig.parallelChunkConcurrency,
                 streamingEnabled: workingConfig.streamingEnabled,
                 streamingThreshold: workingConfig.streamingThreshold,
-                melChunkContext: workingConfig.melChunkContext,
+                melChunkContext: workingConfig.melChunkContextOverride,
                 dualDecodeArbitration: workingConfig.dualDecodeArbitration
             )
         } else {

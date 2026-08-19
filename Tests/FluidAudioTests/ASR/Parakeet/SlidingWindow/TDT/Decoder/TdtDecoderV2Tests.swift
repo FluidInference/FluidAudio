@@ -27,7 +27,7 @@ final class TdtDecoderV2Tests: XCTestCase {
             adaptedConfig.tdtConfig.consecutiveBlankLimit,
             baseConfig.tdtConfig.consecutiveBlankLimit
         )
-        XCTAssertEqual(adaptedConfig.melChunkContext, baseConfig.melChunkContext)
+        XCTAssertEqual(adaptedConfig.melChunkContextOverride, baseConfig.melChunkContextOverride)
         XCTAssertEqual(adaptedConfig.dualDecodeArbitration, baseConfig.dualDecodeArbitration)
     }
 
@@ -47,7 +47,7 @@ final class TdtDecoderV2Tests: XCTestCase {
             adaptedConfig.tdtConfig.consecutiveBlankLimit,
             baseConfig.tdtConfig.consecutiveBlankLimit
         )
-        XCTAssertEqual(adaptedConfig.melChunkContext, baseConfig.melChunkContext)
+        XCTAssertEqual(adaptedConfig.melChunkContextOverride, baseConfig.melChunkContextOverride)
         XCTAssertEqual(adaptedConfig.dualDecodeArbitration, baseConfig.dualDecodeArbitration)
     }
 
