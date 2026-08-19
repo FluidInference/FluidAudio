@@ -317,11 +317,12 @@ public enum Repo: String, CaseIterable, Sendable {
 /// Encoder precision for the v3 Parakeet TDT 0.6B encoder.
 public enum ParakeetEncoderPrecision: String, Sendable, CaseIterable {
     case int8
-    /// int8 per-channel linear re-quantization of the v3 encoder
-    /// (`Encoder_v2.mlmodelc`). Fixes token corruption caused by the original
-    /// 6-bit-LUT palettized `Encoder.mlmodelc` (issue #760). `.int8` requests
-    /// auto-resolve to this file when it is available; see
-    /// `AsrModels.resolveEncoderPrecision`.
+    /// Opt-in int8 per-channel linear re-quantization of the v3 encoder
+    /// (`Encoder_v2.mlmodelc`, 568M vs 425M). Avoids token corruption the
+    /// original 6-bit-LUT palettized `Encoder.mlmodelc` exhibits under
+    /// specific right-context (issue #760). `.int8` remains the default and
+    /// keeps loading the original file; select this explicitly to use the
+    /// rebuild.
     case int8V2 = "int8-v2"
     case int4
 
