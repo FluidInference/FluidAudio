@@ -46,9 +46,12 @@ import Foundation
 ///
 /// Greedy-decoding caveat: this biases a greedy argmax, so once a boosted
 /// token wins it is committed — there is no beam to recover an over-fire.
-/// Streaming caveat (same as the CTC path documents): a term whose audio
-/// spans a chunk boundary is decoded as two independent halves, so
-/// single-word terms are the reliable target.
+/// Chunk boundaries are NOT a barrier, unlike the sliding-window CTC path:
+/// the decoder state and this match tail both persist across chunks (only
+/// `reset()`/`finish()` clear them), so a term whose audio spans a
+/// boundary keeps its bias. Verified by a boundary-phase sweep — leading
+/// silence stepped through a full chunk period leaves term recovery intact
+/// at every phase.
 final class NemotronVocabularyBias {
 
     /// One boostable token continuation at the current match state.

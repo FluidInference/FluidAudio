@@ -115,8 +115,13 @@ Semantics and limits:
   there is no beam to undo an over-fire. Keep vocabularies to genuinely
   rare terms; a term the model hears as a word it already spells
   ("Pheynix" → "Phoenix") needs an alias, not more weight.
-- **Chunk boundaries.** A term whose audio spans a chunk boundary is decoded
-  as two independent halves; single-word terms are the reliable target.
+- **Chunk boundaries are not a barrier.** Unlike the sliding-window CTC
+  path, the decoder state and the term match state persist across chunks
+  (only `reset()`/`finish()` clear them), so a term whose audio spans a
+  boundary keeps its bias. Verified by a boundary-phase sweep: stepping
+  leading silence through a full 2240 ms chunk period, term recovery holds
+  at every phase. Multi-word terms are still harder — more greedy steps
+  must go right — but not because of chunking.
 - Terms shorter than 3 letters are skipped (2 for CJK); word-start anchoring
   keeps "ran" from matching into "CRAN". CJK terms match unanchored.
 - **False-fire profile** (LibriSpeech test-clean spot check, 40 invented
