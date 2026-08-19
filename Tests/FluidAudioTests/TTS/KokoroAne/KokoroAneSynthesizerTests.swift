@@ -69,6 +69,23 @@ final class KokoroAneSynthesizerTests: XCTestCase {
         ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_KOKOROANE_E2E"] == "1"
     }
 
+    func testPublishedBundlesContainFlexibleShapeInformation() async throws {
+        try XCTSkipUnless(
+            shouldRunHeavy,
+            "Set FLUIDAUDIO_RUN_KOKOROANE_E2E=1 to validate the real Kokoro-ANE models."
+        )
+
+        let repoDirectory = try await KokoroAneResourceDownloader.ensureModels()
+        let incompatible = KokoroAneModelCompatibility.existingBundlesRequiringMigration(
+            in: repoDirectory,
+            modelNames: ModelNames.KokoroAne.requiredCoreMLModels)
+
+        XCTAssertEqual(
+            incompatible,
+            [],
+            "Published Kokoro ANE bundles must expose FlexibleShapeInformation to OS 27")
+    }
+
     func testSynthesizeShortPhrase() async throws {
         try XCTSkipUnless(
             shouldRunHeavy,

@@ -32,6 +32,18 @@ public enum KokoroAneResourceDownloader {
         case .japanese:
             required = ModelNames.KokoroAne.requiredModelsJa
         }
+
+        // ModelHub deliberately skips existing files. Repair legacy compiled
+        // bundles before the existence-only fast path so caches created before
+        // the flexible-shape models were published do not remain broken on the
+        // OS 27 E5 runtime forever (#738).
+        try await KokoroAneModelCacheMigrationCoordinator.shared.repairIfNeeded(
+            repo: repo,
+            modelsDirectory: modelsDirectory,
+            repoDirectory: repoDir,
+            progressHandler: progressHandler
+        )
+
         let allPresent = required.allSatisfy { name in
             FileManager.default.fileExists(atPath: repoDir.appendingPathComponent(name).path)
         }

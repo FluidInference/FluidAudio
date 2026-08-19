@@ -231,8 +231,22 @@ phrases that pull the per-corpus aggregate down to ~5.2× — see
 
 ## Known OS issues
 
-Two distinct Apple runtime bugs affect the 7-stage chain. Neither is
-input-, model-, or FluidAudio-version-gated.
+The following OS/runtime constraints affect the 7-stage chain:
+
+- **OS 27 background inference:** iOS and iPadOS 27 require the host app to
+  include the
+  [`com.apple.developer.background-tasks.continued-processing.inference`](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.background-tasks.continued-processing.inference)
+  entitlement before Core ML can use the Neural Engine while the app is in the
+  background. A Swift package cannot add application entitlements; enable it
+  on the consuming app target. Foreground inference does not require it.
+- **Legacy Kokoro ANE caches on OS 27:** older compiled bundles without MIL
+  `FlexibleShapeInformation` can return invalid dynamic-shape output (including
+  NaN durations) under the E5 runtime (#738). FluidAudio now detects those
+  bundles during initialization and transactionally replaces only the affected
+  cache entries. No manual cache deletion is required; a failed download rolls
+  back to the previous bundle.
+- The two execution bugs below are handled by OS updates or FluidAudio's
+  default per-stage compute routing.
 
 | Bug | Signature | Affected OS | Status |
 |-----|-----------|-------------|--------|
