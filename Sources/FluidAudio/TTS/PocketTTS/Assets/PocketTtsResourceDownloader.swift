@@ -349,6 +349,58 @@ public enum PocketTtsResourceDownloader {
         return encoderPath
     }
 
+    /// Ensure the pack-local per-language voice-cloning encoder
+    /// (`v2.1/<lang>/mimi_encoderv3.mlmodelc`) is available and return its URL.
+    ///
+    /// Every language pack ships its own mimi codec weights, so cloned-voice
+    /// conditioning must be encoded with the pack's own encoder (its speaker
+    /// projection is baked in — no host-side reprojection). Best-effort:
+    /// returns `nil` when the encoder can't be fetched (offline, or not yet
+    /// published for the pack); callers then fall back to the shared root
+    /// encoder + reprojection path (#793).
+    public static func ensurePackMimiEncoder(
+        language: PocketTtsLanguage, directory: URL? = nil
+    ) async -> URL? {
+        do {
+            let targetDir = try directory ?? cacheDirectory()
+            let modelsDirectory = targetDir.appendingPathComponent(
+                PocketTtsConstants.defaultModelsSubdirectory)
+            let repoDir = modelsDirectory.appendingPathComponent(Repo.pocketTts.folderName)
+            let encoderSubpath =
+                "\(language.repoSubdirectory)/\(ModelNames.PocketTTS.mimiEncoderV3File)"
+            let encoderPath = repoDir.appendingPathComponent(encoderSubpath)
+
+            if FileManager.default.fileExists(atPath: encoderPath.path) {
+                return encoderPath
+            }
+
+            try FileManager.default.createDirectory(
+                at: repoDir, withIntermediateDirectories: true)
+
+            logger.info(
+                "Downloading per-language Mimi encoder for \(language.rawValue) voice cloning...")
+            try await ModelHub.download(
+                .pocketTts,
+                subdirectory: encoderSubpath,
+                to: repoDir
+            )
+
+            guard FileManager.default.fileExists(atPath: encoderPath.path) else {
+                logger.warning(
+                    "Per-language Mimi encoder unavailable for \(language.rawValue); "
+                        + "falling back to the shared encoder + reprojection (#793).")
+                return nil
+            }
+            return encoderPath
+        } catch {
+            logger.warning(
+                "Failed to fetch per-language Mimi encoder for \(language.rawValue): "
+                    + "\(error.localizedDescription). Falling back to the shared encoder + "
+                    + "reprojection (#793).")
+            return nil
+        }
+    }
+
     /// Ensure voice conditioning data for the given language is available,
     /// downloading from HuggingFace if missing.
     ///

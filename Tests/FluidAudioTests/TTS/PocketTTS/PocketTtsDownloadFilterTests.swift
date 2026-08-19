@@ -72,6 +72,16 @@ final class PocketTtsDownloadFilterTests: XCTestCase {
         XCTAssertFalse(skips("v2.1/english/manifest.json"))
     }
 
+    func testPackLocalCloningEncoderIsSkippedInPackDownloads() {
+        // The per-language voice-cloning encoder (`mimi_encoderv3.mlmodelc`,
+        // #793) is not part of any required model set — it is fetched lazily
+        // by `ensurePackMimiEncoder` on first clone, so pack downloads for
+        // synthesis-only users stay lean.
+        XCTAssertTrue(skips("v2.1/spanish_24l/mimi_encoderv3.mlmodelc"))
+        XCTAssertTrue(skips("v2.1/spanish_24l/mimi_encoderv3.mlmodelc/weights/weight.bin"))
+        XCTAssertTrue(skips("v2.1/spanish_24l/mimi_encoderv3.mlmodelc", placement: .ane))
+    }
+
     func testHistoricalExclusionsStillApply() {
         // .mlpackage sources are skipped even for a required model name.
         XCTAssertTrue(skips("v2.1/english/cond_prefill.mlpackage"))

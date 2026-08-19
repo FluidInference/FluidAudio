@@ -80,6 +80,7 @@ public struct TTS {
         var saveVoicePath: String? = nil
         var pocketLanguage: PocketTtsLanguage = .english
         var pocketPlacement: PocketTtsModelPlacement = .gpu
+        var pocketTemperature: Float = PocketTtsConstants.temperature
         // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
         var pocketSeed: UInt64? = nil
         // StyleTTS2 zero-shot args.
@@ -228,6 +229,11 @@ public struct TTS {
                     luxttsPromptText = arguments[i + 1]
                     i += 1
                 }
+            case "--temperature":
+                if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
+                    pocketTemperature = v
+                    i += 1
+                }
             case "--silence":
                 if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
                     supertonicSilence = v
@@ -345,7 +351,7 @@ public struct TTS {
                 metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
                 voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath,
                 language: pocketLanguage, seed: pocketSeed,
-                placement: pocketPlacement)
+                placement: pocketPlacement, temperature: pocketTemperature)
         case .kokoroAne:
             await runKokoroAne(
                 text: text, output: output, voice: voice, metricsPath: metricsPath,
@@ -638,11 +644,13 @@ public struct TTS {
         voice: String,
         voiceData: PocketTtsVoiceData?,
         seed: UInt64,
-        deEss: Bool
+        deEss: Bool,
+        temperature: Float
     ) async throws -> Data {
         logger.info("PocketTTS deterministic mode: seed=\(seed)")
         let session = try await makePocketSeededSession(
-            manager: manager, voice: voice, voiceData: voiceData, seed: seed)
+            manager: manager, voice: voice, voiceData: voiceData, seed: seed,
+            temperature: temperature)
         session.enqueue(text)
         session.finish()
         var allSamples: [Float] = []
@@ -668,17 +676,18 @@ public struct TTS {
         manager: PocketTtsManager,
         voice: String,
         voiceData: PocketTtsVoiceData?,
-        seed: UInt64
+        seed: UInt64,
+        temperature: Float
     ) async throws -> PocketTtsSession {
         if let voiceData = voiceData {
             return try await manager.makeSession(
                 voiceData: voiceData,
-                temperature: PocketTtsConstants.temperature,
+                temperature: temperature,
                 seed: seed)
         }
         return try await manager.makeSession(
             voice: voice,
-            temperature: PocketTtsConstants.temperature,
+            temperature: temperature,
             seed: seed)
     }
 
@@ -688,7 +697,8 @@ public struct TTS {
         voiceFilePath: String?, saveVoicePath: String?,
         language: PocketTtsLanguage,
         seed: UInt64? = nil,
-        placement: PocketTtsModelPlacement = .gpu
+        placement: PocketTtsModelPlacement = .gpu,
+        temperature: Float = PocketTtsConstants.temperature
     ) async {
         do {
             let tStart = Date()
@@ -734,13 +744,14 @@ public struct TTS {
                     voice: pocketVoice,
                     voiceData: voiceData,
                     seed: seed,
-                    deEss: deEss)
+                    deEss: deEss,
+                    temperature: temperature)
             } else if let voiceData = voiceData {
                 wav = try await manager.synthesize(
-                    text: text, voiceData: voiceData, deEss: deEss)
+                    text: text, voiceData: voiceData, temperature: temperature, deEss: deEss)
             } else {
                 wav = try await manager.synthesize(
-                    text: text, voice: pocketVoice, deEss: deEss)
+                    text: text, voice: pocketVoice, temperature: temperature, deEss: deEss)
             }
             let tSynth1 = Date()
 
@@ -1373,6 +1384,7 @@ public struct TTS {
                                    portuguese, portuguese_24l, spanish, spanish_24l
                                    Note: French is 24-layer only (no 6-layer pack upstream)
               --seed N             Deterministic-mode seed (uses session API for fixed RNG)
+              --temperature T      Generation temperature (default 0.7)
               --placement P        Model placement: gpu (default), ane (rank-4 ANE models),
                                    ane-state (Trial 23 MLState multifunction pipeline;
                                    macOS 15+/iOS 18+, requires pocket_state.mlmodelc)

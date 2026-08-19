@@ -998,6 +998,13 @@ public enum ModelNames {
         public static let pocketState = "pocket_state"
         public static let mimiDecoder = "mimi_decoder"
         public static let mimiEncoder = "mimi_encoderv2"
+        /// Per-language voice-cloning encoder, stored inside each pack's
+        /// directory (`v2.1/<lang>/mimi_encoderv3.mlmodelc`). Every language
+        /// pack ships its own mimi weights, so cloned-voice conditioning must
+        /// be encoded with the pack's own codec + speaker projection (baked
+        /// in at conversion). The shared root `mimi_encoderv2` (English mimi)
+        /// remains the fallback for English and stale caches (#793).
+        public static let mimiEncoderV3 = "mimi_encoderv3"
 
         /// Function names inside the `pocket_state` multifunction package.
         public enum StateFunction {
@@ -1017,6 +1024,7 @@ public enum ModelNames {
         public static let pocketStateFile = pocketState + ".mlmodelc"
         public static let mimiDecoderFile = mimiDecoder + ".mlmodelc"
         public static let mimiEncoderFile = mimiEncoder + ".mlmodelc"
+        public static let mimiEncoderV3File = mimiEncoderV3 + ".mlmodelc"
 
         /// Directory containing binary constants, tokenizer, and voice data.
         public static let constantsBinDir = "constants_bin"
