@@ -423,4 +423,61 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertEqual(deduped, current, "Repetition ~10s later is not a seam duplicate")
         XCTAssertEqual(removed, 0)
     }
+
+    // MARK: - Issue #855: final-window re-decode plan (decoder-entry behavior)
+
+    /// The plan drives the production decoder entry: frame-0 re-decode plus an
+    /// emission cutoff. Removing the production change removes this helper, so
+    /// these tests are coupled to the fix itself, not just to dedup.
+    func testRedecodePlan_LastStreamingChunk() {
+        let plan = AsrManager.lastChunkRedecodePlan(
+            isLastChunk: true,
+            previousTokens: [1, 2, 3],
+            previousTokenTimestamps: [130, 134, 137],
+            globalFrameOffset: 112
+        )
+        XCTAssertEqual(plan.initialTimeIndexOverride, 0, "Final window must re-decode from frame 0")
+        XCTAssertEqual(
+            plan.emitTokensAfterFrame,
+            137 - 112 - AsrManager.redecodeEmissionJitterFrames,
+            "Cutoff = last emitted frame in window-local space minus the jitter margin")
+    }
+
+    func testRedecodePlan_CutoffClampedToZero() {
+        let plan = AsrManager.lastChunkRedecodePlan(
+            isLastChunk: true,
+            previousTokens: [1],
+            previousTokenTimestamps: [3],
+            globalFrameOffset: 112
+        )
+        XCTAssertEqual(plan.initialTimeIndexOverride, 0)
+        XCTAssertEqual(plan.emitTokensAfterFrame, 0, "Cutoff before the window start suppresses nothing")
+    }
+
+    func testRedecodePlan_InactiveOutsideFinalStreamingWindow() {
+        let interior = AsrManager.lastChunkRedecodePlan(
+            isLastChunk: false,
+            previousTokens: [1, 2],
+            previousTokenTimestamps: [10, 20],
+            globalFrameOffset: 0
+        )
+        XCTAssertNil(interior.initialTimeIndexOverride)
+        XCTAssertNil(interior.emitTokensAfterFrame)
+
+        let noTimestamps = AsrManager.lastChunkRedecodePlan(
+            isLastChunk: true,
+            previousTokens: [1, 2],
+            previousTokenTimestamps: nil,
+            globalFrameOffset: 0
+        )
+        XCTAssertNil(noTimestamps.initialTimeIndexOverride, "Batch callers (no timestamps) keep legacy navigation")
+
+        let firstWindow = AsrManager.lastChunkRedecodePlan(
+            isLastChunk: true,
+            previousTokens: [],
+            previousTokenTimestamps: [],
+            globalFrameOffset: 0
+        )
+        XCTAssertNil(firstWindow.initialTimeIndexOverride, "Single-window streams have nothing to re-decode")
+    }
 }
