@@ -358,9 +358,19 @@ public enum PocketTtsResourceDownloader {
     /// returns `nil` when the encoder can't be fetched (offline, or not yet
     /// published for the pack); callers then fall back to the shared root
     /// encoder + reprojection path (#793).
+    ///
+    /// Cache acceptance goes through `ModelCache.isCacheComplete`, not bare
+    /// directory existence: an interrupted download deliberately leaves
+    /// `*.partial` staging files behind for byte-range resume, and accepting
+    /// such a bundle would fail `MLModel(contentsOf:)` later without ever
+    /// taking the shared-encoder fallback (same class as issue #819).
+    ///
+    /// Throws only on cancellation — a cancelled caller must not be routed
+    /// into the fallback (or trigger further downloads); genuine
+    /// availability/network failures return `nil`.
     public static func ensurePackMimiEncoder(
         language: PocketTtsLanguage, directory: URL? = nil
-    ) async -> URL? {
+    ) async throws -> URL? {
         do {
             let targetDir = try directory ?? cacheDirectory()
             let modelsDirectory = targetDir.appendingPathComponent(
@@ -370,7 +380,7 @@ public enum PocketTtsResourceDownloader {
                 "\(language.repoSubdirectory)/\(ModelNames.PocketTTS.mimiEncoderV3File)"
             let encoderPath = repoDir.appendingPathComponent(encoderSubpath)
 
-            if FileManager.default.fileExists(atPath: encoderPath.path) {
+            if ModelCache.isCacheComplete(at: repoDir, requiredFiles: [encoderSubpath]) {
                 return encoderPath
             }
 
@@ -385,14 +395,37 @@ public enum PocketTtsResourceDownloader {
                 to: repoDir
             )
 
-            guard FileManager.default.fileExists(atPath: encoderPath.path) else {
+            if ModelCache.isCacheComplete(at: repoDir, requiredFiles: [encoderSubpath]) {
+                return encoderPath
+            }
+
+            // Still incomplete after a resume attempt: a genuinely interrupted
+            // transfer resumes its `.partial` and completes above, so what's
+            // left is a corrupt bundle the resume path can't repair (e.g. a
+            // stale staging file next to complete weights). Clear it and
+            // re-download once from scratch — same delete-and-retry semantics
+            // as `ModelHub.loadWithRecovery`.
+            logger.warning(
+                "Per-language Mimi encoder bundle for \(language.rawValue) is corrupt after "
+                    + "resume; clearing and re-downloading once...")
+            try? FileManager.default.removeItem(at: encoderPath)
+            try await ModelHub.download(
+                .pocketTts,
+                subdirectory: encoderSubpath,
+                to: repoDir
+            )
+
+            guard ModelCache.isCacheComplete(at: repoDir, requiredFiles: [encoderSubpath]) else {
                 logger.warning(
-                    "Per-language Mimi encoder unavailable for \(language.rawValue); "
+                    "Per-language Mimi encoder unavailable or incomplete for \(language.rawValue); "
                         + "falling back to the shared encoder + reprojection (#793).")
                 return nil
             }
             return encoderPath
         } catch {
+            if RetryPolicy.isCancellation(error) {
+                throw error
+            }
             logger.warning(
                 "Failed to fetch per-language Mimi encoder for \(language.rawValue): "
                     + "\(error.localizedDescription). Falling back to the shared encoder + "

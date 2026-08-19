@@ -397,7 +397,7 @@ public actor PocketTtsModelStore {
         config.computeUnits = .cpuAndGPU
 
         if language != .english,
-            let packURL = await PocketTtsResourceDownloader.ensurePackMimiEncoder(
+            let packURL = try await PocketTtsResourceDownloader.ensurePackMimiEncoder(
                 language: language, directory: directory)
         {
             logger.info("Loading pack-local Mimi encoder (\(self.language.rawValue))...")
