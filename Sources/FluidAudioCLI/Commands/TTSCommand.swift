@@ -879,10 +879,12 @@ public struct TTS {
                 detailed = try await manager.synthesizeDetailed(
                     text: text, voice: resolvedVoice, speed: 1.0)
             }
+            // Native level for all variants — matches the PyTorch reference
+            // now that KokoroTail_v2 carries the COLA-corrected iSTFT (#852).
             let wav = try AudioWAV.data(
                 from: detailed.samples,
                 sampleRate: Double(detailed.sampleRate),
-                normalize: variant != .japanese)
+                normalize: false)
             let tSynth1 = Date()
 
             let outURL = resolveInputURL(output)

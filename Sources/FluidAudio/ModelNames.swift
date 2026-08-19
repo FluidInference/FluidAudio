@@ -1428,7 +1428,10 @@ public enum ModelNames {
         // re-download. See mobius laishere-coreml docs/trials-and-errors.md.
         public static let noise = "KokoroNoise_v2.mlmodelc"
         public static let vocoder = "KokoroVocoder.mlmodelc"
-        public static let tail = "KokoroTail.mlmodelc"
+        // v2: COLA-normalized iSTFT deconv weights (raw output was exactly 1.5x
+        // the PyTorch reference). Renamed (not overwritten) so cached clients
+        // re-download. See issue #852.
+        public static let tail = "KokoroTail_v2.mlmodelc"
 
         /// Auxiliary (non-CoreML) files that must accompany the mlmodelc bundles.
         public static let vocab = "vocab.json"

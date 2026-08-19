@@ -96,7 +96,7 @@ public enum KokoroAneStage: String, CaseIterable, Sendable {
         case .prosody: return "KokoroProsody.mlmodelc"
         case .noise: return "KokoroNoise_v2.mlmodelc"  // v2: atan2 phase-correction (HF-noise fix)
         case .vocoder: return "KokoroVocoder.mlmodelc"
-        case .tail: return "KokoroTail.mlmodelc"
+        case .tail: return "KokoroTail_v2.mlmodelc"  // v2: COLA-normalized iSTFT (level fix, #852)
         }
     }
 }

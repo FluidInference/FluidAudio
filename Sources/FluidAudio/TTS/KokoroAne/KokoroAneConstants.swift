@@ -16,7 +16,7 @@ public enum KokoroAneConstants {
     /// Default voice id for the Japanese (`ANE-ja/`) variant.
     public static let defaultVoiceJapanese = "jf_alpha"
 
-    /// Output sample rate of the iSTFT in `KokoroTail.mlpackage`.
+    /// Output sample rate of the iSTFT in `KokoroTail_v2.mlpackage`.
     public static let sampleRate = 24_000
 
     /// BOS / EOS token id used by both `convert-coreml.py` and the iOS demo.

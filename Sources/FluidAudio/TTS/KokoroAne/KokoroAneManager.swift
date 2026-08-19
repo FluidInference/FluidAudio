@@ -358,14 +358,14 @@ public actor KokoroAneManager {
 
     private func wavData(from result: KokoroAneSynthesisResult) throws -> Data {
         do {
-            // Japanese writes at the model's native level (no peak-normalization)
-            // so the output matches the PyTorch reference instead of being
-            // slammed to 0 dBFS. English/Mandarin keep peak-normalization until
-            // their tails get the same COLA-corrected iSTFT (#698 follow-up).
+            // All variants write at the model's native level (no
+            // peak-normalization) so the output matches the PyTorch reference
+            // instead of being slammed to 0 dBFS. Requires the COLA-corrected
+            // KokoroTail_v2 (#852).
             return try AudioWAV.data(
                 from: result.samples,
                 sampleRate: Double(result.sampleRate),
-                normalize: variant != .japanese)
+                normalize: false)
         } catch {
             throw KokoroAneError.audioConversionFailed(error.localizedDescription)
         }
