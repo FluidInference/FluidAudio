@@ -114,47 +114,41 @@ final class TextNormalizerTests: XCTestCase {
 
     // MARK: - TextNormalizer Instance
 
-    func testTextNormalizerInit() {
+    func testNativeLibraryAlwaysAvailable() {
+        // The engine is linked via the bundled NemoTextProcessing binary target,
+        // so it must be available in every consumer build (issue #839).
         let normalizer = TextNormalizer()
-        // isNativeAvailable depends on whether the Rust library is linked.
-        // In unit tests it won't be, so just verify it initializes without crashing.
-        XCTAssertNotNil(normalizer)
+        XCTAssertTrue(normalizer.isNativeAvailable)
+        XCTAssertTrue(normalizer.isTnAvailable)
+        XCTAssertNotNil(normalizer.version)
     }
 
-    func testTextNormalizerFallbackWithoutNativeLib() {
+    func testNormalizeConvertsSpokenNumbers() {
         let normalizer = TextNormalizer()
-
-        guard !normalizer.isNativeAvailable else {
-            // If native lib IS available (e.g., in integration tests), skip this test
-            return
-        }
-
-        // Without native library, normalize should return input unchanged
-        XCTAssertEqual(normalizer.normalize("twenty one"), "twenty one")
-        XCTAssertEqual(normalizer.normalizeSentence("I have twenty one apples"), "I have twenty one apples")
+        XCTAssertEqual(normalizer.normalize("twenty one"), "21")
+        XCTAssertEqual(normalizer.normalize("two hundred"), "200")
+        // Exact repro from issue #839
+        XCTAssertEqual(normalizer.normalize("twelve dollars"), "$12")
     }
 
-    func testTextNormalizerVersionWithoutNativeLib() {
+    func testNormalizeSentenceConvertsSpans() {
         let normalizer = TextNormalizer()
-
-        guard !normalizer.isNativeAvailable else {
-            return
-        }
-
-        XCTAssertNil(normalizer.version)
+        XCTAssertEqual(normalizer.normalizeSentence("I have twenty one apples"), "I have 21 apples")
+        XCTAssertEqual(normalizer.normalizeSentence("it costs twelve dollars"), "it costs $12")
     }
 
-    func testTextNormalizerCustomRulesWithoutNativeLib() {
+    func testTnNormalizeConvertsWrittenToSpoken() {
         let normalizer = TextNormalizer()
+        XCTAssertEqual(normalizer.tnNormalize("$5.50"), "five dollars fifty cents")
+    }
 
-        guard !normalizer.isNativeAvailable else {
-            return
-        }
-
-        // Custom rules should be no-ops without native lib
-        normalizer.addRule(spoken: "test", written: "TEST")
+    func testCustomRules() {
+        let normalizer = TextNormalizer()
+        normalizer.addRule(spoken: "gee pee tee", written: "GPT")
+        XCTAssertEqual(normalizer.ruleCount, 1)
+        XCTAssertEqual(normalizer.normalize("gee pee tee"), "GPT")
+        XCTAssertTrue(normalizer.removeRule(spoken: "gee pee tee"))
         XCTAssertEqual(normalizer.ruleCount, 0)
-        XCTAssertFalse(normalizer.removeRule(spoken: "test"))
     }
 
     func testTextNormalizerIsSendable() {
@@ -322,18 +316,6 @@ final class TextNormalizerTests: XCTestCase {
 
     // MARK: - filterAmbiguousWords Logic
 
-    func testFilterReturnsUnchangedWhenNoAmbiguousWords() throws {
-        let normalizer = TextNormalizer()
-        // This asserts the no-native-lib fallback (normalizeSentence returns the
-        // input unchanged). When the native ITN lib is linked it deliberately
-        // rewrites spoken forms (e.g. "twenty one" → "21"); that path is
-        // covered in text-processing-rs, so skip here.
-        try XCTSkipIf(normalizer.isNativeAvailable, "native ITN linked; asserts the fallback path")
-        let input = "I have twenty one apples"
-        let result = normalizer.normalizeSentence(input)
-        XCTAssertEqual(result, input)
-    }
-
     func testFilterWithAmbiguousWordInSentence() {
         let normalizer = TextNormalizer()
         // Ambiguous words used as natural language (nouns) must survive
@@ -350,33 +332,17 @@ final class TextNormalizerTests: XCTestCase {
         }
     }
 
-    func testStandaloneAmbiguousWordStillNormalizes() throws {
-        let normalizer = TextNormalizer()
+    func testStandaloneAmbiguousWordStillNormalizes() {
         // The mask only protects natural-language usage; a standalone spoken
-        // command still normalizes when the native lib is linked.
-        try XCTSkipIf(!normalizer.isNativeAvailable, "requires the native normalizer")
-        XCTAssertEqual(normalizer.normalizeSentence("period"), ".")
-    }
-
-    func testFilterWithStandalonePunctuationWord() {
+        // command still normalizes.
         let normalizer = TextNormalizer()
-        // Standalone "period" — should be treated as punctuation command
-        let input = "period"
-        let result = normalizer.normalizeSentence(input)
-        // Without native lib, returns unchanged. With native lib,
-        // standalone "period" should normalize to "."
-        if normalizer.isNativeAvailable {
-            XCTAssertEqual(result, ".")
-        } else {
-            XCTAssertEqual(result, input)
-        }
+        XCTAssertEqual(normalizer.normalizeSentence("period"), ".")
     }
 
     // MARK: - TextNormalizer normalize(result:) Method
 
-    func testNormalizeASRResultWithoutNativeLib() {
+    func testNormalizeASRResult() {
         let normalizer = TextNormalizer()
-        guard !normalizer.isNativeAvailable else { return }
 
         let asrResult = ASRResult(
             text: "I have twenty one apples",
@@ -388,56 +354,23 @@ final class TextNormalizerTests: XCTestCase {
             ctcAppliedTerms: []
         )
         let normalized = normalizer.normalize(result: asrResult)
-        // Without native lib, text should be unchanged
-        XCTAssertEqual(normalized.text, "I have twenty one apples")
+        XCTAssertEqual(normalized.text, "I have 21 apples")
         // Metadata should be preserved
         XCTAssertEqual(normalized.confidence, 0.95)
         XCTAssertEqual(normalized.duration, 2.0)
     }
 
-    // MARK: - TextNormalizer Shared Instance
-
-    func testSharedInstanceIsSameType() {
-        let shared = TextNormalizer.shared
-        XCTAssertNotNil(shared)
-        // Verify shared instance is consistent
-        XCTAssertEqual(shared.isNativeAvailable, TextNormalizer.shared.isNativeAvailable)
-    }
-
     // MARK: - TextNormalizer maxSpanTokens Variant
 
-    func testNormalizeSentenceWithMaxSpanWithoutNativeLib() {
+    func testNormalizeSentenceWithMaxSpan() {
         let normalizer = TextNormalizer()
-        guard !normalizer.isNativeAvailable else { return }
-
-        let input = "twenty one apples"
-        let result = normalizer.normalizeSentence(input, maxSpanTokens: 8)
-        XCTAssertEqual(result, input)
+        XCTAssertEqual(normalizer.normalizeSentence("twenty one apples", maxSpanTokens: 8), "21 apples")
     }
 
     // MARK: - TN (written → spoken) surface
 
-    func testTnPassthroughWithoutNativeLib() {
+    func testTnNormalizeSentence() {
         let normalizer = TextNormalizer()
-        guard !normalizer.isNativeAvailable else { return }
-
-        // No native library linked → TN unavailable and inputs pass through.
-        XCTAssertFalse(normalizer.isTnAvailable)
-        XCTAssertEqual(normalizer.tnNormalize("$5.50"), "$5.50")
-        XCTAssertEqual(normalizer.tnNormalizeSentence("I paid $5"), "I paid $5")
-    }
-
-    /// When the native TN surface is unavailable (the default), the shared TTS
-    /// entry point must equal the conservative baseline so spoken output is
-    /// unchanged.
-    func testFrontendNormalizationFallsBackToBaseline() {
-        guard !TextNormalizer.shared.isTnAvailable else { return }
-
-        for input in ["I am 26 years old.", "The score is 3.14.", "Agent 007", "hello world"] {
-            XCTAssertEqual(
-                EnglishTextNormalizer.normalizeForFrontend(input),
-                EnglishTextNormalizer.normalize(input),
-                "frontend normalization should match the baseline without the native lib")
-        }
+        XCTAssertEqual(normalizer.tnNormalizeSentence("I paid $5"), "I paid five dollars")
     }
 }

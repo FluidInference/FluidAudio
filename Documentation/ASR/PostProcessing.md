@@ -30,7 +30,7 @@ TN converts written-form text to spoken form — useful for TTS preprocessing:
 
 ## Using with FluidAudio
 
-FluidAudio includes optional support for text-processing-rs through the `TextNormalizer` class. The library uses dynamic loading, so it's completely optional — if not linked, `normalize()` returns the input unchanged.
+FluidAudio supports text-processing-rs through the `TextNormalizer` class. The native engine ships with the package as the `NemoTextProcessing` binary target and is linked directly — no setup required, it works out of the box for every SwiftPM consumer.
 
 ### ITN (Spoken to Written)
 
@@ -39,14 +39,11 @@ import FluidAudio
 
 let normalizer = TextNormalizer.shared
 
-// Check if native library is available
-if normalizer.isNativeAvailable {
-    print("ITN version: \(normalizer.version ?? "unknown")")
-}
+print("ITN version: \(normalizer.version ?? "unknown")")
 
 // Normalize spoken-form text
 let result = normalizer.normalize("two hundred dollars")
-// Returns "$200" (with native library) or "two hundred dollars" (without)
+// Returns "$200"
 ```
 
 ### TN (Written to Spoken)
@@ -71,12 +68,6 @@ let normalizedResult = normalizer.normalize(result: asrResult)
 print(normalizedResult.text)  // Written form
 ```
 
-### Linking the Native Library
+### Native Library
 
-To enable text processing support, link your app against `libnemo_text_processing`:
-
-1. Build text-processing-rs for your target platform
-2. Add the library to your Xcode project's linker settings
-3. `TextNormalizer.isNativeAvailable` will return `true`
-
-See the [text-processing-rs README](https://github.com/FluidInference/text-processing-rs) for build instructions.
+The engine is bundled: `Package.swift` declares a `NemoTextProcessing` binary target (a prebuilt xcframework from [text-processing-rs](https://github.com/FluidInference/text-processing-rs) releases) that SwiftPM downloads and links automatically. `TextNormalizer.isNativeAvailable` always returns `true`; it is kept only for source compatibility with releases ≤ 0.15.6, which resolved the library at runtime and silently returned input unchanged when it was absent.
