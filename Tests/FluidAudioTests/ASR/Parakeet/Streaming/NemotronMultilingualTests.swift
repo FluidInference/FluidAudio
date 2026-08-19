@@ -306,6 +306,71 @@ final class NemotronMultilingualTests: XCTestCase {
         XCTAssertFalse(StreamingNemotronMultilingualAsrManager.containsLexicalContent(""))
     }
 
+    private func timing(_ id: Int, _ start: Double, token: String = "▁w") -> TokenTiming {
+        TokenTiming(
+            token: token, tokenId: id, startTime: start,
+            endTime: start + 0.08, confidence: 1.0)
+    }
+
+    func testMergeRescuedTokensInsertsAtTimestampPosition() {
+        // Live: word@1.0, word@5.0 (later speech from the same chunk already
+        // appended). Rescued: word@3.0 must land between them, not after.
+        let live = ([10, 20], [timing(10, 1.0), timing(20, 5.0)])
+        let merged = StreamingNemotronMultilingualAsrManager.mergeRescuedTokens(
+            liveIds: live.0, liveTimings: live.1,
+            rescuedIds: [30], rescuedTimings: [timing(30, 3.0)],
+            langTagTokenIds: [], spanStartSec: 2.9)
+        XCTAssertEqual(merged.ids, [10, 30, 20])
+        XCTAssertEqual(merged.timings.map { $0.tokenId }, [10, 30, 20])
+        XCTAssertEqual(merged.timings.map { $0.startTime }, [1.0, 3.0, 5.0])
+    }
+
+    func testMergeRescuedTokensAppendsWhenSpanIsLatest() {
+        let merged = StreamingNemotronMultilingualAsrManager.mergeRescuedTokens(
+            liveIds: [10], liveTimings: [timing(10, 1.0)],
+            rescuedIds: [30, 31], rescuedTimings: [timing(30, 3.0), timing(31, 3.1)],
+            langTagTokenIds: [], spanStartSec: 2.9)
+        XCTAssertEqual(merged.ids, [10, 30, 31])
+        XCTAssertEqual(merged.timings.map { $0.startTime }, [1.0, 3.0, 3.1])
+    }
+
+    func testMergeRescuedTokensSkipsLeadingLangTag() {
+        // Lang-tag ids occupy an id slot but no timing slot; insertion at
+        // timing index 0 must not displace the leading tag.
+        let langTag = 13000
+        let merged = StreamingNemotronMultilingualAsrManager.mergeRescuedTokens(
+            liveIds: [langTag, 10], liveTimings: [timing(10, 5.0)],
+            rescuedIds: [30], rescuedTimings: [timing(30, 2.0)],
+            langTagTokenIds: [langTag], spanStartSec: 1.9)
+        XCTAssertEqual(merged.ids, [langTag, 30, 10])
+        XCTAssertEqual(merged.timings.map { $0.startTime }, [2.0, 5.0])
+    }
+
+    func testMergeRescuedTokensEmptyLive() {
+        let merged = StreamingNemotronMultilingualAsrManager.mergeRescuedTokens(
+            liveIds: [], liveTimings: [],
+            rescuedIds: [30], rescuedTimings: [timing(30, 0.5)],
+            langTagTokenIds: [], spanStartSec: 0.4)
+        XCTAssertEqual(merged.ids, [30])
+        XCTAssertEqual(merged.timings.count, 1)
+    }
+
+    func testBlankSpanCountersClearOnReset() async {
+        let manager = StreamingNemotronMultilingualAsrManager()
+        await manager.recordDetectedBlankSpan()
+        await manager.recordDetectedBlankSpan()
+        await manager.recordSuccessfulRescue()
+        var detected = await manager.detectedBlankSpanCount
+        var rescued = await manager.blankRescueCount
+        XCTAssertEqual(detected, 2)
+        XCTAssertEqual(rescued, 1)
+        await manager.reset()
+        detected = await manager.detectedBlankSpanCount
+        rescued = await manager.blankRescueCount
+        XCTAssertEqual(detected, 0)
+        XCTAssertEqual(rescued, 0)
+    }
+
     func testBlankRescueDefaults() {
         // Default-on unless FLUIDAUDIO_DISABLE_BLANK_RESCUE is set in the
         // environment (CI does not set it).

@@ -156,13 +156,31 @@ extension StreamingNemotronMultilingualAsrManager {
         }
         guard !spanEmitted else { return }
 
-        try await rescueDecode(span: spanAudio, spanStartFrame: startFrame - preRollFrames)
+        recordDetectedBlankSpan()
+        try await rescueDecode(
+            span: spanAudio,
+            spanStartFrame: startFrame - preRollFrames,
+            spanEndFrame: lastSpeechFrame + 1)
     }
 
-    /// Re-decode `span` on fresh encoder caches and decoder state, appending
-    /// recovered tokens to the transcript, then restore the live stream state.
-    private func rescueDecode(span: [Float], spanStartFrame: Int) async throws {
-        guard encoder != nil, config.chunkSamples > 0 else { return }
+    /// A speech span decoded to all-blank live; a rescue is being attempted.
+    internal func recordDetectedBlankSpan() {
+        detectedBlankSpanCount += 1
+    }
+
+    /// A rescue committed lexical content to the transcript.
+    internal func recordSuccessfulRescue() {
+        blankRescueCount += 1
+    }
+
+    /// Re-decode `span` on fresh encoder caches and decoder state. The trial
+    /// decode is staged: its tokens are captured and removed, partial
+    /// callbacks are suppressed, and the result is committed only when it
+    /// contains lexical content — inserted at the span's timestamp position
+    /// so words already decoded from later audio in the same chunk keep
+    /// their order. Live stream state is restored afterwards.
+    private func rescueDecode(span: [Float], spanStartFrame: Int, spanEndFrame: Int) async throws {
+        guard encoder != nil, config.chunkSamples > 0, let tokenizer = tokenizer else { return }
 
         // Save the live stream's carried state. Loopback outputs are never
         // output-backed (see makePredictionOptions), so these references stay
@@ -185,6 +203,11 @@ extension StreamingNemotronMultilingualAsrManager {
         let savedChunkCount = chunkCount
         let savedProcessedChunks = processedChunks
         let savedVadRun = vadConsecutiveLowChunks
+        // Suppress partial callbacks for the duration of the trial decode —
+        // they would surface unvalidated, out-of-order text. A single
+        // callback fires after a successful commit instead.
+        let savedPartialCallback = partialCallback
+        partialCallback = nil
 
         inBlankRescue = true
         defer {
@@ -206,6 +229,7 @@ extension StreamingNemotronMultilingualAsrManager {
             chunkCount = savedChunkCount
             processedChunks = savedProcessedChunks
             vadConsecutiveLowChunks = savedVadRun
+            partialCallback = savedPartialCallback
             inBlankRescue = false
         }
 
@@ -227,19 +251,106 @@ extension StreamingNemotronMultilingualAsrManager {
         audio.append(contentsOf: repeatElement(0, count: chunkSamples))
 
         let tokensBefore = accumulatedTokenIds.count
+        let timingsBefore = accumulatedTokenTimings.count
         var offset = 0
         while offset < audio.count {
             try await processChunk(Array(audio[offset..<(offset + chunkSamples)]))
             offset += chunkSamples
         }
-        let recovered = accumulatedTokenIds.count - tokensBefore
-        if recovered > 0 {
-            blankRescueCount += 1
+
+        // Stage: pull the trial decode's output back out of the accumulators.
+        // Lang-tag re-emissions carry no user content (and have no timing
+        // entry) — drop them so staged ids and timings stay 1:1.
+        let stagedIds = Array(accumulatedTokenIds[tokensBefore...])
+            .filter { !config.langTagTokenIds.contains($0) }
+        // Clamp staged timings to the span's real extent: the rescue decode's
+        // own emission latency (plus the zero-pad flush) stamps trailing
+        // tokens past the span end, and a timing that bleeds into the NEXT
+        // span's attribution window would wrongly mask that span's drop.
+        let spanEndSec = Double(spanEndFrame) * ASRConstants.secondsPerEncoderFrame
+        let stagedTimings = Array(accumulatedTokenTimings[timingsBefore...]).map { t in
+            t.startTime <= spanEndSec
+                ? t
+                : TokenTiming(
+                    token: t.token, tokenId: t.tokenId, startTime: spanEndSec,
+                    endTime: spanEndSec + ASRConstants.secondsPerEncoderFrame,
+                    confidence: t.confidence)
+        }
+        accumulatedTokenIds.removeSubrange(tokensBefore...)
+        accumulatedTokenTimings.removeSubrange(timingsBefore...)
+
+        // Commit only lexical recoveries: punctuation or nothing means the
+        // span is genuinely blank (noise, or unrecoverable) — leave the
+        // transcript untouched.
+        let hasLexical = stagedIds.contains {
+            Self.containsLexicalContent(tokenizer.rawToken(for: $0) ?? "")
+        }
+        guard hasLexical else {
             logger.info(
-                "Blank-span rescue recovered \(recovered) token(s) from a "
+                "Blank-span rescue found no lexical content in a "
                     + String(format: "%.2f", Double(span.count) / 16000.0) + "s span at frame \(spanStartFrame)"
             )
+            return
         }
+
+        let spanStartSec = Double(max(0, spanStartFrame)) * ASRConstants.secondsPerEncoderFrame
+        (accumulatedTokenIds, accumulatedTokenTimings) = Self.mergeRescuedTokens(
+            liveIds: accumulatedTokenIds,
+            liveTimings: accumulatedTokenTimings,
+            rescuedIds: stagedIds,
+            rescuedTimings: stagedTimings,
+            langTagTokenIds: config.langTagTokenIds,
+            spanStartSec: spanStartSec
+        )
+        recordSuccessfulRescue()
+        logger.info(
+            "Blank-span rescue recovered \(stagedIds.count) token(s) from a "
+                + String(format: "%.2f", Double(span.count) / 16000.0) + "s span at frame \(spanStartFrame)"
+        )
+        if let callback = savedPartialCallback {
+            callback(tokenizer.decode(ids: accumulatedTokenIds).text)
+        }
+    }
+
+    /// Insert rescued tokens at the span's timestamp position instead of
+    /// appending: when a dropped span and later speech share one chunk, the
+    /// later words are already in the accumulators by the time the span
+    /// closes, and a plain append would order them "later-word rescued-word".
+    ///
+    /// `liveTimings` is 1:1 with the non-lang-tag entries of `liveIds`
+    /// (lang-tag tokens never get timings — see `appendTokenTiming`);
+    /// `rescuedIds`/`rescuedTimings` are 1:1 (lang tags already dropped).
+    nonisolated internal static func mergeRescuedTokens(
+        liveIds: [Int],
+        liveTimings: [TokenTiming],
+        rescuedIds: [Int],
+        rescuedTimings: [TokenTiming],
+        langTagTokenIds: Set<Int>,
+        spanStartSec: Double
+    ) -> (ids: [Int], timings: [TokenTiming]) {
+        let insertKey = rescuedTimings.first?.startTime ?? spanStartSec
+        let timingInsertIndex =
+            liveTimings.firstIndex { $0.startTime > insertKey } ?? liveTimings.count
+
+        // Map the timing index onto the ids array by walking past lang-tag
+        // entries, which occupy an id slot but no timing slot.
+        var idsInsertIndex = liveIds.count
+        var timedSeen = 0
+        for (index, id) in liveIds.enumerated() {
+            if timedSeen == timingInsertIndex, !langTagTokenIds.contains(id) {
+                idsInsertIndex = index
+                break
+            }
+            if !langTagTokenIds.contains(id) {
+                timedSeen += 1
+            }
+        }
+
+        var ids = liveIds
+        var timings = liveTimings
+        ids.insert(contentsOf: rescuedIds, at: idsInsertIndex)
+        timings.insert(contentsOf: rescuedTimings, at: timingInsertIndex)
+        return (ids, timings)
     }
 
     /// True when the raw token piece carries letters/digits (any script) —
@@ -296,5 +407,7 @@ extension StreamingNemotronMultilingualAsrManager {
         rescueSpanOverflowed = false
         rescuePreRollTail = []
         inBlankRescue = false
+        detectedBlankSpanCount = 0
+        blankRescueCount = 0
     }
 }

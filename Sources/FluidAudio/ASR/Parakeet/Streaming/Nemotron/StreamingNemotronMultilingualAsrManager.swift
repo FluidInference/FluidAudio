@@ -225,9 +225,14 @@ public actor StreamingNemotronMultilingualAsrManager {
     internal var rescueSpanOverflowed: Bool = false
     internal var rescuePreRollTail: [Float] = []
     internal var inBlankRescue: Bool = false
-    /// Number of spans whose fresh-state re-decode recovered tokens this
-    /// session. A nonzero value means the live decode silently dropped
-    /// pause-delimited speech (issue #838).
+    /// Number of speech spans this session that the live decode left
+    /// all-blank (a fresh-state rescue was attempted). A nonzero value means
+    /// the live decode silently dropped pause-delimited speech (issue #838),
+    /// whether or not the rescue recovered it. Cleared by `reset()`.
+    public internal(set) var detectedBlankSpanCount: Int = 0
+    /// Number of blank spans whose fresh-state re-decode recovered lexical
+    /// content this session (always <= `detectedBlankSpanCount`). Cleared by
+    /// `reset()`.
     public internal(set) var blankRescueCount: Int = 0
 
     // Decoder LSTM states
