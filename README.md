@@ -46,18 +46,18 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 ## Video Demos
 
 | Link | Description |
-| --- | :---: | --- |
-| **[Spokenly Real-time ASR](https://www.youtube.com/watch?v=9fXKKkyL8JE)** | — | Video demonstration of FluidAudio's transcription accuracy and speed |
-| **[Senko Integration](https://x.com/hamza_q_/status/1970228971657928995)** | — | Python Speaker diarization on Mac using FluidAudio's segmentation model |
-| **[Kokoro TTS](https://x.com/sach1n/status/1977817056507793521)** | — | Text-to-speech demo using FluidAudio's Kokoro and Silero models on iOS |
-| **[Parakeet Realtime EOU](https://x.com/sach1n/status/2003210626659680762)** | — | Parakeet streaming ASR with end-of-utterance detection on iOS |
-| **[Sortformer Diarization](https://x.com/Alex_tra_memory/status/2010530705667661843)** | — | Sortformer for speaker diarization with overlapping speech on iOS |
-| **[PocketTTS](https://x.com/sach1n/status/2017627657006158296)** | — | Streaming text-to-speech using PocketTTS on iOS |
-| **[Parakeet EOU Ultra-Low Latency](https://x.com/y_earu/status/2038654262608064967)** | — | Real-time Parakeet EOU transcription on iOS demonstrating ultra-low latency speech-to-text |
-| **[Action Phrase Live Production Control](https://www.youtube.com/watch?v=ykcvdTHHmrk)** | — | Voice-controlled live production workflow using FluidAudio's ASR and speaker diarization to trigger cameras, graphics, and layouts with natural voice commands |
-| **[talat - VAD, ASR, Speaker ID](https://www.youtube.com/watch?v=OjP4Adrv9_E)** | — | A video demo showcasing FluidAudio's VAD, two different ASR models, and speaker diarization during a talat.app meeting recording |
-| **[Kyutai PocketTTS on ANE](https://x.com/sach1n/status/2051375097408360596)** | — | Kyutai labs PocketTTS in iOS running fast on the ANE & background-capable |
-| **[Supertonic-3 on iPhone 17 Pro ANE](https://x.com/sach1n/status/2056476851825250685)** | — | Supertonic-3 running on iPhone 17 Pro via ANE/CoreML with 2 minutes of audio generated in 3 seconds with low RAM & background support |
+| --- | --- |
+| **[Spokenly Real-time ASR](https://www.youtube.com/watch?v=9fXKKkyL8JE)** | Video demonstration of FluidAudio's transcription accuracy and speed |
+| **[Senko Integration](https://x.com/hamza_q_/status/1970228971657928995)** | Python Speaker diarization on Mac using FluidAudio's segmentation model |
+| **[Kokoro TTS](https://x.com/sach1n/status/1977817056507793521)** | Text-to-speech demo using FluidAudio's Kokoro and Silero models on iOS |
+| **[Parakeet Realtime EOU](https://x.com/sach1n/status/2003210626659680762)** | Parakeet streaming ASR with end-of-utterance detection on iOS |
+| **[Sortformer Diarization](https://x.com/Alex_tra_memory/status/2010530705667661843)** | Sortformer for speaker diarization with overlapping speech on iOS |
+| **[PocketTTS](https://x.com/sach1n/status/2017627657006158296)** | Streaming text-to-speech using PocketTTS on iOS |
+| **[Parakeet EOU Ultra-Low Latency](https://x.com/y_earu/status/2038654262608064967)** | Real-time Parakeet EOU transcription on iOS demonstrating ultra-low latency speech-to-text |
+| **[Action Phrase Live Production Control](https://www.youtube.com/watch?v=ykcvdTHHmrk)** | Voice-controlled live production workflow using FluidAudio's ASR and speaker diarization to trigger cameras, graphics, and layouts with natural voice commands |
+| **[talat - VAD, ASR, Speaker ID](https://www.youtube.com/watch?v=OjP4Adrv9_E)** | A video demo showcasing FluidAudio's VAD, two different ASR models, and speaker diarization during a talat.app meeting recording |
+| **[Kyutai PocketTTS on ANE](https://x.com/sach1n/status/2051375097408360596)** | Kyutai labs PocketTTS in iOS running fast on the ANE & background-capable |
+| **[Supertonic-3 on iPhone 17 Pro ANE](https://x.com/sach1n/status/2056476851825250685)** | Supertonic-3 running on iPhone 17 Pro via ANE/CoreML with 2 minutes of audio generated in 3 seconds with low RAM & background support |
 
 ## Showcase
 
@@ -90,6 +90,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Talat](https://talat.app)** | — | Privacy-focused AI meeting notes app. Records and transcribes meetings locally on your Mac with speaker identification and LLM-powered summaries. Featured in [TechCrunch](https://techcrunch.com/2026/03/24/talats-ai-meeting-notes-stay-on-your-machine-not-in-the-cloud/). Uses Parakeet ASR. |
 | **[VivaDicta](https://github.com/n0an/VivaDicta)** | ✓ | Open-source iOS voice-to-text app with system-wide AI voice keyboard — dictate and AI-process text in any app. 15+ AI providers, 40+ AI presets. Uses Parakeet ASR. |
 | **[MimicScribe](https://mimicscribe.app/)** | — | macOS menu bar app combining Parakeet TDT streaming ASR, PyanNote Community 1 speaker diarization, and cloud LLMs to provide AI-generated talking points during meetings, derived from the live transcript and user-provided instructions. Features meeting summarization, natural language search, an MCP server for agent integration, and a keyboard- and voice-forward UI. |
+| **[Action Phrase](https://actionphrase.com/)** | — | Voice-controlled live production app for iOS, iPadOS, and macOS. Control cameras, graphics, layouts, and production workflows with natural voice commands. Integrates with popular tools including OBS, vMix, ProPresenter, Bitfocus Companion, and more. Uses Parakeet TDT ASR and Sortformer diarization. |
 | **[Sayboard](https://github.com/stanlsv/sayboard)** | ✓ | Privacy-first AI voice keyboard for iOS. Local models, no servers, no tracking, no subscriptions, no ads, no in-app purchases. Fully offline and open-source. |
 | **[Kesha Voice Kit](https://github.com/drakulavich/kesha-voice-kit)** | ✓ | Local-first voice toolkit for CLI and LLM-agent workflows. Speech-to-text in 25 languages, text-to-speech in 9, VAD, language detection, and MCP, OpenClaw and Hermes integrations. On Apple Silicon, FluidAudio powers ASR, Kokoro TTS and speaker diarization. |
 | **[Dictato](https://dicta.to)** | — | Turn your voice into text anywhere on your Mac. Fully local, private, and offline — boost your own vocabulary and dictate in multiple languages. Uses Parakeet TDT ASR. |
