@@ -135,20 +135,22 @@ public actor ParaformerManager {
         logits: MLMultiArray, tokenCount: Int, alphas: [Float], audio: [Float]
     ) -> [TimestampedSegment] {
         let upsampleRate = 3
-        let timeRate = 10.0 * 6.0 / 1000.0 / Double(upsampleRate) // 0.02 s
+        let timeRate = 10.0 * 6.0 / 1000.0 / Double(upsampleRate)  // 0.02 s
         let cifThreshold: Float = 1.0 - 1e-4
 
         // 1) Greedy decode every decoder position; ids stay 1:1 with the acoustic
-        //    fire frames. Uses Accelerate (vDSP_maxvi) + stride-correct pointer read,
-        //    matching `decode` and the SenseVoice CTC optimization.
-        let tokenIds = greedyArgmax(logits: logits, tokenCount: tokenCount)
+        //    fire frames.
+        let tokenIds = LogitsArgmax.argmaxPerFrame(logits: logits, frames: tokenCount)
 
         // 2) char_list: drop <blank>/<s>/</s> (keep ▁ if present).
         var charList: [String] = []
         for id in tokenIds {
             if id == ParaformerConfig.blankId
                 || id == ParaformerConfig.sosId
-                || id == ParaformerConfig.eosId { continue }
+                || id == ParaformerConfig.eosId
+            {
+                continue
+            }
             guard let tok = models.vocabulary[id], !tok.isEmpty else { continue }
             charList.append(tok)
         }
@@ -192,19 +194,27 @@ public actor ParaformerManager {
         let env = Self.smooth(rawEnv, window: 3)
         let floor = env.isEmpty ? 0 : Self.percentile(env, q: 0.1)
         let energyThreshold = max(floor * 2.5, 1e-4)
-        let minRun = 3 // frames (~30 ms) — reject single-frame noise spikes
+        let minRun = 3  // frames (~30 ms) — reject single-frame noise spikes
         let n = min(charList.count, centroids.count - 1)
+        // Typical inter-token spacing; bounds the final token so trailing silence
+        // (audioEnd - centroid) can't inflate its span to the end of the file.
+        let spacings = (1..<max(n, 1)).map { Float(centroids[$0] - centroids[$0 - 1]) }
+        let typicalDur = Double(spacings.isEmpty ? 0.3 : Self.percentile(spacings, q: 0.5))
         var raw: [(text: String, start: Double, end: Double)] = []
         var cursor: Double = 0.0
         for i in 0..<n {
-            let dur = (i < n - 1) ? (centroids[i + 1] - centroids[i]) : (audioEnd - centroids[i])
+            let dur =
+                (i < n - 1)
+                ? (centroids[i + 1] - centroids[i])
+                : min(audioEnd - centroids[i], max(typicalDur * 2, 0.4))
             let searchEnd = min(audioEnd, centroids[i] + dur * 1.5 + 0.15)
             let span = Self.energySpan(
                 from: cursor, to: searchEnd, centroid: centroids[i],
                 env: env, hopSec: 0.01, threshold: energyThreshold, minRun: minRun)
             let (s, e): (Double, Double)
             if let span {
-                s = span.0; e = span.1
+                s = span.0
+                e = span.1
             } else {
                 // No energy run found (very quiet token): advance by the expected
                 // duration so we don't get stuck, and keep a plausible span.
@@ -227,7 +237,8 @@ public actor ParaformerManager {
                 text = String(text.dropLast(2))
                 i += 1
                 if i < raw.count {
-                    let piece = raw[i].text.hasPrefix(ASRConstants.sentencePieceWordBoundary)
+                    let piece =
+                        raw[i].text.hasPrefix(ASRConstants.sentencePieceWordBoundary)
                         ? String(raw[i].text.dropFirst()) : raw[i].text
                     text += piece
                     end = raw[i].end
@@ -271,7 +282,10 @@ public actor ParaformerManager {
         var idx = 0
         while idx + hop <= audio.count {
             var sum: Float = 0
-            for j in 0..<hop { let s = audio[idx + j]; sum += s * s }
+            for j in 0..<hop {
+                let s = audio[idx + j]
+                sum += s * s
+            }
             env.append(sqrt(sum / Float(hop)))
             idx += hop
         }
@@ -335,7 +349,10 @@ public actor ParaformerManager {
         var bestD = abs((runs[0].0 + runs[0].1) - 2 * ci)
         for r in runs[1...] {
             let d = abs((r.0 + r.1) - 2 * ci)
-            if d < bestD { bestD = d; best = r }
+            if d < bestD {
+                bestD = d
+                best = r
+            }
         }
         return (Double(best.0) * hopSec, Double(best.1) * hopSec)
     }
@@ -430,53 +447,8 @@ public actor ParaformerManager {
         return logits
     }
 
-    /// Greedy argmax over the decoder logits `[1, L, V]` for the first `tokenCount`
-    /// positions. Returns the raw token ids (before special-token filtering).
-    ///
-    /// This mirrors the SenseVoice CTC-decode optimization: a naive Swift loop over
-    /// `tokenCount × vocab` (~1M for Paraformer) of `MLMultiArray` `NSNumber` reads is
-    /// several hundred milliseconds; `vDSP_maxvi` (SIMD) collapses it to sub-ms. The
-    /// real row `stride` is used (CoreML pads rows for ANE alignment, e.g. 8404→8408),
-    /// so it is correct for both float16 (converted via `vImage` first) and float32.
-    private func greedyArgmax(logits: MLMultiArray, tokenCount: Int) -> [Int] {
-        let vocab = logits.shape[2].intValue
-        // The frame stride may exceed `vocab` (CoreML pads rows for ANE alignment).
-        // Use the real stride and only scan `vocab` elements per row.
-        let frameStride = logits.strides[1].intValue
-        var ids: [Int] = []
-        ids.reserveCapacity(tokenCount)
-
-        func runLoop(_ p: UnsafePointer<Float>) {
-            for t in 0..<tokenCount {
-                let base = t * frameStride
-                var bestVal: Float = 0
-                var bestIdx = vDSP_Length(0)
-                vDSP_maxvi(p + base, 1, &bestVal, &bestIdx, vDSP_Length(vocab))
-                ids.append(Int(bestIdx))
-            }
-        }
-
-        if logits.dataType == .float32 {
-            runLoop(logits.dataPointer.assumingMemoryBound(to: Float32.self))
-        } else {
-            let count = tokenCount * frameStride
-            var buf = [Float](repeating: 0, count: count)
-            let src = logits.dataPointer.assumingMemoryBound(to: Float16.self)
-            var srcBuf = vImage_Buffer(
-                data: UnsafeMutableRawPointer(mutating: src),
-                height: 1, width: vImagePixelCount(count),
-                rowBytes: count * MemoryLayout<Float16>.size)
-            var dstBuf = vImage_Buffer(
-                data: &buf, height: 1, width: vImagePixelCount(count),
-                rowBytes: count * MemoryLayout<Float>.size)
-            vImageConvert_Planar16FtoPlanarF(&srcBuf, &dstBuf, 0)  // float16 → float32
-            buf.withUnsafeBufferPointer { runLoop($0.baseAddress!) }
-        }
-        return ids
-    }
-
     private func decode(logits: MLMultiArray, tokenCount: Int) -> String {
-        let ids = greedyArgmax(logits: logits, tokenCount: tokenCount)
+        let ids = LogitsArgmax.argmaxPerFrame(logits: logits, frames: tokenCount)
         var pieces: [String] = []
         for best in ids {
             if best == ParaformerConfig.blankId || best == ParaformerConfig.sosId || best == ParaformerConfig.eosId {
