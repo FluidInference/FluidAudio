@@ -87,4 +87,86 @@ final class VBxConstraintTests: XCTestCase {
         )
         XCTAssertEqual(output.activeClusterCount, 4)
     }
+
+    // MARK: - Assigned cluster count (the count callers observe, #802 review)
+
+    func testAssignedClusterCountIgnoresClustersWithNoArgmaxWins() {
+        // Clusters 3 and 4 keep trace mixture weight (pi > epsilon) but never win
+        // an embedding's argmax responsibility: they receive no hard assignments
+        // and vanish from the output. The pi census says 5; callers see 3.
+        let output = VBxOutput(
+            gamma: [
+                [0.7, 0.1, 0.1, 0.05, 0.05],
+                [0.1, 0.7, 0.1, 0.05, 0.05],
+                [0.1, 0.1, 0.7, 0.05, 0.05],
+                [0.6, 0.2, 0.1, 0.05, 0.05],
+            ],
+            pi: [0.4, 0.3, 0.28, 0.01, 0.01],
+            hardClusters: [],
+            centroids: [],
+            numClusters: 5,
+            elbos: []
+        )
+        XCTAssertEqual(output.activeClusterCount, 5, "pi census counts the ghost clusters")
+        XCTAssertEqual(output.assignedClusterCount, 3, "assignment count must not")
+    }
+
+    func testAssignedClusterCountMatchesActiveWhenAllClustersWin() {
+        let output = VBxOutput(
+            gamma: [
+                [0.8, 0.1, 0.1],
+                [0.1, 0.8, 0.1],
+                [0.1, 0.1, 0.8],
+            ],
+            pi: [0.4, 0.3, 0.3],
+            hardClusters: [],
+            centroids: [],
+            numClusters: 3,
+            elbos: []
+        )
+        XCTAssertEqual(output.assignedClusterCount, 3)
+        XCTAssertEqual(output.assignedClusterCount, output.activeClusterCount)
+    }
+
+    func testAssignedClusterCountFallsBackWithoutGamma() {
+        let output = VBxOutput(
+            gamma: [],
+            pi: [0.6, 0.4, 1e-12],
+            hardClusters: [],
+            centroids: [],
+            numClusters: 3,
+            elbos: []
+        )
+        XCTAssertEqual(output.assignedClusterCount, 2, "no gamma -> fall back to the pi census")
+    }
+
+    /// The #802-review probe scenario: numSpeakers equals the pi census but two
+    /// clusters win no assignments. The constraint must fire (needsAdjustment),
+    /// not be silently satisfied.
+    func testConstraintFiresWhenRequestMatchesPiCensusButNotAssignments() {
+        let output = VBxOutput(
+            gamma: [
+                [0.7, 0.1, 0.1, 0.05, 0.05],
+                [0.1, 0.7, 0.1, 0.05, 0.05],
+                [0.1, 0.1, 0.7, 0.05, 0.05],
+                [0.6, 0.2, 0.1, 0.05, 0.05],
+                [0.2, 0.6, 0.1, 0.05, 0.05],
+                [0.1, 0.2, 0.6, 0.05, 0.05],
+            ],
+            pi: [0.4, 0.3, 0.28, 0.01, 0.01],
+            hardClusters: [],
+            centroids: [],
+            numClusters: 5,
+            elbos: []
+        )
+        // numEmbeddings must exceed the request: resolve() clamps to it.
+        let constraints = SpeakerCountConstraints.resolve(
+            numEmbeddings: 6, numSpeakers: 5, minSpeakers: nil, maxSpeakers: nil)
+        XCTAssertFalse(
+            constraints.needsAdjustment(detectedCount: output.activeClusterCount),
+            "gating on the pi census silently ignores the request (the old bug)")
+        XCTAssertTrue(
+            constraints.needsAdjustment(detectedCount: output.assignedClusterCount),
+            "gating on the assignment count re-clusters to the requested 5")
+    }
 }

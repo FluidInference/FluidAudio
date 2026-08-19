@@ -668,9 +668,36 @@ public struct VBxOutput: Sendable {
     /// VBx is warm-started with the AHC cluster count (`numClusters`) and prunes
     /// clusters by driving their mixture weight to zero, so this — not
     /// `numClusters` — is the auto-detected speaker count (pyannote parity).
+    ///
+    /// Note: a cluster can keep trace mixture weight without ever being any
+    /// embedding's best cluster; `assignedClusterCount` is the count callers
+    /// actually observe after hard assignment.
     public var activeClusterCount: Int {
         guard !pi.isEmpty else { return numClusters }
         return pi.filter { $0 > Self.activeClusterEpsilon }.count
+    }
+
+    /// Number of clusters that win at least one embedding's argmax responsibility.
+    ///
+    /// A cluster can survive the `pi > epsilon` test while never being any
+    /// embedding's best cluster; it then receives no hard assignments and
+    /// vanishes from the pipeline output. Speaker-count constraints must be
+    /// checked against this count — the one callers see — or a request equal to
+    /// the pi-census is silently ignored while the output shows fewer speakers.
+    public var assignedClusterCount: Int {
+        guard !gamma.isEmpty else { return activeClusterCount }
+        var winners = Set<Int>()
+        for row in gamma {
+            guard !row.isEmpty else { continue }
+            var best = 0
+            var bestValue = row[0]
+            for index in 1..<row.count where row[index] > bestValue {
+                bestValue = row[index]
+                best = index
+            }
+            winners.insert(best)
+        }
+        return winners.isEmpty ? activeClusterCount : winners.count
     }
 }
 

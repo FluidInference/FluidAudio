@@ -694,12 +694,13 @@ struct VBxClustering {
             return output
         }
 
-        // Compare against the clusters VBx actually kept (pi above epsilon), not the
-        // AHC warm-start count: VBx collapses unused warm-start clusters, and that
-        // collapsed count is what the pipeline reports as the detected speaker count.
-        // Checking the warm-start count re-clusters even when VBx already agrees
-        // with the requested count, replacing its partition with K-Means (#801).
-        let detectedCount = output.activeClusterCount
+        // Compare against the clusters embeddings actually land in, not the AHC
+        // warm-start count (re-clusters even when VBx already agrees, #801) and
+        // not the pi > epsilon census: a cluster can keep trace mixture weight
+        // while winning no embedding's argmax, so it vanishes from the output.
+        // Gating on the pi census then silently ignores a numSpeakers request
+        // that matches it while the caller sees fewer speakers (#802 review).
+        let detectedCount = output.assignedClusterCount
         guard constraints.needsAdjustment(detectedCount: detectedCount) else {
             return output
         }
