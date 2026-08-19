@@ -88,6 +88,8 @@ struct FluidAudioCLI {
             await NemotronMultilingualMultiStreamBench.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-transcribe":
             await SenseVoiceTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "campplus-embed":
+            await CampPlusEmbedCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-benchmark":
             await SenseVoiceBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "paraformer-transcribe":
@@ -138,6 +140,7 @@ struct FluidAudioCLI {
                 sortformer-benchmark    Run Sortformer benchmark on AMI dataset
                 lseend                  Run LS-EEND diarization on a single file
                 lseend-benchmark        Run LS-EEND benchmark on AMI dataset
+                campplus-embed          CAM++ speaker embedding / cosine similarity (beta)
                 g2p-benchmark           Run multilingual G2P benchmark
                 nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
                 nemotron-transcribe     Transcribe custom audio files with Nemotron

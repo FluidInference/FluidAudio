@@ -11,6 +11,9 @@ public enum Repo: String, CaseIterable, Sendable {
     /// 3-stage: fp32 CPU preprocessor (waveform→560-d LFR feats) + fp16 ANE
     /// encoder+CTC (+ fp32 fallback) + host greedy-CTC decode. See ASR/SenseVoice.
     case senseVoiceSmall = "FluidInference/sensevoice-small-coreml"
+    /// CAM++ speaker-embedding model (fbank80 -> 192-d) for speaker verification /
+    /// diarization clustering. See Speaker/CampPlusEmbedder.
+    case campPlus = "FluidInference/campplus-coreml"
     /// Paraformer-large (zh) — non-autoregressive ASR: SANM encoder + CIF
     /// predictor (host-side integrate-and-fire) + parallel decoder. See ASR/Paraformer.
     case paraformerLargeZh = "FluidInference/paraformer-large-zh-coreml"
@@ -97,6 +100,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-ctc-0.6b-coreml"
         case .senseVoiceSmall:
             return "sensevoice-small-coreml"
+        case .campPlus:
+            return "campplus-coreml"
         case .paraformerLargeZh:
             return "paraformer-large-zh-coreml"
         case .parakeetJa:
@@ -442,6 +447,22 @@ public enum ModelNames {
         }
 
         public static let requiredModels: Set<String> = requiredModels()
+    }
+
+    /// CAM++ speaker-embedding model names (2 CoreML stages).
+    ///   Preprocessor (fp32/CPU): waveform -> 80-d fbank
+    ///   CamPlusPlus (fp16/ANE): fbank -> 192-d speaker embedding
+    public enum CampPlus {
+        public static let preprocessor = "CamPlusPreprocessor"
+        public static let model = "CamPlusPlus"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let modelFile = model + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            modelFile,
+        ]
     }
 
     /// Canary-1B-v2 (AED) model names. 4 CoreML stages + host greedy loop:
@@ -1427,6 +1448,8 @@ public enum ModelNames {
             return ModelNames.CTC.requiredModels
         case .senseVoiceSmall:
             return ModelNames.SenseVoice.requiredModels(precision: variant)
+        case .campPlus:
+            return ModelNames.CampPlus.requiredModels
         case .paraformerLargeZh:
             return ModelNames.ParaformerZh.requiredModels
         case .parakeetJa:
