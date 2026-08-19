@@ -373,4 +373,54 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Issue #855: last-window overlap re-decode must be stripped
+
+    /// Captured from the issue #855 repro (repetitive speech, final flush window
+    /// re-decoded from frame 0): the previous tail ends "...would go for where we
+    /// would." and the re-decode repeats that run 1-3 frames later before the new
+    /// words (" remove filler words."). The temporally-gated dedup must strip the
+    /// re-decoded overlap (including the partial leading token) and keep the new
+    /// trailing words.
+    func testDedup_855_LastWindowRedecodeStripped() {
+        let asrManager = AsrManager()
+        let previous = [
+            4223, 6882, 317, 910, 3463, 6314, 1316, 7950, 283, 7877, 1974, 4223, 1455, 509, 6843, 750, 4223, 7883,
+        ]
+        let previousTs = [100, 103, 105, 106, 108, 111, 113, 115, 117, 120, 122, 124, 126, 128, 130, 131, 134, 137]
+        // 5831 is a partial word at the window edge; 4223...4223 re-decodes the
+        // previous tail; 4942... are the genuinely new trailing words.
+        let current = [5831, 4223, 1455, 509, 6843, 750, 4223, 4942, 1337, 309, 6312, 4128, 7870, 7883]
+        let currentTs = [122, 125, 127, 130, 133, 135, 137, 139, 141, 144, 146, 150, 152, 154]
+
+        let (deduped, removed) = asrManager.removeDuplicateTokenSequence(
+            previous: previous,
+            current: current,
+            previousTimestamps: previousTs,
+            currentTimestamps: currentTs
+        )
+        XCTAssertEqual(
+            deduped, [4942, 1337, 309, 6312, 4128, 7870, 7883],
+            "Re-decoded overlap must be stripped; trailing words must survive")
+        XCTAssertEqual(removed, 7)
+    }
+
+    /// Same trace with the timestamps 10s apart: the identical token runs are then
+    /// genuine repetition, not a seam duplicate, and must be kept (gate holds).
+    func testDedup_855_FarApartRepetitionKept() {
+        let asrManager = AsrManager()
+        let previous = [1974, 4223, 1455, 509, 6843, 750, 4223]
+        let previousTs = [10, 12, 14, 16, 18, 20, 22]
+        let current = [1974, 4223, 1455, 509, 6843, 750, 4223, 4942]
+        let currentTs = [145, 147, 149, 151, 153, 155, 157, 159]
+
+        let (deduped, removed) = asrManager.removeDuplicateTokenSequence(
+            previous: previous,
+            current: current,
+            previousTimestamps: previousTs,
+            currentTimestamps: currentTs
+        )
+        XCTAssertEqual(deduped, current, "Repetition ~10s later is not a seam duplicate")
+        XCTAssertEqual(removed, 0)
+    }
 }

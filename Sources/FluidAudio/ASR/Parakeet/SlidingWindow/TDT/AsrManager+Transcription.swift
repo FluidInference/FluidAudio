@@ -66,6 +66,13 @@ extension AsrManager {
         let (alignedSamples, frameAlignedLength) = frameAlignedAudio(
             chunkSamples, allowAlignment: previousTokens.isEmpty)
         let padded = padAudioIfNeeded(alignedSamples, targetLength: ASRConstants.maxModelSamples)
+        // Last streaming window: decode from frame 0 instead of skipping the overlap.
+        // Jumping mid-window into a short flush window can blank out the trailing
+        // speech entirely (issue #855: the joint emits a boundary punctuation, then
+        // blanks to the end, dropping the final words). Re-decoding the overlap with
+        // the carried state is robust, and the temporally-gated dedup below strips
+        // the re-decoded tokens (they land within a few frames of the originals).
+        let redecodeFromWindowStart = isLastChunk && previousTokenTimestamps != nil && !previousTokens.isEmpty
         let (hypothesis, encLen) = try await executeMLInferenceWithTimings(
             padded,
             originalLength: frameAlignedLength,
@@ -73,7 +80,8 @@ extension AsrManager {
             decoderState: &decoderState,
             contextFrameAdjustment: 0,  // Non-streaming chunks don't use adaptive context
             isLastChunk: isLastChunk,
-            language: language
+            language: language,
+            initialTimeIndexOverride: redecodeFromWindowStart ? 0 : nil
         )
 
         // Apply token deduplication if previous tokens are provided
