@@ -283,7 +283,8 @@ final class ModelRegistryTests: XCTestCase {
             "FluidInference/parakeet-tdt-0.6b-v3-coreml": "DictionLabs/parakeet-tdt-0.6b-v3-coreml"
         ]
 
-        let url = try ModelRegistry.resolveModel("FluidInference/parakeet-tdt-0.6b-v3-coreml", "Encoder.mlmodelc/model.mil")
+        let url = try ModelRegistry.resolveModel(
+            "FluidInference/parakeet-tdt-0.6b-v3-coreml", "Encoder.mlmodelc/model.mil")
         XCTAssertEqual(
             url.absoluteString,
             "https://huggingface.co/DictionLabs/parakeet-tdt-0.6b-v3-coreml/resolve/main/Encoder.mlmodelc/model.mil")
@@ -320,7 +321,8 @@ final class ModelRegistryTests: XCTestCase {
             "FluidInference/parakeet-realtime-eou-120m-coreml": "DictionLabs/parakeet-realtime-eou-120m-coreml"
         ]
 
-        let url = try ModelRegistry.resolveModel("FluidInference/parakeet-realtime-eou-120m-coreml/160ms", "config.json")
+        let url = try ModelRegistry.resolveModel(
+            "FluidInference/parakeet-realtime-eou-120m-coreml/160ms", "config.json")
         XCTAssertEqual(
             url.absoluteString,
             "https://huggingface.co/DictionLabs/parakeet-realtime-eou-120m-coreml/160ms/resolve/main/config.json")
