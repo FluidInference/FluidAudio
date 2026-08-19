@@ -84,6 +84,8 @@ struct FluidAudioCLI {
             await NemotronMultilingualTranscribe.run(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-multilingual-benchmark":
             await NemotronMultilingualFleursBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron-vocab-benchmark":
+            await NemotronVocabBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-multilingual-multi-stream-bench":
             await NemotronMultilingualMultiStreamBench.run(arguments: Array(arguments.dropFirst(2)))
         case "sensevoice-transcribe":
@@ -149,6 +151,7 @@ struct FluidAudioCLI {
                 nemotron-transcribe     Transcribe custom audio files with Nemotron
                 nemotron-multilingual-transcribe   Transcribe audio with Nemotron multilingual (local model path)
                 nemotron-multilingual-benchmark    Run Nemotron multilingual benchmark on FLEURS / MCV-17 / MLS (local model path)
+                nemotron-vocab-benchmark  Paired baseline-vs-biased custom vocabulary benchmark (earnings22-kws)
                 nemotron-multilingual-multi-stream-bench  Parallel multi-stream benchmark (N concurrent managers)
                 ja-benchmark            Run Japanese ASR benchmark on JSUT/Common Voice
                 cohere-transcribe       Transcribe using Cohere Transcribe (cache-external pipeline, 14 languages)
