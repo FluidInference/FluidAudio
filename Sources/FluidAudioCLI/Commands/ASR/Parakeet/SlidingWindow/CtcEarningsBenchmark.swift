@@ -16,6 +16,13 @@ public enum CtcEarningsBenchmark {
         case file = "file"
     }
 
+    /// Primary transcription engine (the CTC spotting/rescoring side is
+    /// engine-independent — issue #851)
+    public enum BenchmarkEngine: String {
+        case tdt = "tdt"
+        case unified = "unified"
+    }
+
     /// Default CTC model directory for a given variant
     private static func defaultCtcModelPath(for variant: CtcModelVariant) -> String? {
         let appSupport = FileManager.default.urls(
@@ -59,6 +66,7 @@ public enum CtcEarningsBenchmark {
         var ctcVariant: CtcModelVariant = .ctc110m
         // Constrained CTC rescoring is enabled by default
         var useConstrainedCTC = true
+        var engine: BenchmarkEngine = .tdt
 
         var i = 0
         while i < arguments.count {
@@ -127,6 +135,15 @@ public enum CtcEarningsBenchmark {
                 }
             case "--no-constrained-ctc":
                 useConstrainedCTC = false
+            case "--engine":
+                if i + 1 < arguments.count {
+                    if let parsed = BenchmarkEngine(rawValue: arguments[i + 1].lowercased()) {
+                        engine = parsed
+                    } else {
+                        print("WARNING: Invalid engine '\(arguments[i + 1])'. Using 'tdt'.")
+                    }
+                    i += 1
+                }
             default:
                 break
             }
@@ -148,9 +165,10 @@ public enum CtcEarningsBenchmark {
             dataDir = defaultDataDir()
         }
 
-        print("Earnings Benchmark (TDT transcription + CTC keyword spotting)")
+        print("Earnings Benchmark (\(engine == .unified ? "Unified" : "TDT") transcription + CTC keyword spotting)")
         print("  Data directory: \(dataDir ?? "not found")")
         print("  Output file: \(outputFile)")
+        print("  Engine: \(engine.rawValue)")
         print("  TDT version: \(tdtVersion == .v2 ? "v2" : tdtVersion == .tdtCtc110m ? "110m" : "v3")")
         print("  CTC variant: \(ctcVariant.displayName)")
         print("  CTC model: \(ctcModelPath ?? "not found")")
@@ -177,14 +195,26 @@ public enum CtcEarningsBenchmark {
         let dataDirResolved = finalDataDir
 
         do {
-            // Load TDT models for transcription
-            print(
-                "Loading TDT models (\(tdtVersion == .v2 ? "v2" : tdtVersion == .tdtCtc110m ? "110m" : "v3")) for transcription..."
-            )
-            let tdtModels = try await AsrModels.downloadAndLoad(version: tdtVersion)
-            let asrManager = AsrManager(config: .default)
-            try await asrManager.loadModels(tdtModels)
-            print("TDT models loaded successfully")
+            // Load the primary transcription engine
+            var asrManager: AsrManager? = nil
+            var unifiedManager: UnifiedAsrManager? = nil
+            switch engine {
+            case .tdt:
+                print(
+                    "Loading TDT models (\(tdtVersion == .v2 ? "v2" : tdtVersion == .tdtCtc110m ? "110m" : "v3")) for transcription..."
+                )
+                let tdtModels = try await AsrModels.downloadAndLoad(version: tdtVersion)
+                let manager = AsrManager(config: .default)
+                try await manager.loadModels(tdtModels)
+                asrManager = manager
+                print("TDT models loaded successfully")
+            case .unified:
+                print("Loading parakeet-unified offline models for transcription...")
+                let manager = UnifiedAsrManager()
+                try await manager.loadModels()
+                unifiedManager = manager
+                print("Unified models loaded successfully")
+            }
 
             // Load CTC models for keyword spotting
             print("Loading CTC models from: \(modelPath)")
@@ -247,6 +277,7 @@ public enum CtcEarningsBenchmark {
                     fileId: fileId,
                     dataDir: dataDirURL,
                     asrManager: asrManager,
+                    unifiedManager: unifiedManager,
                     ctcModels: ctcModels,
                     spotter: spotter,
                     keywordsMode: keywordsMode,
@@ -370,7 +401,8 @@ public enum CtcEarningsBenchmark {
     private static func processFile(
         fileId: String,
         dataDir: URL,
-        asrManager: AsrManager,
+        asrManager: AsrManager?,
+        unifiedManager: UnifiedAsrManager?,
         ctcModels: CtcModels,
         spotter: CtcKeywordSpotter,
         keywordsMode: KeywordsMode,
@@ -453,19 +485,33 @@ public enum CtcEarningsBenchmark {
 
         let startTime = Date()
 
-        // 1. TDT transcription for low WER
-        var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
-        let tdtResult = try await asrManager.transcribe(wavFile, decoderState: &decoderState)
+        // 1. Primary transcription for low WER
+        let asrText: String
+        let asrTimings: [TokenTiming]?
+        if let unifiedManager {
+            let unifiedResult = try await unifiedManager.transcribeWithTimings(samples)
+            asrText = unifiedResult.text
+            asrTimings = unifiedResult.tokenTimings
+        } else if let asrManager {
+            var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+            let tdtResult = try await asrManager.transcribe(wavFile, decoderState: &decoderState)
+            asrText = tdtResult.text
+            asrTimings = tdtResult.tokenTimings
+        } else {
+            throw NSError(
+                domain: "CtcEarningsBenchmark", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "No transcription engine loaded"])
+        }
 
-        // Skip files where TDT returns empty (some audio files cause model issues)
-        if tdtResult.text.isEmpty {
-            print("  SKIPPED: TDT returned empty transcription")
+        // Skip files where the engine returns empty (some audio files cause model issues)
+        if asrText.isEmpty {
+            print("  SKIPPED: engine returned empty transcription")
             return nil
         }
 
-        // Debug: Show TDT word timings if available
+        // Debug: Show engine word timings if available
         let debugTimings = ProcessInfo.processInfo.environment["DEBUG_TIMINGS"] == "1"
-        if debugTimings, let tokenTimings = tdtResult.tokenTimings, !tokenTimings.isEmpty {
+        if debugTimings, let tokenTimings = asrTimings, !tokenTimings.isEmpty {
             print("  TDT Token Count: \(tokenTimings.count)")
             // Show raw tokens around 8.0-12.0s (where "Bose" should be - reference says "Bose, just, all I said")
             print("  TDT Tokens 7.0-13.0s:")
@@ -527,7 +573,13 @@ public enum CtcEarningsBenchmark {
             let vocabSize = vocabularyWords.count
             let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocabSize)
 
-            let rescorerConfig = VocabularyRescorer.Config.default
+            // Match production defaults per engine: the unified engine's ITN
+            // output needs the #702 spotter-rescue similarity floors (see
+            // VocabularyBoostingSession.itnDefaultConfig).
+            let rescorerConfig =
+                unifiedManager != nil
+                ? VocabularyBoostingSession.itnDefaultConfig
+                : VocabularyRescorer.Config.default
 
             let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
             let rescorer = try await VocabularyRescorer.create(
@@ -562,10 +614,10 @@ public enum CtcEarningsBenchmark {
                 ProcessInfo.processInfo.environment["MARGIN_SECONDS"]
                 .flatMap { Double($0) } ?? ContextBiasingConstants.defaultMarginSeconds
 
-            if useConstrainedCTC, let tokenTimings = tdtResult.tokenTimings, !tokenTimings.isEmpty {
+            if useConstrainedCTC, let tokenTimings = asrTimings, !tokenTimings.isEmpty {
                 // Use constrained CTC rescoring (string similarity first, then constrained DP)
                 let rescoreResult = rescorer.ctcTokenRescore(
-                    transcript: tdtResult.text,
+                    transcript: asrText,
                     tokenTimings: tokenTimings,
                     logProbs: logProbs,
                     frameDuration: frameDuration,
@@ -575,10 +627,10 @@ public enum CtcEarningsBenchmark {
                 )
                 hypothesis = rescoreResult.text
             } else {
-                hypothesis = tdtResult.text  // No rescoring (missing token timings or --no-constrained-ctc)
+                hypothesis = asrText  // No rescoring (missing token timings or --no-constrained-ctc)
             }
         } else {
-            hypothesis = tdtResult.text  // Baseline: no CTC corrections
+            hypothesis = asrText  // Baseline: no CTC corrections
         }
 
         let processingTime = Date().timeIntervalSince(startTime)
@@ -1124,6 +1176,7 @@ public enum CtcEarningsBenchmark {
                                       - 110m: Parakeet CTC 110M (hybrid TDT+CTC, blank-dominant)
                                       - 06b: Parakeet CTC 0.6B (pure CTC, better for greedy decoding)
                 --no-constrained-ctc  Disable constrained CTC rescoring (enabled by default)
+                --engine <engine>     Transcription engine: 'tdt' (default) or 'unified' (parakeet-unified offline batch)
                 --file-id <id>        Run benchmark on a single file (e.g., "4468654_chunk39")
                 --max-files <n>       Maximum number of files to process
                 --output, -o <path>   Output JSON file (default: ctc_earnings_benchmark.json)
