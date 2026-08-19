@@ -59,6 +59,10 @@ public enum PocketTtsResourceDownloader {
         if allPresent {
             logger.info(
                 "PocketTTS \(language.rawValue) (\(precision)) models found in cache")
+            // Caches downloaded before the #853 variant-aware filter may still
+            // hold the unused FlowLM precision; complete caches return from
+            // this branch, so the post-download cleanup below never sees them.
+            removeUnusedFlowlmVariant(at: languageRoot, keeping: precision)
             // Pre-#592 caches lack `constants_bin/bos_before_voice.bin`. The
             // language-pack files are otherwise complete, so try to fetch just
             // the missing constant rather than re-downloading the whole subdir.

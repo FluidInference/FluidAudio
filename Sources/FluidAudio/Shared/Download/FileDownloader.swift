@@ -425,6 +425,12 @@ private final class StreamingDownloadDelegate: NSObject, URLSessionDataDelegate,
         var watchdog: DispatchSourceTimer?
         var bytesAtWindowStart: Int64 = 0
         var stalled = false
+        // Latches a caller `cancel()` that arrives before `attach()` registers
+        // the task — a Swift task that is already cancelled runs its
+        // cancellation handler before the operation, so without the latch the
+        // request would start anyway (e.g. siblings of a failed download in
+        // ModelHub's bounded task group).
+        var cancelled = false
     }
 
     /// Serial queue that fires every download's stall-watchdog timer; shared so
@@ -466,27 +472,58 @@ private final class StreamingDownloadDelegate: NSObject, URLSessionDataDelegate,
     /// cancels the task if fewer than `minStallBytes` arrived since the last
     /// wake — catching a frozen CDN connection in seconds rather than waiting
     /// out the request's idle `timeout`.
+    ///
+    /// When `cancel()` already ran (a pre-cancelled Swift task fires its
+    /// cancellation handler before the operation body), the continuation is
+    /// failed here directly: the URLSession task is cancelled before its
+    /// `resume()`, so it never loads and never delivers
+    /// `didCompleteWithError` — waiting on the delegate would hang.
     func attach(
         continuation: CheckedContinuation<HTTPURLResponse, Error>,
         task: URLSessionDataTask
     ) {
-        let timer: DispatchSourceTimer? =
-            (minStallBytes > 0 && stallWindow > 0)
-            ? DispatchSource.makeTimerSource(queue: Self.watchdogQueue) : nil
-        state.withLockUnchecked {
-            $0.continuation = continuation
-            $0.task = task
-            $0.watchdog = timer
+        let alreadyCancelled = state.withLockUnchecked { st -> Bool in
+            if st.cancelled {
+                st.finished = true
+                return true
+            }
+            st.continuation = continuation
+            st.task = task
+            return false
         }
-        if let timer {
-            timer.schedule(deadline: .now() + stallWindow, repeating: stallWindow)
-            timer.setEventHandler { [weak self] in self?.checkStall() }
+        if alreadyCancelled {
+            task.cancel()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+
+        guard minStallBytes > 0 && stallWindow > 0 else { return }
+        let timer = DispatchSource.makeTimerSource(queue: Self.watchdogQueue)
+        let armed = state.withLockUnchecked { st -> Bool in
+            guard !st.finished else { return false }
+            st.watchdog = timer
+            return true
+        }
+        guard armed else {
+            // The transfer finished (or was cancelled) between the two lock
+            // scopes, so nothing will ever cancel this timer. A suspended
+            // DispatchSource cannot be released; resume-then-cancel disposes
+            // it safely (no handler is set, so it fires into nothing).
             timer.resume()
+            timer.cancel()
+            return
         }
+        timer.schedule(deadline: .now() + stallWindow, repeating: stallWindow)
+        timer.setEventHandler { [weak self] in self?.checkStall() }
+        timer.resume()
     }
 
     func cancel() {
-        state.withLockUnchecked { $0.task }?.cancel()
+        let task = state.withLockUnchecked { st -> URLSessionTask? in
+            st.cancelled = true
+            return st.task
+        }
+        task?.cancel()
     }
 
     /// One watchdog tick: cancel the task if the byte count advanced by less
