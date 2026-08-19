@@ -153,14 +153,21 @@ final class NemotronVocabularyBiasTests: XCTestCase {
         XCTAssertEqual(candidateMap(weighted)[5], 5.5)
     }
 
-    func testWeightsAboveCapAreClamped() throws {
+    func testLegacyWeightsFallBackToDefault() throws {
         // The simple text-list loader assigns weight 10.0 on a CTC
         // rescoring scale; applied raw as a per-token logit bonus it would
-        // over-bias, so the engine clamps.
+        // over-bias, and pinning it to the aggressive 6.0 ceiling is still
+        // hotter than the measured recall peak — so out-of-range weights
+        // use the default instead.
         let bias = try XCTUnwrap(makeBias([CustomVocabularyTerm(text: "torvane", weight: 10.0)]))
-        XCTAssertEqual(candidateMap(bias)[5], NemotronVocabularyBias.maxBoost)
+        XCTAssertEqual(candidateMap(bias)[5], NemotronVocabularyBias.defaultBoost)
         XCTAssertEqual(
             NemotronVocabularyBias.effectiveBoost(of: CustomVocabularyTerm(text: "x", weight: 10)),
+            NemotronVocabularyBias.defaultBoost)
+        // An explicit in-range weight is still honored, up to the ceiling.
+        XCTAssertEqual(
+            NemotronVocabularyBias.effectiveBoost(
+                of: CustomVocabularyTerm(text: "x", weight: NemotronVocabularyBias.maxBoost)),
             NemotronVocabularyBias.maxBoost)
     }
 

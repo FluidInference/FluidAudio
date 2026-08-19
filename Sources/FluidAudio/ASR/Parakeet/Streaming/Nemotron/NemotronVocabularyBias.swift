@@ -1,4 +1,4 @@
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 
 /// Decode-time shallow-fusion hotword biasing for the Nemotron streaming
@@ -93,7 +93,8 @@ final class NemotronVocabularyBias {
     /// predates this engine and is set to 10.0 by the simple text-list
     /// loader — a CTC-rescoring scale, not a per-token logit bonus. Applied
     /// raw it would over-bias badly (degradation is measurable from 6.0),
-    /// so overrides are clamped here rather than reinterpreted.
+    /// so weights above this fall back to `defaultBoost` (see
+    /// `effectiveBoost`).
     static let maxBoost: Float = 6.0
 
     private let entries: [Entry]
@@ -187,9 +188,14 @@ final class NemotronVocabularyBias {
     }
 
     /// The per-token bonus a term will actually receive: its `weight` when
-    /// set (clamped into `(0, maxBoost]`), the default otherwise.
+    /// set and within `(0, maxBoost]`, the default otherwise. A weight above
+    /// `maxBoost` was tuned for the CTC rescoring scale (the simple text-list
+    /// loader assigns 10.0 to every term), not for this engine — treating it
+    /// as "untuned" and using the measured default beats pinning those terms
+    /// to the aggressive ceiling.
     static func effectiveBoost(of term: CustomVocabularyTerm, defaultBoost: Float = defaultBoost) -> Float {
-        min(term.weight ?? defaultBoost, maxBoost)
+        guard let weight = term.weight, weight <= maxBoost else { return defaultBoost }
+        return weight
     }
 
     /// The surfaces of `term` (text + aliases) that pass the length and
@@ -350,19 +356,21 @@ extension StreamingNemotronMultilingualAsrManager {
     /// effect from the next emission. May be called before models load —
     /// the vocabulary is (re)bound whenever a tokenizer becomes available.
     ///
-    /// `weight` is a per-token log-prob bonus clamped to
-    /// `NemotronVocabularyBias.maxBoost`; most terms should omit it.
-    /// Biasing requires a logits-producing step decoder: when only the
-    /// fused-argmax (B2) asset is loaded, the vocabulary is rejected with
-    /// an error log rather than silently half-applied.
-    public func setCustomVocabulary(_ terms: [CustomVocabularyTerm]) {
+    /// `weight` is a per-token log-prob bonus; most terms should omit it
+    /// (default 4.5). Weights above `NemotronVocabularyBias.maxBoost` are
+    /// treated as legacy CTC-scale values and fall back to the default.
+    /// Biasing requires a logits-producing step decoder: one is loaded
+    /// lazily from the model directory when the tier priority skipped it,
+    /// and when none exists the vocabulary is rejected with an error log
+    /// rather than silently half-applied.
+    public func setCustomVocabulary(_ terms: [CustomVocabularyTerm]) async {
         vocabularyTerms = terms
-        rebuildVocabularyBias()
+        await rebuildVocabularyBias()
     }
 
     /// Bind the stored terms to the loaded tokenizer. Called from the model
     /// load path and from `setCustomVocabulary`.
-    internal func rebuildVocabularyBias() {
+    internal func rebuildVocabularyBias() async {
         guard !vocabularyTerms.isEmpty, let tokenizer else {
             vocabularyBias = nil
             return
@@ -370,8 +378,16 @@ extension StreamingNemotronMultilingualAsrManager {
         let anyStepDecoder =
             decoderJointNoEncProj != nil || decoderJointArgmax != nil || decoderJoint != nil
             || (decoder != nil && joint != nil)
-        let logitsStepDecoder =
+        var logitsStepDecoder =
             decoderJointNoEncProj != nil || decoderJoint != nil || (decoder != nil && joint != nil)
+        if anyStepDecoder && !logitsStepDecoder {
+            // The normal load path skips the logits-producing fused decoders
+            // when B2 wins the tier priority, but the bundle may still ship
+            // one — bring up B1 (plain `encoder` input, works with every
+            // encoder) before rejecting.
+            await loadLogitsStepDecoderForVocabulary()
+            logitsStepDecoder = decoderJoint != nil
+        }
         if anyStepDecoder && !logitsStepDecoder {
             // B2-only asset set: the fused-argmax model never exposes
             // logits, so no decode site can be biased. All-or-nothing —
@@ -383,12 +399,13 @@ extension StreamingNemotronMultilingualAsrManager {
                     + "decoder_joint_noencproj or decoder_joint asset to enable it.")
             return
         }
-        let clamped = vocabularyTerms.filter { ($0.weight ?? 0) > NemotronVocabularyBias.maxBoost }
-        if !clamped.isEmpty {
+        let legacyWeights = vocabularyTerms.filter { ($0.weight ?? 0) > NemotronVocabularyBias.maxBoost }
+        if !legacyWeights.isEmpty {
             logger.warning(
-                "Custom vocabulary: \(clamped.count) term(s) with weight > "
-                    + "\(NemotronVocabularyBias.maxBoost) clamped (weight is a per-token logit bonus "
-                    + "here, not a CTC rescoring weight)")
+                "Custom vocabulary: \(legacyWeights.count) term(s) with weight > "
+                    + "\(NemotronVocabularyBias.maxBoost) use the \(NemotronVocabularyBias.defaultBoost) "
+                    + "default instead (a weight that large is a CTC rescoring value, not a per-token "
+                    + "logit bonus)")
         }
         // The multilingual wrapper hides the base vocabulary map, but ids
         // are contiguous and `rawToken(for:)` is exact — rebuild the table.
@@ -406,6 +423,32 @@ extension StreamingNemotronMultilingualAsrManager {
             logger.info(
                 "Custom vocabulary active: preferring the logits-producing step decoder over the "
                     + "fused-argmax (decoder_joint_argmax) asset so emissions can be biased")
+        }
+    }
+
+    /// Load the B1 fused decoder (`decoder_joint`) from the remembered model
+    /// directory so an active vocabulary has a logits-producing step decoder
+    /// on a bundle where B2 won the tier priority. B1 is the safe choice:
+    /// it takes the plain `encoder` step every decode path already has,
+    /// whereas B3 (`decoder_joint_noencproj`) also needs the encoder to emit
+    /// `encoder_proj` — loading a model the decode loop can't feed would
+    /// silently fall back to unbiased B2, the exact failure this avoids.
+    private func loadLogitsStepDecoderForVocabulary() async {
+        guard decoderJoint == nil, let directory = modelDirectory else { return }
+        do {
+            guard
+                let fusedURL = try await locateOptionalModelBundle(
+                    in: directory, compiled: "decoder_joint.mlmodelc",
+                    uncompiled: "decoder_joint.mlpackage")
+            else { return }
+            decoderJoint = try await MLModel.load(contentsOf: fusedURL, configuration: mlConfiguration)
+            logger.info(
+                "Loaded decoder_joint for custom vocabulary — the fused-argmax (B2) path exposes no "
+                    + "logits, so biased decoding uses B1")
+        } catch {
+            logger.warning(
+                "Custom vocabulary: failed to load decoder_joint from \(directory.path): "
+                    + "\(error.localizedDescription)")
         }
     }
 

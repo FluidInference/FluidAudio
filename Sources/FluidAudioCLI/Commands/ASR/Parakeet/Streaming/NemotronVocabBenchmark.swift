@@ -281,8 +281,9 @@ public enum NemotronVocabBenchmark {
                                      (default: auto-download 2240ms variant)
                 --max-files <int>    Number of chunks to run (default: 50)
                 --language <code>    Language hint (default: en-US)
-                --weight <float>     Per-term weight override (default boost 4.5;
-                                     clamped to 6.0 by the engine)
+                --weight <float>     Per-term weight override in (0, 6.0]
+                                     (default boost 4.5; values above 6.0
+                                     fall back to the default)
                 --output, -o <path>  Write per-file JSON results
             """
         )

@@ -317,8 +317,10 @@ public struct CustomVocabularyContext: Sendable {
     /// Load a vocabulary file, auto-detecting the structured JSON config vs the
     /// simple one-term-per-line text format. JSON config files begin with `{`
     /// (after optional leading whitespace); anything else is treated as simple
-    /// text.
-    static func loadVocabularyFile(at url: URL) throws -> CustomVocabularyContext {
+    /// text. Detection is by first meaningful byte, not by try-and-fallback,
+    /// so a malformed JSON config surfaces its parse error instead of being
+    /// silently reinterpreted as a list of hotwords.
+    public static func loadVocabularyFile(at url: URL) throws -> CustomVocabularyContext {
         let data = try Data(contentsOf: url)
         let whitespace: Set<UInt8> = [0x20, 0x09, 0x0a, 0x0d]  // space, tab, LF, CR
         let firstMeaningfulByte = data.first { !whitespace.contains($0) }

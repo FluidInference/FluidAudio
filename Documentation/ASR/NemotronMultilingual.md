@@ -103,14 +103,18 @@ Semantics and limits:
 
 - **Weight scale.** `weight` here is a *per-token logit bonus* (default 4.5,
   the measured recall peak), not the CTC rescoring weight. Values above 6.0
-  are clamped — the simple text-list loader's `weight: 10.0` would otherwise
+  are treated as legacy CTC-scale weights and fall back to the 4.5 default —
+  the simple text-list loader's blanket `weight: 10.0` would otherwise
   over-bias (measured artifacts: word splits like "build today" → "build to
-  day"). Most terms should omit `weight`.
+  day"). Most terms should omit `weight`; explicit values in (0, 6.0] are
+  honored.
 - **Assets.** Biasing needs a logits-producing step decoder
   (`decoder_joint_noencproj` or `decoder_joint`). When a vocabulary is
   active the fused-argmax `decoder_joint_argmax` asset is bypassed in favor
-  of a logits path; if it is the *only* step decoder, the vocabulary is
-  rejected with an error log rather than silently half-applied.
+  of a logits path; if the load-time tier priority skipped `decoder_joint`,
+  it is loaded lazily from the model directory when the vocabulary is set.
+  Only if no logits decoder exists at all is the vocabulary rejected, with
+  an error log rather than silent half-application.
 - **Greedy decode.** Once a boosted token wins the argmax it is committed —
   there is no beam to undo an over-fire. Keep vocabularies to genuinely
   rare terms; a term the model hears as a word it already spells

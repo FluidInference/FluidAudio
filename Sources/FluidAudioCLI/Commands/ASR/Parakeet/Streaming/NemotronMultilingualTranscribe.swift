@@ -202,12 +202,7 @@ public class NemotronMultilingualTranscribe {
 
             if let vocabPath = config.customVocabPath {
                 let vocabURL = URL(fileURLWithPath: vocabPath)
-                let vocab: CustomVocabularyContext
-                do {
-                    vocab = try CustomVocabularyContext.load(from: vocabURL)
-                } catch {
-                    vocab = try CustomVocabularyContext.loadFromSimpleFormat(from: vocabURL)
-                }
+                let vocab = try CustomVocabularyContext.loadVocabularyFile(at: vocabURL)
                 await manager.setCustomVocabulary(vocab.terms)
                 logger.info("Custom vocabulary: \(vocab.terms.count) term(s) from \(vocabPath)")
             }

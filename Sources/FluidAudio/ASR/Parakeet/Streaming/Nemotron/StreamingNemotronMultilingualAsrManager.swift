@@ -94,6 +94,8 @@ public actor StreamingNemotronMultilingualAsrManager {
     // rebuilt whenever a tokenizer becomes available.
     internal var vocabularyTerms: [CustomVocabularyTerm] = []
     internal var vocabularyBias: NemotronVocabularyBias?
+    // Directory loadModels() read from, for lazy vocabulary-driven loads.
+    internal var modelDirectory: URL?
 
     // Per-token absolute timings captured during the RNNT decode loop, parallel
     // to the user-visible (lang-tag-stripped) token stream. Each token's
@@ -325,6 +327,9 @@ public actor StreamingNemotronMultilingualAsrManager {
         }
 
         logger.info("Loading Nemotron multilingual CoreML models from \(directory.path)...")
+        // Remembered so vocabulary biasing can lazily load a logits-producing
+        // step decoder the tier priority skipped (see rebuildVocabularyBias).
+        self.modelDirectory = directory
 
         // Load config from metadata.json (required — the prompt dictionary lives here)
         let metadataPath = directory.appendingPathComponent(ModelNames.NemotronMultilingualStreaming.metadata)
@@ -497,7 +502,7 @@ public actor StreamingNemotronMultilingualAsrManager {
             vocabPath: tokenizerURL,
             langTagTokenIds: config.langTagTokenIds
         )
-        rebuildVocabularyBias()
+        await rebuildVocabularyBias()
 
         // Initialize states
         try resetStates()
@@ -726,8 +731,9 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// load site still gets the caching behavior (mlpackage → cached
     /// .mlmodelc next to source) instead of compiling to a temp dir per
     /// cold start.
-    private func locateOptionalModelBundle(in directory: URL, compiled: String, uncompiled: String) async throws -> URL?
-    {
+    internal func locateOptionalModelBundle(
+        in directory: URL, compiled: String, uncompiled: String
+    ) async throws -> URL? {
         let compiledURL = directory.appendingPathComponent(compiled)
         let uncompiledURL = directory.appendingPathComponent(uncompiled)
         if !FileManager.default.fileExists(atPath: compiledURL.path)
