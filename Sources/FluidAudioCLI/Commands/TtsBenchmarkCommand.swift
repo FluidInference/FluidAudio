@@ -388,6 +388,8 @@ public enum TtsBenchmarkCommand {
             outputJson: outputJson,
             audioDir: audioDir,
             asrChoice: asrChoice,
+            // Native level — KokoroAne ships un-normalized output (#852).
+            normalizeWavs: false,
             extraSummary: ["voice": voice]
         ) { text in
             let t0 = Date()
@@ -483,6 +485,7 @@ public enum TtsBenchmarkCommand {
             outputJson: outputJson,
             audioDir: audioDir,
             asrChoice: asrChoice,
+            normalizeWavs: true,
             extraSummary: ["voice": voice, "language": language.rawValue]
         ) { text in
             // PocketTTS is streaming-first: we measure TTFT (time to first
@@ -567,6 +570,7 @@ public enum TtsBenchmarkCommand {
             outputJson: outputJson,
             audioDir: audioDir,
             asrChoice: asrChoice,
+            normalizeWavs: true,
             extraSummary: [
                 "reference": referenceURL.path,
                 "alpha": Double(StyleTTS2Constants.defaultAlpha),
@@ -659,6 +663,7 @@ public enum TtsBenchmarkCommand {
             outputJson: outputJson,
             audioDir: audioDir,
             asrChoice: asrChoice,
+            normalizeWavs: true,
             extraSummary: [
                 "voice_style": style.name,
                 "language": language,
@@ -701,6 +706,7 @@ public enum TtsBenchmarkCommand {
         outputJson: String?,
         audioDir: String?,
         asrChoice: AsrChoice,
+        normalizeWavs: Bool,
         extraSummary: [String: Any],
         synthOne: (String) async throws -> BackendPhraseSample
     ) async throws {
@@ -738,7 +744,8 @@ public enum TtsBenchmarkCommand {
                     .appendingPathComponent("tts-benchmark-\(UUID().uuidString).wav")
             }
             let wavData = try AudioWAV.data(
-                from: sample.samples, sampleRate: Double(sample.sampleRate))
+                from: sample.samples, sampleRate: Double(sample.sampleRate),
+                normalize: normalizeWavs)
             try wavData.write(to: wavURL)
 
             var werValue = Double.nan

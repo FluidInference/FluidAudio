@@ -146,8 +146,10 @@ public enum TTSAsrVerifyCommand {
                 let synth0 = Date()
                 let detailed = try await manager.synthesizeDetailed(
                     text: phrase, voice: resolvedVoice, speed: 1.0)
+                // Native level — KokoroAne ships un-normalized output (#852).
                 let wav = try AudioWAV.data(
-                    from: detailed.samples, sampleRate: Double(detailed.sampleRate))
+                    from: detailed.samples, sampleRate: Double(detailed.sampleRate),
+                    normalize: false)
                 let synthS = Date().timeIntervalSince(synth0)
 
                 // Persist WAV (audioDir if set, else temp file).
