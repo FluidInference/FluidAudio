@@ -69,6 +69,10 @@ public actor UnifiedAsrManager {
     private var lastTranscript: String = ""
     private var partialCallback: (@Sendable (String) -> Void)?
 
+    // Vocabulary boosting (issue #851): configured via
+    // configureVocabularyBoosting() before transcription.
+    private var vocabularyBoosting: VocabularyBoostingSession?
+
     public private(set) var mlConfiguration: MLModelConfiguration
 
     public init(
@@ -180,6 +184,36 @@ public actor UnifiedAsrManager {
         }
     }
 
+    // MARK: - Vocabulary Boosting
+
+    /// Configure vocabulary boosting for batch transcription.
+    ///
+    /// When configured, the final merged transcript of each `transcribe` call
+    /// is rescored against CTC acoustic evidence: a separate CTC model runs
+    /// over the same audio and vocabulary terms replace misrecognized words
+    /// where the acoustics support it. Same pipeline as
+    /// `SlidingWindowAsrManager.configureVocabularyBoosting`.
+    ///
+    /// - Parameters:
+    ///   - vocabulary: Custom vocabulary context with terms to detect
+    ///     (tokenize via `CustomVocabularyContext.loadWithCtcTokens`)
+    ///   - ctcModels: Pre-loaded CTC models for keyword spotting
+    ///   - config: Optional rescorer configuration (default:
+    ///     `VocabularyBoostingSession.itnDefaultConfig` — this engine's ITN
+    ///     output needs the #702 spotter-rescue similarity floors)
+    /// - Throws: Error if rescorer initialization fails
+    public func configureVocabularyBoosting(
+        vocabulary: CustomVocabularyContext,
+        ctcModels: CtcModels,
+        config: VocabularyRescorer.Config? = nil
+    ) async throws {
+        self.vocabularyBoosting = try await VocabularyBoostingSession(
+            vocabulary: vocabulary, ctcModels: ctcModels,
+            config: config ?? VocabularyBoostingSession.itnDefaultConfig
+        )
+        logger.info("Vocabulary boosting configured with \(vocabulary.terms.count) terms")
+    }
+
     // MARK: - Batch API
 
     /// A transcript and the per-token timings behind it.
@@ -198,7 +232,8 @@ public actor UnifiedAsrManager {
     public func transcribe(_ samples: [Float]) async throws -> String {
         guard let tokenizer = tokenizer else { throw ASRError.notInitialized }
         let merged = try await decodedTokens(samples, tokenizer: tokenizer)
-        return tokenizer.decode(ids: merged.map(\.token))
+        let text = tokenizer.decode(ids: merged.map(\.token))
+        return await rescoreIfConfigured(text: text, merged: merged, samples: samples)
     }
 
     /// Transcribe as `transcribe(_:)` does, additionally reporting the encoder
@@ -224,15 +259,38 @@ public actor UnifiedAsrManager {
     public func transcribeWithTimings(_ samples: [Float]) async throws -> TranscriptionWithTimings {
         guard let tokenizer = tokenizer else { throw ASRError.notInitialized }
         let merged = try await decodedTokens(samples, tokenizer: tokenizer)
-        return TranscriptionWithTimings(
-            text: tokenizer.decode(ids: merged.map(\.token)),
-            tokenTimings: Self.tokenTimings(
-                from: merged,
-                secondsPerFrame: Double(config.frameSamples) / Double(config.sampleRate),
-                vocabulary: tokenizer.vocabulary,
-                clipDuration: Double(samples.count) / Double(config.sampleRate)
-            )
+        let timings = Self.tokenTimings(
+            from: merged,
+            secondsPerFrame: Double(config.frameSamples) / Double(config.sampleRate),
+            vocabulary: tokenizer.vocabulary,
+            clipDuration: Double(samples.count) / Double(config.sampleRate)
         )
+        var text = tokenizer.decode(ids: merged.map(\.token))
+        // Rescored text can replace words, so token timings no longer decode
+        // to the text verbatim; they remain the raw emissions, which is what
+        // timing consumers (seek, attribution) want.
+        if let boosting = vocabularyBoosting,
+            let rescored = await boosting.rescore(text: text, tokenTimings: timings, audioSamples: samples)
+        {
+            text = rescored.text
+        }
+        return TranscriptionWithTimings(text: text, tokenTimings: timings)
+    }
+
+    /// Apply vocabulary rescoring to a finished transcript when boosting is
+    /// configured; otherwise return the transcript unchanged.
+    private func rescoreIfConfigured(
+        text: String, merged: [ChunkProcessor.TokenWindow], samples: [Float]
+    ) async -> String {
+        guard let boosting = vocabularyBoosting, let tokenizer = tokenizer else { return text }
+        let timings = Self.tokenTimings(
+            from: merged,
+            secondsPerFrame: Double(config.frameSamples) / Double(config.sampleRate),
+            vocabulary: tokenizer.vocabulary,
+            clipDuration: Double(samples.count) / Double(config.sampleRate)
+        )
+        let rescored = await boosting.rescore(text: text, tokenTimings: timings, audioSamples: samples)
+        return rescored?.text ?? text
     }
 
     /// Emission frames → seconds. Pure, so the back-fill rule can be tested

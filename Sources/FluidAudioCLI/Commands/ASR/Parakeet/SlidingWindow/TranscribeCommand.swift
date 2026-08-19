@@ -932,6 +932,19 @@ enum TranscribeCommand {
             let loadTime = Date().timeIntervalSince(loadStart)
             logger.info("Models loaded in \(String(format: "%.2f", loadTime))s")
 
+            if let vocabPath = args.customVocabPath {
+                let (customVocab, ctcModels) = try await CustomVocabularyContext.loadWithCtcTokens(from: vocabPath)
+                if let unified = engine as? StreamingUnifiedAsrManager {
+                    try await unified.configureVocabularyBoosting(vocabulary: customVocab, ctcModels: ctcModels)
+                    logger.info("Vocabulary boosting enabled (\(customVocab.terms.count) terms)")
+                } else if let unifiedBatch = engine as? UnifiedAsrManager {
+                    try await unifiedBatch.configureVocabularyBoosting(vocabulary: customVocab, ctcModels: ctcModels)
+                    logger.info("Vocabulary boosting enabled (\(customVocab.terms.count) terms)")
+                } else {
+                    logger.warning("--custom-vocab is not supported for \(variant.displayName); ignoring")
+                }
+            }
+
             let audioFileURL = URL(fileURLWithPath: audioFile)
             let audioFileHandle = try AVAudioFile(forReading: audioFileURL)
             let format = audioFileHandle.processingFormat

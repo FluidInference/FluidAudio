@@ -60,12 +60,9 @@ public actor SlidingWindowAsrManager {
     private var lastWindowError: SlidingWindowAsrError?
 
     // Vocabulary boosting
-    // These are initialized via configureVocabularyBoosting() before start()
-    private var customVocabulary: CustomVocabularyContext?
-    private var ctcSpotter: CtcKeywordSpotter?
-    private var vocabularyRescorer: VocabularyRescorer?
-    private var vocabSizeConfig: ContextBiasingConstants.VocabSizeConfig?
-    private var vocabBoostingEnabled: Bool { customVocabulary != nil && vocabularyRescorer != nil }
+    // Initialized via configureVocabularyBoosting() before start()
+    private var vocabularyBoosting: VocabularyBoostingSession?
+    private var vocabBoostingEnabled: Bool { vocabularyBoosting != nil }
 
     /// Initialize the sliding-window ASR manager
     /// - Parameter config: Configuration for streaming behavior
@@ -97,27 +94,11 @@ public actor SlidingWindowAsrManager {
         ctcModels: CtcModels,
         config: VocabularyRescorer.Config? = nil
     ) async throws {
-        self.customVocabulary = vocabulary
-
-        // Create CTC spotter
-        let blankId = ctcModels.vocabulary.count
-        self.ctcSpotter = CtcKeywordSpotter(models: ctcModels, blankId: blankId)
-
-        // Use vocabulary-size-aware config (matching batch mode behavior)
-        let vocabSize = vocabulary.terms.count
-        let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocabSize)
-        self.vocabSizeConfig = vocabConfig
-        let effectiveConfig = config ?? .default
-
-        // Create rescorer
-        let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
-        self.vocabularyRescorer = try await VocabularyRescorer.create(
-            spotter: ctcSpotter!,
-            vocabulary: vocabulary,
-            config: effectiveConfig,
-            ctcModelDirectory: ctcModelDir
+        self.vocabularyBoosting = try await VocabularyBoostingSession(
+            vocabulary: vocabulary, ctcModels: ctcModels, config: config
         )
 
+        let vocabSize = vocabulary.terms.count
         let isLargeVocab = vocabSize > ContextBiasingConstants.largeVocabThreshold
         logger.info(
             "Vocabulary boosting configured with \(vocabSize) terms (isLargeVocab: \(isLargeVocab))"
@@ -611,62 +592,10 @@ public actor SlidingWindowAsrManager {
         tokenTimings: [TokenTiming],
         windowSamples: [Float]
     ) async -> VocabularyRescorer.RescoreOutput? {
-        guard let spotter = ctcSpotter,
-            let rescorer = vocabularyRescorer,
-            let vocab = customVocabulary,
-            !tokenTimings.isEmpty
-        else {
-            return nil
-        }
-
-        do {
-            // Run CTC inference on the chunk audio to get log probabilities
-            let spotResult = try await spotter.spotKeywordsWithLogProbs(
-                audioSamples: windowSamples,
-                customVocabulary: vocab,
-                minScore: nil
-            )
-
-            let logProbs = spotResult.logProbs
-            guard !logProbs.isEmpty else {
-                logger.debug("Vocabulary rescoring skipped: no log probs from CTC")
-                return nil
-            }
-
-            // Determine rescoring parameters based on vocabulary size,
-            // but respect the caller-specified threshold when stricter.
-            let vocabConfig = vocabSizeConfig ?? ContextBiasingConstants.rescorerConfig(forVocabSize: 0)
-            let minSimilarity = max(vocabConfig.minSimilarity, vocab.minSimilarity)
-            let cbw = vocabConfig.cbw
-
-            // Apply constrained CTC rescoring
-            let rescoreOutput = rescorer.ctcTokenRescore(
-                transcript: text,
-                tokenTimings: tokenTimings,
-                logProbs: logProbs,
-                frameDuration: spotResult.frameDuration,
-                cbw: cbw,
-                marginSeconds: 0.5,
-                minSimilarity: minSimilarity
-            )
-
-            if rescoreOutput.wasModified {
-                logger.info(
-                    "Vocabulary rescoring applied \(rescoreOutput.replacements.count) replacement(s) in streaming chunk"
-                )
-                for replacement in rescoreOutput.replacements where replacement.shouldReplace {
-                    logger.debug(
-                        "  '\(replacement.originalWord)' → '\(replacement.replacementWord ?? "")'"
-                    )
-                }
-                return rescoreOutput
-            }
-
-            return nil
-        } catch {
-            logger.warning("Vocabulary rescoring failed: \(error.localizedDescription)")
-            return nil
-        }
+        guard let boosting = vocabularyBoosting else { return nil }
+        return await boosting.rescore(
+            text: text, tokenTimings: tokenTimings, audioSamples: windowSamples
+        )
     }
 
     /// Apply encoder-frame offset derived from the absolute window start sample.

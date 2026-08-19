@@ -62,6 +62,29 @@ public actor StreamingUnifiedAsrManager {
     private var partialCallback: (@Sendable (String) -> Void)?
     private var processedChunks: Int = 0
 
+    // Vocabulary boosting (issue #851). The CTC spotter needs the segment's
+    // raw audio and the rescorer segment-local token timings, so while
+    // boosting is enabled the manager retains audio and timings for the
+    // not-yet-rescored tail of the stream and rescores it one word-aligned
+    // segment at a time (~15 s, matching the sliding-window batch cadence)
+    // instead of per 1 s chunk — CTC keyword spans would straddle chunk
+    // seams and a per-chunk CTC pass would dominate the step budget.
+    private var vocabularyBoosting: VocabularyBoostingSession?
+    // Transcript already rescored (immutable prefix). The un-rescored tail
+    // is the concatenation of `vocabTimings` token texts.
+    private var rescoredTranscript: String = ""
+    // Token timings (global clock) for the un-rescored tail.
+    private var vocabTimings: [TokenTiming] = []
+    // Audio backing the un-rescored tail; `vocabAudio[0]` is global sample
+    // `vocabAudioGlobalStart`.
+    private var vocabAudio: [Float] = []
+    private var vocabAudioGlobalStart: Int = 0
+    /// Un-rescored audio needed before a segment rescore is attempted.
+    private let vocabSegmentSeconds: Double = 15.0
+    /// Audio kept before the first pending token when a segment is released,
+    /// so the next CTC pass sees the word's onset.
+    private let vocabPreRollSeconds: Double = 1.0
+
     public private(set) var mlConfiguration: MLModelConfiguration
 
     public init(
@@ -178,22 +201,65 @@ public actor StreamingUnifiedAsrManager {
         }
     }
 
+    // MARK: - Vocabulary Boosting
+
+    /// Configure vocabulary boosting for streaming transcription.
+    ///
+    /// When configured, the transcript is rescored against CTC acoustic
+    /// evidence in word-aligned segments of roughly `vocabSegmentSeconds`:
+    /// corrections surface retroactively through `getPartialTranscript()` /
+    /// the partial callback, and the tail is always rescored by `finish()`.
+    /// Call before streaming starts. Same pipeline as
+    /// `SlidingWindowAsrManager.configureVocabularyBoosting`.
+    ///
+    /// - Parameters:
+    ///   - vocabulary: Custom vocabulary context with terms to detect
+    ///     (tokenize via `CustomVocabularyContext.loadWithCtcTokens`)
+    ///   - ctcModels: Pre-loaded CTC models for keyword spotting
+    ///   - config: Optional rescorer configuration (default:
+    ///     `VocabularyBoostingSession.itnDefaultConfig` — this engine's ITN
+    ///     output needs the #702 spotter-rescue similarity floors)
+    /// - Throws: Error if rescorer initialization fails
+    public func configureVocabularyBoosting(
+        vocabulary: CustomVocabularyContext,
+        ctcModels: CtcModels,
+        config: VocabularyRescorer.Config? = nil
+    ) async throws {
+        self.vocabularyBoosting = try await VocabularyBoostingSession(
+            vocabulary: vocabulary, ctcModels: ctcModels,
+            config: config ?? VocabularyBoostingSession.itnDefaultConfig
+        )
+        // Anchor the retained-audio clock at the current stream position and
+        // freeze any text decoded before boosting was enabled: audio for it
+        // was not retained, so it can never be rescored.
+        vocabAudio.removeAll()
+        vocabAudioGlobalStart = samplesGlobalStart + samples.count
+        rescoredTranscript += transcriptCache
+        transcriptCache = ""
+        logger.info("Vocabulary boosting configured with \(vocabulary.terms.count) terms")
+    }
+
     // MARK: - Streaming API
 
     public func appendAudio(_ buffer: AVAudioPCMBuffer) throws {
         let converted = try audioConverter.resampleBuffer(buffer)
         samples.append(contentsOf: converted)
+        if vocabularyBoosting != nil {
+            vocabAudio.append(contentsOf: converted)
+        }
     }
 
     /// Process as many complete chunks as the buffered audio allows.
     public func processBufferedAudio() async throws {
         try await processAvailableWindows(isFinal: false)
+        await maybeRescoreSegment(force: false)
     }
 
     /// Flush remaining audio and return the final transcript.
     public func finish() async throws -> String {
         guard tokenizer != nil else { throw ASRError.notInitialized }
         try await processAvailableWindows(isFinal: true)
+        await maybeRescoreSegment(force: true)
         return currentTranscript()
     }
 
@@ -230,6 +296,10 @@ public actor StreamingUnifiedAsrManager {
         transcriptCache = ""
         pendingTokenTimings.removeAll()
         processedChunks = 0
+        rescoredTranscript = ""
+        vocabTimings.removeAll()
+        vocabAudio.removeAll()
+        vocabAudioGlobalStart = 0
         try rnntDecoder?.reset()
     }
 
@@ -308,7 +378,6 @@ public actor StreamingUnifiedAsrManager {
             for emission in emissions {
                 guard let piece = tokenizer.piece(forId: emission.token) else { continue }
                 let text = piece.replacingOccurrences(of: "\u{2581}", with: " ")
-                transcriptCache += text
                 let start = Double(emission.frame) * secondsPerFrame
                 // RNNT tokens have no intrinsic duration — back-fill the previous
                 // token's end to this token's start so durations reflect real gaps.
@@ -321,15 +390,29 @@ public actor StreamingUnifiedAsrManager {
                     )
                 }
                 // Frontier token: provisional one-frame end until the next emission.
-                pendingTokenTimings.append(
-                    TokenTiming(
-                        token: text,
-                        tokenId: emission.token,
-                        startTime: start,
-                        endTime: start + secondsPerFrame,
-                        confidence: emission.prob
-                    )
+                let timing = TokenTiming(
+                    token: text,
+                    tokenId: emission.token,
+                    startTime: start,
+                    endTime: start + secondsPerFrame,
+                    confidence: emission.prob
                 )
+                pendingTokenTimings.append(timing)
+                if vocabularyBoosting != nil {
+                    // The un-rescored tail lives in `vocabTimings` (its token
+                    // texts ARE the tail transcript); same frontier back-fill.
+                    if let last = vocabTimings.indices.last, vocabTimings[last].endTime > start {
+                        let prev = vocabTimings[last]
+                        vocabTimings[last] = TokenTiming(
+                            token: prev.token, tokenId: prev.tokenId,
+                            startTime: prev.startTime, endTime: max(prev.startTime, start),
+                            confidence: prev.confidence
+                        )
+                    }
+                    vocabTimings.append(timing)
+                } else {
+                    transcriptCache += text
+                }
             }
         }
         processedChunks += 1
@@ -340,7 +423,118 @@ public actor StreamingUnifiedAsrManager {
     }
 
     private func currentTranscript() -> String {
-        transcriptCache.trimmingCharacters(in: .whitespaces)
+        guard vocabularyBoosting != nil else {
+            return transcriptCache.trimmingCharacters(in: .whitespaces)
+        }
+        return (rescoredTranscript + vocabTimings.map(\.token).joined())
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: - Segment Rescoring
+
+    /// Rescore the un-rescored tail of the stream against CTC evidence.
+    ///
+    /// Non-final calls wait until `vocabSegmentSeconds` of audio has
+    /// accumulated, then rescore up to the last word boundary, holding the
+    /// frontier word back (it may still be growing). `force` (at `finish()`)
+    /// rescores everything pending.
+    private func maybeRescoreSegment(force: Bool) async {
+        guard let boosting = vocabularyBoosting else { return }
+
+        let sampleRate = Double(config.sampleRate)
+        let segmentStartSeconds = Double(vocabAudioGlobalStart) / sampleRate
+
+        // Silence guard: no pending tokens, so there is nothing to rescore —
+        // cap the retained audio at one encoder window (future emissions can
+        // only come from frames the windower has not consumed yet).
+        if vocabTimings.isEmpty {
+            let keep = config.windowSamples
+            if vocabAudio.count > keep {
+                dropVocabAudio(count: vocabAudio.count - keep)
+            }
+            return
+        }
+
+        if !force && vocabAudio.count < Int(vocabSegmentSeconds * sampleRate) { return }
+
+        guard let cut = Self.vocabSegmentCut(timings: vocabTimings, force: force) else { return }
+
+        let segmentTimings = Self.segmentLocalTimings(
+            Array(vocabTimings[..<cut]), segmentStartSeconds: segmentStartSeconds
+        )
+        let segmentText = vocabTimings[..<cut].map(\.token).joined()
+
+        var releasedText = segmentText
+        // The rescorer reconstructs its output text from the word timings, so
+        // every token of the segment must be represented: if any were dropped
+        // for lacking retained audio (configure-mid-stream straddle), release
+        // this one segment unscored rather than lose those words.
+        if segmentTimings.count == cut,
+            let rescored = await boosting.rescore(
+                text: segmentText, tokenTimings: segmentTimings, audioSamples: vocabAudio
+            )
+        {
+            // The rescorer rebuilds its text as words joined by single spaces,
+            // dropping the segment's leading separator — restore it so the
+            // released text still butts cleanly against the rescored prefix.
+            releasedText = (segmentText.hasPrefix(" ") ? " " : "") + rescored.text
+        }
+        rescoredTranscript += releasedText
+        vocabTimings.removeFirst(cut)
+
+        // Release segment audio, keeping a pre-roll before the first held
+        // token so the next CTC pass sees its word onset.
+        if let firstKept = vocabTimings.first {
+            let newStart = Int((firstKept.startTime - vocabPreRollSeconds) * sampleRate)
+            if newStart > vocabAudioGlobalStart {
+                dropVocabAudio(count: min(newStart - vocabAudioGlobalStart, vocabAudio.count))
+            }
+        } else {
+            dropVocabAudio(count: vocabAudio.count)
+        }
+
+        if releasedText != segmentText, let callback = partialCallback {
+            callback(currentTranscript())
+        }
+    }
+
+    private func dropVocabAudio(count: Int) {
+        guard count > 0 else { return }
+        vocabAudio.removeFirst(count)
+        vocabAudioGlobalStart += count
+    }
+
+    /// Word-boundary cut for a segment release: rescore `[0..<cut]`, hold
+    /// `[cut...]`. Cutting only where a token starts a new word (leading
+    /// space after `▁` substitution) guarantees a sub-word split across the
+    /// segment edge can never be half-replaced. Non-final calls hold the
+    /// frontier word back (it may still be growing), so a single pending
+    /// word yields no cut. Pure, for testability.
+    static func vocabSegmentCut(timings: [TokenTiming], force: Bool) -> Int? {
+        guard !timings.isEmpty else { return nil }
+        if force { return timings.count }
+        guard let lastWordStart = timings.lastIndex(where: { $0.token.hasPrefix(" ") }),
+            lastWordStart > 0
+        else { return nil }
+        return lastWordStart
+    }
+
+    /// Rebase global-clock timings onto the retained segment audio (t=0 at
+    /// `segmentStartSeconds`). Tokens decoded before that point have no
+    /// retained audio behind them and are dropped — they pass through
+    /// unscored. Pure, for testability.
+    static func segmentLocalTimings(
+        _ timings: [TokenTiming], segmentStartSeconds: Double
+    ) -> [TokenTiming] {
+        timings.compactMap { timing in
+            guard timing.startTime >= segmentStartSeconds else { return nil }
+            return TokenTiming(
+                token: timing.token, tokenId: timing.tokenId,
+                startTime: timing.startTime - segmentStartSeconds,
+                endTime: max(0, timing.endTime - segmentStartSeconds),
+                confidence: timing.confidence
+            )
+        }
     }
 
     /// Drop audio that can no longer appear in any future window.
