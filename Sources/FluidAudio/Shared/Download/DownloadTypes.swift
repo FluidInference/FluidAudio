@@ -78,14 +78,23 @@ public struct DownloadConfig: Sendable {
     /// 120 s.
     public let stallWindow: TimeInterval
 
+    /// Maximum number of files fetched concurrently by subdirectory downloads
+    /// (#853). HuggingFace serves LFS objects through a CDN that handles
+    /// concurrent range requests fine, so a small fan-out cuts wall-clock for
+    /// many-file packs without hammering the server. Values below 1 are
+    /// treated as 1. Defaults to 4.
+    public let maxConcurrentFiles: Int
+
     public init(
         timeout: TimeInterval = 1800,  // 30 minutes for large models
         minStallBytes: Int64 = 1 << 20,  // 1 MiB
-        stallWindow: TimeInterval = 120
+        stallWindow: TimeInterval = 120,
+        maxConcurrentFiles: Int = 4
     ) {
         self.timeout = timeout
         self.minStallBytes = minStallBytes
         self.stallWindow = stallWindow
+        self.maxConcurrentFiles = maxConcurrentFiles
     }
 
     public static let `default` = DownloadConfig()

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Models download-operation progress as weighted phases (#765 Wave 4),
 /// replacing the fraction math previously copy-pasted at call sites.
@@ -97,5 +98,82 @@ struct ProgressReporter: Sendable {
     /// The operation is complete.
     func finished() {
         emit(1.0, .compiling(modelName: ""))
+    }
+}
+
+/// Progress bookkeeping for a download loop whose files complete out of
+/// order (#853). The sequential loops thread `completedBytes` through as a
+/// plain running total; with a bounded task group that bookkeeping races, so
+/// this class owns the counters instead. Byte updates and file boundaries
+/// arrive from concurrent tasks; both the counter update and the handler
+/// call happen under one lock, so emissions stay ordered and
+/// `fractionCompleted` keeps the documented monotonic invariant.
+final class ConcurrentProgress: Sendable {
+    private struct Counters {
+        /// Cumulative bytes reported so far by each still-downloading file.
+        var inFlightBytes: [Int: Int64] = [:]
+        var completedBytes: Int64 = 0
+        var completedFiles = 0
+        /// High-water mark; emissions below it are lifted to it so a file
+        /// boundary landing behind another file's live bytes never regresses.
+        var maxFraction = 0.0
+    }
+
+    private let state = OSAllocatedUnfairLock<Counters>(initialState: Counters())
+    private let reporter: ProgressReporter
+    private let totalBytes: Int64
+    private let totalFiles: Int
+
+    init(reporter: ProgressReporter, totalBytes: Int64, totalFiles: Int) {
+        self.reporter = reporter
+        self.totalBytes = totalBytes
+        self.totalFiles = totalFiles
+    }
+
+    /// Live byte callback for file `index`; nil when there is no handler
+    /// (skip the closure allocation and delegate churn entirely).
+    func liveBytesCallback(fileIndex: Int) -> (@Sendable (Int64, Int64) -> Void)? {
+        guard reporter.handler != nil else { return nil }
+        return { bytesWritten, _ in
+            self.updateBytes(fileIndex: fileIndex, bytesWritten: bytesWritten)
+        }
+    }
+
+    /// Record that file `index` finished (downloaded, cached, or created
+    /// empty) and emit its boundary. Returns the new completed-file count
+    /// for the caller's log cadence.
+    func fileCompleted(fileIndex: Int, size: Int) -> Int {
+        state.withLock { counters in
+            counters.inFlightBytes[fileIndex] = nil
+            counters.completedBytes += Int64(max(0, size))
+            counters.completedFiles += 1
+            emitLocked(&counters, phaseFiles: counters.completedFiles)
+            return counters.completedFiles
+        }
+    }
+
+    private func updateBytes(fileIndex: Int, bytesWritten: Int64) {
+        // Unknown-size files carry zero weight in totalBytes, so their real
+        // bytes would inflate the fraction mid-file and snap back at the
+        // boundary. Mirrors the sequential loop's guard.
+        guard totalBytes > 0 else { return }
+        state.withLock { counters in
+            counters.inFlightBytes[fileIndex] = bytesWritten
+            emitLocked(&counters, phaseFiles: counters.completedFiles)
+        }
+    }
+
+    private func emitLocked(_ counters: inout Counters, phaseFiles: Int) {
+        let bytes = counters.completedBytes + counters.inFlightBytes.values.reduce(0, +)
+        let fraction =
+            reporter.downloadPhaseWeight
+            * ProgressReporter.downloadFraction(
+                completedBytes: bytes, totalBytes: totalBytes,
+                completedFiles: phaseFiles, totalFiles: totalFiles)
+        counters.maxFraction = max(counters.maxFraction, fraction)
+        reporter.handler?(
+            DownloadProgress(
+                fractionCompleted: counters.maxFraction,
+                phase: .downloading(completedFiles: phaseFiles, totalFiles: totalFiles)))
     }
 }

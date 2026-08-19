@@ -23,11 +23,11 @@ public enum PocketTtsResourceDownloader {
     /// - Returns: The directory that contains the requested `.mlmodelc`
     ///   packages plus `constants_bin/` for the requested language.
     ///
-    /// Note: the upstream `v2/<lang>/` directory ships both flowlm variants,
-    /// so a fresh download pulls the unused variant too. After download
-    /// completes, the unused FlowLM `.mlmodelc` directory is deleted so only
-    /// the requested precision occupies disk (~140 MB savings for `.int8`,
-    /// ~75 MB savings for `.fp16`).
+    /// Note: the upstream `v2/<lang>/` directory ships every precision and
+    /// placement variant side by side (both FlowLM precisions plus the
+    /// `_ane`/`pocket_state` packages). The download filter skips any
+    /// `.mlmodelc` outside `ModelNames.PocketTTS.requiredModels(precision:placement:)`,
+    /// so only the variants this call loads come over the network (#853).
     ///
     /// The downloader also skips redundant repo artifacts entirely:
     /// `.mlpackage` sources (CoreML never loads them — the compiled
@@ -96,11 +96,11 @@ public enum PocketTtsResourceDownloader {
             subdirectory: subdir,
             to: repoDir,
             progressHandler: progressHandler,
-            shouldSkip: Self.shouldSkipAsset(at:)
+            shouldSkip: { Self.shouldSkipAsset(at: $0, required: required) }
         )
 
-        // The HF subdir contains both FlowLM precisions; delete the one we
-        // don't need so disk usage matches the loaded models.
+        // The filter above keeps the unused FlowLM variant off the network for
+        // fresh downloads; this cleans it off disk for caches that predate it.
         removeUnusedFlowlmVariant(at: languageRoot, keeping: precision)
 
         // The Trial 23 multifunction state package is not published on
@@ -148,13 +148,25 @@ public enum PocketTtsResourceDownloader {
     /// holds intermediate `.npy/.npz` files whose binary equivalents live
     /// under `constants_bin/`; `verify.wav` is an upstream debug artifact;
     /// `.DS_Store` is macOS junk.
-    @Sendable
-    private static func shouldSkipAsset(at path: String) -> Bool {
+    ///
+    /// `required` is the exact model set for the caller's precision +
+    /// placement (`ModelNames.PocketTTS.requiredModels(precision:placement:)`).
+    /// Any `.mlmodelc` bundle outside it is skipped whole — the upstream
+    /// directory ships every precision/placement variant side by side, and
+    /// without this the unused variants all came over the network (#853).
+    /// Skipping a directory path prunes the whole subtree in the lister, so
+    /// excluded bundles cost no tree-API calls either.
+    static func shouldSkipAsset(at path: String, required: Set<String>) -> Bool {
         let basename = (path as NSString).lastPathComponent
         if basename == ".DS_Store" || basename == "verify.wav" {
             return true
         }
         if basename.hasSuffix(".mlpackage") || path.contains(".mlpackage/") {
+            return true
+        }
+        if let bundle = path.split(separator: "/").first(where: { $0.hasSuffix(".mlmodelc") }),
+            !required.contains(String(bundle))
+        {
             return true
         }
         // Only skip the intermediate "constants/" subdirectory, never

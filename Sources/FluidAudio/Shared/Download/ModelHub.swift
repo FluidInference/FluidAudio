@@ -568,7 +568,31 @@ public enum ModelHub {
         progressHandler: ProgressHandler? = nil,
         shouldSkip: (@Sendable (String) -> Bool)? = nil
     ) async throws {
+        try await download(
+            repo, subdirectory: subdirectory, to: repoDirectory,
+            config: config, progressHandler: progressHandler, shouldSkip: shouldSkip,
+            configuration: nil)
+    }
+
+    /// Internal seam: `configuration` overrides the session used for tree
+    /// listing and per-file downloads so tests can drive the pipeline with a
+    /// stub `URLProtocol` (see `SubdirectoryDownloadTests`).
+    static func download(
+        _ repo: Repo,
+        subdirectory: String,
+        to repoDirectory: URL,
+        config: DownloadConfig = .default,
+        progressHandler: ProgressHandler? = nil,
+        shouldSkip: (@Sendable (String) -> Bool)? = nil,
+        configuration: URLSessionConfiguration?
+    ) async throws {
         try ensureOnlineAllowed("download(\(repo.folderName)/\(subdirectory))")
+
+        let listingSession = configuration.map { URLSession(configuration: $0) } ?? session
+        defer {
+            if configuration != nil { listingSession.finishTasksAndInvalidate() }
+        }
+
         // Subdirectory downloads have no compile phase: download spans 0-1.
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 1.0)
         reporter.listing()
@@ -576,7 +600,7 @@ public enum ModelHub {
             repoRemotePath: repo.remotePath,
             startingAt: subdirectory,
             include: { itemPath, _ in shouldSkip?(itemPath) != true },
-            fetch: HFTreeLister.fetch(using: session)
+            fetch: HFTreeLister.fetch(using: listingSession)
         )
         let totalFiles = filesToDownload.count
         logger.info("Found \(totalFiles) files in \(subdirectory)")
@@ -584,55 +608,83 @@ public enum ModelHub {
         // Compute total known bytes for byte-weighted progress.
         // Files with unknown sizes (size == -1) are treated as 0 for weighting.
         let totalBytes: Int64 = filesToDownload.reduce(0) { $0 + Int64(max(0, $1.size)) }
-        var completedBytes: Int64 = 0
 
         reporter.fileBoundary(
-            completedBytes: completedBytes,
+            completedBytes: 0,
             totalBytes: totalBytes,
             completedFiles: 0,
             totalFiles: totalFiles)
 
-        for (index, file) in filesToDownload.enumerated() {
-            let destPath = repoDirectory.appendingPathComponent(file.path)
-
-            // Only stream live byte progress for files with a known size: an
-            // unknown-size file (-1) carries zero weight in totalBytes, so its
-            // real bytesWritten would inflate the fraction mid-file and snap
-            // back at the boundary. Boundary emits keep progress monotonic.
-            let onBytes =
-                file.size > 0
-                ? reporter.liveBytesCallback(
-                    baseBytes: completedBytes,
-                    totalBytes: totalBytes,
-                    fileIndex: index,
-                    totalFiles: totalFiles)
-                : nil
-
-            // Fail loudly on blocked paths: subdirectory downloads land in
-            // caller-provided directories, so a regular file where a directory
-            // belongs is surfaced, never silently deleted.
-            let outcome = try await FileDownloader.ensure(
-                file: file,
-                from: repo.remotePath,
-                at: destPath,
-                recoveringBlockedPaths: false,
-                config: config,
-                onBytes: onBytes
-            )
-            completedBytes += Int64(max(0, file.size))
-
-            reporter.fileBoundary(
-                completedBytes: completedBytes,
-                totalBytes: totalBytes,
-                completedFiles: index + 1,
-                totalFiles: totalFiles)
-
-            if outcome != .alreadyPresent, (index + 1) % 5 == 0 || index == totalFiles - 1 {
-                logger.info("Downloaded \(index + 1)/\(totalFiles) \(subdirectory) files")
+        // Fetch files through a bounded task group (#853): the sequential
+        // loop paid one network round-trip of latency per file, which
+        // dominated wall-clock for many-file packs. The first thrown error
+        // cancels the group (in-flight `.partial` files resume by byte range
+        // on the next attempt). ConcurrentProgress owns the byte/file
+        // counters so emissions stay monotonic across out-of-order finishes.
+        let progress = ConcurrentProgress(
+            reporter: reporter, totalBytes: totalBytes, totalFiles: totalFiles)
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            var nextIndex = 0
+            func addNextTask() {
+                guard nextIndex < filesToDownload.count else { return }
+                let index = nextIndex
+                let file = filesToDownload[index]
+                nextIndex += 1
+                group.addTask {
+                    try await downloadSubdirectoryFile(
+                        file, index: index, repo: repo, subdirectory: subdirectory,
+                        repoDirectory: repoDirectory, totalFiles: totalFiles,
+                        config: config, configuration: configuration, progress: progress)
+                }
+            }
+            for _ in 0..<min(max(1, config.maxConcurrentFiles), totalFiles) {
+                addNextTask()
+            }
+            while try await group.next() != nil {
+                addNextTask()
             }
         }
 
         logger.info("Downloaded \(subdirectory) from \(repo.folderName)")
+    }
+
+    /// One file of a subdirectory download, run inside the bounded task group.
+    private static func downloadSubdirectoryFile(
+        _ file: RemoteFile,
+        index: Int,
+        repo: Repo,
+        subdirectory: String,
+        repoDirectory: URL,
+        totalFiles: Int,
+        config: DownloadConfig,
+        configuration: URLSessionConfiguration?,
+        progress: ConcurrentProgress
+    ) async throws {
+        let destPath = repoDirectory.appendingPathComponent(file.path)
+
+        // Only stream live byte progress for files with a known size: an
+        // unknown-size file (-1) carries zero weight in totalBytes, so its
+        // real bytesWritten would inflate the fraction mid-file and snap
+        // back at the boundary. Boundary emits keep progress monotonic.
+        let onBytes = file.size > 0 ? progress.liveBytesCallback(fileIndex: index) : nil
+
+        // Fail loudly on blocked paths: subdirectory downloads land in
+        // caller-provided directories, so a regular file where a directory
+        // belongs is surfaced, never silently deleted.
+        let outcome = try await FileDownloader.ensure(
+            file: file,
+            from: repo.remotePath,
+            at: destPath,
+            recoveringBlockedPaths: false,
+            config: config,
+            configuration: configuration,
+            onBytes: onBytes
+        )
+
+        let completed = progress.fileCompleted(fileIndex: index, size: file.size)
+        if outcome != .alreadyPresent, completed % 5 == 0 || completed == totalFiles {
+            logger.info("Downloaded \(completed)/\(totalFiles) \(subdirectory) files")
+        }
     }
 
     /// Fetch a single file from HuggingFace with the converged retry policy
