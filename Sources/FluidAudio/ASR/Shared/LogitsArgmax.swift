@@ -32,22 +32,12 @@ enum LogitsArgmax {
             run(logits.dataPointer.assumingMemoryBound(to: Float32.self))
         } else {
             let count = frames * frameStride
-            let src = logits.dataPointer.assumingMemoryBound(to: Float16.self)
+            // Address fp16 storage as raw bit patterns: Swift's `Float16` is
+            // unavailable on macOS x86_64.
+            let src = logits.dataPointer.assumingMemoryBound(to: UInt16.self)
             var buf = [Float](repeating: 0, count: count)
-            // The vImage buffers must not outlive the pointers they wrap, so the
-            // convert + argmax both run inside the withUnsafe scope.
             buf.withUnsafeMutableBufferPointer { dst in
-                var srcBuf = vImage_Buffer(
-                    data: UnsafeMutableRawPointer(mutating: src),
-                    height: 1,
-                    width: vImagePixelCount(count),
-                    rowBytes: count * MemoryLayout<Float16>.size)
-                var dstBuf = vImage_Buffer(
-                    data: dst.baseAddress!,
-                    height: 1,
-                    width: vImagePixelCount(count),
-                    rowBytes: count * MemoryLayout<Float>.size)
-                vImageConvert_Planar16FtoPlanarF(&srcBuf, &dstBuf, 0)
+                Float16Conversion.toFloat32(src: src, dst: dst.baseAddress!, count: count)
                 run(dst.baseAddress!)
             }
         }

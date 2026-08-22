@@ -28,6 +28,18 @@ jobs:
         run: swift test --parallel --num-workers $(sysctl -n hw.ncpu)
         timeout-minutes: 20
 
+  build-macos-x86_64:
+    name: Build Swift Package (macOS x86_64 cross-compile)
+    runs-on: macos-15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # Intel macs have no Swift Float16; this guards against unguarded
+      # fp16 usage breaking universal builds (issue #875).
+      - name: Build package (x86_64)
+        run: swift build --arch x86_64
+
   build-ios:
     name: Build (iOS)
     runs-on: macos-15

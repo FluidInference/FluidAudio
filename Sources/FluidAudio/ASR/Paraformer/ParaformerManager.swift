@@ -474,11 +474,15 @@ public actor ParaformerManager {
                 out.append(Array(UnsafeBufferPointer(start: p + t * frameStride, count: dim)))
             }
         } else {
-            let p = arr.dataPointer.assumingMemoryBound(to: Float16.self)
+            // Address fp16 storage as raw bit patterns: Swift's `Float16` is
+            // unavailable on macOS x86_64.
+            let p = arr.dataPointer.assumingMemoryBound(to: UInt16.self)
             for t in 0..<count {
                 var r = [Float](repeating: 0, count: dim)
-                let base = t * frameStride
-                for d in 0..<dim { r[d] = Float(p[base + d]) }
+                r.withUnsafeMutableBufferPointer { dst in
+                    Float16Conversion.toFloat32(
+                        src: p + t * frameStride, dst: dst.baseAddress!, count: dim)
+                }
                 out.append(r)
             }
         }

@@ -167,10 +167,10 @@ struct NeuTtsSynthesizer {
                 state.withMultiArray(for: name) { array in
                     array.withUnsafeMutableBytes { rawBuffer, _ in
                         guard let dstBase = rawBuffer.baseAddress else { return }
-                        let dst = dstBase.assumingMemoryBound(to: Float16.self)
-                        for i in 0..<layerElements {
-                            dst[i] = Float16(base[i])
-                        }
+                        // Address fp16 storage as raw bit patterns: Swift's
+                        // `Float16` is unavailable on macOS x86_64.
+                        let dst = dstBase.assumingMemoryBound(to: UInt16.self)
+                        Float16Conversion.fromFloat32(src: base, dst: dst, count: layerElements)
                     }
                 }
             }
@@ -227,8 +227,10 @@ struct NeuTtsSynthesizer {
                 dst.baseAddress!.update(from: ptr, count: count)
             }
         case .float16:
-            let ptr = array.dataPointer.assumingMemoryBound(to: Float16.self)
-            for i in 0..<count { out[i] = Float(ptr[i]) }
+            let ptr = array.dataPointer.assumingMemoryBound(to: UInt16.self)
+            out.withUnsafeMutableBufferPointer { dst in
+                Float16Conversion.toFloat32(src: ptr, dst: dst.baseAddress!, count: count)
+            }
         default:
             throw SynthesisError.missingOutput("unexpected dataType \(array.dataType.rawValue)")
         }
