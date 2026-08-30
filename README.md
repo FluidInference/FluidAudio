@@ -108,6 +108,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Better Voice](https://voice.baselinemakes.com)** | — | macOS menu-bar app for on-device dictation and meeting notes that save to Apple Notes. Everything runs locally. Uses speaker diarization. |
 | **[Logue](https://github.com/bitwize-ai/Logue)** | ✓ | Privacy-first AI meeting notes and writing assistant for macOS. Records mic + system audio and transcribes locally on Apple Silicon, with speaker diarization, Smart Minutes, and an on-device AI writing editor — nothing leaves the Mac. Uses FluidAudio streaming Sortformer speaker diarization. |
 | **[Goodmeet](https://goodmeet.com/)** | — | The AI note-taker that puts your privacy first. Uses FluidAudio models for VAD and transcription. |
+| **[Subtitles](https://subtitles-live.com/)** | [✓](https://github.com/daformat/subtitles) | Live captions for anything your Mac plays: meetings and calls, videos, podcasts and lectures, drawn as an always-on-top overlay that stays put while you switch apps. Captures system audio with a Core Audio process tap and transcribes entirely on-device, with selectable latency and optional speaker breaks. Uses Parakeet EOU and Nemotron streaming ASR, Silero VAD, and Sortformer speaker diarization on the Apple Neural Engine. |
 
 More apps built with FluidAudio are listed in [Documentation/Showcase.md](Documentation/Showcase.md).
 
