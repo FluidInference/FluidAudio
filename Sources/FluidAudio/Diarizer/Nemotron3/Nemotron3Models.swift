@@ -26,6 +26,14 @@ public struct Nemotron3Models {
     private let outputMaskArray: MLMultiArray?
     private let memoryOptimizer: ANEMemoryOptimizer
 
+    /// Preallocated output backings (fp16, contiguous). Reusing them removes the per-call
+    /// output IOSurface allocation — the root cause of pool exhaustion on long ANE runs —
+    /// and shaves per-call marshaling overhead.
+    private let predsBacking: MLMultiArray
+    private let hiresBacking: MLMultiArray
+    private let embsBacking: MLMultiArray?
+    private let predictionOptions: MLPredictionOptions
+
     private static let logger = AppLogger(category: "Nemotron3Models")
 
     public init(
@@ -71,6 +79,31 @@ public struct Nemotron3Models {
             self.attnBiasArray = nil
             self.outputMaskArray = nil
         }
+
+        // fp16 to match the model's native output precision (CoreML fills them without
+        // conversion); plain MLMultiArrays are contiguous, which also simplifies readback.
+        let t = config.packedFrames
+        let up = config.upsampleFactor
+        let s = config.numSpeakers
+        self.predsBacking = try MLMultiArray(
+            shape: [1, NSNumber(value: t), NSNumber(value: s)], dataType: .float16)
+        self.hiresBacking = try MLMultiArray(
+            shape: [1, NSNumber(value: t * up), NSNumber(value: s)], dataType: .float16)
+        if config.splitGraph {
+            self.embsBacking = nil
+        } else {
+            self.embsBacking = try MLMultiArray(
+                shape: [1, NSNumber(value: config.chunkEncFrames), NSNumber(value: config.preEncoderDims)],
+                dataType: .float16)
+        }
+        let options = MLPredictionOptions()
+        var backings: [String: MLMultiArray] = [
+            "speaker_preds": predsBacking,
+            "speaker_preds_10ms": hiresBacking,
+        ]
+        if let embsBacking { backings["chunk_pre_encode_embs"] = embsBacking }
+        options.outputBackings = backings
+        self.predictionOptions = options
     }
 
     /// Load from a local models directory.
@@ -196,15 +229,12 @@ public struct Nemotron3Models {
         let inputPrepSeconds = Date().timeIntervalSince(tStage)
 
         tStage = Date()
-        let output = try model.prediction(from: inputs)
+        let output = try model.prediction(from: inputs, options: predictionOptions)
         let predictSeconds = Date().timeIntervalSince(tStage)
         tStage = Date()
 
-        guard let predsArray = output.featureValue(for: "speaker_preds")?.multiArrayValue,
-            let hiresArray = output.featureValue(for: "speaker_preds_10ms")?.multiArrayValue
-        else {
-            throw Nemotron3Error.inferenceFailed("Missing split model outputs")
-        }
+        let predsArray = output.featureValue(for: "speaker_preds")?.multiArrayValue ?? predsBacking
+        let hiresArray = output.featureValue(for: "speaker_preds_10ms")?.multiArrayValue ?? hiresBacking
         return Output(
             predictions: Self.floats(from: predsArray),
             highResPredictions: Self.floats(from: hiresArray),
@@ -264,15 +294,18 @@ public struct Nemotron3Models {
         let inputPrepSeconds = Date().timeIntervalSince(tStage)
 
         tStage = Date()
-        let output = try model.prediction(from: inputs)
+        let output = try model.prediction(from: inputs, options: predictionOptions)
         let predictSeconds = Date().timeIntervalSince(tStage)
         tStage = Date()
 
-        guard let predsArray = output.featureValue(for: "speaker_preds")?.multiArrayValue,
-            let hiresArray = output.featureValue(for: "speaker_preds_10ms")?.multiArrayValue,
-            let embsArray = output.featureValue(for: "chunk_pre_encode_embs")?.multiArrayValue
-        else {
-            throw Nemotron3Error.inferenceFailed("Missing model outputs")
+        // Outputs land in the preallocated backings; fall back to the provider's arrays
+        // if the runtime declined a backing (e.g. shape/dtype mismatch on some OS).
+        let predsArray = output.featureValue(for: "speaker_preds")?.multiArrayValue ?? predsBacking
+        let hiresArray = output.featureValue(for: "speaker_preds_10ms")?.multiArrayValue ?? hiresBacking
+        let embsArray =
+            output.featureValue(for: "chunk_pre_encode_embs")?.multiArrayValue ?? embsBacking
+        guard let embsArray else {
+            throw Nemotron3Error.inferenceFailed("Missing chunk_pre_encode_embs output")
         }
         let preds = Self.floats(from: predsArray)
         let hires = Self.floats(from: hiresArray)
