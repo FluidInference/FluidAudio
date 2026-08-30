@@ -68,6 +68,12 @@ struct FluidAudioCLI {
             await EmissionDelayBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "sortformer":
             await SortformerCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron3-diarize":
+            await Nemotron3DiarizeCommand.runDiarize(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron3-benchmark":
+            await Nemotron3DiarizeCommand.runBenchmark(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron3-batch":
+            await Nemotron3DiarizeCommand.runBatch(arguments: Array(arguments.dropFirst(2)))
         case "sortformer-benchmark":
             await SortformerBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "lseend":
