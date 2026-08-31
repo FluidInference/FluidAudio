@@ -352,6 +352,134 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         XCTAssertEqual(result, "<g2p:gozzz>")
     }
 
+    // MARK: - Possessive `-'s` clitic
+
+    /// Lexicon stand-in for the possessive cases. Mirrors the real
+    /// `us_lexicon_cache.json`, which stores the clitic `'s` as its own entry
+    /// and carries no glued `today's` / `someone's` / `boss's` keys.
+    private let possessiveLexicon: [String: [String]] = [
+        "'s": ["z"],
+        "today": ["t", "ə", "d", "ˈ", "A"],
+        "someone": ["s", "ˈ", "ʌ", "m", "w", "ʌ", "n"],
+        "boss": ["b", "ˈ", "ɑ", "s"],
+        "cat": ["k", "ˈ", "æ", "t"],
+        "coat": ["k", "ˈ", "O", "t"],
+        "is": ["ɪ", "z"],
+        "here": ["h", "ˈ", "ɪ", "ɹ"],
+        "law": ["l", "ˈ", "ɔ"],
+        "in": ["ɪ", "n"],
+        "mother": ["m", "ˈ", "ʌ", "ð", "ɜ", "ɹ"],
+    ]
+
+    private func makePossessivePhonemizer() -> KokoroAneEnglishPhonemizer {
+        KokoroAneEnglishPhonemizer(
+            wordToPhonemes: possessiveLexicon,
+            caseSensitiveWordToPhonemes: caseSensitive,
+            allowedPunctuation: punctuation
+        )
+    }
+
+    func testPossessiveVoicedStemTakesZ() async throws {
+        let recorder = FallbackRecorder()
+        // `someone's` is absent from the lexicon; before the fix `normalizeKey`
+        // stripped the apostrophe and G2P sounded out `someones`.
+        let result = try await makePossessivePhonemizer()
+            .phonemize("someone's coat is here.") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "sˈʌmwʌnz kˈOt ɪz hˈɪɹ.")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty, "stem + clitic must not reach G2P")
+    }
+
+    func testPossessiveVowelFinalStemTakesZ() async throws {
+        let recorder = FallbackRecorder()
+        let result = try await makePossessivePhonemizer()
+            .phonemize("today's") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "tədˈAz")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty, "stem + clitic must not reach G2P")
+    }
+
+    func testPossessiveVoicelessStemTakesS() async throws {
+        // `kˈæt` ends in /t/ — voiceless non-sibilant, so the clitic devoices.
+        let result = try await makePossessivePhonemizer()
+            .phonemize("the cat's bowl") { _ in ["<g2p>"] }
+        XCTAssertTrue(result.contains("kˈæts"), "expected devoiced clitic, got \(result)")
+    }
+
+    func testPossessiveSibilantStemTakesEpentheticVowel() async throws {
+        // `bˈɑs` ends in /s/ — the clitic needs the epenthetic `ᵻ` (the US
+        // form; Misaki uses `ɪ` only in British mode).
+        let result = try await makePossessivePhonemizer()
+            .phonemize("the boss's office") { _ in ["<g2p>"] }
+        XCTAssertTrue(result.contains("bˈɑsᵻz"), "expected `ᵻz` clitic, got \(result)")
+    }
+
+    func testPossessiveFoldsCurlyApostrophe() async throws {
+        // U+2019 must fold before the suffix test (issue #774 + this rule).
+        let result = try await makePossessivePhonemizer()
+            .phonemize("today\u{2019}s") { _ in ["<g2p>"] }
+        XCTAssertEqual(result, "tədˈAz")
+    }
+
+    func testPossessiveIsCaseInsensitiveAndKeepsStemCase() async throws {
+        let recorder = FallbackRecorder()
+        // `NASA` is a case-sensitive entry; upper-cased `'S` must still stem,
+        // and the stem must reach the case-sensitive lexicon.
+        let result = try await makePossessivePhonemizer()
+            .phonemize("NASA'S") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "nˈæsəz")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty, "case-sensitive stem must not reach G2P")
+    }
+
+    func testPossessiveWithUnknownStemFallsBackToWholeToken() async throws {
+        let recorder = FallbackRecorder()
+        // Misaki's `stem_s` only fires on a *known* stem. An OOV stem must
+        // leave the token on the pre-existing whole-word G2P path rather than
+        // being re-shaped from a guessed stem.
+        // `normalizeKey` keeps the apostrophe, so G2P sees the token as written.
+        let result = try await makePossessivePhonemizer()
+            .phonemize("zzzyx's") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "<g2p:zzzyx's>")
+        let recorded = await recorder.words
+        XCTAssertEqual(recorded, ["zzzyx's"])
+    }
+
+    func testPossessiveOnHyphenatedCompound() async throws {
+        let recorder = FallbackRecorder()
+        // The stem resolves through the normal chain, so #775's hyphen split
+        // still applies underneath the clitic.
+        let result = try await makePossessivePhonemizer()
+            .phonemize("mother-in-law's") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "mˈʌðɜɹ ɪn lˈɔz")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty, "every part is in the lexicon")
+    }
+
+    func testLexiconEntryStillWinsOverStemming() async throws {
+        // A glued entry that *is* in the lexicon must be used verbatim; the
+        // stemming rule only runs after a full lexicon miss.
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            wordToPhonemes: possessiveLexicon.merging(["it's": ["ɪ", "t", "s"]]) { _, new in new },
+            allowedPunctuation: punctuation
+        )
+        let result = try await phonemizer.phonemize("it's") { _ in ["<g2p>"] }
+        XCTAssertEqual(result, "ɪts")
+    }
+
+    func testCliticRuleMatchesMisakiUnderscoreS() {
+        // Direct port check of Misaki `Lexicon._s`.
+        for voiceless in ["p", "t", "k", "f", "θ"] {
+            XCTAssertEqual(KokoroAneEnglishPhonemizer.clitic(after: "ˈɑ" + voiceless), "s")
+        }
+        for sibilant in ["s", "z", "ʃ", "ʒ", "ʧ", "ʤ"] {
+            XCTAssertEqual(KokoroAneEnglishPhonemizer.clitic(after: "ˈɑ" + sibilant), "ᵻz")
+        }
+        for other in ["n", "d", "ɹ", "A", "ɔ", "b", "ɡ", "v", "ð", "m", "l", "ŋ"] {
+            XCTAssertEqual(KokoroAneEnglishPhonemizer.clitic(after: "ˈɑ" + other), "z")
+        }
+    }
+
     // MARK: - Without lexicon (pre-#691 behavior preserved)
 
     func testEmptyLexiconFallsBackToG2PForEveryWord() async throws {

@@ -16,7 +16,9 @@ import Foundation
 ///      citation form (`tˈO`) that over-stresses them (issue #691)
 ///   6. strict ASCII all-caps initialisms (`FBI`, `ATP`) spelled as
 ///      letter names after a full lexicon miss (issue #710)
-///   7. BART G2P CoreML fallback for OOV words (injected by the caller)
+///   7. `-'s` stem + clitic for possessives whose stem is a known word
+///      (`today's` → `today` + /z/), mirroring Misaki's `stem_s`
+///   8. BART G2P CoreML fallback for OOV words (injected by the caller)
 ///
 /// Punctuation supported by the chain's `vocab.json` (`, . ! ? ; …` etc.)
 /// is preserved and attached to the preceding word — Kokoro treats those
@@ -111,8 +113,14 @@ struct KokoroAneEnglishPhonemizer: Sendable {
 
     // MARK: - Word resolution
 
+    /// - Parameter allowFallback: when `false`, the BART G2P fallback is
+    ///   skipped and an OOV word resolves to `nil`. Used by the possessive
+    ///   rule, which — like Misaki's `stem_s` — only fires when the stem is a
+    ///   *known* word; an OOV stem must leave the whole token on its original
+    ///   path instead of quietly re-shaping it.
     private func resolveWord(
         _ word: String,
+        allowFallback: Bool = true,
         fallback: (String) async throws -> [String]?
     ) async throws -> String? {
         let normalized = Self.normalizeKey(word)
@@ -162,18 +170,31 @@ struct KokoroAneEnglishPhonemizer: Sendable {
             return spelled
         }
 
+        // A possessive / `-'s` clitic whose stem is a known word (`today's`,
+        // `someone's`, `the boss's`). The lexicon stores the clitic `'s` as its
+        // own entry and carries no glued `today's` key, so these always miss
+        // above and the whole inflected token goes to BART G2P, which mangles
+        // it (`someone's` → "Samian's"). Resolve the stem and append the clitic
+        // by rule instead — same shape as Misaki's `Lexicon.stem_s`.
+        if let possessive = try await resolvePossessive(
+            word, lowered: lowered, fallback: fallback)
+        {
+            return possessive
+        }
+
         // A hyphenated compound that missed every lexicon as a whole
         // (`tales-to-amaze`) — resolve each part and join, so it reads as
         // `tales to amaze` instead of BART G2P on the glued `talestoamaze`
         // (issue #775). Real lexicon compounds (`twenty-one`) already returned
         // above, so only genuine misses reach here.
         if word.contains("-"),
-            let compound = try await resolveHyphenatedCompound(word, fallback: fallback)
+            let compound = try await resolveHyphenatedCompound(
+                word, allowFallback: allowFallback, fallback: fallback)
         {
             return compound
         }
 
-        guard !normalized.isEmpty else { return nil }
+        guard allowFallback, !normalized.isEmpty else { return nil }
         do {
             if let phonemes = try await fallback(normalized), !phonemes.isEmpty {
                 return phonemes.joined()
@@ -194,6 +215,7 @@ struct KokoroAneEnglishPhonemizer: Sendable {
     /// recurse back into itself.
     private func resolveHyphenatedCompound(
         _ word: String,
+        allowFallback: Bool = true,
         fallback: (String) async throws -> [String]?
     ) async throws -> String? {
         let parts = word.split(separator: "-", omittingEmptySubsequences: true).map(String.init)
@@ -202,12 +224,72 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         var resolved: [String] = []
         resolved.reserveCapacity(parts.count)
         for part in parts {
-            guard let ipa = try await resolveWord(part, fallback: fallback), !ipa.isEmpty else {
+            guard
+                let ipa = try await resolveWord(
+                    part, allowFallback: allowFallback, fallback: fallback),
+                !ipa.isEmpty
+            else {
                 return nil
             }
             resolved.append(ipa)
         }
         return resolved.joined(separator: " ")
+    }
+
+    // MARK: - Possessive / `-'s` clitic
+
+    /// Resolve a lower-cased token ending in `'s` as stem + `-s` clitic.
+    ///
+    /// Mirrors Misaki's `Lexicon.stem_s`, which only accepts the split when
+    /// the stem is a known word — so an OOV stem returns `nil` here and the
+    /// caller falls through to whole-token G2P exactly as before. The stem is
+    /// resolved through the normal chain minus the G2P fallback, which keeps
+    /// custom-lexicon overrides, letter-name spelling and hyphen splitting
+    /// working for compounds like `mother-in-law's`.
+    ///
+    /// - Parameters:
+    ///   - word: the token as written (apostrophes already folded to ASCII by
+    ///     ``normalizeApostrophes``). Original case is preserved so the stem
+    ///     can still reach case-sensitive entries (`NASA's`, `iPhone's`).
+    ///   - lowered: `word.lowercased()`, so `TODAY'S` matches too.
+    private func resolvePossessive(
+        _ word: String,
+        lowered: String,
+        fallback: (String) async throws -> [String]?
+    ) async throws -> String? {
+        // `len(word) < 3` in Misaki: a bare `'s` (and anything shorter than
+        // three characters) never stems.
+        guard lowered.count >= 3, lowered.hasSuffix("'s") else { return nil }
+        let stem = String(word.dropLast(2))
+        guard !stem.isEmpty, !stem.hasSuffix("'") else { return nil }
+
+        guard
+            let stemIPA = try await resolveWord(stem, allowFallback: false, fallback: fallback),
+            !stemIPA.isEmpty
+        else {
+            return nil
+        }
+        return stemIPA + Self.clitic(after: stemIPA)
+    }
+
+    /// Voiceless non-sibilant obstruents — the `-s` clitic devoices after
+    /// these (`cat's` → `kˈæts`).
+    private static let voicelessNonSibilants: Set<Character> = ["p", "t", "k", "f", "θ"]
+
+    /// Sibilants — the clitic takes an epenthetic vowel after these
+    /// (`boss's` → `bˈɑsᵻz`). Note the Misaki lexicon spells the affricates
+    /// with the single-scalar ligatures `ʧ` / `ʤ`, not `tʃ` / `dʒ`.
+    private static let sibilants: Set<Character> = ["s", "z", "ʃ", "ʒ", "ʧ", "ʤ"]
+
+    /// The `-s` clitic phoneme for a stem, by English phonology — a direct
+    /// port of Misaki's `Lexicon._s`. The US form of the epenthetic vowel is
+    /// `ᵻ` (Misaki uses `ɪ` only when `british`); this frontend loads the US
+    /// lexicon, and `ᵻ` is in the chain's `vocab.json`.
+    static func clitic(after stemIPA: String) -> String {
+        guard let last = stemIPA.last else { return "z" }
+        if voicelessNonSibilants.contains(last) { return "s" }
+        if sibilants.contains(last) { return "ᵻz" }
+        return "z"
     }
 
     // MARK: - Letter-name initialisms (issue #710)
