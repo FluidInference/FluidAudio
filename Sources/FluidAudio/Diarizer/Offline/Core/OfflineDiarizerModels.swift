@@ -111,6 +111,8 @@ public struct OfflineDiarizerModels: Sendable {
             throw OfflineDiarizationError.modelNotLoaded(ModelNames.OfflineDiarizer.pldaRho)
         }
 
+        // CPU is fastest for FBank, but on macOS 14 this pins every FBank
+        // prediction to the crash-prone BNNS path (#878).
         let fbankComputeUnits: MLComputeUnits = .cpuOnly
         let fbankModels = try await ModelHub.loadModels(
             .diarizer,

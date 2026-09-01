@@ -191,6 +191,8 @@ let diarizer = DiarizerManager(config: config)
 
 > Requires macOS 14 / iOS 17 or later. The offline stack uses native C++ clustering and AsyncStream coordination that are unavailable on older OS releases.
 
+> **Known OS issue — macOS 14 can crash in BNNS.** macOS 14 (all patch levels through at least 14.8.7) carries an Apple bug that crashes Core ML predictions on the BNNS CPU path (`EXC_BAD_ACCESS` in `libBNNS`, `BNNSGraphContextExecute_v2` → `_platform_memmove`). Offline diarization is the component most exposed because its FBank model always runs on CPU. Nothing at the library or app level avoids it — serialized pipelines, single-model runs, and every compute-unit routing all crash ([#878](https://github.com/FluidInference/FluidAudio/issues/878), 1200/1200 reproduction on macOS 14 CI runners; also [#661](https://github.com/FluidInference/FluidAudio/issues/661)). On machines without a Neural Engine (VMs, CI runners) the crash is deterministic; on Apple Silicon it is intermittent, striking when predictions fall back from the ANE to BNNS. Apple fixed it in macOS 15 — the only remedy is updating the OS. `OfflineDiarizerManager` logs a warning when initialized on an affected build. (This is a distinct bug from the macOS/iOS 26.4–26.5 BNNS crash documented for Kokoro TTS in [KokoroAne.md](../TTS/KokoroAne.md).)
+
 When you need full parity with the pyannote/Core ML exporter (powerset segmentation + VBx clustering), use `OfflineDiarizerManager`. It orchestrates segmentation, soft mask interpolation, WeSpeaker embedding extraction, PLDA/VBx clustering, and timeline reconstruction in one place:
 
 ```swift

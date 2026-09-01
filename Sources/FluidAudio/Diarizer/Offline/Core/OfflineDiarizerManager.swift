@@ -17,8 +17,33 @@ public final class OfflineDiarizerManager {
     }
 
     public func initialize(models: OfflineDiarizerModels) {
+        if Self.isBnnsCrashProneOS(ProcessInfo.processInfo.operatingSystemVersion) {
+            logger.warning(
+                "macOS 14 has a known Apple BNNS bug that can crash offline "
+                    + "diarization (EXC_BAD_ACCESS in libBNNS) regardless of compute-unit "
+                    + "routing or serialization. Fixed in macOS 15. "
+                    + "See https://github.com/FluidInference/FluidAudio/issues/878")
+        }
         self.models = models
         logger.info("Offline diarizer models initialized")
+    }
+
+    #if os(macOS)
+    private static let runningOnMacOS = true
+    #else
+    private static let runningOnMacOS = false
+    #endif
+
+    /// macOS 14 carries an Apple BNNS bug that crashes Core ML predictions on
+    /// the BNNS CPU path (`BNNSGraphContextExecute_v2` → `_platform_memmove`,
+    /// #661/#878). Deterministic on machines without an ANE, intermittent on
+    /// Apple Silicon when predictions fall back from the ANE. No usage pattern
+    /// avoids it; Apple fixed it in macOS 15. iOS is unflagged — no reproduction
+    /// has been reported on the iOS 17 line.
+    static func isBnnsCrashProneOS(
+        _ version: OperatingSystemVersion, onMacOS: Bool = runningOnMacOS
+    ) -> Bool {
+        onMacOS && version.majorVersion == 14
     }
 
     /// Ensure offline diarizer models are available, downloading and compiling them when needed.
