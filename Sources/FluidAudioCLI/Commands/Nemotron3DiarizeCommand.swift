@@ -26,7 +26,9 @@ enum Nemotron3DiarizeCommand {
                 --output <file>      Write RTTM hypothesis
 
             nemotron3-benchmark options:
-                --dataset <name>     ami (default: ami)
+                --dataset <name>     ami | ami-sdm | alimeeting-far | alimeeting-near |
+                                     notsofar-mhm | notsofar-sc | voxconverse | callhome
+                                     (default: ami — the AMI test MHM/Mix-Headset condition)
                 --single-file <name> Process one meeting (e.g. ES2004a)
                 --max-files <n>      Limit number of files
                 --collar <sec>       DER collar (default: 0)
@@ -544,11 +546,14 @@ enum Nemotron3DiarizeCommand {
             let avgFA = results.map(\.falseAlarmRate).reduce(0, +) / Float(results.count)
             let avgConf = results.map(\.speakerErrorRate).reduce(0, +) / Float(results.count)
             let avgRTFx = results.map(\.rtfx).reduce(0, +) / Float(results.count)
-            print("\n=== Nemotron 3 Diarization (\(variantName)) — AMI SDM test (\(results.count) files) ===")
+            let (sca, mae) = DiarizationBenchmarkUtils.speakerCountMetrics(results: results)
+            print(
+                "\n=== Nemotron 3 Diarization (\(variantName)) — \(dataset.rawValue) (\(results.count) files) ===")
             print("Avg DER:  \(String(format: "%.2f", avgDER))%")
             print(
                 "  miss \(String(format: "%.2f", avgMiss))%  fa \(String(format: "%.2f", avgFA))%  "
                     + "conf \(String(format: "%.2f", avgConf))%")
+            print("SCA: \(String(format: "%.2f", sca))%  MAE: \(String(format: "%.4f", mae))")
             print("Avg RTFx: \(String(format: "%.1f", avgRTFx))x")
 
             if let outputFile {
