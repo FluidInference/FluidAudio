@@ -310,3 +310,47 @@ config.
 - **Optimization hints can backfire.** `MLOptimizationHints(reshapeFrequency: .infrequent,
   specializationStrategy: .fastPrediction)` regressed RTFx 26% on a static-shape encoder. Re-bench
   before enabling. See `Sources/FluidAudio/Shared/MLModelConfigurationUtils.swift`.
+
+## Why convolutions love the ANE and attention doesn't
+
+The gotchas above are symptoms of one architectural fact: the ANE is a **weight-stationary
+convolution engine**, while attention is built from the two things such an engine handles worst —
+activation-by-activation matmuls and layout shuffles. This is why conv-heavy audio models in this
+repo profile at 93–100% ANE while transformer stacks split, fall back, or deliberately ship on GPU.
+
+**What the ANE is built for.** The engine multiplies a *fixed* weight tensor against streaming
+activations in a channels-major 4D layout. Convolutions fit exactly: kernel weights load once into
+the MAC array and are reused at every spatial position, arithmetic intensity is high, shapes are
+static, and activations stay in local SRAM. Kokoro's conv vocoder (99% ANE) and the WeSpeaker
+embedding (93%) are the canonical wins.
+
+**Where attention fights the hardware:**
+
+- **No stationary weight.** `QKᵀ` and `attn×V` multiply two runtime activations — there is nothing
+  to pin in the MAC array, so the reuse model that makes convs fast simply doesn't apply, and
+  utilization drops.
+- **Layout and transposes.** The transformer-native `(batch, seq, dim)` layout isn't what the engine
+  speaks; graphs must be reformulated to `(B, C, 1, S)` pseudo-images with attention expressed as
+  1×1 convs (Apple's `ane_transformers` recipe). The `Kᵀ` transpose is not a free register swizzle
+  as on GPU — it's a real memory-bound data-movement op, and a naive attention graph is full of them.
+- **Softmax stalls the pipeline.** A bandwidth-bound reduction sandwiched between the two matmuls;
+  the MAC array idles through it.
+- **S×S doesn't tile.** The attention matrix grows quadratically with sequence length and blows past
+  the engine's static tile sizes, forcing chunking, DRAM round-trips, or silent CPU/GPU fallback of
+  individual ops.
+- **KV caches are dynamic state.** Autoregressive decode changes shape every step — see the
+  dynamic-shape and `MLState` gotchas above. This is why PocketTTS's flowlm (rank-5 KV-cache
+  `scatter`) is rejected by the ANE compiler at any precision, and why LLM prefill (big, static,
+  batched matmuls) maps to the ANE while decode does not.
+
+**Why the GPU wins those graphs.** A RoPE transformer encoder is a stack of large dense GEMMs plus
+softmax — precisely what GPU shader cores stream at full memory bandwidth with no layout gymnastics.
+The Parakeet v3 encoder shipping on `.cpuAndGPU` (+8% RTFx) is this effect, not a tuning accident.
+The mirror image holds on NVIDIA hardware: tensor cores are GEMM engines, so convolutions must be
+lowered to implicit GEMM and small-channel speech convs utilize them poorly — an architecture chosen
+for GPU training throughput tends to be ANE-hostile, and vice versa.
+
+Practical consequence: for transformer graphs, treat the ANE as a *power/residency* play (fits in
+95–200 MB, frees the GPU, sips battery on iOS) that usually costs peak Mac throughput, and expect to
+earn residency via graph surgery — static shapes, split graphs, fused loops, quantization — rather
+than a config flag. For conv graphs, the ANE is usually free performance.
