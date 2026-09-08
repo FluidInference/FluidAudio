@@ -25,7 +25,7 @@ let package = Package(
             dependencies: [
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
-                "NemoTextProcessing",
+                .target(name: "NemoTextProcessing", condition: .when(platforms: [.macOS, .iOS])),
             ],
             path: "Sources/FluidAudio",
             exclude: ["ASR/Parakeet/Unified/benchmark.md"],

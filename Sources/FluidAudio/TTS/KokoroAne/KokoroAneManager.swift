@@ -227,7 +227,11 @@ public actor KokoroAneManager {
             // Normalize written forms to their Mandarin reading before
             // segmentation — e.g. "$5" → "五美元", "2024年" → "二零二四年" —
             // so the numeric/semiotic tokens reach MandarinG2P as Hanzi.
+            #if canImport(CNemoTextProcessing)
             let normalized = NemoTextNormalizer.normalize(text, language: .mandarin)
+            #else
+            let normalized = text
+            #endif
             if MandarinG2P.looksLikeHanzi(normalized) {
                 let g2p = try await store.mandarinG2PPipeline()
                 return try await g2p.phonemize(normalized)

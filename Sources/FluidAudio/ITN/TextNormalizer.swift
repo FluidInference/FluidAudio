@@ -1,3 +1,4 @@
+#if canImport(CNemoTextProcessing)
 import CNemoTextProcessing
 import Foundation
 import NaturalLanguage
@@ -254,3 +255,5 @@ public final class TextNormalizer: Sendable {
         return out
     }
 }
+
+#endif

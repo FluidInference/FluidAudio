@@ -1,3 +1,4 @@
+#if canImport(CNemoTextProcessing)
 import CNemoTextProcessing
 import Foundation
 
@@ -34,3 +35,5 @@ public enum NemoTextNormalizer {
         return String(cString: ptr)
     }
 }
+
+#endif
