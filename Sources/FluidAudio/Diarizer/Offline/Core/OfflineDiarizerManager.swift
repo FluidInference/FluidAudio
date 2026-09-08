@@ -20,8 +20,11 @@ public final class OfflineDiarizerManager {
         if Self.isBnnsCrashProneOS(ProcessInfo.processInfo.operatingSystemVersion) {
             logger.warning(
                 "macOS 14 has a known Apple BNNS bug that can crash offline "
-                    + "diarization (EXC_BAD_ACCESS in libBNNS) regardless of compute-unit "
-                    + "routing or serialization. Fixed in macOS 15. "
+                    + "diarization (EXC_BAD_ACCESS in libBNNS) when predictions run on the "
+                    + "BNNS CPU path. Reproduced 1200/1200 with .cpuAndNeuralEngine on "
+                    + "hosts without an ANE; serialization does not help. GPU-enabled "
+                    + "routing (.all) is reported to stop reproduction but is unverified. "
+                    + "Fixed in macOS 15. "
                     + "See https://github.com/FluidInference/FluidAudio/issues/878")
         }
         self.models = models
@@ -37,9 +40,11 @@ public final class OfflineDiarizerManager {
     /// macOS 14 carries an Apple BNNS bug that crashes Core ML predictions on
     /// the BNNS CPU path (`BNNSGraphContextExecute_v2` → `_platform_memmove`,
     /// #661/#878). Deterministic on machines without an ANE, intermittent on
-    /// Apple Silicon when predictions fall back from the ANE. No usage pattern
-    /// avoids it; Apple fixed it in macOS 15. iOS is unflagged — no reproduction
-    /// has been reported on the iOS 17 line.
+    /// Apple Silicon when predictions fall back from the ANE. Serialization does
+    /// not avoid it. The #878 matrix only tested `.cpuAndNeuralEngine`; its
+    /// harness notes that GPU-enabled routing (`.all`) stops reproduction, which
+    /// is unverified as a mitigation. Apple fixed it in macOS 15. iOS is
+    /// unflagged — no reproduction has been reported on the iOS 17 line.
     static func isBnnsCrashProneOS(
         _ version: OperatingSystemVersion, onMacOS: Bool = runningOnMacOS
     ) -> Bool {
