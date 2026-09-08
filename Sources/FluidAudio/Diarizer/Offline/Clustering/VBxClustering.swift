@@ -27,6 +27,7 @@ struct VBxClustering {
     private let config: OfflineDiarizerConfig
     private let pldaTransform: PLDATransform
     private let logger = AppLogger(category: "OfflineVBx")
+    private static let constraintLogger = AppLogger(category: "OfflineVBx")
     private let signposter = OSSignposter(
         subsystem: "com.fluidaudio.diarization",
         category: .pointsOfInterest
@@ -690,23 +691,64 @@ struct VBxClustering {
     ) -> VBxOutput {
         let output = refine(rhoFeatures: rhoFeatures, initialClusters: initialClusters)
 
+        return Self.applyConstraints(
+            to: output,
+            trainingEmbeddings: trainingEmbeddings,
+            constraints: constraints
+        )
+    }
+
+    /// Re-clusters a VBx output to satisfy speaker count constraints.
+    ///
+    /// Split out of `refineWithConstraints` and made static so the constraint
+    /// decision can be exercised without PLDA models: everything below the VBx
+    /// refinement itself is pure arithmetic over the output.
+    ///
+    /// - Parameters:
+    ///   - output: The VBx refinement to check.
+    ///   - trainingEmbeddings: Original embeddings for K-Means re-clustering.
+    ///   - constraints: Speaker count constraints; `nil` leaves `output` untouched.
+    /// - Returns: `output`, or a K-Means re-clustering of it at the target count.
+    static func applyConstraints(
+        to output: VBxOutput,
+        trainingEmbeddings: [[Double]],
+        constraints: SpeakerCountConstraints?
+    ) -> VBxOutput {
         guard let constraints = constraints else {
             return output
         }
 
-        // Compare against the clusters embeddings actually land in, not the AHC
-        // warm-start count (re-clusters even when VBx already agrees, #801) and
-        // not the pi > epsilon census: a cluster can keep trace mixture weight
-        // while winning no embedding's argmax, so it vanishes from the output.
-        // Gating on the pi census then silently ignores a numSpeakers request
-        // that matches it while the caller sees fewer speakers (#802 review).
-        let detectedCount = output.assignedClusterCount
+        // Both censuses have to fit the bounds, because both are visible
+        // downstream, and neither is the AHC warm-start count (gating on that
+        // re-clusters even when VBx already agrees, #801).
+        //
+        // The argmax census is the count embeddings actually land in: a cluster
+        // can keep trace mixture weight while winning no embedding's argmax, so
+        // gating on the pi census alone silently ignores a numSpeakers request
+        // that matches it while the caller sees fewer speakers (#802).
+        //
+        // The pi census still has to fit too. Centroid construction covers every
+        // cluster with pi > epsilon — pyannote parity, so constrained assignment
+        // can place a speaker sharing a chunk onto a cluster that won no argmax.
+        // That revives a cluster this check had excluded, and the result exceeds
+        // numSpeakers/maxSpeakers with no adjustment having run.
+        //
+        // The argmax census leads when both are out of bounds: it is what #802
+        // tuned the adjustment around, so an under-count still re-clusters to
+        // the same target as before. The pi census only decides cases the argmax
+        // census called satisfied.
+        let assignedCount = output.assignedClusterCount
+        let activeCount = output.activeClusterCount
+        let detectedCount =
+            constraints.needsAdjustment(detectedCount: assignedCount)
+            ? assignedCount
+            : activeCount
         guard constraints.needsAdjustment(detectedCount: detectedCount) else {
             return output
         }
 
         let targetCount = constraints.targetCount(detectedCount: detectedCount)
-        logger.info(
+        constraintLogger.info(
             "Speaker count \(detectedCount) outside bounds [\(constraints.minSpeakers), \(constraints.maxSpeakers)]; re-clustering to \(targetCount)"
         )
 
