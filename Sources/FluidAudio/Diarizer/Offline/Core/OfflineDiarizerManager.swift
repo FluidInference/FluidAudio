@@ -407,37 +407,13 @@ public final class OfflineDiarizerManager {
             )
         }
 
-        let centroidComputation = computeCentroids(
-            trainingEmbeddings: trainingEmbeddings,
+        let (centroids, assignments) = clusterAssignments(
             vbxOutput: vbxOutput,
-            initialClusters: initialClusters
+            trainingEmbeddings: trainingEmbeddings,
+            embeddingFeatures: embeddingFeatures,
+            initialClusters: initialClusters,
+            chunkIndices: timedEmbeddings.map(\.chunkIndex)
         )
-        var centroids = centroidComputation.centroids
-        if centroids.isEmpty {
-            centroids = computeFallbackCentroids(from: embeddingFeatures)
-        }
-        // pyannote parity: constrain co-chunk speakers to distinct clusters, but
-        // not when the count was forced via K-Means — the constraint can then
-        // artificially inflate the number of speakers.
-        let useConstrainedAssignment =
-            config.clustering.constrainedAssignment
-            && !vbxOutput.wasAdjusted
-            && centroids.count > 1
-        let assignments: [Int]
-        if useConstrainedAssignment {
-            assignments = ConstrainedClusterAssignment.assign(
-                scores: centroidScores(
-                    embeddingFeatures: embeddingFeatures,
-                    centroids: centroids
-                ),
-                chunkIndices: timedEmbeddings.map(\.chunkIndex)
-            )
-        } else {
-            assignments = assignEmbeddings(
-                embeddingFeatures: embeddingFeatures,
-                centroids: centroids
-            )
-        }
 
         let chunkAssignments = buildChunkAssignments(
             segmentation: segmentation,
@@ -673,6 +649,54 @@ public final class OfflineDiarizerManager {
         }
 
         return selected
+    }
+
+    /// Turns a VBx output into per-embedding cluster assignments.
+    ///
+    /// Split out of `cluster(_:)` so the centroid census and the assignment rule
+    /// can be exercised together without CoreML models: given a `VBxOutput`, the
+    /// rest of this stage is pure arithmetic. The speaker count a caller finally
+    /// observes is `Set(assignments).count`, which is what speaker count
+    /// constraints have to hold for.
+    func clusterAssignments(
+        vbxOutput: VBxOutput,
+        trainingEmbeddings: [[Double]],
+        embeddingFeatures: [[Double]],
+        initialClusters: [Int],
+        chunkIndices: [Int]
+    ) -> (centroids: [[Double]], assignments: [Int]) {
+        let centroidComputation = computeCentroids(
+            trainingEmbeddings: trainingEmbeddings,
+            vbxOutput: vbxOutput,
+            initialClusters: initialClusters
+        )
+        var centroids = centroidComputation.centroids
+        if centroids.isEmpty {
+            centroids = computeFallbackCentroids(from: embeddingFeatures)
+        }
+        // pyannote parity: constrain co-chunk speakers to distinct clusters, but
+        // not when the count was forced via K-Means — the constraint can then
+        // artificially inflate the number of speakers.
+        let useConstrainedAssignment =
+            config.clustering.constrainedAssignment
+            && !vbxOutput.wasAdjusted
+            && centroids.count > 1
+        let assignments: [Int]
+        if useConstrainedAssignment {
+            assignments = ConstrainedClusterAssignment.assign(
+                scores: centroidScores(
+                    embeddingFeatures: embeddingFeatures,
+                    centroids: centroids
+                ),
+                chunkIndices: chunkIndices
+            )
+        } else {
+            assignments = assignEmbeddings(
+                embeddingFeatures: embeddingFeatures,
+                centroids: centroids
+            )
+        }
+        return (centroids, assignments)
     }
 
     private func computeCentroids(
