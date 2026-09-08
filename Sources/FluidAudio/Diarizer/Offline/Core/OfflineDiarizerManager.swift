@@ -4,6 +4,12 @@ import Foundation
 import OSLog
 
 @available(macOS 14.0, iOS 17.0, *)
+private enum OfflinePreparationWorkerResult: Sendable {
+    case segmentation(SegmentationOutput, TimeInterval)
+    case embeddings([TimedEmbedding], TimeInterval)
+}
+
+@available(macOS 14.0, iOS 17.0, *)
 public final class OfflineDiarizerManager {
     private let logger = AppLogger(category: "OfflineDiarizer")
     private let config: OfflineDiarizerConfig
@@ -187,64 +193,93 @@ public final class OfflineDiarizerManager {
         let capturedModels = models
         let capturedConfig = config
 
-        let segmentationTask = Task.detached(priority: .userInitiated) {
-            [capturedModels, capturedConfig] () throws -> (SegmentationOutput, TimeInterval) in
-            let processor = OfflineSegmentationProcessor()
-            let start = Date()
-            do {
-                let segmentation = try await processor.process(
-                    audioSource: audioSource,
-                    segmentationModel: capturedModels.segmentationModel,
-                    config: capturedConfig,
-                    chunkHandler: { chunk in
-                        progressCallback?(chunk.chunkIndex + 1, totalChunks)
-                        switch chunkContinuation.yield(chunk) {
-                        case .enqueued, .dropped:
-                            return .continue
-                        case .terminated:
-                            return .stop
-                        @unknown default:
-                            return .stop
+        let results = try await withThrowingTaskGroup(
+            of: OfflinePreparationWorkerResult.self,
+            returning: (
+                segmentation: (SegmentationOutput, TimeInterval),
+                embeddings: ([TimedEmbedding], TimeInterval)
+            ).self
+        ) { group in
+            group.addTask(priority: .userInitiated) { [capturedModels, capturedConfig] in
+                let processor = OfflineSegmentationProcessor()
+                let start = Date()
+                do {
+                    let segmentation = try await processor.process(
+                        audioSource: audioSource,
+                        segmentationModel: capturedModels.segmentationModel,
+                        config: capturedConfig,
+                        chunkHandler: { chunk in
+                            progressCallback?(chunk.chunkIndex + 1, totalChunks)
+                            switch chunkContinuation.yield(chunk) {
+                            case .enqueued, .dropped:
+                                return .continue
+                            case .terminated:
+                                return .stop
+                            @unknown default:
+                                return .stop
+                            }
                         }
-                    }
+                    )
+                    chunkContinuation.finish()
+                    return .segmentation(
+                        segmentation,
+                        Date().timeIntervalSince(start)
+                    )
+                } catch {
+                    chunkContinuation.finish(throwing: error)
+                    throw error
+                }
+            }
+
+            group.addTask(priority: .userInitiated) { [capturedModels, capturedConfig] in
+                let extractor = OfflineEmbeddingExtractor(
+                    fbankModel: capturedModels.fbankModel,
+                    embeddingModel: capturedModels.embeddingModel,
+                    pldaTransform: PLDATransform(
+                        pldaRhoModel: capturedModels.pldaRhoModel,
+                        psi: capturedModels.pldaPsi
+                    ),
+                    config: capturedConfig
                 )
-                chunkContinuation.finish()
-                return (segmentation, Date().timeIntervalSince(start))
+                let start = Date()
+                let embeddings = try await extractor.extractEmbeddings(
+                    audioSource: audioSource,
+                    segmentationStream: chunkStream
+                )
+                return .embeddings(
+                    embeddings,
+                    Date().timeIntervalSince(start)
+                )
+            }
+
+            var segmentationResult: (SegmentationOutput, TimeInterval)?
+            var embeddingResult: ([TimedEmbedding], TimeInterval)?
+
+            do {
+                while let result = try await group.next() {
+                    switch result {
+                    case .segmentation(let segmentation, let duration):
+                        segmentationResult = (segmentation, duration)
+                    case .embeddings(let embeddings, let duration):
+                        embeddingResult = (embeddings, duration)
+                    }
+                }
             } catch {
+                group.cancelAll()
                 chunkContinuation.finish(throwing: error)
                 throw error
             }
+
+            guard let segmentationResult, let embeddingResult else {
+                throw OfflineDiarizationError.processingFailed(
+                    "Offline preparation workers ended without complete results"
+                )
+            }
+            return (segmentationResult, embeddingResult)
         }
 
-        let embeddingTask = Task.detached(priority: .userInitiated) {
-            [capturedModels, capturedConfig] () throws -> ([TimedEmbedding], TimeInterval) in
-            let extractor = OfflineEmbeddingExtractor(
-                fbankModel: capturedModels.fbankModel,
-                embeddingModel: capturedModels.embeddingModel,
-                pldaTransform: PLDATransform(pldaRhoModel: capturedModels.pldaRhoModel, psi: capturedModels.pldaPsi),
-                config: capturedConfig
-            )
-            let start = Date()
-            let embeddings = try await extractor.extractEmbeddings(
-                audioSource: audioSource,
-                segmentationStream: chunkStream
-            )
-            return (embeddings, Date().timeIntervalSince(start))
-        }
-
-        let segmentationResult: (SegmentationOutput, TimeInterval)
-        let embeddingResult: ([TimedEmbedding], TimeInterval)
-        do {
-            async let awaitedSegmentation = segmentationTask.value
-            async let awaitedEmbeddings = embeddingTask.value
-            segmentationResult = try await awaitedSegmentation
-            embeddingResult = try await awaitedEmbeddings
-        } catch {
-            segmentationTask.cancel()
-            embeddingTask.cancel()
-            chunkContinuation.finish(throwing: error)
-            throw error
-        }
+        let segmentationResult = results.segmentation
+        let embeddingResult = results.embeddings
 
         let (segmentation, segmentationTime) = segmentationResult
         logger.debug("Segmentation completed in \(segmentationTime)s (async)")
