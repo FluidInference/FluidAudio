@@ -16,9 +16,14 @@ import Foundation
 ///      citation form (`tˈO`) that over-stresses them (issue #691)
 ///   6. strict ASCII all-caps initialisms (`FBI`, `ATP`) spelled as
 ///      letter names after a full lexicon miss (issue #710)
-///   7. `-'s` stem + clitic for possessives whose stem is a known word
-///      (`today's` → `today` + /z/), mirroring Misaki's `stem_s`
-///   8. BART G2P CoreML fallback for OOV words (injected by the caller)
+///   7. hyphenated-compound split for a token that missed as a whole
+///      (`land-use's` → `land` + `use's`), resolving each part through
+///      this same chain (issue #775)
+///   8. `-'s` stem + clitic for possessives whose stem is a known word
+///      (`today's` → `today` + /z/), mirroring Misaki's `stem_s`. It runs
+///      *after* the hyphen split so a compound's final part can still hit
+///      a glued lexicon entry of its own
+///   9. BART G2P CoreML fallback for OOV words (injected by the caller)
 ///
 /// Punctuation supported by the chain's `vocab.json` (`, . ! ? ; …` etc.)
 /// is preserved and attached to the preceding word — Kokoro treats those
@@ -170,28 +175,41 @@ struct KokoroAneEnglishPhonemizer: Sendable {
             return spelled
         }
 
-        // A possessive / `-'s` clitic whose stem is a known word (`today's`,
-        // `someone's`, `the boss's`). The lexicon stores the clitic `'s` as its
-        // own entry and carries no glued `today's` key, so these always miss
-        // above and the whole inflected token goes to BART G2P, which mangles
-        // it (`someone's` → "Samian's"). Resolve the stem and append the clitic
-        // by rule instead — same shape as Misaki's `Lexicon.stem_s`.
-        if let possessive = try await resolvePossessive(
-            word, lowered: lowered, fallback: fallback)
-        {
-            return possessive
-        }
-
         // A hyphenated compound that missed every lexicon as a whole
         // (`tales-to-amaze`) — resolve each part and join, so it reads as
         // `tales to amaze` instead of BART G2P on the glued `talestoamaze`
         // (issue #775). Real lexicon compounds (`twenty-one`) already returned
         // above, so only genuine misses reach here.
+        //
+        // This runs BEFORE the possessive rule on purpose. The lexicon carries
+        // ~350 glued `-'s` entries for heteronyms whose possessive does not
+        // read as the bare word plus a clitic (`use` = `jˈuz` the verb but
+        // `use's` = `jˈusᵻz` the noun; `produce` = `pɹədˈus` but `produce's` =
+        // `pɹˈOdˌusᵻz`). Splitting first lets the final part reach its own
+        // entry (`land-use's` → `land` + `use's`); stemming first would strip
+        // the `'s`, split the stem, and derive the wrong (verb) reading. The
+        // stem-and-clitic derivation still handles compounds with no glued
+        // entry, because each part is resolved through this same chain
+        // (`mother-in-law's` → `mother` + `in` + `law's` → `law` + /z/).
         if word.contains("-"),
             let compound = try await resolveHyphenatedCompound(
                 word, allowFallback: allowFallback, fallback: fallback)
         {
             return compound
+        }
+
+        // A possessive / `-'s` clitic whose stem is a known word (`today's`,
+        // `someone's`, `the boss's`). The lexicon stores the clitic `'s` as its
+        // own entry and has no glued key for ordinary words like `today's`, so
+        // these miss above and the whole inflected token goes to BART G2P,
+        // which mangles it (`someone's` → "Samian's"). Resolve the stem and
+        // append the clitic by rule instead — same shape as Misaki's
+        // `Lexicon.stem_s`. Glued entries that *do* exist won the lexicon
+        // lookups above, so this only fires on genuine misses.
+        if let possessive = try await resolvePossessive(
+            word, lowered: lowered, fallback: fallback)
+        {
+            return possessive
         }
 
         guard allowFallback, !normalized.isEmpty else { return nil }
@@ -244,8 +262,12 @@ struct KokoroAneEnglishPhonemizer: Sendable {
     /// the stem is a known word — so an OOV stem returns `nil` here and the
     /// caller falls through to whole-token G2P exactly as before. The stem is
     /// resolved through the normal chain minus the G2P fallback, which keeps
-    /// custom-lexicon overrides, letter-name spelling and hyphen splitting
-    /// working for compounds like `mother-in-law's`.
+    /// custom-lexicon overrides and letter-name spelling working.
+    ///
+    /// Hyphenated tokens are split before this rule is reached, so a compound
+    /// arrives here only one part at a time (`mother-in-law's` → `law's` →
+    /// `law` + /z/). That ordering keeps a part with its own glued lexicon
+    /// entry (`land-use's` → `use's`) from being re-derived from its stem.
     ///
     /// - Parameters:
     ///   - word: the token as written (apostrophes already folded to ASCII by

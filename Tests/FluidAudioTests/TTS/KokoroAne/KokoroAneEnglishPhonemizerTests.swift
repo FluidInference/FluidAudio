@@ -356,7 +356,9 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
 
     /// Lexicon stand-in for the possessive cases. Mirrors the real
     /// `us_lexicon_cache.json`, which stores the clitic `'s` as its own entry
-    /// and carries no glued `today's` / `someone's` / `boss's` keys.
+    /// and carries no glued `today's` / `someone's` / `boss's` keys — but does
+    /// carry 347 glued `-'s` keys for heteronyms whose possessive reads
+    /// differently from the bare word (`use's`, `produce's`).
     private let possessiveLexicon: [String: [String]] = [
         "'s": ["z"],
         "today": ["t", "ə", "d", "ˈ", "A"],
@@ -369,6 +371,15 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         "law": ["l", "ˈ", "ɔ"],
         "in": ["ɪ", "n"],
         "mother": ["m", "ˈ", "ʌ", "ð", "ɜ", "ɹ"],
+        // Heteronym pairs the real lexicon glues: the bare verb and the noun
+        // possessive have different vowels/stress, so the glued key is the
+        // only way to reach the noun reading.
+        "use": ["j", "ˈ", "u", "z"],
+        "use's": ["j", "ˈ", "u", "s", "ᵻ", "z"],
+        "produce": ["p", "ɹ", "ə", "d", "ˈ", "u", "s"],
+        "produce's": ["p", "ɹ", "ˈ", "O", "d", "ˌ", "u", "s", "ᵻ", "z"],
+        "land": ["l", "ˈ", "æ", "n", "d"],
+        "fresh": ["f", "ɹ", "ˈ", "ɛ", "ʃ"],
     ]
 
     private func makePossessivePhonemizer() -> KokoroAneEnglishPhonemizer {
@@ -452,6 +463,32 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         let result = try await makePossessivePhonemizer()
             .phonemize("mother-in-law's") { await recorder.g2p($0) }
         XCTAssertEqual(result, "mˈʌðɜɹ ɪn lˈɔz")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty, "every part is in the lexicon")
+    }
+
+    func testHyphenatedCompoundPartHitsGluedPossessiveEntry() async throws {
+        let recorder = FallbackRecorder()
+        // `use` is a verb (`jˈuz`) but `use's` is the noun possessive
+        // (`jˈusᵻz`) — a heteronym pair the real lexicon spells out. The
+        // hyphen split has to run *before* the possessive rule so `use's`
+        // reaches its own entry; stemming first would produce the verb plus a
+        // clitic (`jˈuzz`-shaped).
+        let result = try await makePossessivePhonemizer()
+            .phonemize("land-use's") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "lˈænd jˈusᵻz")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty, "every part is in the lexicon")
+    }
+
+    func testHyphenatedCompoundPartKeepsHeteronymStress() async throws {
+        let recorder = FallbackRecorder()
+        // Same shape as above with a stress-shifting heteronym: the verb
+        // `produce` is `pɹədˈus`, the noun possessive `produce's` is
+        // `pɹˈOdˌusᵻz`. Only the glued entry carries the noun stress.
+        let result = try await makePossessivePhonemizer()
+            .phonemize("fresh-produce's") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "fɹˈɛʃ pɹˈOdˌusᵻz")
         let recorded = await recorder.words
         XCTAssertTrue(recorded.isEmpty, "every part is in the lexicon")
     }
