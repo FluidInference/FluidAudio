@@ -167,6 +167,16 @@ Splitting priority:
 ## CoreML Details
 
 - Per-model compute units (measured fastest, v2.1): `flowlm`/`flow_decoder_fused` `.all`, `cond_prefill` `.all` (GPU), `mimi_decoder` `.cpuOnly`. Only the fused flow decoder reaches the ANE; mimi stays off the ANE (fp16 streaming-state feedback causes audible artifacts there)
+- **Overriding compute units (#881).** The defaults above are measured on M-series / macOS 26 and are not tunable through `placement`, which only swaps model variants. Some hardware/OS pairs reject a default placement — an M1 Max on macOS 26.6.2 aborts `flow_decoder_fused` on the ANE (`ANEProgramProcessRequestDirect status=0x16`) at both precisions and both placements. Pass `PocketTtsComputeUnits` to `PocketTtsManager` / `PocketTtsModelStore`; every field is optional and `nil` keeps that stage's default:
+
+  ```swift
+  // Keep every stage off the Neural Engine (GPU for the transformer stages, CPU for mimi)
+  let tts = PocketTtsManager(computeUnits: .avoidNeuralEngine)
+  // Or move just the failing stage
+  let tts = PocketTtsManager(computeUnits: PocketTtsComputeUnits(flowDecoder: .cpuAndGPU))
+  ```
+
+  CLI: `fluidaudiocli tts "…" --backend pocket --compute-units no-ane` (also `default`, `all`, `cpu-gpu`, `cpu-ane`, `cpu-only`). Under `.aneState` placement the `flowLM` field governs the fused `pocket_state` functions; that placement is ANE-resident by design, so pair `.avoidNeuralEngine` with `.gpu`.
 - Models compiled from `.mlpackage` → `.mlmodelc` on first load, cached on disk
 - `PocketTtsModelStore` is an actor — thread-safe access to loaded models
 - Voice data cached per voice name to avoid reloading
