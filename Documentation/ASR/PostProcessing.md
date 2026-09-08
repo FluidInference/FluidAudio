@@ -87,4 +87,33 @@ With the trait disabled:
 - Every normalization call returns its input unchanged; `version` is `nil`; custom rules are ignored (a warning is logged).
 - TTS frontends run without NeMo normalization: Kokoro English falls back to the built-in `EnglishTextNormalizer` rules, and Kokoro Mandarin verbalizes numerals with `MandarinNumberNormalizer`. Keep the trait enabled for byte-exact NeMo readings.
 
+**Xcode projects.** Xcode 26.3 has no UI or pbxproj key for package traits (support appears in 26.4). Until then, wrap the dependency in a one-target local package that sets the trait and re-exports the module, and link the app against that instead of FluidAudio directly:
+
+```swift
+// FluidAudioShim/Package.swift
+// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: "FluidAudioShim",
+    platforms: [.macOS(.v14), .iOS(.v17)],
+    products: [.library(name: "FluidAudioShim", targets: ["FluidAudioShim"])],
+    dependencies: [
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.7", traits: [])
+    ],
+    targets: [
+        .target(name: "FluidAudioShim", dependencies: [.product(name: "FluidAudio", package: "FluidAudio")])
+    ]
+)
+```
+
+```swift
+// FluidAudioShim/Sources/FluidAudioShim/Reexport.swift
+@_exported import FluidAudio
+```
+
+Existing `import FluidAudio` lines keep compiling. Measured on a universal macOS app this way (Xcode 26.3): 16.85 MB off the executable, 12.7%, zero engine symbols, ASR/diarization symbols unchanged.
+
+**The xcframework still downloads.** The binary target is declared unconditionally and only the dependency edge is trait-conditioned, so a clean resolve still fetches the 49 MB `NemoTextProcessing.xcframework.zip` even with the trait off. Ship size is unaffected; CI and cold checkouts pay the download. That is a SwiftPM limitation, not something the package can change.
+
 To build the package itself without the engine: `swift build --disable-default-traits`.
