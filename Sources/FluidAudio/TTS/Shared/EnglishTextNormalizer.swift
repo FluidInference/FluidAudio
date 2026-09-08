@@ -53,8 +53,12 @@ enum EnglishTextNormalizer {
     /// engine leaves the text unchanged (e.g. plain prose, or a build without
     /// the `fst-engine` feature).
     static func normalizeForFrontend(_ text: String) -> String {
+        #if canImport(CNemoTextProcessing)
         let fst = NemoTextNormalizer.normalize(text, language: .english)
         return fst == text ? normalize(text) : fst
+        #else
+        return normalize(text)
+        #endif
     }
 
     // MARK: - Boundaries
