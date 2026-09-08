@@ -36,7 +36,7 @@ let package = Package(
         ),
         // Byte-exact NeMo text normalization (FST engine, all 7 languages).
         // Prebuilt xcframework from FluidInference/text-processing-rs v0.3.0.
-        // Always linked on tools < 6.1; Package@swift-6.1.swift exposes it as
+        // Always linked on tools < 6.2; Package@swift-6.2.swift exposes it as
         // the opt-out `NemoTextProcessing` trait (#880, #888).
         .binaryTarget(
             name: "NemoTextProcessing",

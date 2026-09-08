@@ -30,7 +30,7 @@ TN converts written-form text to spoken form — useful for TTS preprocessing:
 
 ## Using with FluidAudio
 
-FluidAudio supports text-processing-rs through the `TextNormalizer` class. The native engine ships with the package as the `NemoTextProcessing` binary target and is linked directly — no setup required, it works out of the box for every SwiftPM consumer. Apps that don't use TTS or ITN can opt out of the ~18 MB engine with a package trait; see [Opting out](#opting-out-of-the-engine).
+FluidAudio supports text-processing-rs through the `TextNormalizer` class. The native engine ships with the package as the `NemoTextProcessing` binary target and is linked directly — no setup required, it works out of the box for every SwiftPM consumer. Apps that don't use TTS or ITN can opt out of the engine (about 8 MB per architecture slice) with a package trait; see [Opting out](#opting-out-of-the-engine).
 
 ### ITN (Spoken to Written)
 
@@ -74,7 +74,7 @@ The engine is bundled: `Package.swift` declares a `NemoTextProcessing` binary ta
 
 ### Opting out of the engine
 
-The engine is a prebuilt Rust static library (~18 MB per slice). ASR/VAD/diarization-only apps, and apps that ship their own Rust runtime (a second copy of the Rust std symbols fails to link), can leave it out with the `NemoTextProcessing` package trait. Requires Swift tools 6.1 / Xcode 16.3 or later; older toolchains read `Package.swift` and always link the engine.
+The engine is a prebuilt Rust static library (about 8 MB per architecture slice once linked and stripped, measured on `fluidaudiocli`; the xcframework itself is ~29 MB per iOS slice). ASR/VAD/diarization-only apps, and apps that ship their own Rust runtime (a second copy of the Rust std symbols fails to link), can leave it out with the `NemoTextProcessing` package trait. Requires Swift 6.2 / Xcode 26 or later; older toolchains read `Package.swift` and always link the engine. (SwiftPM 6.1 in Xcode 16.3–16.4 accepts `traits: []` but still links the binary target, so it gives no size benefit there.)
 
 ```swift
 // Package.swift of the consuming package / app

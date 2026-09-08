@@ -21,7 +21,7 @@ import NaturalLanguage
 /// (e.g., "period" as a noun vs. punctuation).
 ///
 /// The native engine (`text-processing-rs`) ships with the package as a binary
-/// target and is linked directly — no runtime discovery. Consumers on tools 6.1+
+/// target and is linked directly — no runtime discovery. Consumers on Swift 6.2+
 /// may opt out with the `NemoTextProcessing` trait, in which case this class
 /// stays present and passes text through (`isNativeAvailable == false`).
 public final class TextNormalizer: Sendable {

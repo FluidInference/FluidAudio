@@ -40,9 +40,16 @@ jobs:
           swift --version
           xcodebuild -version
 
-      # #880/#888: consumers on tools 6.1+ can resolve with `traits: []` to keep the
+      # #880/#888: consumers on Swift 6.2+ can resolve with `traits: []` to keep the
       # ~18 MB Rust engine out of ASR-only apps. Prove the package still builds and
-      # that no engine symbol reaches the linked product.
+      # that no engine symbol reaches the linked product. SwiftPM 6.1 (Xcode 16.4,
+      # the image default) accepts the flag but still links the binary target, so
+      # this job must run on an Xcode 26 toolchain.
+      - name: Select Xcode 26
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app
+          swift --version
+
       - name: Build with the trait disabled
         run: swift build --disable-default-traits --product fluidaudiocli
 
