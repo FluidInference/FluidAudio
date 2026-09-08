@@ -28,6 +28,34 @@ jobs:
         run: swift test --parallel --num-workers $(sysctl -n hw.ncpu)
         timeout-minutes: 20
 
+  build-without-nemo-text-processing:
+    name: Build without NemoTextProcessing trait (macOS)
+    runs-on: macos-15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Check versions
+        run: |
+          swift --version
+          xcodebuild -version
+
+      # #880/#888: consumers on tools 6.1+ can resolve with `traits: []` to keep the
+      # ~18 MB Rust engine out of ASR-only apps. Prove the package still builds and
+      # that no engine symbol reaches the linked product.
+      - name: Build with the trait disabled
+        run: swift build --disable-default-traits --product fluidaudiocli
+
+      - name: Assert no engine symbols linked
+        run: |
+          count=$(nm .build/debug/fluidaudiocli | grep -c 'text_processing_rs\|_nemo_' || true)
+          echo "engine symbols in fluidaudiocli: $count"
+          test "$count" -eq 0
+
+      - name: Run tests with the trait disabled
+        run: swift test --disable-default-traits --filter 'TextNormalizerUnavailableTests|NemoTextNormalizerUnavailableTests|TextNormalizerTests|NemoTextNormalizerTests'
+        timeout-minutes: 20
+
   build-macos-x86_64:
     name: Build Swift Package (macOS x86_64 cross-compile)
     runs-on: macos-15

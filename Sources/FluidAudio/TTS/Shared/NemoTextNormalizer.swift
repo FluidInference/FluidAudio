@@ -1,4 +1,6 @@
+#if canImport(CNemoTextProcessing)
 import CNemoTextProcessing
+#endif
 import Foundation
 
 /// Byte-exact NeMo text normalization via the bundled compiled-FST engine
@@ -24,13 +26,29 @@ public enum NemoTextNormalizer {
         case hindi = "hi"
     }
 
+    /// Whether the engine is linked into this build. `false` when the package
+    /// was resolved with the `NemoTextProcessing` trait disabled (#880, #888);
+    /// `normalize` then returns its input unchanged.
+    public static var isAvailable: Bool {
+        #if canImport(CNemoTextProcessing)
+        return true
+        #else
+        return false
+        #endif
+    }
+
     /// Normalize `text` for `language`. Returns `text` unchanged if the engine
-    /// declines the input (its own out-of-domain passthrough) or the underlying
-    /// library was built without the `fst-engine` feature — so this is always
-    /// safe to call as a frontend pre-pass.
+    /// declines the input (its own out-of-domain passthrough), the underlying
+    /// library was built without the `fst-engine` feature, or the engine is
+    /// not linked (`isAvailable == false`) — so this is always safe to call as
+    /// a frontend pre-pass.
     public static func normalize(_ text: String, language: Language) -> String {
+        #if canImport(CNemoTextProcessing)
         guard let ptr = nemo_tn_fst(text, language.rawValue) else { return text }
         defer { nemo_free_string(ptr) }
         return String(cString: ptr)
+        #else
+        return text
+        #endif
     }
 }

@@ -30,7 +30,7 @@ TN converts written-form text to spoken form — useful for TTS preprocessing:
 
 ## Using with FluidAudio
 
-FluidAudio supports text-processing-rs through the `TextNormalizer` class. The native engine ships with the package as the `NemoTextProcessing` binary target and is linked directly — no setup required, it works out of the box for every SwiftPM consumer.
+FluidAudio supports text-processing-rs through the `TextNormalizer` class. The native engine ships with the package as the `NemoTextProcessing` binary target and is linked directly — no setup required, it works out of the box for every SwiftPM consumer. Apps that don't use TTS or ITN can opt out of the ~18 MB engine with a package trait; see [Opting out](#opting-out-of-the-engine).
 
 ### ITN (Spoken to Written)
 
@@ -70,4 +70,21 @@ print(normalizedResult.text)  // Written form
 
 ### Native Library
 
-The engine is bundled: `Package.swift` declares a `NemoTextProcessing` binary target (a prebuilt xcframework from [text-processing-rs](https://github.com/FluidInference/text-processing-rs) releases) that SwiftPM downloads and links automatically. `TextNormalizer.isNativeAvailable` always returns `true`; it is kept only for source compatibility with releases ≤ 0.15.6, which resolved the library at runtime and silently returned input unchanged when it was absent.
+The engine is bundled: `Package.swift` declares a `NemoTextProcessing` binary target (a prebuilt xcframework from [text-processing-rs](https://github.com/FluidInference/text-processing-rs) releases) that SwiftPM downloads and links automatically. It is linked at build time, so `TextNormalizer.isNativeAvailable` is a compile-time constant: `true` whenever the engine is part of the build, `false` only when a consumer opts out (below). Releases ≤ 0.15.6 resolved the library at runtime and silently returned input unchanged when it was absent.
+
+### Opting out of the engine
+
+The engine is a prebuilt Rust static library (~18 MB per slice). ASR/VAD/diarization-only apps, and apps that ship their own Rust runtime (a second copy of the Rust std symbols fails to link), can leave it out with the `NemoTextProcessing` package trait. Requires Swift tools 6.1 / Xcode 16.3 or later; older toolchains read `Package.swift` and always link the engine.
+
+```swift
+// Package.swift of the consuming package / app
+.package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.7", traits: [])
+```
+
+With the trait disabled:
+
+- `TextNormalizer` and `NemoTextNormalizer` remain in the API. `isNativeAvailable`, `isTnAvailable`, and `NemoTextNormalizer.isAvailable` report `false`.
+- Every normalization call returns its input unchanged; `version` is `nil`; custom rules are ignored (a warning is logged).
+- TTS frontends run without NeMo normalization: Kokoro English falls back to the built-in `EnglishTextNormalizer` rules, and Kokoro Mandarin verbalizes numerals with `MandarinNumberNormalizer`. Keep the trait enabled for byte-exact NeMo readings.
+
+To build the package itself without the engine: `swift build --disable-default-traits`.

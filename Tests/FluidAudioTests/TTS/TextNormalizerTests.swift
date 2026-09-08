@@ -5,6 +5,12 @@ import XCTest
 
 final class TextNormalizerTests: XCTestCase {
 
+    override func setUpWithError() throws {
+        try XCTSkipUnless(
+            NemoTextNormalizer.isAvailable,
+            "NemoTextProcessing trait disabled; engine not linked")
+    }
+
     // MARK: - NLTagger Context Spotting
 
     /// Ambiguous words that are both punctuation spoken forms AND common English words.
@@ -372,5 +378,30 @@ final class TextNormalizerTests: XCTestCase {
     func testTnNormalizeSentence() {
         let normalizer = TextNormalizer()
         XCTAssertEqual(normalizer.tnNormalizeSentence("I paid $5"), "I paid five dollars")
+    }
+}
+
+/// Contract when the package is resolved with the `NemoTextProcessing` trait
+/// disabled (#880, #888): the API stays present, reports the engine as absent,
+/// and every entry point is a passthrough instead of a crash or a silent rewrite.
+final class TextNormalizerUnavailableTests: XCTestCase {
+
+    override func setUpWithError() throws {
+        try XCTSkipIf(NemoTextNormalizer.isAvailable, "engine linked; passthrough path not reachable")
+    }
+
+    func testReportsUnavailableAndPassesThrough() {
+        let normalizer = TextNormalizer()
+        XCTAssertFalse(normalizer.isNativeAvailable)
+        XCTAssertFalse(normalizer.isTnAvailable)
+        XCTAssertNil(normalizer.version)
+        XCTAssertEqual(normalizer.normalize("twelve dollars"), "twelve dollars")
+        XCTAssertEqual(normalizer.normalizeSentence("period"), "period")
+        XCTAssertEqual(normalizer.normalizeSentence("two hundred", maxSpanTokens: 3), "two hundred")
+        XCTAssertEqual(normalizer.tnNormalize("$12"), "$12")
+        XCTAssertEqual(normalizer.tnNormalizeSentence("$12"), "$12")
+        normalizer.addRule(spoken: "foo", written: "bar")
+        XCTAssertEqual(normalizer.ruleCount, 0)
+        XCTAssertFalse(normalizer.removeRule(spoken: "foo"))
     }
 }

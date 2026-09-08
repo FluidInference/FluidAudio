@@ -1,6 +1,10 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.1
 import PackageDescription
 import Foundation
+
+// Tools 6.1+ manifest: identical to Package.swift plus the `NemoTextProcessing`
+// trait. Keep the two in sync; Package.swift serves toolchains < 6.1, which
+// have no traits and always link the engine.
 
 let package = Package(
     name: "FluidAudio",
@@ -18,6 +22,19 @@ let package = Package(
             targets: ["FluidAudioCLI"]
         ),
     ],
+    traits: [
+        // Opt out of the ~18 MB NeMo text-normalization engine (a prebuilt
+        // Rust staticlib) for ASR/VAD/diarization-only apps, or when the app
+        // links its own Rust runtime (#880, #888):
+        //   .package(url: ..., traits: [])
+        // TTS frontends and `TextNormalizer` then pass text through unchanged
+        // and report `isNativeAvailable == false`.
+        .trait(
+            name: "NemoTextProcessing",
+            description: "Link the bundled NeMo text-normalization engine (TTS frontends, ITN)."
+        ),
+        .default(enabledTraits: ["NemoTextProcessing"]),
+    ],
     dependencies: [],
     targets: [
         .target(
@@ -25,7 +42,7 @@ let package = Package(
             dependencies: [
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
-                "NemoTextProcessing",
+                .target(name: "NemoTextProcessing", condition: .when(traits: ["NemoTextProcessing"])),
             ],
             path: "Sources/FluidAudio",
             exclude: ["ASR/Parakeet/Unified/benchmark.md"],
@@ -36,8 +53,6 @@ let package = Package(
         ),
         // Byte-exact NeMo text normalization (FST engine, all 7 languages).
         // Prebuilt xcframework from FluidInference/text-processing-rs v0.3.0.
-        // Always linked on tools < 6.1; Package@swift-6.1.swift exposes it as
-        // the opt-out `NemoTextProcessing` trait (#880, #888).
         .binaryTarget(
             name: "NemoTextProcessing",
             url:
