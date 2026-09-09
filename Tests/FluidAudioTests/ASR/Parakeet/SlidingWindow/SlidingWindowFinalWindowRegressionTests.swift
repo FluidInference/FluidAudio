@@ -49,22 +49,58 @@ final class SlidingWindowFinalWindowRegressionTests: XCTestCase {
         return url
     }
 
+    /// Decode the whole fixture to 16 kHz mono Float32 samples.
+    private func loadSamples(_ url: URL) throws -> [Float] {
+        let file = try AVAudioFile(forReading: url)
+        let format = file.processingFormat
+        XCTAssertEqual(format.sampleRate, 16_000, "fixtures are 16 kHz")
+        XCTAssertEqual(format.channelCount, 1, "fixtures are mono")
+        guard
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: format, frameCapacity: AVAudioFrameCount(file.length))
+        else {
+            throw XCTSkip("could not allocate a buffer for \(url.lastPathComponent)")
+        }
+        try file.read(into: buffer)
+        guard let channel = buffer.floatChannelData?[0] else {
+            throw XCTSkip("fixture \(url.lastPathComponent) is not float PCM")
+        }
+        return Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+    }
+
+    /// A self-contained 1 s buffer, like a live microphone tap delivers. Built
+    /// fresh per chunk (own format, own storage) so it can be sent to the actor.
+    private nonisolated static func makeChunk(_ samples: ArraySlice<Float>) -> AVAudioPCMBuffer? {
+        guard
+            let format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false),
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
+            let channel = buffer.floatChannelData?[0]
+        else { return nil }
+        for (offset, sample) in samples.enumerated() {
+            channel[offset] = sample
+        }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        return buffer
+    }
+
     private func streamTranscript(_ url: URL, models: AsrModels) async throws -> String {
         let manager = SlidingWindowAsrManager()
         try await manager.loadModels(models)
         try await manager.startStreaming()
 
-        let file = try AVAudioFile(forReading: url)
-        let format = file.processingFormat
-        let chunkFrames = AVAudioFrameCount(format.sampleRate)  // 1 s, like a live mic tap
-        while file.framePosition < file.length {
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrames) else {
-                XCTFail("could not allocate buffer")
+        let samples = try loadSamples(url)
+        let chunk = 16_000  // 1 s
+        var position = 0
+        while position < samples.count {
+            let end = min(position + chunk, samples.count)
+            guard let buffer = Self.makeChunk(samples[position..<end]) else {
+                XCTFail("could not allocate chunk buffer")
                 break
             }
-            try file.read(into: buffer, frameCount: chunkFrames)
-            if buffer.frameLength == 0 { break }
             await manager.streamAudio(buffer)
+            position = end
         }
         return try await manager.finish()
     }
