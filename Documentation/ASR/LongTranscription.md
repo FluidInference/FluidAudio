@@ -397,6 +397,39 @@ which only the V3 decoder implements — v3 and tdtJa models get the
 end-aligned window; v2/tdtCtc110m keep the zero-padded layout
 (`supportsSuppressedPrefix`).
 
+## Streaming Final Window (issue #855)
+
+`SlidingWindowAsrManager` decodes overlapping windows with a carried decoder
+state and enters each non-final window mid-way (after the left context) so the
+overlap is not re-emitted. The final flush window is different: it can be
+short, and a mid-window entry into a short window with the carried state can
+emit one boundary punctuation and then blank across real trailing speech
+(#855 repro 1, PR #861).
+
+The final window is therefore decoded from frame 0 with an emission cutoff
+(`AsrManager.lastChunkRedecodePlan`): tokens for audio the previous windows
+already emitted are suppressed at the source, minus a 5-frame jitter margin
+that dedup strips. Two rules make this safe:
+
+- **Fresh decoder state.** The re-decode starts from `TdtDecoderState.make`,
+  exactly as the batch chunker does for every chunk. Re-walking the overlap
+  with the *carried* state — state that already consumed that audio — leaves
+  the decoder emitting blanks for the rest of the window. On three real
+  recordings with a ~12 s final window it produced zero tokens for 9 s of
+  never-seen speech, silently dropping the last 5–24 words (#855 follow-up).
+  The 2 s left context is enough for a fresh state to re-establish itself
+  before the cutoff.
+- **Suppression, not dedup, handles the overlap.** A token-dense overlap can
+  exceed dedup's bounded search; suppressing at the source keeps dedup's job
+  to the jitter margin.
+
+Known residue: a word cut by the previous window's edge (`and an` → `and
+analyzing`) can survive as a fragment, since dedup matches whole tokens.
+
+Regression fixtures: `Tests/FluidAudioTests/ASR/Parakeet/SlidingWindow/Fixtures`
+(three real recordings, cleared for release by the speaker), exercised by
+`SlidingWindowFinalWindowRegressionTests` whenever the v3 models are cached.
+
 ## Post-Merge Repair Pass
 
 Every fix in the earlier sections operates on tokens that *exist* in at
