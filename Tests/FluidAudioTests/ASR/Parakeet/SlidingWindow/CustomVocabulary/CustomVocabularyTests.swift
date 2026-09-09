@@ -280,4 +280,20 @@ final class CustomVocabularyTests: XCTestCase {
         XCTAssertEqual(result.context.terms.map(\.text), ["keep"])
         XCTAssertEqual(result.dropped, ["drop"])
     }
+
+    // MARK: - Spotter detections surfaced as ctcDetectedTerms (#899)
+
+    func testDetectedTermTextsAreTimeOrderedAndDeduplicated() {
+        func detection(_ text: String, at start: TimeInterval) -> CtcKeywordSpotter.KeywordDetection {
+            CtcKeywordSpotter.KeywordDetection(
+                term: CustomVocabularyTerm(text: text), score: -3, totalFrames: 100,
+                startFrame: Int(start * 12.5), endFrame: Int(start * 12.5) + 5,
+                startTime: start, endTime: start + 0.4)
+        }
+        let texts = VocabularyBoostingSession.detectedTermTexts([
+            detection("PyTorch", at: 9.0), detection("Codex", at: 2.0), detection("codex", at: 12.0),
+        ])
+        XCTAssertEqual(texts, ["Codex", "PyTorch"])
+        XCTAssertEqual(VocabularyBoostingSession.detectedTermTexts([]), [])
+    }
 }

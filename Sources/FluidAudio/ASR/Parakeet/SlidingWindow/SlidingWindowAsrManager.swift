@@ -516,7 +516,7 @@ public actor SlidingWindowAsrManager {
                     tokenTimings: chunkLocalTimings,
                     windowSamples: windowSamples
                 ) {
-                    let detected = rescored.replacements.compactMap { $0.replacementWord }
+                    let detected = rescored.detectedTerms
                     let applied = rescored.replacements.filter { $0.shouldReplace }.compactMap {
                         $0.replacementWord
                     }
@@ -536,7 +536,9 @@ public actor SlidingWindowAsrManager {
                 confidence: interim.confidence,
                 timestamp: Date(),
                 tokenIds: tokens,
-                tokenTimings: displayResult.tokenTimings ?? []
+                tokenTimings: displayResult.tokenTimings ?? [],
+                ctcDetectedTerms: displayResult.ctcDetectedTerms,
+                ctcAppliedTerms: displayResult.ctcAppliedTerms
             )
 
             updateContinuation?.yield(update)
@@ -871,13 +873,21 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
         tokenTimings.map(\.token)
     }
 
+    /// Vocabulary terms the CTC spotter detected in this window's audio, when
+    /// boosting is configured (#899). Present even if nothing was replaced.
+    public let ctcDetectedTerms: [String]?
+    /// Vocabulary terms applied as replacements in this window's text.
+    public let ctcAppliedTerms: [String]?
+
     public init(
         text: String,
         isConfirmed: Bool,
         confidence: Float,
         timestamp: Date,
         tokenIds: [Int] = [],
-        tokenTimings: [TokenTiming] = []
+        tokenTimings: [TokenTiming] = [],
+        ctcDetectedTerms: [String]? = nil,
+        ctcAppliedTerms: [String]? = nil
     ) {
         self.text = text
         self.isConfirmed = isConfirmed
@@ -885,5 +895,7 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
         self.timestamp = timestamp
         self.tokenIds = tokenIds
         self.tokenTimings = tokenTimings
+        self.ctcDetectedTerms = ctcDetectedTerms
+        self.ctcAppliedTerms = ctcAppliedTerms
     }
 }

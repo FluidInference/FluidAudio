@@ -211,6 +211,10 @@ public struct VocabularyRescorer: Sendable {
         public let text: String
         public let replacements: [RescoringResult]
         public let wasModified: Bool
+        /// Vocabulary terms the CTC spotter detected in the audio (canonical
+        /// text, in time order, deduplicated), whether or not any replacement
+        /// was applied. Populated by `VocabularyBoostingSession.rescore` (#899).
+        public var detectedTerms: [String] = []
     }
 
     /// The discovery path that produced a vocabulary candidate.

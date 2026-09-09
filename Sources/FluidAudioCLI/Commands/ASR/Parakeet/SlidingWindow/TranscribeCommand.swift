@@ -511,21 +511,7 @@ enum TranscribeCommand {
                     let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
 
                     let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: customVocab.terms.count)
-                    // #702: opt-in short-term over-fire controls. Each flag
-                    // falls back to the library default (disabled) when unset.
-                    let rescorerConfig = VocabularyRescorer.Config(
-                        shortTermCbwTaperPivot: args.vocabShortTermTaperPivot
-                            ?? ContextBiasingConstants.defaultShortTermCbwTaperPivot,
-                        spotterRescueMinSimilarity: args.vocabSpotterMinSim
-                            ?? ContextBiasingConstants.defaultSpotterRescueMinSimilarity,
-                        spotterRescueMultiWordMinSimilarity: args.vocabSpotterMinSimMulti
-                            ?? ContextBiasingConstants.defaultSpotterRescueMultiWordMinSimilarity,
-                        // #724: `--vocab-disable-spotter-rescue` forces the acoustic
-                        // rescue pass off; otherwise follow the library/env default
-                        // (on unless `FLUID_SPOTTER_RESCUE` disables it).
-                        spotterRescueEnabled: args.vocabDisableSpotterRescue
-                            ? false : ContextBiasingConstants.defaultSpotterRescueEnabled
-                    )
+                    let rescorerConfig = makeRescorerConfig(args)
 
                     let rescorer = try await VocabularyRescorer.create(
                         spotter: spotter,
@@ -668,6 +654,22 @@ enum TranscribeCommand {
 
     // MARK: - Streaming Mode
 
+    /// #702/#724 opt-in over-fire controls, shared by batch and streaming. Each
+    /// flag falls back to the library default when unset; the library/env default
+    /// for the rescue pass is on unless `FLUID_SPOTTER_RESCUE` disables it.
+    private static func makeRescorerConfig(_ args: ParsedArgs) -> VocabularyRescorer.Config {
+        VocabularyRescorer.Config(
+            shortTermCbwTaperPivot: args.vocabShortTermTaperPivot
+                ?? ContextBiasingConstants.defaultShortTermCbwTaperPivot,
+            spotterRescueMinSimilarity: args.vocabSpotterMinSim
+                ?? ContextBiasingConstants.defaultSpotterRescueMinSimilarity,
+            spotterRescueMultiWordMinSimilarity: args.vocabSpotterMinSimMulti
+                ?? ContextBiasingConstants.defaultSpotterRescueMultiWordMinSimilarity,
+            spotterRescueEnabled: args.vocabDisableSpotterRescue
+                ? false : ContextBiasingConstants.defaultSpotterRescueEnabled
+        )
+    }
+
     private static func runStreaming(
         audioFile: String, args: ParsedArgs
     ) async {
@@ -700,9 +702,12 @@ enum TranscribeCommand {
                 let (customVocab, ctcModels) = try await CustomVocabularyContext.loadWithCtcTokens(from: vocabPath)
                 logger.info("Loaded \(customVocab.terms.count) vocabulary terms for streaming")
 
+                // Same #702/#724 over-fire flags as batch mode (#899: streaming
+                // previously dropped them and always ran the library default).
                 try await streamingAsr.configureVocabularyBoosting(
                     vocabulary: customVocab,
-                    ctcModels: ctcModels
+                    ctcModels: ctcModels,
+                    config: makeRescorerConfig(args)
                 )
             }
 

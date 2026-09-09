@@ -1264,14 +1264,26 @@ extension VocabularyRescorer {
         }
     }
 
+    /// How far (seconds, detection centre to word centre) the nearest-word
+    /// fallback may reach when no TDT word overlaps a spotter detection.
+    /// Unbounded, a spurious low-score detection in the first 0.5 s of a
+    /// window snapped onto whatever word was nearest — `Hey` 0.68 s away on
+    /// one machine, `validate` on another (#899). Half a second covers the
+    /// CTC-vs-TDT timestamp skew a near miss can have; the session's search
+    /// margin is the same value.
+    static let spotterRescueFallbackRadiusSeconds: Double = 0.5
+
     /// Find the indices of TDT words whose [startTime, endTime] window
     /// overlaps the supplied detection range. Returns at most a small
     /// contiguous run; non-contiguous overlaps are reduced to the run
-    /// containing the time-center of the detection.
+    /// containing the time-center of the detection. With no overlap, the
+    /// nearest word is used only if it lies within `fallbackRadius` of the
+    /// detection centre; otherwise the detection maps to nothing.
     private func wordIndices(
         in wordTimings: [WordTiming],
         overlapping start: Double,
-        end: Double
+        end: Double,
+        fallbackRadius: Double = spotterRescueFallbackRadiusSeconds
     ) -> [Int] {
         guard !wordTimings.isEmpty, start < end else { return [] }
 
@@ -1282,7 +1294,7 @@ extension VocabularyRescorer {
             overlapping.append(idx)
         }
         if overlapping.isEmpty {
-            // Fall back to nearest word to the detection center.
+            // Fall back to the nearest word to the detection centre, bounded.
             let center = (start + end) / 2.0
             var bestIdx = 0
             var bestDelta = Double.infinity
@@ -1294,6 +1306,18 @@ extension VocabularyRescorer {
                     bestIdx = idx
                 }
             }
+            guard bestDelta <= fallbackRadius else {
+                debugLog(
+                    String(
+                        format:
+                            "  [SPOTTER-RESCUE] detection %.2f–%.2fs overlaps no word; nearest '%@' is %.2fs away (> %.2fs), skipped",
+                        start, end, wordTimings[bestIdx].word, bestDelta, fallbackRadius))
+                return []
+            }
+            debugLog(
+                String(
+                    format: "  [SPOTTER-RESCUE] detection %.2f–%.2fs overlaps no word; using nearest '%@' (%.2fs away)",
+                    start, end, wordTimings[bestIdx].word, bestDelta))
             return [bestIdx]
         }
         // Ensure contiguity (consecutive indices).
