@@ -90,9 +90,11 @@ public struct VocabularyBoostingSession: Sendable {
     /// is the first sample. Callers rescoring a window or segment out of a
     /// longer stream pass segment-local timings with the segment's audio.
     ///
-    /// - Returns: The rescore output if any replacement was applied,
-    ///   nil otherwise (including on CTC inference failure, which is logged
-    ///   and absorbed — boosting must never break transcription).
+    /// - Returns: The rescore output when a replacement was applied **or** the
+    ///   spotter detected at least one vocabulary term (`detectedTerms`); the
+    ///   text is the caller's own when nothing was replaced. Nil when there is
+    ///   nothing to report, and on CTC inference failure, which is logged and
+    ///   absorbed — boosting must never break transcription.
     public func rescore(
         text: String,
         tokenTimings: [TokenTiming],
@@ -127,20 +129,45 @@ public struct VocabularyBoostingSession: Sendable {
                 minSimilarity: minSimilarity
             )
 
-            guard rescoreOutput.wasModified else { return nil }
+            let detectedTerms = Self.detectedTermTexts(spotResult.detections)
+            guard rescoreOutput.wasModified || !detectedTerms.isEmpty else { return nil }
 
-            logger.info(
-                "Vocabulary rescoring applied \(rescoreOutput.replacements.count) replacement(s)"
-            )
-            for replacement in rescoreOutput.replacements where replacement.shouldReplace {
-                logger.debug(
-                    "  '\(replacement.originalWord)' → '\(replacement.replacementWord ?? "")'"
+            if rescoreOutput.wasModified {
+                logger.info(
+                    "Vocabulary rescoring applied \(rescoreOutput.replacements.count) replacement(s)"
                 )
+                for replacement in rescoreOutput.replacements where replacement.shouldReplace {
+                    logger.debug(
+                        "  '\(replacement.originalWord)' → '\(replacement.replacementWord ?? "")'"
+                    )
+                }
             }
-            return rescoreOutput
+            // The rescorer rebuilds its text from word timings (single spaces,
+            // timing-backed words only). Only hand that back when it actually
+            // changed something; otherwise the caller keeps its own text.
+            return VocabularyRescorer.RescoreOutput(
+                text: rescoreOutput.wasModified ? rescoreOutput.text : text,
+                replacements: rescoreOutput.replacements,
+                wasModified: rescoreOutput.wasModified,
+                detectedTerms: detectedTerms
+            )
         } catch {
             logger.warning("Vocabulary rescoring failed: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    /// Canonical texts of the spotter's detections, in time order, without
+    /// repeats. Pure, for testability.
+    static func detectedTermTexts(_ detections: [CtcKeywordSpotter.KeywordDetection]) -> [String] {
+        var seen = Set<String>()
+        var texts: [String] = []
+        for detection in detections.sorted(by: { $0.startTime < $1.startTime }) {
+            let text = detection.term.text
+            if seen.insert(text.lowercased()).inserted {
+                texts.append(text)
+            }
+        }
+        return texts
     }
 }
