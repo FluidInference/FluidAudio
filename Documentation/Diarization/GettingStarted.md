@@ -269,6 +269,18 @@ The offline controller mirrors the reference pipeline:
 - `postProcessing`: Minimum gap duration when stitching segments back together.
 - `export`: Optional `embeddingsPath` for dumping per-speaker vectors to JSON.
 
+#### Why VBx has no transition (self-loop) prior
+
+BUT's original VBx runs an HMM over one time-ordered sequence of x-vectors, and its `loopProb` (the probability of staying with the current speaker) is the knob for "how readily may the speaker change". This pipeline deliberately has no such prior, and none is exposed on `OfflineDiarizerConfig.VBx`. That is pyannote parity, not an omission in the port: pyannote's `utils/vbx.py` replaces the forward-backward pass with a per-frame GMM update (its own comment reads `# use GMM update`), and `VBxClustering` mirrors it.
+
+The reason is the observation sequence. VBx here refines clusters over *per-chunk speaker embeddings*, and a chunk with overlapping speech yields several embeddings for the same time span. An HMM over that flattened array would read simultaneous speakers as rapid speaker switches. So the VB step only decides *which* speakers exist and *which embedding belongs to which*; temporal structure is left to the segmentation model.
+
+Consequences for tuning ([#879](https://github.com/FluidInference/FluidAudio/issues/879)):
+
+- `clustering.warmStartFa` / `warmStartFb` scale the evidence in the ELBO. They change how many clusters survive, not how often the speaker may change; a sweep can move the speaker count from 9 to 22 while leaving DER and turn alternation bit-identical.
+- Turn-taking sensitivity lives in segmentation. A smaller `segmentation.stepRatio` (denser windows) and a lower `minSegmentDurationSeconds` recover short turns that a coarser step absorbs into their neighbours, at the cost of more segments. On far-field meetings with rapid exchanges, `stepRatio 0.1` is the setting that has measured best for alternation.
+- Adding a transition prior would mean diverging from the pyannote recipe and building a temporally meaningful observation sequence that handles overlapping local tracks first. It is not planned.
+
 `prepareModels` captures Core ML compilation timings (and download durations when a fresh fetch is needed), so `DiarizationResult.timings` reflects audio loading, segmentation, embedding, clustering, and post-processing costs in one place. Per-speaker embeddings are exposed in `speakerDatabase` for downstream analytics without toggling debug flags.
 
 #### CLI shortcut
