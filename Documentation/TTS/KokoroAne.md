@@ -252,15 +252,23 @@ The following OS/runtime constraints affect the 7-stage chain:
 |-----|-----------|-------------|--------|
 | BNNS CPU segfault | `EXC_BAD_ACCESS` in `libBNNS.dylib` (`BNNSGraphContextExecute_v2` → `BnnsCpuInferenceOperation::ExecuteSync`, queue `com.apple.e5rt.concurrentExecutionQueue`) | iOS/macOS **26.4 – 26.5.x** | **Fixed in the 26.6 line.** Verified on M5/macOS 26.6: the #667 repro (repeated synthesis) passes under `cpuOnly` and `allAne`, both of which segfaulted every time on 26.5. |
 | GPU RNN JIT assert | `GPURNNOps.mm: failed assertion 'JIT not supported'` (SIGABRT) | macOS 26.5+, incl. **26.6** (M5-class) | **Still live.** Avoided by the default routing (#671/#677), which keeps RNN-bearing stages off the GPU. Do not route Prosody/Vocoder to `.cpuAndGPU`. |
+| MPSGraph abort (Metal route) | `SIGABRT` in MetalPerformanceShadersGraph while a GPU stage (noise / tail) runs under Core ML | iOS/iPadOS **27.0 through beta 8** (24A5430a), iPad17,2 and iPad16,2 | **Still live.** The default routing on OS 27 (`aneTailCpu`, #849) keeps Metal out of the chain. |
+| BNNS `vadd_fp16_sme` segfault (Metal-free route) | `SIGSEGV` in `libBNNS` `vadd_fp16_sme_internal` on the OS-27 default route (noise + tail on CPU) | iOS **27.0** (24A5418b), iPhone18,1, ~54 min into a session | **No safe Core ML route on iOS 27 is demonstrated** (#889). The model, phonemizer and voice packs are not at fault: the same Kokoro-82M v1.0 graph ran 2 h 34 min on ONNX Runtime's CPU provider on the same OS line. `initialize()` logs an advisory on the 27 line. |
 
 The BNNS segfault cannot be avoided by compute-unit routing — CoreML places
 segments on the BNNS CPU path even under `.cpuOnly` (#587), and on affected
 OS builds the same binary can flip between all-pass and all-crash across a
 day (#817). `KokoroAneManager.initialize()` logs a warning on affected OS
-builds. The only reliable remedy is updating to the 26.6 OS line.
+builds. On macOS the remedy is the 26.6 line. On iOS the 26.6 line still
+crashes (#844), and on the iOS 27 line both Core ML routes have terminated
+the process (#889), so there is currently no OS version or routing on iOS
+that is demonstrated safe for long sessions; whether Kokoro ANE should be
+disabled by default there is tracked in #889.
 
 History: #328 (26.4 beta), #587 (iOS 26.4.2), #661 (cross-manager E5RT),
-#667 (M5/macOS 26.5), #817 (time/environment-gated evidence).
+#667 (M5/macOS 26.5), #817 (time/environment-gated evidence), #843/#849
+(OS 27 Metal abort, CPU-tail default), #844 (iOS 26.6), #889 (iOS 27 BNNS
+segfault on the CPU-tail route).
 
 ## Source
 
