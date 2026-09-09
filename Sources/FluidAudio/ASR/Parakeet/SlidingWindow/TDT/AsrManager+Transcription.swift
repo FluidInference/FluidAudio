@@ -60,10 +60,11 @@ extension AsrManager {
     /// Decoder-entry plan for the final streaming window (issue #855).
     ///
     /// Returns `initialTimeIndexOverride: 0` so the decoder re-decodes the window
-    /// from frame 0 with its carried state (a mid-window entry into a short flush
-    /// window can blank out the trailing speech), plus an emission cutoff in
-    /// window-local frames: tokens for audio the previous windows already emitted
-    /// are suppressed at the source, leaving dedup only the jitter margin.
+    /// from frame 0 (a mid-window entry into a short flush window can blank out
+    /// the trailing speech), plus an emission cutoff in window-local frames:
+    /// tokens for audio the previous windows already emitted are suppressed at
+    /// the source, leaving dedup only the jitter margin. `transcribeChunk` pairs
+    /// the frame-0 entry with a *fresh* decoder state — see the note there.
     /// Non-final windows and callers without accumulated timestamps get `(nil, nil)`
     /// — the legacy navigation.
     nonisolated internal static func lastChunkRedecodePlan(
@@ -97,17 +98,27 @@ extension AsrManager {
         // Last streaming window: decode from frame 0 instead of skipping the overlap.
         // Jumping mid-window into a short flush window can blank out the trailing
         // speech entirely (issue #855: the joint emits a boundary punctuation, then
-        // blanks to the end, dropping the final words). Re-decoding the overlap with
-        // the carried state is robust; emissions for audio the previous windows
-        // already covered are suppressed at the source (the decoder still updates
-        // its LSTM state through them), so dedup only sees the few-frame jitter
-        // margin — a token-dense overlap cannot outgrow dedup's bounded search.
+        // blanks to the end, dropping the final words). Emissions for audio the
+        // previous windows already covered are suppressed at the source, so dedup
+        // only sees the few-frame jitter margin — a token-dense overlap cannot
+        // outgrow dedup's bounded search.
+        //
+        // The re-decode runs on a FRESH decoder state, as the batch chunker does
+        // for every chunk. Re-walking the overlap with the carried state — state
+        // that already consumed that audio — leaves the decoder emitting blanks
+        // for the rest of the window: on a 12 s final window it produced zero
+        // tokens for 9 s of never-seen speech (#855 follow-up, three real
+        // recordings). The 2 s left context is enough for a fresh state to
+        // re-establish itself before the cutoff.
         let redecodePlan = Self.lastChunkRedecodePlan(
             isLastChunk: isLastChunk,
             previousTokens: previousTokens,
             previousTokenTimestamps: previousTokenTimestamps,
             globalFrameOffset: globalFrameOffset
         )
+        if redecodePlan.initialTimeIndexOverride == 0 {
+            decoderState = TdtDecoderState.make(decoderLayers: decoderLayerCount)
+        }
         let (hypothesis, encLen) = try await executeMLInferenceWithTimings(
             padded,
             originalLength: frameAlignedLength,

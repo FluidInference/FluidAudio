@@ -70,7 +70,10 @@ let package = Package(
                 "FluidAudioCLI",
             ],
             resources: [
-                .process("TTS/LuxTts/Resources")
+                .process("TTS/LuxTts/Resources"),
+                // Real recordings (cleared for public release by the speaker) for the
+                // streaming final-window regression, issue #855.
+                .copy("ASR/Parakeet/SlidingWindow/Fixtures"),
             ]
         ),
     ],
