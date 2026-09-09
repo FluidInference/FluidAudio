@@ -11,6 +11,12 @@ import XCTest
 /// bundled grammars are wired correctly.
 final class NemoTextNormalizerTests: XCTestCase {
 
+    override func setUpWithError() throws {
+        try XCTSkipUnless(
+            NemoTextNormalizer.isAvailable,
+            "NemoTextProcessing trait disabled; engine not linked")
+    }
+
     private func assertNormalizes(
         _ input: String,
         _ language: NemoTextNormalizer.Language,
@@ -103,5 +109,20 @@ final class NemoTextNormalizerTests: XCTestCase {
                 out, input,
                 "\(language.rawValue) grammar appears unbundled (input returned unchanged)")
         }
+    }
+}
+
+/// The one behaviour that must hold when the package is resolved with the
+/// `NemoTextProcessing` trait disabled (#880, #888): the wrapper stays callable
+/// and returns its input unchanged.
+final class NemoTextNormalizerUnavailableTests: XCTestCase {
+
+    override func setUpWithError() throws {
+        try XCTSkipIf(NemoTextNormalizer.isAvailable, "engine linked; passthrough path not reachable")
+    }
+
+    func testNormalizePassesThroughWithoutEngine() {
+        XCTAssertEqual(NemoTextNormalizer.normalize("$5", language: .english), "$5")
+        XCTAssertEqual(NemoTextNormalizer.normalize("2024年", language: .mandarin), "2024年")
     }
 }

@@ -30,7 +30,7 @@ TN converts written-form text to spoken form — useful for TTS preprocessing:
 
 ## Using with FluidAudio
 
-FluidAudio supports text-processing-rs through the `TextNormalizer` class. The native engine ships with the package as the `NemoTextProcessing` binary target and is linked directly — no setup required, it works out of the box for every SwiftPM consumer.
+FluidAudio supports text-processing-rs through the `TextNormalizer` class. The native engine ships with the package as the `NemoTextProcessing` binary target and is linked directly — no setup required, it works out of the box for every SwiftPM consumer. Apps that don't use TTS or ITN can opt out of the engine (about 8 MB per architecture slice) with a package trait; see [Opting out](#opting-out-of-the-engine).
 
 ### ITN (Spoken to Written)
 
@@ -70,4 +70,50 @@ print(normalizedResult.text)  // Written form
 
 ### Native Library
 
-The engine is bundled: `Package.swift` declares a `NemoTextProcessing` binary target (a prebuilt xcframework from [text-processing-rs](https://github.com/FluidInference/text-processing-rs) releases) that SwiftPM downloads and links automatically. `TextNormalizer.isNativeAvailable` always returns `true`; it is kept only for source compatibility with releases ≤ 0.15.6, which resolved the library at runtime and silently returned input unchanged when it was absent.
+The engine is bundled: `Package.swift` declares a `NemoTextProcessing` binary target (a prebuilt xcframework from [text-processing-rs](https://github.com/FluidInference/text-processing-rs) releases) that SwiftPM downloads and links automatically. It is linked at build time, so `TextNormalizer.isNativeAvailable` is a compile-time constant: `true` whenever the engine is part of the build, `false` only when a consumer opts out (below). Releases ≤ 0.15.6 resolved the library at runtime and silently returned input unchanged when it was absent.
+
+### Opting out of the engine
+
+The engine is a prebuilt Rust static library (about 8 MB per architecture slice once linked and stripped, measured on `fluidaudiocli`; the xcframework itself is ~29 MB per iOS slice). ASR/VAD/diarization-only apps, and apps that ship their own Rust runtime (a second copy of the Rust std symbols fails to link), can leave it out with the `NemoTextProcessing` package trait. Requires Swift 6.2 / Xcode 26 or later; older toolchains read `Package.swift` and always link the engine. (SwiftPM 6.1 in Xcode 16.3–16.4 accepts `traits: []` but still links the binary target, so it gives no size benefit there.)
+
+```swift
+// Package.swift of the consuming package / app
+.package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.7", traits: [])
+```
+
+With the trait disabled:
+
+- `TextNormalizer` and `NemoTextNormalizer` remain in the API. `isNativeAvailable`, `isTnAvailable`, and `NemoTextNormalizer.isAvailable` report `false`.
+- Every normalization call returns its input unchanged; `version` is `nil`; custom rules are ignored (a warning is logged).
+- TTS frontends run without NeMo normalization: Kokoro English falls back to the built-in `EnglishTextNormalizer` rules, and Kokoro Mandarin verbalizes numerals with `MandarinNumberNormalizer`. Keep the trait enabled for byte-exact NeMo readings.
+
+**Xcode projects.** Xcode 26.3 has no UI or pbxproj key for package traits (support appears in 26.4). Until then, wrap the dependency in a one-target local package that sets the trait and re-exports the module, and link the app against that instead of FluidAudio directly:
+
+```swift
+// FluidAudioShim/Package.swift
+// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: "FluidAudioShim",
+    platforms: [.macOS(.v14), .iOS(.v17)],
+    products: [.library(name: "FluidAudioShim", targets: ["FluidAudioShim"])],
+    dependencies: [
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.7", traits: [])
+    ],
+    targets: [
+        .target(name: "FluidAudioShim", dependencies: [.product(name: "FluidAudio", package: "FluidAudio")])
+    ]
+)
+```
+
+```swift
+// FluidAudioShim/Sources/FluidAudioShim/Reexport.swift
+@_exported import FluidAudio
+```
+
+Existing `import FluidAudio` lines keep compiling. Measured on a universal macOS app this way (Xcode 26.3): 16.85 MB off the executable, 12.7%, zero engine symbols, ASR/diarization symbols unchanged.
+
+**The xcframework still downloads.** The binary target is declared unconditionally and only the dependency edge is trait-conditioned, so a clean resolve still fetches the 49 MB `NemoTextProcessing.xcframework.zip` even with the trait off. Ship size is unaffected; CI and cold checkouts pay the download. That is a SwiftPM limitation, not something the package can change.
+
+To build the package itself without the engine: `swift build --disable-default-traits`.

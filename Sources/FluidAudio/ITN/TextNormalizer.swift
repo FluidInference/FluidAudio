@@ -1,4 +1,6 @@
+#if canImport(CNemoTextProcessing)
 import CNemoTextProcessing
+#endif
 import Foundation
 import NaturalLanguage
 
@@ -19,24 +21,34 @@ import NaturalLanguage
 /// (e.g., "period" as a noun vs. punctuation).
 ///
 /// The native engine (`text-processing-rs`) ships with the package as a binary
-/// target and is linked directly — no runtime discovery, always available.
+/// target and is linked directly — no runtime discovery. Consumers on Swift 6.2+
+/// may opt out with the `NemoTextProcessing` trait, in which case this class
+/// stays present and passes text through (`isNativeAvailable == false`).
 public final class TextNormalizer: Sendable {
 
     /// Whether the native NeMo library is available.
     ///
-    /// Always `true`: the library is statically linked via the bundled
-    /// `NemoTextProcessing` binary target. Kept for source compatibility with
-    /// releases that resolved the library at runtime (≤ 0.15.6).
+    /// A compile-time constant: `true` whenever the bundled `NemoTextProcessing`
+    /// binary target is linked (the default), `false` only when the consumer
+    /// resolved the package with that trait disabled (#880, #888) — every
+    /// call then returns its input unchanged. Releases ≤ 0.15.6 resolved the
+    /// library at runtime instead.
+    #if canImport(CNemoTextProcessing)
     public let isNativeAvailable = true
+    #else
+    public let isNativeAvailable = false
+    #endif
 
     /// Whether the linked library exposes the TN (written→spoken) surface used
     /// by the TTS frontends.
     ///
-    /// Always `true` with the bundled library. Kept for source compatibility.
-    public var isTnAvailable: Bool { true }
+    /// Tracks `isNativeAvailable`: the bundled library carries both surfaces.
+    public var isTnAvailable: Bool { isNativeAvailable }
 
     /// Shared instance for convenience.
     public static let shared = TextNormalizer()
+
+    private static let logger = AppLogger(category: "ITN")
 
     /// Words that are ambiguous — they could be punctuation spoken forms OR normal English words.
     /// When these appear in sentence context, NLTagger is used to check if they're nouns/verbs/adjectives
@@ -54,11 +66,15 @@ public final class TextNormalizer: Sendable {
     /// - Parameter input: Spoken-form text from ASR (e.g., "two hundred")
     /// - Returns: Written-form text (e.g., "200"), or original if no normalization applies
     public func normalize(_ input: String) -> String {
+        #if canImport(CNemoTextProcessing)
         guard let resultPtr = nemo_normalize(input) else {
             return input
         }
         defer { nemo_free_string(resultPtr) }
         return String(cString: resultPtr)
+        #else
+        return input
+        #endif
     }
 
     // MARK: - Text Normalization (written → spoken)
@@ -66,21 +82,29 @@ public final class TextNormalizer: Sendable {
     /// Normalize written-form text to spoken form (single expression), e.g.
     /// `"$5.50"` → `"five dollars fifty cents"`.
     public func tnNormalize(_ input: String) -> String {
+        #if canImport(CNemoTextProcessing)
         guard let resultPtr = nemo_tn_normalize(input) else {
             return input
         }
         defer { nemo_free_string(resultPtr) }
         return String(cString: resultPtr)
+        #else
+        return input
+        #endif
     }
 
     /// Normalize a full sentence to spoken form, rewriting written-form spans
     /// in place (`"I paid $5"` → `"I paid five dollars"`).
     public func tnNormalizeSentence(_ input: String) -> String {
+        #if canImport(CNemoTextProcessing)
         guard let resultPtr = nemo_tn_normalize_sentence(input) else {
             return input
         }
         defer { nemo_free_string(resultPtr) }
         return String(cString: resultPtr)
+        #else
+        return input
+        #endif
     }
 
     /// Normalize a full sentence, replacing spoken-form spans with written form.
@@ -92,12 +116,16 @@ public final class TextNormalizer: Sendable {
     /// - Parameter input: Full sentence from ASR
     /// - Returns: Sentence with spoken-form spans replaced
     public func normalizeSentence(_ input: String) -> String {
+        #if canImport(CNemoTextProcessing)
         let (masked, restore) = maskAmbiguousWords(in: input)
         guard let resultPtr = nemo_normalize_sentence(masked) else {
             return input
         }
         defer { nemo_free_string(resultPtr) }
         return restoreMaskedWords(String(cString: resultPtr), restore)
+        #else
+        return input
+        #endif
     }
 
     /// Normalize a full sentence with a configurable max span size.
@@ -107,12 +135,16 @@ public final class TextNormalizer: Sendable {
     ///   - maxSpanTokens: Maximum consecutive tokens per normalizable span
     /// - Returns: Sentence with spoken-form spans replaced
     public func normalizeSentence(_ input: String, maxSpanTokens: UInt32) -> String {
+        #if canImport(CNemoTextProcessing)
         let (masked, restore) = maskAmbiguousWords(in: input)
         guard let resultPtr = nemo_normalize_sentence_with_options(masked, 0, maxSpanTokens, 0) else {
             return input
         }
         defer { nemo_free_string(resultPtr) }
         return restoreMaskedWords(String(cString: resultPtr), restore)
+        #else
+        return input
+        #endif
     }
 
     /// Normalize an ASR result, returning a new result with normalized text.
@@ -148,7 +180,11 @@ public final class TextNormalizer: Sendable {
     ///   - spoken: The spoken form to match (e.g., "gee pee tee")
     ///   - written: The written replacement (e.g., "GPT")
     public func addRule(spoken: String, written: String) {
+        #if canImport(CNemoTextProcessing)
         nemo_add_rule(spoken, written)
+        #else
+        Self.logger.warning("addRule ignored: NemoTextProcessing engine not linked")
+        #endif
     }
 
     /// Remove a custom normalization rule.
@@ -157,27 +193,43 @@ public final class TextNormalizer: Sendable {
     /// - Returns: True if the rule was found and removed
     @discardableResult
     public func removeRule(spoken: String) -> Bool {
+        #if canImport(CNemoTextProcessing)
         nemo_remove_rule(spoken) != 0
+        #else
+        return false
+        #endif
     }
 
     /// Clear all custom normalization rules.
     public func clearRules() {
+        #if canImport(CNemoTextProcessing)
         nemo_clear_rules()
+        #else
+        return
+        #endif
     }
 
     /// The number of custom rules currently registered.
     public var ruleCount: Int {
+        #if canImport(CNemoTextProcessing)
         Int(nemo_rule_count())
+        #else
+        return 0
+        #endif
     }
 
     // MARK: - Info
 
     /// The native library version.
     public var version: String? {
+        #if canImport(CNemoTextProcessing)
         guard let versionPtr = nemo_version() else {
             return nil
         }
         return String(cString: versionPtr)
+        #else
+        return nil
+        #endif
     }
 
     // MARK: - NLTagger Context Spotting
