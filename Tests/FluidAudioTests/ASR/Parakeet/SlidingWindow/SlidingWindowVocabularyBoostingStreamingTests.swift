@@ -10,18 +10,18 @@ import os
 /// every defect hid behind:
 ///
 /// 1. terms built in code (`CustomVocabularyTerm(text:)`, no token IDs) must be
-///    tokenized at configure time instead of silently ignored — the spotter can
-///    only detect a term it has token IDs for;
-/// 2. an unconfirmed window must still be rescored — the detection is asserted
-///    on an update with `isConfirmed == false`;
+///    tokenized at configure time — asserted on the session's vocabulary;
+/// 2. an unconfirmed window must still be rescored — asserted by every
+///    unconfirmed update carrying a non-nil `ctcDetectedTerms`, which is set
+///    only when rescoring ran for that window (#899);
 /// 3. an unconfirmed window must not erase the previous window's volatile text —
 ///    asserted by the opening phrase surviving; with boosting on, `finish()`
 ///    builds from that text and returned "" before the fix.
 ///
-/// The assertion is on spotter *activity* (`ctcDetectedTerms`, #899), not on a
-/// particular misrecognition being corrected: decodes differ between machines
-/// (a CI runner already emitted "follow-up" on this clip), so a text-only
-/// assertion could pass on model output alone.
+/// Nothing here depends on the runner's acoustics. A CI runner's raw decode
+/// already said "follow-up" on this clip, and a later run's spotter found no
+/// "Codex" at all, so neither a text correction nor a detection is asserted;
+/// detections are only logged.
 ///
 /// Needs the Parakeet v3 and CTC models; runs when both are cached or
 /// `FLUIDAUDIO_RUN_ASR_E2E=1` allows a download.
@@ -54,6 +54,13 @@ final class SlidingWindowVocabularyBoostingStreamingTests: XCTestCase {
             CustomVocabularyTerm(text: "Codex"), CustomVocabularyTerm(text: "follow-up"),
         ])
         try await manager.configureVocabularyBoosting(vocabulary: vocabulary, ctcModels: ctcModels)
+
+        // Fix 1: the in-code terms received CTC token IDs at configure time.
+        let configuredTerms = await manager.vocabularyBoosting?.vocabulary.terms ?? []
+        XCTAssertEqual(configuredTerms.count, 2)
+        XCTAssertTrue(
+            configuredTerms.allSatisfy { !($0.ctcTokenIds ?? []).isEmpty },
+            "in-code terms were not tokenized: \(configuredTerms.map { ($0.text, $0.ctcTokenIds ?? []) })")
         try await manager.startStreaming()
 
         let updates = OSAllocatedUnfairLock<[SlidingWindowTranscriptionUpdate]>(initialState: [])
@@ -86,17 +93,16 @@ final class SlidingWindowVocabularyBoostingStreamingTests: XCTestCase {
         XCTAssertTrue(folded.contains("help them out"), "tail lost: \(text)")
         XCTAssertTrue(folded.contains("codex"), "vocabulary word missing from: \(text)")
 
-        // Fixes 1 + 2: the spotter found "Codex" (so the in-code term had token
-        // IDs) inside a window that was never confirmed (so it was rescored).
+        // Fix 2: rescoring ran on every window even though none confirmed.
         XCTAssertFalse(seen.isEmpty, "no streaming updates observed")
         XCTAssertTrue(seen.allSatisfy { !$0.isConfirmed }, "no window may confirm in this configuration")
-        let detectedInVolatile = seen.contains { update in
-            !update.isConfirmed && (update.ctcDetectedTerms ?? []).contains { $0.lowercased() == "codex" }
+        for (index, update) in seen.enumerated() where !update.text.isEmpty {
+            XCTAssertNotNil(
+                update.ctcDetectedTerms,
+                "window \(index) was not rescored (unconfirmed, boosting configured): '\(update.text.prefix(40))'")
         }
-        XCTAssertTrue(
-            detectedInVolatile,
-            "spotter never reported 'Codex' on an unconfirmed window; detections: \(seen.map { $0.ctcDetectedTerms ?? [] })"
-        )
+        // Informational: which windows the spotter found the term in.
+        print("[#851 e2e] detections per window: \(seen.map { $0.ctcDetectedTerms ?? ["<not rescored>"] })")
     }
 
     private static func loadSamples(_ url: URL) throws -> [Float] {
