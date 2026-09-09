@@ -38,6 +38,7 @@ public actor PocketTtsModelStore {
     public let language: PocketTtsLanguage
     public let precision: PocketTtsPrecision
     public let placement: PocketTtsModelPlacement
+    public let computeUnits: PocketTtsComputeUnits
 
     /// - Parameters:
     ///   - language: Which upstream language pack to load. Defaults to
@@ -55,16 +56,21 @@ public actor PocketTtsModelStore {
     ///   ignores `precision` for the FlowLM (fp16 only). `.aneState` loads
     ///   the Trial 23 `pocket_state.mlmodelc` multifunction package (MLState
     ///   KV cache; macOS 15+/iOS 18+ at runtime, fp16 only).
+    /// - Parameter computeUnits: Per-stage compute-unit overrides (#881).
+    ///   `.default` keeps the measured-fastest routing below; set a stage, or
+    ///   use `.avoidNeuralEngine`, on hardware where the ANE rejects one.
     public init(
         language: PocketTtsLanguage = .english,
         directory: URL? = nil,
         precision: PocketTtsPrecision = .fp16,
-        placement: PocketTtsModelPlacement = .gpu
+        placement: PocketTtsModelPlacement = .gpu,
+        computeUnits: PocketTtsComputeUnits = .default
     ) {
         self.language = language
         self.directory = directory
         self.precision = precision
         self.placement = placement
+        self.computeUnits = computeUnits
     }
 
     /// Load all four CoreML models and the constants bundle.
@@ -125,10 +131,13 @@ public actor PocketTtsModelStore {
         // M-series — the trade buys a GPU-free decode loop). cond_prefill_ane
         // is 92% ANE-capable but its single fat T=256 call is ~2x faster on
         // GPU, so it stays `.all` and lets the scheduler pick.
-        let condConfig = config(.all)
-        let flowlmConfig = config(placement == .ane ? .cpuAndNeuralEngine : .all)
-        let flowDecoderConfig = config(.all)
-        let mimiConfig = config(.cpuOnly)
+        // Callers can override any stage (#881: M1 Max / macOS 26.6 aborts
+        // `flow_decoder_fused` on the ANE, and no placement avoids `.all`).
+        let units = computeUnits.resolved(for: placement)
+        let condConfig = config(units.conditioner)
+        let flowlmConfig = config(units.flowLM)
+        let flowDecoderConfig = config(units.flowDecoder)
+        let mimiConfig = config(units.mimiDecoder)
 
         let loadStart = Date()
 
@@ -155,7 +164,7 @@ public actor PocketTtsModelStore {
             let modelURL = languageRoot.appendingPathComponent(spec.file)
             let model = try MLModel(contentsOf: modelURL, configuration: spec.config)
             loadedModels.append(model)
-            logger.info("Loaded \(spec.file) (computeUnits=\(spec.config.computeUnits.rawValue))")
+            logger.info("Loaded \(spec.file) (computeUnits=\(spec.config.computeUnits.pocketTtsLabel))")
         }
 
         // In v2.1 the conditioner IS cond_prefill (no per-token cond_step).
@@ -224,9 +233,10 @@ public actor PocketTtsModelStore {
         let stateURL = languageRoot.appendingPathComponent(
             ModelNames.PocketTTS.pocketStateFile)
 
+        let stateUnits = computeUnits.resolvedStatePipeline
         func functionConfig(_ functionName: String) -> MLModelConfiguration {
             let c = MLModelConfiguration()
-            c.computeUnits = .cpuAndNeuralEngine
+            c.computeUnits = stateUnits
             c.functionName = functionName
             return c
         }
@@ -239,16 +249,17 @@ public actor PocketTtsModelStore {
             configuration: functionConfig(ModelNames.PocketTTS.StateFunction.generate))
         stateModelsStore = PocketTtsStateModels(prefill: prefill, generate: generate)
         logger.info(
-            "Loaded \(ModelNames.PocketTTS.pocketStateFile) (functions: prefill, generate; computeUnits=cpuAndNeuralEngine)"
+            "Loaded \(ModelNames.PocketTTS.pocketStateFile) (functions: prefill, generate; computeUnits=\(stateUnits.pocketTtsLabel))"
         )
 
         let mimiConfig = MLModelConfiguration()
-        mimiConfig.computeUnits = .cpuOnly
+        mimiConfig.computeUnits = computeUnits.mimiDecoder ?? .cpuOnly
         let mimiURL = languageRoot.appendingPathComponent(ModelNames.PocketTTS.mimiDecoderFile)
         let mimi = try MLModel(contentsOf: mimiURL, configuration: mimiConfig)
         mimiDecoderModel = mimi
         mimiDecoderKeysCache = try PocketTtsMimiKeys.discover(from: mimi)
-        logger.info("Loaded \(ModelNames.PocketTTS.mimiDecoderFile) (computeUnits=cpuOnly)")
+        logger.info(
+            "Loaded \(ModelNames.PocketTTS.mimiDecoderFile) (computeUnits=\(mimiConfig.computeUnits.pocketTtsLabel))")
 
         let elapsed = Date().timeIntervalSince(loadStart)
         logger.info("PocketTTS state-pipeline models loaded in \(String(format: "%.2f", elapsed))s")
@@ -394,7 +405,7 @@ public actor PocketTtsModelStore {
         guard mimiEncoderModel == nil else { return }
 
         let config = MLModelConfiguration()
-        config.computeUnits = .cpuAndGPU
+        config.computeUnits = computeUnits.resolvedMimiEncoder
 
         if language != .english,
             let packURL = try await PocketTtsResourceDownloader.ensurePackMimiEncoder(

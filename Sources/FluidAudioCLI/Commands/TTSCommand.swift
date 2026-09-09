@@ -80,6 +80,7 @@ public struct TTS {
         var saveVoicePath: String? = nil
         var pocketLanguage: PocketTtsLanguage = .english
         var pocketPlacement: PocketTtsModelPlacement = .gpu
+        var pocketComputeUnits: PocketTtsComputeUnits = .default
         var pocketTemperature: Float = PocketTtsConstants.temperature
         // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
         var pocketSeed: UInt64? = nil
@@ -300,6 +301,23 @@ public struct TTS {
                     saveVoicePath = arguments[i + 1]
                     i += 1
                 }
+            case "--compute-units":
+                if i + 1 < arguments.count {
+                    switch arguments[i + 1].lowercased() {
+                    case "default": pocketComputeUnits = .default
+                    case "no-ane", "avoid-ane": pocketComputeUnits = .avoidNeuralEngine
+                    case "all": pocketComputeUnits = .uniform(.all)
+                    case "cpu-gpu", "gpu": pocketComputeUnits = .uniform(.cpuAndGPU)
+                    case "cpu-ane", "ane": pocketComputeUnits = .uniform(.cpuAndNeuralEngine)
+                    case "cpu-only", "cpu": pocketComputeUnits = .uniform(.cpuOnly)
+                    default:
+                        logger.error(
+                            "Unknown --compute-units '\(arguments[i + 1])'. Supported: default, no-ane, all, cpu-gpu, cpu-ane, cpu-only"
+                        )
+                        return
+                    }
+                    i += 1
+                }
             case "--placement":
                 if i + 1 < arguments.count {
                     let raw = arguments[i + 1].lowercased()
@@ -351,7 +369,8 @@ public struct TTS {
                 metricsPath: metricsPath, cloneVoicePath: cloneVoicePath,
                 voiceFilePath: voiceFilePath, saveVoicePath: saveVoicePath,
                 language: pocketLanguage, seed: pocketSeed,
-                placement: pocketPlacement, temperature: pocketTemperature)
+                placement: pocketPlacement, computeUnits: pocketComputeUnits,
+                temperature: pocketTemperature)
         case .kokoroAne:
             await runKokoroAne(
                 text: text, output: output, voice: voice, metricsPath: metricsPath,
@@ -698,6 +717,7 @@ public struct TTS {
         language: PocketTtsLanguage,
         seed: UInt64? = nil,
         placement: PocketTtsModelPlacement = .gpu,
+        computeUnits: PocketTtsComputeUnits = .default,
         temperature: Float = PocketTtsConstants.temperature
     ) async {
         do {
@@ -706,7 +726,8 @@ public struct TTS {
                 voice == TtsConstants.recommendedVoice
                 ? PocketTtsConstants.defaultVoice : voice
             let manager = PocketTtsManager(
-                defaultVoice: pocketVoice, language: language, placement: placement)
+                defaultVoice: pocketVoice, language: language, placement: placement,
+                computeUnits: computeUnits)
             logger.info(
                 "PocketTTS language: \(language.rawValue), placement: \(placement.rawValue)")
 
@@ -1385,6 +1406,8 @@ public struct TTS {
                                    Note: French is 24-layer only (no 6-layer pack upstream)
               --seed N             Deterministic-mode seed (uses session API for fixed RNG)
               --temperature T      Generation temperature (default 0.7)
+              --compute-units U    PocketTTS per-stage routing: default, no-ane (keep every
+                                   stage off the Neural Engine, #881), all, cpu-gpu, cpu-ane, cpu-only
               --placement P        Model placement: gpu (default), ane (rank-4 ANE models),
                                    ane-state (Trial 23 MLState multifunction pipeline;
                                    macOS 15+/iOS 18+, requires pocket_state.mlmodelc)

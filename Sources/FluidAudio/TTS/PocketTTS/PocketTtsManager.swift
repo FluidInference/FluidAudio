@@ -39,18 +39,23 @@ public actor PocketTtsManager {
     ///   - placement: `.gpu` (default) loads the v2.1 rank-5 models;
     ///     `.ane` loads the rank-4 ANE-eligible variants (`flowlm_step_ane`,
     ///     `cond_prefill_ane`) with the FlowLM pinned to the Neural Engine.
+    ///   - computeUnits: Per-stage compute-unit overrides (#881). `.default`
+    ///     keeps the measured-fastest routing; `.avoidNeuralEngine` keeps
+    ///     every stage off the ANE on hardware where it aborts a stage.
     public init(
         defaultVoice: String = PocketTtsConstants.defaultVoice,
         language: PocketTtsLanguage = .english,
         directory: URL? = nil,
         precision: PocketTtsPrecision = .fp16,
-        placement: PocketTtsModelPlacement = .gpu
+        placement: PocketTtsModelPlacement = .gpu,
+        computeUnits: PocketTtsComputeUnits = .default
     ) {
         self.modelStore = PocketTtsModelStore(
             language: language,
             directory: directory,
             precision: precision,
-            placement: placement
+            placement: placement,
+            computeUnits: computeUnits
         )
         self.defaultVoice = defaultVoice
         self.language = language
