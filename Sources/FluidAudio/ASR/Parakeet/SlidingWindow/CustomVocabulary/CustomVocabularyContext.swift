@@ -122,6 +122,54 @@ public struct CustomVocabularyContext: Sendable {
         self.minTermLength = minTermLength
     }
 
+    /// Copy with the same thresholds and a different term list.
+    func replacingTerms(_ newTerms: [CustomVocabularyTerm]) -> CustomVocabularyContext {
+        CustomVocabularyContext(
+            terms: newTerms,
+            alpha: alpha,
+            minCtcScore: minCtcScore,
+            minSimilarity: minSimilarity,
+            minCombinedConfidence: minCombinedConfidence,
+            minTermLength: minTermLength
+        )
+    }
+
+    /// Fill in `ctcTokenIds` for every term that lacks them (#851).
+    ///
+    /// The spotter and rescorer silently skip terms without CTC token IDs, so a
+    /// context built in code from plain `CustomVocabularyTerm(text:)` values was a
+    /// no-op on every engine. `VocabularyBoostingSession` calls this with the CTC
+    /// tokenizer at configure time; pre-tokenized terms pass through unchanged.
+    /// `tokenIds` (Parakeet TDT IDs) are not a substitute — they index a different
+    /// vocabulary — so a term with only `tokenIds` is tokenized too.
+    ///
+    /// - Returns: The tokenized context, how many terms were tokenized, and the
+    ///   texts of terms that encoded to nothing (dropped).
+    func tokenizingMissingCtcTokens(
+        using encode: (String) -> [Int]
+    ) -> (context: CustomVocabularyContext, tokenized: Int, dropped: [String]) {
+        var tokenized = 0
+        var dropped: [String] = []
+        let newTerms = terms.compactMap { term -> CustomVocabularyTerm? in
+            if let ids = term.ctcTokenIds, !ids.isEmpty { return term }
+            let ids = encode(term.text)
+            guard !ids.isEmpty else {
+                dropped.append(term.text)
+                return nil
+            }
+            tokenized += 1
+            return CustomVocabularyTerm(
+                text: term.text,
+                weight: term.weight,
+                aliases: term.aliases,
+                tokenIds: term.tokenIds,
+                ctcTokenIds: ids,
+                minSimilarity: term.minSimilarity
+            )
+        }
+        return (replacingTerms(newTerms), tokenized, dropped)
+    }
+
     /// Load a custom vocabulary JSON file produced by the analysis tooling.
     public static func load(from url: URL) throws -> CustomVocabularyContext {
         let logger = AppLogger(category: "CustomVocabulary")

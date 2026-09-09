@@ -257,7 +257,7 @@ jobs:
         if: always()
         env:
           FLUIDAUDIO_RUN_ASR_E2E: "1"
-        run: swift test --filter SlidingWindowFinalWindowRegressionTests
+        run: swift test --filter 'SlidingWindowFinalWindowRegressionTests|SlidingWindowVocabularyBoostingStreamingTests'
         timeout-minutes: 15
 
       - name: Comment PR
