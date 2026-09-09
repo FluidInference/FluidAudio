@@ -296,4 +296,32 @@ final class CustomVocabularyTests: XCTestCase {
         XCTAssertEqual(texts, ["Codex", "PyTorch"])
         XCTAssertEqual(VocabularyBoostingSession.detectedTermTexts([]), [])
     }
+
+    // MARK: - Bounded nearest-word fallback (#899)
+
+    private func word(_ text: String, _ start: Double, _ end: Double) -> VocabularyRescorer.WordTiming {
+        VocabularyRescorer.WordTiming(word: text, startTime: start, endTime: end, tokenRange: nil)
+    }
+
+    /// The #899 shape: a spurious detection in the first half second of the
+    /// window, whose nearest word starts much later. Unbounded, it snapped to
+    /// "Hey" 0.68 s away (and to "validate" on another machine).
+    func testFallbackRejectsWordOutsideRadius() {
+        let words = [word("Hey,", 0.90, 1.10), word("before", 1.10, 1.40), word("we", 1.40, 1.50)]
+        let center = (0.16 + 0.48) / 2
+        let nearest = VocabularyRescorer.nearestWord(in: words, toCenter: center)
+        XCTAssertEqual(nearest?.index, 0)
+        XCTAssertEqual(nearest?.delta ?? 0, 0.68, accuracy: 0.01)
+        XCTAssertNil(VocabularyRescorer.fallbackWordIndex(in: words, toCenter: center))
+        XCTAssertNil(VocabularyRescorer.fallbackWordIndex(in: words, toCenter: center, radius: 0.5))
+    }
+
+    /// A genuine near miss (CTC/TDT timestamp skew) still maps to the word.
+    func testFallbackAcceptsWordWithinRadius() {
+        let words = [word("Codex", 9.10, 9.50), word("and", 9.50, 9.60)]
+        // Detection just before the word, centre 0.35 s from the word centre.
+        XCTAssertEqual(VocabularyRescorer.fallbackWordIndex(in: words, toCenter: 8.95), 0)
+        XCTAssertNil(VocabularyRescorer.fallbackWordIndex(in: words, toCenter: 8.95, radius: 0.2))
+        XCTAssertNil(VocabularyRescorer.fallbackWordIndex(in: [], toCenter: 1.0))
+    }
 }

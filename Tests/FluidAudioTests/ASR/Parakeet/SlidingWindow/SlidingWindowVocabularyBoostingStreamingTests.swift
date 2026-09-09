@@ -1,6 +1,5 @@
 import AVFoundation
 import XCTest
-import os
 
 @testable import FluidAudio
 
@@ -63,13 +62,18 @@ final class SlidingWindowVocabularyBoostingStreamingTests: XCTestCase {
             "in-code terms were not tokenized: \(configuredTerms.map { ($0.text, $0.ctcTokenIds ?? []) })")
         try await manager.startStreaming()
 
-        let updates = OSAllocatedUnfairLock<[SlidingWindowTranscriptionUpdate]>(initialState: [])
-        let consumer = Task {
-            for await update in await manager.transcriptionUpdates {
-                updates.withLock { $0.append(update) }
+        // Subscribe before any audio is fed: the continuation exists only once
+        // `transcriptionUpdates` has been read, and updates yielded before that
+        // are dropped. The stream is closed by `cancel()` after `finish()`, which
+        // delivers buffered updates and ends the consumer.
+        let stream = await manager.transcriptionUpdates
+        let consumer = Task { () -> [SlidingWindowTranscriptionUpdate] in
+            var collected: [SlidingWindowTranscriptionUpdate] = []
+            for await update in stream {
+                collected.append(update)
             }
+            return collected
         }
-        defer { consumer.cancel() }
 
         let samples = try Self.loadSamples(url)
         var position = 0
@@ -83,10 +87,14 @@ final class SlidingWindowVocabularyBoostingStreamingTests: XCTestCase {
             position = end
         }
         let text = try await manager.finish()
+        await manager.cancel()  // closes the update stream; finish() leaves it open
+        let seen = await consumer.value
         let folded = text.lowercased()
-        let seen = updates.withLock { $0 }
 
         XCTAssertFalse(folded.isEmpty, "boosted streaming transcript must not be empty")
+        // #899: the spurious window-start detection must not rewrite the first
+        // word through the (now bounded) nearest-word fallback.
+        XCTAssertTrue(folded.hasPrefix("hey"), "first word rewritten by the rescue pass: \(text)")
         // Fix 3: the first (volatile) window's text survives the second volatile window.
         XCTAssertTrue(folded.contains("before we go to them"), "first window lost: \(text)")
         // #855 fixture contract: the final window's tail survives.

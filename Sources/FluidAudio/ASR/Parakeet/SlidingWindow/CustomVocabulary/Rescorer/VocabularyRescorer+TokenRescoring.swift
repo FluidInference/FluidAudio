@@ -1273,6 +1273,33 @@ extension VocabularyRescorer {
     /// margin is the same value.
     static let spotterRescueFallbackRadiusSeconds: Double = 0.5
 
+    /// The word whose centre is closest to `center`, and how far it is. Pure,
+    /// so the fallback bound can be unit-tested without a rescorer.
+    static func nearestWord(
+        in wordTimings: [WordTiming], toCenter center: Double
+    ) -> (index: Int, delta: Double)? {
+        var best: (index: Int, delta: Double)?
+        for (idx, w) in wordTimings.enumerated() {
+            let delta = abs((w.startTime + w.endTime) / 2.0 - center)
+            if best == nil || delta < best!.delta {
+                best = (idx, delta)
+            }
+        }
+        return best
+    }
+
+    /// The bounded-fallback decision on its own: the nearest word's index when
+    /// it lies within `radius` seconds of `center`, nil otherwise (#899).
+    static func fallbackWordIndex(
+        in wordTimings: [WordTiming], toCenter center: Double,
+        radius: Double = spotterRescueFallbackRadiusSeconds
+    ) -> Int? {
+        guard let nearest = nearestWord(in: wordTimings, toCenter: center), nearest.delta <= radius else {
+            return nil
+        }
+        return nearest.index
+    }
+
     /// Find the indices of TDT words whose [startTime, endTime] window
     /// overlaps the supplied detection range. Returns at most a small
     /// contiguous run; non-contiguous overlaps are reduced to the run
@@ -1296,29 +1323,21 @@ extension VocabularyRescorer {
         if overlapping.isEmpty {
             // Fall back to the nearest word to the detection centre, bounded.
             let center = (start + end) / 2.0
-            var bestIdx = 0
-            var bestDelta = Double.infinity
-            for (idx, w) in wordTimings.enumerated() {
-                let mid = (w.startTime + w.endTime) / 2.0
-                let delta = abs(mid - center)
-                if delta < bestDelta {
-                    bestDelta = delta
-                    bestIdx = idx
-                }
-            }
-            guard bestDelta <= fallbackRadius else {
+            let nearest = Self.nearestWord(in: wordTimings, toCenter: center)
+            guard let nearest else { return [] }
+            guard nearest.delta <= fallbackRadius else {
                 debugLog(
                     String(
                         format:
                             "  [SPOTTER-RESCUE] detection %.2f–%.2fs overlaps no word; nearest '%@' is %.2fs away (> %.2fs), skipped",
-                        start, end, wordTimings[bestIdx].word, bestDelta, fallbackRadius))
+                        start, end, wordTimings[nearest.index].word, nearest.delta, fallbackRadius))
                 return []
             }
             debugLog(
                 String(
                     format: "  [SPOTTER-RESCUE] detection %.2f–%.2fs overlaps no word; using nearest '%@' (%.2fs away)",
-                    start, end, wordTimings[bestIdx].word, bestDelta))
-            return [bestIdx]
+                    start, end, wordTimings[nearest.index].word, nearest.delta))
+            return [nearest.index]
         }
         // Ensure contiguity (consecutive indices).
         var contiguous: [Int] = [overlapping[0]]
