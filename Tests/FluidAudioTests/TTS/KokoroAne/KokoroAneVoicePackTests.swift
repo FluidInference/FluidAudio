@@ -104,4 +104,60 @@ final class KokoroAneVoicePackTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - Kokoro-82M v1.0 JSON packs (#896)
+
+    /// Serialize a pack the way the hosted `voices/<name>.json` files are laid
+    /// out: keys "1"…"510", each a 256-number row, plus an ignored "embedding".
+    private func jsonData(for pack: KokoroAneVoicePack, dropRow: Int? = nil) throws -> Data {
+        var object: [String: Any] = ["embedding": Array(repeating: 0.0, count: cols)]
+        for r in 0..<rows where r + 1 != dropRow {
+            object[String(r + 1)] = Array(pack.storage[(r * cols)..<((r + 1) * cols)]).map { Double($0) }
+        }
+        return try JSONSerialization.data(withJSONObject: object)
+    }
+
+    func testLoadFromJSONMapsKeyKPlusOneToRowK() throws {
+        let pack = try makePack()
+        let loaded = try KokoroAneVoicePack.load(fromJSON: jsonData(for: pack))
+        XCTAssertEqual(loaded.storage, pack.storage)
+        // Row 0 is key "1": cell (0, 5) encodes 0*1000 + 5.
+        XCTAssertEqual(loaded.storage[5], 5)
+        // Row 509 is key "510".
+        XCTAssertEqual(loaded.storage[509 * cols + 7], 509_000 + 7)
+        XCTAssertEqual(loaded.binaryData.count, rows * cols * MemoryLayout<Float>.size)
+    }
+
+    func testBinaryDataRoundTripsThroughLoad() throws {
+        let pack = try makePack()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kokoro-pack-\(UUID().uuidString).bin")
+        try pack.binaryData.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertEqual(try KokoroAneVoicePack.load(from: url).storage, pack.storage)
+    }
+
+    func testLoadFromJSONRejectsMissingRow() throws {
+        let data = try jsonData(for: makePack(), dropRow: 42)
+        XCTAssertThrowsError(try KokoroAneVoicePack.load(fromJSON: data)) { error in
+            guard case KokoroAneError.invalidVoicePack(let detail) = error else {
+                return XCTFail("Expected invalidVoicePack, got \(error)")
+            }
+            XCTAssertTrue(detail.contains("row 42"), detail)
+        }
+    }
+
+    func testLoadFromJSONRejectsNonObject() {
+        XCTAssertThrowsError(try KokoroAneVoicePack.load(fromJSON: Data("[1, 2, 3]".utf8)))
+    }
+
+    func testVoiceCatalogsIncludeDefaultsAndReporterVoices() {
+        XCTAssertTrue(KokoroAneVariant.english.knownVoices.contains(KokoroAneConstants.defaultVoice))
+        XCTAssertTrue(KokoroAneVariant.mandarin.knownVoices.contains(KokoroAneConstants.defaultVoiceMandarin))
+        XCTAssertTrue(KokoroAneVariant.japanese.knownVoices.contains(KokoroAneConstants.defaultVoiceJapanese))
+        // The two voices named in #896.
+        XCTAssertTrue(KokoroAneVariant.english.knownVoices.contains("af_bella"))
+        XCTAssertTrue(KokoroAneVariant.english.knownVoices.contains("am_michael"))
+        XCTAssertEqual(KokoroAneVariant.english.knownVoices.count, 54)
+    }
 }

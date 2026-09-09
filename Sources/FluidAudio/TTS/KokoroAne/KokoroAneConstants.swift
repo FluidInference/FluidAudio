@@ -16,6 +16,54 @@ public enum KokoroAneConstants {
     /// Default voice id for the Japanese (`ANE-ja/`) variant.
     public static let defaultVoiceJapanese = "jf_alpha"
 
+    /// Voice packs published for the English (`ANE/`) variant. Only
+    /// `af_heart.bin` ships pre-converted; every other name is the Kokoro-82M
+    /// v1.0 pack hosted as `voices/<name>.json` at the repository root, which
+    /// `KokoroAneResourceDownloader.ensureVoicePack` converts to the flat
+    /// `[510, 256]` fp32 layout on first use (#896). The 7-stage chain takes
+    /// the style vectors as runtime inputs, so any v1.0 pack works with it;
+    /// non-English-prefixed packs (`zf_*`, `jf_*`, …) still speak English
+    /// phonemes here, just with that voice's timbre.
+    /// Listing as of 2026-09-09 (huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/voices).
+    public static let englishVoices: [String] = [
+        "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore",
+        "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky", "am_adam",
+        "am_echo", "am_eric", "am_fenrir", "am_liam", "am_michael", "am_onyx",
+        "am_puck", "am_santa", "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
+        "bm_daniel", "bm_fable", "bm_george", "bm_lewis", "ef_dora", "em_alex",
+        "em_santa", "ff_siwis", "hf_alpha", "hf_beta", "hm_omega", "hm_psi",
+        "if_sara", "im_nicola", "jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro",
+        "jm_kumo", "pf_dora", "pm_alex", "pm_santa", "zf_xiaobei", "zf_xiaoni",
+        "zf_xiaoxiao", "zf_xiaoyi", "zm_yunjian", "zm_yunxi", "zm_yunxia", "zm_yunyang",
+    ]
+
+    /// Voice packs in the Mandarin (`ANE-zh/voices/`) bundle, as of 2026-09-09.
+    public static let mandarinVoices: [String] = [
+        "af_maple", "af_sol", "bf_vale", "zf_001", "zf_002", "zf_003",
+        "zf_004", "zf_005", "zf_006", "zf_007", "zf_008", "zf_017",
+        "zf_018", "zf_019", "zf_021", "zf_022", "zf_023", "zf_024",
+        "zf_026", "zf_027", "zf_028", "zf_032", "zf_036", "zf_038",
+        "zf_039", "zf_040", "zf_042", "zf_043", "zf_044", "zf_046",
+        "zf_047", "zf_048", "zf_049", "zf_051", "zf_059", "zf_060",
+        "zf_067", "zf_070", "zf_071", "zf_072", "zf_073", "zf_074",
+        "zf_075", "zf_076", "zf_077", "zf_078", "zf_079", "zf_083",
+        "zf_084", "zf_085", "zf_086", "zf_087", "zf_088", "zf_090",
+        "zf_092", "zf_093", "zf_094", "zf_099", "zm_009", "zm_010",
+        "zm_011", "zm_012", "zm_013", "zm_014", "zm_015", "zm_016",
+        "zm_020", "zm_025", "zm_029", "zm_030", "zm_031", "zm_033",
+        "zm_034", "zm_035", "zm_037", "zm_041", "zm_045", "zm_050",
+        "zm_052", "zm_053", "zm_054", "zm_055", "zm_056", "zm_057",
+        "zm_058", "zm_061", "zm_062", "zm_063", "zm_064", "zm_065",
+        "zm_066", "zm_068", "zm_069", "zm_080", "zm_081", "zm_082",
+        "zm_089", "zm_091", "zm_095", "zm_096", "zm_097", "zm_098",
+        "zm_100",
+    ]
+
+    /// Voice packs in the Japanese (`ANE-ja/voices/`) bundle, as of 2026-09-09.
+    public static let japaneseVoices: [String] = [
+        "jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro", "jm_kumo",
+    ]
+
     /// Output sample rate of the iSTFT in `KokoroTail_v2.mlpackage`.
     public static let sampleRate = 24_000
 
@@ -149,6 +197,17 @@ public enum KokoroAneVariant: String, CaseIterable, Sendable {
         switch self {
         case .english: return false
         case .mandarin, .japanese: return true
+        }
+    }
+
+    /// Voice ids known to be available for this variant (see
+    /// `KokoroAneConstants.englishVoices` etc.). Used for error messages and
+    /// the CLI listing; a name outside the list is still attempted.
+    public var knownVoices: [String] {
+        switch self {
+        case .english: return KokoroAneConstants.englishVoices
+        case .mandarin: return KokoroAneConstants.mandarinVoices
+        case .japanese: return KokoroAneConstants.japaneseVoices
         }
     }
 
