@@ -61,7 +61,8 @@ public actor SlidingWindowAsrManager {
 
     // Vocabulary boosting
     // Initialized via configureVocabularyBoosting() before start()
-    private var vocabularyBoosting: VocabularyBoostingSession?
+    // Internal (not private) so tests can inspect the configured vocabulary.
+    var vocabularyBoosting: VocabularyBoostingSession?
     private var vocabBoostingEnabled: Bool { vocabularyBoosting != nil }
 
     /// Initialize the sliding-window ASR manager
@@ -511,21 +512,22 @@ public actor SlidingWindowAsrManager {
             {
                 let chunkLocalTimings = chunkLocalResult.tokenTimings ?? []
 
-                if let rescored = await applyVocabularyRescoring(
+                // Rescoring ran for this window: report its detections even when
+                // there are none, so `ctcDetectedTerms` is nil only when boosting
+                // is not configured (a deterministic "rescored" signal, #899).
+                let rescored = await applyVocabularyRescoring(
                     text: interim.text,
                     tokenTimings: chunkLocalTimings,
                     windowSamples: windowSamples
-                ) {
-                    let detected = rescored.detectedTerms
-                    let applied = rescored.replacements.filter { $0.shouldReplace }.compactMap {
-                        $0.replacementWord
-                    }
-                    displayResult = interim.withRescoring(
-                        text: rescored.text,
-                        detected: detected.isEmpty ? nil : detected,
-                        applied: applied.isEmpty ? nil : applied
-                    )
+                )
+                let applied = (rescored?.replacements ?? []).filter { $0.shouldReplace }.compactMap {
+                    $0.replacementWord
                 }
+                displayResult = interim.withRescoring(
+                    text: rescored?.text ?? interim.text,
+                    detected: rescored?.detectedTerms ?? [],
+                    applied: applied.isEmpty ? nil : applied
+                )
             }
 
             await updateTranscriptionState(with: displayResult, shouldConfirm: shouldConfirm)
@@ -873,8 +875,10 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
         tokenTimings.map(\.token)
     }
 
-    /// Vocabulary terms the CTC spotter detected in this window's audio, when
-    /// boosting is configured (#899). Present even if nothing was replaced.
+    /// Vocabulary terms the CTC spotter detected in this window's audio (#899).
+    /// `nil` when vocabulary boosting is not configured; empty when rescoring
+    /// ran on this window and detected nothing. Present even if nothing was
+    /// replaced.
     public let ctcDetectedTerms: [String]?
     /// Vocabulary terms applied as replacements in this window's text.
     public let ctcAppliedTerms: [String]?
