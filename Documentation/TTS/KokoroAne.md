@@ -156,11 +156,21 @@ is a flat `[510, 256]` fp32 matrix. Row index = `min(max(phonemeCount - 1,
 + Prosody).
 
 The English bundle stores voice packs flat at the bundle root
-(`<voice>.bin`); the Mandarin bundle nests them under `voices/<voice>.bin`.
-This single-voice-per-variant constraint is intrinsic to the upstream
-conversion — adding voices requires re-converting `KokoroPostAlbert` /
-`KokoroProsody` / `KokoroNoise` / `KokoroVocoder` against the new style
-embeddings.
+(`<voice>.bin`); the Mandarin and Japanese bundles nest them under
+`voices/<voice>.bin`.
+
+**Any Kokoro-82M v1.0 voice works with the English chain.** The four style
+consumers take `style_s` / `style_timbre` as runtime inputs — nothing is baked
+into the converted models — so a voice is just another `[510, 256]` pack. The
+English bundle publishes only `af_heart.bin` pre-converted; for any other name
+`KokoroAneResourceDownloader.ensureVoicePack` fetches the repo-root
+`voices/<name>.json` (the upstream v1.0 set, 54 voices, see
+`KokoroAneConstants.englishVoices`) and converts it on first use — row `k` of
+the flat pack is JSON key `"k+1"`, verified byte-exact against `af_heart.bin`
+(#896). Pick with `KokoroAneManager(defaultVoice:)` or `synthesize(text:voice:)`;
+an unknown name throws `KokoroAneError.voiceNotFound` listing the catalog.
+The Mandarin bundle ships 103 voices and the Japanese bundle 5, all
+pre-converted (`KokoroAneConstants.mandarinVoices` / `japaneseVoices`).
 
 ## Mandarin G2P
 
@@ -200,7 +210,7 @@ viable upgrades — the current pipeline trades them for a zero-network
 - **Phonemes:** ≤ 510 IPA / Bopomofo chars per call (ALBERT context = 512
   incl. BOS/EOS). No built-in chunker — split upstream if you need longer
   inputs.
-- **Voices:** `af_heart` only (English) / `zf_001` only (Mandarin).
+- **Voices:** any pack in the variant's catalog (`KokoroAneVariant.knownVoices`): 54 English (converted on first use), 103 Mandarin, 5 Japanese. See "Voice packs" above.
 - **Custom lexicon / SSML / Markdown overrides:** not supported. The pipeline
   goes `text → G2P → phonemes → token ids` with no interception point.
 - **Acoustic frames:** `T_a ≤ 2000` (compile-time `--max-frames` baked into
