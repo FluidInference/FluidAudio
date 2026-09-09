@@ -34,16 +34,39 @@ public struct VocabularyBoostingSession: Sendable {
     ///
     /// - Parameters:
     ///   - vocabulary: Custom vocabulary context with terms to detect. Terms
-    ///     must carry `ctcTokenIds` (e.g. via
-    ///     `CustomVocabularyContext.loadWithCtcTokens(from:ctcVariant:)`).
+    ///     without `ctcTokenIds` are tokenized here with the CTC tokenizer
+    ///     shipped alongside `ctcModels` (#851); pre-tokenized terms (e.g. via
+    ///     `CustomVocabularyContext.loadWithCtcTokens(from:ctcVariant:)`) are
+    ///     used as-is.
     ///   - ctcModels: Pre-loaded CTC models for keyword spotting
     ///   - config: Optional rescorer configuration (default: `.default`)
-    /// - Throws: Error if rescorer initialization fails
+    /// - Throws: Error if the CTC tokenizer cannot be loaded for untokenized
+    ///   terms, or if rescorer initialization fails
     public init(
         vocabulary: CustomVocabularyContext,
         ctcModels: CtcModels,
         config: VocabularyRescorer.Config? = nil
     ) async throws {
+        let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
+
+        // Terms built in code arrive without CTC token IDs, and every consumer
+        // (spotter, rescorer) skips such terms without a word — the documented
+        // `CustomVocabularyContext(terms: [CustomVocabularyTerm(text:)])` path
+        // was a silent no-op on every engine (#851). Tokenize them here.
+        var vocabulary = vocabulary
+        let needsTokens = vocabulary.terms.contains { ($0.ctcTokenIds ?? []).isEmpty }
+        if needsTokens {
+            let tokenizer = try await CtcTokenizer.load(from: ctcModelDir)
+            let result = vocabulary.tokenizingMissingCtcTokens(using: tokenizer.encode)
+            vocabulary = result.context
+            logger.info("Tokenized \(result.tokenized) vocabulary term(s) with the CTC tokenizer")
+            for text in result.dropped {
+                logger.warning("Vocabulary term '\(text)' produced no CTC tokens; dropped")
+            }
+        }
+        if vocabulary.terms.isEmpty {
+            logger.warning("Vocabulary boosting configured with no usable terms; rescoring will be a no-op")
+        }
         self.vocabulary = vocabulary
 
         let blankId = ctcModels.vocabulary.count
@@ -53,7 +76,6 @@ public struct VocabularyBoostingSession: Sendable {
         self.vocabSizeConfig = ContextBiasingConstants.rescorerConfig(
             forVocabSize: vocabulary.terms.count)
 
-        let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
         self.rescorer = try await VocabularyRescorer.create(
             spotter: spotter,
             vocabulary: vocabulary,

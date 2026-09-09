@@ -307,4 +307,17 @@ final class SlidingWindowAsrManagerTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - Volatile text accumulation (#851)
+
+    func testAppendingVolatileExtendsRatherThanReplaces() {
+        XCTAssertEqual(
+            SlidingWindowAsrManager.appendingVolatile("first window", "second window"), "first window second window")
+    }
+
+    func testAppendingVolatileIgnoresEmptyFlushWindow() {
+        XCTAssertEqual(SlidingWindowAsrManager.appendingVolatile("first window", ""), "first window")
+        XCTAssertEqual(SlidingWindowAsrManager.appendingVolatile("", "only"), "only")
+        XCTAssertEqual(SlidingWindowAsrManager.appendingVolatile("", ""), "")
+    }
 }

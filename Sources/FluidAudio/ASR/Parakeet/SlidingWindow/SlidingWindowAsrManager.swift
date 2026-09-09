@@ -491,9 +491,13 @@ public actor SlidingWindowAsrManager {
             let isHighConfidence = Double(interim.confidence) >= config.confirmationThreshold
             let shouldConfirm = isHighConfidence && hasMinimumContext
 
-            // Rescore before updating transcript state so finish() returns rescored content
+            // Rescore before updating transcript state so finish() returns rescored content.
+            // Every window is rescored, not only confirmed ones: confirmation is a display
+            // promotion, but a window's text is promoted verbatim later, so a window that
+            // was volatile when decoded (short clip under `minContextForConfirmation`, low
+            // confidence, the final flush) would otherwise never see its vocabulary (#851).
             var displayResult = interim
-            if shouldConfirm && vocabBoostingEnabled,
+            if vocabBoostingEnabled,
                 let chunkLocalResult = await asrManager?.processTranscriptionResult(
                     tokenIds: tokens,
                     timestamps: timestamps,  // Original chunk-local timestamps (not adjusted)
@@ -568,7 +572,12 @@ public actor SlidingWindowAsrManager {
                 "CONFIRMED (\(result.confidence), \(String(format: "%.1f", totalAudioProcessed))s context): promoted to confirmed; new volatile '\(result.text)'"
             )
         } else {
-            volatileTranscript = result.text
+            // Each window carries new audio, so an unconfirmed window extends the
+            // volatile tail rather than replacing it. Overwriting lost the previous
+            // window's text whenever two consecutive windows went unconfirmed — with
+            // boosting on, finish() builds from this text, and a trailing empty flush
+            // window returned an empty transcript for a 15 s clip (#851).
+            volatileTranscript = Self.appendingVolatile(volatileTranscript, result.text)
             let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
             let reason =
                 !hasMinimumContext
@@ -577,7 +586,13 @@ public actor SlidingWindowAsrManager {
         }
     }
 
-    /// Apply vocabulary rescoring to confirmed text using CTC-based constrained decoding.
+    /// Join the still-volatile text with a newer unconfirmed window's text.
+    /// Empty pieces (a silent flush window) contribute nothing. Pure, for testability.
+    static func appendingVolatile(_ existing: String, _ incoming: String) -> String {
+        [existing, incoming].filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// Apply vocabulary rescoring to a window's text using CTC-based constrained decoding.
     ///
     /// This runs CTC inference on the chunk audio and applies vocabulary rescoring
     /// to replace misrecognized words with vocabulary terms when acoustic evidence supports it.

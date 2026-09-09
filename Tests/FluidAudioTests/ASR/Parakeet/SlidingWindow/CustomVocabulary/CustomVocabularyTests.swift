@@ -235,4 +235,49 @@ final class CustomVocabularyTests: XCTestCase {
         XCTAssertNotNil(term.aliases)
         XCTAssertTrue(term.aliases?.isEmpty == true)
     }
+
+    // MARK: - Automatic CTC tokenization (#851)
+
+    private func fakeEncode(_ text: String) -> [Int] {
+        // Deterministic stand-in for CtcTokenizer.encode: one id per character.
+        text.unicodeScalars.map { Int($0.value) }
+    }
+
+    func testTokenizingMissingCtcTokensFillsUntokenizedTerms() {
+        let context = CustomVocabularyContext(
+            terms: [CustomVocabularyTerm(text: "NVIDIA"), CustomVocabularyTerm(text: "PyTorch", weight: 2)],
+            minSimilarity: 0.42, minTermLength: 4)
+        let result = context.tokenizingMissingCtcTokens(using: fakeEncode)
+        XCTAssertEqual(result.tokenized, 2)
+        XCTAssertTrue(result.dropped.isEmpty)
+        XCTAssertEqual(result.context.terms.map(\.text), ["NVIDIA", "PyTorch"])
+        XCTAssertEqual(result.context.terms[0].ctcTokenIds, fakeEncode("NVIDIA"))
+        XCTAssertEqual(result.context.terms[1].weight, 2, "per-term settings survive")
+        XCTAssertEqual(result.context.minSimilarity, 0.42, accuracy: 0.001, "thresholds survive")
+        XCTAssertEqual(result.context.minTermLength, 4)
+    }
+
+    func testTokenizingMissingCtcTokensLeavesPreTokenizedTermsAlone() {
+        let pre = CustomVocabularyTerm(text: "Bose", ctcTokenIds: [7, 8, 9])
+        let result = CustomVocabularyContext(terms: [pre]).tokenizingMissingCtcTokens(using: fakeEncode)
+        XCTAssertEqual(result.tokenized, 0)
+        XCTAssertEqual(result.context.terms[0].ctcTokenIds, [7, 8, 9])
+    }
+
+    /// TDT `tokenIds` index a different vocabulary; they must not stand in for CTC ids.
+    func testTokenizingMissingCtcTokensIgnoresTdtTokenIds() {
+        let tdtOnly = CustomVocabularyTerm(text: "Bose", tokenIds: [100, 200])
+        let result = CustomVocabularyContext(terms: [tdtOnly]).tokenizingMissingCtcTokens(using: fakeEncode)
+        XCTAssertEqual(result.tokenized, 1)
+        XCTAssertEqual(result.context.terms[0].ctcTokenIds, fakeEncode("Bose"))
+        XCTAssertEqual(result.context.terms[0].tokenIds, [100, 200])
+    }
+
+    func testTokenizingMissingCtcTokensDropsTermsThatEncodeToNothing() {
+        let result = CustomVocabularyContext(terms: [
+            CustomVocabularyTerm(text: "keep"), CustomVocabularyTerm(text: "drop"),
+        ]).tokenizingMissingCtcTokens(using: { $0 == "drop" ? [] : self.fakeEncode($0) })
+        XCTAssertEqual(result.context.terms.map(\.text), ["keep"])
+        XCTAssertEqual(result.dropped, ["drop"])
+    }
 }

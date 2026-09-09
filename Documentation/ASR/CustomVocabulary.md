@@ -384,7 +384,9 @@ let vocabulary = CustomVocabularyContext(terms: [
 ])
 ```
 
-Each term is tokenized and scored against CTC log-probabilities. High-scoring terms are used to correct the TDT transcript.
+Terms without `ctcTokenIds` are tokenized with the CTC tokenizer when boosting is configured (`configureVocabularyBoosting` on any engine, or `VocabularyBoostingSession.init`), so the plain `CustomVocabularyTerm(text:)` form above works as written. Pre-tokenized terms (from `loadWithCtcTokens(from:)`, or an explicit `ctcTokenIds:`) are used as-is; a term that encodes to nothing is dropped with a warning. Each term is then scored against CTC log-probabilities, and high-scoring terms correct the transcript. (Before #851 this path was a silent no-op: untokenized terms were skipped without any log.)
+
+**Streaming (`SlidingWindowAsrManager`).** Every window is rescored, including windows that are still volatile (a clip shorter than `minContextForConfirmation`, a low-confidence window, the final flush) — confirmation only governs display promotion, and a window's text is promoted verbatim later.
 
 #### Alias Support
 
