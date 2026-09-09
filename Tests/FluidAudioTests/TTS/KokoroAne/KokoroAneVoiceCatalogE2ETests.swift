@@ -1,3 +1,5 @@
+// BISECT: temporarily compiled out to isolate a CI segfault (#901).
+#if false
 import XCTest
 
 @testable import FluidAudio
@@ -36,3 +38,4 @@ final class KokoroAneVoiceCatalogE2ETests: XCTestCase {
         }
     }
 }
+#endif
