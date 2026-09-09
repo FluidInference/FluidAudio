@@ -81,8 +81,10 @@ public actor SlidingWindowAsrManager {
 
     /// Configure vocabulary boosting for streaming transcription
     ///
-    /// When configured, vocabulary terms will be rescored when text is confirmed during streaming.
-    /// This provides real-time vocabulary corrections visible in confirmed updates.
+    /// When configured, every window is rescored against CTC evidence as it is
+    /// decoded — confirmed or not (#851) — so corrections appear in both volatile
+    /// and confirmed updates and in `finish()`. Terms without `ctcTokenIds` are
+    /// tokenized here with the CTC tokenizer.
     ///
     /// - Parameters:
     ///   - vocabulary: Custom vocabulary context with terms to detect

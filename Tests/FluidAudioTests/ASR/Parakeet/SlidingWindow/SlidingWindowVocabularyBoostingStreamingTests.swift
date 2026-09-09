@@ -4,18 +4,21 @@ import XCTest
 @testable import FluidAudio
 
 /// End-to-end check of the three #851 defects on a real recording, through the
-/// public API exactly as an integrator uses it:
+/// public API exactly as an integrator uses it. `minContextForConfirmation` is
+/// set above the clip length so **no window ever confirms**, which is the state
+/// every defect hid behind:
 ///
 /// 1. terms built in code (`CustomVocabularyTerm(text:)`, no token IDs) must be
-///    tokenized at configure time instead of silently ignored;
-/// 2. a window that is never confirmed (this clip has two windows; the second is
-///    the flush) must still be rescored;
-/// 3. an unconfirmed trailing window must not erase the previous window's text —
-///    with boosting on, `finish()` builds from that text and returned "".
+///    tokenized at configure time instead of silently ignored — asserted by the
+///    corrected spelling `follow-up` (unboosted decode says `follow up`);
+/// 2. an unconfirmed window must still be rescored — same assertion, since the
+///    word sits in the second, never-confirmed window;
+/// 3. an unconfirmed window must not erase the previous window's volatile text —
+///    asserted by the opening phrase surviving; with boosting on, `finish()`
+///    builds from that text and returned "" before the fix.
 ///
-/// Asserts the transcript is non-empty, keeps the recording's tail, and still
-/// contains the vocabulary term's word. Needs the Parakeet v3 and CTC models;
-/// runs when both are cached or `FLUIDAUDIO_RUN_ASR_E2E=1` allows a download.
+/// Needs the Parakeet v3 and CTC models; runs when both are cached or
+/// `FLUIDAUDIO_RUN_ASR_E2E=1` allows a download.
 @available(macOS 14.0, iOS 17.0, *)
 final class SlidingWindowVocabularyBoostingStreamingTests: XCTestCase {
 
@@ -36,7 +39,9 @@ final class SlidingWindowVocabularyBoostingStreamingTests: XCTestCase {
 
         let asrModels = try await AsrModels.downloadAndLoad()
         let ctcModels = try await CtcModels.downloadAndLoad()
-        let manager = SlidingWindowAsrManager()
+        // 60 s > 21.4 s clip: every window stays volatile for the whole stream.
+        let config = SlidingWindowAsrConfig(minContextForConfirmation: 60)
+        let manager = SlidingWindowAsrManager(config: config)
         try await manager.loadModels(asrModels)
         // Untokenized on purpose: this is the documented in-code path.
         let vocabulary = CustomVocabularyContext(terms: [
@@ -60,7 +65,13 @@ final class SlidingWindowVocabularyBoostingStreamingTests: XCTestCase {
         let folded = text.lowercased()
 
         XCTAssertFalse(folded.isEmpty, "boosted streaming transcript must not be empty")
+        // Fix 3: the first (volatile) window's text survives the second volatile window.
+        XCTAssertTrue(folded.contains("before we go to them"), "first window lost: \(text)")
+        // #855 fixture contract: the final window's tail survives.
         XCTAssertTrue(folded.contains("help them out"), "tail lost: \(text)")
+        // Fixes 1 + 2: the in-code term was tokenized and applied inside a window
+        // that never confirmed. Unboosted decode of this clip says "follow up".
+        XCTAssertTrue(folded.contains("follow-up"), "term not applied in unconfirmed window: \(text)")
         XCTAssertTrue(folded.contains("codex"), "vocabulary word missing from: \(text)")
     }
 
