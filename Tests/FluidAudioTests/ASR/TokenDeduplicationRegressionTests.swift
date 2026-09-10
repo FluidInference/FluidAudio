@@ -757,10 +757,11 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             previousTimestamps: [96, 100],
             trailingWordStart: 1,
             currentTokens: [7948, 9],
-            currentTimestamps: [99, 112],
+            currentTimestamps: [107, 112],  // starts after the previous word's span: a new word
             currentPieces: [" ó", " si"],
             previousPieces: [" digo", " que"]
         )
+        XCTAssertEqual(seam.droppedPrevious, 0)
         XCTAssertEqual(seam.droppedCurrent, 0, "`ó` is a word, not punctuation, regardless of its id")
     }
 
