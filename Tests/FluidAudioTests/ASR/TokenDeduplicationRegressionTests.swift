@@ -646,22 +646,71 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertFalse(AsrManager.isPunctuationPiece(""))
     }
 
-    func testReconcileFinalWindowSeam_EmptyEarlyAndDegenerateInputsKeepPrevious() {
+    /// Same word, different segmentation: the previous `▁out` is one piece, the
+    /// re-decode spells it `▁o` `ut` with a comma behind. Id-level matching
+    /// cannot see the duplicate, so the same-word branch must consume the whole
+    /// re-emitted word range itself.
+    func testReconcileFinalWindowSeam_SameWordDifferentSegmentationIsConsumed() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3],  // ▁them ▁out .
+            previousTimestamps: [254, 258, 261],
+            trailingWordStart: 1,
+            currentTokens: [40, 41, 99, 50],  // ▁o ut , ▁and
+            currentTimestamps: [259, 260, 262, 270],
+            currentPieces: [" o", "ut", ",", " and"],
+            previousPieces: [" them", " out", "."],
+            punctuationTokens: []
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 2, "both pieces of the re-emitted `out` go; the comma and `and` stay")
+    }
+
+    /// Adversarial for the prefix rule: a continuation head followed by a new
+    /// word that merely extends the previous text (`an` … `another`). The new
+    /// word starts after the previous word's span, so it is kept as a new word
+    /// and the previous `an` survives.
+    func testReconcileFinalWindowSeam_LaterExtendingWordDoesNotRetire() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [30, 31, 32],
+            currentTimestamps: [103, 112, 116],
+            currentPieces: ["x", " another", " thing"],
+            previousPieces: [" is", " an"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0, "`another` at 112 starts after `an`'s span; not a replacement")
+        XCTAssertEqual(seam.droppedCurrent, 1, "the continuation head still goes")
+    }
+
+    func testReconcileFinalWindowSeam_EmptyEarlyMisalignedAndDegenerateInputsKeepPrevious() {
         let empty = AsrManager.reconcileFinalWindowSeam(
             previousTokens: [1, 2, 3, 4], previousTimestamps: [250, 254, 258, 261], trailingWordStart: 2,
-            currentTokens: [], currentTimestamps: [])
+            currentTokens: [], currentTimestamps: [], currentPieces: [], previousPieces: [" a", " b", " c", " d"])
         XCTAssertEqual(empty.droppedPrevious, 0)
         XCTAssertEqual(empty.droppedCurrent, 0)
         // Only a punctuation before the previous word's onset: nothing re-emitted.
         let earlyOnly = AsrManager.reconcileFinalWindowSeam(
             previousTokens: [1, 2, 3, 4], previousTimestamps: [250, 254, 258, 261], trailingWordStart: 2,
-            currentTokens: [7883], currentTimestamps: [240], currentPieces: ["."], punctuationTokens: [])
+            currentTokens: [7883], currentTimestamps: [240], currentPieces: ["."],
+            previousPieces: [" a", " b", " out", "."], punctuationTokens: [])
         XCTAssertEqual(earlyOnly.droppedPrevious, 0)
         XCTAssertEqual(earlyOnly.droppedCurrent, 1, "punctuation before the previous word's onset is a seam artifact")
+        // Missing or misaligned piece arrays: a no-op, never a mass drop.
+        let noPieces = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3], previousTimestamps: [100, 104, 108], trailingWordStart: 2,
+            currentTokens: [9, 10], currentTimestamps: [110, 114])
+        XCTAssertEqual(noPieces.droppedPrevious, 0)
+        XCTAssertEqual(noPieces.droppedCurrent, 0)
+        let misaligned = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3], previousTimestamps: [100, 104, 108], trailingWordStart: 2,
+            currentTokens: [9, 10], currentTimestamps: [110, 114], currentPieces: [" only"],
+            previousPieces: [" a", " b", " c"])
+        XCTAssertEqual(misaligned.droppedCurrent, 0)
         XCTAssertEqual(
             AsrManager.reconcileFinalWindowSeam(
                 previousTokens: [1], previousTimestamps: [5], trailingWordStart: 0,
-                currentTokens: [2], currentTimestamps: [6]
+                currentTokens: [2], currentTimestamps: [6], currentPieces: [" x"], previousPieces: [" y"]
             ).droppedPrevious, 0)
     }
 }

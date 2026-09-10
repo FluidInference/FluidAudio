@@ -168,7 +168,8 @@ extension AsrManager {
     ///
     /// Returns how many trailing previous tokens to drop (the whole last word
     /// or none) and how many leading current tokens to drop. Pure, for
-    /// testability; timestamps are global frames.
+    /// testability; timestamps are global frames. Both piece arrays must be
+    /// aligned with their token arrays, otherwise the result is a no-op.
     nonisolated internal static func reconcileFinalWindowSeam(
         previousTokens: [Int],
         previousTimestamps: [Int],
@@ -181,13 +182,18 @@ extension AsrManager {
         jitterFrames: Int = redecodeEmissionJitterFrames,
         frameTolerance: Int = ASRConstants.duplicateFrameTolerance
     ) -> (droppedPrevious: Int, droppedCurrent: Int) {
+        // The decision is by piece text, so both piece arrays must be aligned
+        // with their token arrays; without them the only safe answer is a no-op
+        // (an unknown piece would otherwise read as a continuation and drop).
         guard trailingWordStart > 0, trailingWordStart < previousTokens.count,
             previousTimestamps.count == previousTokens.count,
             currentTimestamps.count == currentTokens.count,
+            currentPieces.count == currentTokens.count,
+            previousPieces.count == previousTokens.count,
             !currentTokens.isEmpty
         else { return (0, 0) }
 
-        func piece(_ index: Int) -> String { index < currentPieces.count ? currentPieces[index] : "" }
+        func piece(_ index: Int) -> String { currentPieces[index] }
         // `ASRConstants.punctuationTokens` lists only sentence-final marks; the
         // seam artifact is usually a comma, so classify by the piece text too.
         func isPunctuation(_ index: Int) -> Bool {
@@ -216,14 +222,18 @@ extension AsrManager {
         let firstWordIndex = (head..<currentTokens.count).first { startsWord($0) && !isPunctuation($0) }
         let firstWordFrame = firstWordIndex.map { currentTimestamps[$0] }
 
+        let overlapsPrevious = firstWordFrame.map { $0 <= previousLastFrame + jitterFrames } ?? false
         let retire: Bool
         if !extendsBeyondPrevious || currentWord.isEmpty || previousWord.isEmpty {
             retire = false
         } else if currentWord == previousWord {
             retire = false
-        } else if currentWord.hasPrefix(previousWord) {
+        } else if currentWord.hasPrefix(previousWord), overlapsPrevious {
+            // A fragment's replacement starts where the fragment started. A
+            // later word that merely happens to extend the previous text
+            // (`an` … `another`) is a new word; keep the previous one.
             retire = true
-        } else if head == 0, let frame = firstWordFrame, frame <= previousLastFrame + jitterFrames {
+        } else if head == 0, overlapsPrevious {
             // Overlapping different word, and the re-decode started it itself
             // (no continuation head): it disagrees with more context. Behind a
             // continuation head the first real word is the *next* word by
@@ -238,9 +248,21 @@ extension AsrManager {
             zip(previousTokens, previousTimestamps).prefix(retire ? trailingWordStart : previousTokens.count))
         let keptLastFrame = keptPrevious.last?.1 ?? -1
 
-        // 4. Strip the seam artifacts from the re-decode's head.
+        // 4. Strip the seam artifacts from the re-decode's head. When the
+        // previous word is kept because the re-decode's first word is the same
+        // word, consume that word's whole piece range explicitly — its
+        // segmentation, casing or punctuation may differ from the kept copy,
+        // so id-level duplicate matching cannot be relied on for it.
         var droppedCurrent = head
-        for index in head..<currentTokens.count {
+        if !retire, currentWord == previousWord, let firstIndex = firstWordIndex {
+            var end = firstIndex + 1
+            while end < currentTokens.count, !startsWord(end), !isPunctuation(end) {
+                end += 1
+            }
+            // Punctuation between the head and the word is a seam artifact too.
+            droppedCurrent = end
+        }
+        for index in droppedCurrent..<currentTokens.count {
             let id = currentTokens[index]
             let frame = currentTimestamps[index]
             if isPunctuation(index), frame <= lastWordStartFrame {
