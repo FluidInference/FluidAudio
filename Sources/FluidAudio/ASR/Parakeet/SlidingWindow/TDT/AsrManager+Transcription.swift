@@ -149,8 +149,11 @@ extension AsrManager {
     ///    the tail of the previous last word whose start fell under the cutoff
     ///    (`box` + `x, but`). They are dropped and never justify retiring.
     /// 2. The first real word of the re-decode then decides the previous word's
-    ///    fate. Same word: keep the previous copy (it carries the sentence-final
-    ///    punctuation a re-decode at the audio end omits), drop the re-emission.
+    ///    fate. Same word starting within the previous word's span: keep the
+    ///    previous copy (it carries the sentence-final punctuation a re-decode
+    ///    at the audio end omits), drop the re-emission and — when the kept copy
+    ///    ends with punctuation — the re-decode's punctuation behind it. A same
+    ///    word starting later is a genuine repetition and stays.
     ///    Previous text a strict prefix of it (`an`→`analyzing`,
     ///    `every`→`everything`): a fragment, retire. A different word that
     ///    overlaps the previous word's span and was started by the re-decode
@@ -254,12 +257,19 @@ extension AsrManager {
         // segmentation, casing or punctuation may differ from the kept copy,
         // so id-level duplicate matching cannot be relied on for it.
         var droppedCurrent = head
-        if !retire, currentWord == previousWord, let firstIndex = firstWordIndex {
+        if !retire, currentWord == previousWord, overlapsPrevious, let firstIndex = firstWordIndex {
             var end = firstIndex + 1
             while end < currentTokens.count, !startsWord(end), !isPunctuation(end) {
                 end += 1
             }
-            // Punctuation between the head and the word is a seam artifact too.
+            // Punctuation policy: the kept previous copy already carries its own
+            // trailing punctuation, so the re-decode's is a duplicate — drop it.
+            // If the previous copy has none, the re-decoded punctuation is the
+            // only one and stays.
+            let previousEndsWithPunctuation = previousPieces.last.map { isPunctuationPiece($0) } ?? false
+            while previousEndsWithPunctuation, end < currentTokens.count, isPunctuation(end) {
+                end += 1
+            }
             droppedCurrent = end
         }
         for index in droppedCurrent..<currentTokens.count {

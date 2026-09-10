@@ -662,7 +662,43 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             punctuationTokens: []
         )
         XCTAssertEqual(seam.droppedPrevious, 0)
-        XCTAssertEqual(seam.droppedCurrent, 2, "both pieces of the re-emitted `out` go; the comma and `and` stay")
+        XCTAssertEqual(
+            seam.droppedCurrent, 3,
+            "both pieces of the re-emitted `out` go, and so does the comma behind it: the kept `out.` already carries its punctuation"
+        )
+    }
+
+    /// Punctuation policy, the other way round: the kept previous word has no
+    /// trailing punctuation, so the re-decoded period is the only one and stays.
+    func testReconcileFinalWindowSeam_SameWordKeepsRedecodedPunctuationWhenPreviousHasNone() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],  // ▁them ▁out
+            previousTimestamps: [254, 258],
+            trailingWordStart: 1,
+            currentTokens: [2, 7883, 50],  // ▁out . ▁and
+            currentTimestamps: [259, 261, 270],
+            currentPieces: [" out", ".", " and"],
+            previousPieces: [" them", " out"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 1, "only the re-emitted word; its period is the only one")
+    }
+
+    /// A genuine later repetition of the same word (`go` … `go again`) must not
+    /// be consumed: the same-word rule applies only when the re-emission starts
+    /// within the previous word's span.
+    func testReconcileFinalWindowSeam_LaterRepetitionOfSameWordIsKept() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],  // ▁let's ▁go
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [30, 2, 31],  // o ▁go ▁again
+            currentTimestamps: [103, 115, 119],
+            currentPieces: ["o", " go", " again"],
+            previousPieces: [" let's", " go"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 1, "only the continuation head; the later `go` is a new word")
     }
 
     /// Adversarial for the prefix rule: a continuation head followed by a new
