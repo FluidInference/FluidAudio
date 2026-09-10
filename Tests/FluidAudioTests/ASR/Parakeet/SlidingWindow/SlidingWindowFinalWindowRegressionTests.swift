@@ -21,12 +21,20 @@ final class SlidingWindowFinalWindowRegressionTests: XCTestCase {
         let file: String
         /// Words that only the final window can produce, lower-cased.
         let tail: String
+        /// Seam text that must be spelled as batch does (#897), lower-cased.
+        var seam: String? = nil
+        /// Seam artifact that must not survive (#897), lower-cased.
+        var seamArtifact: String? = nil
     }
 
     private let fixtures: [Fixture] = [
         Fixture(file: "01-validation-request-21.4s.wav", tail: "help them out"),
         Fixture(file: "02-release-readiness-19.8s.wav", tail: "cutting a release"),
-        Fixture(file: "03-diff-explanation-16.9s.wav", tail: "in that difference"),
+        // Window 1 ends on the fragment "an" of "analyzing"; the final window
+        // re-decodes the word. Before #897: "code and an, and analyzing".
+        Fixture(
+            file: "03-diff-explanation-16.9s.wav", tail: "in that difference",
+            seam: "code and analyzing", seamArtifact: "and an,"),
     ]
 
     private func loadModels() async throws -> AsrModels {
@@ -113,6 +121,14 @@ final class SlidingWindowFinalWindowRegressionTests: XCTestCase {
             XCTAssertTrue(
                 text.contains(fixture.tail),
                 "\(fixture.file): streaming transcript lost its tail; expected '\(fixture.tail)' in: \(text)")
+            if let seam = fixture.seam {
+                XCTAssertTrue(
+                    text.contains(seam), "\(fixture.file): seam not reconciled; expected '\(seam)' in: \(text)")
+            }
+            if let artifact = fixture.seamArtifact {
+                XCTAssertFalse(
+                    text.contains(artifact), "\(fixture.file): seam artifact '\(artifact)' survived in: \(text)")
+            }
         }
     }
 }

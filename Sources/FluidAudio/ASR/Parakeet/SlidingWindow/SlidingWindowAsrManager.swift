@@ -445,7 +445,22 @@ public actor SlidingWindowAsrManager {
             // Update stored decoder state
             self.decoderState = state
 
-            let (tokens, timestamps, confidences, _) = result
+            let (tokens, timestamps, confidences, _, droppedPreviousTokens) = result
+
+            // Final window re-decoded the previous window's last word in full (#897):
+            // retire that word from the accumulated tokens and from the text state.
+            if droppedPreviousTokens > 0, droppedPreviousTokens < accumulatedTokens.count {
+                let dropped = Array(accumulatedTokens.suffix(droppedPreviousTokens))
+                accumulatedTokens.removeLast(droppedPreviousTokens)
+                accumulatedTokenTimestamps.removeLast(min(droppedPreviousTokens, accumulatedTokenTimestamps.count))
+                if let droppedText = await asrManager?.convertTokensToText(dropped), !droppedText.isEmpty {
+                    if let trimmed = Self.removingTrailingWord(droppedText, from: volatileTranscript) {
+                        volatileTranscript = trimmed
+                    } else if let trimmed = Self.removingTrailingWord(droppedText, from: confirmedTranscript) {
+                        confirmedTranscript = trimmed
+                    }
+                }
+            }
 
             let adjustedTimestamps = Self.applyGlobalFrameOffset(
                 to: timestamps,
@@ -590,6 +605,14 @@ public actor SlidingWindowAsrManager {
                 ? "insufficient context (\(String(format: "%.1f", totalAudioProcessed))s)" : "low confidence"
             logger.debug("VOLATILE (\(result.confidence)): \(reason) - updated volatile '\(result.text)'")
         }
+    }
+
+    /// `text` without its trailing `word` when `text` ends with that word as a
+    /// whole word (equal, or preceded by a space); nil otherwise. Pure.
+    static func removingTrailingWord(_ word: String, from text: String) -> String? {
+        if text == word { return "" }
+        guard text.hasSuffix(" " + word) else { return nil }
+        return String(text.dropLast(word.count + 1))
     }
 
     /// Join the still-volatile text with a newer unconfirmed window's text.
