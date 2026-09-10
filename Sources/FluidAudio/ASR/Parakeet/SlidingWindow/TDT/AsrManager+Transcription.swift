@@ -144,12 +144,31 @@ extension AsrManager {
     /// and a boundary punctuation the decoder attaches at its emission start
     /// blocks the suffix–prefix match.
     ///
-    /// Returns how many trailing previous tokens to drop (the whole last word,
-    /// only when the re-decode extends past the previous window's last frame)
-    /// and how many leading current tokens to drop: punctuation emitted at or
-    /// before the previous last word's frame (a seam artifact), and tokens that
-    /// duplicate a kept previous token within `frameTolerance` inside the jitter
-    /// region. Pure, for testability; timestamps are global frames.
+    /// Decision, from the token shapes in the #897 corpus run:
+    /// 1. Leading *continuation* pieces of the re-decode (no word boundary) are
+    ///    the tail of the previous last word whose start fell under the cutoff
+    ///    (`box` + `x, but`). They are dropped and never justify retiring.
+    /// 2. The first real word of the re-decode then decides the previous word's
+    ///    fate. Same word: keep the previous copy (it carries the sentence-final
+    ///    punctuation a re-decode at the audio end omits), drop the re-emission.
+    ///    Previous text a strict prefix of it (`an`→`analyzing`,
+    ///    `every`→`everything`): a fragment, retire. A different word that
+    ///    overlaps the previous word's span and was started by the re-decode
+    ///    itself (no continuation head): it disagrees with more context, retire.
+    ///    Behind a continuation head the first real word is the next word by
+    ///    construction, so only the prefix rule can retire. A different word
+    ///    starting later: the re-decode skipped the previous word, keep it.
+    /// 3. Retiring additionally requires the re-decode to reach past the
+    ///    previous window's last frame; an empty or early-ending final window
+    ///    keeps the previous word.
+    /// 4. The re-decode's head is then stripped of seam artifacts: punctuation
+    ///    at or before the previous last word's frame, and tokens — punctuation
+    ///    included — that duplicate a kept previous token within
+    ///    `frameTolerance` inside the jitter region.
+    ///
+    /// Returns how many trailing previous tokens to drop (the whole last word
+    /// or none) and how many leading current tokens to drop. Pure, for
+    /// testability; timestamps are global frames.
     nonisolated internal static func reconcileFinalWindowSeam(
         previousTokens: [Int],
         previousTimestamps: [Int],
@@ -164,45 +183,66 @@ extension AsrManager {
     ) -> (droppedPrevious: Int, droppedCurrent: Int) {
         guard trailingWordStart > 0, trailingWordStart < previousTokens.count,
             previousTimestamps.count == previousTokens.count,
-            currentTimestamps.count == currentTokens.count
+            currentTimestamps.count == currentTokens.count,
+            !currentTokens.isEmpty
         else { return (0, 0) }
 
+        func piece(_ index: Int) -> String { index < currentPieces.count ? currentPieces[index] : "" }
         // `ASRConstants.punctuationTokens` lists only sentence-final marks; the
         // seam artifact is usually a comma, so classify by the piece text too.
         func isPunctuation(_ index: Int) -> Bool {
-            if punctuationTokens.contains(currentTokens[index]) { return true }
-            guard index < currentPieces.count else { return false }
-            return isPunctuationPiece(currentPieces[index])
+            punctuationTokens.contains(currentTokens[index]) || isPunctuationPiece(piece(index))
+        }
+        func startsWord(_ index: Int) -> Bool {
+            let p = piece(index)
+            return p.hasPrefix(ASRConstants.sentencePieceWordBoundary) || p.hasPrefix(" ")
         }
 
         let lastWordStartFrame = previousTimestamps[trailingWordStart]
         let previousLastFrame = previousTimestamps[previousTokens.count - 1]
-
-        // Retire the previous word only when the re-decode saw more audio than
-        // the previous window did — a token past the previous window's last
-        // frame (plus jitter). That is the only case in which the previous word
-        // can be an edge-cut fragment. A final window that ends where the
-        // previous one ended (a 0.4 s flush after "…help them out.") keeps the
-        // previous word, punctuation included, and its re-emission is a
-        // duplicate to strip.
         let extendsBeyondPrevious =
             (currentTimestamps.max() ?? Int.min) > previousLastFrame + jitterFrames
 
-        // If the re-decode's first word is the same word the previous window
-        // ended on, that word was complete, not a fragment: keep the previous
-        // copy (it carries any sentence-final punctuation the re-decode omits at
-        // the audio end) and let the re-emission fall to the duplicate rule.
+        // 1. Leading continuation pieces: the tail of the previous last word.
+        var head = 0
+        while head < currentTokens.count, !startsWord(head), !isPunctuation(head) {
+            head += 1
+        }
+
+        // 2. The first real word of the re-decode.
         let previousWord = wordCore(previousPieces.dropFirst(trailingWordStart))
-        let currentWord = wordCore(firstWordPieces(currentPieces))
-        let sameWord = !previousWord.isEmpty && previousWord == currentWord
-        let retire = extendsBeyondPrevious && !sameWord
+        let firstWord = firstWordPieces(Array(currentPieces.dropFirst(head)))
+        let currentWord = wordCore(firstWord)
+        let firstWordIndex = (head..<currentTokens.count).first { startsWord($0) && !isPunctuation($0) }
+        let firstWordFrame = firstWordIndex.map { currentTimestamps[$0] }
+
+        let retire: Bool
+        if !extendsBeyondPrevious || currentWord.isEmpty || previousWord.isEmpty {
+            retire = false
+        } else if currentWord == previousWord {
+            retire = false
+        } else if currentWord.hasPrefix(previousWord) {
+            retire = true
+        } else if head == 0, let frame = firstWordFrame, frame <= previousLastFrame + jitterFrames {
+            // Overlapping different word, and the re-decode started it itself
+            // (no continuation head): it disagrees with more context. Behind a
+            // continuation head the first real word is the *next* word by
+            // construction (`box` + `x, but`), so only the prefix rule applies.
+            retire = true
+        } else {
+            retire = false
+        }
+
         let droppedPrevious = retire ? previousTokens.count - trailingWordStart : 0
         let keptPrevious = Array(
             zip(previousTokens, previousTimestamps).prefix(retire ? trailingWordStart : previousTokens.count))
         let keptLastFrame = keptPrevious.last?.1 ?? -1
 
-        var droppedCurrent = 0
-        for (index, (id, frame)) in zip(currentTokens, currentTimestamps).enumerated() {
+        // 4. Strip the seam artifacts from the re-decode's head.
+        var droppedCurrent = head
+        for index in head..<currentTokens.count {
+            let id = currentTokens[index]
+            let frame = currentTimestamps[index]
             if isPunctuation(index), frame <= lastWordStartFrame {
                 droppedCurrent += 1
                 continue
