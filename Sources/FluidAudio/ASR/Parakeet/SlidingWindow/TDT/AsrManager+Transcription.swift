@@ -111,6 +111,29 @@ extension AsrManager {
         return core.unicodeScalars.allSatisfy { CharacterSet.punctuationCharacters.contains($0) }
     }
 
+    /// Letters/digits of a word's pieces, lower-cased: boundary markers, spaces
+    /// and punctuation stripped. Empty when the pieces carry no word.
+    nonisolated internal static func wordCore<S: Sequence>(_ pieces: S) -> String where S.Element == String {
+        pieces.joined().lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+            .map { String($0) }.joined()
+    }
+
+    /// The pieces of the first word in a token sequence: from the first
+    /// word-start piece through the piece before the next word start.
+    nonisolated internal static func firstWordPieces(_ pieces: [String]) -> [String] {
+        func startsWord(_ p: String) -> Bool {
+            p.hasPrefix(ASRConstants.sentencePieceWordBoundary) || p.hasPrefix(" ")
+        }
+        guard let start = pieces.firstIndex(where: { startsWord($0) && !isPunctuationPiece($0) }) else {
+            return []
+        }
+        var end = start + 1
+        while end < pieces.count, !startsWord(pieces[end]), !isPunctuationPiece(pieces[end]) {
+            end += 1
+        }
+        return Array(pieces[start..<end])
+    }
+
     /// Seam reconciliation for the final streaming window (#897).
     ///
     /// The previous window's trailing word may be a fragment cut by the window
@@ -121,7 +144,8 @@ extension AsrManager {
     /// and a boundary punctuation the decoder attaches at its emission start
     /// blocks the suffix–prefix match.
     ///
-    /// Returns how many trailing previous tokens to drop (the whole last word)
+    /// Returns how many trailing previous tokens to drop (the whole last word,
+    /// only when the re-decode extends past the previous window's last frame)
     /// and how many leading current tokens to drop: punctuation emitted at or
     /// before the previous last word's frame (a seam artifact), and tokens that
     /// duplicate a kept previous token within `frameTolerance` inside the jitter
@@ -133,6 +157,7 @@ extension AsrManager {
         currentTokens: [Int],
         currentTimestamps: [Int],
         currentPieces: [String] = [],
+        previousPieces: [String] = [],
         punctuationTokens: [Int] = ASRConstants.punctuationTokens,
         jitterFrames: Int = redecodeEmissionJitterFrames,
         frameTolerance: Int = ASRConstants.duplicateFrameTolerance
@@ -150,9 +175,30 @@ extension AsrManager {
             return isPunctuationPiece(currentPieces[index])
         }
 
-        let droppedPrevious = previousTokens.count - trailingWordStart
         let lastWordStartFrame = previousTimestamps[trailingWordStart]
-        let keptPrevious = Array(zip(previousTokens, previousTimestamps).prefix(trailingWordStart))
+        let previousLastFrame = previousTimestamps[previousTokens.count - 1]
+
+        // Retire the previous word only when the re-decode saw more audio than
+        // the previous window did — a token past the previous window's last
+        // frame (plus jitter). That is the only case in which the previous word
+        // can be an edge-cut fragment. A final window that ends where the
+        // previous one ended (a 0.4 s flush after "…help them out.") keeps the
+        // previous word, punctuation included, and its re-emission is a
+        // duplicate to strip.
+        let extendsBeyondPrevious =
+            (currentTimestamps.max() ?? Int.min) > previousLastFrame + jitterFrames
+
+        // If the re-decode's first word is the same word the previous window
+        // ended on, that word was complete, not a fragment: keep the previous
+        // copy (it carries any sentence-final punctuation the re-decode omits at
+        // the audio end) and let the re-emission fall to the duplicate rule.
+        let previousWord = wordCore(previousPieces.dropFirst(trailingWordStart))
+        let currentWord = wordCore(firstWordPieces(currentPieces))
+        let sameWord = !previousWord.isEmpty && previousWord == currentWord
+        let retire = extendsBeyondPrevious && !sameWord
+        let droppedPrevious = retire ? previousTokens.count - trailingWordStart : 0
+        let keptPrevious = Array(
+            zip(previousTokens, previousTimestamps).prefix(retire ? trailingWordStart : previousTokens.count))
         let keptLastFrame = keptPrevious.last?.1 ?? -1
 
         var droppedCurrent = 0
@@ -251,7 +297,8 @@ extension AsrManager {
                 trailingWordStart: trailingWordStart,
                 currentTokens: currentTokens,
                 currentTimestamps: currentTimestamps.map { $0 + globalFrameOffset },
-                currentPieces: currentTokens.map { vocabulary[$0] ?? "" }
+                currentPieces: currentTokens.map { vocabulary[$0] ?? "" },
+                previousPieces: previousTokens.map { vocabulary[$0] ?? "" }
             )
             droppedPrevious = seam.droppedPrevious
             if seam.droppedCurrent > 0 {

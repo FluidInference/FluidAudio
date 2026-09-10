@@ -527,6 +527,7 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             currentTokens: [99, 3, 5, 6, 7, 8],  // , ▁and ▁anal y z ing
             currentTimestamps: [152, 155, 159, 162, 164, 166],
             currentPieces: [",", " and", " anal", "y", "z", "ing"],
+            previousPieces: [" c", "ode", " and", " an"],
             punctuationTokens: []
         )
         XCTAssertEqual(seam.droppedPrevious, 1, "the fragment `an` is retired")
@@ -564,6 +565,56 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             punctuationTokens: [7883]
         )
         XCTAssertEqual(late.droppedCurrent, 0)
+        // The final window re-emitted nothing for the previous word (empty flush,
+        // or only tokens before its onset): keep the previous word, drop nothing.
+        let emptyFinal = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4],  // … ▁them ▁out .
+            previousTimestamps: [250, 254, 258, 261],
+            trailingWordStart: 2,
+            currentTokens: [],
+            currentTimestamps: []
+        )
+        XCTAssertEqual(emptyFinal.droppedPrevious, 0, "nothing re-emitted the word; the tail must survive")
+        XCTAssertEqual(emptyFinal.droppedCurrent, 0)
+        let earlyOnly = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4],
+            previousTimestamps: [250, 254, 258, 261],
+            trailingWordStart: 2,
+            currentTokens: [7883],
+            currentTimestamps: [240],
+            currentPieces: ["."],
+            punctuationTokens: []
+        )
+        XCTAssertEqual(earlyOnly.droppedPrevious, 0)
+        // A short final window that ends where the previous one ended re-emits
+        // "out" but not the "."; keep the previous "out." and strip the re-emission.
+        let sameEnd = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4],  // … ▁them ▁out .
+            previousTimestamps: [250, 254, 258, 261],
+            trailingWordStart: 2,
+            currentTokens: [3],  // ▁out
+            currentTimestamps: [259]
+        )
+        XCTAssertEqual(sameEnd.droppedPrevious, 0, "re-decode saw no more audio than the previous window")
+        XCTAssertEqual(sameEnd.droppedCurrent, 1, "the re-emitted `out` duplicates the kept one")
+        // The re-decode saw more audio but its first word IS the previous last
+        // word: it was complete, so keep the previous copy (with its period) and
+        // drop the re-emission. Only a *different* first word retires it.
+        let sameWord = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4],  // … ▁them ▁out .
+            previousTimestamps: [250, 254, 258, 261],
+            trailingWordStart: 2,
+            currentTokens: [3, 9],  // ▁out <silence-token>
+            currentTimestamps: [259, 270],
+            currentPieces: [" out", " uh"],
+            previousPieces: [" help", " them", " out", "."]
+        )
+        XCTAssertEqual(sameWord.droppedPrevious, 0)
+        XCTAssertEqual(sameWord.droppedCurrent, 1)
+        XCTAssertEqual(AsrManager.wordCore([" out", "."]), "out")
+        XCTAssertEqual(AsrManager.wordCore([" anal", "y", "z", "ing"]), "analyzing")
+        XCTAssertEqual(AsrManager.firstWordPieces([",", " and", " anal", "y"]), [" and"])
+        XCTAssertEqual(AsrManager.firstWordPieces([" anal", "y", "z", "ing", " if"]), [" anal", "y", "z", "ing"])
         // Degenerate inputs are a no-op.
         XCTAssertEqual(
             AsrManager.reconcileFinalWindowSeam(
