@@ -684,6 +684,43 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertEqual(seam.droppedCurrent, 1, "only the re-emitted word; its period is the only one")
     }
 
+    /// `well` vs `we'll`: the comparison form keeps interior apostrophes, so the
+    /// re-decoded contraction is a *different* overlapping word and retires the
+    /// earlier `well` instead of being consumed as a re-emission of it. Both
+    /// tokenizations of the contraction are covered.
+    func testReconcileFinalWindowSeam_ContractionIsNotTheSameWord() {
+        XCTAssertNotEqual(AsrManager.wordCore([" well"]), AsrManager.wordCore([" we'll"]))
+        XCTAssertNotEqual(AsrManager.wordCore([" cant"]), AsrManager.wordCore([" can\u{2019}t"]))
+        XCTAssertEqual(AsrManager.wordCore([" we", "'", "ll"]), "we'll")
+        XCTAssertEqual(AsrManager.wordCore([" out", "."]), "out")
+        XCTAssertEqual(AsrManager.firstWordPieces([" we", "'", "ll", " go"]), [" we", "'", "ll"])
+
+        let singlePiece = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],  // ▁and ▁well
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [30, 31],  // ▁we'll ▁go
+            currentTimestamps: [101, 108],
+            currentPieces: [" we'll", " go"],
+            previousPieces: [" and", " well"]
+        )
+        XCTAssertEqual(singlePiece.droppedPrevious, 1, "the re-decoded contraction replaces `well`")
+        XCTAssertEqual(singlePiece.droppedCurrent, 0)
+
+        let splitPieces = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [30, 99, 32, 33],  // ▁we ' ll ▁go
+            currentTimestamps: [101, 102, 103, 108],
+            currentPieces: [" we", "'", "ll", " go"],
+            previousPieces: [" and", " well"],
+            punctuationTokens: []
+        )
+        XCTAssertEqual(splitPieces.droppedPrevious, 1)
+        XCTAssertEqual(splitPieces.droppedCurrent, 0)
+    }
+
     /// A genuine later repetition of the same word (`go` … `go again`) must not
     /// be consumed: the same-word rule applies only when the re-emission starts
     /// within the previous word's span.

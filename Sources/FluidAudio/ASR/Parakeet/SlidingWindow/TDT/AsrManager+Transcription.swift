@@ -111,15 +111,59 @@ extension AsrManager {
         return core.unicodeScalars.allSatisfy { CharacterSet.punctuationCharacters.contains($0) }
     }
 
-    /// Letters/digits of a word's pieces, lower-cased: boundary markers, spaces
-    /// and punctuation stripped. Empty when the pieces carry no word.
+    /// Comparison form of a word's pieces: boundary markers and surrounding
+    /// whitespace/punctuation stripped, lower-cased, curly apostrophes
+    /// normalized — but *interior* apostrophes and hyphens kept, so `well` and
+    /// `we'll` (or `cant` and `can't`) never compare equal. Empty when the
+    /// pieces carry no word.
     nonisolated internal static func wordCore<S: Sequence>(_ pieces: S) -> String where S.Element == String {
-        pieces.joined().lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
-            .map { String($0) }.joined()
+        let joined = pieces.joined()
+            .replacingOccurrences(of: ASRConstants.sentencePieceWordBoundary, with: " ")
+            .replacingOccurrences(of: "\u{2019}", with: "'")
+            .lowercased()
+        let scalars = Array(joined.unicodeScalars)
+        let isEdge: (Unicode.Scalar) -> Bool = {
+            CharacterSet.whitespaces.contains($0) || CharacterSet.punctuationCharacters.contains($0)
+        }
+        guard let first = scalars.firstIndex(where: { !isEdge($0) }),
+            let last = scalars.lastIndex(where: { !isEdge($0) })
+        else { return "" }
+        return String(String.UnicodeScalarView(scalars[first...last]))
+    }
+
+    /// A piece that joins two halves of one word (`we` `'` `ll`, `co` `-` `op`):
+    /// an apostrophe or hyphen on its own.
+    nonisolated internal static func isJoiningPunctuationPiece(_ piece: String) -> Bool {
+        let core = piece.replacingOccurrences(of: ASRConstants.sentencePieceWordBoundary, with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return core == "'" || core == "\u{2019}" || core == "-"
+    }
+
+    /// Exclusive end of the word that starts at `start`: continuation pieces
+    /// follow, and a joining apostrophe/hyphen piece is absorbed when a
+    /// continuation piece follows it.
+    nonisolated internal static func wordExtent(in pieces: [String], from start: Int) -> Int {
+        func startsWord(_ p: String) -> Bool {
+            p.hasPrefix(ASRConstants.sentencePieceWordBoundary) || p.hasPrefix(" ")
+        }
+        var end = start + 1
+        while end < pieces.count {
+            let p = pieces[end]
+            if !startsWord(p), !isPunctuationPiece(p) {
+                end += 1
+            } else if isJoiningPunctuationPiece(p), end + 1 < pieces.count, !startsWord(pieces[end + 1]),
+                !isPunctuationPiece(pieces[end + 1])
+            {
+                end += 2
+            } else {
+                break
+            }
+        }
+        return end
     }
 
     /// The pieces of the first word in a token sequence: from the first
-    /// word-start piece through the piece before the next word start.
+    /// word-start piece through the end of that word (see `wordExtent`).
     nonisolated internal static func firstWordPieces(_ pieces: [String]) -> [String] {
         func startsWord(_ p: String) -> Bool {
             p.hasPrefix(ASRConstants.sentencePieceWordBoundary) || p.hasPrefix(" ")
@@ -127,11 +171,7 @@ extension AsrManager {
         guard let start = pieces.firstIndex(where: { startsWord($0) && !isPunctuationPiece($0) }) else {
             return []
         }
-        var end = start + 1
-        while end < pieces.count, !startsWord(pieces[end]), !isPunctuationPiece(pieces[end]) {
-            end += 1
-        }
-        return Array(pieces[start..<end])
+        return Array(pieces[start..<wordExtent(in: pieces, from: start)])
     }
 
     /// Seam reconciliation for the final streaming window (#897).
@@ -214,8 +254,16 @@ extension AsrManager {
 
         // 1. Leading continuation pieces: the tail of the previous last word.
         var head = 0
-        while head < currentTokens.count, !startsWord(head), !isPunctuation(head) {
-            head += 1
+        while head < currentTokens.count {
+            if !startsWord(head), !isPunctuation(head) {
+                head += 1
+            } else if isJoiningPunctuationPiece(piece(head)), head + 1 < currentTokens.count,
+                !startsWord(head + 1), !isPunctuation(head + 1)
+            {
+                head += 2
+            } else {
+                break
+            }
         }
 
         // 2. The first real word of the re-decode.
@@ -258,10 +306,7 @@ extension AsrManager {
         // so id-level duplicate matching cannot be relied on for it.
         var droppedCurrent = head
         if !retire, currentWord == previousWord, overlapsPrevious, let firstIndex = firstWordIndex {
-            var end = firstIndex + 1
-            while end < currentTokens.count, !startsWord(end), !isPunctuation(end) {
-                end += 1
-            }
+            var end = wordExtent(in: currentPieces, from: firstIndex)
             // Punctuation policy: the kept previous copy already carries its own
             // trailing punctuation, so the re-decode's is a duplicate — drop it.
             // If the previous copy has none, the re-decoded punctuation is the
