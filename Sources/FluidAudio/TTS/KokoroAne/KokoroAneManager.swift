@@ -66,13 +66,8 @@ public actor KokoroAneManager {
     /// Download (if missing), load all 7 mlmodelcs + vocab + default voice
     /// pack. Optionally pre-warm additional voice packs.
     public func initialize(preloadVoices: Set<String>? = nil) async throws {
-        if Self.isBnnsCrashProneOS(ProcessInfo.processInfo.operatingSystemVersion) {
-            logger.warning(
-                "This OS build has a known Apple BNNS bug that can "
-                    + "intermittently crash Kokoro synthesis (EXC_BAD_ACCESS in libBNNS) "
-                    + "regardless of compute-unit routing. macOS 26.6 fixes it; on iOS "
-                    + "the 26.6 line still crashes. "
-                    + "See https://github.com/FluidInference/FluidAudio/issues/844")
+        if let advisory = Self.osAdvisory(for: ProcessInfo.processInfo.operatingSystemVersion) {
+            logger.warning(advisory)
         }
         try await store.loadIfNeeded()
         // English G2P CoreML assets live in the kokoro repo and are loaded
@@ -117,13 +112,41 @@ public actor KokoroAneManager {
     /// The 26.4+ OS line carries an Apple BNNS bug that can intermittently
     /// crash synthesis in libBNNS on any compute-unit routing
     /// (#328/#587/#667/#817). macOS 26.6 fixes it (verified, #817); iOS 26.6
-    /// still crashes with the identical signature (#844), so on non-macOS the
-    /// whole 26.4+ line stays flagged until a fixed build is confirmed.
+    /// still crashes with the identical signature (#844), and iOS 27.0 crashes
+    /// in libBNNS (`vadd_fp16_sme_internal`) on the Metal-free route that is
+    /// the 27 default, while the Metal route aborts in MPSGraph (#843, #889).
+    /// So on non-macOS everything from 26.4 on stays flagged until a build is
+    /// shown to be safe. macOS 27 has no report and is not flagged.
     static func isBnnsCrashProneOS(
         _ version: OperatingSystemVersion, onMacOS: Bool = runningOnMacOS
     ) -> Bool {
+        if version.majorVersion >= 27 { return !onMacOS }
         guard version.majorVersion == 26, version.minorVersion >= 4 else { return false }
         return onMacOS ? version.minorVersion <= 5 : true
+    }
+
+    /// The warning `initialize()` logs on a crash-prone OS build, or nil.
+    /// Route-aware: on the iOS 27 line neither Core ML route is known to be
+    /// safe (#889), which is a different message from the 26.x BNNS bug.
+    static func osAdvisory(
+        for version: OperatingSystemVersion, onMacOS: Bool = runningOnMacOS
+    ) -> String? {
+        guard isBnnsCrashProneOS(version, onMacOS: onMacOS) else { return nil }
+        if version.majorVersion >= 27 {
+            return
+                "iOS/iPadOS 27: no Core ML route for Kokoro ANE is known to be safe. "
+                + "The default Metal-free route (noise + tail on CPU) has crashed in libBNNS "
+                + "(vadd_fp16_sme_internal SIGSEGV) after ~1 h of synthesis, and the Metal "
+                + "route aborts in MPSGraph within minutes. Both are uncatchable in-process. "
+                + "Consider disabling Kokoro ANE on this OS line until a safe route is shown. "
+                + "See https://github.com/FluidInference/FluidAudio/issues/889"
+        }
+        return
+            "This OS build has a known Apple BNNS bug that can "
+            + "intermittently crash Kokoro synthesis (EXC_BAD_ACCESS in libBNNS) "
+            + "regardless of compute-unit routing. macOS 26.6 fixes it; on iOS "
+            + "the 26.6 line still crashes. "
+            + "See https://github.com/FluidInference/FluidAudio/issues/844"
     }
 
     /// `true` once the 7 mlmodelcs + vocab are resident.
