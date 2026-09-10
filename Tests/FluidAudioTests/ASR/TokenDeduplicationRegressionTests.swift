@@ -518,20 +518,121 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertNil(AsrManager.trailingWordStartIndex(pieces: []))
     }
 
-    func testReconcileFinalWindowSeam_DropsFragmentSeamCommaAndReemittedWord() {
-        // The comma is not in ASRConstants.punctuationTokens; it is recognized by piece text.
+    /// Clip 03 of the #855 fixtures: previous `▁c ode ▁and ▁an`, re-decode
+    /// `, ▁and ▁anal y z ing`. `an` is a strict prefix of `analyzing`: retire it;
+    /// the seam comma and the re-emitted `and` (dup of the kept `and`@153) go.
+    func testReconcileFinalWindowSeam_FragmentPrefixRetiresAndStripsSeam() {
         let seam = AsrManager.reconcileFinalWindowSeam(
-            previousTokens: [1, 2, 3, 4],  // ▁c ode ▁and ▁an
+            previousTokens: [1, 2, 3, 4],
             previousTimestamps: [147, 149, 153, 156],
             trailingWordStart: 3,
-            currentTokens: [99, 3, 5, 6, 7, 8],  // , ▁and ▁anal y z ing
+            currentTokens: [99, 3, 5, 6, 7, 8],
             currentTimestamps: [152, 155, 159, 162, 164, 166],
             currentPieces: [",", " and", " anal", "y", "z", "ing"],
-            previousPieces: [" c", "ode", " and", " an"],
-            punctuationTokens: []
+            previousPieces: [" c", "ode", " and", " an"]
         )
-        XCTAssertEqual(seam.droppedPrevious, 1, "the fragment `an` is retired")
-        XCTAssertEqual(seam.droppedCurrent, 2, "seam comma + re-emitted `and` (dup of the kept `and`@153)")
+        XCTAssertEqual(seam.droppedPrevious, 1)
+        XCTAssertEqual(seam.droppedCurrent, 2)
+    }
+
+    /// #897 corpus `99C654B5`: previous `… ▁in ▁the ▁box`, re-decode `x , ▁but …`.
+    /// The leading `x` is a continuation piece — the tail of `box`, whose start
+    /// fell under the cutoff — so `box` is kept and `x` dropped; the comma is
+    /// real. The first version of this rule produced `in thex`.
+    func testReconcileFinalWindowSeam_ContinuationHeadKeepsPreviousWord() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3],
+            previousTimestamps: [300, 303, 306],
+            trailingWordStart: 2,
+            currentTokens: [30, 99, 31, 32],
+            currentTimestamps: [308, 309, 311, 314],
+            currentPieces: ["x", ",", " but", " she"],
+            previousPieces: [" in", " the", " box"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0, "`but` is not `box` nor an extension of it")
+        XCTAssertEqual(seam.droppedCurrent, 1, "only the continuation tail `x` goes; the comma stays")
+    }
+
+    /// #897 corpus `0A575FDA`: previous `… ▁capture ▁every`, re-decode
+    /// `turing ▁everything ▁saying`. The continuation `turing` is dropped, and
+    /// `every` is a strict prefix of `everything`: retire the fragment.
+    func testReconcileFinalWindowSeam_ContinuationThenPrefixRetires() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [400, 404],
+            trailingWordStart: 1,
+            currentTokens: [40, 41, 42],
+            currentTimestamps: [407, 409, 414],
+            currentPieces: ["turing", " everything", " saying"],
+            previousPieces: [" capture", " every"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 1)
+        XCTAssertEqual(seam.droppedCurrent, 1)
+    }
+
+    /// Same word re-emitted: keep the previous copy (it carries the period the
+    /// re-decode omits at the audio end) and drop the re-emission as a duplicate.
+    func testReconcileFinalWindowSeam_SameWordKeepsPreviousAndDropsReemission() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4],  // … ▁them ▁out .
+            previousTimestamps: [250, 254, 258, 261],
+            trailingWordStart: 2,
+            currentTokens: [3, 9],
+            currentTimestamps: [259, 270],
+            currentPieces: [" out", " uh"],
+            previousPieces: [" help", " them", " out", "."]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 1)
+    }
+
+    /// #897 corpus doubled-word shape: previous `… ▁two .`, re-decode `. ▁two ▁in`.
+    /// The re-emitted period duplicates the kept one and the word behind it
+    /// duplicates `two`: both go, nothing is retired.
+    func testReconcileFinalWindowSeam_DuplicatePunctuationThenWordBothDropped() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 7883],  // ▁or ▁two .
+            previousTimestamps: [200, 203, 205],
+            trailingWordStart: 1,
+            currentTokens: [7883, 2, 5],
+            currentTimestamps: [204, 206, 212],
+            currentPieces: [".", " two", " in"],
+            previousPieces: [" or", " two", "."]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 2)
+    }
+
+    /// A different word overlapping the previous word's span (`properly.` vs
+    /// `correctly.`): the re-decode disagrees with more context — retire.
+    func testReconcileFinalWindowSeam_DifferentOverlappingWordRetires() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 7883],
+            previousTimestamps: [100, 104, 108],
+            trailingWordStart: 1,
+            currentTokens: [9, 7883, 10],
+            currentTimestamps: [105, 109, 120],
+            currentPieces: [" correctly", ".", " and"],
+            previousPieces: [" it", " properly", "."]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 2)
+        XCTAssertEqual(seam.droppedCurrent, 0)
+    }
+
+    /// A different word that starts *after* the previous word's span: the
+    /// re-decode skipped the previous word — keep it, drop nothing.
+    func testReconcileFinalWindowSeam_LaterWordKeepsPrevious() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3],
+            previousTimestamps: [100, 104, 108],
+            trailingWordStart: 2,
+            currentTokens: [9, 10],
+            currentTimestamps: [130, 134],
+            currentPieces: [" later", " words"],
+            previousPieces: [" a", " b", " kept"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 0)
     }
 
     func testIsPunctuationPiece() {
@@ -543,83 +644,219 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertFalse(AsrManager.isPunctuationPiece(""))
     }
 
-    func testReconcileFinalWindowSeam_KeepsGenuineLeadingTokens() {
-        // Current starts with a new word that duplicates nothing: nothing dropped from it.
+    /// Same word, different segmentation: the previous `▁out` is one piece, the
+    /// re-decode spells it `▁o` `ut` with a comma behind. Id-level matching
+    /// cannot see the duplicate, so the same-word branch must consume the whole
+    /// re-emitted word range itself.
+    func testReconcileFinalWindowSeam_SameWordDifferentSegmentationIsConsumed() {
         let seam = AsrManager.reconcileFinalWindowSeam(
-            previousTokens: [1, 2, 3],
-            previousTimestamps: [100, 104, 108],
-            trailingWordStart: 2,
-            currentTokens: [9, 10],
-            currentTimestamps: [110, 114],
-            punctuationTokens: [7883]
+            previousTokens: [1, 2, 3],  // ▁them ▁out .
+            previousTimestamps: [254, 258, 261],
+            trailingWordStart: 1,
+            currentTokens: [40, 41, 99, 50],  // ▁o ut , ▁and
+            currentTimestamps: [259, 260, 262, 270],
+            currentPieces: [" o", "ut", ",", " and"],
+            previousPieces: [" them", " out", "."]
         )
-        XCTAssertEqual(seam.droppedPrevious, 1)
-        XCTAssertEqual(seam.droppedCurrent, 0)
-        // Punctuation after the last word start is real, not a seam artifact.
-        let late = AsrManager.reconcileFinalWindowSeam(
-            previousTokens: [1, 2, 3],
-            previousTimestamps: [100, 104, 108],
-            trailingWordStart: 2,
-            currentTokens: [7883, 9],
-            currentTimestamps: [120, 124],
-            punctuationTokens: [7883]
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(
+            seam.droppedCurrent, 3,
+            "both pieces of the re-emitted `out` go, and so does the comma behind it: the kept `out.` already carries its punctuation"
         )
-        XCTAssertEqual(late.droppedCurrent, 0)
-        // The final window re-emitted nothing for the previous word (empty flush,
-        // or only tokens before its onset): keep the previous word, drop nothing.
-        let emptyFinal = AsrManager.reconcileFinalWindowSeam(
-            previousTokens: [1, 2, 3, 4],  // … ▁them ▁out .
-            previousTimestamps: [250, 254, 258, 261],
-            trailingWordStart: 2,
-            currentTokens: [],
-            currentTimestamps: []
+    }
+
+    /// Punctuation policy, the other way round: the kept previous word has no
+    /// trailing punctuation, so the re-decoded period is the only one and stays.
+    func testReconcileFinalWindowSeam_SameWordKeepsRedecodedPunctuationWhenPreviousHasNone() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],  // ▁them ▁out
+            previousTimestamps: [254, 258],
+            trailingWordStart: 1,
+            currentTokens: [2, 7883, 50],  // ▁out . ▁and
+            currentTimestamps: [259, 261, 270],
+            currentPieces: [" out", ".", " and"],
+            previousPieces: [" them", " out"]
         )
-        XCTAssertEqual(emptyFinal.droppedPrevious, 0, "nothing re-emitted the word; the tail must survive")
-        XCTAssertEqual(emptyFinal.droppedCurrent, 0)
-        let earlyOnly = AsrManager.reconcileFinalWindowSeam(
-            previousTokens: [1, 2, 3, 4],
-            previousTimestamps: [250, 254, 258, 261],
-            trailingWordStart: 2,
-            currentTokens: [7883],
-            currentTimestamps: [240],
-            currentPieces: ["."],
-            punctuationTokens: []
-        )
-        XCTAssertEqual(earlyOnly.droppedPrevious, 0)
-        // A short final window that ends where the previous one ended re-emits
-        // "out" but not the "."; keep the previous "out." and strip the re-emission.
-        let sameEnd = AsrManager.reconcileFinalWindowSeam(
-            previousTokens: [1, 2, 3, 4],  // … ▁them ▁out .
-            previousTimestamps: [250, 254, 258, 261],
-            trailingWordStart: 2,
-            currentTokens: [3],  // ▁out
-            currentTimestamps: [259]
-        )
-        XCTAssertEqual(sameEnd.droppedPrevious, 0, "re-decode saw no more audio than the previous window")
-        XCTAssertEqual(sameEnd.droppedCurrent, 1, "the re-emitted `out` duplicates the kept one")
-        // The re-decode saw more audio but its first word IS the previous last
-        // word: it was complete, so keep the previous copy (with its period) and
-        // drop the re-emission. Only a *different* first word retires it.
-        let sameWord = AsrManager.reconcileFinalWindowSeam(
-            previousTokens: [1, 2, 3, 4],  // … ▁them ▁out .
-            previousTimestamps: [250, 254, 258, 261],
-            trailingWordStart: 2,
-            currentTokens: [3, 9],  // ▁out <silence-token>
-            currentTimestamps: [259, 270],
-            currentPieces: [" out", " uh"],
-            previousPieces: [" help", " them", " out", "."]
-        )
-        XCTAssertEqual(sameWord.droppedPrevious, 0)
-        XCTAssertEqual(sameWord.droppedCurrent, 1)
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 1, "only the re-emitted word; its period is the only one")
+    }
+
+    /// `well` vs `we'll`: the comparison form keeps interior apostrophes, so the
+    /// re-decoded contraction is a *different* overlapping word and retires the
+    /// earlier `well` instead of being consumed as a re-emission of it. Both
+    /// tokenizations of the contraction are covered.
+    func testReconcileFinalWindowSeam_ContractionIsNotTheSameWord() {
+        XCTAssertNotEqual(AsrManager.wordCore([" well"]), AsrManager.wordCore([" we'll"]))
+        XCTAssertNotEqual(AsrManager.wordCore([" cant"]), AsrManager.wordCore([" can\u{2019}t"]))
+        XCTAssertEqual(AsrManager.wordCore([" we", "'", "ll"]), "we'll")
         XCTAssertEqual(AsrManager.wordCore([" out", "."]), "out")
-        XCTAssertEqual(AsrManager.wordCore([" anal", "y", "z", "ing"]), "analyzing")
-        XCTAssertEqual(AsrManager.firstWordPieces([",", " and", " anal", "y"]), [" and"])
-        XCTAssertEqual(AsrManager.firstWordPieces([" anal", "y", "z", "ing", " if"]), [" anal", "y", "z", "ing"])
-        // Degenerate inputs are a no-op.
+        XCTAssertEqual(AsrManager.firstWordPieces([" we", "'", "ll", " go"]), [" we", "'", "ll"])
+        // Only a bare apostrophe/hyphen joins; the boundary-marked variants the v3
+        // vocabulary also carries (" '" = 7306, " -" = 5071) start a new word.
+        for joiner in ["'", "\u{2019}", "-"] {
+            XCTAssertTrue(AsrManager.isJoiningPunctuationPiece(joiner), joiner)
+            XCTAssertFalse(AsrManager.isJoiningPunctuationPiece(" " + joiner), "space-marked " + joiner)
+            XCTAssertFalse(AsrManager.isJoiningPunctuationPiece("▁" + joiner), "boundary-marked " + joiner)
+        }
+        XCTAssertFalse(AsrManager.isJoiningPunctuationPiece(","))
+        XCTAssertEqual(
+            AsrManager.firstWordPieces([" rock", " -", "and", " roll"]), [" rock"],
+            "a boundary-marked hyphen ends the word; it is not absorbed")
+        XCTAssertEqual(AsrManager.firstWordPieces([" rock", "-", "and", " roll"]), [" rock", "-", "and"])
+
+        let singlePiece = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],  // ▁and ▁well
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [30, 31],  // ▁we'll ▁go
+            currentTimestamps: [101, 108],
+            currentPieces: [" we'll", " go"],
+            previousPieces: [" and", " well"]
+        )
+        XCTAssertEqual(singlePiece.droppedPrevious, 1, "the re-decoded contraction replaces `well`")
+        XCTAssertEqual(singlePiece.droppedCurrent, 0)
+
+        let splitPieces = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [30, 99, 32, 33],  // ▁we ' ll ▁go
+            currentTimestamps: [101, 102, 103, 108],
+            currentPieces: [" we", "'", "ll", " go"],
+            previousPieces: [" and", " well"]
+        )
+        XCTAssertEqual(splitPieces.droppedPrevious, 1)
+        XCTAssertEqual(splitPieces.droppedCurrent, 0)
+    }
+
+    /// A word that begins with a boundary-marked apostrophe (`▁'` `cause`) is one
+    /// word, not leading punctuation plus a stray continuation. Same-word
+    /// consumption must cover exactly that word.
+    func testReconcileFinalWindowSeam_LeadingApostropheWordIsOneWord() {
+        XCTAssertEqual(AsrManager.firstWordPieces([" '", "cause", " every"]), [" '", "cause"])
+        XCTAssertEqual(AsrManager.wordCore([" '", "cause"]), "cause")
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3],  // ▁just ▁' cause
+            previousTimestamps: [96, 100, 101],
+            trailingWordStart: 1,
+            currentTokens: [2, 3, 9],  // ▁' cause ▁every
+            currentTimestamps: [100, 102, 110],
+            currentPieces: [" '", "cause", " every"],
+            previousPieces: [" just", " '", "cause"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 2, "exactly the re-emitted `'cause`; `every` stays")
+    }
+
+    /// After keeping a punctuated previous word (`said` `.`), the trailing
+    /// punctuation cleanup must stop at a boundary-marked apostrophe that begins
+    /// the next word (`▁'` `cause`): only the re-emitted `said` goes.
+    func testReconcileFinalWindowSeam_PunctuationCleanupStopsAtNextWordStart() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 7883],  // ▁he ▁said .
+            previousTimestamps: [96, 100, 103],
+            trailingWordStart: 1,
+            currentTokens: [2, 30, 31, 32],  // ▁said ▁' cause ▁more
+            currentTimestamps: [101, 104, 105, 112],
+            currentPieces: [" said", " '", "cause", " more"],
+            previousPieces: [" he", " said", "."]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 1, "only the re-emitted `said`; `'cause more` is intact")
+        // The generic head rule has the same protection: a word-starting apostrophe
+        // before the previous word's onset is not a seam artifact.
+        let head = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [30, 31, 32],  // ▁' cause ▁more
+            currentTimestamps: [99, 101, 112],
+            currentPieces: [" '", "cause", " more"],
+            previousPieces: [" just", " so"]
+        )
+        XCTAssertEqual(head.droppedCurrent, 0)
+    }
+
+    /// Token ids are not punctuation evidence: id 7948 is `ó` in the v3
+    /// vocabulary although it sits in `ASRConstants.punctuationTokens`. A word
+    /// starting with it must not be dropped as a seam artifact.
+    func testReconcileFinalWindowSeam_ClassifiesPunctuationByPieceNotId() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [7948, 9],
+            currentTimestamps: [107, 112],  // starts after the previous word's span: a new word
+            currentPieces: [" ó", " si"],
+            previousPieces: [" digo", " que"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 0, "`ó` is a word, not punctuation, regardless of its id")
+    }
+
+    /// A genuine later repetition of the same word (`go` … `go again`) must not
+    /// be consumed: the same-word rule applies only when the re-emission starts
+    /// within the previous word's span.
+    func testReconcileFinalWindowSeam_LaterRepetitionOfSameWordIsKept() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],  // ▁let's ▁go
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [30, 2, 31],  // o ▁go ▁again
+            currentTimestamps: [103, 115, 119],
+            currentPieces: ["o", " go", " again"],
+            previousPieces: [" let's", " go"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 1, "only the continuation head; the later `go` is a new word")
+    }
+
+    /// Adversarial for the prefix rule: a continuation head followed by a new
+    /// word that merely extends the previous text (`an` … `another`). The new
+    /// word starts after the previous word's span, so it is kept as a new word
+    /// and the previous `an` survives.
+    func testReconcileFinalWindowSeam_LaterExtendingWordDoesNotRetire() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [30, 31, 32],
+            currentTimestamps: [103, 112, 116],
+            currentPieces: ["x", " another", " thing"],
+            previousPieces: [" is", " an"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0, "`another` at 112 starts after `an`'s span; not a replacement")
+        XCTAssertEqual(seam.droppedCurrent, 1, "the continuation head still goes")
+    }
+
+    func testReconcileFinalWindowSeam_EmptyEarlyMisalignedAndDegenerateInputsKeepPrevious() {
+        let empty = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4], previousTimestamps: [250, 254, 258, 261], trailingWordStart: 2,
+            currentTokens: [], currentTimestamps: [], currentPieces: [], previousPieces: [" a", " b", " c", " d"])
+        XCTAssertEqual(empty.droppedPrevious, 0)
+        XCTAssertEqual(empty.droppedCurrent, 0)
+        // Only a punctuation before the previous word's onset: nothing re-emitted.
+        let earlyOnly = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4], previousTimestamps: [250, 254, 258, 261], trailingWordStart: 2,
+            currentTokens: [7883], currentTimestamps: [240], currentPieces: ["."],
+            previousPieces: [" a", " b", " out", "."])
+        XCTAssertEqual(earlyOnly.droppedPrevious, 0)
+        XCTAssertEqual(earlyOnly.droppedCurrent, 1, "punctuation before the previous word's onset is a seam artifact")
+        // Missing or misaligned piece arrays: a no-op, never a mass drop.
+        let noPieces = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3], previousTimestamps: [100, 104, 108], trailingWordStart: 2,
+            currentTokens: [9, 10], currentTimestamps: [110, 114])
+        XCTAssertEqual(noPieces.droppedPrevious, 0)
+        XCTAssertEqual(noPieces.droppedCurrent, 0)
+        let misaligned = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3], previousTimestamps: [100, 104, 108], trailingWordStart: 2,
+            currentTokens: [9, 10], currentTimestamps: [110, 114], currentPieces: [" only"],
+            previousPieces: [" a", " b", " c"])
+        XCTAssertEqual(misaligned.droppedCurrent, 0)
         XCTAssertEqual(
             AsrManager.reconcileFinalWindowSeam(
                 previousTokens: [1], previousTimestamps: [5], trailingWordStart: 0,
-                currentTokens: [2], currentTimestamps: [6]
+                currentTokens: [2], currentTimestamps: [6], currentPieces: [" x"], previousPieces: [" y"]
             ).droppedPrevious, 0)
     }
 }
