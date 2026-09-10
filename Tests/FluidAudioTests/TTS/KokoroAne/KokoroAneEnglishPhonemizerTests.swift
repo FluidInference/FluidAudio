@@ -456,10 +456,10 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         XCTAssertEqual(recorded, ["zzzyx's"])
     }
 
-    func testPossessiveOnHyphenatedCompound() async throws {
+    func testPossessiveOnHyphenatedCompoundWithoutWholeStem() async throws {
         let recorder = FallbackRecorder()
-        // The stem resolves through the normal chain, so #775's hyphen split
-        // still applies underneath the clitic.
+        // This fixture deliberately lacks the whole `mother-in-law` entry:
+        // #775's split must still resolve each known component.
         let result = try await makePossessivePhonemizer()
             .phonemize("mother-in-law's") { await recorder.g2p($0) }
         XCTAssertEqual(result, "mˈʌðɜɹ ɪn lˈɔz")
@@ -491,6 +491,119 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         XCTAssertEqual(result, "fɹˈɛʃ pɹˈOdˌusᵻz")
         let recorded = await recorder.words
         XCTAssertTrue(recorded.isEmpty, "every part is in the lexicon")
+    }
+
+    func testWholeCompoundPossessiveUsesLexiconStemBeforeSplitting() async throws {
+        // Real Misaki cache entries: whole compounds preserve stress and weak
+        // vowels that are lost when their components are pronounced separately.
+        let stems = [
+            "C-section": "sˈisˌɛkʃən",
+            "X-ray": "ˈɛksɹˌA",
+            "T-shirt": "tˈiʃˌɜɹt",
+            "well-being": "wˈɛlbˌiɪŋ",
+            "mother-in-law": "mˈʌðəɹənlˌɔ",
+        ]
+        let expected = [
+            "C-section": "sˈisˌɛkʃənz",
+            "X-ray": "ˈɛksɹˌAz",
+            "T-shirt": "tˈiʃˌɜɹts",
+            "well-being": "wˈɛlbˌiɪŋz",
+            "mother-in-law": "mˈʌðəɹənlˌɔz",
+        ]
+        let lower = stems.reduce(into: possessiveLexicon) { result, entry in
+            result[entry.key.lowercased()] = entry.value.map(String.init)
+        }
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            wordToPhonemes: lower,
+            caseSensitiveWordToPhonemes: caseSensitive,
+            allowedPunctuation: punctuation
+        )
+        let recorder = FallbackRecorder()
+        for stem in stems.keys.sorted() {
+            for suffix in ["'s", "'S", "’s", "ʼs"] {
+                let result = try await phonemizer.phonemize(stem + suffix) { await recorder.g2p($0) }
+                XCTAssertEqual(result, expected[stem], stem + suffix)
+            }
+        }
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty, "whole lexicon stems must never be split or sent to G2P")
+    }
+
+    func testWholeCompoundPossessivePreservesLexiconPrecedence() async throws {
+        // Case-sensitive whole stems beat the lower-case and normalized keys.
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            wordToPhonemes: ["c-section": ["l", "o"], "csection": ["n", "o"]],
+            caseSensitiveWordToPhonemes: ["C-section": ["s", "ˈ", "i", "s", "ˌ", "ɛ", "k", "ʃ", "ə", "n"]]
+        )
+        let recorder = FallbackRecorder()
+        let exact = try await phonemizer.phonemize("C-section's") { await recorder.g2p($0) }
+        let lower = try await phonemizer.phonemize("c-section's") { await recorder.g2p($0) }
+        XCTAssertEqual(exact, "sˈisˌɛkʃənz")
+        XCTAssertEqual(lower, "loz")
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty)
+    }
+
+    func testWholeCompoundPossessiveUsesCustomStemOverride() async throws {
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            wordToPhonemes: ["mother-in-law": ["m", "ˈ", "ʌ", "ð", "ə", "ɹ", "ə", "n", "l", "ˌ", "ɔ"]],
+            customLexicon: ["mother-in-law": "mʌðəɹɪnlɔ"]
+        )
+        let result = try await phonemizer.phonemize("mother-in-law's") { _ in nil }
+        XCTAssertEqual(result, "mʌðəɹɪnlɔz")
+    }
+
+    func testWholeCompoundPossessiveKeepsNormalizedCustomLookup() async throws {
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            wordToPhonemes: ["c-section": ["l", "o"]],
+            customLexicon: ["csection": "sɛkʃən"]
+        )
+        let result = try await phonemizer.phonemize("C-section's") { _ in nil }
+        XCTAssertEqual(result, "sɛkʃənz")
+    }
+
+    func testExplicitWholeCompoundPossessiveWinsOverStem() async throws {
+        // The real glued entry has different stress from the stem. It must
+        // still win even when a custom override exists for the bare stem.
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            wordToPhonemes: [
+                "re-count": ["ɹ", "ˌ", "i", "k", "ˈ", "W", "n", "t"],
+                "re-count's": ["ɹ", "ˈ", "i", "k", "ˌ", "W", "n", "t", "s"],
+            ],
+            customLexicon: ["re-count": "kWnt"]
+        )
+        let result = try await phonemizer.phonemize("re-count's") { _ in nil }
+        XCTAssertEqual(result, "ɹˈikˌWnts")
+    }
+
+    func testCompoundPossessiveMissDoesNotG2PTheBareStem() async throws {
+        let recorder = FallbackRecorder()
+        // No whole stem: retain #775's component fallback and the explicit
+        // noun-possessive entry. Never guess `zzzyx-use` or re-derive `use's`.
+        let result = try await makePossessivePhonemizer()
+            .phonemize("zzzyx-use's") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "<g2p:zzzyx> jˈusᵻz")
+        let recorded = await recorder.words
+        XCTAssertEqual(recorded, ["zzzyx"])
+    }
+
+    func testCompoundPossessiveWithUnknownFinalStemKeepsInflectedFallback() async throws {
+        let recorder = FallbackRecorder()
+        let result = try await makePossessivePhonemizer()
+            .phonemize("land-zzzyx's") { await recorder.g2p($0) }
+        XCTAssertEqual(result, "lˈænd <g2p:zzzyx's>")
+        let recorded = await recorder.words
+        XCTAssertEqual(recorded, ["zzzyx's"])
+    }
+
+    func testPossessiveInitialismsKeepLetterNameRules() async throws {
+        let recorder = FallbackRecorder()
+        for (word, expected) in [("AI's", "ˈA ˈIz"), ("US's", "jˈu ˈɛsᵻz"), ("FBI's", "ˈɛf bˈi ˈIz")] {
+            let result = try await makePossessivePhonemizer().phonemize(word) { await recorder.g2p($0) }
+            XCTAssertEqual(result, expected)
+        }
+        let recorded = await recorder.words
+        XCTAssertTrue(recorded.isEmpty)
     }
 
     func testLexiconEntryStillWinsOverStemming() async throws {

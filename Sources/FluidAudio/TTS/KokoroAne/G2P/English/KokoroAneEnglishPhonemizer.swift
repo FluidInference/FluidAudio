@@ -16,14 +16,13 @@ import Foundation
 ///      citation form (`tˈO`) that over-stresses them (issue #691)
 ///   6. strict ASCII all-caps initialisms (`FBI`, `ATP`) spelled as
 ///      letter names after a full lexicon miss (issue #710)
-///   7. hyphenated-compound split for a token that missed as a whole
-///      (`land-use's` → `land` + `use's`), resolving each part through
-///      this same chain (issue #775)
-///   8. `-'s` stem + clitic for possessives whose stem is a known word
-///      (`today's` → `today` + /z/), mirroring Misaki's `stem_s`. It runs
-///      *after* the hyphen split so a compound's final part can still hit
-///      a glued lexicon entry of its own
-///   9. BART G2P CoreML fallback for OOV words (injected by the caller)
+///   7. whole-compound possessive stem lookup, using lexicons only
+///      (`C-section's` → lexicon `C-section` + /z/)
+///   8. hyphenated-compound split after a whole-stem miss
+///      (`land-use's` → `land` + lexicon `use's`) (issue #775)
+///   9. `-'s` stem + clitic for other known stems (`today's` → `today` + /z/),
+///      including letter-name initialisms (`FBI's`)
+///   10. BART G2P CoreML fallback for OOV words (injected by the caller)
 ///
 /// Punctuation supported by the chain's `vocab.json` (`, . ! ? ; …` etc.)
 /// is preserved and attached to the preceding word — Kokoro treats those
@@ -157,13 +156,8 @@ struct KokoroAneEnglishPhonemizer: Sendable {
                     + "falling back to the bundled pronunciation")
         }
 
-        if let phonemes = caseSensitiveWordToPhonemes[word]
-            ?? caseSensitiveWordToPhonemes[normalized]
-            ?? wordToPhonemes[lowered]
-            ?? wordToPhonemes[normalized],
-            !phonemes.isEmpty
-        {
-            return phonemes.joined()
+        if let phonemes = lookupMisakiWord(word) {
+            return phonemes
         }
 
         // After a full lexicon miss, read strict ASCII all-caps tokens of a
@@ -175,22 +169,19 @@ struct KokoroAneEnglishPhonemizer: Sendable {
             return spelled
         }
 
-        // A hyphenated compound that missed every lexicon as a whole
-        // (`tales-to-amaze`) — resolve each part and join, so it reads as
-        // `tales to amaze` instead of BART G2P on the glued `talestoamaze`
-        // (issue #775). Real lexicon compounds (`twenty-one`) already returned
-        // above, so only genuine misses reach here.
-        //
-        // This runs BEFORE the possessive rule on purpose. The lexicon carries
-        // ~350 glued `-'s` entries for heteronyms whose possessive does not
-        // read as the bare word plus a clitic (`use` = `jˈuz` the verb but
-        // `use's` = `jˈusᵻz` the noun; `produce` = `pɹədˈus` but `produce's` =
-        // `pɹˈOdˌusᵻz`). Splitting first lets the final part reach its own
-        // entry (`land-use's` → `land` + `use's`); stemming first would strip
-        // the `'s`, split the stem, and derive the wrong (verb) reading. The
-        // stem-and-clitic derivation still handles compounds with no glued
-        // entry, because each part is resolved through this same chain
-        // (`mother-in-law's` → `mother` + `in` + `law's` → `law` + /z/).
+        // A known whole-compound stem carries stress and reduced vowels
+        // that splitting would lose (`mother-in-law's`, `C-section's`). This
+        // probe must be lexicon-only: recursively resolving `land-use` would
+        // derive from the verb `use` before its noun-possessive entry `use's`
+        // gets a chance to match in the component path below.
+        if let possessive = resolveWholeCompoundPossessive(word, lowered: lowered) {
+            return possessive
+        }
+
+        // Whole token and whole possessive stem both missed: resolve parts
+        // independently, preserving any explicit possessive entry on a part
+        // (`land-use's` → `land` + `use's`). Ordinary compounds retain #775's
+        // behavior, including per-part G2P when needed.
         if word.contains("-"),
             let compound = try await resolveHyphenatedCompound(
                 word, allowFallback: allowFallback, fallback: fallback)
@@ -223,6 +214,40 @@ struct KokoroAneEnglishPhonemizer: Sendable {
             Self.logger.warning("G2P failed on word '\(normalized)': \(error.localizedDescription)")
             throw error
         }
+    }
+
+    /// Direct bundled lookup, shared by ordinary words and the whole-stem
+    /// probe. No initialism spelling, compound splitting, stemming, or G2P.
+    private func lookupMisakiWord(_ word: String) -> String? {
+        let normalized = Self.normalizeKey(word)
+        guard
+            let phonemes = caseSensitiveWordToPhonemes[word]
+                ?? caseSensitiveWordToPhonemes[normalized]
+                ?? wordToPhonemes[word.lowercased()]
+                ?? wordToPhonemes[normalized],
+            !phonemes.isEmpty
+        else {
+            return nil
+        }
+        return phonemes.joined()
+    }
+
+    /// Try only a whole hyphenated stem's lexicon entries. Non-compound
+    /// stems keep the existing resolution path (notably `AI`/`US` letter-name
+    /// overrides), and explicit entries for the inflected token already won.
+    private func resolveWholeCompoundPossessive(_ word: String, lowered: String) -> String? {
+        guard word.contains("-"), lowered.hasSuffix("'s") else { return nil }
+        let stem = String(word.dropLast(2))
+        guard !stem.isEmpty, !stem.hasSuffix("'") else { return nil }
+        guard
+            let stemIPA = customLexicon[stem]
+                ?? customLexicon[Self.normalizeKey(stem)]
+                ?? lookupMisakiWord(stem),
+            !stemIPA.isEmpty
+        else {
+            return nil
+        }
+        return stemIPA + Self.clitic(after: stemIPA)
     }
 
     /// Resolve a hyphenated compound that missed the lexicon by splitting on
@@ -264,10 +289,9 @@ struct KokoroAneEnglishPhonemizer: Sendable {
     /// resolved through the normal chain minus the G2P fallback, which keeps
     /// custom-lexicon overrides and letter-name spelling working.
     ///
-    /// Hyphenated tokens are split before this rule is reached, so a compound
-    /// arrives here only one part at a time (`mother-in-law's` → `law's` →
-    /// `law` + /z/). That ordering keeps a part with its own glued lexicon
-    /// entry (`land-use's` → `use's`) from being re-derived from its stem.
+    /// Known whole-compound stems have already returned through the direct
+    /// lexicon probe. Otherwise the hyphen split gives each part its own
+    /// lexicon lookup before this derivation (`land-use's` → `use's`).
     ///
     /// - Parameters:
     ///   - word: the token as written (apostrophes already folded to ASCII by
