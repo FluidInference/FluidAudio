@@ -694,6 +694,18 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertEqual(AsrManager.wordCore([" we", "'", "ll"]), "we'll")
         XCTAssertEqual(AsrManager.wordCore([" out", "."]), "out")
         XCTAssertEqual(AsrManager.firstWordPieces([" we", "'", "ll", " go"]), [" we", "'", "ll"])
+        // Only a bare apostrophe/hyphen joins; the boundary-marked variants the v3
+        // vocabulary also carries (" '" = 7306, " -" = 5071) start a new word.
+        for joiner in ["'", "\u{2019}", "-"] {
+            XCTAssertTrue(AsrManager.isJoiningPunctuationPiece(joiner), joiner)
+            XCTAssertFalse(AsrManager.isJoiningPunctuationPiece(" " + joiner), "space-marked " + joiner)
+            XCTAssertFalse(AsrManager.isJoiningPunctuationPiece("▁" + joiner), "boundary-marked " + joiner)
+        }
+        XCTAssertFalse(AsrManager.isJoiningPunctuationPiece(","))
+        XCTAssertEqual(
+            AsrManager.firstWordPieces([" rock", " -", "and", " roll"]), [" rock"],
+            "a boundary-marked hyphen ends the word; it is not absorbed")
+        XCTAssertEqual(AsrManager.firstWordPieces([" rock", "-", "and", " roll"]), [" rock", "-", "and"])
 
         let singlePiece = AsrManager.reconcileFinalWindowSeam(
             previousTokens: [1, 2],  // ▁and ▁well

@@ -132,11 +132,14 @@ extension AsrManager {
     }
 
     /// A piece that joins two halves of one word (`we` `'` `ll`, `co` `-` `op`):
-    /// an apostrophe or hyphen on its own.
+    /// a *bare* apostrophe or hyphen. The v3 vocabulary also carries
+    /// boundary-marked variants (`▁'`, `▁-`, normalized to a leading space)
+    /// that start a new word; those are never joiners.
     nonisolated internal static func isJoiningPunctuationPiece(_ piece: String) -> Bool {
-        let core = piece.replacingOccurrences(of: ASRConstants.sentencePieceWordBoundary, with: "")
-            .trimmingCharacters(in: .whitespaces)
-        return core == "'" || core == "\u{2019}" || core == "-"
+        guard !piece.hasPrefix(ASRConstants.sentencePieceWordBoundary), !piece.hasPrefix(" ") else {
+            return false
+        }
+        return piece == "'" || piece == "\u{2019}" || piece == "-"
     }
 
     /// Exclusive end of the word that starts at `start`: continuation pieces
