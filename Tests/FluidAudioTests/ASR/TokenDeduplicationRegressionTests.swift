@@ -748,6 +748,35 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertEqual(seam.droppedCurrent, 2, "exactly the re-emitted `'cause`; `every` stays")
     }
 
+    /// After keeping a punctuated previous word (`said` `.`), the trailing
+    /// punctuation cleanup must stop at a boundary-marked apostrophe that begins
+    /// the next word (`▁'` `cause`): only the re-emitted `said` goes.
+    func testReconcileFinalWindowSeam_PunctuationCleanupStopsAtNextWordStart() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 7883],  // ▁he ▁said .
+            previousTimestamps: [96, 100, 103],
+            trailingWordStart: 1,
+            currentTokens: [2, 30, 31, 32],  // ▁said ▁' cause ▁more
+            currentTimestamps: [101, 104, 105, 112],
+            currentPieces: [" said", " '", "cause", " more"],
+            previousPieces: [" he", " said", "."]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 1, "only the re-emitted `said`; `'cause more` is intact")
+        // The generic head rule has the same protection: a word-starting apostrophe
+        // before the previous word's onset is not a seam artifact.
+        let head = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [30, 31, 32],  // ▁' cause ▁more
+            currentTimestamps: [99, 101, 112],
+            currentPieces: [" '", "cause", " more"],
+            previousPieces: [" just", " so"]
+        )
+        XCTAssertEqual(head.droppedCurrent, 0)
+    }
+
     /// Token ids are not punctuation evidence: id 7948 is `ó` in the v3
     /// vocabulary although it sits in `ASRConstants.punctuationTokens`. A word
     /// starting with it must not be dropped as a seam artifact.

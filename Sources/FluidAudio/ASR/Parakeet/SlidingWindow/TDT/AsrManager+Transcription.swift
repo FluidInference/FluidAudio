@@ -328,8 +328,11 @@ extension AsrManager {
             // trailing punctuation, so the re-decode's is a duplicate — drop it.
             // If the previous copy has none, the re-decoded punctuation is the
             // only one and stays.
+            // Never a boundary-marked piece that begins the next word (`▁'` `cause`).
             let previousEndsWithPunctuation = previousPieces.last.map { isPunctuationPiece($0) } ?? false
-            while previousEndsWithPunctuation, end < currentTokens.count, isPunctuation(end) {
+            while previousEndsWithPunctuation, end < currentTokens.count, isPunctuation(end),
+                !startsWordPiece(in: currentPieces, at: end)
+            {
                 end += 1
             }
             droppedCurrent = end
@@ -337,7 +340,7 @@ extension AsrManager {
         for index in droppedCurrent..<currentTokens.count {
             let id = currentTokens[index]
             let frame = currentTimestamps[index]
-            if isPunctuation(index), frame <= lastWordStartFrame {
+            if isPunctuation(index), !startsWordPiece(in: currentPieces, at: index), frame <= lastWordStartFrame {
                 droppedCurrent += 1
                 continue
             }
