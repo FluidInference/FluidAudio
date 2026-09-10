@@ -320,4 +320,14 @@ final class SlidingWindowAsrManagerTests: XCTestCase {
         XCTAssertEqual(SlidingWindowAsrManager.appendingVolatile("", "only"), "only")
         XCTAssertEqual(SlidingWindowAsrManager.appendingVolatile("", ""), "")
     }
+
+    // MARK: - Trailing-word retirement (#897)
+
+    func testRemovingTrailingWordOnlyMatchesWholeWords() {
+        XCTAssertEqual(
+            SlidingWindowAsrManager.removingTrailingWord("an", from: "the net new code and an"), "the net new code and")
+        XCTAssertEqual(SlidingWindowAsrManager.removingTrailingWord("an", from: "an"), "")
+        XCTAssertNil(SlidingWindowAsrManager.removingTrailingWord("an", from: "we have a plan"), "suffix inside a word")
+        XCTAssertNil(SlidingWindowAsrManager.removingTrailingWord("an", from: "and so"))
+    }
 }

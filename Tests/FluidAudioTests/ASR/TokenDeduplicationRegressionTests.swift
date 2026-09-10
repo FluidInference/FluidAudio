@@ -480,4 +480,95 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         )
         XCTAssertNil(firstWindow.initialTimeIndexOverride, "Single-window streams have nothing to re-decode")
     }
+
+    // MARK: - Issue #897: final-window seam reconciliation
+
+    /// Clip 03 of the #855 fixtures: window 1 ends `▁and`@153 `▁an`@156 (the
+    /// fragment of "analyzing" cut by the window edge); the re-decoded final
+    /// window emits `,`@152 `▁and`@155 `▁anal`@159 `y`@162 … The cutoff must
+    /// anchor at the last word start, the fragment must go, and the seam
+    /// comma plus the re-emitted `and` must not survive as duplicates.
+    func testRedecodePlan_CutoffAnchorsAtLastWordStart() {
+        let plan = AsrManager.lastChunkRedecodePlan(
+            isLastChunk: true,
+            previousTokens: [10, 11, 12, 13],
+            previousTokenTimestamps: [147, 149, 153, 156],
+            globalFrameOffset: 112,
+            lastWordStartFrame: 156
+        )
+        XCTAssertEqual(plan.emitTokensAfterFrame, 156 - 112 - AsrManager.redecodeEmissionJitterFrames)
+        // A multi-token last word anchors at its first token, not its last.
+        let multi = AsrManager.lastChunkRedecodePlan(
+            isLastChunk: true,
+            previousTokens: [10, 11, 12],
+            previousTokenTimestamps: [140, 150, 160],
+            globalFrameOffset: 112,
+            lastWordStartFrame: 150
+        )
+        XCTAssertEqual(multi.emitTokensAfterFrame, 150 - 112 - AsrManager.redecodeEmissionJitterFrames)
+    }
+
+    func testTrailingWordStartIndex() {
+        XCTAssertEqual(AsrManager.trailingWordStartIndex(pieces: ["▁c", "ode", "▁and", "▁an"]), 3)
+        // The loaded vocabulary normalizes the boundary to a leading space.
+        XCTAssertEqual(AsrManager.trailingWordStartIndex(pieces: [" c", "ode", " and", " an"]), 3)
+        XCTAssertEqual(AsrManager.trailingWordStartIndex(pieces: ["▁c", "ode", "▁anal", "y", "z"]), 2)
+        XCTAssertNil(AsrManager.trailingWordStartIndex(pieces: ["▁one", "word"]), "index 0 would drop everything")
+        XCTAssertNil(AsrManager.trailingWordStartIndex(pieces: ["no", "starts"]))
+        XCTAssertNil(AsrManager.trailingWordStartIndex(pieces: []))
+    }
+
+    func testReconcileFinalWindowSeam_DropsFragmentSeamCommaAndReemittedWord() {
+        // The comma is not in ASRConstants.punctuationTokens; it is recognized by piece text.
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4],  // ▁c ode ▁and ▁an
+            previousTimestamps: [147, 149, 153, 156],
+            trailingWordStart: 3,
+            currentTokens: [99, 3, 5, 6, 7, 8],  // , ▁and ▁anal y z ing
+            currentTimestamps: [152, 155, 159, 162, 164, 166],
+            currentPieces: [",", " and", " anal", "y", "z", "ing"],
+            punctuationTokens: []
+        )
+        XCTAssertEqual(seam.droppedPrevious, 1, "the fragment `an` is retired")
+        XCTAssertEqual(seam.droppedCurrent, 2, "seam comma + re-emitted `and` (dup of the kept `and`@153)")
+    }
+
+    func testIsPunctuationPiece() {
+        XCTAssertTrue(AsrManager.isPunctuationPiece(","))
+        XCTAssertTrue(AsrManager.isPunctuationPiece("▁."))
+        XCTAssertTrue(AsrManager.isPunctuationPiece(" ?"))
+        XCTAssertFalse(AsrManager.isPunctuationPiece(" and"))
+        XCTAssertFalse(AsrManager.isPunctuationPiece("▁"))
+        XCTAssertFalse(AsrManager.isPunctuationPiece(""))
+    }
+
+    func testReconcileFinalWindowSeam_KeepsGenuineLeadingTokens() {
+        // Current starts with a new word that duplicates nothing: nothing dropped from it.
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3],
+            previousTimestamps: [100, 104, 108],
+            trailingWordStart: 2,
+            currentTokens: [9, 10],
+            currentTimestamps: [110, 114],
+            punctuationTokens: [7883]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 1)
+        XCTAssertEqual(seam.droppedCurrent, 0)
+        // Punctuation after the last word start is real, not a seam artifact.
+        let late = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3],
+            previousTimestamps: [100, 104, 108],
+            trailingWordStart: 2,
+            currentTokens: [7883, 9],
+            currentTimestamps: [120, 124],
+            punctuationTokens: [7883]
+        )
+        XCTAssertEqual(late.droppedCurrent, 0)
+        // Degenerate inputs are a no-op.
+        XCTAssertEqual(
+            AsrManager.reconcileFinalWindowSeam(
+                previousTokens: [1], previousTimestamps: [5], trailingWordStart: 0,
+                currentTokens: [2], currentTimestamps: [6]
+            ).droppedPrevious, 0)
+    }
 }

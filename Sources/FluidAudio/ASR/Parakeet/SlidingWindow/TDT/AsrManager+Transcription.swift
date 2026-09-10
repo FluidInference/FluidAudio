@@ -71,14 +71,105 @@ extension AsrManager {
         isLastChunk: Bool,
         previousTokens: [Int],
         previousTokenTimestamps: [Int]?,
-        globalFrameOffset: Int
+        globalFrameOffset: Int,
+        lastWordStartFrame: Int? = nil
     ) -> (initialTimeIndexOverride: Int?, emitTokensAfterFrame: Int?) {
         guard isLastChunk, let previousTimestamps = previousTokenTimestamps, !previousTokens.isEmpty else {
             return (nil, nil)
         }
-        let lastEmittedGlobalFrame = previousTimestamps.max() ?? 0
-        let cutoff = max(0, lastEmittedGlobalFrame - globalFrameOffset - redecodeEmissionJitterFrames)
+        // Anchor the cutoff at the previous window's last *word*, not its last
+        // token: that word may have been cut by the window edge (#897), and the
+        // re-decode must be free to re-emit it in full.
+        let anchorGlobalFrame = lastWordStartFrame ?? (previousTimestamps.max() ?? 0)
+        let cutoff = max(0, anchorGlobalFrame - globalFrameOffset - redecodeEmissionJitterFrames)
         return (0, cutoff)
+    }
+
+    /// Index of the first token of the previous window's last word — a piece
+    /// carrying the SentencePiece word boundary, or the leading space the loaded
+    /// vocabulary normalizes it to — or nil when the sequence has no word start
+    /// after its first token (dropping index 0 would discard the whole window).
+    /// Pure, for testability.
+    nonisolated internal static func trailingWordStartIndex(pieces: [String]) -> Int? {
+        guard
+            let idx = pieces.lastIndex(where: {
+                $0.hasPrefix(ASRConstants.sentencePieceWordBoundary) || $0.hasPrefix(" ")
+            }), idx > 0
+        else { return nil }
+        return idx
+    }
+
+    /// A vocabulary piece that is nothing but punctuation once the word
+    /// boundary (marker or normalized leading space) is stripped.
+    nonisolated internal static func isPunctuationPiece(_ piece: String) -> Bool {
+        var core = piece
+        if core.hasPrefix(ASRConstants.sentencePieceWordBoundary) {
+            core.removeFirst(ASRConstants.sentencePieceWordBoundary.count)
+        }
+        core = core.trimmingCharacters(in: .whitespaces)
+        guard !core.isEmpty else { return false }
+        return core.unicodeScalars.allSatisfy { CharacterSet.punctuationCharacters.contains($0) }
+    }
+
+    /// Seam reconciliation for the final streaming window (#897).
+    ///
+    /// The previous window's trailing word may be a fragment cut by the window
+    /// edge (`and an` for `and analyzing`); the re-decoded final window emits
+    /// that word in full from `trailingWordStart`'s frame minus the jitter
+    /// margin. Dedup cannot fix this — the fragment never equals the full word,
+    /// a re-emitted single token is below the substring matcher's minimum run,
+    /// and a boundary punctuation the decoder attaches at its emission start
+    /// blocks the suffix–prefix match.
+    ///
+    /// Returns how many trailing previous tokens to drop (the whole last word)
+    /// and how many leading current tokens to drop: punctuation emitted at or
+    /// before the previous last word's frame (a seam artifact), and tokens that
+    /// duplicate a kept previous token within `frameTolerance` inside the jitter
+    /// region. Pure, for testability; timestamps are global frames.
+    nonisolated internal static func reconcileFinalWindowSeam(
+        previousTokens: [Int],
+        previousTimestamps: [Int],
+        trailingWordStart: Int,
+        currentTokens: [Int],
+        currentTimestamps: [Int],
+        currentPieces: [String] = [],
+        punctuationTokens: [Int] = ASRConstants.punctuationTokens,
+        jitterFrames: Int = redecodeEmissionJitterFrames,
+        frameTolerance: Int = ASRConstants.duplicateFrameTolerance
+    ) -> (droppedPrevious: Int, droppedCurrent: Int) {
+        guard trailingWordStart > 0, trailingWordStart < previousTokens.count,
+            previousTimestamps.count == previousTokens.count,
+            currentTimestamps.count == currentTokens.count
+        else { return (0, 0) }
+
+        // `ASRConstants.punctuationTokens` lists only sentence-final marks; the
+        // seam artifact is usually a comma, so classify by the piece text too.
+        func isPunctuation(_ index: Int) -> Bool {
+            if punctuationTokens.contains(currentTokens[index]) { return true }
+            guard index < currentPieces.count else { return false }
+            return isPunctuationPiece(currentPieces[index])
+        }
+
+        let droppedPrevious = previousTokens.count - trailingWordStart
+        let lastWordStartFrame = previousTimestamps[trailingWordStart]
+        let keptPrevious = Array(zip(previousTokens, previousTimestamps).prefix(trailingWordStart))
+        let keptLastFrame = keptPrevious.last?.1 ?? -1
+
+        var droppedCurrent = 0
+        for (index, (id, frame)) in zip(currentTokens, currentTimestamps).enumerated() {
+            if isPunctuation(index), frame <= lastWordStartFrame {
+                droppedCurrent += 1
+                continue
+            }
+            if frame <= keptLastFrame + jitterFrames,
+                keptPrevious.contains(where: { $0.0 == id && abs($0.1 - frame) <= frameTolerance })
+            {
+                droppedCurrent += 1
+                continue
+            }
+            break
+        }
+        return (droppedPrevious, droppedCurrent)
     }
 
     /// Chunk transcription that preserves decoder state between calls.
@@ -91,7 +182,10 @@ extension AsrManager {
         globalFrameOffset: Int = 0,
         isLastChunk: Bool = false,
         language: Language? = nil
-    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
+    ) async throws -> (
+        tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int,
+        droppedPreviousTokens: Int
+    ) {
         let (alignedSamples, frameAlignedLength) = frameAlignedAudio(
             chunkSamples, allowAlignment: previousTokens.isEmpty)
         let padded = padAudioIfNeeded(alignedSamples, targetLength: ASRConstants.maxModelSamples)
@@ -110,11 +204,18 @@ extension AsrManager {
         // tokens for 9 s of never-seen speech (#855 follow-up, three real
         // recordings). The 2 s left context is enough for a fresh state to
         // re-establish itself before the cutoff.
+        // The previous window's last word is re-decoded in full by the final
+        // window and dropped from the accumulated output afterwards (#897).
+        let trailingWordStart: Int? =
+            isLastChunk && previousTokenTimestamps?.count == previousTokens.count
+            ? Self.trailingWordStartIndex(pieces: previousTokens.map { vocabulary[$0] ?? "" })
+            : nil
         let redecodePlan = Self.lastChunkRedecodePlan(
             isLastChunk: isLastChunk,
             previousTokens: previousTokens,
             previousTokenTimestamps: previousTokenTimestamps,
-            globalFrameOffset: globalFrameOffset
+            globalFrameOffset: globalFrameOffset,
+            lastWordStartFrame: trailingWordStart.flatMap { previousTokenTimestamps?[$0] }
         )
         if redecodePlan.initialTimeIndexOverride == 0 {
             decoderState = TdtDecoderState.make(decoderLayers: decoderLayerCount)
@@ -131,26 +232,62 @@ extension AsrManager {
             initialTimeIndexOverride: redecodePlan.initialTimeIndexOverride
         )
 
+        var currentTokens = hypothesis.ySequence
+        var currentTimestamps = hypothesis.timestamps
+        var currentConfidences = hypothesis.tokenConfidences
+        var effectivePrevious = previousTokens
+        var effectivePreviousTimestamps = previousTokenTimestamps
+        var droppedPrevious = 0
+
+        // Final window: replace the previous window's (possibly edge-cut) last
+        // word with the re-decoded one, and strip the seam artifacts the
+        // re-decode emits ahead of it (#897).
+        if redecodePlan.initialTimeIndexOverride == 0, let trailingWordStart,
+            let previousTimestamps = previousTokenTimestamps
+        {
+            let seam = Self.reconcileFinalWindowSeam(
+                previousTokens: previousTokens,
+                previousTimestamps: previousTimestamps,
+                trailingWordStart: trailingWordStart,
+                currentTokens: currentTokens,
+                currentTimestamps: currentTimestamps.map { $0 + globalFrameOffset },
+                currentPieces: currentTokens.map { vocabulary[$0] ?? "" }
+            )
+            droppedPrevious = seam.droppedPrevious
+            if seam.droppedCurrent > 0 {
+                currentTokens.removeFirst(seam.droppedCurrent)
+                currentTimestamps.removeFirst(seam.droppedCurrent)
+                currentConfidences.removeFirst(min(seam.droppedCurrent, currentConfidences.count))
+            }
+            effectivePrevious = Array(previousTokens.prefix(trailingWordStart))
+            effectivePreviousTimestamps = Array(previousTimestamps.prefix(trailingWordStart))
+            if droppedPrevious > 0 || seam.droppedCurrent > 0 {
+                logger.debug(
+                    "Final-window seam: dropped \(droppedPrevious) trailing previous token(s), \(seam.droppedCurrent) leading current token(s)"
+                )
+            }
+        }
+
         // Apply token deduplication if previous tokens are provided
-        if !previousTokens.isEmpty && hypothesis.hasTokens {
+        if !effectivePrevious.isEmpty && !currentTokens.isEmpty {
             // Convert this chunk's local frame timestamps into the same global frame
             // space as `previousTokenTimestamps` so dedup can require temporal adjacency.
             let currentGlobalTimestamps: [Int]? =
-                previousTokenTimestamps != nil ? hypothesis.timestamps.map { $0 + globalFrameOffset } : nil
+                effectivePreviousTimestamps != nil ? currentTimestamps.map { $0 + globalFrameOffset } : nil
             let (deduped, removedCount) = removeDuplicateTokenSequence(
-                previous: previousTokens, current: hypothesis.ySequence,
-                previousTimestamps: previousTokenTimestamps,
+                previous: effectivePrevious, current: currentTokens,
+                previousTimestamps: effectivePreviousTimestamps,
                 currentTimestamps: currentGlobalTimestamps)
             let adjustedTimestamps =
-                removedCount > 0 ? Array(hypothesis.timestamps.dropFirst(removedCount)) : hypothesis.timestamps
+                removedCount > 0 ? Array(currentTimestamps.dropFirst(removedCount)) : currentTimestamps
             let adjustedConfidences =
                 removedCount > 0
-                ? Array(hypothesis.tokenConfidences.dropFirst(removedCount)) : hypothesis.tokenConfidences
+                ? Array(currentConfidences.dropFirst(removedCount)) : currentConfidences
 
-            return (deduped, adjustedTimestamps, adjustedConfidences, encLen)
+            return (deduped, adjustedTimestamps, adjustedConfidences, encLen, droppedPrevious)
         }
 
-        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, encLen)
+        return (currentTokens, currentTimestamps, currentConfidences, encLen, droppedPrevious)
     }
 
     internal func processTranscriptionResult(

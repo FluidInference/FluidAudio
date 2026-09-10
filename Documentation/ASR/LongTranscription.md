@@ -423,8 +423,19 @@ that dedup strips. Two rules make this safe:
   exceed dedup's bounded search; suppressing at the source keeps dedup's job
   to the jitter margin.
 
-Known residue: a word cut by the previous window's edge (`and an` → `and
-analyzing`) can survive as a fragment, since dedup matches whole tokens.
+**Seam reconciliation (#897).** The previous window's last word may be a
+fragment cut by the window edge (`and an` for `and analyzing`), which dedup
+can never repair: the fragment never equals the full word, a re-emitted single
+token is below the substring matcher's two-token minimum, and a punctuation
+token the decoder attaches at its emission start blocks the suffix–prefix
+match. So the cutoff anchors at the previous window's *last word start*
+(`lastWordStartFrame`), the final window re-decodes that word in full, and
+`AsrManager.reconcileFinalWindowSeam` retires the previous last word from the
+accumulated tokens and text (`droppedPreviousTokens`) while stripping the
+re-decode's seam artifacts: punctuation emitted at or before that word's
+frame, and tokens duplicating a kept previous token inside the jitter region.
+Clip 03 of the fixtures pins it: `code and an, and analyzing` → `code and
+analyzing`, matching batch.
 
 Regression fixtures: `Tests/FluidAudioTests/ASR/Parakeet/SlidingWindow/Fixtures`
 (three real recordings, cleared for release by the speaker), exercised by
