@@ -142,6 +142,22 @@ extension AsrManager {
         return piece == "'" || piece == "\u{2019}" || piece == "-"
     }
 
+    /// Whether the piece at `index` starts a word: a boundary-marked piece that
+    /// is not punctuation — or a boundary-marked apostrophe/hyphen immediately
+    /// followed by a continuation piece (`▁'` `cause`), which is the first
+    /// piece of that word rather than leading punctuation.
+    nonisolated internal static func startsWordPiece(in pieces: [String], at index: Int) -> Bool {
+        let p = pieces[index]
+        guard p.hasPrefix(ASRConstants.sentencePieceWordBoundary) || p.hasPrefix(" ") else { return false }
+        if !isPunctuationPiece(p) { return true }
+        let core = p.replacingOccurrences(of: ASRConstants.sentencePieceWordBoundary, with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard core == "'" || core == "\u{2019}" || core == "-", index + 1 < pieces.count else { return false }
+        let next = pieces[index + 1]
+        return !next.hasPrefix(ASRConstants.sentencePieceWordBoundary) && !next.hasPrefix(" ")
+            && !isPunctuationPiece(next)
+    }
+
     /// Exclusive end of the word that starts at `start`: continuation pieces
     /// follow, and a joining apostrophe/hyphen piece is absorbed when a
     /// continuation piece follows it.
@@ -171,7 +187,7 @@ extension AsrManager {
         func startsWord(_ p: String) -> Bool {
             p.hasPrefix(ASRConstants.sentencePieceWordBoundary) || p.hasPrefix(" ")
         }
-        guard let start = pieces.firstIndex(where: { startsWord($0) && !isPunctuationPiece($0) }) else {
+        guard let start = pieces.indices.first(where: { startsWordPiece(in: pieces, at: $0) }) else {
             return []
         }
         return Array(pieces[start..<wordExtent(in: pieces, from: start)])
@@ -224,7 +240,6 @@ extension AsrManager {
         currentTimestamps: [Int],
         currentPieces: [String] = [],
         previousPieces: [String] = [],
-        punctuationTokens: [Int] = ASRConstants.punctuationTokens,
         jitterFrames: Int = redecodeEmissionJitterFrames,
         frameTolerance: Int = ASRConstants.duplicateFrameTolerance
     ) -> (droppedPrevious: Int, droppedCurrent: Int) {
@@ -240,11 +255,10 @@ extension AsrManager {
         else { return (0, 0) }
 
         func piece(_ index: Int) -> String { currentPieces[index] }
-        // `ASRConstants.punctuationTokens` lists only sentence-final marks; the
-        // seam artifact is usually a comma, so classify by the piece text too.
-        func isPunctuation(_ index: Int) -> Bool {
-            punctuationTokens.contains(currentTokens[index]) || isPunctuationPiece(piece(index))
-        }
+        // Classify by piece text only. Token ids are model-dependent:
+        // `ASRConstants.punctuationTokens` was written for an older vocabulary
+        // and maps to `й` / `ó` in v3.
+        func isPunctuation(_ index: Int) -> Bool { isPunctuationPiece(piece(index)) }
         func startsWord(_ index: Int) -> Bool {
             let p = piece(index)
             return p.hasPrefix(ASRConstants.sentencePieceWordBoundary) || p.hasPrefix(" ")
@@ -273,7 +287,7 @@ extension AsrManager {
         let previousWord = wordCore(previousPieces.dropFirst(trailingWordStart))
         let firstWord = firstWordPieces(Array(currentPieces.dropFirst(head)))
         let currentWord = wordCore(firstWord)
-        let firstWordIndex = (head..<currentTokens.count).first { startsWord($0) && !isPunctuation($0) }
+        let firstWordIndex = (head..<currentTokens.count).first { startsWordPiece(in: currentPieces, at: $0) }
         let firstWordFrame = firstWordIndex.map { currentTimestamps[$0] }
 
         let overlapsPrevious = firstWordFrame.map { $0 <= previousLastFrame + jitterFrames } ?? false

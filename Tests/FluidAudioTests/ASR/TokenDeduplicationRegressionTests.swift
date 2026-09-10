@@ -529,8 +529,7 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             currentTokens: [99, 3, 5, 6, 7, 8],
             currentTimestamps: [152, 155, 159, 162, 164, 166],
             currentPieces: [",", " and", " anal", "y", "z", "ing"],
-            previousPieces: [" c", "ode", " and", " an"],
-            punctuationTokens: []
+            previousPieces: [" c", "ode", " and", " an"]
         )
         XCTAssertEqual(seam.droppedPrevious, 1)
         XCTAssertEqual(seam.droppedCurrent, 2)
@@ -548,8 +547,7 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             currentTokens: [30, 99, 31, 32],
             currentTimestamps: [308, 309, 311, 314],
             currentPieces: ["x", ",", " but", " she"],
-            previousPieces: [" in", " the", " box"],
-            punctuationTokens: []
+            previousPieces: [" in", " the", " box"]
         )
         XCTAssertEqual(seam.droppedPrevious, 0, "`but` is not `box` nor an extension of it")
         XCTAssertEqual(seam.droppedCurrent, 1, "only the continuation tail `x` goes; the comma stays")
@@ -658,8 +656,7 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             currentTokens: [40, 41, 99, 50],  // ▁o ut , ▁and
             currentTimestamps: [259, 260, 262, 270],
             currentPieces: [" o", "ut", ",", " and"],
-            previousPieces: [" them", " out", "."],
-            punctuationTokens: []
+            previousPieces: [" them", " out", "."]
         )
         XCTAssertEqual(seam.droppedPrevious, 0)
         XCTAssertEqual(
@@ -726,11 +723,45 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             currentTokens: [30, 99, 32, 33],  // ▁we ' ll ▁go
             currentTimestamps: [101, 102, 103, 108],
             currentPieces: [" we", "'", "ll", " go"],
-            previousPieces: [" and", " well"],
-            punctuationTokens: []
+            previousPieces: [" and", " well"]
         )
         XCTAssertEqual(splitPieces.droppedPrevious, 1)
         XCTAssertEqual(splitPieces.droppedCurrent, 0)
+    }
+
+    /// A word that begins with a boundary-marked apostrophe (`▁'` `cause`) is one
+    /// word, not leading punctuation plus a stray continuation. Same-word
+    /// consumption must cover exactly that word.
+    func testReconcileFinalWindowSeam_LeadingApostropheWordIsOneWord() {
+        XCTAssertEqual(AsrManager.firstWordPieces([" '", "cause", " every"]), [" '", "cause"])
+        XCTAssertEqual(AsrManager.wordCore([" '", "cause"]), "cause")
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3],  // ▁just ▁' cause
+            previousTimestamps: [96, 100, 101],
+            trailingWordStart: 1,
+            currentTokens: [2, 3, 9],  // ▁' cause ▁every
+            currentTimestamps: [100, 102, 110],
+            currentPieces: [" '", "cause", " every"],
+            previousPieces: [" just", " '", "cause"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 2, "exactly the re-emitted `'cause`; `every` stays")
+    }
+
+    /// Token ids are not punctuation evidence: id 7948 is `ó` in the v3
+    /// vocabulary although it sits in `ASRConstants.punctuationTokens`. A word
+    /// starting with it must not be dropped as a seam artifact.
+    func testReconcileFinalWindowSeam_ClassifiesPunctuationByPieceNotId() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [7948, 9],
+            currentTimestamps: [99, 112],
+            currentPieces: [" ó", " si"],
+            previousPieces: [" digo", " que"]
+        )
+        XCTAssertEqual(seam.droppedCurrent, 0, "`ó` is a word, not punctuation, regardless of its id")
     }
 
     /// A genuine later repetition of the same word (`go` … `go again`) must not
@@ -778,7 +809,7 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         let earlyOnly = AsrManager.reconcileFinalWindowSeam(
             previousTokens: [1, 2, 3, 4], previousTimestamps: [250, 254, 258, 261], trailingWordStart: 2,
             currentTokens: [7883], currentTimestamps: [240], currentPieces: ["."],
-            previousPieces: [" a", " b", " out", "."], punctuationTokens: [])
+            previousPieces: [" a", " b", " out", "."])
         XCTAssertEqual(earlyOnly.droppedPrevious, 0)
         XCTAssertEqual(earlyOnly.droppedCurrent, 1, "punctuation before the previous word's onset is a seam artifact")
         // Missing or misaligned piece arrays: a no-op, never a mass drop.
