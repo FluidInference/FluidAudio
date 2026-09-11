@@ -167,7 +167,6 @@ public actor SlidingWindowAsrManager {
         // Create decoder state with correct layer count for this model
         if let mgr = asrManager {
             self.decoderState = TdtDecoderState.make(decoderLayers: await mgr.decoderLayerCount)
-            await mgr.resetEmptyDecodeRecovery()
         }
 
         // Reset sliding window state
@@ -304,7 +303,6 @@ public actor SlidingWindowAsrManager {
         // Reset decoder state
         if let mgr = asrManager {
             self.decoderState = TdtDecoderState.make(decoderLayers: await mgr.decoderLayerCount)
-            await mgr.resetEmptyDecodeRecovery()
         }
 
         // Reset sliding window state
@@ -752,7 +750,6 @@ public actor SlidingWindowAsrManager {
 
         // Recreate decoder state
         self.decoderState = TdtDecoderState.make(decoderLayers: await mgr.decoderLayerCount)
-        await mgr.resetEmptyDecodeRecovery()
         logger.info("Successfully reset decoder state during error recovery")
     }
 }

@@ -513,15 +513,18 @@ decoded fine and its new audio was silent — at the cost of one extra
 preprocessor + encoder + decoder pass per step. The energy gate is a
 non-silence test, not a speech test, so a recovered hypothesis replaces the
 empty decode only when it is credible (at least two tokens at a mean
-confidence of 0.7; genuine recoveries score about 0.9). Music and noise
-decode to nothing on every window and pass the energy gate, so the ladder
-has a budget scoped to one transcription (reset at every batch `transcribe`
-entry and at the streaming manager's `startStreaming` / `reset`): after two
-consecutive failed recoveries it degrades to its first policy, one extra
-pass per empty window, so the recoverable speech window that follows
-non-speech audio is still probed, and it runs the full ladder again every
-fifth empty window; any recovery or normal decode restores it. The recovery
-is enabled for `parakeet-tdt-0.6b-v3`, the model it was demonstrated on.
+confidence of 0.7; genuine recoveries score about 0.9). Every suspicious
+window gets the whole ladder: a reduced ladder would lose for good a
+one-off cut that only a later policy flips (the next window's overlap
+covers only part of it, and single-shot decoding has no later chance), and
+nothing cheaper than the model itself tells speech from music or noise
+here. Music and noise decode to nothing on every window and pass the
+energy gate, so non-speech audio pays the full ladder per window. Measured
+on 30 s of MUSAN music on an M5 Pro, net of model load: batch 0.0 s → 0.5 s,
+streaming at the default chunk 0.4 s → 1.0 s — still tens of times faster
+than real time.
+The recovery is enabled for `parakeet-tdt-0.6b-v3`, the model it was
+demonstrated on.
 
 ## Post-Merge Repair Pass
 

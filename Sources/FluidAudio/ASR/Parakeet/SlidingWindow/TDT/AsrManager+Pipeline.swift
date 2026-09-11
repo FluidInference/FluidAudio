@@ -15,7 +15,11 @@ extension AsrManager {
     /// declaring the audio 0.2 s shorter with that tail silenced (`trimmedTail`),
     /// each flip cuts the others do not, while a good cut is never touched (the
     /// ladder runs only after an empty decode, and the decoder still stops at
-    /// the real frames).
+    /// the real frames). Every suspicious window gets the whole ladder: a
+    /// reduced ladder would lose for good a one-off cut that only a later
+    /// policy flips, and nothing cheaper than the model itself tells speech
+    /// from music or noise here, so non-speech audio pays up to five extra
+    /// passes per window (measured on MUSAN music: see LongTranscription.md).
     struct InferenceLengthPolicy: OptionSet, CustomStringConvertible {
         let rawValue: Int
         static let encoderFull = InferenceLengthPolicy(rawValue: 1)
@@ -51,47 +55,6 @@ extension AsrManager {
     /// and what the perturbations coax out of it must not be accepted blindly.
     static let emptyDecodeRecoveryMinimumConfidence: Float = 0.7
     static let emptyDecodeRecoveryMinimumTokens = 2
-    /// Cost control for the recovery ladder, scoped to one transcription.
-    ///
-    /// Non-speech audio (music, noise) decodes to nothing on every window and
-    /// passes the energy gate, so an unbounded ladder would pay five extra
-    /// passes per window for no output. After `maximumConsecutiveFailures`
-    /// failed recoveries the budget degrades the ladder to its first policy
-    /// (`encoderFull`, which recovered most of the reproduced cuts) so every
-    /// empty window is still probed at one extra pass, and runs the full ladder
-    /// again every `fullLadderPeriod` empty windows so a cut that needs another
-    /// policy is not missed indefinitely. Any recovery or normal decode resets
-    /// it. Pure, for testability.
-    struct EmptyDecodeRecoveryBudget: Equatable {
-        static let maximumConsecutiveFailures = 2
-        static let fullLadderPeriod = 5
-
-        private(set) var consecutiveFailures = 0
-        private(set) var emptyWindowsSinceFullLadder = 0
-
-        var isDegraded: Bool { consecutiveFailures >= Self.maximumConsecutiveFailures }
-
-        /// The policies to try for the empty window at hand.
-        mutating func nextAttempt() -> [InferenceLengthPolicy] {
-            guard isDegraded else { return AsrManager.emptyDecodeRecoveryPolicies }
-            emptyWindowsSinceFullLadder += 1
-            if emptyWindowsSinceFullLadder >= Self.fullLadderPeriod {
-                emptyWindowsSinceFullLadder = 0
-                return AsrManager.emptyDecodeRecoveryPolicies
-            }
-            return [AsrManager.emptyDecodeRecoveryPolicies[0]]
-        }
-
-        mutating func recordFailure() {
-            consecutiveFailures += 1
-        }
-
-        /// A recovery succeeded or a window decoded normally.
-        mutating func recordRecovered() {
-            self = EmptyDecodeRecoveryBudget()
-        }
-    }
-
     /// A decode that produced nothing at all — not even tokens suppressed
     /// before a streaming re-decode cutoff. A window whose only tokens were
     /// suppressed decoded fine; its new audio simply had no speech, and the
@@ -151,14 +114,9 @@ extension AsrManager {
             globalFrameOffset: globalFrameOffset, language: language,
             emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
             initialTimeIndexOverride: initialTimeIndexOverride)
-        guard Self.isWholeWindowBlank(result.hypothesis) else {
-            emptyDecodeRecovery.recordRecovered()
-            return result
-        }
-        guard let entryState else { return result }
+        guard Self.isWholeWindowBlank(result.hypothesis), let entryState else { return result }
 
-        let policies = emptyDecodeRecovery.nextAttempt()
-        for policy in policies {
+        for policy in Self.emptyDecodeRecoveryPolicies {
             var retryState = try TdtDecoderState(from: entryState)
             let retry = try await runInference(
                 paddedAudio, originalLength: originalLength, actualAudioFrames: actualAudioFrames,
@@ -172,16 +130,7 @@ extension AsrManager {
                 "Empty decode of \(String(format: "%.1f", Double(audioLength) / Double(ASRConstants.sampleRate))) s of speech recovered with the \(String(describing: policy)) length policy (#909): \(retry.hypothesis.ySequence.count) tokens"
             )
             decoderState = retryState
-            result = retry
-            emptyDecodeRecovery.recordRecovered()
-            return result
-        }
-        let wasDegraded = emptyDecodeRecovery.isDegraded
-        emptyDecodeRecovery.recordFailure()
-        if !wasDegraded, emptyDecodeRecovery.isDegraded {
-            logger.info(
-                "Empty-decode recovery degraded to one policy per window after \(EmptyDecodeRecoveryBudget.maximumConsecutiveFailures) consecutive failures (non-speech audio?); the full ladder returns every \(EmptyDecodeRecoveryBudget.fullLadderPeriod) empty windows or after any recovery (#909)"
-            )
+            return retry
         }
         return result
     }
