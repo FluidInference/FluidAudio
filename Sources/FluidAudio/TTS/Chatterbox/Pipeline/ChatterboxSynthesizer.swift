@@ -45,7 +45,6 @@ struct ChatterboxSynthesizer {
             throw ChatterboxError.unsupportedLanguage(lang)
         }
 
-
         // ---- Tokenize + prefill embeds ----
         let normalized = ChatterboxTokenizer.puncNorm(text)
         var textIds = models.tokenizer.encode(normalized, languageId: lang)
