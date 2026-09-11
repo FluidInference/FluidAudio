@@ -461,7 +461,8 @@ extension AsrManager {
             let (deduped, removedCount) = removeDuplicateTokenSequence(
                 previous: effectivePrevious, current: currentTokens,
                 previousTimestamps: effectivePreviousTimestamps,
-                currentTimestamps: currentGlobalTimestamps)
+                currentTimestamps: currentGlobalTimestamps,
+                punctuationTokens: punctuationTokenIds)
             let adjustedTimestamps =
                 removedCount > 0 ? Array(currentTimestamps.dropFirst(removedCount)) : currentTimestamps
             let adjustedConfidences =

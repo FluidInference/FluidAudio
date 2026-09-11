@@ -9,11 +9,13 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
 
     // MARK: - AsrManager Token Deduplication Tests
 
-    /// Test punctuation deduplication (Stage 1)
+    /// Test punctuation deduplication (Stage 1). Ids are the v3 vocabulary's
+    /// `.` `?` `!` (7883 / 7956 / 8020); the pre-#905 constant carried 7952 (`й`)
+    /// and 7948 (`ó`) instead, so those must no longer count as punctuation.
     func testRemoveDuplicateTokenSequence_PunctuationDeduplication() async throws {
         let asrManager = AsrManager()
 
-        // Test case: Punctuation token (7883 = period) duplicated at boundary
+        // Period duplicated at the boundary (default fallback = v3 constant).
         let (deduped1, removed1) = asrManager.removeDuplicateTokenSequence(
             previous: [100, 101, 7883],
             current: [7883, 102, 103]
@@ -21,21 +23,43 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertEqual(deduped1, [102, 103], "Should remove duplicate punctuation token")
         XCTAssertEqual(removed1, 1, "Should report 1 removed token")
 
-        // Test case: Comma (7952) duplicated
+        // Question mark duplicated.
         let (deduped2, removed2) = asrManager.removeDuplicateTokenSequence(
-            previous: [200, 201, 7952],
-            current: [7952, 202, 203]
+            previous: [200, 201, 7956],
+            current: [7956, 202, 203]
         )
-        XCTAssertEqual(deduped2, [202, 203], "Should remove duplicate comma")
+        XCTAssertEqual(deduped2, [202, 203], "Should remove duplicate question mark")
         XCTAssertEqual(removed2, 1, "Should report 1 removed token")
 
-        // Test case: Question mark (7948) duplicated
+        // Exclamation mark duplicated.
         let (deduped3, removed3) = asrManager.removeDuplicateTokenSequence(
-            previous: [300, 301, 7948],
-            current: [7948, 302, 303]
+            previous: [300, 301, 8020],
+            current: [8020, 302, 303]
         )
-        XCTAssertEqual(deduped3, [302, 303], "Should remove duplicate question mark")
+        XCTAssertEqual(deduped3, [302, 303], "Should remove duplicate exclamation mark")
         XCTAssertEqual(removed3, 1, "Should report 1 removed token")
+
+        // The old guesses are letters in v3 (`й`, `ó`): a repeated one is not a
+        // punctuation duplicate. Stages 2/3 fall back to ID equality without
+        // timestamps, so use different ids around it to keep them out of play.
+        let (deduped4, removed4) = asrManager.removeDuplicateTokenSequence(
+            previous: [400, 401, 7952],
+            current: [7948, 402, 403]
+        )
+        XCTAssertEqual(deduped4, [7948, 402, 403])
+        XCTAssertEqual(removed4, 0)
+
+        // A vocabulary-resolved set (v2 ids: `.` 841, `?` 854, `!` 885) is
+        // honoured when passed explicitly; the v3 fallback would not match.
+        let v2 = ASRConstants.punctuationTokenIds(in: [841: ".", 854: "?", 885: "!", 7883: "▁the"])
+        XCTAssertEqual(v2, [841, 854, 885])
+        let (deduped5, removed5) = asrManager.removeDuplicateTokenSequence(
+            previous: [500, 501, 854],
+            current: [854, 502, 503],
+            punctuationTokens: v2
+        )
+        XCTAssertEqual(deduped5, [502, 503], "Should remove the v2 question mark")
+        XCTAssertEqual(removed5, 1)
     }
 
     /// Test suffix-prefix overlap (Stage 2)

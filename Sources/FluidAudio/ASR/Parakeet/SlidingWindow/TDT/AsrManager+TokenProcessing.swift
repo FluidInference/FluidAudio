@@ -131,11 +131,14 @@ extension AsrManager {
         previous: [Int], current: [Int], maxOverlap: Int = 12,
         previousTimestamps: [Int]? = nil,
         currentTimestamps: [Int]? = nil,
-        frameTolerance: Int = ASRConstants.duplicateFrameTolerance
+        frameTolerance: Int = ASRConstants.duplicateFrameTolerance,
+        punctuationTokens: Set<Int>? = nil
     ) -> (deduped: [Int], removedCount: Int) {
 
-        // Handle single punctuation token duplicates first (domain-specific)
-        let punctuationTokens = ASRConstants.punctuationTokens
+        // Handle single punctuation token duplicates first (domain-specific).
+        // Ids are resolved from the loaded vocabulary (issue #905); the v3
+        // constant is only the fallback for callers without one.
+        let punctuationTokens = punctuationTokens ?? Set(ASRConstants.punctuationTokens)
         var workingCurrent = current
         var workingCurrentTimestamps = currentTimestamps
         var removedCount = 0

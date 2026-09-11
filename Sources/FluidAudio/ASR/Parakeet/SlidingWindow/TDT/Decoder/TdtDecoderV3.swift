@@ -112,6 +112,7 @@ internal struct TdtDecoderV3: Sendable {
         globalFrameOffset: Int = 0,
         language: Language? = nil,
         vocabulary: [Int: String]? = nil,
+        punctuationTokenIds: Set<Int>? = nil,
         emitTokensAfterGlobalFrame: Int? = nil,
         initialTimeIndexOverride: Int? = nil
     ) async throws -> TdtHypothesis {
@@ -584,10 +585,11 @@ internal struct TdtDecoderV3: Sendable {
         decoderState.lastToken = hypothesis.lastToken
 
         // Clear cached predictor output if ending with punctuation
-        // This prevents punctuation from being duplicated at chunk boundaries
-        if let lastToken = hypothesis.lastToken,
-            ASRConstants.punctuationTokens.contains(lastToken)
-        {
+        // This prevents punctuation from being duplicated at chunk boundaries.
+        // Ids come from the loaded vocabulary (issue #905); the v3 constant is
+        // only the fallback when the caller has none.
+        let punctuation = punctuationTokenIds ?? Set(ASRConstants.punctuationTokens)
+        if let lastToken = hypothesis.lastToken, punctuation.contains(lastToken) {
             decoderState.predictorOutput = nil
             // Keep lastToken for linguistic context - deduplication handles duplicates at higher level
         }
