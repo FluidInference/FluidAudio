@@ -505,10 +505,16 @@ attempt started from, and keeps the first non-empty result:
    the price of the final 0.2 s, which the next window's overlap covers
    everywhere but at the very end of the stream.
 
-Each policy flips cuts the others do not; on the ten reproduced spans the
-ladder recovers all of them. A good window is never touched: the ladder
-runs only when the first decode is empty, at the cost of one extra
-preprocessor + encoder + decoder pass per step.
+Each policy flips cuts the others do not; the ladder recovers ten of the
+eleven reproduced spans. A good window is never touched: the ladder runs
+only when the first decode produced nothing at all — not even tokens
+suppressed before a streaming re-decode cutoff, which mean the window
+decoded fine and its new audio was silent — at the cost of one extra
+preprocessor + encoder + decoder pass per step. The energy gate is a
+non-silence test, not a speech test, so a recovered hypothesis replaces the
+empty decode only when it is credible (at least two tokens at a mean
+confidence of 0.7; genuine recoveries score about 0.9). The recovery is
+enabled for `parakeet-tdt-0.6b-v3`, the model it was demonstrated on.
 
 ## Post-Merge Repair Pass
 

@@ -44,6 +44,33 @@ extension AsrManager {
     static let emptyDecodeRecoveryMinimumSamples = 2 * ASRConstants.sampleRate
     static let emptyDecodeRecoveryMinimumRMS: Float = 0.003
 
+    /// Mean token confidence a recovered hypothesis must reach to replace the
+    /// empty decode, and the minimum token count. Genuine recoveries of the
+    /// reproduced cuts score 0.89–0.93 over 33–62 tokens; the energy gate is a
+    /// non-silence test, so a window of music or noise can reach the ladder,
+    /// and what the perturbations coax out of it must not be accepted blindly.
+    static let emptyDecodeRecoveryMinimumConfidence: Float = 0.7
+    static let emptyDecodeRecoveryMinimumTokens = 2
+
+    /// A decode that produced nothing at all — not even tokens suppressed
+    /// before a streaming re-decode cutoff. A window whose only tokens were
+    /// suppressed decoded fine; its new audio simply had no speech, and the
+    /// suppressed tokens are seam evidence that must not be discarded. Pure.
+    static func isWholeWindowBlank(_ hypothesis: TdtHypothesis) -> Bool {
+        hypothesis.ySequence.isEmpty && hypothesis.suppressedTokens.isEmpty
+    }
+
+    /// Whether a recovered hypothesis is credible enough to replace an empty
+    /// decode: enough tokens, and a mean confidence a hallucination on noise
+    /// does not reach. Pure.
+    static func recoveryIsCredible(_ hypothesis: TdtHypothesis) -> Bool {
+        let confidences = hypothesis.tokenConfidences
+        guard hypothesis.ySequence.count >= emptyDecodeRecoveryMinimumTokens, !confidences.isEmpty else {
+            return false
+        }
+        return confidences.reduce(0, +) / Float(confidences.count) >= emptyDecodeRecoveryMinimumConfidence
+    }
+
     /// Whether an empty decode of `samples[0..<actualLength]` deserves a retry:
     /// enough audio, and not silence. Pure.
     static func shouldRecoverEmptyDecode(samples: [Float], actualLength: Int) -> Bool {
@@ -69,7 +96,10 @@ extension AsrManager {
         initialTimeIndexOverride: Int? = nil
     ) async throws -> (hypothesis: TdtHypothesis, encoderSequenceLength: Int) {
         let audioLength = originalLength ?? paddedAudio.count
-        let recoverable = Self.shouldRecoverEmptyDecode(samples: paddedAudio, actualLength: audioLength)
+        // Demonstrated on parakeet-tdt-0.6b-v3 only; the other models keep the
+        // plain path until a blank of theirs is reproduced.
+        let recoverable =
+            asrModels?.version == .v3 && Self.shouldRecoverEmptyDecode(samples: paddedAudio, actualLength: audioLength)
         // The decode mutates the state; keep a copy so a retry starts where the
         // first attempt did.
         let entryState = recoverable ? try TdtDecoderState(from: decoderState) : nil
@@ -81,7 +111,7 @@ extension AsrManager {
             globalFrameOffset: globalFrameOffset, language: language,
             emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
             initialTimeIndexOverride: initialTimeIndexOverride)
-        guard result.hypothesis.ySequence.isEmpty, let entryState else { return result }
+        guard Self.isWholeWindowBlank(result.hypothesis), let entryState else { return result }
 
         for policy in Self.emptyDecodeRecoveryPolicies {
             var retryState = try TdtDecoderState(from: entryState)
@@ -92,7 +122,7 @@ extension AsrManager {
                 globalFrameOffset: globalFrameOffset, language: language,
                 emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
                 initialTimeIndexOverride: initialTimeIndexOverride)
-            guard !retry.hypothesis.ySequence.isEmpty else { continue }
+            guard Self.recoveryIsCredible(retry.hypothesis) else { continue }
             logger.info(
                 "Empty decode of \(String(format: "%.1f", Double(audioLength) / Double(ASRConstants.sampleRate))) s of speech recovered with the \(String(describing: policy)) length policy (#909): \(retry.hypothesis.ySequence.count) tokens"
             )

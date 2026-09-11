@@ -53,6 +53,37 @@ final class EmptyDecodeRecoveryTests: XCTestCase {
         XCTAssertEqual(try AsrManager.declaringFullMelLength(other).featureNames, other.featureNames)
     }
 
+    /// A streaming re-decode whose new audio holds no speech has an empty
+    /// visible sequence but tokens suppressed before the cutoff: the window
+    /// decoded fine and those tokens are seam evidence. Not a blank.
+    func testWindowWithOnlySuppressedTokensIsNotBlank() throws {
+        var hypothesis = TdtHypothesis(decState: TdtDecoderState.make())
+        XCTAssertTrue(AsrManager.isWholeWindowBlank(hypothesis))
+        hypothesis.suppressedTokens = [506, 768]
+        hypothesis.suppressedTimestamps = [140, 143]
+        XCTAssertFalse(AsrManager.isWholeWindowBlank(hypothesis), "suppressed tokens mean the window decoded")
+        hypothesis.ySequence = [575]
+        hypothesis.timestamps = [150]
+        XCTAssertFalse(AsrManager.isWholeWindowBlank(hypothesis))
+    }
+
+    /// The energy gate is a non-silence test, so what the ladder coaxes out of
+    /// music or noise must clear a confidence bar before it replaces the empty
+    /// decode. Genuine recoveries score about 0.9 over dozens of tokens.
+    func testRecoveryMustBeCredible() {
+        var hypothesis = TdtHypothesis(decState: TdtDecoderState.make())
+        XCTAssertFalse(AsrManager.recoveryIsCredible(hypothesis), "nothing recovered")
+        hypothesis.ySequence = [1, 2, 3, 4]
+        hypothesis.tokenConfidences = [0.95, 0.9, 0.85, 0.99]
+        XCTAssertTrue(AsrManager.recoveryIsCredible(hypothesis))
+        hypothesis.tokenConfidences = [0.4, 0.5, 0.3, 0.6]
+        XCTAssertFalse(AsrManager.recoveryIsCredible(hypothesis), "low mean confidence is a hallucination")
+        hypothesis.ySequence = [1]
+        hypothesis.tokenConfidences = [0.99]
+        XCTAssertFalse(AsrManager.recoveryIsCredible(hypothesis), "a lone token is not a recovery")
+        XCTAssertEqual(AsrManager.emptyDecodeRecoveryMinimumConfidence, 0.7)
+    }
+
     func testRecoveryLadderOrderAndNames() {
         let ladder = AsrManager.emptyDecodeRecoveryPolicies
         XCTAssertEqual(
