@@ -84,6 +84,17 @@ final class EmptyDecodeRecoveryTests: XCTestCase {
         XCTAssertEqual(AsrManager.emptyDecodeRecoveryMinimumConfidence, 0.7)
     }
 
+    /// Music and noise decode to nothing on every window and pass the energy
+    /// gate; the ladder is suspended after two consecutive failures so such a
+    /// stream does not pay five extra passes per window.
+    func testRecoveryBudgetSuspendsAfterConsecutiveFailures() {
+        XCTAssertTrue(AsrManager.recoveryAllowed(afterFailures: 0))
+        XCTAssertTrue(AsrManager.recoveryAllowed(afterFailures: 1))
+        XCTAssertFalse(AsrManager.recoveryAllowed(afterFailures: 2))
+        XCTAssertFalse(AsrManager.recoveryAllowed(afterFailures: 10))
+        XCTAssertEqual(AsrManager.emptyDecodeRecoveryBudget, 2)
+    }
+
     func testRecoveryLadderOrderAndNames() {
         let ladder = AsrManager.emptyDecodeRecoveryPolicies
         XCTAssertEqual(

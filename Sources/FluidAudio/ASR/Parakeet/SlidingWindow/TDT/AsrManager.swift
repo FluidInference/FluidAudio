@@ -59,6 +59,12 @@ public actor AsrManager {
 
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
+    /// Consecutive empty decodes the #909 recovery ladder failed to recover.
+    /// Non-speech audio (music, noise) decodes to nothing every window and
+    /// passes the energy gate; after `emptyDecodeRecoveryBudget` failures the
+    /// ladder stays off until a window decodes normally, so such a stream
+    /// costs at most a couple of ladders instead of five extra passes per window.
+    internal var consecutiveFailedRecoveries = 0
     /// Sentence-final punctuation ids resolved from `vocabulary` (issue #905).
     internal var punctuationTokenIds: Set<Int> = Set(ASRConstants.punctuationTokens)
     #if DEBUG

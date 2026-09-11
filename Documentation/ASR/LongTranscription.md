@@ -513,8 +513,12 @@ decoded fine and its new audio was silent — at the cost of one extra
 preprocessor + encoder + decoder pass per step. The energy gate is a
 non-silence test, not a speech test, so a recovered hypothesis replaces the
 empty decode only when it is credible (at least two tokens at a mean
-confidence of 0.7; genuine recoveries score about 0.9). The recovery is
-enabled for `parakeet-tdt-0.6b-v3`, the model it was demonstrated on.
+confidence of 0.7; genuine recoveries score about 0.9). Music and noise
+decode to nothing on every window and pass the energy gate, so the ladder
+is suspended after two consecutive failed recoveries and resumes when a
+window decodes normally; a non-speech stream pays at most two ladders. The
+recovery is enabled for `parakeet-tdt-0.6b-v3`, the model it was
+demonstrated on.
 
 ## Post-Merge Repair Pass
 

@@ -51,6 +51,13 @@ extension AsrManager {
     /// and what the perturbations coax out of it must not be accepted blindly.
     static let emptyDecodeRecoveryMinimumConfidence: Float = 0.7
     static let emptyDecodeRecoveryMinimumTokens = 2
+    /// Consecutive failed recoveries after which the ladder is suspended
+    /// until a window decodes normally. Pure companion: ``recoveryAllowed(afterFailures:)``.
+    static let emptyDecodeRecoveryBudget = 2
+
+    static func recoveryAllowed(afterFailures failures: Int) -> Bool {
+        failures < emptyDecodeRecoveryBudget
+    }
 
     /// A decode that produced nothing at all — not even tokens suppressed
     /// before a streaming re-decode cutoff. A window whose only tokens were
@@ -99,7 +106,8 @@ extension AsrManager {
         // Demonstrated on parakeet-tdt-0.6b-v3 only; the other models keep the
         // plain path until a blank of theirs is reproduced.
         let recoverable =
-            asrModels?.version == .v3 && Self.shouldRecoverEmptyDecode(samples: paddedAudio, actualLength: audioLength)
+            asrModels?.version == .v3 && Self.recoveryAllowed(afterFailures: consecutiveFailedRecoveries)
+            && Self.shouldRecoverEmptyDecode(samples: paddedAudio, actualLength: audioLength)
         // The decode mutates the state; keep a copy so a retry starts where the
         // first attempt did.
         let entryState = recoverable ? try TdtDecoderState(from: decoderState) : nil
@@ -111,7 +119,11 @@ extension AsrManager {
             globalFrameOffset: globalFrameOffset, language: language,
             emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
             initialTimeIndexOverride: initialTimeIndexOverride)
-        guard Self.isWholeWindowBlank(result.hypothesis), let entryState else { return result }
+        guard Self.isWholeWindowBlank(result.hypothesis) else {
+            consecutiveFailedRecoveries = 0
+            return result
+        }
+        guard let entryState else { return result }
 
         for policy in Self.emptyDecodeRecoveryPolicies {
             var retryState = try TdtDecoderState(from: entryState)
@@ -128,7 +140,14 @@ extension AsrManager {
             )
             decoderState = retryState
             result = retry
-            break
+            consecutiveFailedRecoveries = 0
+            return result
+        }
+        consecutiveFailedRecoveries += 1
+        if !Self.recoveryAllowed(afterFailures: consecutiveFailedRecoveries) {
+            logger.info(
+                "Empty-decode recovery suspended after \(self.consecutiveFailedRecoveries) consecutive failures (non-speech audio?); resumes when a window decodes normally (#909)"
+            )
         }
         return result
     }
