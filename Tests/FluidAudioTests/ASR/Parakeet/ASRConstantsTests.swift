@@ -236,5 +236,12 @@ final class ASRConstantsTests: XCTestCase {
         // A vocabulary without punctuation (EOU) yields an empty set, so the
         // punctuation rules never fire instead of firing on random ids.
         XCTAssertTrue(ASRConstants.punctuationTokenIds(in: [7883: "abc", 7956: "▁xyz"]).isEmpty)
+
+        // Japanese (parakeet-0.6b-ja): `。` is token 1, `?` and `!` stay ASCII,
+        // `、` is a comma and must not count. Full-width `？` `！` resolve too.
+        let japanese: [Int: String] = [
+            0: "<unk>", 1: "。", 2: "▁", 8: "、", 25: "?", 27: "!", 40: "です", 41: "？", 42: "！",
+        ]
+        XCTAssertEqual(ASRConstants.punctuationTokenIds(in: japanese), [1, 25, 27, 41, 42])
     }
 }

@@ -44,8 +44,10 @@ public enum ASRConstants {
     /// vocabulary is available. See issue #905.
     public static let punctuationTokens: [Int] = [7883, 7956, 8020]
 
-    /// Sentence-final punctuation pieces resolved by text.
-    public static let sentenceFinalPunctuation: Set<String> = [".", "?", "!"]
+    /// Sentence-final punctuation pieces resolved by text: ASCII `.` `?` `!`
+    /// plus the ideographic full stop and full-width marks the Japanese
+    /// vocabulary uses (`。` is token 1 there; `?` `!` stay ASCII in it).
+    public static let sentenceFinalPunctuation: Set<String> = [".", "?", "!", "。", "？", "！"]
 
     /// Resolve the sentence-final punctuation token ids (`.` `?` `!`) from a
     /// loaded vocabulary. A piece matches with or without a leading word
