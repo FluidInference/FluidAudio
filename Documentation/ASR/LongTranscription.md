@@ -515,10 +515,13 @@ non-silence test, not a speech test, so a recovered hypothesis replaces the
 empty decode only when it is credible (at least two tokens at a mean
 confidence of 0.7; genuine recoveries score about 0.9). Music and noise
 decode to nothing on every window and pass the energy gate, so the ladder
-is suspended after two consecutive failed recoveries and resumes when a
-window decodes normally; a non-speech stream pays at most two ladders. The
-recovery is enabled for `parakeet-tdt-0.6b-v3`, the model it was
-demonstrated on.
+has a budget scoped to one transcription (reset at every batch `transcribe`
+entry and at the streaming manager's `startStreaming` / `reset`): after two
+consecutive failed recoveries it degrades to its first policy, one extra
+pass per empty window, so the recoverable speech window that follows
+non-speech audio is still probed, and it runs the full ladder again every
+fifth empty window; any recovery or normal decode restores it. The recovery
+is enabled for `parakeet-tdt-0.6b-v3`, the model it was demonstrated on.
 
 ## Post-Merge Repair Pass
 

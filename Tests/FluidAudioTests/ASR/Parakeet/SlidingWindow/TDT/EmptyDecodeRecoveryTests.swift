@@ -84,15 +84,47 @@ final class EmptyDecodeRecoveryTests: XCTestCase {
         XCTAssertEqual(AsrManager.emptyDecodeRecoveryMinimumConfidence, 0.7)
     }
 
-    /// Music and noise decode to nothing on every window and pass the energy
-    /// gate; the ladder is suspended after two consecutive failures so such a
-    /// stream does not pay five extra passes per window.
-    func testRecoveryBudgetSuspendsAfterConsecutiveFailures() {
-        XCTAssertTrue(AsrManager.recoveryAllowed(afterFailures: 0))
-        XCTAssertTrue(AsrManager.recoveryAllowed(afterFailures: 1))
-        XCTAssertFalse(AsrManager.recoveryAllowed(afterFailures: 2))
-        XCTAssertFalse(AsrManager.recoveryAllowed(afterFailures: 10))
-        XCTAssertEqual(AsrManager.emptyDecodeRecoveryBudget, 2)
+    /// Two failed recoveries on non-speech audio must not disable the fix for
+    /// the recoverable speech window that follows: the budget degrades the
+    /// ladder to its first policy (one extra pass per empty window) rather
+    /// than switching it off, brings the full ladder back periodically, and
+    /// resets on any recovery or normal decode.
+    func testRecoveryBudgetDegradesButKeepsProbing() {
+        var budget = AsrManager.EmptyDecodeRecoveryBudget()
+        let full = AsrManager.emptyDecodeRecoveryPolicies
+        XCTAssertEqual(budget.nextAttempt(), full)
+        budget.recordFailure()
+        XCTAssertEqual(budget.nextAttempt(), full, "one failure keeps the full ladder")
+        budget.recordFailure()
+        XCTAssertTrue(budget.isDegraded)
+        // The recoverable blank speech window right after two non-speech
+        // failures is still probed, with the policy that recovers most cuts.
+        XCTAssertEqual(budget.nextAttempt(), [.encoderFull])
+        for _ in 0..<3 {
+            budget.recordFailure()
+            XCTAssertEqual(budget.nextAttempt(), [.encoderFull])
+        }
+        budget.recordFailure()
+        XCTAssertEqual(budget.nextAttempt(), full, "the full ladder returns every fifth empty window")
+        budget.recordFailure()
+        XCTAssertEqual(budget.nextAttempt(), [.encoderFull])
+        // A recovery, or a window that decodes normally, clears the history.
+        budget.recordRecovered()
+        XCTAssertFalse(budget.isDegraded)
+        XCTAssertEqual(budget.nextAttempt(), full)
+        XCTAssertEqual(AsrManager.EmptyDecodeRecoveryBudget.maximumConsecutiveFailures, 2)
+        XCTAssertEqual(AsrManager.EmptyDecodeRecoveryBudget.fullLadderPeriod, 5)
+    }
+
+    /// The budget is per transcription: a fresh session starts undegraded.
+    func testRecoveryBudgetResetsPerSession() async {
+        let manager = AsrManager()
+        await manager.setEmptyDecodeRecoveryForTesting(failures: 3)
+        var budget = await manager.emptyDecodeRecovery
+        XCTAssertTrue(budget.isDegraded)
+        await manager.resetEmptyDecodeRecovery()
+        budget = await manager.emptyDecodeRecovery
+        XCTAssertFalse(budget.isDegraded)
     }
 
     func testRecoveryLadderOrderAndNames() {

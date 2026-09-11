@@ -59,12 +59,23 @@ public actor AsrManager {
 
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
-    /// Consecutive empty decodes the #909 recovery ladder failed to recover.
-    /// Non-speech audio (music, noise) decodes to nothing every window and
-    /// passes the energy gate; after `emptyDecodeRecoveryBudget` failures the
-    /// ladder stays off until a window decodes normally, so such a stream
-    /// costs at most a couple of ladders instead of five extra passes per window.
-    internal var consecutiveFailedRecoveries = 0
+    /// Cost control for the #909 empty-decode recovery ladder, scoped to one
+    /// transcription: reset at every batch `transcribe` entry and by the
+    /// streaming manager at `startStreaming` / `reset`.
+    internal var emptyDecodeRecovery = EmptyDecodeRecoveryBudget()
+
+    /// Forget the recovery ladder's failure history (a new transcription,
+    /// stream, or file starts). Non-speech audio in one session must not
+    /// disable the recovery for the next.
+    internal func resetEmptyDecodeRecovery() {
+        emptyDecodeRecovery = EmptyDecodeRecoveryBudget()
+    }
+    #if DEBUG
+    internal func setEmptyDecodeRecoveryForTesting(failures: Int) {
+        emptyDecodeRecovery = EmptyDecodeRecoveryBudget()
+        for _ in 0..<failures { emptyDecodeRecovery.recordFailure() }
+    }
+    #endif
     /// Sentence-final punctuation ids resolved from `vocabulary` (issue #905).
     internal var punctuationTokenIds: Set<Int> = Set(ASRConstants.punctuationTokens)
     #if DEBUG
@@ -509,6 +520,7 @@ public actor AsrManager {
         decoderState: inout TdtDecoderState,
         language: Language? = nil
     ) async throws -> ASRResult {
+        resetEmptyDecodeRecovery()
         let shouldEmitProgress = audioSamples.count > ASRConstants.maxModelSamples
         if shouldEmitProgress {
             _ = await progressEmitter.ensureSession()
