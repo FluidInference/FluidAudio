@@ -348,11 +348,14 @@ extension AsrManager {
             // later word that merely happens to extend the previous text
             // (`an` … `another`) is a new word; keep the previous one.
             retire = true
-        } else if head == 0, overlapsPrevious {
-            // Overlapping different word, and the re-decode started it itself
-            // (no continuation head): it disagrees with more context. Behind a
-            // continuation head the first real word is the *next* word by
-            // construction (`box` + `x, but`), so only the prefix rule applies.
+        } else if head == 0 || currentTimestamps[0] < lastWordStartFrame, overlapsPrevious {
+            // Overlapping different word, and the re-decode started it itself:
+            // it disagrees with more context (`Savior.` → `Saviour`). A
+            // continuation head that belongs to the previous *last* word makes
+            // the first real word the *next* word by construction (`box` +
+            // `x, but`), so only the prefix rule applies there; a head that
+            // continues an earlier word (`ist` of `Christ` ahead of `Savior`)
+            // says nothing about the last word.
             retire = true
         } else {
             retire = false
@@ -391,20 +394,29 @@ extension AsrManager {
             }
             droppedCurrent = end
         }
-        for index in droppedCurrent..<currentTokens.count {
-            let id = currentTokens[index]
+        // Jitter duplicates of kept previous tokens are stripped word by word: a
+        // word-start piece goes only together with its continuation pieces, and
+        // only when every piece of the word matches (`S` alone must not go and
+        // leave `aviour` behind).
+        var index = droppedCurrent
+        while index < currentTokens.count {
             let frame = currentTimestamps[index]
             if isPunctuation(index), !startsWordPiece(in: currentPieces, at: index), frame <= lastWordStartFrame {
-                droppedCurrent += 1
+                index += 1
+                droppedCurrent = index
                 continue
             }
-            if frame <= keptLastFrame + jitterFrames,
-                keptPrevious.contains(where: { $0.0 == id && abs($0.1 - frame) <= frameTolerance })
-            {
-                droppedCurrent += 1
-                continue
+            guard frame <= keptLastFrame + jitterFrames else { break }
+            let end =
+                startsWordPiece(in: currentPieces, at: index) ? wordExtent(in: currentPieces, from: index) : index + 1
+            let duplicated = (index..<end).allSatisfy { position in
+                keptPrevious.contains(where: {
+                    $0.0 == currentTokens[position] && abs($0.1 - currentTimestamps[position]) <= frameTolerance
+                })
             }
-            break
+            guard duplicated else { break }
+            index = end
+            droppedCurrent = index
         }
         return (droppedPrevious, droppedCurrent)
     }

@@ -923,6 +923,39 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertEqual(later.droppedCurrent, 0)
     }
 
+    /// LibriSpeech 3729-6852-0008 at chunk 11 (#897): the re-decode starts with
+    /// `ist` (continuation of `Christ`, an earlier word), re-emits `had been
+    /// the`, then spells the last word `Saviour` where the previous window had
+    /// `Savior.`. Before: the continuation head blocked the retire rule and the
+    /// id-level scan stripped `S` alone → `Savior. aviour of all mankind`.
+    func testReconcileFinalWindowSeam_HeadOfEarlierWordDoesNotProtectLastWord() {
+        let previousPieces = ["ist", " had", " been", " the", " S", "avi", "or", "."]
+        let previousTs = [261, 263, 265, 266, 267, 268, 270, 273]
+        let different = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 5, 6, 7, 7883],
+            previousTimestamps: previousTs,
+            trailingWordStart: 4,
+            currentTokens: [1, 2, 3, 4, 5, 10, 11, 12, 13, 14],  // ist ▁had ▁been ▁the ▁S av io ur ▁of ▁all
+            currentTimestamps: [263, 265, 268, 270, 272, 273, 275, 277, 278, 280],
+            currentPieces: ["ist", " had", " been", " the", " S", "av", "io", "ur", " of", " all"],
+            previousPieces: previousPieces
+        )
+        XCTAssertEqual(different.droppedPrevious, 4, "`Savior.` retires for the re-decoded `Saviour`")
+        XCTAssertEqual(different.droppedCurrent, 4, "head and re-emitted `had been the` go; `Saviour` stays")
+        // Same spelling: the whole re-emitted word goes, never `S` alone.
+        let same = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 5, 6, 7, 7883],
+            previousTimestamps: previousTs,
+            trailingWordStart: 4,
+            currentTokens: [1, 2, 3, 4, 5, 6, 7, 13, 14],
+            currentTimestamps: [263, 265, 268, 270, 272, 273, 275, 278, 280],
+            currentPieces: ["ist", " had", " been", " the", " S", "avi", "or", " of", " all"],
+            previousPieces: previousPieces
+        )
+        XCTAssertEqual(same.droppedPrevious, 0)
+        XCTAssertEqual(same.droppedCurrent, 7)
+    }
+
     /// Token ids are not punctuation evidence: id 7948 is `ó` in the v3
     /// vocabulary although it sits in `ASRConstants.punctuationTokens`. A word
     /// starting with it must not be dropped as a seam artifact.
