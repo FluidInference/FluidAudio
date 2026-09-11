@@ -261,6 +261,8 @@ extension AsrManager {
         currentTimestamps: [Int],
         currentPieces: [String] = [],
         previousPieces: [String] = [],
+        suppressedPieces: [String] = [],
+        suppressedTimestamps: [Int] = [],
         jitterFrames: Int = redecodeEmissionJitterFrames,
         frameTolerance: Int = 2 * redecodeEmissionJitterFrames
     ) -> (droppedPrevious: Int, droppedCurrent: Int) {
@@ -375,9 +377,17 @@ extension AsrManager {
         // (an end-aligned final window re-emits an edge-decoded `out`@247 at 253),
         // so the same-word test compares word starts within the duplicate
         // tolerance, like the re-emitted earlier words above; a later genuine
-        // repetition (`go … go again`) is further away than that.
+        // repetition (`go … go again`) is further away than that. A fast
+        // repetition inside the tolerance is told apart by evidence: when the
+        // decoder already re-emitted the previous word *before* the cutoff (it
+        // is in the suppressed list at that word's frame), the visible copy is
+        // a second word and stays.
+        let previousWordSuppressed =
+            suppressedPieces.count == suppressedTimestamps.count
+            && words(in: suppressedPieces, timestamps: suppressedTimestamps, upTo: suppressedPieces.count)
+                .contains { $0.core == previousWord && abs($0.frame - lastWordStartFrame) <= frameTolerance }
         var droppedCurrent = consumed
-        if !retire, currentWord == previousWord, let firstIndex = firstWordIndex,
+        if !retire, currentWord == previousWord, !previousWordSuppressed, let firstIndex = firstWordIndex,
             abs(currentTimestamps[firstIndex] - lastWordStartFrame) <= frameTolerance
         {
             var end = wordExtent(in: currentPieces, from: firstIndex)
@@ -498,7 +508,9 @@ extension AsrManager {
                 currentTokens: currentTokens,
                 currentTimestamps: currentTimestamps.map { $0 + globalFrameOffset },
                 currentPieces: currentTokens.map { vocabulary[$0] ?? "" },
-                previousPieces: previousTokens.map { vocabulary[$0] ?? "" }
+                previousPieces: previousTokens.map { vocabulary[$0] ?? "" },
+                suppressedPieces: hypothesis.suppressedTokens.map { vocabulary[$0] ?? "" },
+                suppressedTimestamps: hypothesis.suppressedTimestamps
             )
             droppedPrevious = seam.droppedPrevious
             if seam.droppedCurrent > 0 {

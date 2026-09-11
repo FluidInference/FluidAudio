@@ -425,6 +425,9 @@ internal struct TdtDecoderV3: Sendable {
                     hypothesis.timestamps.append(emissionTimestamp)
                     hypothesis.tokenConfidences.append(score)
                     hypothesis.tokenDurations.append(duration)
+                } else {
+                    hypothesis.suppressedTokens.append(label)
+                    hypothesis.suppressedTimestamps.append(emissionTimestamp)
                 }
                 hypothesis.lastToken = label  // Remember for next iteration
 
@@ -553,6 +556,9 @@ internal struct TdtDecoderV3: Sendable {
                         hypothesis.timestamps.append(finalTimestamp)
                         hypothesis.tokenConfidences.append(score)
                         hypothesis.tokenDurations.append(duration)
+                    } else {
+                        hypothesis.suppressedTokens.append(token)
+                        hypothesis.suppressedTimestamps.append(finalTimestamp)
                     }
                     hypothesis.lastToken = token
 

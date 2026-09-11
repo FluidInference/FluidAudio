@@ -452,6 +452,19 @@ frame, and tokens duplicating a kept previous token inside the jitter region.
 Clip 03 of the fixtures pins it: `code and an, and analyzing` → `code and
 analyzing`, matching batch.
 
+Two refinements the end-aligned window made necessary: the re-decode can
+re-emit the word *before* the previous last word inside the jitter margin, so
+re-emitted earlier words are consumed as whole words before the retire
+decision; and the re-decode's copy of the last word can drift past the margin
+(`out`@247 re-emitted at 253), so the same-word test compares word starts
+within the duplicate tolerance. A genuine fast repetition inside that
+tolerance (`go go again`) is told apart by evidence: the decoder reports the
+tokens it consumed but suppressed before the cutoff, and when the previous
+word is among them at its own frame, the visible copy is a second word and
+stays. With vocabulary boosting the transcript text may hold a replacement
+for the retired word rather than its raw token text, so the manager tracks
+the rendered form of each window's last word and retires that.
+
 **End-aligned final window.** A short final flush window (a 16.9 s clip at
 an 8 s chunk leaves 0.9 s of new audio behind 2 s of left context) yields
 nothing from a fresh state, dropping the last words — the dominant remaining

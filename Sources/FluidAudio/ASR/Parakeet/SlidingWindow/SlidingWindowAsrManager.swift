@@ -35,6 +35,11 @@ public actor SlidingWindowAsrManager {
     // accumulatedTokens). Lets per-chunk dedup require temporal adjacency so a
     // coincidental subword-prefix match between far-apart words isn't dropped (#787).
     private var accumulatedTokenTimestamps: [Int] = []
+    /// The previous window's last word as it was appended to the transcript
+    /// text — the vocabulary replacement when rescoring replaced it — so seam
+    /// retirement can remove it even when it no longer equals the raw token
+    /// text (#897).
+    private var lastWindowRenderedLastWord: String?
 
     // Raw sample buffer for sliding-window assembly (absolute indexing)
     private var sampleBuffer: [Float] = []
@@ -169,6 +174,7 @@ public actor SlidingWindowAsrManager {
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
         accumulatedTokenTimestamps.removeAll()
+        lastWindowRenderedLastWord = nil
         failedWindowCount = 0
         lastWindowError = nil
 
@@ -304,6 +310,7 @@ public actor SlidingWindowAsrManager {
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
         accumulatedTokenTimestamps.removeAll()
+        lastWindowRenderedLastWord = nil
 
         logger.info("SlidingWindowAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -462,10 +469,18 @@ public actor SlidingWindowAsrManager {
                 accumulatedTokens.removeLast(droppedPreviousTokens)
                 accumulatedTokenTimestamps.removeLast(min(droppedPreviousTokens, accumulatedTokenTimestamps.count))
                 if let droppedText = await asrManager?.convertTokensToText(dropped), !droppedText.isEmpty {
-                    if let trimmed = Self.removingTrailingWord(droppedText, from: volatileTranscript) {
-                        volatileTranscript = trimmed
-                    } else if let trimmed = Self.removingTrailingWord(droppedText, from: confirmedTranscript) {
-                        confirmedTranscript = trimmed
+                    // The text state may hold a vocabulary-rescored replacement
+                    // for that word rather than its raw token text.
+                    let candidates = [droppedText] + (lastWindowRenderedLastWord.map { [$0] } ?? [])
+                    for candidate in candidates {
+                        if let trimmed = Self.removingTrailingWord(candidate, from: volatileTranscript) {
+                            volatileTranscript = trimmed
+                            break
+                        }
+                        if let trimmed = Self.removingTrailingWord(candidate, from: confirmedTranscript) {
+                            confirmedTranscript = trimmed
+                            break
+                        }
                     }
                 }
             }
@@ -523,6 +538,7 @@ public actor SlidingWindowAsrManager {
             // was volatile when decoded (short clip under `minContextForConfirmation`, low
             // confidence, the final flush) would otherwise never see its vocabulary (#851).
             var displayResult = interim
+            var appliedReplacements: [VocabularyRescorer.RescoringResult] = []
             if vocabBoostingEnabled,
                 let chunkLocalResult = await asrManager?.processTranscriptionResult(
                     tokenIds: tokens,
@@ -543,9 +559,8 @@ public actor SlidingWindowAsrManager {
                     tokenTimings: chunkLocalTimings,
                     windowSamples: windowSamples
                 )
-                let applied = (rescored?.replacements ?? []).filter { $0.shouldReplace }.compactMap {
-                    $0.replacementWord
-                }
+                appliedReplacements = (rescored?.replacements ?? []).filter { $0.shouldReplace }
+                let applied = appliedReplacements.compactMap { $0.replacementWord }
                 displayResult = interim.withRescoring(
                     text: rescored?.text ?? interim.text,
                     detected: rescored?.detectedTerms ?? [],
@@ -554,6 +569,8 @@ public actor SlidingWindowAsrManager {
             }
 
             await updateTranscriptionState(with: displayResult, shouldConfirm: shouldConfirm)
+            lastWindowRenderedLastWord = Self.renderedLastWord(
+                rawText: interim.text, renderedText: displayResult.text, replacements: appliedReplacements)
 
             let update = SlidingWindowTranscriptionUpdate(
                 text: displayResult.text,
@@ -624,6 +641,24 @@ public actor SlidingWindowAsrManager {
         let regular = max(0, nextCenterStart - left)
         let endAligned = max(0, nextCenterStart + effectiveChunk - chunk - left)
         return min(regular, endAligned)
+    }
+
+    /// The form in which a window's last word reached the transcript text: the
+    /// vocabulary replacement when rescoring replaced that word (possibly a
+    /// multi-word term), otherwise the last word of the rendered text. Pure.
+    static func renderedLastWord(
+        rawText: String, renderedText: String, replacements: [VocabularyRescorer.RescoringResult]
+    ) -> String? {
+        func core(_ word: String) -> String {
+            word.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+        }
+        guard let rawLast = rawText.split(separator: " ").last.map(String.init) else { return nil }
+        if let hit = replacements.last(where: { $0.shouldReplace && core($0.originalWord) == core(rawLast) }),
+            let replacement = hit.replacementWord, !replacement.isEmpty
+        {
+            return replacement
+        }
+        return renderedText.split(separator: " ").last.map(String.init)
     }
 
     /// `text` without its trailing `word` when `text` ends with that word as a

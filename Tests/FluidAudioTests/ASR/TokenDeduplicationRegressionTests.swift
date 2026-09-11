@@ -956,6 +956,36 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertEqual(same.droppedCurrent, 7)
     }
 
+    /// A fast repetition inside the duplicate tolerance (`go` at 100, `go
+    /// again` at 106) is kept when the decoder already re-emitted the previous
+    /// `go` before the cutoff (suppressed at 94): the visible `go` is a second
+    /// word. Without that evidence the visible `go` is the re-emitted copy.
+    func testReconcileFinalWindowSeam_FastRepetitionKeptWhenPreviousCopyWasSuppressed() {
+        let kept = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],  // ▁let's ▁go
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [2, 31],  // ▁go ▁again
+            currentTimestamps: [106, 115],
+            currentPieces: [" go", " again"],
+            previousPieces: [" let's", " go"],
+            suppressedPieces: [" go"],
+            suppressedTimestamps: [94]
+        )
+        XCTAssertEqual(kept.droppedPrevious, 0)
+        XCTAssertEqual(kept.droppedCurrent, 0, "the previous `go` was re-emitted (suppressed); this one is new")
+        let consumed = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [2, 31],
+            currentTimestamps: [106, 115],
+            currentPieces: [" go", " again"],
+            previousPieces: [" let's", " go"]
+        )
+        XCTAssertEqual(consumed.droppedCurrent, 1, "no suppressed copy: the visible `go` is the drifted re-emission")
+    }
+
     /// Token ids are not punctuation evidence: id 7948 is `ó` in the v3
     /// vocabulary although it sits in `ASRConstants.punctuationTokens`. A word
     /// starting with it must not be dropped as a seam artifact.
