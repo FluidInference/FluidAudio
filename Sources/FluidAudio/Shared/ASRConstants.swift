@@ -36,8 +36,35 @@ public enum ASRConstants {
     /// WER threshold for detailed error analysis in benchmarks
     public static let highWERThreshold: Double = 0.15
 
-    /// Punctuation token IDs (period, question mark, exclamation mark)
-    public static let punctuationTokens: [Int] = [7883, 7952, 7948]
+    /// Sentence-final punctuation token IDs (`.` `?` `!`) in the
+    /// parakeet-tdt-0.6b-v3 vocabulary. Every other shipped vocabulary uses
+    /// different ids (v2: 841/854/885, 110m: 986/1002/1016), so runtime code
+    /// resolves the set from the loaded vocabulary via
+    /// ``punctuationTokenIds(in:)`` and only falls back to this when no
+    /// vocabulary is available. See issue #905.
+    public static let punctuationTokens: [Int] = [7883, 7956, 8020]
+
+    /// Sentence-final punctuation pieces resolved by text.
+    public static let sentenceFinalPunctuation: Set<String> = [".", "?", "!"]
+
+    /// Resolve the sentence-final punctuation token ids (`.` `?` `!`) from a
+    /// loaded vocabulary. A piece matches with or without a leading word
+    /// boundary (`▁` or the space it is normalized to).
+    public static func punctuationTokenIds(in vocabulary: [Int: String]) -> Set<Int> {
+        var ids: Set<Int> = []
+        for (id, piece) in vocabulary {
+            var core = Substring(piece)
+            if core.hasPrefix(sentencePieceWordBoundary) {
+                core = core.dropFirst(sentencePieceWordBoundary.count)
+            } else if core.hasPrefix(" ") {
+                core = core.dropFirst()
+            }
+            if sentenceFinalPunctuation.contains(String(core)) {
+                ids.insert(id)
+            }
+        }
+        return ids
+    }
 
     /// SentencePiece word-boundary marker (U+2581 LOWER ONE EIGHTH BLOCK).
     /// Prefixes tokens that begin a new word in BPE/Unigram tokenization.

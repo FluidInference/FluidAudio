@@ -59,10 +59,13 @@ public actor AsrManager {
 
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
+    /// Sentence-final punctuation ids resolved from `vocabulary` (issue #905).
+    internal var punctuationTokenIds: Set<Int> = Set(ASRConstants.punctuationTokens)
     #if DEBUG
     // Test-only setter
     internal func setVocabularyForTesting(_ vocab: [Int: String]) {
         vocabulary = vocab
+        punctuationTokenIds = ASRConstants.punctuationTokenIds(in: vocab)
     }
     #endif
 
@@ -81,6 +84,7 @@ public actor AsrManager {
             self.decoderModel = models.decoder
             self.jointModel = models.joint
             self.vocabulary = models.vocabulary
+            self.punctuationTokenIds = ASRConstants.punctuationTokenIds(in: models.vocabulary)
         }
 
         // Pre-warm caches if possible
@@ -141,6 +145,7 @@ public actor AsrManager {
         self.decoderModel = models.decoder
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
+        self.punctuationTokenIds = ASRConstants.punctuationTokenIds(in: models.vocabulary)
 
         logger.info("AsrManager loaded successfully with provided models")
     }
@@ -302,6 +307,7 @@ public actor AsrManager {
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,
                 globalFrameOffset: globalFrameOffset,
+                punctuationTokenIds: punctuationTokenIds,
                 emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
                 initialTimeIndexOverride: initialTimeIndexOverride
             )
@@ -322,6 +328,7 @@ public actor AsrManager {
                 globalFrameOffset: globalFrameOffset,
                 language: language,
                 vocabulary: vocabulary,
+                punctuationTokenIds: punctuationTokenIds,
                 emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
                 initialTimeIndexOverride: initialTimeIndexOverride
             )
@@ -347,6 +354,7 @@ public actor AsrManager {
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,
                 globalFrameOffset: globalFrameOffset,
+                punctuationTokenIds: punctuationTokenIds,
                 emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
                 initialTimeIndexOverride: initialTimeIndexOverride
             )

@@ -19,6 +19,7 @@ internal struct TdtDecoderV2 {
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
         globalFrameOffset: Int = 0,
+        punctuationTokenIds: Set<Int>? = nil,
         emitTokensAfterGlobalFrame: Int? = nil,
         initialTimeIndexOverride: Int? = nil
     ) async throws -> TdtHypothesis {
@@ -33,6 +34,7 @@ internal struct TdtDecoderV2 {
             contextFrameAdjustment: contextFrameAdjustment,
             isLastChunk: isLastChunk,
             globalFrameOffset: globalFrameOffset,
+            punctuationTokenIds: punctuationTokenIds,
             emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
             initialTimeIndexOverride: initialTimeIndexOverride
         )

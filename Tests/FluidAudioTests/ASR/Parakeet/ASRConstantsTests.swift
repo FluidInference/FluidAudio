@@ -214,4 +214,27 @@ final class ASRConstantsTests: XCTestCase {
             XCTAssertEqual(calculatedFrames, frameIndex, "Time -> Samples -> Frames should round-trip correctly")
         }
     }
+
+    // MARK: - Punctuation ids (#905)
+
+    /// The constant only matches the v3 vocabulary; runtime code resolves the
+    /// set from the loaded vocabulary so v2/110m/unified get their own ids and
+    /// non-punctuation pieces at the old v3-guess ids (7952 `й`, 7948 `ó`)
+    /// are never treated as sentence-final punctuation.
+    func testPunctuationTokenIdsResolveFromVocabularyByPieceText() {
+        let v3Shape: [Int: String] = [
+            7877: ",", 7883: ".", 7948: "ó", 7952: "й", 7956: "?", 8020: "!",
+            100: " the", 101: "ing", 102: " '", 103: "...",
+        ]
+        XCTAssertEqual(ASRConstants.punctuationTokenIds(in: v3Shape), [7883, 7956, 8020])
+        XCTAssertEqual(Set(ASRConstants.punctuationTokens), [7883, 7956, 8020])
+
+        // Word-boundary-marked variants resolve too, in both marker forms.
+        let marked: [Int: String] = [1: "▁.", 2: " ?", 3: "▁!", 4: "▁a", 5: "?x"]
+        XCTAssertEqual(ASRConstants.punctuationTokenIds(in: marked), [1, 2, 3])
+
+        // A vocabulary without punctuation (EOU) yields an empty set, so the
+        // punctuation rules never fire instead of firing on random ids.
+        XCTAssertTrue(ASRConstants.punctuationTokenIds(in: [7883: "abc", 7956: "▁xyz"]).isEmpty)
+    }
 }

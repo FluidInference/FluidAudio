@@ -113,6 +113,15 @@ final class SlidingWindowFinalWindowRegressionTests: XCTestCase {
         return try await manager.finish()
     }
 
+    /// The shipped v3 vocabulary resolves `.` `?` `!` to 7883 / 7956 / 8020;
+    /// the ids the constant carried before #905 (7952, 7948) are `й` and `ó`.
+    func testPunctuationTokenIdsResolveAgainstShippedV3Vocabulary() async throws {
+        let models = try await loadModels()
+        XCTAssertEqual(ASRConstants.punctuationTokenIds(in: models.vocabulary), [7883, 7956, 8020])
+        XCTAssertEqual(models.vocabulary[7952], "й")
+        XCTAssertEqual(models.vocabulary[7948], "ó")
+    }
+
     func testFinalWindowKeepsTrailingWordsOnRealRecordings() async throws {
         let models = try await loadModels()
         for fixture in fixtures {
