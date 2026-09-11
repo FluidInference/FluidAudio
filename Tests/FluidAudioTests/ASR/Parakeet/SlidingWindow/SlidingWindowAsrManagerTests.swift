@@ -318,6 +318,28 @@ final class SlidingWindowAsrManagerTests: XCTestCase {
     func testAppendingVolatileIgnoresEmptyFlushWindow() {
         XCTAssertEqual(SlidingWindowAsrManager.appendingVolatile("first window", ""), "first window")
         XCTAssertEqual(SlidingWindowAsrManager.appendingVolatile("", "only"), "only")
+    }
+
+    /// The final flush window is end-aligned to a full chunk plus the left
+    /// context (#897): a 2–3 s window decoded from a fresh state emits nothing.
+    func testFinalWindowStartIsEndAligned() {
+        let s = 16_000
+        // 0.9 s of new audio behind center 16 s, chunk 8 s, left 2 s: regular
+        // start would be 14 s; end-aligned start is 16.9 - 10 = 6.9 s.
+        XCTAssertEqual(
+            SlidingWindowAsrManager.finalWindowStart(
+                nextCenterStart: 16 * s, effectiveChunk: Int(0.9 * Double(s)), chunk: 8 * s, left: 2 * s),
+            Int(6.9 * Double(s)))
+        // A full final chunk keeps the regular `center - left` start.
+        XCTAssertEqual(
+            SlidingWindowAsrManager.finalWindowStart(
+                nextCenterStart: 16 * s, effectiveChunk: 8 * s, chunk: 8 * s, left: 2 * s),
+            14 * s)
+        // Never before the start of the stream.
+        XCTAssertEqual(
+            SlidingWindowAsrManager.finalWindowStart(
+                nextCenterStart: 0, effectiveChunk: 3 * s, chunk: 8 * s, left: 2 * s),
+            0)
         XCTAssertEqual(SlidingWindowAsrManager.appendingVolatile("", ""), "")
     }
 

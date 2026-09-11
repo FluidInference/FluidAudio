@@ -52,29 +52,30 @@ extension AsrManager {
         return result
     }
 
-    /// Cross-window emission jitter allowance for the final-window re-decode: a
+    /// Cross-window emission jitter allowance for a window re-decode: a
     /// re-decoded token can land a few frames from its original emission, so the
     /// suppression cutoff backs off this much and dedup strips what remains.
     internal static let redecodeEmissionJitterFrames = 5
 
-    /// Decoder-entry plan for the final streaming window (issue #855).
+    /// Decoder-entry plan for a streaming window that follows accumulated
+    /// tokens (issue #855 for the final window, #897 for every other one).
     ///
     /// Returns `initialTimeIndexOverride: 0` so the decoder re-decodes the window
-    /// from frame 0 (a mid-window entry into a short flush window can blank out
-    /// the trailing speech), plus an emission cutoff in window-local frames:
+    /// from frame 0 (a mid-window entry with the carried state can blank out the
+    /// rest of the window), plus an emission cutoff in window-local frames:
     /// tokens for audio the previous windows already emitted are suppressed at
     /// the source, leaving dedup only the jitter margin. `transcribeChunk` pairs
     /// the frame-0 entry with a *fresh* decoder state — see the note there.
-    /// Non-final windows and callers without accumulated timestamps get `(nil, nil)`
-    /// — the legacy navigation.
-    nonisolated internal static func lastChunkRedecodePlan(
-        isLastChunk: Bool,
+    /// `redecode == false` (the first window) and callers without accumulated
+    /// timestamps get `(nil, nil)` — the legacy navigation.
+    nonisolated internal static func redecodePlan(
+        redecode: Bool,
         previousTokens: [Int],
         previousTokenTimestamps: [Int]?,
         globalFrameOffset: Int,
         lastWordStartFrame: Int? = nil
     ) -> (initialTimeIndexOverride: Int?, emitTokensAfterFrame: Int?) {
-        guard isLastChunk, let previousTimestamps = previousTokenTimestamps, !previousTokens.isEmpty else {
+        guard redecode, let previousTimestamps = previousTokenTimestamps, !previousTokens.isEmpty else {
             return (nil, nil)
         }
         // Anchor the cutoff at the previous window's last *word*, not its last
@@ -97,6 +98,26 @@ extension AsrManager {
             }), idx > 0
         else { return nil }
         return idx
+    }
+
+    /// The words of `pieces[0..<upTo]` as (core text, start frame), for matching
+    /// re-emitted words at the seam. Pure.
+    nonisolated internal static func words(
+        in pieces: [String], timestamps: [Int], upTo: Int
+    ) -> [(core: String, frame: Int)] {
+        var result: [(core: String, frame: Int)] = []
+        var index = 0
+        let limit = min(upTo, pieces.count, timestamps.count)
+        while index < limit {
+            guard startsWordPiece(in: pieces, at: index) else {
+                index += 1
+                continue
+            }
+            let end = min(wordExtent(in: pieces, from: index), limit)
+            result.append((wordCore(Array(pieces[index..<end])), timestamps[index]))
+            index = end
+        }
+        return result
     }
 
     /// A vocabulary piece that is nothing but punctuation once the word
@@ -241,7 +262,7 @@ extension AsrManager {
         currentPieces: [String] = [],
         previousPieces: [String] = [],
         jitterFrames: Int = redecodeEmissionJitterFrames,
-        frameTolerance: Int = ASRConstants.duplicateFrameTolerance
+        frameTolerance: Int = 2 * redecodeEmissionJitterFrames
     ) -> (droppedPrevious: Int, droppedCurrent: Int) {
         // The decision is by piece text, so both piece arrays must be aligned
         // with their token arrays; without them the only safe answer is a no-op
@@ -283,11 +304,37 @@ extension AsrManager {
             }
         }
 
-        // 2. The first real word of the re-decode.
+        // 2. Re-emitted earlier words. The cutoff backs off by the jitter margin,
+        // so the re-decode can re-emit the word(s) *before* the previous last
+        // word (`new` ahead of `code`). Consume them as whole words when the kept
+        // previous output already has that word at the same frame — otherwise
+        // the retire rules below would read a re-emitted `new` as the
+        // replacement for `code`, and a jitter duplicate whose continuation
+        // piece falls a frame outside the margin would leave `uld` behind.
+        let previousWords = words(in: previousPieces, timestamps: previousTimestamps, upTo: trailingWordStart)
+        var consumed = head
+        while consumed < currentTokens.count {
+            if isPunctuation(consumed), !startsWordPiece(in: currentPieces, at: consumed),
+                currentTimestamps[consumed] <= lastWordStartFrame
+            {
+                consumed += 1
+                continue
+            }
+            guard startsWordPiece(in: currentPieces, at: consumed) else { break }
+            let end = wordExtent(in: currentPieces, from: consumed)
+            let core = wordCore(Array(currentPieces[consumed..<end]))
+            let frame = currentTimestamps[consumed]
+            guard frame <= lastWordStartFrame + jitterFrames, !core.isEmpty,
+                previousWords.contains(where: { $0.core == core && abs($0.frame - frame) <= frameTolerance })
+            else { break }
+            consumed = end
+        }
+
+        // 3. The first real word of the re-decode.
         let previousWord = wordCore(previousPieces.dropFirst(trailingWordStart))
-        let firstWord = firstWordPieces(Array(currentPieces.dropFirst(head)))
+        let firstWord = firstWordPieces(Array(currentPieces.dropFirst(consumed)))
         let currentWord = wordCore(firstWord)
-        let firstWordIndex = (head..<currentTokens.count).first { startsWordPiece(in: currentPieces, at: $0) }
+        let firstWordIndex = (consumed..<currentTokens.count).first { startsWordPiece(in: currentPieces, at: $0) }
         let firstWordFrame = firstWordIndex.map { currentTimestamps[$0] }
 
         let overlapsPrevious = firstWordFrame.map { $0 <= previousLastFrame + jitterFrames } ?? false
@@ -321,8 +368,15 @@ extension AsrManager {
         // word, consume that word's whole piece range explicitly — its
         // segmentation, casing or punctuation may differ from the kept copy,
         // so id-level duplicate matching cannot be relied on for it.
-        var droppedCurrent = head
-        if !retire, currentWord == previousWord, overlapsPrevious, let firstIndex = firstWordIndex {
+        // The re-decode's copy of the last word can drift past the jitter margin
+        // (an end-aligned final window re-emits an edge-decoded `out`@247 at 253),
+        // so the same-word test compares word starts within the duplicate
+        // tolerance, like the re-emitted earlier words above; a later genuine
+        // repetition (`go … go again`) is further away than that.
+        var droppedCurrent = consumed
+        if !retire, currentWord == previousWord, let firstIndex = firstWordIndex,
+            abs(currentTimestamps[firstIndex] - lastWordStartFrame) <= frameTolerance
+        {
             var end = wordExtent(in: currentPieces, from: firstIndex)
             // Punctuation policy: the kept previous copy already carries its own
             // trailing punctuation, so the re-decode's is a duplicate — drop it.
@@ -372,29 +426,26 @@ extension AsrManager {
         let (alignedSamples, frameAlignedLength) = frameAlignedAudio(
             chunkSamples, allowAlignment: previousTokens.isEmpty)
         let padded = padAudioIfNeeded(alignedSamples, targetLength: ASRConstants.maxModelSamples)
-        // Last streaming window: decode from frame 0 instead of skipping the overlap.
-        // Jumping mid-window into a short flush window can blank out the trailing
-        // speech entirely (issue #855: the joint emits a boundary punctuation, then
-        // blanks to the end, dropping the final words). Emissions for audio the
-        // previous windows already covered are suppressed at the source, so dedup
-        // only sees the few-frame jitter margin — a token-dense overlap cannot
-        // outgrow dedup's bounded search.
-        //
-        // The re-decode runs on a FRESH decoder state, as the batch chunker does
-        // for every chunk. Re-walking the overlap with the carried state — state
-        // that already consumed that audio — leaves the decoder emitting blanks
-        // for the rest of the window: on a 12 s final window it produced zero
-        // tokens for 9 s of never-seen speech (#855 follow-up, three real
-        // recordings). The 2 s left context is enough for a fresh state to
-        // re-establish itself before the cutoff.
-        // The previous window's last word is re-decoded in full by the final
-        // window and dropped from the accumulated output afterwards (#897).
+        // Every streaming window after the first decodes from frame 0 on a FRESH
+        // decoder state, as the batch chunker does for every chunk, with emissions
+        // for audio the previous windows already covered suppressed at the source
+        // (issue #855 for the final window, #897 for the interior ones). Entering
+        // a window mid-way with the carried state — state that already consumed
+        // the overlap — is not safe anywhere: after a sentence-final token it can
+        // blank across the rest of the window (10 s of speech lost at chunk 7 on
+        // a real recording), and re-walking the overlap re-emits it with a
+        // different segmentation that dedup cannot match (`environment` vs
+        // `air environment`). The 2 s left context plus the previous right
+        // context give the fresh state 4 s to re-establish itself before the
+        // cutoff. The previous window's last word is re-decoded in full and
+        // reconciled afterwards (#897).
+        let redecodeWindow = isLastChunk || !previousTokens.isEmpty
         let trailingWordStart: Int? =
-            isLastChunk && previousTokenTimestamps?.count == previousTokens.count
+            redecodeWindow && previousTokenTimestamps?.count == previousTokens.count
             ? Self.trailingWordStartIndex(pieces: previousTokens.map { vocabulary[$0] ?? "" })
             : nil
-        let redecodePlan = Self.lastChunkRedecodePlan(
-            isLastChunk: isLastChunk,
+        let redecodePlan = Self.redecodePlan(
+            redecode: redecodeWindow,
             previousTokens: previousTokens,
             previousTokenTimestamps: previousTokenTimestamps,
             globalFrameOffset: globalFrameOffset,
@@ -422,9 +473,9 @@ extension AsrManager {
         var effectivePreviousTimestamps = previousTokenTimestamps
         var droppedPrevious = 0
 
-        // Final window: replace the previous window's (possibly edge-cut) last
-        // word with the re-decoded one, and strip the seam artifacts the
-        // re-decode emits ahead of it (#897).
+        // Replace the previous window's (possibly edge-cut) last word with the
+        // re-decoded one, and strip the seam artifacts the re-decode emits
+        // ahead of it (#897).
         if redecodePlan.initialTimeIndexOverride == 0, let trailingWordStart,
             let previousTimestamps = previousTokenTimestamps
         {
@@ -447,7 +498,7 @@ extension AsrManager {
             effectivePreviousTimestamps = Array(previousTimestamps.prefix(trailingWordStart))
             if droppedPrevious > 0 || seam.droppedCurrent > 0 {
                 logger.debug(
-                    "Final-window seam: dropped \(droppedPrevious) trailing previous token(s), \(seam.droppedCurrent) leading current token(s)"
+                    "Window seam: dropped \(droppedPrevious) trailing previous token(s), \(seam.droppedCurrent) leading current token(s)"
                 )
             }
         }
@@ -458,10 +509,19 @@ extension AsrManager {
             // space as `previousTokenTimestamps` so dedup can require temporal adjacency.
             let currentGlobalTimestamps: [Int]? =
                 effectivePreviousTimestamps != nil ? currentTimestamps.map { $0 + globalFrameOffset } : nil
+            // A re-decoded window only leaks duplicates inside the jitter margin
+            // (suppression handles the rest), so the matcher must not reach
+            // across it: with the legacy 2 s tolerance a word repeated within
+            // 2 s of the seam (`old code and the net new code`) matched its
+            // earlier copy and dedup chopped the whole re-decoded prefix.
+            let tolerance =
+                redecodePlan.initialTimeIndexOverride == 0
+                ? 2 * Self.redecodeEmissionJitterFrames : ASRConstants.duplicateFrameTolerance
             let (deduped, removedCount) = removeDuplicateTokenSequence(
                 previous: effectivePrevious, current: currentTokens,
                 previousTimestamps: effectivePreviousTimestamps,
                 currentTimestamps: currentGlobalTimestamps,
+                frameTolerance: tolerance,
                 punctuationTokens: punctuationTokenIds)
             let adjustedTimestamps =
                 removedCount > 0 ? Array(currentTimestamps.dropFirst(removedCount)) : currentTimestamps

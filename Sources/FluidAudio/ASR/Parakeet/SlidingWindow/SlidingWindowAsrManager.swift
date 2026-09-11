@@ -360,8 +360,9 @@ public actor SlidingWindowAsrManager {
             // Advance by chunk size
             nextWindowCenterStart += chunk
 
-            // Trim buffer to keep only what's needed for left context
-            let trimToAbs = max(0, nextWindowCenterStart - left)
+            // Keep a full chunk plus the left context behind the next center so a
+            // short final flush window can be end-aligned (see `flushRemaining`).
+            let trimToAbs = max(0, nextWindowCenterStart - left - chunk)
             let dropCount = max(0, trimToAbs - bufferStartIndex)
             if dropCount > 0 && dropCount <= sampleBuffer.count {
                 sampleBuffer.removeFirst(dropCount)
@@ -385,14 +386,21 @@ public actor SlidingWindowAsrManager {
             if availableAhead <= 0 { break }
             let effectiveChunk = min(chunk, availableAhead)
 
-            let leftStartAbs = max(0, nextWindowCenterStart - left)
             let rightEndAbs = nextWindowCenterStart + effectiveChunk
+            let isLastWindow = rightEndAbs >= currentAbsEnd
+            // End-align a short final window: a fresh decoder state needs more
+            // than a couple of seconds of audio to emit anything, and the
+            // re-decode cutoff suppresses what previous windows already emitted.
+            let leftStartAbs =
+                isLastWindow
+                ? Self.finalWindowStart(
+                    nextCenterStart: nextWindowCenterStart, effectiveChunk: effectiveChunk, chunk: chunk, left: left)
+                : max(0, nextWindowCenterStart - left)
             let startIdx = max(leftStartAbs - bufferStartIndex, 0)
             let endIdx = max(rightEndAbs - bufferStartIndex, startIdx)
             if startIdx < 0 || endIdx > sampleBuffer.count || startIdx >= endIdx { break }
 
             let window = Array(sampleBuffer[startIdx..<endIdx])
-            let isLastWindow = (nextWindowCenterStart + effectiveChunk) >= currentAbsEnd
             await processWindow(
                 window,
                 windowStartSample: leftStartAbs,
@@ -402,7 +410,7 @@ public actor SlidingWindowAsrManager {
             nextWindowCenterStart += effectiveChunk
 
             // Trim
-            let trimToAbs = max(0, nextWindowCenterStart - left)
+            let trimToAbs = max(0, nextWindowCenterStart - left - chunk)
             let dropCount = max(0, trimToAbs - bufferStartIndex)
             if dropCount > 0 && dropCount <= sampleBuffer.count {
                 sampleBuffer.removeFirst(dropCount)
@@ -447,7 +455,7 @@ public actor SlidingWindowAsrManager {
 
             let (tokens, timestamps, confidences, _, droppedPreviousTokens) = result
 
-            // Final window re-decoded the previous window's last word in full (#897):
+            // The window re-decoded the previous window's last word in full (#897):
             // retire that word from the accumulated tokens and from the text state.
             if droppedPreviousTokens > 0, droppedPreviousTokens < accumulatedTokens.count {
                 let dropped = Array(accumulatedTokens.suffix(droppedPreviousTokens))
@@ -605,6 +613,17 @@ public actor SlidingWindowAsrManager {
                 ? "insufficient context (\(String(format: "%.1f", totalAudioProcessed))s)" : "low confidence"
             logger.debug("VOLATILE (\(result.confidence)): \(reason) - updated volatile '\(result.text)'")
         }
+    }
+
+    /// Start sample of the final flush window: end-aligned so the window spans a
+    /// full chunk plus the left context even when little new audio remains
+    /// (#897). A 2–3 s window decoded from a fresh state emits nothing and the
+    /// last words are lost; the re-decode cutoff makes the longer window safe.
+    /// Never later than the regular `center - left` start. Pure.
+    static func finalWindowStart(nextCenterStart: Int, effectiveChunk: Int, chunk: Int, left: Int) -> Int {
+        let regular = max(0, nextCenterStart - left)
+        let endAligned = max(0, nextCenterStart + effectiveChunk - chunk - left)
+        return min(regular, endAligned)
     }
 
     /// `text` without its trailing `word` when `text` ends with that word as a
