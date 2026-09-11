@@ -448,14 +448,14 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertEqual(removed, 0)
     }
 
-    // MARK: - Issue #855: final-window re-decode plan (decoder-entry behavior)
+    // MARK: - Issues #855 / #897: window re-decode plan (decoder-entry behavior)
 
     /// The plan drives the production decoder entry: frame-0 re-decode plus an
     /// emission cutoff. Removing the production change removes this helper, so
     /// these tests are coupled to the fix itself, not just to dedup.
     func testRedecodePlan_LastStreamingChunk() {
-        let plan = AsrManager.lastChunkRedecodePlan(
-            isLastChunk: true,
+        let plan = AsrManager.redecodePlan(
+            redecode: true,
             previousTokens: [1, 2, 3],
             previousTokenTimestamps: [130, 134, 137],
             globalFrameOffset: 112
@@ -468,8 +468,8 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
     }
 
     func testRedecodePlan_CutoffClampedToZero() {
-        let plan = AsrManager.lastChunkRedecodePlan(
-            isLastChunk: true,
+        let plan = AsrManager.redecodePlan(
+            redecode: true,
             previousTokens: [1],
             previousTokenTimestamps: [3],
             globalFrameOffset: 112
@@ -478,26 +478,40 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertEqual(plan.emitTokensAfterFrame, 0, "Cutoff before the window start suppresses nothing")
     }
 
-    func testRedecodePlan_InactiveOutsideFinalStreamingWindow() {
-        let interior = AsrManager.lastChunkRedecodePlan(
-            isLastChunk: false,
+    /// Every window after the first is a re-decode (#897), not only the final
+    /// one: the plan is the same, anchored at the previous window's last word.
+    func testRedecodePlan_AppliesToInteriorWindows() {
+        let interior = AsrManager.redecodePlan(
+            redecode: true,
+            previousTokens: [10, 11, 12],
+            previousTokenTimestamps: [100, 104, 109],
+            globalFrameOffset: 62,
+            lastWordStartFrame: 104
+        )
+        XCTAssertEqual(interior.initialTimeIndexOverride, 0, "Interior windows re-decode from frame 0 too")
+        XCTAssertEqual(interior.emitTokensAfterFrame, 104 - 62 - AsrManager.redecodeEmissionJitterFrames)
+    }
+
+    func testRedecodePlan_InactiveWithoutPreviousTokensOrTimestamps() {
+        let legacy = AsrManager.redecodePlan(
+            redecode: false,
             previousTokens: [1, 2],
             previousTokenTimestamps: [10, 20],
             globalFrameOffset: 0
         )
-        XCTAssertNil(interior.initialTimeIndexOverride)
-        XCTAssertNil(interior.emitTokensAfterFrame)
+        XCTAssertNil(legacy.initialTimeIndexOverride, "Callers that opt out keep legacy navigation")
+        XCTAssertNil(legacy.emitTokensAfterFrame)
 
-        let noTimestamps = AsrManager.lastChunkRedecodePlan(
-            isLastChunk: true,
+        let noTimestamps = AsrManager.redecodePlan(
+            redecode: true,
             previousTokens: [1, 2],
             previousTokenTimestamps: nil,
             globalFrameOffset: 0
         )
         XCTAssertNil(noTimestamps.initialTimeIndexOverride, "Batch callers (no timestamps) keep legacy navigation")
 
-        let firstWindow = AsrManager.lastChunkRedecodePlan(
-            isLastChunk: true,
+        let firstWindow = AsrManager.redecodePlan(
+            redecode: true,
             previousTokens: [],
             previousTokenTimestamps: [],
             globalFrameOffset: 0
@@ -505,7 +519,35 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertNil(firstWindow.initialTimeIndexOverride, "Single-window streams have nothing to re-decode")
     }
 
-    // MARK: - Issue #897: final-window seam reconciliation
+    /// Clip 03 at chunk 9 (#897): the re-decode after the seam reads `and the
+    /// net new code and analyzing`; `code` repeats 20 frames after the previous
+    /// window's `old code`. With the legacy 2 s tolerance the bounded substring
+    /// matcher paired the two `c ode` sequences and chopped the whole prefix;
+    /// the re-decode path passes twice the jitter margin instead.
+    func testRemoveDuplicateTokenSequence_RedecodeToleranceKeepsRepeatedWord() {
+        let asrManager = AsrManager()
+        let previous = [506, 768, 7874, 298, 3241]  // ▁the ▁ol d ▁c ode
+        let previousTs = [119, 122, 125, 128, 130]
+        let current = [575, 506, 2464, 409, 7898, 298, 3241, 575, 6709]  // ▁and ▁the ▁net ▁ne w ▁c ode ▁and ▁anal
+        let currentTs = [134, 137, 138, 143, 145, 148, 150, 155, 159]
+        let legacy = asrManager.removeDuplicateTokenSequence(
+            previous: previous, current: current, previousTimestamps: previousTs, currentTimestamps: currentTs,
+            frameTolerance: ASRConstants.duplicateFrameTolerance)
+        XCTAssertEqual(legacy.removedCount, 7, "documents the legacy false positive")
+        let redecode = asrManager.removeDuplicateTokenSequence(
+            previous: previous, current: current, previousTimestamps: previousTs, currentTimestamps: currentTs,
+            frameTolerance: 2 * AsrManager.redecodeEmissionJitterFrames)
+        XCTAssertEqual(redecode.removedCount, 0)
+        XCTAssertEqual(redecode.deduped, current)
+        // A genuine jitter duplicate inside the margin is still stripped.
+        let jitter = asrManager.removeDuplicateTokenSequence(
+            previous: previous, current: [298, 3241, 575], previousTimestamps: previousTs,
+            currentTimestamps: [131, 133, 136], frameTolerance: 2 * AsrManager.redecodeEmissionJitterFrames)
+        XCTAssertEqual(jitter.deduped, [575])
+        XCTAssertEqual(jitter.removedCount, 2)
+    }
+
+    // MARK: - Issue #897: window seam reconciliation
 
     /// Clip 03 of the #855 fixtures: window 1 ends `▁and`@153 `▁an`@156 (the
     /// fragment of "analyzing" cut by the window edge); the re-decoded final
@@ -513,8 +555,8 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
     /// anchor at the last word start, the fragment must go, and the seam
     /// comma plus the re-emitted `and` must not survive as duplicates.
     func testRedecodePlan_CutoffAnchorsAtLastWordStart() {
-        let plan = AsrManager.lastChunkRedecodePlan(
-            isLastChunk: true,
+        let plan = AsrManager.redecodePlan(
+            redecode: true,
             previousTokens: [10, 11, 12, 13],
             previousTokenTimestamps: [147, 149, 153, 156],
             globalFrameOffset: 112,
@@ -522,8 +564,8 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         )
         XCTAssertEqual(plan.emitTokensAfterFrame, 156 - 112 - AsrManager.redecodeEmissionJitterFrames)
         // A multi-token last word anchors at its first token, not its last.
-        let multi = AsrManager.lastChunkRedecodePlan(
-            isLastChunk: true,
+        let multi = AsrManager.redecodePlan(
+            redecode: true,
             previousTokens: [10, 11, 12],
             previousTokenTimestamps: [140, 150, 160],
             globalFrameOffset: 112,
@@ -799,6 +841,149 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             previousPieces: [" just", " so"]
         )
         XCTAssertEqual(head.droppedCurrent, 0)
+    }
+
+    /// End-aligned final window, clip 03 at chunk 10 (#897): the cutoff's
+    /// jitter margin lets the re-decode re-emit `new` (the word before the
+    /// previous last word `code`) at its original frame, then `code` itself.
+    /// `new` is consumed as a re-emitted earlier word, so `code` compares
+    /// with `code` (same word, kept) instead of being retired for `new`.
+    func testReconcileFinalWindowSeam_ReemittedEarlierWordThenSameLastWord() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 5, 6],  // ▁the ▁net ▁ne w ▁c ode
+            previousTimestamps: [136, 138, 143, 144, 146, 147],
+            trailingWordStart: 4,
+            currentTokens: [3, 4, 5, 6, 7, 8],  // ▁ne w ▁c ode ▁and ▁anal
+            currentTimestamps: [143, 145, 148, 150, 155, 159],
+            currentPieces: [" ne", "w", " c", "ode", " and", " anal"],
+            previousPieces: [" the", " net", " ne", "w", " c", "ode"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 4, "`new` and the re-emitted `code` go; `and` stays")
+        // A different overlapping last word after the re-emitted `new` still
+        // replaces the previous one.
+        let different = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 5, 6],
+            previousTimestamps: [136, 138, 143, 144, 146, 147],
+            trailingWordStart: 4,
+            currentTokens: [3, 4, 5, 11, 7],  // ▁ne w ▁c old ▁and
+            currentTimestamps: [143, 145, 148, 150, 155],
+            currentPieces: [" ne", "w", " c", "old", " and"],
+            previousPieces: [" the", " net", " ne", "w", " c", "ode"]
+        )
+        XCTAssertEqual(different.droppedPrevious, 2)
+        XCTAssertEqual(different.droppedCurrent, 2)
+    }
+
+    /// End-aligned final window, clip 02 at chunk 7 (#897): a continuation head
+    /// (`yt hing` of `anything`), two re-emitted words (`else`, `we`), then the
+    /// previous last word `should` re-emitted with its continuation piece one
+    /// frame outside the jitter window. Before: `sho` was stripped as a jitter
+    /// duplicate but `uld` survived (`we shoulduld complete`).
+    func testReconcileFinalWindowSeam_ReemittedWordsConsumedWhole() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 5, 6],  // hing ▁el se ▁we ▁sho uld
+            previousTimestamps: [190, 191, 192, 194, 195, 196],
+            trailingWordStart: 4,
+            currentTokens: [9, 1, 2, 3, 4, 5, 6, 10],  // yt hing ▁el se ▁we ▁sho uld ▁compl
+            currentTimestamps: [190, 192, 193, 194, 197, 200, 201, 204],
+            currentPieces: ["yt", "hing", " el", "se", " we", " sho", "uld", " compl"],
+            previousPieces: ["hing", " el", "se", " we", " sho", "uld"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 7, "head, `else`, `we` and the whole re-emitted `should` go")
+    }
+
+    /// End-aligned final window, clip 01 at chunk 6 and 10 (#897): the
+    /// re-decode's timestamps drift a few frames past the edge-decoded previous
+    /// copy (`out`@247 re-emitted at 253, outside the 5-frame jitter margin).
+    /// Before: read as a later repetition → `help them out out.`
+    func testReconcileFinalWindowSeam_DriftedSameLastWordIsConsumed() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 5, 6],  // ▁them ▁to ▁hel p ▁them ▁out
+            previousTimestamps: [240, 242, 243, 244, 245, 247],
+            trailingWordStart: 5,
+            currentTokens: [2, 3, 4, 5, 6, 7883],  // ▁to ▁hel p ▁them ▁out .
+            currentTimestamps: [242, 245, 247, 249, 253, 260],
+            currentPieces: [" to", " hel", "p", " them", " out", "."],
+            previousPieces: [" them", " to", " hel", "p", " them", " out"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 5, "re-emitted words and the drifted `out` go; the period stays")
+        // Beyond the duplicate tolerance it is a genuine repetition.
+        let later = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [2, 31],
+            currentTimestamps: [112, 119],
+            currentPieces: [" go", " again"],
+            previousPieces: [" let's", " go"]
+        )
+        XCTAssertEqual(later.droppedCurrent, 0)
+    }
+
+    /// LibriSpeech 3729-6852-0008 at chunk 11 (#897): the re-decode starts with
+    /// `ist` (continuation of `Christ`, an earlier word), re-emits `had been
+    /// the`, then spells the last word `Saviour` where the previous window had
+    /// `Savior.`. Before: the continuation head blocked the retire rule and the
+    /// id-level scan stripped `S` alone → `Savior. aviour of all mankind`.
+    func testReconcileFinalWindowSeam_HeadOfEarlierWordDoesNotProtectLastWord() {
+        let previousPieces = ["ist", " had", " been", " the", " S", "avi", "or", "."]
+        let previousTs = [261, 263, 265, 266, 267, 268, 270, 273]
+        let different = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 5, 6, 7, 7883],
+            previousTimestamps: previousTs,
+            trailingWordStart: 4,
+            currentTokens: [1, 2, 3, 4, 5, 10, 11, 12, 13, 14],  // ist ▁had ▁been ▁the ▁S av io ur ▁of ▁all
+            currentTimestamps: [263, 265, 268, 270, 272, 273, 275, 277, 278, 280],
+            currentPieces: ["ist", " had", " been", " the", " S", "av", "io", "ur", " of", " all"],
+            previousPieces: previousPieces
+        )
+        XCTAssertEqual(different.droppedPrevious, 4, "`Savior.` retires for the re-decoded `Saviour`")
+        XCTAssertEqual(different.droppedCurrent, 4, "head and re-emitted `had been the` go; `Saviour` stays")
+        // Same spelling: the whole re-emitted word goes, never `S` alone.
+        let same = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 5, 6, 7, 7883],
+            previousTimestamps: previousTs,
+            trailingWordStart: 4,
+            currentTokens: [1, 2, 3, 4, 5, 6, 7, 13, 14],
+            currentTimestamps: [263, 265, 268, 270, 272, 273, 275, 278, 280],
+            currentPieces: ["ist", " had", " been", " the", " S", "avi", "or", " of", " all"],
+            previousPieces: previousPieces
+        )
+        XCTAssertEqual(same.droppedPrevious, 0)
+        XCTAssertEqual(same.droppedCurrent, 7)
+    }
+
+    /// A fast repetition inside the duplicate tolerance (`go` at 100, `go
+    /// again` at 106) is kept when the decoder already re-emitted the previous
+    /// `go` before the cutoff (suppressed at 94): the visible `go` is a second
+    /// word. Without that evidence the visible `go` is the re-emitted copy.
+    func testReconcileFinalWindowSeam_FastRepetitionKeptWhenPreviousCopyWasSuppressed() {
+        let kept = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],  // ▁let's ▁go
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [2, 31],  // ▁go ▁again
+            currentTimestamps: [106, 115],
+            currentPieces: [" go", " again"],
+            previousPieces: [" let's", " go"],
+            suppressedPieces: [" go"],
+            suppressedTimestamps: [94]
+        )
+        XCTAssertEqual(kept.droppedPrevious, 0)
+        XCTAssertEqual(kept.droppedCurrent, 0, "the previous `go` was re-emitted (suppressed); this one is new")
+        let consumed = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2],
+            previousTimestamps: [96, 100],
+            trailingWordStart: 1,
+            currentTokens: [2, 31],
+            currentTimestamps: [106, 115],
+            currentPieces: [" go", " again"],
+            previousPieces: [" let's", " go"]
+        )
+        XCTAssertEqual(consumed.droppedCurrent, 1, "no suppressed copy: the visible `go` is the drifted re-emission")
     }
 
     /// Token ids are not punctuation evidence: id 7948 is `ó` in the v3

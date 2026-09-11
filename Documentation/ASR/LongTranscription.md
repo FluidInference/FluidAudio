@@ -397,31 +397,46 @@ which only the V3 decoder implements — v3 and tdtJa models get the
 end-aligned window; v2/tdtCtc110m keep the zero-padded layout
 (`supportsSuppressedPrefix`).
 
-## Streaming Final Window (issue #855)
+## Streaming Windows (issues #855, #897)
 
-`SlidingWindowAsrManager` decodes overlapping windows with a carried decoder
-state and enters each non-final window mid-way (after the left context) so the
-overlap is not re-emitted. The final flush window is different: it can be
-short, and a mid-window entry into a short window with the carried state can
-emit one boundary punctuation and then blank across real trailing speech
-(#855 repro 1, PR #861).
+`SlidingWindowAsrManager` decodes overlapping windows (`[left 2 s | chunk |
+right 2 s]`, so consecutive windows share 4 s of audio). Every window after
+the first is decoded **from frame 0 on a fresh decoder state**
+(`TdtDecoderState.make`, exactly as the batch chunker does for every chunk)
+with an emission cutoff (`AsrManager.redecodePlan`): tokens for audio the
+previous windows already emitted are suppressed at the source, minus a
+5-frame jitter margin that dedup strips.
 
-The final window is therefore decoded from frame 0 with an emission cutoff
-(`AsrManager.lastChunkRedecodePlan`): tokens for audio the previous windows
-already emitted are suppressed at the source, minus a 5-frame jitter margin
-that dedup strips. Two rules make this safe:
+The original design entered each non-final window mid-way with the *carried*
+decoder state so the overlap was not re-emitted. That entry is not safe
+anywhere, and the failures are silent:
 
-- **Fresh decoder state.** The re-decode starts from `TdtDecoderState.make`,
-  exactly as the batch chunker does for every chunk. Re-walking the overlap
-  with the *carried* state — state that already consumed that audio — leaves
-  the decoder emitting blanks for the rest of the window. On three real
-  recordings with a ~12 s final window it produced zero tokens for 9 s of
-  never-seen speech, silently dropping the last 5–24 words (#855 follow-up).
-  The 2 s left context is enough for a fresh state to re-establish itself
-  before the cutoff.
+- **Blank-out after a sentence-final token.** The carried state, having
+  already consumed the overlap, re-walks it and — typically right after a
+  `.` — emits blanks at 0.98 confidence across the rest of the window. On a
+  real recording at a 7 s chunk, window 2 emitted `s.` and then nothing for
+  10 s of clear speech (`can you do me a favor and validate your findings
+  with codex` lost); at 6 s and 8 s different spans of the same clip went
+  missing. The short final flush window showed the same pathology first
+  (#855, PR #861), and the fresh-state re-decode fixed it there (#895);
+  entering *after* the overlap with the carried state instead of re-walking
+  it does not help — the blank-out follows the next `.` just the same.
+- **Re-segmented overlap duplicates.** When the re-walk did not stall, it
+  re-emitted the overlap with a different segmentation that ID-based dedup
+  cannot match (`environment.` → `air environment`), so both survived.
+
+Two rules make the fresh-state re-decode safe:
+
+- **Fresh decoder state.** Re-walking the overlap with the carried state is
+  the failure above; a fresh state has the previous right context plus this
+  window's left context (4 s) to re-establish itself before the cutoff.
 - **Suppression, not dedup, handles the overlap.** A token-dense overlap can
   exceed dedup's bounded search; suppressing at the source keeps dedup's job
-  to the jitter margin.
+  to the jitter margin. For that reason the re-decode path also passes dedup a
+  tolerance of twice the jitter margin (10 frames) instead of the legacy 2 s:
+  with 2 s, a word repeated within 2 s of the seam (`the old code and the net
+  new code`) matched its earlier copy and the bounded substring matcher chopped
+  the whole re-decoded prefix.
 
 **Seam reconciliation (#897).** The previous window's last word may be a
 fragment cut by the window edge (`and an` for `and analyzing`), which dedup
@@ -429,13 +444,35 @@ can never repair: the fragment never equals the full word, a re-emitted single
 token is below the substring matcher's two-token minimum, and a punctuation
 token the decoder attaches at its emission start blocks the suffix–prefix
 match. So the cutoff anchors at the previous window's *last word start*
-(`lastWordStartFrame`), the final window re-decodes that word in full, and
+(`lastWordStartFrame`), the window re-decodes that word in full, and
 `AsrManager.reconcileFinalWindowSeam` retires the previous last word from the
 accumulated tokens and text (`droppedPreviousTokens`) while stripping the
 re-decode's seam artifacts: punctuation emitted at or before that word's
 frame, and tokens duplicating a kept previous token inside the jitter region.
 Clip 03 of the fixtures pins it: `code and an, and analyzing` → `code and
 analyzing`, matching batch.
+
+Two refinements the end-aligned window made necessary: the re-decode can
+re-emit the word *before* the previous last word inside the jitter margin, so
+re-emitted earlier words are consumed as whole words before the retire
+decision; and the re-decode's copy of the last word can drift past the margin
+(`out`@247 re-emitted at 253), so the same-word test compares word starts
+within the duplicate tolerance. A genuine fast repetition inside that
+tolerance (`go go again`) is told apart by evidence: the decoder reports the
+tokens it consumed but suppressed before the cutoff, and when the previous
+word is among them at its own frame, the visible copy is a second word and
+stays. With vocabulary boosting the transcript text may hold a replacement
+for the retired word rather than its raw token text, so the manager tracks
+the rendered form of each window's last word and retires that.
+
+**End-aligned final window.** A short final flush window (a 16.9 s clip at
+an 8 s chunk leaves 0.9 s of new audio behind 2 s of left context) yields
+nothing from a fresh state, dropping the last words — the dominant remaining
+loss on long LibriSpeech files. The final window is therefore end-aligned to
+span a full chunk plus the left context (`finalWindowStart`), the sample
+buffer keeps that much audio behind the next window center, and the re-decode
+cutoff suppresses what previous windows already emitted, as the batch path
+does since #747.
 
 Regression fixtures: `Tests/FluidAudioTests/ASR/Parakeet/SlidingWindow/Fixtures`
 (three real recordings, cleared for release by the speaker), exercised by
