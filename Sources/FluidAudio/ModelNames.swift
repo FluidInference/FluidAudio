@@ -96,10 +96,21 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Conversion lives in mobius (`models/tts/inflect-v2`).
     case inflectMicro = "FluidInference/inflect-v2-coreml/micro"
     case inflectNano = "FluidInference/inflect-v2-coreml/nano"
+    /// Chatterbox Multilingual (ResembleAI, 23 languages) — T3 Llama-520M
+    /// AR speech-token generator (CFG batch 2, MLState KV decode) + S3Gen
+    /// flow-matching mel decoder + HiFT vocoder. Repo root holds the
+    /// `.mlmodelc` bundles plus `tables/` (embedding/positional tables and
+    /// the precomputed default voice, safetensors) and `tokenizer/` (23-lang
+    /// grapheme BPE). The `.mlpackage` sources and the I/O-KV decode variant
+    /// alongside them are never downloaded. Conversion lives in mobius
+    /// (`models/tts/chatterbox/coreml`).
+    case chatterbox = "FluidInference/chatterbox-multilingual-coreml"
 
     /// Repository slug (without owner)
     public var name: String {
         switch self {
+        case .chatterbox:
+            return "chatterbox-multilingual-coreml"
         case .neuTts:
             return "neutts-2e-coreml"
         case .nemotronMultilingual:
@@ -1526,6 +1537,32 @@ public enum ModelNames {
         ]
     }
 
+    /// Chatterbox Multilingual model names
+    /// (`FluidInference/chatterbox-multilingual-coreml`).
+    public enum Chatterbox {
+        public static let prefillFile = "T3-Prefill-T256-M1024-fp16.mlmodelc"
+        public static let decodeFile = "T3-Decode-M1024-fp16-stateful.mlmodelc"
+        public static let flowFile = "Flow-N500-fp16.mlmodelc"
+        public static let vocoderFile = "HiFT-T1000-fp16.mlmodelc"
+        public static let tablesFile = "tables/tables.safetensors"
+        public static let defaultVoiceFile = "tables/voice-default.safetensors"
+        public static let tokenizerFile = "tokenizer/grapheme_mtl_merged_expanded_v1.json"
+
+        public static let requiredModels: Set<String> = [
+            prefillFile,
+            decodeFile,
+            flowFile,
+            vocoderFile,
+        ]
+        /// Non-model assets fetched individually (nested under `tables/` and
+        /// `tokenizer/`, which the repo-root model walk does not descend into).
+        public static let auxFiles: [String] = [
+            tablesFile,
+            defaultVoiceFile,
+            tokenizerFile,
+        ]
+    }
+
     static func getRequiredModelNames(for repo: Repo, variant: String?) -> Set<String> {
         switch repo {
         case .nemotronMultilingual:
@@ -1625,6 +1662,8 @@ public enum ModelNames {
             return ModelNames.Supertonic3.requiredFiles(veVariant: variant)
         case .neuTts:
             return ModelNames.NeuTts.requiredModels
+        case .chatterbox:
+            return ModelNames.Chatterbox.requiredModels
         case .luxtts:
             // Variants: "gpu" (macOS) / "ane" (iOS); nil → platform default.
             return ModelNames.LuxTts.requiredFiles(variant: variant)

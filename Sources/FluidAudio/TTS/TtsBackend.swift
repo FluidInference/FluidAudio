@@ -53,4 +53,13 @@ public enum TtsBackend: Sendable {
     ///
     /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
     case inflect
+    /// Chatterbox Multilingual (ResembleAI) — T3 Llama-520M emits S3 speech
+    /// tokens autoregressively (CFG batch 2, alignment-analyzer EOS control,
+    /// MLState KV cache — macOS 15+/iOS 18+ only), decoded to 24 kHz audio by
+    /// the S3Gen flow-matching mel decoder + HiFT vocoder. 18 of the 23
+    /// upstream languages (zh/ja/he/ko/ru need language-specific text
+    /// preprocessing not yet ported); built-in voice only.
+    ///
+    /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
+    case chatterbox
 }
