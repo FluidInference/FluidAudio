@@ -478,6 +478,38 @@ Regression fixtures: `Tests/FluidAudioTests/ASR/Parakeet/SlidingWindow/Fixtures`
 (three real recordings, cleared for release by the speaker), exercised by
 `SlidingWindowFinalWindowRegressionTests` whenever the v3 models are cached.
 
+## Empty-Window Recovery (issue #909)
+
+Parakeet TDT v3 has input cuts on which it emits nothing: the joint predicts
+blank at every frame from a fresh state, for 11–13 s of clear read speech.
+It reproduces in batch on the exact span (`121-123859-0002` 0–13.0 s empty,
+0–12.9 s and 0–14.0 s correct), flips with tenths of a second of length, and
+the fp16 MLX port of the same checkpoint blanks on the same cuts — so this is
+the model, not CoreML quantization. The output is on a knife edge with
+respect to the length inputs: the mel normalization moves by about 1 %
+between a 12 s and a 13 s input, and that is enough to flip the whole
+sequence.
+
+`AsrManager.executeMLInferenceWithTimings` (every decode path: single-shot,
+batch chunks, streaming windows) therefore recovers an empty decode of a
+window that carries speech (≥ 2 s, RMS ≥ −50 dBFS) by re-running with a
+different length declaration, from a copy of the decoder state the first
+attempt started from, and keeps the first non-empty result:
+
+1. `.encoderFull` — `mel_length` set to the padded frame count, so the
+   encoder treats the zero padding as valid audio (the decoder still stops
+   at the real frames);
+2. `.preprocessorFull` — `audio_length` set to the padded length, which
+   also changes the mel normalization;
+3. `.trimmedTail` — the audio declared 0.2 s shorter; the last resort, at
+   the price of the final 0.2 s, which the next window's overlap covers
+   everywhere but at the very end of the stream.
+
+Each policy flips cuts the others do not; on the ten reproduced spans the
+ladder recovers all of them. A good window is never touched: the ladder
+runs only when the first decode is empty, at the cost of one extra
+preprocessor + encoder + decoder pass per step.
+
 ## Post-Merge Repair Pass
 
 Every fix in the earlier sections operates on tokens that *exist* in at
