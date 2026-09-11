@@ -32,9 +32,13 @@ final class ChatterboxTokenizerTests: XCTestCase {
     }
 
     func testPuncNormReplacesLlmPunctuation() {
+        // Upstream collapses whitespace BEFORE the punctuation replacements,
+        // so ", " insertions legitimately produce double spaces — verified
+        // against the Python reference (and the [7,2,2] double-SPACE ids in
+        // the parity vectors below).
         XCTAssertEqual(
             ChatterboxTokenizer.puncNorm("wait; ok… fine — yes"),
-            "Wait, ok, fine - yes.")
+            "Wait,  ok,  fine - yes.")
         XCTAssertEqual(ChatterboxTokenizer.puncNorm("a  b   c"), "A b c.")
     }
 
