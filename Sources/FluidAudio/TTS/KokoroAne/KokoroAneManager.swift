@@ -269,11 +269,11 @@ public actor KokoroAneManager {
                 return normalized
             }
         case .japanese:
-            var normalized = NemoTextNormalizer.normalize(text, language: .japanese)
-            normalized = normalized.precomposedStringWithCompatibilityMapping
-            if !Self.containsJapaneseScript(normalized) {
-                return normalized
-            }
+            // Pre-computed IPA passes through untouched: NFKC would fold the
+            // modifier letters in it (ʲ → j), and the frontend normalizes
+            // Japanese text itself.
+            guard Self.containsJapaneseScript(text) else { return text }
+            let normalized = NemoTextNormalizer.normalize(text, language: .japanese)
             let g2p = try await store.japaneseG2PPipeline()
             return try await g2p.phonemize(normalized)
         }
