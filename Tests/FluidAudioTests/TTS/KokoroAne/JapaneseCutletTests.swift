@@ -31,6 +31,8 @@ final class JapaneseCutletTests: XCTestCase {
         XCTAssertEqual(JapaneseCutlet.normalize("3〜5"), " さんから ご")
         XCTAssertEqual(JapaneseCutlet.normalize("1〜2〜3〜4"), " いちから にから さんから よん", "every range marker")
         XCTAssertEqual(JapaneseCutlet.normalize("〜あ"), "〜あ", "a wave dash not followed by a digit stays")
+        XCTAssertEqual(JapaneseCutlet.normalize("３～５"), " さんから ご", "full-width digits mark a range too")
+        XCTAssertEqual(JapaneseCutlet.normalize("パン３〜５個"), "パン さんから ご個")
     }
 
     func testFoldingHalfWidthForms() {
@@ -38,6 +40,7 @@ final class JapaneseCutletTests: XCTestCase {
         XCTAssertEqual(JapaneseCutlet.foldingHalfWidthForms("ﾊﾟﾝ3～5個"), "パン3〜5個", "tilde folded, digits untouched")
         XCTAssertEqual(JapaneseCutlet.foldingHalfWidthForms("aɾʲi １２"), "aɾʲi １２", "only half-width kana folds")
         XCTAssertEqual(JapaneseCutlet.foldingHalfWidthForms("な～と"), "な～と", "a drawl tilde is not a range")
+        XCTAssertEqual(JapaneseCutlet.foldingHalfWidthForms("３～５"), "３〜５", "full-width digit after the tilde")
     }
 
     func testPrecomputedIPAPredicate() {
@@ -84,11 +87,21 @@ final class JapaneseCutletTests: XCTestCase {
             try JapaneseMecabDictionary.validateAsset(
                 named: KokoroAneConstants.japaneseWordListFile,
                 at: directory.appendingPathComponent(KokoroAneConstants.japaneseWordListFile)))
-        // A well-formed empty lexicon (no darts, no tokens) is accepted; only
-        // the short char.bin remains to reject.
+        // Structurally empty assets are unusable and must be rejected too: an
+        // all-zero 72-byte lexicon, a four-byte matrix with 0×0 contexts, a
+        // char.bin announcing zero categories.
         try Data(count: 72).write(to: directory.appendingPathComponent(KokoroAneConstants.japaneseSystemDictionaryFile))
-        try Data(count: 72).write(
-            to: directory.appendingPathComponent(KokoroAneConstants.japaneseUnknownDictionaryFile))
+        try Data(count: 4).write(to: directory.appendingPathComponent(KokoroAneConstants.japaneseConnectionMatrixFile))
+        try Data(count: 4 + 0xFFFF * 4).write(
+            to: directory.appendingPathComponent(KokoroAneConstants.japaneseCharCategoryFile))
+        for name in [
+            KokoroAneConstants.japaneseSystemDictionaryFile, KokoroAneConstants.japaneseConnectionMatrixFile,
+            KokoroAneConstants.japaneseCharCategoryFile,
+        ] {
+            XCTAssertThrowsError(
+                try JapaneseMecabDictionary.validateAsset(named: name, at: directory.appendingPathComponent(name)),
+                name)
+        }
         XCTAssertThrowsError(try JapaneseMecabDictionary(directory: directory))
     }
 

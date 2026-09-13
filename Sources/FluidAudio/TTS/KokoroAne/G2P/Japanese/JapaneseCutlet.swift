@@ -54,7 +54,7 @@ enum JapaneseCutlet {
         for (i, scalar) in scalars.enumerated() {
             if (0xFF61...0xFF9F).contains(scalar.value) {
                 run.append(scalar)
-            } else if scalar.value == 0xFF5E, i + 1 < scalars.count, (0x30...0x39).contains(scalars[i + 1].value) {
+            } else if scalar.value == 0xFF5E, i + 1 < scalars.count, scalars[i + 1].properties.numericType == .decimal {
                 flush()
                 result.append("\u{301C}")
             } else {
@@ -66,14 +66,18 @@ enum JapaneseCutlet {
         return String(result)
     }
 
+    /// A decimal digit in any script width (`5`, `５`); NFKC folds the
+    /// full-width form to ASCII later, but the range rule runs before that.
+    static func isDecimalDigit(_ character: Character) -> Bool {
+        character.unicodeScalars.count == 1 && character.unicodeScalars.first?.properties.numericType == .decimal
+    }
+
     static func normalize(_ text: String) -> String {
         var result = ""
         // A wave dash before a digit reads as a range (から), every occurrence.
         let characters = Array(text)
         for (i, character) in characters.enumerated() {
-            if character == "〜" || character == "～", i + 1 < characters.count, characters[i + 1].isASCII,
-                characters[i + 1].isNumber
-            {
+            if character == "〜" || character == "～", i + 1 < characters.count, isDecimalDigit(characters[i + 1]) {
                 result += "から"
             } else if let mapped = katakanaPhoneticExtensions[character] {
                 result.append(mapped)

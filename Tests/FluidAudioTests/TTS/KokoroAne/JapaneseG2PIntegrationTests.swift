@@ -75,5 +75,7 @@ final class JapaneseG2PIntegrationTests: XCTestCase {
         XCTAssertEqual(one, "iʨi")
         let halfWidth = try await g2p.phonemize("ｶﾞｷﾞ")
         XCTAssertEqual(halfWidth, "ɡa ɡʲi")
+        let fullWidthRange = try await g2p.phonemize("パン３～５個")
+        XCTAssertEqual(fullWidthRange, "paɴ saɴ kaɾa ɡo ko")
     }
 }

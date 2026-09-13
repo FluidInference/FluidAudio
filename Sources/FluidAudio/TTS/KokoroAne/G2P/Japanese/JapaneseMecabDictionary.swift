@@ -40,6 +40,8 @@ final class JapaneseMecabDictionary: Sendable {
         let tokenCount: Int
         private let featuresOffset: Int
         private let featuresLength: Int
+        let leftSize: Int
+        let rightSize: Int
 
         init(url: URL) throws {
             let mapped = try Data(contentsOf: url, options: .mappedIfSafe)
@@ -47,6 +49,8 @@ final class JapaneseMecabDictionary: Sendable {
             func word(_ index: Int) -> Int {
                 Int(mapped.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: index * 4, as: UInt32.self) })
             }
+            leftSize = word(4)
+            rightSize = word(5)
             let dsize = word(6)
             let tsize = word(7)
             let fsize = word(8)
@@ -160,9 +164,13 @@ final class JapaneseMecabDictionary: Sendable {
     // MARK: - Validation
 
     /// Structural checks on the binary assets, run before any header field is
-    /// read: every section a header announces must fit in the file. Cheap
-    /// (mmapped, header bytes only), so the downloader can run them on cached
-    /// files and refetch only the ones that fail.
+    /// read. Each file is exactly the size its header implies (the trimmed
+    /// dictionaries are written that way), every section is nonempty, and the
+    /// format version is MeCab's 102 — so a truncated, empty, or foreign file
+    /// fails, and the downloader can refetch only the files that do. Cheap:
+    /// mmapped, header bytes only.
+    static let mecabDictionaryVersion = 102
+
     static func validateLexicon(_ mapped: Data, name: String) throws {
         guard mapped.count >= 72 else {
             throw KokoroAneError.modelNotLoaded("MeCab dictionary \(name) is truncated")
@@ -170,11 +178,23 @@ final class JapaneseMecabDictionary: Sendable {
         func word(_ index: Int) -> Int {
             Int(mapped.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: index * 4, as: UInt32.self) })
         }
+        guard word(1) == mecabDictionaryVersion else {
+            throw KokoroAneError.modelNotLoaded("MeCab dictionary \(name) has version \(word(1)), expected 102")
+        }
+        let lexsize = word(3)
+        let lsize = word(4)
+        let rsize = word(5)
         let dsize = word(6)
         let tsize = word(7)
         let fsize = word(8)
-        guard 72 + dsize + tsize + fsize <= mapped.count, dsize % 8 == 0, tsize % 16 == 0 else {
-            throw KokoroAneError.modelNotLoaded("MeCab dictionary \(name) has an invalid header")
+        guard lexsize > 0, lsize > 0, rsize > 0, dsize > 0, tsize > 0, fsize > 0,
+            dsize % 8 == 0, tsize % 16 == 0
+        else {
+            throw KokoroAneError.modelNotLoaded("MeCab dictionary \(name) has an empty section")
+        }
+        guard 72 + dsize + tsize + fsize == mapped.count else {
+            throw KokoroAneError.modelNotLoaded(
+                "MeCab dictionary \(name) is \(mapped.count) bytes, header implies \(72 + dsize + tsize + fsize)")
         }
     }
 
@@ -182,8 +202,8 @@ final class JapaneseMecabDictionary: Sendable {
         guard chars.count >= 4 else { throw KokoroAneError.modelNotLoaded("MeCab char.bin is truncated") }
         let count = Int(chars.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt32.self) })
         // MeCab's table has 0xFFFF entries (code points 0…0xFFFE).
-        guard chars.count >= 4 + count * 32 + 0xFFFF * 4 else {
-            throw KokoroAneError.modelNotLoaded("MeCab char.bin is truncated")
+        guard count > 0, chars.count == 4 + count * 32 + 0xFFFF * 4 else {
+            throw KokoroAneError.modelNotLoaded("MeCab char.bin is \(chars.count) bytes with \(count) categories")
         }
     }
 
@@ -191,8 +211,9 @@ final class JapaneseMecabDictionary: Sendable {
         guard costs.count >= 4 else { throw KokoroAneError.modelNotLoaded("MeCab matrix.bin is truncated") }
         let leftSize = Int(costs.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt16.self) })
         let rightSize = Int(costs.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 2, as: UInt16.self) })
-        guard costs.count >= 4 + leftSize * rightSize * 2 else {
-            throw KokoroAneError.modelNotLoaded("MeCab matrix.bin is truncated")
+        guard leftSize > 0, rightSize > 0, costs.count == 4 + leftSize * rightSize * 2 else {
+            throw KokoroAneError.modelNotLoaded(
+                "MeCab matrix.bin is \(costs.count) bytes for \(leftSize)×\(rightSize) contexts")
         }
     }
 
@@ -232,6 +253,13 @@ final class JapaneseMecabDictionary: Sendable {
         try Self.validateConnectionMatrix(costs)
         leftSize = Int(costs.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt16.self) })
         rightSize = Int(costs.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 2, as: UInt16.self) })
+        // The lexicons and the matrix must come from the same build.
+        for lexicon in [system, unknown]
+        where lexicon.leftSize != leftSize || lexicon.rightSize != rightSize {
+            throw KokoroAneError.modelNotLoaded(
+                "MeCab dictionary contexts \(lexicon.leftSize)×\(lexicon.rightSize) "
+                    + "do not match matrix.bin \(leftSize)×\(rightSize)")
+        }
         matrix = costs
     }
 
