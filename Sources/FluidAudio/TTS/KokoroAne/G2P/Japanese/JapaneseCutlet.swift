@@ -36,18 +36,46 @@ enum JapaneseCutlet {
 
     // MARK: - Normalization
 
-    static func normalize(_ text: String) -> String {
-        var result = ""
-        // Wave dash before a digit reads as a range: から.
-        var characters = Array(text)
-        for i in characters.indices where (characters[i] == "〜" || characters[i] == "～") {
-            if i + 1 < characters.count, characters[i + 1].isASCII, characters[i + 1].isNumber {
-                characters[i] = "か"
-                characters.insert("ら", at: i + 1)
+    /// The folds that must precede NeMo text normalization: NFKC on
+    /// half-width katakana runs only (U+FF61–U+FF9F, including the split
+    /// dakuten/handakuten marks the FST drops), and a full-width tilde that
+    /// marks a range (a digit follows) to the wave dash the FST leaves alone,
+    /// so `normalize`'s range rule still sees it. A tilde used as a drawl
+    /// (な～) stays: the FST folds it to `~`, as NFKC does upstream.
+    static func foldingHalfWidthForms(_ text: String) -> String {
+        var result = String.UnicodeScalarView()
+        var run = String.UnicodeScalarView()
+        func flush() {
+            guard !run.isEmpty else { return }
+            result.append(contentsOf: String(run).precomposedStringWithCompatibilityMapping.unicodeScalars)
+            run.removeAll()
+        }
+        let scalars = Array(text.unicodeScalars)
+        for (i, scalar) in scalars.enumerated() {
+            if (0xFF61...0xFF9F).contains(scalar.value) {
+                run.append(scalar)
+            } else if scalar.value == 0xFF5E, i + 1 < scalars.count, (0x30...0x39).contains(scalars[i + 1].value) {
+                flush()
+                result.append("\u{301C}")
+            } else {
+                flush()
+                result.append(scalar)
             }
         }
-        for character in characters {
-            if let mapped = katakanaPhoneticExtensions[character] {
+        flush()
+        return String(result)
+    }
+
+    static func normalize(_ text: String) -> String {
+        var result = ""
+        // A wave dash before a digit reads as a range (から), every occurrence.
+        let characters = Array(text)
+        for (i, character) in characters.enumerated() {
+            if character == "〜" || character == "～", i + 1 < characters.count, characters[i + 1].isASCII,
+                characters[i + 1].isNumber
+            {
+                result += "から"
+            } else if let mapped = katakanaPhoneticExtensions[character] {
                 result.append(mapped)
             } else {
                 result.append(character)

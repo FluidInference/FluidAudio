@@ -43,18 +43,13 @@ final class JapaneseMecabDictionary: Sendable {
 
         init(url: URL) throws {
             let mapped = try Data(contentsOf: url, options: .mappedIfSafe)
-            guard mapped.count >= 72 else {
-                throw KokoroAneError.modelNotLoaded("MeCab dictionary \(url.lastPathComponent) is truncated")
-            }
+            try JapaneseMecabDictionary.validateLexicon(mapped, name: url.lastPathComponent)
             func word(_ index: Int) -> Int {
                 Int(mapped.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: index * 4, as: UInt32.self) })
             }
             let dsize = word(6)
             let tsize = word(7)
             let fsize = word(8)
-            guard 72 + dsize + tsize + fsize <= mapped.count, dsize % 8 == 0, tsize % 16 == 0 else {
-                throw KokoroAneError.modelNotLoaded("MeCab dictionary \(url.lastPathComponent) has an invalid header")
-            }
             data = mapped
             dartsOffset = 72
             dartsUnits = dsize / 8
@@ -162,17 +157,68 @@ final class JapaneseMecabDictionary: Sendable {
     let leftSize: Int
     let rightSize: Int
 
+    // MARK: - Validation
+
+    /// Structural checks on the binary assets, run before any header field is
+    /// read: every section a header announces must fit in the file. Cheap
+    /// (mmapped, header bytes only), so the downloader can run them on cached
+    /// files and refetch only the ones that fail.
+    static func validateLexicon(_ mapped: Data, name: String) throws {
+        guard mapped.count >= 72 else {
+            throw KokoroAneError.modelNotLoaded("MeCab dictionary \(name) is truncated")
+        }
+        func word(_ index: Int) -> Int {
+            Int(mapped.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: index * 4, as: UInt32.self) })
+        }
+        let dsize = word(6)
+        let tsize = word(7)
+        let fsize = word(8)
+        guard 72 + dsize + tsize + fsize <= mapped.count, dsize % 8 == 0, tsize % 16 == 0 else {
+            throw KokoroAneError.modelNotLoaded("MeCab dictionary \(name) has an invalid header")
+        }
+    }
+
+    static func validateCharCategories(_ chars: Data) throws {
+        guard chars.count >= 4 else { throw KokoroAneError.modelNotLoaded("MeCab char.bin is truncated") }
+        let count = Int(chars.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt32.self) })
+        // MeCab's table has 0xFFFF entries (code points 0…0xFFFE).
+        guard chars.count >= 4 + count * 32 + 0xFFFF * 4 else {
+            throw KokoroAneError.modelNotLoaded("MeCab char.bin is truncated")
+        }
+    }
+
+    static func validateConnectionMatrix(_ costs: Data) throws {
+        guard costs.count >= 4 else { throw KokoroAneError.modelNotLoaded("MeCab matrix.bin is truncated") }
+        let leftSize = Int(costs.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt16.self) })
+        let rightSize = Int(costs.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 2, as: UInt16.self) })
+        guard costs.count >= 4 + leftSize * rightSize * 2 else {
+            throw KokoroAneError.modelNotLoaded("MeCab matrix.bin is truncated")
+        }
+    }
+
+    /// Validates one asset file by name; a missing file throws too.
+    static func validateAsset(named name: String, at url: URL) throws {
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        switch name {
+        case KokoroAneConstants.japaneseSystemDictionaryFile, KokoroAneConstants.japaneseUnknownDictionaryFile:
+            try validateLexicon(data, name: name)
+        case KokoroAneConstants.japaneseCharCategoryFile:
+            try validateCharCategories(data)
+        case KokoroAneConstants.japaneseConnectionMatrixFile:
+            try validateConnectionMatrix(data)
+        default:
+            guard !data.isEmpty else { throw KokoroAneError.modelNotLoaded("Japanese G2P asset \(name) is empty") }
+        }
+    }
+
     init(directory: URL) throws {
         system = try Lexicon(url: directory.appendingPathComponent(KokoroAneConstants.japaneseSystemDictionaryFile))
         unknown = try Lexicon(url: directory.appendingPathComponent(KokoroAneConstants.japaneseUnknownDictionaryFile))
         let chars = try Data(
             contentsOf: directory.appendingPathComponent(KokoroAneConstants.japaneseCharCategoryFile),
             options: .mappedIfSafe)
+        try Self.validateCharCategories(chars)
         let count = Int(chars.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt32.self) })
-        // MeCab's table has 0xFFFF entries (code points 0…0xFFFE).
-        guard chars.count >= 4 + count * 32 + 0xFFFF * 4 else {
-            throw KokoroAneError.modelNotLoaded("MeCab char.bin is truncated")
-        }
         categoryNames = (0..<count).map { i in
             let start = 4 + i * 32
             let slice = chars[start..<start + 32].prefix { $0 != 0 }
@@ -183,11 +229,9 @@ final class JapaneseMecabDictionary: Sendable {
         let costs = try Data(
             contentsOf: directory.appendingPathComponent(KokoroAneConstants.japaneseConnectionMatrixFile),
             options: .mappedIfSafe)
+        try Self.validateConnectionMatrix(costs)
         leftSize = Int(costs.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt16.self) })
         rightSize = Int(costs.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 2, as: UInt16.self) })
-        guard costs.count >= 4 + leftSize * rightSize * 2 else {
-            throw KokoroAneError.modelNotLoaded("MeCab matrix.bin is truncated")
-        }
         matrix = costs
     }
 

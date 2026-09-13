@@ -269,11 +269,15 @@ public actor KokoroAneManager {
                 return normalized
             }
         case .japanese:
-            // Pre-computed IPA passes through untouched: NFKC would fold the
-            // modifier letters in it (ʲ → j), and the frontend normalizes
-            // Japanese text itself.
-            guard Self.containsJapaneseScript(text) else { return text }
-            let normalized = NemoTextNormalizer.normalize(text, language: .japanese)
+            // Pre-computed IPA (issue #698) passes through untouched: NFKC
+            // would fold its modifier letters (ʲ → j). Anything outside the
+            // phoneme alphabet — kana, kanji, half-width kana, digits — is
+            // text and goes through normalization and the frontend.
+            guard !Self.looksLikePrecomputedJapaneseIPA(text) else { return text }
+            // The NeMo FST drops half-width dakuten (ｶﾞ → カ) and reads the
+            // full-width tilde as a symbol, so fold both before it runs.
+            let folded = JapaneseCutlet.foldingHalfWidthForms(text)
+            let normalized = NemoTextNormalizer.normalize(folded, language: .japanese)
             let g2p = try await store.japaneseG2PPipeline()
             return try await g2p.phonemize(normalized)
         }
@@ -402,15 +406,25 @@ public actor KokoroAneManager {
         }
     }
 
-    private static func containsJapaneseScript(_ text: String) -> Bool {
-        text.unicodeScalars.contains { scalar in
-            switch scalar.value {
-            case 0x3040...0x30FF, 0x31F0...0x31FF, 0x3400...0x4DBF, 0x4E00...0x9FFF,
-                0xF900...0xFAFF:
-                return true
-            default:
-                return false
+    /// Every scalar is one Kokoro's Japanese phoneme strings can contain:
+    /// ASCII letters, punctuation and space, IPA and modifier letters,
+    /// combining marks, and the quotes/dashes the frontend emits. Digits,
+    /// kana (full- or half-width) and kanji are text, not phonemes.
+    static func looksLikePrecomputedJapaneseIPA(_ text: String) -> Bool {
+        !text.isEmpty
+            && text.unicodeScalars.allSatisfy { scalar in
+                switch scalar.value {
+                case 0x20, 0x21...0x2F, 0x3A...0x40, 0x5B...0x60, 0x7B...0x7E: return true  // ASCII punctuation, space
+                case 0x41...0x5A, 0x61...0x7A: return true  // ASCII letters
+                case 0x00C0...0x024F: return true  // Latin-1 / Extended-A/B (ɡ ǀ ß …)
+                case 0x0250...0x02AF: return true  // IPA extensions
+                case 0x02B0...0x02FF: return true  // spacing modifier letters (ʲ ʰ ː)
+                case 0x0300...0x036F: return true  // combining diacritics
+                case 0x0370...0x03FF: return true  // Greek (β)
+                case 0x1D00...0x1DBF: return true  // phonetic extensions (ᵝ)
+                case 0x2010...0x2027, 0x2039...0x203A, 0x00AB, 0x00BB: return true  // dashes, quotes, ellipsis
+                default: return false
+                }
             }
-        }
     }
 }

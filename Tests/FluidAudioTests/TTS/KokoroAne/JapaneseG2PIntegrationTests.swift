@@ -69,5 +69,11 @@ final class JapaneseG2PIntegrationTests: XCTestCase {
         XCTAssertEqual(people, "ɸɯtaɾʲi tomo ɡeŋkʲi desɨ.")
         let time = try await g2p.phonemize("午前十時から")
         XCTAssertEqual(time, "ɡoʣeɴ ʥɨːʥi kaɾa")
+        // Inputs the pass-through predicate must not swallow: a lone digit and
+        // half-width kana are read, not returned verbatim.
+        let one = try await g2p.phonemize("1")
+        XCTAssertEqual(one, "iʨi")
+        let halfWidth = try await g2p.phonemize("ｶﾞｷﾞ")
+        XCTAssertEqual(halfWidth, "ɡa ɡʲi")
     }
 }

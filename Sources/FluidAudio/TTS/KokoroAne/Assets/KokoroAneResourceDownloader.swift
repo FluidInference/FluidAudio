@@ -139,10 +139,16 @@ public enum KokoroAneResourceDownloader {
         }
         for name in KokoroAneConstants.japaneseG2PFiles {
             let localURL = g2pDir.appendingPathComponent(name)
-            if let size = try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? NSNumber,
-                size.intValue > 0
-            {
-                continue
+            if FileManager.default.fileExists(atPath: localURL.path) {
+                do {
+                    try JapaneseMecabDictionary.validateAsset(named: name, at: localURL)
+                    continue
+                } catch {
+                    // A truncated or empty cached file must not make the
+                    // downloader skip the fetch (it keeps existing files).
+                    logger.warning("Cached Japanese G2P asset '\(name)' rejected (\(error)); re-downloading")
+                    try? FileManager.default.removeItem(at: localURL)
+                }
             }
             logger.info(
                 "Downloading Japanese G2P asset '\(name)' from "
