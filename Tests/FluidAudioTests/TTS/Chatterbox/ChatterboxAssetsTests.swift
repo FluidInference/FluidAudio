@@ -86,6 +86,89 @@ final class ChatterboxAssetsTests: XCTestCase {
         XCTAssertEqual(loadCalls, 2)
     }
 
+    // MARK: - Dimension validation (unsafe-copy bounds)
+
+    /// `validate` reads only rows/cols, so empty `values` keep fixtures
+    /// lightweight.
+    private func table(_ rows: Int, _ cols: Int) -> ChatterboxTables.Table {
+        ChatterboxTables.Table(rows: rows, cols: cols, values: [])
+    }
+
+    private func mtlTables(
+        textPosRows: Int = ChatterboxConstants.prefillLength,
+        speechPosRows: Int = ChatterboxConstants.maxContext
+    ) -> ChatterboxTables {
+        let hidden = ChatterboxConstants.hiddenSize
+        return ChatterboxTables(
+            textEmb: table(ChatterboxConstants.textVocabSize, hidden),
+            speechEmb: table(ChatterboxConstants.outputVocabSize, hidden),
+            textPos: table(textPosRows, hidden),
+            speechPos: table(speechPosRows, hidden))
+    }
+
+    private func voice(
+        hidden: Int, promptTokens: Int, promptFeatRows: Int
+    )
+        -> ChatterboxTables.Voice
+    {
+        ChatterboxTables.Voice(
+            condEmb: table(34, hidden),
+            promptTokens: [Int32](repeating: 0, count: promptTokens),
+            promptFeat: table(promptFeatRows, 80),
+            embedding: [Float](repeating: 0, count: 192))
+    }
+
+    func testValidDimensionsPassBothVariants() throws {
+        try ChatterboxTables.validate(
+            mtlTables(),
+            voice: voice(
+                hidden: ChatterboxConstants.hiddenSize, promptTokens: 157,
+                promptFeatRows: 314))
+        let nanoHidden = ChatterboxNanoConstants.hiddenSize
+        try ChatterboxTables.validate(
+            ChatterboxTables.Nano(
+                textEmb: table(ChatterboxNanoConstants.textVocabSize, nanoHidden),
+                speechEmb: table(ChatterboxNanoConstants.outputVocabSize, nanoHidden)),
+            voice: voice(hidden: nanoHidden, promptTokens: 250, promptFeatRows: 500))
+    }
+
+    func testOversizedPromptFeatRejected() {
+        // A [1001, 80] prompt mel would write 80 floats past the fixed
+        // [1, 1000, 80] flow buffer if it reached the pointer copy.
+        XCTAssertThrowsError(
+            try ChatterboxTables.validate(
+                mtlTables(),
+                voice: voice(
+                    hidden: ChatterboxConstants.hiddenSize, promptTokens: 157,
+                    promptFeatRows: 1001)))
+        // Rows consistent with tokens but exceeding the mel bucket.
+        XCTAssertThrowsError(
+            try ChatterboxTables.validate(
+                mtlTables(),
+                voice: voice(
+                    hidden: ChatterboxConstants.hiddenSize, promptTokens: 501,
+                    promptFeatRows: 1002)))
+    }
+
+    func testPromptFeatTokenMismatchRejected() {
+        XCTAssertThrowsError(
+            try ChatterboxTables.validate(
+                mtlTables(),
+                voice: voice(
+                    hidden: ChatterboxConstants.hiddenSize, promptTokens: 157,
+                    promptFeatRows: 316)))
+    }
+
+    func testUndersizedPositionalTablesRejected() {
+        let goodVoice = voice(
+            hidden: ChatterboxConstants.hiddenSize, promptTokens: 157, promptFeatRows: 314)
+        // A one-row text_pos_emb would trap at row(1) on ordinary text.
+        XCTAssertThrowsError(
+            try ChatterboxTables.validate(mtlTables(textPosRows: 1), voice: goodVoice))
+        XCTAssertThrowsError(
+            try ChatterboxTables.validate(mtlTables(speechPosRows: 10), voice: goodVoice))
+    }
+
     // MARK: - Safetensors header hardening
 
     /// Build a syntactically valid safetensors file from a JSON header

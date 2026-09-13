@@ -77,20 +77,7 @@ struct ChatterboxModels: Sendable {
                 tablesURL: repoDir.appendingPathComponent(ModelNames.Chatterbox.tablesFile))
             let voice = try ChatterboxTables.loadVoice(
                 voiceURL: repoDir.appendingPathComponent(ModelNames.Chatterbox.defaultVoiceFile))
-            // Dimension guards: table lookups later copy rows by raw
-            // pointer, so a structurally valid but wrong-shape file must
-            // fail here, not at synthesis time.
-            let hidden = ChatterboxConstants.hiddenSize
-            guard tables.textEmb.cols == hidden, tables.speechEmb.cols == hidden,
-                tables.textPos.cols == hidden, tables.speechPos.cols == hidden,
-                tables.textEmb.rows >= ChatterboxConstants.textVocabSize,
-                tables.speechEmb.rows >= ChatterboxConstants.outputVocabSize,
-                voice.condEmb.cols == hidden,
-                voice.promptFeat.cols == 80,
-                voice.embedding.count == 192
-            else {
-                throw ChatterboxError.malformedAsset("tables/voice dimensions mismatch")
-            }
+            try ChatterboxTables.validate(tables, voice: voice)
             return (tokenizer, tables, voice)
         }
 

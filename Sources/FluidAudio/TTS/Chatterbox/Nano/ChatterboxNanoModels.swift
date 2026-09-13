@@ -79,19 +79,7 @@ struct ChatterboxNanoModels: Sendable {
             let voice = try ChatterboxTables.loadVoice(
                 voiceURL: repoDir.appendingPathComponent(
                     ModelNames.ChatterboxNano.defaultVoiceFile))
-            // Dimension guards: table lookups later copy rows by raw
-            // pointer, so a structurally valid but wrong-shape file must
-            // fail here, not at synthesis time.
-            let hidden = ChatterboxNanoConstants.hiddenSize
-            guard tables.textEmb.cols == hidden, tables.speechEmb.cols == hidden,
-                tables.textEmb.rows >= ChatterboxNanoConstants.textVocabSize,
-                tables.speechEmb.rows >= ChatterboxNanoConstants.outputVocabSize,
-                voice.condEmb.cols == hidden,
-                voice.promptFeat.cols == 80,
-                voice.embedding.count == 192
-            else {
-                throw ChatterboxError.malformedAsset("tables/voice dimensions mismatch")
-            }
+            try ChatterboxTables.validate(tables, voice: voice)
             return (tokenizer, tables, voice)
         }
 

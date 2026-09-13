@@ -57,6 +57,56 @@ struct ChatterboxTables: Sendable {
             speechEmb: try tensors.table("speech_emb"))
     }
 
+    /// Dimension guards for the Multilingual bundle: every later table
+    /// lookup / prompt-feat copy is an unchecked pointer operation into
+    /// fixed-size buffers, so a structurally valid but wrong-shape file
+    /// must fail here, not overflow (or trap) at synthesis time.
+    static func validate(_ tables: ChatterboxTables, voice: Voice) throws {
+        let hidden = ChatterboxConstants.hiddenSize
+        guard tables.textEmb.cols == hidden, tables.speechEmb.cols == hidden,
+            tables.textPos.cols == hidden, tables.speechPos.cols == hidden,
+            tables.textEmb.rows >= ChatterboxConstants.textVocabSize,
+            tables.speechEmb.rows >= ChatterboxConstants.outputVocabSize,
+            // Reachable positions: text rows up to the prefill window,
+            // speech rows up to the decode context (step + 1 ≤ maxContext).
+            tables.textPos.rows >= ChatterboxConstants.prefillLength,
+            tables.speechPos.rows >= ChatterboxConstants.maxContext
+        else {
+            throw ChatterboxError.malformedAsset("tables dimensions mismatch")
+        }
+        try validateVoice(
+            voice, hidden: hidden, melBucket: ChatterboxConstants.melFrameBucket)
+    }
+
+    /// Dimension guards for the Nano bundle (no positional tables — GPT2's
+    /// `wpe` is applied in-graph).
+    static func validate(_ tables: Nano, voice: Voice) throws {
+        let hidden = ChatterboxNanoConstants.hiddenSize
+        guard tables.textEmb.cols == hidden, tables.speechEmb.cols == hidden,
+            tables.textEmb.rows >= ChatterboxNanoConstants.textVocabSize,
+            tables.speechEmb.rows >= ChatterboxNanoConstants.outputVocabSize
+        else {
+            throw ChatterboxError.malformedAsset("tables dimensions mismatch")
+        }
+        try validateVoice(
+            voice, hidden: hidden, melBucket: ChatterboxNanoConstants.melFrameBucket)
+    }
+
+    /// Voice conditioning guards shared by both variants. The prompt mel is
+    /// copied wholesale into a `[1, melBucket, 80]` buffer, so its row
+    /// count must match the prompt tokens (2 mel frames per 25 Hz token)
+    /// and fit the bucket.
+    private static func validateVoice(_ voice: Voice, hidden: Int, melBucket: Int) throws {
+        guard voice.condEmb.cols == hidden,
+            voice.promptFeat.cols == 80,
+            voice.promptFeat.rows == 2 * voice.promptTokens.count,
+            voice.promptFeat.rows <= melBucket,
+            voice.embedding.count == 192
+        else {
+            throw ChatterboxError.malformedAsset("voice dimensions mismatch")
+        }
+    }
+
     static func loadVoice(voiceURL: URL) throws -> Voice {
         let tensors = try SafetensorsFile(url: voiceURL)
         let condEmb = try tensors.table("t3_cond_emb")
