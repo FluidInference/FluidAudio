@@ -240,8 +240,8 @@ public enum TtsBenchmarkCommand {
 
         // --phonemes: each corpus line is `ipa_phonemes|reference_text`.
         // Synthesis feeds the phonemes (G2P bypass); WER/CER scores against
-        // the reference text. Kokoro ANE only — the Japanese variant has no
-        // in-process G2P, so this is the only way to benchmark it.
+        // the reference text. Kokoro ANE only; useful for comparing a
+        // pre-computed frontend against the built-in frontends.
         var phonemesByReference: [String: String] = [:]
         if phonemesMode {
             guard backend == .kokoroAne else {
@@ -300,12 +300,6 @@ public enum TtsBenchmarkCommand {
             switch backend {
             case .kokoroAne:
                 let kaVariant = parseKokoroAneVariant(variantArg)
-                if kaVariant == .japanese && !phonemesMode {
-                    logger.error(
-                        "The japanese variant has no text G2P; pass --phonemes with a "
-                            + "`ipa_phonemes|reference_text` corpus (see #698).")
-                    exit(1)
-                }
                 try await runKokoroAne(
                     phrases: phrases, corpusLabel: corpusLabel,
                     variant: kaVariant,
@@ -366,13 +360,13 @@ public enum TtsBenchmarkCommand {
 
         let firstStart = Date()
         if let phonemesByReference {
-            // Text warm-up would throw on G2P-less variants (japanese);
-            // warm up through the same bypass the loop uses.
+            // Warm up through the same bypass the loop uses.
             let warmUp = phrases.first.flatMap { phonemesByReference[$0.text] } ?? "aɾʲiɡatoː"
             _ = try await manager.synthesizeFromPhonemesDetailed(warmUp, voice: voice, speed: 1.0)
         } else {
+            let warmUpText = variant == .japanese ? "初期化します。" : "Initialization warm-up."
             _ = try await manager.synthesizeDetailed(
-                text: "Initialization warm-up.", voice: voice, speed: 1.0)
+                text: warmUpText, voice: voice, speed: 1.0)
         }
         let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
         logger.info(String(format: "First synth: %.0f ms", firstSynthMs))

@@ -70,8 +70,7 @@ public struct TTS {
         var text: String? = nil
         // KokoroAne: treat the positional/`--text` value as a pre-computed
         // phoneme string (IPA for en/ja, Bopomofo+tone for zh) and bypass
-        // G2P via synthesizeFromPhonemes. Required for `.japanese`, which
-        // ships no text frontend (issue #698).
+        // G2P via synthesizeFromPhonemes.
         var treatAsPhonemes = false
         var deEss = true
         var backend: TtsBackend = .kokoroAne
@@ -899,12 +898,10 @@ public struct TTS {
             let tLoad1 = Date()
 
             let tSynth0 = Date()
-            // synthesizeDetailed handles English (G2PModel) and Mandarin
-            // (MandarinG2P, with pass-through for pre-computed Bopomofo).
-            // With --phonemes, or for Japanese (no text frontend), bypass
-            // G2P and feed the input as a pre-computed phoneme string.
+            // synthesizeDetailed handles all three text frontends. With
+            // --phonemes, bypass G2P and feed a pre-computed phoneme string.
             let detailed: KokoroAneSynthesisResult
-            if treatAsPhonemes || variant == .japanese {
+            if treatAsPhonemes {
                 detailed = try await manager.synthesizeFromPhonemesDetailed(
                     text, voice: resolvedVoice, speed: 1.0)
             } else {

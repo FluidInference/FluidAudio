@@ -14,11 +14,11 @@ used with the author's permission. Conversion lives in
 | Aspect           | `KokoroAneManager`                              |
 |------------------|-------------------------------------------------|
 | Compute          | 4 stages on ANE, 3 on GPU                       |
-| Voices           | Single per variant (`af_heart` / `zf_001`)      |
-| Input length     | ≤ 510 IPA / Bopomofo phonemes / utt.            |
+| Voices           | Variant catalogs (54 English / 103 zh / 5 ja)   |
+| Input length     | ≤ 510 phoneme characters / utterance             |
 | Custom lexicon   | No                                              |
 | SSML             | No                                              |
-| Languages        | English (`ANE/`) + Mandarin (`ANE-zh/`)         |
+| Languages        | English (`ANE/`), Mandarin (`ANE-zh/`), Japanese (`ANE-ja/`) |
 
 For multi-voice / SSML / long-form, use `PocketTtsSynthesizer` or
 `StyleTTS2Manager` instead.
@@ -34,12 +34,14 @@ text-to-phoneme frontend differ.
 |---------------|-------------|-------|---------------|-----------------------------|--------------------------------------------|
 | `.english`    | `ANE/`      | 177   | `af_heart`    | flat (`<voice>.bin`)        | G2P CoreML (BART seq2seq) → IPA            |
 | `.mandarin`   | `ANE-zh/`   | 171   | `zf_001`      | nested (`voices/<voice>.bin`) | Rule-based dict lookup → Bopomofo + tones |
+| `.japanese`   | `ANE-ja/`   | 114   | `jf_alpha`    | nested (`voices/<voice>.bin`) | OpenJTalk contextual reading → IPA        |
 
 Pick the variant on construction:
 
 ```swift
 let english  = KokoroAneManager(variant: .english)   // default
 let mandarin = KokoroAneManager(variant: .mandarin)
+let japanese = KokoroAneManager(variant: .japanese)
 ```
 
 ## Quick Start
@@ -56,6 +58,11 @@ swift run fluidaudiocli tts "Welcome to FluidAudio" \
 swift run fluidaudiocli tts "你好世界，今天天气真好。" \
   --backend kokoro-ane --variant zh \
   --output ~/Desktop/demo_zh.wav
+
+# Japanese (plain kana/kanji)
+swift run fluidaudiocli tts "今日は良い天気です。" \
+  --backend kokoro-ane --variant ja \
+  --output ~/Desktop/demo_ja.wav
 ```
 
 First invocation downloads the 7 `.mlmodelc` bundles + `vocab.json` +
@@ -63,10 +70,15 @@ default voice from
 [`FluidInference/kokoro-82m-coreml/ANE/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE)
 (English) or
 [`ANE-zh/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE-zh)
-(Mandarin); later runs reuse the cached assets. The Mandarin variant
+(Mandarin) or
+[`ANE-ja/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE-ja)
+(Japanese); later runs reuse the cached assets. The Mandarin variant
 additionally fetches the G2P pinyin dictionaries from
 [`ANE-zh/assets/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE-zh/assets)
 on first synthesis (~10 MB, cached at `<repoDir>/g2p/`).
+Japanese plain-text synthesis lazily downloads OpenJTalk's pinned UTF-8
+NAIST-JDIC archive (23 MB download / 102 MB installed) on first use. IPA
+bypass calls do not download it.
 
 ### Swift
 
@@ -83,6 +95,11 @@ let enWav = try await english.synthesize(text: "Hello from FluidAudio!")
 let mandarin = KokoroAneManager(variant: .mandarin)
 try await mandarin.initialize()
 let zhWav = try await mandarin.synthesize(text: "你好世界")
+
+// Japanese — OpenJTalk resolves contextual kanji readings before IPA mapping.
+let japanese = KokoroAneManager(variant: .japanese)
+try await japanese.initialize()
+let jaWav = try await japanese.synthesize(text: "今日中に返します。")
 ```
 
 ### Per-stage timings
@@ -105,6 +122,9 @@ let enWav = try await english.synthesizeFromPhonemes("həˈloʊ wɝld")
 // Mandarin: pre-computed Bopomofo + tone digits matching the
 // `ANE-zh/vocab.json` token set.
 let zhWav = try await mandarin.synthesizeFromPhonemes("ㄋㄧ2ㄏㄠ3")
+
+// Japanese: pre-computed IPA remains supported.
+let jaWav = try await japanese.synthesizeFromPhonemes("aɾʲiɡatoː")
 ```
 
 Useful when you've already phonemized upstream.
@@ -114,6 +134,7 @@ Useful when you've already phonemized upstream.
 ```
 English:   text → G2P (CoreML BART) → IPA → vocab.json → token ids
 Mandarin:  text → MandarinG2P (dict + sandhi) → Bopomofo → vocab.json → token ids
+Japanese:  text → OpenJTalk (NAIST-JDIC) → Kokoro IPA → vocab.json → token ids
                                                                           │
         ┌─────────────────────────────────────────────────────────────────┘
         ▼
@@ -205,6 +226,34 @@ fallback, POS-aware tone sandhi, neural polyphone disambiguation
 viable upgrades — the current pipeline trades them for a zero-network
 ~10 MB footprint that handles short conversational text well.
 
+## Japanese G2P
+
+The Japanese frontend uses OpenJTalk 1.11 through the VOICEVOX Core C API.
+OpenJTalk performs morphological analysis and contextual kanji reading, so
+compounds such as `今日中` resolve to `キョージュー` instead of treating
+`今日` as the greeting reading `コンニチ`. The resolved moras are mapped to
+the same IPA alphabet used by Misaki's Cutlet frontend and the `ANE-ja`
+acoustic model. Pitch-marker characters are deliberately not appended because
+they are absent from the model vocabulary.
+
+The analysis groups moras by accent phrase, so particles attach to the
+preceding word (`kʲoːβa` where Misaki writes `kʲoː βa`); the phoneme
+sequence is the same. VOICEVOX renders both a long vowel and a vowel-initial
+particle as a repeated vowel mora, so the frontend analyzes the object
+particle を separately (`日本語を` → `ɲihoŋɡo o`, not `ɲihoŋɡoː`). The same
+ambiguity remains for へ and は after a word ending in the same vowel
+(`家へ` → `ieː`), which are far rarer; pre-computed IPA through
+`synthesizeFromPhonemes` is the escape hatch. Latin letters are read by
+OpenJTalk (`AI` → `eːai`) where Misaki passes them through unphonemized.
+Round trip through the Japanese ASR model (`transcribe --model-version
+tdt-ja`) returns the four documentation sentences verbatim.
+
+The runtime is linked by the default Swift 6.2 `JapaneseTextProcessing` trait.
+Apps that do not use Japanese TTS can opt out with package `traits`; Japanese
+plain-text calls then fail explicitly, while pre-computed IPA bypass remains
+available. The dictionary archive is pinned by byte count and SHA-256 and is
+expanded through a traversal-safe in-process tar.gz reader on macOS and iOS.
+
 ## Limits
 
 - **Phonemes:** ≤ 510 IPA / Bopomofo chars per call (ALBERT context = 512
@@ -284,8 +333,11 @@ segfault on the CPU-tail route).
 
 - HuggingFace (English): [`FluidInference/kokoro-82m-coreml/ANE/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE)
 - HuggingFace (Mandarin): [`FluidInference/kokoro-82m-coreml/ANE-zh/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE-zh)
+- HuggingFace (Japanese): [`FluidInference/kokoro-82m-coreml/ANE-ja/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE-ja)
 - Upstream PyTorch (English): [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
 - Upstream PyTorch (Mandarin): [hexgrad/Kokoro-82M-v1.1-zh](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh)
 - Mandarin G2P reference: [hexgrad/misaki](https://github.com/hexgrad/misaki) (`zh_frontend.py`, `tone_sandhi.py`)
+- Japanese reading frontend: [OpenJTalk 1.11.1](https://github.com/r9y9/open_jtalk/releases/tag/v1.11.1)
+- Japanese mora mapping reference: [hexgrad/misaki](https://github.com/hexgrad/misaki) (`cutlet.py`)
 - Conversion script: [mobius/models/tts/kokoro/laishere-coreml](https://github.com/FluidInference/mobius/tree/main/models/tts/kokoro/laishere-coreml)
 - Original CoreML fork: [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml)

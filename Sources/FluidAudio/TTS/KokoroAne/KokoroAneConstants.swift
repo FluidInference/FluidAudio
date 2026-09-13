@@ -157,6 +157,25 @@ public enum KokoroAneConstants {
     /// Remote artefact filenames (mirrors the local names — no rename).
     public static let g2pwVocabRemoteFile = "vocab.txt"
     public static let g2pwPolyphonicCharsRemoteFile = "POLYPHONIC_CHARS.txt"
+
+    // MARK: - Japanese OpenJTalk frontend
+
+    /// Local directory containing OpenJTalk's UTF-8 NAIST-JDIC dictionary.
+    public static let japaneseG2PSubdir = "g2p/open_jtalk_dic_utf_8-1.11"
+
+    /// Pinned upstream dictionary archive. Kept separate from the Kokoro
+    /// weights so the 103 MB expanded dictionary is downloaded only when a
+    /// caller passes plain Japanese text.
+    public static let japaneseDictionaryArchiveURL = URL(
+        string:
+            "https://github.com/r9y9/open_jtalk/releases/download/v1.11.1/"
+            + "open_jtalk_dic_utf_8-1.11.tar.gz"
+    )!
+
+    public static let japaneseDictionaryArchiveFile = "open_jtalk_dic_utf_8-1.11.tar.gz"
+    public static let japaneseDictionaryArchiveBytes = 23_646_843
+    public static let japaneseDictionaryArchiveSHA256 =
+        "fe6ba0e43542cef98339abdffd903e062008ea170b04e7e2a35da805902f382a"
 }
 
 /// Language variant of the laishere/kokoro 7-stage CoreML chain.
@@ -170,12 +189,11 @@ public enum KokoroAneConstants {
 /// |--------------|------------|---------------|-------------------------------|------------------------------|
 /// | `.english`   | `ANE/`     | `af_heart`    | flat (`<voice>.bin`)          | `KokoroAneEnglishPhonemizer` |
 /// | `.mandarin`  | `ANE-zh/`  | `zf_001`      | nested (`voices/<voice>.bin`) | `MandarinG2P`                |
-/// | `.japanese`  | `ANE-ja/`  | `jf_alpha`    | nested (`voices/<voice>.bin`) | none — phoneme bypass only   |
+/// | `.japanese`  | `ANE-ja/`  | `jf_alpha`    | nested (`voices/<voice>.bin`) | OpenJTalk → IPA              |
 ///
-/// The Japanese variant ships **no in-process text → phoneme frontend**.
-/// `synthesize(text:)` / `phonemes(for:)` throw for `.japanese`; callers feed
-/// pre-computed IPA through ``KokoroAneManager/synthesizeFromPhonemes(_:voice:speed:)``
-/// (the bypass path the 7-stage chain already supports). See issue #698.
+/// The Japanese variant accepts plain kana/kanji through its lazy OpenJTalk
+/// frontend. Pre-computed IPA remains supported through
+/// ``KokoroAneManager/synthesizeFromPhonemes(_:voice:speed:)``. See #698/#914.
 public enum KokoroAneVariant: String, CaseIterable, Sendable {
     case english
     case mandarin

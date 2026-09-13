@@ -234,9 +234,10 @@ public actor KokoroAneManager {
     ///
     /// English: Misaki-lexicon-first with BART G2P fallback. Mandarin:
     /// the ``MandarinG2P`` pipeline for Hanzi input, pass-through for
-    /// strings that already look like phonemes. Japanese: no text frontend
-    /// — throws (use ``synthesizeFromPhonemes(_:voice:speed:)`` with
-    /// pre-computed IPA, issue #698).
+    /// strings that already look like phonemes. Japanese: NeMo written-form
+    /// normalization followed by OpenJTalk contextual reading and a
+    /// Kokoro-compatible mora-to-IPA mapping. Inputs without Japanese script
+    /// remain a phoneme pass-through for compatibility with issue #698.
     public func phonemes(for text: String) async throws -> String {
         switch variant {
         case .english:
@@ -268,13 +269,13 @@ public actor KokoroAneManager {
                 return normalized
             }
         case .japanese:
-            // The Japanese variant ships no in-process kana/kanji → IPA
-            // frontend. Text synthesis isn't supported; callers feed
-            // pre-computed IPA via synthesizeFromPhonemes(_:voice:speed:),
-            // which bypasses phonemes(for:) entirely.
-            throw KokoroAneError.inputProcessingFailed(
-                "Japanese variant has no text G2P frontend; call "
-                    + "synthesizeFromPhonemes(_:voice:speed:) with pre-computed IPA (see #698).")
+            var normalized = NemoTextNormalizer.normalize(text, language: .japanese)
+            normalized = normalized.precomposedStringWithCompatibilityMapping
+            if !Self.containsJapaneseScript(normalized) {
+                return normalized
+            }
+            let g2p = try await store.japaneseG2PPipeline()
+            return try await g2p.phonemize(normalized)
         }
     }
 
@@ -398,6 +399,18 @@ public actor KokoroAneManager {
                 normalize: false)
         } catch {
             throw KokoroAneError.audioConversionFailed(error.localizedDescription)
+        }
+    }
+
+    private static func containsJapaneseScript(_ text: String) -> Bool {
+        text.unicodeScalars.contains { scalar in
+            switch scalar.value {
+            case 0x3040...0x30FF, 0x31F0...0x31FF, 0x3400...0x4DBF, 0x4E00...0x9FFF,
+                0xF900...0xFAFF:
+                return true
+            default:
+                return false
+            }
         }
     }
 }

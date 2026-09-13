@@ -3,11 +3,11 @@ import XCTest
 
 @testable import FluidAudio
 
-/// Config tests for the `.japanese` KokoroAne variant (issue #698).
+/// Config tests for the `.japanese` KokoroAne variant (issues #698 and #914).
 ///
 /// The Japanese variant reuses the language-agnostic 7-stage chain and the
-/// `synthesizeFromPhonemes` bypass; it ships no text frontend. These tests
-/// pin the wiring (HF paths, default voice, required-file set, routing) so a
+/// `synthesizeFromPhonemes` bypass and the lazy OpenJTalk text frontend. These
+/// tests pin the wiring (HF paths, default voice, required-file set, routing) so a
 /// regression surfaces without needing the (separately uploaded) `ANE-ja/`
 /// CoreML weights.
 final class KokoroAneJapaneseVariantTests: XCTestCase {
@@ -38,7 +38,7 @@ final class KokoroAneJapaneseVariantTests: XCTestCase {
         XCTAssertTrue(required.contains(ModelNames.KokoroAne.vocab))
         XCTAssertTrue(required.contains(ModelNames.KokoroAne.defaultVoiceFileJa))
         XCTAssertEqual(ModelNames.KokoroAne.defaultVoiceFileJa, "voices/jf_alpha.bin")
-        // No Mandarin g2pW bundle — Japanese has no in-process G2P.
+        // OpenJTalk is a package runtime + lazy dictionary, not a CoreML model.
         XCTAssertFalse(required.contains(ModelNames.KokoroAne.g2pwModelZh))
         XCTAssertEqual(required.count, 9)
     }
@@ -49,20 +49,19 @@ final class KokoroAneJapaneseVariantTests: XCTestCase {
             ModelNames.KokoroAne.requiredModelsJa)
     }
 
-    /// The Japanese variant has no text→phoneme frontend; `phonemes(for:)`
-    /// must throw rather than silently mis-synthesize. (Phoneme bypass via
-    /// `synthesizeFromPhonemes` does not route through this method.)
-    func testTextFrontendThrows() async {
+    func testPrecomputedPhonemesRemainPassThrough() async throws {
         let manager = KokoroAneManager(variant: .japanese)
-        do {
-            _ = try await manager.phonemes(for: "ありがとう")
-            XCTFail("expected phonemes(for:) to throw on the Japanese variant")
-        } catch let error as KokoroAneError {
-            guard case .inputProcessingFailed = error else {
-                return XCTFail("expected inputProcessingFailed, got \(error)")
-            }
-        } catch {
-            XCTFail("expected KokoroAneError.inputProcessingFailed, got \(error)")
-        }
+        let ipa = "aɾʲiɡatoː"
+        let result = try await manager.phonemes(for: ipa)
+        XCTAssertEqual(result, ipa)
+    }
+
+    func testOpenJTalkDictionaryPin() {
+        XCTAssertEqual(KokoroAneConstants.japaneseDictionaryArchiveBytes, 23_646_843)
+        XCTAssertEqual(
+            KokoroAneConstants.japaneseDictionaryArchiveSHA256,
+            "fe6ba0e43542cef98339abdffd903e062008ea170b04e7e2a35da805902f382a")
+        XCTAssertTrue(
+            KokoroAneConstants.japaneseDictionaryArchiveURL.absoluteString.contains("v1.11.1"))
     }
 }

@@ -11,6 +11,16 @@ public enum KokoroAneResourceDownloader {
     /// `<App caches>/fluidaudio/Models/` on iOS.
     public static let modelsSubdirectory = "Models"
 
+    /// Resolve a variant's cache directory without downloading its CoreML
+    /// chain. Auxiliary frontends use this to remain independently lazy.
+    static func repositoryDirectory(
+        variant: KokoroAneVariant,
+        directory: URL? = nil
+    ) throws -> URL {
+        let modelsDirectory = try directory ?? defaultModelsDirectory()
+        return modelsDirectory.appendingPathComponent(variant.repo.folderName)
+    }
+
     /// Ensure all required mlmodelc + vocab + default voice files are present.
     /// Returns the repo directory containing them.
     @discardableResult
@@ -21,7 +31,7 @@ public enum KokoroAneResourceDownloader {
     ) async throws -> URL {
         let modelsDirectory = try directory ?? defaultModelsDirectory()
         let repo = variant.repo
-        let repoDir = modelsDirectory.appendingPathComponent(repo.folderName)
+        let repoDir = try repositoryDirectory(variant: variant, directory: modelsDirectory)
 
         let required: Set<String>
         switch variant {
@@ -112,6 +122,29 @@ public enum KokoroAneResourceDownloader {
         }
 
         return g2pDir
+    }
+
+    /// Ensure OpenJTalk's UTF-8 NAIST-JDIC dictionary is installed for the
+    /// Japanese text frontend. The pinned upstream archive is downloaded and
+    /// SHA-256 verified, then extracted through a path-safe streaming reader.
+    /// The 103 MB dictionary is fetched only when plain Japanese text is used.
+    @discardableResult
+    public static func ensureJapaneseG2P(
+        repoDirectory: URL
+    ) async throws -> URL {
+        try await JapaneseDictionaryInstaller.shared.ensureInstalled(
+            repoDirectory: repoDirectory
+        ) { remoteURL, destinationURL in
+            _ = try await AssetDownloader.ensure(
+                .init(
+                    description: "OpenJTalk Japanese dictionary",
+                    remoteURL: remoteURL,
+                    destinationURL: destinationURL,
+                    transferMode: .file()
+                ),
+                logger: logger
+            )
+        }
     }
 
     /// Best-effort fetch of the jieba HMM tables (start / trans / emit)
