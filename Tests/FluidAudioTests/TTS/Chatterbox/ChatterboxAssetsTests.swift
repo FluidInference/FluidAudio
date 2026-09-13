@@ -169,6 +169,93 @@ final class ChatterboxAssetsTests: XCTestCase {
             try ChatterboxTables.validate(mtlTables(speechPosRows: 10), voice: goodVoice))
     }
 
+    // MARK: - Tokenizer id bounds
+
+    private func writeMtlTokenizer(vocab: String, addedTokens: String) throws -> URL {
+        let json = """
+            {"model": {"vocab": \(vocab), "merges": []},
+             "added_tokens": \(addedTokens)}
+            """
+        let url = tmpDir.appendingPathComponent("tokenizer.json")
+        try Data(json.utf8).write(to: url)
+        return url
+    }
+
+    func testMtlTokenizerRejectsOutOfRangeIds() throws {
+        // Oversized vocab id: passes parsing, must fail validate against
+        // the embedding rows (textEmb.row(999999) would trap).
+        let big = try ChatterboxTokenizer(
+            tokenizerJsonURL: writeMtlTokenizer(
+                vocab: #"{"[UNK]": 0, "a": 999999}"#, addedTokens: "[]"))
+        XCTAssertThrowsError(try big.validate(embeddingRows: 2454))
+
+        // Negative added-token id.
+        let negative = try ChatterboxTokenizer(
+            tokenizerJsonURL: writeMtlTokenizer(
+                vocab: #"{"[UNK]": 0}"#,
+                addedTokens: #"[{"content": "[en]", "id": -1}]"#))
+        XCTAssertThrowsError(try negative.validate(embeddingRows: 2454))
+
+        // In-range ids pass.
+        let good = try ChatterboxTokenizer(
+            tokenizerJsonURL: writeMtlTokenizer(
+                vocab: #"{"[UNK]": 0, "a": 5}"#,
+                addedTokens: #"[{"content": "[en]", "id": 10}]"#))
+        XCTAssertNoThrow(try good.validate(embeddingRows: 2454))
+    }
+
+    func testMtlTokenizerRejectsNonIntegerVocabEntries() throws {
+        let url = try writeMtlTokenizer(
+            vocab: #"{"[UNK]": 0, "a": "not-a-number"}"#, addedTokens: "[]")
+        XCTAssertThrowsError(try ChatterboxTokenizer(tokenizerJsonURL: url))
+    }
+
+    private func writeNanoTokenizer(
+        vocab: String, addedTokens: String
+    ) throws
+        -> (vocab: URL, merges: URL, added: URL)
+    {
+        let vocabURL = tmpDir.appendingPathComponent("vocab.json")
+        let mergesURL = tmpDir.appendingPathComponent("merges.txt")
+        let addedURL = tmpDir.appendingPathComponent("added_tokens.json")
+        try Data(vocab.utf8).write(to: vocabURL)
+        try Data("#version: 0.2\n".utf8).write(to: mergesURL)
+        try Data(addedTokens.utf8).write(to: addedURL)
+        return (vocabURL, mergesURL, addedURL)
+    }
+
+    func testNanoTokenizerRejectsOutOfRangeIds() throws {
+        let (v1, m1, a1) = try writeNanoTokenizer(
+            vocab: #"{"a": 999999}"#, addedTokens: "{}")
+        let big = try ChatterboxNanoTokenizer(
+            vocabURL: v1, mergesURL: m1, addedTokensURL: a1)
+        XCTAssertThrowsError(try big.validate(embeddingRows: 50276))
+
+        let (v2, m2, a2) = try writeNanoTokenizer(
+            vocab: #"{"a": 5}"#, addedTokens: #"{"[laugh]": -1}"#)
+        let negative = try ChatterboxNanoTokenizer(
+            vocabURL: v2, mergesURL: m2, addedTokensURL: a2)
+        XCTAssertThrowsError(try negative.validate(embeddingRows: 50276))
+
+        let (v3, m3, a3) = try writeNanoTokenizer(
+            vocab: #"{"a": 5}"#, addedTokens: #"{"[laugh]": 50275}"#)
+        let good = try ChatterboxNanoTokenizer(
+            vocabURL: v3, mergesURL: m3, addedTokensURL: a3)
+        XCTAssertNoThrow(try good.validate(embeddingRows: 50276))
+    }
+
+    func testNanoTokenizerRejectsNonIntegerIds() throws {
+        let (v1, m1, a1) = try writeNanoTokenizer(
+            vocab: #"{"a": 1.5}"#, addedTokens: "{}")
+        XCTAssertThrowsError(
+            try ChatterboxNanoTokenizer(vocabURL: v1, mergesURL: m1, addedTokensURL: a1))
+
+        let (v2, m2, a2) = try writeNanoTokenizer(
+            vocab: #"{"a": 5}"#, addedTokens: #"{"[laugh]": "nope"}"#)
+        XCTAssertThrowsError(
+            try ChatterboxNanoTokenizer(vocabURL: v2, mergesURL: m2, addedTokensURL: a2))
+    }
+
     // MARK: - Safetensors header hardening
 
     /// Build a syntactically valid safetensors file from a JSON header

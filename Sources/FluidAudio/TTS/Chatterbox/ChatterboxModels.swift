@@ -78,6 +78,7 @@ struct ChatterboxModels: Sendable {
             let voice = try ChatterboxTables.loadVoice(
                 voiceURL: repoDir.appendingPathComponent(ModelNames.Chatterbox.defaultVoiceFile))
             try ChatterboxTables.validate(tables, voice: voice)
+            try tokenizer.validate(embeddingRows: tables.textEmb.rows)
             return (tokenizer, tables, voice)
         }
 

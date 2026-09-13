@@ -80,6 +80,7 @@ struct ChatterboxNanoModels: Sendable {
                 voiceURL: repoDir.appendingPathComponent(
                     ModelNames.ChatterboxNano.defaultVoiceFile))
             try ChatterboxTables.validate(tables, voice: voice)
+            try tokenizer.validate(embeddingRows: tables.textEmb.rows)
             return (tokenizer, tables, voice)
         }
 

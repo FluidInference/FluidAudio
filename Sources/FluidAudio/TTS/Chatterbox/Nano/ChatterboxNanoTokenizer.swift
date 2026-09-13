@@ -39,7 +39,11 @@ final class ChatterboxNanoTokenizer: Sendable {
         }
         var vocab = [String: Int](minimumCapacity: vocabAny.count)
         for (token, id) in vocabAny {
-            if let id = id as? Int { vocab[token] = id }
+            guard let id = id as? Int else {
+                throw ChatterboxError.malformedAsset(
+                    "\(vocabURL.lastPathComponent): non-integer id for '\(token)'")
+            }
+            vocab[token] = id
         }
         self.vocab = vocab
 
@@ -62,12 +66,30 @@ final class ChatterboxNanoTokenizer: Sendable {
         }
         var added: [(String, Int)] = []
         for (content, id) in addedAny {
-            if let id = id as? Int { added.append((content, id)) }
+            guard let id = id as? Int else {
+                throw ChatterboxError.malformedAsset(
+                    "\(addedTokensURL.lastPathComponent): non-integer id for '\(content)'")
+            }
+            added.append((content, id))
         }
         self.addedTokens = added.sorted { $0.0.count > $1.0.count }
 
         self.splitRegex = try NSRegularExpression(pattern: Self.gpt2SplitPattern)
         self.byteChars = Self.bytesToUnicode()
+    }
+
+    /// Every id this tokenizer can emit indexes `textEmb` with an unchecked
+    /// row slice — reject out-of-range ids at load, before cache recovery
+    /// is bypassed.
+    func validate(embeddingRows: Int) throws {
+        for (token, id) in vocab where id < 0 || id >= embeddingRows {
+            throw ChatterboxError.malformedAsset(
+                "vocab id \(id) for '\(token)' outside 0..<\(embeddingRows)")
+        }
+        for (content, id) in addedTokens where id < 0 || id >= embeddingRows {
+            throw ChatterboxError.malformedAsset(
+                "added-token id \(id) for '\(content)' outside 0..<\(embeddingRows)")
+        }
     }
 
     /// Upstream `tts_turbo.punc_norm`: capitalization, whitespace collapse,

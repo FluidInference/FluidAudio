@@ -34,16 +34,24 @@ final class ChatterboxTokenizer: Sendable {
 
         var vocab = [String: Int](minimumCapacity: vocabAny.count)
         for (token, id) in vocabAny {
-            if let id = id as? Int { vocab[token] = id }
+            guard let id = id as? Int else {
+                throw ChatterboxError.malformedAsset(
+                    "tokenizer json: non-integer id for vocab entry '\(token)'")
+            }
+            vocab[token] = id
         }
         self.vocab = vocab
 
         var added: [(String, Int)] = []
         if let addedAny = root["added_tokens"] as? [[String: Any]] {
             for entry in addedAny {
-                if let content = entry["content"] as? String, let id = entry["id"] as? Int {
-                    added.append((content, id))
+                guard let content = entry["content"] as? String,
+                    let id = entry["id"] as? Int
+                else {
+                    throw ChatterboxError.malformedAsset(
+                        "tokenizer json: malformed added_tokens entry")
                 }
+                added.append((content, id))
             }
         }
         self.addedTokens = added.sorted { $0.0.count > $1.0.count }
@@ -62,6 +70,23 @@ final class ChatterboxTokenizer: Sendable {
         self.unkId = vocab["[UNK]"] ?? 1
         // HF `Whitespace` pre-tokenizer: `\w+|[^\w\s]+` (Unicode-aware).
         self.splitRegex = try NSRegularExpression(pattern: "[\\w]+|[^\\w\\s]+")
+    }
+
+    /// Every id this tokenizer can emit indexes `textEmb` with an unchecked
+    /// row slice — reject out-of-range ids at load, before cache recovery
+    /// is bypassed.
+    func validate(embeddingRows: Int) throws {
+        for (token, id) in vocab where id < 0 || id >= embeddingRows {
+            throw ChatterboxError.malformedAsset(
+                "tokenizer vocab id \(id) for '\(token)' outside 0..<\(embeddingRows)")
+        }
+        for (content, id) in addedTokens where id < 0 || id >= embeddingRows {
+            throw ChatterboxError.malformedAsset(
+                "tokenizer added-token id \(id) for '\(content)' outside 0..<\(embeddingRows)")
+        }
+        guard unkId >= 0 && unkId < embeddingRows else {
+            throw ChatterboxError.malformedAsset("tokenizer [UNK] id \(unkId) out of range")
+        }
     }
 
     /// Upstream `punc_norm`: capitalization, whitespace collapse, LLM-punc
