@@ -13,6 +13,8 @@ enum SentencePieceProto {
     struct Piece: Sendable {
         let piece: String
         let score: Float
+        /// `SentencePiece.type`: 1 normal, 2 unknown, 3 control, 4 user-defined, 5 unused, 6 byte.
+        let type: Int
     }
 
     enum ParseError: Error {
@@ -70,13 +72,15 @@ enum SentencePieceProto {
         var offset = start
         var piece: String?
         var score: Float = 0
+        var type = 1
 
         while offset < end {
             let (fieldNumber, wireType) = try readTag(bytes: bytes, count: end, offset: &offset)
 
             switch wireType {
             case 0:
-                _ = try readVarint(bytes: bytes, count: end, offset: &offset)
+                let value = try readVarint(bytes: bytes, count: end, offset: &offset)
+                if fieldNumber == 3 { type = Int(value) }
             case 1:
                 offset += 8
                 guard offset <= end else { throw ParseError.unexpectedEnd }
@@ -107,7 +111,7 @@ enum SentencePieceProto {
             }
         }
 
-        return Piece(piece: piece ?? "", score: score)
+        return Piece(piece: piece ?? "", score: score, type: type)
     }
 
     private static func readTag(

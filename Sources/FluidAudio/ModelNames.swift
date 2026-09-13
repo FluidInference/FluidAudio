@@ -77,6 +77,12 @@ public enum Repo: String, CaseIterable, Sendable {
     /// recipe. Ships four `.mlmodelc` bundles + `tts.json` +
     /// `unicode_indexer.json` at the repo root.
     case supertonic3 = "FluidInference/supertonic-3-coreml"
+    /// MOSS-TTS-Nano (OpenMOSS) — 0.1B multilingual streaming TTS with zero-shot
+    /// voice cloning, 48 kHz stereo. Four streaming-path `.mlmodelc` bundles
+    /// (Prefill / Step / Frame / CodecStep) + `config.json` + `tokenizer.model` at
+    /// the repo root, fp32 `CodecEncoder` for voice cloning, `voices/*.json` presets.
+    /// Conversion: mobius `models/tts/moss-tts-nano/coreml`.
+    case mossTtsNano = "FluidInference/moss-tts-nano-coreml"
     /// NeuTTS-2E emotional English TTS (Qwen3 236M backbone + NeuCodec
     /// decoder). Compiled `.mlmodelc` bundles + `tokenizer.json` +
     /// `samples/<speaker>.json` reference codes at the repo root; the
@@ -178,6 +184,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "inflect-v2-coreml/micro"
         case .inflectNano:
             return "inflect-v2-coreml/nano"
+        case .mossTtsNano:
+            return "moss-tts-nano-coreml"
         }
     }
 
@@ -1204,6 +1212,34 @@ public enum ModelNames {
     /// Supertonic-3 multilingual TTS — 4 `.mlmodelc` bundles + 2 companion
     /// JSON files. File names match the HuggingFace tree at
     /// `FluidInference/supertonic-3-coreml/`.
+    public enum MossTtsNano {
+        public static let prefill = "MossNano-Prefill-T512-M1024-fp16"
+        public static let step = "MossNano-Step-M1024-fp16"
+        public static let frame = "MossNano-Frame-fp16"
+        public static let codecStep = "MossNano-CodecStep-fp16"
+        public static let codecDecoder = "MossNano-CodecDecoder-fp16"
+        public static let codecEncoder = "MossNano-CodecEncoder-fp32"
+
+        public static let prefillFile = prefill + ".mlmodelc"
+        public static let stepFile = step + ".mlmodelc"
+        public static let frameFile = frame + ".mlmodelc"
+        public static let codecStepFile = codecStep + ".mlmodelc"
+        /// Flexible-length batch decoder (≤ 125 frames); not used by the Swift streaming path.
+        public static let codecDecoderFile = codecDecoder + ".mlmodelc"
+        /// fp32 prompt encoder for custom voice cloning; downloaded on demand.
+        public static let codecEncoderFile = codecEncoder + ".mlmodelc"
+
+        public static let configFile = "config.json"
+        public static let tokenizerFile = "tokenizer.model"
+        public static let voicesSubdir = "voices"
+
+        /// Streaming-path bundles loaded by `MossTtsNanoModelStore`.
+        public static let requiredModels: Set<String> = [prefillFile, stepFile, frameFile, codecStepFile]
+
+        /// Models + companion files fetched on first use.
+        public static let requiredFiles: Set<String> = requiredModels.union([configFile, tokenizerFile])
+    }
+
     public enum Supertonic3 {
         public static let textEncoder = "TextEncoder"
         public static let durationPredictor = "DurationPredictor"
@@ -1630,6 +1666,8 @@ public enum ModelNames {
             return ModelNames.LuxTts.requiredFiles(variant: variant)
         case .inflectMicro, .inflectNano:
             return ModelNames.Inflect.requiredModels
+        case .mossTtsNano:
+            return ModelNames.MossTtsNano.requiredFiles
         }
     }
 }
