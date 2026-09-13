@@ -69,13 +69,33 @@ struct ChatterboxModels: Sendable {
             contentsOf: repoDir.appendingPathComponent(ModelNames.Chatterbox.vocoderFile),
             configuration: makeConfig(.cpuAndGPU))
 
-        let tokenizer = try ChatterboxTokenizer(
-            tokenizerJsonURL: repoDir.appendingPathComponent(
-                ModelNames.Chatterbox.tokenizerFile))
-        let tables = try ChatterboxTables.load(
-            tablesURL: repoDir.appendingPathComponent(ModelNames.Chatterbox.tablesFile))
-        let voice = try ChatterboxTables.loadVoice(
-            voiceURL: repoDir.appendingPathComponent(ModelNames.Chatterbox.defaultVoiceFile))
+        func loadAux() throws -> (ChatterboxTokenizer, ChatterboxTables, ChatterboxTables.Voice) {
+            let tokenizer = try ChatterboxTokenizer(
+                tokenizerJsonURL: repoDir.appendingPathComponent(
+                    ModelNames.Chatterbox.tokenizerFile))
+            let tables = try ChatterboxTables.load(
+                tablesURL: repoDir.appendingPathComponent(ModelNames.Chatterbox.tablesFile))
+            let voice = try ChatterboxTables.loadVoice(
+                voiceURL: repoDir.appendingPathComponent(ModelNames.Chatterbox.defaultVoiceFile))
+            return (tokenizer, tables, voice)
+        }
+
+        // Cache checks are existence-only, so a truncated/corrupt aux file
+        // would otherwise fail every launch — drop and re-fetch once.
+        let tokenizer: ChatterboxTokenizer
+        let tables: ChatterboxTables
+        let voice: ChatterboxTables.Voice
+        do {
+            (tokenizer, tables, voice) = try loadAux()
+        } catch {
+            logger.warning("Aux assets failed to load (\(error)); re-fetching")
+            for relative in ModelNames.Chatterbox.auxFiles {
+                try? FileManager.default.removeItem(
+                    at: repoDir.appendingPathComponent(relative))
+            }
+            try await ensureAuxAssets(repoDir: repoDir)
+            (tokenizer, tables, voice) = try loadAux()
+        }
 
         return ChatterboxModels(
             prefill: prefill,

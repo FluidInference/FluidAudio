@@ -92,20 +92,25 @@ private struct SafetensorsFile {
         let headerLen = data.withUnsafeBytes { raw in
             raw.loadUnaligned(fromByteOffset: 0, as: UInt64.self).littleEndian
         }
-        let headerEnd = 8 + Int(headerLen)
-        guard headerEnd <= data.count,
+        // Checked arithmetic throughout: a corrupt header must throw, never
+        // trap (Int overflow, reversed ranges) or read out of bounds.
+        guard let headerLenInt = Int(exactly: headerLen), headerLenInt <= data.count - 8,
             let header = try JSONSerialization.jsonObject(
-                with: data.subdata(in: 8..<headerEnd)) as? [String: Any]
+                with: data.subdata(in: 8..<(8 + headerLenInt))) as? [String: Any]
         else {
             throw ChatterboxError.malformedAsset("\(url.lastPathComponent): bad JSON header")
         }
+        let headerEnd = 8 + headerLenInt
+        let payloadSize = data.count - headerEnd
 
         var entries = [String: Entry]()
         for (name, value) in header where name != "__metadata__" {
             guard let obj = value as? [String: Any],
                 let dtype = obj["dtype"] as? String,
                 let shape = obj["shape"] as? [Int],
-                let offsets = obj["data_offsets"] as? [Int], offsets.count == 2
+                shape.allSatisfy({ $0 >= 0 }),
+                let offsets = obj["data_offsets"] as? [Int], offsets.count == 2,
+                offsets[0] >= 0, offsets[0] <= offsets[1], offsets[1] <= payloadSize
             else {
                 throw ChatterboxError.malformedAsset("\(url.lastPathComponent): entry \(name)")
             }
@@ -140,6 +145,11 @@ private struct SafetensorsFile {
         let entry = try entry(name)
         let bytes = data.subdata(
             in: (dataStart + entry.range.lowerBound)..<(dataStart + entry.range.upperBound))
+        let elementSize = entry.dtype == "F32" ? 4 : 2
+        guard bytes.count % elementSize == 0 else {
+            throw ChatterboxError.malformedAsset(
+                "tensor '\(name)': \(bytes.count) bytes not \(elementSize)-aligned")
+        }
         switch entry.dtype {
         case "F32":
             let count = bytes.count / 4
@@ -173,6 +183,10 @@ private struct SafetensorsFile {
         }
         let bytes = data.subdata(
             in: (dataStart + entry.range.lowerBound)..<(dataStart + entry.range.upperBound))
+        guard bytes.count % 4 == 0 else {
+            throw ChatterboxError.malformedAsset(
+                "tensor '\(name)': \(bytes.count) bytes not 4-aligned")
+        }
         let count = bytes.count / 4
         var out = [Int32](repeating: 0, count: count)
         bytes.withUnsafeBytes { raw in

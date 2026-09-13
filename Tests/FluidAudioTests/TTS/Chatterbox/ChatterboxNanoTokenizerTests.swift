@@ -66,6 +66,15 @@ final class ChatterboxNanoTokenizerTests: XCTestCase {
             [1026, 338, 513, 13, 1415, 11, 2125, 470, 340, 30, 220, 20401, 220, 9029, 13])
     }
 
+    func testPuncNormCollapsesAllWhitespace() {
+        // Python str.split() collapses tabs and newlines, not just spaces —
+        // a surviving newline would reach the BPE and emit a Ċ token.
+        XCTAssertEqual(
+            ChatterboxNanoTokenizer.puncNorm("Hello\nworld\tagain"), "Hello world again.")
+        XCTAssertEqual(
+            ChatterboxNanoTokenizer.puncNorm("Line one.\n\nLine two."), "Line one. Line two.")
+    }
+
     func testPuncNormTurboVariant() {
         // Capitalization + trailing full stop.
         XCTAssertEqual(

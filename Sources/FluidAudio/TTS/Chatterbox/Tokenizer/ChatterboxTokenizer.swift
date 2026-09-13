@@ -72,7 +72,8 @@ final class ChatterboxTokenizer: Sendable {
         if let first = text.first, first.isLowercase {
             text = first.uppercased() + text.dropFirst()
         }
-        text = text.split(separator: " ").joined(separator: " ")
+        // Python str.split(): any whitespace (tabs, newlines, …), collapsed.
+        text = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         let replacements: [(String, String)] = [
             ("...", ", "), ("…", ", "), (":", ","), (" - ", ", "), (";", ", "),
             ("—", "-"), ("–", "-"), (" ,", ","), ("\u{201C}", "\""), ("\u{201D}", "\""),
@@ -158,7 +159,11 @@ final class ChatterboxTokenizer: Sendable {
     }
 
     private func bpe(_ word: String) -> [Int] {
-        var parts = word.map { String($0) }
+        // Unicode scalars, NOT Characters: after NFKD a decomposed pair like
+        // "u" + U+0308 is one grapheme cluster, but the reference BPE (and
+        // the shipped vocabulary) operate per scalar — clustering would send
+        // every accented character to [UNK].
+        var parts = word.unicodeScalars.map(String.init)
         guard !parts.isEmpty else { return [] }
 
         while parts.count > 1 {

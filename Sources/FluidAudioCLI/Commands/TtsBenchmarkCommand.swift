@@ -719,6 +719,15 @@ public enum TtsBenchmarkCommand {
             logger.error("chatterbox backend requires macOS 15+ (MLState KV cache)")
             exit(1)
         }
+        // The Chatterbox loaders pin every model to .cpuAndGPU (the T3
+        // packages crash on .cpuOnly and the ANE compiler rejects them), so
+        // other presets cannot be honored — warn and report what actually ran.
+        if preset != .default && preset != .cpuAndGpu {
+            logger.warning(
+                "Chatterbox always runs .cpuAndGPU; --compute-units \(preset.cliValue) not supported."
+            )
+        }
+        let appliedPreset = TtsComputeUnitPreset.cpuAndGpu
         let language = resolveChatterboxLanguage(explicit: languageName, corpus: corpusLabel)
         logger.info("Chatterbox language=\(language) voice=default")
 
@@ -739,7 +748,7 @@ public enum TtsBenchmarkCommand {
             voiceLabel: "default",
             corpusLabel: corpusLabel,
             phrases: phrases,
-            preset: preset,
+            preset: appliedPreset,
             coldStartS: coldStartS,
             firstSynthMs: firstSynthMs,
             outputJson: outputJson,
@@ -782,6 +791,12 @@ public enum TtsBenchmarkCommand {
             logger.error("chatterbox-nano backend requires macOS 15+ (MLState KV cache)")
             exit(1)
         }
+        if preset != .default && preset != .cpuAndGpu {
+            logger.warning(
+                "Chatterbox Nano always runs .cpuAndGPU; --compute-units \(preset.cliValue) not supported."
+            )
+        }
+        let appliedPreset = TtsComputeUnitPreset.cpuAndGpu
         logger.info("Chatterbox Nano voice=default")
 
         let manager = ChatterboxNanoManager()
@@ -800,7 +815,7 @@ public enum TtsBenchmarkCommand {
             voiceLabel: "default",
             corpusLabel: corpusLabel,
             phrases: phrases,
-            preset: preset,
+            preset: appliedPreset,
             coldStartS: coldStartS,
             firstSynthMs: firstSynthMs,
             outputJson: outputJson,

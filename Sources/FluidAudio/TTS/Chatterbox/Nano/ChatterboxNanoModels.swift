@@ -68,16 +68,36 @@ struct ChatterboxNanoModels: Sendable {
             contentsOf: repoDir.appendingPathComponent(ModelNames.ChatterboxNano.vocoderFile),
             configuration: makeConfig(.cpuAndGPU))
 
-        let tokenizer = try ChatterboxNanoTokenizer(
-            vocabURL: repoDir.appendingPathComponent(ModelNames.ChatterboxNano.vocabFile),
-            mergesURL: repoDir.appendingPathComponent(ModelNames.ChatterboxNano.mergesFile),
-            addedTokensURL: repoDir.appendingPathComponent(
-                ModelNames.ChatterboxNano.addedTokensFile))
-        let tables = try ChatterboxTables.loadNano(
-            tablesURL: repoDir.appendingPathComponent(ModelNames.ChatterboxNano.tablesFile))
-        let voice = try ChatterboxTables.loadVoice(
-            voiceURL: repoDir.appendingPathComponent(
-                ModelNames.ChatterboxNano.defaultVoiceFile))
+        func loadAux() throws -> (ChatterboxNanoTokenizer, ChatterboxTables.Nano, ChatterboxTables.Voice) {
+            let tokenizer = try ChatterboxNanoTokenizer(
+                vocabURL: repoDir.appendingPathComponent(ModelNames.ChatterboxNano.vocabFile),
+                mergesURL: repoDir.appendingPathComponent(ModelNames.ChatterboxNano.mergesFile),
+                addedTokensURL: repoDir.appendingPathComponent(
+                    ModelNames.ChatterboxNano.addedTokensFile))
+            let tables = try ChatterboxTables.loadNano(
+                tablesURL: repoDir.appendingPathComponent(ModelNames.ChatterboxNano.tablesFile))
+            let voice = try ChatterboxTables.loadVoice(
+                voiceURL: repoDir.appendingPathComponent(
+                    ModelNames.ChatterboxNano.defaultVoiceFile))
+            return (tokenizer, tables, voice)
+        }
+
+        // Cache checks are existence-only, so a truncated/corrupt aux file
+        // would otherwise fail every launch — drop and re-fetch once.
+        let tokenizer: ChatterboxNanoTokenizer
+        let tables: ChatterboxTables.Nano
+        let voice: ChatterboxTables.Voice
+        do {
+            (tokenizer, tables, voice) = try loadAux()
+        } catch {
+            logger.warning("Aux assets failed to load (\(error)); re-fetching")
+            for relative in ModelNames.ChatterboxNano.auxFiles {
+                try? FileManager.default.removeItem(
+                    at: repoDir.appendingPathComponent(relative))
+            }
+            try await ensureAuxAssets(repoDir: repoDir)
+            (tokenizer, tables, voice) = try loadAux()
+        }
 
         return ChatterboxNanoModels(
             prefill: prefill,

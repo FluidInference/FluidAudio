@@ -21,7 +21,43 @@ final class ChatterboxTokenizerTests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    // MARK: - Decomposed characters (fixture vocab, non-skipping)
+
+    /// After NFKD, "ü" is the two scalars `u` + U+0308 but ONE Swift
+    /// Character; the BPE must iterate scalars or every accented character
+    /// collapses to [UNK]. Fixture vocabulary deliberately has no
+    /// precomposed entries, so grapheme-cluster iteration cannot pass.
+    func testDecomposedCharactersTokenizePerScalar() throws {
+        let json = """
+            {
+              "model": {
+                "vocab": {"[UNK]": 0, "u": 10, "\\u0308": 11, "b": 12, "e": 13, "r": 14},
+                "merges": []
+              },
+              "added_tokens": [
+                {"content": "[de]", "id": 100},
+                {"content": "[SPACE]", "id": 101}
+              ]
+            }
+            """
+        let url = tmpDir.appendingPathComponent("tokenizer.json")
+        try json.data(using: .utf8)!.write(to: url)
+        let tokenizer = try ChatterboxTokenizer(tokenizerJsonURL: url)
+
+        let ids = tokenizer.encode("über", languageId: "de")
+        XCTAssertEqual(ids, [100, 10, 11, 12, 13, 14])
+        XCTAssertFalse(ids.dropFirst().contains(0), "accented char fell to [UNK]")
+    }
+
     // MARK: - puncNorm
+
+    func testPuncNormCollapsesAllWhitespace() {
+        // Python str.split() collapses tabs and newlines, not just spaces.
+        XCTAssertEqual(
+            ChatterboxTokenizer.puncNorm("Hello\nworld\tagain"), "Hello world again.")
+        XCTAssertEqual(
+            ChatterboxTokenizer.puncNorm("Line one.\n\nLine two."), "Line one. Line two.")
+    }
 
     func testPuncNormAddsTrailingStopAndCapitalizes() {
         XCTAssertEqual(ChatterboxTokenizer.puncNorm("hello world"), "Hello world.")

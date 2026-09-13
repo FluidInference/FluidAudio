@@ -80,7 +80,8 @@ final class ChatterboxNanoTokenizer: Sendable {
         if let first = text.first, first.isLowercase {
             text = first.uppercased() + text.dropFirst()
         }
-        text = text.split(separator: " ").joined(separator: " ")
+        // Python str.split(): any whitespace (tabs, newlines, …), collapsed.
+        text = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         let replacements: [(String, String)] = [
             ("…", ", "), (":", ","),
             ("—", "-"), ("–", "-"), (" ,", ","), ("\u{201C}", "\""), ("\u{201D}", "\""),
