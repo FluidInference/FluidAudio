@@ -96,7 +96,7 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Conversion lives in mobius (`models/tts/inflect-v2`).
     case inflectMicro = "FluidInference/inflect-v2-coreml/micro"
     case inflectNano = "FluidInference/inflect-v2-coreml/nano"
-    /// Chatterbox Multilingual (ResembleAI, 23 languages) — T3 Llama-520M
+    /// Chatterbox Multilingual (ResembleAI, 23 languages, **beta**) — T3 Llama-520M
     /// AR speech-token generator (CFG batch 2, MLState KV decode) + S3Gen
     /// flow-matching mel decoder + HiFT vocoder. Repo root holds the
     /// `.mlmodelc` bundles plus `tables/` (embedding/positional tables and
@@ -105,7 +105,7 @@ public enum Repo: String, CaseIterable, Sendable {
     /// alongside them are never downloaded. Conversion lives in mobius
     /// (`models/tts/chatterbox/coreml`).
     case chatterbox = "FluidInference/chatterbox-multilingual-coreml"
-    /// Chatterbox Nano (ResembleAI, 110M, English) — T3 GPT2-small AR
+    /// Chatterbox Nano (ResembleAI, 110M, English, **beta**) — T3 GPT2-small AR
     /// speech-token generator (batch 1, MLState KV decode) + S3Gen 2-step
     /// meanflow mel decoder + HiFT vocoder. Same repo layout as
     /// `.chatterbox`; `tokenizer/` holds the GPT2 BPE assets (vocab.json,

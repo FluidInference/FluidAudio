@@ -1,6 +1,7 @@
 import Foundation
 
-/// Compile-time constants for the Chatterbox Nano backend.
+/// Compile-time constants for the Chatterbox Nano backend (beta model
+/// conversion — artifacts and defaults may change).
 ///
 /// Pipeline: T3 (GPT2-small, 110M, batch 1 — no CFG, no alignment analyzer)
 /// emits S3 speech tokens at 25 Hz, the S3Gen meanflow decoder maps them to
