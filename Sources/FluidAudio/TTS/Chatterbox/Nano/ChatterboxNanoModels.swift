@@ -79,25 +79,31 @@ struct ChatterboxNanoModels: Sendable {
             let voice = try ChatterboxTables.loadVoice(
                 voiceURL: repoDir.appendingPathComponent(
                     ModelNames.ChatterboxNano.defaultVoiceFile))
+            // Dimension guards: table lookups later copy rows by raw
+            // pointer, so a structurally valid but wrong-shape file must
+            // fail here, not at synthesis time.
+            let hidden = ChatterboxNanoConstants.hiddenSize
+            guard tables.textEmb.cols == hidden, tables.speechEmb.cols == hidden,
+                tables.textEmb.rows >= ChatterboxNanoConstants.textVocabSize,
+                tables.speechEmb.rows >= ChatterboxNanoConstants.outputVocabSize,
+                voice.condEmb.cols == hidden,
+                voice.promptFeat.cols == 80,
+                voice.embedding.count == 192
+            else {
+                throw ChatterboxError.malformedAsset("tables/voice dimensions mismatch")
+            }
             return (tokenizer, tables, voice)
         }
 
         // Cache checks are existence-only, so a truncated/corrupt aux file
-        // would otherwise fail every launch — drop and re-fetch once.
-        let tokenizer: ChatterboxNanoTokenizer
-        let tables: ChatterboxTables.Nano
-        let voice: ChatterboxTables.Voice
-        do {
-            (tokenizer, tables, voice) = try loadAux()
-        } catch {
-            logger.warning("Aux assets failed to load (\(error)); re-fetching")
-            for relative in ModelNames.ChatterboxNano.auxFiles {
-                try? FileManager.default.removeItem(
-                    at: repoDir.appendingPathComponent(relative))
-            }
-            try await ensureAuxAssets(repoDir: repoDir)
-            (tokenizer, tables, voice) = try loadAux()
-        }
+        // would otherwise fail every launch — drop and re-fetch once
+        // (never in offline mode; see loadAuxWithRecovery).
+        let (tokenizer, tables, voice) = try await ChatterboxMLSupport.loadAuxWithRecovery(
+            repoDir: repoDir,
+            auxFiles: ModelNames.ChatterboxNano.auxFiles,
+            logger: logger,
+            refetch: { try await ensureAuxAssets(repoDir: repoDir) },
+            load: loadAux)
 
         return ChatterboxNanoModels(
             prefill: prefill,

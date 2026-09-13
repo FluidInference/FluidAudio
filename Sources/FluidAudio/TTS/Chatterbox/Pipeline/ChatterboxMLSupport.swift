@@ -4,6 +4,40 @@ import Foundation
 /// CoreML plumbing shared by the Multilingual and Nano synthesizers.
 enum ChatterboxMLSupport {
 
+    /// Load host-side aux assets (tokenizer / tables / voice) with one
+    /// drop-and-refetch recovery, mirroring `ModelHub.loadWithRecovery`'s
+    /// contract: offline mode never purges or re-downloads (valid cached
+    /// files are preserved and the parse error rethrown), and cancellation
+    /// is not treated as corruption.
+    static func loadAuxWithRecovery<T>(
+        repoDir: URL,
+        auxFiles: [String],
+        logger: AppLogger,
+        refetch: () async throws -> Void,
+        load: () throws -> T
+    ) async throws -> T {
+        do {
+            return try load()
+        } catch {
+            if ModelHub.offlineMode {
+                logger.warning(
+                    "Offline mode: aux assets failed to load and re-fetch blocked. "
+                        + error.localizedDescription)
+                throw error
+            }
+            if RetryPolicy.isCancellation(error) {
+                throw error
+            }
+            logger.warning("Aux assets failed to load (\(error)); re-fetching")
+            for relative in auxFiles {
+                try? FileManager.default.removeItem(
+                    at: repoDir.appendingPathComponent(relative))
+            }
+            try await refetch()
+            return try load()
+        }
+    }
+
     /// Copy an MLMultiArray into a dense row-major `[Float]`, honoring the
     /// array's strides and dtype. GPU-backed CoreML outputs routinely arrive
     /// as fp16 IOSurfaces with padded row strides (e.g. a [1, 80, 1000] mel

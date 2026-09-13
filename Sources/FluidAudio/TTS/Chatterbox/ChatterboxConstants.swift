@@ -27,6 +27,8 @@ public enum ChatterboxConstants {
     /// Conditioning block length (speaker + 32 perceiver latents + emotion).
     public static let condLength = 34
 
+    /// Grapheme tokenizer vocabulary size (text embedding table rows).
+    public static let textVocabSize = 2454
     public static let startTextToken = 255
     public static let stopTextToken = 0
     public static let startSpeechToken = 6561

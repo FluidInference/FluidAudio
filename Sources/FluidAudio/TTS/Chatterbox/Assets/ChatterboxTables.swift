@@ -133,9 +133,22 @@ private struct SafetensorsFile {
         let entry = try entry(name)
         let dims = entry.shape.drop { $0 == 1 }
         let cols = dims.last ?? 1
-        let rows = dims.dropLast().reduce(1, *)
+        // Overflow-checked products: a header like shape [Int.max, 2] passes
+        // the non-negative check but must throw here, not trap.
+        var rows = 1
+        for dim in dims.dropLast() {
+            let (product, overflow) = rows.multipliedReportingOverflow(by: dim)
+            guard !overflow else {
+                throw ChatterboxError.malformedAsset("tensor '\(name)': shape overflow")
+            }
+            rows = product
+        }
+        let (expected, overflow) = rows.multipliedReportingOverflow(by: cols)
+        guard !overflow else {
+            throw ChatterboxError.malformedAsset("tensor '\(name)': shape overflow")
+        }
         let values = try floatValues(name)
-        guard values.count == rows * cols else {
+        guard values.count == expected else {
             throw ChatterboxError.malformedAsset("tensor '\(name)' shape/data mismatch")
         }
         return ChatterboxTables.Table(rows: rows, cols: cols, values: values)

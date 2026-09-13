@@ -27,6 +27,8 @@ public enum ChatterboxNanoConstants {
     public static let kvHeads = 12
     public static let headDim = 64
 
+    /// GPT2 BPE vocabulary size incl. added tokens (text table rows).
+    public static let textVocabSize = 50276
     public static let startSpeechToken = 6561
     public static let stopSpeechToken = 6562
     /// Valid S3 speech-token range for the flow decoder; generated ids at or
