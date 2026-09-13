@@ -65,7 +65,9 @@ final class JapaneseG2PIntegrationTests: XCTestCase {
     /// says ɲi çito); the phonemes differ from Misaki only in grouping.
     func testDigitsReadThroughNormalizedNumerals() async throws {
         let g2p = try await loadG2P()
-        XCTAssertEqual(try await g2p.phonemize("二人とも元気です。"), "ɸɯtaɾʲi tomo ɡeŋkʲi desɨ.")
-        XCTAssertEqual(try await g2p.phonemize("午前十時から"), "ɡoʣeɴ ʥɨːʥi kaɾa")
+        let people = try await g2p.phonemize("二人とも元気です。")
+        XCTAssertEqual(people, "ɸɯtaɾʲi tomo ɡeŋkʲi desɨ.")
+        let time = try await g2p.phonemize("午前十時から")
+        XCTAssertEqual(time, "ɡoʣeɴ ʥɨːʥi kaɾa")
     }
 }
