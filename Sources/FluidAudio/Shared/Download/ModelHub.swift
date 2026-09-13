@@ -770,7 +770,9 @@ public enum ModelHub {
                     itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model") || itemPath.hasSuffix(".bin")
                 return isInSubPath && (matchesPattern || isMetadata)
             }
-            return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+            // Patterns carry a trailing "/" (bundle directories); a required root-level
+            // *file* (e.g. `tokenizer.model`) matches when the pattern is exactly its path.
+            return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) || $0 == itemPath + "/" }
                 || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
         }
     }

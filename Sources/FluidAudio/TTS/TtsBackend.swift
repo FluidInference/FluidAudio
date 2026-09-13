@@ -53,4 +53,9 @@ public enum TtsBackend: Sendable {
     ///
     /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
     case inflect
+    /// MOSS-TTS-Nano — 0.1B autoregressive LM (GPT-2 global + local transformer)
+    /// over MOSS-Audio-Tokenizer-Nano codes: `Prefill → (Frame → CodecStep →
+    /// Step)*`. Multilingual (20 languages), zero-shot voice cloning from a
+    /// reference clip, streaming 80 ms frames, native 48 kHz stereo output.
+    case mossTtsNano
 }

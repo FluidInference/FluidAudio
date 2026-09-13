@@ -108,6 +108,10 @@ public struct TTS {
         var luxttsSeed: UInt64 = LuxTtsConstants.defaultSeed
         var neuttsSeed: UInt64 = 1234
         var neuttsEmotion = NeuTtsConstants.defaultEmotion
+        // MOSS-TTS-Nano: `--tokens-only` prints tokenizer ids and exits (parity checks);
+        // `--greedy` selects argmax decoding (parity oracle, not a quality mode).
+        var mossTokensOnly = false
+        var mossGreedy = false
 
         var i = 0
         while i < arguments.count {
@@ -181,6 +185,8 @@ public struct TTS {
                     case "inflect-nano":
                         backend = .inflect
                         inflectVariant = .nano
+                    case "moss-tts-nano", "moss", "mossnano", "moss-nano", "moss_tts_nano":
+                        backend = .mossTtsNano
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro-ane")
                     }
@@ -272,6 +278,10 @@ public struct TTS {
                     neuttsEmotion = arguments[i + 1].lowercased()
                     i += 1
                 }
+            case "--tokens-only":
+                mossTokensOnly = true
+            case "--greedy":
+                mossGreedy = true
             case "--cpu-only":
                 cpuOnly = true
             case "--text":
@@ -411,7 +421,168 @@ public struct TTS {
                 variant: inflectVariant, treatAsPhonemes: treatAsPhonemes,
                 seed: pocketSeed ?? 0,
                 metricsPath: metricsPath, cpuOnly: cpuOnly)
+        case .mossTtsNano:
+            await runMossTtsNano(
+                text: text, output: output, voiceName: voice,
+                voiceFilePath: voiceFilePath, cloneVoicePath: cloneVoicePath,
+                saveVoicePath: saveVoicePath, seed: pocketSeed,
+                greedy: mossGreedy, tokensOnly: mossTokensOnly,
+                metricsPath: metricsPath, cpuOnly: cpuOnly)
         }
+    }
+
+    // MARK: - MOSS-TTS-Nano
+
+    /// Run MOSS-TTS-Nano (zero-shot voice cloning, 48 kHz stereo). Voice resolution:
+    /// `--clone-voice <clip>` encodes a reference clip (optionally `--save-voice
+    /// <codes.json>`), `--voice-file <codes.json>` loads saved codes, otherwise
+    /// `--voice` names a published preset (`en_2` default, `zh_1`).
+    private static func runMossTtsNano(
+        text: String, output: String, voiceName: String,
+        voiceFilePath: String?, cloneVoicePath: String?, saveVoicePath: String?,
+        seed: UInt64?, greedy: Bool, tokensOnly: Bool,
+        metricsPath: String?, cpuOnly: Bool
+    ) async {
+        do {
+            let tStart = Date()
+            let manager = MossTtsNanoManager(computeUnits: cpuOnly ? .cpuOnly : .cpuAndGPU)
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+
+            if tokensOnly {
+                let ids = try await manager.tokenize(text)
+                print(ids.map(String.init).joined(separator: " "))
+                return
+            }
+
+            let voice: MossTtsNanoVoice
+            if let cloneVoicePath {
+                let url = resolveInputURL(cloneVoicePath)
+                voice = try await manager.cloneVoice(audioURL: url)
+                logger.info("MOSS-TTS-Nano voice cloned from \(url.path): \(voice.frames) frames")
+                if let saveVoicePath {
+                    let saveURL = resolveInputURL(saveVoicePath)
+                    try voice.save(to: saveURL)
+                    logger.info("Saved voice codes to \(saveURL.path)")
+                }
+            } else if let voiceFilePath {
+                voice = try MossTtsNanoVoice.load(from: resolveInputURL(voiceFilePath))
+                logger.info("MOSS-TTS-Nano voice (file): \(voice.name), \(voice.frames) frames")
+            } else {
+                let preset: MossTtsNanoBuiltInVoice
+                if let named = MossTtsNanoBuiltInVoice(name: voiceName) {
+                    preset = named
+                } else {
+                    if voiceName != TtsConstants.recommendedVoice {
+                        logger.warning(
+                            "Unknown MOSS-TTS-Nano voice '\(voiceName)'; using "
+                                + "\(MossTtsNanoBuiltInVoice.default.rawValue). Presets: "
+                                + MossTtsNanoBuiltInVoice.allCases.map(\.rawValue).joined(separator: ", "))
+                    }
+                    preset = .default
+                }
+                voice = try await manager.loadVoice(preset)
+                logger.info("MOSS-TTS-Nano voice: \(preset.rawValue) (preset, \(voice.frames) frames)")
+            }
+
+            var options = MossTtsNanoSamplingOptions()
+            options.seed = seed
+            options.greedy = greedy
+
+            let tSynth0 = Date()
+            var left: [Float] = []
+            var right: [Float] = []
+            var firstFrameAt: Date? = nil
+            let stream = try await manager.synthesizeStreaming(text: text, voice: voice, options: options)
+            for try await frame in stream {
+                if firstFrameAt == nil { firstFrameAt = Date() }
+                left.append(contentsOf: frame.left)
+                right.append(contentsOf: frame.right)
+            }
+            let tSynth1 = Date()
+
+            let outURL = resolveInputURL(output)
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try stereoWavData(left: left, right: right, sampleRate: MossTtsNanoConstants.sampleRate)
+                .write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let ttfaS = (firstFrameAt ?? tSynth1).timeIntervalSince(tSynth0)
+            let audioSecs = Double(left.count) / Double(MossTtsNanoConstants.sampleRate)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+            logger.info("MOSS-TTS-Nano synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info(
+                "  Synthesis: \(String(format: "%.3f", synthS))s "
+                    + "(first audio after \(String(format: "%.3f", ttfaS))s)")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s @ 48 kHz stereo")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Output: \(outURL.path)")
+
+            if let metricsPath {
+                var metricsDict: [String: Any] = [
+                    "backend": "moss-tts-nano",
+                    "text": text,
+                    "voice": voice.name,
+                    "greedy": greedy,
+                    "output": outURL.path,
+                    "model_load_time_s": loadS,
+                    "inference_time_s": synthS,
+                    "time_to_first_audio_s": ttfaS,
+                    "audio_duration_s": audioSecs,
+                    "realtime_speed": rtfx,
+                    "total_time_s": tSynth1.timeIntervalSince(tStart),
+                ]
+                if let seed { metricsDict["seed"] = seed }
+                let artifactsRoot = try ensureArtifactsRoot()
+                let mURL = resolveOutputURL(
+                    metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+                try FileManager.default.createDirectory(
+                    at: mURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let data = try JSONSerialization.data(
+                    withJSONObject: metricsDict, options: [.prettyPrinted, .sortedKeys])
+                try data.write(to: mURL)
+                logger.info("  Metrics: \(mURL.path)")
+            }
+        } catch {
+            logger.error("MOSS-TTS-Nano synthesis failed: \(error)")
+            exit(1)
+        }
+    }
+
+    /// 16-bit PCM stereo WAV (the shared `AudioWAV` writer is mono).
+    private static func stereoWavData(left: [Float], right: [Float], sampleRate: Int) -> Data {
+        let frames = min(left.count, right.count)
+        var pcm = Data(capacity: frames * 4)
+        for i in 0..<frames {
+            for sample in [left[i], right[i]] {
+                let clipped = max(-1.0, min(1.0, sample))
+                var value = Int16(clipped * 32767).littleEndian
+                withUnsafeBytes(of: &value) { pcm.append(contentsOf: $0) }
+            }
+        }
+        var header = Data()
+        func append<T: FixedWidthInteger>(_ v: T) {
+            var le = v.littleEndian
+            withUnsafeBytes(of: &le) { header.append(contentsOf: $0) }
+        }
+        header.append(contentsOf: Array("RIFF".utf8))
+        append(UInt32(36 + pcm.count))
+        header.append(contentsOf: Array("WAVE".utf8))
+        header.append(contentsOf: Array("fmt ".utf8))
+        append(UInt32(16))
+        append(UInt16(1))
+        append(UInt16(2))
+        append(UInt32(sampleRate))
+        append(UInt32(sampleRate * 4))
+        append(UInt16(4))
+        append(UInt16(16))
+        header.append(contentsOf: Array("data".utf8))
+        append(UInt32(pcm.count))
+        return header + pcm
     }
 
     /// Run Inflect v2 (Micro / Nano) TTS. With `--phonemes` the positional
@@ -1348,7 +1519,16 @@ public struct TTS {
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for KokoroAne, alba for PocketTTS)
               --backend            TTS backend: kokoro-ane (default), pocket, styletts2,
-                                   supertonic3, luxtts, neutts (beta), inflect (beta)
+                                   supertonic3, luxtts, neutts (beta), inflect (beta),
+                                   moss-tts-nano
+                                   MOSS-TTS-Nano (zero-shot voice cloning, 20 langs, 48 kHz stereo):
+                                     --voice en_2               preset voice (en_2 default, zh_1)
+                                     --clone-voice <clip.wav>   encode a reference clip (<= ~25 s)
+                                     --save-voice <codes.json>  save the cloned voice codes
+                                     --voice-file <codes.json>  reuse saved voice codes
+                                     --seed N                   deterministic sampling seed
+                                     --greedy                   argmax decoding (parity oracle)
+                                     --tokens-only              print tokenizer ids and exit
                                    StyleTTS2 (zero-shot, English):
                                      --reference <speaker.wav>  required
                                      --alpha 0.3                ref-side blend (default 0.3)
