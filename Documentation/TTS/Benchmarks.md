@@ -60,7 +60,7 @@ Reference each language as `--corpus minimax-<lang>`:
 
 | Backend     | Default corpus     | Other supported MiniMax languages              |
 |-------------|--------------------|------------------------------------------------|
-| Kokoro ANE  | `minimax-english` | `english` (`af_heart`); Kokoro ANE also ships `chinese` (`--variant mandarin`, voice `zf_001`) and `japanese` (`--variant japanese`, voice `jf_alpha`, built-in OpenJTalk G2P; see footnote ᴶ) |
+| Kokoro ANE  | `minimax-english` | `english` (`af_heart`); Kokoro ANE also ships `chinese` (`--variant mandarin`, voice `zf_001`) and `japanese` (`--variant japanese`, voice `jf_alpha`, built-in MeCab + Cutlet G2P; see footnote ᴶ) |
 | PocketTTS   | `minimax-english`  | 6L packs: `english`, `german`, `italian`, `portuguese`, `spanish`. 24L packs: `french_24l`, `german_24l`, `italian_24l`, `portuguese_24l`, `spanish_24l` |
 | StyleTTS2   | `minimax-english`  | `english` only (LibriTTS iteration_3, zero-shot from `--reference` audio) |
 | Supertonic-3 | `minimax-english` | 31 ISO codes minus `zh`: `english`, `korean`, `japanese`, `arabic`, `bulgarian`, `czech`, `danish`, `german`, `greek`, `spanish`, `estonian`, `finnish`, `french`, `hindi`, `croatian`, `hungarian`, `indonesian`, `italian`, `lithuanian`, `latvian`, `dutch`, `polish`, `portuguese`, `romanian`, `russian`, `slovak`, `slovenian`, `swedish`, `turkish`, `ukrainian`, `vietnamese`. Voice styling via `--voice-style <preset.json>` |
@@ -250,7 +250,7 @@ has no word boundaries and `WERCalculator` splits on whitespace —
 word-level WER reads near 100% and is meaningless.
 
 ᴶ **Kokoro ANE Japanese** (`jf_alpha`, ANE-ja bundle) now accepts plain
-Japanese through its OpenJTalk frontend (#914). The historical quality number
+Japanese through its in-process MeCab + Cutlet frontend (#914). The historical quality number
 below used the `--phonemes` G2P bypass: the 100-phrase `minimax-japanese`
 corpus was phonemized offline with
 [`misaki[ja]`](https://github.com/hexgrad/misaki) (the same G2P

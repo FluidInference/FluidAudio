@@ -34,7 +34,7 @@ text-to-phoneme frontend differ.
 |---------------|-------------|-------|---------------|-----------------------------|--------------------------------------------|
 | `.english`    | `ANE/`      | 177   | `af_heart`    | flat (`<voice>.bin`)        | G2P CoreML (BART seq2seq) → IPA            |
 | `.mandarin`   | `ANE-zh/`   | 171   | `zf_001`      | nested (`voices/<voice>.bin`) | Rule-based dict lookup → Bopomofo + tones |
-| `.japanese`   | `ANE-ja/`   | 114   | `jf_alpha`    | nested (`voices/<voice>.bin`) | OpenJTalk contextual reading → IPA        |
+| `.japanese`   | `ANE-ja/`   | 114   | `jf_alpha`    | nested (`voices/<voice>.bin`) | MeCab (unidic-lite) + Cutlet rules → IPA |
 
 Pick the variant on construction:
 
@@ -76,9 +76,9 @@ default voice from
 additionally fetches the G2P pinyin dictionaries from
 [`ANE-zh/assets/`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE-zh/assets)
 on first synthesis (~10 MB, cached at `<repoDir>/g2p/`).
-Japanese plain-text synthesis lazily downloads OpenJTalk's pinned UTF-8
-NAIST-JDIC archive (23 MB download / 102 MB installed) on first use. IPA
-bypass calls do not download it.
+Japanese plain-text synthesis lazily downloads the trimmed unidic-lite
+dictionary and Cutlet word list (about 115 MB) on first use. IPA bypass
+calls do not download them.
 
 ### Swift
 
@@ -96,7 +96,7 @@ let mandarin = KokoroAneManager(variant: .mandarin)
 try await mandarin.initialize()
 let zhWav = try await mandarin.synthesize(text: "你好世界")
 
-// Japanese — OpenJTalk resolves contextual kanji readings before IPA mapping.
+// Japanese — MeCab resolves contextual kanji readings before IPA mapping.
 let japanese = KokoroAneManager(variant: .japanese)
 try await japanese.initialize()
 let jaWav = try await japanese.synthesize(text: "今日中に返します。")
@@ -134,7 +134,7 @@ Useful when you've already phonemized upstream.
 ```
 English:   text → G2P (CoreML BART) → IPA → vocab.json → token ids
 Mandarin:  text → MandarinG2P (dict + sandhi) → Bopomofo → vocab.json → token ids
-Japanese:  text → OpenJTalk (NAIST-JDIC) → Kokoro IPA → vocab.json → token ids
+Japanese:  text → MeCab (unidic-lite) → Cutlet rules → Kokoro IPA → vocab.json → token ids
                                                                           │
         ┌─────────────────────────────────────────────────────────────────┘
         ▼
@@ -228,31 +228,42 @@ viable upgrades — the current pipeline trades them for a zero-network
 
 ## Japanese G2P
 
-The Japanese frontend uses OpenJTalk 1.11 through the VOICEVOX Core C API.
-OpenJTalk performs morphological analysis and contextual kanji reading, so
-compounds such as `今日中` resolve to `キョージュー` instead of treating
-`今日` as the greeting reading `コンニチ`. The resolved moras are mapped to
-the same IPA alphabet used by Misaki's Cutlet frontend and the `ANE-ja`
-acoustic model. Pitch-marker characters are deliberately not appended because
-they are absent from the model vocabulary.
+The Japanese frontend is an in-process port of Misaki's Cutlet
+(`misaki/cutlet.py`), the text → IPA path Kokoro's Japanese voices were
+trained on, in the same shape as the Mandarin frontend: no linked runtime,
+assets downloaded from HuggingFace on first use.
 
-The analysis groups moras by accent phrase, so particles attach to the
-preceding word (`kʲoːβa` where Misaki writes `kʲoː βa`); the phoneme
-sequence is the same. VOICEVOX renders both a long vowel and a vowel-initial
-particle as a repeated vowel mora, so the frontend analyzes the object
-particle を separately (`日本語を` → `ɲihoŋɡo o`, not `ɲihoŋɡoː`). The same
-ambiguity remains for へ and は after a word ending in the same vowel
-(`家へ` → `ieː`), which are far rarer; pre-computed IPA through
-`synthesizeFromPhonemes` is the escape hatch. Latin letters are read by
-OpenJTalk (`AI` → `eːai`) where Misaki passes them through unphonemized.
-Round trip through the Japanese ASR model (`transcribe --model-version
-tdt-ja`) returns the four documentation sentences verbatim.
+1. `NemoTextNormalizer` (Japanese) spells digits, currency and units as
+   kanji numerals, as for the other backends.
+2. `JapaneseTokenizer` is a MeCab-compatible Viterbi tokenizer over
+   `JapaneseMecabDictionary`, a memory-mapped reader of the standard MeCab
+   binary layout (double array, token table, feature strings, `char.bin`
+   categories, `unk.dic`, connection matrix). The dictionary is `unidic-lite`,
+   the one fugashi/Cutlet use, trimmed by
+   `mobius/models/tts/kokoro/coreml/g2p/japanese/convert_unidic_lite.py` to
+   the three fields the frontend needs (`pos1,pron,kana`): 188 MB → 41 MB,
+   with the 71 MB connection matrix copied unchanged. Segmentation and
+   readings are identical to fugashi on the reference sentences.
+3. `JapaneseCutlet` applies Cutlet's rules: width folding, digit runs read
+   as kana, regrouping of tokens that form a dictionary word
+   (`ja_words.txt`, 日本 + 語 → 日本語), the hiragana → IPA table with its
+   context rules (digraphs, sokuon `ʔ`, the moraic nasal as m/ŋ/ɲ/n/ɴ, long
+   vowels `ː`), and Cutlet's spacing.
 
-The runtime is linked by the default Swift 6.2 `JapaneseTextProcessing` trait.
-Apps that do not use Japanese TTS can opt out with package `traits`; Japanese
-plain-text calls then fail explicitly, while pre-computed IPA bypass remains
-available. The dictionary archive is pinned by byte count and SHA-256 and is
-expanded through a traversal-safe in-process tar.gz reader on macOS and iOS.
+On the 100-phrase MiniMax Japanese corpus the output is byte-identical to
+Misaki's `ja.JAG2P()` on the 88 sentences without digits. The 12 with digits
+differ only in how numerals are grouped, because they arrive as kanji from
+NeMo rather than Cutlet's hiragana digit reader; the readings are correct and
+sometimes better (`2人` → ふたり where Cutlet says に-ひと). Cutlet's own
+quirks are reproduced on purpose, since they are in Kokoro's training
+distribution (`今日中` → こんにち-ちゅう, `私` → わたくし).
+
+Assets: `sys.dic` (41 MB), `matrix.bin` (71 MB), `char.bin`, `unk.dic`,
+`ja_words.txt` (2 MB) under `ANE-ja/assets/` on HuggingFace, cached in
+`<repoDir>/g2p/`. They are fetched only when plain Japanese text is
+synthesized; `synthesizeFromPhonemes` never needs them. A TTS → ASR round
+trip through the Japanese ASR model (`transcribe --model-version tdt-ja`)
+returns the documentation sentences verbatim.
 
 ## Limits
 
@@ -337,7 +348,7 @@ segfault on the CPU-tail route).
 - Upstream PyTorch (English): [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
 - Upstream PyTorch (Mandarin): [hexgrad/Kokoro-82M-v1.1-zh](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh)
 - Mandarin G2P reference: [hexgrad/misaki](https://github.com/hexgrad/misaki) (`zh_frontend.py`, `tone_sandhi.py`)
-- Japanese reading frontend: [OpenJTalk 1.11.1](https://github.com/r9y9/open_jtalk/releases/tag/v1.11.1)
-- Japanese mora mapping reference: [hexgrad/misaki](https://github.com/hexgrad/misaki) (`cutlet.py`)
+- Japanese dictionary: [unidic-lite](https://github.com/polm/unidic-lite) (BSD), trimmed by the mobius script
+- Japanese frontend reference: [hexgrad/misaki](https://github.com/hexgrad/misaki) `cutlet.py` (Apache-2.0, adapted from polm/cutlet)
 - Conversion script: [mobius/models/tts/kokoro/laishere-coreml](https://github.com/FluidInference/mobius/tree/main/models/tts/kokoro/laishere-coreml)
 - Original CoreML fork: [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml)

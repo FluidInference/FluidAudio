@@ -124,27 +124,42 @@ public enum KokoroAneResourceDownloader {
         return g2pDir
     }
 
-    /// Ensure OpenJTalk's UTF-8 NAIST-JDIC dictionary is installed for the
-    /// Japanese text frontend. The pinned upstream archive is downloaded and
-    /// SHA-256 verified, then extracted through a path-safe streaming reader.
-    /// The 103 MB dictionary is fetched only when plain Japanese text is used.
+    /// Ensure the Japanese frontend assets (trimmed unidic-lite MeCab
+    /// dictionary + Cutlet word list) are resident under `<repoDir>/g2p/`,
+    /// pulled from `FluidInference/kokoro-82m-coreml/ANE-ja/assets/` the way
+    /// the Mandarin tables are. Fetched only when plain Japanese text is
+    /// synthesized; the IPA bypass never needs them. Idempotent.
     @discardableResult
     public static func ensureJapaneseG2P(
         repoDirectory: URL
     ) async throws -> URL {
-        try await JapaneseDictionaryInstaller.shared.ensureInstalled(
-            repoDirectory: repoDirectory
-        ) { remoteURL, destinationURL in
+        let g2pDir = repoDirectory.appendingPathComponent(KokoroAneConstants.g2pSubdir)
+        if !FileManager.default.fileExists(atPath: g2pDir.path) {
+            try FileManager.default.createDirectory(at: g2pDir, withIntermediateDirectories: true)
+        }
+        for name in KokoroAneConstants.japaneseG2PFiles {
+            let localURL = g2pDir.appendingPathComponent(name)
+            if let size = try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? NSNumber,
+                size.intValue > 0
+            {
+                continue
+            }
+            logger.info(
+                "Downloading Japanese G2P asset '\(name)' from "
+                    + "\(KokoroAneConstants.g2pRemoteRepo)/\(KokoroAneConstants.japaneseG2PRemoteSubdir)/...")
+            let remoteURL = try ModelRegistry.resolveModel(
+                KokoroAneConstants.g2pRemoteRepo, "\(KokoroAneConstants.japaneseG2PRemoteSubdir)/\(name)")
             _ = try await AssetDownloader.ensure(
                 .init(
-                    description: "OpenJTalk Japanese dictionary",
+                    description: "Japanese G2P asset \(name)",
                     remoteURL: remoteURL,
-                    destinationURL: destinationURL,
+                    destinationURL: localURL,
                     transferMode: .file()
                 ),
                 logger: logger
             )
         }
+        return g2pDir
     }
 
     /// Best-effort fetch of the jieba HMM tables (start / trans / emit)

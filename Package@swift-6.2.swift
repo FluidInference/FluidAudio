@@ -35,22 +35,16 @@ let package = Package(
             name: "NemoTextProcessing",
             description: "Link the bundled NeMo text-normalization engine (TTS frontends, ITN)."
         ),
-        .trait(
-            name: "JapaneseTextProcessing",
-            description: "Link OpenJTalk for the Kokoro ANE Japanese text frontend."
-        ),
-        .default(enabledTraits: ["NemoTextProcessing", "JapaneseTextProcessing"]),
+        .default(enabledTraits: ["NemoTextProcessing"]),
     ],
     dependencies: [],
     targets: [
         .target(
             name: "FluidAudio",
             dependencies: [
-                "CZlib",
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
                 .target(name: "NemoTextProcessing", condition: .when(traits: ["NemoTextProcessing"])),
-                .target(name: "voicevox_core", condition: .when(traits: ["JapaneseTextProcessing"])),
             ],
             path: "Sources/FluidAudio",
             exclude: ["ASR/Parakeet/Unified/benchmark.md"],
@@ -66,19 +60,6 @@ let package = Package(
             url:
                 "https://github.com/FluidInference/text-processing-rs/releases/download/v0.3.0/NemoTextProcessing.xcframework.zip",
             checksum: "76d0ee9a32b1ee2193231299180ca9bc4fc7e98794e771b3d55d66498352d85f"
-        ),
-        // OpenJTalk runtime for the Kokoro ANE Japanese text frontend: VOICEVOX
-        // CORE 0.17.0's xcframework (macOS + iOS + simulator slices), ad-hoc
-        // re-signed — the upstream zip's macOS slice ships with an invalid code
-        // signature and the kernel kills any process that loads it.
-        // HOSTING_PLACEHOLDER: replace `path:` with the published `url:` + `checksum:`.
-        .binaryTarget(
-            name: "voicevox_core",
-            path: ".mobius/voicevox_core.xcframework"
-        ),
-        .systemLibrary(
-            name: "CZlib",
-            path: "Sources/CZlib"
         ),
         .target(
             name: "FastClusterWrapper",

@@ -6,7 +6,7 @@ import XCTest
 /// Config tests for the `.japanese` KokoroAne variant (issues #698 and #914).
 ///
 /// The Japanese variant reuses the language-agnostic 7-stage chain and the
-/// `synthesizeFromPhonemes` bypass and the lazy OpenJTalk text frontend. These
+/// `synthesizeFromPhonemes` bypass and the lazy MeCab + Cutlet text frontend. These
 /// tests pin the wiring (HF paths, default voice, required-file set, routing) so a
 /// regression surfaces without needing the (separately uploaded) `ANE-ja/`
 /// CoreML weights.
@@ -38,7 +38,7 @@ final class KokoroAneJapaneseVariantTests: XCTestCase {
         XCTAssertTrue(required.contains(ModelNames.KokoroAne.vocab))
         XCTAssertTrue(required.contains(ModelNames.KokoroAne.defaultVoiceFileJa))
         XCTAssertEqual(ModelNames.KokoroAne.defaultVoiceFileJa, "voices/jf_alpha.bin")
-        // OpenJTalk is a package runtime + lazy dictionary, not a CoreML model.
+        // The Japanese frontend is a lazily downloaded MeCab dictionary, not a CoreML model.
         XCTAssertFalse(required.contains(ModelNames.KokoroAne.g2pwModelZh))
         XCTAssertEqual(required.count, 9)
     }
@@ -56,12 +56,9 @@ final class KokoroAneJapaneseVariantTests: XCTestCase {
         XCTAssertEqual(result, ipa)
     }
 
-    func testOpenJTalkDictionaryPin() {
-        XCTAssertEqual(KokoroAneConstants.japaneseDictionaryArchiveBytes, 23_646_843)
+    func testJapaneseG2PAssetLayoutMirrorsMandarin() {
+        XCTAssertEqual(KokoroAneConstants.japaneseG2PRemoteSubdir, "ANE-ja/assets")
         XCTAssertEqual(
-            KokoroAneConstants.japaneseDictionaryArchiveSHA256,
-            "fe6ba0e43542cef98339abdffd903e062008ea170b04e7e2a35da805902f382a")
-        XCTAssertTrue(
-            KokoroAneConstants.japaneseDictionaryArchiveURL.absoluteString.contains("v1.11.1"))
+            KokoroAneConstants.japaneseG2PFiles, ["sys.dic", "unk.dic", "char.bin", "matrix.bin", "ja_words.txt"])
     }
 }

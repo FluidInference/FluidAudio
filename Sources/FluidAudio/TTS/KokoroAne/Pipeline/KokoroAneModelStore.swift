@@ -332,30 +332,24 @@ public actor KokoroAneModelStore {
         return pipeline
     }
 
-    /// Lazy-load and cache the OpenJTalk-backed Japanese frontend. The
-    /// dictionary download is independent of the CoreML model download and
-    /// occurs only when a caller supplies plain Japanese text.
+    /// Lazy-load and cache the Japanese frontend (MeCab over the trimmed
+    /// unidic-lite dictionary + Cutlet rules). The asset download is
+    /// independent of the CoreML model download and occurs only when a caller
+    /// supplies plain Japanese text.
     func japaneseG2PPipeline() async throws -> JapaneseG2P {
         if let japaneseG2P { return japaneseG2P }
         guard variant == .japanese else {
             throw KokoroAneError.inputProcessingFailed(
                 "Japanese G2P requested on a non-japanese store")
         }
-        guard JapaneseG2P.isAvailable else {
-            throw KokoroAneError.inputProcessingFailed(
-                "Japanese text processing is unavailable because the "
-                    + "JapaneseTextProcessing package trait is disabled.")
-        }
         let repoDirectory =
             try repoDirectory
             ?? KokoroAneResourceDownloader.repositoryDirectory(
                 variant: .japanese, directory: directory)
-
-        let dictionaryURL = try await KokoroAneResourceDownloader.ensureJapaneseG2P(
-            repoDirectory: repoDirectory)
-        let pipeline = try JapaneseG2P(dictionaryURL: dictionaryURL)
+        let g2pDirectory = try await KokoroAneResourceDownloader.ensureJapaneseG2P(repoDirectory: repoDirectory)
+        let pipeline = try JapaneseG2P(directory: g2pDirectory)
         japaneseG2P = pipeline
-        logger.info("Loaded Japanese OpenJTalk G2P")
+        logger.info("Loaded Japanese G2P (MeCab + Cutlet)")
         return pipeline
     }
 
