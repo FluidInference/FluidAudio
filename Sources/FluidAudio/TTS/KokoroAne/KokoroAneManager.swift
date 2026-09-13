@@ -234,10 +234,12 @@ public actor KokoroAneManager {
     ///
     /// English: Misaki-lexicon-first with BART G2P fallback. Mandarin:
     /// the ``MandarinG2P`` pipeline for Hanzi input, pass-through for
-    /// strings that already look like phonemes. Japanese: NeMo written-form
-    /// normalization followed by OpenJTalk contextual reading and a
-    /// Kokoro-compatible mora-to-IPA mapping. Inputs without Japanese script
-    /// remain a phoneme pass-through for compatibility with issue #698.
+    /// strings that already look like phonemes. Japanese: half-width kana
+    /// and range-tilde folding, NeMo written-form normalization, then the
+    /// in-process Cutlet port (MeCab over unidic-lite + Cutlet rules, the
+    /// Kokoro training frontend). A string made only of phoneme-alphabet
+    /// scalars is treated as pre-computed IPA and passed through (issue
+    /// #698); digits, kana and kanji always go through the frontend.
     public func phonemes(for text: String) async throws -> String {
         switch variant {
         case .english:
