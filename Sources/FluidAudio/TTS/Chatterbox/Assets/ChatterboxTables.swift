@@ -29,6 +29,13 @@ struct ChatterboxTables: Sendable {
         let embedding: [Float]
     }
 
+    /// Nano/Turbo tables: embedding lookups only — GPT2's positional table
+    /// (`wpe`) is applied inside the CoreML graphs, so it is not exported.
+    struct Nano: Sendable {
+        let textEmb: Table
+        let speechEmb: Table
+    }
+
     let textEmb: Table
     let speechEmb: Table
     let textPos: Table
@@ -41,6 +48,13 @@ struct ChatterboxTables: Sendable {
             speechEmb: try tensors.table("speech_emb"),
             textPos: try tensors.table("text_pos_emb"),
             speechPos: try tensors.table("speech_pos_emb"))
+    }
+
+    static func loadNano(tablesURL: URL) throws -> Nano {
+        let tensors = try SafetensorsFile(url: tablesURL)
+        return Nano(
+            textEmb: try tensors.table("text_emb"),
+            speechEmb: try tensors.table("speech_emb"))
     }
 
     static func loadVoice(voiceURL: URL) throws -> Voice {

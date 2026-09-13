@@ -62,4 +62,13 @@ public enum TtsBackend: Sendable {
     ///
     /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
     case chatterbox
+    /// Chatterbox Nano (ResembleAI) — 110M English TTS: T3 GPT2-small emits
+    /// S3 speech tokens autoregressively (batch 1 — no CFG, no alignment
+    /// analyzer; MLState KV cache — macOS 15+/iOS 18+ only), decoded to
+    /// 24 kHz audio by the S3Gen 2-step meanflow mel decoder + HiFT vocoder.
+    /// Paralinguistic tags (`[laugh]`, `[chuckle]`, …) inline in the text;
+    /// built-in voice only.
+    ///
+    /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
+    case chatterboxNano
 }

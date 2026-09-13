@@ -342,6 +342,11 @@ public enum TtsBenchmarkCommand {
                     languageName: languageName,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
+            case .chatterboxNano:
+                try await runChatterboxNano(
+                    phrases: phrases, corpusLabel: corpusLabel,
+                    preset: preset, outputJson: outputJson, audioDir: audioDir,
+                    asrChoice: asrChoice)
             }
         } catch {
             logger.error("tts-benchmark failed: \(error)")
@@ -763,6 +768,66 @@ public enum TtsBenchmarkCommand {
         }
     }
 
+    // MARK: - Chatterbox Nano driver
+
+    private static func runChatterboxNano(
+        phrases: [(category: String, text: String)],
+        corpusLabel: String,
+        preset: TtsComputeUnitPreset,
+        outputJson: String?,
+        audioDir: String?,
+        asrChoice: AsrChoice
+    ) async throws {
+        guard #available(macOS 15.0, *) else {
+            logger.error("chatterbox-nano backend requires macOS 15+ (MLState KV cache)")
+            exit(1)
+        }
+        logger.info("Chatterbox Nano voice=default")
+
+        let manager = ChatterboxNanoManager()
+        let coldStart = Date()
+        try await manager.initialize()
+        let coldStartS = Date().timeIntervalSince(coldStart)
+        logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
+
+        let firstStart = Date()
+        _ = try await manager.synthesize(text: "Initialization warm-up.", seed: 42)
+        let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
+        logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
+
+        try await runPhraseLoop(
+            backendId: "chatterbox-nano",
+            voiceLabel: "default",
+            corpusLabel: corpusLabel,
+            phrases: phrases,
+            preset: preset,
+            coldStartS: coldStartS,
+            firstSynthMs: firstSynthMs,
+            outputJson: outputJson,
+            audioDir: audioDir,
+            asrChoice: asrChoice,
+            normalizeWavs: true,
+            extraSummary: [
+                "language": "en",
+                "seed": 42,
+            ]
+        ) { text in
+            // One-shot backend: the AR decode + flow + vocoder complete
+            // before any audio is available, so TTFT == synthMs.
+            let t0 = Date()
+            let result = try await manager.synthesize(text: text, seed: 42)
+            let synthMs = Date().timeIntervalSince(t0) * 1000
+            return BackendPhraseSample(
+                synthMs: synthMs,
+                ttftMs: synthMs,
+                samples: result.samples,
+                sampleRate: ChatterboxNanoConstants.sampleRate,
+                stageMs: [:],
+                extraFields: [:]
+            )
+        }
+    }
+
     /// Map `--language` or a `minimax-<lang>` corpus name onto a Chatterbox
     /// language code. Falls back to English.
     private static func resolveChatterboxLanguage(explicit: String?, corpus: String) -> String {
@@ -1046,6 +1111,7 @@ public enum TtsBenchmarkCommand {
         case styleTts2
         case supertonic3
         case chatterbox
+        case chatterboxNano
 
         var defaultCorpus: String {
             return "minimax-english"
@@ -1064,6 +1130,8 @@ public enum TtsBenchmarkCommand {
             return .supertonic3
         case "chatterbox", "chatterbox-mtl", "chatterbox-multilingual":
             return .chatterbox
+        case "chatterbox-nano", "chatterboxnano":
+            return .chatterboxNano
         default:
             logger.warning("Unknown backend '\(name)' — defaulting to kokoro-ane")
             return .kokoroAne

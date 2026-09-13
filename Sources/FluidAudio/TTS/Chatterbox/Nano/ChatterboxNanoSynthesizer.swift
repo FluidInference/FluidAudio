@@ -1,19 +1,20 @@
 @preconcurrency import CoreML
 import Foundation
 
-/// Chatterbox Multilingual synthesis: T3 prefill → stateful autoregressive
-/// decode (CFG + alignment analyzer + repetition penalty / min-p sampling
-/// over S3 speech tokens) → S3Gen flow (mel) → HiFT vocoding.
+/// Chatterbox Nano synthesis: T3 prefill → stateful autoregressive decode
+/// (turbo sampling over S3 speech tokens — no CFG, no alignment analyzer) →
+/// S3Gen meanflow (mel) → HiFT vocoding.
 ///
 /// Host responsibilities mirror the mobius reference driver
-/// (`models/tts/chatterbox/coreml/verify/e2e_coreml.py`): embedding prep from
-/// tables (CFG zeroes the text embedding BEFORE the positional add; the
-/// prefill context ends with two BOS embeds — both are upstream-faithful),
-/// sampling, SineGen randomness, and bucket padding/cropping.
+/// (`models/tts/chatterbox/coreml/verify/e2e_nano_coreml.py`): embedding
+/// prep from tables (bare lookups — GPT2's `wpe` is applied in-graph; the
+/// prefill context is cond ++ text ++ a single BOS), turbo sampling
+/// (temperature → top-k → top-p → repetition penalty), SineGen randomness,
+/// and bucket padding/cropping.
 @available(macOS 15.0, iOS 18.0, *)
-struct ChatterboxSynthesizer {
+struct ChatterboxNanoSynthesizer {
 
-    private static let logger = AppLogger(category: "ChatterboxSynthesizer")
+    private static let logger = AppLogger(category: "ChatterboxNanoSynthesizer")
 
     struct Result {
         let samples: [Float]
@@ -25,36 +26,27 @@ struct ChatterboxSynthesizer {
         let vocoderSeconds: Double
     }
 
-    let models: ChatterboxModels
+    let models: ChatterboxNanoModels
 
     /// Runs on the caller's actor (`#isolation`) so the non-Sendable CoreML
     /// state never crosses an isolation boundary.
     func synthesize(
         text: String,
-        language: String,
-        cfgWeight: Float,
         temperature: Float,
-        repetitionPenalty: Float,
-        minP: Float,
+        topK: Int,
         topP: Float,
+        repetitionPenalty: Float,
         seed: UInt64,
         isolation: isolated (any Actor)? = #isolation
     ) async throws -> Result {
-        let lang = language.lowercased()
-        guard ChatterboxConstants.supportedLanguages.contains(lang) else {
-            throw ChatterboxError.unsupportedLanguage(lang)
-        }
-
         // ---- Tokenize + prefill embeds ----
-        let normalized = ChatterboxTokenizer.puncNorm(text)
-        var textIds = models.tokenizer.encode(normalized, languageId: lang)
-        textIds.insert(ChatterboxConstants.startTextToken, at: 0)
-        textIds.append(ChatterboxConstants.stopTextToken)
+        let normalized = ChatterboxNanoTokenizer.puncNorm(text)
+        let textIds = models.tokenizer.encode(normalized)
         let condLen = models.voice.condEmb.rows
-        let contextLen = condLen + textIds.count + 2  // two BOS embeds
-        guard contextLen <= ChatterboxConstants.prefillLength else {
+        let contextLen = condLen + textIds.count + 1  // single BOS embed
+        guard contextLen <= ChatterboxNanoConstants.prefillLength else {
             throw ChatterboxError.textTooLong(
-                tokens: contextLen, max: ChatterboxConstants.prefillLength)
+                tokens: contextLen, max: ChatterboxNanoConstants.prefillLength)
         }
 
         let prefillEmbeds = try buildPrefillEmbeds(textIds: textIds)
@@ -68,7 +60,6 @@ struct ChatterboxSynthesizer {
                 "input_len": MLFeatureValue(multiArray: inputLen),
             ]))
         guard let logitsArr = prefillOut.featureValue(for: "logits")?.multiArrayValue,
-            let alignArr = prefillOut.featureValue(for: "align_attn")?.multiArrayValue,
             let kvK = prefillOut.featureValue(for: "kv_k")?.multiArrayValue,
             let kvV = prefillOut.featureValue(for: "kv_v")?.multiArrayValue
         else {
@@ -78,49 +69,45 @@ struct ChatterboxSynthesizer {
 
         // ---- Seed decode state from prefill KV ----
         let state = models.decode.makeState()
-        try seedState(state, kvK: kvK, kvV: kvV)
+        let layerElements =
+            ChatterboxNanoConstants.kvHeads * ChatterboxNanoConstants.maxContext
+            * ChatterboxNanoConstants.headDim
+        try ChatterboxMLSupport.seedState(
+            state, kvK: kvK, kvV: kvV,
+            layerCount: ChatterboxNanoConstants.layerCount, layerElements: layerElements)
 
         // ---- Autoregressive decode ----
         let decodeStart = Date()
         var rng = SplitMix64(seed: seed)
-        var analyzer = ChatterboxAlignmentAnalyzer(
-            textStart: condLen, textEnd: condLen + textIds.count,
-            eosIndex: ChatterboxConstants.stopSpeechToken)
-        var logits2 = try floatBuffer(logitsArr)  // [2 * V]
-        var alignRows = try prefillAlignRows(alignArr, contextLen: contextLen)
-        var generatedIds: [Int] = [ChatterboxConstants.startSpeechToken]
+        var logits = try ChatterboxMLSupport.floatBuffer(logitsArr)  // [V]
+        var generatedIds: [Int] = []
         var speechTokens: [Int] = []
         var decodedTokens = 0
 
         let stepEmbeds = try MLMultiArray(
-            shape: [2, 1, NSNumber(value: ChatterboxConstants.hiddenSize)], dataType: .float32)
+            shape: [1, 1, NSNumber(value: ChatterboxNanoConstants.hiddenSize)],
+            dataType: .float32)
         let curLenArr = try MLMultiArray(shape: [1], dataType: .int32)
-        let vocab = ChatterboxConstants.outputVocabSize
         let maxSteps = min(
-            ChatterboxConstants.maxNewTokens,
-            ChatterboxConstants.maxContext - contextLen - 1)
+            ChatterboxNanoConstants.maxNewTokens,
+            ChatterboxNanoConstants.maxContext - contextLen - 1)
 
         for step in 0..<maxSteps {
-            // CFG combine over the batch-2 logits.
-            var logits = [Float](repeating: 0, count: vocab)
-            for i in 0..<vocab {
-                let cond = logits2[i]
-                let uncond = logits2[vocab + i]
-                logits[i] = cond + cfgWeight * (cond - uncond)
-            }
-            analyzer.step(
-                logits: &logits, alignRows: alignRows,
-                nextToken: generatedIds.last)
+            // Upstream's first sample penalizes the BOS id (its input_ids
+            // start as [BOS]); every later step penalizes generated ids only.
+            let penalized =
+                generatedIds.isEmpty
+                ? [ChatterboxNanoConstants.startSpeechToken] : generatedIds
             let token = Self.sample(
-                logits: &logits, generated: generatedIds,
-                temperature: temperature, repetitionPenalty: repetitionPenalty,
-                minP: minP, topP: topP, rng: &rng)
+                logits: &logits, generated: penalized,
+                temperature: temperature, topK: topK, topP: topP,
+                repetitionPenalty: repetitionPenalty, rng: &rng)
             decodedTokens += 1
             generatedIds.append(token)
-            if token == ChatterboxConstants.stopSpeechToken { break }
-            if token < ChatterboxConstants.speechVocabSize { speechTokens.append(token) }
+            if token == ChatterboxNanoConstants.stopSpeechToken { break }
+            if token < ChatterboxNanoConstants.speechVocabSize { speechTokens.append(token) }
 
-            try fillStepEmbeds(stepEmbeds, token: token, step: step)
+            try fillStepEmbeds(stepEmbeds, token: token)
             curLenArr[0] = NSNumber(value: contextLen + step)
             let out = try await models.decode.prediction(
                 from: MLDictionaryFeatureProvider(dictionary: [
@@ -129,27 +116,29 @@ struct ChatterboxSynthesizer {
                 ]),
                 using: state,
                 options: MLPredictionOptions())
-            guard let stepLogits = out.featureValue(for: "logits")?.multiArrayValue,
-                let stepAlign = out.featureValue(for: "align_attn")?.multiArrayValue
-            else {
+            guard let stepLogits = out.featureValue(for: "logits")?.multiArrayValue else {
                 throw ChatterboxError.processingFailed("decode outputs missing")
             }
-            logits2 = try floatBuffer(stepLogits)
-            alignRows = [decodeAlignRow(try floatBuffer(stepAlign), contextLen: contextLen + step + 1)]
+            logits = try ChatterboxMLSupport.floatBuffer(stepLogits)
         }
         let decodeSeconds = -decodeStart.timeIntervalSinceNow
 
         guard !speechTokens.isEmpty else {
             throw ChatterboxError.processingFailed("no speech tokens generated")
         }
+        // Upstream appends three silence tokens before vocoding.
+        speechTokens.append(
+            contentsOf: [Int](
+                repeating: ChatterboxNanoConstants.silenceToken,
+                count: ChatterboxNanoConstants.silenceTokenCount))
         let promptLen = models.voice.promptTokens.count
         let totalTokens = promptLen + speechTokens.count
-        guard totalTokens <= ChatterboxConstants.flowTokenBucket else {
+        guard totalTokens <= ChatterboxNanoConstants.flowTokenBucket else {
             throw ChatterboxError.generationTooLong(
-                tokens: totalTokens, max: ChatterboxConstants.flowTokenBucket)
+                tokens: totalTokens, max: ChatterboxNanoConstants.flowTokenBucket)
         }
 
-        // ---- S3Gen: flow (mel) + HiFT (waveform) ----
+        // ---- S3Gen: meanflow (mel) + HiFT (waveform) ----
         let flowStart = Date()
         let mel = try await runFlow(speechTokens: speechTokens, rng: &rng)
         let flowSeconds = -flowStart.timeIntervalSinceNow
@@ -171,179 +160,116 @@ struct ChatterboxSynthesizer {
 
     // MARK: - Embedding prep
 
-    /// `[2, prefillLength, hidden]` fp32: `[cond, text(+pos), BOS, BOS]` per
-    /// CFG row; row 1 zeroes the text embedding but keeps the positional add.
+    /// `[1, prefillLength, hidden]` fp32: `[cond, text, BOS]` — bare table
+    /// lookups, no positional adds (GPT2 `wpe` is applied in-graph).
     private func buildPrefillEmbeds(textIds: [Int]) throws -> MLMultiArray {
-        let hidden = ChatterboxConstants.hiddenSize
-        let tPrefill = ChatterboxConstants.prefillLength
+        let hidden = ChatterboxNanoConstants.hiddenSize
+        let tPrefill = ChatterboxNanoConstants.prefillLength
         let tables = models.tables
         let condEmb = models.voice.condEmb
-        let condLen = condEmb.rows
 
         let array = try MLMultiArray(
-            shape: [2, NSNumber(value: tPrefill), NSNumber(value: hidden)],
+            shape: [1, NSNumber(value: tPrefill), NSNumber(value: hidden)],
             dataType: .float32)
         let ptr = array.dataPointer.assumingMemoryBound(to: Float.self)
         ptr.update(repeating: 0, count: array.count)
 
-        var bos = [Float](repeating: 0, count: hidden)
-        let bosEmb = tables.speechEmb.row(ChatterboxConstants.startSpeechToken)
-        let bosPos = tables.speechPos.row(0)
-        for (i, (e, p)) in zip(bosEmb, bosPos).enumerated() { bos[i] = e + p }
-
-        for row in 0..<2 {
-            var offset = row * tPrefill * hidden
-            for value in condEmb.values {
-                ptr[offset] = value
+        var offset = 0
+        for value in condEmb.values {
+            ptr[offset] = value
+            offset += 1
+        }
+        for id in textIds {
+            for e in tables.textEmb.row(id) {
+                ptr[offset] = e
                 offset += 1
             }
-            for (pos, id) in textIds.enumerated() {
-                let posEmb = tables.textPos.row(pos)
-                if row == 0 {
-                    let tokEmb = tables.textEmb.row(id)
-                    for (e, p) in zip(tokEmb, posEmb) {
-                        ptr[offset] = e + p
-                        offset += 1
-                    }
-                } else {
-                    for p in posEmb {
-                        ptr[offset] = p
-                        offset += 1
-                    }
-                }
-            }
-            for _ in 0..<2 {
-                for v in bos {
-                    ptr[offset] = v
-                    offset += 1
-                }
-            }
-            _ = condLen  // context layout: cond + text + 2×BOS
+        }
+        for e in tables.speechEmb.row(ChatterboxNanoConstants.startSpeechToken) {
+            ptr[offset] = e
+            offset += 1
         }
         return array
     }
 
-    private func fillStepEmbeds(_ array: MLMultiArray, token: Int, step: Int) throws {
-        let hidden = ChatterboxConstants.hiddenSize
+    private func fillStepEmbeds(_ array: MLMultiArray, token: Int) throws {
         let ptr = array.dataPointer.assumingMemoryBound(to: Float.self)
-        let tokEmb = models.tables.speechEmb.row(token)
-        let posEmb = models.tables.speechPos.row(step + 1)
-        for (i, (e, p)) in zip(tokEmb, posEmb).enumerated() {
-            let v = e + p
-            ptr[i] = v
-            ptr[hidden + i] = v
+        for (i, e) in models.tables.speechEmb.row(token).enumerated() {
+            ptr[i] = e
         }
-    }
-
-    // MARK: - Alignment rows
-
-    /// Prefill `align_attn` is `[3, 2, maxContext]` (three heads × two BOS
-    /// queries); average heads → two `[ctx]` rows.
-    private func prefillAlignRows(_ array: MLMultiArray, contextLen: Int) throws -> [[Float]] {
-        let maxLen = ChatterboxConstants.maxContext
-        let values = try floatBuffer(array)
-        var rows = [[Float]](repeating: [Float](repeating: 0, count: contextLen), count: 2)
-        for q in 0..<2 {
-            for c in 0..<contextLen {
-                var sum: Float = 0
-                for h in 0..<3 { sum += values[(h * 2 + q) * maxLen + c] }
-                rows[q][c] = sum / 3
-            }
-        }
-        return rows
-    }
-
-    /// Decode `align_attn` is `[3, maxContext]`; average heads → one row.
-    private func decodeAlignRow(_ values: [Float], contextLen: Int) -> [Float] {
-        let maxLen = ChatterboxConstants.maxContext
-        var row = [Float](repeating: 0, count: contextLen)
-        for c in 0..<contextLen {
-            row[c] = (values[c] + values[maxLen + c] + values[2 * maxLen + c]) / 3
-        }
-        return row
-    }
-
-    // MARK: - KV state seeding
-
-    /// Copy prefill KV (`[layers, 2, heads, maxContext, headDim]`) into the
-    /// decode model's per-layer fp16 state buffers.
-    private func seedState(_ state: MLState, kvK: MLMultiArray, kvV: MLMultiArray) throws {
-        let layerElements =
-            2 * ChatterboxConstants.kvHeads * ChatterboxConstants.maxContext
-            * ChatterboxConstants.headDim
-        try ChatterboxMLSupport.seedState(
-            state, kvK: kvK, kvV: kvV,
-            layerCount: ChatterboxConstants.layerCount, layerElements: layerElements)
     }
 
     // MARK: - Sampling
 
-    /// Upstream order: repetition penalty → temperature → min-p → top-p →
-    /// softmax → multinomial. `logits` arrive CFG-combined and
-    /// analyzer-adjusted.
+    /// Upstream `inference_turbo` order: temperature → top-k → top-p →
+    /// repetition penalty → softmax → multinomial. Note the repetition
+    /// penalty runs LAST, on the already-filtered logits — the reverse of
+    /// the multilingual sampler.
     static func sample(
         logits: inout [Float], generated: [Int],
-        temperature: Float, repetitionPenalty: Float, minP: Float, topP: Float,
+        temperature: Float, topK: Int, topP: Float, repetitionPenalty: Float,
         rng: inout SplitMix64
     ) -> Int {
-        if repetitionPenalty != 1.0 {
-            for id in Set(generated) {
-                let score = logits[id]
-                logits[id] = score < 0 ? score * repetitionPenalty : score / repetitionPenalty
-            }
-        }
-        if temperature != 1.0 {
-            let invTemp = 1.0 / max(temperature, 1e-6)
+        if temperature > 0 && temperature != 1.0 {
+            let invTemp = 1.0 / temperature
             for i in 0..<logits.count { logits[i] *= invTemp }
         }
 
-        // Softmax (stable).
+        // Top-k: mask everything below the k-th largest logit.
+        if topK > 0 && topK < logits.count {
+            var sorted = logits
+            sorted.sort(by: >)
+            let threshold = sorted[topK - 1]
+            for i in 0..<logits.count where logits[i] < threshold {
+                logits[i] = -Float.infinity
+            }
+        }
+
+        // Top-p nucleus over the softmax of the surviving logits.
+        if topP < 1.0 {
+            var maxLogit = -Float.infinity
+            for v in logits where v > maxLogit { maxLogit = v }
+            var probs = [Float](repeating: 0, count: logits.count)
+            var total: Float = 0
+            for i in 0..<logits.count where logits[i] > -Float.infinity {
+                let p = expf(logits[i] - maxLogit)
+                probs[i] = p
+                total += p
+            }
+            let order = probs.indices.sorted { probs[$0] > probs[$1] }
+            var cumulative: Float = 0
+            var cut = false
+            for idx in order {
+                if cut {
+                    logits[idx] = -Float.infinity
+                    continue
+                }
+                cumulative += probs[idx] / total
+                if cumulative >= topP { cut = true }
+            }
+        }
+
+        // HF RepetitionPenaltyLogitsProcessor on the filtered logits.
+        if repetitionPenalty != 1.0 {
+            for id in Set(generated) {
+                let score = logits[id]
+                if score.isFinite {
+                    logits[id] = score < 0 ? score * repetitionPenalty : score / repetitionPenalty
+                }
+            }
+        }
+
+        // Softmax + multinomial.
         var maxLogit = -Float.infinity
         for v in logits where v > maxLogit { maxLogit = v }
         var probs = [Float](repeating: 0, count: logits.count)
         var total: Float = 0
-        for i in 0..<logits.count {
+        for i in 0..<logits.count where logits[i] > -Float.infinity {
             let p = expf(logits[i] - maxLogit)
             probs[i] = p
             total += p
         }
-        for i in 0..<probs.count { probs[i] /= total }
-
-        // Min-p: drop tokens below minP × top probability.
-        if minP > 0 {
-            var topProb: Float = 0
-            for p in probs where p > topProb { topProb = p }
-            let threshold = minP * topProb
-            var kept: Float = 0
-            for i in 0..<probs.count {
-                if probs[i] < threshold {
-                    probs[i] = 0
-                } else {
-                    kept += probs[i]
-                }
-            }
-            for i in 0..<probs.count { probs[i] /= kept }
-        }
-
-        // Top-p nucleus (no-op at the upstream default of 1.0).
-        if topP < 1.0 {
-            let order = probs.indices.sorted { probs[$0] > probs[$1] }
-            var cumulative: Float = 0
-            var kept: Float = 0
-            var cut = false
-            for idx in order {
-                if cut {
-                    probs[idx] = 0
-                    continue
-                }
-                cumulative += probs[idx]
-                kept += probs[idx]
-                if cumulative >= topP { cut = true }
-            }
-            for i in 0..<probs.count { probs[i] /= kept }
-        }
-
-        var draw = Float(rng.nextUniform())
+        var draw = Float(rng.nextUniform()) * total
         var last = 0
         for i in 0..<probs.count where probs[i] > 0 {
             draw -= probs[i]
@@ -359,8 +285,8 @@ struct ChatterboxSynthesizer {
         speechTokens: [Int], rng: inout SplitMix64,
         isolation: isolated (any Actor)? = #isolation
     ) async throws -> MLMultiArray {
-        let bucket = ChatterboxConstants.flowTokenBucket
-        let melBucket = ChatterboxConstants.melFrameBucket
+        let bucket = ChatterboxNanoConstants.flowTokenBucket
+        let melBucket = ChatterboxNanoConstants.melFrameBucket
         let voice = models.voice
         let promptLen = voice.promptTokens.count
         let totalLen = promptLen + speechTokens.count
@@ -390,7 +316,7 @@ struct ChatterboxSynthesizer {
             embPtr.update(from: src.baseAddress!, count: src.count)
         }
 
-        // CFM initial noise: gaussian over the live frames, zeros beyond.
+        // Meanflow initial noise: gaussian over the live frames, zeros beyond.
         let z = try MLMultiArray(
             shape: [1, 80, NSNumber(value: melBucket)], dataType: .float32)
         let zPtr = z.dataPointer.assumingMemoryBound(to: Float.self)
@@ -421,9 +347,9 @@ struct ChatterboxSynthesizer {
         mel: MLMultiArray, melFrames: Int, rng: inout SplitMix64,
         isolation: isolated (any Actor)? = #isolation
     ) async throws -> [Float] {
-        let melBucket = ChatterboxConstants.melFrameBucket
+        let melBucket = ChatterboxNanoConstants.melFrameBucket
         let promptFrames = 2 * models.voice.promptTokens.count
-        let melValues = try floatBuffer(mel)  // [80 * melBucket]
+        let melValues = try ChatterboxMLSupport.floatBuffer(mel)  // [80 * melBucket]
 
         // Crop the generated frames ([2*promptLen, 2*totalLen)) to the front
         // of the vocoder bucket, zero-padded beyond.
@@ -438,7 +364,7 @@ struct ChatterboxSynthesizer {
         }
 
         // SineGen randomness: per-harmonic phase (row 0 fixed at 0) + noise.
-        let harmonics = ChatterboxConstants.hiftHarmonics
+        let harmonics = ChatterboxNanoConstants.hiftHarmonics
         let phase = try MLMultiArray(
             shape: [1, NSNumber(value: harmonics), 1], dataType: .float32)
         let phasePtr = phase.dataPointer.assumingMemoryBound(to: Float.self)
@@ -446,7 +372,7 @@ struct ChatterboxSynthesizer {
         for h in 1..<harmonics {
             phasePtr[h] = Float(rng.nextUniform()) * 2 * .pi - .pi
         }
-        let sampleCount = melBucket * ChatterboxConstants.samplesPerMelFrame
+        let sampleCount = melBucket * ChatterboxNanoConstants.samplesPerMelFrame
         let noise = try MLMultiArray(
             shape: [1, NSNumber(value: harmonics), NSNumber(value: sampleCount)],
             dataType: .float32)
@@ -463,36 +389,20 @@ struct ChatterboxSynthesizer {
             throw ChatterboxError.processingFailed("vocoder output missing")
         }
 
-        var samples = try floatBuffer(audio)
-        let validSamples = melFrames * ChatterboxConstants.samplesPerMelFrame
+        var samples = try ChatterboxMLSupport.floatBuffer(audio)
+        let validSamples = melFrames * ChatterboxNanoConstants.samplesPerMelFrame
         if samples.count > validSamples {
             samples.removeLast(samples.count - validSamples)
         }
 
         // Upstream trim fade: 20 ms silence + 20 ms half-cosine ramp-in to
         // reduce reference-clip spillover.
-        let nTrim = ChatterboxConstants.sampleRate / 50
+        let nTrim = ChatterboxNanoConstants.sampleRate / 50
         for i in 0..<min(nTrim, samples.count) { samples[i] = 0 }
         for i in 0..<nTrim where nTrim + i < samples.count {
             let ramp = (cosf(.pi - .pi * Float(i) / Float(nTrim - 1)) + 1) / 2
             samples[nTrim + i] *= ramp
         }
         return samples
-    }
-
-    // MARK: - Helpers
-
-    /// See `ChatterboxMLSupport.floatBuffer` (strided fp16 IOSurface safe).
-    private func floatBuffer(_ array: MLMultiArray) throws -> [Float] {
-        try ChatterboxMLSupport.floatBuffer(array)
-    }
-}
-
-extension SplitMix64 {
-    /// Standard normal via Box–Muller.
-    mutating func nextGaussian() -> Float {
-        let u1 = max(nextUniform(), 1e-12)
-        let u2 = nextUniform()
-        return Float((-2.0 * Foundation.log(u1)).squareRoot() * Foundation.cos(2.0 * .pi * u2))
     }
 }
