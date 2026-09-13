@@ -84,8 +84,10 @@ final class ChatterboxNanoTokenizerTests: XCTestCase {
             ChatterboxNanoTokenizer.puncNorm("Two  spaces   here."), "Two spaces here.")
         // LLM-punc replacement; ellipsis char rewritten, ASCII "..." kept
         // (the turbo variant drops the multilingual "..." rule).
+        // Whitespace collapses BEFORE the punc replacements, so "… " -> ",  "
+        // legitimately double-spaces (matches upstream tts_turbo.punc_norm).
         XCTAssertEqual(
-            ChatterboxNanoTokenizer.puncNorm("Wait… what: no"), "Wait, what, no.")
+            ChatterboxNanoTokenizer.puncNorm("Wait… what: no"), "Wait,  what, no.")
         XCTAssertEqual(
             ChatterboxNanoTokenizer.puncNorm("Really..."), "Really...")
         // Comma already ends the sentence — no full stop appended.
