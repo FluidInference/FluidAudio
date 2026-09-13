@@ -133,4 +133,19 @@ final class ModelHubIncludeRuleTests: XCTestCase {
         XCTAssertTrue(rule("vocab.txt", false))
         XCTAssertFalse(rule("Other.mlmodelc/model.mil", false))
     }
+
+    // MARK: - Root-level repo with a required non-JSON file
+
+    func testRequiredRootFileWithoutMetadataExtensionIncluded() {
+        // `tokenizer.model` is a required file at the repo root. Patterns carry a
+        // trailing "/", so a prefix match alone never admitted it and the verify
+        // pass threw `modelNotFound`.
+        let include = ModelHub.repoIncludeRule(
+            subPath: nil, patterns: ["Frame.mlmodelc/", "config.json/", "tokenizer.model/"])
+        XCTAssertTrue(include("tokenizer.model", false))
+        XCTAssertTrue(include("config.json", false))
+        XCTAssertTrue(include("Frame.mlmodelc/model.mil", false))
+        XCTAssertFalse(include("tokenizer_test_vectors.model", false))
+        XCTAssertFalse(include("Encoder.mlmodelc/model.mil", false))
+    }
 }
