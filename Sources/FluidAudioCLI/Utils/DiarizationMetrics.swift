@@ -186,8 +186,11 @@ enum DiarizationMetricsCalculator {
             groundTruth: groundTruthBySpeaker
         )
 
+        // Dictionary iteration order is per-instance random, so accumulate in
+        // sorted order — Double addition is not associative, and near-zero
+        // confusion/JER residues are sensitive to the summation order.
         var correctlyAssigned = 0.0
-        for (predId, truthId) in speakerMapping {
+        for (predId, truthId) in speakerMapping.sorted(by: { $0.key < $1.key }) {
             if let predSegments = predictedBySpeaker[predId],
                 let truthSegments = groundTruthBySpeaker[truthId]
             {
@@ -205,7 +208,7 @@ enum DiarizationMetricsCalculator {
         var jaccardScores: [Double] = []
         let inverseMapping = Dictionary(uniqueKeysWithValues: speakerMapping.map { ($0.value, $0.key) })
 
-        for (truthId, truthSegments) in groundTruthBySpeaker {
+        for (truthId, truthSegments) in groundTruthBySpeaker.sorted(by: { $0.key < $1.key }) {
             let matchedPred = inverseMapping[truthId]
             let predictedSegmentsForSpeaker = matchedPred.flatMap { predictedBySpeaker[$0] } ?? []
             let intersection = overlapDuration(predictedSegmentsForSpeaker, truthSegments)
@@ -215,7 +218,8 @@ enum DiarizationMetricsCalculator {
             }
         }
 
-        for (predId, predSegments) in predictedBySpeaker where speakerMapping[predId] == nil {
+        for (predId, predSegments) in predictedBySpeaker.sorted(by: { $0.key < $1.key })
+        where speakerMapping[predId] == nil {
             if unionDuration(predSegments) > 0 {
                 jaccardScores.append(0.0)
             }
@@ -230,7 +234,7 @@ enum DiarizationMetricsCalculator {
         }
 
         if let logger = logger {
-            logger.debug("🎯 Offline mapping: \(speakerMapping)")
+            logger.debug("🎯 Offline mapping: \(speakerMapping.sorted(by: { $0.key < $1.key }))")
             let formattedDer = String(format: "%.1f", der)
             let formattedMiss = String(format: "%.1f", missRate)
             let formattedFalseAlarm = String(format: "%.1f", falseAlarmRate)

@@ -31,8 +31,10 @@ final class DiarizationSpeakerMappingTests: XCTestCase {
 
         let first = DiarizationMetricsCalculator.offlineMetrics(
             predicted: predicted, groundTruth: groundTruth)
-        XCTAssertEqual(first.speakerMapping.count, 1)
-        XCTAssertEqual(Set(first.speakerMapping.values), ["spk_a"])
+        // Pinned winner: the assignment DP keeps the skip-branch result on
+        // ties, so with sorted ids "right" wins. A silent tie-break change
+        // would shift recorded benchmark numbers; this catches it.
+        XCTAssertEqual(first.speakerMapping, ["right": "spk_a"])
 
         // Every call regroups segments into fresh dictionaries, so each
         // iteration samples a new per-instance key order.
