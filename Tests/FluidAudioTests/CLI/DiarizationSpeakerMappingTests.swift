@@ -47,6 +47,51 @@ final class DiarizationSpeakerMappingTests: XCTestCase {
         }
     }
 
+    /// With 3+ speakers, der/jer accumulate Doubles across several speakers;
+    /// the sums must be byte-stable call to call now that the accumulation
+    /// loops iterate in sorted key order.
+    func testMultiSpeakerMetricsAreStableAcrossCalls() {
+        let groundTruth = [
+            segment("gt_a", 0, 10),
+            segment("gt_b", 11, 20),
+            segment("gt_c", 21, 30),
+        ]
+        let predicted = [
+            segment("p1", 0, 9),
+            segment("p2", 11.5, 19),
+            segment("p3", 21.5, 28),
+        ]
+
+        let first = DiarizationMetricsCalculator.offlineMetrics(
+            predicted: predicted, groundTruth: groundTruth)
+        XCTAssertEqual(first.speakerMapping, ["p1": "gt_a", "p2": "gt_b", "p3": "gt_c"])
+
+        for _ in 0..<50 {
+            let metrics = DiarizationMetricsCalculator.offlineMetrics(
+                predicted: predicted, groundTruth: groundTruth)
+            XCTAssertEqual(metrics.speakerMapping, first.speakerMapping)
+            XCTAssertEqual(metrics.der, first.der)
+            XCTAssertEqual(metrics.jer, first.jer)
+            XCTAssertEqual(metrics.speakerErrorRate, first.speakerErrorRate)
+        }
+    }
+
+    /// The streaming scorer's overlap winner must break ties by smaller
+    /// speaker id, not by whichever tied entry a fresh dictionary happens to
+    /// enumerate first.
+    func testStreamingTieBreakPicksSmallestSpeakerId() {
+        for _ in 0..<100 {
+            let overlaps: [String: Float] = ["spk_b": 2.0, "spk_a": 2.0, "spk_c": 1.5]
+            let best = StreamDiarizationBenchmark.bestOverlapMatch(overlaps)
+            XCTAssertEqual(best?.speakerId, "spk_a")
+            XCTAssertEqual(best?.overlap, 2.0)
+        }
+
+        let unambiguous = StreamDiarizationBenchmark.bestOverlapMatch(["spk_a": 1.0, "spk_b": 3.0])
+        XCTAssertEqual(unambiguous?.speakerId, "spk_b")
+        XCTAssertNil(StreamDiarizationBenchmark.bestOverlapMatch([:]))
+    }
+
     /// Unambiguous overlaps must still produce the correct mapping after the
     /// key arrays are sorted.
     func testUnambiguousMappingIsCorrect() {
