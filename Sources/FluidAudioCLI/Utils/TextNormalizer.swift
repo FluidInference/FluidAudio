@@ -230,7 +230,7 @@ struct TextNormalizer {
         if britishToAmerican.isEmpty {
             print("WARNING: english.json failed to load or is empty!")
         }
-        for (british, american) in britishToAmerican {
+        for (british, american) in britishToAmerican.sorted(by: longestKeyFirst) {
             let pattern = "\\b" + NSRegularExpression.escapedPattern(for: british) + "\\b"
             normalized = normalized.replacingOccurrences(
                 of: pattern,
@@ -280,7 +280,7 @@ struct TextNormalizer {
             "bc": "bc",
         ]
 
-        for (abbrev, expansion) in abbreviations {
+        for (abbrev, expansion) in abbreviations.sorted(by: longestKeyFirst) {
             let pattern = "\\b" + abbrev + "\\b"
             normalized = normalized.replacingOccurrences(
                 of: pattern,
@@ -447,7 +447,7 @@ struct TextNormalizer {
             "he'd": "he would",
         ]
 
-        for (contraction, expansion) in contractions {
+        for (contraction, expansion) in contractions.sorted(by: longestKeyFirst) {
             normalized = normalized.replacingOccurrences(of: contraction, with: expansion)
         }
 
@@ -511,7 +511,7 @@ struct TextNormalizer {
         // Advanced Number Conversion (e.g. "one hundred" -> "100")
         normalized = convertNumbers(normalized)
 
-        for (word, digit) in numberWords {
+        for (word, digit) in numberWords.sorted(by: longestKeyFirst) {
             let pattern = "\\b" + word + "\\b"
             normalized = normalized.replacingOccurrences(
                 of: pattern,
@@ -595,6 +595,19 @@ struct TextNormalizer {
         normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return normalized
+    }
+
+    /// Swift dictionaries iterate in a per-instance random order, so replacement
+    /// tables with overlapping keys ("n't" vs "'t", "'d been" vs "'d") produce
+    /// different normalizations call to call. Longest key first makes the result
+    /// deterministic and lets the most specific rule win; ties break lexically.
+    private static func longestKeyFirst(
+        _ a: (key: String, value: String), _ b: (key: String, value: String)
+    ) -> Bool {
+        if a.key.count != b.key.count {
+            return a.key.count > b.key.count
+        }
+        return a.key < b.key
     }
 
     // MARK: - Advanced Number Parsing
