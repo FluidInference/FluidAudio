@@ -4,6 +4,8 @@ import Foundation
 /// Public API for MOSS-TTS-Nano: 0.1B multilingual streaming TTS with zero-shot
 /// voice cloning, native 48 kHz stereo output.
 ///
+/// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
+///
 /// ```swift
 /// let manager = try await MossTtsNanoManager.downloadAndCreate()
 /// let voice = try await manager.loadVoice(.en2)

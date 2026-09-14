@@ -1,5 +1,8 @@
 # MOSS-TTS-Nano Swift Inference
 
+> **Beta.** This is a beta model conversion: the Swift API, the published model
+> artifacts and the output quality may change between releases.
+
 0.1B multilingual streaming TTS with zero-shot voice cloning. 20 languages, native
 48 kHz **stereo** Float32 output, 80 ms frames streamed as they are decoded.
 Six CoreML bundles (≈ 275 MB fp16 on disk; the fp32 voice encoder is fetched only

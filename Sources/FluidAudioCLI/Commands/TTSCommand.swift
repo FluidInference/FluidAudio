@@ -1520,8 +1520,8 @@ public struct TTS {
               --voice, -v          Voice name (default: af_heart for KokoroAne, alba for PocketTTS)
               --backend            TTS backend: kokoro-ane (default), pocket, styletts2,
                                    supertonic3, luxtts, neutts (beta), inflect (beta),
-                                   moss-tts-nano
-                                   MOSS-TTS-Nano (zero-shot voice cloning, 20 langs, 48 kHz stereo):
+                                   moss-tts-nano (beta)
+                                   MOSS-TTS-Nano (beta; zero-shot voice cloning, 20 langs, 48 kHz stereo):
                                      --voice en_2               preset voice (en_2 default, zh_1)
                                      --clone-voice <clip.wav>   encode a reference clip (<= ~25 s)
                                      --save-voice <codes.json>  save the cloned voice codes

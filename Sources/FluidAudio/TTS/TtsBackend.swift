@@ -57,5 +57,7 @@ public enum TtsBackend: Sendable {
     /// over MOSS-Audio-Tokenizer-Nano codes: `Prefill → (Frame → CodecStep →
     /// Step)*`. Multilingual (20 languages), zero-shot voice cloning from a
     /// reference clip, streaming 80 ms frames, native 48 kHz stereo output.
+    ///
+    /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
     case mossTtsNano
 }
