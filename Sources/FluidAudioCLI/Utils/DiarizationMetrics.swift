@@ -593,8 +593,11 @@ enum DiarizationMetricsCalculator {
     ) -> [String: String] {
         guard !predicted.isEmpty, !groundTruth.isEmpty else { return [:] }
 
-        let predictedIds = Array(predicted.keys)
-        let groundTruthIds = Array(groundTruth.keys)
+        // Sorted so assignment tie-breaks are deterministic: dictionary key
+        // order is per-instance random, and the solvers keep the
+        // first-encountered winner among tied overlaps (issue #922).
+        let predictedIds = predicted.keys.sorted()
+        let groundTruthIds = groundTruth.keys.sorted()
 
         var confusionMatrix = Array(
             repeating: Array(repeating: 0, count: predictedIds.count),
