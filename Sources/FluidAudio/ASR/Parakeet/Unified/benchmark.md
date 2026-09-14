@@ -5,6 +5,9 @@ Measured through the FluidAudio Swift managers (`UnifiedAsrManager` for batch,
 scored with the repo's `TextNormalizer` (same normalization as `asr-benchmark`).
 Encoder precision: **int8**. Run with `swift run -c release fluidaudiocli unified-benchmark`.
 
+> WER rows below predate the deterministic normalizer ordering (#911); reruns
+> may differ by a few tenths of a point with no model change.
+
 | Mode | Avg WER | Aggregate WER | Median WER | Median RTFx | Overall RTFx | Long files (>15s) |
 |------|---------|---------------|------------|-------------|--------------|-------------------|
 | batch | 2.16% | 1.68% | 0.00% | 130.0x | 143.6x | 238 |

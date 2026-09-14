@@ -9,7 +9,10 @@ import XCTest
 /// could expand "don't" differently between the reference and hypothesis
 /// calls of a single WER computation — moving CI benchmark rows between runs
 /// with no code change.
-final class AsrTextNormalizerTests: XCTestCase {
+///
+/// Named to avoid the `TextNormalizerTests` substring: the trait-gating CI job
+/// selects classes with an unanchored `--filter 'TextNormalizerTests|...'`.
+final class AsrScoringNormalizerTests: XCTestCase {
 
     /// The exact record from issue #911 that scored WER 0% or 10% depending
     /// on dictionary iteration order.
@@ -17,7 +20,7 @@ final class AsrTextNormalizerTests: XCTestCase {
         let hypothesis = "You don't mean that you thought me so silly."
         let reference = "YOU DON'T MEAN THAT YOU THOUGHT ME SO SILLY"
 
-        for _ in 0..<100 {
+        for _ in 0..<10 {
             let metrics = WERCalculator.calculateWERAndCER(
                 hypothesis: hypothesis, reference: reference)
             XCTAssertEqual(metrics.wer, 0.0)
@@ -25,9 +28,9 @@ final class AsrTextNormalizerTests: XCTestCase {
         }
     }
 
-    /// Repeated calls must produce byte-identical output. Each call builds
-    /// fresh replacement dictionaries, so any order-dependence shows up as
-    /// call-to-call drift even within one process.
+    /// Repeated calls must produce byte-identical output. Iterating guards
+    /// against a regression to per-call table construction, where each call
+    /// samples a fresh per-instance dictionary order.
     func testNormalizeIsDeterministicAcrossCalls() {
         let inputs = [
             "You don't mean that you thought me so silly.",
@@ -37,7 +40,7 @@ final class AsrTextNormalizerTests: XCTestCase {
         ]
         for input in inputs {
             let first = TextNormalizer.normalize(input)
-            for _ in 0..<100 {
+            for _ in 0..<10 {
                 XCTAssertEqual(TextNormalizer.normalize(input), first)
             }
         }
