@@ -147,9 +147,12 @@ struct ChatterboxSynthesizer {
         }
         let promptLen = models.voice.promptTokens.count
         let totalTokens = promptLen + speechTokens.count
+        // Report generated tokens vs. what remains of the flow bucket after
+        // the voice's prompt tokens (#924).
         guard totalTokens <= ChatterboxConstants.flowTokenBucket else {
             throw ChatterboxError.generationTooLong(
-                tokens: totalTokens, max: ChatterboxConstants.flowTokenBucket)
+                tokens: speechTokens.count,
+                max: ChatterboxConstants.flowTokenBucket - promptLen)
         }
 
         // ---- S3Gen: flow (mel) + HiFT (waveform) ----
