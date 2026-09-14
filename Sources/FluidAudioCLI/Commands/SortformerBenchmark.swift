@@ -649,7 +649,7 @@ enum SortformerBenchmark {
             switch dataset {
             case .ami:
                 groundTruthSpeakers = AMIParser.getGroundTruthSpeakerCount(for: meetingName)
-            case .voxconverse, .callhome:
+            default:
                 // Count unique speakers from ground truth
                 groundTruthSpeakers = Set(groundTruth.map { $0.speakerId }).count
             }
