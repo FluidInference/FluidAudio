@@ -6,10 +6,15 @@ import Foundation
 /// Requires macOS 15 / iOS 18: the T3 decode step keeps its KV cache in
 /// CoreML `MLState` buffers.
 ///
+/// Per-call budgets are set by the static model shapes *minus the voice's
+/// own footprint* (#924): with the built-in voice, text is capped at 135
+/// BPE tokens (~500–550 characters) and generated audio at ≈9.9 s
+/// (`.standard`) or ≈29.9 s (`.extended`, an extra ~280 MB download).
+///
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 ///
 /// ```swift
-/// let manager = ChatterboxNanoManager()
+/// let manager = ChatterboxNanoManager()          // or (outputCapacity: .extended)
 /// try await manager.initialize()
 /// let audio = try await manager.synthesize(
 ///     text: "Well that went better than expected [chuckle], see you tomorrow.")
@@ -25,14 +30,22 @@ public actor ChatterboxNanoManager {
     }
 
     private var models: ChatterboxNanoModels?
+    private let outputCapacity: ChatterboxNanoOutputCapacity
 
-    public init() {}
+    /// - Parameter outputCapacity: which S3Gen bucket pair to load —
+    ///   `.standard` (≈9.9 s of generated audio per call with the built-in
+    ///   voice) or `.extended` (≈29.9 s; separate ~280 MB download, roughly
+    ///   double the flow/vocoder latency per call).
+    public init(outputCapacity: ChatterboxNanoOutputCapacity = .standard) {
+        self.outputCapacity = outputCapacity
+    }
 
     /// Download (if needed) and load the four CoreML models + tables + tokenizer.
     public func initialize(progressHandler: ProgressHandler? = nil) async throws {
         guard models == nil else { return }
-        models = try await ChatterboxNanoModels.load(progressHandler: progressHandler)
-        Self.logger.info("Chatterbox Nano models ready")
+        models = try await ChatterboxNanoModels.load(
+            capacity: outputCapacity, progressHandler: progressHandler)
+        Self.logger.info("Chatterbox Nano models ready (\(self.outputCapacity.rawValue) capacity)")
     }
 
     /// Synthesize English `text` with the built-in voice. Paralinguistic

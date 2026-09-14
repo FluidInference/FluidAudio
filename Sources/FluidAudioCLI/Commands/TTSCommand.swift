@@ -109,6 +109,7 @@ public struct TTS {
         var neuttsSeed: UInt64 = 1234
         var neuttsEmotion = NeuTtsConstants.defaultEmotion
         var chatterboxSeed: UInt64 = 42
+        var nanoCapacity: ChatterboxNanoOutputCapacity = .standard
 
         var i = 0
         while i < arguments.count {
@@ -280,6 +281,9 @@ public struct TTS {
                 }
             case "--cpu-only":
                 cpuOnly = true
+            case "--extended-output":
+                // chatterbox-nano: N1000/T2000 S3Gen bucket (~30 s per call).
+                nanoCapacity = .extended
             case "--text":
                 if i + 1 < arguments.count {
                     text = arguments[i + 1]
@@ -423,7 +427,7 @@ public struct TTS {
                 seed: chatterboxSeed, metricsPath: metricsPath)
         case .chatterboxNano:
             await runChatterboxNano(
-                text: text, output: output,
+                text: text, output: output, capacity: nanoCapacity,
                 seed: chatterboxSeed, metricsPath: metricsPath)
         }
     }
@@ -1429,9 +1433,11 @@ public struct TTS {
     }
 
     /// Run Chatterbox Nano TTS (English, built-in voice, paralinguistic tags
-    /// inline in the text; `--seed` picks the sampling seed).
+    /// inline in the text; `--seed` picks the sampling seed,
+    /// `--extended-output` loads the ~30 s N1000/T2000 bucket pair).
     private static func runChatterboxNano(
         text: String, output: String,
+        capacity: ChatterboxNanoOutputCapacity,
         seed: UInt64, metricsPath: String?
     ) async {
         guard #available(macOS 15.0, *) else {
@@ -1440,7 +1446,7 @@ public struct TTS {
         }
         do {
             let tStart = Date()
-            let manager = ChatterboxNanoManager()
+            let manager = ChatterboxNanoManager(outputCapacity: capacity)
             let tLoad0 = Date()
             try await manager.initialize()
             let tLoad1 = Date()
@@ -1518,6 +1524,8 @@ public struct TTS {
                                      --seed N                   sampling seed (default 42)
                                    Chatterbox Nano (built-in voice, English):
                                      --seed N                   sampling seed (default 42)
+                                     --extended-output          ~30 s output bucket (default ~10 s;
+                                                                extra ~280 MB download)
                                    StyleTTS2 (zero-shot, English):
                                      --reference <speaker.wav>  required
                                      --alpha 0.3                ref-side blend (default 0.3)

@@ -52,9 +52,12 @@ struct ChatterboxSynthesizer {
         textIds.append(ChatterboxConstants.stopTextToken)
         let condLen = models.voice.condEmb.rows
         let contextLen = condLen + textIds.count + 2  // two BOS embeds
+        // Report text tokens vs. what remains of the prefill window after
+        // the voice conditioning and BOS embeds (#924).
         guard contextLen <= ChatterboxConstants.prefillLength else {
             throw ChatterboxError.textTooLong(
-                tokens: contextLen, max: ChatterboxConstants.prefillLength)
+                tokens: textIds.count,
+                max: ChatterboxConstants.prefillLength - condLen - 2)
         }
 
         let prefillEmbeds = try buildPrefillEmbeds(textIds: textIds)

@@ -66,9 +66,19 @@ takes (the T3 stage samples stochastically).
 
 - One-shot synthesis (no streaming): the AR decode + flow + vocoder finish
   before audio is available.
-- Generation is capped by the 500-token flow bucket ≈ **10 s of audio per
-  call** after the built-in voice's prompt tokens; split long text into
-  sentences.
+- Per-call budgets are the static model shapes *minus the voice's own
+  footprint* (#924). With the built-in voice:
+
+  | | Raw shape | Voice footprint | Usable budget |
+  |---|---|---|---|
+  | Input text | 512-token prefill | 376 cond rows + BOS | **≤135 BPE tokens** (~500–550 chars) |
+  | Generated audio | 500-token flow bucket | 250 prompt + 3 silence | **≤247 tokens ≈ 9.9 s** |
+
+  The output cap binds first in practice. Nano can trade download size for
+  headroom: `ChatterboxNanoManager(outputCapacity: .extended)` (CLI
+  `--extended-output`) loads an `N1000`/`T2000` S3Gen pair — **≈29.9 s per
+  call**, extra ~280 MB download, roughly double the flow/vocoder latency.
+  Otherwise split long text into sentences.
 - Never force `.cpuOnly` — the Multilingual T3 packages hard-crash there
   (Nano untested; both load `.cpuAndGPU`).
 - **Benchmark with `-c release`.** Debug builds spend ~12 ms/token in

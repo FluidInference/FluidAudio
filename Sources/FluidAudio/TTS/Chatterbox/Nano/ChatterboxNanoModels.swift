@@ -15,6 +15,7 @@ struct ChatterboxNanoModels: Sendable {
     let decode: MLModel
     let flow: MLModel
     let vocoder: MLModel
+    let capacity: ChatterboxNanoOutputCapacity
     let tokenizer: ChatterboxNanoTokenizer
     let tables: ChatterboxTables.Nano
     let voice: ChatterboxTables.Voice
@@ -22,13 +23,14 @@ struct ChatterboxNanoModels: Sendable {
 
     static func load(
         directory: URL? = nil,
+        capacity: ChatterboxNanoOutputCapacity = .standard,
         progressHandler: ProgressHandler? = nil
     ) async throws -> ChatterboxNanoModels {
         let modelsRoot = try directory ?? defaultCacheRoot()
         let repoDir = modelsRoot.appendingPathComponent(Repo.chatterboxNano.folderName)
 
         let requiredPaths =
-            ModelNames.ChatterboxNano.requiredModels.map { $0 }
+            ModelNames.ChatterboxNano.requiredModels(capacity: capacity).map { $0 }
             + ModelNames.ChatterboxNano.auxFiles
         let allPresent = requiredPaths.allSatisfy {
             FileManager.default.fileExists(atPath: repoDir.appendingPathComponent($0).path)
@@ -37,6 +39,7 @@ struct ChatterboxNanoModels: Sendable {
             logger.info("Downloading Chatterbox Nano CoreML assets from HuggingFace…")
             try await ModelHub.download(
                 .chatterboxNano, to: modelsRoot,
+                variant: capacity == .standard ? nil : capacity.rawValue,
                 progressHandler: progressHandler)
             // The repo walk only descends into the required .mlmodelc bundles;
             // the tables + tokenizer assets live in subdirectories and are
@@ -61,11 +64,17 @@ struct ChatterboxNanoModels: Sendable {
         let decode = try await MLModel.load(
             contentsOf: repoDir.appendingPathComponent(ModelNames.ChatterboxNano.decodeFile),
             configuration: makeConfig(.cpuAndGPU))
+        let flowFile =
+            capacity == .standard
+            ? ModelNames.ChatterboxNano.flowFile : ModelNames.ChatterboxNano.flowFileExtended
+        let vocoderFile =
+            capacity == .standard
+            ? ModelNames.ChatterboxNano.vocoderFile : ModelNames.ChatterboxNano.vocoderFileExtended
         let flow = try await MLModel.load(
-            contentsOf: repoDir.appendingPathComponent(ModelNames.ChatterboxNano.flowFile),
+            contentsOf: repoDir.appendingPathComponent(flowFile),
             configuration: makeConfig(.cpuAndGPU))
         let vocoder = try await MLModel.load(
-            contentsOf: repoDir.appendingPathComponent(ModelNames.ChatterboxNano.vocoderFile),
+            contentsOf: repoDir.appendingPathComponent(vocoderFile),
             configuration: makeConfig(.cpuAndGPU))
 
         func loadAux() throws -> (ChatterboxNanoTokenizer, ChatterboxTables.Nano, ChatterboxTables.Voice) {
@@ -99,6 +108,7 @@ struct ChatterboxNanoModels: Sendable {
             decode: decode,
             flow: flow,
             vocoder: vocoder,
+            capacity: capacity,
             tokenizer: tokenizer,
             tables: tables,
             voice: voice,

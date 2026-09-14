@@ -1578,6 +1578,10 @@ public enum ModelNames {
         public static let decodeFile = "T3Nano-Decode-M1536-fp16-stateful.mlmodelc"
         public static let flowFile = "FlowMean-N500-fp16.mlmodelc"
         public static let vocoderFile = "HiFT-T1000-fp16.mlmodelc"
+        /// Larger S3Gen bucket pair (`ChatterboxNanoOutputCapacity.extended`,
+        /// ~30 s of generated audio) — downloaded only when requested.
+        public static let flowFileExtended = "FlowMean-N1000-fp16.mlmodelc"
+        public static let vocoderFileExtended = "HiFT-T2000-fp16.mlmodelc"
         public static let tablesFile = "tables/tables.safetensors"
         public static let defaultVoiceFile = "tables/voice-default.safetensors"
         public static let vocabFile = "tokenizer/vocab.json"
@@ -1590,6 +1594,16 @@ public enum ModelNames {
             flowFile,
             vocoderFile,
         ]
+        /// Required model set for an output capacity ("extended" swaps in
+        /// the N1000/T2000 S3Gen pair).
+        public static func requiredModels(capacity: ChatterboxNanoOutputCapacity) -> Set<String> {
+            switch capacity {
+            case .standard:
+                return requiredModels
+            case .extended:
+                return [prefillFile, decodeFile, flowFileExtended, vocoderFileExtended]
+            }
+        }
         /// Non-model assets fetched individually (nested under `tables/` and
         /// `tokenizer/`, which the repo-root model walk does not descend into).
         public static let auxFiles: [String] = [
@@ -1703,7 +1717,9 @@ public enum ModelNames {
         case .chatterbox:
             return ModelNames.Chatterbox.requiredModels
         case .chatterboxNano:
-            return ModelNames.ChatterboxNano.requiredModels
+            // Variant: "extended" → N1000/T2000 S3Gen bucket pair (~30 s).
+            let capacity = ChatterboxNanoOutputCapacity(rawValue: variant ?? "") ?? .standard
+            return ModelNames.ChatterboxNano.requiredModels(capacity: capacity)
         case .luxtts:
             // Variants: "gpu" (macOS) / "ane" (iOS); nil → platform default.
             return ModelNames.LuxTts.requiredFiles(variant: variant)

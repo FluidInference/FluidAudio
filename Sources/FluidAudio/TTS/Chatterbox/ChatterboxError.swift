@@ -24,9 +24,15 @@ public enum ChatterboxError: Error, LocalizedError {
                 + "(needs language-specific text preprocessing). Supported: "
                 + ChatterboxConstants.supportedLanguages.sorted().joined(separator: ", ")
         case .textTooLong(let tokens, let max):
-            return "Text tokenizes to \(tokens) tokens; the prefill window holds \(max)"
+            return
+                "Text tokenizes to \(tokens) BPE tokens but the usable budget is \(max) "
+                + "(the prefill window minus the voice's conditioning); split the text"
         case .generationTooLong(let tokens, let max):
-            return "Generated \(tokens) speech tokens; the flow bucket holds \(max)"
+            return
+                "Generated \(tokens) speech tokens but the usable budget is \(max) "
+                + "≈ \(String(format: "%.1f", Double(max) / 25.0)) s of audio "
+                + "(the flow bucket minus the voice's prompt tokens); split the text "
+                + "or load ChatterboxNanoOutputCapacity.extended (Nano only)"
         case .processingFailed(let detail):
             return "Chatterbox synthesis failed: \(detail)"
         }

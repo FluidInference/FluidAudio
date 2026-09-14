@@ -44,9 +44,12 @@ struct ChatterboxNanoSynthesizer {
         let textIds = models.tokenizer.encode(normalized)
         let condLen = models.voice.condEmb.rows
         let contextLen = condLen + textIds.count + 1  // single BOS embed
+        // Report the budget the caller can actually influence: text tokens
+        // vs. what remains of the prefill window after the voice
+        // conditioning and BOS (#924).
+        let textBudget = ChatterboxNanoConstants.prefillLength - condLen - 1
         guard contextLen <= ChatterboxNanoConstants.prefillLength else {
-            throw ChatterboxError.textTooLong(
-                tokens: contextLen, max: ChatterboxNanoConstants.prefillLength)
+            throw ChatterboxError.textTooLong(tokens: textIds.count, max: textBudget)
         }
 
         let prefillEmbeds = try buildPrefillEmbeds(textIds: textIds)
@@ -91,6 +94,11 @@ struct ChatterboxNanoSynthesizer {
         let maxSteps = min(
             ChatterboxNanoConstants.maxNewTokens,
             ChatterboxNanoConstants.maxContext - contextLen - 1)
+        // Speech tokens the loaded flow bucket can hold beyond the voice's
+        // prompt and the appended silence — fail as soon as it's exhausted
+        // rather than decoding to EOS first (#924).
+        let generationBudget = models.capacity.generationBudget(
+            promptTokens: models.voice.promptTokens.count)
 
         for step in 0..<maxSteps {
             // Upstream's first sample penalizes the BOS id (its input_ids
@@ -106,6 +114,10 @@ struct ChatterboxNanoSynthesizer {
             generatedIds.append(token)
             if token == ChatterboxNanoConstants.stopSpeechToken { break }
             if token < ChatterboxNanoConstants.speechVocabSize { speechTokens.append(token) }
+            if speechTokens.count > generationBudget {
+                throw ChatterboxError.generationTooLong(
+                    tokens: speechTokens.count, max: generationBudget)
+            }
 
             try fillStepEmbeds(stepEmbeds, token: token)
             curLenArr[0] = NSNumber(value: contextLen + step)
@@ -126,17 +138,12 @@ struct ChatterboxNanoSynthesizer {
         guard !speechTokens.isEmpty else {
             throw ChatterboxError.processingFailed("no speech tokens generated")
         }
-        // Upstream appends three silence tokens before vocoding.
+        // Upstream appends three silence tokens before vocoding. The
+        // in-loop budget check already reserved room for them.
         speechTokens.append(
             contentsOf: [Int](
                 repeating: ChatterboxNanoConstants.silenceToken,
                 count: ChatterboxNanoConstants.silenceTokenCount))
-        let promptLen = models.voice.promptTokens.count
-        let totalTokens = promptLen + speechTokens.count
-        guard totalTokens <= ChatterboxNanoConstants.flowTokenBucket else {
-            throw ChatterboxError.generationTooLong(
-                tokens: totalTokens, max: ChatterboxNanoConstants.flowTokenBucket)
-        }
 
         // ---- S3Gen: meanflow (mel) + HiFT (waveform) ----
         let flowStart = Date()
@@ -285,8 +292,8 @@ struct ChatterboxNanoSynthesizer {
         speechTokens: [Int], rng: inout SplitMix64,
         isolation: isolated (any Actor)? = #isolation
     ) async throws -> MLMultiArray {
-        let bucket = ChatterboxNanoConstants.flowTokenBucket
-        let melBucket = ChatterboxNanoConstants.melFrameBucket
+        let bucket = models.capacity.flowTokenBucket
+        let melBucket = models.capacity.melFrameBucket
         let voice = models.voice
         let promptLen = voice.promptTokens.count
         let totalLen = promptLen + speechTokens.count
@@ -347,7 +354,7 @@ struct ChatterboxNanoSynthesizer {
         mel: MLMultiArray, melFrames: Int, rng: inout SplitMix64,
         isolation: isolated (any Actor)? = #isolation
     ) async throws -> [Float] {
-        let melBucket = ChatterboxNanoConstants.melFrameBucket
+        let melBucket = models.capacity.melFrameBucket
         let promptFrames = 2 * models.voice.promptTokens.count
         let melValues = try ChatterboxMLSupport.floatBuffer(mel)  // [80 * melBucket]
 
