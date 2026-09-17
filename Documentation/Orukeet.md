@@ -14,6 +14,8 @@ It retains the top-K outputs required for language hints. The JSON manifest is
 used to verify the pinned archive and participates in Hugging Face's normal
 NeMo download counts. Neither loading nor transcription sends a download event.
 
+The download example requires Python 3.11 or later.
+
 ```sh
 python -m pip install huggingface-hub
 ```
