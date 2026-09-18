@@ -581,9 +581,9 @@ neural acoustic echo canceller + noise suppressor + dereverberator for 16 kHz
 speech. Feed it the mic capture and a far-end reference (what the speaker
 played) and it returns clean near-end speech, sample-aligned with the input.
 Two checkpoints (v1.3 4.8M, v1.2 1.3M) in 256 ms and 16 ms chunk exports;
-36× / 14× real-time on CPU for v1.3. On the AEC-Challenge synthetic set v1.3
-lifts ASR near-end word recall from 39.5% to 87.5% and cuts far-end word
-leakage from 33.8% to 1.8%. See
+36× / 14× real-time on CPU for v1.3. On an exploratory AEC-Challenge synthetic
+subset v1.3 lifts ASR near-end word recall from 44.1% to 77.6% and cuts
+far-end word leakage from 34.0% to 1.1%. See
 [Documentation/Enhancement/LocalVQE.md](Documentation/Enhancement/LocalVQE.md).
 
 ```swift

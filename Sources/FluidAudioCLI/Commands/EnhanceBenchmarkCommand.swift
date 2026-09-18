@@ -132,6 +132,7 @@ enum EnhanceBenchmarkCommand {
             var totals = [String: ConditionTotals]()
             var bySer = [String: [String: ConditionTotals]]()  // bucket -> condition -> totals
             var rows: [[String: Any]] = []
+            var emptyReferences = 0
 
             for (i, example) in examples.enumerated() {
                 let mic = try converter.resampleAudioFile(example.mic)
@@ -144,6 +145,12 @@ enum EnhanceBenchmarkCommand {
                 }
 
                 let refWords = words(try await transcribe(asr, clean))
+                if refWords.isEmpty {
+                    // No reference words to recall: the ASR produced nothing on the
+                    // clean near-end clip. Excluded from every metric and counted.
+                    emptyReferences += 1
+                    continue
+                }
                 let farWords = words(try await transcribe(asr, lpb))
                 let bucket = serBucket(example.ser)
                 var row: [String: Any] = [
@@ -199,6 +206,9 @@ enum EnhanceBenchmarkCommand {
             }
 
             report("")
+            if emptyReferences > 0 {
+                report("Excluded \(emptyReferences) examples whose clean near-end transcript was empty.")
+            }
             report(row(["condition", "files", "recall", "WER", "leakage", "RTFx"]))
             for condition in conditions {
                 let t = totals[condition.name] ?? ConditionTotals()
@@ -227,6 +237,7 @@ enum EnhanceBenchmarkCommand {
                 }
                 let payload: [String: Any] = [
                     "dataset": datasetDir.path, "chunk": options.chunk.rawValue, "summary": summary, "files": rows,
+                    "excluded_empty_reference": emptyReferences,
                 ]
                 let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
                 try data.write(to: URL(fileURLWithPath: outputPath))

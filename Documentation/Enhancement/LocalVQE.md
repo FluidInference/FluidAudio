@@ -168,12 +168,17 @@ this port.
 
 ## Benchmark: near-end recall / far-end leakage
 
-`fluidaudiocli enhance-benchmark` scores the enhancer with the in-repo
-Parakeet TDT v3 ASR on the Microsoft AEC-Challenge synthetic set (mic +
-loopback + clean near-end triples; 200-example subset at
+**Exploratory.** `fluidaudiocli enhance-benchmark` scores the enhancer with
+the in-repo Parakeet TDT v3 ASR on a 200-example subset (the first 200 of
+shard 0) of the Microsoft AEC-Challenge synthetic *training* set (mic +
+loopback + clean near-end triples;
 [FluidInference/aec-challenge-synthetic-mini](https://huggingface.co/datasets/FluidInference/aec-challenge-synthetic-mini),
 auto-downloaded). The ASR transcript of the clean near-end clip is the
-reference; the loopback transcript gives the far-end words.
+reference and the loopback transcript gives the far-end words, so the
+metrics are relative to machine transcripts, not human ones; examples whose
+clean-near-end transcript is empty (33 of 200) are excluded and reported.
+Use it to compare conditions, not as an absolute quality figure; the
+AEC-Challenge blind-set table above is the quality reference.
 
 - **Recall**: reference words kept by the hypothesis, `1 - (D + S) / N`.
 - **WER**: `(S + D + I) / N` against the clean-near-end transcript. Above
@@ -181,19 +186,24 @@ reference; the loopback transcript gives the far-end words.
 - **Leakage**: far-end words that appear in the hypothesis without being
   near-end words, over the far-end word count.
 
-200 examples, signal-to-echo ratio (SER) −10…+10 dB, M5 Pro, 256 ms chunk, CPU:
+167 scored examples, signal-to-echo ratio (SER) −10…+10 dB, M5 Pro, 256 ms
+chunk, CPU:
 
 | Condition | Recall | WER | Leakage | RTFx |
 |---|---:|---:|---:|---:|
-| Unprocessed mic | 39.5% | 134.2% | 33.8% | – |
-| LocalVQE v1.3 | **87.5%** | 43.4% | **1.8%** | 36× |
-| LocalVQE v1.2 | 86.3% | 49.4% | 1.9% | 62× |
-| v1.3, silent reference (NS only) | 45.3% | 122.6% | 24.4% | 36× |
+| Unprocessed mic | 44.1% | 112.2% | 34.0% | – |
+| LocalVQE v1.3 | **77.6%** | 29.6% | **1.1%** | 34× |
+| LocalVQE v1.2 | 73.0% | 33.9% | 1.0% | 57× |
+| v1.3, silent reference (NS only) | 42.3% | 101.8% | 23.9% | 34× |
 
-By SER: at SER ≤ 0 dB (echo louder than speech, 110 files) v1.3 lifts recall
-32.0% → 87.0% and cuts leakage 41.5% → 2.3%; at SER > 0 dB (90 files)
-49.5% → 88.3% and 25.2% → 1.3%. The silent-reference row shows the model
+By SER: at SER ≤ 0 dB (echo louder than speech, 93 files) v1.3 lifts recall
+36.4% → 74.5% and cuts leakage 41.1% → 1.6%; at SER > 0 dB (74 files)
+54.4% → 81.7% and 25.9% → 0.5%. The silent-reference row shows the model
 needs the loopback to cancel echo; without it, it only denoises.
+
+An earlier revision of this table reported 87.5% / 86.3% recall: the shared
+WER scorer had its insertion/deletion labels swapped, so an empty hypothesis
+scored 100% recall. Fixed in `WERCalculator` (WER itself was unaffected).
 
 ```bash
 swift run -c release fluidaudiocli enhance-benchmark                      # both variants, 200 files

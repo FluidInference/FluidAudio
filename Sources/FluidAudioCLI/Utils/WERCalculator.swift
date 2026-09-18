@@ -179,11 +179,13 @@ enum WERCalculator {
         let m = seq1.count
         let n = seq2.count
 
+        // seq1 is the hypothesis, seq2 the reference: an empty hypothesis is n
+        // deletions (reference words missing), an empty reference m insertions.
         if m == 0 {
-            return EditDistanceResult(total: n, insertions: n, deletions: 0, substitutions: 0)
+            return EditDistanceResult(total: n, insertions: 0, deletions: n, substitutions: 0)
         }
         if n == 0 {
-            return EditDistanceResult(total: m, insertions: 0, deletions: m, substitutions: 0)
+            return EditDistanceResult(total: m, insertions: m, deletions: 0, substitutions: 0)
         }
 
         var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
@@ -220,10 +222,12 @@ enum WERCalculator {
                 i -= 1
                 j -= 1
             } else if i > 0 && dp[i][j] == dp[i - 1][j] + 1 {
-                deletions += 1
+                // hypothesis word with no reference counterpart
+                insertions += 1
                 i -= 1
             } else if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {
-                insertions += 1
+                // reference word missing from the hypothesis
+                deletions += 1
                 j -= 1
             } else {
                 break
