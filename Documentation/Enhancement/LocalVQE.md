@@ -163,13 +163,15 @@ protocol reproduces the card's unprocessed baseline exactly
 | farend-singletalk-with-movement | 3.88 / 4.98 | 3.75 / 4.96 | 4.12 / 4.96 | 4.27 / 4.96 |
 | nearend-singletalk | 5.00 / 4.18 | 5.00 / 4.18 | 5.00 / 4.16 | 5.00 / 4.17 |
 
-Every double-talk and near-end cell reproduces within 0.02; ERLE within
-about 1 dB and OVRL within 0.06 (full columns in the mobius README). The
-v1.3 far-end cells are 0.15 low from aligned float output and within 0.04
-when the upstream CLI's raw 16-bit, one-hop-late output is scored instead.
-The v1.2 far-end echo rows are not reproduced from either runtime (ours
-score 0.2–0.4 higher); the private upstream scoring script is not public, so
-exact reproduction of every cell is not established. An earlier revision of
+Unprocessed baseline: exact. v1.3: double-talk and near-end within 0.01
+echo MOS; far-end 0.15 low from aligned float output and within 0.04 when
+the upstream CLI's raw 16-bit, one-hop-late output is scored instead; gated
+ERLE within 0.8 dB and OVRL within 0.01 (full columns in the mobius
+README). v1.2: double-talk and near-end within 0.02 echo, 0.02 deg, 0.1 dB
+ERLE and 0.06 OVRL; the far-end rows are not reproduced on any metric (echo
++0.29 / +0.15, gated ERLE +1.9 / +0.7 dB, OVRL +0.09 / +0.05, from either
+runtime). The private upstream scoring script is not public, so exact
+reproduction of every cell is not established. An earlier revision of
 this page said the v1.3 far-end row could not have come from the published
 weights; that was a protocol mismatch and is retracted.
 
