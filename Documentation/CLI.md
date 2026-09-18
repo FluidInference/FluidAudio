@@ -126,6 +126,12 @@ swift run -c release fluidaudiocli enhance mic.wav -r speaker.wav --chunk 16ms -
 moves the model off the CPU, and `--model-dir DIR` loads local `.mlmodelc`
 bundles instead of downloading.
 
+```bash
+# Near-end word recall / WER / far-end leakage on the AEC-Challenge synthetic mini set (auto-downloads)
+swift run -c release fluidaudiocli enhance-benchmark
+swift run -c release fluidaudiocli enhance-benchmark --max-files 50 --variants v1.3 --no-reference --output results.json
+```
+
 ## Datasets
 
 ```bash
