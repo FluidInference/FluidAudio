@@ -18,6 +18,11 @@ import OSLog
 /// tensors; the stream just passes each call's outputs back in as the next
 /// call's inputs. Create one stream per audio channel pair; a stream is not
 /// reusable across unrelated clips without `reset()`.
+///
+/// Streams created from one `LocalVqeManager` share its `MLModel`. Inference
+/// goes through Core ML's async prediction API, which Apple documents as
+/// thread-safe (WWDC23 10049), so independent streams may run concurrently;
+/// the synchronous API would require serializing every call on the model.
 public actor LocalVqeStream {
 
     private static let logger = AppLogger(category: "LocalVqeStream")
@@ -114,7 +119,7 @@ public actor LocalVqeStream {
     /// `mic` and `reference` must have the same length; both may be any
     /// length (including zero) — partial calls are buffered until enough
     /// samples arrive.
-    public func enhance(mic: [Float], reference: [Float]) throws -> [Float] {
+    public func enhance(mic: [Float], reference: [Float]) async throws -> [Float] {
         guard mic.count == reference.count else {
             throw LocalVqeError.lengthMismatch(mic: mic.count, reference: reference.count)
         }
@@ -125,7 +130,7 @@ public actor LocalVqeStream {
         var out: [Float] = []
         var offset = 0
         while pendingMic.count - offset >= samplesPerCall {
-            let hop = try runCall(
+            let hop = try await runCall(
                 mic: pendingMic[offset..<offset + samplesPerCall],
                 reference: pendingRef[offset..<offset + samplesPerCall])
             out.append(contentsOf: hop)
@@ -141,7 +146,7 @@ public actor LocalVqeStream {
     /// Drain the delay line by feeding silence, returning the remaining
     /// samples so that total output length equals total input length.
     /// Ends the current clip: the stream is reset afterwards.
-    public func flush() throws -> [Float] {
+    public func flush() async throws -> [Float] {
         let outstanding = samplesIn - samplesOut
         guard outstanding > 0 else {
             try reset()
@@ -157,7 +162,7 @@ public actor LocalVqeStream {
         var out: [Float] = []
         var offset = 0
         while pendingMic.count - offset >= samplesPerCall {
-            let hop = try runCall(
+            let hop = try await runCall(
                 mic: pendingMic[offset..<offset + samplesPerCall],
                 reference: pendingRef[offset..<offset + samplesPerCall])
             out.append(contentsOf: hop)
@@ -181,7 +186,7 @@ public actor LocalVqeStream {
         return result
     }
 
-    private func runCall(mic: ArraySlice<Float>, reference: ArraySlice<Float>) throws -> [Float] {
+    private func runCall(mic: ArraySlice<Float>, reference: ArraySlice<Float>) async throws -> [Float] {
         micInput.withUnsafeMutableBufferPointer(ofType: Float.self) { buf, _ in
             _ = buf.initialize(from: mic)
         }
@@ -196,7 +201,7 @@ public actor LocalVqeStream {
         let output: MLFeatureProvider
         do {
             let provider = try MLDictionaryFeatureProvider(dictionary: features)
-            output = try model.prediction(from: provider)
+            output = try await model.compatPrediction(from: provider, options: MLPredictionOptions())
         } catch {
             throw LocalVqeError.modelProcessingFailed(error.localizedDescription)
         }

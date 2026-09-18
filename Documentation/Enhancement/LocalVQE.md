@@ -7,8 +7,8 @@ CPU-tuned derivative of DeepVQE (Indenbom et al., Interspeech 2023). Typical
 use: cleaning up call audio captured without headphones, where the mic picks
 up what the loudspeaker plays.
 
-**Beta.** Bit-matched to the upstream PyTorch and GGML engines and scored
-identically to GGML on the 800-clip AEC-Challenge blind set (see
+**Beta.** Numerically equivalent to the upstream PyTorch and GGML engines and
+scored identically to GGML on the 800-clip AEC-Challenge blind set (see
 [Quality](#quality-aec-challenge-blind-test-set)); not yet exercised inside
 production call pipelines.
 
@@ -48,6 +48,9 @@ let out = try await stream.enhance(mic: micBuffer, reference: refBuffer)
 // End of clip: drain the delay line so total output == total input.
 let tail = try await stream.flush()
 ```
+
+Streams from one manager share its model and may run concurrently: inference
+uses Core ML's async prediction API, which Apple documents as thread-safe.
 
 `enhance` returns samples as whole model calls complete. Output sample `i`
 corresponds to input sample `i`, delivered one hop (256 samples, 16 ms)
@@ -143,17 +146,23 @@ challenge's segment rules. Scripts live in the mobius repo
 | nearend-singletalk | 200 | 5.00 | 4.99 / 4.14 | – | 4.99 / 4.09 | – |
 
 **Port fidelity.** The upstream GGML engine was run on the same 800 clips
-and scored on identical, aligned samples: every per-scenario mean matches
-the Core ML port to two decimals and the per-clip echo-MOS delta has mean
-−0.0001 (95th percentile 0.02). The only differences found are artefacts of
-the upstream CLI (256-sample output delay, tail truncation, and a 16-bit
-writer that wraps samples above full scale); the Swift CLI writes float32.
+and scored on identical, aligned whole-hop samples: every per-scenario mean
+matches the Core ML port to two decimals, the per-clip echo-MOS delta has
+mean +0.0002 (95th percentile 0.017), degradation-MOS 95th percentile 0.0004,
+and the aligned waveforms agree at a median 84 dB SNR (numerically
+equivalent within 16-bit quantisation, not bit-identical). The only
+differences found are artefacts of the upstream CLI (256-sample output
+delay, zero-filled trailing hop, and a 16-bit writer that wraps samples above
+full scale); the Swift CLI writes float32.
 
-**Against the published table.** v1.2 matches the upstream single-talk
-rows (far-end ERLE 45.7 dB vs 45.7 dB). The double-talk rows are scored on
-a segment upstream did not document (our unprocessed baseline is 2.17 vs
-their 2.67), and the published v1.3 far-end echo MOS is about 1 point above
-what the published v1.3 weights produce under this protocol, at higher
+**Against the published table.** v1.2 agrees with the upstream single-talk
+rows to within about 0.15 MOS and reproduces the far-end ERLE exactly
+(45.7 dB), with one exception (with-movement ERLE 38.2 dB vs 40.6 dB
+published). The double-talk rows disagree for every model including the
+unprocessed baseline (2.17 vs 2.67), and no segment rule tried reproduces
+them: an undocumented evaluation-protocol difference, cause not established.
+The published v1.3 far-end echo MOS is about 1 point above what the
+published v1.3 weights produce under the documented protocol, at higher
 ERLE. Treat the table above, not the upstream README, as the reference for
 this port.
 

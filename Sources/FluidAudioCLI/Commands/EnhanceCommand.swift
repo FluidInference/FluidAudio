@@ -227,7 +227,8 @@ enum EnhanceCommand {
     }
 
     private static func printUsage() {
-        logger.info(
+        // print, not the logger: usage must show in release builds too.
+        print(
             """
             Usage: fluidaudiocli enhance <mic.wav> [options]
 
