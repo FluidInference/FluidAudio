@@ -43,6 +43,12 @@ TDT/CTC and the non-autoregressive models above are wrapped by `SlidingWindowAsr
 |-------|-------------|---------|
 | **Silero VAD** | Voice activity detection; speech vs silence on 256ms windows. Segments audio before ASR or diarization. | Support model that other pipelines build on. Converted at the time being the best model out there |
 
+## Speech Enhancement Models
+
+| Model | Description | Context |
+|-------|-------------|---------|
+| **LocalVQE** | Neural acoustic echo cancellation + noise suppression + dereverberation for 16 kHz speech (DeepVQE derivative, Apache-2.0). Takes mic + far-end reference, returns clean near-end speech with 16 ms algorithmic latency. fp32 streaming exports with explicit state: v1.3 (4.8M, default) and v1.2 (1.3M) in 256 ms and 16 ms chunk sizes; 36× / 14× RTFx on CPU (M5 Pro). Managed by `LocalVqeManager` / `LocalVqeStream`. | Requested in [#49](https://github.com/FluidInference/FluidAudio/issues/49#issuecomment-5719663475) for hands-free calls. fp16 rejected (parity 102 → 5 dB); ANE not used. Upstream's GGUF-only v1.4-AEC / GTCRN line not converted. |
+
 ## Diarization Models
 
 | Model | Description | Context |
@@ -86,6 +92,7 @@ Models we converted and tested but are not supported: too large for on-device de
 | Parakeet EOU | [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml) (subdirs: `/160ms`, `/320ms`, `/1280ms`) |
 | Cohere Transcribe (INT8 hybrid, default) | [FluidInference/cohere-transcribe-03-2026-coreml](https://huggingface.co/FluidInference/cohere-transcribe-03-2026-coreml) (variant: `/q8`) |
 | Silero VAD | [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml) |
+| LocalVQE | [FluidInference/localvqe-coreml](https://huggingface.co/FluidInference/localvqe-coreml) (`localvqe-v1.3-4.8M-{16ms,256ms}.mlmodelc`, `localvqe-v1.2-1.3M-{16ms,256ms}.mlmodelc`) |
 | Diarization (Pyannote) | [FluidInference/speaker-diarization-coreml](https://huggingface.co/FluidInference/speaker-diarization-coreml) |
 | LS-EEND | [FluidInference/ls-eend-coreml](https://huggingface.co/FluidInference/ls-eend-coreml) (per-dataset optimized variants: `/optimized/ami`, `/optimized/ch`, `/optimized/dih2`, `/optimized/dih3`) |
 | Sortformer | [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml) |

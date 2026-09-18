@@ -109,6 +109,23 @@ swift run fluidaudiocli vad-benchmark --all-files --output vad_results.json --de
 `swift run fluidaudiocli vad-analyze --help` lists every tuning option (padding,
 negative threshold overrides, max-duration splitting, etc.).
 
+## Speech Enhancement (LocalVQE)
+
+```bash
+# Echo cancellation + noise suppression: mic capture plus what the speaker played
+swift run -c release fluidaudiocli enhance mic.wav --reference speaker.wav --output clean.wav
+
+# Noise suppression / dereverb only (silent far end)
+swift run -c release fluidaudiocli enhance mic.wav --output clean.wav
+
+# Drive the streaming API in 256-sample buffers with the 16 ms export and report per-call latency
+swift run -c release fluidaudiocli enhance mic.wav -r speaker.wav --chunk 16ms --streaming --buffer-samples 256
+```
+
+`--variant v1.2` selects the 1.3M-param checkpoint, `--compute-units gpu`
+moves the model off the CPU, and `--model-dir DIR` loads local `.mlmodelc`
+bundles instead of downloading.
+
 ## Datasets
 
 ```bash

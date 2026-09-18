@@ -1,0 +1,131 @@
+# LocalVQE — Echo Cancellation & Noise Suppression
+
+`LocalVqeManager` runs [LocalVQE](https://github.com/localai-org/LocalVQE)
+(Apache-2.0), a compact neural model for acoustic echo cancellation (AEC),
+noise suppression and dereverberation of 16 kHz speech. It is a streaming,
+CPU-tuned derivative of DeepVQE (Indenbom et al., Interspeech 2023). Typical
+use: cleaning up call audio captured without headphones, where the mic picks
+up what the loudspeaker plays.
+
+**Beta.** Verified against the upstream PyTorch and GGML engines on the
+upstream double-talk demo (see [Parity](#parity)); not yet exercised inside
+production call pipelines.
+
+## Inputs
+
+The model takes two 16 kHz mono signals of equal length:
+
+- **mic** — the microphone capture.
+- **reference** — the far-end signal: a loopback of what the loudspeaker
+  played. Without it the model still denoises and dereverberates; pass
+  silence (`process(mic:)` does this for you).
+
+Output is 16 kHz mono, same length as the input, sample-aligned. Level
+matches the upstream GGML engine (the OBS plugin and HF demo).
+
+## Quick start
+
+```swift
+import FluidAudio
+
+let vqe = try await LocalVqeManager()               // downloads v1.3 (256 ms chunk) on first use
+let clean = try await vqe.process(mic: micSamples, reference: farEndSamples)
+
+// Files (any format / rate; converted to 16 kHz mono)
+let cleanFile = try await vqe.process(micURL: micURL, referenceURL: speakerURL)
+```
+
+### Streaming
+
+```swift
+let vqe = try await LocalVqeManager(config: LocalVqeConfig(chunk: .realtime16ms))
+let stream = try await vqe.makeStream()
+
+// Push buffers of any size as they arrive (mic and reference must be equal length).
+let out = try await stream.enhance(mic: micBuffer, reference: refBuffer)
+
+// End of clip: drain the delay line so total output == total input.
+let tail = try await stream.flush()
+```
+
+`enhance` returns samples as whole model calls complete. Output sample `i`
+corresponds to input sample `i`, delivered one hop (256 samples, 16 ms)
+after the input that produced it plus whatever is still buffered toward the
+next call. `flush()` resets the stream; call `reset()` to start a new clip
+without flushing.
+
+## Configuration
+
+```swift
+LocalVqeConfig(
+    variant: .v13,          // .v13 (4.8M params, default) or .v12 (1.3M, ~1/4 the cost)
+    chunk: .batch256ms,     // .batch256ms (files) or .realtime16ms (live capture)
+    computeUnits: .cpuOnly  // fp32 models; CPU is fastest for the 16 ms chunk
+)
+```
+
+Both variants are joint AEC + NS + dereverb models. The chunk size only
+changes how many 16 ms hops each Core ML call consumes; the audio is
+bit-identical either way.
+
+| Variant | Chunk | Compute | Per-call p50 | RTFx |
+|---|---|---|---:|---:|
+| v1.3 | 256 ms | CPU | 7.1 ms | 36× |
+| v1.3 | 16 ms | CPU | 1.2 ms | 14× |
+| v1.2 | 256 ms | CPU | 4.2 ms | 60× |
+| v1.2 | 16 ms | CPU | 0.7 ms | 24× |
+
+Apple M5 Pro, release build, `fluidaudiocli enhance --streaming`. RTFx is
+audio-per-call ÷ p50 latency. GPU gives ~15% on the 256 ms chunk at the cost
+of a ~110 ms first-call compile; ANE is not used (see below).
+
+## CLI
+
+```bash
+swift run -c release fluidaudiocli enhance mic.wav --reference speaker.wav --output clean.wav
+swift run -c release fluidaudiocli enhance mic.wav --output clean.wav            # NS/dereverb only
+swift run -c release fluidaudiocli enhance mic.wav -r speaker.wav --chunk 16ms --streaming
+```
+
+`--variant v1.2`, `--compute-units gpu`, `--buffer-samples N` (streaming
+buffer size) and `--model-dir DIR` (load local `.mlmodelc` bundles) are also
+available; `--help` lists everything.
+
+## Models
+
+HuggingFace: [FluidInference/localvqe-coreml](https://huggingface.co/FluidInference/localvqe-coreml).
+One `.mlmodelc` per (variant, chunk); only the configured one is downloaded
+(19 MB for v1.3, 5 MB for v1.2). Cached under
+`~/Library/Application Support/FluidAudio/Models/localvqe/`.
+
+Manual loading:
+
+```swift
+let vqe = try LocalVqeManager(config: config, modelDirectory: URL(fileURLWithPath: "/path/with/mlmodelc"))
+```
+
+The models are fp32 streaming exports with explicit state: every call takes
+`mic`/`ref` plus 33 `in_*` state tensors and returns `enhanced` plus the
+matching `out_*` tensors. fp16 was rejected: it drops parity with the
+reference from 102 dB to 5 dB (CPU) / 33 dB (ANE) because the power-law
+front-end epsilons underflow and the S4D recurrence accumulates error.
+Conversion lives in the [mobius](https://github.com/FluidInference/mobius)
+repo under `models/enhancement/localvqe/coreml`.
+
+## Parity
+
+Upstream double-talk demo clip (10 s), Swift `LocalVqeStream` output:
+
+| Against | max abs diff | SNR |
+|---|---:|---:|
+| Upstream PyTorch reference (fp32, ×2 to the GGML level) | 3.8e-5 | 74 dB (16-bit WAV limited) |
+| Upstream GGML CLI (`localvqe-v1.3-4.8M-f32.gguf`) | 2.8e-5 | 80 dB |
+
+Streaming in 100 / 256 / 1000 / 4096-sample buffers and whole-clip
+processing produce the same audio to 1e-5.
+
+## Not included
+
+Upstream's `v1.4-AEC` (echo-only, keeps room and noise) and the low-power
+GTCRN line are GGUF-only and depend on a C++ adaptive-filter front-end with
+no PyTorch reference; they are not converted.

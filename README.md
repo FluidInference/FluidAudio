@@ -40,6 +40,7 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 - **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
+- **Speech Enhancement (AEC + Noise Suppression)**: [LocalVQE](Documentation/Enhancement/LocalVQE.md) (4.8M) removes loudspeaker echo, noise and reverb from 16 kHz mic audio given a far-end reference; streaming with 16 ms latency (beta)
 - **Apple Neural Engine**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 - **Open-Source Models**: All models are publicly available on HuggingFace — converted and optimized by our team; permissive licenses. See [full model catalog](Documentation/Models.md).
 
@@ -268,6 +269,7 @@ The default is `false` — no behaviour change for existing callers. Combine wit
     - [Speaker Diarization Guide](Documentation/Diarization/GettingStarted.md)
   - VAD: [Getting Started](Documentation/VAD/GettingStarted.md)
     - [Segmentation](Documentation/VAD/Segmentation.md)
+  - Speech Enhancement: [LocalVQE (AEC + NS)](Documentation/Enhancement/LocalVQE.md)
     - [Model Conversion Code](https://github.com/FluidInference/mobius)
 - [Benchmarks](Documentation/Benchmarks.md)
 - [API Reference](Documentation/API.md)
@@ -569,6 +571,31 @@ swift run fluidaudiocli vad-benchmark --num-files 50 --threshold 0.3
 `swift run fluidaudiocli vad-analyze --help` lists every tuning option, including
 negative-threshold overrides, max-speech splitting, padding, and chunk size.
 Offline mode also reports RTFx using the model's per-chunk processing time.
+
+## Speech Enhancement (Echo Cancellation + Noise Suppression)
+
+> **⚠️ Beta:** verified against the upstream engines on the upstream demo clip; not yet exercised in production call pipelines.
+
+[LocalVQE](https://github.com/localai-org/LocalVQE) (Apache-2.0) is a compact
+neural acoustic echo canceller + noise suppressor + dereverberator for 16 kHz
+speech. Feed it the mic capture and a far-end reference (what the speaker
+played) and it returns clean near-end speech, sample-aligned with the input.
+Two checkpoints (v1.3 4.8M, v1.2 1.3M) in 256 ms and 16 ms chunk exports;
+36× / 14× real-time on CPU for v1.3. See
+[Documentation/Enhancement/LocalVQE.md](Documentation/Enhancement/LocalVQE.md).
+
+```swift
+let vqe = try await LocalVqeManager()
+let clean = try await vqe.process(mic: micSamples, reference: farEndSamples)
+
+// Live capture: push buffers of any size, 16 ms algorithmic latency
+let stream = try await LocalVqeManager(config: LocalVqeConfig(chunk: .realtime16ms)).makeStream()
+let out = try await stream.enhance(mic: micBuffer, reference: refBuffer)
+```
+
+```bash
+swift run -c release fluidaudiocli enhance mic.wav --reference speaker.wav --output clean.wav
+```
 
 ## Text‑To‑Speech (TTS)
 
