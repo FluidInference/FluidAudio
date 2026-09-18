@@ -132,18 +132,46 @@ processing produce the same audio to 1e-5.
 
 The upstream quality table is AECMOS on the ICASSP 2022 AEC-Challenge blind
 set (800 real device recordings). The Swift port was rendered over all 800
-clips and scored with Microsoft's local AECMOS model (echo and degradation
-MOS, 1–5, higher is better), blind ERLE and DNSMOS OVRL, using the
-challenge's segment rules. Scripts live in the mobius repo
+clips and scored two ways, kept separate because they answer different
+questions. Scripts and per-clip results live in the mobius repo
 (`models/enhancement/localvqe/coreml/score_blind.py`).
 
-| Scenario | n | Unprocessed echo | v1.3 echo / deg | v1.3 ERLE | v1.2 echo / deg | v1.2 ERLE |
-|---|--:|--:|---|--:|---|--:|
-| doubletalk | 115 | 2.17 | 4.35 / 3.93 | – | 4.20 / 3.63 | – |
-| doubletalk-with-movement | 185 | 2.21 | 4.35 / 3.86 | – | 4.13 / 3.57 | – |
-| farend-singletalk | 107 | 1.95 | 2.49 / 5.00 | 54.1 dB | 3.92 / 5.00 | 45.7 dB |
-| farend-singletalk-with-movement | 193 | 2.23 | 3.08 / 5.00 | 55.0 dB | 4.13 / 5.00 | 38.2 dB |
-| nearend-singletalk | 200 | 5.00 | 4.99 / 4.14 | – | 4.99 / 4.09 | – |
+**Challenge protocol (reference).** Microsoft's current scenario-aware AECMOS
+model with the challenge's segment rules (convergence portions excluded),
+DNSMOS OVRL on the same rated segment, and blind ERLE with the LocalVQE
+technical-report gating (far-end-dominated frames only). AECMOS is 1–5,
+higher is better.
+
+| Scenario | n | Unprocessed echo | v1.3 echo / deg / ERLE / OVRL | v1.2 echo / deg / ERLE / OVRL |
+|---|--:|--:|---|---|
+| doubletalk | 115 | 2.17 | 4.35 / 3.93 / 6.3 dB / 2.89 | 4.20 / 3.63 / 6.2 dB / 2.77 |
+| doubletalk-with-movement | 185 | 2.21 | 4.35 / 3.86 / 6.1 dB / 2.84 | 4.13 / 3.57 / 6.0 dB / 2.73 |
+| farend-singletalk | 107 | 1.95 | 2.49 / 5.00 / 54.2 dB / 1.95 | 3.92 / 5.00 / 53.2 dB / 1.89 |
+| farend-singletalk-with-movement | 193 | 2.23 | 3.08 / 5.00 / 55.9 dB / 1.96 | 4.13 / 5.00 / 47.3 dB / 1.80 |
+| nearend-singletalk | 200 | 5.00 | 4.99 / 4.14 / 2.3 dB / 3.17 | 4.99 / 4.09 / 2.1 dB / 3.17 |
+
+**Upstream protocol (HF model-card reproduction).** The published table was
+produced with the legacy AECMOS model over the first 20 s of each clip; that
+protocol reproduces the card's unprocessed baseline exactly
+(2.67 / 2.56 / 1.90 / 2.13 / 5.00). Under it, the Core ML port gives:
+
+| Scenario | HF card v1.3 | Core ML v1.3 | HF card v1.2 | Core ML v1.2 |
+|---|---|---|---|---|
+| doubletalk | 4.73 / 2.62 | 4.73 / 2.62 | 4.72 / 2.37 | 4.72 / 2.39 |
+| doubletalk-with-movement | 4.67 / 2.43 | 4.66 / 2.44 | 4.65 / 2.30 | 4.64 / 2.31 |
+| farend-singletalk | 3.69 / 4.83 | 3.54 / 4.82 | 3.78 / 4.91 | 4.07 / 4.93 |
+| farend-singletalk-with-movement | 3.88 / 4.98 | 3.75 / 4.96 | 4.12 / 4.96 | 4.27 / 4.96 |
+| nearend-singletalk | 5.00 / 4.18 | 5.00 / 4.18 | 5.00 / 4.16 | 5.00 / 4.17 |
+
+Every double-talk and near-end cell reproduces within 0.02; ERLE within
+about 1 dB and OVRL within 0.06 (full columns in the mobius README). The
+v1.3 far-end cells are 0.15 low from aligned float output and within 0.04
+when the upstream CLI's raw 16-bit, one-hop-late output is scored instead.
+The v1.2 far-end echo rows are not reproduced from either runtime (ours
+score 0.2–0.4 higher); the private upstream scoring script is not public, so
+exact reproduction of every cell is not established. An earlier revision of
+this page said the v1.3 far-end row could not have come from the published
+weights; that was a protocol mismatch and is retracted.
 
 **Port fidelity.** The upstream GGML engine was run on the same 800 clips
 and scored on identical, aligned whole-hop samples: every per-scenario mean
@@ -154,17 +182,6 @@ equivalent within 16-bit quantisation, not bit-identical). The only
 differences found are artefacts of the upstream CLI (256-sample output
 delay, zero-filled trailing hop, and a 16-bit writer that wraps samples above
 full scale); the Swift CLI writes float32.
-
-**Against the published table.** v1.2 agrees with the upstream single-talk
-rows to within about 0.15 MOS and reproduces the far-end ERLE exactly
-(45.7 dB), with one exception (with-movement ERLE 38.2 dB vs 40.6 dB
-published). The double-talk rows disagree for every model including the
-unprocessed baseline (2.17 vs 2.67), and no segment rule tried reproduces
-them: an undocumented evaluation-protocol difference, cause not established.
-The published v1.3 far-end echo MOS is about 1 point above what the
-published v1.3 weights produce under the documented protocol, at higher
-ERLE. Treat the table above, not the upstream README, as the reference for
-this port.
 
 ## Benchmark: near-end recall / far-end leakage
 
