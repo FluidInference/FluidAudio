@@ -232,9 +232,7 @@ extension AsrModels {
         }
         let vocabularyURL = directory.appendingPathComponent(names.vocabulary)
         let vocabulary = try parseVocabulary(at: vocabularyURL)
-        guard vocabulary.count == version.blankId,
-            (0..<version.blankId).allSatisfy({ vocabulary[$0] != nil })
-        else {
+        guard (0..<version.blankId).allSatisfy({ vocabulary[$0] != nil }) else {
             throw AsrModelsError.loadingFailed("Local vocabulary must contain every token before the blank ID")
         }
         let encoder =
