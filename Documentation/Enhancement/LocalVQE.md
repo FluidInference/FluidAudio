@@ -177,8 +177,13 @@ ERLE and 0.06 OVRL; the far-end rows are not reproduced on any metric (echo
 +0.29 / +0.15, gated ERLE +1.9 / +0.7 dB, OVRL +0.09 / +0.05, from either
 runtime). Those values are above the published ones, which is not evidence
 that the port outperforms upstream; +0.29 echo MOS is not rounding noise.
-The private upstream scoring script is not public, so exact reproduction of
-every cell is not established. An earlier revision of
+Rendering v1.2 at the pre-v1.2 delay window (dmax 32, which the reference
+config left on the day that row was published) reproduces the card's
+far-end ERLE (44.9 / 40.5 dB) and deg (4.88 / 4.96) but not its echo MOS;
+softmax temperature 1.0, the ReLU6 reference, the upstream CLI's output
+format and every scorer/segment variation were also tested and rejected
+(details in the mobius README). The private upstream scoring script is not
+public, so those two cells remain unexplained. An earlier revision of
 this page said the v1.3 far-end row could not have come from the published
 weights; that was a protocol mismatch and is retracted.
 
