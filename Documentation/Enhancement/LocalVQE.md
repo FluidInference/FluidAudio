@@ -7,9 +7,11 @@ CPU-tuned derivative of DeepVQE (Indenbom et al., Interspeech 2023). Typical
 use: cleaning up call audio captured without headphones, where the mic picks
 up what the loudspeaker plays.
 
-**Beta.** Numerically equivalent to the upstream PyTorch and GGML engines and
-scored identically to GGML on the 800-clip AEC-Challenge blind set (see
-[Quality](#quality-aec-challenge-blind-test-set)); not yet exercised inside
+**Beta.** Port fidelity validated (numerically equivalent to the upstream
+PyTorch and GGML engines, scored identically to GGML on the 800-clip
+AEC-Challenge blind set); the published benchmark is substantially
+reproduced, with unresolved v1.2 far-end differences (see
+[Quality](#quality-aec-challenge-blind-test-set)). Not yet exercised inside
 production call pipelines.
 
 ## Inputs
@@ -130,6 +132,9 @@ processing produce the same audio to 1e-5.
 
 ## Quality: AEC-Challenge blind test set
 
+**Summary: port fidelity validated; published benchmark substantially
+reproduced, with unresolved v1.2 far-end differences.**
+
 The upstream quality table is AECMOS on the ICASSP 2022 AEC-Challenge blind
 set (800 real device recordings). The Swift port was rendered over all 800
 clips and scored two ways, kept separate because they answer different
@@ -170,8 +175,10 @@ ERLE within 0.8 dB and OVRL within 0.01 (full columns in the mobius
 README). v1.2: double-talk and near-end within 0.02 echo, 0.02 deg, 0.1 dB
 ERLE and 0.06 OVRL; the far-end rows are not reproduced on any metric (echo
 +0.29 / +0.15, gated ERLE +1.9 / +0.7 dB, OVRL +0.09 / +0.05, from either
-runtime). The private upstream scoring script is not public, so exact
-reproduction of every cell is not established. An earlier revision of
+runtime). Those values are above the published ones, which is not evidence
+that the port outperforms upstream; +0.29 echo MOS is not rounding noise.
+The private upstream scoring script is not public, so exact reproduction of
+every cell is not established. An earlier revision of
 this page said the v1.3 far-end row could not have come from the published
 weights; that was a protocol mismatch and is retracted.
 
