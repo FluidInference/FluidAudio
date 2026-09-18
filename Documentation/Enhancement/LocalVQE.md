@@ -7,8 +7,9 @@ CPU-tuned derivative of DeepVQE (Indenbom et al., Interspeech 2023). Typical
 use: cleaning up call audio captured without headphones, where the mic picks
 up what the loudspeaker plays.
 
-**Beta.** Verified against the upstream PyTorch and GGML engines on the
-upstream double-talk demo (see [Parity](#parity)); not yet exercised inside
+**Beta.** Bit-matched to the upstream PyTorch and GGML engines and scored
+identically to GGML on the 800-clip AEC-Challenge blind set (see
+[Quality](#quality-aec-challenge-blind-test-set)); not yet exercised inside
 production call pipelines.
 
 ## Inputs
@@ -123,6 +124,38 @@ Upstream double-talk demo clip (10 s), Swift `LocalVqeStream` output:
 
 Streaming in 100 / 256 / 1000 / 4096-sample buffers and whole-clip
 processing produce the same audio to 1e-5.
+
+## Quality: AEC-Challenge blind test set
+
+The upstream quality table is AECMOS on the ICASSP 2022 AEC-Challenge blind
+set (800 real device recordings). The Swift port was rendered over all 800
+clips and scored with Microsoft's local AECMOS model (echo and degradation
+MOS, 1–5, higher is better), blind ERLE and DNSMOS OVRL, using the
+challenge's segment rules. Scripts live in the mobius repo
+(`models/enhancement/localvqe/coreml/score_blind.py`).
+
+| Scenario | n | Unprocessed echo | v1.3 echo / deg | v1.3 ERLE | v1.2 echo / deg | v1.2 ERLE |
+|---|--:|--:|---|--:|---|--:|
+| doubletalk | 115 | 2.17 | 4.35 / 3.93 | – | 4.20 / 3.63 | – |
+| doubletalk-with-movement | 185 | 2.21 | 4.35 / 3.86 | – | 4.13 / 3.57 | – |
+| farend-singletalk | 107 | 1.95 | 2.49 / 5.00 | 54.1 dB | 3.92 / 5.00 | 45.7 dB |
+| farend-singletalk-with-movement | 193 | 2.23 | 3.08 / 5.00 | 55.0 dB | 4.13 / 5.00 | 38.2 dB |
+| nearend-singletalk | 200 | 5.00 | 4.99 / 4.14 | – | 4.99 / 4.09 | – |
+
+**Port fidelity.** The upstream GGML engine was run on the same 800 clips
+and scored on identical, aligned samples: every per-scenario mean matches
+the Core ML port to two decimals and the per-clip echo-MOS delta has mean
+−0.0001 (95th percentile 0.02). The only differences found are artefacts of
+the upstream CLI (256-sample output delay, tail truncation, and a 16-bit
+writer that wraps samples above full scale); the Swift CLI writes float32.
+
+**Against the published table.** v1.2 matches the upstream single-talk
+rows (far-end ERLE 45.7 dB vs 45.7 dB). The double-talk rows are scored on
+a segment upstream did not document (our unprocessed baseline is 2.17 vs
+their 2.67), and the published v1.3 far-end echo MOS is about 1 point above
+what the published v1.3 weights produce under this protocol, at higher
+ERLE. Treat the table above, not the upstream README, as the reference for
+this port.
 
 ## Benchmark: near-end recall / far-end leakage
 
