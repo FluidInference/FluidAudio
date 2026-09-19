@@ -1073,6 +1073,8 @@ median; the original remains the default.
 limit (maximum 0.0204874), and one output would be rejected by Swift's probability-sum
 check despite a correct selection. These accuracy numbers score raw model outputs.
 
+All 11 probability-error cases passed a focused FP32 CPU rerun (max error 0.0000012), pointing to FP16/backend rounding.
+
 [Full report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/synthetic-test.json) ·
 [Dataset and reproduction](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#full-published-synthetic-test) ·
 [Per-row trace](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/62ffd3653cf0edef7222a886e2006503e2367d10/reports/synthetic-test-decisions.jsonl.gz) ·
