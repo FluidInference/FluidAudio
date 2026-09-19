@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+Package.resolved
+*.app
+# Small, pinned upstream text fixture required by the standalone demo.
+!Sources/CuaDemoCore/Resources/
+!Sources/CuaDemoCore/Resources/demo.jsonl
