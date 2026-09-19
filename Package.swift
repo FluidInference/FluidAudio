@@ -71,6 +71,7 @@ let package = Package(
             ],
             resources: [
                 .process("TTS/LuxTts/Resources"),
+                .process("TTS/PocketTTS/Fixtures"),
                 // Real recordings (cleared for public release by the speaker) for the
                 // streaming final-window regression, issue #855.
                 .copy("ASR/Parakeet/SlidingWindow/Fixtures"),

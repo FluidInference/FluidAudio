@@ -375,14 +375,12 @@ public actor PocketTtsSession {
             sequence = try PocketTtsSynthesizer.createSequenceFromLatent(latent)
         }
 
-        if !Task.isCancelled
-            && PocketTtsSynthesizer.didExhaustCacheBudget(
+        if !Task.isCancelled {
+            try PocketTtsSynthesizer.validateGenerationCompleted(
                 generatedFrameLimit: maxGenLen,
                 cachePosition: cachePosition,
                 eosStep: eosStep,
                 framesAfterEos: totalFramesAfterEos)
-        {
-            Self.logger.warning("Session chunk \(chunkIndex) exhausted the KV cache generation budget")
         }
     }
 
@@ -549,15 +547,12 @@ public actor PocketTtsSession {
             sequence = latent
         }
 
-        if !Task.isCancelled
-            && PocketTtsSynthesizer.didExhaustCacheBudget(
+        if !Task.isCancelled {
+            try PocketTtsSynthesizer.validateGenerationCompleted(
                 generatedFrameLimit: maxGenLen,
                 cachePosition: Int(prefilledPosition),
                 eosStep: eosStep,
                 framesAfterEos: totalFramesAfterEos)
-        {
-            Self.logger.warning(
-                "Session chunk \(chunkIndex) (state) exhausted the KV cache generation budget")
         }
     }
 }

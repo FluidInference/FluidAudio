@@ -580,15 +580,12 @@ public struct PocketTtsSynthesizer {
                         sequence = try PocketTtsSynthesizer.createSequenceFromLatent(latent)
                     }
 
-                    if !Task.isCancelled
-                        && PocketTtsSynthesizer.didExhaustCacheBudget(
+                    if !Task.isCancelled {
+                        try PocketTtsSynthesizer.validateGenerationCompleted(
                             generatedFrameLimit: maxGenLen,
                             cachePosition: cachePosition,
                             eosStep: eosStep,
                             framesAfterEos: totalFramesAfterEos)
-                    {
-                        PocketTtsSynthesizer.logger.warning(
-                            "Stream chunk \(chunkIdx + 1) exhausted the KV cache generation budget")
                     }
 
                     if Task.isCancelled { break }
@@ -629,19 +626,14 @@ public struct PocketTtsSynthesizer {
             // actor (CPU) in order and yield audio. While it awaits mimi.decode,
             // the producer below runs flowlm/flow on GPU/ANE — the overlap.
             let consumer = Task.detached {
-                do {
-                    for await w in latents {
-                        if Task.isCancelled { break }
-                        let audio = try await mimi.decode(w.latent)
-                        continuation.yield(
-                            AudioFrame(
-                                samples: audio, frameIndex: w.frameIndex,
-                                chunkIndex: w.chunkIndex, chunkCount: totalChunks,
-                                utteranceIndex: nil))
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
+                for await w in latents {
+                    if Task.isCancelled { break }
+                    let audio = try await mimi.decode(w.latent)
+                    continuation.yield(
+                        AudioFrame(
+                            samples: audio, frameIndex: w.frameIndex,
+                            chunkIndex: w.chunkIndex, chunkCount: totalChunks,
+                            utteranceIndex: nil))
                 }
             }
 
@@ -685,26 +677,24 @@ public struct PocketTtsSynthesizer {
                             LatentWork(latent: latent, frameIndex: step, chunkIndex: chunkIdx))
                         sequence = try PocketTtsSynthesizer.createSequenceFromLatent(latent)
                     }
-                    if !Task.isCancelled
-                        && PocketTtsSynthesizer.didExhaustCacheBudget(
+                    if !Task.isCancelled {
+                        try PocketTtsSynthesizer.validateGenerationCompleted(
                             generatedFrameLimit: maxGenLen,
                             cachePosition: cachePosition,
                             eosStep: eosStep,
                             framesAfterEos: totalFramesAfterEos)
-                    {
-                        PocketTtsSynthesizer.logger.warning(
-                            "Stream chunk \(chunkIdx + 1) exhausted the KV cache generation budget")
                     }
                     if Task.isCancelled { break }
                 }
                 latentCont.finish()
+                try await consumer.value
+                continuation.finish()
             } catch {
                 latentCont.finish()
                 consumer.cancel()
                 continuation.finish(throwing: error)
                 return
             }
-            _ = await consumer.value
         }
     }
 
@@ -1374,18 +1364,25 @@ public struct PocketTtsSynthesizer {
         return min(estimateMaxFrames(text: text), remaining)
     }
 
-    /// Whether a generation loop reached the cache boundary before it could
-    /// observe EOS and emit the configured trailing frames.
-    static func didExhaustCacheBudget(
+    /// Reject a generation that reached the cache boundary before it could
+    /// observe EOS and emit the configured trailing frames. Streaming callers
+    /// may already have received frames, so this must surface as an error rather
+    /// than reporting truncated audio as a successful utterance.
+    static func validateGenerationCompleted(
         generatedFrameLimit: Int,
         cachePosition: Int,
         eosStep: Int?,
         framesAfterEos: Int
-    ) -> Bool {
+    ) throws {
         let remaining = max(0, PocketTtsConstants.kvCacheMaxLen - cachePosition)
-        guard generatedFrameLimit > 0, generatedFrameLimit == remaining else { return false }
-        guard let eosStep else { return true }
-        return eosStep + framesAfterEos >= generatedFrameLimit
+        guard generatedFrameLimit == remaining else { return }
+        if let eosStep, eosStep + framesAfterEos <= generatedFrameLimit {
+            return
+        }
+        throw PocketTTSError.processingFailed(
+            "PocketTTS generation exhausted the KV cache before completing the text: "
+                + "conditioning ended at position \(cachePosition), capacity "
+                + "\(PocketTtsConstants.kvCacheMaxLen)")
     }
 
     /// Number of cache positions occupied by voice conditioning before text
