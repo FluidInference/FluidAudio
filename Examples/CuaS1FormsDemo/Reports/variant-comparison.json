@@ -1,0 +1,4143 @@
+{
+  "artifacts" : {
+    "ane-gather" : {
+      "filesSHA256" : {
+        "Data/com.apple.CoreML/model.mlmodel" : "de18e313c3b625e35d008ed8b6b24108edc6df7bf2fae9533af03519eca11b63",
+        "Data/com.apple.CoreML/weights/weight.bin" : "4da9259f798e44f5a1b50769ee1916fd3747c4d723dd9997b516c7fe238c7895",
+        "Manifest.json" : "38f812a04eb2322080634ba788c61df362336168466ca67e5549058d346ac793"
+      },
+      "firstCallMilliseconds" : 1.552084,
+      "loadMilliseconds" : 583.114125
+    },
+    "baseline" : {
+      "filesSHA256" : {
+        "Data/com.apple.CoreML/model.mlmodel" : "70485fc18cbb21785df833cbddddc0b5b59acb00d22394b76e55307e2c135dd0",
+        "Data/com.apple.CoreML/weights/weight.bin" : "4da9259f798e44f5a1b50769ee1916fd3747c4d723dd9997b516c7fe238c7895",
+        "Manifest.json" : "2bc0f5f62337b27fb6b0ecde248f1e3dc269e1ba4b65516aaeede2a60e293dcc"
+      },
+      "firstCallMilliseconds" : 2.291,
+      "loadMilliseconds" : 600.17475
+    }
+  },
+  "build" : "release",
+  "computeUnits" : "cpuAndNeuralEngine",
+  "datasetSHA256" : "4f43b442e79ba2e2ce731e27e9b8e340c2b5dfcaffc92d8ff564c34f115ff1ca",
+  "forms" : {
+    "auto-claim" : {
+      "ane-gather" : {
+        "calls" : 68,
+        "correct" : 68,
+        "medianMilliseconds" : 0.9610415,
+        "p95Milliseconds" : 0.9831149
+      },
+      "baseline" : {
+        "calls" : 68,
+        "correct" : 68,
+        "medianMilliseconds" : 0.9028955,
+        "p95Milliseconds" : 0.9259375
+      }
+    },
+    "job-application" : {
+      "ane-gather" : {
+        "calls" : 60,
+        "correct" : 60,
+        "medianMilliseconds" : 0.956958,
+        "p95Milliseconds" : 0.98495355
+      },
+      "baseline" : {
+        "calls" : 60,
+        "correct" : 60,
+        "medianMilliseconds" : 0.9150005000000001,
+        "p95Milliseconds" : 0.9271681
+      }
+    },
+    "patient-registration" : {
+      "ane-gather" : {
+        "calls" : 72,
+        "correct" : 72,
+        "medianMilliseconds" : 0.962709,
+        "p95Milliseconds" : 0.98381075
+      },
+      "baseline" : {
+        "calls" : 72,
+        "correct" : 72,
+        "medianMilliseconds" : 0.916542,
+        "p95Milliseconds" : 0.9402545
+      }
+    }
+  },
+  "hardware" : "Apple M5 Pro, 24 GB memory",
+  "limitations" : "Exploratory local timing on 3 supplied forms; not a held-out generalization benchmark. Load may use system caches.",
+  "operatingSystem" : "Version 27.0 (Build 26A428)",
+  "protocolDescription" : "Both resident; one 50-row warmup each; ABBA; two 50-row passes per block",
+  "rows" : [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    68,
+    69,
+    70,
+    71,
+    72,
+    73,
+    74,
+    75,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    130,
+    131,
+    132,
+    133,
+    134,
+    135,
+    136,
+    137,
+    138,
+    139,
+    140,
+    141,
+    142,
+    143,
+    144,
+    145,
+    146
+  ],
+  "samples" : [
+    {
+      "block" : 0,
+      "expectedIndex" : 22,
+      "form" : "patient-registration",
+      "milliseconds" : 0.968625,
+      "pass" : 0,
+      "row" : 0,
+      "selectedIndex" : 22,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 23,
+      "form" : "patient-registration",
+      "milliseconds" : 0.943208,
+      "pass" : 0,
+      "row" : 1,
+      "selectedIndex" : 23,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 2,
+      "form" : "patient-registration",
+      "milliseconds" : 0.914625,
+      "pass" : 0,
+      "row" : 2,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 5,
+      "form" : "patient-registration",
+      "milliseconds" : 0.915875,
+      "pass" : 0,
+      "row" : 3,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 4,
+      "form" : "patient-registration",
+      "milliseconds" : 0.908208,
+      "pass" : 0,
+      "row" : 4,
+      "selectedIndex" : 4,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 6,
+      "form" : "patient-registration",
+      "milliseconds" : 0.914125,
+      "pass" : 0,
+      "row" : 5,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 7,
+      "form" : "patient-registration",
+      "milliseconds" : 0.901125,
+      "pass" : 0,
+      "row" : 6,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 8,
+      "form" : "patient-registration",
+      "milliseconds" : 0.916875,
+      "pass" : 0,
+      "row" : 7,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 9,
+      "form" : "patient-registration",
+      "milliseconds" : 0.930459,
+      "pass" : 0,
+      "row" : 8,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 10,
+      "form" : "patient-registration",
+      "milliseconds" : 0.929291,
+      "pass" : 0,
+      "row" : 9,
+      "selectedIndex" : 10,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 11,
+      "form" : "patient-registration",
+      "milliseconds" : 0.933167,
+      "pass" : 0,
+      "row" : 10,
+      "selectedIndex" : 11,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 13,
+      "form" : "patient-registration",
+      "milliseconds" : 0.911083,
+      "pass" : 0,
+      "row" : 11,
+      "selectedIndex" : 13,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 15,
+      "form" : "patient-registration",
+      "milliseconds" : 0.916667,
+      "pass" : 0,
+      "row" : 12,
+      "selectedIndex" : 15,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 16,
+      "form" : "patient-registration",
+      "milliseconds" : 0.914792,
+      "pass" : 0,
+      "row" : 13,
+      "selectedIndex" : 16,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.915709,
+      "pass" : 0,
+      "row" : 14,
+      "selectedIndex" : 26,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 24,
+      "form" : "patient-registration",
+      "milliseconds" : 0.93525,
+      "pass" : 0,
+      "row" : 15,
+      "selectedIndex" : 24,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.919791,
+      "pass" : 0,
+      "row" : 16,
+      "selectedIndex" : 26,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 25,
+      "form" : "patient-registration",
+      "milliseconds" : 0.931334,
+      "pass" : 0,
+      "row" : 17,
+      "selectedIndex" : 25,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 0,
+      "form" : "job-application",
+      "milliseconds" : 0.912583,
+      "pass" : 0,
+      "row" : 68,
+      "selectedIndex" : 0,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 1,
+      "form" : "job-application",
+      "milliseconds" : 0.915209,
+      "pass" : 0,
+      "row" : 69,
+      "selectedIndex" : 1,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 2,
+      "form" : "job-application",
+      "milliseconds" : 0.910292,
+      "pass" : 0,
+      "row" : 70,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 3,
+      "form" : "job-application",
+      "milliseconds" : 0.91775,
+      "pass" : 0,
+      "row" : 71,
+      "selectedIndex" : 3,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 5,
+      "form" : "job-application",
+      "milliseconds" : 0.917083,
+      "pass" : 0,
+      "row" : 72,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 6,
+      "form" : "job-application",
+      "milliseconds" : 0.922833,
+      "pass" : 0,
+      "row" : 73,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 7,
+      "form" : "job-application",
+      "milliseconds" : 0.938958,
+      "pass" : 0,
+      "row" : 74,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 8,
+      "form" : "job-application",
+      "milliseconds" : 0.9265,
+      "pass" : 0,
+      "row" : 75,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 9,
+      "form" : "job-application",
+      "milliseconds" : 0.92825,
+      "pass" : 0,
+      "row" : 76,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 13,
+      "form" : "job-application",
+      "milliseconds" : 0.92425,
+      "pass" : 0,
+      "row" : 77,
+      "selectedIndex" : 13,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.914417,
+      "pass" : 0,
+      "row" : 78,
+      "selectedIndex" : 20,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.906667,
+      "pass" : 0,
+      "row" : 79,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.916375,
+      "pass" : 0,
+      "row" : 80,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.914625,
+      "pass" : 0,
+      "row" : 81,
+      "selectedIndex" : 20,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 19,
+      "form" : "job-application",
+      "milliseconds" : 0.911167,
+      "pass" : 0,
+      "row" : 82,
+      "selectedIndex" : 19,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 1,
+      "form" : "auto-claim",
+      "milliseconds" : 0.920167,
+      "pass" : 0,
+      "row" : 130,
+      "selectedIndex" : 1,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 2,
+      "form" : "auto-claim",
+      "milliseconds" : 0.903375,
+      "pass" : 0,
+      "row" : 131,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 3,
+      "form" : "auto-claim",
+      "milliseconds" : 0.913958,
+      "pass" : 0,
+      "row" : 132,
+      "selectedIndex" : 3,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 4,
+      "form" : "auto-claim",
+      "milliseconds" : 0.907667,
+      "pass" : 0,
+      "row" : 133,
+      "selectedIndex" : 4,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 5,
+      "form" : "auto-claim",
+      "milliseconds" : 0.909625,
+      "pass" : 0,
+      "row" : 134,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 6,
+      "form" : "auto-claim",
+      "milliseconds" : 0.912833,
+      "pass" : 0,
+      "row" : 135,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 7,
+      "form" : "auto-claim",
+      "milliseconds" : 0.905542,
+      "pass" : 0,
+      "row" : 136,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 8,
+      "form" : "auto-claim",
+      "milliseconds" : 0.901292,
+      "pass" : 0,
+      "row" : 137,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 9,
+      "form" : "auto-claim",
+      "milliseconds" : 0.898209,
+      "pass" : 0,
+      "row" : 138,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 10,
+      "form" : "auto-claim",
+      "milliseconds" : 0.901292,
+      "pass" : 0,
+      "row" : 139,
+      "selectedIndex" : 10,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 11,
+      "form" : "auto-claim",
+      "milliseconds" : 0.899,
+      "pass" : 0,
+      "row" : 140,
+      "selectedIndex" : 11,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 12,
+      "form" : "auto-claim",
+      "milliseconds" : 0.901708,
+      "pass" : 0,
+      "row" : 141,
+      "selectedIndex" : 12,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.898125,
+      "pass" : 0,
+      "row" : 142,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 16,
+      "form" : "auto-claim",
+      "milliseconds" : 0.903291,
+      "pass" : 0,
+      "row" : 143,
+      "selectedIndex" : 16,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.905625,
+      "pass" : 0,
+      "row" : 144,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.905,
+      "pass" : 0,
+      "row" : 145,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 17,
+      "form" : "auto-claim",
+      "milliseconds" : 0.905125,
+      "pass" : 0,
+      "row" : 146,
+      "selectedIndex" : 17,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 22,
+      "form" : "patient-registration",
+      "milliseconds" : 0.905291,
+      "pass" : 1,
+      "row" : 0,
+      "selectedIndex" : 22,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 23,
+      "form" : "patient-registration",
+      "milliseconds" : 0.923791,
+      "pass" : 1,
+      "row" : 1,
+      "selectedIndex" : 23,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 2,
+      "form" : "patient-registration",
+      "milliseconds" : 0.906583,
+      "pass" : 1,
+      "row" : 2,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 5,
+      "form" : "patient-registration",
+      "milliseconds" : 0.9105,
+      "pass" : 1,
+      "row" : 3,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 4,
+      "form" : "patient-registration",
+      "milliseconds" : 0.913083,
+      "pass" : 1,
+      "row" : 4,
+      "selectedIndex" : 4,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 6,
+      "form" : "patient-registration",
+      "milliseconds" : 0.926416,
+      "pass" : 1,
+      "row" : 5,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 7,
+      "form" : "patient-registration",
+      "milliseconds" : 0.928333,
+      "pass" : 1,
+      "row" : 6,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 8,
+      "form" : "patient-registration",
+      "milliseconds" : 0.913417,
+      "pass" : 1,
+      "row" : 7,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 9,
+      "form" : "patient-registration",
+      "milliseconds" : 0.908167,
+      "pass" : 1,
+      "row" : 8,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 10,
+      "form" : "patient-registration",
+      "milliseconds" : 0.916417,
+      "pass" : 1,
+      "row" : 9,
+      "selectedIndex" : 10,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 11,
+      "form" : "patient-registration",
+      "milliseconds" : 0.91875,
+      "pass" : 1,
+      "row" : 10,
+      "selectedIndex" : 11,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 13,
+      "form" : "patient-registration",
+      "milliseconds" : 0.92675,
+      "pass" : 1,
+      "row" : 11,
+      "selectedIndex" : 13,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 15,
+      "form" : "patient-registration",
+      "milliseconds" : 0.941833,
+      "pass" : 1,
+      "row" : 12,
+      "selectedIndex" : 15,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 16,
+      "form" : "patient-registration",
+      "milliseconds" : 0.913875,
+      "pass" : 1,
+      "row" : 13,
+      "selectedIndex" : 16,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.910833,
+      "pass" : 1,
+      "row" : 14,
+      "selectedIndex" : 26,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 24,
+      "form" : "patient-registration",
+      "milliseconds" : 0.916875,
+      "pass" : 1,
+      "row" : 15,
+      "selectedIndex" : 24,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.919875,
+      "pass" : 1,
+      "row" : 16,
+      "selectedIndex" : 26,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 25,
+      "form" : "patient-registration",
+      "milliseconds" : 0.93275,
+      "pass" : 1,
+      "row" : 17,
+      "selectedIndex" : 25,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 0,
+      "form" : "job-application",
+      "milliseconds" : 0.918625,
+      "pass" : 1,
+      "row" : 68,
+      "selectedIndex" : 0,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 1,
+      "form" : "job-application",
+      "milliseconds" : 0.897208,
+      "pass" : 1,
+      "row" : 69,
+      "selectedIndex" : 1,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 2,
+      "form" : "job-application",
+      "milliseconds" : 0.914792,
+      "pass" : 1,
+      "row" : 70,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 3,
+      "form" : "job-application",
+      "milliseconds" : 0.919,
+      "pass" : 1,
+      "row" : 71,
+      "selectedIndex" : 3,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 5,
+      "form" : "job-application",
+      "milliseconds" : 0.920541,
+      "pass" : 1,
+      "row" : 72,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 6,
+      "form" : "job-application",
+      "milliseconds" : 0.927208,
+      "pass" : 1,
+      "row" : 73,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 7,
+      "form" : "job-application",
+      "milliseconds" : 0.901625,
+      "pass" : 1,
+      "row" : 74,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 8,
+      "form" : "job-application",
+      "milliseconds" : 0.924541,
+      "pass" : 1,
+      "row" : 75,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 9,
+      "form" : "job-application",
+      "milliseconds" : 0.917458,
+      "pass" : 1,
+      "row" : 76,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 13,
+      "form" : "job-application",
+      "milliseconds" : 0.922292,
+      "pass" : 1,
+      "row" : 77,
+      "selectedIndex" : 13,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.896084,
+      "pass" : 1,
+      "row" : 78,
+      "selectedIndex" : 20,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.917583,
+      "pass" : 1,
+      "row" : 79,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.904875,
+      "pass" : 1,
+      "row" : 80,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.900625,
+      "pass" : 1,
+      "row" : 81,
+      "selectedIndex" : 20,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 19,
+      "form" : "job-application",
+      "milliseconds" : 0.923083,
+      "pass" : 1,
+      "row" : 82,
+      "selectedIndex" : 19,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 1,
+      "form" : "auto-claim",
+      "milliseconds" : 0.894541,
+      "pass" : 1,
+      "row" : 130,
+      "selectedIndex" : 1,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 2,
+      "form" : "auto-claim",
+      "milliseconds" : 0.9015,
+      "pass" : 1,
+      "row" : 131,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 3,
+      "form" : "auto-claim",
+      "milliseconds" : 0.918167,
+      "pass" : 1,
+      "row" : 132,
+      "selectedIndex" : 3,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 4,
+      "form" : "auto-claim",
+      "milliseconds" : 0.921167,
+      "pass" : 1,
+      "row" : 133,
+      "selectedIndex" : 4,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 5,
+      "form" : "auto-claim",
+      "milliseconds" : 0.916834,
+      "pass" : 1,
+      "row" : 134,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 6,
+      "form" : "auto-claim",
+      "milliseconds" : 0.874709,
+      "pass" : 1,
+      "row" : 135,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 7,
+      "form" : "auto-claim",
+      "milliseconds" : 0.873125,
+      "pass" : 1,
+      "row" : 136,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 8,
+      "form" : "auto-claim",
+      "milliseconds" : 0.896792,
+      "pass" : 1,
+      "row" : 137,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 9,
+      "form" : "auto-claim",
+      "milliseconds" : 0.886292,
+      "pass" : 1,
+      "row" : 138,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 10,
+      "form" : "auto-claim",
+      "milliseconds" : 0.882125,
+      "pass" : 1,
+      "row" : 139,
+      "selectedIndex" : 10,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 11,
+      "form" : "auto-claim",
+      "milliseconds" : 0.911125,
+      "pass" : 1,
+      "row" : 140,
+      "selectedIndex" : 11,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 12,
+      "form" : "auto-claim",
+      "milliseconds" : 0.914792,
+      "pass" : 1,
+      "row" : 141,
+      "selectedIndex" : 12,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.920541,
+      "pass" : 1,
+      "row" : 142,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 16,
+      "form" : "auto-claim",
+      "milliseconds" : 0.911875,
+      "pass" : 1,
+      "row" : 143,
+      "selectedIndex" : 16,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.901666,
+      "pass" : 1,
+      "row" : 144,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.919542,
+      "pass" : 1,
+      "row" : 145,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 0,
+      "expectedIndex" : 17,
+      "form" : "auto-claim",
+      "milliseconds" : 0.947458,
+      "pass" : 1,
+      "row" : 146,
+      "selectedIndex" : 17,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 22,
+      "form" : "patient-registration",
+      "milliseconds" : 0.999,
+      "pass" : 0,
+      "row" : 0,
+      "selectedIndex" : 22,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 23,
+      "form" : "patient-registration",
+      "milliseconds" : 0.976875,
+      "pass" : 0,
+      "row" : 1,
+      "selectedIndex" : 23,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 2,
+      "form" : "patient-registration",
+      "milliseconds" : 0.968209,
+      "pass" : 0,
+      "row" : 2,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 5,
+      "form" : "patient-registration",
+      "milliseconds" : 0.975375,
+      "pass" : 0,
+      "row" : 3,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 4,
+      "form" : "patient-registration",
+      "milliseconds" : 0.9775,
+      "pass" : 0,
+      "row" : 4,
+      "selectedIndex" : 4,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 6,
+      "form" : "patient-registration",
+      "milliseconds" : 0.972,
+      "pass" : 0,
+      "row" : 5,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 7,
+      "form" : "patient-registration",
+      "milliseconds" : 0.929416,
+      "pass" : 0,
+      "row" : 6,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 8,
+      "form" : "patient-registration",
+      "milliseconds" : 0.962459,
+      "pass" : 0,
+      "row" : 7,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 9,
+      "form" : "patient-registration",
+      "milliseconds" : 0.973959,
+      "pass" : 0,
+      "row" : 8,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 10,
+      "form" : "patient-registration",
+      "milliseconds" : 0.9725,
+      "pass" : 0,
+      "row" : 9,
+      "selectedIndex" : 10,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 11,
+      "form" : "patient-registration",
+      "milliseconds" : 0.941292,
+      "pass" : 0,
+      "row" : 10,
+      "selectedIndex" : 11,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 13,
+      "form" : "patient-registration",
+      "milliseconds" : 0.942667,
+      "pass" : 0,
+      "row" : 11,
+      "selectedIndex" : 13,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 15,
+      "form" : "patient-registration",
+      "milliseconds" : 0.950375,
+      "pass" : 0,
+      "row" : 12,
+      "selectedIndex" : 15,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 16,
+      "form" : "patient-registration",
+      "milliseconds" : 0.95175,
+      "pass" : 0,
+      "row" : 13,
+      "selectedIndex" : 16,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.933459,
+      "pass" : 0,
+      "row" : 14,
+      "selectedIndex" : 26,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 24,
+      "form" : "patient-registration",
+      "milliseconds" : 0.9685,
+      "pass" : 0,
+      "row" : 15,
+      "selectedIndex" : 24,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.975291,
+      "pass" : 0,
+      "row" : 16,
+      "selectedIndex" : 26,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 25,
+      "form" : "patient-registration",
+      "milliseconds" : 0.956917,
+      "pass" : 0,
+      "row" : 17,
+      "selectedIndex" : 25,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 0,
+      "form" : "job-application",
+      "milliseconds" : 0.956375,
+      "pass" : 0,
+      "row" : 68,
+      "selectedIndex" : 0,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 1,
+      "form" : "job-application",
+      "milliseconds" : 0.957541,
+      "pass" : 0,
+      "row" : 69,
+      "selectedIndex" : 1,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 2,
+      "form" : "job-application",
+      "milliseconds" : 0.949584,
+      "pass" : 0,
+      "row" : 70,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 3,
+      "form" : "job-application",
+      "milliseconds" : 0.947334,
+      "pass" : 0,
+      "row" : 71,
+      "selectedIndex" : 3,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 5,
+      "form" : "job-application",
+      "milliseconds" : 0.983583,
+      "pass" : 0,
+      "row" : 72,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 6,
+      "form" : "job-application",
+      "milliseconds" : 0.943333,
+      "pass" : 0,
+      "row" : 73,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 7,
+      "form" : "job-application",
+      "milliseconds" : 0.941292,
+      "pass" : 0,
+      "row" : 74,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 8,
+      "form" : "job-application",
+      "milliseconds" : 0.93875,
+      "pass" : 0,
+      "row" : 75,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 9,
+      "form" : "job-application",
+      "milliseconds" : 0.9435,
+      "pass" : 0,
+      "row" : 76,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 13,
+      "form" : "job-application",
+      "milliseconds" : 0.948917,
+      "pass" : 0,
+      "row" : 77,
+      "selectedIndex" : 13,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.955,
+      "pass" : 0,
+      "row" : 78,
+      "selectedIndex" : 20,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.973917,
+      "pass" : 0,
+      "row" : 79,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.962834,
+      "pass" : 0,
+      "row" : 80,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.965792,
+      "pass" : 0,
+      "row" : 81,
+      "selectedIndex" : 20,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 19,
+      "form" : "job-application",
+      "milliseconds" : 0.96525,
+      "pass" : 0,
+      "row" : 82,
+      "selectedIndex" : 19,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 1,
+      "form" : "auto-claim",
+      "milliseconds" : 0.983334,
+      "pass" : 0,
+      "row" : 130,
+      "selectedIndex" : 1,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 2,
+      "form" : "auto-claim",
+      "milliseconds" : 0.970917,
+      "pass" : 0,
+      "row" : 131,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 3,
+      "form" : "auto-claim",
+      "milliseconds" : 0.972458,
+      "pass" : 0,
+      "row" : 132,
+      "selectedIndex" : 3,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 4,
+      "form" : "auto-claim",
+      "milliseconds" : 0.970625,
+      "pass" : 0,
+      "row" : 133,
+      "selectedIndex" : 4,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 5,
+      "form" : "auto-claim",
+      "milliseconds" : 0.974958,
+      "pass" : 0,
+      "row" : 134,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 6,
+      "form" : "auto-claim",
+      "milliseconds" : 0.965416,
+      "pass" : 0,
+      "row" : 135,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 7,
+      "form" : "auto-claim",
+      "milliseconds" : 0.984917,
+      "pass" : 0,
+      "row" : 136,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 8,
+      "form" : "auto-claim",
+      "milliseconds" : 0.947875,
+      "pass" : 0,
+      "row" : 137,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 9,
+      "form" : "auto-claim",
+      "milliseconds" : 0.958459,
+      "pass" : 0,
+      "row" : 138,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 10,
+      "form" : "auto-claim",
+      "milliseconds" : 0.966625,
+      "pass" : 0,
+      "row" : 139,
+      "selectedIndex" : 10,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 11,
+      "form" : "auto-claim",
+      "milliseconds" : 0.975541,
+      "pass" : 0,
+      "row" : 140,
+      "selectedIndex" : 11,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 12,
+      "form" : "auto-claim",
+      "milliseconds" : 0.960708,
+      "pass" : 0,
+      "row" : 141,
+      "selectedIndex" : 12,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.955125,
+      "pass" : 0,
+      "row" : 142,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 16,
+      "form" : "auto-claim",
+      "milliseconds" : 0.97375,
+      "pass" : 0,
+      "row" : 143,
+      "selectedIndex" : 16,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.970875,
+      "pass" : 0,
+      "row" : 144,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.965958,
+      "pass" : 0,
+      "row" : 145,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 17,
+      "form" : "auto-claim",
+      "milliseconds" : 0.946083,
+      "pass" : 0,
+      "row" : 146,
+      "selectedIndex" : 17,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 22,
+      "form" : "patient-registration",
+      "milliseconds" : 0.966709,
+      "pass" : 1,
+      "row" : 0,
+      "selectedIndex" : 22,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 23,
+      "form" : "patient-registration",
+      "milliseconds" : 0.971709,
+      "pass" : 1,
+      "row" : 1,
+      "selectedIndex" : 23,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 2,
+      "form" : "patient-registration",
+      "milliseconds" : 0.961916,
+      "pass" : 1,
+      "row" : 2,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 5,
+      "form" : "patient-registration",
+      "milliseconds" : 0.960667,
+      "pass" : 1,
+      "row" : 3,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 4,
+      "form" : "patient-registration",
+      "milliseconds" : 0.99375,
+      "pass" : 1,
+      "row" : 4,
+      "selectedIndex" : 4,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 6,
+      "form" : "patient-registration",
+      "milliseconds" : 0.961333,
+      "pass" : 1,
+      "row" : 5,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 7,
+      "form" : "patient-registration",
+      "milliseconds" : 0.983417,
+      "pass" : 1,
+      "row" : 6,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 8,
+      "form" : "patient-registration",
+      "milliseconds" : 0.950625,
+      "pass" : 1,
+      "row" : 7,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 9,
+      "form" : "patient-registration",
+      "milliseconds" : 0.949375,
+      "pass" : 1,
+      "row" : 8,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 10,
+      "form" : "patient-registration",
+      "milliseconds" : 0.932083,
+      "pass" : 1,
+      "row" : 9,
+      "selectedIndex" : 10,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 11,
+      "form" : "patient-registration",
+      "milliseconds" : 0.935416,
+      "pass" : 1,
+      "row" : 10,
+      "selectedIndex" : 11,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 13,
+      "form" : "patient-registration",
+      "milliseconds" : 0.94425,
+      "pass" : 1,
+      "row" : 11,
+      "selectedIndex" : 13,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 15,
+      "form" : "patient-registration",
+      "milliseconds" : 0.961917,
+      "pass" : 1,
+      "row" : 12,
+      "selectedIndex" : 15,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 16,
+      "form" : "patient-registration",
+      "milliseconds" : 0.967125,
+      "pass" : 1,
+      "row" : 13,
+      "selectedIndex" : 16,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.962292,
+      "pass" : 1,
+      "row" : 14,
+      "selectedIndex" : 26,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 24,
+      "form" : "patient-registration",
+      "milliseconds" : 0.976792,
+      "pass" : 1,
+      "row" : 15,
+      "selectedIndex" : 24,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.970041,
+      "pass" : 1,
+      "row" : 16,
+      "selectedIndex" : 26,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 25,
+      "form" : "patient-registration",
+      "milliseconds" : 0.972458,
+      "pass" : 1,
+      "row" : 17,
+      "selectedIndex" : 25,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 0,
+      "form" : "job-application",
+      "milliseconds" : 0.992625,
+      "pass" : 1,
+      "row" : 68,
+      "selectedIndex" : 0,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 1,
+      "form" : "job-application",
+      "milliseconds" : 0.984084,
+      "pass" : 1,
+      "row" : 69,
+      "selectedIndex" : 1,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 2,
+      "form" : "job-application",
+      "milliseconds" : 0.954375,
+      "pass" : 1,
+      "row" : 70,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 3,
+      "form" : "job-application",
+      "milliseconds" : 0.962583,
+      "pass" : 1,
+      "row" : 71,
+      "selectedIndex" : 3,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 5,
+      "form" : "job-application",
+      "milliseconds" : 0.985667,
+      "pass" : 1,
+      "row" : 72,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 6,
+      "form" : "job-application",
+      "milliseconds" : 0.989542,
+      "pass" : 1,
+      "row" : 73,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 7,
+      "form" : "job-application",
+      "milliseconds" : 0.968541,
+      "pass" : 1,
+      "row" : 74,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 8,
+      "form" : "job-application",
+      "milliseconds" : 0.948375,
+      "pass" : 1,
+      "row" : 75,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 9,
+      "form" : "job-application",
+      "milliseconds" : 0.975125,
+      "pass" : 1,
+      "row" : 76,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 13,
+      "form" : "job-application",
+      "milliseconds" : 0.971666,
+      "pass" : 1,
+      "row" : 77,
+      "selectedIndex" : 13,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.984,
+      "pass" : 1,
+      "row" : 78,
+      "selectedIndex" : 20,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.967083,
+      "pass" : 1,
+      "row" : 79,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.982334,
+      "pass" : 1,
+      "row" : 80,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.97675,
+      "pass" : 1,
+      "row" : 81,
+      "selectedIndex" : 20,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 19,
+      "form" : "job-application",
+      "milliseconds" : 0.960084,
+      "pass" : 1,
+      "row" : 82,
+      "selectedIndex" : 19,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 1,
+      "form" : "auto-claim",
+      "milliseconds" : 0.960292,
+      "pass" : 1,
+      "row" : 130,
+      "selectedIndex" : 1,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 2,
+      "form" : "auto-claim",
+      "milliseconds" : 0.961959,
+      "pass" : 1,
+      "row" : 131,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 3,
+      "form" : "auto-claim",
+      "milliseconds" : 0.9625,
+      "pass" : 1,
+      "row" : 132,
+      "selectedIndex" : 3,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 4,
+      "form" : "auto-claim",
+      "milliseconds" : 0.961709,
+      "pass" : 1,
+      "row" : 133,
+      "selectedIndex" : 4,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 5,
+      "form" : "auto-claim",
+      "milliseconds" : 0.968792,
+      "pass" : 1,
+      "row" : 134,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 6,
+      "form" : "auto-claim",
+      "milliseconds" : 0.982708,
+      "pass" : 1,
+      "row" : 135,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 7,
+      "form" : "auto-claim",
+      "milliseconds" : 0.981791,
+      "pass" : 1,
+      "row" : 136,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 8,
+      "form" : "auto-claim",
+      "milliseconds" : 0.966917,
+      "pass" : 1,
+      "row" : 137,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 9,
+      "form" : "auto-claim",
+      "milliseconds" : 0.950667,
+      "pass" : 1,
+      "row" : 138,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 10,
+      "form" : "auto-claim",
+      "milliseconds" : 0.942041,
+      "pass" : 1,
+      "row" : 139,
+      "selectedIndex" : 10,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 11,
+      "form" : "auto-claim",
+      "milliseconds" : 0.935709,
+      "pass" : 1,
+      "row" : 140,
+      "selectedIndex" : 11,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 12,
+      "form" : "auto-claim",
+      "milliseconds" : 0.9825,
+      "pass" : 1,
+      "row" : 141,
+      "selectedIndex" : 12,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.983708,
+      "pass" : 1,
+      "row" : 142,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 16,
+      "form" : "auto-claim",
+      "milliseconds" : 1.0375,
+      "pass" : 1,
+      "row" : 143,
+      "selectedIndex" : 16,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.954625,
+      "pass" : 1,
+      "row" : 144,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.9545,
+      "pass" : 1,
+      "row" : 145,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 1,
+      "expectedIndex" : 17,
+      "form" : "auto-claim",
+      "milliseconds" : 0.976208,
+      "pass" : 1,
+      "row" : 146,
+      "selectedIndex" : 17,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 22,
+      "form" : "patient-registration",
+      "milliseconds" : 0.960375,
+      "pass" : 0,
+      "row" : 0,
+      "selectedIndex" : 22,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 23,
+      "form" : "patient-registration",
+      "milliseconds" : 0.954375,
+      "pass" : 0,
+      "row" : 1,
+      "selectedIndex" : 23,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 2,
+      "form" : "patient-registration",
+      "milliseconds" : 0.978375,
+      "pass" : 0,
+      "row" : 2,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 5,
+      "form" : "patient-registration",
+      "milliseconds" : 0.962292,
+      "pass" : 0,
+      "row" : 3,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 4,
+      "form" : "patient-registration",
+      "milliseconds" : 0.9495,
+      "pass" : 0,
+      "row" : 4,
+      "selectedIndex" : 4,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 6,
+      "form" : "patient-registration",
+      "milliseconds" : 0.940625,
+      "pass" : 0,
+      "row" : 5,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 7,
+      "form" : "patient-registration",
+      "milliseconds" : 0.950166,
+      "pass" : 0,
+      "row" : 6,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 8,
+      "form" : "patient-registration",
+      "milliseconds" : 0.95125,
+      "pass" : 0,
+      "row" : 7,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 9,
+      "form" : "patient-registration",
+      "milliseconds" : 0.977875,
+      "pass" : 0,
+      "row" : 8,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 10,
+      "form" : "patient-registration",
+      "milliseconds" : 0.943959,
+      "pass" : 0,
+      "row" : 9,
+      "selectedIndex" : 10,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 11,
+      "form" : "patient-registration",
+      "milliseconds" : 0.938542,
+      "pass" : 0,
+      "row" : 10,
+      "selectedIndex" : 11,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 13,
+      "form" : "patient-registration",
+      "milliseconds" : 0.949917,
+      "pass" : 0,
+      "row" : 11,
+      "selectedIndex" : 13,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 15,
+      "form" : "patient-registration",
+      "milliseconds" : 0.959666,
+      "pass" : 0,
+      "row" : 12,
+      "selectedIndex" : 15,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 16,
+      "form" : "patient-registration",
+      "milliseconds" : 0.981167,
+      "pass" : 0,
+      "row" : 13,
+      "selectedIndex" : 16,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.965917,
+      "pass" : 0,
+      "row" : 14,
+      "selectedIndex" : 26,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 24,
+      "form" : "patient-registration",
+      "milliseconds" : 0.990125,
+      "pass" : 0,
+      "row" : 15,
+      "selectedIndex" : 24,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.954333,
+      "pass" : 0,
+      "row" : 16,
+      "selectedIndex" : 26,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 25,
+      "form" : "patient-registration",
+      "milliseconds" : 0.974792,
+      "pass" : 0,
+      "row" : 17,
+      "selectedIndex" : 25,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 0,
+      "form" : "job-application",
+      "milliseconds" : 0.959708,
+      "pass" : 0,
+      "row" : 68,
+      "selectedIndex" : 0,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 1,
+      "form" : "job-application",
+      "milliseconds" : 0.960083,
+      "pass" : 0,
+      "row" : 69,
+      "selectedIndex" : 1,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 2,
+      "form" : "job-application",
+      "milliseconds" : 0.962458,
+      "pass" : 0,
+      "row" : 70,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 3,
+      "form" : "job-application",
+      "milliseconds" : 0.969291,
+      "pass" : 0,
+      "row" : 71,
+      "selectedIndex" : 3,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 5,
+      "form" : "job-application",
+      "milliseconds" : 0.965916,
+      "pass" : 0,
+      "row" : 72,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 6,
+      "form" : "job-application",
+      "milliseconds" : 0.968125,
+      "pass" : 0,
+      "row" : 73,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 7,
+      "form" : "job-application",
+      "milliseconds" : 0.96375,
+      "pass" : 0,
+      "row" : 74,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 8,
+      "form" : "job-application",
+      "milliseconds" : 0.984916,
+      "pass" : 0,
+      "row" : 75,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 9,
+      "form" : "job-application",
+      "milliseconds" : 0.978583,
+      "pass" : 0,
+      "row" : 76,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 13,
+      "form" : "job-application",
+      "milliseconds" : 0.945958,
+      "pass" : 0,
+      "row" : 77,
+      "selectedIndex" : 13,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.938958,
+      "pass" : 0,
+      "row" : 78,
+      "selectedIndex" : 20,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.93975,
+      "pass" : 0,
+      "row" : 79,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.939125,
+      "pass" : 0,
+      "row" : 80,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.942375,
+      "pass" : 0,
+      "row" : 81,
+      "selectedIndex" : 20,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 19,
+      "form" : "job-application",
+      "milliseconds" : 0.946209,
+      "pass" : 0,
+      "row" : 82,
+      "selectedIndex" : 19,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 1,
+      "form" : "auto-claim",
+      "milliseconds" : 0.943167,
+      "pass" : 0,
+      "row" : 130,
+      "selectedIndex" : 1,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 2,
+      "form" : "auto-claim",
+      "milliseconds" : 0.956416,
+      "pass" : 0,
+      "row" : 131,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 3,
+      "form" : "auto-claim",
+      "milliseconds" : 0.937958,
+      "pass" : 0,
+      "row" : 132,
+      "selectedIndex" : 3,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 4,
+      "form" : "auto-claim",
+      "milliseconds" : 0.93875,
+      "pass" : 0,
+      "row" : 133,
+      "selectedIndex" : 4,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 5,
+      "form" : "auto-claim",
+      "milliseconds" : 0.937291,
+      "pass" : 0,
+      "row" : 134,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 6,
+      "form" : "auto-claim",
+      "milliseconds" : 0.94325,
+      "pass" : 0,
+      "row" : 135,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 7,
+      "form" : "auto-claim",
+      "milliseconds" : 0.947583,
+      "pass" : 0,
+      "row" : 136,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 8,
+      "form" : "auto-claim",
+      "milliseconds" : 0.975625,
+      "pass" : 0,
+      "row" : 137,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 9,
+      "form" : "auto-claim",
+      "milliseconds" : 0.957834,
+      "pass" : 0,
+      "row" : 138,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 10,
+      "form" : "auto-claim",
+      "milliseconds" : 0.954,
+      "pass" : 0,
+      "row" : 139,
+      "selectedIndex" : 10,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 11,
+      "form" : "auto-claim",
+      "milliseconds" : 0.963125,
+      "pass" : 0,
+      "row" : 140,
+      "selectedIndex" : 11,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 12,
+      "form" : "auto-claim",
+      "milliseconds" : 0.96025,
+      "pass" : 0,
+      "row" : 141,
+      "selectedIndex" : 12,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.939625,
+      "pass" : 0,
+      "row" : 142,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 16,
+      "form" : "auto-claim",
+      "milliseconds" : 0.95225,
+      "pass" : 0,
+      "row" : 143,
+      "selectedIndex" : 16,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.97625,
+      "pass" : 0,
+      "row" : 144,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.952875,
+      "pass" : 0,
+      "row" : 145,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 17,
+      "form" : "auto-claim",
+      "milliseconds" : 0.941917,
+      "pass" : 0,
+      "row" : 146,
+      "selectedIndex" : 17,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 22,
+      "form" : "patient-registration",
+      "milliseconds" : 0.973583,
+      "pass" : 1,
+      "row" : 0,
+      "selectedIndex" : 22,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 23,
+      "form" : "patient-registration",
+      "milliseconds" : 0.961291,
+      "pass" : 1,
+      "row" : 1,
+      "selectedIndex" : 23,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 2,
+      "form" : "patient-registration",
+      "milliseconds" : 0.95625,
+      "pass" : 1,
+      "row" : 2,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 5,
+      "form" : "patient-registration",
+      "milliseconds" : 0.968125,
+      "pass" : 1,
+      "row" : 3,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 4,
+      "form" : "patient-registration",
+      "milliseconds" : 0.969541,
+      "pass" : 1,
+      "row" : 4,
+      "selectedIndex" : 4,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 6,
+      "form" : "patient-registration",
+      "milliseconds" : 0.969417,
+      "pass" : 1,
+      "row" : 5,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 7,
+      "form" : "patient-registration",
+      "milliseconds" : 0.962959,
+      "pass" : 1,
+      "row" : 6,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 8,
+      "form" : "patient-registration",
+      "milliseconds" : 0.9775,
+      "pass" : 1,
+      "row" : 7,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 9,
+      "form" : "patient-registration",
+      "milliseconds" : 0.969208,
+      "pass" : 1,
+      "row" : 8,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 10,
+      "form" : "patient-registration",
+      "milliseconds" : 0.969709,
+      "pass" : 1,
+      "row" : 9,
+      "selectedIndex" : 10,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 11,
+      "form" : "patient-registration",
+      "milliseconds" : 0.984292,
+      "pass" : 1,
+      "row" : 10,
+      "selectedIndex" : 11,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 13,
+      "form" : "patient-registration",
+      "milliseconds" : 0.961291,
+      "pass" : 1,
+      "row" : 11,
+      "selectedIndex" : 13,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 15,
+      "form" : "patient-registration",
+      "milliseconds" : 0.969458,
+      "pass" : 1,
+      "row" : 12,
+      "selectedIndex" : 15,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 16,
+      "form" : "patient-registration",
+      "milliseconds" : 0.953875,
+      "pass" : 1,
+      "row" : 13,
+      "selectedIndex" : 16,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.963666,
+      "pass" : 1,
+      "row" : 14,
+      "selectedIndex" : 26,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 24,
+      "form" : "patient-registration",
+      "milliseconds" : 0.953125,
+      "pass" : 1,
+      "row" : 15,
+      "selectedIndex" : 24,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.967833,
+      "pass" : 1,
+      "row" : 16,
+      "selectedIndex" : 26,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 25,
+      "form" : "patient-registration",
+      "milliseconds" : 0.953583,
+      "pass" : 1,
+      "row" : 17,
+      "selectedIndex" : 25,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 0,
+      "form" : "job-application",
+      "milliseconds" : 0.95275,
+      "pass" : 1,
+      "row" : 68,
+      "selectedIndex" : 0,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 1,
+      "form" : "job-application",
+      "milliseconds" : 0.95525,
+      "pass" : 1,
+      "row" : 69,
+      "selectedIndex" : 1,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 2,
+      "form" : "job-application",
+      "milliseconds" : 0.927208,
+      "pass" : 1,
+      "row" : 70,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 3,
+      "form" : "job-application",
+      "milliseconds" : 0.943666,
+      "pass" : 1,
+      "row" : 71,
+      "selectedIndex" : 3,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 5,
+      "form" : "job-application",
+      "milliseconds" : 0.932833,
+      "pass" : 1,
+      "row" : 72,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 6,
+      "form" : "job-application",
+      "milliseconds" : 0.930083,
+      "pass" : 1,
+      "row" : 73,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 7,
+      "form" : "job-application",
+      "milliseconds" : 0.931708,
+      "pass" : 1,
+      "row" : 74,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 8,
+      "form" : "job-application",
+      "milliseconds" : 0.958333,
+      "pass" : 1,
+      "row" : 75,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 9,
+      "form" : "job-application",
+      "milliseconds" : 0.964708,
+      "pass" : 1,
+      "row" : 76,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 13,
+      "form" : "job-application",
+      "milliseconds" : 0.937167,
+      "pass" : 1,
+      "row" : 77,
+      "selectedIndex" : 13,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.943333,
+      "pass" : 1,
+      "row" : 78,
+      "selectedIndex" : 20,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.949375,
+      "pass" : 1,
+      "row" : 79,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.938292,
+      "pass" : 1,
+      "row" : 80,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.93825,
+      "pass" : 1,
+      "row" : 81,
+      "selectedIndex" : 20,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 19,
+      "form" : "job-application",
+      "milliseconds" : 0.943959,
+      "pass" : 1,
+      "row" : 82,
+      "selectedIndex" : 19,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 1,
+      "form" : "auto-claim",
+      "milliseconds" : 0.953208,
+      "pass" : 1,
+      "row" : 130,
+      "selectedIndex" : 1,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 2,
+      "form" : "auto-claim",
+      "milliseconds" : 0.982291,
+      "pass" : 1,
+      "row" : 131,
+      "selectedIndex" : 2,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 3,
+      "form" : "auto-claim",
+      "milliseconds" : 0.976167,
+      "pass" : 1,
+      "row" : 132,
+      "selectedIndex" : 3,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 4,
+      "form" : "auto-claim",
+      "milliseconds" : 0.97325,
+      "pass" : 1,
+      "row" : 133,
+      "selectedIndex" : 4,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 5,
+      "form" : "auto-claim",
+      "milliseconds" : 0.973542,
+      "pass" : 1,
+      "row" : 134,
+      "selectedIndex" : 5,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 6,
+      "form" : "auto-claim",
+      "milliseconds" : 0.961375,
+      "pass" : 1,
+      "row" : 135,
+      "selectedIndex" : 6,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 7,
+      "form" : "auto-claim",
+      "milliseconds" : 0.968083,
+      "pass" : 1,
+      "row" : 136,
+      "selectedIndex" : 7,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 8,
+      "form" : "auto-claim",
+      "milliseconds" : 0.96575,
+      "pass" : 1,
+      "row" : 137,
+      "selectedIndex" : 8,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 9,
+      "form" : "auto-claim",
+      "milliseconds" : 0.973333,
+      "pass" : 1,
+      "row" : 138,
+      "selectedIndex" : 9,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 10,
+      "form" : "auto-claim",
+      "milliseconds" : 0.959167,
+      "pass" : 1,
+      "row" : 139,
+      "selectedIndex" : 10,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 11,
+      "form" : "auto-claim",
+      "milliseconds" : 0.943375,
+      "pass" : 1,
+      "row" : 140,
+      "selectedIndex" : 11,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 12,
+      "form" : "auto-claim",
+      "milliseconds" : 0.946834,
+      "pass" : 1,
+      "row" : 141,
+      "selectedIndex" : 12,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.959125,
+      "pass" : 1,
+      "row" : 142,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 16,
+      "form" : "auto-claim",
+      "milliseconds" : 0.948875,
+      "pass" : 1,
+      "row" : 143,
+      "selectedIndex" : 16,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.950875,
+      "pass" : 1,
+      "row" : 144,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.952125,
+      "pass" : 1,
+      "row" : 145,
+      "selectedIndex" : 18,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 2,
+      "expectedIndex" : 17,
+      "form" : "auto-claim",
+      "milliseconds" : 0.952459,
+      "pass" : 1,
+      "row" : 146,
+      "selectedIndex" : 17,
+      "variant" : "ane-gather"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 22,
+      "form" : "patient-registration",
+      "milliseconds" : 0.940667,
+      "pass" : 0,
+      "row" : 0,
+      "selectedIndex" : 22,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 23,
+      "form" : "patient-registration",
+      "milliseconds" : 0.905042,
+      "pass" : 0,
+      "row" : 1,
+      "selectedIndex" : 23,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 2,
+      "form" : "patient-registration",
+      "milliseconds" : 0.891791,
+      "pass" : 0,
+      "row" : 2,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 5,
+      "form" : "patient-registration",
+      "milliseconds" : 0.916417,
+      "pass" : 0,
+      "row" : 3,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 4,
+      "form" : "patient-registration",
+      "milliseconds" : 0.918667,
+      "pass" : 0,
+      "row" : 4,
+      "selectedIndex" : 4,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 6,
+      "form" : "patient-registration",
+      "milliseconds" : 0.900166,
+      "pass" : 0,
+      "row" : 5,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 7,
+      "form" : "patient-registration",
+      "milliseconds" : 0.905875,
+      "pass" : 0,
+      "row" : 6,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 8,
+      "form" : "patient-registration",
+      "milliseconds" : 0.887417,
+      "pass" : 0,
+      "row" : 7,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 9,
+      "form" : "patient-registration",
+      "milliseconds" : 0.882583,
+      "pass" : 0,
+      "row" : 8,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 10,
+      "form" : "patient-registration",
+      "milliseconds" : 0.882667,
+      "pass" : 0,
+      "row" : 9,
+      "selectedIndex" : 10,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 11,
+      "form" : "patient-registration",
+      "milliseconds" : 0.901,
+      "pass" : 0,
+      "row" : 10,
+      "selectedIndex" : 11,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 13,
+      "form" : "patient-registration",
+      "milliseconds" : 0.931041,
+      "pass" : 0,
+      "row" : 11,
+      "selectedIndex" : 13,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 15,
+      "form" : "patient-registration",
+      "milliseconds" : 0.881625,
+      "pass" : 0,
+      "row" : 12,
+      "selectedIndex" : 15,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 16,
+      "form" : "patient-registration",
+      "milliseconds" : 0.909667,
+      "pass" : 0,
+      "row" : 13,
+      "selectedIndex" : 16,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.92225,
+      "pass" : 0,
+      "row" : 14,
+      "selectedIndex" : 26,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 24,
+      "form" : "patient-registration",
+      "milliseconds" : 0.877833,
+      "pass" : 0,
+      "row" : 15,
+      "selectedIndex" : 24,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.894459,
+      "pass" : 0,
+      "row" : 16,
+      "selectedIndex" : 26,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 25,
+      "form" : "patient-registration",
+      "milliseconds" : 0.898583,
+      "pass" : 0,
+      "row" : 17,
+      "selectedIndex" : 25,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 0,
+      "form" : "job-application",
+      "milliseconds" : 0.925625,
+      "pass" : 0,
+      "row" : 68,
+      "selectedIndex" : 0,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 1,
+      "form" : "job-application",
+      "milliseconds" : 0.909958,
+      "pass" : 0,
+      "row" : 69,
+      "selectedIndex" : 1,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 2,
+      "form" : "job-application",
+      "milliseconds" : 0.927166,
+      "pass" : 0,
+      "row" : 70,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 3,
+      "form" : "job-application",
+      "milliseconds" : 0.904958,
+      "pass" : 0,
+      "row" : 71,
+      "selectedIndex" : 3,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 5,
+      "form" : "job-application",
+      "milliseconds" : 0.908375,
+      "pass" : 0,
+      "row" : 72,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 6,
+      "form" : "job-application",
+      "milliseconds" : 0.919375,
+      "pass" : 0,
+      "row" : 73,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 7,
+      "form" : "job-application",
+      "milliseconds" : 0.904791,
+      "pass" : 0,
+      "row" : 74,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 8,
+      "form" : "job-application",
+      "milliseconds" : 0.889125,
+      "pass" : 0,
+      "row" : 75,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 9,
+      "form" : "job-application",
+      "milliseconds" : 0.918542,
+      "pass" : 0,
+      "row" : 76,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 13,
+      "form" : "job-application",
+      "milliseconds" : 0.924833,
+      "pass" : 0,
+      "row" : 77,
+      "selectedIndex" : 13,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.919083,
+      "pass" : 0,
+      "row" : 78,
+      "selectedIndex" : 20,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.926583,
+      "pass" : 0,
+      "row" : 79,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.926333,
+      "pass" : 0,
+      "row" : 80,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.919708,
+      "pass" : 0,
+      "row" : 81,
+      "selectedIndex" : 20,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 19,
+      "form" : "job-application",
+      "milliseconds" : 0.92525,
+      "pass" : 0,
+      "row" : 82,
+      "selectedIndex" : 19,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 1,
+      "form" : "auto-claim",
+      "milliseconds" : 0.912208,
+      "pass" : 0,
+      "row" : 130,
+      "selectedIndex" : 1,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 2,
+      "form" : "auto-claim",
+      "milliseconds" : 0.895083,
+      "pass" : 0,
+      "row" : 131,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 3,
+      "form" : "auto-claim",
+      "milliseconds" : 0.892791,
+      "pass" : 0,
+      "row" : 132,
+      "selectedIndex" : 3,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 4,
+      "form" : "auto-claim",
+      "milliseconds" : 0.890042,
+      "pass" : 0,
+      "row" : 133,
+      "selectedIndex" : 4,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 5,
+      "form" : "auto-claim",
+      "milliseconds" : 0.886334,
+      "pass" : 0,
+      "row" : 134,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 6,
+      "form" : "auto-claim",
+      "milliseconds" : 0.8925,
+      "pass" : 0,
+      "row" : 135,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 7,
+      "form" : "auto-claim",
+      "milliseconds" : 0.879583,
+      "pass" : 0,
+      "row" : 136,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 8,
+      "form" : "auto-claim",
+      "milliseconds" : 0.930292,
+      "pass" : 0,
+      "row" : 137,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 9,
+      "form" : "auto-claim",
+      "milliseconds" : 0.923584,
+      "pass" : 0,
+      "row" : 138,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 10,
+      "form" : "auto-claim",
+      "milliseconds" : 0.891334,
+      "pass" : 0,
+      "row" : 139,
+      "selectedIndex" : 10,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 11,
+      "form" : "auto-claim",
+      "milliseconds" : 0.899834,
+      "pass" : 0,
+      "row" : 140,
+      "selectedIndex" : 11,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 12,
+      "form" : "auto-claim",
+      "milliseconds" : 0.885292,
+      "pass" : 0,
+      "row" : 141,
+      "selectedIndex" : 12,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.892083,
+      "pass" : 0,
+      "row" : 142,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 16,
+      "form" : "auto-claim",
+      "milliseconds" : 0.888834,
+      "pass" : 0,
+      "row" : 143,
+      "selectedIndex" : 16,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.917959,
+      "pass" : 0,
+      "row" : 144,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.897667,
+      "pass" : 0,
+      "row" : 145,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 17,
+      "form" : "auto-claim",
+      "milliseconds" : 0.920625,
+      "pass" : 0,
+      "row" : 146,
+      "selectedIndex" : 17,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 22,
+      "form" : "patient-registration",
+      "milliseconds" : 0.926209,
+      "pass" : 1,
+      "row" : 0,
+      "selectedIndex" : 22,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 23,
+      "form" : "patient-registration",
+      "milliseconds" : 0.919167,
+      "pass" : 1,
+      "row" : 1,
+      "selectedIndex" : 23,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 2,
+      "form" : "patient-registration",
+      "milliseconds" : 0.902083,
+      "pass" : 1,
+      "row" : 2,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 5,
+      "form" : "patient-registration",
+      "milliseconds" : 0.903459,
+      "pass" : 1,
+      "row" : 3,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 4,
+      "form" : "patient-registration",
+      "milliseconds" : 0.9305,
+      "pass" : 1,
+      "row" : 4,
+      "selectedIndex" : 4,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 6,
+      "form" : "patient-registration",
+      "milliseconds" : 0.929,
+      "pass" : 1,
+      "row" : 5,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 7,
+      "form" : "patient-registration",
+      "milliseconds" : 0.891166,
+      "pass" : 1,
+      "row" : 6,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 8,
+      "form" : "patient-registration",
+      "milliseconds" : 0.917417,
+      "pass" : 1,
+      "row" : 7,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 9,
+      "form" : "patient-registration",
+      "milliseconds" : 0.939917,
+      "pass" : 1,
+      "row" : 8,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 10,
+      "form" : "patient-registration",
+      "milliseconds" : 0.922708,
+      "pass" : 1,
+      "row" : 9,
+      "selectedIndex" : 10,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 11,
+      "form" : "patient-registration",
+      "milliseconds" : 0.904541,
+      "pass" : 1,
+      "row" : 10,
+      "selectedIndex" : 11,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 13,
+      "form" : "patient-registration",
+      "milliseconds" : 0.91675,
+      "pass" : 1,
+      "row" : 11,
+      "selectedIndex" : 13,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 15,
+      "form" : "patient-registration",
+      "milliseconds" : 0.922,
+      "pass" : 1,
+      "row" : 12,
+      "selectedIndex" : 15,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 16,
+      "form" : "patient-registration",
+      "milliseconds" : 0.935916,
+      "pass" : 1,
+      "row" : 13,
+      "selectedIndex" : 16,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.931833,
+      "pass" : 1,
+      "row" : 14,
+      "selectedIndex" : 26,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 24,
+      "form" : "patient-registration",
+      "milliseconds" : 0.903833,
+      "pass" : 1,
+      "row" : 15,
+      "selectedIndex" : 24,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 26,
+      "form" : "patient-registration",
+      "milliseconds" : 0.924583,
+      "pass" : 1,
+      "row" : 16,
+      "selectedIndex" : 26,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 25,
+      "form" : "patient-registration",
+      "milliseconds" : 0.931542,
+      "pass" : 1,
+      "row" : 17,
+      "selectedIndex" : 25,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 0,
+      "form" : "job-application",
+      "milliseconds" : 0.924833,
+      "pass" : 1,
+      "row" : 68,
+      "selectedIndex" : 0,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 1,
+      "form" : "job-application",
+      "milliseconds" : 0.9055,
+      "pass" : 1,
+      "row" : 69,
+      "selectedIndex" : 1,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 2,
+      "form" : "job-application",
+      "milliseconds" : 0.91075,
+      "pass" : 1,
+      "row" : 70,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 3,
+      "form" : "job-application",
+      "milliseconds" : 0.908333,
+      "pass" : 1,
+      "row" : 71,
+      "selectedIndex" : 3,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 5,
+      "form" : "job-application",
+      "milliseconds" : 0.894375,
+      "pass" : 1,
+      "row" : 72,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 6,
+      "form" : "job-application",
+      "milliseconds" : 0.886333,
+      "pass" : 1,
+      "row" : 73,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 7,
+      "form" : "job-application",
+      "milliseconds" : 0.909375,
+      "pass" : 1,
+      "row" : 74,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 8,
+      "form" : "job-application",
+      "milliseconds" : 0.9085,
+      "pass" : 1,
+      "row" : 75,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 9,
+      "form" : "job-application",
+      "milliseconds" : 0.898625,
+      "pass" : 1,
+      "row" : 76,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 13,
+      "form" : "job-application",
+      "milliseconds" : 0.923709,
+      "pass" : 1,
+      "row" : 77,
+      "selectedIndex" : 13,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.897625,
+      "pass" : 1,
+      "row" : 78,
+      "selectedIndex" : 20,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.890667,
+      "pass" : 1,
+      "row" : 79,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 18,
+      "form" : "job-application",
+      "milliseconds" : 0.885042,
+      "pass" : 1,
+      "row" : 80,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 20,
+      "form" : "job-application",
+      "milliseconds" : 0.888,
+      "pass" : 1,
+      "row" : 81,
+      "selectedIndex" : 20,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 19,
+      "form" : "job-application",
+      "milliseconds" : 0.914083,
+      "pass" : 1,
+      "row" : 82,
+      "selectedIndex" : 19,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 1,
+      "form" : "auto-claim",
+      "milliseconds" : 0.878375,
+      "pass" : 1,
+      "row" : 130,
+      "selectedIndex" : 1,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 2,
+      "form" : "auto-claim",
+      "milliseconds" : 0.897875,
+      "pass" : 1,
+      "row" : 131,
+      "selectedIndex" : 2,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 3,
+      "form" : "auto-claim",
+      "milliseconds" : 0.905417,
+      "pass" : 1,
+      "row" : 132,
+      "selectedIndex" : 3,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 4,
+      "form" : "auto-claim",
+      "milliseconds" : 0.925125,
+      "pass" : 1,
+      "row" : 133,
+      "selectedIndex" : 4,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 5,
+      "form" : "auto-claim",
+      "milliseconds" : 0.926375,
+      "pass" : 1,
+      "row" : 134,
+      "selectedIndex" : 5,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 6,
+      "form" : "auto-claim",
+      "milliseconds" : 0.92475,
+      "pass" : 1,
+      "row" : 135,
+      "selectedIndex" : 6,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 7,
+      "form" : "auto-claim",
+      "milliseconds" : 0.891084,
+      "pass" : 1,
+      "row" : 136,
+      "selectedIndex" : 7,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 8,
+      "form" : "auto-claim",
+      "milliseconds" : 0.890417,
+      "pass" : 1,
+      "row" : 137,
+      "selectedIndex" : 8,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 9,
+      "form" : "auto-claim",
+      "milliseconds" : 0.892792,
+      "pass" : 1,
+      "row" : 138,
+      "selectedIndex" : 9,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 10,
+      "form" : "auto-claim",
+      "milliseconds" : 0.894334,
+      "pass" : 1,
+      "row" : 139,
+      "selectedIndex" : 10,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 11,
+      "form" : "auto-claim",
+      "milliseconds" : 0.886084,
+      "pass" : 1,
+      "row" : 140,
+      "selectedIndex" : 11,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 12,
+      "form" : "auto-claim",
+      "milliseconds" : 0.937167,
+      "pass" : 1,
+      "row" : 141,
+      "selectedIndex" : 12,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.906916,
+      "pass" : 1,
+      "row" : 142,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 16,
+      "form" : "auto-claim",
+      "milliseconds" : 0.9025,
+      "pass" : 1,
+      "row" : 143,
+      "selectedIndex" : 16,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.907625,
+      "pass" : 1,
+      "row" : 144,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 18,
+      "form" : "auto-claim",
+      "milliseconds" : 0.916167,
+      "pass" : 1,
+      "row" : 145,
+      "selectedIndex" : 18,
+      "variant" : "baseline"
+    },
+    {
+      "block" : 3,
+      "expectedIndex" : 17,
+      "form" : "auto-claim",
+      "milliseconds" : 0.906625,
+      "pass" : 1,
+      "row" : 146,
+      "selectedIndex" : 17,
+      "variant" : "baseline"
+    }
+  ],
+  "summaries" : {
+    "ane-gather" : {
+      "calls" : 200,
+      "correct" : 200,
+      "medianMilliseconds" : 0.961354,
+      "p95Milliseconds" : 0.9840943999999999
+    },
+    "baseline" : {
+      "calls" : 200,
+      "correct" : 200,
+      "medianMilliseconds" : 0.9123955,
+      "p95Milliseconds" : 0.9332711499999999
+    }
+  },
+  "timestamp" : "2026-09-19T20:36:23Z",
+  "timingScope" : "Swift manager.score: encoding + actor call + Core ML + output decoding; no UI or animation"
+}

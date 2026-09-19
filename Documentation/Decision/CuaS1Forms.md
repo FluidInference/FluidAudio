@@ -141,3 +141,21 @@ to the real `.mlmodelc`. The Mobius README includes its compilation command.
 Without these paths, integration tests skip; byte-encoding, limits, rejection,
 and model-registry unit tests still run. XCTest requires a full Xcode installation
 on macOS. No model or dataset is downloaded by the tests automatically.
+
+## Live browser demo and Swift comparison
+
+Run `Examples/CuaS1FormsDemo/run.sh --browser` for two independent WebKit forms
+driven by the original and ANE-gather exports. Both observe live DOM controls,
+score supplied candidates, execute fill/check actions, and verify the resulting
+DOM state. The [recording and reproduction guide](../../Examples/CuaS1FormsDemo/README.md#live-browser-agent-both-variants)
+show all three forms, with 100/100 labeled browser decisions and event checks.
+This is bounded local browser automation; external desktop control and document
+extraction remain application responsibilities.
+
+A matched release Swift run on this M5 Pro covers the full 50-control manifest,
+with 200 measured calls per variant: original p50/p95 **0.912/0.933 ms**, ANE
+gather **0.961/0.984 ms**. All 400 decisions match upstream labels. Timing includes
+Swift encoding, Core ML, and output decoding, with no rendering or animation.
+See the [raw report](../../Examples/CuaS1FormsDemo/Reports/variant-comparison.json)
+for model hashes, per-form results, load/first-call costs, and every sample.
+The higher-ANE export remains optional because it is about 5.4% slower here.

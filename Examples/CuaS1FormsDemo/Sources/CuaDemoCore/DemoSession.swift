@@ -88,7 +88,8 @@ public final class DemoSession {
     /// Create an unloaded session.
     public init() {}
 
-    init(scenarios: [DemoScenario]) {
+    /// Create a profile editor from a catalog without loading a scoring model.
+    public init(scenarios: [DemoScenario]) {
         self.scenarios = scenarios
         controls = scenarios.first?.controls ?? []
     }

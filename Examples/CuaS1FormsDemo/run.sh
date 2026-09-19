@@ -2,8 +2,9 @@
 # Build a native app bundle with SwiftPM; a full Xcode project is not required.
 set -euo pipefail
 DEMO_DIR="$(cd "$(dirname "$0")" && pwd)"
-swift build --package-path "$DEMO_DIR" -j 4
-BIN_DIR="$(swift build --package-path "$DEMO_DIR" --show-bin-path)"
+DEMO_CONFIGURATION="${DEMO_CONFIGURATION:-release}"
+swift build --package-path "$DEMO_DIR" -c "$DEMO_CONFIGURATION" -j 4
+BIN_DIR="$(swift build --package-path "$DEMO_DIR" -c "$DEMO_CONFIGURATION" --show-bin-path)"
 APP_DIR="$DEMO_DIR/.build/CUA Forms.app"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BIN_DIR/CuaS1FormsDemo" "$APP_DIR/Contents/MacOS/CuaS1FormsDemo.new"

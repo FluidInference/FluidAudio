@@ -11,6 +11,9 @@ let package = Package(
             name: "CuaDemoCore",
             dependencies: [.product(name: "FluidAudio", package: "FluidAudio")],
             resources: [.copy("Resources/demo.jsonl")]),
-        .executableTarget(name: "CuaS1FormsDemo", dependencies: ["CuaDemoCore"]),
+        .target(
+            name: "CuaBrowserCore", dependencies: ["CuaDemoCore", .product(name: "FluidAudio", package: "FluidAudio")]),
+        .executableTarget(name: "CuaS1FormsDemo", dependencies: ["CuaDemoCore", "CuaBrowserCore"]),
+        .testTarget(name: "CuaBrowserCoreTests", dependencies: ["CuaBrowserCore"]),
         .testTarget(name: "CuaDemoCoreTests", dependencies: ["CuaDemoCore"]),
     ])

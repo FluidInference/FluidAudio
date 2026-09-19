@@ -5,7 +5,9 @@ Enter your own details once, then watch the real Core ML model match them to
 three different forms and explain each decision with live option scores. No Python or browser server
 is involved in the running app.
 
-![The native SwiftUI demo after switching examples and filling the auto insurance claim with real Core ML predictions](preview.png)
+[![Two real Core ML variants driving separate WebKit forms](browser-demo.gif)](browser-demo.mp4)
+
+[Watch the recorded browser demo](browser-demo.mp4) · [Browser action trace](Reports/browser-validation.json) · [Matched Swift benchmark](Reports/variant-comparison.json)
 
 ## Run
 
@@ -18,7 +20,7 @@ From the FluidAudio repository root:
 Examples/CuaS1FormsDemo/run.sh
 ```
 
-The script builds and opens `Examples/CuaS1FormsDemo/.build/CUA Forms.app`.
+The script builds in release mode and opens `Examples/CuaS1FormsDemo/.build/CUA Forms.app`.
 The first launch downloads the 1.51 MB portable model package from the exact
 [reviewed HF commit](https://huggingface.co/FluidInference/cua-s1-forms-coreml/tree/c87b915d302bdbff644709408d8fbd8c8effe894),
 checks every file's SHA-256, and compiles it locally. Subsequent launches reuse
@@ -42,6 +44,96 @@ You can also open this example's `Package.swift` in Xcode and run the
 ```bash
 swift run --package-path Examples/CuaS1FormsDemo CuaS1FormsDemo
 ```
+
+## Live browser agent: both variants
+
+```bash
+Examples/CuaS1FormsDemo/run.sh --browser
+```
+
+The native app hosts **two separate WKWebViews**. Enter source details or click
+**Use example**, choose one of the three forms, and press **Run both agents**.
+The driver observes each live DOM label, role, form title, value, and checkbox
+state; combines it with the supplied task; calls the actual Core ML model;
+then executes the selected fill/check action and independently reads the DOM
+back. Text changes dispatch input/change events; checkboxes receive clicks.
+The outlined field and action card show the actual model decision. **Step**
+processes one control in each browser. **Stop** prevents the next action.
+
+Each browser's HTML is generated from the original control catalog, without
+source values or answer keys. The agent does not read a field-to-value mapping.
+A stale DOM observation is rejected before writing. Model-selected button clicks
+are shown for review; only a user's explicit click creates a local receipt.
+There is no external navigation or submission. The source editor stays in memory,
+and untouched examples follow the selected form just as in the SwiftUI mode.
+The displayed option score is not calibrated confidence.
+
+Both portable packages are downloaded once and checked against pinned hashes.
+The optional export is pinned to [f66dd2a](https://huggingface.co/FluidInference/cua-s1-forms-coreml/tree/f66dd2af1ee94f359b1e65305d35540263d4a2fe/ane-gather).
+To supply both locally, add `--model /path/to/baseline.mlpackage`
+and `--ane-model /path/to/ane-gather.mlpackage`.
+
+The recorded run checks **100/100 labeled decisions**: 50 controls for each
+variant. Both fill 14 patient, 10 job, and 12 insurance text fields, dispatch the
+expected input/change events, preserve skipped fields, and never submit
+implicitly. Separate integration checks reject stale observations and verify
+explicit local button clicks. The [complete trace](Reports/browser-validation.json)
+contains actual contexts, candidates, choices, event counts, and DOM-verified
+actions from public examples only.
+
+This demonstrates bounded browser form automation in a Swift app. It does not
+inspect arbitrary desktop apps, parse PDFs, or establish accuracy on unseen forms.
+The original 196-row parity check remains the conversion validation; this demo
+adds evidence that the observe/decide/act loop works in a real browser engine.
+
+## Matched Swift benchmark
+
+Measured on an Apple M5 Pro, 24 GB, macOS 27.0 (26A428), release Swift, with
+`cpuAndNeuralEngine`. Both models stay loaded. Each receives a 50-control warmup,
+then ABBA blocks with two full passes per block: **200 timed calls per variant**.
+The timer covers `CuaS1FormsManager.score`, including Swift byte encoding and
+output decoding. No browser, animation, screenshot capture, or model loading
+is included. Correctness checks occur outside the timer; no slow calls are removed.
+
+| Export | Correct decisions | Median | p95 | ANE / CPU operations¹ |
+| --- | ---: | ---: | ---: | ---: |
+| Original | 200/200 | 0.912 ms | 0.933 ms | 149 / 24 |
+| ANE gather | 200/200 | 0.961 ms | 0.984 ms | 162 / 3 |
+
+ANE gather is about **5.4% slower by median call time** in this run. More ANE
+operations did not improve latency. Keep the original as the default.
+
+¹ Placement is from the earlier [compute-plan profile](../../Documentation/Decision/CuaS1Forms.md#ane-profile)
+on the same machine and exact artifacts, not a utilization or power measurement.
+The full benchmark report records file hashes, raw samples, per-form summaries,
+load times (600/583 ms), and first calls (2.29/1.55 ms); loads can use system caches.
+This small fixture comparison is exploratory, not a held-out generalization score.
+Live UI call times can be higher because rendering and scheduling are active.
+
+```bash
+swift run --package-path Examples/CuaS1FormsDemo -c release CuaS1FormsDemo \
+  --benchmark --report /absolute/path/to/variant-comparison.json \
+  --hardware "Describe the measured Mac"
+```
+
+Add the same `--model` and `--ane-model` overrides to measure local packages.
+For reproducible provenance, benchmark inputs must be portable `.mlpackage` files.
+
+To capture the actual browser run with public examples, use an empty directory:
+
+```bash
+Examples/CuaS1FormsDemo/run.sh --browser \
+  --showcase /absolute/path/to/capture --exit-after-showcase
+ffmpeg -framerate 4 -i /absolute/path/to/capture/frame-%04d.png \
+  -vf "scale=1440:-2" -c:v libx264 -crf 20 -pix_fmt yuv420p \
+  -movflags +faststart browser-demo.mp4
+```
+
+The recording is a paced sequence of actual app/WebKit snapshots, held at four
+frames per second to make actions readable. Capture is separate from benchmarking.
+Only this app is captured; screen-recording permission is unnecessary. The output
+also contains per-form screenshots and `browser-validation.json`. A failed
+verification writes `failure.txt` instead of a success report.
 
 ## Try it
 
@@ -79,12 +171,12 @@ values stay in memory; the app does not save them or send them over the network.
 The 32-option and 96-byte-per-option model limits are validated before inference.
 
 Animation uses a 240 ms presentation delay per control; displayed scoring times
-exclude that delay and include the Swift manager call. No audio, external app
-control, browser automation, or remote submission is used.
+exclude that delay and include the Swift manager call. The default SwiftUI mode uses local controls. Browser automation is available in
+the explicit `--browser` mode; neither mode submits to an external service.
 
 ## What this demonstrates
 
-The app contains native SwiftUI controls and changes them using actual model
+The default mode contains native SwiftUI controls and changes them using actual model
 predictions. Its target form descriptions come from the original Cua demo. Source candidates
 come from the editable profile. **Use example** preserves the original document
 entities and distractors for reproducible sample checks.
