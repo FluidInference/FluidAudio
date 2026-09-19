@@ -756,3 +756,5 @@ Or use one of these code snippets:
 ```
 
 </details>
+
+Compatible community weights, including Orukeet, can use the [explicit local Core ML loader](Documentation/Orukeet.md).
