@@ -167,6 +167,7 @@ public enum ModelHub {
     ) async {
         guard !offlineMode else { return }
         let repoPath = directory.appendingPathComponent(repo.folderName)
+        let revision = ModelRegistry.mapRevision(repo.remotePath, default: repo.revision)
         let subPath = repo.subPath
         var patterns: [String] = []
         for model in requiredFiles {
@@ -179,6 +180,7 @@ public enum ModelHub {
         do {
             let remote = try await HFTreeLister.listTree(
                 repoRemotePath: repo.remotePath,
+                revision: revision,
                 startingAt: subPath ?? "",
                 include: { itemPath, isDirectory in
                     if isDirectory {
@@ -244,11 +246,16 @@ public enum ModelHub {
     ) async throws -> T {
         await SystemInfo.logOnce(using: logger)
         let repoPath = directory.appendingPathComponent(repo.folderName)
+        let revision = ModelRegistry.mapRevision(repo.remotePath, default: repo.revision)
         let additionalModelNames = requiredFiles.subtracting(
             ModelNames.getRequiredModelNames(for: repo, variant: variant))
 
         func ensureCacheComplete() async throws {
-            let incomplete = ModelCache.incompleteFiles(at: repoPath, requiredFiles: requiredFiles)
+            let revisionMatches = ModelCache.matchesRevision(at: repoPath, revision: revision)
+            let incomplete =
+                revisionMatches
+                ? ModelCache.incompleteFiles(at: repoPath, requiredFiles: requiredFiles)
+                : requiredFiles.sorted()
             if incomplete.isEmpty {
                 logger.info("Found \(repo.folderName) locally, no download needed")
                 return
@@ -322,6 +329,7 @@ public enum ModelHub {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
+        let revision = ModelRegistry.mapRevision(repo.remotePath, default: repo.revision)
         let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
         // The caller-supplied `modelNames` may include files outside the repo's
         // default "required" set (e.g. CtcHead.mlmodelc inside parakeet-ctc-110m
@@ -332,11 +340,15 @@ public enum ModelHub {
         let effectiveModels = requiredModels.union(extraModelNames)
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 0.5)
 
-        if !ModelCache.allModelsExist(at: repoPath, models: effectiveModels) {
+        let revisionMatches = ModelCache.matchesRevision(at: repoPath, revision: revision)
+        if !revisionMatches || !ModelCache.allModelsExist(at: repoPath, models: effectiveModels) {
             // In offline mode surface a typed error listing the
             // missing files instead of attempting a HuggingFace fetch.
             if offlineMode {
-                let missing = ModelCache.missingModels(at: repoPath, models: effectiveModels)
+                let missing =
+                    revisionMatches
+                    ? ModelCache.missingModels(at: repoPath, models: effectiveModels)
+                    : effectiveModels.sorted()
                 logger.error(
                     "Offline mode: required models missing at \(repoPath.path): \(missing)"
                 )
@@ -425,7 +437,7 @@ public enum ModelHub {
         }
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
-        try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
+        let revision = ModelRegistry.mapRevision(repo.remotePath, default: repo.revision)
 
         let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
             .union(additionalModelNames)
@@ -451,6 +463,7 @@ public enum ModelHub {
         let treeFetch = HFTreeLister.fetch(using: listingSession)
         var filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
             repoRemotePath: repo.remotePath,
+            revision: revision,
             startingAt: subPath ?? "",
             include: include,
             fetch: treeFetch
@@ -480,6 +493,7 @@ public enum ModelHub {
                 let names = Set(missingAux)
                 filesToDownload += try await HFTreeLister.listTree(
                     repoRemotePath: repo.remotePath,
+                    revision: revision,
                     include: { itemPath, isDirectory in
                         !isDirectory && names.contains((itemPath as NSString).lastPathComponent)
                     },
@@ -488,6 +502,7 @@ public enum ModelHub {
             }
         }
 
+        try ModelCache.prepareForDownload(at: repoPath, revision: revision)
         logger.info("Found \(filesToDownload.count) files to download")
 
         // Compute total known bytes for byte-weighted progress.
@@ -516,6 +531,7 @@ public enum ModelHub {
                 file: file,
                 from: repo.remotePath,
                 at: destPath,
+                revision: revision,
                 recoveringBlockedPaths: true,
                 config: config,
                 configuration: configuration,
@@ -596,12 +612,16 @@ public enum ModelHub {
         // Subdirectory downloads have no compile phase: download spans 0-1.
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 1.0)
         reporter.listing()
+        let revision = ModelRegistry.mapRevision(repo.remotePath, default: repo.revision)
         let filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
             repoRemotePath: repo.remotePath,
+            revision: revision,
             startingAt: subdirectory,
             include: { itemPath, _ in shouldSkip?(itemPath) != true },
             fetch: HFTreeLister.fetch(using: listingSession)
         )
+        let revisionCache = repoDirectory.appendingPathComponent(subdirectory)
+        try ModelCache.prepareForDownload(at: revisionCache, revision: revision)
         let totalFiles = filesToDownload.count
         logger.info("Found \(totalFiles) files in \(subdirectory)")
 
@@ -634,6 +654,7 @@ public enum ModelHub {
                     try await downloadSubdirectoryFile(
                         file, index: index, repo: repo, subdirectory: subdirectory,
                         repoDirectory: repoDirectory, totalFiles: totalFiles,
+                        revision: revision,
                         config: config, configuration: configuration, progress: progress)
                 }
             }
@@ -656,6 +677,7 @@ public enum ModelHub {
         subdirectory: String,
         repoDirectory: URL,
         totalFiles: Int,
+        revision: String,
         config: DownloadConfig,
         configuration: URLSessionConfiguration?,
         progress: ConcurrentProgress
@@ -675,6 +697,7 @@ public enum ModelHub {
             file: file,
             from: repo.remotePath,
             at: destPath,
+            revision: revision,
             recoveringBlockedPaths: false,
             config: config,
             configuration: configuration,

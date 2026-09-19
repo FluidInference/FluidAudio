@@ -180,9 +180,18 @@ import FluidAudio
 // Set custom registry before using any managers
 ModelRegistry.baseURL = "https://your-mirror.example.com"
 
+// Only needed when the mirror does not preserve an upstream pinned commit.
+ModelRegistry.revisionOverrides = [
+    "FluidInference/speaker-diarization-coreml": "your-mirror-revision"
+]
+
 // Models will now download from the custom registry
 let diarizer = DiarizerManager()
 ```
+
+Mirrors should preserve upstream Git revisions when possible. For repositories
+that FluidAudio pins to an immutable commit, set `revisionOverrides` explicitly
+if the mirror exposes the same files under a different branch, tag, or commit.
 
 **Environment Variables (recommended for CLI/testing):**
 ```bash

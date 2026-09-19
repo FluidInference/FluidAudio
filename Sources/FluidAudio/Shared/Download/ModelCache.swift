@@ -10,6 +10,45 @@ enum ModelCache {
     /// existing `category == "DownloadUtils"` predicates keep capturing the
     /// whole download trail; renaming it is a separate, opt-in decision.
     private static let logger = AppLogger(category: "DownloadUtils")
+    private static let revisionMarkerName = ".fluidaudio-revision"
+
+    /// Whether the managed cache contains files from `revision`.
+    ///
+    /// Historical `main` caches predate revision markers and remain valid. A
+    /// pinned revision always requires an exact marker so an SDK revision bump
+    /// cannot silently reuse files downloaded by an older release.
+    static func matchesRevision(at repoPath: URL, revision: String) -> Bool {
+        let marker = repoPath.appendingPathComponent(revisionMarkerName)
+        guard let data = try? Data(contentsOf: marker) else {
+            return revision == "main"
+        }
+        guard let storedRevision = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        else {
+            return false
+        }
+        return storedRevision == revision
+    }
+
+    /// Prepare a managed cache for downloads from one resolved revision.
+    /// Existing files are preserved when the marker matches and replaced when
+    /// the requested revision changes. The marker is written before downloads
+    /// begin so interrupted files can resume on the next attempt.
+    static func prepareForDownload(at repoPath: URL, revision: String) throws {
+        let fm = FileManager.default
+        guard !matchesRevision(at: repoPath, revision: revision) else {
+            try fm.createDirectory(at: repoPath, withIntermediateDirectories: true)
+            return
+        }
+
+        if fm.fileExists(atPath: repoPath.path) {
+            try fm.removeItem(at: repoPath)
+        }
+        try fm.createDirectory(at: repoPath, withIntermediateDirectories: true)
+        guard revision != "main" else { return }
+
+        let marker = repoPath.appendingPathComponent(revisionMarkerName)
+        try Data((revision + "\n").utf8).write(to: marker, options: .atomic)
+    }
 
     /// Robustly create a directory, removing any conflicting files in the path.
     ///

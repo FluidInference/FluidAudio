@@ -51,6 +51,10 @@ TDT/CTC and the non-autoregressive models above are wrapped by `SlidingWindowAsr
 | **Sortformer** | NVIDIA's enterprise-grade end-to-end streaming diarization model. Supports both streaming and complete-buffer inference for up to 4 speakers. More stable than LS-EEND, but sometimes misses speech. Processes audio in chunks, requiring 1040ms of warmup audio and 480ms per update for the low latency versions. | Added after Pyannote to support low-latency streaming diarization. |
 | **Pyannote CoreML Pipeline** | Speaker diarization. Segmentation model + WeSpeaker embeddings for clustering. Online/streaming pipeline (DiarizerManager) based on pyannote/speaker-diarization-3.1. Offline batch pipeline (OfflineDiarizerManager) based on pyannote/speaker-diarization-community-1. | First diarizer model added. Converted from Pyannote with custom made batching mode |
 
+FluidAudio pins Pyannote diarization downloads to an immutable model-repository revision. The model card's
+[provenance record](https://huggingface.co/FluidInference/speaker-diarization-coreml/blob/df2625ac79a7ac6b65ad868fee6d80f320da4232/PROVENANCE.md)
+maps the supported artifacts to their upstream sources and documents the limits of the historical reconstruction.
+
 ## TTS Models
 
 | Model | Description | Context |
