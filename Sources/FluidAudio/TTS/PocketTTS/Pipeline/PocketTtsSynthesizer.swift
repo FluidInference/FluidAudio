@@ -793,6 +793,15 @@ public struct PocketTtsSynthesizer {
         }
     }
 
+    /// Collapse every run of whitespace, newlines included, to one space.
+    ///
+    /// Shared by `normalizeText` and `chunkTextWithMetadata` so the text a
+    /// chunk is sized on is the text it is synthesized from.
+    static func collapseWhitespace(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: "\\s+", with: " ", options: .regularExpression)
+    }
+
     /// Normalize a text chunk for PocketTTS (matching Python `prepare_text_prompt`).
     ///
     /// For chunks that are continuations of a longer sentence (mid-sentence
@@ -809,13 +818,11 @@ public struct PocketTtsSynthesizer {
         isMidSentence: Bool = false,
         language: PocketTtsLanguage = .english
     ) -> (text: String, framesAfterEos: Int) {
-        var result = normalizeForLanguage(
-            normalizeSmartQuotes(
-                text.trimmingCharacters(in: .whitespacesAndNewlines)),
-            language: language)
-        // Collapse whitespace
-        result = result.replacingOccurrences(
-            of: "\\s+", with: " ", options: .regularExpression)
+        var result = collapseWhitespace(
+            normalizeForLanguage(
+                normalizeSmartQuotes(
+                    text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                language: language))
 
         if !isMidSentence {
             // Strip trailing clause punctuation (commas, semicolons, colons)
@@ -883,10 +890,14 @@ public struct PocketTtsSynthesizer {
         maxTokens: Int = PocketTtsConstants.maxTokensPerChunk,
         language: PocketTtsLanguage = .english
     ) -> [TextChunk] {
-        let normalized = normalizeForLanguage(
-            normalizeSmartQuotes(
-                text.trimmingCharacters(in: .whitespacesAndNewlines)),
-            language: language)
+        // Size chunks on the text the model is given. `normalizeText` collapses
+        // whitespace before synthesis; a count taken before that pass measures
+        // newlines and runs of spaces the model never sees.
+        let normalized = collapseWhitespace(
+            normalizeForLanguage(
+                normalizeSmartQuotes(
+                    text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                language: language))
 
         // If it fits in one chunk, return as-is. A single-chunk input is
         // never mid-sentence — it's whatever the caller passed in.
