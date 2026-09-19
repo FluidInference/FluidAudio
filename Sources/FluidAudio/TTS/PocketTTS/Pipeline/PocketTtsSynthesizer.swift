@@ -6,8 +6,9 @@ import Foundation
 /// Generates audio autoregressively: each generation step produces
 /// an 80ms audio frame (1920 samples at 24kHz).
 ///
-/// Long text is split into sentence-based chunks (≤50 tokens each)
-/// to stay within the KV cache limit (512 positions).
+/// Long text is split into sentence-based chunks. Separate sentences target
+/// 50 tokens per chunk, while longer sentences stay whole when the selected
+/// voice leaves enough KV-cache capacity for their text and generated audio.
 ///
 /// Pipeline: text → chunk → [tokenize → embed → prefill KV → generate → flow decode → mimi decode] → WAV
 public struct PocketTtsSynthesizer {
@@ -222,6 +223,12 @@ public struct PocketTtsSynthesizer {
 
         logger.info("PocketTTS streaming synthesis with custom voice: '\(text)'")
 
+        let voicePosition = voiceCachePosition(for: voiceData)
+        let effectiveMaxTokens = try effectiveMaxTokensPerChunk(
+            requested: maxTokensPerChunk,
+            voiceCachePosition: voicePosition
+        )
+
         // `.aneState` runs on the Trial 23 MLState pipeline (one shared KV
         // state instead of 24-tensor cache I/O) via a one-shot session.
         if store.placement == .aneState {
@@ -230,7 +237,7 @@ public struct PocketTtsSynthesizer {
                 voiceData: voiceData,
                 temperature: temperature,
                 seed: seed,
-                maxTokensPerChunk: maxTokensPerChunk,
+                maxTokensPerChunk: effectiveMaxTokens,
                 language: language
             )
         }
@@ -238,7 +245,11 @@ public struct PocketTtsSynthesizer {
         let constants = try await store.constants()
         let chunks = chunkTextWithMetadata(
             text, tokenizer: constants.tokenizer,
-            maxTokens: maxTokensPerChunk, language: language)
+            maxTokens: effectiveMaxTokens,
+            preferredMaxTokens: min(
+                PocketTtsConstants.preferredTokensPerChunk, effectiveMaxTokens),
+            voiceCachePosition: voicePosition,
+            language: language)
         let condModel = try await store.condStep()
         let hasCondPrefill = await store.hasCondPrefill()
         let stepModel = try await store.flowlmStep()
@@ -351,7 +362,7 @@ public struct PocketTtsSynthesizer {
             "Session voice prefill at position \(Int(voiceKVSnapshot.positions[0][0].floatValue))"
         )
 
-        let session = PocketTtsSession(
+        let session = try PocketTtsSession(
             voiceKVSnapshot: voiceKVSnapshot,
             mimiState: mimiState,
             constants: constants,
@@ -524,7 +535,9 @@ public struct PocketTtsSynthesizer {
                         useFastPrefill: useCondPrefill
                     )
 
-                    let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: chunk.text)
+                    let cachePosition = try PocketTtsSynthesizer.kvCachePosition(in: kvState)
+                    let maxGenLen = PocketTtsSynthesizer.boundedGenerationFrameCount(
+                        text: chunk.text, cachePosition: cachePosition)
                     var eosStep: Int?
                     var sequence = try PocketTtsSynthesizer.createBosStartSequence(
                         bosEmbedding: constants.bosEmbedding,
@@ -565,6 +578,17 @@ public struct PocketTtsSynthesizer {
                             ))
 
                         sequence = try PocketTtsSynthesizer.createSequenceFromLatent(latent)
+                    }
+
+                    if !Task.isCancelled
+                        && PocketTtsSynthesizer.didExhaustCacheBudget(
+                            generatedFrameLimit: maxGenLen,
+                            cachePosition: cachePosition,
+                            eosStep: eosStep,
+                            framesAfterEos: totalFramesAfterEos)
+                    {
+                        PocketTtsSynthesizer.logger.warning(
+                            "Stream chunk \(chunkIdx + 1) exhausted the KV cache generation budget")
                     }
 
                     if Task.isCancelled { break }
@@ -638,7 +662,9 @@ public struct PocketTtsSynthesizer {
                         layerKeys: condLayerKeys, prefillModel: condPrefillModel,
                         prefillLayerKeys: condPrefillLayerKeys, useFastPrefill: useCondPrefill)
 
-                    let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: chunk.text)
+                    let cachePosition = try PocketTtsSynthesizer.kvCachePosition(in: kvState)
+                    let maxGenLen = PocketTtsSynthesizer.boundedGenerationFrameCount(
+                        text: chunk.text, cachePosition: cachePosition)
                     var eosStep: Int?
                     var sequence = try PocketTtsSynthesizer.createBosStartSequence(
                         bosEmbedding: constants.bosEmbedding,
@@ -658,6 +684,16 @@ public struct PocketTtsSynthesizer {
                         latentCont.yield(
                             LatentWork(latent: latent, frameIndex: step, chunkIndex: chunkIdx))
                         sequence = try PocketTtsSynthesizer.createSequenceFromLatent(latent)
+                    }
+                    if !Task.isCancelled
+                        && PocketTtsSynthesizer.didExhaustCacheBudget(
+                            generatedFrameLimit: maxGenLen,
+                            cachePosition: cachePosition,
+                            eosStep: eosStep,
+                            framesAfterEos: totalFramesAfterEos)
+                    {
+                        PocketTtsSynthesizer.logger.warning(
+                            "Stream chunk \(chunkIdx + 1) exhausted the KV cache generation budget")
                     }
                     if Task.isCancelled { break }
                 }
@@ -882,14 +918,21 @@ public struct PocketTtsSynthesizer {
     /// Like `chunkText`, but tags each chunk with `isMidSentence` so callers
     /// can preserve casing/punctuation for clause- or word-boundary splits.
     ///
+    /// `maxTokens` is a hard ceiling. When `preferredMaxTokens` is lower,
+    /// sentences up to the hard ceiling stay whole, while separate sentence
+    /// pieces are grouped only up to the preferred target.
+    ///
     /// The `language` parameter selects language-specific abbreviation and
     /// punctuation tables. English is the default.
     static func chunkTextWithMetadata(
         _ text: String,
         tokenizer: SentencePieceTokenizer,
         maxTokens: Int = PocketTtsConstants.maxTokensPerChunk,
+        preferredMaxTokens: Int? = nil,
+        voiceCachePosition: Int? = nil,
         language: PocketTtsLanguage = .english
     ) -> [TextChunk] {
+        let preferredMaxTokens = min(preferredMaxTokens ?? maxTokens, maxTokens)
         // Size chunks on the text the model is given. `normalizeText` collapses
         // whitespace before synthesis; a count taken before that pass measures
         // newlines and runs of spaces the model never sees.
@@ -899,10 +942,20 @@ public struct PocketTtsSynthesizer {
                     text.trimmingCharacters(in: .whitespacesAndNewlines)),
                 language: language))
 
+        func fits(_ candidate: String, isMidSentence: Bool = false) -> Bool {
+            fitsTextChunk(
+                candidate,
+                tokenizer: tokenizer,
+                maxTokens: maxTokens,
+                voiceCachePosition: voiceCachePosition,
+                isMidSentence: isMidSentence,
+                language: language)
+        }
+
         // If it fits in one chunk, return as-is. A single-chunk input is
         // never mid-sentence — it's whatever the caller passed in.
         let tokenCount = tokenizer.encode(normalized).count
-        if tokenCount <= maxTokens {
+        if tokenCount <= preferredMaxTokens && fits(normalized) {
             return [TextChunk(text: normalized, isMidSentence: false)]
         }
 
@@ -915,12 +968,15 @@ public struct PocketTtsSynthesizer {
         // doesn't capitalize them or append a period.
         var pieces: [TextChunk] = []
         for sentence in sentences {
-            let sentenceTokens = tokenizer.encode(sentence).count
-            if sentenceTokens <= maxTokens {
+            if fits(sentence) {
                 pieces.append(TextChunk(text: sentence, isMidSentence: false))
             } else {
                 let subPieces = splitOversizedSentence(
-                    sentence, tokenizer: tokenizer, maxTokens: maxTokens)
+                    sentence,
+                    tokenizer: tokenizer,
+                    maxTokens: maxTokens,
+                    voiceCachePosition: voiceCachePosition,
+                    language: language)
                 // The first sub-piece keeps the sentence's leading capital and
                 // is treated as a sentence-start; subsequent sub-pieces are
                 // mid-sentence continuations. The last sub-piece carries the
@@ -936,9 +992,11 @@ public struct PocketTtsSynthesizer {
             }
         }
 
-        // Group pieces into chunks that fit the token limit. Two pieces can
-        // merge only if their mid-sentence flags are compatible; otherwise
-        // we'd lose the boundary information needed for correct prosody.
+        // Group separate pieces only up to the preferred target. A sentence
+        // already above that target remains intact as long as it fits the hard
+        // ceiling. Two pieces can merge only if their mid-sentence flags are
+        // compatible; otherwise we'd lose the boundary information needed for
+        // correct prosody.
         var chunks: [TextChunk] = []
         var current: TextChunk?
 
@@ -958,7 +1016,9 @@ public struct PocketTtsSynthesizer {
 
             let candidate = existing.text + " " + piece.text
             let candidateTokens = tokenizer.encode(candidate).count
-            if candidateTokens <= maxTokens {
+            if candidateTokens <= preferredMaxTokens
+                && fits(candidate, isMidSentence: existing.isMidSentence)
+            {
                 current = TextChunk(
                     text: candidate, isMidSentence: existing.isMidSentence)
             } else {
@@ -983,8 +1043,19 @@ public struct PocketTtsSynthesizer {
     static func splitOversizedSentence(
         _ text: String,
         tokenizer: SentencePieceTokenizer,
-        maxTokens: Int
+        maxTokens: Int,
+        voiceCachePosition: Int? = nil,
+        language: PocketTtsLanguage = .english
     ) -> [String] {
+        func fits(_ candidate: String) -> Bool {
+            fitsTextChunk(
+                candidate,
+                tokenizer: tokenizer,
+                maxTokens: maxTokens,
+                voiceCachePosition: voiceCachePosition,
+                language: language)
+        }
+
         // First try: split at clause boundaries
         let clauseParts = splitAtClauseBoundaries(text)
 
@@ -994,17 +1065,21 @@ public struct PocketTtsSynthesizer {
 
         for part in clauseParts {
             let candidate = currentPart.isEmpty ? part : currentPart + " " + part
-            let candidateTokens = tokenizer.encode(candidate).count
-
-            if candidateTokens <= maxTokens {
+            if fits(candidate) {
                 currentPart = candidate
             } else {
                 if !currentPart.isEmpty {
                     result.append(currentPart)
                 }
                 // If single clause part still exceeds limit, split at word boundaries
-                if tokenizer.encode(part).count > maxTokens {
-                    result.append(contentsOf: splitAtWordBoundaries(part, tokenizer: tokenizer, maxTokens: maxTokens))
+                if !fits(part) {
+                    result.append(
+                        contentsOf: splitAtWordBoundaries(
+                            part,
+                            tokenizer: tokenizer,
+                            maxTokens: maxTokens,
+                            voiceCachePosition: voiceCachePosition,
+                            language: language))
                     currentPart = ""
                 } else {
                     currentPart = part
@@ -1065,19 +1140,28 @@ public struct PocketTtsSynthesizer {
     static func splitAtWordBoundaries(
         _ text: String,
         tokenizer: SentencePieceTokenizer,
-        maxTokens: Int
+        maxTokens: Int,
+        voiceCachePosition: Int? = nil,
+        language: PocketTtsLanguage = .english
     ) -> [String] {
         let words = text.split(separator: " ").map(String.init)
         guard words.count > 1 else { return [text] }
+
+        func fits(_ candidate: String) -> Bool {
+            fitsTextChunk(
+                candidate,
+                tokenizer: tokenizer,
+                maxTokens: maxTokens,
+                voiceCachePosition: voiceCachePosition,
+                language: language)
+        }
 
         var chunks: [String] = []
         var currentWords: [String] = []
 
         for word in words {
             let candidate = (currentWords + [word]).joined(separator: " ")
-            let tokens = tokenizer.encode(candidate).count
-
-            if tokens > maxTokens && !currentWords.isEmpty {
+            if !fits(candidate) && !currentWords.isEmpty {
                 chunks.append(currentWords.joined(separator: " "))
                 currentWords = [word]
             } else {
@@ -1102,8 +1186,10 @@ public struct PocketTtsSynthesizer {
                 let donated = prevWords.last!
                 let newPrev = prevWords.dropLast().joined(separator: " ")
                 let newTail = donated + " " + tail
-                chunks[prevIndex] = newPrev
-                chunks[chunks.count - 1] = newTail
+                if fits(newPrev) && fits(newTail) {
+                    chunks[prevIndex] = newPrev
+                    chunks[chunks.count - 1] = newTail
+                }
             }
         }
 
@@ -1243,6 +1329,98 @@ public struct PocketTtsSynthesizer {
         let wordCount = text.split(separator: " ").count
         let genLenSec = Double(wordCount) + 2.0
         return Int(genLenSec * 12.5)
+    }
+
+    /// Estimate the cache space a normally paced rendering needs.
+    ///
+    /// This is intentionally separate from `estimateMaxFrames`, whose
+    /// one-second-per-word allowance is a broad generation timeout rather
+    /// than a realistic chunk-sizing budget. Half a second per word plus two
+    /// seconds for pauses and trailing audio keeps ordinary long sentences
+    /// intact while still reserving cache space for generated frames.
+    static func estimateRequiredCacheFrames(text: String) -> Int {
+        let wordCount = text.split(whereSeparator: { $0.isWhitespace }).count
+        let estimatedSeconds = Double(wordCount) * 0.5 + 2.0
+        return max(1, Int(ceil(estimatedSeconds * 12.5)))
+    }
+
+    /// Whether a text chunk fits both the caller's token ceiling and the
+    /// fixed KV cache after normalization performed by synthesis.
+    static func fitsTextChunk(
+        _ text: String,
+        tokenizer: SentencePieceTokenizer,
+        maxTokens: Int,
+        voiceCachePosition: Int?,
+        isMidSentence: Bool = false,
+        language: PocketTtsLanguage = .english
+    ) -> Bool {
+        let normalized = normalizeText(
+            text, isMidSentence: isMidSentence, language: language
+        ).text
+        let textTokenCount = tokenizer.encode(normalized).count
+        guard textTokenCount <= maxTokens else { return false }
+        guard let voiceCachePosition else { return true }
+
+        return voiceCachePosition + textTokenCount
+            + estimateRequiredCacheFrames(text: normalized)
+            <= PocketTtsConstants.kvCacheMaxLen
+    }
+
+    /// Bound a generation loop to the positions still available after
+    /// conditioning. This prevents a late KV overflow after audio frames have
+    /// already been emitted to a streaming caller.
+    static func boundedGenerationFrameCount(text: String, cachePosition: Int) -> Int {
+        let remaining = max(0, PocketTtsConstants.kvCacheMaxLen - cachePosition)
+        return min(estimateMaxFrames(text: text), remaining)
+    }
+
+    /// Whether a generation loop reached the cache boundary before it could
+    /// observe EOS and emit the configured trailing frames.
+    static func didExhaustCacheBudget(
+        generatedFrameLimit: Int,
+        cachePosition: Int,
+        eosStep: Int?,
+        framesAfterEos: Int
+    ) -> Bool {
+        let remaining = max(0, PocketTtsConstants.kvCacheMaxLen - cachePosition)
+        guard generatedFrameLimit > 0, generatedFrameLimit == remaining else { return false }
+        guard let eosStep else { return true }
+        return eosStep + framesAfterEos >= generatedFrameLimit
+    }
+
+    /// Number of cache positions occupied by voice conditioning before text
+    /// prefill starts. Shipped voices carry the exact baked offset; cloned
+    /// voices prepend one `bos_before_voice` token to their prompt frames.
+    static func voiceCachePosition(for voiceData: PocketTtsVoiceData) -> Int {
+        if let snapshot = voiceData.cacheSnapshot {
+            return snapshot.layers.map(\.offset).max() ?? snapshot.cacheSeqLen
+        }
+        return voiceData.promptLength > 0 ? voiceData.promptLength + 1 : 0
+    }
+
+    /// Clamp the caller's hard text ceiling to leave at least one generation
+    /// position. Chunking reserves the estimated speech frames separately.
+    static func effectiveMaxTokensPerChunk(
+        requested: Int,
+        voiceCachePosition: Int
+    ) throws -> Int {
+        guard requested > 0 else {
+            throw PocketTTSError.processingFailed(
+                "PocketTTS maxTokensPerChunk must be greater than zero")
+        }
+        guard voiceCachePosition >= 0 else {
+            throw PocketTTSError.processingFailed(
+                "PocketTTS voice cache position cannot be negative")
+        }
+
+        let available = PocketTtsConstants.kvCacheMaxLen - voiceCachePosition - 1
+        guard available > 0 else {
+            throw PocketTTSError.processingFailed(
+                "PocketTTS voice conditioning uses \(voiceCachePosition) of "
+                    + "\(PocketTtsConstants.kvCacheMaxLen) cache positions, leaving too little "
+                    + "room for generation")
+        }
+        return min(requested, available)
     }
 
     /// Create the BOS embedding as an MLMultiArray [32].
