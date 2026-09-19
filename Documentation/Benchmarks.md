@@ -1080,6 +1080,24 @@ All 11 probability-error cases passed a focused FP32 CPU rerun (max error 0.0000
 [Per-row trace](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/62ffd3653cf0edef7222a886e2006503e2367d10/reports/synthetic-test-decisions.jsonl.gz) ·
 [Swift API](API.md#decision-scoring)
 
+### INT8 weight trial
+
+A matched run over all **24,370 synthetic decisions** on the same M5 Pro:
+
+| Export | Package size | Accuracy | Median | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Original FP16 | 1.51 MB | 99.9549% | 0.990 ms | 1.102 ms |
+| INT8 weights, FP16 compute | 0.81 MB | 99.9549% | 0.990 ms | 1.104 ms |
+
+**46.2% smaller**, with every selected option unchanged and effectively identical
+latency. Numerical parity still fails: 64 rows exceed the 0.005 probability-error
+limit (maximum 0.067738), versus 11 for FP16. No INT8 probability-sum violations
+were observed. The original remains the default.
+
+Batch-1 Core ML CPU+ANE calls, excluding encoding/loading/UI; both models timed
+in the same process with alternating order. [Full report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/int8-synthetic-test.json) ·
+[INT8 reproduction](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#int8-weight-trial)
+
 ### Swift runtime and ANE placement
 
 Separate release Swift benchmark: **200/200 correct per variant** over 50 demo
