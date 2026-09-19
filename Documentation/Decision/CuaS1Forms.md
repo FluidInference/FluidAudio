@@ -81,6 +81,26 @@ for pinned assets, source, licenses, conversion instructions, per-row reports,
 and the original Cua evaluator. Exploratory Python timing and device placement
 are documented there separately from Swift runtime correctness.
 
+## ANE profile
+
+On Apple M5 Pro / macOS 27.0, the default `.cpuAndNeuralEngine` configuration
+places **149 of 173 operations (86.1%) on ANE** and **24 on CPU** in the scheduler
+plan. Integer/mask preparation and embedding gathers account for the CPU fallback.
+With `.all`, the same model's plan selects the GPU on this Mac.
+
+A bounded follow-up uses real upstream rows 0, 68, and 130, two warmup passes,
+and ten timed passes (30 calls per policy). Median Python model-call times were
+**0.929 ms with CPU + ANE**, 1.527 ms CPU-only, 0.929 ms CPU + GPU, and 0.912 ms
+with all devices allowed. CPU + ANE p95 was **0.973 ms**. All 120 timed calls
+selected their labeled options correctly. ANE model loading took 566.8 ms and its
+first prediction 1.65 ms with system caches retained; this is not a cold-start test.
+
+These timings exclude Swift input encoding and demo UI work. Operation counts
+describe the preferred-device plan, not utilization or a share of runtime; no
+Instruments power/runtime trace was captured. See the reproducible
+[profiler and protocol](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#device-placement)
+and [complete report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/ane-profile.json).
+
 ## Reproduce the Swift integration checks
 
 In the Mobius conversion directory, prepare the real assets and reference scores:

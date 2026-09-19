@@ -24,6 +24,21 @@
 
 ---
 
+# Computer-use decision models
+
+Measured separately on September 19, 2026: Apple M5 Pro, 24 GB, macOS 27.0.
+CUA-S1-FORMS uses real text inputs, not audio. With `.cpuAndNeuralEngine`, its
+plan assigns 149 operations to ANE and 24 to CPU; `.all` selects 173 GPU operations.
+
+| Model | ANE ops | GPU ops | CPU ops | Portable size | Warm model call |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| CUA-S1-FORMS (`.cpuAndNeuralEngine`) | 149 (86.1%) | 0 | 24 (13.9%) | 1.51 MB | p50 0.929 ms / p95 0.973 ms |
+
+Timing uses 30 Python Core ML calls over three real form inputs after warmup,
+excluding encoding and UI work. Counts are scheduler assignments, not measured
+runtime shares. See [the model guide](Decision/CuaS1Forms.md#ane-profile) for the
+four-policy comparison, load timings, fallback reasons, protocol, and raw report.
+
 # ASR
 
 | Model | Type | Chunk | ANE | GPU | CPU | ops | Size | Heavy graph → device |
