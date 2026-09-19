@@ -6,14 +6,6 @@ stateless prediction. This is a decision component: your application supplies
 document entities, describes the UI, constructs candidates, validates the result,
 and executes authorized actions.
 
-## Native Mac demo
-
-Run `Examples/CuaS1FormsDemo/run.sh` to open the [SwiftUI example](../../Examples/CuaS1FormsDemo).
-Enter your own details once and reuse them across three upstream forms. The
-example uses this manager directly, with live option scores, step/fill/recheck
-controls, editable source values, and local-only submission. The first launch downloads
-the pinned portable model from the HF PR; an existing local model can also be used.
-
 ## Load and score
 
 ```swift
@@ -75,6 +67,16 @@ PyTorch and both tested Core ML configurations selected all 196 labeled options
 correctly. Maximum probability differences were 0.003099 (`ALL`) and 0.002336
 (`CPU_AND_NE`), within the 0.005 conversion tolerance. These are demo conversion
 checks, not evidence of general computer-use accuracy.
+
+The complete published synthetic test adds **24,370 decisions**: PyTorch and
+both Core ML exports get **24,359 correct (99.9549%)**, with every selected index
+matching. **Strict numerical parity fails** on this larger split: 11 rows exceed
+the 0.005 probability-error tolerance (maximum 0.0204874), and row 19270 has a
+probability sum of 0.99893665 that falls outside this manager's normalization
+guard. Raw argmax agreement does not mean every output is accepted by the API.
+See [Benchmarks](../Benchmarks.md#cua-s1-forms-decision-scoring) for the full
+accuracy/latency comparison, ANE placement, protocol, raw reports, and recorded
+browser evidence. No model or tolerance changes were made for this comparison.
 
 See the [Mobius conversion toolkit](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml)
 for pinned assets, source, licenses, conversion instructions, per-row reports,
@@ -141,21 +143,3 @@ to the real `.mlmodelc`. The Mobius README includes its compilation command.
 Without these paths, integration tests skip; byte-encoding, limits, rejection,
 and model-registry unit tests still run. XCTest requires a full Xcode installation
 on macOS. No model or dataset is downloaded by the tests automatically.
-
-## Live browser demo and Swift comparison
-
-Run `Examples/CuaS1FormsDemo/run.sh --browser` for two independent WebKit forms
-driven by the original and ANE-gather exports. Both observe live DOM controls,
-score supplied candidates, execute fill/check actions, and verify the resulting
-DOM state. The [recording and reproduction guide](../../Examples/CuaS1FormsDemo/README.md#live-browser-agent-both-variants)
-show all three forms, with 100/100 labeled browser decisions and event checks.
-This is bounded local browser automation; external desktop control and document
-extraction remain application responsibilities.
-
-A matched release Swift run on this M5 Pro covers the full 50-control manifest,
-with 200 measured calls per variant: original p50/p95 **0.912/0.933 ms**, ANE
-gather **0.961/0.984 ms**. All 400 decisions match upstream labels. Timing includes
-Swift encoding, Core ML, and output decoding, with no rendering or animation.
-See the [raw report](../../Examples/CuaS1FormsDemo/Reports/variant-comparison.json)
-for model hashes, per-form results, load/first-call costs, and every sample.
-The higher-ANE export remains optional because it is about 5.4% slower here.
