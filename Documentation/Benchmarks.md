@@ -1070,8 +1070,8 @@ the same 11 incorrect fill-for-skip decisions. ANE-gather is **4.8% slower** by
 median; the original remains the default.
 
 **Numerical parity fails for both exports:** 11 rows exceed the 0.005 probability-error
-limit (maximum 0.0204874), and one output would be rejected by Swift's probability-sum
-check despite a correct selection. These accuracy numbers score raw model outputs.
+limit (maximum 0.0204874), and one raw output fails the probability-sum check.
+The Swift runtime fix below handles that output; these accuracy numbers score raw model outputs.
 
 All 11 probability-error cases passed a focused FP32 CPU rerun (max error 0.0000012), pointing to FP16/backend rounding.
 
@@ -1119,10 +1119,19 @@ INT8 preserves all choices at 0.81 MB; the original FP16 remains the default.
 [Full report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/int4-synthetic-test.json) ·
 [INT4 reproduction](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#int4-weight-trial)
 
+### Swift probability fix
+
+Stable softmax in Swift fixes the FP16 probability-sum exception: **73,110/73,110 calls
+complete**, covering all 24,370 decisions for FP16, INT8, and INT4. Every selected
+option is unchanged; accuracy remains **99.9549%, 99.9549%, and 99.9302%**, respectively.
+Original model scores remain available as `rawProbabilities`; raw conversion-parity
+failures above remain. [Report and reproduction](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#swift-probability-fix)
+
 ### Swift runtime and ANE placement
 
 Separate release Swift benchmark: **200/200 correct per variant** over 50 demo
 controls. Timing includes Swift encoding, inference, and decoding; excludes UI.
+These timings predate the stable-softmax fix; complete SDK latency has not been remeasured.
 
 | Export | ANE operations | CPU operations | Swift median | Swift p95 |
 | --- | ---: | ---: | ---: | ---: |

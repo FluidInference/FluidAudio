@@ -64,12 +64,16 @@ final class CuaS1FormsIntegrationTests: XCTestCase {
             XCTAssertEqual(result.selectedIndex, row.label, "Demo row \(index)")
             XCTAssertEqual(result.selectedOption, row.options[row.label])
             XCTAssertEqual(result.probabilities.count, expected.count)
+            XCTAssertEqual(result.rawProbabilities.count, expected.count)
             XCTAssertEqual(expected.count, row.options.count)
             let referenceIndex = expected.indices.max { expected[$0] < expected[$1] }
             XCTAssertEqual(result.selectedIndex, referenceIndex)
             for (actual, target) in zip(result.probabilities, expected) {
                 maximumError = max(maximumError, abs(actual - target))
                 XCTAssertEqual(actual, target, accuracy: 0.005, "Demo row \(index)")
+            }
+            for (raw, target) in zip(result.rawProbabilities, expected) {
+                XCTAssertEqual(raw, target, accuracy: 0.005, "Raw model probability, demo row \(index)")
             }
             XCTAssertEqual(result.probabilities.reduce(0, +), 1, accuracy: 0.001)
             XCTAssertTrue(result.logits.allSatisfy(\.isFinite))

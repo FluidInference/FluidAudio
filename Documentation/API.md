@@ -453,8 +453,10 @@ and use the local loader; automatic downloading requires the artifacts on HF `ma
 - Encoding truncates at 224 UTF-8 bytes for context and 96 bytes per option;
   inspect `contextWasTruncated` and `truncatedOptionIndices` before acting.
 - `selectedIndex` is zero-based; `selectedOption` retains the original string.
+  `probabilities` uses a stable softmax of the emitted logits; `rawProbabilities`
+  retains the model's unmodified softmax output for conversion comparisons.
   Scores contain only supplied options, in order. Calls on one manager are serialized.
-- Invalid tensors, nonfinite scores, invalid probability sums, and nonzero padding
+- Invalid tensors, nonfinite or out-of-range scores, and nonzero padding
   probabilities throw `CuaS1FormsError`. Scores do not authorize an action.
 
 See [Benchmarks](Benchmarks.md#cua-s1-forms-decision-scoring) for accuracy, latency,

@@ -32,15 +32,19 @@ public enum CuaS1FormsError: Error, LocalizedError, Sendable, Equatable {
 
 /// Scores for the supplied options, in their original order.
 ///
-/// Probabilities are model outputs, not guarantees of correctness. This result
+/// Probabilities are scores, not guarantees of correctness. This result
 /// describes one form decision; it does not execute or authorize a GUI action.
 public struct CuaS1FormsResult: Sendable {
     /// Zero-based index of the highest-probability supplied option.
     public let selectedIndex: Int
     /// The original, untruncated option string at `selectedIndex`.
     public let selectedOption: String
+    /// Stable softmax of the emitted logits, computed with Double arithmetic and returned as Float.
     /// One probability per supplied option; padding is omitted.
     public let probabilities: [Float]
+    /// Unmodified model softmax output for the supplied options, excluding padding.
+    /// FP16 rounding can leave its sum outside one; use this for raw conversion comparisons.
+    public let rawProbabilities: [Float]
     /// One raw score per supplied option; padding is omitted.
     public let logits: [Float]
     /// Whether context encoding exceeded the model's 224-byte input limit.

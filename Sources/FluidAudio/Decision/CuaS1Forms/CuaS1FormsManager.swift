@@ -71,6 +71,8 @@ public actor CuaS1FormsManager {
     ///
     /// Text is truncated by UTF-8 bytes exactly as in the upstream checkpoint. The result
     /// reports any truncation; options beyond the supported capacity are rejected, not dropped.
+    /// Probabilities use a stable host softmax of the model logits. The model's original
+    /// softmax output is retained separately in `rawProbabilities` for conversion comparisons.
     /// Calls on a manager are serialized by the actor; only Sendable values leave it.
     public func score(context: String, options: [String]) throws -> CuaS1FormsResult {
         try Task.checkCancellation()
@@ -82,25 +84,12 @@ public actor CuaS1FormsManager {
                 "option_mask": makeArray(encoded.optionMask, shape: [1, Self.maximumOptions]),
             ])
             let prediction = try model.prediction(from: features)
-            let logits = try readOutput("logits", from: prediction)
-            let probabilities = try readOutput("probabilities", from: prediction)
-            guard probabilities.allSatisfy({ $0 >= 0 && $0 <= 1 }) else {
-                throw CuaS1FormsError.invalidOutput("Probabilities must be between zero and one")
-            }
-            let live = Array(probabilities.prefix(options.count))
-            guard abs(live.reduce(0, +) - 1) <= 0.001 else {
-                throw CuaS1FormsError.invalidOutput("Live probabilities do not sum to one")
-            }
-            guard probabilities.dropFirst(options.count).allSatisfy({ $0 == 0 }) else {
-                throw CuaS1FormsError.invalidOutput("Padded options received probability mass")
-            }
-            var selectedIndex = 0
-            for index in live.indices.dropFirst() where live[index] > live[selectedIndex] {
-                selectedIndex = index
-            }
+            let output = try CuaS1FormsOutput(
+                logits: readOutput("logits", from: prediction),
+                rawProbabilities: readOutput("probabilities", from: prediction), optionCount: options.count)
             return CuaS1FormsResult(
-                selectedIndex: selectedIndex, selectedOption: options[selectedIndex],
-                probabilities: live, logits: Array(logits.prefix(options.count)),
+                selectedIndex: output.selectedIndex, selectedOption: options[output.selectedIndex],
+                probabilities: output.probabilities, rawProbabilities: output.rawProbabilities, logits: output.logits,
                 contextWasTruncated: encoded.contextWasTruncated,
                 truncatedOptionIndices: encoded.truncatedOptionIndices)
         }
@@ -119,11 +108,7 @@ public actor CuaS1FormsManager {
         else {
             throw CuaS1FormsError.invalidOutput("\(name) must be float32 [1, 32]")
         }
-        let values = (0..<Self.maximumOptions).map { array[$0].floatValue }
-        guard values.allSatisfy(\.isFinite) else {
-            throw CuaS1FormsError.invalidOutput("\(name) contains a nonfinite value")
-        }
-        return values
+        return (0..<Self.maximumOptions).map { array[$0].floatValue }
     }
 
     private static func validateModel(_ description: MLModelDescription) throws {
