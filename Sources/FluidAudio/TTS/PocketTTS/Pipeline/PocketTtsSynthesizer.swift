@@ -793,6 +793,15 @@ public struct PocketTtsSynthesizer {
         }
     }
 
+    /// Collapse every run of whitespace, newlines included, to one space.
+    ///
+    /// Shared by `normalizeText` and `chunkTextWithMetadata` so the text a
+    /// chunk is sized on is the text it is synthesized from.
+    static func collapseWhitespace(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: "\\s+", with: " ", options: .regularExpression)
+    }
+
     /// Normalize a text chunk for PocketTTS (matching Python `prepare_text_prompt`).
     ///
     /// For chunks that are continuations of a longer sentence (mid-sentence
@@ -809,18 +818,16 @@ public struct PocketTtsSynthesizer {
         isMidSentence: Bool = false,
         language: PocketTtsLanguage = .english
     ) -> (text: String, framesAfterEos: Int) {
-        var result = normalizeForLanguage(
-            normalizeSmartQuotes(
-                text.trimmingCharacters(in: .whitespacesAndNewlines)),
-            language: language)
-        // Collapse whitespace
-        result = result.replacingOccurrences(
-            of: "\\s+", with: " ", options: .regularExpression)
+        var result = collapseWhitespace(
+            normalizeForLanguage(
+                normalizeSmartQuotes(
+                    text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                language: language))
 
         if !isMidSentence {
-            // Strip trailing clause punctuation (commas, semicolons, colons)
+            // Strip trailing clause punctuation (commas, semicolons, colons, dashes)
             // before adding sentence-ending punctuation
-            while let last = result.last, ",;:".contains(last) {
+            while let last = result.last, ",;:\u{2014}\u{2013}-".contains(last) {
                 result = String(result.dropLast())
             }
             result = result.trimmingCharacters(in: .whitespaces)
@@ -883,10 +890,14 @@ public struct PocketTtsSynthesizer {
         maxTokens: Int = PocketTtsConstants.maxTokensPerChunk,
         language: PocketTtsLanguage = .english
     ) -> [TextChunk] {
-        let normalized = normalizeForLanguage(
-            normalizeSmartQuotes(
-                text.trimmingCharacters(in: .whitespacesAndNewlines)),
-            language: language)
+        // Size chunks on the text the model is given. `normalizeText` collapses
+        // whitespace before synthesis; a count taken before that pass measures
+        // newlines and runs of spaces the model never sees.
+        let normalized = collapseWhitespace(
+            normalizeForLanguage(
+                normalizeSmartQuotes(
+                    text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                language: language))
 
         // If it fits in one chunk, return as-is. A single-chunk input is
         // never mid-sentence — it's whatever the caller passed in.
@@ -1008,19 +1019,50 @@ public struct PocketTtsSynthesizer {
         return result.isEmpty ? [text] : result
     }
 
-    /// Split text at clause punctuation (commas, semicolons, colons).
+    /// Split text at clause punctuation: commas, semicolons, colons, dashes,
+    /// ellipses, and the edges of a bracketed aside.
     ///
-    /// Does not split at commas within numbers (e.g., "3,500").
+    /// These are the places a speaker pauses, so a chunk seam there is covered
+    /// by a pause the listener already expects. Exceptions keep tokens whole:
+    /// - A comma between digits ("3,500") does not split.
+    /// - An en dash or hyphen splits only with a space on each side, so
+    ///   hyphenated words and numeric ranges stay whole. An em dash always splits.
+    /// - An opening bracket splits before itself; a closing bracket or ellipsis
+    ///   splits after itself, and only when a space follows, so trailing
+    ///   punctuation ("aside)," or "…?") stays attached.
     static func splitAtClauseBoundaries(_ text: String) -> [String] {
-        let clauseBreaks: Set<Character> = [",", ";", ":"]
+        let breakAfter: Set<Character> = [",", ";", ":", "\u{2014}"]
+        let breakAfterWhenSpaced: Set<Character> = ["\u{2013}", "-"]
+        let breakAfterBeforeSpace: Set<Character> = [")", "]", "\u{2026}"]
+        let breakBefore: Set<Character> = ["(", "["]
         var parts: [String] = []
         var current = ""
         let chars = Array(text)
 
+        func flush() {
+            let trimmed = current.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty {
+                parts.append(trimmed)
+            }
+            current = ""
+        }
+
         for (i, char) in chars.enumerated() {
+            if breakBefore.contains(char) {
+                flush()
+            }
             current.append(char)
 
-            guard clauseBreaks.contains(char) else { continue }
+            let prevIsSpace = i > 0 && chars[i - 1] == " "
+            let nextIsSpace = i + 1 < chars.count && chars[i + 1] == " "
+
+            if breakAfterWhenSpaced.contains(char) {
+                guard prevIsSpace && nextIsSpace else { continue }
+            } else if breakAfterBeforeSpace.contains(char) {
+                guard nextIsSpace else { continue }
+            } else {
+                guard breakAfter.contains(char) else { continue }
+            }
 
             // Don't split at commas between digits (e.g., "3,500")
             if char == "," {
@@ -1031,26 +1073,24 @@ public struct PocketTtsSynthesizer {
                 }
             }
 
-            let trimmed = current.trimmingCharacters(in: .whitespaces)
-            if !trimmed.isEmpty {
-                parts.append(trimmed)
-            }
-            current = ""
+            flush()
         }
 
-        let trimmed = current.trimmingCharacters(in: .whitespaces)
-        if !trimmed.isEmpty {
-            parts.append(trimmed)
-        }
-
+        flush()
         return parts
     }
 
     /// Split text at word boundaries to fit within the token limit.
     ///
-    /// Avoids orphaning a single trailing word ("…stations-service de" +
-    /// "TotalEnergies") by pre-budgeting one word back from the head chunk
-    /// when the tail would otherwise be a single short word. See issue #584.
+    /// Parts are balanced: text needing `n` parts aims each at a `1/n` share of
+    /// its tokens. Filling every part to the limit instead leaves whatever
+    /// spills past the last full part as a short tail ("…the first drops hit" +
+    /// "the pavement."), and a two-word chunk is synthesized with a prosodic
+    /// start of its own. No part exceeds `maxTokens`.
+    ///
+    /// Also avoids orphaning a single trailing word ("…stations-service de" +
+    /// "TotalEnergies") by donating one word back from the preceding chunk.
+    /// See issue #584.
     static func splitAtWordBoundaries(
         _ text: String,
         tokenizer: SentencePieceTokenizer,
@@ -1059,18 +1099,37 @@ public struct PocketTtsSynthesizer {
         let words = text.split(separator: " ").map(String.init)
         guard words.count > 1 else { return [text] }
 
+        let totalTokens = tokenizer.encode(text).count
+        let partCount = max(1, (totalTokens + maxTokens - 1) / maxTokens)
+        let target = min(maxTokens, (totalTokens + partCount - 1) / partCount)
+
         var chunks: [String] = []
         var currentWords: [String] = []
+        var currentTokens = 0
 
         for word in words {
             let candidate = (currentWords + [word]).joined(separator: " ")
             let tokens = tokenizer.encode(candidate).count
 
-            if tokens > maxTokens && !currentWords.isEmpty {
+            // The last part takes what remains, up to the hard limit. Earlier
+            // parts close at whichever word boundary lies nearest the target.
+            let isLastPart = chunks.count >= partCount - 1
+            let closesPart: Bool
+            if tokens > maxTokens {
+                closesPart = true
+            } else if isLastPart || tokens <= target {
+                closesPart = false
+            } else {
+                closesPart = tokens - target >= target - currentTokens
+            }
+
+            if closesPart && !currentWords.isEmpty {
                 chunks.append(currentWords.joined(separator: " "))
                 currentWords = [word]
+                currentTokens = tokenizer.encode(word).count
             } else {
                 currentWords.append(word)
+                currentTokens = tokens
             }
         }
 
@@ -1078,9 +1137,8 @@ public struct PocketTtsSynthesizer {
             chunks.append(currentWords.joined(separator: " "))
         }
 
-        // If the tail is a single short word (likely orphaned by the greedy
-        // split), shift one word back from the preceding chunk so the tail
-        // has at least two words and prosody is less jarring. Only applies
+        // If the tail is a single short word, shift one word back from the
+        // preceding chunk so the tail has at least two words. Only applies
         // when the preceding chunk has multiple words to give up.
         if chunks.count >= 2, let tail = chunks.last,
             tail.split(separator: " ").count == 1
@@ -1157,6 +1215,11 @@ public struct PocketTtsSynthesizer {
             current.append(char)
 
             guard ".!?".contains(char) else { continue }
+
+            // A run of sentence punctuation ("...", "?!") ends one sentence, once.
+            if i + 1 < chars.count, ".!?".contains(chars[i + 1]) {
+                continue
+            }
 
             // For periods, check if this is an abbreviation
             if char == "." {
