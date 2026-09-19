@@ -52,6 +52,11 @@ final class HFTreeListerTests: XCTestCase {
         return (try! ModelRegistry.apiModels(Self.repo, apiPath)).absoluteString
     }
 
+    private func treeURL(revision: String, path: String = "") -> String {
+        let apiPath = path.isEmpty ? "tree/\(revision)" : "tree/\(revision)/\(path)"
+        return (try! ModelRegistry.apiModels(Self.repo, apiPath)).absoluteString
+    }
+
     // MARK: - Walking + pruning
 
     func testRecursiveWalkWithPruningAndFileExclusion() async throws {
@@ -94,6 +99,35 @@ final class HFTreeListerTests: XCTestCase {
         XCTAssertFalse(
             server.requested.contains(treeURL("prune.mlmodelc")),
             "a pruned directory must not be fetched at all")
+    }
+
+    func testWalkUsesImmutableRevisionRecursively() async throws {
+        let revision = "df2625ac79a7ac6b65ad868fee6d80f320da4232"
+        let server = PageServer()
+        try server.addPage(
+            url: treeURL(revision: revision),
+            items: [["path": "model.mlmodelc", "type": "directory"]]
+        )
+        try server.addPage(
+            url: treeURL(revision: revision, path: "model.mlmodelc"),
+            items: [["path": "model.mlmodelc/model.mil", "type": "file", "size": 42]]
+        )
+
+        let files = try await HFTreeLister.listTree(
+            repoRemotePath: Self.repo,
+            revision: revision,
+            include: { _, _ in true },
+            fetch: server.fetch
+        )
+
+        XCTAssertEqual(files, [RemoteFile(path: "model.mlmodelc/model.mil", size: 42)])
+        XCTAssertEqual(
+            server.requested,
+            [
+                treeURL(revision: revision),
+                treeURL(revision: revision, path: "model.mlmodelc"),
+            ]
+        )
     }
 
     // MARK: - Pagination

@@ -233,6 +233,21 @@ public enum Repo: String, CaseIterable, Sendable {
         }
     }
 
+    /// Immutable Hugging Face revision used for downloads.
+    ///
+    /// Most repositories retain the historical `main` behavior. Repositories
+    /// with reviewed supply-chain metadata can opt into a pinned commit so a
+    /// mutable Hub branch cannot silently change the files loaded by a released
+    /// FluidAudio version.
+    public var revision: String {
+        switch self {
+        case .diarizer:
+            return "df2625ac79a7ac6b65ad868fee6d80f320da4232"
+        default:
+            return "main"
+        }
+    }
+
     /// Subdirectory within repo (for repos with multiple model variants)
     public var subPath: String? {
         switch self {

@@ -114,6 +114,42 @@ final class ModelCacheCompletenessTests: XCTestCase {
             ModelCache.isCacheComplete(at: repoPath, requiredFiles: ["encoder.mlmodelc"]))
     }
 
+    // MARK: - Revision identity
+
+    func testHistoricalMainCacheDoesNotRequireRevisionMarker() throws {
+        try makeFile("weights.bin")
+
+        XCTAssertTrue(ModelCache.matchesRevision(at: repoPath, revision: "main"))
+        XCTAssertFalse(
+            ModelCache.matchesRevision(
+                at: repoPath, revision: String(repeating: "a", count: 40)))
+    }
+
+    func testPreparingPinnedRevisionPurgesStaleCacheAndWritesMarker() throws {
+        let revision = String(repeating: "a", count: 40)
+        try makeFile("stale.bin")
+
+        try ModelCache.prepareForDownload(at: repoPath, revision: revision)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repoPath.appendingPathComponent("stale.bin").path))
+        XCTAssertTrue(ModelCache.matchesRevision(at: repoPath, revision: revision))
+        XCTAssertFalse(
+            ModelCache.matchesRevision(
+                at: repoPath, revision: String(repeating: "b", count: 40)))
+    }
+
+    func testPreparingSamePinnedRevisionPreservesResumableFiles() throws {
+        let revision = String(repeating: "a", count: 40)
+        try ModelCache.prepareForDownload(at: repoPath, revision: revision)
+        try makeFile("weights.bin.partial")
+
+        try ModelCache.prepareForDownload(at: repoPath, revision: revision)
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: repoPath.appendingPathComponent("weights.bin.partial").path))
+    }
+
     // MARK: - SenseVoice / Paraformer public gates
 
     func testSenseVoiceModelsExistRejectsInterruptedDownload() throws {

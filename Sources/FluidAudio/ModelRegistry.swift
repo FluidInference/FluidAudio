@@ -45,6 +45,7 @@ public enum ModelRegistry {
 
     // Mutable static for runtime configuration, matching the `_customBaseURL` pattern above.
     nonisolated(unsafe) private static var _repoOverrides: [String: String] = [:]
+    nonisolated(unsafe) private static var _revisionOverrides: [String: String] = [:]
 
     /// Maps upstream repository paths to alternates, e.g. a mirror under a different owner.
     ///
@@ -63,6 +64,21 @@ public enum ModelRegistry {
         set { _repoOverrides = newValue }
     }
 
+    /// Maps upstream repository paths to revisions available on a configured mirror.
+    ///
+    /// FluidAudio pins selected upstream repositories to immutable commits. A mirror
+    /// that does not preserve those Git commits must provide its corresponding ref
+    /// here. Keys use the original `FluidInference/...` path and follow the same
+    /// longest-prefix matching rules as ``repoOverrides``.
+    ///
+    ///     ModelRegistry.revisionOverrides = [
+    ///         "FluidInference/speaker-diarization-coreml": "main"
+    ///     ]
+    public static var revisionOverrides: [String: String] {
+        get { _revisionOverrides }
+        set { _revisionOverrides = newValue }
+    }
+
     /// Applies `repoOverrides` to a repository path. Longest key wins, so a more specific
     /// mapping always beats a broader one regardless of dictionary ordering.
     static func mapRepoPath(_ repoPath: String) -> String {
@@ -79,6 +95,17 @@ public enum ModelRegistry {
         return repoPath
     }
 
+    /// Resolve the revision for an original repository path before any path override.
+    static func mapRevision(_ repoPath: String, default defaultRevision: String) -> String {
+        for from in _revisionOverrides.keys.sorted(by: { $0.count > $1.count }) {
+            guard let revision = _revisionOverrides[from] else { continue }
+            if repoPath == from || repoPath.hasPrefix(from + "/") {
+                return revision
+            }
+        }
+        return defaultRevision
+    }
+
     // MARK: - URL Construction
 
     /// Construct API URL for listing model repository contents
@@ -91,8 +118,12 @@ public enum ModelRegistry {
     }
 
     /// Construct download URL for a model file
-    public static func resolveModel(_ repoPath: String, _ filePath: String) throws -> URL {
-        let urlString = "\(baseURL)/\(mapRepoPath(repoPath))/resolve/main/\(filePath)"
+    public static func resolveModel(
+        _ repoPath: String,
+        _ filePath: String,
+        revision: String = "main"
+    ) throws -> URL {
+        let urlString = "\(baseURL)/\(mapRepoPath(repoPath))/resolve/\(revision)/\(filePath)"
         guard let url = URL(string: urlString) else {
             throw Error.invalidURL(urlString)
         }

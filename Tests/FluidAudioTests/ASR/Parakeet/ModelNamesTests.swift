@@ -28,6 +28,11 @@ final class ModelNamesTests: XCTestCase {
         }
     }
 
+    func testDiarizerUsesImmutableModelRevision() {
+        XCTAssertEqual(Repo.diarizer.revision, "df2625ac79a7ac6b65ad868fee6d80f320da4232")
+        XCTAssertEqual(Repo.vad.revision, "main")
+    }
+
     func testRepoSubPathForVariants() {
         XCTAssertEqual(Repo.parakeetEou160.subPath, "160ms")
         XCTAssertEqual(Repo.parakeetEou320.subPath, "320ms")

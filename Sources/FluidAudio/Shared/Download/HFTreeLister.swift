@@ -48,12 +48,13 @@ enum HFTreeLister {
     /// excludes the file.
     static func listTree(
         repoRemotePath: String,
+        revision: String = "main",
         startingAt path: String = "",
         include: (_ itemPath: String, _ isDirectory: Bool) -> Bool,
         fetch: Fetch
     ) async throws -> [RemoteFile] {
         var files: [RemoteFile] = []
-        let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
+        let apiPath = path.isEmpty ? "tree/\(revision)" : "tree/\(revision)/\(path)"
         var pageURL: URL? = try ModelRegistry.apiModels(repoRemotePath, apiPath)
         // Guards the walk against a server echoing a cursor it already served
         // (the old one-request-per-directory walkers could not loop).
@@ -85,6 +86,7 @@ enum HFTreeLister {
                     guard include(itemPath, true) else { continue }
                     files += try await listTree(
                         repoRemotePath: repoRemotePath,
+                        revision: revision,
                         startingAt: itemPath,
                         include: include,
                         fetch: fetch
