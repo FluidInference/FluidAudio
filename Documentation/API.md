@@ -8,10 +8,11 @@ Primary public APIs for FluidAudio components. See inline doc comments for compl
 - [Voice Activity Detection](#voice-activity-detection)
 - [Automatic Speech Recognition](#automatic-speech-recognition)
 - [Text-to-Speech](#text-to-speech)
+- [Decision Scoring](#decision-scoring)
 
 ## Common Patterns
 
-**Audio Format:** All modules expect 16kHz mono Float32 audio samples. Use `FluidAudio.AudioConverter` to convert `AVAudioPCMBuffer` or files to 16kHz mono for both CLI and library paths.
+**Audio Format:** Audio modules expect 16kHz mono Float32 audio samples. Use `FluidAudio.AudioConverter` to convert `AVAudioPCMBuffer` or files to 16kHz mono for both CLI and library paths.
 
 **Model Registry:** Models auto-download from HuggingFace by default. Customize the registry URL using:
 - `ModelRegistry.baseURL` (programmatic) - recommended for apps
@@ -415,3 +416,46 @@ for try await chunk in manager.synthesizeStreaming(text: longText) {
     playAudio(chunk)
 }
 ```
+
+## Decision Scoring
+
+### CuaS1FormsManager
+
+Actor-backed Core ML classifier that selects one supplied action for a form element.
+The caller supplies document values and UI descriptions, then validates and executes actions.
+
+```swift
+import FluidAudio
+import Foundation
+
+let manager = try await CuaS1FormsManager.load(
+    from: URL(fileURLWithPath: "/models/cua_s1_forms_fp16_options32.mlpackage"))
+let decision = try await manager.score(
+    context: """
+        TASK fill the form from the document, then submit
+        FORM Contact details
+        ELEMENT Edit "Email address" value=""
+        """,
+    options: ["fill E-mail: person@example.com", "check", "click", "skip"])
+print(decision.selectedOption, decision.probabilities)
+```
+
+**Loading:** `load(from:computeUnits:)` accepts a local `.mlpackage` or `.mlmodelc`;
+`init(model:)` accepts an already loaded `MLModel`. Both validate the tensor contract.
+`load(cacheDirectory:computeUnits:progressHandler:)` uses the shared download cache.
+The default compute policy is `.cpuAndNeuralEngine`. During review, download the
+[model PR artifacts](https://huggingface.co/FluidInference/cua-s1-forms-coreml/discussions/1)
+and use the local loader; automatic downloading requires the artifacts on HF `main`.
+
+**Input and output:**
+
+- Supply a nonempty context and 2–32 nonempty options. Excess options raise an error.
+- Encoding truncates at 224 UTF-8 bytes for context and 96 bytes per option;
+  inspect `contextWasTruncated` and `truncatedOptionIndices` before acting.
+- `selectedIndex` is zero-based; `selectedOption` retains the original string.
+  Scores contain only supplied options, in order. Calls on one manager are serialized.
+- Invalid tensors, nonfinite scores, invalid probability sums, and nonzero padding
+  probabilities throw `CuaS1FormsError`. Scores do not authorize an action.
+
+See [Benchmarks](Benchmarks.md#cua-s1-forms-decision-scoring) for accuracy, latency,
+ANE placement, and the unresolved numerical failures in the converted artifacts.

@@ -5,7 +5,7 @@ import XCTest
 @testable import FluidAudio
 
 /// Opt-in checks against the actual converted checkpoint and the pinned upstream demo.
-/// See Documentation/Decision/CuaS1Forms.md for the three local fixture paths.
+/// Fixture setup is in the Mobius CUA-S1-FORMS toolkit under "Swift integration checks".
 @MainActor
 final class CuaS1FormsIntegrationTests: XCTestCase {
     private struct Decision: Decodable, Sendable {

@@ -1104,7 +1104,7 @@ GUI completion or document extraction.
 
 See the [full report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/synthetic-test.json), [compressed per-row trace](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/62ffd3653cf0edef7222a886e2006503e2367d10/reports/synthetic-test-decisions.jsonl.gz),
 and [pinned manifest and reproduction harness](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#full-published-synthetic-test).
-The [Swift API guide](Decision/CuaS1Forms.md) describes input limits and validation.
+The [Swift API guide](API.md#decision-scoring) describes input limits and validation.
 
 ### ANE placement and Swift runtime checks
 
