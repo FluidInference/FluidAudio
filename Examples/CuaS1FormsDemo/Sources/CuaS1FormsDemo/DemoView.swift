@@ -2,7 +2,7 @@ import AppKit
 import CuaDemoCore
 import SwiftUI
 
-private enum Palette {
+enum Palette {
     static let ink = Color(red: 0.10, green: 0.17, blue: 0.19)
     static let muted = Color(red: 0.42, green: 0.48, blue: 0.48)
     static let green = Color(red: 0.06, green: 0.45, blue: 0.34)
@@ -20,7 +20,7 @@ struct DemoView: View {
             VStack(alignment: .leading, spacing: 20) {
                 introduction
                 HStack(alignment: .top, spacing: 18) {
-                    sourcePanel.frame(width: 270)
+                    ProfileEditorView(session: session).frame(width: 290)
                     formPanel.frame(maxWidth: .infinity)
                     inspectorPanel.frame(width: 310)
                 }
@@ -35,6 +35,7 @@ struct DemoView: View {
         .task {
             await session.load(modelURL: DemoLauncher.argumentURL("--model"))
             if CommandLine.arguments.contains("--snapshot-filled"), session.isReady {
+                session.useExampleDetails()
                 do { while !session.isComplete { try await session.scoreNext() } } catch {
                     print("Snapshot run failed: \(error)")
                 }
@@ -76,8 +77,8 @@ struct DemoView: View {
     private var introduction: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 7) {
-                Text("A form, filled on your Mac.").font(.system(size: 32, weight: .semibold, design: .rounded))
-                Text("One tiny model chooses the next action. Swift carries it out.")
+                Text("Your details. Any sample form.").font(.system(size: 32, weight: .semibold, design: .rounded))
+                Text("Enter your information once. Watch the model match it to different forms.")
                     .foregroundStyle(Palette.muted)
             }
             Spacer()
@@ -86,35 +87,6 @@ struct DemoView: View {
                 Text("SwiftUI + FluidAudio + Core ML").font(.system(size: 11)).foregroundStyle(Palette.muted)
             }
         }
-    }
-
-    private var sourcePanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            panelTitle("01", "Source document", symbol: "doc.text")
-            VStack(alignment: .leading, spacing: 10) {
-                Text(session.scenario?.documentTitle ?? "Sample document")
-                    .font(.system(size: 20, weight: .medium, design: .serif))
-                Text("Pre-extracted entities from Cua’s sample document.")
-                    .font(.system(size: 11)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
-            }.padding(18)
-            Divider().overlay(Palette.line).padding(.horizontal, 18)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(session.scenario?.entities ?? []) { entity in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(entity.name).font(.system(size: 10, weight: .medium)).foregroundStyle(Palette.muted)
-                            Text(entity.value).font(.system(size: 12)).textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }.padding(18)
-            }
-            Text("All entities are candidates, including irrelevant ones.")
-                .font(.system(size: 10)).foregroundStyle(Palette.muted)
-                .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.canvas.opacity(0.6))
-        }.panel()
     }
 
     private var formPanel: some View {
@@ -233,7 +205,7 @@ struct DemoView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             Image(systemName: "cursorarrow.rays").font(.system(size: 28)).foregroundStyle(Palette.green)
                             Text("See the choice happen.").font(.system(size: 18, weight: .medium))
-                            Text("Fill the form or take one step. The live scores for every option will appear here.")
+                            Text("Enter your details, then fill a form or take one step to see the live choices.")
                                 .font(.system(size: 12)).foregroundStyle(Palette.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }.padding(.vertical, 15)
@@ -297,7 +269,7 @@ struct DemoView: View {
         let probability = Double(decision.result.probabilities[index])
         return VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .top, spacing: 8) {
-                Text(session.scenario?.options[index] ?? "Option \(index)")
+                Text(decision.options[index])
                     .font(.system(size: 10)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                 Text(String(format: "%.1f%%", probability * 100))
                     .font(.system(size: 10, design: .monospaced)).foregroundStyle(Palette.muted)
@@ -325,7 +297,9 @@ struct DemoView: View {
                 } label: {
                     Label(session.isComplete ? "Recheck form" : "Fill form", systemImage: "play.fill").frame(width: 110)
                 }
-                .buttonStyle(.borderedProminent).tint(Palette.ink).disabled(!session.isReady)
+                .buttonStyle(.borderedProminent).tint(Palette.ink).disabled(
+                    !session.isReady || session.inputIssue != nil
+                )
                 .keyboardShortcut(.return, modifiers: .command)
             }
             Button {
@@ -333,7 +307,8 @@ struct DemoView: View {
             } label: {
                 Label("Step", systemImage: "forward.end")
             }
-            .buttonStyle(.bordered).disabled(!session.isReady || session.isRunning || session.isComplete)
+            .buttonStyle(.bordered).disabled(
+                !session.isReady || session.inputIssue != nil || session.isRunning || session.isComplete)
             Button {
                 session.reset()
             } label: {
@@ -350,6 +325,8 @@ struct DemoView: View {
                 ProgressView().controlSize(.small)
                 Text("First launch downloads the model; later runs use the local cache.")
                     .font(.system(size: 11)).foregroundStyle(Palette.muted)
+            } else if let issue = session.inputIssue {
+                Text(issue).font(.system(size: 11)).foregroundStyle(Palette.muted)
             } else {
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(
@@ -358,7 +335,7 @@ struct DemoView: View {
                             session.totalMilliseconds)
                     )
                     .font(.system(size: 11, weight: .medium))
-                    Text("Animation is paced for readability. Sample data stays on this Mac.")
+                    Text("Animation is paced for readability. Your details stay on this Mac.")
                         .font(.system(size: 10)).foregroundStyle(Palette.muted)
                 }
             }
@@ -385,7 +362,7 @@ struct DemoView: View {
 }
 
 extension View {
-    fileprivate func panel() -> some View {
+    func panel() -> some View {
         frame(maxHeight: .infinity, alignment: .top)
             .background(.white, in: RoundedRectangle(cornerRadius: 13))
             .clipShape(RoundedRectangle(cornerRadius: 13))

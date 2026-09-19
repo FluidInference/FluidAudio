@@ -16,6 +16,7 @@ public enum DemoVerification {
         var checked = 0
         for scenarioIndex in session.scenarios.indices {
             session.selectScenario(scenarioIndex)
+            session.useExampleDetails()
             while !session.isComplete { try await session.scoreNext() }
             for decision in session.decisions {
                 guard decision.result.selectedIndex == labels[decision.id] else {
@@ -30,6 +31,7 @@ public enum DemoVerification {
         }
         guard checked == 50 else { throw DemoError("The selected 50-control manifest changed.") }
         session.selectScenario(0)
+        session.useExampleDetails()
         try await session.scoreNext()
         let filledValue = session.controls[0].value
         session.reset()
@@ -52,8 +54,64 @@ public enum DemoVerification {
             session.controls.allSatisfy({ $0.value.isEmpty && !$0.isChecked })
         else { throw DemoError("Reset did not cancel pending scoring safely.") }
         print("PASS single-step and cancellation/reset behavior")
+        try await verifyEnteredProfile(session)
         print(
             "Verified 50 original form decisions, filled-state recheck, and playback controls with the real Swift manager."
         )
+    }
+
+    @MainActor
+    private static func verifyEnteredProfile(_ session: DemoSession) async throws {
+        session.clearDetails()
+        // Public sample values entered into a blank profile, reused across all forms.
+        let supplied = [
+            "First name": "Kenji", "Last name": "Tanaka",
+            "Email": "ktanaka42@outlook.com", "Phone": "(720) 555-0186",
+        ]
+        for (name, value) in supplied {
+            guard let detail = session.details.first(where: { $0.name == name }) else {
+                throw DemoError("Missing profile input.")
+            }
+            session.updateDetail(detail.id, value: value)
+        }
+        let expectedValues = [
+            "First name": "Kenji", "Last name": "Tanaka", "Full name": "Kenji Tanaka",
+            "Email address": "ktanaka42@outlook.com", "Email": "ktanaka42@outlook.com",
+            "Phone number": "(720) 555-0186", "Mobile phone": "(720) 555-0186",
+            "Daytime phone": "(720) 555-0186",
+        ]
+        let choices = try ProfileChoices.make(from: session.details)
+        guard choices.count == 8, choices.contains("fill Name: Kenji Tanaka") else {
+            throw DemoError("Blank entries or combined-name construction changed the options.")
+        }
+        for index in session.scenarios.indices {
+            session.selectScenario(index)
+            while !session.isComplete { try await session.scoreNext() }
+            guard session.decisions.allSatisfy({ $0.options == choices }) else {
+                throw DemoError("A decision used stale or sample options instead of the entered profile.")
+            }
+            for control in session.controls where control.role == "Edit" {
+                let expected = expectedValues[control.title] ?? ""
+                guard control.value == expected else {
+                    throw DemoError("Entered-profile result needs review for \(control.title) on form \(index).")
+                }
+            }
+            print("PASS entered profile on \(session.scenario?.shortTitle ?? "form")")
+        }
+        guard let email = session.details.first(where: { $0.name == "Email" }) else {
+            throw DemoError("Profile was lost when switching forms.")
+        }
+        let priorCount = session.decisions.count
+        session.updateDetail(email.id, value: email.value)
+        guard session.decisions.count == priorCount else {
+            throw DemoError("An unchanged editor value invalidated the current results.")
+        }
+        session.updateDetail(email.id, value: "")
+        let updatedChoices = try ProfileChoices.make(from: session.details)
+        guard session.decisions.isEmpty, session.nextIndex == 0,
+            session.controls.allSatisfy({ $0.value.isEmpty && !$0.isChecked }),
+            !updatedChoices.contains(where: { $0.hasPrefix("fill Email:") })
+        else { throw DemoError("Editing the profile did not invalidate old choices and results.") }
+        print("PASS source edits reset the preview and remove old candidates")
     }
 }

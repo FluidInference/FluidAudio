@@ -1,8 +1,8 @@
 # CUA-S1-FORMS native Mac demo
 
 A standalone SwiftUI app that calls FluidAudio's `CuaS1FormsManager` directly.
-Watch the real Core ML model choose among document entities, fill a sample form,
-and explain each decision with live option scores. No Python or browser server
+Enter your own details once, then watch the real Core ML model match them to
+three different forms and explain each decision with live option scores. No Python or browser server
 is involved in the running app.
 
 ![The native SwiftUI demo after real Core ML predictions fill the patient registration form](preview.png)
@@ -40,31 +40,47 @@ swift run --package-path Examples/CuaS1FormsDemo CuaS1FormsDemo
 
 ## Try it
 
-1. Choose patient registration, job application, or auto insurance claim.
-2. Press **Fill form** to watch a paced pass, or **Step** for one live prediction.
-3. Inspect the selected option, candidate probabilities, exact input context, and
+1. Enter your details in the left panel. It starts empty; **Use example** loads the
+   selected form's public sample data for a quick trial.
+2. Choose **Patient registration**, **Job application**, or **Auto insurance claim**.
+   Switching forms keeps the same entered details, so you can see how the model
+   matches different field labels to the same information.
+3. Press **Fill form** for a paced pass, or **Step** for one live prediction.
+4. Inspect the selected option, candidate probabilities, exact input context, and
    measured time. Click a field or a past decision to inspect it again.
-4. Edit a value and press **Recheck form** after a complete pass. The model sees
-   the current field values and can choose `skip` for already-filled fields.
-5. Press **Submit demo** to produce a local receipt. Model-selected `click`
-   actions are proposals; the scoring loop never submits the form itself.
+5. Edit a target field and press **Recheck form** after a complete pass. The model
+   sees current field values and can choose `skip` for already-filled fields.
+6. Press **Submit demo** to produce a local receipt. A model-selected `click`
+   remains a proposal; the scoring loop never submits the form itself.
 
-**Stop** cancels a sequence. **Reset** cancels any pending prediction and restores
-the original empty form. Animation uses a 240 ms presentation delay per control;
-the displayed scoring times exclude that delay and include the Swift manager call.
-No audio, external app control, browser automation, or remote submission is used.
+Use **Add another detail** for a labeled value such as insurance provider or
+current employer. Blank values are excluded from the candidates. An explicit
+first and last name also produce a combined full-name choice, unless a full name
+is already supplied. The model sees only these current choices plus check/click/skip;
+there is no fallback to hidden sample information.
+
+**Stop** cancels a sequence. **Reset** clears the target form and keeps your details.
+Editing, adding, or removing source details clears old predictions and resets the
+target preview. **Clear** removes personal information from the session. Entered
+values stay in memory; the app does not save them or send them over the network.
+The 32-option and 96-byte-per-option model limits are validated before inference.
+
+Animation uses a 240 ms presentation delay per control; displayed scoring times
+exclude that delay and include the Swift manager call. No audio, external app
+control, browser automation, or remote submission is used.
 
 ## What this demonstrates
 
 The app contains native SwiftUI controls and changes them using actual model
-predictions. Its form descriptions and pre-extracted document entities come from
-the original Cua demo. All candidate options, including distractors, are preserved.
+predictions. Its target form descriptions come from the original Cua demo. Source candidates
+come from the editable profile. **Use example** preserves the original document
+entities and distractors for reproducible sample checks.
 Answer labels are not decoded by the UI catalog or passed to inference; only the
 verification command reads them to score correctness.
 
 This is a bounded example of integrating the decision component. It does not
-parse a PDF or inspect arbitrary applications. Source document entities are
-already supplied in the fixture. These three sample forms do not establish
+parse a PDF or inspect arbitrary applications. Users enter labeled values themselves; the optional examples supply the original
+pre-extracted document entities. These three sample forms do not establish
 accuracy on new forms, new languages, or real-world automation tasks.
 
 ## Validation
@@ -79,10 +95,15 @@ It checks the explicitly selected initial-form rows **0–17, 68–82, and 130�
 50 decisions across the three upstream forms, plus a filled-field recheck,
 single-step execution, cancellation/reset, and explicit local submission.
 A local run selected all 50 labeled options correctly and passed the state checks.
+An additional pass enters four public sample values into a blank profile and reuses
+that profile across all three forms: supplied names/email/phone are filled, missing
+values remain empty, and source edits invalidate the old choices and predictions.
+These changed-profile checks are demo regressions, not the original benchmark score.
 `--model /absolute/path/to/model.mlpackage` also works in verification mode.
 
 Unit tests cover the pinned fixture, candidate retention, context updates,
-fill-value parsing, checkbox/click semantics, and invalid-action rejection:
+fill-value parsing, checkbox/click semantics, invalid-action rejection, empty-profile
+handling, source-only candidates, name combination, and option/byte limits:
 
 ```bash
 swift test --package-path Examples/CuaS1FormsDemo

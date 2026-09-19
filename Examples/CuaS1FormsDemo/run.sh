@@ -28,5 +28,5 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 codesign --force --sign - "$APP_DIR"
-open "$APP_DIR" --args "$@"
+open -n "$APP_DIR" --args "$@"
 echo "Opened $APP_DIR"

@@ -38,6 +38,8 @@ public struct DemoDecision: Identifiable, Sendable {
     public let id: Int
     /// Control description passed to the model in this call.
     public let context: String
+    /// Exact choices supplied in this call, retained for honest score inspection.
+    public let options: [String]
     /// Original control label.
     public let title: String
     /// Live Swift manager output.
@@ -58,6 +60,8 @@ public final class DemoSession {
     public private(set) var scenarioIndex = 0
     /// Current mutable form controls.
     public private(set) var controls: [DemoControl] = []
+    /// User-entered source data, retained in memory when switching target forms.
+    public private(set) var details = ProfileChoices.emptyDetails()
     /// Predictions made during this pass, in form order.
     public private(set) var decisions: [DemoDecision] = []
     /// Control displayed in the decision inspector.
@@ -98,6 +102,57 @@ public final class DemoSession {
 
     /// Total Swift scoring-call time, excluding the presentation delay.
     public var totalMilliseconds: Double { decisions.reduce(0) { $0 + $1.milliseconds } }
+
+    /// A source-data problem that must be resolved before scoring.
+    public var inputIssue: String? {
+        do {
+            _ = try ProfileChoices.make(from: details)
+            return nil
+        } catch { return error.localizedDescription }
+    }
+
+    /// Number of nonempty source choices, including a combined full name when present.
+    public var detailCount: Int { ((try? ProfileChoices.make(from: details))?.count ?? 3) - 3 }
+
+    /// Edit source data and clear predictions made using its previous contents.
+    public func updateDetail(_ id: UUID, name: String? = nil, value: String? = nil) {
+        guard !isRunning, let index = details.firstIndex(where: { $0.id == id }) else { return }
+        guard
+            (name ?? details[index].name) != details[index].name
+                || (value ?? details[index].value) != details[index].value
+        else { return }
+        if let name { details[index].name = name }
+        if let value { details[index].value = value }
+        reset()
+    }
+
+    /// Add a custom labeled source value.
+    public func addDetail() {
+        guard !isRunning else { return }
+        details.append(ProfileDetail(name: ""))
+        reset()
+    }
+
+    /// Remove a source value from subsequent model choices.
+    public func removeDetail(_ id: UUID) {
+        guard !isRunning else { return }
+        details.removeAll { $0.id == id }
+        reset()
+    }
+
+    /// Clear personal data from this session and return to the blank profile.
+    public func clearDetails() {
+        guard !isRunning else { return }
+        details = ProfileChoices.emptyDetails()
+        reset()
+    }
+
+    /// Load the selected form's original public example into the editable source panel.
+    public func useExampleDetails() {
+        guard !isRunning, let scenario else { return }
+        details = scenario.entities.map { ProfileDetail(name: $0.name, value: $0.value) }
+        reset()
+    }
 
     /// Load the bundled source fixture and real Core ML package.
     public func load(modelURL: URL? = nil) async {
@@ -157,7 +212,7 @@ public final class DemoSession {
 
     /// Start a paced sequence, or execute just one control when stepping.
     public func start(singleStep: Bool = false) {
-        guard isReady, !isRunning, !isComplete else { return }
+        guard isReady, inputIssue == nil, !isRunning, !isComplete else { return }
         isRunning = true
         errorMessage = nil
         let startedGeneration = generation
@@ -184,15 +239,16 @@ public final class DemoSession {
 
     /// Perform one real prediction and apply only a compatible local effect.
     public func scoreNext() async throws {
-        guard let manager, let scenario, controls.indices.contains(nextIndex) else {
+        guard let manager, controls.indices.contains(nextIndex) else {
             throw DemoError("Load a model and select an unfinished form first.")
         }
+        let options = try ProfileChoices.make(from: details)
         let index = nextIndex
         let startedGeneration = generation
         let control = controls[index]
         selectedControlID = control.id
         let start = ContinuousClock.now
-        let result = try await manager.score(context: control.context, options: scenario.options)
+        let result = try await manager.score(context: control.context, options: options)
         let elapsed = start.duration(to: .now).components
         let milliseconds = Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds) / 1e15
         try Task.checkCancellation()
@@ -203,7 +259,7 @@ public final class DemoSession {
         let effect = try DemoActions.apply(result.selectedOption, to: &controls[index])
         decisions.append(
             DemoDecision(
-                id: control.id, context: control.context, title: control.title, result: result,
+                id: control.id, context: control.context, options: options, title: control.title, result: result,
                 milliseconds: milliseconds, effect: effect))
         nextIndex += 1
     }
@@ -211,6 +267,7 @@ public final class DemoSession {
     /// Change a field value before starting a new scoring pass.
     public func setValue(_ value: String, for id: Int) {
         guard !isRunning, let index = controls.firstIndex(where: { $0.id == id }) else { return }
+        guard controls[index].value != value else { return }
         controls[index].value = value
         isSubmitted = false
     }
@@ -218,6 +275,7 @@ public final class DemoSession {
     /// Change a checkbox before starting a new scoring pass.
     public func setChecked(_ value: Bool, for id: Int) {
         guard !isRunning, let index = controls.firstIndex(where: { $0.id == id }) else { return }
+        guard controls[index].isChecked != value else { return }
         controls[index].isChecked = value
         isSubmitted = false
     }
