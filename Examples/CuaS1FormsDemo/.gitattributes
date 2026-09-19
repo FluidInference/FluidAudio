@@ -1,0 +1,2 @@
+# Preserve the upstream fixture byte-for-byte, including its CRLF endings.
+Sources/CuaDemoCore/Resources/demo.jsonl -text whitespace=cr-at-eol

@@ -6,6 +6,13 @@ stateless prediction. This is a decision component: your application supplies
 document entities, describes the UI, constructs candidates, validates the result,
 and executes authorized actions.
 
+## Native Mac demo
+
+Run `Examples/CuaS1FormsDemo/run.sh` to open the [SwiftUI example](../../Examples/CuaS1FormsDemo).
+It uses this manager directly, with three upstream forms, live option scores,
+step/fill/recheck controls, and local-only submission. The first launch downloads
+the pinned portable model from the HF PR; an existing local model can also be used.
+
 ## Load and score
 
 ```swift

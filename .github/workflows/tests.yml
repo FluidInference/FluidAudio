@@ -9,6 +9,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  cua-swiftui-demo:
+    name: Build and test CUA SwiftUI demo
+    runs-on: macos-15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Build native demo
+        run: swift build --package-path Examples/CuaS1FormsDemo
+      - name: Test fixture and local action handling
+        run: swift test --package-path Examples/CuaS1FormsDemo
+        timeout-minutes: 10
+
   build-and-test-macos:
     name: Build and Test Swift Package (macOS)
     runs-on: macos-15
