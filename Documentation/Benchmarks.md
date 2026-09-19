@@ -1056,78 +1056,42 @@ swift run -c release fluidaudiocli ja-benchmark --decoder tdt --dataset jsut --s
 
 ## CUA-S1-FORMS decision scoring
 
-Evaluated the complete published synthetic [`test.jsonl`](https://huggingface.co/datasets/cua-ai/cua-s1-forms/blob/8273f34778b99ac2e12d9f6e7d57dad99ae20845/test.jsonl):
-**24,370 decisions across 1,040 episode seeds**, with no excluded rows or truncated
-inputs. The dataset revision is `8273f34778b99ac2e12d9f6e7d57dad99ae20845`; its
-SHA-256 is `d63a7e0db195d4d20154a40b2f8dd09ce3bb65487a158c638da5c609d4475e7c`.
-The upstream [model card](https://huggingface.co/cua-ai/cua-s1-forms/blob/f54adbf447f4ca6ec259f529ee3f2e3e09f8cc71/README.md) reports 99.95% on an approximately 15,000-row
-synthetic test. Our result rounds to that accuracy, but the released file contains
-24,370 rows; this does not reconstruct the card's unspecified smaller manifest.
+Apple M5 Pro, 24 GB, macOS 27.0. Full published synthetic test: **24,370 decisions**,
+with no filtering or truncation. Batch-1 model-call timing excludes encoding, loading, and UI.
 
-| Model / backend | Correct decisions | Top-1 accuracy | Median call | p95 call |
+| Model / backend | Correct decisions | Accuracy | Median | p95 |
 | --- | ---: | ---: | ---: | ---: |
 | Upstream PyTorch / CPU | 24,359 / 24,370 | 99.9549% | 1.787 ms | 3.104 ms |
 | Original FP16 Core ML / CPU + ANE | 24,359 / 24,370 | 99.9549% | 1.003 ms | 1.133 ms |
 | ANE-gather FP16 Core ML / CPU + ANE | 24,359 / 24,370 | 99.9549% | 1.052 ms | 1.177 ms |
 
-Both Core ML exports select the same option as PyTorch on **all 24,370 rows**.
-All three share the same 11 errors: choosing `fill` when the label is `skip`.
-The original Cua evaluator counts these as wrong/unsafe actions; this offline
-benchmark executes no actions. All 9,802 fill, 816 check, and 1,040 click labels
-are correct; skip accuracy is 12,701/12,712. Higher ANE placement is approximately
-**4.8% slower** by median here, so the original remains the default.
+Both Core ML exports match PyTorch's selected option on **every row**, including
+the same 11 incorrect fill-for-skip decisions. ANE-gather is **4.8% slower** by
+median; the original remains the default.
 
-**Strict numerical conversion parity fails for both exports.** Each has 11 rows
-above the original 0.005 absolute probability-error limit, with a maximum error
-of **0.0204874**. One further row (zero-based index 19270) has a live-probability
-sum of **0.99893665**. That lies outside the current Swift manager's 0.001
-normalization guard, so this output would be rejected despite its correct argmax.
-These are raw model-output accuracy results, not a claim that every row succeeds
-through the Swift API. No probabilities were renormalized and no tolerances or
-model weights were changed. The earlier 196-row demo passed its numerical gates;
-the larger split exposes failures that demo did not cover.
+**Numerical parity fails for both exports:** 11 rows exceed the 0.005 probability-error
+limit (maximum 0.0204874), and one output would be rejected by Swift's probability-sum
+check despite a correct selection. These accuracy numbers score raw model outputs.
 
-Measured September 19, 2026 on **Apple M5 Pro, 24 GB, macOS 27.0 (26A428)**,
-Python 3.11.11, PyTorch 2.7.0, coremltools 9.0. Batch size 1, three warmup rows per
-model, one timed pass over the whole split; both Core ML models remain loaded
-and alternate AB/BA order by row. PyTorch uses two CPU threads and one inter-op
-thread, with the Transformer fast path disabled. Timers cover PyTorch
-forward + softmax or synchronous Core ML prediction, excluding encoding,
-validation, loading, UI, and network. These compare deployment backends, not
-algorithms on equal hardware, and differ from the Swift timings below.
+[Full report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/synthetic-test.json) ·
+[Dataset and reproduction](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#full-published-synthetic-test) ·
+[Per-row trace](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/62ffd3653cf0edef7222a886e2006503e2367d10/reports/synthetic-test-decisions.jsonl.gz) ·
+[Swift API](API.md#decision-scoring)
 
-Upstream describes this synthetic split as disjoint from training/validation by
-form signature; those signatures were not independently re-audited here. No
-training, validation inference, test-based tuning, or hosted Jev/API comparison
-was performed. This measures supplied-option classification, not unseen real-world
-GUI completion or document extraction.
+### Swift runtime and ANE placement
 
-See the [full report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/synthetic-test.json), [compressed per-row trace](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/62ffd3653cf0edef7222a886e2006503e2367d10/reports/synthetic-test-decisions.jsonl.gz),
-and [pinned manifest and reproduction harness](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#full-published-synthetic-test).
-The [Swift API guide](API.md#decision-scoring) describes input limits and validation.
-
-### ANE placement and Swift runtime checks
-
-A separate release Swift comparison uses the original 50-control demo manifest:
-both models loaded, one 50-row warmup pass each, then ABBA blocks with two passes
-per block (200 timed calls per model). Both score **200/200 correctly**. These
-timers include Swift encoding, Core ML inference, and output decoding; rendering
-and animation are excluded. Hardware is the same M5 Pro described above.
+Separate release Swift benchmark: **200/200 correct per variant** over 50 demo
+controls. Timing includes Swift encoding, inference, and decoding; excludes UI.
 
 | Export | ANE operations | CPU operations | Swift median | Swift p95 |
 | --- | ---: | ---: | ---: | ---: |
 | Original | 149 / 173 (86.1%) | 24 | 0.912 ms | 0.933 ms |
 | ANE-gather | 162 / 165 (98.2%) | 3 | 0.961 ms | 0.984 ms |
 
-Operation counts are scheduler preferred-device assignments from the separate
-compute-plan profile, not utilization, energy, or runtime percentages. Higher ANE
-placement was approximately 5.4% slower in this Swift protocol. See the
-[Swift report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/swift-variant-comparison.json)
-and [compute-plan profiles](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#device-placement).
+Higher ANE placement is **5.4% slower** in Swift. Operation counts describe scheduler
+placement, not utilization or energy use. [Swift report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/swift-variant-comparison.json) ·
+[Compute-plan profiles](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#device-placement)
 
-The separately recorded browser check covers patient, job, and insurance forms:
-100/100 labeled decisions across both models, with actual fill/check changes,
-independent DOM readback, input/change events, and no implicit submission.
-The [recording](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/8b0c36f86a8b24f76f3dd866db62dbb2d2620a02/demo/browser-demo.mp4)
-and [browser report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/browser-validation.json)
-provide bounded application evidence separately from the synthetic accuracy test.
+Browser demonstration: **100/100 decisions** across patient, job, and insurance forms,
+with actual fill/check actions and verified DOM changes. [Recording](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/8b0c36f86a8b24f76f3dd866db62dbb2d2620a02/demo/browser-demo.mp4) ·
+[Browser report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/browser-validation.json)
