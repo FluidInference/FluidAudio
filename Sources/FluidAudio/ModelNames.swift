@@ -3,6 +3,10 @@ import Foundation
 /// Model repositories on HuggingFace
 public enum Repo: String, CaseIterable, Sendable {
     case vad = "FluidInference/silero-vad-coreml"
+    /// LocalVQE speech enhancement (AEC + NS + dereverb). fp32 streaming
+    /// exports of the v1.3 (4.8M) and v1.2 (1.3M) checkpoints in 16 ms and
+    /// 256 ms chunk sizes; the variant key selects one file. See Enhancement/LocalVQE.
+    case localVqe = "FluidInference/localvqe-coreml"
     case parakeetV3 = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
@@ -126,6 +130,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"
         case .vad:
             return "silero-vad-coreml"
+        case .localVqe:
+            return "localvqe-coreml"
         case .parakeetV3:
             return "parakeet-tdt-0.6b-v3-coreml"
         case .parakeetV2:
@@ -647,6 +653,42 @@ public enum ModelNames {
         public static let requiredModels: Set<String> = [
             sileroVadFile
         ]
+    }
+
+    /// LocalVQE speech-enhancement model names.
+    ///
+    /// One `.mlmodelc` per (checkpoint, chunk) pair, e.g.
+    /// `localvqe-v1.3-4.8M-256ms.mlmodelc`. The download variant key
+    /// (`"v1.3-256ms"`) narrows the required set to that single file.
+    public enum LocalVQE {
+        public static func modelFile(variant: LocalVqeVariant, chunk: LocalVqeChunk) -> String {
+            "\(variant.fileStem)-\(chunk.rawValue).mlmodelc"
+        }
+
+        public static func variantKey(variant: LocalVqeVariant, chunk: LocalVqeChunk) -> String {
+            "\(variant.rawValue)-\(chunk.rawValue)"
+        }
+
+        public static var allModels: Set<String> {
+            var files: Set<String> = []
+            for variant in LocalVqeVariant.allCases {
+                for chunk in LocalVqeChunk.allCases {
+                    files.insert(modelFile(variant: variant, chunk: chunk))
+                }
+            }
+            return files
+        }
+
+        /// Required files for a download variant key; the full set when the
+        /// key is absent or unrecognised.
+        public static func requiredModels(variant: String?) -> Set<String> {
+            for v in LocalVqeVariant.allCases {
+                for c in LocalVqeChunk.allCases where variantKey(variant: v, chunk: c) == variant {
+                    return [modelFile(variant: v, chunk: c)]
+                }
+            }
+            return allModels
+        }
     }
 
     /// Parakeet EOU streaming model names
@@ -1632,6 +1674,8 @@ public enum ModelNames {
             ]
         case .vad:
             return ModelNames.VAD.requiredModels
+        case .localVqe:
+            return ModelNames.LocalVQE.requiredModels(variant: variant)
         case .parakeetV3:
             let precision = ParakeetEncoderPrecision(rawValue: variant ?? "") ?? .int8
             return ModelNames.ASR.requiredModelsV3(precision: precision)
