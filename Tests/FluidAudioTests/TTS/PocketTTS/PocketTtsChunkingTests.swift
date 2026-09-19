@@ -29,13 +29,16 @@ final class PocketTtsChunkingTests: XCTestCase {
     }
 
     func testSentenceAfterParagraphBreakIsNotCutAtAWordBoundary() throws {
-        // The second sentence is 8 tokens and fits the cap whole. Counted with
-        // its leading newlines it measured one token per character, overflowed,
-        // and was cut between words.
+        // Keep the preferred grouping target at 8 tokens, but leave enough hard
+        // capacity for the leading-space padding added to short sentences during
+        // synthesis. Before whitespace was collapsed, the paragraph break still
+        // made the second sentence overflow and split between words.
         let tokenizer = try makeTokenizer()
         let chunks = PocketTtsSynthesizer.chunkTextWithMetadata(
             "one two three.\n\nfour five six, seven eight nine.",
-            tokenizer: tokenizer, maxTokens: 8)
+            tokenizer: tokenizer,
+            maxTokens: 20,
+            preferredMaxTokens: 8)
 
         XCTAssertEqual(
             chunks,
