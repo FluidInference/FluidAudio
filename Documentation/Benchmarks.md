@@ -1098,6 +1098,27 @@ Batch-1 Core ML CPU+ANE calls, excluding encoding/loading/UI; both models timed
 in the same process with alternating order. [Full report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/int8-synthetic-test.json) ·
 [INT8 reproduction](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#int8-weight-trial)
 
+### INT4 weight trial
+
+A matched run over all **24,370 synthetic decisions** on M5 Pro, CPU+ANE:
+
+| Export | Package size | Accuracy | Median | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| FP16 control, iOS 18 target | 1.51 MB | 99.9549% | 0.982 ms | 1.081 ms |
+| INT4 weights, FP16 compute | 0.45 MB | 99.9302% | 0.982 ms | 1.082 ms |
+
+**70.1% smaller**, with essentially unchanged latency. INT4 makes **17 errors
+versus 11** for FP16: 14 choices change, introducing 10 errors and correcting four.
+Numerical parity fails: 356 rows exceed the 0.005 probability-error limit
+(maximum 0.754359); no INT4 probability-sum violations were observed.
+
+Packed INT4 requires **iOS 18/macOS 15**. Both exports use the same decomposed
+attention graph and FP16 computation. Batch-1 timing excludes encoding/loading/UI.
+INT8 preserves all choices at 0.81 MB; the original FP16 remains the default.
+
+[Full report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/int4-synthetic-test.json) ·
+[INT4 reproduction](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#int4-weight-trial)
+
 ### Swift runtime and ANE placement
 
 Separate release Swift benchmark: **200/200 correct per variant** over 50 demo
