@@ -206,6 +206,57 @@ extension AsrModels {
         }
     }
 
+    /// Load compiled models from this exact directory without downloading or resolving a repository.
+    ///
+    /// Use this for compatible community weights such as Orukeet. The directory must contain
+    /// the version's `.mlmodelc` components and vocabulary; missing files fail locally.
+    /// Compile portable `.mlpackage` files on the destination device with `MLModel.compileModel(at:)`.
+    public static func loadLocal(
+        from directory: URL,
+        version: AsrModelVersion = .v3,
+        configuration: MLModelConfiguration? = nil,
+        encoderPrecision: ParakeetEncoderPrecision = .int8,
+        encoderComputeUnits: MLComputeUnits? = nil
+    ) throws -> AsrModels {
+        let config = configuration ?? defaultConfiguration()
+        let names = getModelFileNames(version: version, encoderPrecision: encoderPrecision)
+        func component(_ name: String, units: MLComputeUnits) throws -> MLModel {
+            let url = directory.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw AsrModelsError.modelNotFound(name, url)
+            }
+            let modelConfig = MLModelConfiguration()
+            modelConfig.computeUnits = units
+            modelConfig.allowLowPrecisionAccumulationOnGPU = config.allowLowPrecisionAccumulationOnGPU
+            return try MLModel(contentsOf: url, configuration: modelConfig)
+        }
+        let vocabularyURL = directory.appendingPathComponent(names.vocabulary)
+        let vocabulary = try parseVocabulary(at: vocabularyURL)
+        guard (0..<version.blankId).allSatisfy({ vocabulary[$0] != nil }) else {
+            throw AsrModelsError.loadingFailed("Local vocabulary must contain every token before the blank ID")
+        }
+        let encoder =
+            try version.hasFusedEncoder
+            ? nil
+            : component(
+                names.encoder, units: encoderComputeUnits ?? config.computeUnits)
+        let ctcURL = directory.appendingPathComponent(Names.ctcHeadFile)
+        let ctcHead =
+            try FileManager.default.fileExists(atPath: ctcURL.path)
+            ? component(Names.ctcHeadFile, units: config.computeUnits) : nil
+        return try AsrModels(
+            encoder: encoder,
+            preprocessor: component(
+                Names.preprocessorFile, units: version.hasFusedEncoder ? config.computeUnits : .cpuOnly),
+            decoder: component(names.decoder, units: config.computeUnits),
+            joint: component(names.joint, units: config.computeUnits),
+            ctcHead: ctcHead,
+            configuration: config,
+            vocabulary: vocabulary,
+            version: version
+        )
+    }
+
     /// Load ASR models from a directory
     ///
     /// - Parameters:
@@ -367,6 +418,11 @@ extension AsrModels {
         let vocabularyFileName = getModelFileNames(version: version, encoderPrecision: .int8).vocabulary
         let vocabPath = repoPath(from: directory, version: version).appendingPathComponent(vocabularyFileName)
 
+        return try parseVocabulary(at: vocabPath)
+    }
+
+    private static func parseVocabulary(at vocabPath: URL) throws -> [Int: String] {
+        let vocabularyFileName = vocabPath.lastPathComponent
         if !FileManager.default.fileExists(atPath: vocabPath.path) {
             logger.warning(
                 "Vocabulary file not found at \(vocabPath.path). Please ensure the vocab file is downloaded with the models."
