@@ -53,7 +53,9 @@ public actor CuaS1FormsManager {
         let compiledURL: URL
         switch modelURL.pathExtension {
         case "mlpackage":
-            compiledURL = try await MLModel.compileModel(at: modelURL)
+            let package = try CuaS1FormsPackage.prepare(modelURL)
+            defer { package.cleanup() }
+            compiledURL = try await MLModel.compileModel(at: package.url)
         case "mlmodelc":
             compiledURL = modelURL
         default:

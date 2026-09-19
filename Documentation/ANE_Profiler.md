@@ -37,7 +37,7 @@ plan assigns 149 operations to ANE and 24 to CPU; `.all` selects 173 GPU operati
 
 Timing uses 30 Python Core ML calls over three real form inputs after warmup,
 excluding encoding and UI work. Counts are scheduler assignments, not measured
-runtime shares. See [the model guide](Decision/CuaS1Forms.md#ane-profile) for the
+runtime shares. See [the conversion toolkit](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#device-placement) for the
 four-policy comparison, load timings, fallback reasons, protocol, and raw report.
 The optional unsigned-gather variant leaves only three input casts on CPU. Its
 matched ABBA comparison used 60 calls per model and measured 0.915 ms for the

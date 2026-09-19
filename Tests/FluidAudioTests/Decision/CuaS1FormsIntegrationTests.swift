@@ -119,4 +119,35 @@ final class CuaS1FormsIntegrationTests: XCTestCase {
         let result = try await manager.score(context: row.context, options: row.options)
         XCTAssertEqual(result.selectedIndex, row.label)
     }
+
+    func testLoadsRealPackageThroughCacheSymlinks() async throws {
+        let source = try fixtureURL("FLUIDAUDIO_CUA_MODEL_PATH")
+        guard source.pathExtension == "mlpackage" else {
+            throw XCTSkip("Set FLUIDAUDIO_CUA_MODEL_PATH to the real portable package for the symlink check")
+        }
+        let row = try XCTUnwrap(demo().first)
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        let linked = root.appendingPathComponent("linked.mlpackage")
+        try files.createDirectory(at: linked, withIntermediateDirectories: true)
+        for name in ["Manifest.json", "Data"] {
+            try files.createSymbolicLink(
+                at: linked.appendingPathComponent(name), withDestinationURL: source.appendingPathComponent(name))
+        }
+        let prepared = try CuaS1FormsPackage.prepare(linked)
+        defer { prepared.cleanup() }
+        let weightPath = "Data/com.apple.CoreML/weights/weight.bin"
+        let weight = prepared.url.appendingPathComponent(weightPath)
+        XCTAssertFalse(try weight.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink ?? true)
+        XCTAssertEqual(
+            try Data(contentsOf: weight), try Data(contentsOf: source.appendingPathComponent(weightPath)))
+
+        let manager = try await CuaS1FormsManager.load(from: linked)
+        let result = try await manager.score(context: row.context, options: row.options)
+        XCTAssertEqual(result.selectedIndex, row.label)
+        prepared.cleanup()
+        XCTAssertFalse(files.fileExists(atPath: prepared.url.path))
+        XCTAssertTrue(files.fileExists(atPath: source.path))
+    }
 }
