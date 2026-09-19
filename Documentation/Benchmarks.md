@@ -1075,8 +1075,8 @@ The Swift runtime fix below handles that output; these accuracy numbers score ra
 
 All 11 probability-error cases passed a focused FP32 CPU rerun (max error 0.0000012), pointing to FP16/backend rounding.
 
-[Full report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/synthetic-test.json) ·
-[Dataset and reproduction](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#full-published-synthetic-test) ·
+[Full report](https://github.com/FluidInference/mobius/blob/main/models/computer-use/cua-s1-forms/coreml/reports/synthetic-test.json) ·
+[Dataset and reproduction](https://github.com/FluidInference/mobius/tree/main/models/computer-use/cua-s1-forms/coreml#full-published-synthetic-test) ·
 [Per-row trace](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/62ffd3653cf0edef7222a886e2006503e2367d10/reports/synthetic-test-decisions.jsonl.gz) ·
 [Swift API](API.md#decision-scoring)
 
@@ -1095,8 +1095,8 @@ limit (maximum 0.067738), versus 11 for FP16. No INT8 probability-sum violations
 were observed. The original remains the default.
 
 Batch-1 Core ML CPU+ANE calls, excluding encoding/loading/UI; both models timed
-in the same process with alternating order. [Full report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/int8-synthetic-test.json) ·
-[INT8 reproduction](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#int8-weight-trial)
+in the same process with alternating order. [Full report](https://github.com/FluidInference/mobius/blob/main/models/computer-use/cua-s1-forms/coreml/reports/int8-synthetic-test.json) ·
+[INT8 reproduction](https://github.com/FluidInference/mobius/tree/main/models/computer-use/cua-s1-forms/coreml#int8-weight-trial)
 
 ### INT4 weight trial
 
@@ -1116,8 +1116,8 @@ Packed INT4 requires **iOS 18/macOS 15**. Both exports use the same decomposed
 attention graph and FP16 computation. Batch-1 timing excludes encoding/loading/UI.
 INT8 preserves all choices at 0.81 MB; the original FP16 remains the default.
 
-[Full report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/int4-synthetic-test.json) ·
-[INT4 reproduction](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#int4-weight-trial)
+[Full report](https://github.com/FluidInference/mobius/blob/main/models/computer-use/cua-s1-forms/coreml/reports/int4-synthetic-test.json) ·
+[INT4 reproduction](https://github.com/FluidInference/mobius/tree/main/models/computer-use/cua-s1-forms/coreml#int4-weight-trial)
 
 ### Swift probability fix
 
@@ -1125,7 +1125,7 @@ Stable softmax in Swift fixes the FP16 probability-sum exception: **73,110/73,11
 complete**, covering all 24,370 decisions for FP16, INT8, and INT4. Every selected
 option is unchanged; accuracy remains **99.9549%, 99.9549%, and 99.9302%**, respectively.
 Original model scores remain available as `rawProbabilities`; raw conversion-parity
-failures above remain. [Report and reproduction](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#swift-probability-fix)
+failures above remain. [Report and reproduction](https://github.com/FluidInference/mobius/tree/main/models/computer-use/cua-s1-forms/coreml#swift-probability-fix)
 
 ### Swift runtime and ANE placement
 
@@ -1139,9 +1139,9 @@ These timings predate the stable-softmax fix; complete SDK latency has not been 
 | ANE-gather | 162 / 165 (98.2%) | 3 | 0.961 ms | 0.984 ms |
 
 Higher ANE placement is **5.4% slower** in Swift. Operation counts describe scheduler
-placement, not utilization or energy use. [Swift report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/swift-variant-comparison.json) ·
-[Compute-plan profiles](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#device-placement)
+placement, not utilization or energy use. [Swift report](https://github.com/FluidInference/mobius/blob/main/models/computer-use/cua-s1-forms/coreml/reports/swift-variant-comparison.json) ·
+[Compute-plan profiles](https://github.com/FluidInference/mobius/tree/main/models/computer-use/cua-s1-forms/coreml#device-placement)
 
 Browser demonstration: **100/100 decisions** across patient, job, and insurance forms,
 with actual fill/check actions and verified DOM changes. [Recording](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/8b0c36f86a8b24f76f3dd866db62dbb2d2620a02/demo/browser-demo.mp4) ·
-[Browser report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/browser-validation.json)
+[Browser report](https://github.com/FluidInference/mobius/blob/main/models/computer-use/cua-s1-forms/coreml/reports/browser-validation.json)

@@ -443,9 +443,10 @@ print(decision.selectedOption, decision.probabilities)
 **Loading:** `load(from:computeUnits:)` accepts a local `.mlpackage` or `.mlmodelc`;
 `init(model:)` accepts an already loaded `MLModel`. Both validate the tensor contract.
 `load(cacheDirectory:computeUnits:progressHandler:)` uses the shared download cache.
-The default compute policy is `.cpuAndNeuralEngine`. During review, download the
-[model PR artifacts](https://huggingface.co/FluidInference/cua-s1-forms-coreml/discussions/1)
-and use the local loader; automatic downloading requires the artifacts on HF `main`.
+The default compute policy is `.cpuAndNeuralEngine`. Use
+`try await CuaS1FormsManager.load()` to download and cache the default model from
+[Hugging Face](https://huggingface.co/FluidInference/cua-s1-forms-coreml), or download
+a portable package and use the local loader.
 
 **Input and output:**
 
