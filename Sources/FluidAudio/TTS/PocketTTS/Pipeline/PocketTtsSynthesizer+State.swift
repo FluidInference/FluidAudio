@@ -72,7 +72,7 @@ extension PocketTtsSynthesizer {
         let bosEmb = try createBosEmbedding(constants.bosEmbedding)
         let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
 
-        let session = PocketTtsSession(
+        let session = try PocketTtsSession(
             stateModels: stateModels,
             voiceData: voiceData,
             mimiState: mimiState,

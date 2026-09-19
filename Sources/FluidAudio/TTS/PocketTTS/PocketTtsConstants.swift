@@ -45,12 +45,19 @@ public enum PocketTtsConstants {
     public static let longTextExtraFrames: Int = 1
     public static let extraFramesAfterDetection: Int = 2
     public static let shortTextWordThreshold: Int = 5
-    /// Max text tokens per chunk — keeps total KV cache usage under kvCacheMaxLen.
-    public static let maxTokensPerChunk: Int = 50
+    /// Preferred text-token target when grouping separate sentences.
+    ///
+    /// PocketTTS upstream treats 50 tokens as a quality guideline, not a
+    /// transformer limit. Keeping it as the grouping target avoids combining
+    /// several long sentences into one cache-heavy generation pass.
+    public static let preferredTokensPerChunk: Int = 50
+    /// Absolute requested text-token ceiling. Runtime chunking lowers this to
+    /// the capacity left by the selected voice and estimated speech duration.
+    public static let maxTokensPerChunk: Int = 512
 
     // MARK: - KV cache
 
-    /// Max KV cache positions: voice (~125) + text (≤50) + generated frames.
+    /// Max KV cache positions: voice conditioning + text + generated frames.
     public static let kvCacheMaxLen: Int = 512
 
     // MARK: - Voice

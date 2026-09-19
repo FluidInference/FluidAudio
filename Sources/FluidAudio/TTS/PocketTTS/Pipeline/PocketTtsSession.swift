@@ -73,6 +73,7 @@ public actor PocketTtsSession {
     private let temperature: Float
     private let language: PocketTtsLanguage
     private let maxTokensPerChunk: Int
+    private let voiceCachePosition: Int
     private var mimiState: PocketTtsSynthesizer.MimiState
     private var rng: SeededRNG
 
@@ -110,7 +111,7 @@ public actor PocketTtsSession {
         seed: UInt64,
         language: PocketTtsLanguage = .english,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk
-    ) {
+    ) throws {
         self.voiceKVSnapshot = voiceKVSnapshot
         self.mimiState = mimiState
         self.constants = constants
@@ -127,7 +128,11 @@ public actor PocketTtsSession {
         self.bosEmb = bosEmb
         self.temperature = temperature
         self.language = language
-        self.maxTokensPerChunk = maxTokensPerChunk
+        let voicePosition = Int(voiceKVSnapshot.positions[0][0].floatValue)
+        self.voiceCachePosition = voicePosition
+        self.maxTokensPerChunk = try PocketTtsSynthesizer.effectiveMaxTokensPerChunk(
+            requested: maxTokensPerChunk, voiceCachePosition: voicePosition
+        )
         self.rng = SeededRNG(seed: seed)
         self.stateModels = nil
         self.stateVoiceData = nil
@@ -164,7 +169,7 @@ public actor PocketTtsSession {
         seed: UInt64,
         language: PocketTtsLanguage = .english,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk
-    ) {
+    ) throws {
         self.voiceKVSnapshot = nil
         self.mimiState = mimiState
         self.constants = constants
@@ -181,7 +186,11 @@ public actor PocketTtsSession {
         self.bosEmb = bosEmb
         self.temperature = temperature
         self.language = language
-        self.maxTokensPerChunk = maxTokensPerChunk
+        let voicePosition = PocketTtsSynthesizer.voiceCachePosition(for: voiceData)
+        self.voiceCachePosition = voicePosition
+        self.maxTokensPerChunk = try PocketTtsSynthesizer.effectiveMaxTokensPerChunk(
+            requested: maxTokensPerChunk, voiceCachePosition: voicePosition
+        )
         self.rng = SeededRNG(seed: seed)
         self.stateModels = stateModels
         self.stateVoiceData = voiceData
@@ -225,7 +234,11 @@ public actor PocketTtsSession {
 
                 let chunks = PocketTtsSynthesizer.chunkTextWithMetadata(
                     trimmed, tokenizer: constants.tokenizer,
-                    maxTokens: maxTokensPerChunk, language: language
+                    maxTokens: maxTokensPerChunk,
+                    preferredMaxTokens: min(
+                        PocketTtsConstants.preferredTokensPerChunk, maxTokensPerChunk),
+                    voiceCachePosition: voiceCachePosition,
+                    language: language
                 )
                 Self.logger.info(
                     "Session enqueued '\(trimmed)', \(chunks.count) chunk(s)")
@@ -296,7 +309,9 @@ public actor PocketTtsSession {
         )
 
         // Generation loop
-        let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: text)
+        let cachePosition = try PocketTtsSynthesizer.kvCachePosition(in: kvState)
+        let maxGenLen = PocketTtsSynthesizer.boundedGenerationFrameCount(
+            text: text, cachePosition: cachePosition)
         var eosStep: Int?
         var sequence = try PocketTtsSynthesizer.createBosStartSequence(
             bosEmbedding: constants.bosEmbedding,
@@ -358,6 +373,14 @@ public actor PocketTtsSession {
 
             // Autoregressive feedback
             sequence = try PocketTtsSynthesizer.createSequenceFromLatent(latent)
+        }
+
+        if !Task.isCancelled {
+            try PocketTtsSynthesizer.validateGenerationCompleted(
+                generatedFrameLimit: maxGenLen,
+                cachePosition: cachePosition,
+                eosStep: eosStep,
+                framesAfterEos: totalFramesAfterEos)
         }
     }
 
@@ -468,7 +491,8 @@ public actor PocketTtsSession {
         // Generation loop. BOS = the BOS latent passed as `sequence`
         // (the fused graph has no NaN-BOS protocol — same contract as the
         // rank-4 `.ane` models).
-        let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: text)
+        let maxGenLen = PocketTtsSynthesizer.boundedGenerationFrameCount(
+            text: text, cachePosition: Int(prefilledPosition))
         var eosStep: Int?
         var sequence = constants.bosEmbedding
         let totalFramesAfterEos = framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
@@ -521,6 +545,14 @@ public actor PocketTtsSession {
 
             // Autoregressive feedback
             sequence = latent
+        }
+
+        if !Task.isCancelled {
+            try PocketTtsSynthesizer.validateGenerationCompleted(
+                generatedFrameLimit: maxGenLen,
+                cachePosition: Int(prefilledPosition),
+                eosStep: eosStep,
+                framesAfterEos: totalFramesAfterEos)
         }
     }
 }
