@@ -33,11 +33,16 @@ plan assigns 149 operations to ANE and 24 to CPU; `.all` selects 173 GPU operati
 | Model | ANE ops | GPU ops | CPU ops | Portable size | Warm model call |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | CUA-S1-FORMS (`.cpuAndNeuralEngine`) | 149 (86.1%) | 0 | 24 (13.9%) | 1.51 MB | p50 0.929 ms / p95 0.973 ms |
+| CUA-S1-FORMS `ane-gather` (optional) | 162 (98.2%) | 0 | 3 (1.8%) | ~1.51 MB | paired p50 0.970 ms / p95 0.988 ms |
 
 Timing uses 30 Python Core ML calls over three real form inputs after warmup,
 excluding encoding and UI work. Counts are scheduler assignments, not measured
 runtime shares. See [the model guide](Decision/CuaS1Forms.md#ane-profile) for the
 four-policy comparison, load timings, fallback reasons, protocol, and raw report.
+The optional unsigned-gather variant leaves only three input casts on CPU. Its
+matched ABBA comparison used 60 calls per model and measured 0.915 ms for the
+default versus 0.970 ms for `ane-gather`; more ANE placement was about 6% slower.
+The default artifact is retained. No utilization or energy saving was measured.
 
 # ASR
 

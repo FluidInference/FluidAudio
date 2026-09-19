@@ -101,6 +101,19 @@ Instruments power/runtime trace was captured. See the reproducible
 [profiler and protocol](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#device-placement)
 and [complete report](https://github.com/FluidInference/mobius/blob/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml/reports/ane-profile.json).
 
+An optional **`ane-gather`** export moves the embedding gathers onto ANE while
+keeping the same tensor interface: **162/165 ANE operations (98.2%) and 3 CPU
+input casts**. All 196 decisions pass on `ALL` and `CPU_AND_NE`, with maximum
+probability error 0.002336. On this M5 Pro, `.all` also selects ANE for this variant.
+A matched comparison measured **0.970 ms median versus 0.915 ms for the default**
+(60 real-input calls per model). Higher ANE placement is about 6% slower here;
+the original artifact remains the default. No power saving is established.
+
+The optional package is under `ane-gather/` in the HF model PR. Download that
+variant and pass its local `.mlpackage` or `.mlmodelc` to the existing
+`CuaS1FormsManager.load(from:)`; no Swift API change is required. See
+[reproduction and reports](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#optional-higher-ane-variant).
+
 ## Reproduce the Swift integration checks
 
 In the Mobius conversion directory, prepare the real assets and reference scores:

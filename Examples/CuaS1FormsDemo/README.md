@@ -31,6 +31,11 @@ To use an existing local package or compiled bundle without downloading:
 Examples/CuaS1FormsDemo/run.sh --model /absolute/path/to/cua_s1_forms_fp16_options32.mlpackage
 ```
 
+The optional `ane-gather/` package in the model PR uses the same interface and
+works with `--model` too. It places 98.2% of operations on ANE on the measured
+M5 Pro, but was about 6% slower than the default in a matched model-call check.
+See the [ANE profile](../../Documentation/Decision/CuaS1Forms.md#ane-profile).
+
 You can also open this example's `Package.swift` in Xcode and run the
 `CuaS1FormsDemo` executable scheme, or use:
 
