@@ -118,6 +118,8 @@ actor PocketTtsStateEngine {
     /// instead of 6 per-layer ones and NO cache tensors marshalled.
     func prefill(flatConditioning: [Float], tokenCount: Int) async throws {
         guard tokenCount > 0 else { return }
+        try PocketTtsSynthesizer.validateKVCacheCapacity(
+            currentPosition: Int(position), additionalPositions: tokenCount)
         let dim = PocketTtsConstants.embeddingDim
         let tMax = PocketTtsConstants.condPrefillMaxTokens
 
@@ -172,6 +174,8 @@ actor PocketTtsStateEngine {
     func generateFrame(
         sequence: [Float], noise: [Float]
     ) async throws -> (latent: [Float], eosLogit: Float) {
+        try PocketTtsSynthesizer.validateKVCacheCapacity(
+            currentPosition: Int(position), additionalPositions: 1)
         let latentDim = PocketTtsConstants.latentDim
 
         let sequenceArray = try MLMultiArray(

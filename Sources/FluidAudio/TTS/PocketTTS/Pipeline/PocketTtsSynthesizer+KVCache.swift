@@ -3,6 +3,40 @@ import Foundation
 
 extension PocketTtsSynthesizer {
 
+    /// Reject a conditioning or generation write that would exceed the
+    /// fixed-size KV cache. Core ML scatter operations otherwise fail with an
+    /// opaque model error (or can produce invalid output on some placements).
+    static func validateKVCacheCapacity(
+        currentPosition: Int,
+        additionalPositions: Int
+    ) throws {
+        guard currentPosition >= 0, additionalPositions >= 0,
+            currentPosition <= PocketTtsConstants.kvCacheMaxLen,
+            additionalPositions <= PocketTtsConstants.kvCacheMaxLen - currentPosition
+        else {
+            throw PocketTTSError.processingFailed(
+                "PocketTTS KV cache capacity exceeded: position \(currentPosition), "
+                    + "requested \(additionalPositions) additional position(s), capacity "
+                    + "\(PocketTtsConstants.kvCacheMaxLen)")
+        }
+    }
+
+    /// Read and validate the shared logical position from an IO cache state.
+    static func kvCachePosition(in state: KVCacheState) throws -> Int {
+        guard let first = state.positions.first else {
+            throw PocketTTSError.processingFailed(
+                "PocketTTS KV cache state has no position counters")
+        }
+        let position = Int(first[0].floatValue)
+        for layerPosition in state.positions.dropFirst() {
+            guard Int(layerPosition[0].floatValue) == position else {
+                throw PocketTTSError.processingFailed(
+                    "PocketTTS KV cache layer positions are inconsistent")
+            }
+        }
+        return position
+    }
+
     /// Mutable KV cache state passed through conditioning and generation steps.
     ///
     /// One cache per transformer layer stores the K (key) and V (value) projections
@@ -165,6 +199,8 @@ extension PocketTtsSynthesizer {
         model: MLModel,
         layerKeys: PocketTtsLayerKeys
     ) async throws {
+        try validateKVCacheCapacity(
+            currentPosition: try kvCachePosition(in: state), additionalPositions: 1)
         let layers = layerKeys.layerCount
         var inputDict: [String: Any] = [
             "conditioning": conditioning
@@ -197,6 +233,9 @@ extension PocketTtsSynthesizer {
         let dim = PocketTtsConstants.embeddingDim
         let tMax = PocketTtsConstants.condPrefillMaxTokens
         guard tokenCount > 0 else { return }
+        try validateKVCacheCapacity(
+            currentPosition: try kvCachePosition(in: state),
+            additionalPositions: tokenCount)
         let layers = layerKeys.layerCount
 
         // Process the block in <= T_max windows so ANY conditioning length works
@@ -535,6 +574,8 @@ extension PocketTtsSynthesizer {
         model: MLModel,
         layerKeys: PocketTtsLayerKeys
     ) async throws -> (transformerOut: MLMultiArray, eosLogit: Float) {
+        try validateKVCacheCapacity(
+            currentPosition: try kvCachePosition(in: state), additionalPositions: 1)
         guard let transformerKey = layerKeys.transformerOut, let eosKey = layerKeys.eosLogit
         else {
             throw PocketTTSError.processingFailed(
