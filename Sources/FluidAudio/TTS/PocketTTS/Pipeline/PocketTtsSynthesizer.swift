@@ -852,9 +852,9 @@ public struct PocketTtsSynthesizer {
                 language: language))
 
         if !isMidSentence {
-            // Strip trailing clause punctuation (commas, semicolons, colons)
+            // Strip trailing clause punctuation (commas, semicolons, colons, dashes)
             // before adding sentence-ending punctuation
-            while let last = result.last, ",;:".contains(last) {
+            while let last = result.last, ",;:\u{2014}\u{2013}-".contains(last) {
                 result = String(result.dropLast())
             }
             result = result.trimmingCharacters(in: .whitespaces)
@@ -1091,19 +1091,50 @@ public struct PocketTtsSynthesizer {
         return result.isEmpty ? [text] : result
     }
 
-    /// Split text at clause punctuation (commas, semicolons, colons).
+    /// Split text at clause punctuation: commas, semicolons, colons, dashes,
+    /// ellipses, and the edges of a bracketed aside.
     ///
-    /// Does not split at commas within numbers (e.g., "3,500").
+    /// These are the places a speaker pauses, so a chunk seam there is covered
+    /// by a pause the listener already expects. Exceptions keep tokens whole:
+    /// - A comma between digits ("3,500") does not split.
+    /// - An en dash or hyphen splits only with a space on each side, so
+    ///   hyphenated words and numeric ranges stay whole. An em dash always splits.
+    /// - An opening bracket splits before itself; a closing bracket or ellipsis
+    ///   splits after itself, and only when a space follows, so trailing
+    ///   punctuation ("aside)," or "…?") stays attached.
     static func splitAtClauseBoundaries(_ text: String) -> [String] {
-        let clauseBreaks: Set<Character> = [",", ";", ":"]
+        let breakAfter: Set<Character> = [",", ";", ":", "\u{2014}"]
+        let breakAfterWhenSpaced: Set<Character> = ["\u{2013}", "-"]
+        let breakAfterBeforeSpace: Set<Character> = [")", "]", "\u{2026}"]
+        let breakBefore: Set<Character> = ["(", "["]
         var parts: [String] = []
         var current = ""
         let chars = Array(text)
 
+        func flush() {
+            let trimmed = current.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty {
+                parts.append(trimmed)
+            }
+            current = ""
+        }
+
         for (i, char) in chars.enumerated() {
+            if breakBefore.contains(char) {
+                flush()
+            }
             current.append(char)
 
-            guard clauseBreaks.contains(char) else { continue }
+            let prevIsSpace = i > 0 && chars[i - 1] == " "
+            let nextIsSpace = i + 1 < chars.count && chars[i + 1] == " "
+
+            if breakAfterWhenSpaced.contains(char) {
+                guard prevIsSpace && nextIsSpace else { continue }
+            } else if breakAfterBeforeSpace.contains(char) {
+                guard nextIsSpace else { continue }
+            } else {
+                guard breakAfter.contains(char) else { continue }
+            }
 
             // Don't split at commas between digits (e.g., "3,500")
             if char == "," {
@@ -1114,18 +1145,10 @@ public struct PocketTtsSynthesizer {
                 }
             }
 
-            let trimmed = current.trimmingCharacters(in: .whitespaces)
-            if !trimmed.isEmpty {
-                parts.append(trimmed)
-            }
-            current = ""
+            flush()
         }
 
-        let trimmed = current.trimmingCharacters(in: .whitespaces)
-        if !trimmed.isEmpty {
-            parts.append(trimmed)
-        }
-
+        flush()
         return parts
     }
 
@@ -1253,6 +1276,11 @@ public struct PocketTtsSynthesizer {
             current.append(char)
 
             guard ".!?".contains(char) else { continue }
+
+            // A run of sentence punctuation ("...", "?!") ends one sentence, once.
+            if i + 1 < chars.count, ".!?".contains(chars[i + 1]) {
+                continue
+            }
 
             // For periods, check if this is an abbreviation
             if char == "." {
