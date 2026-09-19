@@ -5,7 +5,7 @@ Enter your own details once, then watch the real Core ML model match them to
 three different forms and explain each decision with live option scores. No Python or browser server
 is involved in the running app.
 
-![The native SwiftUI demo after real Core ML predictions fill the patient registration form](preview.png)
+![The native SwiftUI demo after switching examples and filling the auto insurance claim with real Core ML predictions](preview.png)
 
 ## Run
 
@@ -41,10 +41,12 @@ swift run --package-path Examples/CuaS1FormsDemo CuaS1FormsDemo
 ## Try it
 
 1. Enter your details in the left panel. It starts empty; **Use example** loads the
-   selected form's public sample data for a quick trial.
+   selected form's public sample data for a quick trial. The panel names the sample.
 2. Choose **Patient registration**, **Job application**, or **Auto insurance claim**.
-   Switching forms keeps the same entered details, so you can see how the model
-   matches different field labels to the same information.
+   Untouched examples automatically change to match the selected form. Once you edit,
+   add, or remove a detail, your profile stays the same across forms, so you can see
+   how the model matches different field labels to the same information. Press
+   **Use example** again to return to the selected form's sample.
 3. Press **Fill form** for a paced pass, or **Step** for one live prediction.
 4. Inspect the selected option, candidate probabilities, exact input context, and
    measured time. Click a field or a past decision to inspect it again.
@@ -52,6 +54,12 @@ swift run --package-path Examples/CuaS1FormsDemo CuaS1FormsDemo
    sees current field values and can choose `skip` for already-filled fields.
 6. Press **Submit demo** to produce a local receipt. A model-selected `click`
    remains a proposal; the scoring loop never submits the form itself.
+
+Each example includes data for its form: patient contact, address, insurance, and
+emergency contact details; job contact details, LinkedIn, employer, title,
+experience, salary, start date, and cover letter; or insurance policy, vehicle,
+incident, and claim details. The examples fill 14, 10, and 12 text fields respectively.
+Promo, referral, and agent codes are left empty as specified by the original tasks.
 
 Use **Add another detail** for a labeled value such as insurance provider or
 current employer. Blank values are excluded from the candidates. An explicit
@@ -95,6 +103,9 @@ It checks the explicitly selected initial-form rows **0–17, 68–82, and 130�
 50 decisions across the three upstream forms, plus a filled-field recheck,
 single-step execution, cancellation/reset, and explicit local submission.
 A local run selected all 50 labeled options correctly and passed the state checks.
+The check loads an example once, then switches forms to verify that each form gets
+its own sample. Unchanged editor updates keep examples following forms; edited
+profiles persist, and clearing details prevents samples from returning automatically.
 An additional pass enters four public sample values into a blank profile and reuses
 that profile across all three forms: supplied names/email/phone are filled, missing
 values remain empty, and source edits invalidate the old choices and predictions.
@@ -103,7 +114,8 @@ These changed-profile checks are demo regressions, not the original benchmark sc
 
 Unit tests cover the pinned fixture, candidate retention, context updates,
 fill-value parsing, checkbox/click semantics, invalid-action rejection, empty-profile
-handling, source-only candidates, name combination, and option/byte limits:
+handling, source-only candidates, name combination, option/byte limits, example
+switching, and preserving edited profiles:
 
 ```bash
 swift test --package-path Examples/CuaS1FormsDemo
@@ -116,9 +128,12 @@ For visual regression checks in a logged-in Mac session, the app can save only
 its own content view, without screen-recording permission:
 
 ```bash
-swift run --package-path Examples/CuaS1FormsDemo CuaS1FormsDemo \
+Examples/CuaS1FormsDemo/run.sh \
   --snapshot /absolute/path/to/demo.png --snapshot-filled --exit-after-snapshot
 ```
+
+Add `--snapshot-form job-application` or `--snapshot-form auto-claim` to check
+switching from the patient example to either other form before filling it.
 
 ## Source and license
 

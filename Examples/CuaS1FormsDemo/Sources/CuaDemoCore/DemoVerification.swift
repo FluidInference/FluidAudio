@@ -14,9 +14,13 @@ public enum DemoVerification {
         await session.load(modelURL: modelURL)
         guard session.isReady else { throw DemoError(session.errorMessage ?? "Model failed to load.") }
         var checked = 0
+        let expectedFilledFields = [14, 10, 12]
+        session.useExampleDetails()
         for scenarioIndex in session.scenarios.indices {
             session.selectScenario(scenarioIndex)
-            session.useExampleDetails()
+            guard session.isUsingExampleDetails,
+                try ProfileChoices.make(from: session.details) == session.scenarios[scenarioIndex].options
+            else { throw DemoError("The public example did not follow the selected form.") }
             while !session.isComplete { try await session.scoreNext() }
             for decision in session.decisions {
                 guard decision.result.selectedIndex == labels[decision.id] else {
@@ -24,10 +28,16 @@ public enum DemoVerification {
                 }
                 checked += 1
             }
+            let filledFields = session.controls.filter { $0.role == "Edit" && !$0.value.isEmpty }.count
+            guard filledFields == expectedFilledFields[scenarioIndex] else {
+                throw DemoError("The example did not fill the expected fields for form \(scenarioIndex).")
+            }
             guard !session.isSubmitted else { throw DemoError("Scoring must never submit a form.") }
             session.submitLocally()
             guard session.isSubmitted else { throw DemoError("The explicit local submit action failed.") }
-            print("PASS \(session.scenario?.shortTitle ?? "form"): \(session.decisions.count) real decisions")
+            print(
+                "PASS \(session.scenario?.shortTitle ?? "form"): "
+                    + "\(session.decisions.count) real decisions, \(filledFields) text fields filled")
         }
         guard checked == 50 else { throw DemoError("The selected 50-control manifest changed.") }
         session.selectScenario(0)
@@ -54,10 +64,41 @@ public enum DemoVerification {
             session.controls.allSatisfy({ $0.value.isEmpty && !$0.isChecked })
         else { throw DemoError("Reset did not cancel pending scoring safely.") }
         print("PASS single-step and cancellation/reset behavior")
+        try verifyExampleEditing(session)
         try await verifyEnteredProfile(session)
         print(
             "Verified 50 original form decisions, filled-state recheck, and playback controls with the real Swift manager."
         )
+    }
+
+    @MainActor
+    private static func verifyExampleEditing(_ session: DemoSession) throws {
+        session.useExampleDetails()
+        guard let detail = session.details.first else { throw DemoError("Missing example details.") }
+        session.updateDetail(detail.id, name: detail.name, value: detail.value)
+        session.selectScenario(1)
+        guard session.isUsingExampleDetails,
+            try ProfileChoices.make(from: session.details) == session.scenarios[1].options
+        else { throw DemoError("An unchanged editor update stopped example switching.") }
+        guard let firstName = session.details.first(where: { $0.name == "First name" }) else {
+            throw DemoError("Missing example first name.")
+        }
+        session.updateDetail(firstName.id, value: "Kenji")
+        let editedChoices = try ProfileChoices.make(from: session.details)
+        session.selectScenario(2)
+        guard !session.isUsingExampleDetails,
+            try ProfileChoices.make(from: session.details) == editedChoices
+        else { throw DemoError("Switching forms overwrote an edited example.") }
+        session.useExampleDetails()
+        guard session.isUsingExampleDetails,
+            try ProfileChoices.make(from: session.details) == session.scenarios[2].options
+        else { throw DemoError("Use example did not restore the selected form's details.") }
+        session.clearDetails()
+        session.selectScenario(0)
+        guard !session.isUsingExampleDetails, session.details.allSatisfy({ $0.value.isEmpty }) else {
+            throw DemoError("Switching forms restored sample data after clearing the profile.")
+        }
+        print("PASS examples follow forms, edited profiles persist, and clear exits example mode")
     }
 
     @MainActor

@@ -36,7 +36,15 @@ struct DemoView: View {
             await session.load(modelURL: DemoLauncher.argumentURL("--model"))
             if CommandLine.arguments.contains("--snapshot-filled"), session.isReady {
                 session.useExampleDetails()
-                do { while !session.isComplete { try await session.scoreNext() } } catch {
+                do {
+                    if let formID = DemoLauncher.argument("--snapshot-form") {
+                        guard let index = session.scenarios.firstIndex(where: { $0.id == formID }) else {
+                            throw DemoError("Unknown snapshot form: \(formID)")
+                        }
+                        session.selectScenario(index)
+                    }
+                    while !session.isComplete { try await session.scoreNext() }
+                } catch {
                     print("Snapshot run failed: \(error)")
                 }
                 session.selectedControlID = session.controls.first?.id

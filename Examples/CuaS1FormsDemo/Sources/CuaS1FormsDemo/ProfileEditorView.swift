@@ -17,15 +17,30 @@ struct ProfileEditorView: View {
             .overlay(alignment: .bottom) { Rectangle().fill(Palette.line).frame(height: 1) }
             VStack(alignment: .leading, spacing: 10) {
                 Text("Start with you.").font(.system(size: 20, weight: .medium, design: .serif))
-                Text("Add the details you want to use. They carry across all three forms.")
-                    .font(.system(size: 11)).foregroundStyle(Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(
+                    session.isUsingExampleDetails
+                        ? "Examples change with the form. Edit any detail to keep and reuse this profile."
+                        : "Add the details you want to use. They carry across all three forms."
+                )
+                .font(.system(size: 11)).foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Button("Use example") { session.useExampleDetails() }.buttonStyle(.bordered)
+                        .help("Load sample details for \(session.scenario?.shortTitle ?? "the selected form")")
+                        .disabled(session.scenario == nil)
                     Spacer()
                     Button("Clear") { session.clearDetails() }.buttonStyle(.borderless)
                         .foregroundStyle(Palette.muted)
                 }.controlSize(.small).disabled(session.isRunning)
+                if let scenario = session.scenario {
+                    Text(
+                        session.isUsingExampleDetails
+                            ? "Example: \(scenario.shortTitle)"
+                            : "Available example: \(scenario.shortTitle)"
+                    )
+                    .font(.system(size: 10, weight: .medium)).foregroundStyle(Palette.green)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
             }.padding(16)
             Divider().overlay(Palette.line).padding(.horizontal, 16)
             ScrollView {

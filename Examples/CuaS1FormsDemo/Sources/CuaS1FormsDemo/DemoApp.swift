@@ -20,9 +20,13 @@ enum DemoLauncher {
     }
 
     static func argumentURL(_ name: String) -> URL? {
+        argument(name).map { URL(fileURLWithPath: $0) }
+    }
+
+    static func argument(_ name: String) -> String? {
         let arguments = CommandLine.arguments
         guard let index = arguments.firstIndex(of: name), arguments.indices.contains(index + 1) else { return nil }
-        return URL(fileURLWithPath: arguments[index + 1])
+        return arguments[index + 1]
     }
 }
 

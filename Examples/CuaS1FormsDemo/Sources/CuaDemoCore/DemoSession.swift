@@ -62,6 +62,8 @@ public final class DemoSession {
     public private(set) var controls: [DemoControl] = []
     /// User-entered source data, retained in memory when switching target forms.
     public private(set) var details = ProfileChoices.emptyDetails()
+    /// Whether untouched sample details should follow the selected form.
+    public private(set) var isUsingExampleDetails = false
     /// Predictions made during this pass, in form order.
     public private(set) var decisions: [DemoDecision] = []
     /// Control displayed in the decision inspector.
@@ -85,6 +87,11 @@ public final class DemoSession {
 
     /// Create an unloaded session.
     public init() {}
+
+    init(scenarios: [DemoScenario]) {
+        self.scenarios = scenarios
+        controls = scenarios.first?.controls ?? []
+    }
 
     /// The currently selected scenario.
     public var scenario: DemoScenario? {
@@ -123,6 +130,7 @@ public final class DemoSession {
         else { return }
         if let name { details[index].name = name }
         if let value { details[index].value = value }
+        isUsingExampleDetails = false
         reset()
     }
 
@@ -130,13 +138,15 @@ public final class DemoSession {
     public func addDetail() {
         guard !isRunning else { return }
         details.append(ProfileDetail(name: ""))
+        isUsingExampleDetails = false
         reset()
     }
 
     /// Remove a source value from subsequent model choices.
     public func removeDetail(_ id: UUID) {
-        guard !isRunning else { return }
+        guard !isRunning, details.contains(where: { $0.id == id }) else { return }
         details.removeAll { $0.id == id }
+        isUsingExampleDetails = false
         reset()
     }
 
@@ -144,14 +154,20 @@ public final class DemoSession {
     public func clearDetails() {
         guard !isRunning else { return }
         details = ProfileChoices.emptyDetails()
+        isUsingExampleDetails = false
         reset()
     }
 
-    /// Load the selected form's original public example into the editable source panel.
+    /// Load public sample details and follow the selected form until the user edits them.
     public func useExampleDetails() {
         guard !isRunning, let scenario else { return }
-        details = scenario.entities.map { ProfileDetail(name: $0.name, value: $0.value) }
+        copyExampleDetails(from: scenario)
         reset()
+    }
+
+    private func copyExampleDetails(from scenario: DemoScenario) {
+        details = scenario.entities.map { ProfileDetail(name: $0.name, value: $0.value) }
+        isUsingExampleDetails = true
     }
 
     /// Load the bundled source fixture and real Core ML package.
@@ -172,10 +188,11 @@ public final class DemoSession {
         }
     }
 
-    /// Switch forms and clear the previous pass.
+    /// Switch forms, refresh untouched examples, and preserve user-entered or edited details.
     public func selectScenario(_ index: Int) {
-        guard scenarios.indices.contains(index) else { return }
+        guard scenarios.indices.contains(index), index != scenarioIndex else { return }
         scenarioIndex = index
+        if isUsingExampleDetails { copyExampleDetails(from: scenarios[index]) }
         reset()
     }
 
