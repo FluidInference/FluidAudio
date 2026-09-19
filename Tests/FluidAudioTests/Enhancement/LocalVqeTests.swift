@@ -42,13 +42,16 @@ final class LocalVqeNamingTests: XCTestCase {
 /// Set `FLUIDAUDIO_LOCALVQE_MODEL_DIR` to a directory holding the compiled
 /// `localvqe-*.mlmodelc` bundles (e.g. the mobius conversion `build/` dir);
 /// otherwise the default model cache is used, and the tests skip when the
-/// model is absent or when running in CI.
+/// model is absent or when running in CI. An explicit directory enables
+/// these tests in CI and a missing model in that directory is a failure.
 final class LocalVqeStreamTests: XCTestCase {
 
     private static let fixture = "01-validation-request-21.4s"
 
     override func setUp() async throws {
-        if ProcessInfo.processInfo.environment["CI"] != nil {
+        if ProcessInfo.processInfo.environment["CI"] != nil,
+            ProcessInfo.processInfo.environment["FLUIDAUDIO_LOCALVQE_MODEL_DIR"] == nil
+        {
             throw XCTSkip("Skipping LocalVQE model tests in CI")
         }
     }
@@ -64,6 +67,9 @@ final class LocalVqeStreamTests: XCTestCase {
         }
         let file = dir.appendingPathComponent(ModelNames.LocalVQE.modelFile(variant: .v13, chunk: chunk))
         guard FileManager.default.fileExists(atPath: file.path) else {
+            if ProcessInfo.processInfo.environment["FLUIDAUDIO_LOCALVQE_MODEL_DIR"] != nil {
+                throw LocalVqeError.modelLoadingFailed("Required test model not available at \(file.path)")
+            }
             throw XCTSkip("LocalVQE model not available at \(file.path)")
         }
         return try LocalVqeManager(config: config, modelDirectory: dir)
@@ -156,5 +162,158 @@ final class LocalVqeStreamTests: XCTestCase {
         XCTAssertTrue(out.isEmpty)
         let stateCount = await stream.stateCount
         XCTAssertEqual(stateCount, 33)
+    }
+
+    private func waitForOperations(_ count: Int, on stream: LocalVqeStream) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while await stream.operationCount < count {
+            guard ContinuousClock.now < deadline else {
+                throw NSError(
+                    domain: "LocalVqeStreamTests", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Never observed \(count) overlapping operations"])
+            }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+    }
+
+    private func assertAudioEqual(
+        _ actual: [Float], _ expected: [Float], file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertEqual(actual.count, expected.count, file: file, line: line)
+        XCTAssertTrue(actual.allSatisfy(\.isFinite), file: file, line: line)
+        let maxDiff = zip(actual, expected).reduce(Float.zero) { max($0, abs($1.0 - $1.1)) }
+        XCTAssertLessThan(maxDiff, 1e-4, file: file, line: line)
+    }
+
+    func testOverlappingPushesAndFlushMatchSequentialAudio() async throws {
+        let manager = try loadManager(chunk: .realtime16ms)
+        let mic = Array(try loadFixture().prefix(16000 * 5 + 137))
+        let split = 16000 * 4
+        let firstMic = Array(mic[..<split])
+        let secondMic = Array(mic[split...])
+        let expected = try await manager.process(mic: mic)
+        let stream = try await manager.makeStream()
+
+        let first = Task {
+            try await stream.enhance(mic: firstMic, reference: [Float](repeating: 0, count: firstMic.count))
+        }
+        defer { first.cancel() }
+        try await waitForOperations(1, on: stream)
+        let second = Task {
+            try await stream.enhance(mic: secondMic, reference: [Float](repeating: 0, count: secondMic.count))
+        }
+        defer { second.cancel() }
+        try await waitForOperations(2, on: stream)
+        let flush = Task { try await stream.flush() }
+        defer { flush.cancel() }
+
+        var actual = try await first.value
+        actual.append(contentsOf: try await second.value)
+        actual.append(contentsOf: try await flush.value)
+        assertAudioEqual(actual, expected)
+        let operations = await stream.operationCount
+        XCTAssertEqual(operations, 0)
+    }
+
+    func testResetBetweenQueuedPushesStartsFreshClip() async throws {
+        let manager = try loadManager(chunk: .realtime16ms)
+        let mic = Array(try loadFixture().prefix(16000 * 5 + 137))
+        let firstMic = Array(mic.prefix(16000 * 4))
+        let nextClip = Array(mic.suffix(16000 + 137))
+        let expected = try await manager.process(mic: nextClip)
+        let stream = try await manager.makeStream()
+        let first = Task {
+            try await stream.enhance(mic: firstMic, reference: [Float](repeating: 0, count: firstMic.count))
+        }
+        defer { first.cancel() }
+        try await waitForOperations(1, on: stream)
+        let reset = Task { try await stream.reset() }
+        defer { reset.cancel() }
+        try await waitForOperations(2, on: stream)
+        let next = Task {
+            try await stream.enhance(mic: nextClip, reference: [Float](repeating: 0, count: nextClip.count))
+        }
+        defer { next.cancel() }
+
+        _ = try await first.value
+        try await reset.value
+        var actual = try await next.value
+        actual.append(contentsOf: try await stream.flush())
+        assertAudioEqual(actual, expected)
+    }
+
+    func testCancelledQueuedOperationsLeaveCurrentClipUntouched() async throws {
+        let manager = try loadManager(chunk: .realtime16ms)
+        let mic = Array(try loadFixture().prefix(16000 * 4 + 137))
+        let expected = try await manager.process(mic: mic)
+        for operation in ["enhance", "flush", "reset"] {
+            let stream = try await manager.makeStream()
+            let first = Task {
+                try await stream.enhance(mic: mic, reference: [Float](repeating: 0, count: mic.count))
+            }
+            defer { first.cancel() }
+            try await waitForOperations(1, on: stream)
+            let queued = Task { () throws -> [Float] in
+                switch operation {
+                case "enhance":
+                    return try await stream.enhance(mic: mic, reference: [Float](repeating: 0, count: mic.count))
+                case "flush":
+                    return try await stream.flush()
+                default:
+                    try await stream.reset()
+                    return []
+                }
+            }
+            defer { queued.cancel() }
+            try await waitForOperations(2, on: stream)
+            queued.cancel()
+            do {
+                _ = try await queued.value
+                XCTFail("Queued \(operation) should throw CancellationError")
+            } catch is CancellationError {
+                // Cancellation must remove the queued operation without resetting the active clip.
+            }
+            var actual = try await first.value
+            actual.append(contentsOf: try await stream.flush())
+            assertAudioEqual(actual, expected)
+        }
+    }
+
+    func testCancelledActivePushResetsBeforeReuse() async throws {
+        let manager = try loadManager(chunk: .realtime16ms)
+        let mic = try loadFixture()
+        let nextClip = Array(mic.suffix(16000 + 137))
+        let expected = try await manager.process(mic: nextClip)
+        let stream = try await manager.makeStream()
+        let active = Task {
+            try await stream.enhance(mic: mic, reference: [Float](repeating: 0, count: mic.count))
+        }
+        defer { active.cancel() }
+        try await waitForOperations(1, on: stream)
+        active.cancel()
+        do {
+            _ = try await active.value
+            XCTFail("Active push should throw CancellationError")
+        } catch is CancellationError {
+            // A partially processed clip must not contaminate the next one.
+        }
+        var actual = try await stream.enhance(
+            mic: nextClip, reference: [Float](repeating: 0, count: nextClip.count))
+        actual.append(contentsOf: try await stream.flush())
+        assertAudioEqual(actual, expected)
+    }
+
+    func testIndependentStreamsCanRunConcurrently() async throws {
+        let manager = try loadManager(chunk: .realtime16ms)
+        let mic = Array(try loadFixture().prefix(16000 + 137))
+        let otherMic = Array(try loadFixture().suffix(16000 + 73))
+        let expected = try await manager.process(mic: mic)
+        let otherExpected = try await manager.process(mic: otherMic)
+
+        async let actual = manager.process(mic: mic)
+        async let otherActual = manager.process(mic: otherMic)
+        let results = try await (actual, otherActual)
+        assertAudioEqual(results.0, expected)
+        assertAudioEqual(results.1, otherExpected)
     }
 }

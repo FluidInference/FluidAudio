@@ -23,6 +23,11 @@ import OSLog
 /// goes through Core ML's async prediction API, which Apple documents as
 /// thread-safe (WWDC23 10049), so independent streams may run concurrently;
 /// the synchronous API would require serializing every call on the model.
+/// Operations on a single stream are serialized in actor-arrival order. Await
+/// each push before submitting the next to preserve capture order and bound
+/// queued audio. Cancellation while queued leaves the clip untouched;
+/// cancellation or inference failure after a push/flush starts discards the
+/// unfinished clip and resets the stream before the next operation.
 public actor LocalVqeStream {
 
     private static let logger = AppLogger(category: "LocalVqeStream")
@@ -46,6 +51,17 @@ public actor LocalVqeStream {
     private var leadingSamplesToDrop = LocalVqeManager.hopSize
     private var samplesIn = 0
     private var samplesOut = 0
+
+    private struct OperationWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
+    private var operationInProgress = false
+    private var operationWaiters: [OperationWaiter] = []
+
+    /// Internal queue snapshot for deterministic concurrency regression tests.
+    var operationCount: Int { (operationInProgress ? 1 : 0) + operationWaiters.count }
 
     init(model: MLModel, samplesPerCall: Int) throws {
         self.model = model
@@ -87,9 +103,20 @@ public actor LocalVqeStream {
     /// Number of state tensors the model carries between calls.
     public var stateCount: Int { stateNames.count }
 
-    /// Clear all recurrent state and buffered audio; the next call starts a new clip.
-    public func reset() throws {
-        try resetStates()
+    /// Clear all recurrent state and buffered audio after earlier operations
+    /// finish; the next push starts a new clip. Cancel the active task first
+    /// when abandoning an in-flight push instead of waiting for it to finish.
+    public func reset() async throws {
+        try await acquireOperation()
+        defer { releaseOperation() }
+        try Task.checkCancellation()
+        clearClip()
+    }
+
+    private func clearClip() {
+        // Allocate fresh zero states lazily on the next model call. Clearing
+        // after an inference failure must not itself require an allocation.
+        states.removeAll(keepingCapacity: true)
         pendingMic.removeAll(keepingCapacity: true)
         pendingRef.removeAll(keepingCapacity: true)
         leadingSamplesToDrop = LocalVqeManager.hopSize
@@ -97,8 +124,36 @@ public actor LocalVqeStream {
         samplesOut = 0
     }
 
-    private func resetStates() throws {
-        states = try Self.zeroStates(names: stateNames, shapes: stateShapes)
+    private func acquireOperation() async throws {
+        try Task.checkCancellation()
+        guard operationInProgress else {
+            operationInProgress = true
+            return
+        }
+
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                operationWaiters.append(OperationWaiter(id: id, continuation: continuation))
+            }
+        } onCancel: {
+            Task { await self.cancelOperation(id: id) }
+        }
+    }
+
+    private func cancelOperation(id: UUID) {
+        guard let index = operationWaiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = operationWaiters.remove(at: index)
+        waiter.continuation.resume(throwing: CancellationError())
+    }
+
+    private func releaseOperation() {
+        guard !operationWaiters.isEmpty else {
+            operationInProgress = false
+            return
+        }
+        // Transfer ownership without opening a gap for a newly arriving call.
+        operationWaiters.removeFirst().continuation.resume()
     }
 
     private static func zeroStates(names: [String], shapes: [String: [NSNumber]]) throws -> [String: MLMultiArray] {
@@ -123,6 +178,20 @@ public actor LocalVqeStream {
         guard mic.count == reference.count else {
             throw LocalVqeError.lengthMismatch(mic: mic.count, reference: reference.count)
         }
+        try await acquireOperation()
+        defer { releaseOperation() }
+        // A cancelled waiter may have acquired the operation just before its
+        // cancellation handler ran. It must not mutate/reset the current clip.
+        try Task.checkCancellation()
+        do {
+            return try await enhanceExclusive(mic: mic, reference: reference)
+        } catch {
+            clearClip()
+            throw error
+        }
+    }
+
+    private func enhanceExclusive(mic: [Float], reference: [Float]) async throws -> [Float] {
         pendingMic.append(contentsOf: mic)
         pendingRef.append(contentsOf: reference)
         samplesIn += mic.count
@@ -147,9 +216,21 @@ public actor LocalVqeStream {
     /// samples so that total output length equals total input length.
     /// Ends the current clip: the stream is reset afterwards.
     public func flush() async throws -> [Float] {
+        try await acquireOperation()
+        defer { releaseOperation() }
+        try Task.checkCancellation()
+        do {
+            return try await flushExclusive()
+        } catch {
+            clearClip()
+            throw error
+        }
+    }
+
+    private func flushExclusive() async throws -> [Float] {
         let outstanding = samplesIn - samplesOut
         guard outstanding > 0 else {
-            try reset()
+            clearClip()
             return []
         }
         // Zeros needed to complete every outstanding sample, rounded up to whole calls.
@@ -170,7 +251,7 @@ public actor LocalVqeStream {
         }
         let emitted = emit(out)
         let tail = Array(emitted.prefix(outstanding))
-        try reset()
+        clearClip()
         return tail
     }
 
@@ -187,6 +268,10 @@ public actor LocalVqeStream {
     }
 
     private func runCall(mic: ArraySlice<Float>, reference: ArraySlice<Float>) async throws -> [Float] {
+        try Task.checkCancellation()
+        if states.isEmpty {
+            states = try Self.zeroStates(names: stateNames, shapes: stateShapes)
+        }
         micInput.withUnsafeMutableBufferPointer(ofType: Float.self) { buf, _ in
             _ = buf.initialize(from: mic)
         }
@@ -203,8 +288,10 @@ public actor LocalVqeStream {
             let provider = try MLDictionaryFeatureProvider(dictionary: features)
             output = try await model.compatPrediction(from: provider, options: MLPredictionOptions())
         } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
             throw LocalVqeError.modelProcessingFailed(error.localizedDescription)
         }
+        try Task.checkCancellation()
 
         for name in stateNames {
             guard let next = output.featureValue(for: Self.stateOutputPrefix + name)?.multiArrayValue else {

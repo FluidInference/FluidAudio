@@ -53,12 +53,46 @@ let tail = try await stream.flush()
 
 Streams from one manager share its model and may run concurrently: inference
 uses Core ML's async prediction API, which Apple documents as thread-safe.
+Within each stream, `enhance`, `flush`, and `reset` execute in the order they
+reach the actor, including across inference suspension points. Feed a stream
+from one consumer task and await each push before submitting the next: tasks
+launched independently from audio callbacks can arrive out of capture order
+and accumulate queued audio. Run enhancement outside the audio render callback.
 
 `enhance` returns samples as whole model calls complete. Output sample `i`
 corresponds to input sample `i`, delivered one hop (256 samples, 16 ms)
 after the input that produced it plus whatever is still buffered toward the
 next call. `flush()` resets the stream; call `reset()` to start a new clip
 without flushing.
+
+Cancelling an operation while it is queued removes it without changing the
+current clip. Cancelling a running push/flush, or an inference error, discards
+the unfinished clip and clears recurrent state before the next operation.
+Treat this as an audio discontinuity. `reset()` waits for earlier operations;
+to abandon an active push, cancel its task, await its completion, then resume
+with the next clip. A cancelled queued reset does not reset the stream.
+
+For live capture, supply continuous 16 kHz mono mic/reference buffers covering
+the same time intervals. The reference must be the actual far-end playback
+signal. Equal buffer lengths alone do not establish correct timing. Reset on
+capture/playback discontinuities, and validate reference timing, route changes,
+sustained latency and recovery in the application on its target devices before
+enabling enhancement by default. The offline benchmark does not exercise that
+live integration.
+
+Real-model streaming regression tests can be enabled locally or in CI with:
+
+```bash
+FLUIDAUDIO_LOCALVQE_MODEL_DIR=/path/to/compiled/models swift test --filter LocalVqe
+```
+
+The explicit directory must contain both v1.3 chunk variants; a missing bundle
+fails the tests. Without that setting, model tests skip in CI or when the local
+cache is absent. The suite covers overlapping pushes, flush/reset ordering,
+queued and active cancellation, fresh-clip recovery, and independent streams.
+See the [streaming validation report](LocalVQEValidation.md) for the completed
+real-model checks, the local XCTest environment limitation and remaining
+live-integration coverage.
 
 ## Configuration
 
@@ -156,7 +190,7 @@ higher is better.
 | nearend-singletalk | 200 | 5.00 | 4.99 / 4.14 / 2.3 dB / 3.17 | 4.99 / 4.09 / 2.1 dB / 3.17 |
 
 **Upstream protocol (HF model-card reproduction).** The published table was
-produced with the legacy AECMOS model over the first 20 s of each clip; that
+compared using the legacy AECMOS model over the first 20 s of each clip; that
 protocol reproduces the card's unprocessed baseline exactly
 (2.67 / 2.56 / 1.90 / 2.13 / 5.00). Under it, the Core ML port gives:
 
@@ -178,14 +212,24 @@ ERLE and 0.06 OVRL; the far-end rows are not reproduced on any metric (echo
 runtime). Those values are above the published ones, which is not evidence
 that the port outperforms upstream; +0.29 echo MOS is not rounding noise.
 Rendering v1.2 at the pre-v1.2 delay window (dmax 32, which the reference
-config left on the day that row was published) reproduces the card's
-far-end ERLE (44.9 / 40.5 dB) and deg (4.88 / 4.96) but not its echo MOS;
+config left on the day that row was published) brings far-end ERLE
+(44.9 / 40.5 vs 45.7 / 40.6 dB) and degradation (4.88 / 4.96 vs 4.91 / 4.96)
+close to the card, but does not establish which configuration upstream used.
+Its echo MOS moves farther from the card;
 softmax temperature 1.0, the ReLU6 reference, the upstream CLI's output
 format and every scorer/segment variation were also tested and rejected
-(details in the mobius README). The private upstream scoring script is not
-public, so those two cells remain unexplained. An earlier revision of
+(details in the mobius README). None of the tested configurations reproduces
+the whole table. Upstream's evaluation configuration, rendered audio or
+scoring script would help resolve the remaining echo cells. An earlier revision of
 this page said the v1.3 far-end row could not have come from the published
 weights; that was a protocol mismatch and is retracted.
+
+The [follow-up investigation in mobius](https://github.com/FluidInference/mobius/blob/a066485e4c65790fa21b180b7ddf5e22e0f2d044/models/enhancement/localvqe/coreml/REPRODUCTION.md)
+also compares the published PT/GGUF tensors and isolates a historical
+upstream state-copy defect. Testing the original engine on all 300 far-end
+recordings still did not reproduce the card's echo MOS. Its per-recording
+results and precision diagnostics are retained separately from the main
+800-clip benchmark.
 
 **Port fidelity.** The upstream GGML engine was run on the same 800 clips
 and scored on identical, aligned whole-hop samples: every per-scenario mean
