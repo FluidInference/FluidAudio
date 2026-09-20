@@ -2,6 +2,8 @@ import Foundation
 
 /// Model repositories on HuggingFace
 public enum Repo: String, CaseIterable, Sendable {
+    /// CUA-S1-FORMS form-option decision scorer. See Decision/CuaS1Forms.
+    case cuaS1Forms = "FluidInference/cua-s1-forms-coreml"
     case vad = "FluidInference/silero-vad-coreml"
     case parakeetV3 = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
@@ -116,6 +118,8 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Repository slug (without owner)
     public var name: String {
         switch self {
+        case .cuaS1Forms:
+            return "cua-s1-forms-coreml"
         case .chatterbox:
             return "chatterbox-multilingual-coreml"
         case .chatterboxNano:
@@ -375,6 +379,16 @@ public enum ParakeetEncoderPrecision: String, Sendable, CaseIterable {
 
 /// Centralized model names for all FluidAudio components
 public enum ModelNames {
+
+    /// CUA-S1-FORMS model artifact names.
+    public enum CuaS1Forms {
+        /// Fixed 32-option FP16 decision scorer.
+        public static let model = "cua_s1_forms_fp16_options32"
+        /// Compiled scorer downloaded by the Swift manager.
+        public static let modelFile = model + ".mlmodelc"
+        /// Complete set of runtime model artifacts.
+        public static let requiredModels: Set<String> = [modelFile]
+    }
 
     /// Diarizer model names
     public enum Diarizer {
@@ -1660,6 +1674,8 @@ public enum ModelNames {
             return ModelNames.SenseVoice.requiredModels(precision: variant)
         case .campPlus:
             return ModelNames.CampPlus.requiredModels
+        case .cuaS1Forms:
+            return ModelNames.CuaS1Forms.requiredModels
         case .fsmnVad:
             return ModelNames.FsmnVad.requiredModels
         case .paraformerLargeZh:

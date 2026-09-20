@@ -279,6 +279,7 @@ The default is `false` — no behaviour change for existing callers. Combine wit
     - [Segmentation](Documentation/VAD/Segmentation.md)
     - [Model Conversion Code](https://github.com/FluidInference/mobius)
 - [Benchmarks](Documentation/Benchmarks.md)
+- [CUA-S1-FORMS decision scoring](Documentation/API.md#decision-scoring)
 - [API Reference](Documentation/API.md)
 - [Command Line Guide](Documentation/CLI.md)
 

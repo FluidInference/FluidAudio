@@ -1053,3 +1053,95 @@ swift run -c release fluidaudiocli ja-benchmark --decoder tdt --dataset jsut --s
 | Mean RTFx | 28.9x |
 
 **Note:** CER calculation includes number normalization (full-width digits → half-width, kanji numbers → Arabic) matching NVIDIA's evaluation methodology. NVIDIA reports 6.4% CER for the same model on JSUT-basic5000.
+
+## CUA-S1-FORMS decision scoring
+
+Apple M5 Pro, 24 GB, macOS 27.0. Full published synthetic test: **24,370 decisions**,
+with no filtering or truncation. Batch-1 model-call timing excludes encoding, loading, and UI.
+
+| Model / backend | Correct decisions | Accuracy | Median | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Upstream PyTorch / CPU | 24,359 / 24,370 | 99.9549% | 1.787 ms | 3.104 ms |
+| Original FP16 Core ML / CPU + ANE | 24,359 / 24,370 | 99.9549% | 1.003 ms | 1.133 ms |
+| ANE-gather FP16 Core ML / CPU + ANE | 24,359 / 24,370 | 99.9549% | 1.052 ms | 1.177 ms |
+
+Both Core ML exports match PyTorch's selected option on **every row**, including
+the same 11 incorrect fill-for-skip decisions. ANE-gather is **4.8% slower** by
+median; the original remains the default.
+
+**Numerical parity fails for both exports:** 11 rows exceed the 0.005 probability-error
+limit (maximum 0.0204874), and one raw output fails the probability-sum check.
+The Swift runtime fix below handles that output; these accuracy numbers score raw model outputs.
+
+All 11 probability-error cases passed a focused FP32 CPU rerun (max error 0.0000012), pointing to FP16/backend rounding.
+
+[Full report](https://github.com/FluidInference/mobius/blob/main/models/computer-use/cua-s1-forms/coreml/reports/synthetic-test.json) ·
+[Dataset and reproduction](https://github.com/FluidInference/mobius/tree/main/models/computer-use/cua-s1-forms/coreml#full-published-synthetic-test) ·
+[Per-row trace](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/62ffd3653cf0edef7222a886e2006503e2367d10/reports/synthetic-test-decisions.jsonl.gz) ·
+[Swift API](API.md#decision-scoring)
+
+### INT8 weight trial
+
+A matched run over all **24,370 synthetic decisions** on the same M5 Pro:
+
+| Export | Package size | Accuracy | Median | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Original FP16 | 1.51 MB | 99.9549% | 0.990 ms | 1.102 ms |
+| INT8 weights, FP16 compute | 0.81 MB | 99.9549% | 0.990 ms | 1.104 ms |
+
+**46.2% smaller**, with every selected option unchanged and effectively identical
+latency. Numerical parity still fails: 64 rows exceed the 0.005 probability-error
+limit (maximum 0.067738), versus 11 for FP16. No INT8 probability-sum violations
+were observed. The original remains the default.
+
+Batch-1 Core ML CPU+ANE calls, excluding encoding/loading/UI; both models timed
+in the same process with alternating order. [Full report](https://github.com/FluidInference/mobius/blob/main/models/computer-use/cua-s1-forms/coreml/reports/int8-synthetic-test.json) ·
+[INT8 reproduction](https://github.com/FluidInference/mobius/tree/main/models/computer-use/cua-s1-forms/coreml#int8-weight-trial)
+
+### INT4 weight trial
+
+A matched run over all **24,370 synthetic decisions** on M5 Pro, CPU+ANE:
+
+| Export | Package size | Accuracy | Median | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| FP16 control, iOS 18 target | 1.51 MB | 99.9549% | 0.982 ms | 1.081 ms |
+| INT4 weights, FP16 compute | 0.45 MB | 99.9302% | 0.982 ms | 1.082 ms |
+
+**70.1% smaller**, with essentially unchanged latency. INT4 makes **17 errors
+versus 11** for FP16: 14 choices change, introducing 10 errors and correcting four.
+Numerical parity fails: 356 rows exceed the 0.005 probability-error limit
+(maximum 0.754359); no INT4 probability-sum violations were observed.
+
+Packed INT4 requires **iOS 18/macOS 15**. Both exports use the same decomposed
+attention graph and FP16 computation. Batch-1 timing excludes encoding/loading/UI.
+INT8 preserves all choices at 0.81 MB; the original FP16 remains the default.
+
+[Full report](https://github.com/FluidInference/mobius/blob/main/models/computer-use/cua-s1-forms/coreml/reports/int4-synthetic-test.json) ·
+[INT4 reproduction](https://github.com/FluidInference/mobius/tree/main/models/computer-use/cua-s1-forms/coreml#int4-weight-trial)
+
+### Swift probability fix
+
+Stable softmax in Swift fixes the FP16 probability-sum exception: **73,110/73,110 calls
+complete**, covering all 24,370 decisions for FP16, INT8, and INT4. Every selected
+option is unchanged; accuracy remains **99.9549%, 99.9549%, and 99.9302%**, respectively.
+Original model scores remain available as `rawProbabilities`; raw conversion-parity
+failures above remain. [Report and reproduction](https://github.com/FluidInference/mobius/tree/main/models/computer-use/cua-s1-forms/coreml#swift-probability-fix)
+
+### Swift runtime and ANE placement
+
+Separate release Swift benchmark: **200/200 correct per variant** over 50 demo
+controls. Timing includes Swift encoding, inference, and decoding; excludes UI.
+These timings predate the stable-softmax fix; complete SDK latency has not been remeasured.
+
+| Export | ANE operations | CPU operations | Swift median | Swift p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Original | 149 / 173 (86.1%) | 24 | 0.912 ms | 0.933 ms |
+| ANE-gather | 162 / 165 (98.2%) | 3 | 0.961 ms | 0.984 ms |
+
+Higher ANE placement is **5.4% slower** in Swift. Operation counts describe scheduler
+placement, not utilization or energy use. [Swift report](https://github.com/FluidInference/mobius/blob/main/models/computer-use/cua-s1-forms/coreml/reports/swift-variant-comparison.json) ·
+[Compute-plan profiles](https://github.com/FluidInference/mobius/tree/main/models/computer-use/cua-s1-forms/coreml#device-placement)
+
+Browser demonstration: **100/100 decisions** across patient, job, and insurance forms,
+with actual fill/check actions and verified DOM changes. [Recording](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/8b0c36f86a8b24f76f3dd866db62dbb2d2620a02/demo/browser-demo.mp4) ·
+[Browser report](https://github.com/FluidInference/mobius/blob/main/models/computer-use/cua-s1-forms/coreml/reports/browser-validation.json)
