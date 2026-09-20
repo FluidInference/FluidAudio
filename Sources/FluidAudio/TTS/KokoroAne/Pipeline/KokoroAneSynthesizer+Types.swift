@@ -50,17 +50,21 @@ public struct KokoroAneSynthesisResult: Sendable {
     /// the downstream prosody/vocoder stages. Exposing them lets callers
     /// derive token/word timestamps without re-aligning the synthesized audio.
     public let predictedDurations: [Int32]
-    /// Text after written-form normalization, exactly as handed to the G2P
-    /// frontend (`"$45"` → `"forty five dollars"`). Lets callers align their
-    /// display words to the spoken words behind ``inputIds`` /
-    /// ``predictedDurations`` without re-running normalization (issue #943).
+    /// Text after written-form normalization, as handed to the G2P frontend
+    /// (`"$45"` → `"forty five dollars"`). Lets callers align display words to
+    /// the spoken words behind ``inputIds`` / ``predictedDurations`` without
+    /// re-running normalization (issue #943).
     ///
-    /// `nil` when the caller bypassed G2P via
-    /// `synthesizeFromPhonemesDetailed`. Equals the input when nothing was
-    /// rewritten or the input was passed through as pre-computed phonemes.
-    public let normalizedText: String?
-    /// Phoneme string fed to the chain — what ``inputIds`` encodes.
-    public let phonemes: String
+    /// `nil` whenever the input was treated as phonemes rather than text:
+    /// `synthesizeFromPhonemesDetailed`, Japanese pre-computed IPA, or a
+    /// Mandarin string with no Hanzi (bopomofo passthrough). The Mandarin and
+    /// Japanese G2P pipelines apply further internal folding (digit readings,
+    /// punctuation width, NFKC) before tokenizing this string.
+    public internal(set) var normalizedText: String?
+    /// Phoneme string handed to the vocab encoder. ``inputIds`` is this string
+    /// with characters missing from `vocab.json` dropped and BOS/EOS added, so
+    /// the two lengths differ when the string carries out-of-vocab scalars.
+    public internal(set) var phonemes: String
     /// Per-stage timings.
     public let timings: KokoroAneStageTimings
 
@@ -89,22 +93,6 @@ public struct KokoroAneSynthesisResult: Sendable {
         self.normalizedText = normalizedText
         self.phonemes = phonemes
         self.timings = timings
-    }
-
-    /// Copy with the frontend provenance attached. The chain stage only sees
-    /// token ids; the manager knows the text and phonemes that produced them.
-    func attachingFrontend(normalizedText: String?, phonemes: String) -> KokoroAneSynthesisResult {
-        KokoroAneSynthesisResult(
-            samples: samples,
-            sampleRate: sampleRate,
-            encoderTokens: encoderTokens,
-            acousticFrames: acousticFrames,
-            timings: timings,
-            inputIds: inputIds,
-            predictedDurations: predictedDurations,
-            normalizedText: normalizedText,
-            phonemes: phonemes
-        )
     }
 }
 
