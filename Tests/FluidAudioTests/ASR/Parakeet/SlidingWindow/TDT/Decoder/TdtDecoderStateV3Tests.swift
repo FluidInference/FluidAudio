@@ -276,6 +276,40 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         }
     }
 
+    func testMLMultiArrayCopyDataBetweenOverlappingViews() throws {
+        // Two zero-copy views of one allocation, offset by 16 elements, overlap on 48 of their 64
+        // elements; the copy must behave as if the source were read completely first.
+        let backing = try ANEMemoryUtils.createAlignedArray(shape: [1, 96], dataType: .float32)
+        for i in 0..<backing.count {
+            backing[i] = NSNumber(value: Float(i))
+        }
+        let strides: [NSNumber] = [64, 1]
+        let sourceView = try ANEMemoryUtils.createZeroCopyView(
+            from: backing, offset: 0, shape: [1, 64], strides: strides)
+        let destinationView = try ANEMemoryUtils.createZeroCopyView(
+            from: backing, offset: 16, shape: [1, 64], strides: strides)
+
+        destinationView.copyData(from: sourceView)
+
+        for j in 0..<64 {
+            XCTAssertEqual(
+                destinationView[j].floatValue, Float(j), "Element \(j) should hold the original source value")
+        }
+    }
+
+    func testMLMultiArrayCopyDataFromItselfLeavesValues() throws {
+        let array = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        for i in 0..<array.count {
+            array[i] = NSNumber(value: Float(i) * 0.5)
+        }
+
+        array.copyData(from: array)
+
+        for i in stride(from: 0, to: array.count, by: 97) {
+            XCTAssertEqual(array[i].floatValue, Float(i) * 0.5, "Element \(i) should be unchanged")
+        }
+    }
+
     func testMLMultiArrayCopyDataNonFloat() throws {
         let sourceArray = try MLMultiArray(shape: [2, 3], dataType: .int32)
         let destArray = try MLMultiArray(shape: [2, 3], dataType: .int32)

@@ -128,8 +128,12 @@ extension MLMultiArray {
     }
 
     /// Copies every element from `source`. Identical layouts copy the backing storage in one
-    /// `memcpy`; anything else goes element by element.
+    /// `memmove`, which stays correct when the two arrays are views of one allocation; anything else
+    /// goes element by element.
     func copyData(from source: MLMultiArray) {
+        if self === source {
+            return
+        }
         let copied = withUnsafeMutableBytes { destination, _ -> Bool in
             source.withUnsafeBytes { origin -> Bool in
                 guard dataType == source.dataType, shape == source.shape, strides == source.strides,
@@ -138,7 +142,7 @@ extension MLMultiArray {
                 else {
                     return false
                 }
-                memcpy(to, from, destination.count)
+                memmove(to, from, destination.count)
                 return true
             }
         }

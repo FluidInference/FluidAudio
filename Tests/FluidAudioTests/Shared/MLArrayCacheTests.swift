@@ -241,6 +241,11 @@ final class MLArrayCacheTests: XCTestCase {
         for i in 0..<cachedArray.count {
             XCTAssertEqual(cachedArray[i].floatValue, 0.0, "Element \(i) should be zero")
         }
+        cachedArray.withUnsafeBytes { bytes in
+            let values = bytes.bindMemory(to: Float.self)
+            XCTAssertGreaterThan(values.count, cachedArray.count, "The aligned layout should carry padding")
+            XCTAssertTrue(values.allSatisfy { $0 == 0 }, "Padding bytes should be zero too")
+        }
     }
 
     // MARK: - Global Cache Tests
