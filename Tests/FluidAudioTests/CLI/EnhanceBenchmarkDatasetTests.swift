@@ -72,6 +72,22 @@ final class EnhanceBenchmarkDatasetTests: XCTestCase {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
     }
 
+    func testRejectsNonCanonicalFileIDs() throws {
+        for id in ["01", "-1", "abc", "../other"] {
+            let directory = try metadataDirectory([header, "\(id),0,0,0,1"].joined(separator: "\n"))
+            XCTAssertThrowsError(try EnhanceBenchmarkDataset.loadExamples(from: directory, fileExists: { _ in true }))
+        }
+    }
+
+    func testRejectsInvalidBooleanFlags() throws {
+        let directory = try metadataDirectory([header, "1,0,2,0,1"].joined(separator: "\n"))
+        XCTAssertThrowsError(try EnhanceBenchmarkDataset.loadExamples(from: directory, fileExists: { _ in true })) {
+            XCTAssertEqual(
+                $0 as? EnhanceBenchmarkDataset.DatasetError,
+                .invalidInteger(line: 2, column: "is_farend_noisy", value: "2"))
+        }
+    }
+
     private func metadataDirectory(_ metadata: String) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -24,8 +24,14 @@ jobs:
       - name: Build package
         run: swift build
 
-      - name: Run tests
-        run: swift test --parallel --num-workers $(sysctl -n hw.ncpu)
+      # Enrollment tests load the same Sortformer cache from separate XCTest
+      # workers. Serialize them on a cold runner to avoid racing .partial files.
+      - name: Run speaker enrollment tests serially
+        run: swift test --filter SpeakerEnrollmentTests
+        timeout-minutes: 20
+
+      - name: Run remaining tests
+        run: swift test --parallel --num-workers $(sysctl -n hw.ncpu) --skip SpeakerEnrollmentTests
         timeout-minutes: 20
 
   build-without-nemo-text-processing:

@@ -59,7 +59,7 @@ enum EnhanceBenchmarkCommand {
                 printUsage()
                 exit(0)
             case "--dataset-dir":
-                options.datasetDir = next(arguments, &index)
+                options.datasetDir = requiredValue(arguments, &index)
             case "--max-files":
                 guard let raw = next(arguments, &index), let maxFiles = Int(raw), maxFiles > 0 else {
                     logger.error("--max-files must be a positive integer")
@@ -67,9 +67,12 @@ enum EnhanceBenchmarkCommand {
                 }
                 options.maxFiles = maxFiles
             case "--variants":
-                let raw = (next(arguments, &index) ?? "").split(separator: ",").map(String.init)
+                let raw = (next(arguments, &index) ?? "").split(separator: ",", omittingEmptySubsequences: false)
+                    .map(String.init)
                 let parsed = raw.compactMap(LocalVqeVariant.init(rawValue:))
-                guard parsed.count == raw.count, !parsed.isEmpty else {
+                guard parsed.count == raw.count, !parsed.isEmpty,
+                    Set(parsed.map(\.rawValue)).count == parsed.count
+                else {
                     logger.error("--variants must be a comma list of \(LocalVqeVariant.allCases.map(\.rawValue))")
                     exit(1)
                 }
@@ -93,9 +96,10 @@ enum EnhanceBenchmarkCommand {
             case "--no-reference":
                 options.includeNoReference = true
             case "--output":
-                options.outputPath = next(arguments, &index)
+                options.outputPath = requiredValue(arguments, &index)
             default:
-                logger.warning("Unknown option: \(arg)")
+                logger.error("Unknown option: \(arg)")
+                exit(1)
             }
             index += 1
         }
@@ -109,10 +113,14 @@ enum EnhanceBenchmarkCommand {
                 exit(1)
             }
             report("Dataset: \(datasetDir.path) (\(examples.count) examples)")
+            let startedAt = Date()
+            let audioHashes = options.outputPath == nil ? [:] : try EnhanceBenchmarkProvenance.audioFiles(examples)
 
             let asr = AsrManager()
-            try await asr.loadModels(try await AsrModels.downloadAndLoad())
-            report("ASR: Parakeet TDT v3 loaded")
+            let asrConfiguration = MLModelConfigurationUtils.defaultConfiguration(computeUnits: .cpuOnly)
+            try await asr.loadModels(
+                try await AsrModels.downloadAndLoad(configuration: asrConfiguration, version: .v3))
+            report("ASR: Parakeet TDT v3 int8 loaded (CPU-only)")
 
             var conditions: [(name: String, manager: LocalVqeManager?, useReference: Bool)] = [
                 ("unprocessed", nil, true)
@@ -126,6 +134,11 @@ enum EnhanceBenchmarkCommand {
                 }
             }
             report("Conditions: \(conditions.map(\.name).joined(separator: ", "))")
+            let modelHashes =
+                options.outputPath == nil
+                ? [:]
+                : try EnhanceBenchmarkProvenance.modelFiles(
+                    variants: options.variants, chunk: options.chunk)
 
             let converter = AudioConverter()
             var totals = [String: ConditionTotals]()
@@ -135,13 +148,9 @@ enum EnhanceBenchmarkCommand {
 
             for (i, example) in examples.enumerated() {
                 let mic = try converter.resampleAudioFile(example.mic)
-                var lpb = try converter.resampleAudioFile(example.lpb)
+                let lpb = try converter.resampleAudioFile(example.lpb)
                 let clean = try converter.resampleAudioFile(example.clean)
-                if lpb.count < mic.count {
-                    lpb.append(contentsOf: [Float](repeating: 0, count: mic.count - lpb.count))
-                } else if lpb.count > mic.count {
-                    lpb.removeLast(lpb.count - mic.count)
-                }
+                try validateAudio(mic: mic, reference: lpb, clean: clean, fileID: example.fileID)
 
                 let refWords = words(try await transcribe(asr, clean))
                 if refWords.isEmpty {
@@ -158,6 +167,7 @@ enum EnhanceBenchmarkCommand {
                     "far_reference": farWords.joined(separator: " "),
                     "is_farend_noisy": example.farendNoisy,
                     "is_nearend_noisy": example.nearendNoisy,
+                    "audio_seconds": Double(mic.count) / Double(LocalVqeManager.sampleRate),
                 ]
 
                 for condition in conditions {
@@ -165,9 +175,14 @@ enum EnhanceBenchmarkCommand {
                     var enhanceSeconds = 0.0
                     if let manager = condition.manager {
                         let reference = condition.useReference ? lpb : [Float](repeating: 0, count: mic.count)
-                        let start = Date()
+                        let start = ContinuousClock.now
                         enhanced = try await manager.process(mic: mic, reference: reference)
-                        enhanceSeconds = Date().timeIntervalSince(start)
+                        let elapsed = start.duration(to: .now).components
+                        enhanceSeconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+                    }
+                    guard enhanced.count == mic.count, enhanced.allSatisfy(\.isFinite) else {
+                        throw LocalVqeError.modelProcessingFailed(
+                            "Invalid \(condition.name) output for fileid \(example.fileID)")
                     }
                     let hypWords = words(try await transcribe(asr, enhanced))
                     let m = score(hypothesis: hypWords, reference: refWords, farEnd: farWords)
@@ -195,6 +210,12 @@ enum EnhanceBenchmarkCommand {
                     row["\(condition.name)_wer"] = refWords.isEmpty ? 0 : Double(m.errors) / Double(refWords.count)
                     row["\(condition.name)_leaked"] = m.leaked
                     row["\(condition.name)_hyp"] = hypWords.joined(separator: " ")
+                    row["\(condition.name)_hits"] = m.hits
+                    row["\(condition.name)_errors"] = m.errors
+                    row["\(condition.name)_insertions"] = m.insertions
+                    row["\(condition.name)_deletions"] = m.deletions
+                    row["\(condition.name)_substitutions"] = m.substitutions
+                    row["\(condition.name)_enhancement_seconds"] = enhanceSeconds
                 }
                 rows.append(row)
 
@@ -207,6 +228,10 @@ enum EnhanceBenchmarkCommand {
                 }
             }
 
+            guard !rows.isEmpty else {
+                throw LocalVqeError.modelProcessingFailed(
+                    "No examples were scored: all \(examples.count) clean-reference transcripts were empty")
+            }
             report("")
             if !emptyReferenceFileIDs.isEmpty {
                 report(
@@ -243,21 +268,39 @@ enum EnhanceBenchmarkCommand {
                     ]
                 }
                 let payload: [String: Any] = [
+                    "schema_version": 2,
+                    "protocol": "localvqe-asr-v2",
+                    "started_at": ISO8601DateFormatter().string(from: startedAt),
+                    "completed_at": ISO8601DateFormatter().string(from: Date()),
+                    "conditions": conditions.map(\.name),
+                    "configuration": [
+                        "asr": "parakeet-tdt-v3-int8", "asr_compute_units": "cpu-only",
+                        "enhancement_compute_units": options.computeUnits.rawValue,
+                        "normalization": "TextNormalizer.normalize", "sample_rate": LocalVqeManager.sampleRate,
+                        "aggregation": "micro", "empty_reference_policy": "exclude-from-all-conditions",
+                    ],
+                    "model_files_sha256": modelHashes,
+                    "environment": [
+                        "os": ProcessInfo.processInfo.operatingSystemVersionString,
+                        "processor_count": ProcessInfo.processInfo.processorCount,
+                        "source_revision": ProcessInfo.processInfo.environment["GITHUB_SHA"] ?? "unrecorded",
+                    ],
                     "dataset": [
                         "path": datasetDir.path,
-                        "repository": datasetRepo,
+                        "repository": options.datasetDir == nil ? datasetRepo : "custom",
                         "revision": options.datasetDir == nil ? datasetRevision : "custom",
                         "archive_sha256": options.datasetDir == nil ? datasetArchiveSHA256 : NSNull(),
                         "metadata_sha256": try EnhanceBenchmarkDataset.sha256(
                             of: datasetDir.appendingPathComponent("meta.csv")),
                         "selection_order": "numeric fileid",
                         "selected_fileids": examples.map(\.fileID),
+                        "audio_files_sha256": audioHashes,
                     ],
                     "chunk": options.chunk.rawValue, "summary": summary, "files": rows,
                     "excluded_empty_reference_fileids": emptyReferenceFileIDs,
                 ]
                 let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
-                try data.write(to: URL(fileURLWithPath: outputPath))
+                try data.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
                 report("Wrote \(outputPath)")
             }
         } catch {
@@ -280,11 +323,10 @@ enum EnhanceBenchmarkCommand {
     /// hits = reference words kept by the hypothesis (N - deletions - substitutions);
     /// errors = S + D + I; leaked = far-end words present in the hypothesis beyond
     /// what the near-end reference accounts for (multiset).
-    private static func score(
+    static func score(
         hypothesis: [String], reference: [String], farEnd: [String]
-    ) -> (hits: Int, errors: Int, leaked: Int) {
-        let m = WERCalculator.calculateWERMetrics(
-            hypothesis: hypothesis.joined(separator: " "), reference: reference.joined(separator: " "))
+    ) -> (hits: Int, errors: Int, leaked: Int, insertions: Int, deletions: Int, substitutions: Int) {
+        let m = WERCalculator.calculateWordMetrics(hypothesis: hypothesis, reference: reference)
         let hits = max(0, m.totalWords - m.deletions - m.substitutions)
         let errors = m.insertions + m.deletions + m.substitutions
 
@@ -296,7 +338,16 @@ enum EnhanceBenchmarkCommand {
             spare[w, default: 0] -= 1
             leaked += 1
         }
-        return (hits, errors, leaked)
+        return (hits, errors, leaked, m.insertions, m.deletions, m.substitutions)
+    }
+
+    static func validateAudio(mic: [Float], reference: [Float], clean: [Float], fileID: String) throws {
+        guard !mic.isEmpty, mic.count == reference.count, mic.count == clean.count else {
+            throw LocalVqeError.modelProcessingFailed("Empty or unequal audio lengths for fileid \(fileID)")
+        }
+        guard mic.allSatisfy(\.isFinite), reference.allSatisfy(\.isFinite), clean.allSatisfy(\.isFinite) else {
+            throw LocalVqeError.modelProcessingFailed("Non-finite audio samples for fileid \(fileID)")
+        }
     }
 
     private static func pct(_ value: Double) -> String {
@@ -376,9 +427,18 @@ enum EnhanceBenchmarkCommand {
     }
 
     private static func next(_ arguments: [String], _ index: inout Int) -> String? {
-        guard index + 1 < arguments.count else { return nil }
+        guard index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--") else { return nil }
         index += 1
         return arguments[index]
+    }
+
+    private static func requiredValue(_ arguments: [String], _ index: inout Int) -> String {
+        let option = arguments[index]
+        guard let value = next(arguments, &index), !value.isEmpty else {
+            logger.error("\(option) requires a value")
+            exit(1)
+        }
+        return value
     }
 
     private static func report(_ line: String) {

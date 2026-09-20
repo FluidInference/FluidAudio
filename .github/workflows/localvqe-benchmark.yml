@@ -1,0 +1,75 @@
+name: LocalVQE Benchmark
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/localvqe-benchmark.yml'
+      - 'Sources/FluidAudio/Enhancement/**'
+      - 'Sources/FluidAudio/ASR/Parakeet/**'
+      - 'Sources/FluidAudio/Shared/Download/**'
+      - 'Sources/FluidAudio/ModelNames.swift'
+      - 'Sources/FluidAudio/ModelRegistry.swift'
+      - 'Sources/FluidAudioCLI/Commands/EnhanceBenchmark*.swift'
+      - 'Sources/FluidAudioCLI/Utils/WERCalculator.swift'
+      - 'Sources/FluidAudioCLI/Utils/TextNormalizer.swift'
+      - 'Tests/FluidAudioTests/CLI/EnhanceBenchmark*'
+      - 'Tests/FluidAudioTests/CLI/WERCalculatorTests.swift'
+      - 'Scripts/verify_localvqe_benchmark.py'
+      - 'Scripts/test_verify_localvqe_benchmark.py'
+      - 'Scripts/localvqe-dataset.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: localvqe-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: LocalVQE 200-example ASR benchmark
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Record environment
+        run: |
+          mkdir -p localvqe-results
+          {
+            git rev-parse HEAD
+            swift --version
+            xcodebuild -version
+            sw_vers
+            sysctl -n machdep.cpu.brand_string
+          } > localvqe-results/environment.txt
+
+      - name: Run scoring and manifest regressions
+        run: swift test --filter 'EnhanceBenchmark|WERCalculatorTests|ModelRegistryTests'
+
+      - name: Build release benchmark
+        run: swift build -c release --product fluidaudiocli
+
+      - name: Score fixed 200-example dataset
+        run: |
+          set -o pipefail
+          .build/release/fluidaudiocli enhance-benchmark \
+            --variants v1.3,v1.2 --chunk 256ms --compute-units cpu-only \
+            --output localvqe-results/benchmark.json 2>&1 | tee localvqe-results/benchmark.log
+
+      - name: Verify coverage, scores and improvement over unprocessed audio
+        run: |
+          LOCALVQE_BENCHMARK_REPORT=localvqe-results/benchmark.json \
+            python3 Scripts/test_verify_localvqe_benchmark.py
+          python3 Scripts/verify_localvqe_benchmark.py localvqe-results/benchmark.json \
+            --expected-files 200 --require-improvement --markdown "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: localvqe-benchmark-${{ github.sha }}
+          path: localvqe-results/
+          retention-days: 30

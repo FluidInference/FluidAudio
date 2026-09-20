@@ -15,10 +15,18 @@ enum WERCalculator {
         let hypWords = hypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
         let refWords = reference.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
 
-        let distance = editDistance(hypWords, refWords)
-        let wer = refWords.isEmpty ? 0.0 : Double(distance.total) / Double(refWords.count)
+        return calculateWordMetrics(hypothesis: hypWords, reference: refWords)
+    }
 
-        return (wer, distance.insertions, distance.deletions, distance.substitutions, refWords.count)
+    /// Score already-normalized tokens without applying text normalization again.
+    static func calculateWordMetrics(
+        hypothesis: [String], reference: [String]
+    )
+        -> (wer: Double, insertions: Int, deletions: Int, substitutions: Int, totalWords: Int)
+    {
+        let distance = editDistance(hypothesis, reference)
+        let wer = reference.isEmpty ? 0.0 : Double(distance.total) / Double(reference.count)
+        return (wer, distance.insertions, distance.deletions, distance.substitutions, reference.count)
     }
 
     /// Compute character-level CER alongside WER if needed.

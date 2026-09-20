@@ -117,12 +117,20 @@ enum EnhanceBenchmarkDataset {
             }
             let fileID = rowFields[fileIDIndex]
             guard !fileID.isEmpty else { throw DatasetError.missingFileID(line: lineNumber) }
+            guard let numericID = Int(fileID), numericID >= 0, String(numericID) == fileID else {
+                throw DatasetError.invalidInteger(line: lineNumber, column: "fileid", value: fileID)
+            }
             guard seen.insert(fileID).inserted else { throw DatasetError.duplicateFileID(fileID) }
             let ser = try integer("ser", value: rowFields[serIndex], line: lineNumber)
             let farendNoisy = try integer(
                 "is_farend_noisy", value: rowFields[farendNoisyIndex], line: lineNumber)
             let nearendNoisy = try integer(
                 "is_nearend_noisy", value: rowFields[nearendNoisyIndex], line: lineNumber)
+            for (column, value) in [("is_farend_noisy", farendNoisy), ("is_nearend_noisy", nearendNoisy)] {
+                guard value == 0 || value == 1 else {
+                    throw DatasetError.invalidInteger(line: lineNumber, column: column, value: String(value))
+                }
+            }
             rows.append(
                 MetadataRow(
                     fileID: fileID,

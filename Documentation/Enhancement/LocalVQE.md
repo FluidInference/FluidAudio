@@ -212,7 +212,7 @@ Selecting the closer gated result does not prove that upstream used this gate.
 
 Unprocessed baseline: exact. v1.3: double-talk and near-end within 0.01
 echo MOS; far-end 0.15 low from aligned float output and within 0.04 when
-the upstream CLI's raw 16-bit, one-hop-late output is scored instead; gated
+the upstream CLI's raw 16-bit, one-hop-late output is scored instead;
 gated ERLE within 0.8 dB and OVRL within 0.01 (full columns in the mobius
 README). v1.2: double-talk and near-end within 0.02 echo, 0.02 deg, 0.1 dB
 gated ERLE and 0.06 OVRL; the far-end rows are not reproduced on any metric (echo
@@ -294,6 +294,44 @@ scored 100% recall. Fixed in `WERCalculator` (WER itself was unaffected).
 When `--output` is used, the JSON includes the dataset revision and hashes,
 numeric-file-ID selection order, exact selected/excluded IDs, both machine
 reference transcripts and the raw word-count numerators and denominators.
+
+### Automated benchmark
+
+The **LocalVQE Benchmark** GitHub Actions workflow runs all 200 examples with
+both variants, CPU-only enhancement and Parakeet v3's default `int8` encoder
+(`Encoder.mlmodelc`) on CPU. It runs on relevant PR changes and supports manual
+dispatch after the workflow is on the default branch. The `localvqe-asr-v2`
+report records per-file S/D/I counts, duration and enhancement time, exact
+audio/model SHA256 fingerprints, compute configuration, OS and source revision.
+This CPU-only protocol is explicit; the earlier exploratory numbers above
+should not be treated as its frozen regression baseline.
+
+The independent verifier recomputes edits, word leakage and micro-averaged
+summaries from the saved transcripts. It requires exact selected/scored/excluded
+coverage, both enhancement conditions, and waveform hashes matching the pinned
+archive. `Scripts/localvqe-dataset.json` contains the 200 IDs and 600 waveform
+hashes extracted from that checksum-verified archive. IDs are sparse; a three-file
+smoke run selects `0`, `1`, `10`. No metrics are used to choose that subset.
+
+The full cloud run must improve recall and reduce leakage relative to its own
+unprocessed condition for both variants. This is a broad quality sanity check,
+not a claim of reproducing the upstream AECMOS/ERLE table or a held-out evaluation.
+The JSON, logs and environment are uploaded as a 30-day workflow artifact;
+results also appear in the workflow summary. Virtual-machine RTFx does not
+represent physical-device performance. Model fingerprints identify the bytes
+actually loaded; model downloads still follow their published repository defaults.
+
+For a small local pipeline check:
+
+```bash
+swift run -c release fluidaudiocli enhance-benchmark --max-files 3 --output smoke.json
+python3 Scripts/verify_localvqe_benchmark.py smoke.json --expected-files 3
+```
+
+For the full run, omit `--max-files` and verify with `--expected-files 200
+--require-improvement`. Empty/mismatched audio, invalid arguments, invalid output
+samples and zero scored references fail the command. An empty reference is
+excluded from every condition and listed explicitly.
 
 ```bash
 swift run -c release fluidaudiocli enhance-benchmark                      # both variants, 200 files
