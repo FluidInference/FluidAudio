@@ -4,11 +4,11 @@ FluidAudio support for NVIDIA's **Nemotron 3 Diarization** (streaming Sortformer
 successor): up to **8 speakers**, arrival-order speaker channels, 10 ms output
 resolution, streaming and offline profiles from a single checkpoint.
 
-> **Model availability:** the checkpoint is currently an early-access preview under
-> an NVIDIA evaluation license, so converted CoreML models are **not distributed**
-> with FluidAudio yet — they load from a local directory. HuggingFace auto-download
-> and full benchmark tables (DER / RTFx) will be published when NVIDIA's public
-> release lands.
+> **Model availability:** the converted CoreML presets are published at
+> [`FluidInference/nemotron-3-diarization-coreml`](https://huggingface.co/FluidInference/nemotron-3-diarization-coreml)
+> (gated until NVIDIA's public release — request access, then set `HF_TOKEN`;
+> ungated afterwards). `Nemotron3Models.loadFromHuggingFace` downloads one preset
+> bundle on first use; `Nemotron3Models.load(config:directory:)` loads a local copy.
 
 ## Quick start
 
@@ -16,10 +16,7 @@ resolution, streaming and offline profiles from a single checkpoint.
 import FluidAudio
 
 let config = Nemotron3Config.fast32  // recommended default
-let models = try await Nemotron3Models.load(
-    config: config,
-    directory: localModelsDirectoryURL
-)
+let models = try await Nemotron3Models.loadFromHuggingFace(config: config)
 let diarizer = Nemotron3Diarizer(config: config, models: models)
 
 let (probs, frames) = try diarizer.processComplete(audioSamples)  // 16 kHz mono
@@ -33,6 +30,31 @@ preserving the output timeline):
 ```swift
 let (probs, frames) = try diarizer.processComplete(audioSamples, speechMask: mask)
 ```
+
+## Streaming (microphone / live audio)
+
+Feed 16 kHz samples as they arrive; a chunk runs as soon as its right context is
+buffered (`config.latencySeconds` after the chunk starts) and returns
+`config.chunkSeconds` of new 10 ms frames. The path is frame-exact with
+`processComplete` on the same audio.
+
+```swift
+diarizer.reset()
+for samples in microphoneSteps {            // any granularity, e.g. 320 ms
+    diarizer.appendAudio(samples)
+    for chunk in try diarizer.processBufferedAudio() {
+        timeline.append(contentsOf: chunk.probabilities)   // [frames * 8]
+    }
+}
+for chunk in try diarizer.finishStream() {  // flushes the trailing partial chunk
+    timeline.append(contentsOf: chunk.probabilities)
+}
+```
+
+`Nemotron3Diarizer` is not thread-safe: own it from one actor or task. For
+word→speaker attribution pair it with
+`StreamingUnifiedAsrManager.consumeWordTimings()` and pick, per word, the speaker
+slot with the most activity over the word's span.
 
 ## Choosing a preset
 
@@ -67,19 +89,24 @@ presets above for typical use.
 ## CLI
 
 ```bash
-# Diarize a file (prints segments; --output writes RTTM)
-swift run fluidaudiocli nemotron3-diarize audio.wav --models <dir> --variant fast32
+# Diarize a file (prints segments; --output writes RTTM). Downloads the preset on first use.
+swift run fluidaudiocli nemotron3-diarize audio.wav --variant fast32
+
+# Same audio through the live path (appendAudio / processBufferedAudio / finishStream)
+swift run fluidaudiocli nemotron3-diarize audio.wav --variant fast32 --streaming
 
 # Benchmark against AMI / VoxConverse harnesses
-swift run fluidaudiocli nemotron3-benchmark --models <dir> --variant fast32 --collar 0
+swift run fluidaudiocli nemotron3-benchmark --variant fast32 --collar 0
 
 # Batch processing with concurrent GPU workers
-swift run fluidaudiocli nemotron3-batch --models <dir> --workers 2 --files a,b,c
+swift run fluidaudiocli nemotron3-batch --workers 2 --files a,b,c
 ```
 
-Useful flags: `--compute-units ane|gpu|all`, `--profile` (per-stage wall breakdown),
-`--vad` (Silero-gated processing), sweep flags (`--chunk-len`, `--fifo`,
-`--spkcache`, `--rc`, `--update-period`) for custom-converted models.
+Useful flags: `--models <dir>` (local bundles instead of the HF download; required for
+`verylow`/`ultra` and sweep variants), `--compute-units ane|gpu|all`, `--profile`
+(per-stage wall breakdown), `--vad` (Silero-gated processing), sweep flags
+(`--chunk-len`, `--fifo`, `--spkcache`, `--rc`, `--update-period`) for
+custom-converted models.
 
 ## Implementation notes
 
