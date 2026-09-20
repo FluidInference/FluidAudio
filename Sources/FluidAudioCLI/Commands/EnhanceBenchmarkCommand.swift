@@ -18,6 +18,10 @@ enum EnhanceBenchmarkCommand {
     static let datasetRepo = "FluidInference/aec-challenge-synthetic-mini"
     static let datasetArchive = "aec-synthetic-mini.tar.gz"
     static let datasetFolder = "aec-synthetic-mini"
+    static let datasetRevision = "1f3714b5a3f98cedef1bbb017f21bbd7ae688596"
+    static let datasetArchiveSHA256 = "45ff5d7acfce499558c25a0eace45eb819cec8aa76420fe733de7ee116ae548d"
+    static let datasetMetadataSHA256 = "865aff8e66eb682c292f42a9d747d931f3a2f71f18e16fec53aea80dbdc2eacc"
+    static let expectedDatasetExamples = 200
 
     private struct Options {
         var datasetDir: String?
@@ -27,15 +31,6 @@ enum EnhanceBenchmarkCommand {
         var computeUnits: MLComputeUnits = .cpuOnly
         var includeNoReference = false
         var outputPath: String?
-    }
-
-    private struct Example {
-        let fileID: String
-        let mic: URL
-        let lpb: URL
-        let clean: URL
-        let ser: Int?
-        let nearendNoisy: Bool
     }
 
     private struct ConditionTotals {
@@ -66,7 +61,11 @@ enum EnhanceBenchmarkCommand {
             case "--dataset-dir":
                 options.datasetDir = next(arguments, &index)
             case "--max-files":
-                options.maxFiles = Int(next(arguments, &index) ?? "")
+                guard let raw = next(arguments, &index), let maxFiles = Int(raw), maxFiles > 0 else {
+                    logger.error("--max-files must be a positive integer")
+                    exit(1)
+                }
+                options.maxFiles = maxFiles
             case "--variants":
                 let raw = (next(arguments, &index) ?? "").split(separator: ",").map(String.init)
                 let parsed = raw.compactMap(LocalVqeVariant.init(rawValue:))
@@ -103,7 +102,7 @@ enum EnhanceBenchmarkCommand {
 
         do {
             let datasetDir = try await resolveDataset(options.datasetDir)
-            var examples = try loadExamples(from: datasetDir)
+            var examples = try EnhanceBenchmarkDataset.loadExamples(from: datasetDir)
             if let maxFiles = options.maxFiles { examples = Array(examples.prefix(maxFiles)) }
             guard !examples.isEmpty else {
                 logger.error("No examples found in \(datasetDir.path)")
@@ -132,7 +131,7 @@ enum EnhanceBenchmarkCommand {
             var totals = [String: ConditionTotals]()
             var bySer = [String: [String: ConditionTotals]]()  // bucket -> condition -> totals
             var rows: [[String: Any]] = []
-            var emptyReferences = 0
+            var emptyReferenceFileIDs: [String] = []
 
             for (i, example) in examples.enumerated() {
                 let mic = try converter.resampleAudioFile(example.mic)
@@ -148,14 +147,17 @@ enum EnhanceBenchmarkCommand {
                 if refWords.isEmpty {
                     // No reference words to recall: the ASR produced nothing on the
                     // clean near-end clip. Excluded from every metric and counted.
-                    emptyReferences += 1
+                    emptyReferenceFileIDs.append(example.fileID)
                     continue
                 }
                 let farWords = words(try await transcribe(asr, lpb))
                 let bucket = serBucket(example.ser)
                 var row: [String: Any] = [
-                    "fileid": example.fileID, "ser": example.ser as Any, "ref_words": refWords.count,
+                    "fileid": example.fileID, "ser": example.ser, "ref_words": refWords.count,
                     "far_words": farWords.count, "reference": refWords.joined(separator: " "),
+                    "far_reference": farWords.joined(separator: " "),
+                    "is_farend_noisy": example.farendNoisy,
+                    "is_nearend_noisy": example.nearendNoisy,
                 ]
 
                 for condition in conditions {
@@ -206,8 +208,10 @@ enum EnhanceBenchmarkCommand {
             }
 
             report("")
-            if emptyReferences > 0 {
-                report("Excluded \(emptyReferences) examples whose clean near-end transcript was empty.")
+            if !emptyReferenceFileIDs.isEmpty {
+                report(
+                    "Excluded \(emptyReferenceFileIDs.count) examples whose clean near-end transcript was empty: "
+                        + emptyReferenceFileIDs.joined(separator: ", "))
             }
             report(row(["condition", "files", "recall", "WER", "leakage", "RTFx"]))
             for condition in conditions {
@@ -233,11 +237,24 @@ enum EnhanceBenchmarkCommand {
                 for (name, t) in totals {
                     summary[name] = [
                         "files": t.files, "recall": t.recall, "wer": t.wer, "leakage": t.leakage, "rtfx": t.rtfx,
+                        "reference_words": t.refWords, "hits": t.hits, "errors": t.errors,
+                        "far_end_words": t.farWords, "leaked_words": t.leaked,
+                        "audio_seconds": t.audioSeconds, "enhancement_seconds": t.enhanceSeconds,
                     ]
                 }
                 let payload: [String: Any] = [
-                    "dataset": datasetDir.path, "chunk": options.chunk.rawValue, "summary": summary, "files": rows,
-                    "excluded_empty_reference": emptyReferences,
+                    "dataset": [
+                        "path": datasetDir.path,
+                        "repository": datasetRepo,
+                        "revision": options.datasetDir == nil ? datasetRevision : "custom",
+                        "archive_sha256": options.datasetDir == nil ? datasetArchiveSHA256 : NSNull(),
+                        "metadata_sha256": try EnhanceBenchmarkDataset.sha256(
+                            of: datasetDir.appendingPathComponent("meta.csv")),
+                        "selection_order": "numeric fileid",
+                        "selected_fileids": examples.map(\.fileID),
+                    ],
+                    "chunk": options.chunk.rawValue, "summary": summary, "files": rows,
+                    "excluded_empty_reference_fileids": emptyReferenceFileIDs,
                 ]
                 let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
                 try data.write(to: URL(fileURLWithPath: outputPath))
@@ -273,10 +290,10 @@ enum EnhanceBenchmarkCommand {
 
         var spare = [String: Int]()
         for w in hypothesis { spare[w, default: 0] += 1 }
-        for w in reference where spare[w, default: 0] > 0 { spare[w]! -= 1 }
+        for w in reference where spare[w, default: 0] > 0 { spare[w, default: 0] -= 1 }
         var leaked = 0
         for w in farEnd where spare[w, default: 0] > 0 {
-            spare[w]! -= 1
+            spare[w, default: 0] -= 1
             leaked += 1
         }
         return (hits, errors, leaked)
@@ -311,14 +328,20 @@ enum EnhanceBenchmarkCommand {
             .appendingPathComponent("Library/Application Support/FluidAudio/Datasets", isDirectory: true)
         let dir = base.appendingPathComponent(datasetFolder, isDirectory: true)
         if FileManager.default.fileExists(atPath: dir.appendingPathComponent("meta.csv").path) {
+            try validatePinnedDataset(dir)
             return dir
         }
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let url = try ModelRegistry.resolveDataset(datasetRepo, datasetArchive)
+        let url = try ModelRegistry.resolveDataset(datasetRepo, datasetArchive, revision: datasetRevision)
         report("Downloading \(url.absoluteString)")
         let (tmp, response) = try await URLSession.shared.download(from: url)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw LocalVqeError.modelProcessingFailed("dataset download failed: \(response)")
+        }
+        let actualArchiveHash = try EnhanceBenchmarkDataset.sha256(of: tmp)
+        guard actualArchiveHash == datasetArchiveSHA256 else {
+            throw LocalVqeError.modelProcessingFailed(
+                "dataset archive checksum mismatch: expected \(datasetArchiveSHA256), got \(actualArchiveHash)")
         }
         let archive = base.appendingPathComponent(datasetArchive)
         try? FileManager.default.removeItem(at: archive)
@@ -334,36 +357,22 @@ enum EnhanceBenchmarkCommand {
         else {
             throw LocalVqeError.modelProcessingFailed("dataset extraction failed (tar status \(tar.terminationStatus))")
         }
+        try validatePinnedDataset(dir)
         return dir
     }
 
-    private static func loadExamples(from dir: URL) throws -> [Example] {
+    private static func validatePinnedDataset(_ dir: URL) throws {
         let metaURL = dir.appendingPathComponent("meta.csv")
-        let text = try String(contentsOf: metaURL, encoding: .utf8)
-        var lines = text.split(whereSeparator: { $0 == "\n" || $0 == "\r\n" }).map(String.init)
-        guard !lines.isEmpty else { return [] }
-        let header = lines.removeFirst().split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-        func column(_ name: String, _ fields: [String]) -> String? {
-            guard let i = header.firstIndex(of: name), i < fields.count else { return nil }
-            let v = fields[i].trimmingCharacters(in: .whitespaces)
-            return v.isEmpty ? nil : v
+        let actualMetadataHash = try EnhanceBenchmarkDataset.sha256(of: metaURL)
+        guard actualMetadataHash == datasetMetadataSHA256 else {
+            throw LocalVqeError.modelProcessingFailed(
+                "dataset metadata checksum mismatch: expected \(datasetMetadataSHA256), got \(actualMetadataHash)")
         }
-        var examples: [Example] = []
-        for line in lines {
-            let fields = line.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
-            guard let fileID = column("fileid", fields) else { continue }
-            let stem = "fileid_\(fileID)"
-            let mic = dir.appendingPathComponent("\(stem)_mic.wav")
-            let lpb = dir.appendingPathComponent("\(stem)_lpb.wav")
-            let clean = dir.appendingPathComponent("\(stem)_clean.wav")
-            guard [mic, lpb, clean].allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else { continue }
-            examples.append(
-                Example(
-                    fileID: fileID, mic: mic, lpb: lpb, clean: clean,
-                    ser: column("ser", fields).flatMap(Int.init),
-                    nearendNoisy: column("is_nearend_noisy", fields) == "1"))
+        let examples = try EnhanceBenchmarkDataset.loadExamples(from: dir)
+        guard examples.count == expectedDatasetExamples else {
+            throw LocalVqeError.modelProcessingFailed(
+                "dataset contains \(examples.count) examples; expected \(expectedDatasetExamples)")
         }
-        return examples.sorted { ($0.ser ?? 0, $0.fileID) < ($1.ser ?? 0, $1.fileID) }
     }
 
     private static func next(_ arguments: [String], _ index: inout Int) -> String? {
@@ -390,7 +399,7 @@ enum EnhanceBenchmarkCommand {
             Options:
                 --dataset-dir <dir>      Directory with fileid_*_{mic,lpb,clean}.wav + meta.csv
                                          (default: auto-download \(datasetRepo)).
-                --max-files <n>          Score only the first n examples (sorted by SER).
+                --max-files <n>          Score only the first n examples (numeric fileid order).
                 --variants <list>        Comma list of v1.3,v1.2 (default both).
                 --chunk <256ms|16ms>     Chunk export to benchmark (default 256ms).
                 --compute-units <cpu-only|gpu|ane|all>

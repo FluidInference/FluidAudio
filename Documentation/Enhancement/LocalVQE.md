@@ -9,8 +9,8 @@ up what the loudspeaker plays.
 
 **Beta.** Port fidelity validated (numerically equivalent to the upstream
 PyTorch and GGML engines, scored identically to GGML on the 800-clip
-AEC-Challenge blind set); the published benchmark is substantially
-reproduced, with unresolved v1.2 far-end differences (see
+AEC-Challenge blind set); the published benchmark is only partially
+reproduced, and its ERLE protocol is ambiguous in the public artifacts (see
 [Quality](#quality-aec-challenge-blind-test-set)). Not yet exercised inside
 production call pipelines.
 
@@ -166,8 +166,8 @@ processing produce the same audio to 1e-5.
 
 ## Quality: AEC-Challenge blind test set
 
-**Summary: port fidelity validated; published benchmark substantially
-reproduced, with unresolved v1.2 far-end differences.**
+**Summary: port fidelity validated; the published benchmark is only partially
+reproduced, with unresolved v1.2 far-end differences and ERLE protocol.**
 
 The upstream quality table is AECMOS on the ICASSP 2022 AEC-Challenge blind
 set (800 real device recordings). The Swift port was rendered over all 800
@@ -192,9 +192,12 @@ higher is better.
 **Upstream protocol (HF model-card reproduction).** The published table was
 compared using the legacy AECMOS model over the first 20 s of each clip; that
 protocol reproduces the card's unprocessed baseline exactly
-(2.67 / 2.56 / 1.90 / 2.13 / 5.00). Under it, the Core ML port gives:
+(2.67 / 2.56 / 1.90 / 2.13 / 5.00). The card defines ERLE as a plain
+whole-signal energy ratio, but its numbers resemble a separately reconstructed
+gated metric. `gERLE*` below is that reconstruction, not a confirmed
+interpretation of the card's protocol. Under it, the Core ML port gives:
 
-| Scenario | HF card v1.3 | Core ML v1.3 | HF card v1.2 | Core ML v1.2 |
+| Scenario | HF card v1.3 | Core ML v1.3 (echo / deg / gERLE* / OVRL) | HF card v1.2 | Core ML v1.2 (echo / deg / gERLE* / OVRL) |
 |---|---|---|---|---|
 | doubletalk | 4.73 / 2.62 | 4.73 / 2.62 | 4.72 / 2.37 | 4.72 / 2.39 |
 | doubletalk-with-movement | 4.67 / 2.43 | 4.66 / 2.44 | 4.65 / 2.30 | 4.64 / 2.31 |
@@ -202,12 +205,17 @@ protocol reproduces the card's unprocessed baseline exactly
 | farend-singletalk-with-movement | 3.88 / 4.98 | 3.75 / 4.96 | 4.12 / 4.96 | 4.27 / 4.96 |
 | nearend-singletalk | 5.00 / 4.18 | 5.00 / 4.18 | 5.00 / 4.16 | 5.00 / 4.17 |
 
+The ERLE definition conflict is material: current GGML gives plain / gated
+far-end ERLE of 43.0 / 50.9 and 40.1 / 49.4 dB for v1.3, versus card values
+50.9 / 49.9; v1.2 gives 38.7 / 48.0 and 30.5 / 41.1 dB, versus 45.7 / 40.6.
+Selecting the closer gated result does not prove that upstream used this gate.
+
 Unprocessed baseline: exact. v1.3: double-talk and near-end within 0.01
 echo MOS; far-end 0.15 low from aligned float output and within 0.04 when
 the upstream CLI's raw 16-bit, one-hop-late output is scored instead; gated
-ERLE within 0.8 dB and OVRL within 0.01 (full columns in the mobius
+gated ERLE within 0.8 dB and OVRL within 0.01 (full columns in the mobius
 README). v1.2: double-talk and near-end within 0.02 echo, 0.02 deg, 0.1 dB
-ERLE and 0.06 OVRL; the far-end rows are not reproduced on any metric (echo
+gated ERLE and 0.06 OVRL; the far-end rows are not reproduced on any metric (echo
 +0.29 / +0.15, gated ERLE +1.9 / +0.7 dB, OVRL +0.09 / +0.05, from either
 runtime). Those values are above the published ones, which is not evidence
 that the port outperforms upstream; +0.29 echo MOS is not rounding noise.
@@ -248,7 +256,11 @@ the in-repo Parakeet TDT v3 ASR on a 200-example subset (the first 200 of
 shard 0) of the Microsoft AEC-Challenge synthetic *training* set (mic +
 loopback + clean near-end triples;
 [FluidInference/aec-challenge-synthetic-mini](https://huggingface.co/datasets/FluidInference/aec-challenge-synthetic-mini),
-auto-downloaded). The ASR transcript of the clean near-end clip is the
+revision `1f3714b5a3f98cedef1bbb017f21bbd7ae688596`, archive SHA256
+`45ff5d7acfce499558c25a0eace45eb819cec8aa76420fe733de7ee116ae548d`).
+The default download and cached metadata are verified before use; malformed
+rows, duplicate IDs and missing audio now fail instead of silently shrinking
+the benchmark. The ASR transcript of the clean near-end clip is the
 reference and the loopback transcript gives the far-end words, so the
 metrics are relative to machine transcripts, not human ones; examples whose
 clean-near-end transcript is empty (33 of 200) are excluded and reported.
@@ -279,6 +291,9 @@ needs the loopback to cancel echo; without it, it only denoises.
 An earlier revision of this table reported 87.5% / 86.3% recall: the shared
 WER scorer had its insertion/deletion labels swapped, so an empty hypothesis
 scored 100% recall. Fixed in `WERCalculator` (WER itself was unaffected).
+When `--output` is used, the JSON includes the dataset revision and hashes,
+numeric-file-ID selection order, exact selected/excluded IDs, both machine
+reference transcripts and the raw word-count numerators and denominators.
 
 ```bash
 swift run -c release fluidaudiocli enhance-benchmark                      # both variants, 200 files

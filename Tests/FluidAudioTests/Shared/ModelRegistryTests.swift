@@ -147,6 +147,17 @@ final class ModelRegistryTests: XCTestCase {
         XCTAssertEqual(url.absoluteString, expectedPath, "Resolve dataset URL should use custom registry")
     }
 
+    func testResolveDatasetURLAtPinnedRevision() throws {
+        let revision = "1f3714b5a3f98cedef1bbb017f21bbd7ae688596"
+        let url = try ModelRegistry.resolveDataset(
+            "FluidInference/aec-challenge-synthetic-mini", "aec-synthetic-mini.tar.gz", revision: revision)
+
+        XCTAssertEqual(
+            url.absoluteString,
+            "https://huggingface.co/datasets/FluidInference/aec-challenge-synthetic-mini/resolve/\(revision)/aec-synthetic-mini.tar.gz"
+        )
+    }
+
     // MARK: - Dataset Base URL Tests
 
     func testResolveDatasetBaseConstruction() {

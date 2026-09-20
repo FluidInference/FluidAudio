@@ -574,7 +574,7 @@ Offline mode also reports RTFx using the model's per-chunk processing time.
 
 ## Speech Enhancement (Echo Cancellation + Noise Suppression)
 
-> **⚠️ Beta:** port fidelity validated (scores identically to the upstream GGML engine on the 800-clip AEC-Challenge blind set); published benchmark substantially reproduced, with unresolved v1.2 far-end differences. Not yet exercised in production call pipelines.
+> **⚠️ Beta:** port fidelity validated (scores identically to the upstream GGML engine on the 800-clip AEC-Challenge blind set); the published table is only partially reproduced, with unresolved v1.2 far-end values and an ambiguous ERLE protocol. Not yet exercised in production call pipelines.
 
 [LocalVQE](https://github.com/localai-org/LocalVQE) (Apache-2.0) is a compact
 neural acoustic echo canceller + noise suppressor + dereverberator for 16 kHz
