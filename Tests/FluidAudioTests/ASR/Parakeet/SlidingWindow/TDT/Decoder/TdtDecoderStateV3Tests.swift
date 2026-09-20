@@ -188,18 +188,24 @@ final class TdtDecoderStateV3Tests: XCTestCase {
 
         array.resetData(to: 7)
 
-        for i in 0..<array.count {
-            XCTAssertEqual(array[i].intValue, 7, "Array should hold 7 at index \(i)")
-        }
+        verifyArrayHasValue(array, value: 7)
+    }
+
+    func testMLMultiArrayResetDataFloat64Value() throws {
+        let array = try MLMultiArray(shape: [3, 4], dataType: .float64)
+
+        array.resetData(to: 2.25)
+        verifyArrayHasValue(array, value: 2.25)
+
+        array.resetData(to: 0)
+        verifyArrayIsZero(array)
     }
 
     func testMLMultiArrayResetDataFloat16Value() throws {
         let array = try MLMultiArray(shape: [3, 5], dataType: .float16)
 
         array.resetData(to: 1.5)
-        for i in 0..<array.count {
-            XCTAssertEqual(array[i].floatValue, 1.5, "Array should hold 1.5 at index \(i)")
-        }
+        verifyArrayHasValue(array, value: 1.5)
 
         array.resetData(to: 0)
         verifyArrayIsZero(array)
@@ -220,6 +226,53 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         for i in 0..<array.count {
             XCTAssertEqual(array[i].intValue, 0, "Array should be reset to zero at index \(i)")
         }
+    }
+
+    func testMLMultiArrayResetDataClearsEveryElementOfPaddedStrides() throws {
+        // Aligned arrays are zero-cleared on allocation, so the storage is poisoned first;
+        // otherwise a fill that skips elements would still look clean.
+        let array = try ANEMemoryUtils.createAlignedArray(shape: [10, 10], dataType: .float32)
+        array.withUnsafeMutableBytes { bytes, _ in
+            bytes.bindMemory(to: Float.self).update(repeating: .nan)
+        }
+
+        array.resetData(to: 0)
+
+        verifyArrayIsZero(array)
+    }
+
+    func testMLMultiArrayResetDataClearsTheWholeContiguousStorage() throws {
+        let array = try ANEMemoryUtils.createAlignedArray(shape: [1, 64], dataType: .float32)
+        array.withUnsafeMutableBytes { bytes, _ in
+            bytes.bindMemory(to: Float.self).update(repeating: .nan)
+        }
+
+        array.resetData(to: 0)
+
+        array.withUnsafeBytes { bytes in
+            XCTAssertTrue(bytes.bindMemory(to: Float.self).allSatisfy { $0 == 0 }, "Every stored value should be zero")
+        }
+    }
+
+    func testMLMultiArrayResetDataLargeArrayWithinBudget() throws {
+        // A per-element reset of 240000 samples costs tens of milliseconds; the bulk path is well
+        // under a millisecond. Timed locally only: the parallel CI job shares its machine.
+        try XCTSkipIf(ProcessInfo.processInfo.environment["CI"] != nil, "Timing budgets run locally only")
+        let shape: [NSNumber] = [1, NSNumber(value: ASRConstants.maxModelSamples)]
+        let array = try MLMultiArray(shape: shape, dataType: .float32)
+        let clock = ContinuousClock()
+        var best = Double.infinity
+
+        for _ in 0..<5 {
+            array[0] = NSNumber(value: Float(1))
+            let elapsed = clock.measure {
+                array.resetData(to: 0)
+            }
+            best = min(best, elapsed / .milliseconds(1))
+        }
+
+        XCTAssertEqual(array[0].floatValue, 0)
+        XCTAssertLessThan(best, 5, "resetData took \(best) ms for \(ASRConstants.maxModelSamples) elements")
     }
 
     func testMLMultiArrayResetDataStaysInsideTheLogicalElements() throws {
@@ -262,7 +315,9 @@ final class TdtDecoderStateV3Tests: XCTestCase {
 
     func testMLMultiArrayCopyDataLargeArrayWithinBudget() throws {
         // The decoder state is snapshotted before every inference, so the copy must be a bulk
-        // transfer. A per-element copy of 240000 samples costs tens of milliseconds.
+        // transfer. A per-element copy of 240000 samples costs tens of milliseconds. Timed locally
+        // only: the parallel CI job shares its machine.
+        try XCTSkipIf(ProcessInfo.processInfo.environment["CI"] != nil, "Timing budgets run locally only")
         let shape: [NSNumber] = [1, NSNumber(value: ASRConstants.maxModelSamples)]
         let sourceArray = try MLMultiArray(shape: shape, dataType: .float32)
         let destArray = try MLMultiArray(shape: shape, dataType: .float32)
@@ -289,15 +344,11 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         let destArray = try MLMultiArray(shape: shape, dataType: .float32)
         XCTAssertNotEqual(sourceArray.strides, destArray.strides)
 
-        for i in 0..<sourceArray.count {
-            sourceArray[i] = NSNumber(value: Float(i) + 0.5)
-        }
+        fillArrayWithTestData(sourceArray, multiplier: 1.5)
 
         destArray.copyData(from: sourceArray)
 
-        for i in 0..<destArray.count {
-            XCTAssertEqual(destArray[i].floatValue, Float(i) + 0.5, "Element \(i) should match the source")
-        }
+        verifyArraysEqual(destArray, sourceArray)
     }
 
     func testMLMultiArrayCopyDataBetweenOverlappingViews() throws {
@@ -315,23 +366,16 @@ final class TdtDecoderStateV3Tests: XCTestCase {
 
         destinationView.copyData(from: sourceView)
 
-        for j in 0..<64 {
-            XCTAssertEqual(
-                destinationView[j].floatValue, Float(j), "Element \(j) should hold the original source value")
-        }
+        verifyArraysEqual(destinationView, try createTestArray(shape: [1, 64], multiplier: 1))
     }
 
     func testMLMultiArrayCopyDataFromItselfLeavesValues() throws {
-        let array = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        for i in 0..<array.count {
-            array[i] = NSNumber(value: Float(i) * 0.5)
-        }
+        let array = try createTestArray(shape: decoderStateShape, multiplier: 0.5)
+        let expected = try createTestArray(shape: decoderStateShape, multiplier: 0.5)
 
         array.copyData(from: array)
 
-        for i in stride(from: 0, to: array.count, by: 97) {
-            XCTAssertEqual(array[i].floatValue, Float(i) * 0.5, "Element \(i) should be unchanged")
-        }
+        verifyArraysEqual(array, expected)
     }
 
     func testMLMultiArrayCopyDataStaysInsideTheLogicalElements() throws {
