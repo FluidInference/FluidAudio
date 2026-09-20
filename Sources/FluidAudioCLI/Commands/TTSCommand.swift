@@ -953,6 +953,10 @@ public struct TTS {
             logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
             logger.info("  Total: \(String(format: "%.3f", totalS))s")
             logger.info("  Output: \(outURL.path)")
+            if let normalizedText = detailed.normalizedText {
+                logger.info("  Normalized: \(normalizedText)")
+            }
+            logger.info("  Phonemes: \(detailed.phonemes)")
             logger.info(
                 "  Stages (ms): albert=\(String(format: "%.1f", detailed.timings.albert))"
                     + " postAlbert=\(String(format: "%.1f", detailed.timings.postAlbert))"

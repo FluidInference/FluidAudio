@@ -58,6 +58,38 @@ final class KokoroAnePredictedDurationTests: XCTestCase {
 
         XCTAssertTrue(result.inputIds.isEmpty)
         XCTAssertTrue(result.predictedDurations.isEmpty)
+        XCTAssertNil(result.normalizedText)
+        XCTAssertEqual(result.phonemes, "")
+    }
+
+    func testAttachingFrontendKeepsChainOutputsAndAddsProvenance() {
+        var timings = KokoroAneStageTimings()
+        timings.albert = 1.5
+        let chain = KokoroAneSynthesisResult(
+            samples: [0.1, -0.1],
+            sampleRate: KokoroAneConstants.sampleRate,
+            encoderTokens: 4,
+            acousticFrames: 9,
+            timings: timings,
+            inputIds: [0, 5, 6, 0],
+            predictedDurations: [1, 4, 3, 1]
+        )
+
+        let result = chain.attachingFrontend(normalizedText: "forty five dollars", phonemes: "fˈɔɹti fˈIv dˈɑləɹz")
+
+        XCTAssertEqual(result.normalizedText, "forty five dollars")
+        XCTAssertEqual(result.phonemes, "fˈɔɹti fˈIv dˈɑləɹz")
+        XCTAssertEqual(result.samples, chain.samples)
+        XCTAssertEqual(result.sampleRate, chain.sampleRate)
+        XCTAssertEqual(result.encoderTokens, chain.encoderTokens)
+        XCTAssertEqual(result.acousticFrames, chain.acousticFrames)
+        XCTAssertEqual(result.inputIds, chain.inputIds)
+        XCTAssertEqual(result.predictedDurations, chain.predictedDurations)
+        XCTAssertEqual(result.timings, chain.timings)
+
+        let bypass = chain.attachingFrontend(normalizedText: nil, phonemes: "həloʊ")
+        XCTAssertNil(bypass.normalizedText)
+        XCTAssertEqual(bypass.phonemes, "həloʊ")
     }
 }
 
@@ -99,6 +131,11 @@ final class KokoroAneSynthesizerTests: XCTestCase {
 
         let result = try await manager.synthesizeDetailed(
             text: "Hello world", voice: nil, speed: 1.0)
+
+        // Frontend provenance (issue #943): plain prose is left unchanged by
+        // normalization, and the reported phonemes are what the chain encoded.
+        XCTAssertEqual(result.normalizedText, "Hello world")
+        XCTAssertEqual(result.phonemes, try await manager.phonemes(for: "Hello world"))
 
         XCTAssertEqual(result.sampleRate, KokoroAneConstants.sampleRate)
         XCTAssertGreaterThan(result.samples.count, 0)
@@ -158,6 +195,10 @@ final class KokoroAneSynthesizerTests: XCTestCase {
         // ones are dropped silently.
         let wav = try await manager.synthesizeFromPhonemes("həloʊ wɹld")
         XCTAssertGreaterThan(wav.count, 44)
+
+        let detailed = try await manager.synthesizeFromPhonemesDetailed("həloʊ wɹld")
+        XCTAssertNil(detailed.normalizedText, "bypass path has no text to normalize")
+        XCTAssertEqual(detailed.phonemes, "həloʊ wɹld")
     }
 
     func testSynthesizeWithoutInitializeAttemptsLoadAndProceeds() async throws {

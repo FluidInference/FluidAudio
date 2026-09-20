@@ -336,7 +336,9 @@ Apple Silicon. See [KokoroAne](TTS/KokoroAne.md) for the full pipeline.
 - `synthesize(text:voice:speed:) async throws -> Data`
   - One-shot text → 24 kHz mono 16-bit PCM WAV
 - `synthesizeDetailed(text:voice:speed:) async throws -> KokoroAneSynthesisResult`
-  - Returns samples + per-stage timings
+  - Returns samples + per-stage timings, plus `normalizedText` / `phonemes`
+    (the frontend output actually spoken) and `inputIds` / `predictedDurations`
+    for word-level timing
 - `synthesizeFromPhonemes(_:voice:speed:) async throws -> Data`
   - Bypass G2P; feed an already-IPA phoneme string directly
 - `synthesizeFromPhonemesDetailed(_:voice:speed:) async throws -> KokoroAneSynthesisResult`

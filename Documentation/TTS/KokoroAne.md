@@ -113,6 +113,26 @@ print("  prosody=\(t.prosody) noise=\(t.noise) vocoder=\(t.vocoder) tail=\(t.tai
 print("  total: \(t.totalMs) ms")
 ```
 
+### Word timing
+
+`synthesizeDetailed` also returns the frontend's provenance: `normalizedText`
+is the text after written-form normalization (`"$45"` → `"forty five dollars"`),
+`phonemes` is the IPA string the chain encoded, and `inputIds` /
+`predictedDurations` give per-token acoustic-frame counts. Split `phonemes` (or
+`inputIds` on the vocab space token) to get one duration group per spoken word,
+then align those to the words of `normalizedText` rather than the original text.
+
+```swift
+let result = try await manager.synthesizeDetailed(text: "Pay $45 by 2024.")
+let spokenWords = result.normalizedText?.split(separator: " ") ?? []
+// ["Pay", "forty", "five", "dollars", "by", "twenty", "twenty", "four."]
+```
+
+`normalizedText` is `nil` for `synthesizeFromPhonemesDetailed`. Note that
+all-caps initialisms (`FBI`) are spelled as letter names and produce one
+space-separated phoneme group per letter, so they map to several groups
+from one normalized word.
+
 ### Bypass G2P
 
 ```swift
