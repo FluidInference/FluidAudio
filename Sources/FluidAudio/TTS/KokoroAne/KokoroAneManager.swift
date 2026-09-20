@@ -224,8 +224,9 @@ public actor KokoroAneManager {
         voice: String? = nil,
         speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> KokoroAneSynthesisResult {
-        let resolved = try await phonemes(for: text)
-        return try await runChain(phonemes: resolved, voice: voice, speed: speed)
+        let frontend = try await resolveFrontend(for: text)
+        return try await runChain(
+            phonemes: frontend.phonemes, normalizedText: frontend.normalizedText, voice: voice, speed: speed)
     }
 
     /// Resolve the exact phoneme string ``synthesize(text:voice:speed:)``
@@ -241,13 +242,21 @@ public actor KokoroAneManager {
     /// scalars is treated as pre-computed IPA and passed through (issue
     /// #698); digits, kana and kanji always go through the frontend.
     public func phonemes(for text: String) async throws -> String {
+        try await resolveFrontend(for: text).phonemes
+    }
+
+    /// Text normalization + G2P, returning both halves so
+    /// ``synthesizeDetailed(text:voice:speed:)`` can report the normalized
+    /// text it actually spoke (issue #943). `normalizedText` is `nil` when the
+    /// input was treated as pre-computed phonemes.
+    func resolveFrontend(for text: String) async throws -> (normalizedText: String?, phonemes: String) {
         switch variant {
         case .english:
             // Byte-exact NeMo TN before G2P via the shared frontend entry
             // point: "$5" → "five dollars", "2024" → "twenty twenty four".
             // No-op for plain prose.
             let normalized = EnglishTextNormalizer.normalizeForFrontend(text)
-            return try await phonemize(text: normalized)
+            return (normalized, try await phonemize(text: normalized))
         case .mandarin:
             try await store.loadIfNeeded()
             // Normalize written forms to their Mandarin reading before
@@ -263,25 +272,25 @@ public actor KokoroAneManager {
             }
             if MandarinG2P.looksLikeHanzi(normalized) {
                 let g2p = try await store.mandarinG2PPipeline()
-                return try await g2p.phonemize(normalized)
+                return (normalized, try await g2p.phonemize(normalized))
             } else {
                 // No Hanzi present → caller already supplied bopomofo /
                 // ASCII punctuation. Pass through so power users can
                 // still override pronunciation manually.
-                return normalized
+                return (nil, normalized)
             }
         case .japanese:
             // Pre-computed IPA (issue #698) passes through untouched: NFKC
             // would fold its modifier letters (ʲ → j). Anything outside the
             // phoneme alphabet — kana, kanji, half-width kana, digits — is
             // text and goes through normalization and the frontend.
-            guard !Self.looksLikePrecomputedJapaneseIPA(text) else { return text }
+            guard !Self.looksLikePrecomputedJapaneseIPA(text) else { return (nil, text) }
             // The NeMo FST drops half-width dakuten (ｶﾞ → カ) and reads the
             // full-width tilde as a symbol, so fold both before it runs.
             let folded = JapaneseCutlet.foldingHalfWidthForms(text)
             let normalized = NemoTextNormalizer.normalize(folded, language: .japanese)
             let g2p = try await store.japaneseG2PPipeline()
-            return try await g2p.phonemize(normalized)
+            return (normalized, try await g2p.phonemize(normalized))
         }
     }
 
@@ -295,7 +304,7 @@ public actor KokoroAneManager {
         voice: String? = nil,
         speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> Data {
-        let result = try await runChain(phonemes: phonemes, voice: voice, speed: speed)
+        let result = try await runChain(phonemes: phonemes, normalizedText: nil, voice: voice, speed: speed)
         return try wavData(from: result)
     }
 
@@ -305,13 +314,14 @@ public actor KokoroAneManager {
         voice: String? = nil,
         speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> KokoroAneSynthesisResult {
-        try await runChain(phonemes: phonemes, voice: voice, speed: speed)
+        try await runChain(phonemes: phonemes, normalizedText: nil, voice: voice, speed: speed)
     }
 
     // MARK: - Private
 
     private func runChain(
         phonemes: String,
+        normalizedText: String?,
         voice: String?,
         speed: Float
     ) async throws -> KokoroAneSynthesisResult {
@@ -326,13 +336,16 @@ public actor KokoroAneManager {
         let phonemeCount = phonemes.count
         let (styleS, styleTimbre) = pack.slice(for: phonemeCount)
 
-        return try await KokoroAneSynthesizer.synthesize(
+        var result = try await KokoroAneSynthesizer.synthesize(
             inputIds: inputIds,
             styleS: styleS,
             styleTimbre: styleTimbre,
             speed: speed,
             store: store
         )
+        result.normalizedText = normalizedText
+        result.phonemes = phonemes
+        return result
     }
 
     /// English text → Misaki-style IPA. Lexicon-first resolution (weak

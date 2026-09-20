@@ -113,6 +113,35 @@ print("  prosody=\(t.prosody) noise=\(t.noise) vocoder=\(t.vocoder) tail=\(t.tai
 print("  total: \(t.totalMs) ms")
 ```
 
+### Word timing
+
+`synthesizeDetailed` also returns the frontend's provenance: `normalizedText`
+is the text after written-form normalization (`"$45"` → `"forty five dollars"`),
+`phonemes` is the IPA string handed to the vocab encoder, and `inputIds` /
+`predictedDurations` give per-token acoustic-frame counts. Split `phonemes` (or
+`inputIds` on the vocab space token) to get one duration group per spoken word,
+then align those to the words of `normalizedText` rather than the original text.
+
+```swift
+let result = try await manager.synthesizeDetailed(text: "Pay $45 by 2024.")
+let spokenWords = result.normalizedText?.split(separator: " ") ?? []
+// ["Pay", "forty", "five", "dollars", "by", "twenty", "twenty", "four."]
+// (with the default NemoTextProcessing trait; the regex baseline used
+// when the trait is off does not expand currency)
+```
+
+`normalizedText` is `nil` whenever the input was treated as phonemes:
+`synthesizeFromPhonemesDetailed`, Japanese pre-computed IPA, or Mandarin text
+with no Hanzi. The Mandarin and Japanese G2P pipelines fold digits and
+punctuation further before tokenizing.
+
+Word groups do not always map 1:1 to normalized words. The English frontend
+spells all-caps initialisms (`FBI`) as one space-separated group per letter,
+splits hyphenated compounds missing from the lexicon into one group per part,
+drops a word the G2P fallback cannot resolve, and emits leading punctuation as
+its own group. `inputIds` also omits characters absent from `vocab.json`, so
+its length can be shorter than `phonemes.count + 2`.
+
 ### Bypass G2P
 
 ```swift

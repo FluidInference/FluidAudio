@@ -58,6 +58,8 @@ final class KokoroAnePredictedDurationTests: XCTestCase {
 
         XCTAssertTrue(result.inputIds.isEmpty)
         XCTAssertTrue(result.predictedDurations.isEmpty)
+        XCTAssertNil(result.normalizedText)
+        XCTAssertEqual(result.phonemes, "")
     }
 }
 
@@ -99,6 +101,13 @@ final class KokoroAneSynthesizerTests: XCTestCase {
 
         let result = try await manager.synthesizeDetailed(
             text: "Hello world", voice: nil, speed: 1.0)
+
+        // Frontend provenance (issue #943): plain prose is left unchanged by
+        // normalization; `inputIds` is `phonemes` minus out-of-vocab scalars
+        // plus BOS/EOS, so it can never be longer than phonemes + 2.
+        XCTAssertEqual(result.normalizedText, "Hello world")
+        XCTAssertFalse(result.phonemes.isEmpty)
+        XCTAssertLessThanOrEqual(result.inputIds.count, result.phonemes.count + 2)
 
         XCTAssertEqual(result.sampleRate, KokoroAneConstants.sampleRate)
         XCTAssertGreaterThan(result.samples.count, 0)
@@ -158,6 +167,10 @@ final class KokoroAneSynthesizerTests: XCTestCase {
         // ones are dropped silently.
         let wav = try await manager.synthesizeFromPhonemes("həloʊ wɹld")
         XCTAssertGreaterThan(wav.count, 44)
+
+        let detailed = try await manager.synthesizeFromPhonemesDetailed("həloʊ wɹld")
+        XCTAssertNil(detailed.normalizedText, "bypass path has no text to normalize")
+        XCTAssertEqual(detailed.phonemes, "həloʊ wɹld")
     }
 
     func testSynthesizeWithoutInitializeAttemptsLoadAndProceeds() async throws {
