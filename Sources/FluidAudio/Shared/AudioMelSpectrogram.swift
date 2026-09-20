@@ -29,8 +29,8 @@ public final class AudioMelSpectrogram {
     // Config
     private let sampleRate: Int
     public let nFFT: Int
-    private let hopLength: Int  // window_stride * sample_rate
-    private let winLength: Int  // window_size * sample_rate
+    public let hopLength: Int  // window_stride * sample_rate
+    public let winLength: Int  // window_size * sample_rate
     private let fMin: Float = 0.0
     private let fMax: Float  // sample_rate / 2
     internal let preemph: Float  // NeMo preemphasis coefficient

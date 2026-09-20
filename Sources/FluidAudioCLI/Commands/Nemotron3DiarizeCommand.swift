@@ -3,25 +3,29 @@ import CoreML
 import FluidAudio
 import Foundation
 
-/// CLI for Nemotron 3 Diarization preview (local eval-license models — no HF download).
+/// CLI for Nemotron 3 Diarization.
 enum Nemotron3DiarizeCommand {
     private static let logger = AppLogger(category: "Nemotron3CLI")
 
     static func printUsage() {
         let usage = """
-            Nemotron 3 Diarization (preview, internal evaluation only)
+            Nemotron 3 Diarization (8-speaker streaming)
 
             Usage:
-              fluidaudiocli nemotron3-diarize <audio.wav> --models <dir> [options]
-              fluidaudiocli nemotron3-benchmark --models <dir> [options]
+              fluidaudiocli nemotron3-diarize <audio.wav> [options]
+              fluidaudiocli nemotron3-benchmark [options]
 
             Shared options:
-                --models <dir>       Directory containing Nemotron3Diarizer_<variant>.mlmodelc
-                                     and learnable_sil_emb.bin (REQUIRED)
-                --variant <name>     offline | low | verylow | ultra (default: low)
+                --models <dir>       Local directory containing Nemotron3Diarizer_<variant>.mlmodelc
+                                     and learnable_sil_emb.bin. Omit to download the preset from
+                                     FluidInference/nemotron-3-diarization-coreml.
+                --variant <name>     offline | low | fast | fast32 | fast128 | fast32-split-w8a8 |
+                                     c128-split-w8a8 (default: low; verylow/ultra need --models)
                 --threshold <t>      Speaker activity threshold (default: 0.5)
 
             nemotron3-diarize options:
+                --streaming          Feed audio in 100 ms pieces through the live path
+                                     (appendAudio / processBufferedAudio / finishStream)
                 --dump-preds <file>  Write raw frame probabilities (float32 LE, [T, 8]) for parity checks
                 --output <file>      Write RTTM hypothesis
 
@@ -47,7 +51,7 @@ enum Nemotron3DiarizeCommand {
     }
 
     private static func loadDiarizer(
-        modelsDir: String, variantName: String, custom: CustomShape = CustomShape(),
+        modelsDir: String?, variantName: String, custom: CustomShape = CustomShape(),
         computeUnits: MLComputeUnits = .all
     ) async throws -> (Nemotron3Diarizer, TimeInterval) {
         var config: Nemotron3Config
@@ -64,12 +68,42 @@ enum Nemotron3DiarizeCommand {
                 modelFileName: "Nemotron3Diarizer_\(variantName).mlmodelc")
         }
         let start = Date()
-        let models = try await Nemotron3Models.load(
-            config: config,
-            directory: URL(fileURLWithPath: modelsDir),
-            computeUnits: computeUnits
-        )
+        let models: Nemotron3Models
+        if let modelsDir {
+            models = try await Nemotron3Models.load(
+                config: config,
+                directory: URL(fileURLWithPath: modelsDir),
+                computeUnits: computeUnits
+            )
+        } else {
+            models = try await Nemotron3Models.loadFromHuggingFace(config: config, computeUnits: computeUnits)
+        }
         return (Nemotron3Diarizer(config: config, models: models), Date().timeIntervalSince(start))
+    }
+
+    /// Drive the live path with fixed-size audio pieces; returns the same flat
+    /// `[frames * 8]` probabilities as `processComplete`.
+    static func streamAudio(
+        _ audio: [Float], through diarizer: Nemotron3Diarizer, pieceSamples: Int = 1600
+    ) throws -> (probabilities: [Float], frameCount: Int) {
+        diarizer.reset()
+        var probs: [Float] = []
+        var frames = 0
+        var offset = 0
+        while offset < audio.count {
+            let end = min(offset + pieceSamples, audio.count)
+            diarizer.appendAudio(Array(audio[offset..<end]))
+            for r in try diarizer.processBufferedAudio() {
+                probs.append(contentsOf: r.probabilities)
+                frames += r.frameCount
+            }
+            offset = end
+        }
+        for r in try diarizer.finishStream() {
+            probs.append(contentsOf: r.probabilities)
+            frames += r.frameCount
+        }
+        return (probs, frames)
     }
 
     static func parseComputeUnits(_ s: String?) -> MLComputeUnits {
@@ -144,6 +178,7 @@ enum Nemotron3DiarizeCommand {
         var outputPath: String?
         var showProfile = false
         var useVad = false
+        var useStreaming = false
         var vadThreshold: Float = 0.85
         var custom = CustomShape()
         var computeUnits: MLComputeUnits = .all
@@ -169,6 +204,8 @@ enum Nemotron3DiarizeCommand {
                 outputPath = arguments[safe: i]
             case "--profile":
                 showProfile = true
+            case "--streaming":
+                useStreaming = true
             case "--vad":
                 useVad = true
             case "--vad-threshold":
@@ -201,7 +238,7 @@ enum Nemotron3DiarizeCommand {
             i += 1
         }
 
-        guard let audioPath, let modelsDir else {
+        guard let audioPath else {
             printUsage()
             exit(1)
         }
@@ -225,7 +262,10 @@ enum Nemotron3DiarizeCommand {
             }
 
             let start = Date()
-            let (probs, frames) = try diarizer.processComplete(audio, speechMask: mask)
+            let (probs, frames) =
+                useStreaming
+                ? try streamAudio(audio, through: diarizer)
+                : try diarizer.processComplete(audio, speechMask: mask)
             let elapsed = Date().timeIntervalSince(start)
             let rtfx = duration / Float(elapsed)
             if useVad {
@@ -349,10 +389,6 @@ enum Nemotron3DiarizeCommand {
             i += 1
         }
 
-        guard let modelsDir else {
-            printUsage()
-            exit(1)
-        }
         if files.isEmpty {
             files = DiarizationBenchmarkUtils.getFiles(for: dataset, maxFiles: maxFiles)
         }
@@ -496,11 +532,6 @@ enum Nemotron3DiarizeCommand {
                 break
             }
             i += 1
-        }
-
-        guard let modelsDir else {
-            printUsage()
-            exit(1)
         }
 
         do {

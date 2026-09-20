@@ -106,22 +106,82 @@ public struct Nemotron3Models {
         self.predictionOptions = options
     }
 
-    /// Load from a local models directory.
+    /// Load from a local models directory holding `config.modelFileName` (or its
+    /// `.mlpackage`) plus `learnable_sil_emb.bin` (and `pre_encode_proj_t.bin` for
+    /// split-graph presets).
     public static func load(
         config: Nemotron3Config,
         directory: URL,
         computeUnits: MLComputeUnits = .all
     ) async throws -> Nemotron3Models {
+        try await load(
+            config: config,
+            modelURL: directory.appendingPathComponent(config.modelFileName),
+            assetsDirectory: directory,
+            computeUnits: computeUnits)
+    }
+
+    /// Download the preset's bundle from `FluidInference/nemotron-3-diarization-coreml`
+    /// (if not cached) and load it.
+    ///
+    /// Layout under `cacheDirectory` (default `~/Library/Application Support/FluidAudio/Models`):
+    /// `nemotron-3-diarization/{monolithic,split}/<bundle>.mlmodelc` plus the root `.bin` assets.
+    /// Only the requested preset's bundle is fetched.
+    public static func loadFromHuggingFace(
+        config: Nemotron3Config,
+        cacheDirectory: URL? = nil,
+        computeUnits: MLComputeUnits = .all,
+        progressHandler: ProgressHandler? = nil
+    ) async throws -> Nemotron3Models {
+        let repo = Repo.nemotron3Diarization
+        let base =
+            cacheDirectory
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FluidAudio/Models")
+        let repoDirectory = base.appendingPathComponent(repo.folderName)
+        let bundlePath = "\(config.hubSubdirectory)/\(config.modelFileName)"
+        let modelURL = repoDirectory.appendingPathComponent(bundlePath)
+        let fm = FileManager.default
+
+        // A compiled bundle is complete once its manifest is on disk; partial downloads
+        // resume file-by-file inside `download(subdirectory:)`.
+        if !fm.fileExists(atPath: modelURL.appendingPathComponent("coremldata.bin").path) {
+            logger.info("Downloading \(bundlePath) from \(repo.remotePath)...")
+            try await ModelHub.download(
+                repo, subdirectory: bundlePath, to: repoDirectory, progressHandler: progressHandler)
+        }
+
+        var assets = [ModelNames.Nemotron3.silenceEmbeddingFile]
+        if config.splitGraph { assets.append(ModelNames.Nemotron3.preEncodeProjectionFile) }
+        let missing = Set(assets.filter { !fm.fileExists(atPath: repoDirectory.appendingPathComponent($0).path) })
+        if !missing.isEmpty {
+            // Root listing with everything but the wanted files skipped (directories are
+            // pruned before recursion, so the bundles are never re-listed).
+            try await ModelHub.download(
+                repo, subdirectory: "", to: repoDirectory, progressHandler: nil,
+                shouldSkip: { !missing.contains($0) })
+        }
+
+        return try await load(
+            config: config, modelURL: modelURL, assetsDirectory: repoDirectory, computeUnits: computeUnits)
+    }
+
+    private static func load(
+        config: Nemotron3Config,
+        modelURL requestedModelURL: URL,
+        assetsDirectory directory: URL,
+        computeUnits: MLComputeUnits
+    ) async throws -> Nemotron3Models {
         let start = Date()
 
-        var modelURL = directory.appendingPathComponent(config.modelFileName)
+        var modelURL = requestedModelURL
         if !FileManager.default.fileExists(atPath: modelURL.path) {
             // Fall back to the uncompiled mlpackage next to the expected mlmodelc.
-            let packageURL = directory.appendingPathComponent(
-                config.modelFileName.replacingOccurrences(of: ".mlmodelc", with: ".mlpackage"))
+            let packageURL = modelURL.deletingPathExtension().appendingPathExtension("mlpackage")
             guard FileManager.default.fileExists(atPath: packageURL.path) else {
                 throw Nemotron3Error.modelLoadFailed(
-                    "Neither \(config.modelFileName) nor its .mlpackage found in \(directory.path)")
+                    "Neither \(config.modelFileName) nor its .mlpackage found at \(modelURL.deletingLastPathComponent().path)"
+                )
             }
             modelURL = try await MLModel.compileModel(at: packageURL)
         }
@@ -130,7 +190,7 @@ public struct Nemotron3Models {
         mlConfig.computeUnits = computeUnits
         let model = try MLModel(contentsOf: modelURL, configuration: mlConfig)
 
-        let silURL = directory.appendingPathComponent("learnable_sil_emb.bin")
+        let silURL = directory.appendingPathComponent(ModelNames.Nemotron3.silenceEmbeddingFile)
         guard let silData = try? Data(contentsOf: silURL) else {
             throw Nemotron3Error.modelLoadFailed("Missing learnable_sil_emb.bin in \(directory.path)")
         }
@@ -143,7 +203,7 @@ public struct Nemotron3Models {
 
         var projection: [Float]? = nil
         if config.splitGraph {
-            let projURL = directory.appendingPathComponent("pre_encode_proj_t.bin")
+            let projURL = directory.appendingPathComponent(ModelNames.Nemotron3.preEncodeProjectionFile)
             guard let projData = try? Data(contentsOf: projURL),
                 projData.count == 1024 * 512 * MemoryLayout<Float>.size
             else {

@@ -74,6 +74,19 @@ public struct Nemotron3Config: Sendable {
     /// Output frame duration for high-resolution predictions (10 ms).
     public var outputFrameSeconds: Float { 0.01 }
 
+    /// Seconds of audio consumed per streaming step (the chunk core).
+    public var chunkSeconds: Double {
+        Double(chunkLen * subsamplingFactor) * 0.01
+    }
+
+    /// Input-buffer latency in seconds: core + right context.
+    public var latencySeconds: Double {
+        Double((chunkLen + chunkRightContext) * subsamplingFactor) * 0.01
+    }
+
+    /// Subdirectory of `FluidInference/nemotron-3-diarization-coreml` holding this preset's bundle.
+    public var hubSubdirectory: String { splitGraph ? "split" : "monolithic" }
+
     // MARK: Presets (model card recommended profiles)
 
     /// 30.4 s input-buffer latency, offline-style quality; highest-throughput batch profile.

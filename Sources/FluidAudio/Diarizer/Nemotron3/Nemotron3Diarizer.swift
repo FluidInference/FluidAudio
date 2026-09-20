@@ -15,6 +15,12 @@ public final class Nemotron3Diarizer {
     private var state: Nemotron3StreamingState
     private let logger = AppLogger(category: "Nemotron3Diarizer")
 
+    // Streaming (audio-in) state — see `appendAudio`.
+    private var frontend: Nemotron3StreamingFrontend
+    private var streamFinished = false
+    /// 10 ms output frames emitted so far by the streaming path.
+    public private(set) var streamedFrameCount = 0
+
     /// Wall-time breakdown of the last `processComplete` call, in seconds.
     public struct PipelineProfile: Sendable {
         public var melSeconds: Double = 0
@@ -39,10 +45,14 @@ public final class Nemotron3Diarizer {
         self.models = models
         self.updater = Nemotron3StateUpdater(config: config, silenceEmbedding: models.silenceEmbedding)
         self.state = Nemotron3StreamingState(config: config)
+        self.frontend = Nemotron3StreamingFrontend(config: config)
     }
 
     public func reset() {
         state = Nemotron3StreamingState(config: config)
+        frontend.reset()
+        streamFinished = false
+        streamedFrameCount = 0
     }
 
     /// Process a complete audio buffer (16 kHz mono) and return per-frame speaker
@@ -142,6 +152,58 @@ public final class Nemotron3Diarizer {
         profile.totalSeconds = Date().timeIntervalSince(t0)
         lastProfile = profile
         return (Array(total[0..<(outputFrames * config.numSpeakers)]), outputFrames)
+    }
+
+    // MARK: - Streaming (audio in)
+
+    /// Buffer 16 kHz mono samples for the streaming path. Call `processBufferedAudio()`
+    /// afterwards to run every chunk the buffered audio completes.
+    ///
+    /// The streaming path is frame-exact with `processComplete` on the same audio: mel
+    /// frames are computed with their full STFT context and the chunk cadence mirrors
+    /// `Nemotron3FeatureLoader`. A chunk runs once `latencySeconds` of audio past its
+    /// start is available.
+    public func appendAudio(_ samples: [Float]) {
+        precondition(!streamFinished, "appendAudio after finishStream; call reset() first")
+        frontend.append(samples)
+    }
+
+    /// Run every chunk the buffered audio completes and return their results in order.
+    /// Each result covers `chunkSeconds` of audio at 10 ms per frame.
+    public func processBufferedAudio() throws -> [Nemotron3ChunkResult] {
+        try runChunks(final: false)
+    }
+
+    /// Flush the tail: pads the stream like `processComplete` does, runs the remaining
+    /// (possibly short) chunks, and trims the output to the audio's exact frame count.
+    /// The diarizer keeps its speaker state afterwards; call `reset()` before a new stream.
+    public func finishStream() throws -> [Nemotron3ChunkResult] {
+        guard !streamFinished else { return [] }
+        streamFinished = true
+        return try runChunks(final: true)
+    }
+
+    private func runChunks(final: Bool) throws -> [Nemotron3ChunkResult] {
+        var results: [Nemotron3ChunkResult] = []
+        while let chunk = frontend.nextChunk(final: final) {
+            var result = try autoreleasepool {
+                try step(
+                    chunkFeatures: chunk.features, chunkMelLength: chunk.length,
+                    leftOffsetMel: chunk.leftOffset, rightOffsetMel: chunk.rightOffset)
+            }
+            // Trim the tail chunk to the audio's exact 10 ms frame count (mirrors
+            // `processComplete`'s ceil(mel_frames) trim).
+            let remaining = frontend.melFramesComputed - streamedFrameCount
+            if final, result.frameCount > remaining {
+                let keep = max(remaining, 0)
+                result = Nemotron3ChunkResult(
+                    probabilities: Array(result.probabilities[0..<(keep * config.numSpeakers)]),
+                    frameCount: keep, numSpeakers: config.numSpeakers)
+            }
+            streamedFrameCount += result.frameCount
+            results.append(result)
+        }
+        return results
     }
 
     /// Run one streaming step from raw mel features.
@@ -253,5 +315,132 @@ public struct Nemotron3FeatureLoader {
 
         startFeat = endFeat
         return (features, length, leftOffset, rightOffset)
+    }
+}
+
+// MARK: - Streaming Frontend
+
+/// Audio-in front end for the streaming path: incremental mel extraction that is
+/// frame-exact with center-padded batch extraction, plus the chunk cadence of
+/// `Nemotron3FeatureLoader`. Model-free so the cadence and framing are unit-testable.
+struct Nemotron3StreamingFrontend {
+    private let config: Nemotron3Config
+    private let mel = AudioMelSpectrogram()
+
+    private var audio: [Float] = []
+    /// Absolute sample index of `audio[0]`.
+    private var audioStart = 0
+    private var samplesReceived = 0
+
+    private var melCache: [Float] = []
+    /// Absolute mel-frame index of `melCache`'s first frame.
+    private var melCacheStart = 0
+    private(set) var melFramesComputed = 0
+    private var nextCoreMel = 0
+
+    init(config: Nemotron3Config) {
+        self.config = config
+    }
+
+    mutating func reset() {
+        audio.removeAll(keepingCapacity: true)
+        audioStart = 0
+        samplesReceived = 0
+        melCache.removeAll(keepingCapacity: true)
+        melCacheStart = 0
+        melFramesComputed = 0
+        nextCoreMel = 0
+    }
+
+    mutating func append(_ samples: [Float]) {
+        audio.append(contentsOf: samples)
+        samplesReceived += samples.count
+    }
+
+    /// The next chunk in `Nemotron3FeatureLoader` layout, or nil when the buffered audio
+    /// does not complete one. With `final`, the stream is right-padded like center-mode
+    /// extraction and the trailing (short) chunks are emitted.
+    mutating func nextChunk(final: Bool) -> (features: [Float], length: Int, leftOffset: Int, rightOffset: Int)? {
+        computeMel(final: final)
+        let sub = config.subsamplingFactor
+        let lcMel = config.chunkLeftContext * sub
+        let rcMel = config.chunkRightContext * sub
+        let coreMel = config.chunkLen * sub
+        let total = melFramesComputed
+        let coreStart = nextCoreMel
+        if final {
+            guard coreStart < total else { return nil }
+        } else {
+            guard coreStart + coreMel + rcMel <= total else { return nil }
+        }
+        let leftOffset = min(lcMel, coreStart)
+        let endFeat = min(coreStart + coreMel, total)
+        let rightOffset = min(rcMel, total - endFeat)
+        let frames = endFeat + rightOffset - (coreStart - leftOffset)
+
+        let lo = (coreStart - leftOffset - melCacheStart) * config.melFeatures
+        var features = Array(melCache[lo..<(lo + frames * config.melFeatures)])
+        let capacity = config.chunkMelFrames * config.melFeatures
+        if features.count < capacity {
+            features.append(contentsOf: repeatElement(0, count: capacity - features.count))
+        }
+
+        nextCoreMel = endFeat
+        let drop = nextCoreMel - lcMel - melCacheStart
+        if drop > 0 {
+            melCache.removeFirst(drop * config.melFeatures)
+            melCacheStart += drop
+        }
+        return (features, frames, leftOffset, rightOffset)
+    }
+
+    /// Extend the mel cache with every frame whose STFT window is fully available;
+    /// `final` zero-pads the right edge exactly like center-mode extraction.
+    private mutating func computeMel(final: Bool) {
+        let hop = mel.hopLength
+        let half = mel.nFFT / 2
+        let received = samplesReceived
+        let target: Int
+        if final {
+            // Center-padded frame count: 1 + (N + 2*half - win) / hop.
+            target = received > 0 ? 1 + (received + 2 * half - mel.winLength) / hop : 0
+        } else {
+            target = received >= half ? (received - half) / hop + 1 : 0
+        }
+        let done = melFramesComputed
+        guard target > done else { return }
+
+        // Frame f is centered on sample f*hop; its window spans ±half around it.
+        let sliceStart = done * hop - half
+        let sliceEnd = (target - 1) * hop + half
+        var slice = [Float](repeating: 0, count: sliceEnd - sliceStart)
+        let copyStart = max(sliceStart, 0)
+        let copyEnd = min(sliceEnd, received)
+        if copyEnd > copyStart {
+            let src = copyStart - audioStart
+            slice.withUnsafeMutableBufferPointer { dst in
+                audio.withUnsafeBufferPointer { buf in
+                    dst.baseAddress!.advanced(by: copyStart - sliceStart)
+                        .update(from: buf.baseAddress!.advanced(by: src), count: copyEnd - copyStart)
+                }
+            }
+        }
+        let previous = sliceStart - 1
+        let lastSample: Float = previous >= 0 && previous < received ? audio[previous - audioStart] : 0
+
+        let (frames, _, _) = mel.computeFlatTransposed(
+            audio: slice, lastAudioSample: lastSample, paddingMode: .prePadded,
+            expectedFrameCount: target - done)
+        melCache.append(contentsOf: frames[0..<((target - done) * config.melFeatures)])
+        melFramesComputed = target
+
+        // Keep one sample of pre-emphasis history plus the half window behind the next frame.
+        // In the final flush the last frames' windows extend past the received audio (right
+        // zero-padding), so the trim point can exceed what is buffered: clamp to `received`.
+        let keepFrom = min(max(0, target * hop - half - 1), received)
+        if keepFrom > audioStart {
+            audio.removeFirst(keepFrom - audioStart)
+            audioStart = keepFrom
+        }
     }
 }

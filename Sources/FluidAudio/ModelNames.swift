@@ -53,6 +53,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case kokoroAneZh = "FluidInference/kokoro-82m-coreml/ANE-zh"
     case kokoroAneJa = "FluidInference/kokoro-82m-coreml/ANE-ja"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
+    case nemotron3Diarization = "FluidInference/nemotron-3-diarization-coreml"
     case lseendAmi = "FluidInference/ls-eend-coreml/optimized/ami"
     case lseendCallHome = "FluidInference/ls-eend-coreml/optimized/ch"
     case lseendDihard2 = "FluidInference/ls-eend-coreml/optimized/dih2"
@@ -174,6 +175,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "kokoro-82m-coreml/ANE-ja"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
+        case .nemotron3Diarization:
+            return "nemotron-3-diarization-coreml"
         case .lseendAmi:
             return "ls-eend-coreml/optimized/ami"
         case .lseendCallHome:
@@ -815,6 +818,14 @@ public enum ModelNames {
     }
 
     /// Sortformer streaming diarization model names
+    public enum Nemotron3 {
+        /// Root-level assets every preset needs (split-graph presets also need
+        /// `pre_encode_proj_t.bin`).
+        public static let silenceEmbeddingFile = "learnable_sil_emb.bin"
+        public static let preEncodeProjectionFile = "pre_encode_proj_t.bin"
+        public static let requiredAssets: Set<String> = [silenceEmbeddingFile, preEncodeProjectionFile]
+    }
+
     public enum Sortformer {
         /// Selects which weight-precision build of the model set to download.
         ///
@@ -1712,6 +1723,14 @@ public enum ModelNames {
                 return [variant]
             }
             return ModelNames.Sortformer.requiredModels
+        case .nemotron3Diarization:
+            // Downloads are driven by `Nemotron3Models.loadFromHuggingFace` via
+            // `download(subdirectory:)` (one preset bundle + the root .bin assets);
+            // provided for exhaustiveness.
+            if let variant = variant {
+                return [variant]
+            }
+            return ModelNames.Nemotron3.requiredAssets
         case .lseendAmi, .lseendCallHome, .lseendDihard2, .lseendDihard3:
             if let variant = variant {
                 return [variant + ".mlmodelc"]
