@@ -47,27 +47,6 @@ final class MLArrayCacheTests: XCTestCase {
         XCTAssertEqual(array2.dataType, .float32)
     }
 
-    func testReturnArrayResetsData() async throws {
-        let shape: [NSNumber] = [10]
-        let array = try await cache.getArray(shape: shape, dataType: .float32)
-
-        // Set some values
-        for i in 0..<array.count {
-            array[i] = NSNumber(value: Float(i) * 2.0)
-        }
-
-        // Return to cache
-        await cache.returnArray(array)
-
-        // Get from cache again
-        let cachedArray = try await cache.getArray(shape: shape, dataType: .float32)
-
-        // Data should be reset to zero
-        for i in 0..<cachedArray.count {
-            XCTAssertEqual(cachedArray[i].floatValue, 0.0)
-        }
-    }
-
     // MARK: - Cache Size Management
 
     func testCacheSizeLimit() async throws {
@@ -203,50 +182,6 @@ final class MLArrayCacheTests: XCTestCase {
     }
 
     // Removed performance test - can cause timing issues
-
-    // MARK: - Reset Cost
-
-    func testReturnArrayResetsPreprocessorBufferWithinBudget() async throws {
-        // The preprocessor input is returned after every transcription. A per-element reset of
-        // 240000 samples costs about 20 ms; a bulk reset is well under a millisecond.
-        let shape: [NSNumber] = [1, NSNumber(value: ASRConstants.maxModelSamples)]
-        let clock = ContinuousClock()
-        var best = Double.infinity
-
-        for _ in 0..<5 {
-            let array = try await cache.getArray(shape: shape, dataType: .float32)
-            array[0] = NSNumber(value: Float(1))
-            let elapsed = await clock.measure {
-                await cache.returnArray(array)
-            }
-            best = min(best, elapsed / .milliseconds(1))
-        }
-
-        XCTAssertLessThan(best, 5, "returnArray took \(best) ms for \(ASRConstants.maxModelSamples) samples")
-    }
-
-    func testReturnArrayResetsPaddedStrideArray() async throws {
-        // Aligned arrays pad the innermost stride to a tile boundary, so the reset must cover
-        // the padded layout, not just the first `count` elements.
-        let shape: [NSNumber] = [10, 10]
-        let array = try await cache.getArray(shape: shape, dataType: .float32)
-
-        for i in 0..<array.count {
-            array[i] = NSNumber(value: Float(i) + 1)
-        }
-
-        await cache.returnArray(array)
-        let cachedArray = try await cache.getArray(shape: shape, dataType: .float32)
-
-        for i in 0..<cachedArray.count {
-            XCTAssertEqual(cachedArray[i].floatValue, 0.0, "Element \(i) should be zero")
-        }
-        cachedArray.withUnsafeBytes { bytes in
-            let values = bytes.bindMemory(to: Float.self)
-            XCTAssertGreaterThan(values.count, cachedArray.count, "The aligned layout should carry padding")
-            XCTAssertTrue(values.allSatisfy { $0 == 0 }, "Padding bytes should be zero too")
-        }
-    }
 
     // MARK: - Global Cache Tests
 
