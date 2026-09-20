@@ -161,7 +161,7 @@ public actor LuxTtsManager {
         speed: Float = LuxTtsConstants.defaultSpeed,
         seed: UInt64 = LuxTtsConstants.defaultSeed
     ) async throws -> LuxTtsSynthesisResult {
-        guard let synthesizer = synthesizer else { throw LuxTtsError.notInitialized }
+        guard let store, let synthesizer else { throw LuxTtsError.notInitialized }
 
         let prompt24k: [Float]
         do {
@@ -173,12 +173,146 @@ public actor LuxTtsManager {
                 "cannot load \(promptAudio.path): \(error.localizedDescription)")
         }
 
-        return try await synthesizer.synthesize(
-            promptTokenIds: promptTokenIds,
-            textTokenIds: tokenIds,
-            promptAudio24k: prompt24k,
-            speed: speed,
-            seed: seed)
+        let tokenizer = try await store.tokenizer()
+        let pauseTokens = Set([",", ".", ";", ":", "!", "?"].compactMap { tokenizer.tokenToId[$0] })
+        let boundaryTokens = pauseTokens.union([tokenizer.tokenToId[" "]].compactMap { $0 })
+        let maxPromptSamples = Int(
+            LuxTtsConstants.maxPromptSeconds * Double(LuxTtsConstants.melSampleRate))
+        let promptFrames = LuxTtsMelExtractor().frameCount(
+            sampleCount: min(prompt24k.count, maxPromptSamples))
+
+        let spans: [[Int]]
+        if LuxTtsContinuation.fitsSinglePass(
+            textTokenCount: tokenIds.count,
+            promptFrames: promptFrames,
+            promptTokenCount: promptTokenIds.count,
+            speed: Double(speed))
+        {
+            spans = [tokenIds]
+        } else {
+            let maxSpanTokens = LuxTtsContinuation.maxSpanTokens(
+                promptFrames: promptFrames,
+                promptTokenCount: promptTokenIds.count,
+                speed: Double(speed))
+            spans = LuxTtsContinuation.chunks(
+                tokenIds: tokenIds,
+                maxTokens: maxSpanTokens,
+                boundaryTokenIds: boundaryTokens)
+            logger.info(
+                "LuxTTS continuation synthesis: \(tokenIds.count) target tokens in "
+                    + "\(spans.count) balanced spans (≤ \(maxSpanTokens) tokens each)")
+        }
+
+        let converter = AudioConverter(sampleRate: Double(LuxTtsConstants.melSampleRate))
+        let crossfadeSamples = Int(
+            LuxTtsConstants.continuationCrossfadeSeconds
+                * Double(LuxTtsConstants.outputSampleRate))
+        var currentPromptAudio = prompt24k
+        var currentPromptTokens = promptTokenIds
+        var samples: [Float] = []
+        var originalPromptFrames = 0
+        var totalGeneratedFrames = 0
+        var previousSpeedFactor: Float = 1
+
+        for (index, span) in spans.enumerated() {
+            // A continuation prompt already speaks at the requested rate;
+            // applying `speed` again would compound it on every span. If the
+            // previous span was compressed by a retry, undo that here.
+            let (result, speedFactor) = try await synthesizeSpan(
+                synthesizer,
+                textTokenIds: span,
+                promptTokenIds: currentPromptTokens,
+                promptAudio24k: currentPromptAudio,
+                speed: index == 0 ? speed : 1 / previousSpeedFactor,
+                seed: seed &+ UInt64(index) &* LuxTtsConstants.continuationSeedStride,
+                allowedPauses: LuxTtsContinuation.expectedPauseCount(
+                    in: span, pauseTokenIds: pauseTokens, boundaryTokenIds: boundaryTokens),
+                label: "span \(index + 1)/\(spans.count)")
+            if spans.count == 1 { return result }
+
+            previousSpeedFactor = speedFactor
+            if index == 0 { originalPromptFrames = result.promptFrames }
+            totalGeneratedFrames += result.generatedFrames
+            var spanSamples = result.samples
+            if index > 0 {
+                spanSamples = LuxTtsContinuation.trimmingLeadingPadding(
+                    spanSamples, sampleRate: result.sampleRate)
+            }
+            let hasNextSpan = index + 1 < spans.count
+            if hasNextSpan,
+                !LuxTtsContinuation.endsWithPausePunctuation(
+                    span, pauseTokenIds: pauseTokens, boundaryTokenIds: boundaryTokens)
+            {
+                spanSamples = LuxTtsContinuation.trimmingTrailingPadding(
+                    spanSamples, sampleRate: result.sampleRate)
+            }
+            LuxTtsContinuation.appendWithCrossfade(
+                spanSamples, to: &samples, crossfadeSamples: crossfadeSamples)
+
+            guard hasNextSpan else { continue }
+            // Prompt with the untrimmed span so its frames-per-token ratio is
+            // the one the model actually produced for these tokens.
+            currentPromptAudio = try converter.resample(
+                result.samples, from: Double(result.sampleRate))
+            currentPromptTokens = span
+        }
+
+        return LuxTtsSynthesisResult(
+            samples: samples,
+            sampleRate: LuxTtsConstants.outputSampleRate,
+            promptFrames: originalPromptFrames,
+            generatedFrames: totalGeneratedFrames,
+            featuresLength: originalPromptFrames + totalGeneratedFrames)
+    }
+
+    /// One flow-matching pass with a bounded re-seed ladder. The model can
+    /// drop a spurious mid-phrase pause whose position depends on the exact
+    /// (length, noise) draw (issue #937; the PyTorch reference does the
+    /// same), so a pass whose silences exceed the span's punctuation is
+    /// re-drawn with the next seed, later attempts also slightly compressed
+    /// in duration. The cleanest attempt is kept. Returns the pass and the
+    /// speed factor it was rendered with.
+    private func synthesizeSpan(
+        _ synthesizer: LuxTtsSynthesizer,
+        textTokenIds: [Int],
+        promptTokenIds: [Int],
+        promptAudio24k: [Float],
+        speed: Float,
+        seed: UInt64,
+        allowedPauses: Int,
+        label: String
+    ) async throws -> (LuxTtsSynthesisResult, Float) {
+        let factors = LuxTtsConstants.spuriousPauseRetrySpeedFactors
+        func render(_ attempt: Int) async throws -> (LuxTtsSynthesisResult, Float, Int) {
+            let factor = factors[min(attempt, factors.count - 1)]
+            let result = try await synthesizer.synthesize(
+                promptTokenIds: promptTokenIds,
+                textTokenIds: textTokenIds,
+                promptAudio24k: promptAudio24k,
+                speed: speed * factor,
+                seed: seed &+ UInt64(attempt))
+            let pauses = LuxTtsContinuation.innerPauseCount(
+                result.samples, sampleRate: result.sampleRate)
+            return (result, factor, max(0, pauses - allowedPauses))
+        }
+
+        var (best, bestFactor, bestSpurious) = try await render(0)
+        guard bestSpurious > 0 else { return (best, bestFactor) }
+
+        for attempt in 1...max(1, LuxTtsConstants.spuriousPauseRetries) {
+            logger.info(
+                "LuxTTS \(label): \(bestSpurious) spurious pause(s) beyond the "
+                    + "\(allowedPauses) the text allows; re-drawing (attempt \(attempt))")
+            let (candidate, factor, spurious) = try await render(attempt)
+            if spurious < bestSpurious {
+                (best, bestFactor, bestSpurious) = (candidate, factor, spurious)
+            }
+            if spurious == 0 { return (candidate, factor) }
+        }
+        logger.warning(
+            "LuxTTS \(label): \(bestSpurious) spurious pause(s) remain after "
+                + "\(LuxTtsConstants.spuriousPauseRetries) re-draws; keeping the cleanest pass")
+        return (best, bestFactor)
     }
 
     public func cleanup() async {

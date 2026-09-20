@@ -119,8 +119,8 @@ struct LuxTtsSynthesizer {
             throw LuxTtsError.tokenizerFailed(
                 "estimated only \(genFrames) generated frames — text too short")
         }
-        // TODO(phase 2): chunk long inputs across multiple vocoder windows
-        // instead of erroring; mel truncation is NOT allowed.
+        // Long inputs are split into continuation-prompted spans by
+        // `LuxTtsManager` before reaching here; mel truncation is NOT allowed.
         guard let bucket = LuxTtsConstants.vocoderBuckets.first(where: { $0 >= genFrames }) else {
             throw LuxTtsError.inputTooLong(
                 "generated frames \(genFrames) exceed the largest vocoder bucket "

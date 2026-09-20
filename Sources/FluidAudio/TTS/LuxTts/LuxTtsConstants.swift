@@ -54,4 +54,40 @@ public enum LuxTtsConstants {
 
     /// Default synthesis noise seed (matches the Python reference scripts).
     public static let defaultSeed: UInt64 = 42
+
+    /// Largest target-token span sent through one flow-matching pass. Spans
+    /// this size keep the per-pass odds of a spurious mid-phrase pause low
+    /// (issue #937) and fit the frame budget for typical prompts; longer text
+    /// is continuation-prompted so callers never see chunk seams.
+    public static let maxSinglePassTextTokens = 102
+
+    /// Re-seed attempts for a pass whose mid-speech silences outnumber the
+    /// span's pause punctuation. The model drops such pauses stochastically
+    /// (position depends on the exact length/noise draw; the PyTorch
+    /// reference does the same), so a fresh seed is the fix. One full pass
+    /// each.
+    public static let spuriousPauseRetries = 3
+    /// Duration compression applied on each re-seed (indexed by attempt,
+    /// attempt 0 is the original pass). A surplus of estimated frames is the
+    /// other way the model ends up with a pause to fill, so later attempts
+    /// also shorten the span a little. The next span is prompted at the
+    /// original pace, so the nudge does not propagate.
+    public static let spuriousPauseRetrySpeedFactors: [Float] = [1.0, 1.0, 1.03, 1.06]
+    /// Silence floor (dB relative to the pass's peak) below which audio
+    /// counts as padding or pause, and the minimum gap between sustained
+    /// speech that counts as a pause. Natural stop closures stay ≤ 60 ms at
+    /// this floor; the reported pauses measure 100–160 ms.
+    public static let pauseFloorDb: Float = -45
+    public static let pauseMinimumSeconds = 0.08
+    /// Seed stride between continuation spans; leaves room for re-seeds.
+    public static let continuationSeedStride: UInt64 = 64
+
+    /// Generated-frame budget per continuation span. A span must fit inside
+    /// `maxPromptSeconds` so its untruncated audio can prompt the next span
+    /// with a transcript that still matches it.
+    public static let continuationSpanFrameBudget =
+        Int(maxPromptSeconds * Double(melSampleRate)) / hopLength
+
+    /// Overlap used when joining continuation-prompted spans.
+    public static let continuationCrossfadeSeconds = 0.03
 }
