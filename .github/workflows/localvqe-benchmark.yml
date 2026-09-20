@@ -27,11 +27,32 @@ concurrency:
   group: localvqe-benchmark-${{ github.ref }}
   cancel-in-progress: true
 
+# The 200-example run is ~7 min on an M5 Pro but far slower on the 3-core
+# macOS runner (a single job exceeded 60 min), so it is split into contiguous
+# shards that a final job merges and verifies as one 200-example report.
+env:
+  SHARD_COUNT: 5
+
 jobs:
-  benchmark:
-    name: LocalVQE 200-example ASR benchmark
+  regressions:
+    name: Scoring and manifest regressions
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Swift scorer / dataset / registry tests
+        run: swift test --filter 'EnhanceBenchmark|WERCalculatorTests|ModelRegistryTests'
+      - name: Python verifier tests
+        run: python3 Scripts/test_verify_localvqe_benchmark.py
+
+  shard:
+    name: Score shard ${{ matrix.shard }}
     runs-on: macos-15
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v5
 
@@ -46,27 +67,50 @@ jobs:
             sysctl -n machdep.cpu.brand_string
           } > localvqe-results/environment.txt
 
-      - name: Run scoring and manifest regressions
-        run: swift test --filter 'EnhanceBenchmark|WERCalculatorTests|ModelRegistryTests'
-
       - name: Build release benchmark
         run: swift build -c release --product fluidaudiocli
 
-      - name: Score fixed 200-example dataset
+      - name: Score shard ${{ matrix.shard }}/${{ env.SHARD_COUNT }} of the fixed 200-example dataset
         run: |
           set -o pipefail
           .build/release/fluidaudiocli enhance-benchmark \
             --variants v1.3,v1.2 --chunk 256ms --compute-units cpu-only \
+            --shard ${{ matrix.shard }}/${{ env.SHARD_COUNT }} \
             --output localvqe-results/benchmark.json 2>&1 | tee localvqe-results/benchmark.log
 
-      - name: Verify coverage, scores and improvement over unprocessed audio
+      - name: Upload shard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: localvqe-shard-${{ matrix.shard }}-${{ github.sha }}
+          path: localvqe-results/
+          retention-days: 30
+
+  verify:
+    name: LocalVQE 200-example ASR benchmark
+    needs: [shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download shard reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: localvqe-shard-*-${{ github.sha }}
+          path: shards
+
+      - name: Merge shards and verify coverage, scores and improvement over unprocessed audio
         run: |
+          mkdir -p localvqe-results
+          ls shards/*/benchmark.json
+          python3 Scripts/verify_localvqe_benchmark.py shards/*/benchmark.json \
+            --merged localvqe-results/benchmark.json \
+            --expected-files 200 --require-improvement --markdown "$GITHUB_STEP_SUMMARY"
           LOCALVQE_BENCHMARK_REPORT=localvqe-results/benchmark.json \
             python3 Scripts/test_verify_localvqe_benchmark.py
-          python3 Scripts/verify_localvqe_benchmark.py localvqe-results/benchmark.json \
-            --expected-files 200 --require-improvement --markdown "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload benchmark evidence
+      - name: Upload merged benchmark evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:

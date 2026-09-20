@@ -18,6 +18,7 @@ enum EnhanceBenchmarkDataset {
         case duplicateFileID(String)
         case emptyMetadata
         case invalidInteger(line: Int, column: String, value: String)
+        case invalidShard(index: Int, count: Int)
         case malformedRow(line: Int, expected: Int, actual: Int)
         case missingAudio(fileID: String, path: String)
         case missingColumn(String)
@@ -31,6 +32,8 @@ enum EnhanceBenchmarkDataset {
                 return "benchmark meta.csv is empty"
             case .invalidInteger(let line, let column, let value):
                 return "benchmark meta.csv line \(line) has invalid \(column) value '\(value)'"
+            case .invalidShard(let index, let count):
+                return "shard \(index)/\(count) is out of range; expected 0 <= index < count"
             case .malformedRow(let line, let expected, let actual):
                 return "benchmark meta.csv line \(line) has \(actual) fields; expected \(expected)"
             case .missingAudio(let fileID, let path):
@@ -75,6 +78,19 @@ enum EnhanceBenchmarkDataset {
                 nearendNoisy: row.nearendNoisy
             )
         }
+    }
+
+    /// Contiguous slice `index` of `count` equal-sized shards (the last may be
+    /// shorter), so concatenating shard results in index order restores the
+    /// full selection order.
+    static func shard<T>(_ items: [T], index: Int, count: Int) throws -> [T] {
+        guard count > 0, (0..<count).contains(index) else {
+            throw DatasetError.invalidShard(index: index, count: count)
+        }
+        let size = (items.count + count - 1) / count
+        let start = min(items.count, index * size)
+        let end = min(items.count, start + size)
+        return Array(items[start..<end])
     }
 
     static func sha256(of url: URL) throws -> String {

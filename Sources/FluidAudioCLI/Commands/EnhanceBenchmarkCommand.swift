@@ -26,6 +26,7 @@ enum EnhanceBenchmarkCommand {
     private struct Options {
         var datasetDir: String?
         var maxFiles: Int?
+        var shard: (index: Int, count: Int)?
         var variants: [LocalVqeVariant] = [.v13, .v12]
         var chunk: LocalVqeChunk = .batch256ms
         var computeUnits: MLComputeUnits = .cpuOnly
@@ -66,6 +67,15 @@ enum EnhanceBenchmarkCommand {
                     exit(1)
                 }
                 options.maxFiles = maxFiles
+            case "--shard":
+                let parts = (next(arguments, &index) ?? "").split(separator: "/", omittingEmptySubsequences: false)
+                guard parts.count == 2, let shardIndex = Int(parts[0]), let shardCount = Int(parts[1]),
+                    shardCount > 0, (0..<shardCount).contains(shardIndex)
+                else {
+                    logger.error("--shard must be <index>/<count> with 0 <= index < count")
+                    exit(1)
+                }
+                options.shard = (shardIndex, shardCount)
             case "--variants":
                 let raw = (next(arguments, &index) ?? "").split(separator: ",", omittingEmptySubsequences: false)
                     .map(String.init)
@@ -108,11 +118,15 @@ enum EnhanceBenchmarkCommand {
             let datasetDir = try await resolveDataset(options.datasetDir)
             var examples = try EnhanceBenchmarkDataset.loadExamples(from: datasetDir)
             if let maxFiles = options.maxFiles { examples = Array(examples.prefix(maxFiles)) }
+            if let shard = options.shard {
+                examples = try EnhanceBenchmarkDataset.shard(examples, index: shard.index, count: shard.count)
+            }
             guard !examples.isEmpty else {
-                logger.error("No examples found in \(datasetDir.path)")
+                logger.error("No examples selected from \(datasetDir.path)")
                 exit(1)
             }
-            report("Dataset: \(datasetDir.path) (\(examples.count) examples)")
+            let shardLabel = options.shard.map { " shard \($0.index)/\($0.count)" } ?? ""
+            report("Dataset: \(datasetDir.path) (\(examples.count) examples\(shardLabel))")
             let startedAt = Date()
             let audioHashes = options.outputPath == nil ? [:] : try EnhanceBenchmarkProvenance.audioFiles(examples)
 
@@ -296,6 +310,7 @@ enum EnhanceBenchmarkCommand {
                         "selected_fileids": examples.map(\.fileID),
                         "audio_files_sha256": audioHashes,
                     ],
+                    "shard": options.shard.map { ["index": $0.index, "count": $0.count] as [String: Any] } ?? NSNull(),
                     "chunk": options.chunk.rawValue, "summary": summary, "files": rows,
                     "excluded_empty_reference_fileids": emptyReferenceFileIDs,
                 ]
@@ -443,6 +458,8 @@ enum EnhanceBenchmarkCommand {
 
     private static func report(_ line: String) {
         print(line)
+        // stdout is block-buffered when piped (CI `tee`); flush so progress is visible live.
+        fflush(stdout)
         logger.info("\(line)")
     }
 
@@ -460,6 +477,8 @@ enum EnhanceBenchmarkCommand {
                 --dataset-dir <dir>      Directory with fileid_*_{mic,lpb,clean}.wav + meta.csv
                                          (default: auto-download \(datasetRepo)).
                 --max-files <n>          Score only the first n examples (numeric fileid order).
+                --shard <i>/<n>          Score contiguous shard i of n (after --max-files); merge the
+                                         shard reports with Scripts/verify_localvqe_benchmark.py.
                 --variants <list>        Comma list of v1.3,v1.2 (default both).
                 --chunk <256ms|16ms>     Chunk export to benchmark (default 256ms).
                 --compute-units <cpu-only|gpu|ane|all>

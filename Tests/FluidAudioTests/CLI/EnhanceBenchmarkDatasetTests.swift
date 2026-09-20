@@ -29,6 +29,17 @@ final class EnhanceBenchmarkDatasetTests: XCTestCase {
         XCTAssertEqual(examples.map(\.nearendNoisy), [true, false])
     }
 
+    func testShardsAreContiguousAndCoverEveryItemOnce() throws {
+        let items = Array(1...11)
+        let shards = try (0..<3).map { try EnhanceBenchmarkDataset.shard(items, index: $0, count: 3) }
+        XCTAssertEqual(shards, [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11]])
+        XCTAssertEqual(try EnhanceBenchmarkDataset.shard(items, index: 0, count: 1), items)
+        XCTAssertEqual(try EnhanceBenchmarkDataset.shard(items, index: 11, count: 12), [])
+        XCTAssertThrowsError(try EnhanceBenchmarkDataset.shard(items, index: 3, count: 3))
+        XCTAssertThrowsError(try EnhanceBenchmarkDataset.shard(items, index: -1, count: 3))
+        XCTAssertThrowsError(try EnhanceBenchmarkDataset.shard(items, index: 0, count: 0))
+    }
+
     func testRejectsDuplicateFileID() throws {
         let metadata = [header, "1,0,0,0,1", "1,1,0,0,1"].joined(separator: "\n")
         let directory = try metadataDirectory(metadata)

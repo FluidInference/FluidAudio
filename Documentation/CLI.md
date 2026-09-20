@@ -130,6 +130,9 @@ bundles instead of downloading.
 # Near-end word recall / WER / far-end leakage on the AEC-Challenge synthetic mini set (auto-downloads)
 swift run -c release fluidaudiocli enhance-benchmark
 swift run -c release fluidaudiocli enhance-benchmark --max-files 50 --variants v1.3 --no-reference --output results.json
+# Split the run across machines: contiguous shard i of n, then merge + verify the shard reports
+swift run -c release fluidaudiocli enhance-benchmark --shard 0/5 --output shard0.json
+python3 Scripts/verify_localvqe_benchmark.py shard*.json --merged results.json --expected-files 200
 ```
 
 ## Datasets

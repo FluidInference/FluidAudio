@@ -3,6 +3,7 @@
 
 import argparse
 from collections import Counter
+from copy import deepcopy
 import json
 import math
 from pathlib import Path
@@ -46,8 +47,81 @@ def close(actual, expected, label):
             f"{label}: expected {expected}, got {actual}")
 
 
+SHARED_FIELDS = ("schema_version", "protocol", "configuration", "chunk", "conditions", "model_files_sha256")
+DATASET_SHARED_FIELDS = ("path", "repository", "revision", "archive_sha256", "metadata_sha256", "selection_order")
+COUNT_FIELDS = ("files", "reference_words", "hits", "errors", "far_end_words", "leaked_words",
+                "audio_seconds", "enhancement_seconds")
+
+
+def merge(reports):
+    """Combine contiguous shard reports (enhance-benchmark --shard i/n) into one full report.
+
+    Shards are concatenated in index order, so the merged selection, scored rows
+    and exclusions keep the canonical numeric-fileid order that verify() checks.
+    """
+    shards = []
+    for report in reports:
+        shard = report.get("shard")
+        require(isinstance(shard, dict) and {"index", "count"} <= set(shard), "Report is not a shard report")
+        shards.append((shard["index"], shard["count"], report))
+    counts = {count for _, count, _ in shards}
+    require(len(counts) == 1, "Shards disagree on the shard count")
+    count = counts.pop()
+    require(sorted(index for index, _, _ in shards) == list(range(count)),
+            f"Expected shards 0..{count - 1} exactly once, got {sorted(index for index, _, _ in shards)}")
+    shards.sort(key=lambda item: item[0])
+    first = shards[0][2]
+    for _, _, report in shards[1:]:
+        for field in SHARED_FIELDS:
+            require(report[field] == first[field], f"Shards disagree on {field}")
+        for field in DATASET_SHARED_FIELDS:
+            require(report["dataset"][field] == first["dataset"][field], f"Shards disagree on dataset.{field}")
+        require(report["environment"]["source_revision"] == first["environment"]["source_revision"],
+                "Shards were produced from different source revisions")
+
+    merged = {field: deepcopy(first[field]) for field in SHARED_FIELDS}
+    merged["dataset"] = {field: first["dataset"][field] for field in DATASET_SHARED_FIELDS}
+    merged["dataset"]["selected_fileids"] = []
+    merged["dataset"]["audio_files_sha256"] = {}
+    merged["files"] = []
+    merged["excluded_empty_reference_fileids"] = []
+    merged["shards"] = []
+    totals = {condition: Counter() for condition in first["conditions"]}
+    for index, _, report in shards:
+        merged["dataset"]["selected_fileids"] += report["dataset"]["selected_fileids"]
+        hashes = report["dataset"]["audio_files_sha256"]
+        require(set(hashes).isdisjoint(merged["dataset"]["audio_files_sha256"]), "Shards overlap in audio files")
+        merged["dataset"]["audio_files_sha256"].update(hashes)
+        merged["files"] += report["files"]
+        merged["excluded_empty_reference_fileids"] += report["excluded_empty_reference_fileids"]
+        merged["shards"].append({"index": index, "count": count, "started_at": report["started_at"],
+                                 "completed_at": report["completed_at"], "environment": report["environment"]})
+        for condition, summary in report["summary"].items():
+            totals[condition].update({field: summary[field] for field in COUNT_FIELDS})
+    require(len(merged["dataset"]["selected_fileids"]) == len(set(merged["dataset"]["selected_fileids"])),
+            "Shards overlap in selected fileids")
+    merged["summary"] = {}
+    for condition, total in totals.items():
+        words, far, seconds = total["reference_words"], total["far_end_words"], total["enhancement_seconds"]
+        merged["summary"][condition] = {
+            **{field: total[field] for field in COUNT_FIELDS},
+            "recall": total["hits"] / words if words else 0, "wer": total["errors"] / words if words else 0,
+            "leakage": total["leaked_words"] / far if far else 0,
+            "rtfx": total["audio_seconds"] / seconds if seconds else 0,
+        }
+    merged["started_at"] = min(shard["started_at"] for shard in merged["shards"])
+    merged["completed_at"] = max(shard["completed_at"] for shard in merged["shards"])
+    merged["environment"] = deepcopy(first["environment"])
+    merged["shard"] = None
+    return merged
+
+
 def verify(report, expected_files, require_improvement=False):
     require(report["schema_version"] == 2 and report["protocol"] == "localvqe-asr-v2", "Unsupported protocol")
+    shard = report.get("shard")
+    require(shard is None or shard["count"] == 1,
+            f"Shard {shard['index']}/{shard['count']} report: pass every shard report so they are merged first"
+            if shard else "")
     config = report["configuration"]
     require(config["asr"] == "parakeet-tdt-v3-int8" and config["asr_compute_units"] == "cpu-only",
             "Unexpected ASR configuration")
@@ -140,16 +214,26 @@ def verify(report, expected_files, require_improvement=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("report", type=Path)
+    parser.add_argument("report", type=Path, nargs="+",
+                        help="one full report, or every shard report of one run (merged in shard order)")
     parser.add_argument("--expected-files", type=int, default=200)
     parser.add_argument("--require-improvement", action="store_true")
     parser.add_argument("--markdown", type=Path)
+    parser.add_argument("--merged", type=Path, help="write the merged full report (shard inputs only)")
     args = parser.parse_args()
-    report = json.loads(args.report.read_text())
+    reports = [json.loads(path.read_text()) for path in args.report]
+    if len(reports) == 1 and not reports[0].get("shard"):
+        report = reports[0]
+        require(args.merged is None, "--merged needs shard reports")
+    else:
+        report = merge(reports)
+        if args.merged:
+            args.merged.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     totals = verify(report, args.expected_files, args.require_improvement)
     lines = ["## LocalVQE ASR benchmark", "",
              f"Verified {args.expected_files} selected examples; {len(report['files'])} scored; "
-             f"{len(report['excluded_empty_reference_fileids'])} empty references excluded.", "",
+             f"{len(report['excluded_empty_reference_fileids'])} empty references excluded"
+             + (f"; merged from {len(report['shards'])} shards." if report.get("shards") else "."), "",
              "| Condition | Recall | WER | Leakage | Enhancement RTFx |",
              "|---|---:|---:|---:|---:|"]
     for condition, total in totals.items():
