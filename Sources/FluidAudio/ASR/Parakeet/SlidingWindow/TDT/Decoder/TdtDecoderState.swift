@@ -96,13 +96,55 @@ public struct TdtDecoderState: Sendable {
 }
 
 extension MLMultiArray {
+    /// Fills every element with `value` through the backing storage, so padded strides are covered.
+    /// Zero is a single `memset`; other values fill through a typed pointer where the type allows.
     func resetData(to value: NSNumber) {
+        let filled = withUnsafeMutableBytes { bytes, _ -> Bool in
+            guard let base = bytes.baseAddress else {
+                return true
+            }
+            if value == 0 {
+                memset(base, 0, bytes.count)
+                return true
+            }
+            switch dataType {
+            case .float32:
+                bytes.bindMemory(to: Float.self).update(repeating: value.floatValue)
+            case .float64:
+                bytes.bindMemory(to: Double.self).update(repeating: value.doubleValue)
+            case .int32:
+                bytes.bindMemory(to: Int32.self).update(repeating: value.int32Value)
+            default:
+                return false
+            }
+            return true
+        }
+        if filled {
+            return
+        }
         for i in 0..<count {
             self[i] = value
         }
     }
 
+    /// Copies every element from `source`. Identical layouts copy the backing storage in one
+    /// `memcpy`; anything else goes element by element.
     func copyData(from source: MLMultiArray) {
+        let copied = withUnsafeMutableBytes { destination, _ -> Bool in
+            source.withUnsafeBytes { origin -> Bool in
+                guard dataType == source.dataType, shape == source.shape, strides == source.strides,
+                    destination.count == origin.count, let to = destination.baseAddress,
+                    let from = origin.baseAddress
+                else {
+                    return false
+                }
+                memcpy(to, from, destination.count)
+                return true
+            }
+        }
+        if copied {
+            return
+        }
         for i in 0..<count {
             self[i] = source[i]
         }

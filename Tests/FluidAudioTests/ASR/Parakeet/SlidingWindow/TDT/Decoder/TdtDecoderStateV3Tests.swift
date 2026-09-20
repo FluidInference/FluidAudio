@@ -183,6 +183,28 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         verifyArrayHasValue(array, value: 3.14)
     }
 
+    func testMLMultiArrayResetDataInt32Value() throws {
+        let array = try MLMultiArray(shape: [4, 6], dataType: .int32)
+
+        array.resetData(to: 7)
+
+        for i in 0..<array.count {
+            XCTAssertEqual(array[i].intValue, 7, "Array should hold 7 at index \(i)")
+        }
+    }
+
+    func testMLMultiArrayResetDataFloat16Value() throws {
+        let array = try MLMultiArray(shape: [3, 5], dataType: .float16)
+
+        array.resetData(to: 1.5)
+        for i in 0..<array.count {
+            XCTAssertEqual(array[i].floatValue, 1.5, "Array should hold 1.5 at index \(i)")
+        }
+
+        array.resetData(to: 0)
+        verifyArrayIsZero(array)
+    }
+
     func testMLMultiArrayResetDataNonFloat() throws {
         let array = try MLMultiArray(shape: [5, 3], dataType: .int32)
 
@@ -212,6 +234,46 @@ final class TdtDecoderStateV3Tests: XCTestCase {
 
         // Verify copy
         verifyArraysEqual(destArray, sourceArray)
+    }
+
+    func testMLMultiArrayCopyDataLargeArrayWithinBudget() throws {
+        // The decoder state is snapshotted before every inference, so the copy must be a bulk
+        // transfer. A per-element copy of 240000 samples costs tens of milliseconds.
+        let shape: [NSNumber] = [1, NSNumber(value: ASRConstants.maxModelSamples)]
+        let sourceArray = try MLMultiArray(shape: shape, dataType: .float32)
+        let destArray = try MLMultiArray(shape: shape, dataType: .float32)
+        sourceArray[sourceArray.count - 1] = NSNumber(value: Float(3))
+        let clock = ContinuousClock()
+        var best = Double.infinity
+
+        for _ in 0..<5 {
+            let elapsed = clock.measure {
+                destArray.copyData(from: sourceArray)
+            }
+            best = min(best, elapsed / .milliseconds(1))
+        }
+
+        XCTAssertEqual(destArray[destArray.count - 1].floatValue, 3)
+        XCTAssertLessThan(best, 5, "copyData took \(best) ms for \(ASRConstants.maxModelSamples) elements")
+    }
+
+    func testMLMultiArrayCopyDataAcrossStrideLayouts() throws {
+        // A plain array and an ANE-aligned array of the same shape have different strides;
+        // the copy must still land every element.
+        let shape: [NSNumber] = [10, 10]
+        let sourceArray = try ANEMemoryUtils.createAlignedArray(shape: shape, dataType: .float32)
+        let destArray = try MLMultiArray(shape: shape, dataType: .float32)
+        XCTAssertNotEqual(sourceArray.strides, destArray.strides)
+
+        for i in 0..<sourceArray.count {
+            sourceArray[i] = NSNumber(value: Float(i) + 0.5)
+        }
+
+        destArray.copyData(from: sourceArray)
+
+        for i in 0..<destArray.count {
+            XCTAssertEqual(destArray[i].floatValue, Float(i) + 0.5, "Element \(i) should match the source")
+        }
     }
 
     func testMLMultiArrayCopyDataNonFloat() throws {
