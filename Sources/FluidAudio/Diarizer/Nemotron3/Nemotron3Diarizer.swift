@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 
 /// Streaming 8-speaker diarizer backed by NVIDIA's Nemotron 3 Diarization preview.
@@ -325,7 +326,9 @@ public struct Nemotron3FeatureLoader {
 /// `Nemotron3FeatureLoader`. Model-free so the cadence and framing are unit-testable.
 struct Nemotron3StreamingFrontend {
     private let config: Nemotron3Config
-    private let mel = AudioMelSpectrogram()
+    /// Pre-emphasis is applied here, before padding, so the extractor runs without it.
+    private let mel = AudioMelSpectrogram(preemph: 0)
+    private let preemph = AudioMelSpectrogram.defaultPreemph
 
     private var audio: [Float] = []
     /// Absolute sample index of `audio[0]`.
@@ -410,27 +413,38 @@ struct Nemotron3StreamingFrontend {
         let done = melFramesComputed
         guard target > done else { return }
 
-        // Frame f is centered on sample f*hop; its window spans ±half around it.
+        // Frame f is centered on sample f*hop; its window spans ±half around it. Like the
+        // batch path, pre-emphasize the received samples only, so the zero padding on both
+        // edges stays zero rather than picking up a -preemph * x[N-1] spike.
         let sliceStart = done * hop - half
         let sliceEnd = (target - 1) * hop + half
         var slice = [Float](repeating: 0, count: sliceEnd - sliceStart)
         let copyStart = max(sliceStart, 0)
         let copyEnd = min(sliceEnd, received)
         if copyEnd > copyStart {
+            let count = copyEnd - copyStart
             let src = copyStart - audioStart
             slice.withUnsafeMutableBufferPointer { dst in
                 audio.withUnsafeBufferPointer { buf in
-                    dst.baseAddress!.advanced(by: copyStart - sliceStart)
-                        .update(from: buf.baseAddress!.advanced(by: src), count: copyEnd - copyStart)
+                    let out = dst.baseAddress!.advanced(by: copyStart - sliceStart)
+                    let input = buf.baseAddress!.advanced(by: src)
+                    var negPreemph = -preemph
+                    if src > 0 {
+                        // y[n] = x[n] - preemph * x[n-1], seeded from the retained history sample.
+                        vDSP_vsma(input - 1, 1, &negPreemph, input, 1, out, 1, vDSP_Length(count))
+                    } else {
+                        // Stream start: x[-1] is the zero pad.
+                        out[0] = input[0]
+                        if count > 1 {
+                            vDSP_vsma(input, 1, &negPreemph, input + 1, 1, out + 1, 1, vDSP_Length(count - 1))
+                        }
+                    }
                 }
             }
         }
-        let previous = sliceStart - 1
-        let lastSample: Float = previous >= 0 && previous < received ? audio[previous - audioStart] : 0
 
         let (frames, _, _) = mel.computeFlatTransposed(
-            audio: slice, lastAudioSample: lastSample, paddingMode: .prePadded,
-            expectedFrameCount: target - done)
+            audio: slice, paddingMode: .prePadded, expectedFrameCount: target - done)
         melCache.append(contentsOf: frames[0..<((target - done) * config.melFeatures)])
         melFramesComputed = target
 
