@@ -46,7 +46,10 @@ final class LuxTtsE2ETests: XCTestCase {
             promptAudio: promptURL,
             promptPhonemes: fixtures.prompt.phonemeString,
             speed: Float(fixtures.e2e.speed),
-            seed: UInt64(fixtures.e2e.seed))
+            seed: UInt64(fixtures.e2e.seed),
+            // Pin the raw pass: the pause detector would otherwise re-draw
+            // this fixture (one breath beyond its two commas) with another seed.
+            maxRedraws: 0)
 
         // Frame accounting must be identical to Python (pure integer math
         // over fixture-pinned token ids and mel frame counts).
@@ -55,6 +58,7 @@ final class LuxTtsE2ETests: XCTestCase {
         XCTAssertEqual(result.featuresLength, fixtures.e2e.featuresLen)
         XCTAssertEqual(result.generatedFrames, fixtures.e2e.genFrames)
         XCTAssertEqual(result.samples.count, fixtures.e2e.wavSamples)
+        XCTAssertEqual(result.redraws, 0)
 
         // Loudness within 1 dB of the Python CoreML pipeline, and non-silent.
         let sumSquares = result.samples.reduce(Double(0)) { $0 + Double($1) * Double($1) }

@@ -45,6 +45,8 @@ public enum LuxTtsConstants {
     /// Prompt duration cap in seconds. Frames beyond this would eat too much
     /// of the 1024-frame bucket (~10.9 s total at 93.75 frames/s).
     public static let maxPromptSeconds: Double = 5.0
+    /// `maxPromptSeconds` in 24 kHz samples.
+    public static let maxPromptSamples = Int(maxPromptSeconds * Double(melSampleRate))
 
     /// Published fixed-shape vocoder buckets (generated frames).
     public static let vocoderBuckets = [282, 555]
@@ -55,11 +57,22 @@ public enum LuxTtsConstants {
     /// Default synthesis noise seed (matches the Python reference scripts).
     public static let defaultSeed: UInt64 = 42
 
-    /// Largest target-token span sent through one flow-matching pass. Spans
-    /// this size keep the per-pass odds of a spurious mid-phrase pause low
-    /// (issue #937) and fit the frame budget for typical prompts; longer text
-    /// is continuation-prompted so callers never see chunk seams.
-    public static let maxSinglePassTextTokens = 102
+    /// Largest target-token span sent through one flow-matching pass; longer
+    /// text is continuation-prompted in balanced spans of at most this size.
+    /// Measured on the issue #937 text (106 tokens, six seeds): as one pass
+    /// it paused on 6 of 8 raw draws and the re-draw ladder still failed one
+    /// seed; as two ~53-token spans every seed was clean with two re-draws
+    /// in total. Shorter passes draw pauses far less often.
+    public static let continuationSpanTokens = 102
+    /// Smallest span worth rendering. A prompt whose frames-per-token ratio
+    /// forces spans below this (silence-heavy clip, transcript that does not
+    /// match) is rejected instead of turning into dozens of passes.
+    public static let minimumSpanTokens = 8
+    /// Highest plausible prompt frames-per-token ratio for continuation
+    /// synthesis. Natural speech sits around 4–6 (93.75 frames/s); a ratio
+    /// beyond this means the transcript covers only part of the clip (or
+    /// the clip is mostly silence), and every span would inherit the error.
+    public static let maxPromptFramesPerToken = 12.0
 
     /// Re-seed attempts for a pass whose mid-speech silences outnumber the
     /// span's pause punctuation. The model drops such pauses stochastically
@@ -67,17 +80,12 @@ public enum LuxTtsConstants {
     /// reference does the same), so a fresh seed is the fix. One full pass
     /// each.
     public static let spuriousPauseRetries = 3
-    /// Duration compression applied on each re-seed (indexed by attempt,
-    /// attempt 0 is the original pass). A surplus of estimated frames is the
-    /// other way the model ends up with a pause to fill, so later attempts
-    /// also shorten the span a little. The next span is prompted at the
-    /// original pace, so the nudge does not propagate.
-    public static let spuriousPauseRetrySpeedFactors: [Float] = [1.0, 1.0, 1.03, 1.06]
     /// Silence floor (dB relative to the pass's peak) below which audio
     /// counts as padding or pause, and the minimum gap between sustained
     /// speech that counts as a pause. Natural stop closures stay ≤ 60 ms at
     /// this floor; the reported pauses measure 100–160 ms.
     public static let pauseFloorDb: Float = -45
+    /// Minimum gap between sustained-speech runs that counts as a pause.
     public static let pauseMinimumSeconds = 0.08
     /// Seed stride between continuation spans; leaves room for re-seeds.
     public static let continuationSeedStride: UInt64 = 64

@@ -74,17 +74,23 @@ jetsam-visible footprint is why iOS uses it.
 All graph shapes are fixed: ≤ 255 tokens (+1 pad slot), ≤ 1024 mel frames
 total, ≤ 555 generated frames (~5.9 s) per flow-matching pass.
 
-Longer text is handled by `LuxTtsManager` with continuation prompting
-rather than a bigger graph: target tokens are split into balanced spans at
-word/punctuation boundaries, each span is generated with the previous
-span's audio and tokens as its prompt, the vocoder's onset/tail padding
-is trimmed around sustained speech (a span ending in punctuation keeps its
-tail), and spans are joined with a 30 ms crossfade. Spans are capped at
-102 target tokens and bounded so no span generates more than ~5 s (468
-frames), which keeps every span short enough to prompt the next one
-untruncated. `speed` is applied to the first span only; later spans
-inherit the rate from their prompt. Text that fits one pass is synthesized
-exactly as before.
+Text that fits one pass (≤ 102 target tokens, token bucket, 1024 frames,
+555-frame vocoder bucket) is rendered in one pass; the 102 cap is measured,
+not a graph limit — see `LuxTtsConstants.continuationSpanTokens`. Longer text is handled by `LuxTtsManager`
+with continuation prompting rather than a bigger graph: target tokens are
+split into balanced spans of ≤ 102 tokens at word/punctuation boundaries,
+each span is generated with the previous span's audio and tokens as its
+prompt, the vocoder's onset/tail padding is trimmed around sustained
+speech (a span ending in punctuation keeps its tail), and spans are joined
+with a 30 ms crossfade. Spans are also bounded by the prompt's
+frames-per-token ratio so none generates more than ~5 s (468 frames),
+which keeps every span short enough to prompt the next one untruncated;
+a prompt whose ratio exceeds 12 frames per token (transcript covering only
+part of the clip) or would force spans under 8 tokens is rejected with
+`inputTooLong`. `speed` is applied to the first span only; later spans
+inherit the rate from their prompt. For multi-span output
+`generatedFrames`/`featuresLength` are sums over spans and `samples.count`
+is shorter than `(generatedFrames − 1) × 512`.
 
 The model also drops the occasional spurious mid-phrase pause (issue #937):
 where it lands depends on the exact length/noise draw — the PyTorch
@@ -92,10 +98,14 @@ reference does it too, and a small `speed` change moves or removes it —
 so longer text simply has more chances to draw one. Every pass is scanned
 for gaps ≥ 80 ms between runs of sustained speech (≤ −45 dB relative to
 peak; natural stop closures stay ≤ 60 ms); when they outnumber the span's
-pause punctuation the span is re-drawn with the next seed, up to 3 times
-(the last two also 3 % / 6 % shorter, since surplus estimated frames are the
-other source of pauses; the following span is prompted back at the original
-pace), keeping the cleanest pass.
+pause punctuation (`, . ; : ! ? -`, plus ellipses and quotes/brackets the
+G2P renders silently when going through the text API) the span is re-drawn
+with the next seed, up to `maxRedraws` times (default 3), keeping the
+cleanest pass. Re-draws keep the duration estimate: compressing it (speed
+× 1.03–1.06) removed some pauses but squeezed the final word into the last
+frames. This applies to single-pass text too, so a given seed is
+only bit-reproducible with `maxRedraws: 0` (CLI `--redraws 0`); the result
+reports `redraws` and `residualPauses`. Each re-draw is one extra pass.
 
 ## Quick Start
 

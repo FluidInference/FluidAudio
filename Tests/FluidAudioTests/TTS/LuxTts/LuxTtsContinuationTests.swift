@@ -40,11 +40,15 @@ final class LuxTtsContinuationTests: XCTestCase {
         XCTAssertEqual(chunks.map(\.count), [68, 69, 68])
     }
 
-    func testMaxSpanTokensIsBoundedByStableRegimeAndFrameBudget() {
-        // Fast prompt: the 102-token stable-regime cap wins.
+    func testMaxSpanTokensIsBoundedBySpanSizeTokenBucketAndFrameBudget() {
+        // Fast prompt: the 102-token span size wins.
         XCTAssertEqual(
             LuxTtsContinuation.maxSpanTokens(promptFrames: 300, promptTokenCount: 100, speed: 1.0),
             102)
+        // Long transcript: the 256-token encoder bucket (minus pad slot) wins.
+        XCTAssertEqual(
+            LuxTtsContinuation.maxSpanTokens(promptFrames: 300, promptTokenCount: 200, speed: 1.0),
+            55)
         // Issue #937 prompt (100 tokens / 5 s): 468 frames ÷ 4.69 frames/token.
         XCTAssertEqual(
             LuxTtsContinuation.maxSpanTokens(promptFrames: 469, promptTokenCount: 100, speed: 1.0),
@@ -57,6 +61,11 @@ final class LuxTtsContinuationTests: XCTestCase {
         XCTAssertEqual(
             LuxTtsContinuation.maxSpanTokens(promptFrames: 0, promptTokenCount: 0, speed: 1.0),
             102)
+        // Pathological ratios floor at 1; the manager rejects anything under
+        // `minimumSpanTokens` instead of rendering dozens of passes.
+        XCTAssertEqual(
+            LuxTtsContinuation.maxSpanTokens(promptFrames: 469, promptTokenCount: 4, speed: 1.0),
+            3)
     }
 
     func testSpanFrameBudgetFitsInsidePromptCap() {
@@ -71,18 +80,36 @@ final class LuxTtsContinuationTests: XCTestCase {
         XCTAssertLessThanOrEqual(budget, LuxTtsConstants.vocoderBuckets.max() ?? 0)
     }
 
-    func testFitsSinglePassUsesIssue937PromptGeometry() {
+    func testFitsSinglePassUsesSpanCapAndGraphLimits() {
         // Reporter's prompt: 100 tokens over 5 s (469 frames), speed 1.0.
         XCTAssertTrue(
             LuxTtsContinuation.fitsSinglePass(
                 textTokenCount: 102, promptFrames: 469, promptTokenCount: 100, speed: 1.0))
+        // 106 tokens would fit the graph (498 frames) but exceed the span cap.
         XCTAssertFalse(
             LuxTtsContinuation.fitsSinglePass(
                 textTokenCount: 106, promptFrames: 469, promptTokenCount: 100, speed: 1.0))
+        // 102 tokens at a slow prompt → 613 generated frames, past the 555 bucket.
+        XCTAssertFalse(
+            LuxTtsContinuation.fitsSinglePass(
+                textTokenCount: 102, promptFrames: 600, promptTokenCount: 100, speed: 1.0))
         // Half speed doubles the frame estimate past the 555 bucket.
         XCTAssertFalse(
             LuxTtsContinuation.fitsSinglePass(
                 textTokenCount: 102, promptFrames: 469, promptTokenCount: 100, speed: 0.5))
+        // Prompt transcript + text must leave the pad slot in the 256 bucket.
+        XCTAssertFalse(
+            LuxTtsContinuation.fitsSinglePass(
+                textTokenCount: 60, promptFrames: 300, promptTokenCount: 196, speed: 1.0))
+        XCTAssertTrue(
+            LuxTtsContinuation.fitsSinglePass(
+                textTokenCount: 59, promptFrames: 300, promptTokenCount: 196, speed: 1.0))
+    }
+
+    func testTextPauseAllowanceCountsSilentBreaksOnly() {
+        XCTAssertEqual(LuxTtsContinuation.textPauseAllowance("He paused... then said \"no\"."), 3)
+        XCTAssertEqual(LuxTtsContinuation.textPauseAllowance("Wait… (really)"), 3)
+        XCTAssertEqual(LuxTtsContinuation.textPauseAllowance("don't, won't; can't."), 0)
     }
 
     func testExpectedPauseCountIgnoresTrailingBoundaryTokens() {
