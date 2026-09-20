@@ -222,6 +222,30 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         }
     }
 
+    func testMLMultiArrayResetDataStaysInsideTheLogicalElements() throws {
+        // A padded layout reports a byte span past its last element: shape [2, 10] with strides
+        // [16, 1] ends at element 26 while the span covers 32. Storage beyond the last element can
+        // belong to someone else, so the reset must not touch it.
+        let elements = 32
+        let storage = UnsafeMutablePointer<Float>.allocate(capacity: elements)
+        defer { storage.deallocate() }
+        storage.initialize(repeating: 1, count: elements)
+        let sentinel: Float = 12345
+        for i in 26..<elements {
+            storage[i] = sentinel
+        }
+        let view = try MLMultiArray(
+            dataPointer: UnsafeMutableRawPointer(storage), shape: [2, 10], dataType: .float32,
+            strides: [16, 1], deallocator: nil)
+
+        view.resetData(to: 0)
+
+        verifyArrayIsZero(view)
+        for i in 26..<elements {
+            XCTAssertEqual(storage[i], sentinel, "Storage past the last element was written at \(i)")
+        }
+    }
+
     func testMLMultiArrayCopyData() throws {
         let sourceArray = try MLMultiArray(shape: [3, 4], dataType: .float32)
         let destArray = try MLMultiArray(shape: [3, 4], dataType: .float32)
@@ -307,6 +331,35 @@ final class TdtDecoderStateV3Tests: XCTestCase {
 
         for i in stride(from: 0, to: array.count, by: 97) {
             XCTAssertEqual(array[i].floatValue, Float(i) * 0.5, "Element \(i) should be unchanged")
+        }
+    }
+
+    func testMLMultiArrayCopyDataStaysInsideTheLogicalElements() throws {
+        // Same padded layout as the reset test: the copy must land every element and leave the
+        // destination's storage past its last element alone.
+        let elements = 32
+        let sourceStorage = UnsafeMutablePointer<Float>.allocate(capacity: elements)
+        let destinationStorage = UnsafeMutablePointer<Float>.allocate(capacity: elements)
+        defer {
+            sourceStorage.deallocate()
+            destinationStorage.deallocate()
+        }
+        sourceStorage.initialize(repeating: 1, count: elements)
+        let sentinel: Float = 12345
+        destinationStorage.initialize(repeating: sentinel, count: elements)
+        let sourceView = try MLMultiArray(
+            dataPointer: UnsafeMutableRawPointer(sourceStorage), shape: [2, 10], dataType: .float32,
+            strides: [16, 1], deallocator: nil)
+        let destinationView = try MLMultiArray(
+            dataPointer: UnsafeMutableRawPointer(destinationStorage), shape: [2, 10], dataType: .float32,
+            strides: [16, 1], deallocator: nil)
+        fillArrayWithTestData(sourceView, multiplier: 3)
+
+        destinationView.copyData(from: sourceView)
+
+        verifyArraysEqual(destinationView, sourceView)
+        for i in 26..<elements {
+            XCTAssertEqual(destinationStorage[i], sentinel, "Storage past the last element was written at \(i)")
         }
     }
 

@@ -96,12 +96,17 @@ public struct TdtDecoderState: Sendable {
 }
 
 extension MLMultiArray {
-    /// Fills every element with `value` through the backing storage, so padded strides are covered.
-    /// Zero is a single `memset`; other values fill through a typed pointer where the type allows.
+    /// Fills every element with `value`.
+    ///
+    /// Contiguous storage fills in bulk: zero is one `memset` for every data type, other values
+    /// fill through a typed pointer for float32, float64 and int32. Padded strides and other data
+    /// types fill element by element, so nothing past the last element is ever written. `value` is
+    /// compared as an `NSNumber`, so `-0.0` takes the zero path and lands as `+0.0`.
     func resetData(to value: NSNumber) {
+        let elementSize = ANEMemoryUtils.getElementSize(for: dataType)
         let filled = withUnsafeMutableBytes { bytes, _ -> Bool in
-            guard let base = bytes.baseAddress else {
-                return true
+            guard bytes.count == count * elementSize, let base = bytes.baseAddress else {
+                return false
             }
             if value == 0 {
                 memset(base, 0, bytes.count)
@@ -127,27 +132,24 @@ extension MLMultiArray {
         }
     }
 
-    /// Copies every element from `source`. Identical layouts copy the backing storage in one
-    /// `memmove`, which stays correct when the two arrays are views of one allocation; anything else
-    /// goes element by element.
+    /// Copies every element from `source`.
+    ///
+    /// Identical contiguous layouts copy the storage in bulk; that copy is overlap-safe, so two
+    /// views of one allocation may overlap. Any other pair copies element by element and assumes
+    /// the two arrays do not share storage.
     func copyData(from source: MLMultiArray) {
-        if self === source {
-            return
-        }
-        let copied = withUnsafeMutableBytes { destination, _ -> Bool in
-            source.withUnsafeBytes { origin -> Bool in
-                guard dataType == source.dataType, shape == source.shape, strides == source.strides,
-                    destination.count == origin.count, let to = destination.baseAddress,
-                    let from = origin.baseAddress
-                else {
+        let elementSize = ANEMemoryUtils.getElementSize(for: dataType)
+        if dataType == source.dataType, shape == source.shape, strides == source.strides {
+            let copied = withUnsafeMutableBytes { destination, _ -> Bool in
+                guard destination.count == count * elementSize else {
                     return false
                 }
-                memmove(to, from, destination.count)
+                source.withUnsafeBytes { destination.copyMemory(from: $0) }
                 return true
             }
-        }
-        if copied {
-            return
+            if copied {
+                return
+            }
         }
         for i in 0..<count {
             self[i] = source[i]
