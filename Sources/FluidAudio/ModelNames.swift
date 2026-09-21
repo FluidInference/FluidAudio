@@ -4,6 +4,8 @@ import Foundation
 public enum Repo: String, CaseIterable, Sendable {
     /// CUA-S1-FORMS form-option decision scorer. See Decision/CuaS1Forms.
     case cuaS1Forms = "FluidInference/cua-s1-forms-coreml"
+    /// laya typed-decision model (choice/score/noul) in fixed-length buckets. See Decision/Laya.
+    case laya = "FluidInference/laya-coreml"
     case vad = "FluidInference/silero-vad-coreml"
     case parakeetV3 = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
@@ -120,6 +122,8 @@ public enum Repo: String, CaseIterable, Sendable {
         switch self {
         case .cuaS1Forms:
             return "cua-s1-forms-coreml"
+        case .laya:
+            return "laya-coreml"
         case .chatterbox:
             return "chatterbox-multilingual-coreml"
         case .chatterboxNano:
@@ -388,6 +392,25 @@ public enum ModelNames {
         public static let modelFile = model + ".mlmodelc"
         /// Complete set of runtime model artifacts.
         public static let requiredModels: Set<String> = [modelFile]
+    }
+
+    /// laya multilingual (mmBERT-base) typed-decision bucket names.
+    public enum Laya {
+        /// Fixed sequence lengths exported by the Mobius conversion.
+        public static let lengths = [128, 256, 512]
+        /// HuggingFace `tokenizer.json` of the mmBERT/Gemma vocabulary.
+        public static let tokenizerFile = "tokenizer.json"
+
+        /// Compiled bucket bundle for one sequence length.
+        public static func modelFile(length: Int) throws -> String {
+            guard lengths.contains(length) else {
+                throw LayaError.invalidAsset("No laya bucket for length \(length); available: \(lengths)")
+            }
+            return "laya_multilingual_fp16_L\(length)_options\(LayaManager.maximumOptions).mlmodelc"
+        }
+
+        /// Every bucket bundle; the manager downloads only the buckets it is asked to load.
+        public static let requiredModels: Set<String> = Set(lengths.compactMap { try? modelFile(length: $0) })
     }
 
     /// Diarizer model names
@@ -1676,6 +1699,8 @@ public enum ModelNames {
             return ModelNames.CampPlus.requiredModels
         case .cuaS1Forms:
             return ModelNames.CuaS1Forms.requiredModels
+        case .laya:
+            return ModelNames.Laya.requiredModels
         case .fsmnVad:
             return ModelNames.FsmnVad.requiredModels
         case .paraformerLargeZh:

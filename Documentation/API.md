@@ -464,3 +464,47 @@ a portable package and use the local loader.
 
 See [Benchmarks](Benchmarks.md#cua-s1-forms-decision-scoring) for accuracy, latency,
 ANE placement, and the unresolved numerical failures in the converted artifacts.
+
+### LayaManager
+
+Actor-backed port of [laya](https://github.com/NandhaKishorM/laya) (Convai Innovations,
+Apache-2.0): a 322M mmBERT-base encoder plus decision head that answers typed
+`choice` / `score` / `noul` questions about a text state with calibrated probabilities,
+one encoder pass per question and no generated tokens. The Core ML conversion ships
+fixed-length buckets (128, 256, 512 tokens); the manager runs a prompt on the smallest
+loaded bucket that fits and truncates the state on the right for the largest one, as
+laya does for `max_len`.
+
+```swift
+import FluidAudio
+
+let laya = try await LayaManager.load()  // downloads the 128 + 512 buckets and tokenizer.json
+let answers = try await laya.answer(
+    state: "Customer: I was charged twice for order #4471 and nobody replies. I want my money back today.",
+    questions: [
+        .choice("What does the customer want?", options: ["refund", "order status", "technical help"]),
+        .score("How frustrated is the customer?", levels: ["calm", "annoyed", "angry"]),
+        .noul("Is the customer likely to churn?"),
+    ])
+print(answers[0].selectedLabel, answers[1].expectedScore!, answers[2].noul!)
+```
+
+**Loading:** `load(cacheDirectory:configuration:progressHandler:)` downloads from
+[Hugging Face](https://huggingface.co/FluidInference/laya-coreml); `load(from:configuration:)`
+takes a local directory holding the bucket bundles and `tokenizer.json`; `init(models:tokenizer:)`
+wraps loaded `MLModel`s. `Configuration.lengths` picks the buckets (default `[128, 512]`, each
+614 MB) and `computeUnits` overrides per bucket (default CPU+ANE for 128, `.all` above, where the
+GPU is faster).
+
+**Input and output:**
+
+- `LayaQuestion.choice` takes 2–32 labels (optionally with descriptions), `.score` 2–32 ordinal
+  levels, `.noul` an optional false/true description pair. Options are capped at 48 tokens each
+  inside a 256-token head budget; a question whose options cannot fit throws `LayaError.promptTooLong`.
+- `LayaAnswer.probabilities` are temperature-calibrated on the host in Double; `rawProbabilities`
+  keeps the model softmax; `confidence` is `1 - H/log k`; `noul` and `expectedScore` are typed
+  conveniences; `tokenCount`, `bucketLength`, and `stateWasTruncated` describe the encoded prompt.
+- Tokenization is a Swift port of the mmBERT/Gemma byte-fallback BPE and matches the HuggingFace
+  tokenizer on the Mobius fixtures; `encode(_:)` exposes it for parity checks.
+
+See [Benchmarks](Benchmarks.md#laya-typed-decisions) for parity and latency per bucket.

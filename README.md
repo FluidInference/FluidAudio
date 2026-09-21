@@ -283,6 +283,7 @@ The default is `false` — no behaviour change for existing callers. Combine wit
     - [Model Conversion Code](https://github.com/FluidInference/mobius)
 - [Benchmarks](Documentation/Benchmarks.md)
 - [CUA-S1-FORMS decision scoring](Documentation/API.md#decision-scoring)
+- [laya typed decisions (choice/score/noul)](Documentation/API.md#layamanager)
 - [API Reference](Documentation/API.md)
 - [Command Line Guide](Documentation/CLI.md)
 

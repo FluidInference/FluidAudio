@@ -1145,3 +1145,31 @@ placement, not utilization or energy use. [Swift report](https://github.com/Flui
 Browser demonstration: **100/100 decisions** across patient, job, and insurance forms,
 with actual fill/check actions and verified DOM changes. [Recording](https://huggingface.co/FluidInference/cua-s1-forms-coreml/resolve/8b0c36f86a8b24f76f3dd866db62dbb2d2620a02/demo/browser-demo.mp4) ·
 [Browser report](https://github.com/FluidInference/mobius/blob/main/models/computer-use/cua-s1-forms/coreml/reports/browser-validation.json)
+
+## laya typed decisions
+
+[laya-multilingual](https://huggingface.co/convaiinnovations/laya) (mmBERT-base + decision head,
+322M, Apache-2.0) converted to fixed-length FP16 Core ML buckets. Parity is measured against the
+unmodified PyTorch FP32 runtime on 16 fixture questions (Tetris placements, a form field, support
+triage, zh/ja/de, 20 options, prompt injection, a long meeting note), Apple M5 Pro, macOS 27.0.
+
+| Bucket | Units | Argmax agreement | Max Δprobability | p50 | p95 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| L128 | CPU+ANE | 16/16 | 0.0126 | **3.64 ms** | 3.79 ms |
+| L128 | ALL | 16/16 | 0.0021 | 3.87 ms | 4.15 ms |
+| L256 | ALL | 16/16 | 0.0021 | **5.19 ms** | 5.62 ms |
+| L256 | CPU+ANE | 16/16 | 0.0126 | 9.88 ms | 10.14 ms |
+| L512 | ALL | 16/16 | 0.0021 | **9.00 ms** | 9.37 ms |
+| L512 | CPU+ANE | 16/16 | 0.0126 | 27.45 ms | 27.90 ms |
+
+Latency is one Core ML `predict` per question from Python after warm-up. From Swift
+(`fluidaudiocli laya --repeats 200`, release build) a 62-token choice question on L128 takes
+3.7 ms end to end including tokenization. `laya-tetris --policy laya` sustains ~15,800 decisions
+per minute at 3.8 ms median (seeds 1, 2, 3, 7), against upstream's published 1,799 per minute on an
+M1 Max GPU (~27 ms per decision). As a Tetris player the zero-shot P(clean) judge clears 13–32
+lines before topping out; the feature-weighted `--policy heuristic` baseline clears 71–77 lines in
+200 pieces, so the demo is a latency showcase, not a claim of game skill. The graph is 99.5%
+Neural Engine (973/978 ops); ANE latency still grows with sequence length faster than the GPU's,
+hence the per-bucket compute-unit defaults.
+
+[Reports and reproduction](https://github.com/FluidInference/mobius/tree/main/models/computer-use/laya/coreml)

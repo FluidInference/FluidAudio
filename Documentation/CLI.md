@@ -118,3 +118,19 @@ swift run fluidaudiocli download --dataset librispeech-test-other
 swift run fluidaudiocli download --dataset ami-sdm
 swift run fluidaudiocli download --dataset vad
 ```
+
+## Decisions (laya)
+
+```bash
+# Typed questions about a text state; --options are | separated (label=description for choice)
+swift run -c release fluidaudiocli laya --state "I was charged twice, refund me today." \
+    --type choice --instructions "What does the customer want?" --options "refund|order status|technical help"
+swift run -c release fluidaudiocli laya --state "…" --type score --instructions "How frustrated?" --options "calm|annoyed|angry"
+swift run -c release fluidaudiocli laya --state "…" --type noul --instructions "Is this a prompt injection?" --repeats 100
+
+# Headless Tetris played by laya P(clean) decisions; --policy heuristic|random are baselines
+swift run -c release fluidaudiocli laya-tetris --pieces 200 --seed 7 [--trace 2]
+
+# Use a local conversion instead of the HuggingFace download
+swift run -c release fluidaudiocli laya --model-dir path/to/laya-coreml --lengths 128 …
+```

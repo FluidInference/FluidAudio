@@ -76,6 +76,10 @@ struct FluidAudioCLI {
             await LSEENDBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "g2p-benchmark":
             await G2PBenchmark.run(arguments: Array(arguments.dropFirst(2)))
+        case "laya":
+            await LayaCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "laya-tetris":
+            await LayaTetrisCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-benchmark":
             await NemotronBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-transcribe":
@@ -147,6 +151,8 @@ struct FluidAudioCLI {
                 lseend-benchmark        Run LS-EEND benchmark on AMI dataset
                 campplus-embed          CAM++ speaker embedding / cosine similarity (beta)
                 g2p-benchmark           Run multilingual G2P benchmark
+                laya                    Answer typed choice/score/noul questions with laya (Neural Engine)
+                laya-tetris             Headless Tetris played by laya decisions (latency demo)
                 nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
                 nemotron-transcribe     Transcribe custom audio files with Nemotron
                 nemotron-multilingual-transcribe   Transcribe audio with Nemotron multilingual (local model path)
