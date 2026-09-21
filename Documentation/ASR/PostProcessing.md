@@ -30,7 +30,7 @@ TN converts written-form text to spoken form — useful for TTS preprocessing:
 
 ## Using with FluidAudio
 
-FluidAudio supports text-processing-rs through the `TextNormalizer` class. The native engine ships with the package as the `NemoTextProcessing` binary target and is linked directly — no setup required, it works out of the box for every SwiftPM consumer. Apps that don't use TTS or ITN can opt out of the engine (about 8 MB per architecture slice) with a package trait; see [Opting out](#opting-out-of-the-engine).
+FluidAudio supports text-processing-rs through the `TextNormalizer` class. The native engine ships with the package as the `NemoTextProcessing` binary target and is linked directly — no setup required, it works out of the box for every SwiftPM consumer. The xcframework carries macOS (arm64 + x86_64), iOS device (arm64), iOS Simulator (arm64 + x86_64) and Mac Catalyst (arm64 + x86_64) slices; text-processing-rs 0.3.0 and earlier had no Catalyst or x86_64-simulator slice, which broke those builds on FluidAudio 0.15.6–0.15.8. Apps that don't use TTS or ITN can opt out of the engine (about 8 MB per architecture slice) with a package trait; see [Opting out](#opting-out-of-the-engine).
 
 ### ITN (Spoken to Written)
 
