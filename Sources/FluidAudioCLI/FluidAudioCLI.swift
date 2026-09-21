@@ -80,6 +80,8 @@ struct FluidAudioCLI {
             await LayaCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "laya-tetris":
             await LayaTetrisCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "laya-benchmark":
+            await LayaBenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-benchmark":
             await NemotronBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-transcribe":
@@ -153,6 +155,7 @@ struct FluidAudioCLI {
                 g2p-benchmark           Run multilingual G2P benchmark
                 laya                    Answer typed choice/score/noul questions with laya (Neural Engine)
                 laya-tetris             Headless Tetris played by laya decisions (latency demo)
+                laya-benchmark          Accuracy + latency on laya's published suites (mobius benchmark.py)
                 nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
                 nemotron-transcribe     Transcribe custom audio files with Nemotron
                 nemotron-multilingual-transcribe   Transcribe audio with Nemotron multilingual (local model path)

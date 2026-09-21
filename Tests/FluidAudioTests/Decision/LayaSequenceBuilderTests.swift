@@ -141,6 +141,6 @@ final class LayaSequenceBuilderTests: XCTestCase {
         XCTAssertEqual(Repo.laya.folderName, "laya-coreml")
         XCTAssertEqual(try ModelNames.Laya.modelFile(length: 128), "laya_multilingual_fp16_L128_options32.mlmodelc")
         XCTAssertThrowsError(try ModelNames.Laya.modelFile(length: 96))
-        XCTAssertEqual(ModelNames.getRequiredModelNames(for: .laya, variant: nil).count, 3)
+        XCTAssertEqual(ModelNames.getRequiredModelNames(for: .laya, variant: nil).count, 4)
     }
 }

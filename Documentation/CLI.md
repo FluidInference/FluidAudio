@@ -131,6 +131,9 @@ swift run -c release fluidaudiocli laya --state "…" --type noul --instructions
 # Headless Tetris played by laya P(clean) decisions; --policy heuristic|random are baselines
 swift run -c release fluidaudiocli laya-tetris --pieces 200 --seed 7 [--trace 2]
 
+# Accuracy + latency on laya's published suites (inputs from mobius benchmark.py)
+swift run -c release fluidaudiocli laya-benchmark --suites suites.jsonl --reference reference-rows.jsonl --report out.json
+
 # Use a local conversion instead of the HuggingFace download
 swift run -c release fluidaudiocli laya --model-dir path/to/laya-coreml --lengths 128 …
 ```

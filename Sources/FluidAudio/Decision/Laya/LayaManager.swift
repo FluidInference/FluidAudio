@@ -4,7 +4,7 @@ import Foundation
 /// On-device laya typed decisions: `choice`, `score`, and `noul` answers with calibrated probabilities,
 /// one encoder pass per question and no generated tokens.
 ///
-/// The Core ML conversion ships fixed-length buckets (128, 256, 512 tokens). A prompt runs on the
+/// The Core ML conversion ships fixed-length buckets (128, 256, 512, 1024 tokens). A prompt runs on the
 /// smallest loaded bucket that fits; longer states are truncated on the right by the largest one,
 /// exactly as laya does for its own `max_len`. Calls on a manager are serialized by the actor.
 public actor LayaManager {

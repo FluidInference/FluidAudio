@@ -1173,3 +1173,28 @@ Neural Engine (973/978 ops); ANE latency still grows with sequence length faster
 hence the per-bucket compute-unit defaults.
 
 [Reports and reproduction](https://github.com/FluidInference/mobius/tree/main/models/computer-use/laya/coreml)
+
+### Accuracy on laya's published suites
+
+`fluidaudiocli laya-benchmark` answers the 3,899 questions that laya's own research scripts build
+(seed 13, 400 per task, 300 MASSIVE cases × 20 options; banking77 skipped, 77 labels > 32 slots)
+with the Core ML buckets from Swift, against the unmodified PyTorch model on this Mac's CPU and
+upstream's published Tesla T4 numbers. Apple M5 Pro, macOS 27.0.
+
+| Suite | n | Upstream (T4) | PyTorch CPU (M5 Pro) | Core ML Swift | p50 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| jev.ag_news | 400 | 0.930 | 0.935 | **0.935** | 3.8 ms |
+| jev.emotion | 400 | 0.530 | 0.537 | **0.537** | 3.7 ms |
+| massive_intent.en | 300 | 0.657 | 0.657 | **0.657** | 5.2 ms |
+| app.support_triage | 400 | 0.522 | 0.540 | **0.542** | 5.3 ms |
+| app.email_spam | 400 | 0.993 | 0.993 | **0.993** | 5.8 ms |
+| app.phishing | 400 | 0.993 | 0.993 | **0.993** | 9.0 ms |
+| app.guardrails_jailbreak | 400 | 0.755 | 0.805 | **0.805** | 3.8 ms |
+| app.moderation_toxicity | 400 | 0.525 | 0.535 | **0.535** | 3.8 ms |
+| app.rag_relevance | 400 | 0.657 | 0.672 | **0.672** | 5.3 ms |
+| app.model_routing_domain | 399 | 0.123 | 0.441 | **0.441** | 5.3 ms |
+
+Whole run: 3,899 questions in 22.9 s, p50 5.2 ms, p95 18.0 ms (bucket picked per prompt), versus
+61.6 ms per question for PyTorch FP32 CPU here and 32.8 ms upstream on a T4. Row-level argmax
+agreement with the reference is 100% on eight suites, 99.8% and 99.5% on the other two. Reports and
+reproduction: mobius `models/computer-use/laya/coreml` (`benchmark.py`, `reports/benchmark-*.json`).

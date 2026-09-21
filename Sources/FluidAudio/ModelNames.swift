@@ -397,7 +397,7 @@ public enum ModelNames {
     /// laya multilingual (mmBERT-base) typed-decision bucket names.
     public enum Laya {
         /// Fixed sequence lengths exported by the Mobius conversion.
-        public static let lengths = [128, 256, 512]
+        public static let lengths = [128, 256, 512, 1024]
         /// HuggingFace `tokenizer.json` of the mmBERT/Gemma vocabulary.
         public static let tokenizerFile = "tokenizer.json"
 
