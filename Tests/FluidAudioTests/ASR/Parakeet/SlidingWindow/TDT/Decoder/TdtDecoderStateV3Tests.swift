@@ -369,6 +369,29 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         verifyArraysEqual(destinationView, try createTestArray(shape: [1, 64], multiplier: 1))
     }
 
+    func testMLMultiArrayCopySnapshotsOverlappingDifferentLayouts() throws {
+        // Two views of one allocation with different strides: the source holds storage slots
+        // 0, 1, 4, 5 and the destination slots 1, 2, 4, 5. Writing the destination in place would
+        // clobber source element 1 before it is read, so the copy must read the whole source first.
+        let backing = try ANEMemoryUtils.createAlignedArray(shape: [1, 8], dataType: .float32)
+        for i in 0..<backing.count {
+            backing[i] = NSNumber(value: Float(i))
+        }
+        let source = try ANEMemoryUtils.createZeroCopyView(
+            from: backing, offset: 0, shape: [2, 2], strides: [4, 1])
+        let destination = try ANEMemoryUtils.createZeroCopyView(
+            from: backing, offset: 1, shape: [2, 2], strides: [3, 1])
+
+        destination.copyData(from: source)
+
+        for (i, expected) in [Float(0), 1, 4, 5].enumerated() {
+            XCTAssertEqual(destination[i].floatValue, expected, "Element \(i) should come from the source")
+        }
+        for i in [0, 3, 6, 7] {
+            XCTAssertEqual(backing[i].floatValue, Float(i), "Storage outside the destination was written at \(i)")
+        }
+    }
+
     func testMLMultiArrayCopyDataFromItselfLeavesValues() throws {
         let array = try createTestArray(shape: decoderStateShape, multiplier: 0.5)
         let expected = try createTestArray(shape: decoderStateShape, multiplier: 0.5)

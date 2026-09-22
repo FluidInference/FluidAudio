@@ -46,8 +46,8 @@ extension MLMultiArray {
     /// Copies every element from `source`.
     ///
     /// Identical contiguous layouts copy the storage in bulk; that copy is overlap-safe, so two
-    /// views of one allocation may overlap. Any other pair copies element by element and assumes
-    /// the two arrays do not share storage.
+    /// views of one allocation may overlap. Any other pair reads the whole source before writing,
+    /// so overlapping views with different layouts stay safe too.
     func copyData(from source: MLMultiArray) {
         let elementSize = ANEMemoryUtils.getElementSize(for: dataType)
         if dataType == source.dataType, shape == source.shape, strides == source.strides {
@@ -62,8 +62,9 @@ extension MLMultiArray {
                 return
             }
         }
+        let values = (0..<count).map { source[$0] }
         for i in 0..<count {
-            self[i] = source[i]
+            self[i] = values[i]
         }
     }
 }
