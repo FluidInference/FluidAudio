@@ -277,14 +277,16 @@ final class TdtDecoderStateV3Tests: XCTestCase {
 
     func testMLMultiArrayResetDataStaysInsideTheLogicalElements() throws {
         // A padded layout reports a byte span past its last element: shape [2, 10] with strides
-        // [16, 1] ends at element 26 while the span covers 32. Storage beyond the last element can
-        // belong to someone else, so the reset must not touch it.
+        // [16, 1] skips slots 10 to 15 between its rows and ends at element 26 while the span
+        // covers 32. Storage between the rows or beyond the last element can belong to someone
+        // else, so the reset must not touch it.
         let elements = 32
+        let outside = Array(10..<16) + Array(26..<elements)
         let storage = UnsafeMutablePointer<Float>.allocate(capacity: elements)
         defer { storage.deallocate() }
         storage.initialize(repeating: 1, count: elements)
         let sentinel: Float = 12345
-        for i in 26..<elements {
+        for i in outside {
             storage[i] = sentinel
         }
         let view = try MLMultiArray(
@@ -294,8 +296,8 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         view.resetData(to: 0)
 
         verifyArrayIsZero(view)
-        for i in 26..<elements {
-            XCTAssertEqual(storage[i], sentinel, "Storage past the last element was written at \(i)")
+        for i in outside {
+            XCTAssertEqual(storage[i], sentinel, "Storage outside the elements was written at \(i)")
         }
     }
 
@@ -403,8 +405,9 @@ final class TdtDecoderStateV3Tests: XCTestCase {
 
     func testMLMultiArrayCopyDataStaysInsideTheLogicalElements() throws {
         // Same padded layout as the reset test: the copy must land every element and leave the
-        // destination's storage past its last element alone.
+        // destination's storage between the rows and past its last element alone.
         let elements = 32
+        let outside = Array(10..<16) + Array(26..<elements)
         let sourceStorage = UnsafeMutablePointer<Float>.allocate(capacity: elements)
         let destinationStorage = UnsafeMutablePointer<Float>.allocate(capacity: elements)
         defer {
@@ -425,8 +428,8 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         destinationView.copyData(from: sourceView)
 
         verifyArraysEqual(destinationView, sourceView)
-        for i in 26..<elements {
-            XCTAssertEqual(destinationStorage[i], sentinel, "Storage past the last element was written at \(i)")
+        for i in outside {
+            XCTAssertEqual(destinationStorage[i], sentinel, "Storage outside the elements was written at \(i)")
         }
     }
 
