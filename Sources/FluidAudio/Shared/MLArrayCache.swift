@@ -31,7 +31,8 @@ actor MLArrayCache {
         return try ANEMemoryUtils.createAlignedArray(shape: shape, dataType: dataType)
     }
 
-    /// Return an array to the cache for reuse
+    /// Return an array to the cache for reuse. Its contents are kept: every consumer of `getArray`
+    /// overwrites the full extent before use, so clearing here would be wasted work.
     func returnArray(_ array: MLMultiArray) {
         let key = CacheKey(
             shape: array.shape.map { $0.intValue },
@@ -42,7 +43,6 @@ actor MLArrayCache {
 
         // Limit cache size per key
         if arrays.count < maxCacheSize / max(cache.count, 1) {
-            array.resetData(to: 0)
             arrays.append(array)
             cache[key] = arrays
         }

@@ -193,6 +193,25 @@ final class ANEMemoryOptimizerTests: XCTestCase {
 
     // MARK: - Memory Pressure Tests
 
+    // MARK: - Zero-Copy View Bounds
+
+    func testZeroCopyViewRejectsPaddedSpanBeyondSource() throws {
+        // A [10, 10] view pads its rows to 16 elements, so its storage span is 160 elements; a
+        // 100-element source cannot back it even though it holds 100 logical elements.
+        let source = try optimizer.createAlignedArray(shape: [100], dataType: .float32)
+
+        XCTAssertThrowsError(try optimizer.createZeroCopyView(from: source, shape: [10, 10]))
+    }
+
+    func testZeroCopyViewAcceptsSpanWithinSource() throws {
+        let source = try optimizer.createAlignedArray(shape: [1024], dataType: .float32)
+
+        let view = try optimizer.createZeroCopyView(from: source, shape: [256], offset: 768)
+
+        XCTAssertEqual(view.shape, [256])
+        XCTAssertEqual(view.dataPointer, source.dataPointer.advanced(by: 768 * MemoryLayout<Float>.stride))
+    }
+
     func testMemoryPressureHandling() throws {
         // Create many buffers to simulate memory pressure
         var buffers: [MLMultiArray] = []

@@ -183,6 +183,34 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         verifyArrayHasValue(array, value: 3.14)
     }
 
+    func testMLMultiArrayResetDataInt32Value() throws {
+        let array = try MLMultiArray(shape: [4, 6], dataType: .int32)
+
+        array.resetData(to: 7)
+
+        verifyArrayHasValue(array, value: 7)
+    }
+
+    func testMLMultiArrayResetDataFloat64Value() throws {
+        let array = try MLMultiArray(shape: [3, 4], dataType: .float64)
+
+        array.resetData(to: 2.25)
+        verifyArrayHasValue(array, value: 2.25)
+
+        array.resetData(to: 0)
+        verifyArrayIsZero(array)
+    }
+
+    func testMLMultiArrayResetDataFloat16Value() throws {
+        let array = try MLMultiArray(shape: [3, 5], dataType: .float16)
+
+        array.resetData(to: 1.5)
+        verifyArrayHasValue(array, value: 1.5)
+
+        array.resetData(to: 0)
+        verifyArrayIsZero(array)
+    }
+
     func testMLMultiArrayResetDataNonFloat() throws {
         let array = try MLMultiArray(shape: [5, 3], dataType: .int32)
 
@@ -200,6 +228,79 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         }
     }
 
+    func testMLMultiArrayResetDataClearsEveryElementOfPaddedStrides() throws {
+        // Aligned arrays are zero-cleared on allocation, so the storage is poisoned first;
+        // otherwise a fill that skips elements would still look clean.
+        let array = try ANEMemoryUtils.createAlignedArray(shape: [10, 10], dataType: .float32)
+        array.withUnsafeMutableBytes { bytes, _ in
+            bytes.bindMemory(to: Float.self).update(repeating: .nan)
+        }
+
+        array.resetData(to: 0)
+
+        verifyArrayIsZero(array)
+    }
+
+    func testMLMultiArrayResetDataClearsTheWholeContiguousStorage() throws {
+        let array = try ANEMemoryUtils.createAlignedArray(shape: [1, 64], dataType: .float32)
+        array.withUnsafeMutableBytes { bytes, _ in
+            bytes.bindMemory(to: Float.self).update(repeating: .nan)
+        }
+
+        array.resetData(to: 0)
+
+        array.withUnsafeBytes { bytes in
+            XCTAssertTrue(bytes.bindMemory(to: Float.self).allSatisfy { $0 == 0 }, "Every stored value should be zero")
+        }
+    }
+
+    func testMLMultiArrayResetDataLargeArrayWithinBudget() throws {
+        // A per-element reset of 240000 samples costs tens of milliseconds; the bulk path is well
+        // under a millisecond. Timed locally only: the parallel CI job shares its machine.
+        try XCTSkipIf(ProcessInfo.processInfo.environment["CI"] != nil, "Timing budgets run locally only")
+        let shape: [NSNumber] = [1, NSNumber(value: ASRConstants.maxModelSamples)]
+        let array = try MLMultiArray(shape: shape, dataType: .float32)
+        let clock = ContinuousClock()
+        var best = Double.infinity
+
+        for _ in 0..<5 {
+            array[0] = NSNumber(value: Float(1))
+            let elapsed = clock.measure {
+                array.resetData(to: 0)
+            }
+            best = min(best, elapsed / .milliseconds(1))
+        }
+
+        XCTAssertEqual(array[0].floatValue, 0)
+        XCTAssertLessThan(best, 5, "resetData took \(best) ms for \(ASRConstants.maxModelSamples) elements")
+    }
+
+    func testMLMultiArrayResetDataStaysInsideTheLogicalElements() throws {
+        // A padded layout reports a byte span past its last element: shape [2, 10] with strides
+        // [16, 1] skips slots 10 to 15 between its rows and ends at element 26 while the span
+        // covers 32. Storage between the rows or beyond the last element can belong to someone
+        // else, so the reset must not touch it.
+        let elements = 32
+        let outside = Array(10..<16) + Array(26..<elements)
+        let storage = UnsafeMutablePointer<Float>.allocate(capacity: elements)
+        defer { storage.deallocate() }
+        storage.initialize(repeating: 1, count: elements)
+        let sentinel: Float = 12345
+        for i in outside {
+            storage[i] = sentinel
+        }
+        let view = try MLMultiArray(
+            dataPointer: UnsafeMutableRawPointer(storage), shape: [2, 10], dataType: .float32,
+            strides: [16, 1], deallocator: nil)
+
+        view.resetData(to: 0)
+
+        verifyArrayIsZero(view)
+        for i in outside {
+            XCTAssertEqual(storage[i], sentinel, "Storage outside the elements was written at \(i)")
+        }
+    }
+
     func testMLMultiArrayCopyData() throws {
         let sourceArray = try MLMultiArray(shape: [3, 4], dataType: .float32)
         let destArray = try MLMultiArray(shape: [3, 4], dataType: .float32)
@@ -212,6 +313,124 @@ final class TdtDecoderStateV3Tests: XCTestCase {
 
         // Verify copy
         verifyArraysEqual(destArray, sourceArray)
+    }
+
+    func testMLMultiArrayCopyDataLargeArrayWithinBudget() throws {
+        // The decoder state is snapshotted before every inference, so the copy must be a bulk
+        // transfer. A per-element copy of 240000 samples costs tens of milliseconds. Timed locally
+        // only: the parallel CI job shares its machine.
+        try XCTSkipIf(ProcessInfo.processInfo.environment["CI"] != nil, "Timing budgets run locally only")
+        let shape: [NSNumber] = [1, NSNumber(value: ASRConstants.maxModelSamples)]
+        let sourceArray = try MLMultiArray(shape: shape, dataType: .float32)
+        let destArray = try MLMultiArray(shape: shape, dataType: .float32)
+        sourceArray[sourceArray.count - 1] = NSNumber(value: Float(3))
+        let clock = ContinuousClock()
+        var best = Double.infinity
+
+        for _ in 0..<5 {
+            let elapsed = clock.measure {
+                destArray.copyData(from: sourceArray)
+            }
+            best = min(best, elapsed / .milliseconds(1))
+        }
+
+        XCTAssertEqual(destArray[destArray.count - 1].floatValue, 3)
+        XCTAssertLessThan(best, 5, "copyData took \(best) ms for \(ASRConstants.maxModelSamples) elements")
+    }
+
+    func testMLMultiArrayCopyDataAcrossStrideLayouts() throws {
+        // A plain array and an ANE-aligned array of the same shape have different strides;
+        // the copy must still land every element.
+        let shape: [NSNumber] = [10, 10]
+        let sourceArray = try ANEMemoryUtils.createAlignedArray(shape: shape, dataType: .float32)
+        let destArray = try MLMultiArray(shape: shape, dataType: .float32)
+        XCTAssertNotEqual(sourceArray.strides, destArray.strides)
+
+        fillArrayWithTestData(sourceArray, multiplier: 1.5)
+
+        destArray.copyData(from: sourceArray)
+
+        verifyArraysEqual(destArray, sourceArray)
+    }
+
+    func testMLMultiArrayCopyDataBetweenOverlappingViews() throws {
+        // Two zero-copy views of one allocation, offset by 16 elements, overlap on 48 of their 64
+        // elements; the copy must behave as if the source were read completely first.
+        let backing = try ANEMemoryUtils.createAlignedArray(shape: [1, 96], dataType: .float32)
+        for i in 0..<backing.count {
+            backing[i] = NSNumber(value: Float(i))
+        }
+        let strides: [NSNumber] = [64, 1]
+        let sourceView = try ANEMemoryUtils.createZeroCopyView(
+            from: backing, offset: 0, shape: [1, 64], strides: strides)
+        let destinationView = try ANEMemoryUtils.createZeroCopyView(
+            from: backing, offset: 16, shape: [1, 64], strides: strides)
+
+        destinationView.copyData(from: sourceView)
+
+        verifyArraysEqual(destinationView, try createTestArray(shape: [1, 64], multiplier: 1))
+    }
+
+    func testMLMultiArrayCopySnapshotsOverlappingDifferentLayouts() throws {
+        // Two views of one allocation with different strides: the source holds storage slots
+        // 0, 1, 4, 5 and the destination slots 1, 2, 4, 5. Writing the destination in place would
+        // clobber source element 1 before it is read, so the copy must read the whole source first.
+        let backing = try ANEMemoryUtils.createAlignedArray(shape: [1, 8], dataType: .float32)
+        for i in 0..<backing.count {
+            backing[i] = NSNumber(value: Float(i))
+        }
+        let source = try ANEMemoryUtils.createZeroCopyView(
+            from: backing, offset: 0, shape: [2, 2], strides: [4, 1])
+        let destination = try ANEMemoryUtils.createZeroCopyView(
+            from: backing, offset: 1, shape: [2, 2], strides: [3, 1])
+
+        destination.copyData(from: source)
+
+        for (i, expected) in [Float(0), 1, 4, 5].enumerated() {
+            XCTAssertEqual(destination[i].floatValue, expected, "Element \(i) should come from the source")
+        }
+        for i in [0, 3, 6, 7] {
+            XCTAssertEqual(backing[i].floatValue, Float(i), "Storage outside the destination was written at \(i)")
+        }
+    }
+
+    func testMLMultiArrayCopyDataFromItselfLeavesValues() throws {
+        let array = try createTestArray(shape: decoderStateShape, multiplier: 0.5)
+        let expected = try createTestArray(shape: decoderStateShape, multiplier: 0.5)
+
+        array.copyData(from: array)
+
+        verifyArraysEqual(array, expected)
+    }
+
+    func testMLMultiArrayCopyDataStaysInsideTheLogicalElements() throws {
+        // Same padded layout as the reset test: the copy must land every element and leave the
+        // destination's storage between the rows and past its last element alone.
+        let elements = 32
+        let outside = Array(10..<16) + Array(26..<elements)
+        let sourceStorage = UnsafeMutablePointer<Float>.allocate(capacity: elements)
+        let destinationStorage = UnsafeMutablePointer<Float>.allocate(capacity: elements)
+        defer {
+            sourceStorage.deallocate()
+            destinationStorage.deallocate()
+        }
+        sourceStorage.initialize(repeating: 1, count: elements)
+        let sentinel: Float = 12345
+        destinationStorage.initialize(repeating: sentinel, count: elements)
+        let sourceView = try MLMultiArray(
+            dataPointer: UnsafeMutableRawPointer(sourceStorage), shape: [2, 10], dataType: .float32,
+            strides: [16, 1], deallocator: nil)
+        let destinationView = try MLMultiArray(
+            dataPointer: UnsafeMutableRawPointer(destinationStorage), shape: [2, 10], dataType: .float32,
+            strides: [16, 1], deallocator: nil)
+        fillArrayWithTestData(sourceView, multiplier: 3)
+
+        destinationView.copyData(from: sourceView)
+
+        verifyArraysEqual(destinationView, sourceView)
+        for i in outside {
+            XCTAssertEqual(destinationStorage[i], sentinel, "Storage outside the elements was written at \(i)")
+        }
     }
 
     func testMLMultiArrayCopyDataNonFloat() throws {

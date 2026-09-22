@@ -47,27 +47,6 @@ final class MLArrayCacheTests: XCTestCase {
         XCTAssertEqual(array2.dataType, .float32)
     }
 
-    func testReturnArrayResetsData() async throws {
-        let shape: [NSNumber] = [10]
-        let array = try await cache.getArray(shape: shape, dataType: .float32)
-
-        // Set some values
-        for i in 0..<array.count {
-            array[i] = NSNumber(value: Float(i) * 2.0)
-        }
-
-        // Return to cache
-        await cache.returnArray(array)
-
-        // Get from cache again
-        let cachedArray = try await cache.getArray(shape: shape, dataType: .float32)
-
-        // Data should be reset to zero
-        for i in 0..<cachedArray.count {
-            XCTAssertEqual(cachedArray[i].floatValue, 0.0)
-        }
-    }
-
     // MARK: - Cache Size Management
 
     func testCacheSizeLimit() async throws {
