@@ -2,10 +2,11 @@
 
 `fr_lexicon_cache.json` and `es_lexicon_cache.json` on
 `FluidInference/kokoro-82m-coreml` are generated from word lists in ipa-dict
-(https://github.com/open-dict-data/ipa-dict, `fr_FR` and `es_ES`). Their
-pronunciations are the output of espeak-ng (https://github.com/espeak-ng/espeak-ng,
-GPL-3.0) with Misaki's `EspeakG2P` post-processing, the phonemization Kokoro's
-Spanish and French voices were trained on. The French file keeps ipa-dict's
+(https://github.com/open-dict-data/ipa-dict, `fr_FR` and `es_ES`), plus
+proper nouns from Misaki's English lexicons. Their pronunciations were
+generated with espeak-ng and Misaki's `EspeakG2P` post-processing, the
+phonemization Kokoro's Spanish and French voices were trained on. No
+espeak-ng code is distributed. The French file keeps ipa-dict's
 h aspiré marks. Words missing from the French lexicon go through CharsiuG2P
 (https://github.com/lingjzhu/CharsiuG2P, MIT), already shipped as
 `MultilingualG2PEncoder/Decoder.mlmodelc`.
