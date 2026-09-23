@@ -4,7 +4,7 @@ import Foundation
 /// Host-side streaming state update for Nemotron 3 Diarization.
 ///
 /// Port of NeMo `SortformerModules.streaming_update_async` (batch size 1) for the
-/// 8-speaker preview checkpoint: fixed-capacity spkcache/FIFO, learned silence embedding
+/// 8-speaker checkpoint: fixed-capacity spkcache/FIFO, learned silence embedding
 /// (`use_learnable_sil_emb: true`, so no running silence profile), score-based cache
 /// compression with latest-frame boosting.
 public struct Nemotron3StateUpdater {

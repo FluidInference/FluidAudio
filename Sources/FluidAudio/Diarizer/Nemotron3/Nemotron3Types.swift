@@ -4,11 +4,8 @@ import Foundation
 
 /// Configuration for Nemotron 3 Diarization streaming inference (8-speaker streaming Sortformer).
 ///
-/// Mirrors NeMo `SortformerModules` parameters for `nvidia/Nemotron-3-Diarization-preview`.
+/// Mirrors NeMo `SortformerModules` parameters for `nvidia/Nemotron-3-Diarization`.
 /// Latency = (chunkLen + chunkRightContext) * 80 ms.
-///
-/// - Important: The preview checkpoint is under an NVIDIA evaluation license. Converted CoreML
-///   models are loaded from a local directory only — there is no HuggingFace download path.
 public struct Nemotron3Config: Sendable {
 
     // MARK: Architecture (fixed by the checkpoint)

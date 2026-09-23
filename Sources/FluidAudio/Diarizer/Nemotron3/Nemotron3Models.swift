@@ -4,9 +4,9 @@ import Foundation
 
 /// Container for the Nemotron 3 Diarization CoreML model and the learned silence embedding.
 ///
-/// Loaded from a local directory only (NVIDIA evaluation license — the converted models are
-/// not distributed). The directory must contain the variant's `.mlmodelc` (or `.mlpackage`)
-/// and `learnable_sil_emb.bin` (512 float32, little-endian).
+/// Download with `loadFromHuggingFace`, or point `load` at a local directory holding the
+/// variant's `.mlmodelc` (or `.mlpackage`) and `learnable_sil_emb.bin` (512 float32,
+/// little-endian).
 public struct Nemotron3Models {
     public let model: MLModel
     /// Learned silence embedding, [512]. Used for disabled frames during cache compression.

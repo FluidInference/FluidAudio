@@ -1,7 +1,7 @@
 import Accelerate
 import Foundation
 
-/// Streaming 8-speaker diarizer backed by NVIDIA's Nemotron 3 Diarization preview.
+/// Streaming 8-speaker diarizer backed by NVIDIA's Nemotron 3 Diarization.
 ///
 /// Processes audio in fixed 80 ms-frame chunks through the CoreML forward pass and applies
 /// NeMo's async speaker-cache/FIFO update host-side. Output is per-frame speaker activity
@@ -272,7 +272,7 @@ public final class Nemotron3Diarizer {
 // MARK: - Feature Loader
 
 /// Chunk iterator over a mel feature sequence, mirroring NeMo's `streaming_feat_loader`:
-/// fixed core stride, left context of 0 (all preview profiles), right context shrinking at
+/// fixed core stride, left context of 0 (all shipped profiles), right context shrinking at
 /// the tail so trailing audio is still emitted.
 public struct Nemotron3FeatureLoader {
     private let lcMel: Int
