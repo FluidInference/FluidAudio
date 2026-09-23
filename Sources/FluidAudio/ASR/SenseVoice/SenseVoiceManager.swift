@@ -44,9 +44,28 @@ public actor SenseVoiceManager {
 
     /// Transcribe 16 kHz mono float samples (in [-1, 1]).
     public func transcribe(audio: [Float]) throws -> String {
+        try transcribeDetailed(audio: audio).text
+    }
+
+    /// Transcribe and keep the model's leading query tags: detected language
+    /// (`zh`, `en`, `yue`, `ja`, `ko`, `nospeech`, …), emotion, and audio event.
+    public func transcribeDetailed(audio: [Float]) throws -> SenseVoiceTranscription {
         let features = try runPreprocessor(audio: audio)
         let (logits, validFrames) = try runEncoder(features: features)
-        return decode(logits: logits, validFrames: validFrames)
+        let raw = decodeRaw(logits: logits, validFrames: validFrames)
+        var tags: [String] = []
+        let pattern = try NSRegularExpression(pattern: "<\\|([^|]*)\\|>")
+        let ns = raw as NSString
+        for m in pattern.matches(in: raw, range: NSRange(location: 0, length: ns.length)) {
+            tags.append(ns.substring(with: m.range(at: 1)))
+        }
+        let text =
+            raw
+            .replacingOccurrences(of: "<\\|[^|]*\\|>", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        let knownLanguages: Set<String> = ["zh", "en", "yue", "ja", "ko", "nospeech"]
+        let language = tags.first { knownLanguages.contains($0) } ?? tags.first
+        return SenseVoiceTranscription(text: text, language: language, tags: tags)
     }
 
     // MARK: - Pipeline
@@ -112,6 +131,13 @@ public actor SenseVoiceManager {
     /// Greedy CTC over the first `validFrames` (drop blank 0, collapse repeats),
     /// detokenize, then strip the `<|...|>` meta tags.
     private func decode(logits: MLMultiArray, validFrames: Int) -> String {
+        decodeRaw(logits: logits, validFrames: validFrames)
+            .replacingOccurrences(of: "<\\|[^|]*\\|>", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// CTC decode with the `<|...|>` query tags left in place.
+    private func decodeRaw(logits: MLMultiArray, validFrames: Int) -> String {
         let frames = min(validFrames, logits.shape[1].intValue)
         // Per-frame argmax via the shared vDSP helper (~0.5s -> sub-ms for the
         // frames×vocab ~6.4M element scan), then CTC collapse (drop blank 0,
@@ -124,10 +150,17 @@ public actor SenseVoiceManager {
             prev = best
         }
 
-        let raw = decodeCtcTokenIds(ids, vocabulary: models.vocabulary)
-        return
-            raw
-            .replacingOccurrences(of: "<\\|[^|]*\\|>", with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespaces)
+        return decodeCtcTokenIds(ids, vocabulary: models.vocabulary)
     }
+}
+
+/// SenseVoice output with the model's leading query tags preserved.
+public struct SenseVoiceTranscription: Sendable {
+    public let text: String
+    /// Detected language tag as emitted by the model (`zh`, `en`, `yue`, `ja`, `ko`, or
+    /// `nospeech`), `nil` when the model emitted none. Other languages are recognized
+    /// but tagged with the closest of the five.
+    public let language: String?
+    /// All leading tags in order: language, emotion, audio event, text-norm.
+    public let tags: [String]
 }
