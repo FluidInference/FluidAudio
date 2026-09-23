@@ -824,6 +824,19 @@ public enum ModelNames {
         public static let silenceEmbeddingFile = "learnable_sil_emb.bin"
         public static let preEncodeProjectionFile = "pre_encode_proj_t.bin"
         public static let requiredAssets: Set<String> = [silenceEmbeddingFile, preEncodeProjectionFile]
+
+        /// Identifies which upstream checkpoint the published CoreML bundles were
+        /// converted from.
+        ///
+        /// The cache is keyed on this, not just on file presence: NVIDIA's general-access
+        /// checkpoint is a retrained model rather than a repack of the preview, so a client
+        /// holding preview bundles would otherwise keep serving superseded weights forever
+        /// — silently, since the file layout is identical. **Bump this whenever the
+        /// published weights change.**
+        public static let weightsVersion = "ga-2026-09-23"
+
+        /// Marker file recording `weightsVersion` for the cached bundles.
+        public static let weightsVersionFile = ".fluidaudio-nemotron3-weights"
     }
 
     public enum Sortformer {

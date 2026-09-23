@@ -143,6 +143,12 @@ public struct Nemotron3Models {
         let modelURL = repoDirectory.appendingPathComponent(bundlePath)
         let fm = FileManager.default
 
+        // Drop a cache built from a superseded checkpoint before looking at what is on
+        // disk. The bundles are keyed by preset name, not by weights, so a client holding
+        // (say) the Nemotron 3 preview would pass every presence check below and keep
+        // serving the old model indefinitely with no error.
+        try discardStaleCache(at: repoDirectory)
+
         // A compiled bundle is complete once its manifest is on disk; partial downloads
         // resume file-by-file inside `download(subdirectory:)`.
         if !fm.fileExists(atPath: modelURL.appendingPathComponent("coremldata.bin").path) {
@@ -162,8 +168,34 @@ public struct Nemotron3Models {
                 shouldSkip: { !missing.contains($0) })
         }
 
+        // Only now that the bundle and assets are both present does the cache represent a
+        // complete copy of this weights version; an interrupted download leaves no marker
+        // and is retried from scratch next time.
+        try? Data((ModelNames.Nemotron3.weightsVersion + "\n").utf8).write(
+            to: repoDirectory.appendingPathComponent(ModelNames.Nemotron3.weightsVersionFile), options: .atomic)
+
         return try await load(
             config: config, modelURL: modelURL, assetsDirectory: repoDirectory, computeUnits: computeUnits)
+    }
+
+    /// Remove a cached download that predates `ModelNames.Nemotron3.weightsVersion`.
+    ///
+    /// Caches written before markers existed have no marker at all and are treated as
+    /// stale, which costs one re-download per client and is the only safe reading: the
+    /// files could be from any earlier checkpoint.
+    static func discardStaleCache(at repoDirectory: URL) throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: repoDirectory.path) else { return }
+
+        let marker = repoDirectory.appendingPathComponent(ModelNames.Nemotron3.weightsVersionFile)
+        let cached = (try? String(contentsOf: marker, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cached != ModelNames.Nemotron3.weightsVersion else { return }
+
+        logger.info(
+            "Cached Nemotron 3 models are from \(cached ?? "an earlier release"); replacing with \(ModelNames.Nemotron3.weightsVersion)."
+        )
+        try fm.removeItem(at: repoDirectory)
     }
 
     private static func load(
