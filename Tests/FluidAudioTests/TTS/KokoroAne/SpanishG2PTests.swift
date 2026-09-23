@@ -62,6 +62,18 @@ final class SpanishG2PTests: XCTestCase {
         XCTAssertEqual(SpanishG2P.phonemize("Él"), "ˈel")
     }
 
+    func testCodaDStaysAStop() {
+        XCTAssertEqual(SpanishG2P.phonemize("la administración"), "la ˌadminˌistɾaθjˈon")
+    }
+
+    /// Lexicon entries already carry espeak's word-internal allophones; only
+    /// the first phone adapts to the previous word.
+    func testLexiconEntriesKeepInternalAllophones() {
+        let lexicon = KokoroAneLexicon(entries: ["web": "wˈeb", "bueno": "bwˈeno"])
+        XCTAssertEqual(SpanishG2P.phonemize("la web", lexicon: lexicon), "la wˈeb")
+        XCTAssertEqual(SpanishG2P.phonemize("muy bueno", lexicon: lexicon), "mˈuj βwˈeno")
+    }
+
     func testDigitsAreDroppedNotSpelled() {
         // Numbers are verbalized by NeMo TN upstream; stray digits vanish.
         XCTAssertEqual(SpanishG2P.phonemize("casa 12"), "kˈasa")

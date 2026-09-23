@@ -328,17 +328,21 @@ enough that it is rules only, with no lexicon:
   pause), nasal assimilation, and unstressed or secondary-stressed function
   words that regain stress before a pause.
 
-Spanish spelling is regular enough that the rules match espeak on 92% of
-the 596k words in ipa-dict's `es_ES` list. The other 49k (stressed `éis`/`áis`
-without the ligature, `ny` → `ɲ`, loanwords, …) ship as
-`es_lexicon_cache.json`, the English lexicon-cache schema holding only those
-exceptions. Without it the rules run alone. NeMo text normalization runs
+Spanish spelling is regular enough that the rules match espeak on 91% of
+the 605k words in ipa-dict's `es_ES` list plus the proper nouns of the
+English lexicon. The other 51.5k (stressed `éis`/`áis` without the ligature,
+`ny` → `ɲ`, loanwords and names, …) ship as `es_lexicon_cache.json`, the
+English lexicon-cache schema holding only those exceptions. Lexicon entries
+keep espeak's word-internal allophones; only their first consonant adapts to
+the previous word. Without it the rules run alone. NeMo text normalization runs
 first, as for the other variants.
 
 ## French G2P
 
 `FrenchG2P` looks words up in `fr_lexicon_cache.json`: the 244k-word
-ipa-dict `fr_FR` vocabulary with espeak-ng `fr-fr` pronunciations, in the
+ipa-dict `fr_FR` vocabulary plus 9k proper nouns from the English lexicon,
+with espeak-ng `fr-fr` pronunciations (so names get espeak's own mix of
+French and English readings), in the
 English lexicon-cache schema plus an `hAspire` list taken from ipa-dict.
 Words it does not list go through the CharsiuG2P CoreML model
 (`MultilingualG2PModel`), cached per session, and are rewritten into
@@ -347,6 +351,8 @@ non-final syllables, eu → `ø` outside the final syllable, schwa deletion
 (`devenu` → `dəvny`), stress on the last full vowel, unstressed clitics,
 elision, and liaison (`lez otʁ`, `ˈɔ̃t eɡalmˈɑ̃`, blocked before h aspiré).
 Initialisms without a vowel are spelled out (`SNCF` → `ˌɛsˌɛnsˌeˈɛf`).
+Punctuation keeps the input's spacing (`“ bɔ̃ʒˈuʁ ”` vs `“sivilizasjˈɔ̃”`),
+and a few fixed phrases read as one unit (`tout le monde` → `tulmˈɔ̃d`).
 
 Nasal vowels are base + U+0303. `KokoroAneVocab` encodes by Unicode scalar,
 like the Python reference, so the tilde reaches the model as its own token.
@@ -358,8 +364,8 @@ transcripts without digits:
 
 | Variant | Sentences | PER    | PER, stress ignored | Exact sentences |
 |---------|-----------|--------|---------------------|-----------------|
-| Spanish | 281       | 0.48 % | 0.3 %               | 216             |
-| French  | 262       | 1.27 % | 1.0 %               | 122             |
+| Spanish | 281       | 0.33 % | 0.2 %               | 240             |
+| French  | 262       | 1.00 % | 0.8 %               | 136             |
 
 What remains is sentence-level (liaison, phrase stress), foreign names and
 acronyms. Parakeet v3 round trip (`--language es/fr`) on 60 of those

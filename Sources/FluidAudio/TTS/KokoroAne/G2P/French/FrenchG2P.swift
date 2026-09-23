@@ -78,20 +78,31 @@ enum FrenchPhonology {
             var phonemes: String
             var word: String = ""
             var hAspire = false
-            var elided = false
+            var spaceBefore = false
         }
 
         var items: [Item] = []
+        var skip = 0
         for (index, token) in tokens.enumerated() {
+            if skip > 0 {
+                skip -= 1
+                continue
+            }
             guard token.isWord else {
-                items.append(Item(isWord: false, phonemes: token.text))
+                items.append(Item(isWord: false, phonemes: token.text, spaceBefore: token.spaceBefore))
+                continue
+            }
+            if let (length, phonemes) = matchPhrase(tokens, at: index) {
+                let last = tokens[index + length - 1].text.lowercased()
+                items.append(Item(isWord: true, phonemes: phonemes, word: last, spaceBefore: token.spaceBefore))
+                skip = length - 1
                 continue
             }
             var lower = token.text.lowercased()
             let trailingApostrophe = lower.hasSuffix("'")
             while lower.hasSuffix("'") { lower.removeLast() }
             if isSpelledAcronym(token.text) {
-                items.append(Item(isWord: true, phonemes: spell(lower), word: lower))
+                items.append(Item(isWord: true, phonemes: spell(lower), word: lower, spaceBefore: token.spaceBefore))
                 continue
             }
             var prefix = ""
@@ -149,25 +160,22 @@ enum FrenchPhonology {
             items.append(
                 Item(
                     isWord: true, phonemes: phonemes, word: classWord, hAspire: hAspire,
-                    elided: !prefix.isEmpty || core.contains("'")))
+                    spaceBefore: token.spaceBefore))
         }
 
-        var out: [(isWord: Bool, text: String)] = []
+        var out: [(isWord: Bool, text: String, spaceBefore: Bool)] = []
         for (k, item) in items.enumerated() {
             guard item.isWord else {
-                out.append((false, item.phonemes))
+                out.append((false, item.phonemes, item.spaceBefore))
                 continue
             }
             var phonemes = item.phonemes
             if k + 1 < items.count, items[k + 1].isWord, !items[k + 1].hAspire,
                 startsWithVowel(items[k + 1].phonemes)
             {
-                let blocked = item.elided && nasalLiaisonWords.contains(item.word)  // d'un ami: no n
-                if !blocked {
-                    phonemes = applyLiaison(item.word, phonemes)
-                }
+                phonemes = applyLiaison(item.word, phonemes)  // elided too: d'un ami → dœ̃n, l'on a → lɔ̃n
             }
-            out.append((true, phonemes))
+            out.append((true, phonemes, item.spaceBefore))
         }
         return join(out)
     }
@@ -190,6 +198,29 @@ enum FrenchPhonology {
         guard let final = names.last else { return "" }
         return names.dropLast().map { addStress($0, .secondary) }.joined() + addStress(final, .primary)
     }
+
+    /// Fixed expressions espeak reads as one unit (tout le monde → tulmˈɔ̃d).
+    /// Returns the number of word tokens consumed and their phonemes.
+    static func matchPhrase(_ tokens: [Token], at index: Int) -> (Int, String)? {
+        for (words, phonemes) in phrases {
+            guard index + words.count <= tokens.count else { continue }
+            let window = tokens[index..<(index + words.count)]
+            if window.allSatisfy(\.isWord),
+                zip(window, words).allSatisfy({ $0.text.lowercased() == $1 })
+            {
+                return (words.count, phonemes)
+            }
+        }
+        return nil
+    }
+
+    static let phrases: [([String], String)] = [
+        (["tout", "le", "monde"], "tulmˈɔ̃d"),
+        (["parce", "que"], "paʁskˌə"),
+        (["est-ce", "que"], "ɛs kə"),
+        (["c'est-à-dire"], "sɛtadˈiʁ"),
+        (["etc"], "ɛtseteʁˈa"),
+    ]
 
     /// Override → lexicon-cache lookup used by ``FrenchG2P``.
     static func lookup(_ word: String, lexicon: KokoroAneLexicon) -> Pronunciation? {
@@ -373,6 +404,9 @@ enum FrenchPhonology {
     struct Token {
         var text: String
         var isWord: Bool
+        /// Whitespace preceded the token in the input; espeak mirrors it
+        /// (« bonjour » vs «civilisation», objectif : …).
+        var spaceBefore = false
     }
 
     /// Words are letter runs joined by internal apostrophes or hyphens
@@ -382,8 +416,14 @@ enum FrenchPhonology {
         let chars = Array(text)
         var tokens: [Token] = []
         var i = 0
+        var sawSpace = false
         while i < chars.count {
             let ch = chars[i]
+            if ch.isWhitespace {
+                sawSpace = true
+                i += 1
+                continue
+            }
             if ch.isLetter {
                 var j = i
                 while j < chars.count, chars[j].isLetter { j += 1 }
@@ -392,32 +432,35 @@ enum FrenchPhonology {
                     while j < chars.count, chars[j].isLetter { j += 1 }
                 }
                 if j < chars.count, chars[j] == "'" { j += 1 }
-                tokens.append(Token(text: String(chars[i..<j]), isWord: true))
+                tokens.append(Token(text: String(chars[i..<j]), isWord: true, spaceBefore: sawSpace))
+                sawSpace = false
                 i = j
                 continue
             }
-            if !ch.isWhitespace, !ch.isNumber, ch != "_" {
-                tokens.append(Token(text: String(ch), isWord: false))
+            if !ch.isNumber, ch != "_" {
+                tokens.append(Token(text: String(ch), isWord: false, spaceBefore: sawSpace))
+                sawSpace = false
             }
             i += 1
         }
         return tokens
     }
 
-    private static func join(_ items: [(isWord: Bool, text: String)]) -> String {
+    /// Join with the input's spacing. Adjacent words always get a space; an
+    /// empty item (unpronounceable word) passes its leading space on.
+    private static func join(_ items: [(isWord: Bool, text: String, spaceBefore: Bool)]) -> String {
         var s = ""
+        var pendingSpace = false
+        var lastWasWord = false
         for item in items {
+            pendingSpace = pendingSpace || item.spaceBefore
             if item.text.isEmpty { continue }
-            if !item.isWord, attachLeft.contains(item.text) {
-                while s.last == " " { s.removeLast() }
-                s += item.text + " "
-            } else if !item.isWord, attachRight.contains(item.text) {
-                s += item.text
-            } else {
-                s += item.text + " "
-            }
+            if !s.isEmpty, pendingSpace || (item.isWord && lastWasWord) { s += " " }
+            s += item.text
+            pendingSpace = false
+            lastWasWord = item.isWord
         }
-        return s.trimmingCharacters(in: .whitespaces)
+        return s
     }
 
     // MARK: - Regex helpers
@@ -513,6 +556,4 @@ enum FrenchPhonology {
     static let onsetSeconds = Set("ʁlj".unicodeScalars)
 
     static let pauseMarks: Set<String> = [",", ".", "!", "?", ";", ":", "—", "…", "(", ")", "«", "»", "\"", "“", "”"]
-    private static let attachLeft: Set<String> = [",", ".", "!", "?", ";", ":", "…", ")", "”"]
-    private static let attachRight: Set<String> = ["(", "“"]
 }

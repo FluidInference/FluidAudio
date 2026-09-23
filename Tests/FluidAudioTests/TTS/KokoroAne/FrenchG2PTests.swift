@@ -18,6 +18,8 @@ final class FrenchG2PTests: XCTestCase {
             "similaire": "similˈɛʁ", "ski": "skˈi", "sont": "sˈɔ̃", "sous": "sˈu", "un": "ˈœ̃", "unis": "ynˈi",
             "à": "ˈa", "également": "eɡalmˈɑ̃", "épaisse": "epˈɛs", "états": "etˈa",
             "ans": "ˈɑ̃", "sept": "sˈɛt", "demain": "dəmˈɛ̃", "île": "ˈil",
+            "ami": "amˈi", "bonjour": "bɔ̃ʒˈuʁ", "civilisation": "sivilizasjˈɔ̃", "dit": "dˈi", "il": "ˈil",
+            "mot": "mˈo", "le": "lˈə", "là": "lˈa",
         ],
         hAspire: ["héros"])
 
@@ -78,6 +80,16 @@ final class FrenchG2PTests: XCTestCase {
         XCTAssertEqual(FrenchPhonology.applyLiaison("mettent", "mˈɛt"), "mˈɛtt")
         XCTAssertEqual(FrenchPhonology.applyLiaison("bus", "bˈys"), "bˈys")
         XCTAssertEqual(FrenchPhonology.applyLiaison("neuf", "nˈœf"), "nˈœv")
+    }
+
+    func testPunctuationKeepsInputSpacing() {
+        XCTAssertEqual(phonemize("il dit « bonjour » !"), "il dˈi “ bɔ̃ʒˈuʁ ” !")
+        XCTAssertEqual(phonemize("le mot «civilisation»"), "lə mˈo “sivilizasjˈɔ̃”")
+    }
+
+    func testFixedPhrasesAndElidedLiaison() {
+        XCTAssertEqual(phonemize("tout le monde est là"), "tulmˈɔ̃d ɛ lˈa")
+        XCTAssertEqual(phonemize("d'un ami"), "dœ̃n amˈi")
     }
 
     func testLoneAccentedCapitalIsAWord() {

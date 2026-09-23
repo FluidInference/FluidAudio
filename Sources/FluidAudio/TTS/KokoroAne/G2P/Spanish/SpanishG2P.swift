@@ -52,16 +52,18 @@ enum SpanishG2P {
                 continue
             }
             var phonemes: String
+            var fromLexicon = false
             switch item.kind {
             case .acronym: phonemes = spell(item.text)
             default:
                 if item.stress == .primary, let entry = lexicon.lookup(item.text) {
                     phonemes = entry
+                    fromLexicon = true
                 } else {
                     phonemes = item.text == "y" ? "i" : phonemizeWord(item.text, stress: item.stress)
                 }
             }
-            phonemes = applyAllophones(phonemes, previous: previous)
+            phonemes = applyAllophones(phonemes, previous: previous, firstPhoneOnly: fromLexicon)
 
             let bare = stripStress(phonemes)
             if previous != nil, let last = output.last, last.isWord, let first = bare.unicodeScalars.first {
@@ -323,15 +325,26 @@ enum SpanishG2P {
     /// b/d/g lenite to β/ð/ɣ except after a pause or a nasal; a coda ɡ and a
     /// word-final d stay stops. Also nasal place assimilation and the
     /// espeak `pt` → `pːt` length mark.
-    static func applyAllophones(_ phonemes: String, previous: Unicode.Scalar?) -> String {
+    /// With `firstPhoneOnly`, only the word-initial phone is adjusted to the
+    /// previous word; lexicon entries already carry espeak's word-internal
+    /// allophones (wˈeb, ˌenfeɾmeðˈad), which the rules would rewrite.
+    static func applyAllophones(
+        _ phonemes: String, previous: Unicode.Scalar?, firstPhoneOnly: Bool = false
+    ) -> String {
         let scalars = Array(phonemes.unicodeScalars)
         var out = ""
         var last = previous
+        var adjusted = false
         for (index, scalar) in scalars.enumerated() {
             if scalar == "ˈ" || scalar == "ˌ" {
                 out.unicodeScalars.append(scalar)
                 continue
             }
+            if firstPhoneOnly, adjusted {
+                out.unicodeScalars.append(scalar)
+                continue
+            }
+            adjusted = true
             let rest = scalars[(index + 1)...].filter { $0 != "ˈ" && $0 != "ˌ" }
             let next = rest.first
             let afterPauseOrNasal = last == nil || nasals.contains(last!)
@@ -342,7 +355,9 @@ enum SpanishG2P {
             case "b":
                 if !(afterPauseOrNasal || next == "t") { phone = "β" }
             case "d":
-                if !afterPauseOrNasal, !rest.isEmpty { phone = "ð" }
+                // A coda d before a consonant stays a stop (ˌadminˌistɾaθjˈon).
+                let coda = next.map { !vocalicPhones.contains($0) && !"ɾlwjr".unicodeScalars.contains($0) } ?? true
+                if !(afterPauseOrNasal || coda) { phone = "ð" }
             case "ɡ":
                 let coda = next.map { !vocalicPhones.contains($0) && !"ɾlwjr".unicodeScalars.contains($0) } ?? true
                 if !(afterPauseOrNasal || coda) { phone = "ɣ" }
