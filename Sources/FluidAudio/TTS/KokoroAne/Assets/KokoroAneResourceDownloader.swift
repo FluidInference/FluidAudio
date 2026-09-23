@@ -191,6 +191,11 @@ public enum KokoroAneResourceDownloader {
         return localURL
     }
 
+    /// Files a compiled `.mlmodelc` bundle needs to load.
+    static let compiledBundleFiles = [
+        "coremldata.bin", "model.mil", "metadata.json", "weights/weight.bin", "analytics/coremldata.bin",
+    ]
+
     /// Ensure the CharsiuG2P CoreML pair (`MultilingualG2PEncoder.mlmodelc`,
     /// `MultilingualG2PDecoder.mlmodelc`) is in the shared kokoro cache
     /// directory, where ``MultilingualG2PModel`` loads it from. The French
@@ -203,8 +208,13 @@ public enum KokoroAneResourceDownloader {
         let kokoroDir = modelsDirectory.appendingPathComponent(Repo.kokoro.folderName)
         for bundle in ModelNames.MultilingualG2P.requiredModels.sorted() {
             let bundleDir = kokoroDir.appendingPathComponent(bundle)
-            let weights = bundleDir.appendingPathComponent("weights/weight.bin")
-            if FileManager.default.fileExists(atPath: weights.path) { continue }
+            // Every file of the compiled bundle, not just the weights: files
+            // download in parallel, so an interrupted first fetch can leave
+            // weight.bin without model.mil. ModelHub skips files already present.
+            let complete = compiledBundleFiles.allSatisfy {
+                FileManager.default.fileExists(atPath: bundleDir.appendingPathComponent($0).path)
+            }
+            if complete { continue }
             logger.info("Downloading \(bundle) from HuggingFace...")
             try await ModelHub.download(
                 .kokoro, subdirectory: bundle, to: kokoroDir, progressHandler: progressHandler)

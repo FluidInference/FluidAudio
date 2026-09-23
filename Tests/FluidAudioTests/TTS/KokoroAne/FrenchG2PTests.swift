@@ -20,6 +20,8 @@ final class FrenchG2PTests: XCTestCase {
             "ans": "ˈɑ̃", "sept": "sˈɛt", "demain": "dəmˈɛ̃", "île": "ˈil",
             "ami": "amˈi", "bonjour": "bɔ̃ʒˈuʁ", "civilisation": "sivilizasjˈɔ̃", "dit": "dˈi", "il": "ˈil",
             "mot": "mˈo", "le": "lˈə", "là": "lˈa",
+            "va": "vˈa", "partir": "paʁtˈiʁ", "fais": "fˈɛ", "que": "kˈə", "vrai": "vʁˈɛ", "dis": "dˈi",
+            "moi": "mwˈa", "quelqu'un": "kɛlkˈœ̃", "venu": "vənˈy", "viendra": "vjɛ̃dʁˈa",
         ],
         hAspire: ["héros"])
 
@@ -90,6 +92,19 @@ final class FrenchG2PTests: XCTestCase {
     func testFixedPhrasesAndElidedLiaison() {
         XCTAssertEqual(phonemize("tout le monde est là"), "tulmˈɔ̃d ɛ lˈa")
         XCTAssertEqual(phonemize("d'un ami"), "dœ̃n amˈi")
+    }
+
+    func testHyphenatedClitics() {
+        XCTAssertEqual(phonemize("Va-t-il partir ?"), "vˈatil paʁtˈiʁ ?")  // euphonic t, unstressed il
+        XCTAssertEqual(phonemize("Est-ce vrai ?"), "ɛs vʁˈɛ ?")  // ce reduced, est unstressed
+        XCTAssertEqual(phonemize("Que fais-je ?"), "kə fˈɛʒ ?")
+        XCTAssertEqual(phonemize("Viendra-t-elle ?"), "vjɛ̃dʁˈatˈɛl ?")  // elle keeps stress
+        XCTAssertEqual(phonemize("Dis-moi."), "dˈimwˌa.")
+    }
+
+    func testApostropheWordKeepsItsOwnClass() {
+        // Stress and liaison come from quelqu'un itself, not from "un".
+        XCTAssertEqual(phonemize("Quelqu'un est venu."), "kɛlkˈœ̃ ɛ vənˈy.")
     }
 
     func testLoneAccentedCapitalIsAWord() {

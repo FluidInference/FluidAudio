@@ -307,11 +307,19 @@ public actor KokoroAneManager {
             let g2p = try await store.japaneseG2PPipeline()
             return (normalized, try await g2p.phonemize(normalized))
         case .spanish:
-            let normalized = NemoTextNormalizer.normalize(text, language: .spanish)
+            var normalized = NemoTextNormalizer.normalize(text, language: .spanish)
+            // Without the engine linked, read numbers here rather than let the
+            // tokenizer drop them.
+            if !NemoTextNormalizer.isAvailable {
+                normalized = RomanceNumberNormalizer.normalize(normalized, language: .spanish)
+            }
             let lexicon = await store.spanishLexicon()
             return (normalized, try Self.nonEmpty(SpanishG2P.phonemize(normalized, lexicon: lexicon), for: text))
         case .french:
-            let normalized = NemoTextNormalizer.normalize(text, language: .french)
+            var normalized = NemoTextNormalizer.normalize(text, language: .french)
+            if !NemoTextNormalizer.isAvailable {
+                normalized = RomanceNumberNormalizer.normalize(normalized, language: .french)
+            }
             let g2p = try await store.frenchG2PPipeline()
             return (normalized, try Self.nonEmpty(await g2p.phonemize(normalized), for: text))
         }

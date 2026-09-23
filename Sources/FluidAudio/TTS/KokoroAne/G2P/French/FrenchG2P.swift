@@ -119,10 +119,13 @@ enum FrenchPhonology {
                     core = parts.count > 1 ? String(parts[1]) : ""
                 }
             }
+            // A listed word with an elided clitic (c'est) takes the class of
+            // what follows the apostrophe; other apostrophe words (quelqu'un,
+            // aujourd'hui) are words in their own right.
+            let apostropheParts = core.split(separator: "'", maxSplits: 1, omittingEmptySubsequences: false)
             let classWord =
-                core.contains("'")
-                ? String(core.split(separator: "'", maxSplits: 1, omittingEmptySubsequences: false).last ?? "")
-                : core
+                apostropheParts.count == 2 && elisionPrefixes[String(apostropheParts[0])] != nil
+                ? String(apostropheParts[1]) : core
             var stress: Stress =
                 unstressedWords.contains(classWord)
                 ? .none : (secondaryWords.contains(classWord) ? .secondary : .primary)
@@ -137,7 +140,9 @@ enum FrenchPhonology {
                 // Hyphenated compounds: every part carries its own stress
                 // (États-Unis → etˈazynˈi), with liaison between parts.
                 let parts = core.split(separator: "-").map(String.init)
-                let resolved = parts.map { wordPhonemes($0, stress: .primary, lookup: lookup) }
+                let resolved = parts.enumerated().map { j, part in
+                    hyphenPartPhonemes(part, isFirst: j == 0, lookup: lookup)
+                }
                 hAspire = resolved.first?.hAspire ?? false
                 phonemes = ""
                 for (j, part) in parts.enumerated() {
@@ -198,6 +203,28 @@ enum FrenchPhonology {
         guard let final = names.last else { return "" }
         return names.dropLast().map { addStress($0, .secondary) }.joined() + addStress(final, .primary)
     }
+
+    /// One part of a hyphenated word. After the first part, the euphonic
+    /// `-t-` is a bare t and clitic pronouns are unstressed, with je/ce
+    /// reduced to their consonant, as espeak reads them (va-t-il → vˈatil,
+    /// est-ce → ɛs, fais-je → fˈɛʒ, dis-moi → dˈimwˌa).
+    static func hyphenPartPhonemes(
+        _ part: String, isFirst: Bool, lookup: (String) -> Pronunciation?
+    ) -> (phonemes: String, hAspire: Bool) {
+        if !isFirst {
+            if part == "t" { return ("t", false) }
+            if let reduced = reducedClitics[part] { return (reduced, false) }
+            if unstressedClitics.contains(part) { return wordPhonemes(part, stress: .none, lookup: lookup) }
+            if part == "moi" || part == "toi" { return wordPhonemes(part, stress: .secondary, lookup: lookup) }
+        }
+        let stress: Stress = isFirst && unstressedWords.contains(part) ? .none : .primary
+        return wordPhonemes(part, stress: stress, lookup: lookup)
+    }
+
+    static let reducedClitics: [String: String] = ["je": "ʒ", "ce": "s"]
+    static let unstressedClitics: Set<String> = [
+        "il", "ils", "on", "vous", "nous", "tu", "le", "la", "les", "en", "y", "lui", "leur",
+    ]
 
     /// Fixed expressions espeak reads as one unit (tout le monde → tulmˈɔ̃d).
     /// Returns the number of word tokens consumed and their phonemes.
