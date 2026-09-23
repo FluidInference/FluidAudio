@@ -321,7 +321,7 @@ public struct Nemotron3Models {
         let inputPrepSeconds = Date().timeIntervalSince(tStage)
 
         tStage = Date()
-        let output = try model.prediction(from: inputs, options: predictionOptions)
+        let output = try predict(inputs)
         let predictSeconds = Date().timeIntervalSince(tStage)
         tStage = Date()
 
@@ -336,6 +336,21 @@ public struct Nemotron3Models {
             predictSeconds: predictSeconds,
             readbackSeconds: Date().timeIntervalSince(tStage)
         )
+    }
+
+    /// Predict with the preallocated output backings, dropping them for good if the
+    /// runtime rejects them. Seen on M3 Max with `.cpuAndNeuralEngine`: the ANE compile
+    /// fails and the fallback refuses the fp16 backings as "not compatible" (#951).
+    private func predict(_ inputs: MLFeatureProvider) throws -> MLFeatureProvider {
+        do {
+            return try model.prediction(from: inputs, options: predictionOptions)
+        } catch {
+            guard !predictionOptions.outputBackings.isEmpty else { throw error }
+            Self.logger.warning(
+                "Output backings rejected (\(error.localizedDescription)); retrying without them")
+            predictionOptions.outputBackings = [:]
+            return try model.prediction(from: inputs, options: predictionOptions)
+        }
     }
 
     // MARK: - Inference
@@ -386,7 +401,7 @@ public struct Nemotron3Models {
         let inputPrepSeconds = Date().timeIntervalSince(tStage)
 
         tStage = Date()
-        let output = try model.prediction(from: inputs, options: predictionOptions)
+        let output = try predict(inputs)
         let predictSeconds = Date().timeIntervalSince(tStage)
         tStage = Date()
 
