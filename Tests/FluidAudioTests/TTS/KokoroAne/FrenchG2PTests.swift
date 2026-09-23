@@ -17,6 +17,7 @@ final class FrenchG2PTests: XCTestCase {
             "pensez": "pɑ̃sˈe", "plus": "plˈy", "randonnée": "ʁɑ̃dɔnˈe", "rendu": "ʁɑ̃dˈy",
             "similaire": "similˈɛʁ", "ski": "skˈi", "sont": "sˈɔ̃", "sous": "sˈu", "un": "ˈœ̃", "unis": "ynˈi",
             "à": "ˈa", "également": "eɡalmˈɑ̃", "épaisse": "epˈɛs", "états": "etˈa",
+            "ans": "ˈɑ̃", "sept": "sˈɛt", "demain": "dəmˈɛ̃", "île": "ˈil",
         ],
         hAspire: ["héros"])
 
@@ -66,6 +67,28 @@ final class FrenchG2PTests: XCTestCase {
         XCTAssertEqual(FrenchPhonology.addStress("pʁɛskə", .primary), "pʁˈɛskə")
         XCTAssertEqual(FrenchPhonology.addStress("ʁɑ̃dy", .primary), "ʁɑ̃dˈy")
         XCTAssertEqual(FrenchPhonology.addStress("mɔ̃", .primary), "mˈɔ̃")
+    }
+
+    func testLiaisonDoesNotDoubleASpokenConsonant() {
+        XCTAssertEqual(phonemize("six ans"), "sˈiz ˈɑ̃")  // voiced, not sisz
+        XCTAssertEqual(phonemize("sept ans"), "sˈɛt ˈɑ̃")  // not sɛtt
+        XCTAssertEqual(phonemize("les ans"), "lez ˈɑ̃")  // plain liaison unchanged
+        // espeak still links plurals in -es and -ent verbs after a spoken consonant.
+        XCTAssertEqual(FrenchPhonology.applyLiaison("classes", "klˈas"), "klˈasz")
+        XCTAssertEqual(FrenchPhonology.applyLiaison("mettent", "mˈɛt"), "mˈɛtt")
+        XCTAssertEqual(FrenchPhonology.applyLiaison("bus", "bˈys"), "bˈys")
+        XCTAssertEqual(FrenchPhonology.applyLiaison("neuf", "nˈœf"), "nˈœv")
+    }
+
+    func testLoneAccentedCapitalIsAWord() {
+        XCTAssertFalse(FrenchPhonology.isSpelledAcronym("À"))
+        XCTAssertEqual(phonemize("À demain."), "a dəmˈɛ̃.")
+    }
+
+    func testApostropheCompoundResolvesThroughParts() async throws {
+        let g2p = FrenchG2P(lexicon: lexicon) { word in word == "presqu" ? "pʁɛsk" : nil }
+        let result = try await g2p.phonemize("une presqu'île")
+        XCTAssertTrue(result.hasSuffix("pʁɛskˈil"), result)
     }
 
     func testAcronymsWithoutVowelsAreSpelled() {

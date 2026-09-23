@@ -53,8 +53,13 @@ final class SpanishG2PTests: XCTestCase {
         XCTAssertEqual(SpanishG2P.phonemize("tengo que."), "tˈɛŋɡo kˈe.")
     }
 
-    func testAcronymsAreSpelled() {
-        XCTAssertEqual(SpanishG2P.phonemize("la ONU"), "la ˌoˌeneˈu")
+    func testOnlyVowellessInitialismsAreSpelled() {
+        XCTAssertEqual(SpanishG2P.phonemize("la BBC"), "la βˌeβˌeθˈe")
+        // Shouted words and initialisms read as words are not spelled.
+        XCTAssertEqual(SpanishG2P.phonemize("¡NO, HOLA!"), "¡nˈo, ˈola!")
+        XCTAssertEqual(SpanishG2P.phonemize("la ONU"), "la ˈonu")
+        // A lone accented capital is a word, not a letter.
+        XCTAssertEqual(SpanishG2P.phonemize("Él"), "ˈel")
     }
 
     func testDigitsAreDroppedNotSpelled() {

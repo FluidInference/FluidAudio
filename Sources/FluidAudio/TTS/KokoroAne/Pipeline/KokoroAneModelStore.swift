@@ -175,6 +175,8 @@ public actor KokoroAneModelStore {
     private var japaneseG2P: JapaneseG2P?
     private var frenchG2P: FrenchG2P?
     private var spanishLexiconCache: KokoroAneLexicon?
+    private var spanishLexiconRetryAfter: Date?
+    static let lexiconRetryInterval: TimeInterval = 300
     private var mandarinCustomLexicon: MandarinCustomLexicon = .empty
 
     private let directory: URL?
@@ -377,9 +379,13 @@ public actor KokoroAneModelStore {
 
     /// Spanish exceptions lexicon (`es_lexicon_cache.json`). Best effort: when
     /// it cannot be fetched the spelling rules run alone, as English falls
-    /// back to BART G2P without its lexicon; the next call retries.
+    /// back to BART G2P without its lexicon. A failure is retried after
+    /// ``lexiconRetryInterval`` (or after `cleanup()`), not on every call.
     func spanishLexicon() async -> KokoroAneLexicon {
         if let spanishLexiconCache { return spanishLexiconCache }
+        // After a failed fetch, run on the rules alone for a while instead of
+        // stalling every utterance on another network attempt.
+        if let retryAfter = spanishLexiconRetryAfter, Date() < retryAfter { return .empty }
         do {
             let url = try await KokoroAneResourceDownloader.ensureLexiconCache(
                 KokoroAneConstants.spanishLexiconCacheFile)
@@ -389,6 +395,7 @@ public actor KokoroAneModelStore {
             return lexicon
         } catch {
             logger.warning("Spanish lexicon unavailable (\(error.localizedDescription)); using spelling rules only")
+            spanishLexiconRetryAfter = Date().addingTimeInterval(Self.lexiconRetryInterval)
             return .empty
         }
     }
@@ -446,5 +453,6 @@ public actor KokoroAneModelStore {
         japaneseG2P = nil
         frenchG2P = nil
         spanishLexiconCache = nil
+        spanishLexiconRetryAfter = nil
     }
 }

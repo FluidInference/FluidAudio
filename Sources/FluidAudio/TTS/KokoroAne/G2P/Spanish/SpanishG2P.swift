@@ -367,10 +367,17 @@ enum SpanishG2P {
         return names.dropLast().map { $0.replacingOccurrences(of: "ˈ", with: "ˌ") }.joined() + final
     }
 
+    /// Vowelless initialisms (BBC, PP) and lone consonant letters are spelled
+    /// out. All-caps words with a vowel are read as words, which covers
+    /// shouted text (NO, HOLA) and initialisms Spanish reads as words (ONU,
+    /// OTAN).
     static func isAcronym(_ token: String) -> Bool {
-        let isUpper = token == token.uppercased() && token != token.lowercased()
-        if token.count >= 2, token.count <= 5, isUpper { return true }
-        return token.count == 1 && !"aeiouy".contains(token.lowercased())
+        let lower = token.lowercased()
+        guard token == token.uppercased(), token != lower,
+            lower.allSatisfy({ letterNames[$0] != nil })
+        else { return false }
+        if token.count == 1 { return !"aeiouy".contains(lower) }
+        return token.count <= 5 && !lower.contains(where: { vowelLetters.contains($0) || $0 == "y" })
     }
 
     // MARK: - Helpers

@@ -131,10 +131,8 @@ enum FrenchPhonology {
                 phonemes = ""
                 for (j, part) in parts.enumerated() {
                     var piece = resolved[j].phonemes
-                    if j + 1 < parts.count, !resolved[j + 1].hAspire, startsWithVowel(resolved[j + 1].phonemes),
-                        let link = liaisonConsonant(part, piece)
-                    {
-                        piece += link
+                    if j + 1 < parts.count, !resolved[j + 1].hAspire, startsWithVowel(resolved[j + 1].phonemes) {
+                        piece = applyLiaison(part, piece)
                     }
                     phonemes += piece
                 }
@@ -165,8 +163,8 @@ enum FrenchPhonology {
                 startsWithVowel(items[k + 1].phonemes)
             {
                 let blocked = item.elided && nasalLiaisonWords.contains(item.word)  // d'un ami: no n
-                if !blocked, let link = liaisonConsonant(item.word, phonemes) {
-                    phonemes += link
+                if !blocked {
+                    phonemes = applyLiaison(item.word, phonemes)
                 }
             }
             out.append((true, phonemes))
@@ -178,7 +176,11 @@ enum FrenchPhonology {
     /// spelled out; pronounceable ones (ONU, OTAN) are read as words.
     static func isSpelledAcronym(_ token: String) -> Bool {
         guard token == token.uppercased(), token != token.lowercased() else { return false }
-        if token.count == 1 { return token != "A" && token != "Y" }
+        if token.count == 1 {
+            // À, É, Ô at a sentence start are words, not letters.
+            guard let letter = token.lowercased().first, letterNames[letter] != nil else { return false }
+            return token != "A" && token != "Y"
+        }
         return token.count <= 5 && !token.contains(where: { "AEIOUYÀÂÉÈÊËÎÏÔÛÙÜ".contains($0) })
     }
 
@@ -208,8 +210,9 @@ enum FrenchPhonology {
         case .raw(let raw):
             return (addStress(mapToEspeak(raw, word: word), stress), raw.hasPrefix("ʼ"))
         case nil:
-            guard word.contains("-") else { return ("", false) }
-            let joined = word.split(separator: "-").map {
+            // Compounds resolve through their parts (États-Unis, presqu'île).
+            guard word.contains("-") || word.contains("'") else { return ("", false) }
+            let joined = word.split(whereSeparator: { $0 == "-" || $0 == "'" }).map {
                 wordPhonemes(String($0), stress: .none, lookup: lookup).phonemes
             }
             return (addStress(joined.joined(), stress), false)
@@ -322,29 +325,41 @@ enum FrenchPhonology {
 
     // MARK: - Liaison
 
-    /// The consonant espeak-ng links from `word` onto a following
-    /// vowel-initial word, or nil.
-    static func liaisonConsonant(_ word: String, _ phonemes: String) -> String? {
+    /// `phonemes` with espeak-ng's liaison onto a following vowel-initial
+    /// word applied: a linking consonant appended (lez‿, ɡʁɑ̃t‿), a spoken
+    /// final s voiced (six ans → siz), or unchanged.
+    static func applyLiaison(_ word: String, _ phonemes: String) -> String {
         let word = word.replacingOccurrences(of: "'", with: "")
         guard let letter = word.last,
             let last = phonemes.unicodeScalars.last(where: { $0 != "ˈ" && $0 != "ˌ" })
-        else { return nil }
+        else { return phonemes }
         switch letter {
         case "s", "x", "z":
-            if sLiaisonWords.contains(word) { return "z" }
-            if matches(word, #"(is|us|és)$"#) { return nil }  // participles: connus, mis
-            return "z"
+            // Final s already spoken: numerals voice it (six ans → siz‿ɑ̃),
+            // plurals in -es still link (classes entières → klasz‿), words
+            // whose s is lexical keep it (os, bus, sens, index).
+            if last == "s" || last == "z" {
+                if voicedFinalS.contains(word) { return String(phonemes.dropLast()) + "z" }
+                return word.hasSuffix("es") ? phonemes + "z" : phonemes
+            }
+            if sLiaisonWords.contains(word) { return phonemes + "z" }
+            if matches(word, #"(is|us|és)$"#) { return phonemes }  // participles: connus, mis
+            return phonemes + "z"
         case "n":
-            return nasalLiaisonWords.contains(word) && last == "\u{0303}" ? "n" : nil
+            return nasalLiaisonWords.contains(word) && last == "\u{0303}" ? phonemes + "n" : phonemes
         case "t", "d":
-            if tLiaisonWords.contains(word) || matches(word, #"(ait|aient|eut|ont)$"#) { return "t" }
-            // Verb -ent (peuvent) links; adverbs and nouns in -ent/-ment do not.
-            if word.hasSuffix("ent"), consonants.contains(last) { return "t" }
-            return nil
+            // Verb -ent (peuvent, mettent → mɛtt‿) links even after a spoken
+            // t; adverbs and nouns in -ent/-ment end in a vowel and do not.
+            if word.hasSuffix("ent"), consonants.contains(last) { return phonemes + "t" }
+            guard last != "t", last != "d" else { return phonemes }  // already spoken: sept, huit
+            if tLiaisonWords.contains(word) || matches(word, #"(ait|aient|eut|ont)$"#) { return phonemes + "t" }
+            return phonemes
+        case "f":
+            return word == "neuf" && last == "f" ? String(phonemes.dropLast()) + "v" : phonemes  // neuf ans
         case "p":
-            return word == "trop" || word == "beaucoup" ? "p" : nil
+            return (word == "trop" || word == "beaucoup") && last != "p" ? phonemes + "p" : phonemes
         default:
-            return nil
+            return phonemes
         }
     }
 
@@ -483,8 +498,10 @@ enum FrenchPhonology {
     ]
     static let tLiaisonWords: Set<String> = [
         "tout", "sont", "ont", "fait", "peut", "doit", "vont", "font", "dont", "quand", "grand", "petit", "avant",
-        "pendant", "devant", "était", "est", "soit", "furent", "sept", "huit", "vingt", "cent", "fort", "trop",
+        "pendant", "devant", "était", "est", "soit", "furent", "sept", "huit", "vingt", "fort", "trop",
     ]
+    /// Words whose spoken final s voices to z in liaison.
+    static let voicedFinalS: Set<String> = ["six", "dix"]
     static let sLiaisonWords: Set<String> = [
         "plus", "nous", "vous", "sous", "dans", "pas", "mais", "très", "jamais", "trois", "moins", "puis", "depuis",
         "alors", "toujours", "après", "dès", "chez", "assez",
