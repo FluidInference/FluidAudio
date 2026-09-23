@@ -96,11 +96,16 @@ public actor KokoroAneManager {
             // to the BART-G2P-only path rather than failing initialize.
             _ = await KokoroAneResourceDownloader.ensureEnglishLexicon(directory: nil)
         }
-        if variant == .french {
+        switch variant {
+        case .french:
             // Lexicon + CharsiuG2P fallback, fetched up front so the first
             // synthesis does not stall on (or fail without) the network.
             _ = try await store.frenchG2PPipeline()
             try await KokoroAneResourceDownloader.ensureMultilingualG2PAssets(directory: nil)
+        case .spanish:
+            _ = await store.spanishLexicon()
+        case .english, .mandarin, .japanese:
+            break
         }
         if let voices = preloadVoices {
             for voice in voices {
@@ -247,9 +252,9 @@ public actor KokoroAneManager {
     /// Kokoro training frontend). A string made only of phoneme-alphabet
     /// scalars is treated as pre-computed IPA and passed through (issue
     /// #698); digits, kana and kanji always go through the frontend.
-    /// Spanish: NeMo normalization, then ``SpanishG2P`` spelling rules.
-    /// French: NeMo normalization, then the ipa-dict lexicon with a
-    /// CharsiuG2P fallback (``FrenchG2P``). Both emit espeak-ng-style IPA;
+    /// Spanish: NeMo normalization, then ``SpanishG2P`` spelling rules with
+    /// the `es_lexicon_cache.json` exceptions. French: NeMo normalization,
+    /// then `fr_lexicon_cache.json` with a CharsiuG2P fallback (``FrenchG2P``). Both emit espeak-ng-style IPA;
     /// pre-computed IPA goes through ``synthesizeFromPhonemes(_:voice:speed:)``.
     public func phonemes(for text: String) async throws -> String {
         try await resolveFrontend(for: text).phonemes
@@ -303,7 +308,8 @@ public actor KokoroAneManager {
             return (normalized, try await g2p.phonemize(normalized))
         case .spanish:
             let normalized = NemoTextNormalizer.normalize(text, language: .spanish)
-            return (normalized, try Self.nonEmpty(SpanishG2P.phonemize(normalized), for: text))
+            let lexicon = await store.spanishLexicon()
+            return (normalized, try Self.nonEmpty(SpanishG2P.phonemize(normalized, lexicon: lexicon), for: text))
         case .french:
             let normalized = NemoTextNormalizer.normalize(text, language: .french)
             let g2p = try await store.frenchG2PPipeline()

@@ -9,14 +9,17 @@ import Foundation
 /// diphthong ligatures (`ai` → `I`, `ei` → `A`, `au` → `W`), the stress mark
 /// placed before the nucleus vowel, alternating secondary stress, unstressed
 /// function words, and phrase-level b/d/g lenition. Spanish spelling is
-/// regular enough that no lexicon is needed.
+/// regular enough that rules cover ~92% of words exactly; the rest (stressed
+/// `éis`, `ny`, loanwords, …) come from `es_lexicon_cache.json`, which lists
+/// only the words where espeak-ng and these rules disagree.
 ///
 /// Input is expected to be normalized already (digits verbalized); digits
 /// that remain are dropped.
 enum SpanishG2P {
 
-    /// Text → Kokoro IPA.
-    static func phonemize(_ text: String) -> String {
+    /// Text → Kokoro IPA. `lexicon` overrides the rules for fully stressed
+    /// words (the exceptions cache); function words always use the rules.
+    static func phonemize(_ text: String, lexicon: KokoroAneLexicon = .empty) -> String {
         let normalized = text.precomposedStringWithCanonicalMapping
             .replacingOccurrences(of: "«", with: "“")
             .replacingOccurrences(of: "»", with: "”")
@@ -51,7 +54,12 @@ enum SpanishG2P {
             var phonemes: String
             switch item.kind {
             case .acronym: phonemes = spell(item.text)
-            default: phonemes = item.text == "y" ? "i" : phonemizeWord(item.text, stress: item.stress)
+            default:
+                if item.stress == .primary, let entry = lexicon.lookup(item.text) {
+                    phonemes = entry
+                } else {
+                    phonemes = item.text == "y" ? "i" : phonemizeWord(item.text, stress: item.stress)
+                }
             }
             phonemes = applyAllophones(phonemes, previous: previous)
 
@@ -79,7 +87,6 @@ enum SpanishG2P {
     /// One orthographic word (lowercased) → IPA with stress marks.
     static func phonemizeWord(_ word: String, stress: Stress) -> String {
         let w = word.precomposedStringWithCanonicalMapping.lowercased()
-        if stress == .primary, let fixed = lexicon[w] { return fixed }
         // -mente adverbs carry two primary stresses: the stem's and mˈente.
         if stress == .primary, w.count > 6, w.hasSuffix("mente") {
             return phonemizeWord(String(w.dropLast(5)), stress: .primary) + "mˈente"
@@ -477,8 +484,6 @@ enum SpanishG2P {
         "para", "como", "entre", "pero", "cuando", "sobre", "desde", "hacia", "hasta", "quienes", "bajo",
         "aunque", "donde", "mientras", "porque", "nuestros", "nuestra", "nuestro", "nuestras", "ante", "cuanto",
     ]
-
-    static let lexicon: [String: String] = ["ser": "sˈer"]
 
     static let letterNames: [Character: String] = [
         "a": "a", "b": "be", "c": "ce", "d": "de", "e": "e", "f": "efe", "g": "ge", "h": "ache", "i": "i",

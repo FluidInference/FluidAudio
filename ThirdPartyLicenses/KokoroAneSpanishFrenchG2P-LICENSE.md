@@ -1,11 +1,14 @@
-# French text frontend (Kokoro ANE `.french`)
+# Spanish / French text frontends (Kokoro ANE `.spanish`, `.french`)
 
-The French frontend looks words up in the `fr_FR` list of ipa-dict
-(https://github.com/open-dict-data/ipa-dict), redistributed as
-`ANE/assets/fr_lexicon.tsv` on `FluidInference/kokoro-82m-coreml` (lowercase
-keys, first listed pronunciation, multi-word entries dropped). Words missing
-from it go through CharsiuG2P (https://github.com/lingjzhu/CharsiuG2P, MIT),
-already shipped as `MultilingualG2PEncoder/Decoder.mlmodelc`.
+`fr_lexicon_cache.json` and `es_lexicon_cache.json` on
+`FluidInference/kokoro-82m-coreml` are generated from word lists in ipa-dict
+(https://github.com/open-dict-data/ipa-dict, `fr_FR` and `es_ES`). Their
+pronunciations are the output of espeak-ng (https://github.com/espeak-ng/espeak-ng,
+GPL-3.0) with Misaki's `EspeakG2P` post-processing, the phonemization Kokoro's
+Spanish and French voices were trained on. The French file keeps ipa-dict's
+h aspiré marks. Words missing from the French lexicon go through CharsiuG2P
+(https://github.com/lingjzhu/CharsiuG2P, MIT), already shipped as
+`MultilingualG2PEncoder/Decoder.mlmodelc`.
 
 ## ipa-dict — MIT
 

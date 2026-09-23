@@ -35,8 +35,8 @@ text-to-phoneme frontend differ.
 | `.english`    | `ANE/`      | 114   | `af_heart`    | flat (`<voice>.bin`)        | G2P CoreML (BART seq2seq) → IPA            |
 | `.mandarin`   | `ANE-zh/`   | 171   | `zf_001`      | nested (`voices/<voice>.bin`) | Rule-based dict lookup → Bopomofo + tones |
 | `.japanese`   | `ANE-ja/`   | 114   | `jf_alpha`    | nested (`voices/<voice>.bin`) | MeCab (unidic-lite) + Cutlet rules → IPA |
-| `.spanish`    | `ANE/`      | 114   | `ef_dora`     | flat (`<voice>.bin`)        | Spelling rules → espeak-style IPA          |
-| `.french`     | `ANE/`      | 114   | `ff_siwis`    | flat (`<voice>.bin`)        | ipa-dict lexicon + CharsiuG2P → espeak-style IPA |
+| `.spanish`    | `ANE/`      | 114   | `ef_dora`     | flat (`<voice>.bin`)        | Spelling rules + `es_lexicon_cache.json` exceptions → IPA |
+| `.french`     | `ANE/`      | 114   | `ff_siwis`    | flat (`<voice>.bin`)        | `fr_lexicon_cache.json` + CharsiuG2P → IPA |
 
 Spanish and French use the same Kokoro-82M v1.0 weights as English, so they
 share the `ANE/` bundle (and its cache); only the frontend differs.
@@ -91,9 +91,10 @@ additionally fetches the G2P pinyin dictionaries from
 on first synthesis (~10 MB, cached at `<repoDir>/g2p/`).
 Japanese plain-text synthesis lazily downloads the trimmed unidic-lite
 dictionary and Cutlet word list (about 115 MB) on first use. IPA bypass
-calls do not download them. French fetches its lexicon (6 MB, from
-`ANE/assets/`) and the CharsiuG2P CoreML pair at `initialize()`; Spanish
-needs no extra assets.
+calls do not download them. Spanish and French fetch `es_lexicon_cache.json`
+(4 MB) / `fr_lexicon_cache.json` (13 MB) from the repo root at
+`initialize()`, next to the English `us_lexicon_cache.json`; French also
+fetches the CharsiuG2P CoreML pair.
 
 ### Swift
 
@@ -327,15 +328,21 @@ enough that it is rules only, with no lexicon:
   pause), nasal assimilation, and unstressed or secondary-stressed function
   words that regain stress before a pause.
 
-NeMo text normalization runs first, as for the other variants.
+Spanish spelling is regular enough that the rules match espeak on 92% of
+the 596k words in ipa-dict's `es_ES` list. The other 49k (stressed `éis`/`áis`
+without the ligature, `ny` → `ɲ`, loanwords, …) ship as
+`es_lexicon_cache.json`, the English lexicon-cache schema holding only those
+exceptions. Without it the rules run alone. NeMo text normalization runs
+first, as for the other variants.
 
 ## French G2P
 
-`FrenchG2P` looks words up in the ipa-dict `fr_FR` lexicon (MIT, 244k
-entries, binary-searched in place). Words it does not list go through the
-CharsiuG2P CoreML model (`MultilingualG2PModel`, trained on the same
-dictionary), cached per session. The result is then rewritten into
-espeak-ng `fr-fr` conventions: `ɥ` → `y`, `ɲ` → `nj`, `ɔ` → `o` in open
+`FrenchG2P` looks words up in `fr_lexicon_cache.json`: the 244k-word
+ipa-dict `fr_FR` vocabulary with espeak-ng `fr-fr` pronunciations, in the
+English lexicon-cache schema plus an `hAspire` list taken from ipa-dict.
+Words it does not list go through the CharsiuG2P CoreML model
+(`MultilingualG2PModel`), cached per session, and are rewritten into
+espeak-ng conventions: `ɥ` → `y`, `ɲ` → `nj`, `ɔ` → `o` in open
 non-final syllables, eu → `ø` outside the final syllable, schwa deletion
 (`devenu` → `dəvny`), stress on the last full vowel, unstressed clitics,
 elision, and liaison (`lez otʁ`, `ˈɔ̃t eɡalmˈɑ̃`, blocked before h aspiré).
@@ -351,24 +358,21 @@ transcripts without digits:
 
 | Variant | Sentences | PER    | PER, stress ignored | Exact sentences |
 |---------|-----------|--------|---------------------|-----------------|
-| Spanish | 281       | 0.54 % | 0.3 %               | 202             |
-| French  | 262       | 1.72 % | 1.4 %               | 80              |
+| Spanish | 281       | 0.48 % | 0.3 %               | 216             |
+| French  | 262       | 1.27 % | 1.0 %               | 122             |
 
-Remaining differences are mostly foreign names, acronyms and espeak lexicon
-entries. Parakeet v3 round trip (`--language es/fr`) on 60 of those
+What remains is sentence-level (liaison, phrase stress), foreign names and
+acronyms. Parakeet v3 round trip (`--language es/fr`) on 60 of those
 sentences, same PyTorch Kokoro model and voice, changing only the phonemes:
 
 | Variant | espeak-ng phonemes | This frontend |
 |---------|--------------------|---------------|
-| Spanish (`ef_dora`) | 4.25 % WER | 5.31 % WER |
-| French (`ff_siwis`) | 3.27 % WER | 3.21 % WER |
+| Spanish (`ef_dora`) | 4.25 % WER | 5.81 % WER |
+| French (`ff_siwis`) | 3.27 % WER | 3.46 % WER |
 
-The Spanish gap is Parakeet switching to English on a few sentences for both
-inputs. Through the CoreML chain the same sentences score 7.68 % (es) and
-3.52 % (fr). The Spanish figure includes one sentence that the chain renders
-as a full-scale signal on macOS 27. It reproduces on `main` with the same
-phonemes through `--variant en --phonemes --voice ef_dora`, so it is a chain
-issue, not a frontend one.
+Each gap is one or two sentences. In Spanish, Parakeet switches to English on
+one sentence, and NeMo expands `EE. UU.` where the reference keeps it
+abbreviated. In French, CharsiuG2P reads `pH` as a word.
 
 ## Limits
 

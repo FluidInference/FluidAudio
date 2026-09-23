@@ -2,21 +2,21 @@ import Foundation
 
 /// Text frontend for the Kokoro ANE French variant.
 ///
-/// Word pronunciations come from the ipa-dict `fr_FR` lexicon; words it does
-/// not list go through the CharsiuG2P CoreML model (``MultilingualG2PModel``,
-/// trained on the same dictionary). Both are then rewritten into the espeak-ng
-/// `fr-fr` conventions Kokoro's French voice was trained on — see
-/// ``FrenchPhonology``.
+/// Word pronunciations come from `fr_lexicon_cache.json` (ipa-dict `fr_FR`
+/// vocabulary with espeak-ng `fr-fr` pronunciations, the IPA Kokoro's French
+/// voice was trained on). Words it does not list go through the CharsiuG2P
+/// CoreML model (``MultilingualG2PModel``) and are rewritten into the same
+/// conventions — see ``FrenchPhonology``.
 actor FrenchG2P {
     typealias Fallback = @Sendable (String) async throws -> String?
 
-    private let lexicon: FrenchLexicon
+    private let lexicon: KokoroAneLexicon
     private let fallback: Fallback
     /// Fallback results, including misses (stored as ""), so each unknown word
     /// runs the autoregressive model once per session.
     private var fallbackCache: [String: String] = [:]
 
-    init(lexicon: FrenchLexicon, fallback: @escaping Fallback) {
+    init(lexicon: KokoroAneLexicon, fallback: @escaping Fallback) {
         self.lexicon = lexicon
         self.fallback = fallback
     }
@@ -35,7 +35,8 @@ actor FrenchG2P {
         }
         let cache = fallbackCache
         return FrenchPhonology.phonemize(text, isLexiconEntry: lexicon.contains) { word in
-            FrenchPhonology.lookup(word, lexicon: lexicon) ?? cache[word].flatMap { $0.isEmpty ? nil : $0 }
+            FrenchPhonology.lookup(word, lexicon: lexicon)
+                ?? cache[word].flatMap { $0.isEmpty ? nil : .raw($0) }
         }
     }
 }
@@ -49,13 +50,22 @@ enum FrenchPhonology {
 
     enum Stress { case primary, secondary, none }
 
-    /// Text → Kokoro IPA. `lookup` returns the raw (ipa-dict style)
-    /// pronunciation of a lowercase word; `isLexiconEntry` says whether a
-    /// token containing an apostrophe is listed whole (aujourd'hui, c'est).
+    /// Where a word's pronunciation came from.
+    enum Pronunciation: Equatable {
+        /// Lexicon cache entry: already espeak-style, with citation stress.
+        case espeak(String, hAspire: Bool)
+        /// ipa-dict-style IPA (citation overrides, CharsiuG2P output) that
+        /// still needs ``mapToEspeak(_:word:)`` and stress.
+        case raw(String)
+    }
+
+    /// Text → Kokoro IPA. `lookup` resolves a lowercase word;
+    /// `isLexiconEntry` says whether a token containing an apostrophe is
+    /// listed whole (aujourd'hui, c'est).
     static func phonemize(
         _ text: String,
         isLexiconEntry: (String) -> Bool,
-        lookup: (String) -> String?
+        lookup: (String) -> Pronunciation?
     ) -> String {
         let normalized = text.precomposedStringWithCanonicalMapping
             .replacingOccurrences(of: "’", with: "'")
@@ -116,11 +126,11 @@ enum FrenchPhonology {
                 // Hyphenated compounds: every part carries its own stress
                 // (États-Unis → etˈazynˈi), with liaison between parts.
                 let parts = core.split(separator: "-").map(String.init)
-                let resolved = parts.map { wordPhonemes($0, lookup: lookup) }
+                let resolved = parts.map { wordPhonemes($0, stress: .primary, lookup: lookup) }
                 hAspire = resolved.first?.hAspire ?? false
                 phonemes = ""
                 for (j, part) in parts.enumerated() {
-                    var piece = addStress(resolved[j].phonemes, .primary)
+                    var piece = resolved[j].phonemes
                     if j + 1 < parts.count, !resolved[j + 1].hAspire, startsWithVowel(resolved[j + 1].phonemes),
                         let link = liaisonConsonant(part, piece)
                     {
@@ -129,8 +139,10 @@ enum FrenchPhonology {
                     phonemes += piece
                 }
             } else {
-                let resolved = core.isEmpty ? (phonemes: "", hAspire: false) : wordPhonemes(core, lookup: lookup)
-                phonemes = addStress(resolved.phonemes, stress)
+                let resolved =
+                    core.isEmpty
+                    ? (phonemes: "", hAspire: false) : wordPhonemes(core, stress: stress, lookup: lookup)
+                phonemes = resolved.phonemes
                 hAspire = resolved.hAspire
             }
             if !prefix.isEmpty {
@@ -177,22 +189,35 @@ enum FrenchPhonology {
         return names.dropLast().map { addStress($0, .secondary) }.joined() + addStress(final, .primary)
     }
 
-    /// Override → lexicon lookup used by ``FrenchG2P``.
-    static func lookup(_ word: String, lexicon: FrenchLexicon) -> String? {
-        citationOverrides[word] ?? lexicon.lookup(word)
+    /// Override → lexicon-cache lookup used by ``FrenchG2P``.
+    static func lookup(_ word: String, lexicon: KokoroAneLexicon) -> Pronunciation? {
+        if let override = citationOverrides[word] { return .raw(override) }
+        return lexicon.lookup(word).map { .espeak($0, hAspire: lexicon.isHAspire(word)) }
     }
 
-    /// One word → espeak-style phonemes (unstressed) and whether it starts
-    /// with an h aspiré (ipa-dict marks it with `ʼ`), which blocks liaison.
-    static func wordPhonemes(_ word: String, lookup: (String) -> String?) -> (phonemes: String, hAspire: Bool) {
-        guard let raw = lookup(word) else {
-            if word.contains("-") {
-                let joined = word.split(separator: "-").map { wordPhonemes(String($0), lookup: lookup).phonemes }
-                return (joined.joined(), false)
+    /// One word → espeak-style phonemes with `stress` applied, and whether it
+    /// starts with an h aspiré, which blocks liaison. Lexicon entries keep
+    /// espeak's own stress placement when the word is fully stressed.
+    static func wordPhonemes(
+        _ word: String, stress: Stress, lookup: (String) -> Pronunciation?
+    ) -> (phonemes: String, hAspire: Bool) {
+        switch lookup(word) {
+        case .espeak(let phonemes, let hAspire):
+            if stress == .primary, phonemes.contains("ˈ") { return (phonemes, hAspire) }
+            return (addStress(stripStress(phonemes), stress), hAspire)
+        case .raw(let raw):
+            return (addStress(mapToEspeak(raw, word: word), stress), raw.hasPrefix("ʼ"))
+        case nil:
+            guard word.contains("-") else { return ("", false) }
+            let joined = word.split(separator: "-").map {
+                wordPhonemes(String($0), stress: .none, lookup: lookup).phonemes
             }
-            return ("", false)
+            return (addStress(joined.joined(), stress), false)
         }
-        return (mapToEspeak(raw, word: word), raw.hasPrefix("ʼ"))
+    }
+
+    static func stripStress(_ phonemes: String) -> String {
+        String(String.UnicodeScalarView(phonemes.unicodeScalars.filter { $0 != "ˈ" && $0 != "ˌ" }))
     }
 
     // MARK: - ipa-dict → espeak conventions

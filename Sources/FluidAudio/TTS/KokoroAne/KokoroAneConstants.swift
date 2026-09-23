@@ -192,15 +192,17 @@ public enum KokoroAneConstants {
         japaneseConnectionMatrixFile, japaneseWordListFile,
     ]
 
-    // MARK: - French frontend (ipa-dict lexicon + CharsiuG2P fallback)
+    // MARK: - Spanish / French lexicon caches
 
-    /// Remote subdirectory of `g2pRemoteRepo` holding the French lexicon.
-    public static let frenchG2PRemoteSubdir = "ANE/assets"
+    /// French lexicon cache at the `kokoro-82m-coreml` repo root, in the
+    /// `us_lexicon_cache.json` schema plus an `hAspire` word list: the
+    /// ipa-dict `fr_FR` vocabulary with espeak-ng `fr-fr` pronunciations.
+    /// Loaded on first French call (about 13 MB).
+    public static let frenchLexiconCacheFile = "fr_lexicon_cache.json"
 
-    /// ipa-dict `fr_FR` (MIT), one `word<TAB>ipa` line per lowercase word,
-    /// first listed pronunciation only, sorted by UTF-8 bytes. Downloaded into
-    /// `<repoDir>/g2p/` on first French call (about 6 MB).
-    public static let frenchLexiconFile = "fr_lexicon.tsv"
+    /// Spanish exceptions cache (same schema): words whose espeak-ng `es`
+    /// pronunciation differs from what ``SpanishG2P``'s spelling rules give.
+    public static let spanishLexiconCacheFile = "es_lexicon_cache.json"
 }
 
 /// Language variant of the laishere/kokoro 7-stage CoreML chain.

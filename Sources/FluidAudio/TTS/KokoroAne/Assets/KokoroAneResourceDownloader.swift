@@ -168,36 +168,26 @@ public enum KokoroAneResourceDownloader {
         return g2pDir
     }
 
-    /// Ensure the French lexicon (ipa-dict `fr_FR`, see
-    /// `KokoroAneConstants.frenchLexiconFile`) is resident under
-    /// `<repoDir>/g2p/`, pulled from
-    /// `FluidInference/kokoro-82m-coreml/ANE/assets/`. Idempotent.
+    /// Ensure a Kokoro lexicon cache (`us_`/`fr_`/`es_lexicon_cache.json`,
+    /// same `{lower, caseSensitive}` schema) is in the shared kokoro cache
+    /// directory, fetched from the `kokoro-82m-coreml` repo root. Returns the
+    /// local file URL.
     @discardableResult
-    public static func ensureFrenchLexicon(repoDirectory: URL) async throws -> URL {
-        let g2pDir = repoDirectory.appendingPathComponent(KokoroAneConstants.g2pSubdir)
-        if !FileManager.default.fileExists(atPath: g2pDir.path) {
-            try FileManager.default.createDirectory(at: g2pDir, withIntermediateDirectories: true)
-        }
-        let name = KokoroAneConstants.frenchLexiconFile
-        let localURL = g2pDir.appendingPathComponent(name)
-        if let size = try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? Int, size > 0 {
+    public static func ensureLexiconCache(
+        _ fileName: String,
+        directory: URL? = nil
+    ) async throws -> URL {
+        let modelsDirectory = try directory ?? defaultModelsDirectory()
+        let kokoroDir = modelsDirectory.appendingPathComponent(Repo.kokoro.folderName)
+        try FileManager.default.createDirectory(at: kokoroDir, withIntermediateDirectories: true)
+        let localURL = kokoroDir.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: localURL.path) {
             return localURL
         }
-        try? FileManager.default.removeItem(at: localURL)
-        logger.info(
-            "Downloading French lexicon from "
-                + "\(KokoroAneConstants.g2pRemoteRepo)/\(KokoroAneConstants.frenchG2PRemoteSubdir)/\(name)...")
-        let remoteURL = try ModelRegistry.resolveModel(
-            KokoroAneConstants.g2pRemoteRepo, "\(KokoroAneConstants.frenchG2PRemoteSubdir)/\(name)")
+        let remoteURL = try ModelRegistry.resolveModel(Repo.kokoro.remotePath, fileName)
         _ = try await AssetDownloader.ensure(
-            .init(
-                description: "French lexicon",
-                remoteURL: remoteURL,
-                destinationURL: localURL,
-                transferMode: .file()
-            ),
-            logger: logger
-        )
+            .init(description: fileName, remoteURL: remoteURL, destinationURL: localURL),
+            logger: logger)
         return localURL
     }
 
