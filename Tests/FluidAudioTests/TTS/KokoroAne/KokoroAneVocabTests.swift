@@ -35,6 +35,16 @@ final class KokoroAneVocabTests: XCTestCase {
         XCTAssertEqual(ids[3], KokoroAneConstants.eosTokenId)
     }
 
+    /// Nasal vowels are base + U+0303. The reference encodes per code point,
+    /// so the tilde must map to its own id rather than make `ɑ̃` one unknown
+    /// Character.
+    func testEncodeSplitsCombiningMarksLikeReference() throws {
+        let vocab = KokoroAneVocab(map: ["ɑ": 69, "\u{0303}": 17, "b": 44])
+        let ids = try vocab.encode("bɑ̃")
+        XCTAssertEqual(Array(ids.dropFirst().dropLast()), [44, 69, 17])
+        XCTAssertEqual(KokoroAneVocab.phonemeLength("bɑ̃"), 3)
+    }
+
     func testEncodeEmptyStringYieldsBosEosOnly() throws {
         let vocab = makeVocab()
         let ids = try vocab.encode("")

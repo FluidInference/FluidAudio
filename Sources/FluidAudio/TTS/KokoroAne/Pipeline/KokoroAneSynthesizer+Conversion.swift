@@ -59,6 +59,45 @@ enum KokoroAneArrays {
         return true
     }
 
+    // MARK: - Allocation
+
+    /// Zeroed bytes kept past the end of every input buffer.
+    ///
+    /// On OS 27, BNNS kernels that CoreML runs for CPU-routed ops read a few
+    /// bytes past the end of their input. `MLMultiArray(shape:dataType:)` puts
+    /// large buffers on page boundaries, so when the byte size is a whole
+    /// number of pages the overread lands on an unmapped page and the process
+    /// segfaults in libBNNS. Vocoder `x_source_0` ([1, 256, 20·T] fp16) hits
+    /// this at T = 416, 440, … 584; 16 bytes of slack already avoids it, and a
+    /// full page covers any vector-width overread.
+    static let tailSlackBytes = 16_384
+
+    /// Row-major MLMultiArray whose backing store carries ``tailSlackBytes``
+    /// of zeroed slack. Contents start zeroed.
+    static func makeArray(shape: [Int], dataType: MLMultiArrayDataType) throws -> MLMultiArray {
+        let elementSize: Int
+        switch dataType {
+        case .float16: elementSize = 2
+        case .float32, .int32: elementSize = 4
+        case .double: elementSize = 8
+        default:
+            return try MLMultiArray(shape: shape.map { NSNumber(value: $0) }, dataType: dataType)
+        }
+        let byteCount = shape.reduce(1, *) * elementSize + tailSlackBytes
+        let buffer = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: 64)
+        buffer.initializeMemory(as: UInt8.self, repeating: 0, count: byteCount)
+        var strides = [Int](repeating: 1, count: shape.count)
+        for i in stride(from: shape.count - 2, through: 0, by: -1) {
+            strides[i] = strides[i + 1] * shape[i + 1]
+        }
+        return try MLMultiArray(
+            dataPointer: buffer,
+            shape: shape.map { NSNumber(value: $0) },
+            dataType: dataType,
+            strides: strides.map { NSNumber(value: $0) },
+            deallocator: { $0.deallocate() })
+    }
+
     // MARK: - Float16 (UInt16-backed) builders
 
     /// Build a Float16 MLMultiArray and fill it from a Float32 source.
@@ -67,8 +106,7 @@ enum KokoroAneArrays {
         precondition(
             source.count == total,
             "float16Array: shape \(shape) (\(total)) ≠ source.count \(source.count)")
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let arr = try MLMultiArray(shape: nsShape, dataType: .float16)
+        let arr = try makeArray(shape: shape, dataType: .float16)
         let dst = arr.dataPointer.bindMemory(to: UInt16.self, capacity: total)
         source.withUnsafeBufferPointer { srcBuf in
             convertF32toF16(src: srcBuf.baseAddress!, dst: dst, count: total)
@@ -79,8 +117,7 @@ enum KokoroAneArrays {
     /// Build a Float16 MLMultiArray, copying from a Float16-backed source array.
     static func float16Array(shape: [Int], from source: MLMultiArray) throws -> MLMultiArray {
         let total = shape.reduce(1, *)
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let dst = try MLMultiArray(shape: nsShape, dataType: .float16)
+        let dst = try makeArray(shape: shape, dataType: .float16)
         precondition(
             source.count == total,
             "float16Array(from MLMultiArray): source has \(source.count) elements, shape implies \(total)")
@@ -107,8 +144,7 @@ enum KokoroAneArrays {
         precondition(
             source.count == total,
             "float32Array: shape \(shape) (\(total)) ≠ source.count \(source.count)")
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let arr = try MLMultiArray(shape: nsShape, dataType: .float32)
+        let arr = try makeArray(shape: shape, dataType: .float32)
         let dst = arr.dataPointer.bindMemory(to: Float.self, capacity: total)
         source.withUnsafeBufferPointer { src in
             dst.update(from: src.baseAddress!, count: total)
@@ -119,8 +155,7 @@ enum KokoroAneArrays {
     /// Build a Float32 MLMultiArray from a Float16-backed source.
     static func float32Array(shape: [Int], from source: MLMultiArray) throws -> MLMultiArray {
         let total = shape.reduce(1, *)
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let dst = try MLMultiArray(shape: nsShape, dataType: .float32)
+        let dst = try makeArray(shape: shape, dataType: .float32)
         precondition(
             source.count == total,
             "float32Array(from MLMultiArray): source has \(source.count) elements, shape implies \(total)")
@@ -147,8 +182,7 @@ enum KokoroAneArrays {
         precondition(
             source.count == total,
             "int32Array: shape \(shape) (\(total)) ≠ source.count \(source.count)")
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let arr = try MLMultiArray(shape: nsShape, dataType: .int32)
+        let arr = try makeArray(shape: shape, dataType: .int32)
         let dst = arr.dataPointer.bindMemory(to: Int32.self, capacity: total)
         source.withUnsafeBufferPointer { src in
             dst.update(from: src.baseAddress!, count: total)

@@ -1211,6 +1211,10 @@ public enum TtsBenchmarkCommand {
             return .mandarin
         case "japanese", "ja", "jp":
             return .japanese
+        case "spanish", "es":
+            return .spanish
+        case "french", "fr":
+            return .french
         case "english", "en", "en-us", nil, "":
             return .english
         default:

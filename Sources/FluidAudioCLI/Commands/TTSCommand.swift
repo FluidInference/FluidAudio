@@ -145,6 +145,10 @@ public struct TTS {
                         kokoroAneVariant = .mandarin
                     case "ja", "japanese", "jp":
                         kokoroAneVariant = .japanese
+                    case "es", "spanish":
+                        kokoroAneVariant = .spanish
+                    case "fr", "french":
+                        kokoroAneVariant = .french
                     case "micro", "inflect-micro":
                         inflectVariant = .micro
                     case "nano", "inflect-nano":
@@ -904,7 +908,7 @@ public struct TTS {
                     if let lex = try loadMandarinLexicon(from: lexiconPath) {
                         await manager.setMandarinCustomLexicon(lex)
                     }
-                case .english, .japanese:
+                case .english, .japanese, .spanish, .french:
                     logger.warning(
                         "--lexicon ignored: only the KokoroAne Mandarin variant "
                             + "supports a custom lexicon.")
@@ -916,7 +920,7 @@ public struct TTS {
             let tLoad1 = Date()
 
             let tSynth0 = Date()
-            // synthesizeDetailed handles all three text frontends. With
+            // synthesizeDetailed handles every variant's text frontend. With
             // --phonemes, bypass G2P and feed a pre-computed phoneme string.
             let detailed: KokoroAneSynthesisResult
             if treatAsPhonemes {
@@ -1560,7 +1564,7 @@ public struct TTS {
                                      word  @bopomofo1        (escape: @-prefixed,
                                                               bypasses tone sandhi)
                                    Ignored for KokoroAne English (no lexicon support yet).
-              --variant            KokoroAne language (values: en,zh).
+              --variant            KokoroAne language (values: en,zh,ja,es,fr).
                                    For --backend kokoro-ane --variant zh, Hanzi
                                    input is auto-phonemized through the bundled
                                    Mandarin G2P pipeline (FMM segmentation +

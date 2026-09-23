@@ -173,6 +173,10 @@ public actor KokoroAneModelStore {
     private var repoDirectory: URL?
     private var mandarinG2P: MandarinG2P?
     private var japaneseG2P: JapaneseG2P?
+    private var frenchG2P: FrenchG2P?
+    private var spanishLexiconCache: KokoroAneLexicon?
+    private var spanishLexiconRetryAfter: Date?
+    static let lexiconRetryInterval: TimeInterval = 300
     private var mandarinCustomLexicon: MandarinCustomLexicon = .empty
 
     private let directory: URL?
@@ -353,6 +357,49 @@ public actor KokoroAneModelStore {
         return pipeline
     }
 
+    /// Lazy-load and cache the French frontend: `fr_lexicon_cache.json` plus
+    /// the CharsiuG2P CoreML fallback for words it does not list. Both live
+    /// in the shared kokoro cache directory, like the English lexicon.
+    func frenchG2PPipeline() async throws -> FrenchG2P {
+        if let frenchG2P { return frenchG2P }
+        guard variant == .french else {
+            throw KokoroAneError.inputProcessingFailed("French G2P requested on a non-french store")
+        }
+        let lexiconURL = try await KokoroAneResourceDownloader.ensureLexiconCache(
+            KokoroAneConstants.frenchLexiconCacheFile)
+        let lexicon = try KokoroAneLexicon(contentsOf: lexiconURL)
+        let pipeline = FrenchG2P(lexicon: lexicon) { word in
+            try await KokoroAneResourceDownloader.ensureMultilingualG2PAssets(directory: nil)
+            return try await MultilingualG2PModel.shared.phonemize(word: word, language: .french)?.joined()
+        }
+        frenchG2P = pipeline
+        logger.info("Loaded French G2P (\(lexicon.count) lexicon entries)")
+        return pipeline
+    }
+
+    /// Spanish exceptions lexicon (`es_lexicon_cache.json`). Best effort: when
+    /// it cannot be fetched the spelling rules run alone, as English falls
+    /// back to BART G2P without its lexicon. A failure is retried after
+    /// ``lexiconRetryInterval`` (or after `cleanup()`), not on every call.
+    func spanishLexicon() async -> KokoroAneLexicon {
+        if let spanishLexiconCache { return spanishLexiconCache }
+        // After a failed fetch, run on the rules alone for a while instead of
+        // stalling every utterance on another network attempt.
+        if let retryAfter = spanishLexiconRetryAfter, Date() < retryAfter { return .empty }
+        do {
+            let url = try await KokoroAneResourceDownloader.ensureLexiconCache(
+                KokoroAneConstants.spanishLexiconCacheFile)
+            let lexicon = try KokoroAneLexicon(contentsOf: url)
+            spanishLexiconCache = lexicon
+            logger.info("Loaded Spanish lexicon (\(lexicon.count) exceptions)")
+            return lexicon
+        } catch {
+            logger.warning("Spanish lexicon unavailable (\(error.localizedDescription)); using spelling rules only")
+            spanishLexiconRetryAfter = Date().addingTimeInterval(Self.lexiconRetryInterval)
+            return .empty
+        }
+    }
+
     /// Best-effort load of the g2pW polyphone disambiguator. Returns
     /// `nil` (and logs) when the assets are missing or fail to load,
     /// so the Mandarin G2P pipeline can keep running on the dict
@@ -404,5 +451,8 @@ public actor KokoroAneModelStore {
         repoDirectory = nil
         mandarinG2P = nil
         japaneseG2P = nil
+        frenchG2P = nil
+        spanishLexiconCache = nil
+        spanishLexiconRetryAfter = nil
     }
 }

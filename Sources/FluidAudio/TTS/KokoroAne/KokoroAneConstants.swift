@@ -16,6 +16,12 @@ public enum KokoroAneConstants {
     /// Default voice id for the Japanese (`ANE-ja/`) variant.
     public static let defaultVoiceJapanese = "jf_alpha"
 
+    /// Default voice id for the Spanish variant (shares the `ANE/` bundle).
+    public static let defaultVoiceSpanish = "ef_dora"
+
+    /// Default voice id for the French variant (shares the `ANE/` bundle).
+    public static let defaultVoiceFrench = "ff_siwis"
+
     /// Voice packs published for the English (`ANE/`) variant. Only
     /// `af_heart.bin` ships pre-converted; every other name is the Kokoro-82M
     /// v1.0 pack hosted as `voices/<name>.json` at the repository root, which
@@ -23,7 +29,9 @@ public enum KokoroAneConstants {
     /// `[510, 256]` fp32 layout on first use (#896). The 7-stage chain takes
     /// the style vectors as runtime inputs, so any v1.0 pack works with it;
     /// non-English-prefixed packs (`zf_*`, `jf_*`, …) still speak English
-    /// phonemes here, just with that voice's timbre.
+    /// phonemes here, just with that voice's timbre. The `ef_*`/`em_*` and
+    /// `ff_*` packs speak their own language through ``KokoroAneVariant/spanish``
+    /// and ``KokoroAneVariant/french``.
     /// Listing as of 2026-09-09 (huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/voices).
     public static let englishVoices: [String] = [
         "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore",
@@ -63,6 +71,12 @@ public enum KokoroAneConstants {
     public static let japaneseVoices: [String] = [
         "jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro", "jm_kumo",
     ]
+
+    /// Kokoro-82M v1.0 Spanish voices (`voices/<name>.json` at the repo root).
+    public static let spanishVoices: [String] = ["ef_dora", "em_alex", "em_santa"]
+
+    /// Kokoro-82M v1.0 French voices (`voices/<name>.json` at the repo root).
+    public static let frenchVoices: [String] = ["ff_siwis"]
 
     /// Output sample rate of the iSTFT in `KokoroTail_v2.mlpackage`.
     public static let sampleRate = 24_000
@@ -177,6 +191,18 @@ public enum KokoroAneConstants {
         japaneseSystemDictionaryFile, japaneseUnknownDictionaryFile, japaneseCharCategoryFile,
         japaneseConnectionMatrixFile, japaneseWordListFile,
     ]
+
+    // MARK: - Spanish / French lexicon caches
+
+    /// French lexicon cache at the `kokoro-82m-coreml` repo root, in the
+    /// `us_lexicon_cache.json` schema plus an `hAspire` word list: the
+    /// ipa-dict `fr_FR` vocabulary with espeak-ng `fr-fr` pronunciations.
+    /// Loaded on first French call (about 13 MB).
+    public static let frenchLexiconCacheFile = "fr_lexicon_cache.json"
+
+    /// Spanish exceptions cache (same schema): words whose espeak-ng `es`
+    /// pronunciation differs from what ``SpanishG2P``'s spelling rules give.
+    public static let spanishLexiconCacheFile = "es_lexicon_cache.json"
 }
 
 /// Language variant of the laishere/kokoro 7-stage CoreML chain.
@@ -191,14 +217,22 @@ public enum KokoroAneConstants {
 /// | `.english`   | `ANE/`     | `af_heart`    | flat (`<voice>.bin`)          | `KokoroAneEnglishPhonemizer` |
 /// | `.mandarin`  | `ANE-zh/`  | `zf_001`      | nested (`voices/<voice>.bin`) | `MandarinG2P`                |
 /// | `.japanese`  | `ANE-ja/`  | `jf_alpha`    | nested (`voices/<voice>.bin`) | `JapaneseG2P` (MeCab+Cutlet) |
+/// | `.spanish`   | `ANE/`     | `ef_dora`     | flat (`<voice>.bin`)          | `SpanishG2P` (rules)         |
+/// | `.french`    | `ANE/`     | `ff_siwis`    | flat (`<voice>.bin`)          | `FrenchG2P` (lexicon)        |
 ///
 /// The Japanese variant accepts plain kana/kanji through its in-process
 /// MeCab + Cutlet frontend. Pre-computed IPA remains supported through
 /// ``KokoroAneManager/synthesizeFromPhonemes(_:voice:speed:)``. See #698/#914.
+///
+/// Spanish and French run the same Kokoro-82M v1.0 weights as English, so
+/// they share the `ANE/` bundle and only add a text frontend that emits the
+/// espeak-ng IPA those voices were trained on (#926).
 public enum KokoroAneVariant: String, CaseIterable, Sendable {
     case english
     case mandarin
     case japanese
+    case spanish
+    case french
 
     /// Default voice id shipped with the variant's HF bundle.
     public var defaultVoice: String {
@@ -206,15 +240,17 @@ public enum KokoroAneVariant: String, CaseIterable, Sendable {
         case .english: return KokoroAneConstants.defaultVoice
         case .mandarin: return KokoroAneConstants.defaultVoiceMandarin
         case .japanese: return KokoroAneConstants.defaultVoiceJapanese
+        case .spanish: return KokoroAneConstants.defaultVoiceSpanish
+        case .french: return KokoroAneConstants.defaultVoiceFrench
         }
     }
 
     /// True if voice packs live under a `voices/` subdirectory inside the repo
     /// bundle (Mandarin / Japanese); false if they sit at the bundle root
-    /// (English).
+    /// (the `ANE/` variants).
     public var useVoicesSubdir: Bool {
         switch self {
-        case .english: return false
+        case .english, .spanish, .french: return false
         case .mandarin, .japanese: return true
         }
     }
@@ -227,13 +263,15 @@ public enum KokoroAneVariant: String, CaseIterable, Sendable {
         case .english: return KokoroAneConstants.englishVoices
         case .mandarin: return KokoroAneConstants.mandarinVoices
         case .japanese: return KokoroAneConstants.japaneseVoices
+        case .spanish: return KokoroAneConstants.spanishVoices
+        case .french: return KokoroAneConstants.frenchVoices
         }
     }
 
     /// HuggingFace repo case for this variant.
     public var repo: Repo {
         switch self {
-        case .english: return .kokoroAne
+        case .english, .spanish, .french: return .kokoroAne
         case .mandarin: return .kokoroAneZh
         case .japanese: return .kokoroAneJa
         }
