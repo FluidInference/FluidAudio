@@ -16,8 +16,8 @@ import Foundation
 ///     Mandarin); additional voices download on demand via ``setDefaultVoice``
 ///     / `voice:` / `initialize(preloadVoices:)`.
 ///   * IPA input capped at 512 tokens — chunk longer prompts upstream.
-///   * Loads from HF path `kokoro-82m-coreml/ANE/` (English) or
-///     `ANE-zh/` (Mandarin).
+///   * Loads from HF path `kokoro-82m-coreml/ANE/` (English, Spanish,
+///     French), `ANE-zh/` (Mandarin) or `ANE-ja/` (Japanese).
 ///
 /// Pipeline:
 ///   * Text → IPA via ``KokoroAneEnglishPhonemizer`` (Misaki lexicon first
@@ -95,6 +95,12 @@ public actor KokoroAneManager {
             // function-word forms, issue #691). Missing lexicon degrades
             // to the BART-G2P-only path rather than failing initialize.
             _ = await KokoroAneResourceDownloader.ensureEnglishLexicon(directory: nil)
+        }
+        if variant == .french {
+            // Lexicon + CharsiuG2P fallback, fetched up front so the first
+            // synthesis does not stall on (or fail without) the network.
+            _ = try await store.frenchG2PPipeline()
+            try await KokoroAneResourceDownloader.ensureMultilingualG2PAssets(directory: nil)
         }
         if let voices = preloadVoices {
             for voice in voices {
@@ -241,6 +247,10 @@ public actor KokoroAneManager {
     /// Kokoro training frontend). A string made only of phoneme-alphabet
     /// scalars is treated as pre-computed IPA and passed through (issue
     /// #698); digits, kana and kanji always go through the frontend.
+    /// Spanish: NeMo normalization, then ``SpanishG2P`` spelling rules.
+    /// French: NeMo normalization, then the ipa-dict lexicon with a
+    /// CharsiuG2P fallback (``FrenchG2P``). Both emit espeak-ng-style IPA;
+    /// pre-computed IPA goes through ``synthesizeFromPhonemes(_:voice:speed:)``.
     public func phonemes(for text: String) async throws -> String {
         try await resolveFrontend(for: text).phonemes
     }
@@ -291,7 +301,21 @@ public actor KokoroAneManager {
             let normalized = NemoTextNormalizer.normalize(folded, language: .japanese)
             let g2p = try await store.japaneseG2PPipeline()
             return (normalized, try await g2p.phonemize(normalized))
+        case .spanish:
+            let normalized = NemoTextNormalizer.normalize(text, language: .spanish)
+            return (normalized, try Self.nonEmpty(SpanishG2P.phonemize(normalized), for: text))
+        case .french:
+            let normalized = NemoTextNormalizer.normalize(text, language: .french)
+            let g2p = try await store.frenchG2PPipeline()
+            return (normalized, try Self.nonEmpty(await g2p.phonemize(normalized), for: text))
         }
+    }
+
+    private static func nonEmpty(_ phonemes: String, for text: String) throws -> String {
+        guard phonemes.contains(where: { $0.isLetter }) else {
+            throw KokoroAneError.inputProcessingFailed("G2P produced no phonemes for '\(text)'.")
+        }
+        return phonemes
     }
 
     /// Bypass G2P; feed an already-IPA phoneme string directly.
@@ -332,8 +356,8 @@ public actor KokoroAneManager {
 
         let inputIds = try vocab.encode(phonemes)
         // Voice pack indexing matches `convert.py:get_ref_data` — row is the
-        // raw phoneme-string length (BOS/EOS not counted).
-        let phonemeCount = phonemes.count
+        // raw phoneme-string length in scalars (BOS/EOS not counted).
+        let phonemeCount = KokoroAneVocab.phonemeLength(phonemes)
         let (styleS, styleTimbre) = pack.slice(for: phonemeCount)
 
         var result = try await KokoroAneSynthesizer.synthesize(

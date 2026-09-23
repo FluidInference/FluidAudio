@@ -14,11 +14,11 @@ used with the author's permission. Conversion lives in
 | Aspect           | `KokoroAneManager`                              |
 |------------------|-------------------------------------------------|
 | Compute          | 4 stages on ANE, 3 on GPU                       |
-| Voices           | Variant catalogs (54 English / 103 zh / 5 ja)   |
+| Voices           | Variant catalogs (54 en / 103 zh / 5 ja / 3 es / 1 fr) |
 | Input length     | ≤ 510 phoneme characters / utterance             |
 | Custom lexicon   | No                                              |
 | SSML             | No                                              |
-| Languages        | English (`ANE/`), Mandarin (`ANE-zh/`), Japanese (`ANE-ja/`) |
+| Languages        | English, Spanish, French (`ANE/`), Mandarin (`ANE-zh/`), Japanese (`ANE-ja/`) |
 
 For multi-voice / SSML / long-form, use `PocketTtsSynthesizer` or
 `StyleTTS2Manager` instead.
@@ -32,9 +32,14 @@ text-to-phoneme frontend differ.
 
 | Variant       | HF subdir   | Vocab | Default voice | Voice layout                | Frontend                                   |
 |---------------|-------------|-------|---------------|-----------------------------|--------------------------------------------|
-| `.english`    | `ANE/`      | 177   | `af_heart`    | flat (`<voice>.bin`)        | G2P CoreML (BART seq2seq) → IPA            |
+| `.english`    | `ANE/`      | 114   | `af_heart`    | flat (`<voice>.bin`)        | G2P CoreML (BART seq2seq) → IPA            |
 | `.mandarin`   | `ANE-zh/`   | 171   | `zf_001`      | nested (`voices/<voice>.bin`) | Rule-based dict lookup → Bopomofo + tones |
 | `.japanese`   | `ANE-ja/`   | 114   | `jf_alpha`    | nested (`voices/<voice>.bin`) | MeCab (unidic-lite) + Cutlet rules → IPA |
+| `.spanish`    | `ANE/`      | 114   | `ef_dora`     | flat (`<voice>.bin`)        | Spelling rules → espeak-style IPA          |
+| `.french`     | `ANE/`      | 114   | `ff_siwis`    | flat (`<voice>.bin`)        | ipa-dict lexicon + CharsiuG2P → espeak-style IPA |
+
+Spanish and French use the same Kokoro-82M v1.0 weights as English, so they
+share the `ANE/` bundle (and its cache); only the frontend differs.
 
 Pick the variant on construction:
 
@@ -42,6 +47,8 @@ Pick the variant on construction:
 let english  = KokoroAneManager(variant: .english)   // default
 let mandarin = KokoroAneManager(variant: .mandarin)
 let japanese = KokoroAneManager(variant: .japanese)
+let spanish  = KokoroAneManager(variant: .spanish)
+let french   = KokoroAneManager(variant: .french)
 ```
 
 ## Quick Start
@@ -63,6 +70,12 @@ swift run fluidaudiocli tts "你好世界，今天天气真好。" \
 swift run fluidaudiocli tts "今日は良い天気です。" \
   --backend kokoro-ane --variant ja \
   --output ~/Desktop/demo_ja.wav
+
+# Spanish / French
+swift run fluidaudiocli tts "¿Dónde está el capítulo?" \
+  --backend kokoro-ane --variant es --output ~/Desktop/demo_es.wav
+swift run fluidaudiocli tts "Bonjour, je m'appelle Marie." \
+  --backend kokoro-ane --variant fr --output ~/Desktop/demo_fr.wav
 ```
 
 First invocation downloads the 7 `.mlmodelc` bundles + `vocab.json` +
@@ -78,7 +91,9 @@ additionally fetches the G2P pinyin dictionaries from
 on first synthesis (~10 MB, cached at `<repoDir>/g2p/`).
 Japanese plain-text synthesis lazily downloads the trimmed unidic-lite
 dictionary and Cutlet word list (about 115 MB) on first use. IPA bypass
-calls do not download them.
+calls do not download them. French fetches its lexicon (6 MB, from
+`ANE/assets/`) and the CharsiuG2P CoreML pair at `initialize()`; Spanish
+needs no extra assets.
 
 ### Swift
 
@@ -294,12 +309,73 @@ synthesized; `synthesizeFromPhonemes` never needs them. A TTS → ASR round
 trip through the Japanese ASR model (`transcribe --model-version tdt-ja`)
 returns the documentation sentences verbatim.
 
+## Spanish G2P
+
+Kokoro's Spanish voices were trained on espeak-ng `es` (Castilian) IPA after
+Misaki's `EspeakG2P` post-processing, so `SpanishG2P` reproduces those
+conventions rather than a textbook transcription. Spanish spelling is regular
+enough that it is rules only, with no lexicon:
+
+- letter-to-sound with θ for c/z, x for j/g, ʎ for ll, and glide resolution
+  (`tiempo` → `tjˈempo`), including hiatus after a liquid onset (`cliente` →
+  `kliˈɛnte`);
+- stress from the written accent or the penultimate/final rule, marked
+  before the nucleus vowel, with espeak's alternating secondary stress
+  (`ˌimbestˌiɣaθjˈon`) and double stress on `-mente` adverbs;
+- Misaki's diphthong ligatures (`ai` → `I`, `ei` → `A`, `au` → `W`);
+- phrase-level b/d/g lenition (`la βˈiða`, but `ˈum bˈaso` after a nasal or a
+  pause), nasal assimilation, and unstressed or secondary-stressed function
+  words that regain stress before a pause.
+
+NeMo text normalization runs first, as for the other variants.
+
+## French G2P
+
+`FrenchG2P` looks words up in the ipa-dict `fr_FR` lexicon (MIT, 244k
+entries, binary-searched in place). Words it does not list go through the
+CharsiuG2P CoreML model (`MultilingualG2PModel`, trained on the same
+dictionary), cached per session. The result is then rewritten into
+espeak-ng `fr-fr` conventions: `ɥ` → `y`, `ɲ` → `nj`, `ɔ` → `o` in open
+non-final syllables, eu → `ø` outside the final syllable, schwa deletion
+(`devenu` → `dəvny`), stress on the last full vowel, unstressed clitics,
+elision, and liaison (`lez otʁ`, `ˈɔ̃t eɡalmˈɑ̃`, blocked before h aspiré).
+Initialisms without a vowel are spelled out (`SNCF` → `ˌɛsˌɛnsˌeˈɛf`).
+
+Nasal vowels are base + U+0303. `KokoroAneVocab` encodes by Unicode scalar,
+like the Python reference, so the tilde reaches the model as its own token.
+
+### Accuracy
+
+Phoneme error rate against espeak-ng + Misaki on the FLEURS test
+transcripts without digits:
+
+| Variant | Sentences | PER    | PER, stress ignored | Exact sentences |
+|---------|-----------|--------|---------------------|-----------------|
+| Spanish | 281       | 0.54 % | 0.3 %               | 202             |
+| French  | 262       | 1.72 % | 1.4 %               | 80              |
+
+Remaining differences are mostly foreign names, acronyms and espeak lexicon
+entries. Parakeet v3 round trip (`--language es/fr`) on 60 of those
+sentences, same PyTorch Kokoro model and voice, changing only the phonemes:
+
+| Variant | espeak-ng phonemes | This frontend |
+|---------|--------------------|---------------|
+| Spanish (`ef_dora`) | 4.25 % WER | 5.31 % WER |
+| French (`ff_siwis`) | 3.27 % WER | 3.21 % WER |
+
+The Spanish gap is Parakeet switching to English on a few sentences for both
+inputs. Through the CoreML chain the same sentences score 7.68 % (es) and
+3.52 % (fr). The Spanish figure includes one sentence that the chain renders
+as a full-scale signal on macOS 27. It reproduces on `main` with the same
+phonemes through `--variant en --phonemes --voice ef_dora`, so it is a chain
+issue, not a frontend one.
+
 ## Limits
 
 - **Phonemes:** ≤ 510 IPA / Bopomofo chars per call (ALBERT context = 512
   incl. BOS/EOS). No built-in chunker — split upstream if you need longer
   inputs.
-- **Voices:** any pack in the variant's catalog (`KokoroAneVariant.knownVoices`): 54 English (converted on first use), 103 Mandarin, 5 Japanese. See "Voice packs" above.
+- **Voices:** any pack in the variant's catalog (`KokoroAneVariant.knownVoices`): 54 English (converted on first use), 103 Mandarin, 5 Japanese, 3 Spanish, 1 French. See "Voice packs" above.
 - **Custom lexicon / SSML / Markdown overrides:** not supported. The pipeline
   goes `text → G2P → phonemes → token ids` with no interception point.
 - **Acoustic frames:** `T_a ≤ 2000` (compile-time `--max-frames` baked into

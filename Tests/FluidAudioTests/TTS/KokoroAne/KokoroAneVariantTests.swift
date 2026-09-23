@@ -35,10 +35,26 @@ final class KokoroAneVariantTests: XCTestCase {
     }
 
     func testVariantAllCases() {
-        XCTAssertEqual(KokoroAneVariant.allCases.count, 3)
+        XCTAssertEqual(KokoroAneVariant.allCases.count, 5)
         XCTAssertTrue(KokoroAneVariant.allCases.contains(.english))
         XCTAssertTrue(KokoroAneVariant.allCases.contains(.mandarin))
         XCTAssertTrue(KokoroAneVariant.allCases.contains(.japanese))
+        XCTAssertTrue(KokoroAneVariant.allCases.contains(.spanish))
+        XCTAssertTrue(KokoroAneVariant.allCases.contains(.french))
+    }
+
+    /// Spanish and French run the v1.0 weights, so they share the English
+    /// `ANE/` bundle and its flat voice layout (#926).
+    func testSpanishFrenchShareEnglishBundle() {
+        for variant in [KokoroAneVariant.spanish, .french] {
+            XCTAssertEqual(variant.repo, .kokoroAne)
+            XCTAssertFalse(variant.useVoicesSubdir)
+            XCTAssertTrue(variant.knownVoices.contains(variant.defaultVoice))
+        }
+        XCTAssertEqual(KokoroAneVariant.spanish.defaultVoice, "ef_dora")
+        XCTAssertEqual(KokoroAneVariant.french.defaultVoice, "ff_siwis")
+        XCTAssertEqual(KokoroAneVariant.spanish.knownVoices, ["ef_dora", "em_alex", "em_santa"])
+        XCTAssertEqual(KokoroAneVariant.french.knownVoices, ["ff_siwis"])
     }
 
     // MARK: - Repo wiring

@@ -173,6 +173,7 @@ public actor KokoroAneModelStore {
     private var repoDirectory: URL?
     private var mandarinG2P: MandarinG2P?
     private var japaneseG2P: JapaneseG2P?
+    private var frenchG2P: FrenchG2P?
     private var mandarinCustomLexicon: MandarinCustomLexicon = .empty
 
     private let directory: URL?
@@ -353,6 +354,29 @@ public actor KokoroAneModelStore {
         return pipeline
     }
 
+    /// Lazy-load and cache the French frontend: the ipa-dict lexicon plus the
+    /// CharsiuG2P CoreML fallback for words it does not list.
+    func frenchG2PPipeline() async throws -> FrenchG2P {
+        if let frenchG2P { return frenchG2P }
+        guard variant == .french else {
+            throw KokoroAneError.inputProcessingFailed("French G2P requested on a non-french store")
+        }
+        let repoDirectory =
+            try repoDirectory
+            ?? KokoroAneResourceDownloader.repositoryDirectory(variant: .french, directory: directory)
+        let lexiconURL = try await KokoroAneResourceDownloader.ensureFrenchLexicon(repoDirectory: repoDirectory)
+        let lexicon = try FrenchLexicon(contentsOf: lexiconURL)
+        let pipeline = FrenchG2P(lexicon: lexicon) { word in
+            // MultilingualG2PModel reads the shared default cache, so the
+            // assets go there regardless of the store's `directory`.
+            try await KokoroAneResourceDownloader.ensureMultilingualG2PAssets(directory: nil)
+            return try await MultilingualG2PModel.shared.phonemize(word: word, language: .french)?.joined()
+        }
+        frenchG2P = pipeline
+        logger.info("Loaded French G2P (\(lexicon.count) lexicon entries)")
+        return pipeline
+    }
+
     /// Best-effort load of the g2pW polyphone disambiguator. Returns
     /// `nil` (and logs) when the assets are missing or fail to load,
     /// so the Mandarin G2P pipeline can keep running on the dict
@@ -404,5 +428,6 @@ public actor KokoroAneModelStore {
         repoDirectory = nil
         mandarinG2P = nil
         japaneseG2P = nil
+        frenchG2P = nil
     }
 }

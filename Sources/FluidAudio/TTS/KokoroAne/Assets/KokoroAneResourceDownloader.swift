@@ -35,7 +35,7 @@ public enum KokoroAneResourceDownloader {
 
         let required: Set<String>
         switch variant {
-        case .english:
+        case .english, .spanish, .french:
             required = ModelNames.KokoroAne.requiredModels
         case .mandarin:
             required = ModelNames.KokoroAne.requiredModelsZh
@@ -166,6 +166,59 @@ public enum KokoroAneResourceDownloader {
             )
         }
         return g2pDir
+    }
+
+    /// Ensure the French lexicon (ipa-dict `fr_FR`, see
+    /// `KokoroAneConstants.frenchLexiconFile`) is resident under
+    /// `<repoDir>/g2p/`, pulled from
+    /// `FluidInference/kokoro-82m-coreml/ANE/assets/`. Idempotent.
+    @discardableResult
+    public static func ensureFrenchLexicon(repoDirectory: URL) async throws -> URL {
+        let g2pDir = repoDirectory.appendingPathComponent(KokoroAneConstants.g2pSubdir)
+        if !FileManager.default.fileExists(atPath: g2pDir.path) {
+            try FileManager.default.createDirectory(at: g2pDir, withIntermediateDirectories: true)
+        }
+        let name = KokoroAneConstants.frenchLexiconFile
+        let localURL = g2pDir.appendingPathComponent(name)
+        if let size = try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? Int, size > 0 {
+            return localURL
+        }
+        try? FileManager.default.removeItem(at: localURL)
+        logger.info(
+            "Downloading French lexicon from "
+                + "\(KokoroAneConstants.g2pRemoteRepo)/\(KokoroAneConstants.frenchG2PRemoteSubdir)/\(name)...")
+        let remoteURL = try ModelRegistry.resolveModel(
+            KokoroAneConstants.g2pRemoteRepo, "\(KokoroAneConstants.frenchG2PRemoteSubdir)/\(name)")
+        _ = try await AssetDownloader.ensure(
+            .init(
+                description: "French lexicon",
+                remoteURL: remoteURL,
+                destinationURL: localURL,
+                transferMode: .file()
+            ),
+            logger: logger
+        )
+        return localURL
+    }
+
+    /// Ensure the CharsiuG2P CoreML pair (`MultilingualG2PEncoder.mlmodelc`,
+    /// `MultilingualG2PDecoder.mlmodelc`) is in the shared kokoro cache
+    /// directory, where ``MultilingualG2PModel`` loads it from. The French
+    /// frontend uses it for words missing from the lexicon.
+    public static func ensureMultilingualG2PAssets(
+        directory: URL? = nil,
+        progressHandler: ProgressHandler? = nil
+    ) async throws {
+        let modelsDirectory = try directory ?? defaultModelsDirectory()
+        let kokoroDir = modelsDirectory.appendingPathComponent(Repo.kokoro.folderName)
+        for bundle in ModelNames.MultilingualG2P.requiredModels.sorted() {
+            let bundleDir = kokoroDir.appendingPathComponent(bundle)
+            let weights = bundleDir.appendingPathComponent("weights/weight.bin")
+            if FileManager.default.fileExists(atPath: weights.path) { continue }
+            logger.info("Downloading \(bundle) from HuggingFace...")
+            try await ModelHub.download(
+                .kokoro, subdirectory: bundle, to: kokoroDir, progressHandler: progressHandler)
+        }
     }
 
     /// Best-effort fetch of the jieba HMM tables (start / trans / emit)
@@ -444,11 +497,12 @@ public enum KokoroAneResourceDownloader {
             return localURL
         }
 
-        // 2. English: the Kokoro-82M v1.0 pack hosted as `voices/<name>.json`
-        //    at the repository root, converted to the flat fp32 layout (#896).
-        //    The chain takes style vectors as runtime inputs, so this is the
-        //    same data `af_heart.bin` carries, byte-exact after conversion.
-        if variant == .english,
+        // 2. `ANE/` variants (English, Spanish, French): the Kokoro-82M v1.0
+        //    pack hosted as `voices/<name>.json` at the repository root,
+        //    converted to the flat fp32 layout (#896). The chain takes style
+        //    vectors as runtime inputs, so this is the same data `af_heart.bin`
+        //    carries, byte-exact after conversion.
+        if variant.repo == .kokoroAne,
             let jsonURL = try? ModelRegistry.resolveModel(repo.remotePath, "voices/\(sanitized).json"),
             let json = try? await AssetDownloader.fetchData(
                 from: jsonURL, description: "\(sanitized) voice pack (json)", logger: logger),
