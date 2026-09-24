@@ -81,7 +81,7 @@ public struct ASRConfig: Sendable {
 
     /// Resolve the mel-context tri-state against the loaded model version.
     func resolvedMelChunkContext(for modelVersion: AsrModelVersion?) -> Bool {
-        melChunkContextOverride ?? (modelVersion != .v3)
+        melChunkContextOverride ?? (modelVersion?.isV3Family != true)
     }
 }
 

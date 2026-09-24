@@ -171,6 +171,7 @@ final class ChunkProcessorTests: XCTestCase {
         // starts), mel elsewhere; explicit values are preserved on all versions.
         let auto = ASRConfig()
         XCTAssertFalse(auto.resolvedMelChunkContext(for: .v3))
+        XCTAssertFalse(auto.resolvedMelChunkContext(for: .redux))
         XCTAssertTrue(auto.resolvedMelChunkContext(for: .v2))
         XCTAssertTrue(auto.resolvedMelChunkContext(for: .tdtCtc110m))
         XCTAssertTrue(auto.resolvedMelChunkContext(for: nil))
