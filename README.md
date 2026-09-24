@@ -309,7 +309,8 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 ## Automatic Speech Recognition (ASR) / Transcription
 
 - **Models**:
-  - `FluidInference/parakeet-tdt-0.6b-v3-coreml` (multilingual, 25 European languages)
+  - `FluidInference/parakeet-ultra-coreml` (multilingual, 25 European languages; recommended — more accurate than v3 at the same speed, see [Parakeet Ultra](Documentation/ASR/ParakeetUltra.md))
+  - `FluidInference/parakeet-tdt-0.6b-v3-coreml` (multilingual, 25 European languages; library default)
   - `FluidInference/parakeet-redux-coreml` (multilingual, smallest download at ~220 MB; iOS 18+ / macOS 15+ only, see [Parakeet Redux](Documentation/ASR/ParakeetRedux.md))
   - `FluidInference/parakeet-tdt-0.6b-v2-coreml` (English-only, highest recall)
 - **Processing Mode**: Batch transcription for complete audio files
@@ -325,7 +326,7 @@ import FluidAudio
 // Batch transcription from an audio file
 Task {
     // 1) Initialize ASR manager and load models
-    let models = try await AsrModels.downloadAndLoad(version: .v3)  // Switch to .v2 for English-only work
+    let models = try await AsrModels.downloadAndLoad(version: .ultra)  // .v3 is the default; .v2 for English-only
     let asrManager = AsrManager(config: .default)
     try await asrManager.loadModels(models)
 

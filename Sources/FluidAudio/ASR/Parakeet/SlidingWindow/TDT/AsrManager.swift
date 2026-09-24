@@ -311,7 +311,7 @@ public actor AsrManager {
                 emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
                 initialTimeIndexOverride: initialTimeIndexOverride
             )
-        case .v3, .redux:
+        case .v3, .redux, .ultra:
             // Pass `vocabulary` unconditionally. `TdtDecoderV3.tokenLanguageFilter`
             // short-circuits when `language` is nil, so there's no cost to
             // forwarding vocab in the default path.

@@ -9,6 +9,9 @@ public enum AsrModelVersion: Sendable {
     /// blank id, window and JointDecisionv3 contract; only the weights differ,
     /// so every v3 decode path applies (see `isV3Family`).
     case redux
+    /// Parakeet Ultra (moondream): full-precision post-training of v3. Same
+    /// architecture and contract as v3; the encoder ships int8-linear.
+    case ultra
     /// 110M parameter hybrid TDT-CTC model with fused preprocessor+encoder
     case tdtCtc110m
     /// 600M parameter TDT model for Japanese (ja) - hybrid CTC preprocessor/encoder + TDT decoder/joint v2
@@ -19,6 +22,7 @@ public enum AsrModelVersion: Sendable {
         case .v2: return .parakeetV2
         case .v3: return .parakeetV3
         case .redux: return .parakeetRedux
+        case .ultra: return .parakeetUltra
         case .tdtCtc110m: return .parakeetTdtCtc110m
         case .tdtJa: return .parakeetJa
         }
@@ -45,7 +49,7 @@ public enum AsrModelVersion: Sendable {
     public var blankId: Int {
         switch self {
         case .v2, .tdtCtc110m: return 1024
-        case .v3, .redux: return 8192
+        case .v3, .redux, .ultra: return 8192
         case .tdtJa: return 3072
         }
     }
@@ -58,12 +62,12 @@ public enum AsrModelVersion: Sendable {
         }
     }
 
-    /// v3 and its weight-compatible derivatives (Redux). Gates the v3-only
+    /// v3 and its weight-compatible derivatives (Redux, Ultra). Gates the v3-only
     /// decode behaviours: `TdtDecoderV3`, silence-aligned chunking, blank
     /// recovery and the JointDecisionv3 top-K contract.
     public var isV3Family: Bool {
         switch self {
-        case .v3, .redux: return true
+        case .v3, .redux, .ultra: return true
         default: return false
         }
     }
@@ -152,13 +156,13 @@ extension AsrModels {
     }
 
     /// Redux's 2-bit encoder uses iOS 18 Core ML ops, so it has no iOS 17 build.
-    /// Fails fast there and points at `.v3`.
+    /// Fails fast there and points at `.ultra` (same languages, more accurate).
     static func checkPlatformSupport(for version: AsrModelVersion) throws {
         guard version == .redux else { return }
         if #available(macOS 15, iOS 18, *) { return }
         throw AsrModelsError.loadingFailed(
             "Parakeet Redux requires iOS 18 / macOS 15 (its 2-bit encoder uses iOS 18 Core ML ops). "
-                + "Use AsrModelVersion.v3 on iOS 17 / macOS 14.")
+                + "Use AsrModelVersion.ultra on iOS 17 / macOS 14.")
     }
 
     /// Helper to get the repo path from a models directory
@@ -169,7 +173,7 @@ extension AsrModels {
 
     private static func inferredVersion(from directory: URL) -> AsrModelVersion? {
         let directoryPath = directory.path.lowercased()
-        let knownVersions: [AsrModelVersion] = [.tdtCtc110m, .v2, .v3, .redux, .tdtJa]
+        let knownVersions: [AsrModelVersion] = [.tdtCtc110m, .v2, .v3, .redux, .ultra, .tdtJa]
 
         for version in knownVersions {
             if directoryPath.contains(version.repo.folderName.lowercased()) {
@@ -207,7 +211,7 @@ extension AsrModels {
                 joint: Names.jointV3File,
                 vocabulary: Names.vocabularyFile
             )
-        case .redux:
+        case .redux, .ultra:
             // Same contract as v3 with a single encoder build.
             return (
                 encoder: Names.encoderFile,
@@ -234,7 +238,7 @@ extension AsrModels {
             return ModelNames.TDTJa.requiredModels
         case .v3:
             return Names.requiredModelsV3(precision: encoderPrecision)
-        case .redux:
+        case .redux, .ultra:
             return Names.requiredModelsV3()
         default:
             return version.hasFusedEncoder ? Names.requiredModelsFused : Names.requiredModels

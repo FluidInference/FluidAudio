@@ -11,6 +11,10 @@ public enum Repo: String, CaseIterable, Sendable {
     /// contract as v3; the encoder ships as exact 2-bit palettized weights
     /// (~180 MB vs ~425 MB). Loaded through `AsrModelVersion.redux`.
     case parakeetRedux = "FluidInference/parakeet-redux-coreml"
+    /// Parakeet Ultra: moondream's full-precision post-training of
+    /// parakeet-tdt-0.6b-v3. Same tokenizer, window and decoder/joint contract
+    /// as v3; int8-linear encoder (~595 MB). Loaded through `AsrModelVersion.ultra`.
+    case parakeetUltra = "FluidInference/parakeet-ultra-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
@@ -140,6 +144,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-tdt-0.6b-v3-coreml"
         case .parakeetRedux:
             return "parakeet-redux-coreml"
+        case .parakeetUltra:
+            return "parakeet-ultra-coreml"
         case .parakeetV2:
             return "parakeet-tdt-0.6b-v2-coreml"
         case .parakeetCtc110m:
@@ -1695,7 +1701,7 @@ public enum ModelNames {
         case .parakeetV3:
             let precision = ParakeetEncoderPrecision(rawValue: variant ?? "") ?? .int8
             return ModelNames.ASR.requiredModelsV3(precision: precision)
-        case .parakeetRedux:
+        case .parakeetRedux, .parakeetUltra:
             // Single encoder build; no precision variants.
             return ModelNames.ASR.requiredModelsV3()
         case .parakeetV2:
