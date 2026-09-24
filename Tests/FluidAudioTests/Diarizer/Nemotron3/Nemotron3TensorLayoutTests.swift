@@ -29,6 +29,21 @@ final class Nemotron3TensorLayoutTests: XCTestCase {
         return true
     }
 
+    func testOutputBackingsFollowDeclaredTypeAndStayContiguous() throws {
+        // GA bundles declare fp32 outputs; an fp16 backing is rejected on some runtimes (#951).
+        for (declared, expected) in [
+            (MLMultiArrayDataType?.some(.float32), MLMultiArrayDataType.float32),
+            (.some(.float16), .float16),
+            (nil, .float16),
+        ] {
+            for size in awkwardSizes {
+                let backing = try Nemotron3Models.outputBacking(declaredType: declared, shape: [1, size, 8])
+                XCTAssertEqual(backing.dataType, expected)
+                XCTAssertTrue(isContiguous(backing), "backing [1, \(size), 8] not contiguous")
+            }
+        }
+    }
+
     func testAlignedArraysPadNonTileAlignedInnermostDims() throws {
         // Documents the underlying behavior this bug class depends on. If this ever
         // starts failing (helper made contiguous), the guards below become moot — fine.
