@@ -9,13 +9,55 @@ public struct AppLogger: Sendable {
     /// Note: Set this before creating any logger instances.
     nonisolated(unsafe) public static var defaultSubsystem: String = "com.fluidinference"
 
-    public enum Level: Int, Sendable {
+    public enum Level: Int, Sendable, Comparable {
         case debug = 0
         case info
         case notice
         case warning
         case error
         case fault
+
+        public static func < (lhs: Level, rhs: Level) -> Bool {
+            lhs.rawValue < rhs.rawValue
+        }
+    }
+
+    struct Configuration: Sendable, Equatable {
+        var minimumLevel: Level = .debug
+        var mirrorsToConsole: Bool = true
+    }
+
+    private static let configuration = OSAllocatedUnfairLock(initialState: Configuration())
+
+    /// Messages below this level are dropped from every sink (console and unified log).
+    /// Defaults to `.debug`. Set once at startup, e.g. `.warning` to keep ASR debug
+    /// lines that contain transcript text out of Debug-build output.
+    public static var minimumLevel: Level {
+        get { configuration.withLock { $0.minimumLevel } }
+        set { configuration.withLock { $0.minimumLevel = newValue } }
+    }
+
+    /// When `false`, nothing is written to stderr; messages go to the unified log only
+    /// (message text is private there unless a debugger is attached). Defaults to `true`.
+    public static var mirrorsToConsole: Bool {
+        get { configuration.withLock { $0.mirrorsToConsole } }
+        set { configuration.withLock { $0.mirrorsToConsole = newValue } }
+    }
+
+    struct Route: Equatable {
+        var osLog: Bool
+        var console: Bool
+    }
+
+    static func route(for level: Level) -> Route {
+        let config = configuration.withLock { $0 }
+        guard level >= config.minimumLevel else { return Route(osLog: false, console: false) }
+        #if DEBUG
+        // Debug builds mirror everything to the console instead of os_log.
+        return config.mirrorsToConsole ? Route(osLog: false, console: true) : Route(osLog: true, console: false)
+        #else
+        return Route(osLog: true, console: config.mirrorsToConsole && level >= .warning)
+        #endif
     }
 
     private let osLogger: Logger
@@ -62,27 +104,20 @@ public struct AppLogger: Sendable {
 
     // MARK: - Console Mirroring
     private func log(_ level: Level, _ message: String) {
-        #if DEBUG
-        logToConsole(level, message)
-        #else
-        switch level {
-        case .debug:
-            osLogger.debug("\(message)")
-        case .info:
-            osLogger.info("\(message)")
-        case .notice:
-            osLogger.notice("\(message)")
-        case .warning:
-            osLogger.warning("\(message)")
-            logToConsole(level, message)  // Also log warnings to console in release
-        case .error:
-            osLogger.error("\(message)")
-            logToConsole(level, message)  // Also log errors to console in release
-        case .fault:
-            osLogger.fault("\(message)")
-            logToConsole(level, message)  // Also log faults to console in release
+        let route = AppLogger.route(for: level)
+        if route.osLog {
+            switch level {
+            case .debug: osLogger.debug("\(message)")
+            case .info: osLogger.info("\(message)")
+            case .notice: osLogger.notice("\(message)")
+            case .warning: osLogger.warning("\(message)")
+            case .error: osLogger.error("\(message)")
+            case .fault: osLogger.fault("\(message)")
+            }
         }
-        #endif
+        if route.console {
+            logToConsole(level, message)
+        }
     }
 
     private func logToConsole(_ level: Level, _ message: String) {
