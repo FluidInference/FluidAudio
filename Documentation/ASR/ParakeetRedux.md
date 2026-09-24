@@ -52,20 +52,21 @@ there:
 Full LibriSpeech, `asr-benchmark`, M-series Mac. WER is corpus-level (total edit distance over total reference
 words, which is what the published leaderboards report); RTFx is total audio divided by total processing time.
 
-| Set | Encoder | v3 WER | redux WER | v3 RTFx | redux RTFx |
-|---|---|------:|----------:|--------:|-----------:|
-| test-clean (2620 files) | GPU | **2.30 %** | 2.67 % | **118×** | 105× |
-| test-other (2939 files) | GPU | **4.10 %** | 5.15 % | **106×** | 99× |
-| test-clean (2620 files) | ANE | 2.27 % | 2.68 % | 101× | 80× |
+| Set | v3 WER | redux WER | v3 RTFx | redux RTFx |
+|---|------:|----------:|--------:|-----------:|
+| test-clean (2620 files) | **2.27 %** | 2.71 % | **128.6×** | 83.9× |
+| test-other (2939 files) | **4.12 %** | 5.12 % | **114.7×** | 76.0× |
 
-**v3 is the more accurate model on English**, by 0.37 points on test-clean and 1.05 on test-other. That reproduces
-the upstream model card's own deltas (+0.44 and +1.21) almost exactly; the absolute values are higher here because
+Default compute units (ANE), v3 and redux run back to back on the same machine, both on the v3-family long-form path
+(no mel context, silence-aligned window starts).
+
+**v3 is the more accurate model on English**, by 0.44 points on test-clean and 1.00 on test-other, which reproduces
+the upstream model card's own deltas (+0.44 and +1.21). The absolute values are higher than the card's because
 FluidAudio decodes in 15 s windows and scores with a simpler normalizer than the Open ASR Leaderboard, which
-penalises both models equally. Compute placement is WER-neutral (redux 2.67 % on GPU vs 2.68 % on ANE), as it is
-for v3.
+penalises both models equally. Compute placement is WER-neutral for both models.
 
-Redux is also slower end to end: 11 % behind v3 on GPU (its encoder is 21.3 ms/window vs 18.3 ms), and 21 % behind
-v3 on ANE (80× vs 101×). Redux on ANE is 23 % slower than redux on GPU; it still defaults to the ANE for iOS background execution.
+Redux is also slower end to end: ~34 % behind v3 on the ANE. On GPU (`.cpuAndGPU`) the gap closes to a few percent
+(its encoder is 21.3 ms/window vs 18.3 ms), but redux keeps the ANE default for iOS background execution.
 
 Conversion fidelity is not the issue — the Core ML redux transcripts match a PyTorch fp32 decode of the redux
 checkpoint to 0.19 % WER. Everything above is the checkpoint's own behaviour. **Choose redux for download size, and
