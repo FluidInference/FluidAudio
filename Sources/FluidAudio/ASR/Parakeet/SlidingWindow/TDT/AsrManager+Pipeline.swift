@@ -102,7 +102,8 @@ extension AsrManager {
         // Demonstrated on parakeet-tdt-0.6b-v3 only; the other models keep the
         // plain path until a blank of theirs is reproduced.
         let recoverable =
-            asrModels?.version == .v3 && Self.shouldRecoverEmptyDecode(samples: paddedAudio, actualLength: audioLength)
+            asrModels?.version.isV3Family == true
+            && Self.shouldRecoverEmptyDecode(samples: paddedAudio, actualLength: audioLength)
         // The decode mutates the state; keep a copy so a retry starts where the
         // first attempt did.
         let entryState = recoverable ? try TdtDecoderState(from: decoderState) : nil

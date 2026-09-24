@@ -1,5 +1,6 @@
 #if os(macOS)
 import AVFoundation
+import CoreML
 import FluidAudio
 import Foundation
 import OSLog
@@ -831,6 +832,8 @@ extension FLEURSBenchmark {
             .appendingPathComponent("Library/Application Support/FluidAudio/FLEURS").path
         var debugMode = false
         var singleFile: String? = nil
+        var modelVersion: AsrModelVersion = .v3
+        var encoderComputeUnits: MLComputeUnits?  // nil = the model version's default
 
         // Parse arguments
         var i = 0
@@ -853,6 +856,38 @@ extension FLEURSBenchmark {
                         samplesPerLanguage = Int.max  // Will process all available files
                     } else {
                         samplesPerLanguage = Int(arguments[i + 1]) ?? 10
+                    }
+                    i += 1
+                }
+            case "--model-version":
+                if i + 1 < arguments.count {
+                    switch arguments[i + 1].lowercased() {
+                    case "v3", "3":
+                        modelVersion = .v3
+                    case "redux":
+                        modelVersion = .redux
+                    default:
+                        AppLogger(category: "FLEURSBenchmark").error(
+                            "Invalid model version: \(arguments[i + 1]). Use 'v3' or 'redux'.")
+                        exit(1)
+                    }
+                    i += 1
+                }
+            case "--encoder-compute-units":
+                if i + 1 < arguments.count {
+                    switch arguments[i + 1].lowercased() {
+                    case "ane", "cpuandneuralengine", "neural-engine":
+                        encoderComputeUnits = .cpuAndNeuralEngine
+                    case "gpu", "cpuandgpu":
+                        encoderComputeUnits = .cpuAndGPU
+                    case "cpu", "cpuonly":
+                        encoderComputeUnits = .cpuOnly
+                    case "all":
+                        encoderComputeUnits = .all
+                    default:
+                        AppLogger(category: "FLEURSBenchmark").error(
+                            "Invalid --encoder-compute-units: \(arguments[i + 1]). Use 'ane', 'gpu', 'cpu', or 'all'.")
+                        exit(1)
                     }
                     i += 1
                 }
@@ -890,7 +925,9 @@ extension FLEURSBenchmark {
                 cacheDir: cacheDir,
                 outputFile: outputFile,
                 debugMode: debugMode,
-                supportedLanguages: tempBenchmark.supportedLanguages
+                supportedLanguages: tempBenchmark.supportedLanguages,
+                modelVersion: modelVersion,
+                encoderComputeUnits: encoderComputeUnits
             )
             return
         }
@@ -928,7 +965,8 @@ extension FLEURSBenchmark {
 
         do {
             cliLogger.info("Initializing ASR system...")
-            let models = try await AsrModels.downloadAndLoad()
+            let models = try await AsrModels.downloadAndLoad(
+                version: modelVersion, encoderComputeUnits: encoderComputeUnits)
             try await asrManager.loadModels(models)
             cliLogger.info("ASR system initialized")
 
@@ -1026,7 +1064,9 @@ extension FLEURSBenchmark {
         cacheDir: String,
         outputFile: String,
         debugMode: Bool,
-        supportedLanguages: [String: String]
+        supportedLanguages: [String: String],
+        modelVersion: AsrModelVersion = .v3,
+        encoderComputeUnits: MLComputeUnits? = nil
     ) async {
         let cliLogger = AppLogger(category: "FLEURSBenchmark")
         cliLogger.info("FLEURS Single File ASR Test")
@@ -1071,7 +1111,8 @@ extension FLEURSBenchmark {
 
         do {
             cliLogger.info("Initializing ASR system...")
-            let models = try await AsrModels.downloadAndLoad()
+            let models = try await AsrModels.downloadAndLoad(
+                version: modelVersion, encoderComputeUnits: encoderComputeUnits)
             try await asrManager.loadModels(models)
             cliLogger.info("ASR system initialized")
 
@@ -1294,6 +1335,8 @@ extension FLEURSBenchmark {
                                          Available: \(langsJoined)
                 --samples <number|all>    Number of samples per language (default: all)
                 --single-file <filename>  Test a single audio file (auto-detects language)
+                --model-version <name>    'v3' (default) or 'redux'
+                --encoder-compute-units <u>  'ane', 'gpu', 'cpu' or 'all' (default: model's own)
                 --output <file>          Output JSON file path
                 --cache-dir <path>       Directory for caching FLEURS data
                 --debug                  Enable debug logging

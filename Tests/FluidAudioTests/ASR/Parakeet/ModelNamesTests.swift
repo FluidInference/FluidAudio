@@ -189,6 +189,21 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertNil(repo.subPath)
     }
 
+    func testParakeetReduxRepoProperties() {
+        let repo = Repo.parakeetRedux
+        XCTAssertEqual(repo.remotePath, "FluidInference/parakeet-redux-coreml")
+        XCTAssertEqual(repo.name, "parakeet-redux-coreml")
+        XCTAssertEqual(repo.folderName, "parakeet-redux")
+        XCTAssertNil(repo.subPath)
+
+        // Single 2-bit encoder build (iOS 18+): the required set ignores the variant.
+        let required = ModelNames.getRequiredModelNames(for: repo, variant: nil)
+        XCTAssertEqual(required, ModelNames.ASR.requiredModelsV3())
+        XCTAssertEqual(required, ModelNames.getRequiredModelNames(for: repo, variant: "int4"))
+        XCTAssertTrue(required.contains(ModelNames.ASR.encoderFile))
+        XCTAssertTrue(required.contains(ModelNames.ASR.jointV3File))
+    }
+
     func testParakeetTdtCtc110mVocabulary() {
         // tdtCtc110m uses same vocabulary file (array-format JSON, parsed at load time)
         let vocabFile = ModelNames.ASR.vocabulary(for: .parakeetTdtCtc110m)

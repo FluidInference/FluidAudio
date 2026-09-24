@@ -310,6 +310,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 
 - **Models**:
   - `FluidInference/parakeet-tdt-0.6b-v3-coreml` (multilingual, 25 European languages)
+  - `FluidInference/parakeet-redux-coreml` (multilingual, smallest download at ~220 MB; iOS 18+ / macOS 15+ only, see [Parakeet Redux](Documentation/ASR/ParakeetRedux.md))
   - `FluidInference/parakeet-tdt-0.6b-v2-coreml` (English-only, highest recall)
 - **Processing Mode**: Batch transcription for complete audio files
 - **Real-time Factor**: ~190x on M4 Pro (processes 1 hour of audio in ~19 seconds)

@@ -50,7 +50,7 @@ struct ChunkProcessor {
     }
 
     private func effectiveWarmupPrefixSamples(melChunkContext: Bool, modelVersion: AsrModelVersion?) -> Int {
-        guard !melChunkContext, case .v3? = modelVersion else { return 0 }
+        guard !melChunkContext, modelVersion?.isV3Family == true else { return 0 }
         return noMelWarmupPrefixSamples
     }
 
@@ -132,7 +132,7 @@ struct ChunkProcessor {
     /// prefix twice. V2-family models keep the zero-padded final window.
     static func supportsSuppressedPrefix(_ version: AsrModelVersion?) -> Bool {
         switch version {
-        case .v3, .tdtJa: return true
+        case .v3, .redux, .tdtJa: return true
         default: return false
         }
     }
@@ -427,7 +427,7 @@ struct ChunkProcessor {
             warmupPrefixSamples: layout.warmupPrefixSamples,
             chunkSamples: layout.chunkSamples,
             strideSamples: layout.strideSamples,
-            preferSilenceAlignment: !melChunkContext && modelVersion == .v3
+            preferSilenceAlignment: !melChunkContext && modelVersion?.isV3Family == true
         ).map { ($0.start, $0.useWarmupPrefix) }
     }
 
@@ -470,7 +470,7 @@ struct ChunkProcessor {
 
         // Dual-decode opt-in (only effective for v3 + no-mel; other paths
         // are not changed by the flag).
-        if dualDecodeArbitration, !melChunkContext, modelVersion == .v3 {
+        if dualDecodeArbitration, !melChunkContext, modelVersion?.isV3Family == true {
             return try await processWithDualDecodeArbitration(
                 using: manager,
                 workers: workers,
@@ -492,7 +492,7 @@ struct ChunkProcessor {
             warmupPrefixSamples: warmupPrefixSamples,
             chunkSamples: chunkSamples,
             strideSamples: strideSamples,
-            preferSilenceAlignment: !melChunkContext && modelVersion == .v3
+            preferSilenceAlignment: !melChunkContext && modelVersion?.isV3Family == true
         )
 
         var chunkOutputs: [[TokenWindow]?] = []
