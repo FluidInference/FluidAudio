@@ -112,6 +112,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Transkript](https://www.transkript.nl/)** | — | Offline AI transcription assistant for iPhone, iPad, and Mac. Transcribes audio/video files and live recordings in 25+ European languages, with color-coded speaker labels, AI summaries, translations, and subtitle export. Uses FluidAudio for ASR and speaker diarization. |
 | **[Notiva](https://trynotiva.com/)** | — | Menu-bar notes app for Mac meetings. Live on-device transcription on the Neural Engine with speaker diarization, merged with your own notes into a single document. Uses FluidAudio for transcription and speaker diarization. |
 | **[oats](https://github.com/ariso-ai/oats)** | ✓ | Open-source (MIT) meeting notes app for macOS and Windows built with Tauri and Vue. One-click recording, real-time transcription with speaker labels, and on-device LLM note generation in Markdown. Uses FluidAudio on the Apple Neural Engine for macOS transcription. |
+| **[Orca One](https://orcaone.com/)** | — | Private Mac dictation and meeting transcription with on-device processing. Uses FluidAudio's Parakeet ASR and Silero VAD. |
 
 More apps built with FluidAudio are listed in [Documentation/Showcase.md](Documentation/Showcase.md).
 
