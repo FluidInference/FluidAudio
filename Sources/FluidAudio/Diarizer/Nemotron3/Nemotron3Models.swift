@@ -26,9 +26,9 @@ public struct Nemotron3Models {
     private let outputMaskArray: MLMultiArray?
     private let memoryOptimizer: ANEMemoryOptimizer
 
-    /// Preallocated output backings (fp16, contiguous). Reusing them removes the per-call
-    /// output IOSurface allocation — the root cause of pool exhaustion on long ANE runs —
-    /// and shaves per-call marshaling overhead.
+    /// Preallocated output backings (contiguous, in the model's declared output type).
+    /// Reusing them removes the per-call output IOSurface allocation — the root cause of
+    /// pool exhaustion on long ANE runs — and shaves per-call marshaling overhead.
     private let predsBacking: MLMultiArray
     private let hiresBacking: MLMultiArray
     private let embsBacking: MLMultiArray?
@@ -80,21 +80,21 @@ public struct Nemotron3Models {
             self.outputMaskArray = nil
         }
 
-        // fp16 to match the model's native output precision (CoreML fills them without
-        // conversion); plain MLMultiArrays are contiguous, which also simplifies readback.
+        // Typed from the model's output description: some runtimes reject a backing whose
+        // type differs from the declared one (#951). Plain MLMultiArrays are contiguous,
+        // which also simplifies readback.
         let t = config.packedFrames
         let up = config.upsampleFactor
         let s = config.numSpeakers
-        self.predsBacking = try MLMultiArray(
-            shape: [1, NSNumber(value: t), NSNumber(value: s)], dataType: .float16)
-        self.hiresBacking = try MLMultiArray(
-            shape: [1, NSNumber(value: t * up), NSNumber(value: s)], dataType: .float16)
+        self.predsBacking = try Self.outputBacking(
+            model, "speaker_preds", shape: [1, t, s])
+        self.hiresBacking = try Self.outputBacking(
+            model, "speaker_preds_10ms", shape: [1, t * up, s])
         if config.splitGraph {
             self.embsBacking = nil
         } else {
-            self.embsBacking = try MLMultiArray(
-                shape: [1, NSNumber(value: config.chunkEncFrames), NSNumber(value: config.preEncoderDims)],
-                dataType: .float16)
+            self.embsBacking = try Self.outputBacking(
+                model, "chunk_pre_encode_embs", shape: [1, config.chunkEncFrames, config.preEncoderDims])
         }
         let options = MLPredictionOptions()
         var backings: [String: MLMultiArray] = [
@@ -104,6 +104,18 @@ public struct Nemotron3Models {
         if let embsBacking { backings["chunk_pre_encode_embs"] = embsBacking }
         options.outputBackings = backings
         self.predictionOptions = options
+    }
+
+    /// Contiguous backing for `name` in its declared output type.
+    static func outputBacking(_ model: MLModel, _ name: String, shape: [Int]) throws -> MLMultiArray {
+        try outputBacking(
+            declaredType: model.modelDescription.outputDescriptionsByName[name]?.multiArrayConstraint?.dataType,
+            shape: shape)
+    }
+
+    /// Contiguous backing of `declaredType` (fp16 if the model declares none).
+    static func outputBacking(declaredType: MLMultiArrayDataType?, shape: [Int]) throws -> MLMultiArray {
+        try MLMultiArray(shape: shape.map { NSNumber(value: $0) }, dataType: declaredType ?? .float16)
     }
 
     /// Load from a local models directory holding `config.modelFileName` (or its
@@ -339,8 +351,7 @@ public struct Nemotron3Models {
     }
 
     /// Predict with the preallocated output backings, dropping them for good if the
-    /// runtime rejects them. Seen on M3 Max with `.cpuAndNeuralEngine`: the ANE compile
-    /// fails and the fallback refuses the fp16 backings as "not compatible" (#951).
+    /// runtime still rejects them (e.g. after a failed ANE compile on M3 Max, #951).
     private func predict(_ inputs: MLFeatureProvider) throws -> MLFeatureProvider {
         do {
             return try model.prediction(from: inputs, options: predictionOptions)
