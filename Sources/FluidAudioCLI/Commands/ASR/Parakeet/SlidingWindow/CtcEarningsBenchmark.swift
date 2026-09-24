@@ -41,6 +41,7 @@ public enum CtcEarningsBenchmark {
         case .v2: return "v2"
         case .v3: return "v3"
         case .redux: return "redux"
+        case .ultra: return "ultra"
         case .tdtCtc110m: return "110m"
         case .tdtJa: return "tdt-ja"
         }
