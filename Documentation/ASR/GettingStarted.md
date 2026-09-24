@@ -18,6 +18,7 @@
 
 - Prefer **v2** when you only need English. It reuses the fused TDT decoder from v3 but ships with a tighter vocabulary, delivering better recall on long-form English audio.
 - Use **v3** for multilingual coverage (25 languages). English accuracy is still strong, but the broader vocab slightly trails v2 on rare words.
+- Prefer **ultra** over v3 for new work: same languages and API, more accurate on English and on all 24 FLEURS languages we measure, same speed. See [ParakeetUltra.md](ParakeetUltra.md).
 - Use **redux** when download size matters most (~220 MB vs ~480 MB for v3). iOS 18+ / macOS 15+ only. See [ParakeetRedux.md](ParakeetRedux.md).
 - Both versions share the same API surface—set `AsrModelVersion` in code or pass `--model-version` in the CLI.
 

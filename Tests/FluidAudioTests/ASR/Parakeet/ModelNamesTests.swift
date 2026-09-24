@@ -204,6 +204,19 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertTrue(required.contains(ModelNames.ASR.jointV3File))
     }
 
+    func testParakeetUltraRepoProperties() {
+        let repo = Repo.parakeetUltra
+        XCTAssertEqual(repo.remotePath, "FluidInference/parakeet-ultra-coreml")
+        XCTAssertEqual(repo.name, "parakeet-ultra-coreml")
+        XCTAssertEqual(repo.folderName, "parakeet-ultra")
+        XCTAssertNil(repo.subPath)
+
+        // Single (iOS 17) encoder build: the required set ignores the variant.
+        let required = ModelNames.getRequiredModelNames(for: repo, variant: nil)
+        XCTAssertEqual(required, ModelNames.ASR.requiredModelsV3())
+        XCTAssertEqual(required, ModelNames.getRequiredModelNames(for: repo, variant: "int4"))
+    }
+
     func testParakeetTdtCtc110mVocabulary() {
         // tdtCtc110m uses same vocabulary file (array-format JSON, parsed at load time)
         let vocabFile = ModelNames.ASR.vocabulary(for: .parakeetTdtCtc110m)

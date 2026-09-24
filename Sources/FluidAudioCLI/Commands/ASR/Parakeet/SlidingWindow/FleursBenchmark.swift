@@ -866,9 +866,11 @@ extension FLEURSBenchmark {
                         modelVersion = .v3
                     case "redux":
                         modelVersion = .redux
+                    case "ultra":
+                        modelVersion = .ultra
                     default:
                         AppLogger(category: "FLEURSBenchmark").error(
-                            "Invalid model version: \(arguments[i + 1]). Use 'v3' or 'redux'.")
+                            "Invalid model version: \(arguments[i + 1]). Use 'v3', 'redux' or 'ultra'.")
                         exit(1)
                     }
                     i += 1
@@ -1335,7 +1337,7 @@ extension FLEURSBenchmark {
                                          Available: \(langsJoined)
                 --samples <number|all>    Number of samples per language (default: all)
                 --single-file <filename>  Test a single audio file (auto-detects language)
-                --model-version <name>    'v3' (default) or 'redux'
+                --model-version <name>    'v3' (default), 'redux' or 'ultra'
                 --encoder-compute-units <u>  'ane', 'gpu', 'cpu' or 'all' (default: model's own)
                 --output <file>          Output JSON file path
                 --cache-dir <path>       Directory for caching FLEURS data

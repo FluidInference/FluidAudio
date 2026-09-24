@@ -303,10 +303,22 @@ final class AsrModelsTests: XCTestCase {
             XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .redux))
         } else {
             XCTAssertThrowsError(try AsrModels.checkPlatformSupport(for: .redux)) { error in
-                XCTAssertTrue(error.localizedDescription.contains("iOS 18"))
+                XCTAssertTrue(error.localizedDescription.contains("ultra"))
             }
         }
+        XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .ultra))
         XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .v3))
+    }
+
+    func testUltraMirrorsV3Contract() {
+        let ultra = AsrModelVersion.ultra
+        XCTAssertEqual(ultra.repo, .parakeetUltra)
+        XCTAssertEqual(ultra.blankId, AsrModelVersion.v3.blankId)
+        XCTAssertEqual(ultra.decoderLayers, AsrModelVersion.v3.decoderLayers)
+        XCTAssertEqual(ultra.encoderHiddenSize, AsrModelVersion.v3.encoderHiddenSize)
+        XCTAssertFalse(ultra.hasFusedEncoder)
+        XCTAssertTrue(ultra.isV3Family)
+        XCTAssertEqual(AsrModels.defaultCacheDirectory(for: .ultra).lastPathComponent, "parakeet-ultra")
     }
 
     func testTdtCtc110mEncoderHiddenSize() {

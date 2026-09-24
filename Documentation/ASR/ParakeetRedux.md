@@ -12,8 +12,8 @@ decode path applies unchanged (`isV3Family`); only the weights and the download 
 | Minimum OS | iOS 17 / macOS 14 | **iOS 18 / macOS 15** |
 
 Redux exists for its download size, which needs the 2-bit encoding and therefore iOS 18 Core ML ops. On iOS 17 /
-macOS 14 `AsrModels` throws before downloading anything and points to `.v3`: an int8 iOS 17 build of Redux is
-WER-identical but 595 MB, larger than v3, so it is not shipped.
+macOS 14 `AsrModels` throws before downloading anything and points to `.ultra`: an int8 iOS 17 build of Redux is
+WER-identical but 595 MB, the same size as Ultra and less accurate, so it is not shipped.
 
 The encoder keeps the checkpoint's exact ternary weights (2-bit codes + the model's own per-row/per-128 fp16 scales),
 so nothing is re-quantized on our side. Decoder and joint are re-exported from the redux checkpoint. Recipe:
@@ -32,7 +32,7 @@ swift run fluidaudiocli asr-benchmark --subset test-clean --max-files 100 --mode
 
 ## Compute units
 
-Redux uses the library default, the Neural Engine, like v3, so iOS apps keep background execution (iOS does
+Redux uses the library default, the Neural Engine, like v3 and Ultra, so iOS apps keep background execution (iOS does
 not allow GPU work in the background). The first ANE load compiles the 2-bit weights for several minutes (~7 min on
 an M-series Mac); Core ML caches it and later loads take seconds. Pass `encoderComputeUnits: .cpuAndGPU` to avoid the
 first compile when background execution does not matter: the GPU decompresses the weights in-kernel, loads in about
@@ -105,5 +105,5 @@ conditions; the ranking is what transfers.
 * **Multilingual, especially Baltic / Maltese / Slovene / Greek** → redux, which is both more accurate on average and
   260 MB smaller.
 * **Size-constrained** → redux, at a known English cost.
-* **iOS 17 / macOS 14** → v3; redux needs iOS 18.
-* **iOS background transcription** → either, on the ANE default; redux pays a one-time multi-minute first compile.
+* **iOS 17 / macOS 14** → ultra; redux needs iOS 18.
+* **iOS background transcription** → any of the three on the ANE default; redux pays a one-time multi-minute first compile.

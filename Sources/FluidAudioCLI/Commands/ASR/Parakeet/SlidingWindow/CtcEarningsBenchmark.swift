@@ -115,6 +115,8 @@ public enum CtcEarningsBenchmark {
                         tdtVersion = .v3
                     case "redux":
                         tdtVersion = .redux
+                    case "ultra":
+                        tdtVersion = .ultra
                     case "110m", "ctc-110m", "tdt-ctc-110m":
                         tdtVersion = .tdtCtc110m
                     default:
