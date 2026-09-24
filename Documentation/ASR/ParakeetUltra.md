@@ -35,8 +35,8 @@ Full corpora, corpus-level WER (total edits over total reference words), same bu
 
 | Set | v3 | redux | ultra |
 |---|---:|---:|---:|
-| LibriSpeech test-clean (2620 files) | 2.27 % | 2.67 % | **2.12 %** |
-| LibriSpeech test-other (2939 files) | 4.12 % | 5.15 % | **3.79 %** |
+| LibriSpeech test-clean (2620 files) | 2.27 % | 2.71 % | **2.13 %** |
+| LibriSpeech test-other (2939 files) | 4.12 % | 5.12 % | **3.81 %** |
 | FLEURS, 24 languages × 100, mean | 14.81 % | 13.06 % | **11.67 %** |
 | FLEURS, duration-weighted | 14.65 % | 12.89 % | **11.51 %** |
 
@@ -46,31 +46,25 @@ direction agrees with the upstream card in 24/24. Unlike redux, it does not give
 high-resource languages (French −0.8, Russian −1.3, English −0.2).
 
 The int8 encoder is WER-identical to an fp16 export (test-clean 2.12 vs 2.13 %, test-other 3.79 vs 3.79 %), and
-compute placement is WER-neutral (ANE 2.12 %, GPU 2.13 %).
+compute placement is WER-neutral (ANE 2.12 %, GPU 2.13 %). All numbers in this page use the v3-family long-form path
+(no mel context, silence-aligned window starts), the library default for v3, redux and ultra.
 
 ## Speed
 
-RTFx = total audio / total processing time. v3, redux and ultra run back to back per row on the same machine (load
-3–6), full test sets:
+RTFx = total audio / total processing time. v3, redux and ultra run back to back per row on the same machine, default
+compute units (ANE), full test sets:
 
-| Set | Encoder | v3 | redux | ultra |
-|---|---|---:|---:|---:|
-| test-clean | ANE | 88.3× | 67.8× | **89.5×** |
-| test-clean | GPU | 93.1× | 86.6× | **94.2×** |
-| test-other | ANE | 92.2× | 68.0× | **96.5×** |
-| test-other | GPU | 93.4× | 89.2× | **100.7×** |
-
-FLEURS (24 languages × 100, `fleurs-benchmark --encoder-compute-units`), same protocol:
-
-| Encoder | v3 | redux | ultra |
+| Set | v3 | redux | ultra |
 |---|---:|---:|---:|
-| ANE | 92.8× | 70.8× | **93.0×** |
-| GPU | 89.8× | 87.0× | **122.5×** |
+| test-clean | **128.6×** | 83.9× | 126.7× |
+| test-other | **114.7×** | 76.0× | 110.1× |
 
-FLEURS clips are short, so its RTFx swings more with machine load than LibriSpeech; compare within a row.
+Ultra is at parity with v3 (within 1–4 %); redux is ~34 % slower on the ANE. On GPU (`encoderComputeUnits:
+.cpuAndGPU`) ultra was at or above v3 in every paired run. FLEURS clips are short and single-window; there ultra ran
+at 135× vs v3 137× on ANE.
 
-The shipped iOS 17 encoder was re-checked against v3 on test-clean: ANE 96.7× vs 94.9×, GPU 102.6× vs 103.4×, WER
-unchanged (2.12 %). In isolation it is within 3–5 % of the iOS 18 export on GPU (16.6–17.4 vs 16.1–16.5 ms/window).
+The shipped iOS 17 encoder matches an iOS 18 export of the same weights on test-other in WER (3.79 / 3.80 %) and speed
+(ANE 96.4× vs 93.3×, GPU 96.7× vs 96.5×).
 
 ## Which to ship
 
