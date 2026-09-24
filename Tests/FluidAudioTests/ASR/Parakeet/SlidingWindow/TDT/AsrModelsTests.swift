@@ -284,6 +284,31 @@ final class AsrModelsTests: XCTestCase {
         XCTAssertFalse(AsrModelVersion.v3.hasFusedEncoder)
     }
 
+    func testReduxMirrorsV3Contract() {
+        let redux = AsrModelVersion.redux
+        XCTAssertEqual(redux.repo, .parakeetRedux)
+        XCTAssertEqual(redux.blankId, AsrModelVersion.v3.blankId)
+        XCTAssertEqual(redux.decoderLayers, AsrModelVersion.v3.decoderLayers)
+        XCTAssertEqual(redux.encoderHiddenSize, AsrModelVersion.v3.encoderHiddenSize)
+        XCTAssertFalse(redux.hasFusedEncoder)
+        XCTAssertTrue(redux.isV3Family)
+        XCTAssertTrue(AsrModelVersion.v3.isV3Family)
+        XCTAssertFalse(AsrModelVersion.v2.isV3Family)
+        XCTAssertFalse(AsrModelVersion.tdtJa.isV3Family)
+        XCTAssertEqual(AsrModels.defaultCacheDirectory(for: .redux).lastPathComponent, "parakeet-redux")
+    }
+
+    func testReduxRequiresIOS18() {
+        if #available(macOS 15, iOS 18, *) {
+            XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .redux))
+        } else {
+            XCTAssertThrowsError(try AsrModels.checkPlatformSupport(for: .redux)) { error in
+                XCTAssertTrue(error.localizedDescription.contains("iOS 18"))
+            }
+        }
+        XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .v3))
+    }
+
     func testTdtCtc110mEncoderHiddenSize() {
         // tdtCtc110m uses 512-dim encoder output
         XCTAssertEqual(AsrModelVersion.tdtCtc110m.encoderHiddenSize, 512)

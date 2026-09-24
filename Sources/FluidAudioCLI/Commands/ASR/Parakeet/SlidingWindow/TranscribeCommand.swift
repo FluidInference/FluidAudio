@@ -262,13 +262,15 @@ enum TranscribeCommand {
                         parsed.modelVersion = .v2
                     case "v3", "3":
                         parsed.modelVersion = .v3
+                    case "redux":
+                        parsed.modelVersion = .redux
                     case "tdt-ctc-110m", "110m":
                         parsed.modelVersion = .tdtCtc110m
                     case "tdt-ja", "ja":
                         parsed.modelVersion = .tdtJa
                     default:
                         fputs(
-                            "ERROR: Invalid model version: \(args[i + 1]). Use 'v2', 'v3', 'tdt-ctc-110m', or 'tdt-ja'\n",
+                            "ERROR: Invalid model version: \(args[i + 1]). Use 'v2', 'v3', 'redux', 'tdt-ctc-110m', or 'tdt-ja'\n",
                             stderr)
                         fflush(stderr)
                         return nil
@@ -588,6 +590,7 @@ enum TranscribeCommand {
                 switch args.modelVersion {
                 case .v2: modelVersionLabel = "v2"
                 case .v3: modelVersionLabel = "v3"
+                case .redux: modelVersionLabel = "redux"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
                 case .tdtJa: modelVersionLabel = "tdt-ja"
                 }
@@ -859,6 +862,7 @@ enum TranscribeCommand {
                 switch args.modelVersion {
                 case .v2: modelVersionLabel = "v2"
                 case .v3: modelVersionLabel = "v3"
+                case .redux: modelVersionLabel = "redux"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
                 case .tdtJa: modelVersionLabel = "tdt-ja"
                 }

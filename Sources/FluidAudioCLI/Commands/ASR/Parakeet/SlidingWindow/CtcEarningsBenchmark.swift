@@ -36,6 +36,16 @@ public enum CtcEarningsBenchmark {
     }
 
     /// Default data directory (from download command)
+    private static func tdtVersionLabel(_ version: AsrModelVersion) -> String {
+        switch version {
+        case .v2: return "v2"
+        case .v3: return "v3"
+        case .redux: return "redux"
+        case .tdtCtc110m: return "110m"
+        case .tdtJa: return "tdt-ja"
+        }
+    }
+
     private static func defaultDataDir() -> String? {
         let dataDir = DatasetDownloader.getEarnings22Directory().appendingPathComponent("test-dataset")
         if FileManager.default.fileExists(atPath: dataDir.path) {
@@ -103,6 +113,8 @@ public enum CtcEarningsBenchmark {
                         tdtVersion = .v2
                     case "v3", "3":
                         tdtVersion = .v3
+                    case "redux":
+                        tdtVersion = .redux
                     case "110m", "ctc-110m", "tdt-ctc-110m":
                         tdtVersion = .tdtCtc110m
                     default:
@@ -169,7 +181,7 @@ public enum CtcEarningsBenchmark {
         print("  Data directory: \(dataDir ?? "not found")")
         print("  Output file: \(outputFile)")
         print("  Engine: \(engine.rawValue)")
-        print("  TDT version: \(tdtVersion == .v2 ? "v2" : tdtVersion == .tdtCtc110m ? "110m" : "v3")")
+        print("  TDT version: \(tdtVersionLabel(tdtVersion))")
         print("  CTC variant: \(ctcVariant.displayName)")
         print("  CTC model: \(ctcModelPath ?? "not found")")
         print("  Keywords mode: \(keywordsMode.rawValue)")
@@ -201,7 +213,7 @@ public enum CtcEarningsBenchmark {
             switch engine {
             case .tdt:
                 print(
-                    "Loading TDT models (\(tdtVersion == .v2 ? "v2" : tdtVersion == .tdtCtc110m ? "110m" : "v3")) for transcription..."
+                    "Loading TDT models (\(tdtVersionLabel(tdtVersion))) for transcription..."
                 )
                 let tdtModels = try await AsrModels.downloadAndLoad(version: tdtVersion)
                 let manager = AsrManager(config: .default)
@@ -358,12 +370,16 @@ public enum CtcEarningsBenchmark {
                 "totalProcessingTime": round(totalProcessingTime * 100) / 100,
             ]
 
-            let output: [String: Any] = [
+            var output: [String: Any] = [
                 "model": modelPath,
+                "engine": engine.rawValue,
                 "keywordsMode": keywordsMode.rawValue,
                 "summary": summaryDict,
                 "results": results,
             ]
+            if engine != .unified {
+                output["tdtVersion"] = tdtVersionLabel(tdtVersion)
+            }
 
             let jsonData = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
             try jsonData.write(to: URL(fileURLWithPath: outputFile))

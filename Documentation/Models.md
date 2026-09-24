@@ -12,6 +12,7 @@ Long-form audio processed via `SlidingWindowAsrManager` — chunked, overlapped,
 |-------|-------------|---------|
 | **Parakeet TDT v2** | Batch speech-to-text, English only (0.6B params). TDT architecture. | First ASR model added. |
 | **Parakeet TDT v3** | Batch speech-to-text, 25 European languages (0.6B params). Default ASR model. | Released after v2 to add multilingual support. |
+| **Parakeet Redux** ([docs](ASR/ParakeetRedux.md)) | moondream's ternary re-training of v3 (`AsrModelVersion.redux`). 183 MB 2-bit encoder (~220 MB model dir). Better than v3 on FLEURS (13.06 vs 14.81 %), worse on English (2.67 vs 2.27 %). iOS 18+ / macOS 15+ only (use v3 on iOS 17); ANE by default, several-minute first compile. | For size-constrained apps on iOS 18+. |
 | **Parakeet TDT-CTC-110M** | Hybrid TDT-CTC batch model (110M params). 3.01% WER on LibriSpeech test-clean. 96.5x RTFx on M2 Mac. Fused preprocessor+encoder for reduced memory footprint. iOS compatible. | Smaller, faster alternative to v3 with competitive accuracy. |
 | **Parakeet TDT Japanese** | Batch speech-to-text, Japanese only (0.6B params). Hybrid model: INT8 CTC-trained preprocessor + encoder paired with a TDT decoder + joint. 6.85% CER on JSUT, 10.8x RTFx on M2. | CTC-only Japanese inference was removed in 846924a1d; only the preprocessor + encoder from the original CTC repo are reused. |
 | **Cohere Transcribe** ([FluidAudio#487](https://github.com/FluidInference/FluidAudio/pull/487), [#537](https://github.com/FluidInference/FluidAudio/pull/537)) | Batch encoder-decoder speech-to-text, 14 languages (en/fr/de/es/it/pt/nl/pl/el/ar/ja/zh/ko/vi). 48-layer Conformer encoder + 8-layer transformer decoder with external KV cache. Mixed precision: INT8 encoder (1.8 GB, iOS 18+) + FP32 ANE-resident static-shape decoder (v2, ~1.6× faster on Apple Silicon than the dynamic FP16 v1 decoder). Hard 35 s per-call audio cap (`max_audio_clip_s` from upstream config), 16 384-token SentencePiece vocab. Language must be passed explicitly via the conditioned prompt. | First Cohere Transcribe port; ANE-optimized v2 decoder (#537) lands fixed `[1, 1, 1, 108]` `attention_mask` so the decoder stays on the Neural Engine. |
@@ -79,6 +80,7 @@ Models we converted and tested but are not supported: too large for on-device de
 | Model | HuggingFace Repo |
 |-------|-----------------|
 | Parakeet TDT v3 | [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml) |
+| Parakeet Redux | [FluidInference/parakeet-redux-coreml](https://huggingface.co/FluidInference/parakeet-redux-coreml) |
 | Parakeet TDT v2 | [FluidInference/parakeet-tdt-0.6b-v2-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml) |
 | Parakeet TDT-CTC-110M | [FluidInference/parakeet-tdt-ctc-110m-coreml](https://huggingface.co/FluidInference/parakeet-tdt-ctc-110m-coreml) |
 | Parakeet TDT Japanese | [FluidInference/parakeet-0.6b-ja-coreml](https://huggingface.co/FluidInference/parakeet-0.6b-ja-coreml) (hybrid: CTC preprocessor/encoder + TDT decoder/joint) |
