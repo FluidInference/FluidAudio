@@ -11,10 +11,22 @@ public struct LuxTtsSynthesisResult: Sendable {
     public let sampleRate: Int
     /// Prompt conditioning length in 24 kHz mel frames.
     public let promptFrames: Int
-    /// Generated mel frames (`featuresLength - promptFrames`).
+    /// Generated mel frames. For a single pass this is
+    /// `featuresLength - promptFrames` and `samples.count == (generatedFrames - 1) * 512`;
+    /// for continuation-prompted text it is the sum over spans, whose
+    /// trimmed padding and crossfades make `samples.count` shorter.
     public let generatedFrames: Int
-    /// Total flow-matching sequence length (prompt + generated frames).
+    /// Flow-matching sequence length (prompt + generated frames), summed
+    /// over spans for continuation-prompted text (then it can exceed the
+    /// per-pass 1024-frame graph).
     public let featuresLength: Int
+    /// Extra flow-matching passes spent re-drawing spans the pause detector
+    /// flagged (0 = every span was clean on its first pass). See
+    /// `LuxTtsManager.synthesize(tokenIds:...maxRedraws:)`.
+    public let redraws: Int
+    /// Pauses beyond the text's punctuation still present in the kept
+    /// passes after the re-draw budget was spent.
+    public let residualPauses: Int
 }
 
 /// Drives the LuxTTS (ZipVoice-Distill) CoreML stages end-to-end, mirroring
@@ -119,8 +131,8 @@ struct LuxTtsSynthesizer {
             throw LuxTtsError.tokenizerFailed(
                 "estimated only \(genFrames) generated frames — text too short")
         }
-        // TODO(phase 2): chunk long inputs across multiple vocoder windows
-        // instead of erroring; mel truncation is NOT allowed.
+        // Long inputs are split into continuation-prompted spans by
+        // `LuxTtsManager` before reaching here; mel truncation is NOT allowed.
         guard let bucket = LuxTtsConstants.vocoderBuckets.first(where: { $0 >= genFrames }) else {
             throw LuxTtsError.inputTooLong(
                 "generated frames \(genFrames) exceed the largest vocoder bucket "
@@ -295,7 +307,9 @@ struct LuxTtsSynthesizer {
             sampleRate: LuxTtsConstants.outputSampleRate,
             promptFrames: promptFrames,
             generatedFrames: genFrames,
-            featuresLength: featuresLength)
+            featuresLength: featuresLength,
+            redraws: 0,
+            residualPauses: 0)
     }
 
     // MARK: - Helpers
