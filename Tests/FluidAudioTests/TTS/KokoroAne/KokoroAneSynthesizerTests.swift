@@ -3,6 +3,21 @@ import XCTest
 
 @testable import FluidAudio
 
+/// Stage bundle names must match the download set, including the renamed v2 bundles.
+final class KokoroAneStageBundleNameTests: XCTestCase {
+
+    func testStageBundlesMatchRequiredDownloadSet() {
+        let bundles = Set(KokoroAneStage.allCases.map(\.bundleName))
+        XCTAssertEqual(bundles, ModelNames.KokoroAne.requiredCoreMLModels)
+    }
+
+    func testProsodyUsesFp32ComputeBundle() {
+        // v1 fp16 Prosody corrupts F0/N at the utterance onset for many T_a >= 400 (#947).
+        XCTAssertEqual(KokoroAneStage.prosody.bundleName, "KokoroProsody_v2.mlmodelc")
+        XCTAssertEqual(ModelNames.KokoroAne.prosody, "KokoroProsody_v2.mlmodelc")
+    }
+}
+
 /// Lightweight tests for the pure duration-rounding helper (no models needed).
 final class KokoroAnePredictedDurationTests: XCTestCase {
 

@@ -1571,7 +1571,10 @@ public enum ModelNames {
         public static let albert = "KokoroAlbert.mlmodelc"
         public static let postAlbert = "KokoroPostAlbert.mlmodelc"
         public static let alignment = "KokoroAlignment.mlmodelc"
-        public static let prosody = "KokoroProsody.mlmodelc"
+        // v2: fp32 compute. The fp16 CPU/ANE path corrupts F0/N at the start of
+        // the utterance for many T_a >= 400 (quiet/garbled onset). Renamed (not
+        // overwritten) so cached clients re-download. See issue #947.
+        public static let prosody = "KokoroProsody_v2.mlmodelc"
         // v2: atan2 phase-correction in the noise-source STFT (removes broad-spectrum
         // HF noise / "sharpness"). Renamed (not overwritten) so cached clients
         // re-download. See mobius laishere-coreml docs/trials-and-errors.md.

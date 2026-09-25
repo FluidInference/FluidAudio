@@ -112,7 +112,7 @@ public enum KokoroAneStage: String, CaseIterable, Sendable {
         case .albert: return "KokoroAlbert.mlmodelc"
         case .postAlbert: return "KokoroPostAlbert.mlmodelc"
         case .alignment: return "KokoroAlignment.mlmodelc"
-        case .prosody: return "KokoroProsody.mlmodelc"
+        case .prosody: return "KokoroProsody_v2.mlmodelc"  // v2: fp32 compute (long-utterance onset fix, #947)
         case .noise: return "KokoroNoise_v2.mlmodelc"  // v2: atan2 phase-correction (HF-noise fix)
         case .vocoder: return "KokoroVocoder.mlmodelc"
         case .tail: return "KokoroTail_v2.mlmodelc"  // v2: COLA-normalized iSTFT (level fix, #852)
