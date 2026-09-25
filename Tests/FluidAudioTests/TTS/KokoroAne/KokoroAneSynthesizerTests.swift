@@ -18,6 +18,40 @@ final class KokoroAneStageBundleNameTests: XCTestCase {
     }
 }
 
+/// Joining per-chunk results for long text input (#712, #940).
+final class KokoroAneResultConcatenationTests: XCTestCase {
+
+    private func part(
+        samples: [Float], ids: [Int32], durations: [Int32], albertMs: Double
+    )
+        -> KokoroAneSynthesisResult
+    {
+        var timings = KokoroAneStageTimings()
+        timings.albert = albertMs
+        return KokoroAneSynthesisResult(
+            samples: samples, sampleRate: 24_000, encoderTokens: ids.count,
+            acousticFrames: Int(durations.reduce(0, +)), timings: timings,
+            inputIds: ids, predictedDurations: durations, normalizedText: "chunk", phonemes: "x")
+    }
+
+    func testConcatenatesInOrderAndSumsCounts() {
+        let a = part(samples: [0.1, 0.2], ids: [0, 5, 0], durations: [1, 2, 1], albertMs: 3)
+        let b = part(samples: [0.3], ids: [0, 7, 8, 0], durations: [1, 1, 1, 1], albertMs: 4)
+        let joined = KokoroAneSynthesisResult.concatenating([a, b])
+
+        XCTAssertEqual(joined.samples, [0.1, 0.2, 0.3])
+        XCTAssertEqual(joined.sampleRate, 24_000)
+        XCTAssertEqual(joined.inputIds, [0, 5, 0, 0, 7, 8, 0])
+        XCTAssertEqual(joined.predictedDurations, [1, 2, 1, 1, 1, 1, 1])
+        XCTAssertEqual(joined.inputIds.count, joined.predictedDurations.count)
+        XCTAssertEqual(joined.encoderTokens, 7)
+        XCTAssertEqual(joined.acousticFrames, 8)
+        XCTAssertEqual(joined.timings.albert, 7)
+        XCTAssertNil(joined.normalizedText)
+        XCTAssertEqual(joined.phonemes, "")
+    }
+}
+
 /// Lightweight tests for the pure duration-rounding helper (no models needed).
 final class KokoroAnePredictedDurationTests: XCTestCase {
 

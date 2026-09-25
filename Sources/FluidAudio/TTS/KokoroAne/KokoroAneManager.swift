@@ -15,7 +15,11 @@ import Foundation
 ///   * One default voice per variant (`af_heart` for English, `zf_001` for
 ///     Mandarin); additional voices download on demand via ``setDefaultVoice``
 ///     / `voice:` / `initialize(preloadVoices:)`.
-///   * IPA input capped at 512 tokens — chunk longer prompts upstream.
+///   * IPA input capped at 512 tokens. The high-level text API
+///     (``synthesize(text:voice:speed:)`` / ``synthesizeDetailed(text:voice:speed:)``)
+///     auto-chunks longer prompts at whitespace / pause punctuation (#712, #940);
+///     the low-level ``synthesizeFromPhonemes(_:voice:speed:)`` stays strict
+///     and throws ``KokoroAneError/phonemeSequenceTooLong(_:)`` past the cap.
 ///   * Loads from HF path `kokoro-82m-coreml/ANE/` (English, Spanish,
 ///     French), `ANE-zh/` (Mandarin) or `ANE-ja/` (Japanese).
 ///
@@ -236,8 +240,23 @@ public actor KokoroAneManager {
         speed: Float = KokoroAneConstants.defaultSpeed
     ) async throws -> KokoroAneSynthesisResult {
         let frontend = try await resolveFrontend(for: text)
-        return try await runChain(
-            phonemes: frontend.phonemes, normalizedText: frontend.normalizedText, voice: voice, speed: speed)
+        // Chunk after normalization / G2P so written forms are never split; the
+        // cap is in Unicode scalars, as the vocab encoder counts it (#712, #940).
+        let chunks = PhonemeChunker.chunk(
+            frontend.phonemes, maxLength: KokoroAneConstants.maxPhonemeLength, countsUnicodeScalars: true)
+        guard chunks.count > 1 else {
+            return try await runChain(
+                phonemes: frontend.phonemes, normalizedText: frontend.normalizedText, voice: voice, speed: speed)
+        }
+        var parts: [KokoroAneSynthesisResult] = []
+        for chunk in chunks {
+            try Task.checkCancellation()
+            parts.append(try await runChain(phonemes: chunk, normalizedText: nil, voice: voice, speed: speed))
+        }
+        var result = KokoroAneSynthesisResult.concatenating(parts)
+        result.normalizedText = frontend.normalizedText
+        result.phonemes = frontend.phonemes
+        return result
     }
 
     /// Resolve the exact phoneme string ``synthesize(text:voice:speed:)``
