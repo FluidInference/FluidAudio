@@ -8,7 +8,12 @@
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/WNsvaCtmDe)
 [![Hugging Face Models](https://img.shields.io/badge/Hugging%20Face%20Models-500k%2B%20Monthly%20Downloads-brightgreen?logo=huggingface)](https://huggingface.co/FluidInference)[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/FluidInference/FluidAudio)
 
+<div align="center">
+
 <a href="https://trendshift.io/repositories/26004?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-26004" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/26004" alt="FluidInference%2FFluidAudio | Trendshift" width="250" height="55"/></a>
+
+</div>
+
 
 FluidAudio is a Swift SDK for fully local, low-latency audio AI on Apple devices, with inference offloaded to the Apple Neural Engine (ANE), resulting in less memory and generally faster inference.
 
