@@ -112,6 +112,44 @@ final class LuxTtsContinuationTests: XCTestCase {
         XCTAssertEqual(LuxTtsContinuation.textPauseAllowance("don't, won't; can't."), 0)
     }
 
+    func testTextPausePositionsLocateSilentBreaks() {
+        let text = "ab... \"c\""
+        XCTAssertEqual(
+            LuxTtsContinuation.textPausePositions(text),
+            [2.0 / 9.0, 6.0 / 9.0, 8.0 / 9.0])
+        XCTAssertEqual(LuxTtsContinuation.textPausePositions(""), [])
+    }
+
+    func testSpanPauseAllowancesStayInTheirSpan() {
+        // Quotes clustered in the last span must not excuse pauses elsewhere.
+        XCTAssertEqual(
+            LuxTtsContinuation.spanPauseAllowances(
+                spanLengths: [50, 50, 50, 50], positions: [0.8, 0.85, 0.9, 0.95]),
+            [0, 0, 0, 4])
+        XCTAssertEqual(
+            LuxTtsContinuation.spanPauseAllowances(
+                spanLengths: [30, 70], positions: [0.0, 0.29, 0.3, 0.99]),
+            [2, 2])
+        XCTAssertEqual(
+            LuxTtsContinuation.spanPauseAllowances(spanLengths: [40], positions: [0.1, 0.5]),
+            [2])
+    }
+
+    func testFitPromptLengthMatchesAllottedFrames() {
+        let extractor = LuxTtsMelExtractor()
+        let generatedFrames = 300
+        // The vocoder emits (gen - 1) hops, which the extractor counts as gen - 1.
+        var audio = [Float](repeating: 0.1, count: (generatedFrames - 1) * LuxTtsConstants.hopLength)
+        XCTAssertEqual(extractor.frameCount(sampleCount: audio.count), generatedFrames - 1)
+        LuxTtsContinuation.fitPromptLength(&audio, frames: generatedFrames)
+        XCTAssertEqual(extractor.frameCount(sampleCount: audio.count), generatedFrames)
+        XCTAssertEqual(audio.last, 0)
+
+        var long = [Float](repeating: 0.1, count: generatedFrames * LuxTtsConstants.hopLength + 77)
+        LuxTtsContinuation.fitPromptLength(&long, frames: generatedFrames)
+        XCTAssertEqual(extractor.frameCount(sampleCount: long.count), generatedFrames)
+    }
+
     func testExpectedPauseCountIgnoresTrailingBoundaryTokens() {
         let space = 0
         let comma = 1

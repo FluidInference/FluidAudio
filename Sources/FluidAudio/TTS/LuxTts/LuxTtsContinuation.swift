@@ -105,11 +105,63 @@ enum LuxTtsContinuation {
     /// and quotes/brackets (`LuxTtsG2p` treats them as clause breaks).
     /// Apostrophes are left out — they are almost always contractions.
     static func textPauseAllowance(_ text: String) -> Int {
-        let ellipses = text.components(separatedBy: "...").count - 1
-        let silentBreaks = text.reduce(0) { count, character in
-            count + ("…\"()[]«»".contains(character) ? 1 : 0)
+        textPausePositions(text).count
+    }
+
+    /// Relative positions (0..<1, by character) of the silent breaks
+    /// `textPauseAllowance` counts, so each span is only allowed the breaks
+    /// that fall inside it.
+    static func textPausePositions(_ text: String) -> [Double] {
+        let characters = Array(text)
+        guard !characters.isEmpty else { return [] }
+        var positions: [Double] = []
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            if character == ".", index + 2 < characters.count,
+                characters[index + 1] == ".", characters[index + 2] == "."
+            {
+                positions.append(Double(index) / Double(characters.count))
+                index += 3
+                continue
+            }
+            if "…\"()[]«»".contains(character) {
+                positions.append(Double(index) / Double(characters.count))
+            }
+            index += 1
         }
-        return ellipses + silentBreaks
+        return positions
+    }
+
+    /// Silent breaks each span may contain: positions are mapped onto spans
+    /// by their share of the token sequence.
+    static func spanPauseAllowances(spanLengths: [Int], positions: [Double]) -> [Int] {
+        let total = spanLengths.reduce(0, +)
+        guard total > 0 else { return spanLengths.map { _ in 0 } }
+        var allowances = [Int](repeating: 0, count: spanLengths.count)
+        for position in positions {
+            let token = Int(position * Double(total))
+            var end = 0
+            for (index, length) in spanLengths.enumerated() {
+                end += length
+                if token < end || index == spanLengths.count - 1 {
+                    allowances[index] += 1
+                    break
+                }
+            }
+        }
+        return allowances
+    }
+
+    /// Zero-pad or truncate 24 kHz audio so the mel extractor counts exactly
+    /// `frames` frames.
+    static func fitPromptLength(_ audio: inout [Float], frames: Int) {
+        let target = max(0, frames) * LuxTtsConstants.hopLength
+        if audio.count > target {
+            audio.removeLast(audio.count - target)
+        } else {
+            audio.append(contentsOf: repeatElement(0, count: target - audio.count))
+        }
     }
 
     /// Whether the span's last spoken token is pause punctuation (trailing
