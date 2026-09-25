@@ -31,17 +31,23 @@ enum PhonemeChunker {
     /// is hard-split at the cap (rare for real phoneme strings). Leading and
     /// trailing whitespace is trimmed from every chunk.
     ///
+    /// - Parameter countsUnicodeScalars: measure length in Unicode scalars
+    ///   instead of `Character`s, for vocabs that encode combining marks as
+    ///   their own token (KokoroAne: `ɑ̃` is two symbols).
     /// - Returns: `[phonemes]` (trimmed) when the input already fits,
     ///   `[]` for blank input, and otherwise the ordered chunks. Length is
-    ///   counted in `Character`s to match the cap TTS vocabularies enforce.
+    ///   counted in `Character`s by default to match the cap TTS vocabularies
+    ///   enforce.
     static func chunk(
         _ phonemes: String,
         maxLength: Int,
-        boundaryPunctuation: Set<Character> = defaultBoundaryPunctuation
+        boundaryPunctuation: Set<Character> = defaultBoundaryPunctuation,
+        countsUnicodeScalars: Bool = false
     ) -> [String] {
         precondition(maxLength > 0, "maxLength must be positive")
 
-        let characters = Array(phonemes)
+        let characters: [Character] =
+            countsUnicodeScalars ? phonemes.unicodeScalars.map(Character.init) : Array(phonemes)
         let count = characters.count
         if count == 0 { return [] }
 

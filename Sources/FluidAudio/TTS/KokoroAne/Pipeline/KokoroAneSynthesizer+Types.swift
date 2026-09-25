@@ -42,7 +42,9 @@ public struct KokoroAneSynthesisResult: Sendable {
     public let acousticFrames: Int
     /// Token ids passed to the Kokoro chain, including BOS/EOS.
     ///
-    /// Indices align one-to-one with ``predictedDurations``.
+    /// Indices align one-to-one with ``predictedDurations``. When the text API
+    /// chunks long input, this is the per-chunk ids concatenated in order, so
+    /// each chunk contributes its own BOS/EOS pair.
     public let inputIds: [Int32]
     /// PostAlbert `pred_dur`: acoustic-frame counts for each input token.
     ///
@@ -64,6 +66,8 @@ public struct KokoroAneSynthesisResult: Sendable {
     /// Phoneme string handed to the vocab encoder. ``inputIds`` is this string
     /// with characters missing from `vocab.json` dropped and BOS/EOS added, so
     /// the two lengths differ when the string carries out-of-vocab scalars.
+    /// For chunked text input this is the full resolved string; the chunks
+    /// drop the whitespace at each split and add one BOS/EOS pair per chunk.
     public internal(set) var phonemes: String
     /// Per-stage timings.
     public let timings: KokoroAneStageTimings
@@ -93,6 +97,24 @@ public struct KokoroAneSynthesisResult: Sendable {
         self.normalizedText = normalizedText
         self.phonemes = phonemes
         self.timings = timings
+    }
+
+    /// Join per-chunk results in order: samples, ids and durations are
+    /// concatenated; token/frame counts and stage timings are summed. Level is
+    /// left untouched (no per-chunk normalization). Text fields are left empty
+    /// for the caller to set.
+    static func concatenating(_ parts: [KokoroAneSynthesisResult]) -> KokoroAneSynthesisResult {
+        var timings = KokoroAneStageTimings()
+        for part in parts { timings.add(part.timings) }
+        return KokoroAneSynthesisResult(
+            samples: parts.flatMap(\.samples),
+            sampleRate: parts.first?.sampleRate ?? KokoroAneConstants.sampleRate,
+            encoderTokens: parts.reduce(0) { $0 + $1.encoderTokens },
+            acousticFrames: parts.reduce(0) { $0 + $1.acousticFrames },
+            timings: timings,
+            inputIds: parts.flatMap(\.inputIds),
+            predictedDurations: parts.flatMap(\.predictedDurations)
+        )
     }
 }
 
