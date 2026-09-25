@@ -143,43 +143,71 @@ extension VocabularyRescorer {
             return Array(repeating: nil, count: baseWords.count)
         }
 
-        var alignments: [[Range<String.Index>]] = []
-
-        func search(
-            wordIndex: Int,
-            cursor: String.Index,
-            ranges: [Range<String.Index>]
-        ) {
-            guard alignments.count < 2 else { return }
-            guard wordIndex < baseWords.count else {
-                guard isDelimiterOnly(baseText[cursor..<baseText.endIndex]) else { return }
-                alignments.append(ranges)
-                return
-            }
-
-            let word = baseWords[wordIndex]
-            var searchStart = cursor
-            while searchStart < baseText.endIndex,
-                let match = baseText.range(
-                    of: word,
-                    options: .literal,
-                    range: searchStart..<baseText.endIndex
-                )
-            {
-                if isDelimiterOnly(baseText[cursor..<match.lowerBound]) {
-                    search(
-                        wordIndex: wordIndex + 1,
-                        cursor: match.upperBound,
-                        ranges: ranges + [match]
-                    )
-                }
-                guard alignments.count < 2, match.lowerBound < baseText.endIndex else { return }
-                searchStart = baseText.index(after: match.lowerBound)
-            }
+        // Iterative backtracking: recursion depth and per-level path copies scaled with word count (#961).
+        // A word may only start inside the delimiter run after the cursor, so each level has few candidates.
+        struct State: Hashable {
+            let wordIndex: Int
+            let cursor: String.Index
+        }
+        struct Frame {
+            let state: State
+            let limit: String.Index
+            var next: String.Index?
+            let alignmentsAtEntry: Int
         }
 
-        search(wordIndex: 0, cursor: baseText.startIndex, ranges: [])
-        guard alignments.count == 1, let alignment = alignments.first else {
+        var alignmentCount = 0
+        var alignment: [Range<String.Index>] = []
+        var path: [Range<String.Index>] = []
+        var deadStates = Set<State>()
+
+        func frame(wordIndex: Int, cursor: String.Index) -> Frame {
+            let limit = baseText[cursor...].firstIndex(where: { !isInterWordDelimiter($0) }) ?? baseText.endIndex
+            return Frame(
+                state: State(wordIndex: wordIndex, cursor: cursor),
+                limit: limit,
+                next: cursor,
+                alignmentsAtEntry: alignmentCount
+            )
+        }
+
+        var stack = [frame(wordIndex: 0, cursor: baseText.startIndex)]
+        path.reserveCapacity(baseWords.count)
+
+        while alignmentCount < 2, let top = stack.last {
+            let wordIndex = top.state.wordIndex
+            if wordIndex == baseWords.count {
+                if top.limit == baseText.endIndex {
+                    alignmentCount += 1
+                    if alignmentCount == 1 { alignment = path }
+                }
+                stack.removeLast()
+                if !path.isEmpty { path.removeLast() }
+                continue
+            }
+
+            guard let start = top.next, start < baseText.endIndex else {
+                if alignmentCount == top.alignmentsAtEntry { deadStates.insert(top.state) }
+                stack.removeLast()
+                if !path.isEmpty { path.removeLast() }
+                continue
+            }
+            stack[stack.count - 1].next = start < top.limit ? baseText.index(after: start) : nil
+
+            guard
+                let match = baseText.range(
+                    of: baseWords[wordIndex],
+                    options: [.literal, .anchored],
+                    range: start..<baseText.endIndex
+                ),
+                !deadStates.contains(State(wordIndex: wordIndex + 1, cursor: match.upperBound))
+            else { continue }
+
+            path.append(match)
+            stack.append(frame(wordIndex: wordIndex + 1, cursor: match.upperBound))
+        }
+
+        guard alignmentCount == 1 else {
             return Array(repeating: nil, count: baseWords.count)
         }
 
