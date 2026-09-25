@@ -140,8 +140,10 @@ public enum ModelRegistry {
     }
 
     /// Construct download URL for a dataset file
-    public static func resolveDataset(_ dataset: String, _ filePath: String) throws -> URL {
-        let urlString = "\(baseURL)/datasets/\(dataset)/resolve/main/\(filePath)"
+    public static func resolveDataset(
+        _ dataset: String, _ filePath: String, revision: String = "main"
+    ) throws -> URL {
+        let urlString = "\(baseURL)/datasets/\(dataset)/resolve/\(revision)/\(filePath)"
         guard let url = URL(string: urlString) else {
             throw Error.invalidURL(urlString)
         }
@@ -149,8 +151,8 @@ public enum ModelRegistry {
     }
 
     /// Construct base URL for dataset directory (without trailing slash)
-    public static func resolveDatasetBase(_ dataset: String) -> String {
-        "\(baseURL)/datasets/\(dataset)/resolve/main"
+    public static func resolveDatasetBase(_ dataset: String, revision: String = "main") -> String {
+        "\(baseURL)/datasets/\(dataset)/resolve/\(revision)"
     }
 
     // MARK: - Session Configuration
