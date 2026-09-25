@@ -79,4 +79,11 @@ final class Nemotron3CacheVersionTests: XCTestCase {
         let absent = root.appendingPathComponent("does-not-exist")
         XCTAssertNoThrow(try Nemotron3Models.discardStaleCache(at: absent))
     }
+
+    func testMonolithicPresetsLoadFromV2AndSplitPresetsFromSplit() {
+        for config in [Nemotron3Config.low, .offline, .fast, .fast32, .fast128] {
+            XCTAssertEqual(config.hubSubdirectory, "monolithic/v2", config.modelFileName)
+        }
+        XCTAssertEqual(Nemotron3Config.preset(named: "fast32-split-w8a8")?.hubSubdirectory, "split")
+    }
 }
