@@ -82,7 +82,11 @@ public struct Nemotron3Config: Sendable {
     }
 
     /// Subdirectory of `FluidInference/nemotron-3-diarization-coreml` holding this preset's bundle.
-    public var hubSubdirectory: String { splitGraph ? "split" : "monolithic" }
+    ///
+    /// Monolithic presets load from `monolithic/v2/`: fp16-I/O, gather-free re-exports that
+    /// compile for the ANE on M3-class chips (#951). The originals stay in `monolithic/` for
+    /// older releases.
+    public var hubSubdirectory: String { splitGraph ? "split" : "monolithic/v2" }
 
     // MARK: Presets (model card recommended profiles)
 

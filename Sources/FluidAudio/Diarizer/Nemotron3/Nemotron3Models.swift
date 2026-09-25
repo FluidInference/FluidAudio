@@ -137,7 +137,7 @@ public struct Nemotron3Models {
     /// (if not cached) and load it.
     ///
     /// Layout under `cacheDirectory` (default `~/Library/Application Support/FluidAudio/Models`):
-    /// `nemotron-3-diarization/{monolithic,split}/<bundle>.mlmodelc` plus the root `.bin` assets.
+    /// `nemotron-3-diarization/{monolithic/v2,split}/<bundle>.mlmodelc` plus the root `.bin` assets.
     /// Only the requested preset's bundle is fetched.
     public static func loadFromHuggingFace(
         config: Nemotron3Config,
