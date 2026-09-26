@@ -121,6 +121,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Notiva](https://trynotiva.com/)** | — | Menu-bar notes app for Mac meetings. Live on-device transcription on the Neural Engine with speaker diarization, merged with your own notes into a single document. Uses FluidAudio for transcription and speaker diarization. |
 | **[oats](https://github.com/ariso-ai/oats)** | ✓ | Open-source (MIT) meeting notes app for macOS and Windows built with Tauri and Vue. One-click recording, real-time transcription with speaker labels, and on-device LLM note generation in Markdown. Uses FluidAudio on the Apple Neural Engine for macOS transcription. |
 | **[Orca One](https://orcaone.com/)** | — | Private Mac dictation and meeting transcription with on-device processing. Uses FluidAudio's Parakeet ASR and Silero VAD. |
+| **[Banter](https://github.com/arvindvenkataramani/banter)** | ✓ | Open-source (Apache-2.0), self-hosted voice interface for OpenClaw, adaptable to other agent harnesses. Runs in the browser on desktop or phone. Its two Swift servers put FluidAudio behind OpenAI-compatible HTTP and streaming WebSocket APIs: Parakeet TDT v3, Parakeet Unified and Nemotron streaming ASR, and Pocket TTS, Kokoro and LuxTTS for speech, all on Apple Silicon. |
 
 More apps built with FluidAudio are listed in [Documentation/Showcase.md](Documentation/Showcase.md).
 
