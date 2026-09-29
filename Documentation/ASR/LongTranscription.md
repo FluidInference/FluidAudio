@@ -353,6 +353,63 @@ content instead of gluing it:
 The rule those three share: **a seam may produce a glued word in the worst
 case, but it must never delete real content.**
 
+### Seam Timing
+
+Token timestamps are emission frames, and they are not equally reliable
+across the window. Decoding the same audio at many window positions and
+comparing each word against the decodes that heard it mid-window:
+
+| Position in a 14.88 s window | Start bias | End bias | Words off by > 160 ms |
+|---|---|---|---|
+| 0.5 s – 13 s | within ±20 ms | within ±20 ms | 0–2 % |
+| 13 s – 14 s | ≈ −50 ms | ≈ −100 ms | 5–7 % |
+| last ≈ 0.9 s | ≈ −190 ms | ≈ −300 ms | ≈ 55 % |
+
+The first 0.5 s runs slightly late (≈ +70 to +100 ms); the last ≈ 1.4 s runs
+early, and word *ends* suffer most because the decoder is running out of
+right context. The curve was the same on English read speech, an English
+conference talk, and a German interview.
+
+The overlap exists so that each seam token is decoded twice, once in each
+position — but the matched-token merge kept the left window's copy, timing
+included, so the transcript carried the tail timings and discarded the good
+ones. A word at the end of one window followed by a word from the next then
+shows a gap that is not in the audio (`actually` 27.20–27.44, `go?` 28.16,
+where the speech is continuous).
+
+`mergeUsingMatches` now takes a matched token's `timestamp` and `duration`
+from the right window once that copy is at least
+`seamTimingHeadGuardFrames` (6 frames, 480 ms) past the right window's start.
+The token's identity — piece, casing, confidence — still comes from the left
+window, which had real left context (see "Case-Folded Matching"). No audio is
+re-decoded: both copies already exist.
+
+| Field | Default | Notes |
+|---|---|---|
+| `ASRConfig.seamTimingRealignment` | `true` | CLI: `--no-seam-timing-realignment` reproduces the previous timings exactly. |
+
+Measured on seam-tail words, against the mid-window reference:
+
+| Recording | End off by > 160 ms, before | after | Interior words |
+|---|---|---|---|
+| English read speech (108 s) | 62 % | 4 % | 6 % |
+| English conference talk (400 s) | 36 % | 7 % | 3 % |
+| German interview (400 s) | 23 % | 6 % | 6 % |
+
+Limits:
+
+- The rule does not touch token identity, but later passes read timestamps
+  (`enforceMonotonicTimestamps`, `collapseSeamWordDuplicates`, the repair
+  pass), so text can change at a seam. In the recordings above it removed
+  one duplicated seam word (`came from from?`) and changed one mumbled
+  aside; the German text was identical.
+- Unmatched tokens between two matches, and the `mergeByMidpoint` fallback,
+  keep their existing behavior.
+- The dual-decode arbitration path merges without a window start and is
+  unchanged.
+- Gaps that open *inside* a window are a different failure and are not
+  addressed here.
+
 ## End-Aligned Final Window (issue #747)
 
 On quiet long-form audio the **final** window used to decode to all-blank
