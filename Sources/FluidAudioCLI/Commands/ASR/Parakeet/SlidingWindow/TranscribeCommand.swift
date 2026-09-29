@@ -218,6 +218,7 @@ enum TranscribeCommand {
         var melChunkContext: Bool? = nil
         var dualDecodeArbitration = false
         var seamGapRepair = true
+        var seamTimingRealignment = true
         var streamingMode = false
 
         // Streaming mode (SlidingWindowAsrConfig)
@@ -371,6 +372,8 @@ enum TranscribeCommand {
                 parsed.dualDecodeArbitration = true
             case "--no-seam-gap-repair":
                 parsed.seamGapRepair = false
+            case "--no-seam-timing-realignment":
+                parsed.seamTimingRealignment = false
 
             // Streaming mode config
             case "--chunk-seconds":
@@ -605,7 +608,8 @@ enum TranscribeCommand {
                 encoderHiddenSize: args.modelVersion.encoderHiddenSize,
                 melChunkContext: args.melChunkContext,
                 dualDecodeArbitration: args.dualDecodeArbitration,
-                seamGapRepair: args.seamGapRepair
+                seamGapRepair: args.seamGapRepair,
+                seamTimingRealignment: args.seamTimingRealignment
             )
             let asrManager = AsrManager(config: asrConfig)
             try await asrManager.loadModels(models)

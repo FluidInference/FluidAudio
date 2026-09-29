@@ -52,6 +52,11 @@ public actor AsrManager {
         config.seamGapRepair
     }
 
+    /// Seam timing flag exposed to `ChunkProcessor`.
+    internal var seamTimingRealignment: Bool {
+        config.seamTimingRealignment
+    }
+
     /// Minimum inter-token gap that triggers a seam-gap repair probe.
     internal var seamGapRepairMinGapSeconds: Double {
         config.seamGapRepairMinGapSeconds
@@ -268,7 +273,8 @@ public actor AsrManager {
                 streamingEnabled: workingConfig.streamingEnabled,
                 streamingThreshold: workingConfig.streamingThreshold,
                 melChunkContext: workingConfig.melChunkContextOverride,
-                dualDecodeArbitration: workingConfig.dualDecodeArbitration
+                dualDecodeArbitration: workingConfig.dualDecodeArbitration,
+                seamTimingRealignment: workingConfig.seamTimingRealignment
             )
         }
 
@@ -283,7 +289,8 @@ public actor AsrManager {
                 streamingEnabled: workingConfig.streamingEnabled,
                 streamingThreshold: workingConfig.streamingThreshold,
                 melChunkContext: workingConfig.melChunkContextOverride,
-                dualDecodeArbitration: workingConfig.dualDecodeArbitration
+                dualDecodeArbitration: workingConfig.dualDecodeArbitration,
+                seamTimingRealignment: workingConfig.seamTimingRealignment
             )
         } else {
             adaptedConfig = workingConfig
