@@ -90,6 +90,53 @@ final class EnglishTextNormalizerTests: XCTestCase {
             "At one forty nine p m on the thirteenth I scored three point one four in twenty six tries.")
     }
 
+    // MARK: - Roman-numeral list markers (issue #972)
+
+    func testRomanParenthesizedEnumerators() {
+        XCTAssertEqual(
+            normalize("(i) pay rent; (ii) keep the peace; (iii) insure; (iv) vacate."),
+            "(one) pay rent; (two) keep the peace; (three) insure; (four) vacate.")
+        XCTAssertEqual(normalize("(ix) and (xiv) and (xxxix)"), "(nine) and (fourteen) and (thirty nine)")
+        XCTAssertEqual(normalize("see (IV) and (XII)"), "see (four) and (twelve)")
+        // Fires mid-sentence and in nested legal citations.
+        XCTAssertEqual(normalize("under 2(a)(ii) above"), "under two(a)(two) above")
+    }
+
+    func testRomanHalfParenEnumerators() {
+        XCTAssertEqual(
+            normalize("as follows: i) rent; ii) noise; iii) pets"), "as follows: one) rent; two) noise; three) pets")
+        XCTAssertEqual(normalize("i) first\nii) second\n  iv) fourth"), "one) first\ntwo) second\n  four) fourth")
+        XCTAssertEqual(normalize("II) second"), "two) second")
+    }
+
+    func testRomanDotEnumerators() {
+        XCTAssertEqual(
+            normalize("i. Introduction\nii. Methods\niv. Results"), "one. Introduction\ntwo. Methods\nfour. Results")
+        XCTAssertEqual(normalize("Contents: II. Scope"), "Contents: two. Scope")
+    }
+
+    func testRomanEnumeratorCombinesWithNumbers() {
+        XCTAssertEqual(normalize("(ii) costs 26 dollars"), "(two) costs twenty six dollars")
+    }
+
+    func testRomanLettersInProseUnchanged() {
+        // Words made of roman letters and the pronoun `I` are not enumerators.
+        XCTAssertEqual(normalize("mix it, did I? civil and mild"), "mix it, did I? civil and mild")
+        XCTAssertEqual(normalize("(and so did I)"), "(and so did I)")
+        XCTAssertEqual(normalize("I. M. Pei designed it"), "I. M. Pei designed it")
+        XCTAssertEqual(normalize("I use vi. It rocks"), "I use vi. It rocks")
+        XCTAssertEqual(normalize("i.e. the rest"), "i.e. the rest")
+        XCTAssertEqual(normalize("the variable x) is free"), "the variable x) is free")
+    }
+
+    func testRomanNonEnumeratorFormsUnchanged() {
+        XCTAssertEqual(normalize("f(x) and g(i)"), "f(x) and g(i)")
+        XCTAssertEqual(normalize("(xl) size"), "(xl) size")
+        XCTAssertEqual(normalize("(mix) (cd) (mm)"), "(mix) (cd) (mm)")
+        // Invalid or mixed-case forms are not roman numerals.
+        XCTAssertEqual(normalize("(iiii) (vv) (Iv) (ivi)"), "(iiii) (vv) (Iv) (ivi)")
+    }
+
     // MARK: - Ambiguous / structured forms left unchanged
 
     func testVersionStringUnchanged() {
