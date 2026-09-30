@@ -106,17 +106,39 @@ final class EnglishTextNormalizerTests: XCTestCase {
         XCTAssertEqual(
             normalize("as follows: i) rent; ii) noise; iii) pets"), "as follows: one) rent; two) noise; three) pets")
         XCTAssertEqual(normalize("i) first\nii) second\n  iv) fourth"), "one) first\ntwo) second\n  four) fourth")
-        XCTAssertEqual(normalize("II) second"), "two) second")
+        XCTAssertEqual(normalize("I) first; II) second"), "one) first; two) second")
     }
 
     func testRomanDotEnumerators() {
         XCTAssertEqual(
             normalize("i. Introduction\nii. Methods\niv. Results"), "one. Introduction\ntwo. Methods\nfour. Results")
-        XCTAssertEqual(normalize("Contents: II. Scope"), "Contents: two. Scope")
+        // An uppercase outline converts as a whole, `I.` included.
+        XCTAssertEqual(normalize("I. Intro\nII. Body\nIII. End"), "one. Intro\ntwo. Body\nthree. End")
     }
 
     func testRomanEnumeratorCombinesWithNumbers() {
         XCTAssertEqual(normalize("(ii) costs 26 dollars"), "(two) costs twenty six dollars")
+    }
+
+    func testRomanSingleLowercaseMarkerIsEnough() {
+        // A chunk holding one lowercase marker still converts (`(i)` alone, `(iv)` alone).
+        XCTAssertEqual(normalize("(i) pay rent"), "(one) pay rent")
+        XCTAssertEqual(normalize("(iv) vacate on notice"), "(four) vacate on notice")
+        XCTAssertEqual(normalize("vi. Appendix"), "six. Appendix")
+    }
+
+    func testRomanAmbiguousMarkersNeedListContext() {
+        // Alone these are abbreviations, variables or sign-offs, not list items.
+        XCTAssertEqual(normalize("morphine (IV) fluids"), "morphine (IV) fluids")
+        XCTAssertEqual(normalize("Mark (x) here"), "Mark (x) here")
+        XCTAssertEqual(normalize("(v) to run"), "(v) to run")
+        XCTAssertEqual(normalize("(I) think"), "(I) think")
+        XCTAssertEqual(normalize("Thanks. xx. Jane"), "Thanks. xx. Jane")
+        XCTAssertEqual(normalize("Marbury\nv. Madison"), "Marbury\nv. Madison")
+        XCTAssertEqual(normalize("Solve for the variable, x. Then"), "Solve for the variable, x. Then")
+        // With a sibling marker they are list items.
+        XCTAssertEqual(normalize("(IV) fluids; (V) rest"), "(four) fluids; (five) rest")
+        XCTAssertEqual(normalize("(ix) foo; (x) bar"), "(nine) foo; (ten) bar")
     }
 
     func testRomanLettersInProseUnchanged() {
@@ -131,6 +153,7 @@ final class EnglishTextNormalizerTests: XCTestCase {
 
     func testRomanNonEnumeratorFormsUnchanged() {
         XCTAssertEqual(normalize("f(x) and g(i)"), "f(x) and g(i)")
+        XCTAssertEqual(normalize("café(i) test"), "café(i) test")
         XCTAssertEqual(normalize("(xl) size"), "(xl) size")
         XCTAssertEqual(normalize("(mix) (cd) (mm)"), "(mix) (cd) (mm)")
         // Invalid or mixed-case forms are not roman numerals.

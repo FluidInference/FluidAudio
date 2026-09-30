@@ -76,21 +76,57 @@ enum EnglishTextNormalizer {
     ///
     /// Keyed on the enumerator *form*, never on the letters alone: `mix`,
     /// `did`, `civil` and the pronoun `I` are all spelled from roman letters.
-    /// The parenthesized form is unambiguous enough to fire anywhere; the
-    /// half-paren and dot forms only fire in enumerator position (line start,
-    /// or after `; : , .` + space) and never for a lone uppercase letter, so
-    /// `(…so did I)` and initials like `I. M. Pei` are untouched.
+    /// The parenthesized form may appear anywhere (not glued to a letter, so
+    /// `f(x)` stays); the half-paren and dot forms only in enumerator position
+    /// — line start, or after `; : , .` + space — which is what keeps `did I)`,
+    /// `I use vi.` and `i.e.` intact.
+    ///
+    /// A numeral that is not self-evidently a list marker (see
+    /// ``isSelfEvidentEnumerator(_:)``) additionally needs a second enumerator
+    /// somewhere in the text: a list has members, while medical `(IV)`, a
+    /// checkbox `(x)`, a kiss sign-off `xx.`, the citation `v. Madison` and the
+    /// initials `I. M. Pei` stand alone. Conversely an uppercase outline
+    /// `I. … II. … III.` converts as a whole.
     private static func spellRomanEnumerators(_ text: String) -> String {
+        let enumerators = romanEnumeratorMatches(in: text)
+        guard !enumerators.isEmpty else { return text }
+        let isList = enumerators.count >= 2
+
+        func spell(_ numeral: String) -> String? {
+            guard isList || isSelfEvidentEnumerator(numeral), let value = romanValue(numeral) else { return nil }
+            return cardinalWords(String(value))
+        }
+
         var result = text
         result = apply(Self.romanParenthesizedRegex, to: result) { groups in
-            guard let spoken = romanCardinal(groups[1]) else { return nil }
-            return "(\(spoken))"
+            spell(groups[1]).map { "(\($0))" }
         }
         result = apply(Self.romanEnumeratorRegex, to: result) { groups in
-            guard let spoken = romanCardinal(groups[2], rejectLoneUppercase: true) else { return nil }
-            return "\(groups[1])\(spoken)\(groups[3])"
+            spell(groups[2]).map { "\(groups[1])\($0)\(groups[3])" }
         }
         return result
+    }
+
+    /// Every well-formed roman numeral in an enumerator form, in text order.
+    private static func romanEnumeratorMatches(in text: String) -> [String] {
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        let parenthesized = romanParenthesizedRegex.matches(in: text, range: range).map {
+            ns.substring(with: $0.range(at: 1))
+        }
+        let bare = romanEnumeratorRegex.matches(in: text, range: range).map { ns.substring(with: $0.range(at: 2)) }
+        return (parenthesized + bare).filter { romanValue($0) != nil }
+    }
+
+    /// Lowercase `i`, or a lowercase multi-letter numeral that is not all `x`:
+    /// nothing else reads as a word or an abbreviation in enumerator position.
+    /// Uppercase (`IV` intravenous, `I` pronoun/initial), a lone `v`/`x`
+    /// (verb marker, variable, checkbox) and `xx`/`xxx` (sign-off, rating) are
+    /// only list markers in company.
+    private static func isSelfEvidentEnumerator(_ numeral: String) -> Bool {
+        guard numeral == numeral.lowercased() else { return false }
+        if numeral == "i" { return true }
+        return numeral.count >= 2 && numeral.contains { $0 != "x" }
     }
 
     /// `[ivx]`-only numerals (1–39) in a single case; the strict form is
@@ -101,45 +137,33 @@ enum EnglishTextNormalizer {
 
     /// `(ii)` — both parentheses present, not glued to a letter (`f(x)`).
     private static let romanParenthesizedRegex = regex(
-        #"(?<![A-Za-z])\("# + romanNumeral + #"\)(?![A-Za-z0-9])"#)
+        #"(?<!\p{L})\("# + romanNumeral + #"\)(?![\p{L}0-9])"#)
 
     /// `ii)` / `ii.` in enumerator position. Group 1 is the lead context
     /// (line start incl. indentation, or clause punctuation + space) and
     /// group 3 the closer, both re-emitted verbatim. The dot form requires
-    /// following whitespace so `i.e.` and a sentence-final `vi.` stay put.
+    /// following whitespace so `i.e.` and a text-final `ii.` stay put.
     private static let romanEnumeratorRegex = regex(
-        #"(^[ \t]*|[;:,.]\s)"# + romanNumeral + #"(\)(?![A-Za-z0-9])|\.(?=\s))"#,
+        #"(^[ \t]*|[;:,.]\s)"# + romanNumeral + #"(\)(?![\p{L}0-9])|\.(?=\s))"#,
         options: [.anchorsMatchLines])
 
-    /// Spell a roman numeral as a cardinal, or `nil` when it isn't a strict
-    /// roman form (or, with `rejectLoneUppercase`, a single capital letter).
-    private static func romanCardinal(_ numeral: String, rejectLoneUppercase: Bool = false) -> String? {
-        if rejectLoneUppercase, numeral.count == 1, numeral == numeral.uppercased() { return nil }
-        guard let value = romanValue(numeral) else { return nil }
-        return cardinalWords(String(value))
-    }
+    /// Strict subtractive form up to 39: tens `X{0,3}`, units `IX|IV|V?I{0,3}`.
+    private static let romanFormRegex = regex(#"^(X{0,3})(IX|IV|V?I{0,3})$"#)
 
-    /// Strict subtractive form up to 39: `X{0,3}` then units `IX|IV|V?I{0,3}`.
-    private static let romanFormRegex = regex(#"^X{0,3}(?:IX|IV|V?I{0,3})$"#)
+    private static let romanUnits: [String: Int] = [
+        "": 0, "I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8, "IX": 9,
+    ]
 
-    private static let romanLetterValues: [Character: Int] = ["I": 1, "V": 5, "X": 10]
-
+    /// Value of a strict-form numeral (1–39) in either case, else `nil`.
     private static func romanValue(_ numeral: String) -> Int? {
-        let upper = numeral.uppercased()
-        let range = NSRange(location: 0, length: (upper as NSString).length)
-        guard !upper.isEmpty, romanFormRegex.firstMatch(in: upper, range: range) != nil else { return nil }
-        var total = 0
-        var previous = 0
-        for letter in upper.reversed() {
-            guard let value = romanLetterValues[letter] else { return nil }
-            if value < previous {
-                total -= value
-            } else {
-                total += value
-                previous = value
-            }
-        }
-        return total > 0 ? total : nil
+        let upper = numeral.uppercased() as NSString
+        guard
+            let match = romanFormRegex.firstMatch(
+                in: upper as String, range: NSRange(location: 0, length: upper.length)),
+            let units = romanUnits[upper.substring(with: match.range(at: 2))]
+        else { return nil }
+        let value = 10 * match.range(at: 1).length + units
+        return value > 0 ? value : nil
     }
 
     // MARK: - Boundaries
