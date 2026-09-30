@@ -21,18 +21,43 @@ import Foundation
 ///   * 12-hour meridiem times — `1:49 PM` → `one forty nine p m`
 ///   * decade forms — `1770s`/`'90s` → `seventeen seventies`/`nineties` (issue #776)
 ///   * bare 4-digit years (1000–2099) — `1770` → `seventeen seventy` (issue #776)
+///   * roman-numeral list markers — `(ii)`, `ii)`, `ii.` → `(two)`, `two)`, `two.`
+///     (issue #972)
 ///
 /// Left unchanged (ambiguous / structured): version strings (`1.2.3`),
 /// grouped numbers (`1,234`), embedded digits (`word26`, `26word`), loose
 /// colon numbers without a meridiem (`1:49`), invalid times (`1:99 PM`),
-/// and 24-hour forms (`13:49`).
+/// 24-hour forms (`13:49`), and roman-numeral letters outside an enumerator
+/// form (`mix`, `did`, the pronoun `I`).
 enum EnglishTextNormalizer {
 
     /// Rewrite strict standalone numeric forms in `text` to spoken words.
+    static func normalize(_ text: String) -> String {
+        spellNumericForms(spellRomanEnumerators(text))
+    }
+
+    /// TTS-frontend entry point shared by KokoroAne and StyleTTS2.
+    ///
+    /// Uses the bundled byte-exact NeMo TN via the compiled-FST engine
+    /// (``NemoTextNormalizer``) — much richer than the baseline: currency,
+    /// measures, dates, ranges, fractions, embedded digits, … The conservative
+    /// always-available baseline in ``normalize(_:)`` is used only if the FST
+    /// engine leaves the text unchanged (e.g. plain prose, or a build without
+    /// the `fst-engine` feature).
+    ///
+    /// Roman-numeral list markers are rewritten before either pass: NeMo's
+    /// roman grammar is uppercase-only, so `(ii)` would otherwise reach G2P
+    /// and be read as letters (issue #972).
+    static func normalizeForFrontend(_ text: String) -> String {
+        let prepared = spellRomanEnumerators(text)
+        let fst = NemoTextNormalizer.normalize(prepared, language: .english)
+        return fst == prepared ? spellNumericForms(prepared) : fst
+    }
+
     /// Passes run in priority order so a token is consumed by the most
     /// specific rule (a meridiem time before its bare digits, a decimal
     /// before its integer part).
-    static func normalize(_ text: String) -> String {
+    private static func spellNumericForms(_ text: String) -> String {
         var result = text
         result = apply(Self.meridiemTimeRegex, to: result, transform: Self.spellMeridiemTime)
         result = apply(Self.decadeRegex, to: result, transform: Self.spellDecade)
@@ -44,17 +69,101 @@ enum EnglishTextNormalizer {
         return result
     }
 
-    /// TTS-frontend entry point shared by KokoroAne and StyleTTS2.
+    // MARK: - Roman-numeral list markers (issue #972)
+
+    /// Rewrite roman-numeral enumerators — `(ii)`, `ii)`, `ii.` — to spoken
+    /// cardinals, leaving the surrounding punctuation in place (`(two)`).
     ///
-    /// Uses the bundled byte-exact NeMo TN via the compiled-FST engine
-    /// (``NemoTextNormalizer``) — much richer than the baseline: currency,
-    /// measures, dates, ranges, fractions, embedded digits, … The conservative
-    /// always-available baseline in ``normalize(_:)`` is used only if the FST
-    /// engine leaves the text unchanged (e.g. plain prose, or a build without
-    /// the `fst-engine` feature).
-    static func normalizeForFrontend(_ text: String) -> String {
-        let fst = NemoTextNormalizer.normalize(text, language: .english)
-        return fst == text ? normalize(text) : fst
+    /// Keyed on the enumerator *form*, never on the letters alone: `mix`,
+    /// `did`, `civil` and the pronoun `I` are all spelled from roman letters.
+    /// The parenthesized form may appear anywhere (not glued to a letter, so
+    /// `f(x)` stays); the half-paren and dot forms only in enumerator position
+    /// — line start, or after `; : , .` + space — which is what keeps `did I)`,
+    /// `I use vi.` and `i.e.` intact.
+    ///
+    /// A numeral that is not self-evidently a list marker (see
+    /// ``isSelfEvidentEnumerator(_:)``) additionally needs a second enumerator
+    /// somewhere in the text: a list has members, while medical `(IV)`, a
+    /// checkbox `(x)`, a kiss sign-off `xx.`, the citation `v. Madison` and the
+    /// initials `I. M. Pei` stand alone. Conversely an uppercase outline
+    /// `I. … II. … III.` converts as a whole.
+    private static func spellRomanEnumerators(_ text: String) -> String {
+        let enumerators = romanEnumeratorMatches(in: text)
+        guard !enumerators.isEmpty else { return text }
+        let isList = enumerators.count >= 2
+
+        func spell(_ numeral: String) -> String? {
+            guard isList || isSelfEvidentEnumerator(numeral), let value = romanValue(numeral) else { return nil }
+            return cardinalWords(String(value))
+        }
+
+        var result = text
+        result = apply(Self.romanParenthesizedRegex, to: result) { groups in
+            spell(groups[1]).map { "(\($0))" }
+        }
+        result = apply(Self.romanEnumeratorRegex, to: result) { groups in
+            spell(groups[2]).map { "\(groups[1])\($0)\(groups[3])" }
+        }
+        return result
+    }
+
+    /// Every well-formed roman numeral in an enumerator form, in text order.
+    private static func romanEnumeratorMatches(in text: String) -> [String] {
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        let parenthesized = romanParenthesizedRegex.matches(in: text, range: range).map {
+            ns.substring(with: $0.range(at: 1))
+        }
+        let bare = romanEnumeratorRegex.matches(in: text, range: range).map { ns.substring(with: $0.range(at: 2)) }
+        return (parenthesized + bare).filter { romanValue($0) != nil }
+    }
+
+    /// Lowercase `i`, or a lowercase multi-letter numeral that is not all `x`:
+    /// nothing else reads as a word or an abbreviation in enumerator position.
+    /// Uppercase (`IV` intravenous, `I` pronoun/initial), a lone `v`/`x`
+    /// (verb marker, variable, checkbox) and `xx`/`xxx` (sign-off, rating) are
+    /// only list markers in company.
+    private static func isSelfEvidentEnumerator(_ numeral: String) -> Bool {
+        guard numeral == numeral.lowercased() else { return false }
+        if numeral == "i" { return true }
+        return numeral.count >= 2 && numeral.contains { $0 != "x" }
+    }
+
+    /// `[ivx]`-only numerals (1–39) in a single case; the strict form is
+    /// checked in ``romanValue(_:)``. Longer/richer numerals (`L C D M`) are
+    /// deliberately out: list markers never get there, and admitting `l`/`c`/
+    /// `d`/`m` would add words like `mix`, `cd`, `mm`, `xl` to the trap set.
+    private static let romanNumeral = #"([ivx]{1,7}|[IVX]{1,7})"#
+
+    /// `(ii)` — both parentheses present, not glued to a letter (`f(x)`).
+    private static let romanParenthesizedRegex = regex(
+        #"(?<!\p{L})\("# + romanNumeral + #"\)(?![\p{L}0-9])"#)
+
+    /// `ii)` / `ii.` in enumerator position. Group 1 is the lead context
+    /// (line start incl. indentation, or clause punctuation + space) and
+    /// group 3 the closer, both re-emitted verbatim. The dot form requires
+    /// following whitespace so `i.e.` and a text-final `ii.` stay put.
+    private static let romanEnumeratorRegex = regex(
+        #"(^[ \t]*|[;:,.]\s)"# + romanNumeral + #"(\)(?![\p{L}0-9])|\.(?=\s))"#,
+        options: [.anchorsMatchLines])
+
+    /// Strict subtractive form up to 39: tens `X{0,3}`, units `IX|IV|V?I{0,3}`.
+    private static let romanFormRegex = regex(#"^(X{0,3})(IX|IV|V?I{0,3})$"#)
+
+    private static let romanUnits: [String: Int] = [
+        "": 0, "I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8, "IX": 9,
+    ]
+
+    /// Value of a strict-form numeral (1–39) in either case, else `nil`.
+    private static func romanValue(_ numeral: String) -> Int? {
+        let upper = numeral.uppercased() as NSString
+        guard
+            let match = romanFormRegex.firstMatch(
+                in: upper as String, range: NSRange(location: 0, length: upper.length)),
+            let units = romanUnits[upper.substring(with: match.range(at: 2))]
+        else { return nil }
+        let value = 10 * match.range(at: 1).length + units
+        return value > 0 ? value : nil
     }
 
     // MARK: - Boundaries
@@ -205,10 +314,12 @@ enum EnglishTextNormalizer {
         text.contains { $0.isNumber }
     }
 
-    private static func regex(_ pattern: String) -> NSRegularExpression {
+    private static func regex(
+        _ pattern: String, options: NSRegularExpression.Options = []
+    ) -> NSRegularExpression {
         // Patterns are compile-time constants; a failure is a programmer error
         // (mirrors `SayAsInterpreter`'s regex initialization).
-        try! NSRegularExpression(pattern: pattern, options: [])
+        try! NSRegularExpression(pattern: pattern, options: options)
     }
 
     /// Apply `regex` to `text`, replacing each match with `transform`'s
