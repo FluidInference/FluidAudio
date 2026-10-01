@@ -253,7 +253,12 @@ enum TranscribeCommand {
             case "--word-timestamps":
                 parsed.wordTimestamps = true
             case "--encoder-compute-units":
-                if i + 1 < args.count {
+                guard i + 1 < args.count else {
+                    fputs("ERROR: --encoder-compute-units needs a value: 'ane', 'gpu', 'cpu', or 'all'\n", stderr)
+                    fflush(stderr)
+                    return nil
+                }
+                do {
                     switch args[i + 1].lowercased() {
                     case "ane", "cpuandneuralengine", "neural-engine":
                         parsed.encoderComputeUnits = .cpuAndNeuralEngine
@@ -483,25 +488,29 @@ enum TranscribeCommand {
 
     // MARK: - Batch Mode
 
+    /// One place for the local-dir / model-dir / download choice and the encoder options, shared by the batch
+    /// and streaming paths.
+    private static func loadModels(_ args: ParsedArgs) async throws -> AsrModels {
+        if let localModelDir = args.localModelDir {
+            return try AsrModels.loadLocal(
+                from: URL(fileURLWithPath: localModelDir), version: args.modelVersion,
+                encoderPrecision: args.encoderPrecision, encoderComputeUnits: args.encoderComputeUnits)
+        }
+        if let modelDir = args.modelDir {
+            return try await AsrModels.load(
+                from: URL(fileURLWithPath: modelDir), version: args.modelVersion,
+                encoderPrecision: args.encoderPrecision, encoderComputeUnits: args.encoderComputeUnits)
+        }
+        return try await AsrModels.downloadAndLoad(
+            version: args.modelVersion, encoderPrecision: args.encoderPrecision,
+            encoderComputeUnits: args.encoderComputeUnits)
+    }
+
     private static func runBatch(
         audioFile: String, args: ParsedArgs
     ) async {
         do {
-            let models: AsrModels
-            if let localModelDir = args.localModelDir {
-                models = try AsrModels.loadLocal(
-                    from: URL(fileURLWithPath: localModelDir), version: args.modelVersion,
-                    encoderPrecision: args.encoderPrecision, encoderComputeUnits: args.encoderComputeUnits)
-            } else if let modelDir = args.modelDir {
-                let dir = URL(fileURLWithPath: modelDir)
-                models = try await AsrModels.load(
-                    from: dir, version: args.modelVersion, encoderPrecision: args.encoderPrecision,
-                    encoderComputeUnits: args.encoderComputeUnits)
-            } else {
-                models = try await AsrModels.downloadAndLoad(
-                    version: args.modelVersion, encoderPrecision: args.encoderPrecision,
-                    encoderComputeUnits: args.encoderComputeUnits)
-            }
+            let models = try await loadModels(args)
             let tdtConfig = TdtConfig(blankId: args.modelVersion.blankId)
             let asrConfig = ASRConfig(
                 tdtConfig: tdtConfig,
@@ -737,22 +746,7 @@ enum TranscribeCommand {
         let streamingAsr = SlidingWindowAsrManager(config: config)
 
         do {
-            // Pass encoder precision + model dir to model loading when available
-            let models: AsrModels
-            if let localModelDir = args.localModelDir {
-                models = try AsrModels.loadLocal(
-                    from: URL(fileURLWithPath: localModelDir), version: args.modelVersion,
-                    encoderPrecision: args.encoderPrecision, encoderComputeUnits: args.encoderComputeUnits)
-            } else if let modelDir = args.modelDir {
-                let dir = URL(fileURLWithPath: modelDir)
-                models = try await AsrModels.load(
-                    from: dir, version: args.modelVersion, encoderPrecision: args.encoderPrecision,
-                    encoderComputeUnits: args.encoderComputeUnits)
-            } else {
-                models = try await AsrModels.downloadAndLoad(
-                    version: args.modelVersion, encoderPrecision: args.encoderPrecision,
-                    encoderComputeUnits: args.encoderComputeUnits)
-            }
+            let models = try await loadModels(args)
 
             if let vocabPath = args.customVocabPath {
                 logger.info("Configuring vocabulary boosting for streaming mode from: \(vocabPath)")
@@ -1088,7 +1082,7 @@ enum TranscribeCommand {
                 --word-timestamps              Show word-level timestamps in results
                 --encoder-compute-units <u>    Encoder placement: ane (default), gpu, cpu, all
                 --output-json <file>           Save full transcription to JSON
-                --model-version <v2|v3|110m>   ASR model version (default: v3)
+                --model-version <name>         v2, v3, redux, ultra, phonon2, tdt-ctc-110m, tdt-ja (default: v3)
                 --model-dir <path>             Repository model cache directory
                 --local-model-dir <path>       Exact compiled model directory; never downloads
                 --encoder-precision <int8|int8-v2|int4> Encoder quantization (default: int8;

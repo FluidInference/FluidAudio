@@ -47,8 +47,14 @@ The HF repo carries four more exact encoders (same transcripts) for other trade-
 The Neural Engine's palette cost grows with the number of palettes, not their bit width, which is why 8 rows per
 palette beats v3's encoder while per-row palettes are 3× slower. The GPU materializes *sparse* weights at every load
 (~150 s of CPU, never cached), so apps that run the encoder on the GPU (`encoderComputeUnits: .cpuAndGPU`) should use
-a dense file: download the model directory, rename `Encoder_lut3.mlmodelc` (small) or `Encoder_lut6.mlmodelc` (fast)
-to `Encoder.mlmodelc`, and load it with `AsrModels.loadLocal(from:version: .phonon2)`.
+a dense file. FluidAudio only downloads `Encoder.mlmodelc`, so fetch the alternate encoder yourself, swap it in, and
+load the directory with `AsrModels.loadLocal(from:version: .phonon2, encoderComputeUnits: .cpuAndGPU)`:
+
+```bash
+hf download FluidInference/phonon-2-coreml --include "Encoder_lut3.mlmodelc/*" --local-dir /tmp/phonon2
+cp -R ~/Library/Application\ Support/FluidAudio/Models/phonon-2 /tmp/phonon2-gpu
+rm -rf /tmp/phonon2-gpu/Encoder.mlmodelc && mv /tmp/phonon2/Encoder_lut3.mlmodelc /tmp/phonon2-gpu/Encoder.mlmodelc
+```
 
 ## Accuracy and speed
 
@@ -78,24 +84,20 @@ the conversion's.
 
 ### 60-minute long-form file (Earnings-22, four concatenated calls)
 
-`transcribe` on the 3600 s `earnings22_top4_1h.wav` (M5 Pro, default ANE encoder, best of 2–3 runs, processing time
-excludes model load). Reference = the concatenated Earnings-22 chunk transcripts, same normalizer as above.
+`transcribe` on the 3600 s `earnings22_top4_1h.wav` (M5 Pro, default ANE encoder, best of 2 runs in one session,
+processing time excludes model load). Reference = the concatenated Earnings-22 chunk transcripts, same normalizer as
+above. These are the same runs as the ANE column of the compute-unit table below and as Benchmarks.md.
 
 | Model | Processing time | RTFx | WER |
 |---|---:|---:|---:|
-| v3 | 10.9 s | 331× | 16.5 % |
-| Ultra | 7.7 s | 469× | **13.5 %** |
-| Redux | 14.2 s | 254× | 14.8 % |
-| Phonon-2 default (sparse, 321 MB) | 7.5 s | **478×** | 17.2 % |
-| Phonon-2 `Encoder_lut6` (470 MB) | 7.4 s | 486× | 17.2 % |
-| Phonon-2 `Encoder_sparse-g4` (246 MB) | 9.0 s | 399× | 17.2 % |
-| Phonon-2 `Encoder_sparse-g1` (176 MB) | 23.4 s | 154× | 17.2 % |
-| Phonon-2 `Encoder_lut3` (253 MB) | 23.6 s | 152× | 17.2 % |
+| v3 | 10.7 s | 335× | 16.5 % |
+| Ultra | 7.9 s | 457× | **13.5 %** |
+| Phonon-2 default (sparse, 321 MB) | 7.5 s | **480×** | 17.2 % |
+| Phonon-2 `Encoder_lut6` (470 MB) | 7.4 s | 484× | 17.2 % |
 
-On conversational long-form audio Phonon-2 is the fastest model we ship (1.45× v3's throughput, on par with Ultra) but
-the least accurate of the four: Ultra and Redux both beat v3 here while Phonon-2 trails it by 0.8 points, consistent
-with the upstream card's Earnings-22 row (6.96 % vs its teacher's 5.85 %). All five Phonon-2 encoders produce the same
-transcript.
+On conversational long-form audio Phonon-2 is the fastest model we ship (1.43× v3's throughput, ahead of Ultra) but the
+least accurate of the three: Ultra beats v3 here while Phonon-2 trails it by 0.8 points, consistent with the upstream
+card's Earnings-22 row (6.96 % vs its teacher's 5.85 %). All Phonon-2 encoder files produce the same transcript.
 
 Encoder compute units on the same 60-minute file (`transcribe --encoder-compute-units`, best of 2, processing time
 excludes model load):

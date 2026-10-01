@@ -21,8 +21,9 @@ public enum Repo: String, CaseIterable, Sendable {
     case parakeetUltra = "FluidInference/parakeet-ultra-coreml"
     /// Phonon-2: Fermion Research's quantization-aware re-training of
     /// parakeet-tdt-0.6b-v3 (English). Same tokenizer, window and decoder/joint
-    /// contract as v3; the encoder keeps the checkpoint's exact five-value
-    /// weights as 3-bit palettes. Loaded through `AsrModelVersion.phonon2`.
+    /// contract as v3; the default encoder keeps the checkpoint's exact
+    /// five-value weights as a sparsity mask plus fp16 palettes (321 MB,
+    /// iOS 18+). Loaded through `AsrModelVersion.phonon2`.
     case phonon2 = "FluidInference/phonon-2-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
