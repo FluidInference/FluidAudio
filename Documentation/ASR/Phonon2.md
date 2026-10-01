@@ -16,8 +16,7 @@ re-training of `parakeet-tdt-0.6b-v3` in which every encoder weight takes one of
 The default encoder keeps the checkpoint's exact five-value weights as a sparsity mask (51 % of the weights are zero)
 plus fp16 palettes over the non-zeros (iOS 18 `constexpr_lut_to_sparse` + `constexpr_sparse_to_dense`, one palette per
 8 output rows), so nothing is re-quantized on our side; decoder and joint are re-exported from the checkpoint's int6
-tables. Recipe: `mobius/models/stt/phonon-2/coreml`. On iOS 17 / macOS 14 `AsrModels` throws before downloading
-anything and points to `.ultra`.
+tables. On iOS 17 / macOS 14 `AsrModels` throws before downloading anything and points to `.ultra`.
 
 ## Usage
 
