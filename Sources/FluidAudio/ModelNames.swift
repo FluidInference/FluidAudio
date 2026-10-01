@@ -19,6 +19,12 @@ public enum Repo: String, CaseIterable, Sendable {
     /// parakeet-tdt-0.6b-v3. Same tokenizer, window and decoder/joint contract
     /// as v3; int8-linear encoder (~595 MB). Loaded through `AsrModelVersion.ultra`.
     case parakeetUltra = "FluidInference/parakeet-ultra-coreml"
+    /// Phonon-2: Fermion Research's quantization-aware re-training of
+    /// parakeet-tdt-0.6b-v3 (English). Same tokenizer, window and decoder/joint
+    /// contract as v3; the default encoder keeps the checkpoint's exact
+    /// five-value weights as a sparsity mask plus fp16 palettes (321 MB,
+    /// iOS 18+). Loaded through `AsrModelVersion.phonon2`.
+    case phonon2 = "FluidInference/phonon-2-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
@@ -152,6 +158,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-redux-coreml"
         case .parakeetUltra:
             return "parakeet-ultra-coreml"
+        case .phonon2:
+            return "phonon-2-coreml"
         case .parakeetV2:
             return "parakeet-tdt-0.6b-v2-coreml"
         case .parakeetCtc110m:
@@ -1748,7 +1756,7 @@ public enum ModelNames {
         case .parakeetV3:
             let precision = ParakeetEncoderPrecision(rawValue: variant ?? "") ?? .int8
             return ModelNames.ASR.requiredModelsV3(precision: precision)
-        case .parakeetRedux, .parakeetUltra:
+        case .parakeetRedux, .parakeetUltra, .phonon2:
             // Single encoder build; no precision variants.
             return ModelNames.ASR.requiredModelsV3()
         case .parakeetV2:

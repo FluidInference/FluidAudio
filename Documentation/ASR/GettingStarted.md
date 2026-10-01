@@ -20,6 +20,7 @@
 - Use **v3** for multilingual coverage (25 languages). English accuracy is still strong, but the broader vocab slightly trails v2 on rare words.
 - Prefer **ultra** over v3 for new work: same languages and API, more accurate on English and on all 24 FLEURS languages we measure, same speed. See [ParakeetUltra.md](ParakeetUltra.md).
 - Use **redux** when download size matters most (~220 MB vs ~480 MB for v3). iOS 18+ / macOS 15+ only. See [ParakeetRedux.md](ParakeetRedux.md).
+- Use **phonon2** for English-only apps on iOS 18+ / macOS 15+: Fermion Research's five-value re-training of v3, with the fastest Neural Engine encoder we ship and a 253 MB GPU encoder option. See [Phonon2.md](Phonon2.md).
 - Both versions share the same API surface—set `AsrModelVersion` in code or pass `--model-version` in the CLI.
 
 ```swift

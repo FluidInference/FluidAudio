@@ -301,13 +301,28 @@ final class AsrModelsTests: XCTestCase {
     func testReduxRequiresIOS18() {
         if #available(macOS 15, iOS 18, *) {
             XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .redux))
+            XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .phonon2))
         } else {
             XCTAssertThrowsError(try AsrModels.checkPlatformSupport(for: .redux)) { error in
                 XCTAssertTrue(error.localizedDescription.contains("ultra"))
             }
+            XCTAssertThrowsError(try AsrModels.checkPlatformSupport(for: .phonon2)) { error in
+                XCTAssertTrue(error.localizedDescription.contains("Phonon-2"))
+            }
         }
         XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .ultra))
         XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .v3))
+    }
+
+    func testPhonon2MirrorsV3Contract() {
+        let phonon2 = AsrModelVersion.phonon2
+        XCTAssertEqual(phonon2.repo, .phonon2)
+        XCTAssertEqual(phonon2.blankId, AsrModelVersion.v3.blankId)
+        XCTAssertEqual(phonon2.decoderLayers, AsrModelVersion.v3.decoderLayers)
+        XCTAssertEqual(phonon2.encoderHiddenSize, AsrModelVersion.v3.encoderHiddenSize)
+        XCTAssertFalse(phonon2.hasFusedEncoder)
+        XCTAssertTrue(phonon2.isV3Family)
+        XCTAssertEqual(AsrModels.defaultCacheDirectory(for: .phonon2).lastPathComponent, "phonon-2")
     }
 
     func testUltraMirrorsV3Contract() {
