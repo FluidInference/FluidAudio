@@ -268,11 +268,22 @@ struct OfflineReconstruction {
             let startString = String(format: "%.2f", startSeconds)
             let endString = String(format: "%.2f", endSeconds)
 
+            // A zero-vote run is, by construction, speech the segmentation model put
+            // in a *different* local slot from the neighbouring speech that did get
+            // votes in the same windows. So the clusters active just before/after
+            // the run are unlikely owners; prefer another cluster unless the
+            // re-embedding clearly favours an incumbent.
+            let incumbents = ZeroVoteReembedder.incumbentClusters(
+                around: run, perFrameClusters: perFrameClusters,
+                frameDuration: frameDuration, lookaroundSeconds: 1.5
+            )
             guard
                 let embedding = spanEmbedder(startSeconds, endSeconds),
                 let assignment = ZeroVoteReembedder.assignment(
                     embedding: embedding.map(Double.init),
-                    centroids: centroids
+                    centroids: centroids,
+                    excluding: incumbents,
+                    incumbentMargin: 0.25
                 )
             else {
                 logger.warning(
@@ -288,8 +299,9 @@ struct OfflineReconstruction {
             let cosineString = assignment.cosines
                 .map { String(format: "%.3f", $0) }
                 .joined(separator: ", ")
+            let incumbentString = incumbents.sorted().map { "S\($0 + 1)" }.joined(separator: ",")
             logger.info(
-                "Zero-vote re-embed [\(startString)s–\(endString)s]: assigned S\(assignment.cluster + 1) (cosines [\(cosineString)])"
+                "Zero-vote re-embed [\(startString)s–\(endString)s]: assigned S\(assignment.cluster + 1) (cosines [\(cosineString)], incumbents [\(incumbentString)])"
             )
         }
     }
