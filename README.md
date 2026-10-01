@@ -6,7 +6,8 @@
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 [![Documentation](https://img.shields.io/badge/Documentation-docs.fluidinference.com-008574.svg)](https://docs.fluidinference.com/introduction)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/WNsvaCtmDe)
-[![Hugging Face Models](https://img.shields.io/badge/Hugging%20Face%20Models-500k%2B%20Monthly%20Downloads-brightgreen?logo=huggingface)](https://huggingface.co/FluidInference)[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/FluidInference/FluidAudio)
+[![Hugging Face Models](https://img.shields.io/badge/Hugging%20Face%20Models-500k%2B%20Monthly%20Downloads-brightgreen?logo=huggingface)](https://huggingface.co/FluidInference)
+
 
 <div align="center">
 
