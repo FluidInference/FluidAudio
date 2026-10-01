@@ -29,6 +29,131 @@ enum ModelCache {
         return storedRevision == revision
     }
 
+    /// Inventory every cached compiled bundle and root file before listing a
+    /// legacy pinned cache. A revision marker covers all variants in this folder.
+    static func legacyCacheContents(
+        at repoPath: URL, revision: String
+    ) throws -> (bundles: Set<String>, rootFiles: Set<String>)? {
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard revision != "main",
+            !fm.fileExists(atPath: repoPath.appendingPathComponent(revisionMarkerName).path),
+            fm.fileExists(atPath: repoPath.path, isDirectory: &isDirectory), isDirectory.boolValue
+        else { return nil }
+
+        let root = repoPath.resolvingSymlinksInPath()
+        var bundles: Set<String> = root.pathExtension == "mlmodelc" ? [""] : []
+        var rootFiles: Set<String> = []
+        guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: nil) else {
+            return (bundles, rootFiles)
+        }
+        for case let item as URL in enumerator {
+            let item = item.resolvingSymlinksInPath()
+            let relative = String(item.path.dropFirst(root.path.count + 1))
+            if item.pathExtension == "mlmodelc" {
+                bundles.insert(relative)
+                enumerator.skipDescendants()
+                continue
+            }
+            guard !relative.contains("/"), !relative.hasSuffix(".partial"), !relative.hasSuffix(".partial.etag"),
+                let attributes = try attributesIfPresent(at: item),
+                attributes[.type] as? FileAttributeType == .typeRegular
+            else { continue }
+            rootFiles.insert(relative)
+        }
+        return (bundles, rootFiles)
+    }
+
+    /// Adopt only after the pinned listing covers every locally cached bundle.
+    /// Incomplete bundles are removed as a unit so the model-existence gate
+    /// re-enters download after an interruption. Existing markers remain authoritative.
+    static func adoptLegacyCache(
+        at repoPath: URL, revision: String, files: [RemoteFile], subPath: String? = nil
+    ) throws {
+        let fm = FileManager.default
+        guard let contents = try legacyCacheContents(at: repoPath, revision: revision) else { return }
+        let marker = repoPath.appendingPathComponent(revisionMarkerName)
+        var listedBundles: Set<String> = []
+        var listedRoots: Set<String> = []
+        var invalidBundles: Set<String> = []
+        var invalidFiles: Set<URL> = []
+        var keptFiles: [(url: URL, bundle: String?)] = []
+        for file in files {
+            let localPath = localPath(for: file.path, subPath: subPath)
+            let components = localPath.split(separator: "/")
+            let bundle =
+                repoPath.pathExtension == "mlmodelc"
+                ? ""
+                : components.firstIndex(where: { $0.hasSuffix(".mlmodelc") }).map {
+                    components[...$0].joined(separator: "/")
+                }
+            if let bundle { listedBundles.insert(bundle) }
+            if !localPath.contains("/") { listedRoots.insert(localPath) }
+            let destination = repoPath.appendingPathComponent(localPath)
+            guard file.size > 0,
+                let attributes = try attributesIfPresent(at: destination),
+                attributes[.type] as? FileAttributeType == .typeRegular,
+                (attributes[.size] as? NSNumber)?.int64Value == Int64(file.size)
+            else {
+                if let bundle {
+                    invalidBundles.insert(bundle)
+                } else {
+                    invalidFiles.insert(destination)
+                }
+                continue
+            }
+            keptFiles.append((destination, bundle))
+        }
+        invalidBundles.formUnion(contents.bundles.subtracting(listedBundles))
+        for rootFile in contents.rootFiles.subtracting(listedRoots) {
+            invalidFiles.insert(repoPath.appendingPathComponent(rootFile))
+        }
+        var removals = invalidBundles.sorted().map {
+            $0.isEmpty ? repoPath : repoPath.appendingPathComponent($0)
+        }
+        removals.append(contentsOf: invalidFiles)
+        for file in keptFiles where file.bundle.map({ !invalidBundles.contains($0) }) ?? true {
+            removals.append(file.url.appendingPathExtension("partial"))
+            removals.append(file.url.appendingPathExtension("partial.etag"))
+        }
+        for path in removals {
+            do {
+                try fm.removeItem(at: path)
+            } catch {
+                guard isMissingFile(error) else { throw error }
+            }
+        }
+        try fm.createDirectory(at: repoPath, withIntermediateDirectories: true)
+        try Data((revision + "\n").utf8).write(to: marker, options: .atomic)
+    }
+
+    static func localPath(for remotePath: String, subPath: String?) -> String {
+        guard let subPath, remotePath.hasPrefix("\(subPath)/") else { return remotePath }
+        return String(remotePath.dropFirst(subPath.count + 1))
+    }
+
+    /// Missing-file races are harmless; permission and other I/O errors still propagate.
+    static func isMissingFile(_ error: Error) -> Bool {
+        let error = error as NSError
+        if error.domain == NSCocoaErrorDomain,
+            error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError
+        {
+            return true
+        }
+        if error.domain == NSPOSIXErrorDomain, error.code == Int(POSIXErrorCode.ENOENT.rawValue) { return true }
+        guard let underlying = error.userInfo[NSUnderlyingErrorKey] as? Error else { return false }
+        return isMissingFile(underlying)
+    }
+
+    private static func attributesIfPresent(at url: URL) throws -> [FileAttributeKey: Any]? {
+        do {
+            return try FileManager.default.attributesOfItem(atPath: url.path)
+        } catch {
+            guard isMissingFile(error) else { throw error }
+            return nil
+        }
+    }
+
     /// Prepare a managed cache for downloads from one resolved revision.
     /// Existing files are preserved when the marker matches and replaced when
     /// the requested revision changes. The marker is written before downloads
