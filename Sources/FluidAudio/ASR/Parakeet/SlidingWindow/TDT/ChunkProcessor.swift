@@ -27,6 +27,13 @@ struct ChunkProcessor {
     // - 2.0s overlap (frame-aligned) to give the decoder slack when merging windows
     let overlapSeconds: Double = 2.0
 
+    /// Frames a token must sit past the start of the right window before its
+    /// timing is trusted over the left window's copy (6 frames = 480 ms).
+    /// Emission times are stable from about 0.5 s into a window and run
+    /// early in its last ~1.4 s — see "Seam Timing" in
+    /// Documentation/ASR/LongTranscription.md.
+    static let seamTimingHeadGuardFrames: Int = 6
+
     /// 80ms prepend from the previous chunk so the encoder's convolutions
     /// have left context (blank-first-frames fix, PR #264). Opt out via
     /// `ASRConfig.melChunkContext` for v3 multilingual drift (issue #594) —
@@ -435,9 +442,12 @@ struct ChunkProcessor {
         left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
         right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
         spliceSafeTokenIds: Set<Int>? = nil,
-        caseVariantIds: [Int: Int]? = nil
+        caseVariantIds: [Int: Int]? = nil,
+        rightWindowStartFrame: Int? = nil
     ) -> [(token: Int, timestamp: Int, confidence: Float, duration: Int)] {
-        mergeChunks(left, right, spliceSafeTokenIds: spliceSafeTokenIds, caseVariantIds: caseVariantIds)
+        mergeChunks(
+            left, right, spliceSafeTokenIds: spliceSafeTokenIds, caseVariantIds: caseVariantIds,
+            rightWindowStartFrame: rightWindowStartFrame)
     }
     #endif
 
@@ -496,6 +506,10 @@ struct ChunkProcessor {
         )
 
         var chunkOutputs: [[TokenWindow]?] = []
+        // Global frame at which each chunk's emitted coverage begins, kept
+        // in step with `chunkOutputs` for the seam timing rule in the merge.
+        var chunkStartFrames: [Int] = []
+        let seamTimingRealignment = await manager.seamTimingRealignment
         var availableWorkers = Array(workers.indices)
         var inFlight = 0
         var chunkDecision = chunkStarts.first ?? ChunkStartDecision(start: 0, useWarmupPrefix: false)
@@ -576,6 +590,7 @@ struct ChunkProcessor {
                 let index = chunkIndex
                 let chunkStartOffset = warmupSamples > 0 ? contextStart : chunkStart
                 chunkOutputs.append(nil)
+                chunkStartFrames.append(chunkStart / ASRConstants.samplesPerEncoderFrame)
 
                 group.addTask {
                     var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
@@ -647,6 +662,9 @@ struct ChunkProcessor {
         }
 
         let orderedChunkOutputs = chunkOutputs.compactMap { $0 }
+        let orderedChunkStartFrames = zip(chunkOutputs, chunkStartFrames).compactMap { output, frame in
+            output == nil ? nil : frame
+        }
 
         guard var mergedTokens = orderedChunkOutputs.first else {
             return await manager.processTranscriptionResult(
@@ -663,12 +681,13 @@ struct ChunkProcessor {
             let vocabulary = await manager.vocabulary
             let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
             let caseVariantIds = Self.caseVariantCanonicalIds(vocabulary: vocabulary)
-            for chunk in orderedChunkOutputs.dropFirst() {
+            for (index, chunk) in orderedChunkOutputs.enumerated().dropFirst() {
                 mergedTokens = mergeChunks(
                     mergedTokens,
                     chunk,
                     spliceSafeTokenIds: spliceSafeTokenIds,
-                    caseVariantIds: caseVariantIds
+                    caseVariantIds: caseVariantIds,
+                    rightWindowStartFrame: seamTimingRealignment ? orderedChunkStartFrames[index] : nil
                 )
             }
             // The pairwise merges above already yield tokens in linear (text)
@@ -953,7 +972,8 @@ struct ChunkProcessor {
         _ left: [TokenWindow],
         _ right: [TokenWindow],
         spliceSafeTokenIds: Set<Int>? = nil,
-        caseVariantIds: [Int: Int]? = nil
+        caseVariantIds: [Int: Int]? = nil,
+        rightWindowStartFrame: Int? = nil
     ) -> [TokenWindow] {
         if left.isEmpty { return right }
         if right.isEmpty { return left }
@@ -1019,7 +1039,8 @@ struct ChunkProcessor {
                 overlapRight: overlapRight,
                 left: left,
                 right: right,
-                spliceSafeTokenIds: spliceSafeTokenIds
+                spliceSafeTokenIds: spliceSafeTokenIds,
+                rightWindowStartFrame: rightWindowStartFrame
             )
         }
 
@@ -1046,7 +1067,8 @@ struct ChunkProcessor {
             overlapRight: overlapRight,
             left: left,
             right: right,
-            spliceSafeTokenIds: spliceSafeTokenIds
+            spliceSafeTokenIds: spliceSafeTokenIds,
+            rightWindowStartFrame: rightWindowStartFrame
         )
     }
 
@@ -1079,7 +1101,8 @@ struct ChunkProcessor {
         overlapRight: [IndexedToken],
         left: [TokenWindow],
         right: [TokenWindow],
-        spliceSafeTokenIds: Set<Int>?
+        spliceSafeTokenIds: Set<Int>?,
+        rightWindowStartFrame: Int? = nil
     ) -> [TokenWindow] {
         let leftIndices = matches.map { overlapLeft[$0.0].index }
         let rightIndices = matches.map { overlapRight[$0.1].index }
@@ -1094,7 +1117,21 @@ struct ChunkProcessor {
             let leftIndex = leftIndices[idx]
             let rightIndex = rightIndices[idx]
 
-            result.append(left[leftIndex])
+            // Both windows decoded this token. The left copy sits in the
+            // tail of its window, where emission times run early; once the
+            // right copy is clear of its own window's head its timing is the
+            // reliable one. Identity (piece, casing, confidence) stays with
+            // the left window, which had real left context — see "Seam
+            // Timing" in Documentation/ASR/LongTranscription.md.
+            var merged = left[leftIndex]
+            if let rightWindowStartFrame {
+                let rightCopy = right[rightIndex]
+                if rightCopy.timestamp >= rightWindowStartFrame + Self.seamTimingHeadGuardFrames {
+                    merged.timestamp = rightCopy.timestamp
+                    merged.duration = rightCopy.duration
+                }
+            }
+            result.append(merged)
 
             guard idx < matches.count - 1 else { continue }
 
